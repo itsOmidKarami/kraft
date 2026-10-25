@@ -112,6 +112,10 @@ async def test_stop_frame_ends_the_group(worker, tmp_path):
     stopped = await request(t, {"t": "stop", "id": "w/s"}, answer="stopped")
     assert stopped["had"] is True
     assert not psutil.pid_exists(got["pid"]) or not psutil.Process(got["pid"]).is_running()
+    for _ in range(250):  # `stopped` answers once the leader is gone; a member is still dying
+        if all(not m.is_running() or m.status() == psutil.STATUS_ZOMBIE for m in members):
+            break
+        await asyncio.sleep(0.02)
     assert all(not m.is_running() or m.status() == psutil.STATUS_ZOMBIE for m in members)
     again = await request(t, {"t": "stop", "id": "w/s"}, answer="stopped")
     assert again["had"] is False

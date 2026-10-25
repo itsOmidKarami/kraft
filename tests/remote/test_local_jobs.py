@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import subprocess
@@ -116,6 +117,26 @@ def test_spawn_refused(tmp_path, cwd_is, missing):
     assert caught.value.missing == missing
     assert str(caught.value)
     assert jobs.running() == []
+
+
+async def test_stop_kills_what_the_session_backgrounded_even_when_it_ignores_sigterm(tmp_path):
+    jobs = LocalJobs(tmp_path)
+    log = tmp_path / "l"
+    log.write_bytes(b"")
+    pidfile = tmp_path / "member"
+    script = f"(trap '' TERM; exec sleep 30) & echo $! > {pidfile}; wait"
+    leader = jobs.spawn(
+        "w/s", ["/bin/sh", "-c", script], cwd=str(tmp_path), env=bare_env(), log_path=str(log)
+    )
+    assert _wait(lambda: pidfile.exists() and pidfile.read_text().strip())
+    member = psutil.Process(int(pidfile.read_text()))
+    try:
+        assert await jobs.stop("w/s", grace=0.3) is True
+        assert not member.is_running() or member.status() == psutil.STATUS_ZOMBIE
+        assert jobs.running() == []
+    finally:
+        with contextlib.suppress(OSError):
+            os.killpg(leader.pid, signal.SIGKILL)
 
 
 def test_two_tables_removing_one_record_do_not_fail(tmp_path):

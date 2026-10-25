@@ -94,12 +94,16 @@ async def test_a_remote_row_keeps_the_identity_check(item, database, run_dirs):
     try:
         started = psutil.Process(proc.pid).create_time()
         await item.session("s1", IMPLEMENT, running=(proc.pid, started), runner="gpu")
-        await reattach.reattach(database, run_dirs, grace_retry_delay_s=0)
+        _, adopted = await reattach.reattach(database, run_dirs, grace_retry_delay_s=0)
+        asked = list(link.calls)
+        for task in adopted.values():
+            task.cancel()
+        await asyncio.gather(*adopted.values(), return_exceptions=True)
     finally:
         proc.kill()
         proc.wait()
 
-    assert link.calls == []
+    assert asked == []
 
 
 @pytest.mark.parametrize(

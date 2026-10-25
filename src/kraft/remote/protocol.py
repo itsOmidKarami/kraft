@@ -14,7 +14,8 @@ Protocol 2. `id` is the job key `"<work item id>/<session id>"`. Frames:
 - `have`, server to machine: `{rid}`; the machine answers `{rid, item, commits}`,
   up to 500 commits its copy of the item has.
 - `job`, server to machine: `{id, spec, blobs}`. `spec` is `JobSpec.to_frame()`;
-  `blobs` names the `code` and `files` blobs that follow.
+  `blobs` names the `code` and `files` blobs that follow. Its `codex_hook` is sent only to a
+  machine listing the `codex_hook` cap: the machine's own codex vouches for Kraft's hook there.
 - `blob`, both ways: `{id, name, seq, last, data}` with `data` in base64. `code`
   (a git bundle) and `files` (a tar.gz) go to the machine; `commits` and `out`
   come back.
@@ -49,7 +50,9 @@ from typing import Protocol
 PROTOCOL_VERSION = 2
 #: What this side understands beyond the base protocol. New behaviour an older peer would get
 #: wrong is sent only to a peer that lists it.
-CAPS: frozenset[str] = frozenset()
+#: The machine has its own codex trust Kraft's hook (`JobSpec.codex_hook`).
+CODEX_HOOK = "codex_hook"
+CAPS: frozenset[str] = frozenset({CODEX_HOOK})
 HANDSHAKE_S = 10.0
 PING_S = 20.0
 DEAD_S = 60.0

@@ -59,6 +59,9 @@ class JobSpec:
     # `egress`, `credentials` and `sentinels` for the install phase, which the setup command runs in
     setup_sandbox: dict | None = None
     ro: list[str] = field(default_factory=list)  # read-only files it may read (server paths)
+    # `{harness, hook, exe, at}`: the machine's own codex trusts Kraft's hook, and the flags it
+    # gives go into `argv` at `at`. Sent only to a machine with the `codex_hook` cap.
+    codex_hook: dict | None = None
 
     @property
     def key(self) -> str:
@@ -166,6 +169,8 @@ class JobRunner:
                 return Outcome(rejected=str(exc), outcome="config_error")
         elif (why := self._missing(argv[0], env)) is not None:
             return Outcome(rejected=why, outcome="config_error")
+        if s.codex_hook is not None and (refused := await self._codex_hook(argv, box)):
+            return refused
         if s.setup_command and (failed := await self._setup(env, box)) is not None:
             return failed
         if self._expired() and s.cap is not None:  # the transfer and setup used up the cap
@@ -223,6 +228,31 @@ class JobRunner:
             capped=capped,
             oom={"memory": oom.memory, "confirmed": oom.confirmed} if oom is not None else None,
         )
+
+    async def _codex_hook(self, argv: list[str], box: Sandboxed | None) -> Outcome | None:
+        """Put the flags that trust Kraft's hook into `argv`, from this machine's codex in its
+        copy of the worktree: the server's codex may hash the hook otherwise, and an untrusted
+        hook is skipped without a word. None when they are in."""
+        from kraft.adapters import hook_install
+
+        hook = self.spec.codex_hook
+        why = f"harness {hook['harness']!r} cannot run Kraft's permission hook, which this "
+        why += "launch's policy needs: "
+        if box is not None:  # the server refuses this before sending it
+            return Outcome(
+                rejected=why + "a sandboxed codex step cannot run on a machine yet",
+                outcome="config_error",
+            )
+        try:
+            flags = await hook_install.codex_hook_flags(
+                [self.pathmap.text(a) for a in hook["exe"]],
+                hook_install.hook_argv(hook["hook"]),
+                Path(self.pathmap.text(self.spec.cwd)),
+            )
+        except hook_install.CodexTrustError as exc:
+            return Outcome(rejected=why + str(exc), outcome="config_error")
+        argv[hook["at"] : hook["at"]] = flags
+        return None
 
     async def _setup(self, env: dict[str, str], box: Sandboxed | None) -> Outcome | None:
         """The repo's setup command in the machine's copy -- in the item's sandbox when it has

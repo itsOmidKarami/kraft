@@ -204,21 +204,35 @@ async def test_merge_watch_does_not_pin_a_pipeline_read_for_a_different_commit(r
     assert run_forge.item.row()["ci_pipeline_ref"] == f"{head_sha}:222"
 
 
+@pytest.mark.parametrize(
+    "no_checks, minutes, outcome, says",
+    [
+        (False, 90, "capped_out", "timed out"),
+        # Kraft-rbjo3: a merge commit with no run at all is a branch that runs
+        # no CI on a push. Within the grace it may still be registering...
+        (True, 4, "waiting", "pipeline pending"),
+        # ...past it, nothing is coming: pass, saying nothing was checked.
+        (True, 5, "done", "no post-merge CI on "),
+    ],
+    ids=["a-pending-run-times-out", "no-run-within-the-grace", "no-run-past-the-grace"],
+)
 async def test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human(
-    run_forge, repo, wait_clock
+    run_forge, repo, wait_clock, no_checks, minutes, outcome, says
 ):
     """`external-wait-timeout-needs-human`, for this wait too. It used to give
     up after its own 40-entry cap and report `done` -- a pipeline nobody saw
     finish, read as a finished chain. Now it runs out like every wait: the
     session is `capped_out`, which the walk stops on for a person."""
-    fake = forge.FakeForge(ci_states=["pending"])
+    fake = forge.FakeForge(ci_states=["pending"], ci_no_checks=no_checks)
 
     first = await run_forge(fake, "merge_watch", "s1", repo=repo)
-    wait_clock.advance(90 * 60)
+    wait_clock.advance(minutes * 60)
     last = await run_forge(fake, "merge_watch", "s2", repo=repo)
 
-    assert (first[0], last[0]) == ("waiting", "capped_out")
-    assert "timed out" in run_forge.log("s1")
+    assert (first[0], last[0]) == ("waiting", outcome)
+    assert says in run_forge.log("s1")
+    absent = run_forge.events("post_merge_ci_absent")
+    assert len(absent) == (outcome == "done"), absent
 
 
 async def test_merge_watch_runs_once_for_a_multi_repo_item(run_forge, item_on, database, repo):

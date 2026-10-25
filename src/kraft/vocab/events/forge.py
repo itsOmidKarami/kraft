@@ -26,6 +26,9 @@ class ForgeEvent(StrEnum):
     CI_INFRA_EXHAUSTED = "ci_infra_exhausted"
     CI_RUN_ABANDONED = "ci_run_abandoned"
     CI_NOT_CONFIGURED = "ci_not_configured"
+    #: The merge commit had no CI run at all once the grace was up, so the
+    #: post-merge wait passed without checking anything (Kraft-rbjo3).
+    POST_MERGE_CI_ABSENT = "post_merge_ci_absent"
     AUTOMATED_REVIEW_NOT_CONFIGURED = "automated_review_not_configured"
     AUTOMATED_REVIEW_ERRORED = "automated_review_errored"
     MERGE_QUEUE_DROPPED = "merge_queue_dropped"
@@ -56,6 +59,7 @@ FORGE_EVENT_TRAITS = total(
         ForgeEvent.CI_INFRA_EXHAUSTED: _PLAIN,
         ForgeEvent.CI_RUN_ABANDONED: _PLAIN,
         ForgeEvent.CI_NOT_CONFIGURED: _PLAIN,
+        ForgeEvent.POST_MERGE_CI_ABSENT: _PLAIN,
         ForgeEvent.AUTOMATED_REVIEW_NOT_CONFIGURED: _PLAIN,
         ForgeEvent.AUTOMATED_REVIEW_ERRORED: _PLAIN,
         ForgeEvent.MERGE_QUEUE_DROPPED: _PLAIN,

@@ -48,6 +48,22 @@ def test_a_codex_launch_with_deny_tools_carries_its_trusted_hook(run, tmp_path):
     assert state.startswith("hooks.state=") and "trusted_hash=" in state
     assert "Bash" not in cmd
     assert FAIL_CLOSED not in seen["env"]
+    assert seen["codex_hook"] is None  # on the server: its own codex vouched, as ever
+
+
+@pytest.mark.parametrize("resume", [None, "thread-1"], ids=["new", "resume"])
+def test_a_codex_step_on_a_machine_leaves_its_hook_trust_to_the_machines_codex(
+    run, tmp_path, monkeypatch, resume
+):
+    """The server's codex may be another version and hash the hook otherwise, so it is never
+    asked: the launch says where the machine puts the flags its own codex gives."""
+    monkeypatch.setenv("FAKE_CODEX_MODE", "exit")  # would refuse, were it asked
+    seen = _codex(run, tmp_path, deny_tools=("Bash",), runner="gpu", resume_session_id=resume)
+    cmd, hook = seen["cmd"], seen["codex_hook"]
+    assert _hook_flags(cmd) == [] and not any("\0" in a for a in cmd)
+    assert hook == {"harness": "codex", "hook": "codex", "exe": shlex.split(FAKE), "at": hook["at"]}
+    tail = ["resume", "thread-1"] if resume else []
+    assert cmd[2 : hook["at"]] == ["exec", *tail]
 
 
 def test_a_codex_launch_under_an_allowlist_runs_fail_closed(run, tmp_path):

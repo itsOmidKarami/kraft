@@ -249,7 +249,8 @@ async def test_gh_branch_ci_status_waits_for_a_run_matching_the_given_head(cli, 
         repo=tmp_path, branch="main", head_sha="other-sha"
     )
 
-    assert status.state == "pending"
+    # No run at all for this head (Kraft-rbjo3): `merge_watch` gives up after a grace.
+    assert (status.state, status.no_checks) == ("pending", True)
 
 
 def _run(name: str, conclusion: str, created: str) -> str:
@@ -296,6 +297,7 @@ async def test_gh_branch_ci_status_judges_the_latest_run_never_a_cancelled_one(
 
     assert (status.state, status.cancelled_at) == (state, cancelled_at)
     assert all(j.failure_reason != "cancelled" for j in status.failed_jobs)
+    assert not status.no_checks, "a head with a run has checks, even a pending one"
 
 
 async def test_gh_set_labels_edits_the_pull_request(cli, tmp_path):

@@ -305,8 +305,14 @@ class GlabCli(mr_ops.CliWaits):
         block_reason = mr_ops.classify_block_reason(detail)
         expected_sha = await git._head_sha(repo, branch)
         pipeline = await self._pipeline_on_ref(repo, branch, pipeline_id, expected_sha, view)
+        # `no_checks=False`: before the merge a missing pipeline stays a plain
+        # wait; only `branch_ci_status` reports it (Kraft-rbjo3).
         return replace(
-            pipeline, mergeable=mergeable, merge_detail=detail, block_reason=block_reason
+            pipeline,
+            mergeable=mergeable,
+            merge_detail=detail,
+            block_reason=block_reason,
+            no_checks=False,
         )
 
     async def branch_ci_status(
@@ -435,6 +441,7 @@ class GlabCli(mr_ops.CliWaits):
             url="",
             jobs=jobs,
             sha=str(row.get("sha", "")) if row is not None else "",
+            no_checks=True,
         )
 
     async def _read_pipeline(self, repo: Path, top: dict, sha: str) -> CIStatus:
