@@ -51,13 +51,30 @@ GENERATED_TESTS = (
     "tests/test_vocab_generated.py",
 )
 
-_FULL = [sys.executable, "-m", "pytest", "-m", "not e2e", "-n", "logical"]
-
 
 @dataclass(frozen=True)
 class Step:
     argv: list[str]
     env: dict[str, str] = field(default_factory=dict)
+
+
+#: The whole suite, still recorded: a full run that records nothing leaves the
+#: next selection larger, and the record never recovers (Kraft-4t45n.5).
+#: `--testmon-noselect` runs everything; `-m` would force it anyway.
+_FULL = Step(
+    [
+        sys.executable,
+        "-m",
+        "pytest",
+        "-m",
+        "not e2e",
+        "-n",
+        "logical",
+        "--testmon",
+        "--testmon-noselect",
+    ],
+    {"COVERAGE_CORE": "ctrace"},
+)
 
 
 @dataclass(frozen=True)
@@ -119,11 +136,11 @@ def read_changed(env: Mapping[str, str], cwd: Path) -> list[str] | None:
 
 def plan(changed: list[str] | None) -> Plan:
     if changed is None:
-        return Plan("no changed-file list and no merge base with origin/main", [Step(_FULL)])
+        return Plan("no changed-file list and no merge base with origin/main", [_FULL])
     blind = [path for path in changed if is_blind(path)]
     if blind:
         more = f" (and {len(blind) - 5} more)" if len(blind) > 5 else ""
-        return Plan(f"testmon cannot see a change to {', '.join(blind[:5])}{more}", [Step(_FULL)])
+        return Plan(f"testmon cannot see a change to {', '.join(blind[:5])}{more}", [_FULL])
     return Plan(
         None,
         [

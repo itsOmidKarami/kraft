@@ -63,8 +63,18 @@ def test_the_plan_runs_the_full_suite_only_for_a_change_testmon_cannot_see(tt, c
     plan = tt.plan(changed)
     if full:
         [step] = plan.steps
-        assert step.argv[1:] == ["-m", "pytest", "-m", "not e2e", "-n", "logical"]
-        assert "--testmon" not in step.argv and step.env == {}
+        # Still recorded, or the next selection grows and never shrinks (Kraft-4t45n.5).
+        assert step.argv[1:] == [
+            "-m",
+            "pytest",
+            "-m",
+            "not e2e",
+            "-n",
+            "logical",
+            "--testmon",
+            "--testmon-noselect",
+        ]
+        assert step.env == {"COVERAGE_CORE": "ctrace"}
         blind = [p for p in changed or [] if tt.is_blind(p)]
         assert plan.reason and all(p in plan.reason for p in blind)
         if changed is None:
