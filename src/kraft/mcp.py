@@ -246,14 +246,16 @@ def build() -> MCPServer:
     async def add_worker(
         name: str,
         ssh: str | None = None,
-        capacity: int = 1,
+        capacity: int | None = None,
         repos: list[str] | None = None,
         give_up_after: str | None = None,
     ) -> dict:
         """Register a machine that may run work item steps. With `ssh` (a host
         or ~/.ssh/config alias) Kraft connects to it once and reports the
         result; without it, the reply carries a one-time `token` and the exact
-        command to run on the machine. `repos` limits it to those connected
+        command to run on the machine. `capacity` caps the steps it runs at
+        once (the machine's own limit applies too, if lower; unset: its own,
+        else 1). `repos` limits it to those connected
         repos; `give_up_after` is a duration like 2h or "never". Machine
         management is a person's call: ask first."""
         return await client.add_worker(

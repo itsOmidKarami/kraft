@@ -59,7 +59,7 @@ class _Strict(BaseModel):
 class Worker(_Strict):
     ssh: str | None = None
     token_sha256: str | None = None
-    capacity: int = Field(default=1, ge=1)
+    capacity: int | None = Field(default=None, ge=1)
     repos: list[str] | None = None
     give_up_after: str = DEFAULT_GIVE_UP
 
@@ -98,8 +98,17 @@ class Worker(_Strict):
         return parse_duration(self.give_up_after)
 
 
+class LocalWorker(_Strict):
+    """The local worker's settings, a top-level `local:` key: it is not a machine
+    under `workers:`, so the name and connection rules above do not apply to it.
+    Unset `capacity` means no limit."""
+
+    capacity: int | None = Field(default=None, ge=1)
+
+
 class WorkersFile(_Strict):
     workers: dict[str, Worker] = Field(default_factory=dict)
+    local: LocalWorker | None = None
 
     @field_validator("workers", mode="before")
     @classmethod
@@ -120,6 +129,10 @@ class WorkersFile(_Strict):
             return cls.model_validate(read_yaml(path))
         except ValidationError as exc:
             raise ConfigError(first_error(exc, FILE)) from exc
+
+    def with_workers(self, workers: dict[str, Worker]) -> WorkersFile:
+        """A copy with `workers` replaced and everything else (`local:`) kept."""
+        return self.model_copy(update={"workers": workers})
 
     def to_yaml(self) -> dict:
         return self.model_dump(exclude_none=True)

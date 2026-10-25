@@ -548,6 +548,9 @@ async def _adopt(
     launch_factory: Callable[[str], LaunchContext] | None = None,
     bd_cwd: str | None = None,
     on_approve: OnApprove | None = None,
+    #: Called once its process is gone, before anything is resolved from what it left: the
+    #: moment its local slot is free again.
+    on_gone: Callable[[], None] = lambda: None,
 ) -> None:
     row = db.read(
         lambda c: c.execute(
@@ -618,6 +621,7 @@ async def _adopt(
     # ends it for a session it launched (R11E-03). Sessions start with
     # `start_new_session=True`, so the pid is the group's id.
     await _kill_group(pid, _KILL_GRACE_S, reap=lambda: _reap(pid))
+    on_gone()
     for backend in _backends.for_session(row["sandbox"]):
         await backend.collect(session_id, result_path, work_item_id=work_item_id)
     # Before `_guarded_adopt`'s `finally` closes the sandbox, which removes it.
@@ -701,6 +705,8 @@ async def _guarded_adopt(
     #: Whether the row ran under `network:` (`worker_sessions.egress`), so
     #: its relay and channel close with it.
     egress: bool = False,
+    #: A local session (no `runner`): it counts against the local worker's limit while it runs.
+    local: bool = False,
 ) -> None:
     """`_adopt`, but a crash marks the work item needs_human instead of
     vanishing. `reattach` hands its tasks to the caller directly rather than
@@ -713,6 +719,10 @@ async def _guarded_adopt(
     (Kraft-mjwz)."""
     adopted = False
     cancelled = False
+    link = _local_link.current() if local else None
+    key = ids.session_ref(work_item_id, session_id)
+    if link is not None:
+        link.adopt(key)
     try:
         await _adopt(
             db,
@@ -724,6 +734,7 @@ async def _guarded_adopt(
             launch_factory=launch_factory,
             bd_cwd=bd_cwd,
             on_approve=on_approve,
+            on_gone=(lambda: link.release(key)) if link is not None else (lambda: None),
         )
         adopted = True
     except asyncio.CancelledError:
@@ -741,6 +752,8 @@ async def _guarded_adopt(
         except Exception:  # noqa: BLE001
             logger.exception("could not mark %s needs_human after adopt crash", work_item_id)
     finally:
+        if link is not None:
+            link.release(key)
         # A clean stop that leaves running local sessions running leaves this one alone too:
         # its sandbox, its route out and its refs stay for the next start's adoption.
         keep = cancelled and await asyncio.shield(_kept_through_stop(db, work_item_id, session_id))
@@ -1054,6 +1067,7 @@ async def reattach(
                     on_approve=on_approve,
                     sandbox=r["sandbox"],
                     egress=r["egress"] is not None,
+                    local=not r["runner"],
                 )
             )
             summary.adopted.append(ids.session_ref(r["work_item_id"], sid))

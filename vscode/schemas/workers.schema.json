@@ -1,13 +1,41 @@
 {
   "$defs": {
+    "LocalWorker": {
+      "additionalProperties": false,
+      "description": "The local worker's settings, a top-level `local:` key: it is not a machine\nunder `workers:`, so the name and connection rules above do not apply to it.\nUnset `capacity` means no limit.",
+      "properties": {
+        "capacity": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capacity"
+        }
+      },
+      "title": "LocalWorker",
+      "type": "object"
+    },
     "Worker": {
       "additionalProperties": false,
       "properties": {
         "capacity": {
-          "default": 1,
-          "minimum": 1,
-          "title": "Capacity",
-          "type": "integer"
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capacity"
         },
         "give_up_after": {
           "default": "2h",
@@ -61,6 +89,17 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "local": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LocalWorker"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "workers": {
       "additionalProperties": {
         "$ref": "#/$defs/Worker"

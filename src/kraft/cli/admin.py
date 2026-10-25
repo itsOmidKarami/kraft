@@ -651,6 +651,7 @@ MACHINE_CONFIG = (
     "repos.yaml",
     "intake.yaml",
     "workers.yaml",
+    "machine.yaml",
     "harnesses",
 )
 

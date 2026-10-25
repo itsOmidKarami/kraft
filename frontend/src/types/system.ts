@@ -109,8 +109,13 @@ export interface Machine {
   /** Why it is offline; empty or null while online. */
   reason: string | null;
   slots_used: number;
-  /** Null for the local worker: only `max_concurrent` limits local work. */
+  /** The limit in use: the lower of `workers.yaml`'s and the machine's own. Null for the local
+   * worker without a `local: capacity:`. */
   capacity: number | null;
+  /** Which side set `capacity`; "default" is neither (one). Absent on the local worker. */
+  capacity_source?: "server" | "machine" | "default";
+  /** The limit the machine set for itself in `machine.yaml`; null if none. Absent on the local worker. */
+  machine_capacity?: number | null;
   /** The repos it is limited to; null for every repo. */
   repos: string[] | null;
   last_seen: string | null;

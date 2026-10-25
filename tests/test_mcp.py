@@ -75,7 +75,8 @@ def test_the_permission_tool_says_it_is_not_for_the_agent_to_call():
     assert "not for you to call" in tool.description.lower()
 
 
-def test_the_worker_tools_call_the_same_client_functions_the_cli_does(monkeypatch):
+@pytest.mark.parametrize("capacity", [2, None], ids=["set", "unset"])
+def test_the_worker_tools_call_the_same_client_functions_the_cli_does(monkeypatch, capacity):
     calls = []
 
     async def add(name, **kwargs):
@@ -83,10 +84,10 @@ def test_the_worker_tools_call_the_same_client_functions_the_cli_does(monkeypatc
         return {"token": "kwt_x"}
 
     monkeypatch.setattr(mcp.client, "add_worker", add)
-    result = asyncio.run(
-        mcp.build().call_tool("add_worker", {"name": "gpu", "ssh": "gpu", "capacity": 2})
-    )
-    assert calls == [("gpu", {"ssh": "gpu", "capacity": 2, "repos": None, "give_up_after": None})]
+    given = {"name": "gpu", "ssh": "gpu", **({} if capacity is None else {"capacity": capacity})}
+    result = asyncio.run(mcp.build().call_tool("add_worker", given))
+    expected = {"ssh": "gpu", "capacity": capacity, "repos": None, "give_up_after": None}
+    assert calls == [("gpu", expected)]
     assert "kwt_x" in result.content[0].text
 
 

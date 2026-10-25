@@ -1129,9 +1129,11 @@
     "workers": [
      {
       "capacity": "_",
+      "capacity_source": "_",
       "give_up_after": "_",
       "kraft_version": "_",
       "last_seen": "_",
+      "machine_capacity": "_",
       "mode": "_",
       "name": "_",
       "online": "_",

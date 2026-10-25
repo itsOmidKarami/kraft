@@ -29,7 +29,7 @@ class AddWorker(BaseModel):
 
     name: str
     ssh: str | None = None
-    capacity: int = 1
+    capacity: int | None = None
     repos: list[str] | None = None
     give_up_after: str | None = None
 
@@ -129,7 +129,7 @@ async def add_worker(body: AddWorker, request: Request):
     def add(current: registry.WorkersFile) -> registry.WorkersFile:
         if body.name in current.workers:
             raise HTTPException(409, f"a worker named {body.name!r} already exists")
-        return registry.WorkersFile(workers={**current.workers, body.name: worker})
+        return current.with_workers({**current.workers, body.name: worker})
 
     await _edit(request, add)
     if token is None:
@@ -153,7 +153,7 @@ async def remove_worker(name: str, request: Request):
     def remove(current: registry.WorkersFile) -> registry.WorkersFile:
         if name not in current.workers:
             raise HTTPException(404, f"no worker named {name!r}")
-        return registry.WorkersFile(workers={n: w for n, w in current.workers.items() if n != name})
+        return current.with_workers({n: w for n, w in current.workers.items() if n != name})
 
     await _edit(request, remove)
     # Nothing will come back from a machine that is no longer listed.

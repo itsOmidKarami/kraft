@@ -5,13 +5,14 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from unittest.mock import AsyncMock
 
 import pytest
-from support.remote import memory_pair
+from support.remote import attach, memory_pair
 from support.stub_ssh import stub_ssh
 
 from kraft.remote import protocol, registry
-from kraft.remote.hub import Hub, Verdict
+from kraft.remote.hub import FULL_RETRY_S, Hub, Verdict
 
 TOKEN = "kwt_secret"
 
@@ -58,6 +59,8 @@ async def test_an_unconnected_machine_lists_offline_and_never_connected():
         "reason": "never connected",
         "slots_used": 0,
         "capacity": 2,
+        "capacity_source": "server",
+        "machine_capacity": None,
         "repos": ["kraft"],
         "last_seen": None,
         "kraft_version": None,
@@ -239,7 +242,7 @@ async def test_a_named_machine_offline_or_full_makes_the_step_wait_and_never_run
     first = await hub.claim("home", _repos("kraft"), "w/1", poll_s=0.01)
     await hub.claim("home", _repos("kraft"), "w/2", poll_s=0.01)  # capacity is 2
     assert _row(hub)["slots_used"] == 2
-    assert hub.decide("home", _repos("kraft")).wait == "waiting for home"  # full, not offline
+    assert hub.decide("home", _repos("kraft")).wait == "waiting for home (full)"
     hub.release(first)
     assert hub.decide("home", _repos("kraft")).machine == "home"
     await machine.close()
@@ -287,7 +290,7 @@ async def test_a_waiting_claim_is_granted_when_a_slot_frees_and_is_cancellable()
         hub.claim("home", _repos("kraft"), "w/3", on_wait=seen.append, poll_s=0.01)
     )
     await asyncio.sleep(0.05)
-    assert not waiter.done() and seen == ["waiting for home"]  # said once
+    assert not waiter.done() and seen == ["waiting for home (full)"]  # said once
     hub.release(held[0])
     assert (await asyncio.wait_for(waiter, 1)).machine == "home"
     cancelled = asyncio.create_task(hub.claim("home", _repos("kraft"), "w/4", poll_s=0.01))
@@ -324,3 +327,128 @@ async def test_unreachable_since_names_the_moment_the_connection_ended_until_it_
     await accepted
     assert hub.unreachable_since("home") == "2023-11-14T22:13:20+00:00"
     assert hub.unreachable_since("nobody") is None
+
+
+def _limits_file(capacity):
+    return registry.WorkersFile.model_validate(
+        {
+            "workers": {
+                "gpu": {
+                    "token_sha256": registry.hash_token(TOKEN),
+                    **({} if capacity is None else {"capacity": capacity}),
+                }
+            }
+        }
+    )
+
+
+class _Peer:
+    """A machine for `attach`: it only needs to take part in the handshake."""
+
+    def __init__(self):
+        self.task = None
+
+    async def serve(self, t, welcome):
+        await protocol.pump(t, on_frame=AsyncMock())
+
+
+async def _online(hub, *caps):
+    await attach(hub, _Peer(), "gpu", caps=frozenset(caps))
+
+
+@pytest.mark.parametrize(
+    ("server", "caps", "limit", "source"),
+    [
+        (None, (), 1, "default"),
+        (3, (), 3, "server"),
+        (None, ("capacity=2",), 2, "machine"),
+        (3, ("capacity=2",), 2, "machine"),
+        (2, ("capacity=5",), 2, "server"),
+        (2, ("capacity=2",), 2, "server"),
+    ],
+    ids=["neither", "server", "machine", "machine-lower", "server-lower", "tie"],
+)
+async def test_the_limit_in_use_is_the_lower_of_the_servers_and_the_machines(
+    server, caps, limit, source
+):
+    hub = Hub("2.3.0")
+    hub.apply(_limits_file(server))
+    await _online(hub, *caps)
+    assert (hub.limit("gpu"), hub.limit_source("gpu")) == (limit, source)
+    row = _row(hub, "gpu")
+    assert (row["capacity"], row["capacity_source"]) == (limit, source)
+    assert row["machine_capacity"] == protocol.reported_capacity(caps)
+    claims = []
+    for i in range(limit):
+        claims.append(await hub.claim("gpu", [], f"w/{i}", poll_s=0.01))
+    assert hub.decide("gpu", []).machine is None  # no slot past the limit
+
+
+async def test_a_machine_reporting_a_new_limit_changes_the_one_in_use():
+    hub = Hub("2.3.0")
+    hub.apply(_limits_file(3))
+    await _online(hub, "capacity=3")
+    hub.set_machine_capacity("gpu", 1)
+    assert hub.limit("gpu") == 1
+    hub.set_machine_capacity("gpu", None)
+    assert hub.limit("gpu") == 3
+
+
+@pytest.mark.parametrize("ends", ["a report", "a step of its own ending", "the retry time"])
+async def test_a_machine_that_turned_a_step_away_is_left_alone_until_something_changes(ends):
+    now = [0.0]
+    hub = Hub("2.3.0", mono=lambda: now[0])
+    hub.apply(_limits_file(2))
+    await _online(hub, "capacity=2")
+    held = await hub.claim("gpu", [], "w/1", poll_s=0.01)
+    hub.mark_full("gpu")
+    assert hub.decide("gpu", []).wait == "waiting for gpu (full)" and not hub.free("gpu", [])
+    {
+        "a report": lambda: hub.set_machine_capacity("gpu", 2),
+        "a step of its own ending": lambda: hub.release(held),
+        "the retry time": lambda: now.__setitem__(0, FULL_RETRY_S),
+    }[ends]()
+    assert hub.free("gpu", [])
+
+
+@pytest.mark.parametrize(
+    ("caps", "machine", "wait"),
+    [
+        ((), None, "waiting for any machine allowed for this item"),
+        (("codex_hook",), "gpu", None),
+    ],
+    ids=["machine-lacks-it", "machine-has-it"],
+)
+async def test_any_gives_a_step_that_needs_a_cap_only_to_a_machine_that_lists_it(
+    caps, machine, wait
+):
+    hub = Hub("2.3.0")
+    other = {"token_sha256": registry.hash_token("kwt_other")}  # never connected
+    hub.apply(
+        registry.WorkersFile.model_validate(
+            {"workers": {"gpu": {"token_sha256": registry.hash_token(TOKEN)}, "other": other}}
+        )
+    )
+    await _online(hub, *caps)
+    verdict = hub.decide("any", [], needs={"codex_hook": "the hook"})
+    assert (verdict.machine, verdict.wait, verdict.refusal) == (machine, wait, None)
+
+
+@pytest.mark.parametrize("runner", ["gpu", "any"])
+async def test_a_step_no_connected_machine_can_take_for_want_of_a_cap_is_refused_saying_so(runner):
+    hub = Hub("2.3.0")
+    hub.apply(_limits_file(None))
+    await _online(hub)
+    refusal = hub.decide(runner, [], needs={"codex_hook": "harness 'codex' cannot run the hook"})
+    assert "harness 'codex' cannot run the hook" in refusal.refusal
+    assert "update Kraft on that machine" in refusal.refusal
+    assert hub.decide(runner, []).machine == "gpu"
+
+
+@pytest.mark.parametrize(("local", "capacity"), [({"capacity": 2}, 2), (None, None)])
+async def test_applying_workers_yaml_hands_the_local_workers_limit_to_its_link(local, capacity):
+    from kraft.remote import local_link
+
+    hub = Hub("2.3.0")
+    hub.apply(registry.WorkersFile.model_validate({"local": local} if local is not None else {}))
+    assert local_link.current().capacity == capacity

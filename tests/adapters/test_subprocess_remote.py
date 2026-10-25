@@ -10,13 +10,15 @@ import pytest
 from support.chain_builders import v1_node
 from support.fake_backend import Remote
 from support.harness import entry_of, v1_chain
-from support.remote import attach
+from support.remote import attach, make_rig, workers_file
 
 from kraft import caps
 from kraft.adapters import hook_install
 from kraft.adapters import subprocess as sp
-from kraft.remote import launch
+from kraft.remote import launch, protocol, registry
 from kraft.remote import runs as runs_mod
+from kraft.remote.machine import Machine
+from kraft.remote.runs import Reserved
 from kraft.worker import backends
 from kraft.worker.backends.docker import OomKill
 
@@ -288,3 +290,170 @@ async def test_a_machine_step_whose_hook_the_machine_cannot_trust_is_refused_and
     assert status == "config_error" and says in log
     assert "'codex' cannot run Kraft's permission hook" in log
     assert not marker.exists() and rig_offline.hub.slots_used("gpu") == 0
+
+
+# ── the machine's own limit: the slot is asked for before the session exists ──
+
+
+@pytest.fixture
+async def pair(tmp_path, database, run_dirs, item_on):
+    """Two machines, `gpu` (whose own limit the test sets through `limit[0]`; none at first) and
+    `spare`, both capacity 2 in workers.yaml. Yields `(rig, limit, spare)`."""
+    limit = [None]
+    workers = workers_file(
+        gpu={"capacity": 2},
+        spare={"capacity": 2, "token_sha256": registry.hash_token("kwt_spare")},
+    )
+    rig = await make_rig(
+        tmp_path,
+        database,
+        run_dirs,
+        item_on,
+        workers=workers,
+        machine_kwargs={"limit": lambda: limit[0]},
+    )
+    spare = Machine(tmp_path / "spare-home", kraft_version="2.3.0")
+    await attach(rig.hub, spare, "spare", token="kwt_spare")
+    yield rig, limit, spare
+    await rig.listener.close()
+    runs_mod.install(None)
+    await rig.hub.close()
+
+
+async def _settled(cond, timeout=5.0):
+    async with asyncio.timeout(timeout):
+        while not cond():
+            await asyncio.sleep(0.02)
+
+
+async def _hold_gpu_then_lower_its_limit(rig, limit):
+    """One step running on `gpu`, then `gpu` sets a limit of one: the server still thinks it has
+    a second slot."""
+    held = await rig.run(["sh", "-c", "sleep 30"], sid="h1")
+    await _settled(lambda: held.state == "running")
+    limit[0] = 1
+    return held
+
+
+async def _kill(rig, run):
+    await rig.runs.signal(run, "KILL")
+    await rig.done(run)
+
+
+async def test_a_step_a_machine_turns_away_runs_on_another_with_no_session_on_the_first(pair):
+    rig, limit, spare = pair
+    held = await _hold_gpu_then_lower_its_limit(rig, limit)
+    status = await _run(rig, "s2", [sys.executable, "-c", "print('ok')"], runner="any")
+    assert status == "done" and _row(rig, "s2")["runner"] == "spare"
+    assert f"{rig.wid}/s2" not in rig.machine._jobs  # gpu was asked, and never sent the job
+    assert (rig.hub.limit("gpu"), rig.hub.limit_source("gpu")) == (1, "machine")
+    await _kill(rig, held)
+
+
+async def test_a_step_named_for_a_machine_at_its_limit_waits_and_runs_there_once_a_slot_frees(pair):
+    rig, limit, spare = pair
+    held = await _hold_gpu_then_lower_its_limit(rig, limit)
+    task = asyncio.create_task(_run(rig, "s2", [sys.executable, "-c", "print('ok')"], runner="gpu"))
+    await _settled(lambda: rig.hub.limit("gpu") == 1)  # turned away once
+    await asyncio.sleep(0.6)
+    assert _row(rig, "s2") is None and not task.done()  # no session row while it waits
+    await _kill(rig, held)
+    assert await asyncio.wait_for(task, 20) == "done" and _row(rig, "s2")["runner"] == "gpu"
+
+
+async def test_a_machine_without_the_reserve_cap_is_not_asked(rig_offline, monkeypatch):
+    asked = []
+    real = rig_offline.runs.reserve
+    monkeypatch.setattr(rig_offline.runs, "reserve", lambda *a, **k: asked.append(a) or real(*a))
+    await attach(rig_offline.hub, rig_offline.machine, caps=protocol.CAPS - {protocol.RESERVE})
+    assert await _run(rig_offline, "s1", ["true"], runner="gpu") == "done"
+    assert asked == []
+
+
+@pytest.mark.parametrize("how", ["spec-fails", "cancelled-at-reserve", "cancelled-at-session"])
+async def test_a_launch_that_ends_before_the_run_starts_gives_back_the_slot_and_the_hold(
+    pair, monkeypatch, how
+):
+    rig, limit, _spare = pair
+    limit[0] = 2  # the machine holds a slot for every step it is asked about
+    if how == "spec-fails":
+
+        def refuse(**kw):
+            raise RuntimeError("no such branch")
+
+        monkeypatch.setattr(launch, "build", refuse)
+    elif how == "cancelled-at-reserve":
+
+        async def never_answers(frame):
+            await asyncio.sleep(60)
+
+        monkeypatch.setattr(rig.machine, "_on_reserve", never_answers)
+    else:
+
+        def cancelled():
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr(sp.store, "replay_claimed", cancelled)
+    task = asyncio.create_task(_run(rig, "s1", ["true"], runner="gpu"))
+    if how == "cancelled-at-reserve":
+        await _settled(lambda: rig.runs._reserved.get("gpu"))
+        task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await asyncio.wait_for(task, 20)
+    await _settled(lambda: not rig.machine._reserved and not rig.runs._reserved.get("gpu"))
+    assert rig.hub.slots_used("gpu") == 0
+
+
+async def test_a_reserve_that_is_not_answered_is_not_a_refusal_and_is_asked_again(
+    pair, monkeypatch
+):
+    rig, limit, _spare = pair
+    limit[0] = 2
+    seen, real, real_reserve = [], rig.machine._on_reserve, rig.runs.reserve
+
+    async def drops_the_first(frame):
+        seen.append(frame["rid"])
+        if len(seen) > 1:
+            await real(frame)
+
+    monkeypatch.setattr(rig.machine, "_on_reserve", drops_the_first)
+    monkeypatch.setattr(rig.runs, "reserve", lambda m, k: real_reserve(m, k, timeout=0.2))
+    assert await _run(rig, "s1", ["true"], runner="gpu") == "done"
+    assert len(seen) == 2 and len(set(seen)) == 2  # each ask has its own rid
+    assert rig.hub._entries["gpu"].full_until is None
+
+
+async def test_a_reconnect_keeps_the_holds_the_server_still_has_and_drops_the_rest(pair):
+    rig, limit, _spare = pair
+    limit[0] = 3
+    assert (await rig.runs.reserve("gpu", f"{rig.wid}/kept")).ok
+    assert (await rig.runs.reserve("gpu", f"{rig.wid}/forgotten")).ok
+    rig.runs._reserved["gpu"].discard(f"{rig.wid}/forgotten")  # the server no longer holds it
+    await rig.reconnect()
+    await _settled(lambda: set(rig.machine._reserved) == {f"{rig.wid}/kept"})
+
+
+async def test_a_refusal_marks_the_machine_full_and_takes_its_limit_whatever_else_it_said(
+    pair, monkeypatch
+):
+    rig, _limit, _spare = pair
+    real = rig.runs.reserve
+
+    async def gpu_is_full(machine, key, **kw):
+        if machine == "gpu":
+            return Reserved(False, 1)
+        return await real(machine, key, **kw)
+
+    monkeypatch.setattr(rig.runs, "reserve", gpu_is_full)
+    got, refusal, _cap = await launch.claim(
+        rig.database,
+        work_item_id=rig.wid,
+        session_id="s1",
+        node_id="build",
+        runner="any",
+        repo_entry=None,
+        time_cap=None,
+    )
+    assert refusal is None and got.machine == "spare"
+    assert not rig.hub.free("gpu", []) and rig.hub.limit("gpu") == 1
+    launch.release(got)

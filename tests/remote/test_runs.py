@@ -382,3 +382,22 @@ async def test_a_machine_adds_sandbox_events_to_its_items_history_and_nothing_el
     assert (type_ in _event_types(database)) is kept
     await rig.runs.signal(run, "KILL")
     await rig.done(run)
+
+
+async def test_a_job_a_full_machine_refuses_ends_the_run_with_the_machines_reason(
+    tmp_path, database, run_dirs, item_on
+):
+    """Only a server that skipped `reserve` gets here: the hub is made to think there is room."""
+    rig = await make_rig(tmp_path, database, run_dirs, item_on, machine_kwargs={"limit": lambda: 1})
+    try:
+        held = await _running(rig, "s1")
+        rig.hub.set_machine_capacity("gpu", None)
+        refused = await rig.done(await rig.run(["true"], sid="s2"))
+        assert refused.exit_code == 1
+        assert "gpu has no free slot of its own (1 of 1 running)" in refused.spool.read_text()
+        await rig.runs.signal(held, "KILL")
+        await rig.done(held)
+    finally:
+        await rig.listener.close()
+        runs_mod.install(None)
+        await rig.hub.close()
