@@ -2,7 +2,7 @@
 title: Concepts
 navigation:
   title: Overview
-description: The lifecycle, limits, permission model, and vocabulary behind Kraft.
+description: The lifecycle, limits, permission model, where a step runs, and vocabulary behind Kraft.
 ---
 
 Kraft runs a work item through a chain of nodes, and stops at a gate for you to

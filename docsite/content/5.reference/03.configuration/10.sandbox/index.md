@@ -58,13 +58,13 @@ _Added in next_
 
 A sandboxed item keeps its sandbox when a step of it [runs on another machine](/guides/run/run-a-step-on-another-machine). The server sends the machine the `sandbox` value the item was filed with and the network lists, and the machine builds that sandbox itself with its own runtime: the same image, limits, network policy, injected credentials and tool policy. The repo's `setup_command` runs inside it too, under the `install` lists.
 
-The machine must have what a local launch needs: for `docker`, the container CLI with a reachable daemon and the item's image already pulled; for `os`, the operating system's process sandbox. Run `kraft admin worker check` on it to see which sandbox backends work there.
+The machine must have what a local launch needs: for `docker`, the container CLI with a reachable daemon, and the item's image already pulled when the sandbox sets `network:` (otherwise the first launch pulls it, inside the step's time cap); for `os`, the operating system's process sandbox. Run `kraft admin worker check` on it to see which sandbox backends work there.
 
 The secrets stay on the machine. A [credential](/reference/configuration/sandbox/credentials) the egress proxy injects, and a name in `env_passthrough`, are read from the machine's own environment, never sent by the server. The Kraft CA for those credentials, and the CA bundle the container trusts, are made on the machine. A credential whose variable the machine does not have stops the step, naming the variable.
 
 A sandbox the machine cannot build never runs unsandboxed. If it has no runtime, the image is missing or the operating system's sandbox is unavailable, the step ends as `config_error` with a log line naming the machine and what is missing, and nothing runs. A memory kill in the machine's sandbox ends the step the way a local one does, as `config_error` with `sandbox_oom_killed`.
 
-A sandboxed `codex` step whose policy needs Kraft's permission hook cannot run on a machine yet, because codex's trust of the hook is checked against the image that runs it. Kraft refuses the launch and says so.
+A sandboxed `codex` step whose policy needs Kraft's permission hook cannot run on a machine, because codex's trust of the hook is checked against the image that runs it. Kraft refuses the launch and says so.
 
 ## What reaches the container
 

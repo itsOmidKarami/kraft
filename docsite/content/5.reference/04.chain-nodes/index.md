@@ -99,7 +99,7 @@ An exec node declares `tasks` or `steps`, never both.
 | `icon` | string | none | The [icon](#icons) the board draws for the node. |
 | `runner` | string | unset | Where it runs: a machine or a [group](/reference/configuration/workers#groups) from [`workers.yaml`](/reference/configuration/workers), `any`, or `local`. See [Placing a step on a machine](/reference/configuration/library-and-chains#placing-a-step-on-a-machine). _Added in next_ |
 
-A fix loop, a recovery plan or a judge's steps may not set `runner`: they run where the node runs.
+The steps of a fix loop or a recovery plan may not set `runner`: they, and a fix loop's judge, run where the node runs.
 
 A recovery that concludes no repair can help reports `failed` with a
 `suggested_action`. See [suggested_action](/reference/chain-nodes/result-file#suggested_action).

@@ -145,7 +145,7 @@ A scope may name a second command that runs only the tests a change affects. It 
 
 - **What it receives.** `KRAFT_TEST_BASE` is the item's whole-branch base commit. `KRAFT_CHANGED_FILES` is the path of a file listing the changed paths, one per line. The list is the diff this round's scopes were selected from: the whole branch in round 0 and after a failed round, and only what changed since after a clean one. Both are set for this command alone, and a sandbox gets the list read-only.
 - **An empty list is an answer.** A round that changed nothing since a clean one still runs it, with an empty list. With no list at all, Kraft runs `command` instead: the item has no base commit, or git could not diff it. A workspace member has no list either. The event says why (`full_reason`).
-- **What it must do.** It runs more, never less, for a change it cannot see: a tool that selects tests from imports has to run everything for a YAML file it knows nothing about. Kraft only hands it the change.
+- **What your command must do.** For a change it cannot map to tests, it runs more tests, never fewer: a tool that selects tests from imports has to run everything for a YAML file it knows nothing about. Kraft only hands it the change.
 - **The full suite is the chain's.** A chain whose merge request runs CI leaves the full suite to it. A chain without CI adds a node with `suite: full`: see [Run the full suite as its own node](/guides/customize/write-your-own-chain#run-the-full-suite-as-its-own-node).
 
 `kraft repo connect --verify` runs it too, against `HEAD^1` and the last commit's paths, and skips it on a repo with one commit.

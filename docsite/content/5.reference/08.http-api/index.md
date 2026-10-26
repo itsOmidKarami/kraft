@@ -265,6 +265,18 @@ _Added in 2.1_
 | [`GET /api/storage`](/reference/http-api/repos-chains-harnesses-and-server#get-apistorage) | Answers the disk the worktrees use, item by item. |
 | [`POST /api/storage/preview`](/reference/http-api/repos-chains-harnesses-and-server#post-apistoragepreview) | Shows what archiving some items would free and lose. |
 
+### Workers
+
+_Added in next_
+
+| Route | What it does |
+|---|---|
+| [`GET /api/workers`](/reference/http-api/repos-chains-harnesses-and-server#get-apiworkers) | Lists the local worker and the machines, with whether each is online. |
+| [`POST /api/workers`](/reference/http-api/repos-chains-harnesses-and-server#post-apiworkers) | Adds a machine, and answers a dial-in machine's token once. |
+| [`PATCH /api/workers/{name}`](/reference/http-api/repos-chains-harnesses-and-server#patch-apiworkersname) | Changes a machine, or the local worker. |
+| [`POST /api/workers/{name}/rotate-token`](/reference/http-api/repos-chains-harnesses-and-server#post-apiworkersnamerotate-token) | Gives a dial-in machine a new token. |
+| [`DELETE /api/workers/{name}`](/reference/http-api/repos-chains-harnesses-and-server#delete-apiworkersname) | Removes a machine no step runs on. |
+
 ### Repos
 
 | Route | What it does |
