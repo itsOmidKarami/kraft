@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from kraft import events, ids, item_paths, store
-from kraft.remote import blobs, bundle, files, protocol
+from kraft.remote import blobs, bundle, files, lfs, protocol
 from kraft.remote.hub import Claim
 from kraft.remote.jobs import JobSpec
 from kraft.vocab.events import RemoteEvent, SandboxEvent
@@ -126,6 +126,11 @@ class Runs:
         return run
 
     async def _drive(self, run: Run) -> None:
+        machine = run.claim.machine
+        # placement keys on the connected repo's path; the worktree is what is actually sent
+        if lfs.uses_lfs(run.spec.server_worktree) and protocol.LFS not in self.hub.caps(machine):
+            await self._reject(run, {"outcome": "config_error", "reason": lfs.no_git_lfs(machine)})
+            return
         while run.exit_code is None:
             try:
                 await self._send_job(run)
@@ -181,21 +186,36 @@ class Runs:
     async def _send_job(self, run: Run) -> None:
         spec, machine = run.spec, run.claim.machine
         worktree = Path(spec.server_worktree)
-        reply = await self._ask(
-            machine, {"t": "have", "rid": f"have:{spec.key}", "item": spec.work_item_id}
-        )
+        ask = {"t": "have", "rid": f"have:{spec.key}", "item": spec.work_item_id}
+        wanted: list[str] = []
+        if await asyncio.to_thread(lfs.uses_lfs, worktree):
+            wanted = await asyncio.to_thread(self._lfs_to_send, worktree, spec.head)
+            ask["lfs"] = wanted
+        reply = await self._ask(machine, ask)
+        wanted = [oid for oid in wanted if oid not in set(reply.get("lfs", []))]
         known = await asyncio.to_thread(bundle.usable, worktree, reply.get("commits", []))
         code = run.folder / "code.bundle"
         has_code = await asyncio.to_thread(bundle.make, worktree, spec.branch, known, code)
         archive = run.folder / "files.tgz"
         run.pushed = await asyncio.to_thread(files.pack, run.entries, archive)
         t = self.hub.transport(machine)
-        names = (["code"] if has_code else []) + ["files"]
+        names = (["code"] if has_code else []) + [f"lfs-{oid}" for oid in wanted] + ["files"]
         await t.send({"t": "job", "id": spec.key, "spec": spec.to_frame(), "blobs": names})
         if has_code:
             await blobs.send_blob(t, job=spec.key, name="code", source=code)
+        store = lfs.store(worktree)
+        for oid in wanted:
+            await blobs.send_blob(
+                t, job=spec.key, name=f"lfs-{oid}", source=lfs.object_path(store, oid)
+            )
         await blobs.send_blob(t, job=spec.key, name="files", source=archive)
         self._save(run)
+
+    @staticmethod
+    def _lfs_to_send(worktree: Path, head: str) -> list[str]:
+        """The objects `head` checks out that the server's store holds."""
+        have = set(lfs.held(lfs.store(worktree)))
+        return sorted(oid for oid in lfs.tree_pointers(worktree, head) if oid in have)
 
     def _save(self, run: Run) -> None:
         (run.folder / "remote-run.json").write_text(
@@ -324,13 +344,16 @@ class Runs:
         old = self._synced.get(spec.work_item_id, spec.head)
         staging = f"refs/kraft/remote/{spec.work_item_id}/{spec.session_id}"
         commits = run.received["commits"]
-        new = await asyncio.to_thread(
-            bundle.fetch, repo, commits, branch=spec.branch, base=old, into_ref=staging
-        )
-        got = await asyncio.to_thread(
-            bundle.publish, repo, spec.branch, old=old, new=new, key=spec.key
-        )
-        await asyncio.to_thread(bundle._git, repo, "update-ref", "-d", staging)
+        try:
+            new = await asyncio.to_thread(
+                bundle.fetch, repo, commits, branch=spec.branch, base=old, into_ref=staging
+            )
+            await asyncio.to_thread(self._take_lfs, run, repo, old, new)
+            got = await asyncio.to_thread(
+                bundle.publish, repo, spec.branch, old=old, new=new, key=spec.key
+            )
+        finally:
+            await asyncio.to_thread(bundle._git, repo, "update-ref", "-d", staging)
         if got.ok:
             self._synced[spec.work_item_id] = new
         else:
@@ -339,6 +362,30 @@ class Runs:
                 SandboxEvent.BRANCH_NOT_SYNCED,
                 {"session_id": spec.session_id, "branch": spec.branch, "reason": got.reason},
             )
+
+    @staticmethod
+    def _take_lfs(run: Run, repo: Path, old: str, new: str) -> None:
+        """Store the LFS objects the machine returned, once every one is shown to be what a new
+        pointer names. Refuses the result when one is not, or a new pointer's object is nowhere."""
+        got = {n.removeprefix("lfs-"): p for n, p in run.received.items() if n.startswith("lfs-")}
+        if not got and not lfs.uses_lfs(repo):
+            return
+        expected = lfs.new_pointers(repo, new, [old])
+        if unnamed := sorted(set(got) - set(expected)):
+            raise bundle.BundleRefused(
+                f"the machine returned an LFS object no new pointer names: {unnamed[0][:80]}"
+            )
+        store = lfs.store(repo)
+        if unsent := sorted(
+            oid for oid in set(expected) - set(got) if not lfs.object_path(store, oid).is_file()
+        ):
+            raise bundle.BundleRefused(
+                f"the machine's commits point to LFS object {unsent[0]}, which it did not send"
+            )
+        try:
+            lfs.take(store, {oid: (path, expected[oid]) for oid, path in got.items()})
+        except lfs.LfsRefused as exc:
+            raise bundle.BundleRefused(str(exc)) from exc
 
     async def _event(self, spec: JobSpec, type_, payload: dict) -> None:
         await self._db.write(

@@ -80,14 +80,12 @@ def test_any_with_no_machine_allowed_is_refused():
 
 @pytest.mark.parametrize(
     ("kind", "says"),
-    [("submodule", "submodules"), ("lfs", "Git LFS"), ("plain", None)],
+    [("submodule", "submodules"), ("plain", None)],
 )
 def test_a_checkout_a_single_bundle_cannot_carry_is_named(tmp_path, kind, says):
     repo = make_repo(tmp_path)
     if kind == "submodule":
         (repo / ".gitmodules").write_text('[submodule "x"]\n\tpath = x\n\turl = ./x\n')
-    if kind == "lfs":
-        (repo / ".gitattributes").write_text("*.bin filter=lfs diff=lfs merge=lfs -text\n")
     got = placement.checkout_problem(repo)
     assert (got is None) if says is None else (says in got)
 

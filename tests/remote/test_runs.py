@@ -1,14 +1,17 @@
 import asyncio
+import hashlib
 import json
 import sys
 import textwrap
 
 import pytest
-from support.harness import git, write
-from support.remote import make_rig, workers_file
+from support.harness import commit_all, git, write
+from support.remote import LFS_ATTRIBUTES, fake_git_lfs, lfs_script, make_rig, workers_file
 
+from kraft.remote import blobs, lfs
 from kraft.remote import runs as runs_mod
 from kraft.remote.runs import REMOTE_GAVE_UP
+from kraft.remote.workdir import Copy
 
 COMMIT = textwrap.dedent(
     """
@@ -404,3 +407,94 @@ async def test_a_job_a_full_machine_refuses_ends_the_run_with_the_machines_reaso
         await rig.listener.close()
         runs_mod.install(None)
         await rig.hub.close()
+
+
+BODY_A, BODY_B = b"object a", b"object b!"
+OID_A, OID_B = (hashlib.sha256(b).hexdigest() for b in (BODY_A, BODY_B))
+
+
+def _pointer(body: bytes) -> str:
+    oid = hashlib.sha256(body).hexdigest()
+    return f"version https://git-lfs.github.com/spec/v1\noid sha256:{oid}\nsize {len(body)}\n"
+
+
+async def _lfs_rig(rig, monkeypatch):
+    """The rig's server repo gains an LFS file `a.bin` whose object the server holds, and the
+    machine says it has git-lfs."""
+    fake_git_lfs(monkeypatch)
+    write(rig.repo, ".gitattributes", LFS_ATTRIBUTES)
+    write(rig.repo, "a.bin", _pointer(BODY_A))
+    commit_all(rig.repo)
+    rig.head = rig.tip()
+    src = rig.run_dirs.base / "a.obj"
+    src.write_bytes(BODY_A)
+    lfs.take(lfs.store(rig.repo), {OID_A: (src, None)})
+    await rig.reconnect()  # the hub learns the machine's caps again
+
+
+async def test_lfs_objects_go_to_the_machine_and_new_ones_come_back_into_the_servers_store(
+    rig, monkeypatch
+):
+    await _lfs_rig(rig, monkeypatch)
+    script = (
+        "from pathlib import Path\nfrom kraft.remote import lfs\n"
+        f"assert lfs.object_path(lfs.store(Path('.')), {OID_A!r}).read_bytes() == {BODY_A!r}\n"
+        + lfs_script(BODY_B)
+    )
+    run = await rig.done(await rig.run([sys.executable, "-c", script]))
+    assert run.exit_code == 0, run.spool.read_text()
+    assert lfs.object_path(lfs.store(rig.repo), OID_B).read_bytes() == BODY_B
+    assert git(rig.repo, "log", "-1", "--format=%s", rig.branch).strip() == "lfs"
+    assert git(rig.repo, "for-each-ref", "refs/kraft/remote").strip() == ""
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param({"stored": b"not the bytes"}, id="forged"),
+        pytest.param({"pointer": False}, id="unnamed"),
+        pytest.param({"store": False}, id="unsent"),
+    ],
+)
+async def test_a_returned_lfs_object_that_does_not_check_out_refuses_the_result(
+    rig, monkeypatch, case
+):
+    await _lfs_rig(rig, monkeypatch)
+    if "pointer" in case:  # an honest machine would not send it: this one does
+        monkeypatch.setattr(
+            Copy,
+            "new_lfs",
+            lambda self, branch, tip, exclude: {
+                OID_B: lfs.object_path(lfs.store(self.bare), OID_B)
+            },
+        )
+    before = rig.tip()
+    run = await rig.done(await rig.run([sys.executable, "-c", lfs_script(BODY_B, **case)]))
+    assert run.exit_code != 0 and rig.tip() == before
+    assert OID_B not in lfs.held(lfs.store(rig.repo))
+    assert "was not taken" in run.spool.read_text()
+    assert git(rig.repo, "for-each-ref", "refs/kraft/remote").strip() == ""
+
+
+async def test_the_second_lfs_step_is_sent_only_objects_the_machine_lacks(rig, monkeypatch):
+    await _lfs_rig(rig, monkeypatch)
+    sent = []
+    real = blobs.send_blob
+
+    async def spy(t, *, job, name, source):
+        sent.append((job, name))
+        await real(t, job=job, name=name, source=source)
+
+    monkeypatch.setattr(runs_mod.blobs, "send_blob", spy)
+    for sid in ("s1", "s2"):
+        await rig.done(await rig.run([sys.executable, "-c", "print('ok')"], sid=sid))
+    assert [(j, n) for j, n in sent if n.startswith("lfs-")] == [(f"{rig.wid}/s1", f"lfs-{OID_A}")]
+
+
+async def test_a_step_of_an_lfs_repo_given_a_machine_without_git_lfs_ends_as_a_config_error(rig):
+    write(rig.repo, ".gitattributes", LFS_ATTRIBUTES)
+    commit_all(rig.repo)
+    rig.head = rig.tip()
+    run = await rig.done(await rig.run([sys.executable, "-c", "print('ok')"]))
+    assert run.exit_code == runs_mod.REMOTE_CONFIG_ERROR
+    assert "has no git-lfs" in run.spool.read_text()

@@ -87,3 +87,19 @@ async def test_a_row_per_sandbox_backend_with_its_health_and_a_warning_when_none
         assert (answer[1] if isinstance(answer, tuple) else "boom") in row["detail"]
     assert ("sandbox runtime" in rows) is (not usable)
     assert not any(not r["ok"] for r in rows.values() if r["name"].startswith("sandbox"))
+
+
+@pytest.mark.parametrize("present", [True, False], ids=["present", "absent"])
+async def test_git_lfs_is_a_row_that_never_fails(monkeypatch, present):
+    monkeypatch.setattr(
+        check.shutil,
+        "which",
+        lambda exe: (
+            f"/bin/{exe}" if exe in ("git", "claude") or (present and exe == "git-lfs") else None
+        ),
+    )
+    row = _by_name(await check.run(kraft_version="2.3.0"))["git-lfs"]
+    assert row["ok"] and row["skipped"] is (not present)
+    assert row["detail"] == (
+        "/bin/git-lfs" if present else "not installed: LFS repos are not placed here"
+    )

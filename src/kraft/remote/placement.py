@@ -76,15 +76,12 @@ def refusal(
 
 
 def checkout_problem(repo_path: str | Path, *, members: Sequence[str] = ()) -> str | None:
-    """A single bundle carries one repository's commits: not members, submodules or LFS objects."""
+    """A single bundle carries one repository's commits: not members or submodules."""
     if members:
         return f"it has workspace members ({', '.join(members)}), which a bundle does not carry"
     root = Path(repo_path)
     if (root / ".gitmodules").exists():
         return "the repo has submodules, which a bundle does not carry"
-    attrs = root / ".gitattributes"
-    if attrs.is_file() and "filter=lfs" in attrs.read_text(errors="replace"):
-        return "the repo uses Git LFS, whose objects a bundle does not carry"
     return None
 
 

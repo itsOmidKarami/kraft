@@ -22,7 +22,7 @@ def _row(name: str, ok: bool, detail: str = "", *, skipped: bool = False, warn: 
 async def run(
     *, server: str | None = None, token: str | None = None, kraft_version: str
 ) -> list[dict]:
-    rows = [_git(), *_agents(), *await _sandboxes()]
+    rows = [_git(), _git_lfs(), *_agents(), *await _sandboxes()]
     if server is not None:
         rows.append(await _server(server, token or "", kraft_version))
     return rows
@@ -31,6 +31,14 @@ async def run(
 def _git() -> dict:
     path = shutil.which("git")
     return _row("git", path is not None, path or "not on PATH")
+
+
+def _git_lfs() -> dict:
+    """Without git-lfs a machine is not given a step of an LFS repo; that is not a failure."""
+    path = shutil.which("git-lfs")
+    if path is not None:
+        return _row("git-lfs", True, path)
+    return _row("git-lfs", True, "not installed: LFS repos are not placed here", skipped=True)
 
 
 def _agents() -> list[dict]:

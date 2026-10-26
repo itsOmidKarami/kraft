@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import os
 import signal
@@ -276,6 +277,42 @@ async def send_job(
         await blobs.send_blob(server, job=spec.key, name=f"lfs-{oid}", source=path)
     await blobs.send_blob(server, job=spec.key, name="files", source=tgz)
     return spec
+
+
+def lfs_script(
+    body: bytes, *, stored: bytes | None = None, store: bool = True, pointer: bool = True
+) -> str:
+    """Python source for a job that puts an LFS object for `body` in its copy's store and commits
+    a pointer to it (`b.bin`). `stored` writes other bytes under the object's name, `store=False`
+    leaves the object out, `pointer=False` commits a note instead of a pointer."""
+    oid = hashlib.sha256(body).hexdigest()
+    text = f"version https://git-lfs.github.com/spec/v1\noid sha256:{oid}\nsize {len(body)}\n"
+    return f"""
+import subprocess
+from pathlib import Path
+from kraft.remote import lfs
+if {store!r}:
+    p = lfs.object_path(lfs.store(Path(".")), {oid!r})
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes({body if stored is None else stored!r})
+Path(".gitattributes").write_text({LFS_ATTRIBUTES!r})
+Path("b.bin").write_text({text if pointer else "a note, no pointer"!r})
+subprocess.run(["git", "add", "-A"], check=True)
+subprocess.run(["git", "commit", "-qm", "lfs"], check=True)
+"""
+
+
+LFS_ATTRIBUTES = "*.bin filter=lfs -text\n"
+
+
+def fake_git_lfs(monkeypatch) -> None:
+    """A machine that says it has git-lfs without having it: nothing runs the filter. A real
+    git-lfs would be called by `filter.lfs.required` on every `git add` of a matching file."""
+    from kraft.remote import lfs
+
+    monkeypatch.setattr(lfs, "available", lambda: True)
+    monkeypatch.setattr(lfs, "configure", lambda bare: None)
+    monkeypatch.setattr(lfs, "checkout", lambda root: None)
 
 
 def stop_daemon(home: Path) -> None:

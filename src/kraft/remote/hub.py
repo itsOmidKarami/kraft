@@ -15,7 +15,7 @@ from pathlib import Path
 
 from kraft import caps
 from kraft.config import RepoEntry
-from kraft.remote import local_link, placement, protocol, registry
+from kraft.remote import lfs, local_link, placement, protocol, registry
 from kraft.remote.transport import FRAME_LIMIT, StreamTransport
 
 logger = logging.getLogger(__name__)
@@ -375,6 +375,11 @@ class Hub:
         (a mapping gives each one's words for a refusal). A group is looked at as `any` is, over
         its remote members: the local worker is not the hub's to give (`launch.placed`).
         `exclude` leaves out machines that already turned this step away."""
+        if any(lfs.uses_lfs(r.path) for r in repos):
+            needs = {
+                **({c: "" for c in needs} if not isinstance(needs, Mapping) else needs),
+                protocol.LFS: "the repo uses Git LFS",
+            }
         label = placement.repos_label(repos)
         group = pinned is None and self._file.is_group(runner)
         if pinned is not None:
@@ -428,6 +433,8 @@ class Hub:
         if lacking and (named or len({n for n, _ in lacking}) == len(names)):
             n, cap = lacking[0]
             what = needs.get(cap) if isinstance(needs, Mapping) else None
+            if cap == protocol.LFS:
+                return Verdict(refusal=lfs.no_git_lfs(n))
             return Verdict(
                 refusal=f"{what or 'this step needs a capability of the machine'}: "
                 f"machine {n!r} runs a Kraft without {cap!r}; update Kraft on that machine"

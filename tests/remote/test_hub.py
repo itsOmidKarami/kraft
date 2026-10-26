@@ -7,6 +7,7 @@ import os
 import sys
 
 import pytest
+from support.harness import entry_of, make_repo
 from support.remote import Peer, attach, memory_pair
 from support.stub_ssh import stub_ssh
 
@@ -436,6 +437,40 @@ async def test_a_step_no_connected_machine_can_take_for_want_of_a_cap_is_refused
     assert "harness 'codex' cannot run the hook" in refusal.refusal
     assert "update Kraft on that machine" in refusal.refusal
     assert hub.decide(runner, []).machine == "gpu"
+
+
+@pytest.mark.parametrize(
+    ("runner", "says", "machine"),
+    [
+        ("a-nolfs", "machine 'a-nolfs' has no git-lfs; install git-lfs there", None),
+        ("any", None, "b-lfs"),
+        ("pool", None, "b-lfs"),
+    ],
+    ids=["named-lacks-it", "any-picks-the-one-with-it", "group-picks-the-one-with-it"],
+)
+async def test_a_step_of_an_lfs_repo_goes_only_to_a_machine_that_lists_lfs(
+    tmp_path, runner, says, machine
+):
+    repo = make_repo(tmp_path)
+    (repo / ".gitattributes").write_text("*.bin filter=lfs -text\n")
+    hub = Hub("2.3.0")
+    hub.apply(
+        registry.WorkersFile.model_validate(
+            {
+                "workers": {
+                    n: {"token_sha256": registry.hash_token(f"kwt_{n}"), "groups": ["pool"]}
+                    for n in ("a-nolfs", "b-lfs")
+                }
+            }
+        )
+    )
+    await attach(hub, Peer(), "a-nolfs", caps=frozenset(), token="kwt_a-nolfs")
+    await attach(hub, Peer(), "b-lfs", caps=frozenset({protocol.LFS}), token="kwt_b-lfs")
+    verdict = hub.decide(runner, [entry_of({"path": str(repo), "name": "r"})])
+    assert (verdict.machine, says is None or says in verdict.refusal) == (machine, True)
+    if says:
+        assert verdict.refusal.startswith("the repo uses Git LFS: ")
+        assert verdict.refusal.endswith("(and update Kraft on it if it is older than the server)")
 
 
 @pytest.mark.parametrize(("local", "capacity"), [({"capacity": 2}, 2), (None, None)])

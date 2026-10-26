@@ -29,6 +29,14 @@ class LfsRefused(Exception):
     """str() is the reason, for the session log."""
 
 
+def no_git_lfs(machine: str) -> str:
+    """Why a step of an LFS repo cannot run on `machine`."""
+    return (
+        f"the repo uses Git LFS: machine {machine!r} has no git-lfs; install git-lfs there "
+        "(and update Kraft on it if it is older than the server)"
+    )
+
+
 def uses_lfs(repo_path: str | Path) -> bool:
     """The root `.gitattributes` routes some files through the lfs filter."""
     attrs = Path(repo_path) / ".gitattributes"

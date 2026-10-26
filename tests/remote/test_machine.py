@@ -10,7 +10,7 @@ import hashlib
 import sys
 
 import pytest
-from support.remote import memory_pair, send_job, stop_daemon
+from support.remote import fake_git_lfs, lfs_script, memory_pair, send_job, stop_daemon
 from websockets.asyncio.server import serve
 
 from kraft.remote import blobs, bundle, lfs, machine, protocol, registry
@@ -208,36 +208,15 @@ async def test_a_job_that_commits_hands_in_a_bundle_of_exactly_its_commits(tmp_p
     await _end(t, task)
 
 
-def _no_git_lfs(monkeypatch):
-    """A machine that says it has git-lfs without having it: nothing runs the filter."""
-    monkeypatch.setattr(lfs, "available", lambda: True)
-    monkeypatch.setattr(lfs, "configure", lambda bare: None)
-    monkeypatch.setattr(lfs, "checkout", lambda root: None)
-
-
 LFS_BODY = b"large file"
 LFS_OID = hashlib.sha256(LFS_BODY).hexdigest()
-COMMIT_LFS = f"""
-import subprocess
-from pathlib import Path
-from kraft.remote import lfs
-p = lfs.object_path(lfs.store(Path(".")), "{LFS_OID}")
-p.parent.mkdir(parents=True, exist_ok=True)
-p.write_bytes({LFS_BODY!r})
-Path(".gitattributes").write_text("*.bin filter=lfs -text\\n")
-Path("a.bin").write_text(
-    "version https://git-lfs.github.com/spec/v1\\noid sha256:{LFS_OID}\\nsize {len(LFS_BODY)}\\n"
-)
-subprocess.run(["git", "add", "-A"])
-subprocess.run(["git", "commit", "-qm", "m"])
-"""
 
 
 async def test_a_job_that_commits_an_lfs_file_hands_in_its_object_beside_the_bundle(
     tmp_path, monkeypatch
 ):
-    _no_git_lfs(monkeypatch)
-    machine, task, t, spec = await _job(tmp_path, [sys.executable, "-c", COMMIT_LFS])
+    fake_git_lfs(monkeypatch)
+    machine, task, t, spec = await _job(tmp_path, [sys.executable, "-c", lfs_script(LFS_BODY)])
     frames = await _frames_until(t, "finished")
     names = [f["name"] for f in frames if f["t"] == "blob"]
     assert [n for i, n in enumerate(names) if n not in names[:i]] == ["commits", f"lfs-{LFS_OID}"]
@@ -267,7 +246,7 @@ async def test_the_have_reply_lists_which_of_the_asked_lfs_objects_the_copy_hold
 
 
 async def test_a_co_task_still_stores_the_lfs_objects_it_was_sent(tmp_path, monkeypatch):
-    _no_git_lfs(monkeypatch)
+    fake_git_lfs(monkeypatch)
     machine = Machine(tmp_path / "home", kraft_version="2.3.0")
     server, task = await _serve(machine)
     await send_job(server, tmp_path / "one", ["sh", "-c", "sleep 30"], sid="a")
