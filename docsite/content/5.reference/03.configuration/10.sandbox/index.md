@@ -54,7 +54,7 @@ An [in-place item](/guides/run/run-items-in-place) runs in the repo's own checko
 
 ## On a remote machine
 
-_Added in next_
+_Added in 2.4_
 
 A sandboxed item keeps its sandbox when a step of it [runs on another machine](/guides/run/run-a-step-on-another-machine). The server sends the machine the `sandbox` value the item was filed with and the network lists, and the machine builds that sandbox itself with its own runtime: the same image, limits, network policy, injected credentials and tool policy. The repo's `setup_command` runs inside it too, under the `install` lists.
 

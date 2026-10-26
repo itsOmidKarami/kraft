@@ -267,7 +267,7 @@ _Added in 2.1_
 
 ### Workers
 
-_Added in next_
+_Added in 2.4_
 
 | Route | What it does |
 |---|---|

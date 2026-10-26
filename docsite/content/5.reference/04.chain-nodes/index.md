@@ -68,7 +68,7 @@ has no default: the chain must set it, itself or through `extends`.
 | `remove` | list of strings | none | With `extends`: the parent's nodes to drop, by id. The final gate cannot be one. _Added in 2.2_ |
 | `add` | list | none | With `extends`: each entry an `after`, a parent node's id, and a `node`, a complete node to put directly after it. _Added in 2.2_ |
 | `overrides` | mapping | none | With `extends`: canonical path to the keys to merge onto that component, such as `implementation.main.implement: { profile: deep }`. _Added in 2.2_ |
-| `runner` | string | unset | Where it runs: a machine or a [group](/reference/configuration/workers#groups) from [`workers.yaml`](/reference/configuration/workers), `any`, or `local`. See [Placing a step on a machine](/reference/configuration/library-and-chains#placing-a-step-on-a-machine). _Added in next_ |
+| `runner` | string | unset | Where it runs: a machine or a [group](/reference/configuration/workers#groups) from [`workers.yaml`](/reference/configuration/workers), `any`, or `local`. See [Placing a step on a machine](/reference/configuration/library-and-chains#placing-a-step-on-a-machine). _Added in 2.4_ |
 
 ## Node keys
 
@@ -97,7 +97,7 @@ An exec node declares `tasks` or `steps`, never both.
 | `on_merge_rejected` | mapping | none | What to repair and re-run when a merge train or merge queue drops the merge request. Only on a node with an `mr.merge` task. See [on_merge_rejected](#on_merge_rejected). _Added in 2.3_ |
 | `read_only` | boolean | `false` | `true` makes Kraft verify that the node's steps leave the [worktree](/concepts/vocabulary#worktree) as they found it. Refused on a node with a `fix_loop`. See [read_only](#read_only). |
 | `icon` | string | none | The [icon](#icons) the board draws for the node. |
-| `runner` | string | unset | Where it runs: a machine or a [group](/reference/configuration/workers#groups) from [`workers.yaml`](/reference/configuration/workers), `any`, or `local`. See [Placing a step on a machine](/reference/configuration/library-and-chains#placing-a-step-on-a-machine). _Added in next_ |
+| `runner` | string | unset | Where it runs: a machine or a [group](/reference/configuration/workers#groups) from [`workers.yaml`](/reference/configuration/workers), `any`, or `local`. See [Placing a step on a machine](/reference/configuration/library-and-chains#placing-a-step-on-a-machine). _Added in 2.4_ |
 
 The steps of a fix loop or a recovery plan may not set `runner`: they, and a fix loop's judge, run where the node runs.
 
@@ -114,7 +114,7 @@ A recovery that concludes no repair can help reports `failed` with a
 | `reject_to` | string | see Meaning | The exec node a rejection re-enters, with the reviewer's note. It must be before the gate. Without it, a rejection re-enters the nearest exec node before the gate, or re-opens the gate when there is none. |
 | `timeout` | duration | none | How long the gate waits for a decision, such as `90m`. It may not exceed the `total_time_cap_minutes` around it. |
 | `auto_review` | mapping | none | An agent task that may report a verdict first. It takes no `fallback`, and may `extends` a library task. See [Add a security review or a gate reviewer](/guides/customize/add-review-agents). |
-| `runner` | string | unset | Where the gate's automated review runs: a machine or a [group](/reference/configuration/workers#groups) from [`workers.yaml`](/reference/configuration/workers), `any`, or `local`. See [Placing a step on a machine](/reference/configuration/library-and-chains#placing-a-step-on-a-machine). _Added in next_ |
+| `runner` | string | unset | Where the gate's automated review runs: a machine or a [group](/reference/configuration/workers#groups) from [`workers.yaml`](/reference/configuration/workers), `any`, or `local`. See [Placing a step on a machine](/reference/configuration/library-and-chains#placing-a-step-on-a-machine). _Added in 2.4_ |
 | `chain_finalized` | boolean | `false` | `true` marks the final review. A `chain_finalized` gate always requires its document, whether or not it sets `artifact_required`. Its approval decides what a later `mr.merge` may merge: see [What the final review approves](#what-the-final-review-approves). |
 
 A gate takes no `icon`.
@@ -402,7 +402,7 @@ none is left, the policy is dropped.
 | `skippable` | boolean | `true` | `false` refuses a skip of this step. |
 | `read_only` | boolean | `false` | `true` verifies the step's tasks leave the worktree as they found it. See [read_only](#read_only). |
 | `icon` | string | none | The [icon](#icons) the board draws for the step. |
-| `runner` | string | unset | Where it runs: a machine or a [group](/reference/configuration/workers#groups) from [`workers.yaml`](/reference/configuration/workers), `any`, or `local`. See [Placing a step on a machine](/reference/configuration/library-and-chains#placing-a-step-on-a-machine). _Added in next_ |
+| `runner` | string | unset | Where it runs: a machine or a [group](/reference/configuration/workers#groups) from [`workers.yaml`](/reference/configuration/workers), `any`, or `local`. See [Placing a step on a machine](/reference/configuration/library-and-chains#placing-a-step-on-a-machine). _Added in 2.4_ |
 
 ## Task keys
 
@@ -441,7 +441,7 @@ Every task takes these keys, then the keys of its kind. A task takes no
 | `profile` | string | none | An [agent profile](/reference/harnesses/agent-profiles) from `harnesses.yaml` (`strong`) that sets the model tier. Not allowed with `model` or `effort`. |
 | `model`, `effort` | string | none | This task's runtime options, checked against what the [provider](/concepts/vocabulary#provider) of the task's harness profile accepts. Not allowed with `profile`. |
 | `fallback` | list | unset | Where the launch goes when it is rate-limited or its harness is unavailable. `[]` means none. See [Fallback](/reference/harnesses/fallback-and-escalation). |
-| `inputs` | list | `[]` | What Kraft hands the task: `review_package`, `carried_findings`, `previous_review`, `bot_feedback` (what the review bots said once they settled; with nothing to say the task is skipped) or `triage_verdict` (where that triage wrote its verdict). _Added in next_ |
+| `inputs` | list | `[]` | What Kraft hands the task: `review_package`, `carried_findings`, `previous_review`, `bot_feedback` (what the review bots said once they settled; with nothing to say the task is skipped) or `triage_verdict` (where that triage wrote its verdict). _Added in 2.4_ |
 
 ### Subprocess task keys
 
@@ -459,7 +459,7 @@ Every task takes these keys, then the keys of its kind. A task takes no
 |---|---|---|---|
 | `ref` | string | required | `kraft.verify_changed_test_scopes` runs the repo's own test scopes. `kraft.mr_rebase` rebases the worktree onto the item's [base branch](/concepts/vocabulary#base-branch). |
 | `execution` | string | `sequential` | `sequential` or `parallel`. |
-| `suite` | string | `targeted` | Only on `kraft.verify_changed_test_scopes`: `targeted` runs each scope's [`targeted_command`](/reference/configuration/repos#targeted_command) where it has one, and `full` always runs its `command`. _Added in next_ |
+| `suite` | string | `targeted` | Only on `kraft.verify_changed_test_scopes`: `targeted` runs each scope's [`targeted_command`](/reference/configuration/repos#targeted_command) where it has one, and `full` always runs its `command`. _Added in 2.4_ |
 
 ### Forge task keys
 
@@ -470,8 +470,8 @@ Every task takes these keys, then the keys of its kind. A task takes no
 |---|---|---|---|
 | `target` | string | required | `mr.open_draft`, `mr.sync`, `mr.ci`, `mr.automated_review`, `mr.mark_ready`, `mr.external_approval`, `mr.merge` or `mr.post_merge_ci`. |
 | `wait` | mapping | none | For a target that waits: `polling`, with an `initial_interval` and a `max_interval`. Set the timeout with the task's `policy`. |
-| `wait.grace_period` | duration | `60s` | Only on `mr.automated_review`: how long a review bot must stay quiet after its last activity on the head to count as finished. Refused on any other target. _Added in next_ |
-| `reviewers` | list | unset | Only on `mr.automated_review`: the reviewers it waits for, each `{bot: LOGIN}` or `{check: NAME}`. The item's `reviewers` override and the repo's `automated_review` come first. `[]` names none. _Added in next_ |
+| `wait.grace_period` | duration | `60s` | Only on `mr.automated_review`: how long a review bot must stay quiet after its last activity on the head to count as finished. Refused on any other target. _Added in 2.4_ |
+| `reviewers` | list | unset | Only on `mr.automated_review`: the reviewers it waits for, each `{bot: LOGIN}` or `{check: NAME}`. The item's `reviewers` override and the repo's `automated_review` come first. `[]` names none. _Added in 2.4_ |
 
 `mr.post_merge_ci` watches the CI of the commit the item merged, however many merges land on the base branch after it. A run cancelled for a newer push moves the watch onto the base's tip, which holds that merge, and records `post_merge_ci_moved`.
 

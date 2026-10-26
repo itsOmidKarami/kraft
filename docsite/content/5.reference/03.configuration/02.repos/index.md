@@ -63,11 +63,11 @@ No key on an entry passes silently. A key within two edits of a field below (`au
 |---|---|---|---|
 | `setup_command` | string | `null` | Runs in every new [worktree](/concepts/vocabulary#worktree) before any node starts. Unset, the file still loads, but the repo's next work item stops before its first task. See [`setup_command`](#setup_command). |
 | `test_command` | string | `null` | The command CI actually runs for this repo: what the changed-test-scope verification runs, as one scope over every path. See [`test_command`](#test_command). |
-| `test_scopes` | list of `{paths, command, targeted_command}` | `null` | A monorepo's per-directory test commands. Each `paths` is a non-empty list and each `command` a non-empty string. `targeted_command` is optional; see [`targeted_command`](#targeted_command). _Added in next_ |
+| `test_scopes` | list of `{paths, command, targeted_command}` | `null` | A monorepo's per-directory test commands. Each `paths` is a non-empty list and each `command` a non-empty string. `targeted_command` is optional; see [`targeted_command`](#targeted_command). _Added in 2.4_ |
 | `areas` | mapping of id to area | `{}` | Path-scoped contexts inside this repo: `{paths: [...], setup: "...", verification: {test_scopes: [...]}}`. See [`areas`](#areas). |
 | `intent_dir` | string, a relative path | `null` | Where the repo's intent tree lives, relative to its root. When set, every agent in the repo is told to follow it. Kraft does not run the tree's check: add it to the repo's `test_scopes` yourself. |
 | `local_files` | list of strings | `[]` | Files to copy into every new worktree, for ones `git worktree add` cannot carry: relative paths, no globs or directories, covered by the worktree's `.gitignore`. Anything else is refused, and named in the `worktree_prepared` event (`kraft view events`). |
-| `carry` | list of strings | `[]` | Files a test-selection tool keeps its state in, such as `.testmondata`. Kraft seeds them into each new worktree and saves them back after a passing local targeted round. See [`carry`](#carry). _Added in next_ |
+| `carry` | list of strings | `[]` | Files a test-selection tool keeps its state in, such as `.testmondata`. Kraft seeds them into each new worktree and saves them back after a passing local targeted round. See [`carry`](#carry). _Added in 2.4_ |
 
 ### Environment
 
@@ -90,7 +90,7 @@ No key on an entry passes silently. A key within two edits of a field below (`au
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `automated_review` | mapping or list | `null` | The automated reviewers a chain's `mr.automated_review` task waits for, each `bot: <login>` or `check: <name>`. A list names several; `[]` names none. See [Automated review](#automated-review). _Added in next_ |
+| `automated_review` | mapping or list | `null` | The automated reviewers a chain's `mr.automated_review` task waits for, each `bot: <login>` or `check: <name>`. A list names several; `[]` names none. See [Automated review](#automated-review). _Added in 2.4_ |
 | `ci_checks` | boolean | `true` | Set `false` on a repo with no CI, so both CI waits pass at once instead of waiting on checks that never come. See [`ci_checks`](#ci_checks). |
 | `library_auto_update` | boolean | `false` | Take text-only changes to this repo's accepted [repo library](/reference/configuration/repo-libraries#automatic-updates) without a person. |
 
@@ -139,7 +139,7 @@ Every command runs from the repository root, without a shell, so one for a proje
 Kraft does not synthesize `test_scopes` from `test_command`: the two stay independently editable.
 
 #### `targeted_command`
-_Added in next_
+_Added in 2.4_
 
 A scope may name a second command that runs only the tests a change affects. It is optional, and an area's scopes (`areas.<name>.verification.test_scopes`) take it too. Verification runs it in place of `command`, in its first round and in every repair round. A bare `test_command` takes none: write a scope.
 
@@ -163,7 +163,7 @@ Commands compare after shell splitting, so `just  test` and `just test` are one 
 An area's test scopes join the repo's and are selected by changed paths the same way. Its `setup` runs once before the first of its scopes runs. Areas are never forge targets.
 
 ### `carry`
-_Added in next_
+_Added in 2.4_
 
 Files a test-selection tool keeps its state in, such as testmon's `.testmondata`. They follow `local_files`' rules: literal file paths inside the repo, no globs or directories, covered by the worktree's `.gitignore`, and never listed in both. Kraft seeds them into every new worktree and saves them back, so the tool does not start cold in each one.
 
@@ -218,7 +218,6 @@ _Added in 2.1_
 
 ### Automated review
 
-<!-- not new: the field and its section are old; the list form, the layers and the collect path below are newer -->
 `automated_review` names one reviewer, or a list of them, each named one of two ways. They are the reviewers a chain's `mr.automated_review` task waits for.
 
 - `bot: <login>` settles when that forge login has reviewed the merge request's current head.
@@ -231,7 +230,7 @@ Unset here and everywhere else, the repository expects no automated review: the 
 Kraft reads only the first page of 100 of each list it asks for: the pull request's reviews, a review's comments, and a GitLab merge request's discussions and commit statuses. A bot with no match on that first page reads as not having reviewed yet.
 
 ### Waiting for several reviewers
-_Added in next_
+_Added in 2.4_
 
 Reviewers can be named in three places. The nearest wins, and its list is the whole list:
 

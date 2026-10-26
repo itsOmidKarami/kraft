@@ -6,6 +6,82 @@ Kraft's release notes for that version. The release workflow writes them; do not
 edit this file by hand. Earlier releases are in Kraft's
 [CHANGELOG](https://github.com/itsOmidKarami/kraft/blob/main/CHANGELOG.md).
 
+## 2.4.0
+
+### Highlights
+
+- `runner:` runs a step on a registered machine (`kraft admin worker add`) instead of the server. The step's commits and files go to the machine, its log and status come back while it runs, and a server restart reattaches it. (#1067)
+
+### New
+
+- Fix: the review page's diff no longer shows main's commits as the item's change after main is merged into its branch, and its file tree can be resized by dragging its edge. (#1056)
+
+- Add: remote workers, part 1: register other machines in `workers.yaml` with `kraft admin worker add`, connect them by dial-in token or ssh, and see in `kraft admin doctor` whether each is up. (#1057)
+
+- Add: list several automated reviewers on a task, repo or work item; the review wait now settles on each bot's activity, and a cheap read-only agent step decides which of their feedback needs fixing. (#1064)
+
+- Remote workers: a step on a machine survives a dropped connection (in ssh mode a background process on the machine keeps it) and is delivered when it returns; the server and the machine each give up after `give_up_after` (default 2h, counting only time the server was awake), and the time cap and idle limit are enforced on the machine too. Settings › Workers lists the machines, a step shows which machine ran it and since when it is unreachable, and `kraft admin doctor` names a chain placed on a machine that is not in `workers.yaml`. (#1068)
+
+- Sandboxed items can now run on a remote machine: the machine builds the item's sandbox itself and fails the step if it cannot. (#1069)
+
+- VS Code: **Open Config…**, the gear on the board, lists Kraft's config files and chains with a line on what each holds, and opens the one you pick. (#1073)
+
+- VS Code: **Open Config…** also offers `sandbox.yaml` and `detectors.yaml` before they exist; saving creates them. (#1074)
+
+- A local worker now runs every local step, so stopping, restarting or updating Kraft within a major version no longer ends running steps of worktree items; `kraft admin stop --now` stops them as before. Settings › Workers lists the worker. (#1079)
+
+- Verification can run a test scope's `targeted_command`, a command that runs only the tests a change affects, in place of its full `command`. A chain picks with `suite: targeted | full` on its verify task, and `kraft repo connect --verify` checks the targeted command. (#1081)
+
+- `carry` in `repos.yaml` names a test-selection tool's state files (such as `.testmondata`). Kraft seeds them into each new worktree and saves them back after a passing targeted round, so the tool stays warm across worktrees. (#1082)
+
+- A step's `runner:` can name a group of machines in `workers.yaml`, and the local worker can join groups and take a limit (`local: capacity:`). (#1102)
+- A machine caps the steps it runs at once with `capacity:` in its own `machine.yaml`. The server sends it no more, and places a step a full machine would refuse on another free machine. (#1102)
+- Settings › Workers can add, edit, enable, disable, re-token and remove machines. `kraft admin worker` gains `edit`, `enable`, `disable` and `rotate-token`, and the MCP tools `edit_worker` and `rotate_worker_token` do the same. Removing a machine that is running a step is now refused instead of cutting the step short. (#1102)
+
+- A repo with submodules can now run on a machine, as long as the item declares no workspace members. Its submodules stay uninitialized there, and Kraft refuses a machine's commits that add or move a submodule pointer. (#1104)
+
+- Git LFS repos run on remote machines that have git-lfs installed: their LFS files travel with the step, and the server verifies each returned object against its pointer before storing it. (#1105)
+
+### Fixes
+
+- Fix: a final review opens on the whole change, not only on what changed since a review at an earlier gate. The phone gate screen says when it shows only part of the change. (#1058)
+
+- Settings › Storage: Clean up now shows each item as it is cleaned up and a bar counting items done and space freed, instead of waiting silently. (#1059)
+
+- Settings › About links to Kraft's source on GitHub. (#1060)
+
+- Fix: opening or closing a changed-test-scope task on the node canvas zooms smoothly instead of snapping to the new zoom after the move. (#1061)
+
+- Fix: an item paused because another merge broke its base now stops its running step and starts no new one, instead of letting the step carry on, run fix rounds and commit while the item showed as paused. (#1062)
+
+- Fix: an item paused because another merge broke its base now says so on its Paused card, with a link to the item that broke the base and the follow-up bead. (#1063)
+
+- Fix: an implementing agent runs the tests for what it changed instead of the repo's whole suite; the test scopes are left to verification. (#1065)
+
+- Build(deps-dev): Bump the npm_and_yarn group across 1 directory with 3 updates (#1070)
+
+- Build(deps): Bump the uv group across 1 directory with 3 updates (#1071)
+
+- The shipped `fast` agent profile runs Haiku at medium effort instead of low; existing installs keep their own setting. (#1075)
+
+- Fix: an item's clock, and analytics' lead time, count from when its chain started, not when it was filed, so a wait behind a dependency no longer counts; an archived item's clock stops when it ended, not when it was archived. (#1080)
+
+- The VS Code extension lists `workers.yaml` in Open Config and checks it against a schema. (#1084)
+
+- A post-merge CI wait on a merge commit that no CI ever runs for, such as a merge into a branch whose workflows run only on pull requests, now passes after 5 minutes and records `post_merge_ci_absent`, instead of waiting out its 90-minute cap and stopping for a person. (#1086)
+
+- `post_merge_ci` on GitHub no longer passes as "no CI" when the merge commit's CI reports from an app other than Actions, as a check run or a commit status. (#1092)
+
+- Build(deps): Bump pillow from 12.3.0 to 13.0.0 in the uv group across 1 directory (#1093)
+
+- `post_merge_ci` watches the commit the item merged, not the base branch's newest commit, so a busy base no longer keeps an item waiting or reports a later PR's red run as its own break. (#1095)
+
+- Fix: a repair that says a node's failure needs a code fix now hands it to that node's fix loop, judged first, instead of stopping the item. (#1097)
+
+- Fix: verification measures a rebased branch from where it now forks, so the base branch's newer commits are no longer counted as the item's own changes. (#1099)
+
+- Fixed: on a machine, a step that follows a local commit or a rebase of the item's branch is published instead of being kept unsynced. (#1107)
+
 ## 2.3.0
 
 ### Highlights
