@@ -110,6 +110,44 @@ async def test_a_bundle_that_plants_a_repository_fails_the_step_and_touches_noth
     assert "evil" in run.spool.read_text() and "was not taken" in run.spool.read_text()
 
 
+def _gitlink(repo, sha):
+    """An uninitialized submodule as `git worktree add` leaves it: `.gitmodules`, a gitlink entry
+    and an empty directory."""
+    write(repo, ".gitmodules", '[submodule "sub"]\n\tpath = sub\n\turl = ./sub\n')
+    git(repo, "add", ".gitmodules")
+    git(repo, "update-index", "--add", "--cacheinfo", f"160000,{sha},sub")
+    git(repo, "commit", "-qm", "gitlink")
+    (repo / "sub").mkdir()
+
+
+BUMP_GITLINK = (
+    "import os, subprocess; "
+    "subprocess.run(['git', 'update-index', '--cacheinfo', '160000,' + '2' * 40 + ',sub'], "
+    "check=True); "
+    "subprocess.run(['git', 'commit', '-qm', 'bump'], check=True); "
+    "open(os.environ['KRAFT_RESULT_PATH'], 'w').write('{\"status\": \"done\"}')"
+)
+
+
+@pytest.mark.parametrize(
+    ("script", "taken"), [(COMMIT, True), (BUMP_GITLINK, False)], ids=["ordinary-file", "bump"]
+)
+async def test_a_repo_with_an_unused_submodule_runs_on_a_machine_but_cannot_move_its_pointer(
+    rig, script, taken
+):
+    _gitlink(rig.repo, rig.head)
+    rig.head = before = rig.tip()
+    gitlink = git(rig.repo, "ls-tree", before, "sub")
+    run = await rig.done(await rig.run([sys.executable, "-c", script]))
+    if taken:
+        assert run.exit_code == 0 and rig.tip() != before, run.spool.read_text()
+        assert git(rig.repo, "ls-tree", rig.tip(), "sub") == gitlink
+        assert git(rig.repo, "log", "-1", "--format=%s", rig.branch).strip() == "machine work"
+    else:
+        assert run.exit_code == 1 and rig.tip() == before
+        assert "was not taken" in run.spool.read_text()
+
+
 async def test_a_document_a_person_edited_while_the_step_ran_keeps_the_servers_version(
     rig, database
 ):

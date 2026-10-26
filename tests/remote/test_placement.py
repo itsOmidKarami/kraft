@@ -80,7 +80,8 @@ def test_any_with_no_machine_allowed_is_refused():
 
 @pytest.mark.parametrize(
     ("kind", "says"),
-    [("submodule", "submodules"), ("plain", None)],
+    [("submodule", None), ("plain", None)],
+    ids=["submodule-and-no-members-is-not-refused", "plain"],
 )
 def test_a_checkout_a_single_bundle_cannot_carry_is_named(tmp_path, kind, says):
     repo = make_repo(tmp_path)
@@ -154,16 +155,15 @@ def test_a_group_whose_remote_members_do_not_allow_the_repo_and_has_no_local_is_
     assert "group 'gpu'" in got and "infra" in got
 
 
-def test_a_group_with_a_submodule_checkout_names_why_no_remote_member_can_take_it(tmp_path):
+def test_a_group_with_workspace_members_names_why_no_remote_member_can_take_it(tmp_path):
     repo = make_repo(tmp_path)
-    (repo / ".gitmodules").write_text('[submodule "x"]\n\tpath = x\n\turl = ./x\n')
     workers = registry.WorkersFile.model_validate(
         {"workers": {"gpu-1": {"ssh": "g1", "groups": ["gpu"]}}}
     )
     (got,) = placement.filing_problems(
-        ["gpu"], workers=workers, repos=[], in_place=False, repo_path=repo
+        ["gpu"], workers=workers, repos=[], in_place=False, repo_path=repo, members=["libs/a"]
     )
-    assert "group 'gpu'" in got and "submodules" in got
+    assert "group 'gpu'" in got and "workspace members" in got
 
 
 def test_library_runners_lists_every_machine_the_chain_names():

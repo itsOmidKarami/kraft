@@ -76,12 +76,14 @@ def refusal(
 
 
 def checkout_problem(repo_path: str | Path, *, members: Sequence[str] = ()) -> str | None:
-    """A single bundle carries one repository's commits: not members or submodules."""
+    """A single bundle carries one repository's commits, not workspace members'.
+
+    Submodules are not refused when `members` is empty: the server's worktree leaves every one
+    uninitialized, the bundle reproduces that, and `bundle.fetch` refuses a gitlink change. Git LFS
+    is not a checkout problem: its objects travel beside the bundle (`remote/lfs.py`).
+    """
     if members:
         return f"it has workspace members ({', '.join(members)}), which a bundle does not carry"
-    root = Path(repo_path)
-    if (root / ".gitmodules").exists():
-        return "the repo has submodules, which a bundle does not carry"
     return None
 
 

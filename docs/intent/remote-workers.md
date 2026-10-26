@@ -91,9 +91,14 @@ enforced-by: tests/remote/test_placement.py::test_a_machine_that_is_unknown_or_n
 origin: src/kraft/remote/placement.py §refusal
 
 ## REQ runner-refuses-items-a-machine-cannot-take
-IF an item with a machine runner is in place, or has workspace members or submodules, THEN the system SHALL refuse it, naming both settings.
-enforced-by: tests/remote/test_placement.py::test_filing_problems_name_both_settings_for_in_place, tests/remote/test_placement.py::test_a_checkout_a_single_bundle_cannot_carry_is_named[submodule-submodules], tests/adapters/test_subprocess_remote.py::test_a_placement_that_cannot_hold_is_a_config_error_naming_why_and_runs_nothing[unknown-machine]
+IF an item with a machine runner is in place, or has workspace members, THEN the system SHALL refuse it, naming both settings.
+enforced-by: tests/remote/test_placement.py::test_filing_problems_name_both_settings_for_in_place, tests/remote/test_placement.py::test_workspace_members_are_named, tests/adapters/test_subprocess_remote.py::test_a_placement_that_cannot_hold_is_a_config_error_naming_why_and_runs_nothing[unknown-machine]
 origin: src/kraft/remote/placement.py §filing_problems
+
+## REQ runner-takes-a-repo-with-submodules-when-no-member-is-declared
+WHERE a repo has submodules but an item declares no workspace members, the system SHALL let a machine run the item, SHALL leave the submodules uninitialized there, and SHALL refuse the machine's commits when they add or move a gitlink.
+enforced-by: tests/remote/test_placement.py::test_a_checkout_a_single_bundle_cannot_carry_is_named[submodule-and-no-members-is-not-refused], tests/remote/test_runs.py::test_a_repo_with_an_unused_submodule_runs_on_a_machine_but_cannot_move_its_pointer[ordinary-file], tests/remote/test_runs.py::test_a_repo_with_an_unused_submodule_runs_on_a_machine_but_cannot_move_its_pointer[bump]
+origin: src/kraft/remote/placement.py §checkout_problem
 
 ## REQ any-never-means-the-server
 WHERE a step's runner is `any`, the system SHALL choose the first connected machine that may work on every repo of the item and has a free slot, and SHALL NOT run the step on the server.
@@ -361,8 +366,8 @@ enforced-by: tests/remote/test_launch.py::test_a_resumed_session_goes_back_to_wh
 origin: src/kraft/store/sessions.py §pinned_runner
 
 ## REQ group-refuses-items-no-member-can-take
-IF no member of a group could take an item (it is in place or has workspace members or submodules, and the local worker is not a member), THEN the system SHALL refuse it at filing, naming the group.
-enforced-by: tests/remote/test_placement.py::test_a_group_holds_when_a_member_could_take_the_item[remote-only-in-place], tests/remote/test_placement.py::test_a_group_with_a_submodule_checkout_names_why_no_remote_member_can_take_it, tests/remote/test_placement.py::test_a_group_holds_when_a_member_could_take_the_item[with-local-in-place]
+IF no member of a group could take an item (it is in place or has workspace members, and the local worker is not a member), THEN the system SHALL refuse it at filing, naming the group.
+enforced-by: tests/remote/test_placement.py::test_a_group_holds_when_a_member_could_take_the_item[remote-only-in-place], tests/remote/test_placement.py::test_a_group_with_workspace_members_names_why_no_remote_member_can_take_it, tests/remote/test_placement.py::test_a_group_holds_when_a_member_could_take_the_item[with-local-in-place]
 origin: src/kraft/remote/placement.py §group_problem
 
 ## REQ step-on-a-group-places-again-for-a-missing-cap
