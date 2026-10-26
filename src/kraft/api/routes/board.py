@@ -97,7 +97,8 @@ def _reject_default(st, row, gate: str | None) -> str | None:
 #: the same shape of boundary `_pending_gate` models. A stop needs one because
 #: `store.request_gate` also sets status 'needs_human' while appending no
 #: `work_item_needs_human`: without this set a first-match scan reads an
-#: answered-and-resumed stop, or a pending gate, as a live one forever.
+#: answered-and-resumed stop, or a pending gate, as a live one forever. A
+#: `work_item_waiting` is one too, and is itself a stop when it has a reason.
 _STOP_BOUNDARY = (
     WorkItemEvent.NEEDS_HUMAN,
     GateEvent.REQUESTED,
@@ -106,7 +107,17 @@ _STOP_BOUNDARY = (
     WorkItemEvent.RETRIED,
     WorkItemEvent.COMPLETED,
     WorkItemEvent.RATE_LIMITED,
+    WorkItemEvent.WAITING,
 )
+
+
+def _stop_payload(event_type: str, payload: dict) -> dict | None:
+    """A boundary event's payload when it is a stop: a `work_item_needs_human`,
+    or a `work_item_waiting` that says why (a step waiting for its machine,
+    `store.mark_waiting`). An external wait's says nothing: no stop reason."""
+    if event_type == WorkItemEvent.NEEDS_HUMAN:
+        return payload
+    return payload if event_type == WorkItemEvent.WAITING and "reason" in payload else None
 
 
 #: How long an `escalation_message` with no session row yet still reads as a
@@ -140,11 +151,7 @@ def _stop_episode(st, wid: str) -> tuple[dict | None, bool]:
         if e["type"] in _STOP_BOUNDARY:
             boundary = e
             break
-    stop = (
-        boundary["payload"]
-        if boundary is not None and boundary["type"] == WorkItemEvent.NEEDS_HUMAN
-        else None
-    )
+    stop = _stop_payload(boundary["type"], boundary["payload"]) if boundary is not None else None
     last = next((e for e in reversed(evs) if e["type"] == EscalationEvent.ESCALATION_MESSAGE), None)
     escalated = False
     if boundary is not None and last is not None and last["seq"] > boundary["seq"]:
@@ -580,11 +587,11 @@ def _latest_payload(c, wid: str, event_type: str) -> dict | None:
 
 
 def _boundary_payload(boundary) -> dict | None:
-    """The `work_item_needs_human` payload of a list row's latest stop-boundary
-    event, or None when that event is not a stop."""
-    if boundary is not None and boundary["type"] == WorkItemEvent.NEEDS_HUMAN:
-        return json.loads(boundary["payload"])
-    return None
+    """The payload of a list row's latest stop-boundary event, or None when
+    that event is not a stop (`_stop_payload`)."""
+    if boundary is None:
+        return None
+    return _stop_payload(boundary["type"], json.loads(boundary["payload"]))
 
 
 def _list_stop(row, pending_gate: str | None, boundary) -> dict | None:

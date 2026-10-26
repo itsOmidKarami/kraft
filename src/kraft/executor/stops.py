@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -20,6 +21,7 @@ from kraft.templates.models import DEFAULT_WAIT, ResolvedNode, ResolvedTask
 from kraft.usage import cap_usd as _cap_usd
 from kraft.usage import usd as _usd
 from kraft.vocab import HOLDS_SLOT, ForgeEvent, LimitEvent, StopKind
+from kraft.vocab.events import RemoteEvent
 from kraft.worker import sandbox as _sandbox
 
 #: Parses a raw event payload (the DB's dict, read back from JSON) into the
@@ -249,11 +251,27 @@ async def stop_for_waiting(
     external waits (`kraft.waits`), and release the walk. A waiting task that
     somehow recorded no next observation is looked at again after the default
     initial interval rather than never."""
-    due = db.read(lambda c: waits.next_observation(c, work_item_id, [t.path for t in waiting]))
+    paths = [t.path for t in waiting]
+    due = db.read(lambda c: waits.next_observation(c, work_item_id, paths))
     if due is None:
         due = (datetime.fromisoformat(_now()) + DEFAULT_WAIT.initial_interval).isoformat()
-    await db.write(lambda c: store.mark_waiting(c, work_item_id, node.id, due))
+    reason = db.read(lambda c: _machine_wait(c, work_item_id, node.id, paths))
+    await db.write(lambda c: store.mark_waiting(c, work_item_id, node.id, due, reason=reason))
     return WAITING
+
+
+def _machine_wait(c, work_item_id: str, node_id: str, paths: list[str]) -> str | None:
+    """What a step of `paths` waiting for its machine or slot said last (`dispatch._note_waiting`
+    writes it just before the step returns `WAITING`), or None: an external wait says nothing
+    there, since only a step that takes the checkout is placed."""
+    rows = c.execute(
+        "SELECT payload FROM events WHERE work_item_id = ? AND type = ? AND node_id = ? "
+        "ORDER BY seq DESC",
+        (work_item_id, RemoteEvent.STEP_WAITING, node_id),
+    )
+    return next(
+        (p["reason"] for r in rows if (p := json.loads(r["payload"]))["task"] in paths), None
+    )
 
 
 #: The suggestion a stop makes when what stopped it is outside the work:

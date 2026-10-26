@@ -29,11 +29,19 @@ async def test_a_step_on_an_offline_machine_parks_the_item_and_runs_when_it_retu
     assert it.status() == "waiting" and it.sessions() == []
     (event,) = it.events("remote_step_waiting")
     assert event["payload"]["reason"] == "waiting for gpu (offline: never connected)"
+    # The stop says it too, for the board and `kraft view show`.
+    assert it.events("work_item_waiting")[-1]["payload"]["reason"] == event["payload"]["reason"]
     await database.write(lambda c: store.mark_reentered(c, it.id))
     await _walk(it, database, run_dirs)  # looked at again, nothing changed: still one event
     assert len(it.events("remote_step_waiting")) == 1
+    assert it.events("work_item_waiting")[-1]["payload"]["reason"] == event["payload"]["reason"]
     await rig_offline.connect()
+    rig_offline.hub.mark_full("gpu")  # back, but full: the stop says the current reason
     await database.write(lambda c: store.mark_reentered(c, it.id))  # what the wait scheduler does
+    await _walk(it, database, run_dirs)
+    assert it.events("work_item_waiting")[-1]["payload"]["reason"] == "waiting for gpu (full)"
+    rig_offline.hub.set_machine_capacity("gpu", None)  # a slot freed
+    await database.write(lambda c: store.mark_reentered(c, it.id))
     await _walk(it, database, run_dirs)
     assert it.status() == "completed"
     assert [(s["runner"], s["status"]) for s in it.sessions()] == [("gpu", "done")]

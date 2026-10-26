@@ -298,8 +298,17 @@ def mark_rate_limited(
     )
 
 
-def mark_waiting(conn: sqlite3.Connection, work_item_id: str, node_id: str, retry_at: str) -> None:
-    """The node is waiting on something outside Kraft (today: a pipeline).
+def mark_waiting(
+    conn: sqlite3.Connection,
+    work_item_id: str,
+    node_id: str,
+    retry_at: str,
+    *,
+    reason: str | None = None,
+) -> None:
+    """The node is waiting on something outside Kraft: a pipeline, or, with a
+    `reason` (`waiting for gpu-box (full)`), the machine or slot a step is
+    placed on. Only a machine wait has a reason: the board names the wait by it.
 
     Sibling of `mark_rate_limited`, and deliberately shaped identically: the
     wait is a row the scheduler owns, not a coroutine holding a slot. A
@@ -314,8 +323,12 @@ def mark_waiting(conn: sqlite3.Connection, work_item_id: str, node_id: str, retr
         (retry_at, _now(), work_item_id),
     ):
         return
+    payload = {"node_id": node_id, "retry_at": retry_at}
     events.append(
-        conn, work_item_id, WorkItemEvent.WAITING, {"node_id": node_id, "retry_at": retry_at}
+        conn,
+        work_item_id,
+        WorkItemEvent.WAITING,
+        {**payload, "reason": reason} if reason else payload,
     )
 
 

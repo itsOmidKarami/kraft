@@ -225,7 +225,12 @@ def test_stop_detail_needs_human(client, repo):
     }
 
 
-def test_stop_detail_waiting(client, repo):
+@pytest.mark.parametrize(
+    "reason",
+    [None, "waiting for gpu-box (full)"],
+    ids=["external-wait-says-nothing", "machine-wait-says-why"],
+)
+def test_stop_detail_waiting(client, repo, reason):
     wid = _paused_item(client, repo)
     _run(lambda c: store.load_chain(c, wid, "ci_poll"))
     _run(
@@ -239,7 +244,11 @@ def test_stop_detail_waiting(client, repo):
             result_path="/r",
         )
     )
-    _run(lambda c: store.mark_waiting(c, wid, "ci_poll", "2026-10-01T00:10:00+00:00"))
+    _run(
+        lambda c: store.mark_waiting(
+            c, wid, "ci_poll", "2026-10-01T00:10:00+00:00", reason=reason
+        )
+    )
 
     body = client.get(f"/api/work-items/{wid}").json()
     assert body["display_status"] == "waiting"
@@ -249,10 +258,13 @@ def test_stop_detail_waiting(client, repo):
         "task": "ci_poll.main.poll",
         "attempt": 1,
         "resume_at": "2026-10-01T00:10:00+00:00",
-        "reason": None,
+        "reason": reason,
         "facts": {},
     }
+    assert body["stop_reason"] == reason
     assert body["retry_at"] == body["stop"]["resume_at"]
+    row = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
+    assert row["stop"]["reason"] == reason
 
 
 def test_stop_detail_rate_limited(client, repo):
