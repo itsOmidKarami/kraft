@@ -135,6 +135,8 @@ describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
     expect(cardOf(mk("needs_you", stop("question", { task: "verification.review.code_review" }), { needs_context_question: "Allow it?" }))).toMatchObject({ title: "Needs you", text: "“Allow it?”", where: "asked by code_review · on verification" });
     expect(cardOf(mk("failed", stop("failed", { reason: "exit 1", task: "verification.review.code_review", attempt: 2 })))).toMatchObject({ tone: "bad", title: "Failed", text: "exit 1", where: "verification › review › code_review · attempt 2" });
     expect(cardOf(mk("waiting", stop("rate_limit", { facts: { harness: "claude", fallback_allowed: ["codex"] } })))?.text).toMatch(/claude hit its rate limit/);
+    expect(cardOf(mk("waiting", stop("wait")))).toMatchObject({ title: "Waiting on CI", text: undefined });
+    expect(cardOf(mk("waiting", stop("wait", { reason: "waiting for gpu-box (full)" })))).toMatchObject({ title: "Waiting for a machine", text: "waiting for gpu-box (full)" });
     expect(cardOf(mk("needs_you", stop("conflict", { facts: { unresolved: ["a.py"], resolved: ["b.py"] } })))?.facts).toEqual([["unresolved", "a.py"], ["resolved", "b.py"]]);
     expect(cardOf(mk("blocked", null, { dependencies: [{ id: "a1", title: "Schema first", status: "needs_human", met: false }, { id: "b2", title: "Old cleanup", status: "completed", met: true }] })))
       .toMatchObject({ tone: "info", title: "Blocked", where: "waiting on 1 item", facts: [["needs human", "Schema first", "a1"], ["completed", "Old cleanup", "b2"]] });

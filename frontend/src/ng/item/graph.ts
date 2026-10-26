@@ -5,6 +5,7 @@ import type { ChainArc, ChainNode } from "../graph/layout";
 import { escalationsIn, isEscalation, passOf } from "./nodeGraph";
 import { materialized, nodeTaskKind } from "./chainValues";
 import { isScopeTask } from "./scopeView";
+import { waitTitle } from "./sharedWords";
 import type { ItemDetail } from "./useItem";
 
 const kindOf = (n: ApiNode) => n.kind ?? "exec";
@@ -72,8 +73,8 @@ export function chainGraph(item: ItemDetail, events: KraftEvent[], now = Date.no
     const started = work.map((s) => s.started_at).filter(Boolean).sort().at(-1);
     const step = item.summary?.step;
     const sub = [step ? `${step.index}/${step.count}` : "", started ? elapsedBetween(started, null, now) : ""].filter(Boolean).join(" · ");
-    // A waiting item's node runs nothing: it waits on CI or the provider, and says so where words are shown (R11b-04).
-    const wait = status === "waiting" ? (stop?.kind === "rate_limit" ? "waiting · rate limit" : stop?.kind === "wait" ? "waiting on CI" : "waiting") : undefined;
+    // A waiting item's node runs nothing: it waits on CI, a machine or the provider, and says so where words are shown (R11b-04).
+    const wait = status === "waiting" ? (stop?.kind === "rate_limit" ? "waiting · rate limit" : stop?.kind === "wait" ? waitTitle(stop.reason).replace(/^W/, "w") : "waiting") : undefined;
     return { ...out, state: "current", running: status === "running" || status === "escalated", sub: sub || undefined, subTone: "amber", ...(wait && { wait }) };
   });
 

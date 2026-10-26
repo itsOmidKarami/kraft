@@ -11,7 +11,7 @@ import type { ItemDetail } from "../../item/useItem";
 import type { ChainNode } from "../../graph/layout";
 import { steerDoor } from "./steer";
 import { CHECKOUT_FREES, gateName, IN_USE_BY, nameOf, WAITING_FOR_CHECKOUT } from "../../board/rowText";
-import { LIMIT_REACHED, CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, MARK_COMPLETE, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, BUDGET_RAN_OUT, WAITING_ON_THE_PROVIDER, REMOVE_FROM_QUEUE, ABANDONED, ABANDONED_TEXT, NO_REASON_GIVEN } from "../../item/sharedWords";
+import { LIMIT_REACHED, CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, MARK_COMPLETE, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, BUDGET_RAN_OUT, WAITING_ON_THE_PROVIDER, waitTitle, REMOVE_FROM_QUEUE, ABANDONED, ABANDONED_TEXT, NO_REASON_GIVEN } from "../../item/sharedWords";
 
 /** The item screen's decisions, pure (W17 brief C): what the state card says,
  *  which pair of buttons the bottom bar offers, what the ⋮ sheet lists, and the
@@ -93,7 +93,7 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
         if (allowed.length) fs.push(["fallback", `${allowed.join(", ")} allowed`]);
         return { tone: "info", title: WAITING_ON_THE_PROVIDER, where, text: `${str(facts.harness) ?? "The agent"} hit its rate limit. Kraft retries by itself, so nothing needs doing.`, facts: fs };
       }
-      if (stop?.kind === "wait") return { tone: "info", title: "Waiting on CI", where, text: stop.reason ?? undefined, facts: stop.resume_at ? [["next check", until(stop.resume_at)]] : [] };
+      if (stop?.kind === "wait") return { tone: "info", title: waitTitle(stop.reason), where, text: stop.reason ?? undefined, facts: stop.resume_at ? [["next check", until(stop.resume_at)]] : [] };
       return null;
     }
     case "needs_you": {

@@ -207,6 +207,9 @@ def _tail(row: dict, stop: dict, node: str, now: float) -> str:
                 return f"{node} · task {progress['current']} of {progress['total']}"
             return node
         case "waiting":
+            # A step waiting for its machine says why, as `waiting for gpu-box (full)`.
+            if stop.get("kind") == "wait" and stop.get("reason"):
+                return f"{node + ' · ' if node else ''}{stop['reason']}"
             at = _or(stop.get("resume_at"), row.get("retry_at"))
             if not at:
                 return f"waiting{where}"

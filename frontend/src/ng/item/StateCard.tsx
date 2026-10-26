@@ -18,7 +18,7 @@ import { totals } from "./Top";
 import { BROKEN_BASE_TEXT, brokenBase, FORGE_LOGIN_HINT, failedFix, failureFacts, headline, keptLine, withCode } from "./cause";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
-import { CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, WAITING_ON_THE_PROVIDER, ABANDONED, ABANDONED_TEXT, NO_REASON_GIVEN } from "./sharedWords";
+import { CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, WAITING_ON_THE_PROVIDER, waitTitle, ABANDONED, ABANDONED_TEXT, NO_REASON_GIVEN } from "./sharedWords";
 import { LinkButton, linkButtonClass } from "../ui/LinkButton";
 import { Select } from "../ui/Select";
 
@@ -182,7 +182,7 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
   }
   if (status === "waiting" && stop?.kind === "wait")
     return {
-      tone: "info", glyph: <Clock size={14} aria-hidden />, title: "Waiting on CI", where, node: stop.node, text: stop.reason ?? undefined,
+      tone: "info", glyph: <Clock size={14} aria-hidden />, title: waitTitle(stop.reason), where, node: stop.node, text: stop.reason ?? undefined,
       facts: stop.resume_at ? [["next check", until(stop.resume_at)]] : [],
       actions: [],
     };

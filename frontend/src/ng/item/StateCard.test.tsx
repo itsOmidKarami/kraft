@@ -304,9 +304,15 @@ describe("StateCard", () => {
     expect(within(card).queryByRole("button", { name: /Retry|for this attempt/ })).toBeNull();
   });
 
-  it("waiting on CI offers no Retry now: the server would refuse it", () => {
-    show({ display_status: "waiting", stop: stop("wait", { reason: "waiting for CI" }) });
-    expect(within(screen.getByRole("region", { name: "Waiting on CI" })).queryByRole("button", { name: /Retry/ })).toBeNull();
+  // Only a step waiting for its machine gives its wait a reason.
+  it.each([
+    ["Waiting on CI", null],
+    ["Waiting for a machine", "waiting for gpu-box (full)"],
+  ])("%s: says why, and offers no Retry now: the server would refuse it", (title, reason) => {
+    show({ display_status: "waiting", stop: stop("wait", { reason }) });
+    const card = screen.getByRole("region", { name: title });
+    if (reason) expect(card).toHaveTextContent(reason);
+    expect(within(card).queryByRole("button", { name: /Retry/ })).toBeNull();
   });
 
   it("conflict: the files the handler left and cleared, review and send back", async () => {

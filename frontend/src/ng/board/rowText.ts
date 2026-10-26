@@ -79,6 +79,8 @@ export function reasonTail(i: Row, now = Date.now()): string {
         // A finished plan (the detail keeps it past the node) has no task left to count.
         return i.progress && !allDone(i.progress) ? `${node} · task ${i.progress.current} of ${i.progress.total}` : node;
       case "waiting": {
+        // A step waiting for its machine says why, as `waiting for gpu-box (full)`.
+        if (i.stop?.kind === "wait" && i.stop.reason) return `${node ? `${node} · ` : ""}${i.stop.reason}`;
         const at = i.stop?.resume_at ?? i.retry_at;
         // A CI wait checks again; only a rate limit retries (R11b-05).
         return at ? `${node ? `${node} · ` : ""}${i.stop?.kind === "wait" ? "next check" : "retry"} ${until(at, now)}` : `waiting${where}`;

@@ -162,6 +162,12 @@
       "tail": "merge request · next check in 5m"
     },
     {
+      "name": "waiting-for-a-machine",
+      "row": { "display_status": "waiting", "current_node_id": "implement", "stop": { "kind": "wait", "node": "implement", "resume_at": "2026-10-15T12:00:30+00:00", "reason": "waiting for gpu-box (full)" } },
+      "group": "running",
+      "tail": "implement · waiting for gpu-box (full)"
+    },
+    {
       "name": "waiting-on-a-rate-limit",
       "row": { "display_status": "waiting", "current_node_id": "implement", "stop": null, "retry_at": "2026-10-15T15:00:00+00:00" },
       "group": "running",
