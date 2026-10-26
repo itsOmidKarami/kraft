@@ -5,6 +5,7 @@ trusting the machine or needing git-lfs."""
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import os
 import re
@@ -182,3 +183,54 @@ def take(store: Path, objects: Mapping[str, tuple[Path, int | None]]) -> None:
             finally:
                 Path(tmp).unlink(missing_ok=True)
         src.unlink(missing_ok=True)
+
+
+@functools.cache
+def available() -> bool:
+    """This machine has git-lfs."""
+    try:
+        done = subprocess.run(
+            ["git", "lfs", "version"], capture_output=True, env=_env(), check=False
+        )
+    except OSError:
+        return False
+    return done.returncode == 0
+
+
+#: What `git lfs install --local` writes, so a `git add` of a matching file runs the clean filter
+#: whatever the machine's own git config says.
+_FILTER = {
+    "filter.lfs.clean": "git-lfs clean -- %f",
+    "filter.lfs.smudge": "git-lfs smudge -- %f",
+    "filter.lfs.process": "git-lfs filter-process",
+    "filter.lfs.required": "true",
+}
+
+
+def configure(bare: Path) -> None:
+    """Set the lfs filter in `bare`'s own config (idempotent); linked worktrees share it."""
+    for key, value in _FILTER.items():
+        subprocess.run(
+            ["git", "-C", str(bare), "config", key, value],
+            capture_output=True,
+            env=_env(),
+            check=True,
+        )
+
+
+def checkout(root: Path) -> None:
+    """Fill `root`'s LFS files from the local store only. An object that is not there stays a
+    pointer; git-lfs says so and that is not an error."""
+    if not uses_lfs(root):
+        return
+    done = subprocess.run(
+        ["git", "-C", str(root), "lfs", "checkout"],
+        capture_output=True,
+        text=True,
+        env=_env(),
+        check=False,
+    )
+    if done.returncode != 0 and "not local" not in done.stdout + done.stderr:
+        raise subprocess.CalledProcessError(
+            done.returncode, done.args, output=done.stdout, stderr=done.stderr
+        )

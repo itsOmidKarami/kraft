@@ -11,14 +11,16 @@ Protocol 2. `id` is the job key `"<work item id>/<session id>"`. Frames:
   Both carry `caps`, the optional behaviours the sender understands (absent from an
   older peer, which reads as none).
 - `ping`, `pong`: keep-alive.
-- `have`, server to machine: `{rid}`; the machine answers `{rid, item, commits}`,
-  up to 500 commits its copy of the item has.
+- `have`, server to machine: `{rid, item}`; the machine answers `{rid, item, commits}`,
+  up to 500 commits its copy of the item has. The ask may carry `lfs`, the oids of the LFS objects
+  the server means to send; the reply then carries `lfs`, the ones its copy already holds.
 - `job`, server to machine: `{id, spec, blobs}`. `spec` is `JobSpec.to_frame()`;
-  `blobs` names the `code` and `files` blobs that follow. Its `codex_hook` is sent only to a
-  machine listing the `codex_hook` cap: the machine's own codex vouches for Kraft's hook there.
+  `blobs` names the `code`, `lfs-<oid>` (one LFS object each) and `files` blobs that follow.
+  Its `codex_hook` is sent only to a machine listing the `codex_hook` cap: the machine's own
+  codex vouches for Kraft's hook there.
 - `blob`, both ways: `{id, name, seq, last, data}` with `data` in base64. `code`
-  (a git bundle) and `files` (a tar.gz) go to the machine; `commits` and `out`
-  come back.
+  (a git bundle), `lfs-<oid>` (an LFS object) and `files` (a tar.gz) go to the machine;
+  `commits`, `lfs-<oid>` and `out` come back.
 - `started`, machine to server: `{id}`; setup is done and the command launched.
 - `rejected`, machine to server: `{id, outcome, reason}`; the command never
   started. `outcome` is `config_error`, `failed`, or `full` (a `job` that skipped `reserve`
@@ -63,7 +65,10 @@ PROTOCOL_VERSION = 2
 CODEX_HOOK = "codex_hook"
 #: The machine holds a slot for a step before the server sends it (`reserve`).
 RESERVE = "reserve"
-CAPS: frozenset[str] = frozenset({CODEX_HOOK, RESERVE})
+#: The machine has git-lfs: it can take a step of an LFS repo (`lfs.available`). Only a machine
+#: that has it lists it, so it is in `CAPS` and dropped by `machine_caps` when it does not.
+LFS = "lfs"
+CAPS: frozenset[str] = frozenset({CODEX_HOOK, RESERVE, LFS})
 _CAPACITY = "capacity="
 HANDSHAKE_S = 10.0
 PING_S = 20.0
@@ -115,9 +120,11 @@ def _caps(raw: object) -> frozenset[str]:
     return frozenset()
 
 
-def machine_caps(capacity: int | None) -> frozenset[str]:
-    """A machine's hello caps: `CAPS`, and `capacity=N` when it has a limit of its own."""
-    return CAPS if capacity is None else CAPS | {f"{_CAPACITY}{capacity}"}
+def machine_caps(capacity: int | None, *, lfs: bool = False) -> frozenset[str]:
+    """A machine's hello caps: `CAPS` (without `lfs` unless it has git-lfs), and `capacity=N` when
+    it has a limit of its own."""
+    caps = CAPS if lfs else CAPS - {LFS}
+    return caps if capacity is None else caps | {f"{_CAPACITY}{capacity}"}
 
 
 def valid_capacity(value: object) -> int | None:

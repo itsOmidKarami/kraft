@@ -181,15 +181,20 @@ async def test_the_machine_hello_lists_its_caps():
     [(None, None), (3, 3)],
     ids=["no-limit", "limit"],
 )
-async def test_a_machines_own_limit_travels_in_its_hello_caps(capacity, reported):
+@pytest.mark.parametrize("has_lfs", [True, False], ids=["lfs", "no-lfs"])
+async def test_a_machines_own_limit_travels_in_its_hello_caps(capacity, reported, has_lfs):
     server, machine = memory_pair()
     peer, _ = await asyncio.gather(
         _server(server),
         protocol.machine_handshake(
-            machine, kraft_version="2.3.0", token="good", caps=protocol.machine_caps(capacity)
+            machine,
+            kraft_version="2.3.0",
+            token="good",
+            caps=protocol.machine_caps(capacity, lfs=has_lfs),
         ),
     )
     assert protocol.RESERVE in peer.caps
+    assert (protocol.LFS in peer.caps) is has_lfs
     assert protocol.reported_capacity(peer.caps) == reported
 
 

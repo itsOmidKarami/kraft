@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 
 from kraft import item_paths, paths
 from kraft.paths import RunDirs
-from kraft.remote import blobs, files, machine_config, protocol
+from kraft.remote import blobs, files, lfs, machine_config, protocol
 from kraft.remote.channels import Channels
 from kraft.remote.forwarder import Forwarder
 from kraft.remote.jobs import JobRunner, JobSpec, job_dir
@@ -233,7 +233,7 @@ class Machine:
 
     def caps(self) -> frozenset[str]:
         """What to list in the hello: `protocol.CAPS` and the limit as it is now."""
-        return protocol.machine_caps(self._limit())
+        return protocol.machine_caps(self._limit(), lfs=lfs.available())
 
     def holds(self, key: str) -> bool:
         """Is `key` (`<work item>/<session>`) one of this machine's jobs?"""
@@ -311,14 +311,11 @@ class Machine:
         kind = frame.get("t")
         if kind == "have":
             wid = frame["item"]
-            await self._emit(
-                {
-                    "t": "have",
-                    "rid": frame["rid"],
-                    "item": wid,
-                    "commits": Copy(self._area / "items" / wid / "repo").commits(),
-                }
-            )
+            copy = Copy(self._area / "items" / wid / "repo")
+            reply = {"t": "have", "rid": frame["rid"], "item": wid, "commits": copy.commits()}
+            if "lfs" in frame:
+                reply["lfs"] = await asyncio.to_thread(copy.held_lfs, frame["lfs"])
+            await self._emit(reply)
         elif kind == "reserve":
             await self._on_reserve(frame)
         elif kind == "unreserve":
@@ -472,6 +469,10 @@ class Machine:
             spec.work_item_id, asyncio.Lock()
         ):  # co-tasks share one copy
             try:
+                await asyncio.to_thread(
+                    copy.take_lfs,
+                    {name[4:]: path for name, path in job.got.items() if name.startswith("lfs-")},
+                )
                 others = self._co_tasks(job)
                 if not others:  # a co-task is using the copy: it is already at this head
                     await asyncio.to_thread(
@@ -482,7 +483,12 @@ class Machine:
                 )
                 for d in spec.dirs:
                     mapper(d.lstrip("/")).mkdir(parents=True, exist_ok=True)
-            except (subprocess.CalledProcessError, OSError, files.FilesRefused) as exc:
+            except (
+                subprocess.CalledProcessError,
+                OSError,
+                files.FilesRefused,
+                lfs.LfsRefused,
+            ) as exc:
                 why = getattr(exc, "stderr", None) or exc
                 await self._reject(job, "failed", f"the machine could not prepare this step: {why}")
                 return
@@ -570,18 +576,23 @@ class Machine:
                         identity=spec.identity,
                     )
         folder = job_dir(self._area, spec.key)
+        delivered = list(self._delivered.get(spec.work_item_id, []))
         tip = await asyncio.to_thread(
-            copy.bundle_since,
-            spec.branch,
-            [spec.head, *self._delivered.get(spec.work_item_id, [])],
-            folder / "commits.bundle",
+            copy.bundle_since, spec.branch, [spec.head, *delivered], folder / "commits.bundle"
+        )
+        objects = (
+            await asyncio.to_thread(copy.new_lfs, spec.branch, tip, [spec.head, *delivered])
+            if tip
+            else {}
         )
         entries = [files.Entry(Path(p), True) for p in spec.rw]
         changed = await asyncio.to_thread(
             files.changed, entries, mapper, pushed, folder / "out.tgz"
         )
-        job.sent = ([("commits", folder / "commits.bundle")] if tip else []) + (
-            [("out", folder / "out.tgz")] if changed else []
+        job.sent = (
+            ([("commits", folder / "commits.bundle")] if tip else [])
+            + [(f"lfs-{oid}", path) for oid, path in objects.items()]
+            + ([("out", folder / "out.tgz")] if changed else [])
         )
         if tip:
             self._delivered.setdefault(spec.work_item_id, []).append(tip)

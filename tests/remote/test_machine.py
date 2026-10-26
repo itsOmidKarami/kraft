@@ -6,13 +6,14 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import hashlib
 import sys
 
 import pytest
 from support.remote import memory_pair, send_job, stop_daemon
 from websockets.asyncio.server import serve
 
-from kraft.remote import blobs, bundle, machine, protocol, registry
+from kraft.remote import blobs, bundle, lfs, machine, protocol, registry
 from kraft.remote import machine as machine_mod
 from kraft.remote.hub import Hub
 from kraft.remote.machine import Machine
@@ -205,6 +206,84 @@ async def test_a_job_that_commits_hands_in_a_bundle_of_exactly_its_commits(tmp_p
     assert frames[-1]["tip"]
     assert bundle._git(tmp_path / "server", "bundle", "verify", str(got[-1])).returncode == 0
     await _end(t, task)
+
+
+def _no_git_lfs(monkeypatch):
+    """A machine that says it has git-lfs without having it: nothing runs the filter."""
+    monkeypatch.setattr(lfs, "available", lambda: True)
+    monkeypatch.setattr(lfs, "configure", lambda bare: None)
+    monkeypatch.setattr(lfs, "checkout", lambda root: None)
+
+
+LFS_BODY = b"large file"
+LFS_OID = hashlib.sha256(LFS_BODY).hexdigest()
+COMMIT_LFS = f"""
+import subprocess
+from pathlib import Path
+from kraft.remote import lfs
+p = lfs.object_path(lfs.store(Path(".")), "{LFS_OID}")
+p.parent.mkdir(parents=True, exist_ok=True)
+p.write_bytes({LFS_BODY!r})
+Path(".gitattributes").write_text("*.bin filter=lfs -text\\n")
+Path("a.bin").write_text(
+    "version https://git-lfs.github.com/spec/v1\\noid sha256:{LFS_OID}\\nsize {len(LFS_BODY)}\\n"
+)
+subprocess.run(["git", "add", "-A"])
+subprocess.run(["git", "commit", "-qm", "m"])
+"""
+
+
+async def test_a_job_that_commits_an_lfs_file_hands_in_its_object_beside_the_bundle(
+    tmp_path, monkeypatch
+):
+    _no_git_lfs(monkeypatch)
+    machine, task, t, spec = await _job(tmp_path, [sys.executable, "-c", COMMIT_LFS])
+    frames = await _frames_until(t, "finished")
+    names = [f["name"] for f in frames if f["t"] == "blob"]
+    assert [n for i, n in enumerate(names) if n not in names[:i]] == ["commits", f"lfs-{LFS_OID}"]
+    sink = blobs.BlobSink(tmp_path / "got")
+    for f in frames:
+        if f["t"] == "blob":
+            sink.add(f)
+    assert sink.path_of(spec.key, f"lfs-{LFS_OID}").read_bytes() == LFS_BODY
+    await _end(t, task)
+
+
+async def test_the_have_reply_lists_which_of_the_asked_lfs_objects_the_copy_holds(tmp_path):
+    server, machine_t = memory_pair()
+    machine = Machine(tmp_path / "home", kraft_version="2.3.0")
+    task = asyncio.create_task(machine.serve(machine_t, {"server": "srv"}))
+    copy = Copy(tmp_path / "home" / "remote" / "srv" / "items" / "w1" / "repo")
+    src = tmp_path / "obj"
+    src.write_bytes(LFS_BODY)
+    copy.take_lfs({LFS_OID: src})
+    other = "e" * 64
+    await server.send({"t": "have", "rid": "r", "item": "w1", "lfs": [other, LFS_OID]})
+    reply = (await _frames_until(server, "have"))[-1]
+    assert reply["lfs"] == [LFS_OID]
+    await server.send({"t": "have", "rid": "s", "item": "w1"})
+    assert "lfs" not in (await _frames_until(server, "have"))[-1]
+    await _end(server, task)
+
+
+async def test_a_co_task_still_stores_the_lfs_objects_it_was_sent(tmp_path, monkeypatch):
+    _no_git_lfs(monkeypatch)
+    machine = Machine(tmp_path / "home", kraft_version="2.3.0")
+    server, task = await _serve(machine)
+    await send_job(server, tmp_path / "one", ["sh", "-c", "sleep 30"], sid="a")
+    await _frames_until(server, "started")
+    src = tmp_path / "obj"
+    src.write_bytes(LFS_BODY)
+    await send_job(
+        server, tmp_path / "two", ["sh", "-c", "sleep 30"], sid="b", lfs_objects={LFS_OID: src}
+    )
+    await _frames_until(server, "started")
+    area = tmp_path / "home" / "remote" / "srv"
+    assert lfs.held(lfs.store(area / "items" / "w1" / "repo.git")) == [LFS_OID]
+    assert list((area / "blobs").glob("*lfs-*")) == []
+    for sid in ("a", "b"):
+        await server.send({"t": "signal", "id": f"w1/{sid}", "sig": "KILL"})
+    await _end(server, task)
 
 
 async def test_a_finished_job_is_resent_from_the_offset_the_server_names(tmp_path):

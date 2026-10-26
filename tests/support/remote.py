@@ -7,6 +7,7 @@ import contextlib
 import json
 import os
 import signal
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -250,8 +251,11 @@ async def make_rig(
     return rig
 
 
-async def send_job(server, tmp_path, argv, *, sid="s1", **extra) -> JobSpec:
-    """Play the server: send a machine one job (a fresh repo branch, an empty `files` blob)."""
+async def send_job(
+    server, tmp_path, argv, *, sid="s1", lfs_objects: Mapping[str, Path] | None = None, **extra
+) -> JobSpec:
+    """Play the server: send a machine one job (a fresh repo branch, an empty `files` blob, and
+    an `lfs-<oid>` blob for each of `lfs_objects`, `oid: file`)."""
     repo = make_repo(tmp_path, "server")
     git(repo, "checkout", "-q", "-b", "kraft/x")
     head = git(repo, "rev-parse", "HEAD").strip()
@@ -265,10 +269,11 @@ async def send_job(server, tmp_path, argv, *, sid="s1", **extra) -> JobSpec:
         setup_command=None, branch="kraft/x", head=head, base=head, identity={},
         server_run_dir=str(tmp_path / "run"), server_worktree=str(repo), **extra,
     )  # fmt: skip
-    await server.send(
-        {"t": "job", "id": spec.key, "spec": spec.to_frame(), "blobs": ["code", "files"]}
-    )
+    names = ["code", *(f"lfs-{oid}" for oid in lfs_objects or {}), "files"]
+    await server.send({"t": "job", "id": spec.key, "spec": spec.to_frame(), "blobs": names})
     await blobs.send_blob(server, job=spec.key, name="code", source=code)
+    for oid, path in (lfs_objects or {}).items():
+        await blobs.send_blob(server, job=spec.key, name=f"lfs-{oid}", source=path)
     await blobs.send_blob(server, job=spec.key, name="files", source=tgz)
     return spec
 

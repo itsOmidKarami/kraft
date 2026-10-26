@@ -17,7 +17,7 @@ import socket
 from collections.abc import Callable
 from pathlib import Path
 
-from kraft.remote import machine_config, protocol
+from kraft.remote import lfs, machine_config, protocol
 from kraft.remote.channels import Channels
 from kraft.remote.machine import Machine
 from kraft.remote.sockets import private_dir, short_socket_path, take_lock
@@ -91,7 +91,7 @@ class _Daemon:
             t,
             kraft_version=self.kraft_version,
             host=socket.gethostname(),
-            caps=protocol.machine_caps(machine_config.limit()),
+            caps=protocol.machine_caps(machine_config.limit(), lfs=lfs.available()),
         )
         server = str(machine_welcome.get("server") or "default")
         if (old := self.current.get(server)) is not None:
