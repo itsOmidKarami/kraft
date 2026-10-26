@@ -128,7 +128,9 @@ class Runs:
     async def _drive(self, run: Run) -> None:
         machine = run.claim.machine
         # placement keys on the connected repo's path; the worktree is what is actually sent
-        if lfs.uses_lfs(run.spec.server_worktree) and protocol.LFS not in self.hub.caps(machine):
+        if protocol.LFS not in self.hub.caps(machine) and await asyncio.to_thread(
+            lfs.uses_lfs, run.spec.server_worktree
+        ):
             await self._reject(run, {"outcome": "config_error", "reason": lfs.no_git_lfs(machine)})
             return
         while run.exit_code is None:
