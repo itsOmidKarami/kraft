@@ -7,8 +7,8 @@ description: The lifecycle, limits, permission model, and vocabulary behind Kraf
 
 Kraft runs a work item through a chain of nodes, and stops at a gate for you to
 decide. Limits bound every scope of that run, a permission gate answers what
-a worker may do while nobody watches, and a worker runs each step on this
-computer or another. These pages explain each idea before you configure it, and
+a worker may do while nobody watches, and a step can run on this computer or
+another. These pages explain each idea before you configure it, and
 each ends with the guide that puts it to work.
 
 Start with how a [work item](/concepts/vocabulary#work-item) runs. Vocabulary
