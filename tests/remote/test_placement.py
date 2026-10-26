@@ -78,17 +78,10 @@ def test_any_with_no_machine_allowed_is_refused():
     assert "no machine" in placement.refusal("any", workers=only_gpu, repos=repos)
 
 
-@pytest.mark.parametrize(
-    ("kind", "says"),
-    [("submodule", None), ("plain", None)],
-    ids=["submodule-and-no-members-is-not-refused", "plain"],
-)
-def test_a_checkout_a_single_bundle_cannot_carry_is_named(tmp_path, kind, says):
+def test_a_repo_with_submodules_and_no_members_is_not_refused(tmp_path):
     repo = make_repo(tmp_path)
-    if kind == "submodule":
-        (repo / ".gitmodules").write_text('[submodule "x"]\n\tpath = x\n\turl = ./x\n')
-    got = placement.checkout_problem(repo)
-    assert (got is None) if says is None else (says in got)
+    (repo / ".gitmodules").write_text('[submodule "x"]\n\tpath = x\n\turl = ./x\n')
+    assert placement.checkout_problem(repo) is None
 
 
 def test_workspace_members_are_named(tmp_path):

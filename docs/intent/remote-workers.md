@@ -97,7 +97,7 @@ origin: src/kraft/remote/placement.py §filing_problems
 
 ## REQ runner-takes-a-repo-with-submodules-when-no-member-is-declared
 WHERE a repo has submodules but an item declares no workspace members, the system SHALL let a machine run the item, SHALL leave the submodules uninitialized there, and SHALL refuse the machine's commits when they add or move a gitlink.
-enforced-by: tests/remote/test_placement.py::test_a_checkout_a_single_bundle_cannot_carry_is_named[submodule-and-no-members-is-not-refused], tests/remote/test_runs.py::test_a_repo_with_an_unused_submodule_runs_on_a_machine_but_cannot_move_its_pointer[ordinary-file], tests/remote/test_runs.py::test_a_repo_with_an_unused_submodule_runs_on_a_machine_but_cannot_move_its_pointer[bump]
+enforced-by: tests/remote/test_placement.py::test_a_repo_with_submodules_and_no_members_is_not_refused, tests/remote/test_runs.py::test_a_repo_with_an_unused_submodule_runs_on_a_machine_but_cannot_move_its_pointer[ordinary-file], tests/remote/test_runs.py::test_a_repo_with_an_unused_submodule_runs_on_a_machine_but_cannot_move_its_pointer[bump]
 origin: src/kraft/remote/placement.py §checkout_problem
 
 ## REQ any-never-means-the-server
