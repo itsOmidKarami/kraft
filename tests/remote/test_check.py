@@ -100,6 +100,5 @@ async def test_git_lfs_is_a_row_that_never_fails(monkeypatch, present):
     )
     row = _by_name(await check.run(kraft_version="2.3.0"))["git-lfs"]
     assert row["ok"] and row["skipped"] is (not present)
-    assert row["detail"] == (
-        "/bin/git-lfs" if present else "not installed: LFS repos are not placed here"
-    )
+    assert row["detail"].startswith("/bin/git-lfs" if present else "not installed: LFS repos")
+    assert ("restart the worker" in row["detail"]) is (not present)

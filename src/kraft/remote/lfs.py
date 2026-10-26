@@ -38,9 +38,18 @@ def no_git_lfs(machine: str) -> str:
 
 
 def uses_lfs(repo_path: str | Path) -> bool:
-    """The root `.gitattributes` routes some files through the lfs filter."""
-    attrs = Path(repo_path) / ".gitattributes"
-    return attrs.is_file() and "filter=lfs" in attrs.read_text(errors="replace")
+    """Some `.gitattributes` in the repo, the root one or a tracked one in a directory, routes
+    files through the lfs filter."""
+    repo = Path(repo_path)
+    names = [".gitattributes"]
+    listed = bundle._git(repo, "ls-files", "-z", "--", ".gitattributes", "*/.gitattributes")
+    if listed.returncode == 0:
+        names += [n for n in listed.stdout.split("\0") if n]
+    for name in dict.fromkeys(names):
+        attrs = repo / name
+        if attrs.is_file() and "filter=lfs" in attrs.read_text(errors="replace"):
+            return True
+    return False
 
 
 def parse_pointer(data: bytes) -> tuple[str, int] | None:

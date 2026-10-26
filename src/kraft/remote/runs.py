@@ -192,7 +192,11 @@ class Runs:
             wanted = await asyncio.to_thread(self._lfs_to_send, worktree, spec.head)
             ask["lfs"] = wanted
         reply = await self._ask(machine, ask)
-        wanted = [oid for oid in wanted if oid not in set(reply.get("lfs", []))]
+        held = reply.get("lfs")
+        held = (
+            set(held) if isinstance(held, list) and all(isinstance(o, str) for o in held) else set()
+        )
+        wanted = [oid for oid in wanted if oid not in held]
         known = await asyncio.to_thread(bundle.usable, worktree, reply.get("commits", []))
         code = run.folder / "code.bundle"
         has_code = await asyncio.to_thread(bundle.make, worktree, spec.branch, known, code)

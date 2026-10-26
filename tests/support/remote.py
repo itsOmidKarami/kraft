@@ -286,11 +286,17 @@ def lfs_pointer(body: bytes) -> tuple[str, str]:
 
 
 def lfs_script(
-    body: bytes, *, stored: bytes | None = None, store: bool = True, pointer: bool = True
+    body: bytes,
+    *,
+    stored: bytes | None = None,
+    store: bool = True,
+    pointer: bool = True,
+    under: str = "",
 ) -> str:
     """Python source for a job that puts an LFS object for `body` in its copy's store and commits
     a pointer to it (`b.bin`). `stored` writes other bytes under the object's name, `store=False`
-    leaves the object out, `pointer=False` commits a note instead of a pointer."""
+    leaves the object out, `pointer=False` commits a note instead of a pointer, `under` puts the
+    `.gitattributes` and `b.bin` in that directory."""
     oid, text = lfs_pointer(body)
     return f"""
 import subprocess
@@ -300,8 +306,9 @@ if {store!r}:
     p = lfs.object_path(lfs.store(Path(".")), {oid!r})
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes({body if stored is None else stored!r})
-Path(".gitattributes").write_text({LFS_ATTRIBUTES!r})
-Path("b.bin").write_text({text if pointer else "a note, no pointer"!r})
+Path({under!r}).mkdir(exist_ok=True)
+Path({under!r}, ".gitattributes").write_text({LFS_ATTRIBUTES!r})
+Path({under!r}, "b.bin").write_text({text if pointer else "a note, no pointer"!r})
 subprocess.run(["git", "add", "-A"], check=True)
 subprocess.run(["git", "commit", "-qm", "lfs"], check=True)
 """

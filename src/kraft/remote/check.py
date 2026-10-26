@@ -34,11 +34,19 @@ def _git() -> dict:
 
 
 def _git_lfs() -> dict:
-    """Without git-lfs a machine is not given a step of an LFS repo; that is not a failure."""
+    """Without git-lfs a machine is not given a step of an LFS repo; that is not a failure. The
+    worker looks for git-lfs once, when it starts, so one installed later is listed only after the
+    worker restarts."""
     path = shutil.which("git-lfs")
     if path is not None:
         return _row("git-lfs", True, path)
-    return _row("git-lfs", True, "not installed: LFS repos are not placed here", skipped=True)
+    return _row(
+        "git-lfs",
+        True,
+        "not installed: LFS repos are not placed here; once installed, restart the worker "
+        "(it looks for git-lfs only when it starts)",
+        skipped=True,
+    )
 
 
 def _agents() -> list[dict]:

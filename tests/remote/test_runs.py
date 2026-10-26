@@ -420,12 +420,13 @@ BODY_A, BODY_B = b"object a", b"object b!"
 OID_A, OID_B = (hashlib.sha256(b).hexdigest() for b in (BODY_A, BODY_B))
 
 
-async def _lfs_rig(rig, monkeypatch):
-    """The rig's server repo gains an LFS file `a.bin` whose object the server holds, and the
-    machine says it has git-lfs."""
+async def _lfs_rig(rig, monkeypatch, under=""):
+    """The rig's server repo gains an LFS file `a.bin` (in directory `under`, whose own
+    `.gitattributes` routes it) whose object the server holds, and the machine says it has
+    git-lfs."""
     fake_git_lfs(monkeypatch)
-    write(rig.repo, ".gitattributes", LFS_ATTRIBUTES)
-    write(rig.repo, "a.bin", lfs_pointer(BODY_A)[1])
+    write(rig.repo, f"{under}/.gitattributes".lstrip("/"), LFS_ATTRIBUTES)
+    write(rig.repo, f"{under}/a.bin".lstrip("/"), lfs_pointer(BODY_A)[1])
     commit_all(rig.repo)
     rig.head = rig.tip()
     src = rig.run_dirs.base / "a.obj"
@@ -434,14 +435,15 @@ async def _lfs_rig(rig, monkeypatch):
     await rig.reconnect()  # the hub learns the machine's caps again
 
 
+@pytest.mark.parametrize("under", ["", "assets"], ids=["root", "nested"])
 async def test_lfs_objects_go_to_the_machine_and_new_ones_come_back_into_the_servers_store(
-    rig, monkeypatch
+    rig, monkeypatch, under
 ):
-    await _lfs_rig(rig, monkeypatch)
+    await _lfs_rig(rig, monkeypatch, under)
     script = (
         "from pathlib import Path\nfrom kraft.remote import lfs\n"
         f"assert lfs.object_path(lfs.store(Path('.')), {OID_A!r}).read_bytes() == {BODY_A!r}\n"
-        + lfs_script(BODY_B)
+        + lfs_script(BODY_B, under=under)
     )
     run = await rig.done(await rig.run([sys.executable, "-c", script]))
     assert run.exit_code == 0, run.spool.read_text()
@@ -491,6 +493,31 @@ async def test_the_second_lfs_step_is_sent_only_objects_the_machine_lacks(rig, m
     for sid in ("s1", "s2"):
         await rig.done(await rig.run([sys.executable, "-c", "print('ok')"], sid=sid))
     assert [(j, n) for j, n in sent if n.startswith("lfs-")] == [(f"{rig.wid}/s1", f"lfs-{OID_A}")]
+
+
+@pytest.mark.parametrize("held", [5, [1], {"x": 1}, "abc"], ids=["int", "non-str", "dict", "str"])
+async def test_a_have_reply_whose_lfs_is_not_a_list_of_strings_counts_as_none_held(
+    rig, monkeypatch, held
+):
+    await _lfs_rig(rig, monkeypatch)
+    real = rig.runs._ask
+
+    async def ask(machine, frame, **kw):
+        reply = await real(machine, frame, **kw)
+        return {**reply, "lfs": held}
+
+    monkeypatch.setattr(rig.runs, "_ask", ask)
+    sent = []
+    real_send = blobs.send_blob
+
+    async def spy(t, *, job, name, source):
+        sent.append(name)
+        await real_send(t, job=job, name=name, source=source)
+
+    monkeypatch.setattr(runs_mod.blobs, "send_blob", spy)
+    run = await rig.done(await rig.run([sys.executable, "-c", "print('ok')"]))
+    assert run.exit_code == 0, run.spool.read_text()
+    assert f"lfs-{OID_A}" in sent
 
 
 async def test_a_step_of_an_lfs_repo_given_a_machine_without_git_lfs_ends_as_a_config_error(rig):

@@ -52,6 +52,32 @@ def test_parse_pointer(data, want):
     assert lfs.parse_pointer(data) == want
 
 
+@pytest.mark.parametrize(
+    ("files", "want"),
+    [
+        pytest.param({".gitattributes": "*.bin filter=lfs -text\n"}, True, id="root"),
+        pytest.param({"assets/.gitattributes": "*.png filter=lfs -text\n"}, True, id="nested"),
+        pytest.param({"readme.md": "hi\n"}, False, id="none"),
+        pytest.param(
+            {".gitattributes": "*.md text\n", "assets/.gitattributes": "*.png -text\n"},
+            False,
+            id="nested-without-lfs",
+        ),
+    ],
+)
+def test_uses_lfs_reads_every_gitattributes(tmp_path, files, want):
+    repo = make_repo(tmp_path)
+    for name, body in files.items():
+        write(repo, name, body)
+    commit_all(repo)
+    assert lfs.uses_lfs(repo) is want
+
+
+def test_uses_lfs_reads_the_root_file_of_a_path_git_cannot_list(tmp_path):
+    write(tmp_path, ".gitattributes", "*.bin filter=lfs -text\n")
+    assert lfs.uses_lfs(tmp_path) is True
+
+
 def test_tree_pointers_finds_pointers_and_skips_ordinary_files(tmp_path):
     repo = make_repo(tmp_path)
     oid1, p1 = lfs_pointer(b"one")
