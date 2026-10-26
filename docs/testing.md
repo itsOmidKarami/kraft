@@ -246,14 +246,18 @@ when `NEW` does not collect.
   frontend.
 - Testmon follows Python execution only, so it cannot see a change to a
   file a test reads or runs as a subprocess: a harness YAML, a skill's
-  `.md`, `fixtures/fake-claude.sh`, `tests/support/` (the sample repo, the
-  fake agents), `config/`, `docs/intent/`. When one of those differs from
+  `.md`, `fixtures/fake-claude.sh`, the `tests/support/` files no test
+  imports (the sample repo, the fake agents and reviewer, the non-Python
+  files; the rest is imported in-process, so testmon traces it), `config/`,
+  `docs/intent/`. When one of those differs from
   the merge base with `origin/main` (committed on the branch or not),
   `just test <paths>` names the files and runs the paths with `--no-testmon`;
   a bare `just test` only warns, since its fallback would be the whole suite.
   `src/kraft/_bundled` is built from `config/` and `plugins/kraft/skills`,
   which are watched in its place. Environment variables are the same blind
-  spot and are not watched.
+  spot and are not watched. `just test-targeted`, which verification runs,
+  runs the full suite for all of these except `docs/intent/`: it runs
+  `tests/test_intent_origins.py` and the intent check instead.
 - `just test <paths>` fails when nothing ran: a path that collects nothing,
   and a run testmon (or `-k`/`-m`) deselected to `0 selected`. Pass
   `--no-testmon` to run the paths regardless.

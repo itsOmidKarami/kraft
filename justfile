@@ -298,10 +298,10 @@ test *ARGS:
     mode=--testmon
     case " $* " in *" --no-testmon "*) mode= ;; esac
     if [ -n "$mode" ]; then
-        # macOS ships bash 3.2, which has no mapfile. The list is dev/targeted_tests.py's BLIND.
-        inputs=(); while IFS= read -r p; do inputs+=("$p"); done < <(uv run python dev/targeted_tests.py pathspecs)
+        # What testmon cannot see is dev/targeted_tests.py's BLIND and INTENT_TREE. A git pathspec
+        # cannot say "tests/support/*.py except these scripts", so that script filters the paths.
         base=$(git merge-base HEAD origin/main 2>/dev/null || echo HEAD)
-        changed=$({ git diff --name-only "$base" -- "${inputs[@]}"; git ls-files --others --exclude-standard -- "${inputs[@]}"; } 2>/dev/null | sort -u)
+        changed=$({ git diff --name-only "$base"; git ls-files --others --exclude-standard; } 2>/dev/null | sort -u | uv run python dev/targeted_tests.py blind)
         if [ -n "$changed" ] && [ -n "$*" ]; then
             echo "just test: testmon cannot see a change to these, so it could deselect the tests that read them -- running the given args with --no-testmon:" >&2
             printf '%s\n' "$changed" | head -20 | sed 's/^/  /' >&2

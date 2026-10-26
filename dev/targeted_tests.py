@@ -5,9 +5,9 @@ tests whose executed code changed; it cannot see a file no test imports (a chain
 YAML, a skill's markdown, a script a test runs as a subprocess), so a change to
 one of those runs the full suite instead. The same blind spots decide
 `just test`'s `--no-testmon` warning, so they are listed once, here, and the
-justfile asks this script for them (`pathspecs`).
+justfile asks this script which changed paths they are (`blind`).
 
-    targeted_tests.py pathspecs           # git pathspecs for the blind spots
+    targeted_tests.py blind               # of the paths on stdin, those `just test` warns about
     targeted_tests.py run [--dry-run]     # the plan, run (or printed)
 
 The changed paths come from `$KRAFT_CHANGED_FILES`, a file of paths one per
@@ -29,18 +29,31 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-#: (directory, skips_python). testmon follows Python execution only, so a change
-#: under one of these is invisible to it. Under `src/kraft` only the non-Python
-#: files are: its `.py` is what testmon traces. `tests/support` and `fixtures`
-#: code also runs as subprocesses testmon cannot trace.
+#: (path, skips_python): a directory, or one file. testmon follows Python
+#: execution only, so a change under one of these is invisible to it. Under
+#: `src/kraft` and `tests/support` only the non-Python files are: their `.py` is
+#: imported in-process, which testmon traces. The `tests/support` scripts and the
+#: sample repo are the exception, named below because no test imports them.
 BLIND: tuple[tuple[str, bool], ...] = (
     ("src/kraft", True),
     ("fixtures", False),
     ("config", False),
-    ("tests/support", False),
-    ("docs/intent", False),
+    ("tests/support", True),
+    # Run as subprocesses, found by grepping how tests start them; a test in
+    # tests/test_dev_targeted_tests.py fails when a new one is not listed.
+    ("tests/support/fake_agent.py", False),
+    ("tests/support/fake_reviewer.py", False),
+    ("tests/support/fake_codex_app_server.py", False),
+    # Copied into a repo and run by its own test command.
+    ("tests/support/sample_repo", False),
     ("plugins/kraft/skills", False),
 )
+
+#: Read only by `INTENT_TESTS` and `python -m kraft.intent` (in `just ci-checks`,
+#: which `test-targeted` runs first), so a change here adds those tests rather
+#: than running the full suite. testmon still cannot see it, so `just test` warns.
+INTENT_TREE = "docs/intent"
+INTENT_TESTS = ("tests/test_intent_origins.py",)
 
 #: Tests that a committed generated file is current. A class body runs once at
 #: import, before any test, so testmon ties a change to it to no test; these are
@@ -84,23 +97,19 @@ class Plan:
     steps: list[Step]
 
 
-def pathspecs() -> list[str]:
-    """Git pathspecs selecting exactly what `is_blind` does."""
-    specs: list[str] = []
-    for directory, skips_python in BLIND:
-        specs.append(directory)
-        if skips_python:
-            specs.append(f":(glob,exclude){directory}/**/*.py")
-    return specs
+def _within(path: str, directory: str) -> bool:
+    return path == directory or path.startswith(f"{directory}/")
 
 
 def is_blind(path: str) -> bool:
-    for directory, skips_python in BLIND:
-        if path == directory or path.startswith(f"{directory}/"):
-            if skips_python and path.endswith(".py"):
-                continue
-            return True
-    return False
+    return any(
+        _within(path, directory) and not (skips_python and path.endswith(".py"))
+        for directory, skips_python in BLIND
+    )
+
+
+def is_intent(path: str) -> bool:
+    return _within(path, INTENT_TREE)
 
 
 def _git(cwd: Path, *args: str) -> str | None:
@@ -141,11 +150,12 @@ def plan(changed: list[str] | None) -> Plan:
     if blind:
         more = f" (and {len(blind) - 5} more)" if len(blind) > 5 else ""
         return Plan(f"testmon cannot see a change to {', '.join(blind[:5])}{more}", [_FULL])
+    tests = GENERATED_TESTS + (INTENT_TESTS if any(is_intent(path) for path in changed) else ())
     return Plan(
         None,
         [
             # A second run, so it cannot disturb the record the next one reads.
-            Step([sys.executable, "-m", "pytest", *GENERATED_TESTS, "--no-testmon", "-q"]),
+            Step([sys.executable, "-m", "pytest", *tests, "--no-testmon", "-q"]),
             # xdist, because single-process testmon is ~9x slower on this suite;
             # forceselect, because `-m` would otherwise turn selection off.
             Step(
@@ -168,8 +178,9 @@ def plan(changed: list[str] | None) -> Plan:
 
 def main(argv: Sequence[str]) -> int:
     command, *rest = argv
-    if command == "pathspecs":
-        print("\n".join(pathspecs()))
+    if command == "blind":
+        paths = sys.stdin.read().splitlines()
+        print("\n".join(p for p in paths if is_blind(p) or is_intent(p)))
         return 0
     if command != "run" or set(rest) - {"--dry-run"}:
         print(__doc__, file=sys.stderr)

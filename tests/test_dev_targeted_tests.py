@@ -8,6 +8,8 @@ the generated-file tests.
 from __future__ import annotations
 
 import importlib.util
+import io
+import re
 import sys
 from pathlib import Path
 
@@ -35,9 +37,12 @@ def tt():
         (["src/kraft/a.py"], False),
         (["src/kraft/templates/lucide_icons.txt"], True),
         (["config/chains/quick-task.yaml"], True),
-        (["tests/support/harness.py"], True),
+        (["tests/support/remote.py"], False),
+        (["tests/support/fake_agent.py"], True),
+        (["tests/support/sample_repo/calc.py"], True),
+        (["tests/support/justfile"], True),
         (["fixtures/fake-claude.sh"], True),
-        (["docs/intent/x.md"], True),
+        (["docs/intent/x.md"], False),
         (["plugins/kraft/skills/a/SKILL.md"], True),
         (["docsite/content/a.md"], False),
         (["docs/café.md"], False),
@@ -49,7 +54,10 @@ def tt():
         "python-under-src",
         "non-python-under-src",
         "chain-yaml",
-        "test-support-python",
+        "support-module-imported-in-process",
+        "support-script-run-as-subprocess",
+        "sample-repo-python",
+        "support-non-python",
         "fixtures",
         "intent-doc",
         "skill",
@@ -83,6 +91,8 @@ def test_the_plan_runs_the_full_suite_only_for_a_change_testmon_cannot_see(tt, c
     assert plan.reason is None
     generated, selected = plan.steps
     assert generated.argv[3 : 3 + len(tt.GENERATED_TESTS)] == list(tt.GENERATED_TESTS)
+    # What reads docs/intent testmon cannot trace, so a change there adds it.
+    assert (set(tt.INTENT_TESTS) <= set(generated.argv)) == any(map(tt.is_intent, changed))
     assert "--no-testmon" in generated.argv and generated.env == {}
     assert "--testmon-forceselect" in selected.argv and "--testmon" in selected.argv
     assert selected.argv[selected.argv.index("-n") + 1] == "logical"
@@ -97,20 +107,42 @@ def test_a_long_list_of_blind_paths_names_five_and_counts_the_rest(tt):
     )
 
 
-def test_the_pathspecs_select_what_is_blind_in_git(tt, tmp_path):
-    repo = make_repo(tmp_path)
-    names = [f"{directory}/inside.txt" for directory, _ in tt.BLIND]
-    names += [f"{directory}/inside.py" for directory, _ in tt.BLIND]
-    names += ["src/kraft/a.py", "src/kraft/b.txt", "tests/test_x.py", "README.md"]
-    for name in names:
-        write(repo, name, "x")
-    commit_all(repo)
+def test_the_blind_command_lists_what_just_test_warns_about(tt, monkeypatch, capsys):
+    paths = [
+        "src/kraft/a.py",
+        "src/kraft/b.txt",
+        "tests/support/remote.py",
+        "tests/support/stub.txt",
+        "tests/support/fake_reviewer.py",
+        "docs/intent/x.md",
+        "README.md",
+    ]
+    monkeypatch.setattr(sys, "stdin", io.StringIO("\n".join(paths)))
+    assert tt.main(["blind"]) == 0
+    assert capsys.readouterr().out.split() == [
+        "src/kraft/b.txt",
+        "tests/support/stub.txt",
+        "tests/support/fake_reviewer.py",
+        "docs/intent/x.md",
+    ]
 
-    listed = set(git(repo, "ls-files", "--", *tt.pathspecs()).splitlines())
-    tracked = set(git(repo, "ls-files").splitlines())
 
-    assert listed == {p for p in tracked if tt.is_blind(p)}
-    assert "src/kraft/inside.py" not in listed and "config/inside.py" in listed
+def test_every_support_script_a_test_runs_as_a_subprocess_is_blind(tt):
+    """testmon traces a support module a test imports, not one a test starts as
+    its own process. Finds those by how tests name them: a script's own `__main__`
+    or shebang, or a `Path` joined with `support` and the file name. A script
+    started another way (`-m support.<name>`) needs adding to BLIND by hand."""
+    tests = Path(__file__).parent
+    scripts = {
+        p.name
+        for p in (tests / "support").glob("*.py")
+        if re.search(r"^(#!|if __name__ ==)", p.read_text(), re.M)
+    }
+    for p in tests.rglob("*.py"):
+        scripts.update(re.findall(r'/\s*"support(?:"\s*/\s*"|/)(\w+\.py)"', p.read_text()))
+
+    assert {"fake_agent.py", "fake_reviewer.py", "fake_codex_app_server.py"} <= scripts
+    assert [n for n in sorted(scripts) if not tt.is_blind(f"tests/support/{n}")] == []
 
 
 @pytest.mark.parametrize(
