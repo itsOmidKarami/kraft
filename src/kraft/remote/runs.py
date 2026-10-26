@@ -347,7 +347,15 @@ class Runs:
 
     async def _publish(self, run: Run) -> None:
         spec, repo = run.spec, Path(run.spec.server_worktree)
-        old = self._synced.get(spec.work_item_id, spec.head)
+        old = spec.head
+        # A co-task sent the same head compares against the tip the first one moved to; a tip the
+        # branch has since left (a local commit, a rebase) is not this step's base.
+        if (synced := self._synced.get(spec.work_item_id)) and synced != old:
+            ancestor = await asyncio.to_thread(
+                bundle._git, repo, "merge-base", "--is-ancestor", old, synced
+            )
+            if ancestor.returncode == 0:
+                old = synced
         staging = f"refs/kraft/remote/{spec.work_item_id}/{spec.session_id}"
         commits = run.received["commits"]
         try:

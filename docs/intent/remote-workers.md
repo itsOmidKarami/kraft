@@ -167,7 +167,7 @@ origin: src/kraft/remote/runs.py §_deliver
 
 ## REQ remote-commits-publish-by-compare-and-swap
 WHEN a remote step's commits arrive and the item branch moved meanwhile, the system SHALL keep them at `refs/kraft/unsynced/…`, record `sandbox_branch_not_synced` and leave the branch as it is.
-enforced-by: tests/remote/test_bundle.py::test_a_branch_that_moved_meanwhile_keeps_the_commits_unsynced_and_is_not_overwritten, tests/remote/test_runs.py::test_a_branch_that_moved_while_the_step_ran_is_kept_unsynced_and_not_overwritten
+enforced-by: tests/remote/test_bundle.py::test_a_branch_that_moved_meanwhile_keeps_the_commits_unsynced_and_is_not_overwritten, tests/remote/test_runs.py::test_a_branch_that_moved_while_the_step_ran_is_kept_unsynced_and_not_overwritten, tests/remote/test_runs.py::test_a_step_after_the_branch_moved_between_steps_is_published_on_that_new_head[local-commit], tests/remote/test_runs.py::test_a_step_after_the_branch_moved_between_steps_is_published_on_that_new_head[rebase]
 origin: src/kraft/remote/bundle.py §publish
 
 ## REQ remote-bundle-may-not-plant-a-repository

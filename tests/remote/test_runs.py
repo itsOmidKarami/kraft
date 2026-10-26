@@ -79,6 +79,25 @@ async def test_the_second_step_is_sent_only_what_the_machine_lacks_and_sees_the_
     assert second.spool.read_text() == "from the machine\n"
 
 
+@pytest.mark.parametrize("rewrite", [False, True], ids=["local-commit", "rebase"])
+async def test_a_step_after_the_branch_moved_between_steps_is_published_on_that_new_head(
+    rig, database, rewrite
+):
+    start = rig.head
+    await rig.done(await rig.run([sys.executable, "-c", COMMIT], sid="s1"))
+    if rewrite:  # a gate's rebase: the first step's commit is no longer an ancestor
+        git(rig.repo, "reset", "-q", "--hard", start)
+    write(rig.repo, "local.txt", "l")
+    git(rig.repo, "add", "-A")
+    git(rig.repo, "commit", "-qm", "between steps")
+    rig.head = rig.tip()
+    second = COMMIT.replace("made.txt", "second.txt").replace("machine work", "second work")
+    await rig.done(await rig.run([sys.executable, "-c", second], sid="s2"))
+    assert git(rig.repo, "log", "-1", "--format=%s", rig.branch).strip() == "second work"
+    assert git(rig.repo, "for-each-ref", "refs/kraft/unsynced").strip() == ""
+    assert "sandbox_branch_not_synced" not in _event_types(database)
+
+
 async def test_a_branch_that_moved_while_the_step_ran_is_kept_unsynced_and_not_overwritten(
     rig, database
 ):
