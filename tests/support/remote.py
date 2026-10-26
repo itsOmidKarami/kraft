@@ -279,14 +279,19 @@ async def send_job(
     return spec
 
 
+def lfs_pointer(body: bytes) -> tuple[str, str]:
+    """`(oid, pointer text)` of an LFS object holding `body`."""
+    oid = hashlib.sha256(body).hexdigest()
+    return oid, f"version https://git-lfs.github.com/spec/v1\noid sha256:{oid}\nsize {len(body)}\n"
+
+
 def lfs_script(
     body: bytes, *, stored: bytes | None = None, store: bool = True, pointer: bool = True
 ) -> str:
     """Python source for a job that puts an LFS object for `body` in its copy's store and commits
     a pointer to it (`b.bin`). `stored` writes other bytes under the object's name, `store=False`
     leaves the object out, `pointer=False` commits a note instead of a pointer."""
-    oid = hashlib.sha256(body).hexdigest()
-    text = f"version https://git-lfs.github.com/spec/v1\noid sha256:{oid}\nsize {len(body)}\n"
+    oid, text = lfs_pointer(body)
     return f"""
 import subprocess
 from pathlib import Path

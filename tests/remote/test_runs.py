@@ -6,7 +6,14 @@ import textwrap
 
 import pytest
 from support.harness import commit_all, git, write
-from support.remote import LFS_ATTRIBUTES, fake_git_lfs, lfs_script, make_rig, workers_file
+from support.remote import (
+    LFS_ATTRIBUTES,
+    fake_git_lfs,
+    lfs_pointer,
+    lfs_script,
+    make_rig,
+    workers_file,
+)
 
 from kraft.remote import blobs, lfs
 from kraft.remote import runs as runs_mod
@@ -413,17 +420,12 @@ BODY_A, BODY_B = b"object a", b"object b!"
 OID_A, OID_B = (hashlib.sha256(b).hexdigest() for b in (BODY_A, BODY_B))
 
 
-def _pointer(body: bytes) -> str:
-    oid = hashlib.sha256(body).hexdigest()
-    return f"version https://git-lfs.github.com/spec/v1\noid sha256:{oid}\nsize {len(body)}\n"
-
-
 async def _lfs_rig(rig, monkeypatch):
     """The rig's server repo gains an LFS file `a.bin` whose object the server holds, and the
     machine says it has git-lfs."""
     fake_git_lfs(monkeypatch)
     write(rig.repo, ".gitattributes", LFS_ATTRIBUTES)
-    write(rig.repo, "a.bin", _pointer(BODY_A))
+    write(rig.repo, "a.bin", lfs_pointer(BODY_A)[1])
     commit_all(rig.repo)
     rig.head = rig.tip()
     src = rig.run_dirs.base / "a.obj"

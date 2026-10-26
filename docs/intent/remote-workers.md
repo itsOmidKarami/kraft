@@ -91,8 +91,8 @@ enforced-by: tests/remote/test_placement.py::test_a_machine_that_is_unknown_or_n
 origin: src/kraft/remote/placement.py §refusal
 
 ## REQ runner-refuses-items-a-machine-cannot-take
-IF an item with a machine runner is in place, or has workspace members, submodules or Git LFS, THEN the system SHALL refuse it, naming both settings.
-enforced-by: tests/remote/test_placement.py::test_filing_problems_name_both_settings_for_in_place, tests/remote/test_placement.py::test_a_checkout_a_single_bundle_cannot_carry_is_named[submodule-submodules], tests/remote/test_placement.py::test_a_checkout_a_single_bundle_cannot_carry_is_named[lfs-Git LFS], tests/adapters/test_subprocess_remote.py::test_a_placement_that_cannot_hold_is_a_config_error_naming_why_and_runs_nothing[unknown-machine]
+IF an item with a machine runner is in place, or has workspace members or submodules, THEN the system SHALL refuse it, naming both settings.
+enforced-by: tests/remote/test_placement.py::test_filing_problems_name_both_settings_for_in_place, tests/remote/test_placement.py::test_a_checkout_a_single_bundle_cannot_carry_is_named[submodule-submodules], tests/adapters/test_subprocess_remote.py::test_a_placement_that_cannot_hold_is_a_config_error_naming_why_and_runs_nothing[unknown-machine]
 origin: src/kraft/remote/placement.py §filing_problems
 
 ## REQ any-never-means-the-server
@@ -117,7 +117,7 @@ origin: src/kraft/remote/machine.py §_on_job
 
 ## REQ machine-reports-its-limit
 The machine SHALL report its own limit from `machine.yaml` in its hello and again whenever the file changes, and a machine that reports none SHALL be limited by the server's alone.
-enforced-by: tests/remote/test_machine.py::test_the_machine_reports_a_changed_limit[lowered], tests/remote/test_machine.py::test_the_machine_reports_a_changed_limit[raised], tests/remote/test_protocol.py::test_a_machines_own_limit_travels_in_its_hello_caps[limit], tests/remote/test_machine_config.py::test_the_limit_is_what_the_file_says_or_none[set]
+enforced-by: tests/remote/test_machine.py::test_the_machine_reports_a_changed_limit[lowered], tests/remote/test_machine.py::test_the_machine_reports_a_changed_limit[raised], tests/remote/test_protocol.py::test_a_machines_own_limit_travels_in_its_hello_caps[lfs-limit], tests/remote/test_machine_config.py::test_the_limit_is_what_the_file_says_or_none[set]
 origin: src/kraft/remote/machine.py §_report
 
 ## REQ unused-reservation-is-given-back
@@ -361,7 +361,7 @@ enforced-by: tests/remote/test_launch.py::test_a_resumed_session_goes_back_to_wh
 origin: src/kraft/store/sessions.py §pinned_runner
 
 ## REQ group-refuses-items-no-member-can-take
-IF no member of a group could take an item (it is in place or has workspace members, submodules or Git LFS, and the local worker is not a member), THEN the system SHALL refuse it at filing, naming the group.
+IF no member of a group could take an item (it is in place or has workspace members or submodules, and the local worker is not a member), THEN the system SHALL refuse it at filing, naming the group.
 enforced-by: tests/remote/test_placement.py::test_a_group_holds_when_a_member_could_take_the_item[remote-only-in-place], tests/remote/test_placement.py::test_a_group_with_a_submodule_checkout_names_why_no_remote_member_can_take_it, tests/remote/test_placement.py::test_a_group_holds_when_a_member_could_take_the_item[with-local-in-place]
 origin: src/kraft/remote/placement.py §group_problem
 
@@ -369,3 +369,18 @@ origin: src/kraft/remote/placement.py §group_problem
 IF the member a step on a group was given lacks a capability the launch needs, THEN the system SHALL place the step again, on a capable member or the local worker.
 enforced-by: tests/remote/test_launch.py::test_a_launch_the_group_member_cannot_take_places_the_step_again, tests/remote/test_launch.py::test_a_codex_step_places_again_on_the_local_worker_when_no_remote_member_has_the_cap
 origin: src/kraft/remote/launch.py §run_placed
+
+## REQ lfs-objects-go-to-the-machine-that-lacks-them
+WHEN a step of an item in a Git LFS repo runs on a machine, the system SHALL send the machine the LFS objects its head checks out that the server holds and the machine lacks.
+enforced-by: tests/remote/test_runs.py::test_lfs_objects_go_to_the_machine_and_new_ones_come_back_into_the_servers_store, tests/remote/test_runs.py::test_the_second_lfs_step_is_sent_only_objects_the_machine_lacks, tests/remote/test_machine.py::test_a_co_task_still_stores_the_lfs_objects_it_was_sent
+origin: src/kraft/remote/runs.py §_send_job
+
+## REQ lfs-objects-are-stored-only-once-verified
+WHEN a step's commits point to new LFS objects, the system SHALL store each on the server only after it hashes to its pointer's oid and size, and SHALL refuse the step's result otherwise.
+enforced-by: tests/remote/test_runs.py::test_a_returned_lfs_object_that_does_not_check_out_refuses_the_result[forged], tests/remote/test_runs.py::test_a_returned_lfs_object_that_does_not_check_out_refuses_the_result[unnamed], tests/remote/test_runs.py::test_a_returned_lfs_object_that_does_not_check_out_refuses_the_result[unsent], tests/remote/test_lfs.py::test_take[wrong-hash], tests/remote/test_lfs.py::test_take[one-bad-of-two]
+origin: src/kraft/remote/runs.py §_take_lfs
+
+## REQ lfs-repo-steps-go-only-to-a-machine-with-git-lfs
+The system SHALL place a step of an item in a Git LFS repo only on a machine that has git-lfs.
+enforced-by: tests/remote/test_hub.py::test_a_step_of_an_lfs_repo_goes_only_to_a_machine_that_lists_lfs[named-lacks-it], tests/remote/test_hub.py::test_a_step_of_an_lfs_repo_goes_only_to_a_machine_that_lists_lfs[any-picks-the-one-with-it], tests/remote/test_hub.py::test_a_step_of_an_lfs_repo_goes_only_to_a_machine_that_lists_lfs[group-picks-the-one-with-it], tests/remote/test_runs.py::test_a_step_of_an_lfs_repo_given_a_machine_without_git_lfs_ends_as_a_config_error
+origin: src/kraft/remote/hub.py §decide

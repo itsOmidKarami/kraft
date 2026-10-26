@@ -5,14 +5,9 @@ from pathlib import Path
 
 import pytest
 from support.harness import commit_all, git, make_repo, write
+from support.remote import lfs_pointer
 
 from kraft.remote import lfs
-
-
-def _pointer(body: bytes) -> tuple[str, str]:
-    oid = hashlib.sha256(body).hexdigest()
-    return oid, f"version https://git-lfs.github.com/spec/v1\noid sha256:{oid}\nsize {len(body)}\n"
-
 
 OID = "a" * 64
 V1 = "version https://git-lfs.github.com/spec/v1"
@@ -59,8 +54,8 @@ def test_parse_pointer(data, want):
 
 def test_tree_pointers_finds_pointers_and_skips_ordinary_files(tmp_path):
     repo = make_repo(tmp_path)
-    oid1, p1 = _pointer(b"one")
-    oid2, p2 = _pointer(b"hello")
+    oid1, p1 = lfs_pointer(b"one")
+    oid2, p2 = lfs_pointer(b"hello")
     write(repo, "a.bin", p1)
     write(repo, "sub/b.bin", p2)
     write(repo, "note.txt", "just a small text file\n")
@@ -70,8 +65,8 @@ def test_tree_pointers_finds_pointers_and_skips_ordinary_files(tmp_path):
 
 def test_new_pointers_lists_only_what_the_new_commits_add(tmp_path):
     repo = make_repo(tmp_path)
-    oid1, p1 = _pointer(b"one")
-    oid2, p2 = _pointer(b"two!")
+    oid1, p1 = lfs_pointer(b"one")
+    oid2, p2 = lfs_pointer(b"two!")
     write(repo, "a.bin", p1)
     first = commit_all(repo)
     write(repo, "b.bin", p2)

@@ -6,6 +6,7 @@ import subprocess
 
 import pytest
 from support.harness import commit_all, git, make_repo, write
+from support.remote import lfs_pointer
 
 from kraft.remote import bundle, lfs
 from kraft.remote.workdir import Copy
@@ -103,15 +104,10 @@ needs_git_lfs = pytest.mark.skipif(not shutil.which("git-lfs"), reason="git-lfs 
 ATTRS = "*.bin filter=lfs diff=lfs merge=lfs -text\n"
 
 
-def _pointer_text(body: bytes) -> tuple[str, str]:
-    oid = hashlib.sha256(body).hexdigest()
-    return oid, f"version https://git-lfs.github.com/spec/v1\noid sha256:{oid}\nsize {len(body)}\n"
-
-
 def _lfs_server(tmp_path, body=b"real content"):
     repo = make_repo(tmp_path, "server")
     git(repo, "checkout", "-q", "-b", "kraft/x")
-    oid, pointer = _pointer_text(body)
+    oid, pointer = lfs_pointer(body)
     write(repo, ".gitattributes", ATTRS)
     write(repo, "a.bin", pointer)
     head = commit_all(repo)
