@@ -8,6 +8,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from support.api import _seed_session
 from support.harness import v1_chain
 
 from kraft import events, store
@@ -162,21 +163,6 @@ def _run(fn) -> None:
         conn.close()
 
 
-def _session(wid: str, node: str, hook_point: str, sid: str = "s1") -> None:
-    """A session of `node` running `hook_point`, as the stop reads its `task` and `attempt`."""
-    _run(
-        lambda c: store.create_session(
-            c,
-            id=sid,
-            work_item_id=wid,
-            node_id=node,
-            hook_point=hook_point,
-            log_path="/l",
-            result_path="/r",
-        )
-    )
-
-
 def _paused_item(client, repo, *, wid="w1", materialized_chain: str | None = None) -> str:
     """A work item with no chain run yet -- `store.create_work_item` directly,
     like the API's own create route, so a test can drive it onto a stop by
@@ -203,8 +189,12 @@ def test_stop_detail_needs_human(client, repo):
     needs_human stop), `reason` and `facts` from the event."""
     wid = _paused_item(client, repo)
     _run(lambda c: store.load_chain(c, wid, "implement"))
-    _session(wid, "implement", "implement.main.implement")
-    _session(wid, "implement", "implement.main.implement", sid="s2")
+    _seed_session(
+        client, wid, session_id="s1", hook_point="implement.main.implement", node_id="implement"
+    )
+    _seed_session(
+        client, wid, session_id="s2", hook_point="implement.main.implement", node_id="implement"
+    )
     _run(lambda c: store.mark_needs_human(c, wid, "implement", "task failed", kind="failed"))
 
     body = client.get(f"/api/work-items/{wid}").json()
@@ -228,7 +218,7 @@ def test_stop_detail_needs_human(client, repo):
 def test_stop_detail_waiting(client, repo, reason, reentered):
     wid = _paused_item(client, repo)
     _run(lambda c: store.load_chain(c, wid, "ci_poll"))
-    _session(wid, "ci_poll", "ci_poll.main.poll")
+    _seed_session(client, wid, session_id="s1", hook_point="ci_poll.main.poll", node_id="ci_poll")
     _run(
         lambda c: store.mark_waiting(c, wid, "ci_poll", "2026-10-01T00:10:00+00:00", reason=reason)
     )
@@ -258,7 +248,9 @@ def test_stop_detail_waiting(client, repo, reason, reentered):
 def test_stop_detail_rate_limited(client, repo):
     wid = _paused_item(client, repo)
     _run(lambda c: store.load_chain(c, wid, "implement"))
-    _session(wid, "implement", "implement.main.implement")
+    _seed_session(
+        client, wid, session_id="s1", hook_point="implement.main.implement", node_id="implement"
+    )
     _run(lambda c: store.mark_rate_limited(c, wid, "implement", "2026-10-01T00:05:00+00:00"))
 
     body = client.get(f"/api/work-items/{wid}").json()
@@ -286,7 +278,7 @@ def _escalation_turn(wid: str, session: str | None, status: str = "pending") -> 
     _run(lambda c: events.append(c, wid, "escalation_message", {"session_id": "e1", "thread": 1}))
     if session is None:
         return
-    _session(wid, "implement", "escalation", sid="e1")
+    _seed_session(None, wid, session_id="e1", hook_point="escalation", node_id="implement")
     _run(
         lambda c: c.execute(
             "UPDATE worker_sessions SET status = ? WHERE work_item_id = ? AND id = 'e1'",
@@ -367,7 +359,9 @@ def test_list_display_status_and_stop_without_facts(client, repo):
     `task` or `attempt` -- it reads no sessions per row (B.4)."""
     wid = _paused_item(client, repo)
     _run(lambda c: store.load_chain(c, wid, "implement"))
-    _session(wid, "implement", "implement.main.implement")
+    _seed_session(
+        client, wid, session_id="s1", hook_point="implement.main.implement", node_id="implement"
+    )
     _run(lambda c: store.mark_needs_human(c, wid, "implement", "task failed", kind="failed"))
 
     row = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
@@ -404,7 +398,9 @@ def test_rate_limit_fallback_facts(client, repo):
     chain = v1_chain(nodes, repo=repo)
     wid = _paused_item(client, repo, materialized_chain=chain.to_json())
     _run(lambda c: store.load_chain(c, wid, "implement"))
-    _session(wid, "implement", "implement.main.implement")
+    _seed_session(
+        client, wid, session_id="s1", hook_point="implement.main.implement", node_id="implement"
+    )
     _run(lambda c: store.mark_rate_limited(c, wid, "implement", "2026-10-01T00:05:00+00:00"))
     override = policy_mod.WorkItemPolicy.model_validate({"allowed_harnesses": ["codex", "claude"]})
     _run(lambda c: store.set_policy_override(c, wid, override))
