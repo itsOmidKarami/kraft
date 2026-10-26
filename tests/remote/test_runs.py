@@ -520,7 +520,12 @@ async def test_a_have_reply_whose_lfs_is_not_a_list_of_strings_counts_as_none_he
     assert f"lfs-{OID_A}" in sent
 
 
-async def test_a_step_of_an_lfs_repo_given_a_machine_without_git_lfs_ends_as_a_config_error(rig):
+async def test_a_step_of_an_lfs_repo_given_a_machine_without_git_lfs_ends_as_a_config_error(
+    rig_offline, monkeypatch
+):
+    rig = rig_offline
+    monkeypatch.setattr(lfs, "available", lambda: False)  # a runner may have the real git-lfs
+    await rig.connect()
     write(rig.repo, ".gitattributes", LFS_ATTRIBUTES)
     commit_all(rig.repo)
     rig.head = rig.tip()
