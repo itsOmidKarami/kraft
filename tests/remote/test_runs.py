@@ -102,13 +102,18 @@ async def test_a_co_task_that_commits_after_the_first_hands_in_is_published_on_t
     rig, database, tmp_path
 ):
     go = tmp_path / "go"
-    wait_for_go = f"import time\nwhile not os.path.exists({str(go)!r}): time.sleep(0.02)\n"
+    # both waits give up after 20s, as `rig.done` does, so a failed run leaves no job spinning
+    wait_for_go = (
+        "import time\nfor _ in range(1000):\n"
+        f"    if os.path.exists({str(go)!r}): break\n    time.sleep(0.02)\n"
+    )
     a = COMMIT.replace("open('made.txt'", wait_for_go + "open('made.txt'")
     # b commits in the same machine copy once a's commit has reached the server
     b = (
-        "import subprocess, time\n"
-        f"while subprocess.run(['git','-C',{str(rig.repo)!r},'rev-parse','{rig.branch}'],"
-        f"capture_output=True,text=True).stdout.strip() == {rig.head!r}: time.sleep(0.02)\n"
+        "import subprocess, time\nfor _ in range(1000):\n"
+        f"    if subprocess.run(['git','-C',{str(rig.repo)!r},'rev-parse','{rig.branch}'],"
+        f"capture_output=True,text=True).stdout.strip() != {rig.head!r}: break\n"
+        "    time.sleep(0.02)\n"
     ) + COMMIT.replace("made.txt", "b.txt").replace("machine work", "b work")
     first = await rig.run([sys.executable, "-c", a], sid="a")
     second = await rig.run([sys.executable, "-c", b], sid="b")
