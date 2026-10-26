@@ -257,16 +257,34 @@ async def test_an_infra_stop_names_the_newest_infra_cause(item_on):
     assert stop["facts"] == {"cause": "ci_infra"}
 
 
+_BUILD = "implementation.main.build"
+
+
+@pytest.mark.parametrize(
+    ("said", "reason"),
+    [
+        (None, None),
+        (("implementation", _BUILD), "waiting for gpu (full)"),
+        (("implementation", "implementation.main.lint"), None),
+        (("review", _BUILD), None),
+    ],
+    ids=["external-wait", "its-machine-wait", "another-tasks-wait", "another-nodes-wait"],
+)
 async def test_a_wait_with_no_next_observation_is_looked_at_after_the_default_interval(
-    item_on, monkeypatch
+    item_on, monkeypatch, said, reason
 ):
     """A waiting task that recorded no next observation still parks the item
     with a time to look again, the default initial interval from now, rather
-    than leaving it where no scheduler wakes it."""
+    than leaving it where no scheduler wakes it. The stop carries the reason
+    only the waiting step's own machine wait gave (`dispatch._note_waiting`)."""
     it = await item_on(_CHAIN, "implementation", repo="/r")
     now = datetime(2026, 1, 1, tzinfo=UTC)
     monkeypatch.setattr(stops, "_now", now.isoformat)
-    waiting = [SimpleNamespace(path="implementation.main.build")]
+    waiting = [SimpleNamespace(path=_BUILD)]
+    if said:
+        node, task = said
+        payload = {"task": task, "node_id": node, "reason": "waiting for gpu (full)"}
+        await it.database.write(lambda c: events.append(c, it.id, "remote_step_waiting", payload))
 
     status = await stops.stop_for_waiting(
         it.database, it.id, SimpleNamespace(id="implementation"), waiting
@@ -275,3 +293,4 @@ async def test_a_wait_with_no_next_observation_is_looked_at_after_the_default_in
     assert status == "waiting"
     due = (now + DEFAULT_WAIT.initial_interval).isoformat()
     assert (it.status(), it.row()["retry_at"]) == ("waiting", due)
+    assert it.events("work_item_waiting")[-1]["payload"].get("reason") == reason
