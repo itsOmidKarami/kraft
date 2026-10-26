@@ -98,6 +98,29 @@ async def test_a_step_after_the_branch_moved_between_steps_is_published_on_that_
     assert "sandbox_branch_not_synced" not in _event_types(database)
 
 
+async def test_a_co_task_that_commits_after_the_first_hands_in_is_published_on_top_of_it(
+    rig, database, tmp_path
+):
+    go = tmp_path / "go"
+    wait_for_go = f"import time\nwhile not os.path.exists({str(go)!r}): time.sleep(0.02)\n"
+    a = COMMIT.replace("open('made.txt'", wait_for_go + "open('made.txt'")
+    # b commits in the same machine copy once a's commit has reached the server
+    b = (
+        "import subprocess, time\n"
+        f"while subprocess.run(['git','-C',{str(rig.repo)!r},'rev-parse','{rig.branch}'],"
+        f"capture_output=True,text=True).stdout.strip() == {rig.head!r}: time.sleep(0.02)\n"
+    ) + COMMIT.replace("made.txt", "b.txt").replace("machine work", "b work")
+    first = await rig.run([sys.executable, "-c", a], sid="a")
+    second = await rig.run([sys.executable, "-c", b], sid="b")
+    go.write_text("")
+    await rig.done(first)
+    await rig.done(second)
+    subjects = git(rig.repo, "log", "--format=%s", "-2", rig.branch).splitlines()
+    assert subjects == ["b work", "machine work"]
+    assert git(rig.repo, "for-each-ref", "refs/kraft/unsynced").strip() == ""
+    assert "sandbox_branch_not_synced" not in _event_types(database)
+
+
 async def test_a_branch_that_moved_while_the_step_ran_is_kept_unsynced_and_not_overwritten(
     rig, database
 ):
