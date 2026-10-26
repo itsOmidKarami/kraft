@@ -372,7 +372,7 @@ origin: src/kraft/remote/launch.py §run_placed
 
 ## REQ lfs-objects-go-to-the-machine-that-lacks-them
 WHEN a step of an item in a Git LFS repo runs on a machine, the system SHALL send the machine the LFS objects its head checks out that the server holds and the machine lacks.
-enforced-by: tests/remote/test_runs.py::test_lfs_objects_go_to_the_machine_and_new_ones_come_back_into_the_servers_store, tests/remote/test_runs.py::test_the_second_lfs_step_is_sent_only_objects_the_machine_lacks, tests/remote/test_machine.py::test_a_co_task_still_stores_the_lfs_objects_it_was_sent
+enforced-by: tests/remote/test_runs.py::test_lfs_objects_go_to_the_machine_and_new_ones_come_back_into_the_servers_store[root], tests/remote/test_runs.py::test_lfs_objects_go_to_the_machine_and_new_ones_come_back_into_the_servers_store[nested], tests/remote/test_runs.py::test_the_second_lfs_step_is_sent_only_objects_the_machine_lacks, tests/remote/test_machine.py::test_a_co_task_still_stores_the_lfs_objects_it_was_sent
 origin: src/kraft/remote/runs.py §_send_job
 
 ## REQ lfs-objects-are-stored-only-once-verified
