@@ -226,9 +226,7 @@ def test_stop_detail_needs_human(client, repo):
 
 
 @pytest.mark.parametrize(
-    "reason",
-    [None, "waiting for gpu-box (full)"],
-    ids=["external-wait-says-nothing", "machine-wait-says-why"],
+    "reason", [None, "waiting for gpu-box (full)"], ids=["external-wait", "machine-wait-says-why"]
 )
 def test_stop_detail_waiting(client, repo, reason):
     wid = _paused_item(client, repo)
@@ -245,9 +243,7 @@ def test_stop_detail_waiting(client, repo, reason):
         )
     )
     _run(
-        lambda c: store.mark_waiting(
-            c, wid, "ci_poll", "2026-10-01T00:10:00+00:00", reason=reason
-        )
+        lambda c: store.mark_waiting(c, wid, "ci_poll", "2026-10-01T00:10:00+00:00", reason=reason)
     )
 
     body = client.get(f"/api/work-items/{wid}").json()
