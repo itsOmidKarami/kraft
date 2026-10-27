@@ -567,6 +567,28 @@ async def commit_stragglers(
 PUSHED_REFS = "refs/kraft/pushed"
 
 
+def _lfsconfig_moved(repo: Path, base: str) -> bool:
+    """Whether the `.lfsconfig` git-lfs would read in `repo` differs from
+    origin's `base` branch: on disk, staged or committed, since git-lfs falls
+    back through all three. Absent counts as a value, so a branch that adds
+    or deletes one has moved it too.
+
+    shortcut: compared against the remote-tracking ref as last fetched, so
+    a `.lfsconfig` changed on `base` after the item branched refuses until
+    someone pushes by hand; fetch `base` first if that ever bites.
+    """
+
+    def blob(spec: str) -> str | None:
+        return git_read(repo, "rev-parse", "--verify", "--quiet", spec, expected_failure=True)
+
+    on_disk = repo / ".lfsconfig"
+    disk = None
+    if os.path.lexists(on_disk):
+        disk = git_read(repo, "hash-object", "--", ".lfsconfig", expected_failure=True) or "?"
+    want = blob(f"refs/remotes/origin/{base}:.lfsconfig")
+    return {blob("HEAD:.lfsconfig"), blob(":.lfsconfig"), disk} != {want}
+
+
 async def push(repo: Path, branch: str) -> None:
     """`git push origin <branch>`, safe to call after a rebase. Never `-u`:
     the push names its branch, so an upstream buys nothing, and it would be
@@ -610,6 +632,16 @@ async def push(repo: Path, branch: str) -> None:
     (Kraft-rki). Not for a hooks directory inside the working tree, which
     the worker writes: that one stays pinned.
     """
+    # git-lfs's pre-push reads its server from `.lfsconfig`, which the worker
+    # writes: a changed one would send this push's LFS traffic from the host,
+    # outside any sandbox, to a URL the branch chose.
+    if _lfsconfig_moved(repo, await default_branch(repo)):
+        raise ForgeError(
+            f"{branch} changes .lfsconfig, which tells git-lfs where to send this "
+            "push's objects; Kraft will not push it from your machine, outside the "
+            "sandbox. Review the change to .lfsconfig in the item's worktree, then "
+            "push the branch yourself if it is meant"
+        )
     env = sandbox.unhardened_git_env(repo)
     pushed_ref = f"{PUSHED_REFS}/{branch}"
     head = git_read(repo, "rev-parse", "--verify", f"refs/heads/{branch}")

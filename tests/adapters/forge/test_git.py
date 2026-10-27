@@ -273,6 +273,50 @@ def test_push_runs_an_installed_pre_push_under_harden_host_git_env(tmp_path, hoo
     assert marker.exists() == runs
 
 
+@pytest.mark.parametrize(
+    ("base_has", "branch", "pushes"),
+    [
+        pytest.param(False, "untouched", True, id="none-anywhere-pushes"),
+        pytest.param(True, "untouched", True, id="the-bases-own-pushes"),
+        pytest.param(True, "committed", False, id="a-committed-change-is-refused"),
+        pytest.param(False, "on-disk", False, id="an-uncommitted-one-is-refused"),
+        pytest.param(True, "deleted", False, id="deleting-the-bases-is-refused"),
+        pytest.param(False, "head-only", False, id="committed-then-gone-from-disk-is-refused"),
+    ],
+)
+def test_push_refuses_a_branch_that_moves_lfsconfig(tmp_path, base_has, branch, pushes):
+    """git-lfs's pre-push sends a push's objects, and asks about locks, at
+    the server `.lfsconfig` names. The worker writes that file, and git-lfs
+    reads it from disk, then the index, then HEAD, so a branch whose copy
+    differs from the base's would have the host talk to a URL the branch
+    chose, outside the sandbox. Kraft refuses such a push and says why."""
+    repo = _repo_with_origin(tmp_path)
+    lfsconfig = repo / ".lfsconfig"
+    if base_has:
+        git(repo, "checkout", "-q", "main")
+        lfsconfig.write_text("[lfs]\n\turl = https://lfs.example/repo\n")
+        commit_all(repo, "the base's lfs server")
+        git(repo, "push", "-q", "origin", "main")
+        git(repo, "checkout", "-q", BRANCH)
+        git(repo, "rebase", "-q", "main")
+    if branch in ("committed", "on-disk", "head-only"):
+        lfsconfig.write_text("[lfs]\n\turl = http://127.0.0.1:1/elsewhere\n")
+    if branch == "deleted":
+        lfsconfig.unlink()
+    if branch in ("committed", "deleted", "head-only"):
+        commit_all(repo, "the branch's lfs server")
+    if branch == "head-only":
+        # git-lfs falls back to the index, then HEAD, when the file is gone.
+        lfsconfig.unlink()
+
+    if pushes:
+        asyncio.run(forge.push(repo, BRANCH))
+        assert git(tmp_path / "origin.git", "rev-parse", BRANCH) == git(repo, "rev-parse", "HEAD")
+    else:
+        with pytest.raises(forge.ForgeError, match=r"changes \.lfsconfig"):
+            asyncio.run(forge.push(repo, BRANCH))
+
+
 @pytest.mark.parametrize("case", ["unseen", "fetched-by-the-checkout", "record-behind-a-crash"])
 def test_push_refuses_to_overwrite_someone_elses_commits(tmp_path, case):
     """Kraft-z6i8's other half: a person's commits on the MR branch are
