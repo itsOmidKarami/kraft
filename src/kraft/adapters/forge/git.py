@@ -567,13 +567,14 @@ async def commit_stragglers(
 PUSHED_REFS = "refs/kraft/pushed"
 
 
-def _lfsconfig_moved(repo: Path) -> bool:
-    """Whether this branch's own work changed the `.lfsconfig` git-lfs would
-    read: a commit not on any `origin/*` branch touched it, or the staged or
-    on-disk copy differs from HEAD's (git-lfs reads disk, then the index,
-    then HEAD). Commits on a remote branch are the base's, a person's or
-    ones already pushed, and a sandboxed worker cannot write
-    `refs/remotes/`: its refs land in its own store.
+def _lfsconfig_moved(repo: Path, rev: str = "HEAD", trusted: str | None = None) -> bool:
+    """Whether the branch's own work changed the `.lfsconfig` git-lfs would
+    read: a commit of `rev` that is on no `origin/*` branch, nor on `trusted`
+    (the base, for a repository with no remote), touched it, or, for HEAD,
+    the staged or on-disk copy differs from HEAD's (git-lfs reads disk, then
+    the index, then HEAD). Commits on a remote branch are the base's, a
+    person's or ones already pushed, and a sandboxed worker cannot write
+    `refs/remotes/` or the base: its refs land in its own store.
 
     shortcut: a branch that changes `.lfsconfig` and changes it back still
     counts as touching it; compare against the boundary commits if that bites.
@@ -585,28 +586,53 @@ def _lfsconfig_moved(repo: Path) -> bool:
             git_read(repo, "rev-parse", "--verify", "--quiet", spec, expected_failure=True) or None
         )
 
-    disk = None
-    if os.path.lexists(repo / ".lfsconfig"):
-        # `--no-filters`: the worker's `.gitattributes` must not reshape it first.
-        disk = (
-            git_read(repo, "hash-object", "--no-filters", "--", ".lfsconfig", expected_failure=True)
-            or "?"
-        )
-    if {blob(":.lfsconfig"), disk} != {blob("HEAD:.lfsconfig")}:
-        return True
+    if rev == "HEAD":
+        disk = None
+        if os.path.lexists(repo / ".lfsconfig"):
+            # `--no-filters`: the worker's `.gitattributes` must not reshape it first.
+            disk = (
+                git_read(
+                    repo, "hash-object", "--no-filters", "--", ".lfsconfig", expected_failure=True
+                )
+                or "?"
+            )
+        if {blob(":.lfsconfig"), disk} != {blob("HEAD:.lfsconfig")}:
+            return True
+    besides = [trusted] if trusted and blob(f"{trusted}^{{commit}}") else []
     touched = git_read(
         repo,
         "log",
         "--format=%H",
         "-1",
-        "HEAD",
+        rev,
         "--not",
         "--remotes",
+        *besides,
         "--",
         ".lfsconfig",
         expected_failure=True,
     )
     return touched is None or touched != ""
+
+
+def assert_lfsconfig_unmoved(
+    repo: Path, step: str, *, rev: str = "HEAD", trusted: str | None = None
+) -> None:
+    """Raise `UnsafeWorktree` before a host git in `repo` that runs git-lfs
+    (a push's pre-push, a checkout's smudge) when the branch's own work
+    changed `.lfsconfig`: git-lfs would talk to whatever server it names from
+    this machine, outside any sandbox. `step` says what Kraft will not do.
+    The dangerous git never runs; whether the item stops at once or later,
+    at its push, is the caller's handling of an UnsafeWorktree.
+    """
+    if _lfsconfig_moved(repo, rev, trusted):
+        raise UnsafeWorktree(
+            f"the item's work changes .lfsconfig, which tells git-lfs where this "
+            f"repository's objects live, so Kraft will not {step} from your machine, "
+            "outside the sandbox. Review the change: drop the commits that make it "
+            "from the branch, or push the branch yourself if it is meant, and Kraft "
+            "carries on"
+        )
 
 
 async def push(repo: Path, branch: str) -> None:
@@ -655,14 +681,7 @@ async def push(repo: Path, branch: str) -> None:
     # git-lfs's pre-push reads its server from `.lfsconfig`, which the worker
     # writes: a changed one would send this push's LFS traffic from the host,
     # outside any sandbox, to a URL the branch chose.
-    # A person looks first, never a fix loop: an UnsafeWorktree stops the item.
-    if _lfsconfig_moved(repo):
-        raise UnsafeWorktree(
-            f"{branch} changes .lfsconfig, which tells git-lfs where to send this "
-            "push's objects; Kraft will not push it from your machine, outside the "
-            "sandbox. Review the change in the item's worktree: revert it, or push "
-            "the branch yourself if it is meant, and Kraft pushes it from then on"
-        )
+    assert_lfsconfig_unmoved(repo, "push it")
     env = sandbox.unhardened_git_env(repo)
     pushed_ref = f"{PUSHED_REFS}/{branch}"
     head = git_read(repo, "rev-parse", "--verify", f"refs/heads/{branch}")

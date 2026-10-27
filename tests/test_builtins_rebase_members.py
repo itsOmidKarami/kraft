@@ -337,6 +337,7 @@ async def _door(door, database, run_dirs, row, root, member, branch):
             "MERGE_AUTOSTASH", "commit_stragglers", id="MERGE_AUTOSTASH-commit_stragglers-member"
         ),
         pytest.param("MERGE_AUTOSTASH", "pointer_bump", id="MERGE_AUTOSTASH-pointer_bump-member"),
+        pytest.param(".lfsconfig", "pointer_bump", id="lfsconfig-pointer_bump-member"),
     ],
 )
 async def test_planted_state_in_a_members_admin_dir_never_moves_an_operator_ref(
@@ -374,7 +375,10 @@ async def test_planted_state_in_a_members_admin_dir_never_moves_an_operator_ref(
         (admin / "MERGE_AUTOSTASH").write_text(f"{stash}\n")
     if kind == "HEAD" or door == "restore_branch":
         (admin / "HEAD").write_text("ref: refs/heads/side\n")
-    before = _refs(connected, tmp_path / "pkg")
+    if kind == ".lfsconfig":
+        # git-lfs's smudge in the checkout would fetch from the server it names.
+        write(member, ".lfsconfig", "[lfs]\n\turl = http://127.0.0.1:1/elsewhere\n")
+    before, head = _refs(connected, tmp_path / "pkg"), git_read(member, "rev-parse", "HEAD")
 
     try:
         status = await _door(door, database, run_dirs, row, root, member, branch)
@@ -383,3 +387,5 @@ async def test_planted_state_in_a_members_admin_dir_never_moves_an_operator_ref(
 
     assert _refs(connected, tmp_path / "pkg") == before
     assert status in ("raised", "config_error")
+    if kind == ".lfsconfig":
+        assert git_read(member, "rev-parse", "HEAD") == head, "no checkout ran"

@@ -5,6 +5,7 @@ check against it is walked in `tests/adapters/forge/test_run_reviewed_head.py`."
 from __future__ import annotations
 
 import pytest
+from support.harness import commit_all, git, make_repo, write
 
 from kraft import events, reviewed_head, store
 
@@ -88,3 +89,30 @@ def test_the_review_head_token_names_every_checkout(tips, named):
         assert got == reviewed_head.token({"/wt": A, "/m": B})
     else:
         assert got == named
+
+
+@pytest.mark.parametrize("planted", [False, True], ids=["clean-brings-it-home", "lfsconfig-stops"])
+async def test_bring_home_never_checks_out_over_a_moved_lfsconfig(tmp_path, planted):
+    """`bring_home` fast-forwards the worktree onto the commits the forge
+    holds, and that checkout runs git-lfs's smudge, which fetches from the
+    server `.lfsconfig` names. One the worker left in the worktree stops it
+    for a person, rather than letting the host talk to that server."""
+    origin = tmp_path / "origin.git"
+    git(tmp_path, "init", "--bare", "-q", "-b", "main", str(origin))
+    repo = make_repo(tmp_path)
+    git(repo, "remote", "add", "origin", str(origin))
+    git(repo, "checkout", "-q", "-b", "kraft/x")
+    git(repo, "push", "-q", "origin", "kraft/x")
+    other = tmp_path / "other"
+    git(tmp_path, "clone", "-q", "-b", "kraft/x", str(origin), str(other))
+    write(other, "theirs.txt", "a person's commit\n")
+    commit_all(other, "a person's commit")
+    git(other, "push", "-q", "origin", "kraft/x")
+    tip = git(repo, "rev-parse", "kraft/x")
+    if planted:
+        write(repo, ".lfsconfig", "[lfs]\n\turl = http://127.0.0.1:1/elsewhere\n")
+        with pytest.raises(RuntimeError, match=r"changes \.lfsconfig"):
+            await reviewed_head.bring_home(repo, "kraft/x", in_place=False)
+        assert git(repo, "rev-parse", "kraft/x") == tip
+    else:
+        assert await reviewed_head.bring_home(repo, "kraft/x", in_place=False)

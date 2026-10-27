@@ -391,7 +391,14 @@ async def _refuse_forge_head(
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )
-    fast_forwarded = await reviewed_head.bring_home(repo, branch, in_place=inplace.is_in_place(row))
+    stopped = None
+    try:
+        fast_forwarded = await reviewed_head.bring_home(
+            repo, branch, in_place=inplace.is_in_place(row)
+        )
+    except git.UnsafeWorktree as exc:
+        # Recorded first, so the stop does not hide that the forge's head moved.
+        fast_forwarded, stopped = False, exc
     reviewed = reviewed_head.reviewed_tip(db, work_item_id, repo)
     await db.write(
         lambda c: events.append(
@@ -408,6 +415,8 @@ async def _refuse_forge_head(
             },
         )
     )
+    if stopped is not None:
+        raise stopped
     held = f"it is now {current[:12]}" if current else "it holds commits"
     return (
         f"not merging {branch}: the forge's {branch} in {repo} changed after the final review "
@@ -2236,6 +2245,7 @@ async def _point_at_merged_members(
         default = await _builtins.base_branch(db, work_item_id, sub_path, member=True)
         await git.run_git(sub_path, ["git", "fetch", "origin", default])
         git.assert_no_operation(sub_path)  # a checkout stores a planted autostash
+        git.assert_lfsconfig_unmoved(sub_path, f"check {sub_path.name}'s merge out")
         await git.run_git(sub_path, ["git", "checkout", landed.merged_sha])
         rel = str(sub_path.relative_to(root_repo))
         await git.run_git(root_repo, ["git", "add", "--", rel])

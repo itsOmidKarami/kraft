@@ -221,6 +221,8 @@ async def bring_home(checkout, branch: str, *, in_place: bool) -> bool:
         or _config.git_read(checkout, "status", "--porcelain", "--untracked-files=no") != ""
     ):
         return False
+    # Raised, not False: a planted .lfsconfig is for a person, not a quiet skip.
+    git.assert_lfsconfig_unmoved(checkout, "bring the forge's commits in")
     try:
         await git.run_git(checkout, ["git", "merge", "--ff-only", fetched])
     except ForgeError:
