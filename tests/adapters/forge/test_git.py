@@ -274,46 +274,57 @@ def test_push_runs_an_installed_pre_push_under_harden_host_git_env(tmp_path, hoo
 
 
 @pytest.mark.parametrize(
-    ("base_has", "branch", "pushes"),
+    ("base", "branch", "pushes"),
     [
-        pytest.param(False, "untouched", True, id="none-anywhere-pushes"),
-        pytest.param(True, "untouched", True, id="the-bases-own-pushes"),
-        pytest.param(True, "committed", False, id="a-committed-change-is-refused"),
-        pytest.param(False, "on-disk", False, id="an-uncommitted-one-is-refused"),
-        pytest.param(True, "deleted", False, id="deleting-the-bases-is-refused"),
-        pytest.param(False, "head-only", False, id="committed-then-gone-from-disk-is-refused"),
+        pytest.param(None, "untouched", True, id="none-anywhere-pushes"),
+        pytest.param("main", "untouched", True, id="the-bases-own-pushes"),
+        pytest.param("release", "untouched", True, id="a-non-default-bases-own-pushes"),
+        pytest.param("main", "committed", False, id="a-committed-change-is-refused"),
+        pytest.param(None, "on-disk", False, id="an-uncommitted-one-is-refused"),
+        pytest.param(None, "staged", False, id="a-staged-one-is-refused"),
+        pytest.param("main", "deleted", False, id="deleting-the-bases-is-refused"),
+        pytest.param(None, "head-only", False, id="committed-then-gone-from-disk-is-refused"),
+        pytest.param(None, "pushed-by-a-person", True, id="once-a-person-pushes-it-kraft-does"),
     ],
 )
-def test_push_refuses_a_branch_that_moves_lfsconfig(tmp_path, base_has, branch, pushes):
+def test_push_refuses_a_branch_that_moves_lfsconfig(tmp_path, base, branch, pushes):
     """git-lfs's pre-push sends a push's objects, and asks about locks, at
     the server `.lfsconfig` names. The worker writes that file, and git-lfs
-    reads it from disk, then the index, then HEAD, so a branch whose copy
-    differs from the base's would have the host talk to a URL the branch
-    chose, outside the sandbox. Kraft refuses such a push and says why."""
+    reads it from disk, then the index, then HEAD, so a branch whose own
+    work changed it would have the host talk to a URL the branch chose,
+    outside the sandbox. Kraft stops the item for a person instead. What is
+    already on a remote branch is not the item's work: the base's own file,
+    whichever branch the base is, and one a person reviewed and pushed."""
     repo = _repo_with_origin(tmp_path)
     lfsconfig = repo / ".lfsconfig"
-    if base_has:
-        git(repo, "checkout", "-q", "main")
+    if base is not None:
+        git(repo, "checkout", "-q", "-B", base, "main")
         lfsconfig.write_text("[lfs]\n\turl = https://lfs.example/repo\n")
         commit_all(repo, "the base's lfs server")
-        git(repo, "push", "-q", "origin", "main")
+        git(repo, "push", "-q", "origin", base)
         git(repo, "checkout", "-q", BRANCH)
-        git(repo, "rebase", "-q", "main")
-    if branch in ("committed", "on-disk", "head-only"):
+        git(repo, "rebase", "-q", base)
+    if branch in ("committed", "on-disk", "staged", "head-only", "pushed-by-a-person"):
         lfsconfig.write_text("[lfs]\n\turl = http://127.0.0.1:1/elsewhere\n")
     if branch == "deleted":
         lfsconfig.unlink()
-    if branch in ("committed", "deleted", "head-only"):
+    if branch in ("committed", "deleted", "head-only", "pushed-by-a-person"):
         commit_all(repo, "the branch's lfs server")
-    if branch == "head-only":
+    if branch == "staged":
+        git(repo, "add", ".lfsconfig")
+    if branch in ("head-only", "staged"):
         # git-lfs falls back to the index, then HEAD, when the file is gone.
         lfsconfig.unlink()
+    if branch == "pushed-by-a-person":
+        git(repo, "push", "-q", "origin", BRANCH)
+        (repo / "more-work.txt").write_text("more work\n")
+        commit_all(repo, "more work")
 
     if pushes:
         asyncio.run(forge.push(repo, BRANCH))
         assert git(tmp_path / "origin.git", "rev-parse", BRANCH) == git(repo, "rev-parse", "HEAD")
     else:
-        with pytest.raises(forge.ForgeError, match=r"changes \.lfsconfig"):
+        with pytest.raises(forge_git.UnsafeWorktree, match=r"changes \.lfsconfig"):
             asyncio.run(forge.push(repo, BRANCH))
 
 
