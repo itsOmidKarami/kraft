@@ -364,6 +364,7 @@ def test_open_vsx_still_publishes_when_only_the_marketplace_steps_failed():
     assert steps["sign in to Azure for the Marketplace"]["id"] == "azure-login"
     assert steps["publish the VS Code extension"]["id"] == "marketplace-publish"
     stable = "steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'"
+    # `${{{{` in the f-string is a literal `${{`; the second piece is a plain string.
     assert steps["publish the VS Code extension to Open VSX"]["if"] == (
         f"${{{{ !cancelled() && {stable} && (success() || steps.azure-login.conclusion == 'failure'"
         " || steps.marketplace-publish.conclusion == 'failure') }}"

@@ -113,10 +113,10 @@ you press the button:
 
 ## What a stable run publishes
 
-In this order. A step that fails stops the ones after it, and what already
-published stays published: the tag exists, so a rerun finds nothing new to
-release and you finish the rest by hand. Secrets are repository secrets or
-secrets of the `release` environment.
+In this order. Unless noted below, a step that fails stops the ones after it,
+and what already published stays published: the tag exists, so a rerun finds
+nothing new to release and you finish the rest by hand. Secrets are repository
+secrets or secrets of the `release` environment.
 
 The VS Code extension goes last, after the run has checked that PyPI serves the
 new version. Its Marketplace login can lapse (the identity removed from the

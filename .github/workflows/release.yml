@@ -475,9 +475,10 @@ jobs:
         # identity removed from the publisher, the federated credential
         # deleted): run first, that left Homebrew on the old version and main
         # unstamped. Run here, it fails the run and skips only the extension's
-        # own steps (never Open VSX, below). The order also suits VS Code's auto-update: an extension
-        # newer than the daemon is read-only, so it should not reach users
-        # before the Kraft that matches it can be installed.
+        # own steps (never Open VSX, below). The order also suits VS Code's
+        # auto-update: an extension newer than the daemon is read-only, so it
+        # should not reach users before the Kraft that matches it can be
+        # installed.
         if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'
         run: |
           VSIX=$(ls "$RUNNER_TEMP"/vsix/*.vsix)
