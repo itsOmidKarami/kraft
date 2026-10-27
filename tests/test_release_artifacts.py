@@ -348,7 +348,26 @@ def test_the_marketplace_publish_is_the_managed_identity_and_holds_no_token():
     # Only a stable run touches the Marketplace: a pre-release or a no-op run never signs in.
     stable = "steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'"
     named = [s for s in _job()["steps"] if s.get("name")]
-    assert [s["if"] for s in named[-4:]] == [stable] * 4
+    login, publish, _open_vsx, listing = named[-4:]
+    assert [s["if"] for s in (login, publish, listing)] == [stable] * 3
+
+
+def test_open_vsx_still_publishes_when_only_the_marketplace_steps_failed():
+    """Open VSX needs no Azure login, so a lapsed Marketplace login or a failed
+    Marketplace publish must not skip it. Four cases, by what GitHub evaluates:
+    everything passed (`success()`), the login failed or the publish failed (their
+    `conclusion` is `failure`), and an earlier step such as PyPI failed (the login
+    is then `skipped`, not `failed`, so Open VSX stays out and the extension cannot
+    reach users before the Kraft it talks to). `!cancelled()` is there because any
+    status function in `if:` turns off the implicit `success()`."""
+    steps = {s.get("name"): s for s in _job()["steps"]}
+    assert steps["sign in to Azure for the Marketplace"]["id"] == "azure-login"
+    assert steps["publish the VS Code extension"]["id"] == "marketplace-publish"
+    stable = "steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'"
+    assert steps["publish the VS Code extension to Open VSX"]["if"] == (
+        f"${{{{ !cancelled() && {stable} && (success() || steps.azure-login.conclusion == 'failure'"
+        " || steps.marketplace-publish.conclusion == 'failure') }}"
+    )
 
 
 def _smoke_version_check() -> str:
