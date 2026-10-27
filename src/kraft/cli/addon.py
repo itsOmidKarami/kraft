@@ -609,14 +609,44 @@ def _cmd_collection_add(ns: argparse.Namespace) -> None:
     ) as exc:
         raise _refuse(str(exc)) from exc
 
+    moved = False
+    left: list[str] = []  # the old source's mirror, once nothing reads it
+    reviewed = True  # whether the next update can see the move as one
+
     def change(raw: dict, config: AddonsConfig) -> None:
+        nonlocal moved, reviewed
         known = config.collections.get(name)
-        if known is not None and (known.git, known.path) != (source.get("git"), source.get("path")):
+        moved = known is not None and (known.git, known.path) != (
+            source.get("git"),
+            source.get("path"),
+        )
+        if moved and not ns.replace:
             raise _refuse(
                 f"collection {name} is already added from {known.git or known.path}; "
-                "remove it first to add it from another source"
+                "add --replace to move it to this source"
             )
-        entry = {**(raw["collections"].get(name) or {}), **source}
+        if moved and "path" in source:
+            own = [
+                i
+                for i in config.addons
+                if i.endswith(f"@{name}") and config.entry(i).auto_update is not None
+            ]
+            if own:
+                raise _refuse(
+                    f"these add-ons set their own auto_update, which a directory never does: "
+                    f"{', '.join(own)}; turn each off with `kraft admin addon auto-update` first"
+                )
+        if moved and known.git is not None:
+            left.append(known.git)
+        # A lock records no directory, so one directory for another is no change it
+        # can show: what the new one holds is the next update.
+        reviewed = not (moved and known.path is not None and "path" in source)
+        old = raw["collections"].get(name) or {}
+        # A move takes the new source whole: the old ref belongs to the old
+        # repository, and a directory never auto-updates.
+        entry = {**source} if moved else {**old, **source}
+        if moved and "git" in source and old.get("auto_update"):
+            entry["auto_update"] = True
         if ns.auto_update:
             entry["auto_update"] = True
         raw["collections"][name] = entry
@@ -627,13 +657,33 @@ def _cmd_collection_add(ns: argparse.Namespace) -> None:
             final = fetch.mirror_path(addons_dir, name, source["git"])
             if not final.is_dir():
                 mirror.rename(final)
+        # Restoring reads the locked commit from the new URL: the old mirror
+        # has no reader left, and `collection remove` would never find it.
+        for url in left:
+            shutil.rmtree(fetch.mirror_path(addons_dir, name, url), ignore_errors=True)
     finally:
         # What was fetched to read the name, when the collection was not added
         # or already had its mirror.
         if mirror is not None:
             shutil.rmtree(mirror, ignore_errors=True)
     shown = {**source, "git": fetch.redact(source["git"])} if "git" in source else source
-    common.emit({"collection": name, **shown}, lambda v: f"added collection {name}", ns.json)
+
+    def render(_value: dict) -> str:
+        if not moved:
+            return f"added collection {name}"
+        if not reviewed:
+            return (
+                f"moved collection {name}; `kraft admin addon update` reads its add-ons "
+                "from the new directory, and shows what changed in them"
+            )
+        return (
+            f"moved collection {name}; its add-ons keep what they locked until "
+            "`kraft admin addon update` shows the move and you accept it"
+        )
+
+    common.emit(
+        {"collection": name, **shown, **({"moved": True} if moved else {})}, render, ns.json
+    )
 
 
 def _cmd_collection_list(ns: argparse.Namespace) -> None:
@@ -1000,6 +1050,11 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
     add_p.add_argument("--ref", help="a branch, tag or commit; default: the default branch")
     add_p.add_argument(
         "--auto-update", action="store_true", help="every add-on installed from it updates itself"
+    )
+    add_p.add_argument(
+        "--replace",
+        action="store_true",
+        help="move a collection already added from another source here; the next update reviews it",
     )
     verb(collections, "list", _cmd_collection_list, "collections and what each publishes")
     update_c = verb(

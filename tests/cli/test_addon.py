@@ -13,6 +13,7 @@ from support.addons import (
     accept_repo_library,
     chain,
     child_manifest,
+    edit_addons_yaml,
     install,
     instance,
     make_collection,
@@ -134,6 +135,54 @@ def test_collection_add_writes_a_full_source(home, capsys, monkeypatch, source, 
         "acme": {key: names.get(value, value) for key, value in writes.items()}
     }
     assert home.yaml()["addons"] == {} and not (home.addons / "store").exists()
+
+
+@pytest.mark.parametrize(
+    "to, before, after",
+    [
+        ("git", {}, {}),
+        ("git", {"ref": "release-1", "auto_update": True}, {"auto_update": True}),
+        ("directory", {"ref": "release-1"}, {}),
+    ],
+    ids=["git", "git-drops-the-ref-keeps-auto-update", "directory"],
+)
+def test_collection_add_replace_moves_it_through_a_reviewed_update(
+    installed, capsys, tmp_path, to, before, after
+):
+    """A fork, a mirror or a local checkout takes over the collection's name;
+    what is installed keeps its lock until a person reads the move."""
+    edit_addons_yaml(installed.config, lambda raw: raw["collections"]["acme"].update(before))
+    other = make_collection(tmp_path / "elsewhere", TWO)
+    source = other.as_uri() if to == "git" else str(other)
+    lock_before = installed.locked()
+
+    code, out = _run(capsys, "collection", "add", source, "--replace")
+
+    assert code == 0 and "moved collection acme" in out, out
+    moved_to = {"git": other.as_uri()} if to == "git" else {"path": str(other)}
+    assert installed.yaml()["collections"]["acme"] == {**moved_to, **after}
+    assert not fetch.mirror_path(installed.addons, "acme", installed.repo.as_uri()).exists()
+    assert _run(capsys, "update", "--check")[0] == 1  # a move waits for a person
+    assert installed.locked() == lock_before
+    code, out = _run(capsys, "update", "-y")
+    assert code == 0 and "collection URL changed" in out, out
+    assert installed.locked().git == (other.as_uri() if to == "git" else None)
+
+
+def test_collection_add_replace_refuses_a_directory_for_an_auto_updating_addon(
+    installed, capsys, tmp_path
+):
+    edit_addons_yaml(
+        installed.config, lambda raw: raw["addons"].update({ID: {"auto_update": True}})
+    )
+    before = installed.written()
+
+    code, out = _run(
+        capsys, "collection", "add", str(make_collection(tmp_path / "elsewhere", TWO)), "--replace"
+    )
+
+    assert code != 0 and "turn each off with `kraft admin addon auto-update`" in out, out
+    assert installed.written() == before
 
 
 def test_collection_add_refuses_a_taken_name(added, capsys, tmp_path):
