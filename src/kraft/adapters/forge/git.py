@@ -579,7 +579,10 @@ def _lfsconfig_moved(repo: Path, base: str) -> bool:
     """
 
     def blob(spec: str) -> str | None:
-        return git_read(repo, "rev-parse", "--verify", "--quiet", spec, expected_failure=True)
+        # `or None`: real git prints the id of anything it finds, so empty is absent.
+        return (
+            git_read(repo, "rev-parse", "--verify", "--quiet", spec, expected_failure=True) or None
+        )
 
     on_disk = repo / ".lfsconfig"
     disk = None
