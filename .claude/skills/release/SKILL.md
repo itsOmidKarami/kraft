@@ -182,8 +182,8 @@ The stable run publishes everywhere and cannot be undone.
    - **Highlight:** if the rc notes had no Highlights section, propose the
      headline PR. Check first that its `## Changelog` line reads as a headline.
    - **Credentials:** you cannot check them. Ask the maintainer to confirm the two
-     under "Before a stable run" in `RELEASING.md`. If `VSCE_PAT` is empty, the
-     Marketplace steps are skipped and the run still goes green.
+     under "Before a stable run" in `RELEASING.md`. If the Marketplace identity
+     or its federated credential is gone, the publish fails and the run goes red.
 2. If they picked a highlight, add the label: `gh pr edit <n> --add-label notes::highlight`
    / `issue_write` with `method: update`. `issue_write` replaces the whole label
    set, so send the existing `release::` label too:
@@ -203,7 +203,7 @@ The stable run publishes everywhere and cannot be undone.
    | Target | Check |
    |---|---|
    | GitHub Release | `vX.Y.Z`, not a pre-release, wheel and `.vsix` attached |
-   | VS Code Marketplace | the run's "publish the VS Code extension" step succeeded. Skipped means `VSCE_PAT` is empty and the extension is not published: report it. |
+   | VS Code Marketplace | the run's "publish the VS Code extension" step succeeded. A failure there usually means the identity's login or membership lapsed, and the extension is not published: report it. |
    | Docs | the `docs` run the release dispatched passed; a warning that it was not dispatched means run `docs` by hand |
 
 8. `.claude/skills/release/scripts/smoke.sh X.Y.Z`, as in Phase 3.
