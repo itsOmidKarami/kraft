@@ -203,7 +203,7 @@ The stable run publishes everywhere and cannot be undone.
    | Target | Check |
    |---|---|
    | GitHub Release | `vX.Y.Z`, not a pre-release, wheel and `.vsix` attached |
-   | VS Code Marketplace | the run's "publish the VS Code extension" step succeeded. A failure there means the identity's login or membership lapsed and the extension is not published: report it. |
+   | VS Code Marketplace | the run's "publish the VS Code extension" step succeeded. A failure there usually means the identity's login or membership lapsed, and the extension is not published: report it. |
    | Docs | the `docs` run the release dispatched passed; a warning that it was not dispatched means run `docs` by hand |
 
 8. `.claude/skills/release/scripts/smoke.sh X.Y.Z`, as in Phase 3.

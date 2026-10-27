@@ -343,9 +343,12 @@ def test_the_marketplace_publish_is_the_managed_identity_and_holds_no_token():
     assert login["with"]["allow-no-subscriptions"] is True
     assert "--azure-credential" in publish["run"]
     assert not re.search(r" -p\b| --pat\b", publish["run"])
-    # Only a stable run publishes: a pre-release or a no-op run never signs in.
+    # The OIDC subject Azure trusts is the `release` environment's.
+    assert _job()["environment"] == "release"
+    # Only a stable run touches the Marketplace: a pre-release or a no-op run never signs in.
     stable = "steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'"
-    assert login["if"] == publish["if"] == stable
+    named = [s for s in _job()["steps"] if s.get("name")]
+    assert [s["if"] for s in named[-4:]] == [stable] * 4
 
 
 def _smoke_version_check() -> str:

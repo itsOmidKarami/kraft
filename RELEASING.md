@@ -104,9 +104,7 @@ you press the button:
   as the publisher's owner and check **Members** lists that identity as a
   *Contributor*. In the Azure portal, open the identity's **Federated
   credentials** and check `github-kraft-release` is still there, for this
-  repository's `release` environment. The identity must also still be a user
-  of the Azure DevOps organization `itsomidkarami`, because the Marketplace
-  finds it through that organization.
+  repository's `release` environment.
 - [ ] **Open VSX still trusts this workflow.** Open VSX takes no token, so
   nothing expires, but its trusted publisher can be removed. Sign in at
   <https://open-vsx.org/user-settings/trusted-publishers> as an owner of the
