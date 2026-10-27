@@ -113,16 +113,18 @@ you press the button:
 
 ## What a stable run publishes
 
-In this order. A step that fails stops the ones after it, and what already
-published stays published: the tag exists, so a rerun finds nothing new to
-release and you finish the rest by hand. Secrets are repository secrets or
-secrets of the `release` environment.
+In this order. Unless noted below, a step that fails stops the ones after it,
+and what already published stays published: the tag exists, so a rerun finds
+nothing new to release and you finish the rest by hand. Secrets are repository
+secrets or secrets of the `release` environment.
 
 The VS Code extension goes last, after the run has checked that PyPI serves the
 new version. Its Marketplace login can lapse (the identity removed from the
 publisher, its federated credential deleted), so its publish is the step most
 likely to fail. Run last, a failure there skips only the extension's own steps,
-never Homebrew or the stamp pull request, and the run still goes red. Last is
+never Homebrew or the stamp pull request, and the run still goes red. Open VSX
+needs no Azure login, so it still publishes when only the Marketplace login or
+publish failed; only the Marketplace listing check is skipped. Last is
 also the safe order for users. VS Code updates the extension on its own, and an
 extension newer than the Kraft it talks to is read-only. It shouldn't arrive
 before that Kraft can be installed.

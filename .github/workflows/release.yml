@@ -452,6 +452,7 @@ jobs:
           exit 1
 
       - name: sign in to Azure for the Marketplace
+        id: azure-login
         # No token: the Marketplace publishes as an Azure managed identity,
         # `kraft-release-publisher`, a Contributor on the kraft-sdlc publisher.
         # Azure trusts this job only because its OIDC token says it runs in this
@@ -468,14 +469,16 @@ jobs:
           allow-no-subscriptions: true
 
       - name: publish the VS Code extension
+        id: marketplace-publish
         # Last, after Kraft itself is on PyPI, Homebrew and main. A failed step
         # stops every step after it, and the Marketplace login can lapse (the
         # identity removed from the publisher, the federated credential
         # deleted): run first, that left Homebrew on the old version and main
         # unstamped. Run here, it fails the run and skips only the extension's
-        # own steps. The order also suits VS Code's auto-update: an extension
-        # newer than the daemon is read-only, so it should not reach users
-        # before the Kraft that matches it can be installed.
+        # own steps (never Open VSX, below). The order also suits VS Code's
+        # auto-update: an extension newer than the daemon is read-only, so it
+        # should not reach users before the Kraft that matches it can be
+        # installed.
         if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'
         run: |
           VSIX=$(ls "$RUNNER_TEMP"/vsix/*.vsix)
@@ -484,7 +487,16 @@ jobs:
       - name: publish the VS Code extension to Open VSX
         # No token: Open VSX trusted publishing, registered for kraft-sdlc.kraft
         # against this workflow and the `release` environment.
-        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'
+        #
+        # Independent of the Marketplace: it needs no Azure login, so a lapsed
+        # login or a failed Marketplace publish must not skip it. It runs when
+        # everything before it passed, or when the only failure is the Azure
+        # login or the Marketplace publish. If an earlier step failed (PyPI,
+        # Homebrew, the stamp), the login is skipped, not failed, so this stays
+        # out: the extension must not reach users before the Kraft it talks to.
+        # `!cancelled()` is needed because any status function in `if:` turns
+        # off the implicit `success()`; a `${{ }}` keeps YAML from reading `!`.
+        if: ${{ !cancelled() && steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none' && (success() || steps.azure-login.conclusion == 'failure' || steps.marketplace-publish.conclusion == 'failure') }}
         run: |
           VSIX=$(ls "$RUNNER_TEMP"/vsix/*.vsix)
           npx --prefix vscode ovsx publish "$VSIX" --trusted-publishing
