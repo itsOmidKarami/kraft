@@ -60,6 +60,12 @@ WHEN the system fetches a collection, it SHALL NOT check out a working tree or r
 enforced-by: tests/addons/test_fetch.py::test_fetch_never_checks_out_or_runs_hooks
 origin: src/kraft/addons/fetch.py §fetch
 
+## REQ fetch-takes-only-the-commit-it-reads
+
+WHEN the system fetches a collection, or one commit of it, it SHALL fetch that commit without its history.
+enforced-by: tests/addons/test_fetch.py::test_a_fetch_takes_only_the_commit_it_reads
+origin: src/kraft/addons/fetch.py §fetch
+
 ## REQ namespace-kraft-is-reserved
 
 IF an add-on is named `kraft` or installed under the alias `kraft`, THEN the system SHALL refuse it.
