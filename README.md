@@ -28,12 +28,8 @@ Cursor, Antigravity, OpenCode, Amp or Gemini CLI too. The shipped chains run
 their agent steps on Claude Code, and any step can
 [switch to another agent](https://kraft-sdlc.dev/guides/switch-harness).
 
-**New in 2.1:** [add-ons](https://kraft-sdlc.dev/guides/customize/share-chains-with-addons)
-that share chains, skills and agent profiles from a git repository;
-`kraft console`, a terminal UI for Kraft; and in-place items that run in the
-repo's own checkout instead of a worktree. The
-[2.1.0 release notes](https://github.com/itsOmidKarami/kraft/releases/tag/v2.1.0)
-have the rest. Coming from 1.4? [What's new in 2.0](https://kraft-sdlc.dev/project/whats-new)
+The [releases](https://github.com/itsOmidKarami/kraft/releases) page says what
+each version adds. Coming from 1.4? [What's new in 2.0](https://kraft-sdlc.dev/project/whats-new)
 says what to check before you upgrade.
 
 [![The Kraft board in the dark Ink look with a violet accent: filters for chain, gate and stop reason above work items grouped by status, Needs you first with each item's one button (Review at a gate, Retry, Raise cap, Answer, Resume and Raise budget on the stopped ones), and Running below it, with a Select all link on every group and a ? shortcuts button in the toolbar](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)](https://kraft-sdlc.dev/demo/)
