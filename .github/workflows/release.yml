@@ -65,6 +65,9 @@ jobs:
           # `git tag --merged` needs the tags and the history, and a shallow
           # clone has neither -- every release would compute as the first one.
           fetch-depth: 0
+          # No write token left in .git/config for `npm ci`'s install scripts
+          # and the build to read; the tag push passes it explicitly.
+          persist-credentials: false
 
       - name: what does this release ship
         id: impact
@@ -205,7 +208,7 @@ jobs:
           # Every zip entry dated by the tagged commit, not by when the bundle
           # was copied: anyone can rebuild the tag and get the published sha256.
           export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
-          uv tool install rust-just
+          uv tool install rust-just==1.59.0
           npm ci --prefix frontend
           just bundle
           uv build --wheel
@@ -335,7 +338,7 @@ jobs:
           PRE: ${{ steps.impact.outputs.pre }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git push origin "$TAG"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$TAG"
           gh release create "$TAG" $([ "$PRE" != none ] && echo --prerelease) dist/*.whl "$RUNNER_TEMP"/vsix/*.vsix --title "Kraft $TAG" --notes-file "$RUNNER_TEMP/body.md"
 
       - name: rebuild the docs for this release
@@ -405,12 +408,6 @@ jobs:
           python3 dev/plan_release.py changelog "$VERSION" "$RUNNER_TEMP/notes.md" vscode/CHANGELOG.md
           git -c user.email=ci@kraft.invalid -c user.name="Kraft CI" \
             commit -am "chore: stamp plugin manifests and changelog for $TAG"
-          # actions/checkout persisted GITHUB_TOKEN's own auth header, which
-          # takes precedence over any credential embedded in the remote URL --
-          # drop it so the push below actually authenticates as the App.
-          # Fails with exit 5 when the header was never set (e.g. a checkout
-          # config change upstream) -- that's not a reason to abort the stamp.
-          git config --local --unset-all http.https://github.com/.extraheader || true
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$BRANCH"
           gh pr create --base main --head "$BRANCH" \
             --title "chore: stamp plugin manifests and changelog for $TAG" \

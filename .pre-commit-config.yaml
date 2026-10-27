@@ -8,13 +8,15 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Keep in step with the `ruff` floor in pyproject.toml, so the hook and
     # `just lint` agree on what is formatted.
-    rev: v0.16.9
+    # Pinned by commit, not tag: a tag can be moved. `frozen:` names it;
+    # update with `pre-commit autoupdate --freeze`, which keeps both.
+    rev: a56c0b927e6465d37cae3e97d35d4d18ab2b96cd  # frozen: v0.16.9
     hooks:
       - id: ruff
         args: [--fix]
       - id: ruff-format
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v6.0.0
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # frozen: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
