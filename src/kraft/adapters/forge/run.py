@@ -2236,6 +2236,7 @@ async def _point_at_merged_members(
         default = await _builtins.base_branch(db, work_item_id, sub_path, member=True)
         await git.run_git(sub_path, ["git", "fetch", "origin", default])
         git.assert_no_operation(sub_path)  # a checkout stores a planted autostash
+        git.assert_lfsconfig_unmoved(sub_path, f"check {sub_path.name}'s merge out")
         await git.run_git(sub_path, ["git", "checkout", landed.merged_sha])
         rel = str(sub_path.relative_to(root_repo))
         await git.run_git(root_repo, ["git", "add", "--", rel])

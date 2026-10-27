@@ -178,6 +178,7 @@ def restore_branch(worktree: Path, branch: str, base: str) -> None:
         # `MERGE_AUTOSTASH` the checkout would store the worker's tree in the
         # repository's shared `refs/stash` (Kraft-xngty).
         git.assert_no_operation(worktree, allow=("MERGE_HEAD",))
+        git.assert_lfsconfig_unmoved(worktree, f"check {branch} out")
         checked_out = run("checkout", "-f", branch)
         if checked_out.returncode != 0:
             # Raised, not logged: the straggler commit that follows would land
@@ -1371,6 +1372,8 @@ async def refresh_worktree_base(
     if autostash:
         await inplace.rebase_in_checkout(worktree, branch, head, base, _committer_env(identity))
         return head
+    # In place is never sandboxed, and the person's own .lfsconfig is theirs to change.
+    git.assert_lfsconfig_unmoved(worktree, f"rebase it onto {base}")
     lock_before = os.path.lexists(_index_lock(worktree))
     aside = await _set_aside_setup_lockfiles(worktree)
     leftovers = (_untracked(worktree), head)

@@ -609,6 +609,22 @@ def _lfsconfig_moved(repo: Path) -> bool:
     return touched is None or touched != ""
 
 
+def assert_lfsconfig_unmoved(repo: Path, step: str) -> None:
+    """Raise `UnsafeWorktree` before a host git in `repo` that runs git-lfs
+    (a push's pre-push, a checkout's smudge) when the branch's own work
+    changed `.lfsconfig`: git-lfs would talk to whatever server it names from
+    this machine, outside any sandbox. `step` says what Kraft will not do.
+    An UnsafeWorktree stops the item for a person, never a fix loop.
+    """
+    if _lfsconfig_moved(repo):
+        raise UnsafeWorktree(
+            f"the item's work changes .lfsconfig, which tells git-lfs where this "
+            f"repository's objects live, so Kraft will not {step} from your machine, "
+            "outside the sandbox. Review the change in the item's worktree: revert "
+            "it, or push the branch yourself if it is meant, and Kraft carries on"
+        )
+
+
 async def push(repo: Path, branch: str) -> None:
     """`git push origin <branch>`, safe to call after a rebase. Never `-u`:
     the push names its branch, so an upstream buys nothing, and it would be
@@ -655,14 +671,7 @@ async def push(repo: Path, branch: str) -> None:
     # git-lfs's pre-push reads its server from `.lfsconfig`, which the worker
     # writes: a changed one would send this push's LFS traffic from the host,
     # outside any sandbox, to a URL the branch chose.
-    # A person looks first, never a fix loop: an UnsafeWorktree stops the item.
-    if _lfsconfig_moved(repo):
-        raise UnsafeWorktree(
-            f"{branch} changes .lfsconfig, which tells git-lfs where to send this "
-            "push's objects; Kraft will not push it from your machine, outside the "
-            "sandbox. Review the change in the item's worktree: revert it, or push "
-            "the branch yourself if it is meant, and Kraft pushes it from then on"
-        )
+    assert_lfsconfig_unmoved(repo, "push it")
     env = sandbox.unhardened_git_env(repo)
     pushed_ref = f"{PUSHED_REFS}/{branch}"
     head = git_read(repo, "rev-parse", "--verify", f"refs/heads/{branch}")
