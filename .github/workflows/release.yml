@@ -408,11 +408,6 @@ jobs:
           python3 dev/plan_release.py changelog "$VERSION" "$RUNNER_TEMP/notes.md" vscode/CHANGELOG.md
           git -c user.email=ci@kraft.invalid -c user.name="Kraft CI" \
             commit -am "chore: stamp plugin manifests and changelog for $TAG"
-          # A checkout that persisted GITHUB_TOKEN's auth header would win over
-          # the App credential in the URL below. The checkout no longer does
-          # (persist-credentials: false), so this is a guard; exit 5 means no
-          # header was set, which is not a reason to abort the stamp.
-          git config --local --unset-all http.https://github.com/.extraheader || true
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$BRANCH"
           gh pr create --base main --head "$BRANCH" \
             --title "chore: stamp plugin manifests and changelog for $TAG" \

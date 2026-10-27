@@ -62,3 +62,7 @@ def test_only_stable_and_rc_publish_to_pypi():
 
 def test_the_release_job_runs_in_the_main_only_environment():
     assert "    environment: release\n" in RELEASE_YML.read_text()
+
+
+def test_the_release_checkout_leaves_no_token_for_the_build_to_read():
+    assert "persist-credentials: false" in RELEASE_YML.read_text()
