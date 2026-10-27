@@ -451,36 +451,35 @@ jobs:
           echo "::error::kraft-sdlc ${TAG#v} is not on PyPI after 10 minutes"
           exit 1
 
-      - name: is there a Marketplace token
-        # Says whether VSCE_PAT is set, for the Marketplace steps' `if:`, which
-        # cannot see a step's own `env`. Only the publish step gets the token
-        # itself: as a job-level variable it sat in the environment of every
-        # step, `npm ci`'s install scripts and the build among them. Empty
-        # until the maintainer adds the secret.
+      - name: sign in to Azure for the Marketplace
+        # No token: the Marketplace publishes as an Azure managed identity,
+        # `kraft-release-publisher`, a Contributor on the kraft-sdlc publisher.
+        # Azure trusts this job only because its OIDC token says it runs in this
+        # repository's `release` environment (the identity's federated
+        # credential), so nothing expires or needs rotating, and only a run
+        # from main can publish. The ids below name the identity; they are not
+        # secrets. Azure DevOps personal access tokens are retired on
+        # 2026-12-01, which is why this replaced the Marketplace token.
         if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'
-        id: marketplace
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: echo "has_pat=${VSCE_PAT:+true}" >> "$GITHUB_OUTPUT"
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: 4e55fc82-f899-43f4-9d7f-596b6cd930ec
+          tenant-id: cd046f23-858b-4780-b1ff-7a7388ce9223
+          allow-no-subscriptions: true
 
       - name: publish the VS Code extension
         # Last, after Kraft itself is on PyPI, Homebrew and main. A failed step
-        # stops every step after it, and VSCE_PAT is a token that expires: run
-        # first, an expired one left Homebrew on the old version and main
+        # stops every step after it, and the Marketplace login can lapse (the
+        # identity removed from the publisher, the federated credential
+        # deleted): run first, that left Homebrew on the old version and main
         # unstamped. Run here, it fails the run and skips only the extension's
         # own steps. The order also suits VS Code's auto-update: an extension
         # newer than the daemon is read-only, so it should not reach users
         # before the Kraft that matches it can be installed.
-        #
-        # Only once the maintainer has created the Marketplace publisher and
-        # added VSCE_PAT; until then the .vsix is still attached to the
-        # GitHub Release.
-        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none' && steps.marketplace.outputs.has_pat == 'true'
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'
         run: |
           VSIX=$(ls "$RUNNER_TEMP"/vsix/*.vsix)
-          npx --prefix vscode vsce publish --packagePath "$VSIX" -p "$VSCE_PAT"
+          npx --prefix vscode vsce publish --packagePath "$VSIX" --azure-credential
 
       - name: publish the VS Code extension to Open VSX
         # No token: Open VSX trusted publishing, registered for kraft-sdlc.kraft
@@ -492,7 +491,7 @@ jobs:
 
       - name: check the Marketplace lists this release
         # Warns only: the Marketplace can take a while to index a publish.
-        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none' && steps.marketplace.outputs.has_pat == 'true'
+        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'
         env:
           TAG: ${{ steps.impact.outputs.tag }}
         run: |

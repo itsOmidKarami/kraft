@@ -97,18 +97,16 @@ A dry run can't tell you whether a credential still works, and a stable run is
 the only one that publishes the extension. Check the two that can lapse before
 you press the button:
 
-- [ ] **`VSCE_PAT` hasn't expired.** It is an Azure DevOps personal access
-  token, and those last a year at most. Sign in at <https://dev.azure.com> as
-  the account that owns the `kraft-sdlc` Marketplace publisher, open **User
-  settings → Personal access tokens**, and read the token's **Expires** date.
-  If it has expired, or will before the run, regenerate it there. A token you
-  create from scratch needs **Organization** set to *All accessible
-  organizations* and the Marketplace *Manage* scope, or the publish is
-  refused. Paste the new value into the `VSCE_PAT` secret, in this
-  repository's **Settings → Environments → release** or **Settings → Secrets
-  and variables → Actions**, wherever it is kept. With the new token in
-  `VSCE_PAT`, `npx --prefix vscode vsce verify-pat kraft-sdlc` confirms it may
-  publish.
+- [ ] **The Marketplace identity can still publish.** The Marketplace takes no
+  token: the workflow signs in over OIDC as an Azure managed identity,
+  `kraft-release-publisher`, so nothing expires. But two things can be removed.
+  Sign in at <https://marketplace.visualstudio.com/manage/publishers/kraft-sdlc>
+  as the publisher's owner and check **Members** lists that identity as a
+  *Contributor*. In the Azure portal, open the identity's **Federated
+  credentials** and check `github-kraft-release` is still there, for this
+  repository's `release` environment. The identity must also still be a user
+  of the Azure DevOps organization `itsomidkarami`, because the Marketplace
+  finds it through that organization.
 - [ ] **Open VSX still trusts this workflow.** Open VSX takes no token, so
   nothing expires, but its trusted publisher can be removed. Sign in at
   <https://open-vsx.org/user-settings/trusted-publishers> as an owner of the
@@ -123,7 +121,8 @@ release and you finish the rest by hand. Secrets are repository secrets or
 secrets of the `release` environment.
 
 The VS Code extension goes last, after the run has checked that PyPI serves the
-new version. Its Marketplace token expires, so its publish is the step most
+new version. Its Marketplace login can lapse (the identity removed from the
+publisher, its federated credential deleted), so its publish is the step most
 likely to fail. Run last, a failure there skips only the extension's own steps,
 never Homebrew or the stamp pull request, and the run still goes red. Last is
 also the safe order for users. VS Code updates the extension on its own, and an
@@ -139,9 +138,12 @@ extension by hand from the GitHub Release:
 
 ```bash
 gh release download vX.Y.Z -p '*.vsix'
-npx --prefix vscode vsce publish --packagePath kraft-X.Y.Z.vsix -p "$VSCE_PAT"
 npx --prefix vscode ovsx publish kraft-X.Y.Z.vsix -p <token>
 ```
+
+The Marketplace by hand has no token to use: upload the `.vsix` at
+<https://marketplace.visualstudio.com/manage/publishers/kraft-sdlc>, in the
+extension's **⋮ → Update** menu, signed in as the publisher's owner.
 
 The Open VSX publish by hand can't use trusted publishing, which works only
 inside the workflow. It needs an access token from
@@ -173,10 +175,12 @@ inside the workflow. It needs an access token from
    push to it. Check:
    `curl -s https://raw.githubusercontent.com/itsOmidKarami/homebrew-kraft/main/Formula/kraft.rb | grep '^  url'`
    names `vX.Y.Z`.
-6. **VS Code Marketplace**, `kraft-sdlc.kraft`. Needs `VSCE_PAT`: a personal
-   access token for the `kraft-sdlc` publisher with the Marketplace *Manage*
-   scope. **With it empty the publish and its check are skipped and the run
-   still goes green**; the `.vsix` is only on the GitHub Release. Check:
+6. **VS Code Marketplace**, `kraft-sdlc.kraft`. Needs no secret: the job signs
+   in to Azure over OIDC from the `release` environment and publishes as the
+   managed identity `kraft-release-publisher`, a Contributor on the
+   `kraft-sdlc` publisher. **If the identity, its membership or its federated
+   credential is gone the publish fails and the run goes red**; the `.vsix` is
+   still on the GitHub Release. Check:
    `npx --prefix vscode vsce show kraft-sdlc.kraft`, and read the version. The
    run warns if the Marketplace hasn't listed it within 5 minutes.
 7. **Open VSX**, `kraft-sdlc/kraft`, which VSCodium and Cursor install from.

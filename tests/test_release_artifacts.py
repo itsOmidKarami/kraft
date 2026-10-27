@@ -306,16 +306,17 @@ def test_the_wheel_is_pinned_after_it_is_built_and_before_it_is_smoke_tested():
 
 
 def test_kraft_ships_everywhere_before_the_extension_is_published():
-    """A failed step stops every step after it, and the Marketplace token
-    expires. With the extension's steps last, an expired token fails the run
+    """A failed step stops every step after it, and the Marketplace login can
+    lapse. With the extension's steps last, a lapsed login fails the run
     without leaving Homebrew on the old version or main unstamped."""
     names = [n for n in _steps() if n]
-    assert names[-3:] == [
+    assert names[-4:] == [
+        "sign in to Azure for the Marketplace",
         "publish the VS Code extension",
         "publish the VS Code extension to Open VSX",
         "check the Marketplace lists this release",
     ]
-    extension = len(names) - 3
+    extension = len(names) - 4
     for kraft in [
         "push the tag and create the release",
         "publish to PyPI",
@@ -330,37 +331,21 @@ def _job() -> dict:
     return yaml.safe_load(RELEASE_YML.read_text())["jobs"]["release"]
 
 
-def test_only_the_marketplace_steps_hold_the_marketplace_token():
-    """VSCE_PAT is a year-long token. As a job-level variable it sat in the
-    environment of every step, `npm ci`'s install scripts among them."""
-    job = _job()
-    assert "VSCE_PAT" not in (job.get("env") or {})
-    holders = [s.get("name") for s in job["steps"] if "secrets.VSCE_PAT" in str(s.get("env"))]
-    assert holders == ["is there a Marketplace token", "publish the VS Code extension"]
-    assert RELEASE_YML.read_text().count("secrets.VSCE_PAT") == 2
-    steps = job["steps"]
-    gated = {s["name"]: s["if"] for s in steps if re.search("VSCE_PAT|has_pat", s.get("if", ""))}
-    assert list(gated) == [
-        "publish the VS Code extension",
-        "check the Marketplace lists this release",
-    ]
-    for condition in gated.values():
-        assert condition.endswith("&& steps.marketplace.outputs.has_pat == 'true'"), condition
-
-
-@pytest.mark.parametrize(("pat", "has_pat"), [("a-token", "true"), ("", "")], ids=["set", "unset"])
-def test_the_marketplace_steps_run_only_when_the_token_is_set(tmp_path, pat, has_pat):
-    (probe,) = (s for s in _job()["steps"] if s.get("id") == "marketplace")
-    output = tmp_path / "output"
-    run = subprocess.run(
-        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", probe["run"]],
-        env={"PATH": os.environ["PATH"], "VSCE_PAT": pat, "GITHUB_OUTPUT": str(output)},
-        capture_output=True,
-        text=True,
-    )
-    assert run.returncode == 0, run.stderr
-    # The token itself never reaches the output, which later steps can read.
-    assert output.read_text() == f"has_pat={has_pat}\n"
+def test_the_marketplace_publish_is_the_managed_identity_and_holds_no_token():
+    """Azure DevOps retires personal access tokens on 2026-12-01, so VSCE_PAT is
+    gone. The job proves it is the `release` environment over OIDC and the
+    publish runs as the identity, so no step holds a Marketplace secret."""
+    assert "VSCE_PAT" not in RELEASE_YML.read_text()
+    steps = {s.get("name"): s for s in _job()["steps"]}
+    login = steps["sign in to Azure for the Marketplace"]
+    publish = steps["publish the VS Code extension"]
+    assert re.fullmatch(r"azure/login@[0-9a-f]{40}", login["uses"])
+    assert login["with"]["allow-no-subscriptions"] is True
+    assert "--azure-credential" in publish["run"]
+    assert not re.search(r" -p\b| --pat\b", publish["run"])
+    # Only a stable run publishes: a pre-release or a no-op run never signs in.
+    stable = "steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'"
+    assert login["if"] == publish["if"] == stable
 
 
 def _smoke_version_check() -> str:
