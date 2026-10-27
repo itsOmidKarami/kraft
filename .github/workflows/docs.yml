@@ -42,8 +42,12 @@ on:
 permissions:
   contents: read
 
+# A pull request's build gets its own group: in the shared `pages` group a
+# newer pending run replaces an older one, so PR pushes could cancel main's
+# pending deploy. A fork runs its own copy of this file, so this stops the
+# accident, not a fork that sets `pages` on purpose; fork approval does that.
 concurrency:
-  group: pages
+  group: ${{ github.event_name == 'pull_request' && format('pages-pr-{0}', github.ref) || 'pages' }}
   cancel-in-progress: false
 
 jobs:

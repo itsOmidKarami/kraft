@@ -5,6 +5,16 @@
 .beads-credential-key
 .beads/proxieddb/
 
+# Credentials: never committed, wherever they land
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.npmrc
+.pypirc
+.netrc
+
 .kraft-run/
 
 # Python build artifacts
