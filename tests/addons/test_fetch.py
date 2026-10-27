@@ -62,6 +62,20 @@ def test_a_fetch_takes_only_the_commit_it_reads(collection, addons_dir):
     assert git(mirror, "rev-list", "--count", older) == "1"
 
 
+def test_a_host_with_no_shallow_fetch_gives_the_whole_history(collection, addons_dir, monkeypatch):
+    """A collection served as static files (dumb HTTP) still installs."""
+    real = fetch._git
+
+    def dumb_http(*args, **kwargs):
+        if "--depth=1" in args:
+            raise fetch.FetchError("refused", "dumb http transport does not support shallow")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(fetch, "_git", dumb_http)
+    _, commit = fetch.fetch(addons_dir, "acme", collection.as_uri(), None)
+    assert commit == git(collection, "rev-parse", "HEAD")
+
+
 def test_a_rewritten_history_keeps_the_pinned_commit(collection, addons_dir):
     """The author force-pushes; the commit an instance locked must still be
     readable from the mirror after a gc."""

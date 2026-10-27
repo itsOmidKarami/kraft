@@ -45,6 +45,7 @@ _AUTH = re.compile(
 #: What git says when the remote answered and has no such ref: not a failure of
 #: the network, and no retry will find it.
 _MISSING_REF = re.compile(r"couldn't find remote ref|invalid refspec", re.IGNORECASE)
+_NO_SHALLOW = re.compile(r"does not support shallow", re.IGNORECASE)
 
 
 class FetchError(Exception):
@@ -122,17 +123,26 @@ def fetch(addons_dir: Path, name: str, url: str, ref: str | None) -> tuple[Path,
     if not mirror.is_dir():
         mirror.parent.mkdir(parents=True, exist_ok=True)
         _git("init", "--quiet", "--bare", str(mirror))
-    try:
+
+    def run(*depth: str) -> None:
         _git(
             "-c", "transfer.fsckObjects=true",
             "-c", "protocol.allow=never",
             "-c", f"protocol.{_scheme(url)}.allow=always",
-            # Only the one commit: extraction reads its tree, never its history.
-            "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--depth=1",
+            "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", *depth,
             "--end-of-options", url, ref or "HEAD",
             git_dir=mirror,
             timeout=FETCH_TIMEOUT_S,
         )  # fmt: skip
+
+    try:
+        try:
+            # Only the one commit: extraction reads its tree, never its history.
+            run("--depth=1")
+        except FetchError as exc:
+            if not _NO_SHALLOW.search(str(exc)):
+                raise
+            run()  # a dumb-HTTP host serves no shallow fetch, only the whole history
     except FetchError as exc:
         if _MISSING_REF.search(str(exc)):
             raise FetchError(

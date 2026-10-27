@@ -62,8 +62,8 @@ origin: src/kraft/addons/fetch.py §fetch
 
 ## REQ fetch-takes-only-the-commit-it-reads
 
-WHEN the system fetches a collection, or one commit of it, it SHALL fetch that commit without its history.
-enforced-by: tests/addons/test_fetch.py::test_a_fetch_takes_only_the_commit_it_reads
+WHEN the system fetches a collection, or one commit of it, it SHALL fetch that commit without its history, unless the host serves no shallow fetch.
+enforced-by: tests/addons/test_fetch.py::test_a_fetch_takes_only_the_commit_it_reads, tests/addons/test_fetch.py::test_a_host_with_no_shallow_fetch_gives_the_whole_history
 origin: src/kraft/addons/fetch.py §fetch
 
 ## REQ namespace-kraft-is-reserved
