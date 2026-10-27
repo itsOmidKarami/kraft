@@ -703,7 +703,10 @@ async def test_a_moved_lfsconfig_stops_a_host_checkout_before_git_runs(
     head = git_read(worktree, "rev-parse", "HEAD")
 
     with pytest.raises(forge_git.UnsafeWorktree, match=r"changes \.lfsconfig"):
-        await _door(door, worktree, repo, branch, Path())
+        if door == "refresh":
+            await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
+        else:
+            kraft_builtins.restore_branch(worktree, branch, "main")
 
     assert git_read(worktree, "rev-parse", "HEAD") == head, "no git moved the worktree"
 
