@@ -216,6 +216,12 @@ IF an `addons.yaml` collection has both or neither of `git` and `path`, a `git` 
 enforced-by: tests/addons/test_config.py::test_addons_yaml_is_refused[git-and-path], tests/addons/test_config.py::test_addons_yaml_is_refused[neither], tests/addons/test_config.py::test_addons_yaml_is_refused[owner-repo], tests/addons/test_config.py::test_addons_yaml_is_refused[http], tests/addons/test_config.py::test_addons_yaml_is_refused[credentials], tests/addons/test_config.py::test_addons_yaml_is_refused[leading-dash], tests/addons/test_config.py::test_addons_yaml_is_refused[relative-path], tests/addons/test_config.py::test_addons_yaml_is_refused[ref-option], tests/cli/test_addon.py::test_collection_add_writes_a_full_source[owner-repo], tests/cli/test_addon.py::test_collection_add_writes_a_full_source[directory], tests/cli/test_addon.py::test_collection_add_writes_a_full_source[ref]
 origin: src/kraft/addons/config.py §CollectionConfig
 
+## REQ a-collection-moves-only-through-a-reviewed-update
+
+WHEN `collection add` names a collection already added from another source, the system SHALL refuse it unless `--replace` is given, and with `--replace` SHALL write only the new source to `addons.yaml`, leaving the lock and the store to the next update a person accepts.
+enforced-by: tests/cli/test_addon.py::test_collection_add_refuses_a_taken_name, tests/cli/test_addon.py::test_collection_add_replace_moves_it_through_a_reviewed_update[git], tests/cli/test_addon.py::test_collection_add_replace_moves_it_through_a_reviewed_update[directory]
+origin: src/kraft/cli/addon.py §_cmd_collection_add
+
 ## REQ a-collection-auto-update-has-no-exceptions
 
 IF an add-on entry sets `auto_update` while its collection sets `auto_update: true`, THEN the system SHALL refuse `addons.yaml`.

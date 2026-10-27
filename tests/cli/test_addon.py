@@ -136,6 +136,25 @@ def test_collection_add_writes_a_full_source(home, capsys, monkeypatch, source, 
     assert home.yaml()["addons"] == {} and not (home.addons / "store").exists()
 
 
+@pytest.mark.parametrize("to", ["git", "directory"])
+def test_collection_add_replace_moves_it_through_a_reviewed_update(installed, capsys, tmp_path, to):
+    """A fork, a mirror or a local checkout takes over the collection's name;
+    what is installed keeps its lock until a person reads the move."""
+    other = make_collection(tmp_path / "elsewhere", TWO)
+    source = other.as_uri() if to == "git" else str(other)
+    lock_before = installed.locked()
+
+    code, out = _run(capsys, "collection", "add", source, "--replace")
+
+    assert code == 0 and "moved collection acme" in out, out
+    written = {"git": other.as_uri()} if to == "git" else {"path": str(other)}
+    assert installed.yaml()["collections"]["acme"] == written
+    assert installed.locked() == lock_before
+    code, out = _run(capsys, "update", "-y")
+    assert code == 0 and "collection URL changed" in out, out
+    assert installed.locked().git == (other.as_uri() if to == "git" else None)
+
+
 def test_collection_add_refuses_a_taken_name(added, capsys, tmp_path):
     other = make_collection(tmp_path / "elsewhere", GOOD)
     before = added.written()
