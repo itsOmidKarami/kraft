@@ -610,9 +610,11 @@ def _cmd_collection_add(ns: argparse.Namespace) -> None:
         raise _refuse(str(exc)) from exc
 
     moved = False
+    left: list[str] = []  # the old source's mirror, once nothing reads it
+    reviewed = True  # whether the next update can see the move as one
 
     def change(raw: dict, config: AddonsConfig) -> None:
-        nonlocal moved
+        nonlocal moved, reviewed
         known = config.collections.get(name)
         moved = known is not None and (known.git, known.path) != (
             source.get("git"),
@@ -623,6 +625,22 @@ def _cmd_collection_add(ns: argparse.Namespace) -> None:
                 f"collection {name} is already added from {known.git or known.path}; "
                 "add --replace to move it to this source"
             )
+        if moved and "path" in source:
+            own = [
+                i
+                for i in config.addons
+                if i.endswith(f"@{name}") and config.entry(i).auto_update is not None
+            ]
+            if own:
+                raise _refuse(
+                    f"these add-ons set their own auto_update, which a directory never does: "
+                    f"{', '.join(own)}; turn each off with `kraft admin addon auto-update` first"
+                )
+        if moved and known.git is not None:
+            left.append(known.git)
+        # A lock records no directory, so one directory for another is no change it
+        # can show: what the new one holds is the next update.
+        reviewed = not (moved and known.path is not None and "path" in source)
         old = raw["collections"].get(name) or {}
         # A move takes the new source whole: the old ref belongs to the old
         # repository, and a directory never auto-updates.
@@ -639,6 +657,10 @@ def _cmd_collection_add(ns: argparse.Namespace) -> None:
             final = fetch.mirror_path(addons_dir, name, source["git"])
             if not final.is_dir():
                 mirror.rename(final)
+        # Restoring reads the locked commit from the new URL: the old mirror
+        # has no reader left, and `collection remove` would never find it.
+        for url in left:
+            shutil.rmtree(fetch.mirror_path(addons_dir, name, url), ignore_errors=True)
     finally:
         # What was fetched to read the name, when the collection was not added
         # or already had its mirror.
@@ -649,6 +671,11 @@ def _cmd_collection_add(ns: argparse.Namespace) -> None:
     def render(_value: dict) -> str:
         if not moved:
             return f"added collection {name}"
+        if not reviewed:
+            return (
+                f"moved collection {name}; `kraft admin addon update` reads its add-ons "
+                "from the new directory, and shows what changed in them"
+            )
         return (
             f"moved collection {name}; its add-ons keep what they locked until "
             "`kraft admin addon update` shows the move and you accept it"

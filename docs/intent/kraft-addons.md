@@ -218,8 +218,8 @@ origin: src/kraft/addons/config.py §CollectionConfig
 
 ## REQ a-collection-moves-only-through-a-reviewed-update
 
-WHEN `collection add` names a collection already added from another source, the system SHALL refuse it unless `--replace` is given, and with `--replace` SHALL write only the new source to `addons.yaml`, leaving the lock and the store to the next update a person accepts.
-enforced-by: tests/cli/test_addon.py::test_collection_add_refuses_a_taken_name, tests/cli/test_addon.py::test_collection_add_replace_moves_it_through_a_reviewed_update[git], tests/cli/test_addon.py::test_collection_add_replace_moves_it_through_a_reviewed_update[directory]
+WHEN `collection add` names a collection already added from another source, the system SHALL refuse it unless `--replace` is given, and with `--replace` SHALL write the new source to `addons.yaml` and leave the lock and the store to the next update a person accepts.
+enforced-by: tests/cli/test_addon.py::test_collection_add_refuses_a_taken_name, tests/cli/test_addon.py::test_collection_add_replace_moves_it_through_a_reviewed_update[git], tests/cli/test_addon.py::test_collection_add_replace_moves_it_through_a_reviewed_update[git-drops-the-ref-keeps-auto-update], tests/cli/test_addon.py::test_collection_add_replace_moves_it_through_a_reviewed_update[directory], tests/cli/test_addon.py::test_collection_add_replace_refuses_a_directory_for_an_auto_updating_addon
 origin: src/kraft/cli/addon.py §_cmd_collection_add
 
 ## REQ a-collection-auto-update-has-no-exceptions

@@ -11,8 +11,9 @@ kraft admin addon install kraft-superpowers@kraft-sdlc
 kraft item create "title" --chain kraft-superpowers:default
 ```
 
-The superpowers plugin must be installed wherever the agent runs. Installing
-this add-on installs `kraft-default`, which it builds on.
+The superpowers plugin must be installed wherever the agent runs, and the
+instance needs the shipped `claude` harness. Installing this add-on installs
+`kraft-default`, which it builds on.
 
 `library.yaml` is the whole add-on: steering that names each method, set on the
 tasks it overrides. The methods are named in steering rather than `skill:`, and
