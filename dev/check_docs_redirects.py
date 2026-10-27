@@ -55,10 +55,10 @@ ENTRY = re.compile(rf"^({_ADDRESS}):\s+({_ADDRESS})$")
 KNOWN_BROKEN: dict[str, str] = {}
 
 # A link between two pages (`](/path#anchor)`) or inside one (`](#anchor)`).
-# /assets and /diagrams are files, not pages, and /demo is the version's
-# dashboard demo, built beside its pages by dev/build_docs_site.sh.
+# /assets, /diagrams and /schemas are files, not pages, and /demo is the
+# version's dashboard demo, built beside its pages by dev/build_docs_site.sh.
 _PAGE_LINK = re.compile(r"\]\((/[a-z0-9/._-]*(?:#[A-Za-z0-9._-]+)?|#[A-Za-z0-9._-]+)\)")
-_FILE_ROOTS = ("/assets/", "/diagrams/", "/demo/")
+_FILE_ROOTS = ("/assets/", "/diagrams/", "/demo/", "/schemas/")
 
 _FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 _HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$")
@@ -270,7 +270,7 @@ def kraft_links(root: Path) -> list[str]:
         text=True,
         check=False,
     ).stdout.split()
-    # /assets, /diagrams and /demo are files built beside the pages, not pages to resolve.
+    # /assets, /diagrams, /schemas and /demo are files beside the pages, not pages to resolve.
     paths = map(site_path, found)
     return [p for p in paths if not (p.partition("#")[0] + "/").startswith(_FILE_ROOTS)]
 

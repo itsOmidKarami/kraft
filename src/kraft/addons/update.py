@@ -1118,7 +1118,9 @@ def _resolve(addon_id: str, ctx: _Context) -> _Move | Result:
                 {p.id for p in rest if p.left_out is None},
                 {child for child, _why in behind},
             )
-            if extracted.tree != locked.tree:
+            # The digest, not the git tree: a file Kraft never reads (a plugin's
+            # hooks, the rest of `config/`) is no change to the add-on.
+            if digest != locked.digest:
                 held_by_tree.append(
                     f"version {locked.version} unchanged, but its files changed at "
                     f"{commit[:12]}; --re-install to take it"

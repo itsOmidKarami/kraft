@@ -1,0 +1,124 @@
+# Kraft's shipped chains (inherited from kraft-default), with superpowers'
+# methods on the tasks that write the spec and the plan, implement, and
+# repair. The agent loads each `superpowers:` skill from the superpowers
+# plugin, which must be installed where it runs
+# (https://github.com/obra/superpowers).
+#
+# The methods are named in steering, not in `skill:`: Kraft treats an agent
+# task with `skill:` as a judging task, and tells it implementing is another
+# node's job. The spec and the plan keep Kraft's own methods, whose output the
+# gates and the board read, and borrow brainstorming's and writing-plans'
+# shape: superpowers writes both for a person in the conversation, and here
+# the person is at Kraft's gates instead.
+#
+# receiving-code-review is on the tasks that change code because of a review:
+# the implementer, which a person's threads from the local or final review
+# reach, and the repairs, which Kraft's code review, the merge request's bots
+# and CI reach. The bot-feedback triage keeps kraft:review-feedback alone: it
+# only judges, and already checks each comment before accepting it.
+#
+# Only methods that work with no person present are used: brainstorming's
+# conversation, using-git-worktrees and finishing-a-development-branch are
+# left out, and Kraft does what they would.
+
+steering:
+  unattended:
+    instructions: >-
+      This session runs unattended inside a Kraft worktree. Never ask a person
+      anything or wait for an answer: where a method says to ask, discuss or
+      offer a choice, take the choice the work item and its approved documents
+      support and say which you took, or stop with status "needs_context" when
+      they cannot decide it. Of superpowers' skills, use the ones these
+      instructions name and the ones those direct you to, except these: do
+      not hold brainstorming's conversation (the work item stands in for it)
+      or follow its hand-off to writing-plans (Kraft's plan node writes the
+      plan), and do not use executing-plans or subagent-driven-development (a
+      task that implements does so itself, in this session),
+      using-git-worktrees, finishing-a-development-branch or
+      requesting-code-review: Kraft's nodes do those. If you cannot load a
+      skill these instructions name, stop with status "needs_context" naming
+      it. Do not create worktrees or branches, push, open pull requests or
+      merge, and never post on the merge request yourself: answering the
+      threads Kraft gives you with `kraft item reply` is the only reply.
+
+  tests-by-path:
+    instructions: >-
+      Where a skill says to run the project's whole or full test command
+      before you call the change done, verification-before-completion's
+      included, do not: run the tests for what you changed, by path, as
+      Kraft's instructions say. Kraft's verification node and CI run the
+      suite against your change.
+
+  spec-like-brainstorming:
+    instructions: >-
+      Write the spec as superpowers:brainstorming's written design, one a
+      talented builder could plan from without asking anyone: the intent and
+      the why; goals, and non-goals and anti-goals as the spec's out-of-scope
+      section; constraints; and the parts of the how the work item decides,
+      as it decides them. What is left to the builder is only what the plan
+      decides, one line each, never a "TBD". The work item and its
+      attachments stand in for the conversation. Mark each choice you make
+      that they do not as your call. Before you finish, read it as that
+      builder yourself, not with a subagent, and settle what such a builder
+      could settle; skip the visual companion. When you revise after a
+      rejection note, change only what it objects to. Keep Kraft's spec
+      format, and write it only where Kraft's instructions say, not under
+      docs/superpowers/specs/. Kraft's spec gate is where a person approves
+      it.
+
+  plan-like-writing-plans:
+    instructions: >-
+      Write the plan in the style of superpowers:writing-plans: bite-sized
+      steps, the failing test first, exact files and commands. Keep Kraft's
+      plan format and its `### Task N:` headings. Leave out its "REQUIRED
+      SUB-SKILL" line and its execution handoff: Kraft's plan gate is the
+      review, and Kraft runs the plan. Write it only where Kraft's
+      instructions say, not under docs/superpowers/.
+
+  test-driven-development:
+    instructions: >-
+      Follow superpowers:test-driven-development for every change, and before
+      you finish, follow superpowers:verification-before-completion.
+
+  systematic-debugging:
+    instructions: >-
+      Follow superpowers:systematic-debugging to find the root cause of a
+      failure before you change anything. Where it says to discuss with a
+      person after repeated failed fixes, stop with status "needs_context"
+      and say what you tried.
+
+  receiving-code-review:
+    instructions: >-
+      Where this task brings you review threads, findings or comments, weigh
+      each the way superpowers:receiving-code-review does, without
+      performative agreement or thanks. A thread a person left at one of
+      Kraft's gates is your human partner's: understand it, then act on it,
+      and push back with technical reasoning only where it would break
+      something. A finding from Kraft's code review, a bot's comment or a CI
+      failure is an external reviewer's: check it against the code before
+      acting on it, act on what holds, and answer what does not with
+      technical reasoning. Do not ask anyone to clarify a comment: where an
+      unclear one could change how the others are handled, stop with status
+      "needs_context" naming it; otherwise handle the clear ones and say which
+      you left and why.
+
+tasks:
+  spec_author:
+    extends: kraft-default:spec_author
+    steering: [project-standards, spec-like-brainstorming, unattended]
+
+  plan_author:
+    extends: kraft-default:plan_author
+    steering: [plan-like-writing-plans, unattended]
+
+  implementer:
+    extends: kraft-default:implementer
+    steering: [test-driven-development, receiving-code-review, tests-by-path, unattended]
+
+  repair_verification:
+    extends: kraft-default:repair_verification
+    steering: [receiving-code-review, systematic-debugging, tests-by-path, unattended]
+
+  repair_mr_feedback:
+    extends: kraft-default:repair_mr_feedback
+    steering: [receiving-code-review, systematic-debugging, tests-by-path, unattended]

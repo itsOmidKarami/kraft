@@ -1,0 +1,21 @@
+{
+  "$schema": "https://kraft-sdlc.dev/schemas/collection.schema.json",
+  "name": "kraft-sdlc",
+  "description": "Chains and libraries published with Kraft",
+  "owner": {
+    "name": "Omid Karami",
+    "email": "6075589+itsOmidKarami@users.noreply.github.com"
+  },
+  "addons": [
+    {
+      "name": "kraft-default",
+      "source": "./config",
+      "description": "Kraft's shipped chains and library"
+    },
+    {
+      "name": "kraft-superpowers",
+      "source": "./addons/kraft-superpowers",
+      "description": "Kraft's chains with superpowers' methods for the spec, plan, implementation, repairs and review feedback"
+    }
+  ]
+}

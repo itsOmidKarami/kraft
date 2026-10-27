@@ -1,0 +1,15 @@
+{
+  "$schema": "https://kraft-sdlc.dev/schemas/addon.schema.json",
+  "name": "kraft-superpowers",
+  "version": "1.0.0",
+  "description": "Kraft's chains, with superpowers' methods for the spec, plan, implementation, repairs and review feedback",
+  "requires": {
+    "kraft": "2.4",
+    "harnesses": [
+      "claude"
+    ],
+    "addons": {
+      "kraft-default@kraft-sdlc": "1"
+    }
+  }
+}

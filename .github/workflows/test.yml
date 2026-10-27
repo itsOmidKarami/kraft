@@ -102,6 +102,9 @@ jobs:
       - run: uv run python dev/check_docs_ledes.py
       # Needs the release tags the checkout above fetches (fetch-depth: 0).
       - run: uv run python dev/check_docs_added_in.py
+      # An add-on of Kraft's own collection that changed against the pull
+      # request's base, or across a push to main, has a higher version.
+      - run: uv run python dev/check_addon_versions.py ${{ github.event_name == 'push' && format('--base {0}', github.event.before) || '' }}
       - run: uv run python dev/check_tests.py
 
   test:

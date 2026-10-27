@@ -319,11 +319,17 @@ def test_check_reads_the_map_and_the_links_of_one_repository(cr, content, tmp_pa
 
 def test_a_link_to_the_demo_is_no_page_to_resolve(cr, tmp_path):
     # The README links the demo, which dev/build_docs_site.sh builds beside the
-    # pages; a page named `demonstration` is still a page.
+    # pages, and a manifest its JSON schema, a file in docsite/public; a page
+    # named `demonstration` is still a page.
     write(
         tmp_path,
         "README.md",
         "https://kraft-sdlc.dev/next/demo/ https://kraft-sdlc.dev/demonstration\n",
+    )
+    write(
+        tmp_path,
+        ".kraft/collection.json",
+        '"https://kraft-sdlc.dev/schemas/collection.schema.json"\n',
     )
     git(tmp_path, "init", "-q")
     commit_all(tmp_path)

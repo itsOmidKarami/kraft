@@ -243,6 +243,9 @@ bundle:
     # them out of the commit, not out of the wheel or the homes it seeds.
     rm -f src/kraft/_bundled/config/access.yaml
     rm -f src/kraft/_bundled/config/notify.yaml
+    # `config/.kraft/` publishes config/ as the add-on kraft-default; a seeded
+    # home is the operator's own config, not an add-on.
+    rm -rf src/kraft/_bundled/config/.kraft
 
 # Refresh Kraft Lite's bundled copy of the packaged library (library.yaml and
 # chains/). tests/plugins/test_kraft_lite_parity.py fails until this is run.
@@ -553,6 +556,7 @@ ci-checks:
     uv run python dev/check_docs_shell.py
     uv run python dev/check_docs_ledes.py
     uv run python dev/check_docs_added_in.py
+    uv run python dev/check_addon_versions.py
     uv run python dev/check_tests.py
     uv run python -m kraft.intent
 

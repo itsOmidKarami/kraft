@@ -66,6 +66,12 @@ WHEN the system fetches a collection, or one commit of it, it SHALL fetch that c
 enforced-by: tests/addons/test_fetch.py::test_a_fetch_takes_only_the_commit_it_reads, tests/addons/test_fetch.py::test_a_host_with_no_shallow_fetch_gives_the_whole_history
 origin: src/kraft/addons/fetch.py §fetch
 
+## REQ kraft-publishes-its-shipped-config-as-an-addon
+
+The repository SHALL publish its shipped `config/` as the add-on `kraft-default` in the collection `kraft-sdlc`, and every add-on in that collection SHALL validate against an instance seeded from the shipped `config/`.
+enforced-by: tests/addons/test_kraft_sdlc_collection.py::test_the_published_collection_validates_against_the_shipped_config
+origin: .kraft/collection.json
+
 ## REQ namespace-kraft-is-reserved
 
 IF an add-on is named `kraft` or installed under the alias `kraft`, THEN the system SHALL refuse it.
@@ -322,6 +328,12 @@ origin: src/kraft/addons/update.py §update
 
 WHERE an add-on comes from a git collection, the system SHALL treat it as having an update only when its version differs from the version in `addons.lock`.
 enforced-by: tests/addons/test_update.py::test_an_update_waits_for_a_version_change[same-version-new-commit], tests/addons/test_update.py::test_an_update_waits_for_a_version_change[version-raised], tests/addons/test_update.py::test_an_update_waits_for_a_version_change[version-lowered]
+origin: src/kraft/addons/update.py §update
+
+## REQ a-same-version-change-is-noted-only-for-what-kraft-reads
+
+WHERE an add-on from a git collection has a new commit at its locked version, the system SHALL note that its files changed when, and only when, the files Kraft reads from it differ from the locked ones.
+enforced-by: tests/cli/test_addon.py::test_update_check_notes_changed_files_at_the_same_version[layout], tests/cli/test_addon.py::test_update_check_notes_changed_files_at_the_same_version[file-kraft-never-reads]
 origin: src/kraft/addons/update.py §update
 
 ## REQ a-directory-collection-updates-on-every-change

@@ -484,14 +484,22 @@ def test_install_pulls_in_its_parent(added, capsys, monkeypatch):
     assert added.locked("tools@acme") and added.locked(ID)
 
 
-def test_update_check_notes_changed_files_at_the_same_version(installed, capsys):
-    """A forgotten version bump gets noticed, and is not an update."""
-    publish(installed.repo, "release", library={"tasks": {"base": AGENT, "more": AGENT}})
+@pytest.mark.parametrize(
+    "change, noted",
+    [
+        pytest.param({"library": {"tasks": {"base": AGENT, "more": AGENT}}}, True, id="layout"),
+        pytest.param({"files": {"hooks/hooks.json": "{}"}}, False, id="file-kraft-never-reads"),
+    ],
+)
+def test_update_check_notes_changed_files_at_the_same_version(installed, capsys, change, noted):
+    """A forgotten version bump gets noticed, and is not an update; a file
+    outside the layout is no change to the add-on."""
+    publish(installed.repo, "release", **change)
 
     code, out = _run(capsys, "update", "--check")
 
     assert code == 0
-    assert "version 1.0.0 unchanged, but its files changed at" in out and "--re-install" in out
+    assert ("version 1.0.0 unchanged, but its files changed at" in out) is noted, out
 
 
 def test_no_terminal_without_yes_declines(installed, capsys):
