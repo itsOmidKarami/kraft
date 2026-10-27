@@ -11,6 +11,7 @@ import pytest
 from inplace.test_rebasing import _behind_origin, _snapshot
 from support import worktree as wtree
 from support.harness import commit_all, git, make_repo, write
+from test_builtins import _item_behind_main, _plant_head
 
 from kraft import builtins as kraft_builtins
 from kraft import caps, events
@@ -737,3 +738,58 @@ async def test_a_failing_put_back_never_hides_the_rebases_own_error(
     with pytest.raises(kraft_builtins.RebaseBlocked):
         await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
     assert "could not put the setup's lockfiles back" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("door", "plant", "stops"),
+    [
+        pytest.param("refresh", "on-disk", True, id="a-rebase-stops"),
+        pytest.param("restore_branch", "on-disk", True, id="a-checkout-back-stops"),
+        pytest.param("worktree-add", "committed", True, id="adding-the-worktree-again-stops"),
+        pytest.param("refresh", "the-base-own", False, id="the-bases-own-rebases-with-no-remote"),
+    ],
+)
+async def test_a_moved_lfsconfig_stops_a_host_checkout_before_git_runs(
+    door, plant, stops, database, run_dirs, repo
+):
+    """git-lfs's smudge, run by a host rebase or checkout, fetches from the
+    server `.lfsconfig` names, and the worker writes that file: the host would
+    talk to it outside the sandbox. Kraft stops for a person first. A
+    repository with no remote trusts its base's own `.lfsconfig` instead."""
+    lfsconfig = "[lfs]\n\turl = http://127.0.0.1:1/elsewhere\n"
+    if plant == "the-base-own":
+        write(repo, ".lfsconfig", lfsconfig)
+        commit_all(repo, "the person's own lfs server")
+    worktree, branch, _ = await _item_behind_main(database, run_dirs, repo)
+    if plant == "on-disk":
+        write(worktree, ".lfsconfig", lfsconfig)
+    if plant == "committed":
+        write(worktree, ".lfsconfig", lfsconfig)
+        commit_all(worktree, "the worker's lfs server")
+        git(repo, "worktree", "remove", "--force", str(worktree))
+    if door == "restore_branch":
+        git(repo, "branch", "side", branch)
+        _plant_head(worktree, "refs/heads/side")
+    head = None if door == "worktree-add" else git(worktree, "symbolic-ref", "HEAD")
+    tip = git(repo, "rev-parse", branch)
+
+    async def through():
+        if door == "refresh":
+            await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
+        elif door == "restore_branch":
+            kraft_builtins.restore_branch(worktree, branch, "main")
+        else:
+            await wtree.ensure(database, run_dirs, repo)
+
+    if not stops:
+        await through()
+        assert git(repo, "rev-parse", branch) != tip, "the rebase ran"
+        return
+    # An UnsafeWorktree; adding a worktree wraps it, and either stops for a person.
+    with pytest.raises(RuntimeError, match=r"changes \.lfsconfig"):
+        await through()
+    assert git(repo, "rev-parse", branch) == tip, "no git moved the branch"
+    if head is not None:
+        assert git(worktree, "symbolic-ref", "HEAD") == head, "no checkout ran"
+    else:
+        assert not worktree.exists(), "no worktree was added"

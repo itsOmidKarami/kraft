@@ -688,29 +688,6 @@ async def test_planted_operation_state_never_moves_an_operator_ref(
     assert _refs(repo) == refs
 
 
-@pytest.mark.parametrize("door", ["refresh", "restore_branch"])
-async def test_a_moved_lfsconfig_stops_a_host_checkout_before_git_runs(
-    door, database, run_dirs, repo
-):
-    """git-lfs's smudge, run by a host rebase or checkout, fetches from the
-    server `.lfsconfig` names, and the worker writes that file: the host would
-    talk to it outside the sandbox. Kraft stops for a person first."""
-    worktree, branch, _ = await _item_behind_main(database, run_dirs, repo)
-    write(worktree, ".lfsconfig", "[lfs]\n\turl = http://127.0.0.1:1/elsewhere\n")
-    if door == "restore_branch":
-        git(repo, "branch", "side", branch)
-        _plant_head(worktree, "refs/heads/side")
-    head = git_read(worktree, "rev-parse", "HEAD")
-
-    with pytest.raises(forge_git.UnsafeWorktree, match=r"changes \.lfsconfig"):
-        if door == "refresh":
-            await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
-        else:
-            kraft_builtins.restore_branch(worktree, branch, "main")
-
-    assert git_read(worktree, "rev-parse", "HEAD") == head, "no git moved the worktree"
-
-
 @pytest.mark.parametrize(
     "kind",
     ["rebase-merge", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG", "sequencer"],
