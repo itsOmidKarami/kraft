@@ -202,7 +202,7 @@ async def bring_home(checkout, branch: str, *, in_place: bool) -> bool:
         await git.run_git(
             checkout,
             ["git", "fetch", "--refmap=", "origin", branch],
-            env=sandbox.unhardened_git_env(),
+            env=sandbox.unhardened_git_env(checkout),
         )
     except ForgeError:
         return False

@@ -361,7 +361,7 @@ def harden_host_git_env(env: MutableMapping[str, str] | None = None) -> None:
     _pin(os.environ if env is None else env, _HARDENED_GIT_CONFIG)
 
 
-def unhardened_git_env() -> dict[str, str]:
+def unhardened_git_env(repo: Path | None = None) -> dict[str, str]:
     """A copy of the process env with `harden_host_git_env`'s hook pin lifted.
 
     For `git push` alone: by the time Kraft pushes, the commit is already
@@ -371,14 +371,46 @@ def unhardened_git_env() -> dict[str, str]:
     is no longer buying anything there, only breaking real hooks a human
     installed, like git-lfs's pre-push (Kraft-rki).
 
+    That holds only for hooks in the gitdir. A `core.hooksPath` inside the
+    working tree (`.husky/`, `.beads/hooks/`) is files the worker writes, so
+    with `repo` given and its hooks there, the pin stays and no hook runs.
+
     Only that pin: `_NO_RECURSION_PINS` stay, so an operator's
     `push.recurseSubmodules=on-demand` still cannot make this push run
     `git push` inside a repository the worker nested in its worktree, with
     that repository's remotes and `core.sshCommand` (Kraft-nx4id).
     """
     env = dict(os.environ)
-    _pin(env, tuple(p for p in _HARDENED_GIT_CONFIG if p[0] != "core.hooksPath"))
+    lifted = tuple(p for p in _HARDENED_GIT_CONFIG if p[0] != "core.hooksPath")
+    _pin(env, lifted)
+    if repo is not None and _hooks_in_working_tree(repo, env):
+        _pin(env, _HARDENED_GIT_CONFIG)
     return env
+
+
+def _hooks_in_working_tree(repo: Path, env: dict[str, str]) -> bool:
+    """Whether git's hooks directory for `repo` is inside its working tree
+    and outside its gitdir: files a worker can edit. True when git cannot
+    say, so a push it cannot read stays hook-free rather than hook-full.
+
+    shortcut: such a repo's own pre-push (git-lfs's under husky, say) no
+    longer runs on Kraft's push; teach the check an allowlist if one needs it.
+    """
+    # Relative output joined by hand, never `--path-format=absolute`: that
+    # resolves symlinks, and a worker can make an in-tree hooks dir a symlink
+    # to somewhere outside the tree, which would then read as "outside".
+    done = subprocess.run(
+        ["git", "rev-parse", "--show-cdup", "--git-common-dir", "--git-path", "hooks"],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    lines = done.stdout.split("\n")[:3]
+    if done.returncode != 0 or len(lines) != 3:
+        return True
+    top, common, hooks = (Path(os.path.abspath(os.path.join(repo, p))) for p in lines)
+    return hooks.is_relative_to(top) and not hooks.is_relative_to(common)
 
 
 def _ls_files(worktree: Path, *args: str) -> list[str] | None:

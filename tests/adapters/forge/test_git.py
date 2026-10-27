@@ -208,14 +208,33 @@ def test_push_publishes_a_rebased_branch_against_real_git(tmp_path, pushed):
     assert remote_head == git(repo, "rev-parse", "HEAD")
 
 
-def test_push_still_runs_pre_push_under_harden_host_git_env(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("hooks", "runs"),
+    [
+        pytest.param("gitdir", True, id="installed-in-the-gitdir-runs"),
+        pytest.param("in-tree", False, id="in-the-working-tree-does-not"),
+        pytest.param("in-tree-symlink", False, id="symlinked-from-the-working-tree-does-not"),
+    ],
+)
+def test_push_runs_an_installed_pre_push_under_harden_host_git_env(tmp_path, hooks, runs):
     """Kraft-rki. `harden_host_git_env` pins `core.hooksPath=/dev/null` on
     the process env so a worker's own commits can't fire a planted hook --
     but by push time the commit is already made, and a real pre-push hook
     (git-lfs's) uploading the objects a push's pointers reference must still
     run. A pinned `core.hooksPath` that survives into `forge.push` would
-    silently drop those uploads."""
+    silently drop those uploads.
+
+    A `core.hooksPath` in the working tree is the worker's to edit, so that
+    one stays pinned: a push that ran it would run the worker's code as the
+    person, outside any sandbox. A symlink there pointing out of the tree is
+    still the worker's file."""
     repo = _repo_with_origin(tmp_path)
+    if hooks != "gitdir":
+        target = tmp_path / "outside-hooks" if hooks == "in-tree-symlink" else repo / ".hooks"
+        target.mkdir()
+        if hooks == "in-tree-symlink":
+            (repo / ".hooks").symlink_to(target)
+        git(repo, "config", "core.hooksPath", ".hooks")
     # Unhardened: a suite run from inside a Kraft worker inherits the pinned
     # `core.hooksPath=/dev/null`, and `--git-path hooks` would answer that.
     hooks_dir = git(repo, "rev-parse", "--git-path", "hooks", env=sandbox.unhardened_git_env())
@@ -233,7 +252,7 @@ def test_push_still_runs_pre_push_under_harden_host_git_env(tmp_path, monkeypatc
     finally:
         os.environ.pop("GIT_CONFIG_COUNT", None)
 
-    assert marker.exists()
+    assert marker.exists() == runs
 
 
 @pytest.mark.parametrize("case", ["unseen", "fetched-by-the-checkout", "record-behind-a-crash"])

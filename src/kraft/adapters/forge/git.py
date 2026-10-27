@@ -607,9 +607,10 @@ async def push(repo: Path, branch: str) -> None:
     `core.hooksPath=/dev/null` no longer stops a worker from planting
     anything -- it only stops a real pre-push hook a human installed, like
     git-lfs's, from uploading the objects this push's pointers reference
-    (Kraft-rki).
+    (Kraft-rki). Not for a hooks directory inside the working tree, which
+    the worker writes: that one stays pinned.
     """
-    env = sandbox.unhardened_git_env()
+    env = sandbox.unhardened_git_env(repo)
     pushed_ref = f"{PUSHED_REFS}/{branch}"
     head = git_read(repo, "rev-parse", "--verify", f"refs/heads/{branch}")
     # Where the push goes, which a `pushurl` or `pushInsteadOf` can make
