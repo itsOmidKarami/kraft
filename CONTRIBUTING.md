@@ -135,10 +135,25 @@ rebuild the extension first.
 
 `.pre-commit-config.yaml` runs ruff, whitespace, YAML and file-size checks,
 and two local hooks. In a fresh clone, `uv run pre-commit install` sets them
-up. In a checkout where beads has taken over `core.hooksPath` (the
-maintainer's), `pre-commit install` refuses and `.beads/hooks/pre-commit` runs
-them instead. Either way, `uv run pre-commit run --all-files` runs them by
-hand. CI is the real gate; the hooks only catch things sooner.
+up. In a checkout that uses beads, `bd hooks install` writes its hooks to the
+git directory (`.git/hooks/`, shared by every linked worktree); there, append
+this below beads' block in `.git/hooks/pre-commit` instead:
+
+```sh
+if command -v uv >/dev/null 2>&1; then
+  uv run --no-sync pre-commit run || exit 1
+fi
+```
+
+Keep `core.hooksPath` unset, or pointing outside the working tree:
+`git config --get core.hooksPath` prints nothing. Do not run
+`bd hooks install --beads` or `--shared`: they point it at `.beads/hooks/` or
+`.beads-hooks/`, files a branch can change, so checking out someone else's
+branch would run its hooks as you. `.beads/hooks/` is gitignored for the same
+reason.
+
+Either way, `uv run pre-commit run --all-files` runs them by hand. CI is the
+real gate; the hooks only catch things sooner.
 
 The two local hooks need `just` on `PATH`:
 

@@ -1,6 +1,6 @@
 # In a fresh clone, `uv run pre-commit install` works. Where beads owns
-# core.hooksPath (.beads/hooks), it doesn't: the tail appended to
-# .beads/hooks/pre-commit runs these instead. Either way,
+# .git/hooks/pre-commit, a tail appended below beads' block runs these instead
+# (CONTRIBUTING.md, "Pre-commit hooks"). Either way,
 # `uv run pre-commit run --all-files` runs them by hand. CI is the hard gate.
 exclude: '^(\.beads/|\.claude/|uv\.lock$|docs/)'
 

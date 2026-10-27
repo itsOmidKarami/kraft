@@ -4,6 +4,8 @@
 *.db
 .beads-credential-key
 .beads/proxieddb/
+# Git hooks live in the git directory, never in the tree: a branch could edit them
+.beads/hooks/
 
 # Credentials: never committed, wherever they land
 .env
