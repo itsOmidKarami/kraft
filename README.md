@@ -1,5 +1,8 @@
 # Kraft
 
+<!-- mcp-name: io.github.itsOmidKarami/kraft -->
+<!-- The official MCP registry reads this line from the PyPI page to confirm the package is ours. -->
+
 [![test](https://github.com/itsOmidKarami/kraft/actions/workflows/test.yml/badge.svg)](https://github.com/itsOmidKarami/kraft/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/kraft-sdlc)](https://pypi.org/project/kraft-sdlc/)
 [![Latest release](https://img.shields.io/github/v/release/itsOmidKarami/kraft)](https://github.com/itsOmidKarami/kraft/releases)
