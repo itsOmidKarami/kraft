@@ -5,15 +5,13 @@ set shell := ["bash", "-uc"]
 _default:
     @just --list
 
-# Install backend + frontend deps. The agent plugins (`setup-plugins`) are
-# opt-in for a person, so a first contribution installs nothing into their
-# agents; a setup Kraft runs still gets them. $KRAFT_DAEMON_PID marks one on
-# this machine, $KRAFT_RUN_DIR one on a remote machine (src/kraft/remote/jobs.py
-# drops the daemon's variables there).
+# Install backend + frontend deps. The agent plugins are a separate, opt-in
+# step, so a first contribution installs nothing into a person's agents. Kraft
+# workers ask for both: `setup_command: just setup setup-plugins`.
 setup:
     uv sync
     cd frontend && npm ci
-    @if [ -n "${KRAFT_DAEMON_PID:-}${KRAFT_RUN_DIR:-}" ]; then just setup-plugins; else echo "agent plugins not installed; 'just setup-plugins' adds them (CONTRIBUTING.md)"; fi
+    @echo "the agent plugins are opt-in: 'just setup-plugins' adds them (CONTRIBUTING.md)"
 
 # superpowers and impeccable, for every agent this repo is worked on with.
 #
@@ -28,7 +26,7 @@ setup:
 # `skills` CLI copies them there; they are gitignored, and only beads is
 # committed in that folder, so each checkout and worktree installs its own.
 #
-# Kraft runs `just setup` (which runs this) in every worktree, more than once, so each half skips
+# Kraft runs this in every worktree (`just setup setup-plugins`), more than once, so each half skips
 # what is already installed, and a missing tool or a failed download is a
 # warning, never a failed setup: neither is needed to build or test Kraft. To
 # refresh: `claude plugin update <id>` and `npx skills update -p`.

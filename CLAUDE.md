@@ -5,7 +5,7 @@
 Everything goes through `just` — run `just` for the list.
 
 ```bash
-just setup      # uv sync + npm ci; a setup Kraft runs also adds the agent plugins
+just setup      # uv sync + npm ci; Kraft workers run `just setup setup-plugins`
 just setup-plugins  # superpowers, impeccable and the other plugins for every agent (opt-in)
 just test       # backend tests affected by your changes (testmon); --no-testmon for all
 just test-ui    # frontend typecheck + unit tests

@@ -64,8 +64,8 @@ on with, and for Claude Code also
 [ponytail](https://github.com/DietrichGebert/ponytail),
 [techdocs-authoring](https://github.com/pkloehn1/techdocs-authoring), and the
 engineering and design plugins from
-[knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins). It is opt-in: `just setup` runs it only in a setup Kraft runs (a
-worker's worktree, on this machine or another), so a contributor's agents get
+[knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins).
+It is opt-in, and `just setup` never runs it, so a contributor's agents get
 nothing they didn't ask for. It skips whatever is already
 installed, and a missing tool or a failed download is a warning, not a failed
 setup. To refresh them, run `claude plugin update <id>` and `npx skills update -p`:
@@ -78,11 +78,10 @@ setup. To refresh them, run `claude plugin update <id>` and `npx skills update -
   of them read. They are gitignored; beads is the only skill committed there.
 
 A fresh git worktree has no gitignored files, so a worktree only gets the
-`.agents/skills/` copies after `just setup-plugins` runs in it (or `just setup`,
-when Kraft runs it). For Kraft workers, set this
-repo's `setup_command` to `just setup` in its `repos.yaml` entry (or pass
-`--setup-command "just setup"` to `kraft repo connect`); Kraft runs it in every
-new worktree. Claude Code's plugins live in `~/.claude` and need no setup per
+`.agents/skills/` copies after `just setup-plugins` runs in it. For Kraft
+workers, set this repo's `setup_command` to `just setup setup-plugins` in its
+`repos.yaml` entry (or pass `--setup-command "just setup setup-plugins"` to
+`kraft repo connect`); Kraft runs it in every new worktree. Claude Code's plugins live in `~/.claude` and need no setup per
 worktree.
 
 superpowers is off in Kraft workers: its skills ask a person questions and push
@@ -111,7 +110,7 @@ worktree. An in-place item runs in your own checkout, so other agents there
 still see the superpowers copies you installed.
 
 Cloud agents start from a fresh clone, so give them the same step. Copilot's
-coding agent already runs `just setup` (`.github/workflows/copilot-setup-steps.yml`).
+coding agent already runs `just setup-plugins` (`.github/workflows/copilot-setup-steps.yml`).
 For Codex cloud, Cursor background agents and the like, add this to the
 environment's setup script:
 
@@ -282,7 +281,7 @@ them unless you use the same tools:
 | `.cursor-plugin/` | the same marketplace for Cursor | Only to rename a plugin or add one |
 | `.claude/` | Claude Code settings: a hook that blocks raw `pytest` (needs `jq`), the plugins it turns on (superpowers, impeccable, ponytail, techdocs-authoring, engineering, design), and a hook that turns superpowers and ponytail off in Kraft workers | Only with Claude Code |
 | `.beads/` | beads config and git hooks for the maintainer's private tracker | No |
-| `.agents/` | a beads skill for agent sessions; `just setup` adds superpowers and impeccable beside it, gitignored | Only with an agent other than Claude Code |
+| `.agents/` | a beads skill for agent sessions; `just setup-plugins` adds superpowers and impeccable beside it, gitignored | Only with an agent other than Claude Code |
 | `.codex/` | Codex hooks that call `bd`; they fail without beads installed | No |
 | `.kraft-lite/` | this repo's Kraft Lite bindings (`bindings.yaml`) | No |
 | `.kraft/` | `collection.json`, which publishes `config/` and `addons/` as the collection `kraft-sdlc` | Only to change what the collection lists |

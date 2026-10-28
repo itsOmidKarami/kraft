@@ -15,12 +15,13 @@ export function formatOgDescription(title: string | undefined, description: stri
 
   if (description.length <= maxLen) return description
 
+  // A sentence ends at . ! or ? before a space or the end, so the dot in "2.0" does not.
+  const ends = [...description.slice(0, maxLen + 1).matchAll(/[.!?](?=\s|$)/g)]
+  const lastEnd = ends.findLast(end => end.index > 0 && end.index < maxLen)
+  if (lastEnd) return description.slice(0, lastEnd.index + 1)
+  // No sentence to end on: end on the last whole word that leaves room for the ellipsis.
   const truncated = description.slice(0, maxLen)
-  const lastDot = truncated.lastIndexOf('.')
-  if (lastDot > 0) return truncated.slice(0, lastDot + 1)
-  // No full stop to end on: end on the last whole word, never mid-word.
-  const room = truncated.slice(0, maxLen - 1) // one place left for the ellipsis
-  const lastSpace = room.lastIndexOf(' ')
-  const words = lastSpace > 0 ? room.slice(0, lastSpace) : room
+  const lastSpace = truncated.lastIndexOf(' ')
+  const words = lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated.slice(0, maxLen - 1)
   return `${words.replace(/[\s,;:]+$/, '')}…`
 }

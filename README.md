@@ -177,7 +177,7 @@ and Cursor (publisher `kraft-sdlc` on both). You can also download
 Every install path, connecting your agent, and updating are in the
 [install guide](https://kraft-sdlc.dev/get-started/install). Coming
 from 1.4? Update with `uv tool install`, not `kraft admin update`: see
-[Upgrading from 1.4](https://kraft-sdlc.dev/get-started/install#upgrading-from-14).
+[Upgrading from 1.4](https://kraft-sdlc.dev/guides/run/upgrade-from-1-4#update-from-14).
 
 ## First run
 
