@@ -270,7 +270,7 @@ def _cmd_check(ns: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
 
 def add(subs, common_parser: argparse.ArgumentParser) -> None:
     worker_p = subs.add_parser("worker", help="machines that may run work item steps")
-    verbs = worker_p.add_subparsers(dest="worker_verb", required=True)
+    verbs = worker_p.add_subparsers(dest="worker_verb", metavar="verb", required=True)
 
     add_p = verbs.add_parser(
         "add", parents=[common_parser], help="register a machine; a dial-in one gets a token"

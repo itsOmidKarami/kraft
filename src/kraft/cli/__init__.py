@@ -31,12 +31,12 @@ def build_parser() -> argparse.ArgumentParser:
     # build that predated this file's argparse answered every subcommand by
     # serving, and nothing said so (Kraft-krd).
     parser.add_argument("--version", action="version", version=f"kraft {admin._version()}")
-    subs = parser.add_subparsers(dest="group", required=True)
+    subs = parser.add_subparsers(dest="group", metavar="command", required=True)
     common_parser = common.json_flag()
 
     for name, help_text, adder in _GROUPS:
         group = subs.add_parser(name, help=help_text)
-        adder(group.add_subparsers(dest="verb", required=True), common_parser)
+        adder(group.add_subparsers(dest="verb", metavar="verb", required=True), common_parser)
     subs.add_parser("console", help="open the terminal UI").set_defaults(func=_console)
     return parser
 

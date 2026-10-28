@@ -1016,7 +1016,7 @@ def _cmd_list(ns: argparse.Namespace) -> None:
 
 def add(subs, common_parser: argparse.ArgumentParser) -> None:
     addon_p = subs.add_parser("addon", help="Kraft add-ons and collections")
-    verbs = addon_p.add_subparsers(dest="addon_verb", required=True)
+    verbs = addon_p.add_subparsers(dest="addon_verb", metavar="verb", required=True)
 
     def verb(to, name: str, func, help: str, *, json: bool = True) -> argparse.ArgumentParser:
         parser = to.add_parser(name, parents=[common_parser] if json else [], help=help)
@@ -1044,7 +1044,7 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
     )
 
     collection_p = verbs.add_parser("collection", help="the collections this instance knows")
-    collections = collection_p.add_subparsers(dest="collection_verb", required=True)
+    collections = collection_p.add_subparsers(dest="collection_verb", metavar="verb", required=True)
     add_p = verb(collections, "add", _cmd_collection_add, "add a collection; installs nothing")
     add_p.add_argument("source", metavar="SOURCE", help="owner/repo, a git URL, or a directory")
     add_p.add_argument("--ref", help="a branch, tag or commit; default: the default branch")

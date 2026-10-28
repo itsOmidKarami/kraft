@@ -209,7 +209,7 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
     harnesses_p.add_argument("profile_id", metavar="ID", nargs="?", help="one profile")
     harnesses_p.set_defaults(func=_cmd_harnesses)
     templates_p = subs.add_parser("templates", help="inspect the library and its chains")
-    verbs = templates_p.add_subparsers(dest="templates_verb", required=True)
+    verbs = templates_p.add_subparsers(dest="templates_verb", metavar="verb", required=True)
     lint_p = verbs.add_parser(
         "lint",
         parents=[common_parser],
