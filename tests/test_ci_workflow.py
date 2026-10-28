@@ -175,3 +175,15 @@ def test_the_gate_passes_only_the_skips_the_change_asked_for(code, python, resul
     assert (ran.returncode == 0) is merges, ran.stdout + ran.stderr
     # and it failed on a job's result, not on a missing jq
     assert ("::error::" in ran.stdout) is not merges, ran.stdout + ran.stderr
+
+
+def test_removals_are_judged_against_the_base_github_merged_into():
+    """`pull_request.base.sha` stays at the commit a pull request was opened
+    from while the job checks out its merge into today's `main`, so every
+    test `main` removed since read as the pull request's own (#1132). The
+    merge commit's first parent is the base it was actually merged into."""
+    (step,) = [
+        s for s in _JOBS["removals-declared"]["steps"] if "check_removals" in s.get("run", "")
+    ]
+    assert 'check_removals.py "$(git rev-parse HEAD^1)"' in step["run"]
+    assert "base.sha" not in str(step)
