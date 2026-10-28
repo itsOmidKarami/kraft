@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { KraftEvent } from "./types";
 import type { EventType } from "./types/vocab.generated";
 import { enabledEvents, isEnabled, maybeNotify, requestPermission, setEnabled, setEvents } from "./browserNotify";
@@ -29,6 +29,8 @@ beforeEach(() => {
   Object.defineProperty(document, "hidden", { value: true, configurable: true });
 });
 
+afterEach(() => vi.restoreAllMocks());
+
 describe("isEnabled/setEnabled", () => {
   it("defaults to disabled and persists via localStorage", () => {
     expect(isEnabled()).toBe(false);
@@ -36,6 +38,31 @@ describe("isEnabled/setEnabled", () => {
     expect(isEnabled()).toBe(true);
     setEnabled(false);
     expect(isEnabled()).toBe(false);
+  });
+
+  it.each(["getter", "getItem"])("treats a blocked localStorage %s as disabled", (blocked) => {
+    setEnabled(true);
+    const fail = () => { throw new DOMException("Storage is blocked", "SecurityError"); };
+    if (blocked === "getter") vi.spyOn(window, "localStorage", "get").mockImplementation(fail);
+    else vi.spyOn(Storage.prototype, "getItem").mockImplementation(fail);
+
+    expect(isEnabled()).toBe(false);
+    maybeNotify(ev("gate_requested"), "My Item");
+    expect(FakeNotification.instances).toHaveLength(0);
+  });
+
+  it.each([
+    { name: "enable", write: () => setEnabled(true), key: "kraft.browserNotify.enabled", value: "1" },
+    { name: "disable", write: () => setEnabled(false), key: "kraft.browserNotify.enabled", value: "0" },
+    { name: "events", write: () => setEvents(["gate_requested"]), key: "kraft.browserNotify.events", value: '["gate_requested"]' },
+  ])("ignores a failed $name write without changing stored preferences", ({ write, key, value }) => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("Storage is full", "QuotaExceededError");
+    });
+
+    expect(write).not.toThrow();
+    expect(setItem).toHaveBeenCalledWith(key, value);
+    expect(localStorage.getItem(key)).toBeNull();
   });
 });
 
@@ -47,6 +74,18 @@ describe("requestPermission", () => {
 });
 
 describe("maybeNotify", () => {
+  it("ignores a throwing Notification constructor", () => {
+    setEnabled(true);
+    const construct = vi.fn(function () { throw new TypeError("Illegal constructor"); });
+    vi.stubGlobal("Notification", Object.assign(construct, { permission: "granted" }));
+
+    expect(() => maybeNotify(ev("gate_requested"), "My Item")).not.toThrow();
+    expect(construct).toHaveBeenCalledWith("My Item", {
+      body: "a decision is waiting", tag: "w1", icon: "/icon.svg",
+    });
+    expect(FakeNotification.instances).toHaveLength(0);
+  });
+
   it("no-ops when disabled", () => {
     setEnabled(false);
     maybeNotify(ev("gate_requested"), "My Item");

@@ -17,11 +17,19 @@ const STORAGE_KEY = "kraft.browserNotify.enabled";
  *  and a laptop wants each device to independently notify only when *that*
  *  device's tab is hidden, not a shared on/off switch. */
 export function isEnabled(): boolean {
-  return localStorage.getItem(STORAGE_KEY) === "1";
+  try {
+    return localStorage.getItem(STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
 }
 
 export function setEnabled(next: boolean): void {
-  localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
+  try {
+    localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
+  } catch {
+    // A blocked or full store leaves the saved preference unchanged.
+  }
 }
 
 const EVENTS_KEY = "kraft.browserNotify.events";
@@ -38,7 +46,11 @@ export function enabledEvents(): string[] {
 }
 
 export function setEvents(ids: string[]): void {
-  localStorage.setItem(EVENTS_KEY, JSON.stringify(ids));
+  try {
+    localStorage.setItem(EVENTS_KEY, JSON.stringify(ids));
+  } catch {
+    // A blocked or full store leaves the saved preference unchanged.
+  }
 }
 
 export async function requestPermission(): Promise<NotificationPermission> {
@@ -59,7 +71,13 @@ export function maybeNotify(ev: KraftEvent, title: string): void {
   if (!event || !enabledEvents().includes(event.id)) return;
 
   const text = notificationText(event, title);
-  const n = new Notification(text.title, { body: text.body, tag: ev.work_item_id, icon: withBase("/icon.svg") });
+  let n: Notification;
+  try {
+    n = new Notification(text.title, { body: text.body, tag: ev.work_item_id, icon: withBase("/icon.svg") });
+  } catch {
+    // Some browsers expose Notification but refuse its constructor.
+    return;
+  }
   n.onclick = () => {
     window.focus();
     location.href = withBase(`/work-items/${ev.work_item_id}`);
