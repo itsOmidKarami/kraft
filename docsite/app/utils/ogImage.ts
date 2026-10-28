@@ -17,5 +17,10 @@ export function formatOgDescription(title: string | undefined, description: stri
 
   const truncated = description.slice(0, maxLen)
   const lastDot = truncated.lastIndexOf('.')
-  return lastDot > 0 ? truncated.slice(0, lastDot + 1) : truncated
+  if (lastDot > 0) return truncated.slice(0, lastDot + 1)
+  // No full stop to end on: end on the last whole word, never mid-word.
+  const room = truncated.slice(0, maxLen - 1) // one place left for the ellipsis
+  const lastSpace = room.lastIndexOf(' ')
+  const words = lastSpace > 0 ? room.slice(0, lastSpace) : room
+  return `${words.replace(/[\s,;:]+$/, '')}…`
 }

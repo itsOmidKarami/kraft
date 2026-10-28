@@ -5,11 +5,15 @@ set shell := ["bash", "-uc"]
 _default:
     @just --list
 
-# Install backend + frontend deps, then the agent skills (`setup-plugins`)
+# Install backend + frontend deps. The agent plugins (`setup-plugins`) are
+# opt-in for a person, so a first contribution installs nothing into their
+# agents; a setup Kraft runs still gets them. $KRAFT_DAEMON_PID marks one on
+# this machine, $KRAFT_RUN_DIR one on a remote machine (src/kraft/remote/jobs.py
+# drops the daemon's variables there).
 setup:
     uv sync
     cd frontend && npm ci
-    @just setup-plugins
+    @if [ -n "${KRAFT_DAEMON_PID:-}${KRAFT_RUN_DIR:-}" ]; then just setup-plugins; else echo "agent plugins not installed; 'just setup-plugins' adds them (CONTRIBUTING.md)"; fi
 
 # superpowers and impeccable, for every agent this repo is worked on with.
 #
@@ -24,7 +28,7 @@ setup:
 # `skills` CLI copies them there; they are gitignored, and only beads is
 # committed in that folder, so each checkout and worktree installs its own.
 #
-# Kraft runs `just setup` in every worktree, more than once, so each half skips
+# Kraft runs `just setup` (which runs this) in every worktree, more than once, so each half skips
 # what is already installed, and a missing tool or a failed download is a
 # warning, never a failed setup: neither is needed to build or test Kraft. To
 # refresh: `claude plugin update <id>` and `npx skills update -p`.
@@ -392,13 +396,19 @@ smoke-models:
     @[ -n "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || { echo "smoke-models: export ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (claude setup-token) -- tests use a temp HOME, so claude login is not seen" >&2; exit 1; }
     KRAFT_E2E=1 KRAFT_E2E_REQUIRE=claude just test tests/test_shipped_models.py -k real_cli --no-testmon
 
-# The pre-commit hook's door to smoke-models: a Kraft worker or a shell with no
-# credential skips it loudly instead of blocking the commit. smoke-models stays strict.
-[doc("smoke-models for the pre-commit hook: skips without a credential")]
+# The pre-commit hook's door to smoke-models: a Kraft worker, a shell without
+# KRAFT_SMOKE_MODELS=1, or one with no credential skips it loudly instead of
+# blocking the commit. smoke-models stays strict.
+[doc("smoke-models for the pre-commit hook: runs only with KRAFT_SMOKE_MODELS=1 and a credential")]
 smoke-models-hook:
     #!/usr/bin/env bash
     if [ -n "${KRAFT_WORK_ITEM_ID:-}" ]; then
         echo "SKIPPED: smoke-models (shipped models on the real CLI): this is a Kraft worker (KRAFT_WORK_ITEM_ID set); run 'just smoke-models' before release" >&2
+        exit 0
+    fi
+    # Opt-in: it spends real money, and a contributor may have a key exported.
+    if [ "${KRAFT_SMOKE_MODELS:-}" != 1 ]; then
+        echo "SKIPPED: smoke-models (shipped models on the real CLI): set KRAFT_SMOKE_MODELS=1 to run it on commit; 'just smoke-models' runs it by hand" >&2
         exit 0
     fi
     if [ -z "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
