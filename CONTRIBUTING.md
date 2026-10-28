@@ -79,9 +79,10 @@ setup. To refresh them, run `claude plugin update <id>` and `npx skills update -
 
 A fresh git worktree has no gitignored files, so a worktree only gets the
 `.agents/skills/` copies after `just setup-plugins` runs in it. For Kraft
-workers, set this repo's `setup_command` to `just setup setup-plugins` in its
-`repos.yaml` entry (or pass `--setup-command "just setup setup-plugins"` to
-`kraft repo connect`); Kraft runs it in every new worktree. Claude Code's plugins live in `~/.claude` and need no setup per
+workers, set this repo's `setup_command` in its `repos.yaml` entry to
+`just setup setup-plugins && (cd vscode && npm ci)`, which is what
+`kraft repo connect` proposes plus the plugins; Kraft runs it in every new
+worktree. Claude Code's plugins live in `~/.claude` and need no setup per
 worktree.
 
 superpowers is off in Kraft workers: its skills ask a person questions and push
@@ -110,7 +111,7 @@ worktree. An in-place item runs in your own checkout, so other agents there
 still see the superpowers copies you installed.
 
 Cloud agents start from a fresh clone, so give them the same step. Copilot's
-coding agent already runs `just setup-plugins` (`.github/workflows/copilot-setup-steps.yml`).
+coding agent already runs `just setup setup-plugins` (`.github/workflows/copilot-setup-steps.yml`).
 For Codex cloud, Cursor background agents and the like, add this to the
 environment's setup script:
 
