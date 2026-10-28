@@ -2,6 +2,30 @@
 
 Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
+## Your first pull request
+
+A plain git pull request is fine: you don't need Kraft, beads or a coding agent
+to contribute.
+
+1. Pick an issue from [Start here](https://github.com/itsOmidKarami/kraft/issues/1131),
+   or any [`good first issue`](https://github.com/itsOmidKarami/kraft/labels/good%20first%20issue),
+   and comment on it so nobody doubles up.
+2. Fork the repository, clone your fork, and install just, uv and Node 22
+   ([Requirements](#requirements)).
+3. Run `just setup`. It installs the Python and frontend dependencies, and
+   nothing into your coding agents.
+4. Make the change and run the test the issue names: `just test <path> -n auto`
+   for Python, `just test-ui` for the frontend, `just ci-checks` for a docs page.
+   `just lint` checks the formatting.
+5. Open a pull request that says `Fixes #<number>`, with one user-facing line
+   under `## Changelog`. A maintainer applies the release label.
+
+In return, you get a first reply within a day and a review within three days. On a
+first pull request, the maintainer finishes the changelog, docs-note and test
+chores rather than sending it back. For a UI fix, the issue says which
+screenshots it needs, and the maintainer does the design polish pass. The rest
+of this guide is the full reference; a starter issue rarely needs it.
+
 ## Requirements
 
 - [just](https://just.systems), the command runner every step below uses:
@@ -29,17 +53,20 @@ files work anyway and says so.
 ## Getting set up
 
 ```bash
-just setup      # uv sync + npm ci + the agent skills below
+just setup      # uv sync + npm ci
+just setup-plugins  # the agent skills below, opt-in
 just dev        # backend + vite, state in .dev/, agents faked, UI on :5173
 ```
 
-`just setup` also installs [superpowers](https://github.com/obra/superpowers)
+`just setup-plugins` installs [superpowers](https://github.com/obra/superpowers)
 and [impeccable](https://impeccable.style) for every agent this repo is worked
 on with, and for Claude Code also
 [ponytail](https://github.com/DietrichGebert/ponytail),
 [techdocs-authoring](https://github.com/pkloehn1/techdocs-authoring), and the
 engineering and design plugins from
-[knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins). `just setup-plugins` runs that step alone. It skips whatever is already
+[knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins).
+It is opt-in, and `just setup` never runs it, so a contributor's agents get
+nothing they didn't ask for. It skips whatever is already
 installed, and a missing tool or a failed download is a warning, not a failed
 setup. To refresh them, run `claude plugin update <id>` and `npx skills update -p`:
 
@@ -51,10 +78,11 @@ setup. To refresh them, run `claude plugin update <id>` and `npx skills update -
   of them read. They are gitignored; beads is the only skill committed there.
 
 A fresh git worktree has no gitignored files, so a worktree only gets the
-`.agents/skills/` copies after `just setup` runs in it. For Kraft workers, set this
-repo's `setup_command` to `just setup` in its `repos.yaml` entry (or pass
-`--setup-command "just setup"` to `kraft repo connect`); Kraft runs it in every
-new worktree. Claude Code's plugins live in `~/.claude` and need no setup per
+`.agents/skills/` copies after `just setup-plugins` runs in it. For Kraft
+workers, set this repo's `setup_command` in its `repos.yaml` entry to
+`just setup setup-plugins && (cd vscode && npm ci)`, which is what
+`kraft repo connect` proposes plus the plugins; Kraft runs it in every new
+worktree. Claude Code's plugins live in `~/.claude` and need no setup per
 worktree.
 
 superpowers is off in Kraft workers: its skills ask a person questions and push
@@ -83,7 +111,7 @@ worktree. An in-place item runs in your own checkout, so other agents there
 still see the superpowers copies you installed.
 
 Cloud agents start from a fresh clone, so give them the same step. Copilot's
-coding agent already runs `just setup` (`.github/workflows/copilot-setup-steps.yml`).
+coding agent already runs `just setup setup-plugins` (`.github/workflows/copilot-setup-steps.yml`).
 For Codex cloud, Cursor background agents and the like, add this to the
 environment's setup script:
 
@@ -162,8 +190,9 @@ The two local hooks need `just` on `PATH`:
   Stage the regenerated files and commit again.
 - `shipped-models-smoke` runs `just smoke-models` when `config/` or
   `src/kraft/harnesses/` changes. It launches the real `claude` CLI and spends
-  a few cents, so it needs `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`.
-  Without one it prints `SKIPPED` and lets the commit through.
+  a few cents, so it is opt-in: it needs `KRAFT_SMOKE_MODELS=1`, plus
+  `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`. Without them it prints
+  `SKIPPED` and lets the commit through.
 
 ### Previewing the docs site
 
@@ -180,7 +209,8 @@ the latest release at <http://localhost:8000/>, each older major at
 
 ## Finding something to work on
 
-Issues labelled
+[Start here](https://github.com/itsOmidKarami/kraft/issues/1131) lists the open
+starter issues by area and size. Issues labelled
 [`good first issue`](https://github.com/itsOmidKarami/kraft/labels/good%20first%20issue)
 are small and self-contained. For anything bigger than a bug fix, open an issue
 first and say what you plan to do, so nobody spends a week on a change that
@@ -252,7 +282,7 @@ them unless you use the same tools:
 | `.cursor-plugin/` | the same marketplace for Cursor | Only to rename a plugin or add one |
 | `.claude/` | Claude Code settings: a hook that blocks raw `pytest` (needs `jq`), the plugins it turns on (superpowers, impeccable, ponytail, techdocs-authoring, engineering, design), and a hook that turns superpowers and ponytail off in Kraft workers | Only with Claude Code |
 | `.beads/` | beads config and git hooks for the maintainer's private tracker | No |
-| `.agents/` | a beads skill for agent sessions; `just setup` adds superpowers and impeccable beside it, gitignored | Only with an agent other than Claude Code |
+| `.agents/` | a beads skill for agent sessions; `just setup-plugins` adds superpowers and impeccable beside it, gitignored | Only with an agent other than Claude Code |
 | `.codex/` | Codex hooks that call `bd`; they fail without beads installed | No |
 | `.kraft-lite/` | this repo's Kraft Lite bindings (`bindings.yaml`) | No |
 | `.kraft/` | `collection.json`, which publishes `config/` and `addons/` as the collection `kraft-sdlc` | Only to change what the collection lists |
@@ -433,6 +463,10 @@ itself:
   branch.
 - Push the pictures to a separate `kraft/<branch>-screenshots` branch, not to the
   pull request's own branch, and link them in the pull request body.
+
+A starter issue (`good first issue` or `help wanted`) says which screenshots it
+needs instead: none, or one before and after at 1280px in light. The
+maintainer does the polish pass.
 
 A screen that also appears in a README or docs screenshot (`.github/assets/`)
 is retaken with `just docs-screenshots` too; see the screen row under

@@ -44,8 +44,9 @@ something. This is normative for `tests/` and `frontend/src/**/*.test.*`;
   `tests/test_shipped_models.py`, runs locally instead: `just smoke-models`,
   which the pre-commit hook calls (through `just smoke-models-hook`) when a
   commit touches `config/` or `src/kraft/harnesses/`. The hook prints
-  `SKIPPED:` and lets the commit through in a Kraft worker or with no
-  credential set; `just smoke-models` itself still fails without one.
+  `SKIPPED:` and lets the commit through in a Kraft worker, without
+  `KRAFT_SMOKE_MODELS=1`, or with no credential set; `just smoke-models`
+  itself still fails without one.
 
 A test that wants to run the same behaviour against both tiers takes one
 parametrized fixture instead of two test bodies. `support.fake_beads` does

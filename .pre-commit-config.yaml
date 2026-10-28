@@ -35,7 +35,8 @@ repos:
         entry: just smoke-models-hook
         language: system
         pass_filenames: false
-        # So the SKIPPED line shows when a worker or a credential-less shell commits.
+        # So the SKIPPED line shows when a worker, a shell without KRAFT_SMOKE_MODELS=1,
+        # or one without a credential commits.
         verbose: true
         files: ^(config/|src/kraft/harnesses/)
       # vscode/schemas/ is generated from pydantic models spread across

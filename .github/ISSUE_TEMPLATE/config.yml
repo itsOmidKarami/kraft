@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Ask a question or share an idea
+    url: https://github.com/itsOmidKarami/kraft/discussions
+    about: Questions, ideas and the chains you've built go in Discussions.
   - name: Report a security vulnerability
     url: https://github.com/itsOmidKarami/kraft/blob/main/SECURITY.md
     about: Please do not open a public issue. SECURITY.md says how to report one privately.

@@ -1,5 +1,8 @@
 # Kraft
 
+<!-- mcp-name: io.github.itsOmidKarami/kraft -->
+<!-- The official MCP registry reads this line from the PyPI page to confirm the package is ours. -->
+
 [![test](https://github.com/itsOmidKarami/kraft/actions/workflows/test.yml/badge.svg)](https://github.com/itsOmidKarami/kraft/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/kraft-sdlc)](https://pypi.org/project/kraft-sdlc/)
 [![Latest release](https://img.shields.io/github/v/release/itsOmidKarami/kraft)](https://github.com/itsOmidKarami/kraft/releases)
@@ -17,16 +20,21 @@ Kraft isn't another coding agent. It runs the one you already use, and adds
 what a single session can't: a process the agent can't skip, checks it doesn't
 grade itself on, and a person at the decisions that matter.
 
-Hand Kraft a task, start it and walk away. A new work item is filed paused,
+Hand Kraft a task, start it and walk away. A new task, a *work item*, is filed paused,
 in the web interface, on a phone and from the CLI alike, so nothing runs until
 you start it. Your agent drafts the spec and the plan and
 stops for your approval of each, or starts from a spec you wrote. It's for
-developers tired of babysitting a session to the end of a task.
+developers tired of babysitting a session to the end of a task;
+[when not to use Kraft](https://kraft-sdlc.dev/get-started/why-kraft#when-not-to-use-kraft)
+says who it isn't for.
+
+Install it with `uv tool install kraft-sdlc` and run `kraft`. It needs Claude
+Code, logged in; [Install](#install) has Homebrew and the agent plugin.
 
 Kraft works with Claude Code out of the box, and you can drive it from Codex,
 Cursor, Antigravity, OpenCode, Amp or Gemini CLI too. The shipped chains run
 their agent steps on Claude Code, and any step can
-[switch to another agent](https://kraft-sdlc.dev/guides/switch-harness).
+[switch to another agent](https://kraft-sdlc.dev/guides/harnesses/switch-harness).
 
 The [releases](https://github.com/itsOmidKarami/kraft/releases) page says what
 each version adds. Coming from 1.4? [What's new in 2.0](https://kraft-sdlc.dev/project/whats-new)
@@ -71,7 +79,7 @@ keyboard shortcuts.
 <td width="60%">
 
 **Same app, phone-sized.** Below 768 pixels it switches to a phone layout on its own. A gate's card opens its review, so nothing is approved from the list, and Chains edits drafts there too. Reach it from another device through a tunnel; see
-[Remote access](https://kraft-sdlc.dev/guides/remote-access).
+[Remote access](https://kraft-sdlc.dev/guides/run/remote-access).
 
 </td>
 <td width="40%">
@@ -87,7 +95,7 @@ Each work item follows a
 nodes such as write the spec, write the plan, implement, verify and open the
 pull request. Some nodes run your coding agent, some run a command, and some
 stop and wait for you. Chains are YAML files you can edit. A team can share
-chains as [Kraft add-ons](https://kraft-sdlc.dev/next/guides/customize/share-chains-with-addons),
+chains as [Kraft add-ons](https://kraft-sdlc.dev/guides/customize/share-chains-with-addons),
 which each instance installs from a git repository or a directory. How the
 pieces fit together is in
 [Architecture](https://kraft-sdlc.dev/project/architecture).
@@ -158,7 +166,7 @@ asks. It needs the server running:
 ```
 
 To clear gates and review diffs from VS Code, install the
-[Kraft extension](https://kraft-sdlc.dev/guides/vscode) from the
+[Kraft extension](https://kraft-sdlc.dev/guides/day-to-day/vscode) from the
 [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=kraft-sdlc.kraft),
 or from [Open VSX](https://open-vsx.org/extension/kraft-sdlc/kraft) in VSCodium
 and Cursor (publisher `kraft-sdlc` on both). You can also download
@@ -169,7 +177,7 @@ and Cursor (publisher `kraft-sdlc` on both). You can also download
 Every install path, connecting your agent, and updating are in the
 [install guide](https://kraft-sdlc.dev/get-started/install). Coming
 from 1.4? Update with `uv tool install`, not `kraft admin update`: see
-[Upgrading from 1.4](https://kraft-sdlc.dev/next/get-started/install#upgrading-from-14).
+[Upgrading from 1.4](https://kraft-sdlc.dev/guides/run/upgrade-from-1-4#update-from-14).
 
 ## First run
 
@@ -192,10 +200,12 @@ board renders live, not a separate pipeline.
 - [Concepts](https://kraft-sdlc.dev/concepts/vocabulary): work items, chains, nodes, gates, caps.
 - [CLI reference](https://kraft-sdlc.dev/reference/cli): every `kraft` verb.
 - [Configuration](https://kraft-sdlc.dev/reference/configuration): `repos.yaml`, `policy.yaml`, `access.yaml`, and the state directory (`$KRAFT_HOME`).
-- [Agent integration](https://kraft-sdlc.dev/guides/agent-integration): MCP tools and skills.
-- [Share chains with add-ons](https://kraft-sdlc.dev/next/guides/customize/share-chains-with-addons): publish chains, skills and agent profiles from a git repository, and install a team's.
-- [Remote access](https://kraft-sdlc.dev/guides/remote-access): reach the board from a phone or another machine.
+- [Agent integration](https://kraft-sdlc.dev/guides/day-to-day/agent-integration): MCP tools and skills.
+- [Share chains with add-ons](https://kraft-sdlc.dev/guides/customize/share-chains-with-addons): publish chains, skills and agent profiles from a git repository, and install a team's.
+- [Remote access](https://kraft-sdlc.dev/guides/run/remote-access): reach the board from a phone or another machine.
 - [Triggers](https://kraft-sdlc.dev/reference/triggers): start a chain from a schedule or an HTTP call.
+- [Discussions](https://github.com/itsOmidKarami/kraft/discussions): questions, ideas, and the chains you've built.
+- [Start here](https://github.com/itsOmidKarami/kraft/issues/1131): small, self-contained issues for a first pull request.
 - [Security](https://kraft-sdlc.dev/project/security): threat model; report vulnerabilities per [SECURITY.md](https://github.com/itsOmidKarami/kraft/blob/main/SECURITY.md).
 
 Kraft Lite, a separate plugin, runs a chain inside a single

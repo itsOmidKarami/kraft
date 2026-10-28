@@ -5,7 +5,8 @@
 Everything goes through `just` — run `just` for the list.
 
 ```bash
-just setup      # uv sync + npm ci + superpowers, impeccable and the other plugins for every agent
+just setup      # uv sync + npm ci; Kraft workers run `just setup setup-plugins`
+just setup-plugins  # superpowers, impeccable and the other plugins for every agent (opt-in)
 just test       # backend tests affected by your changes (testmon); --no-testmon for all
 just test-ui    # frontend typecheck + unit tests
 just test-py 3.12  # the unit tier on another Python (CI runs 3.12, 3.13, 3.14); `requires-python` is the floor
