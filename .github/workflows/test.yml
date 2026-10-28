@@ -633,10 +633,14 @@ jobs:
       # The body is read live, not off the event payload: a re-run replays the
       # original payload, and re-running this job after editing the body is
       # how a declaration is picked up.
+      #
+      # Judged against the checked-out merge commit's first parent, the base
+      # GitHub merged into, not `pull_request.base.sha`: that stays at the
+      # commit the PR was opened from, so a test `main` removed since read as
+      # the PR's own removal.
       - env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
-          BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json body -q .body > "$RUNNER_TEMP/pr-body.md"
-          uv run --python 3.12 --no-project python dev/check_removals.py "$BASE" "$RUNNER_TEMP/pr-body.md"
+          uv run --python 3.12 --no-project python dev/check_removals.py "$(git rev-parse HEAD^1)" "$RUNNER_TEMP/pr-body.md"
