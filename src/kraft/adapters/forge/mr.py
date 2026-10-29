@@ -151,9 +151,12 @@ def meta_flags(meta: MRMeta) -> list[str]:
     return flags
 
 
-def mr_body(work_item_id: str, meta: MRMeta = _EMPTY_META) -> str:
-    """The merge request description: the agent's own, as written, or one line
-    naming the work item when there is none.
+def mr_body(
+    work_item_id: str, meta: MRMeta = _EMPTY_META, *, title: str = "", brief: str = ""
+) -> str:
+    """The merge request description: the agent's own, as written, or, when
+    there is none, the work item's brief under its full title (only when the
+    MR title had to clip it) and a line naming the item.
 
     No commit list and no branch line: the forge already shows both, and every
     sync rewrote them back over a person's edit. Rebuilt on every call all the
@@ -164,7 +167,15 @@ def mr_body(work_item_id: str, meta: MRMeta = _EMPTY_META) -> str:
     path that failed containment) hands in an empty `MRMeta` and still gets a
     body: this is the one path with no filesystem or database of its own.
     """
-    body = meta.description or f"Opened by Kraft for work item {work_item_id}."
+    body = meta.description
+    if not body:
+        head = title.strip()
+        parts = (
+            head if head != mr_title(head) else "",
+            brief.strip(),
+            f"Opened by Kraft for work item {work_item_id}.",
+        )
+        body = "\n\n".join(p for p in parts if p)
 
     if len(body) > MR_BODY_MAX_CHARS:
         cut = MR_BODY_MAX_CHARS - len(_TRUNCATION_MARKER)

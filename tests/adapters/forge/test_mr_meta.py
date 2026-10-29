@@ -100,21 +100,40 @@ def test_read_mr_meta_drops_an_over_long_scalar(tmp_path):
     assert mr_ops.read_mr_meta(tmp_path, WID, _run(tmp_path)).labels == ("keep",)
 
 
+_OPENED = f"Opened by Kraft for work item {WID}."
+
+
 @pytest.mark.parametrize(
-    "meta, expected",
+    "meta, kw, expected",
     [
-        ((MRMeta(description="## What\n\nA new door."),), "## What\n\nA new door."),
+        (
+            (MRMeta(description="## What\n\nA new door."),),
+            {"title": "Add a door", "brief": "The hall needs one."},
+            "## What\n\nA new door.",
+        ),
         # Spec §5: a missing artifact still opens the MR -- the one path
         # `open_mr` must never fail on.
-        ((), f"Opened by Kraft for work item {WID}."),
-        ((MRMeta(),), f"Opened by Kraft for work item {WID}."),
+        ((), {}, _OPENED),
+        ((MRMeta(),), {}, _OPENED),
+        (
+            (),
+            {"title": "Add a door", "brief": "  The hall needs one.\n"},
+            f"The hall needs one.\n\n{_OPENED}",
+        ),
+        (
+            (),
+            {"title": "Add a door\nand a window", "brief": ""},
+            f"Add a door\nand a window\n\n{_OPENED}",
+        ),
     ],
-    ids=["authored", "no-meta", "empty-meta"],
+    ids=["authored", "no-meta", "empty-meta", "brief", "clipped-title-in-full"],
 )
-def test_mr_body_is_the_description_as_written_or_one_line(meta, expected):
+def test_mr_body_is_the_description_as_written_or_the_brief(meta, kw, expected):
     """No commit list or branch line after it: the forge shows both, and each
-    sync wrote them back over a person's edit."""
-    assert mr_ops.mr_body(WID, *meta) == expected
+    sync wrote them back over a person's edit. With no description, the brief
+    says what the change is for; the title only repeats when the MR's clipped
+    it."""
+    assert mr_ops.mr_body(WID, *meta, **kw) == expected
 
 
 def test_mr_body_truncates_a_runaway_description_with_a_visible_marker():

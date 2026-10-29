@@ -237,18 +237,19 @@ async def test_open_mr_uses_the_authored_title_labels_and_description(run_forge,
     assert fake.opened_bodies[number].startswith("## What this introduces")
 
 
-async def test_open_mr_without_the_artifact_opens_the_default_body(run_forge):
+async def test_open_mr_without_the_artifact_opens_the_default_body(run_forge, item_on, tmp_path):
     """Spec §5: no artifact at all -- an install that never ran `on.mr.describe`,
-    or one that failed to write it -- must open exactly today's MR, not fail
-    the node."""
+    or one that failed to write it -- must still open the MR, described by the
+    work item's brief, not fail the node."""
     fake = forge.FakeForge()
+    run_forge.item = await item_on(back_half(), repo=tmp_path, description="The hall needs a door.")
 
     assert await run_forge(fake, "open_mr", "x8", title="the work item title") == ("done", "done")
 
     (number,) = fake.opened
     assert fake.opened_titles[number] == "the work item title"
     assert fake.opened_meta[number] == forge.MRMeta()
-    assert fake.opened_bodies[number] == forge.mr_body("w1")
+    assert fake.opened_bodies[number] == forge.mr_body("w1", brief="The hall needs a door.")
 
 
 async def test_sync_mr_republishes_the_authored_description(run_forge, tmp_path):
