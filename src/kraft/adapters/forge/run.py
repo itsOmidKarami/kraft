@@ -8,7 +8,7 @@ import json
 import logging
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -714,10 +714,12 @@ async def _settle_review(
     reviewers: Reviewers,
     bounds: WaitBounds,
     grace: timedelta,
+    scope: str | None = None,
 ) -> tuple[str, str, WaitNote, list[dict] | None]:
     """One check of whether every reviewer has finished with `head`
     (`settle.decide`): `waiting` with no collection yet, or `done` with what
-    each reviewer said."""
+    each reviewer said. A multi-repo item's repositories each keep their own
+    memory in the wait, under `scope`."""
     # One reading of the clock, so the deadline this tests and the one
     # `waits.observe` tests are the same instant.
     now = waits.now()
@@ -737,6 +739,8 @@ async def _settle_review(
         repo=repo, branch=branch, reviewers=reviewers, since=since
     )
     memory = ((wait.last if wait is not None else None) or {}).get("memory", {})
+    if scope is not None:
+        memory = memory.get(scope, {})
     decided = settle.decide(
         feedback, since=since, now=now, grace=grace, memory=memory, timed_out=timed_out
     )
@@ -827,10 +831,13 @@ async def _run_one(
     #: multi-repo item), with the grace period, wait bounds, session and round
     #: it records its collection under.
     collect: bool = False,
-    #: A single-repo item's review wait with nothing in the node to read what
-    #: it collects: a bot reviewer is still waited for until it has finished
-    #: with the head, as on the collect path, and Kraft reads the verdict itself.
+    #: A review wait that does not collect (nothing in the node reads it, or a
+    #: multi-repo item): a bot reviewer is still waited for until it has
+    #: finished with the head, as on the collect path, and Kraft reads the
+    #: verdict itself.
     settle_bots: bool = False,
+    #: Where a multi-repo item keeps this repository's review memory.
+    scope: str | None = None,
     grace: timedelta = DEFAULT_GRACE,
     bounds: WaitBounds = DEFAULT_WAIT,
     session_id: str = "",
@@ -1084,7 +1091,7 @@ async def _run_one(
             log, status, note, collection = await _settle_review(
                 forge, db, repo=repo, orig_repo=orig_repo, branch=branch, head=head,
                 work_item_id=work_item_id, hook_point=hook_point, reviewers=reviewers,
-                bounds=bounds, grace=grace,
+                bounds=bounds, grace=grace, scope=scope,
             )  # fmt: skip
             if collection is not None:
                 found, unread, unfinished = _verdict(collection)
@@ -1839,8 +1846,8 @@ async def run_task(
     check_clean: bool = True,
     #: Whether a later task of this node reads what the review bots said
     #: (`AgentInput.BOT_FEEDBACK`): the review wait then settles and collects
-    #: rather than failing on feedback. A multi-repo item takes the direct path
-    #: either way, so feedback is never collected and then dropped.
+    #: rather than failing on feedback. A multi-repo item never collects, so
+    #: feedback is never collected and then dropped: Kraft judges it itself.
     reads_feedback: bool = False,
     #: The review wait's grace period (`ForgeTask.grace`).
     grace: timedelta = DEFAULT_GRACE,
@@ -2013,8 +2020,15 @@ async def run_task(
     awaiting_landing = next((t[0] for t in targets if t[0] not in merged_rows), None)
     log, status = "", "done"
     collect = handler == "automated_review" and reads_feedback and not multi
-    settle_bots = handler == "automated_review" and not multi
+    settle_bots = handler == "automated_review"
     note: WaitNote | None = None
+    #: A multi-repo review wait's memory, one entry per repository. Carried
+    #: over from the last check, so a repository this check does not reach
+    #: keeps what it had.
+    memories: dict = {}
+    if multi and settle_bots:
+        last = db.read(lambda c: waits.open_wait(c, work_item_id, hook_point))
+        memories = dict(((last.last if last is not None else None) or {}).get("memory", {}))
     #: The members a conflict rebase moved (Kraft-puqxq).
     moved: list[Path] = []
     #: Why the observation could not be made at all, when it could not.
@@ -2102,11 +2116,18 @@ async def run_task(
                     run_dirs=run_dirs,
                     collect=collect,
                     settle_bots=settle_bots,
+                    scope=str(target_repo) if multi else None,
                     grace=grace,
                     bounds=wait or DEFAULT_WAIT,
                     session_id=session_id,
                     round=round,
                 )
+                if multi and settle_bots and one_note is not None:
+                    memories[str(target_repo)] = one_note.extra["memory"]
+                    wakes = [n.next_at for n in (note, one_note) if n and n.next_at]
+                    one_note = replace(
+                        one_note, extra={"memory": memories}, next_at=min(wakes, default=None)
+                    )
                 note = one_note or note
             else:
                 one_log, one_status, one_findings = "", settled, None
