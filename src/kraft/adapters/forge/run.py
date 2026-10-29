@@ -1516,6 +1516,8 @@ async def _run_one(
                 try:
                     merged = await forge.find_mr(repo=repo, branch=branch)
                 except ForgeError as exc:
+                    if isinstance(exc, git.CliUnavailable):
+                        raise  # no retry starts it: a person looks first
                     retry = f"the merge commit is not known yet ({exc}), will retry\n"
                 else:
                     if merged is not None and merged.state != "merged":

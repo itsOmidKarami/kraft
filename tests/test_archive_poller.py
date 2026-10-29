@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -57,6 +58,8 @@ async def test_the_poller_ticks_as_soon_as_it_is_woken(tmp_path, repo, stub_app)
         assert row["archived_by"] == "auto"
     finally:
         task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 async def test_tick_archives_an_abandoned_item_past_after_days(tmp_path, repo, stub_app):
