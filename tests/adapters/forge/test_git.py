@@ -12,7 +12,9 @@ stubbed, and nothing here touches a network.
 from __future__ import annotations
 
 import asyncio
+import errno
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -652,20 +654,33 @@ def test_assert_clean_sees_a_submodule_with_ignore_all(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "args, match",
+    "args, refused, match",
     [
         # A wait's deadline never reached the subprocess inside it: a stalled gh
         # blocked forever and a 300s cap ran for 16 minutes.
-        (["sleep", "30"], "timed out"),
-        (["kraft-no-such-cli"], "not installed"),
-        # One argument over Linux's 128 KiB: the exec itself is refused (E2BIG).
-        (["true", "\u0627" * 70_000], "could not start"),
+        (["sleep", "30"], False, "timed out"),
+        (["kraft-no-such-cli"], False, "not installed"),
+        (["false", "x" * 5_000], False, "failed"),
+        # Linux refuses one argument over 128 KiB before the CLI starts (E2BIG);
+        # macOS has no such limit, so the refusal is the system's, faked here.
+        (["gh", "pr", "edit", "x" * 5_000], True, "could not start"),
     ],
-    ids=["hangs", "missing", "argument-too-long"],
+    ids=["hangs", "missing", "fails", "refused-to-start"],
 )
-def test_a_cli_call_that_cannot_finish_raises_a_forge_error(tmp_path, args, match):
-    with pytest.raises(forge.ForgeError, match=match):
+def test_a_cli_call_that_cannot_finish_raises_a_forge_error(
+    tmp_path, monkeypatch, args, refused, match
+):
+    """And names the command without the whole of a long argument, a merge
+    request body, which would fill the node's log and events."""
+    if refused:
+
+        def refuse(*_a, **_k):
+            raise OSError(errno.E2BIG, "Argument list too long")
+
+        monkeypatch.setattr(subprocess, "run", refuse)
+    with pytest.raises(forge.ForgeError, match=match) as exc:
         asyncio.run(forge_git.run_git(tmp_path, args, timeout=0.5))
+    assert len(str(exc.value)) < 1_000
 
 
 @pytest.mark.parametrize(

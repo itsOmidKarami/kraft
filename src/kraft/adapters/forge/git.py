@@ -90,6 +90,13 @@ def assert_on_branch(worktree: Path, branch: str) -> None:
 CLI_TIMEOUT_S = 120.0
 
 
+def _shown(args: list[str]) -> str:
+    """The command as an error names it. An argument over 200 characters is
+    clipped: a merge request body can be 100 KB, and the error lands in the
+    node's log and events."""
+    return " ".join(a if len(a) <= 200 else f"{a[:200]}… ({len(a)} chars)" for a in args)
+
+
 async def run_git(
     repo: Path,
     args: list[str],
@@ -101,7 +108,8 @@ async def run_git(
 
     FileNotFoundError becomes ForgeError so a binary that is missing, or a
     backend name that was never installed, reads as the configuration problem it
-    is rather than as a traceback from three frames up.
+    is rather than as a traceback from three frames up. Any other OSError from
+    starting it (E2BIG, a binary that is not executable) does the same.
 
     `env` defaults to `None`, meaning inherit the process env unchanged --
     which carries `sandbox.harden_host_git_env`'s pinned `core.hooksPath`.
@@ -122,7 +130,7 @@ async def run_git(
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
-        raise ForgeError(f"{' '.join(args)} timed out after {timeout:g}s") from exc
+        raise ForgeError(f"{_shown(args)} timed out after {timeout:g}s") from exc
     except FileNotFoundError as exc:
         raise ForgeError(f"{args[0]} is not installed or not on PATH") from exc
     except OSError as exc:
@@ -130,7 +138,7 @@ async def run_git(
         raise ForgeError(f"{args[0]} could not start: {exc.strerror or exc}") from exc
     if done.returncode != 0:
         detail = done.stderr.strip() or done.stdout.strip()
-        raise ForgeError(f"{' '.join(args)} failed: {detail}")
+        raise ForgeError(f"{_shown(args)} failed: {detail}")
     return done.stdout
 
 

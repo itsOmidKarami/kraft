@@ -167,7 +167,7 @@ def test_mr_body_is_unsigned_with_attribution_off(monkeypatch, meta, kw, expecte
 def test_mr_body_truncates_a_runaway_description_with_a_visible_marker(description):
     body = mr_ops.mr_body(WID, MRMeta(description=description))
     assert len(body) <= mr_ops.MR_BODY_MAX_CHARS
-    assert len(body.encode()) <= mr_ops.MR_BODY_MAX_BYTES
+    assert len(body.encode()) <= mr_ops.MR_BODY_MAX_BYTES < 128 * 1024
     assert body.endswith(f"*(truncated -- read the diff, this description did not fit)*{_FOOTER}")
 
 
