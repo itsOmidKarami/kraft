@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -690,6 +691,33 @@ async def _collect_review(
         )
         _write_collection(destination, head, round, [])
         return "automated review: no reviewer configured; nothing to collect\n", "done", None
+    log, status, note, collection = await _settle_review(
+        forge, db, repo=repo, orig_repo=orig_repo, branch=branch, head=head,
+        work_item_id=work_item_id, hook_point=hook_point, reviewers=reviewers,
+        bounds=bounds, grace=grace,
+    )  # fmt: skip
+    if collection is not None:
+        _write_collection(destination, head, round, collection)
+    return log, status, note
+
+
+async def _settle_review(
+    forge: Forge,
+    db,
+    *,
+    repo: Path,
+    orig_repo: Path,
+    branch: str,
+    head: str,
+    work_item_id: str,
+    hook_point: str,
+    reviewers: Reviewers,
+    bounds: WaitBounds,
+    grace: timedelta,
+) -> tuple[str, str, WaitNote, list[dict] | None]:
+    """One check of whether every reviewer has finished with `head`
+    (`settle.decide`): `waiting` with no collection yet, or `done` with what
+    each reviewer said."""
     # One reading of the clock, so the deadline this tests and the one
     # `waits.observe` tests are the same instant.
     now = waits.now()
@@ -714,10 +742,46 @@ async def _collect_review(
     )
     if decided.state == "pending":
         log = f"automated review: waiting for the reviewers to finish with {head[:7]}\n"
-        return log, "waiting", WaitNote(decided.next_at, {"memory": decided.memory}, False, now)
-    _write_collection(destination, head, round, decided.collection)
+        note = WaitNote(decided.next_at, {"memory": decided.memory}, False, now)
+        return log, "waiting", note, None
     log = f"automated review: {len(reviewers)} reviewer(s) finished with {head[:7]}\n"
-    return log, "done", WaitNote(None, {"memory": decided.memory}, timed_out, now)
+    note = WaitNote(None, {"memory": decided.memory}, timed_out, now)
+    return log, "done", note, decided.collection
+
+
+def _verdict(collection: list[dict]) -> tuple[list[str], list[str], list[str]]:
+    """What a settled review asks to change, with nothing in the node to read
+    it: each bot's unresolved threads, its newest review when that requests
+    changes and left no thread, and a check that finished without passing.
+    Also the reviewers whose summaries went unread (only an agent can tell
+    what one says), and the checks the deadline settled unfinished."""
+    findings: list[str] = []
+    unread: list[str] = []
+    unfinished: list[str] = []
+    for entry in collection:
+        for t in entry["threads"]:
+            where = ":".join(str(x) for x in (t.get("file"), t.get("line")) if x)
+            findings.append(f"{where}: {t['body']}" if where else t["body"])
+        for s in entry["summaries"]:
+            if s.get("state") == "CHANGES_REQUESTED":
+                if not entry["threads"]:
+                    findings.append(s["body"] or f"{entry['reviewer']} requested changes")
+            elif s["body"].strip():
+                unread.append(entry["reviewer"])
+        check = entry["check"]
+        if check is not None and check.get("finished"):
+            findings.append(f"{check['name']} {check['conclusion']}: {check.get('output') or ''}")
+        elif check is not None:
+            unfinished.append(check["name"])
+    return findings, sorted(set(unread)), unfinished
+
+
+def _as_findings(messages: Iterable[str]) -> list[dict]:
+    """An automated review's findings, as the node's recovery reads them."""
+    return [
+        {"severity": "important", "message": m, "source_plugin": "mr.automated_review"}
+        for m in messages
+    ]
 
 
 def _write_collection(destination: Path, head: str, round: int, collection: list[dict]) -> None:
@@ -765,6 +829,10 @@ async def _run_one(
     #: multi-repo item), with the grace period, wait bounds, session and round
     #: it records its collection under.
     collect: bool = False,
+    #: A single-repo item's review wait with nothing in the node to read what
+    #: it collects: a bot reviewer is still waited for until it has finished
+    #: with the head, as on the collect path, and Kraft reads the verdict itself.
+    settle_bots: bool = False,
     grace: timedelta = DEFAULT_GRACE,
     bounds: WaitBounds = DEFAULT_WAIT,
     session_id: str = "",
@@ -777,9 +845,9 @@ async def _run_one(
 
     The third element is None for every handler but a code-red `ci_poll`: one
     finding per failed job, for the fix-loop plumbing `on.ci.poll` now feeds
-    (Kraft-cbr §3). The fourth is None for every handler but the review wait's
-    collect path: what it decided about when to look again and what to remember
-    (`WaitNote`).
+    (Kraft-cbr §3). The fourth is None for every handler but a review wait
+    that settles on its bots (`collect` or `settle_bots`): what it decided
+    about when to look again and what to remember (`WaitNote`).
 
     `meta` is resolved once by the caller against the item's own worktree,
     not `repo` -- a multi-repo item's submodule targets are not where the
@@ -1013,6 +1081,28 @@ async def _run_one(
                 session_id=session_id,
                 round=round,
             )
+        case "automated_review" if settle_bots and any(r.bot is not None for r in reviewers):
+            head = await git._head_sha(repo, branch)
+            log, status, note, collection = await _settle_review(
+                forge, db, repo=repo, orig_repo=orig_repo, branch=branch, head=head,
+                work_item_id=work_item_id, hook_point=hook_point, reviewers=reviewers,
+                bounds=bounds, grace=grace,
+            )  # fmt: skip
+            if collection is not None:
+                found, unread, unfinished = _verdict(collection)
+                log += "".join(f"  {f}\n" for f in found)
+                if unread:
+                    log += (
+                        f"not read: the summary from {', '.join(unread)}; nothing in this node "
+                        "reads bot_feedback (see `kraft admin doctor`, triage_review_feedback)\n"
+                    )
+                if found:
+                    status, findings = "failed", _as_findings(found)
+                elif unfinished:
+                    # A check is never skipped: its timeout stops for a person,
+                    # as it does with no bot beside it.
+                    log += f"not finished by the deadline: {', '.join(unfinished)}\n"
+                    status = "waiting"
         case "automated_review":
             # One read. Which reviewer, which webhook or check, is the
             # backend's (`automated-review-implementation-is-not-template-
@@ -1044,15 +1134,7 @@ async def _run_one(
                 # Actionable feedback is a failed task *with findings*, which is
                 # what enters the node's recovery and fix loop
                 # (`post-draft-feedback-uses-node-recovery-controls`).
-                status = "failed"
-                findings = [
-                    {
-                        "severity": "important",
-                        "message": f,
-                        "source_plugin": "mr.automated_review",
-                    }
-                    for f in review.findings
-                ]
+                status, findings = "failed", _as_findings(review.findings)
             else:
                 # The reviewer itself errored. That says nothing about the
                 # code, so it must not spend a repair or a fix cycle (Ruling
@@ -1934,6 +2016,7 @@ async def run_task(
     awaiting_landing = next((t[0] for t in targets if t[0] not in merged_rows), None)
     log, status = "", "done"
     collect = handler == "automated_review" and reads_feedback and not multi
+    settle_bots = handler == "automated_review" and not multi
     note: WaitNote | None = None
     #: The members a conflict rebase moved (Kraft-puqxq).
     moved: list[Path] = []
@@ -2022,6 +2105,7 @@ async def run_task(
                     moved=moved if member else None,
                     run_dirs=run_dirs,
                     collect=collect,
+                    settle_bots=settle_bots,
                     grace=grace,
                     bounds=wait or DEFAULT_WAIT,
                     session_id=session_id,
@@ -2169,8 +2253,8 @@ async def _observed(
     made at all (`unobserved`, the forge's error) ends the wait as an `error`
     and keeps its status -- a failure stays a failure.
 
-    The review wait's collect path hands a `note`: its next check, its memory,
-    and the instant it decided at. Settled by the deadline, it is recorded as
+    A review wait that settles on its bots hands a `note`: its next check, its
+    memory, and the instant it decided at. Settled by the deadline, it is recorded as
     the pending observation `observe` turns into `timed_out` at that same
     instant, and the session still ends `done`: for this wait the deadline is a
     settle (`automated-review-timeout-settles-the-collect-path`), not a stop."""

@@ -220,6 +220,45 @@ def _comment(body, at):
             [{"id": "d1", "file": "calc.py", "line": 3, "body": "unused x"}],
             None,
         ),
+        # An approval, or its withdrawal, is the bot's activity, dated by its
+        # system note; a person's approval is not the bot's.
+        (
+            GLAB,
+            {
+                **_GLAB_BOT,
+                GLAB_NOTES: json.dumps(
+                    [
+                        *json.loads(_GLAB_BOT[GLAB_NOTES]),
+                        _glab_note(
+                            7,
+                            "coderabbitai",
+                            "approved this merge request",
+                            "2026-01-01T12:01:00Z",
+                            system=True,
+                        ),
+                        _glab_note(
+                            8,
+                            "a-person",
+                            "approved this merge request",
+                            "2026-01-01T12:02:00Z",
+                            system=True,
+                        ),
+                        _glab_note(
+                            9,
+                            "coderabbitai",
+                            "unapproved this merge request",
+                            "2026-01-01T12:03:00Z",
+                            system=True,
+                        ),
+                    ]
+                ),
+            },
+            BOT,
+            datetime(2026, 1, 1, 12, 3, 0, tzinfo=UTC),
+            [_comment("walkthrough", "2026-01-01T12:00:30Z")],
+            [{"id": "d1", "file": "calc.py", "line": 3, "body": "unused x"}],
+            None,
+        ),
         (
             GLAB,
             {
@@ -235,7 +274,7 @@ def _comment(body, at):
             {"name": "review-bot", "finished": True, "conclusion": "failed", "output": "2 issues"},
         ),
     ],
-    ids=["gh-bot", "gh-check", "gh-check-cancelled", "glab-bot", "glab-check"],
+    ids=["gh-bot", "gh-check", "gh-check-cancelled", "glab-bot", "glab-bot-approved", "glab-check"],
 )
 async def test_reviewer_feedback_reads(
     cli, tmp_path, backend, routes, reviewer, last_activity, summaries, threads, check
