@@ -20,7 +20,7 @@ from kraft.automated_review import AutomatedReview, as_reviewers
 from kraft.executor import dispatch
 
 from .nodes import forge_node
-from .test_run_chain import _multi_repo_item, _run_task
+from .test_run_chain import _multi_repo_item, _run_task, _with_origin
 
 ROOT = Path(__file__).resolve().parents[3]
 _BOT = {"bot": "coderabbitai"}
@@ -454,27 +454,62 @@ async def test_a_check_with_nothing_reading_it_takes_the_direct_path_and_its_tim
     assert got == "capped_out"
 
 
-async def test_a_multi_repo_item_takes_the_direct_path_whatever_its_node_reads(
-    item_on, database, run_dirs, tmp_path, monkeypatch
+@pytest.mark.parametrize(
+    "checks, again, ended",
+    [
+        # pkg: baseline at 0, resolved at 30, quiet by 90. root: first reached
+        # at 90, resolved at 120, quiet by 180.
+        ((0, 30, 90, 120, 180), False, "done"),
+        # pkg's bot opens a new thread at 130: the check stops at pkg again,
+        # and root keeps what it remembered without being read.
+        ((0, 30, 90, 120, 130), True, "waiting"),
+    ],
+    ids=["each-settles", "an-unread-repository-keeps-its-memory"],
+)
+async def test_a_multi_repo_item_settles_each_repository_s_bot_on_its_own_memory(
+    item_on, database, run_dirs, tmp_path, monkeypatch, wait_clock, checks, again, ended
 ):
-    """One triage across several repositories' feedback is follow-up work, so
-    such an item keeps failing the wait on feedback, and nothing is collected
-    and then dropped."""
+    """Each repository's bot is waited for until it has finished with that
+    repository's head, remembering its own threads between checks: here each
+    bot's only activity is resolving the thread it had open, which a check
+    sees only against what it remembered of that repository."""
     it, worktree, branch = await _multi_repo_item(item_on, database, run_dirs, tmp_path, "ignore")
-    write(worktree / "repos" / "pkg", "new.txt", "x\n")
-    commit_all(worktree / "repos" / "pkg")
-    fake = forge.FakeForge(
-        review_results=[forge.ReviewResult("actionable", findings=("calc.py:1: fix a1",))]
-    )
+    _with_origin(tmp_path, it, worktree)
+    for where, name in ((worktree / "repos" / "pkg", "pkg"), (worktree, "root")):
+        write(where, f"{name}.txt", "x\n")
+        commit_all(where)
+    reads: dict[str, int] = {}
 
-    status = await _run_task(
-        database, run_dirs, it, worktree, branch, fake, monkeypatch,
-        handler="automated_review", reviewers=(_A,), reads_feedback=True,
-    )  # fmt: skip
+    async def feedback(*, repo, branch, reviewers, since):
+        name = "pkg" if repo.name == "pkg" else "root"
+        reads[name] = reads.get(name, 0) + 1
+        opened = {1: [f"{name}1"], 5: ["pkg2"] if again and name == "pkg" else []}
+        return [_feedback(_A, threads=opened.get(reads[name], []))]
 
-    assert status == "failed"
-    assert fake.reviewers_asked == [(_A,)]
-    assert not list(run_dirs.base.rglob("bot_feedback.json"))
+    fake = forge.FakeForge()
+    monkeypatch.setattr(fake, "reviewer_feedback", feedback)
+    ask = {
+        "handler": "automated_review",
+        "reviewers": (_A,),
+        "reads_feedback": True,
+        "wait": forge.WaitBounds.from_seconds(timeout=600, initial=30, maximum=120),
+    }
+
+    got = []
+    for at in checks:
+        wait_clock.now = wait_clock.start + timedelta(seconds=at)
+        got.append(
+            await _run_task(database, run_dirs, it, worktree, branch, fake, monkeypatch, **ask)
+        )
+
+    assert got == ["waiting"] * 4 + [ended]
+    assert reads == {"pkg": 5, "root": 2 if again else 3}, "every check reads the bots' feedback"
+    assert not list(run_dirs.base.rglob("bot_feedback.json")), "one triage per item is follow-up"
+    if again:
+        wait = database.read(lambda c: waits.open_wait(c, it.id, "on.automated_review"))
+        [kept] = [m for repo, m in wait.last["memory"].items() if not repo.endswith("pkg")]
+        resolved = wait_clock.start + timedelta(seconds=120)
+        assert kept["bot:a"]["activity_at"] == resolved.isoformat()
 
 
 _FLAGGED = {
