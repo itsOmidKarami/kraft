@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { capKey, KEYS, limitLabel, SEVERITY_KEY, STUCK_KEY } from "./keys";
+import { ATTRIBUTION_KEY, capKey, KEYS, limitLabel, SEVERITY_KEY, STUCK_KEY } from "./keys";
 import { sectionOfKey, sectionOfProblem, SECTIONS } from "./sections";
 import { parse, parseAge, parseSize, raw, show } from "./units";
 
 describe("Policy sections", () => {
   it("puts every key the page edits in exactly one section", () => {
-    const keys = [...Object.values(KEYS).map((k) => k.key), SEVERITY_KEY.key, STUCK_KEY.key, capKey("default", "tasks", "time_cap_minutes").key, capKey("maximum", "work_item", "budget_usd").key, "loops.verification.fix_loop.attempts"];
+    const keys = [...Object.values(KEYS).map((k) => k.key), SEVERITY_KEY.key, STUCK_KEY.key, ATTRIBUTION_KEY.key, capKey("default", "tasks", "time_cap_minutes").key, capKey("maximum", "work_item", "budget_usd").key, "loops.verification.fix_loop.attempts"];
     for (const k of keys) expect(sectionOfKey(k), k).not.toBeNull();
     expect(sectionOfKey(KEYS.daily.key)).toBe("limits");
     expect(sectionOfKey(KEYS.attemptsMax.key)).toBe("loops");
@@ -13,6 +13,7 @@ describe("Policy sections", () => {
     expect(sectionOfKey(KEYS.concurrent.key)).toBe("housekeeping");
     expect(sectionOfKey(KEYS.relaunch.key)).toBe("housekeeping");
     expect(sectionOfKey(KEYS.forge.key)).toBe("housekeeping");
+    expect(sectionOfKey(ATTRIBUTION_KEY.key)).toBe("housekeeping");
     expect(sectionOfKey("allowed_tools")).toBeNull();
   });
 

@@ -28,6 +28,13 @@ from kraft.worker.worktree_read import read_worktree_file
 #: from the smaller one, not from whichever forge this item happens to use.
 MR_BODY_MAX_CHARS = 65_536
 
+#: Where the footer every merge request is signed with points: the docs site.
+KRAFT_URL = "https://kraft-sdlc.dev/"
+
+#: Whether `mr_body` signs the description, set from `policy.attribution.mr`
+#: at startup and on reload.
+ATTRIBUTION = True
+
 _TRUNCATION_MARKER = "\n\n*(truncated -- read the diff, this description did not fit)*"
 
 #: One agent-authored scalar's ceiling. A label or a username is short; 200
@@ -151,53 +158,36 @@ def meta_flags(meta: MRMeta) -> list[str]:
     return flags
 
 
-def _default_body(work_item_id: str, branch: str, commits: tuple[str, ...]) -> str:
-    """Today's body: a fixed preamble and the commit list. What `mr_body`
-    falls back to whenever there is no summary prose worth leading with --
-    this must stay byte-for-byte what it always was (spec §5's "done when")."""
-    lines = [f"Opened by Kraft for work item {work_item_id}.", ""]
-    if commits:
-        lines.append("Commits on this branch:")
-        lines.append("")
-        lines += [f"- {c}" for c in commits]
-        lines.append("")
-    lines.append(f"Branch `{branch}`. Review the diff and the pipeline before merging.")
-    return "\n".join(lines)
-
-
 def mr_body(
-    work_item_id: str,
-    branch: str,
-    commits: tuple[str, ...],
-    meta: MRMeta = _EMPTY_META,
+    work_item_id: str, meta: MRMeta = _EMPTY_META, *, title: str = "", brief: str = ""
 ) -> str:
-    """The merge request description, rebuilt from the branch as it stands.
+    """The merge request description: the agent's own, as written, or, when
+    there is none, the work item's brief under its full title (only when the
+    MR title had to clip it). Signed with a footer naming Kraft and the work
+    item, kept whole when the rest is truncated, unless `ATTRIBUTION` is off.
 
-    Rebuilt and not appended: `open_mr` runs before verify and mr_checks add
-    their commits, so a description written once describes a branch that no
-    longer exists (Kraft-c09h). An authored body goes stale the same way, for
-    the same reason -- every call rebuilds from scratch.
+    No commit list and no branch line: the forge already shows both, and every
+    sync rewrote them back over a person's edit. Rebuilt on every call all the
+    same, so an authored body re-read after a repair replaces the old one
+    (Kraft-c09h).
 
-    Falls back to today's fixed body when there is no authored description to
-    lead with: this is the one path with no filesystem or database of its
-    own, so a caller that could not resolve the artifact (missing node,
-    missing file, a path that failed containment) hands in an empty `MRMeta`
-    and gets exactly what `open_mr` has always produced.
+    A caller that could not resolve the artifact (missing node, missing file, a
+    path that failed containment) hands in an empty `MRMeta` and still gets a
+    body: this is the one path with no filesystem or database of its own.
     """
-    if not meta.description:
-        return _default_body(work_item_id, branch, commits)
+    sign = f"_Opened by [Kraft]({KRAFT_URL}) for work item `{work_item_id}`._"
+    body = meta.description.strip()
+    if not body:
+        head = title.strip()
+        body = "\n\n".join(p for p in (head if head != mr_title(head) else "", brief.strip()) if p)
+    if not body:
+        # Never blank: unsigned and with nothing else to say, it is the title.
+        return sign if ATTRIBUTION else title.strip() or f"Work item {work_item_id}"
+    footer = f"\n\n---\n{sign}" if ATTRIBUTION else ""
 
-    parts = [meta.description]
-    if commits:
-        commit_list = "\n".join(f"- {c}" for c in commits)
-        parts.append(
-            f"<details>\n<summary>Commits on this branch</summary>\n\n{commit_list}\n\n</details>"
-        )
-    parts.append(f"Branch `{branch}`. Review the diff and the pipeline before merging.")
-    body = "\n\n".join(parts)
-
-    if len(body) > MR_BODY_MAX_CHARS:
-        cut = MR_BODY_MAX_CHARS - len(_TRUNCATION_MARKER)
+    room = MR_BODY_MAX_CHARS - len(footer)
+    if len(body) > room:
+        cut = room - len(_TRUNCATION_MARKER)
         # Land on a newline rather than mid-line, if one is close enough to be
         # worth it -- cosmetic only, so a body with no newline in the last
         # stretch just cuts at `cut` rather than searching arbitrarily far back.
@@ -206,7 +196,7 @@ def mr_body(
             cut = newline
         body = body[:cut] + _TRUNCATION_MARKER
 
-    return body
+    return body + footer
 
 
 #: A forge title is a headline; a Kraft work item title is a paragraph (the

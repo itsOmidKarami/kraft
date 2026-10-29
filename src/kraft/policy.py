@@ -140,6 +140,16 @@ class ArchiveInput(BaseModel):
     after_days: Annotated[StrictInt, Field(ge=0)] | None = None
 
 
+class AttributionInput(BaseModel):
+    """`attribution`: whether what Kraft publishes says Kraft made it. The
+    person's call, not a repo's, so it lives here and not in `repos.yaml`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: The "Opened by Kraft" footer on every merge request description.
+    mr: StrictBool = True
+
+
 class AutoCleanupInput(BaseModel):
     """`storage.worktrees.auto_cleanup`: its presence lets Kraft archive
     finished items for the limit without a person (`kraft.storage.tick`),
@@ -215,6 +225,7 @@ class PolicyInput(BaseModel):
     max_concurrent: PositiveInt = 3
     archive: ArchiveInput | None = None
     storage: StorageInput | None = None
+    attribution: AttributionInput | None = None
     auto_escalate_stuck: StrictBool = True
     auto_escalate_stuck_cap: PositiveInt = DEFAULT_AUTO_ESCALATE_STUCK_CAP
     auto_escalate_delay_s: Annotated[StrictInt, Field(ge=0)] = 0
@@ -387,6 +398,8 @@ class Policy:
     agent_idle_minutes: int = 30
     #: Mirrors `PolicyInput.forge_poll_s` (B8's MR-closed poller cadence).
     forge_poll_s: int = 300
+    #: `attribution.mr`: sign merge request descriptions (`forge.mr.mr_body`).
+    mr_attribution: bool = True
 
     @classmethod
     def from_input(cls, parsed: PolicyInput, *, source: str | Path) -> Policy:
@@ -428,6 +441,7 @@ class Policy:
             forge_cli_timeout_s=float(parsed.forge_cli_timeout_s),
             agent_idle_minutes=parsed.agent_idle_minutes,
             forge_poll_s=parsed.forge_poll_s,
+            mr_attribution=parsed.attribution.mr if parsed.attribution else True,
         )
 
     def cap_for(self, key: str, override: CapOverride | dict | None = None) -> Cap:

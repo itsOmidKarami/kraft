@@ -1,8 +1,9 @@
-import { KEYS } from "./keys";
-import { PolicyCell } from "./PolicyCell";
+import { ATTRIBUTION_KEY, KEYS } from "./keys";
+import { PolicyCell, setValue } from "./PolicyCell";
 import { SectionHead } from "./SectionHead";
 import { problemAt, type Ctx } from "./ctx";
 import { BOARD_AND_FORGE } from "../sharedWords";
+import { Chip } from "../../ui/Chip";
 
 /** Housekeeping (Decisions §12): how this install runs: instance-wide, no repo, chain or item can change these. */
 export function Housekeeping({ ctx }: { ctx: Ctx }) {
@@ -17,6 +18,7 @@ export function Housekeeping({ ctx }: { ctx: Ctx }) {
   const max = p.housekeeping.max_concurrent.value;
   const cleanup = p.housekeeping.storage_auto_cleanup?.value ?? null;
   const num = (v: unknown) => (typeof v === "number" ? v : null);
+  const signed = p.housekeeping.mr_attribution?.value !== false;
   return (
     <>
       <SectionHead id="housekeeping">How this install runs. Instance-wide: no repo, chain or item can change these.</SectionHead>
@@ -29,6 +31,15 @@ export function Housekeeping({ ctx }: { ctx: Ctx }) {
         <h3 className="pol-h2">{BOARD_AND_FORGE}</h3>
         {row("archive", "archive after", p.housekeeping.archive_after_days.value, "Completed and abandoned items older than this are archived. Blank never archives. The board's Done group states this number.")}
         {row("forge", "forge call timeout", num(p.retries.forge_cli_timeout_s?.value), "How long one gh, glab or git call may run before it counts as a forge error. Read at startup.")}
+        <div className="pol-one">
+          <span className="pol-k">merge request footer</span>
+          <span className="pol-chips" role="group" aria-label="Kraft footer on merge requests">
+            {[true, false].map((on) => (
+              <Chip key={String(on)} pressed={signed === on} changed={changes.has(ATTRIBUTION_KEY.key)} onClick={() => void setValue(draft, ATTRIBUTION_KEY, on)}>{on ? "on" : "off"}</Chip>
+            ))}
+          </span>
+          <span className="pol-help">{signed ? "Every merge request description Kraft writes ends with an “Opened by Kraft” footer naming its work item." : "Off: Kraft adds no footer to merge request descriptions."}</span>
+        </div>
       </section>
       <section className="pol-card" aria-label="Storage">
         <h3 className="pol-h2">Storage</h3>

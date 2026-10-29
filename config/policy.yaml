@@ -66,6 +66,12 @@ forge_cli_timeout_s: 120
 # reload.
 agent_idle_minutes: 30
 
+# Whether Kraft signs what it publishes. On by default: every merge request
+# description ends with an "Opened by Kraft" footer naming the work item.
+# `mr: false` leaves it off. Read at startup and on reload.
+# attribution:
+#   mr: true
+
 # How often the MR-closed poller asks the forge about every item parked at a
 # merge-request node, in seconds (minimum 30). Raise it on a rate-limited
 # forge or a large board; this always runs, so there is no "off".

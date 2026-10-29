@@ -19,6 +19,19 @@
       "title": "ArchiveInput",
       "type": "object"
     },
+    "AttributionInput": {
+      "additionalProperties": false,
+      "description": "`attribution`: whether what Kraft publishes says Kraft made it. The\nperson's call, not a repo's, so it lives here and not in `repos.yaml`.",
+      "properties": {
+        "mr": {
+          "default": true,
+          "title": "Mr",
+          "type": "boolean"
+        }
+      },
+      "title": "AttributionInput",
+      "type": "object"
+    },
     "AutoCleanupInput": {
       "additionalProperties": false,
       "description": "`storage.worktrees.auto_cleanup`: its presence lets Kraft archive\nfinished items for the limit without a person (`kraft.storage.tick`),\nnever one that ended less than `min_age` ago.",
@@ -467,6 +480,17 @@
       "anyOf": [
         {
           "$ref": "#/$defs/ArchiveInput"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "attribution": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AttributionInput"
         },
         {
           "type": "null"

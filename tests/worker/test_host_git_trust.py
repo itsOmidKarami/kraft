@@ -526,7 +526,6 @@ async def _every_member_host_call(ws, database) -> None:
         lambda: forge.assert_clean(ws.wt, "main"),
         # M2: publication's reads of the member's branch.
         lambda: forge.git.commits_ahead(ws.member, branch, "main"),
-        lambda: forge.git.commits_on(ws.member, branch, "main"),
         lambda: forge.git.source_changed(ws.member, branch, base="main", exclude=set()),
         lambda: forge.git._head_sha(ws.member),
         # M9: the root's coverage check, which describes each member.

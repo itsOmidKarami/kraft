@@ -3,7 +3,7 @@ import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { plural } from "../../../format";
 import { detailOf, request } from "../../http";
 import { outerValue, problemAt, scopeUnset, type Ctx } from "../../settings/policy/ctx";
-import { capKey, KEYS, limitLabel, SEVERITIES, SEVERITY_KEY, STUCK_KEY, type KeySpec } from "../../settings/policy/keys";
+import { capKey, KEYS, limitLabel, SEVERITIES, SEVERITY_KEY, STUCK_KEY, ATTRIBUTION_KEY, type KeySpec } from "../../settings/policy/keys";
 import { LOOP_WINS, SECTIONS, sectionOfProblem, type Section } from "../../settings/policy/sections";
 import { CAP_LABEL, LEVEL_LABEL, LEVELS, policyOf } from "../../settings/policy/types";
 import { parse, parseAge, parseSize, raw, show, sourceWord, UNIT_WORD } from "../../settings/policy/units";
@@ -255,6 +255,7 @@ function Housekeeping(e: Edits) {
   const max = p.housekeeping.max_concurrent.value;
   const cleanup = p.housekeeping.storage_auto_cleanup?.value ?? null;
   const num = (v: unknown) => (typeof v === "number" ? v : null);
+  const signed = p.housekeeping.mr_attribution?.value !== false;
   return (
     <>
       <Group title="Runs" note="How this install runs. Instance-wide: no repo, chain or item can change these." rows={[
@@ -264,6 +265,7 @@ function Housekeeping(e: Edits) {
       <Group title={BOARD_AND_FORGE} rows={[
         single(e, KEYS.archive, "archive after", p.housekeeping.archive_after_days.value, { never: "never", sub: "completed and abandoned items; empty never archives" }),
         single(e, KEYS.forge, "forge call timeout", num(p.retries.forge_cli_timeout_s?.value), { sub: "read at startup" }),
+        { label: "merge request footer", sub: signed ? "ends each description with “Opened by Kraft”" : "off: Kraft adds no footer", sw: signed, changed: ctx.changes.has(ATTRIBUTION_KEY.key), onSwitch: (on) => void sendValue(ctx.draft, ATTRIBUTION_KEY, on) },
       ]} />
       <Group title="Storage" rows={[
         sizeRow(e, KEYS.storageLimit, "limit", p.housekeeping.storage_limit?.value ?? null, "no limit", "over it, new starts wait until you make room"),

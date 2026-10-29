@@ -809,6 +809,8 @@ async def _run_one(
     handler: str,
     hook_point: str,
     meta: mr_ops.MRMeta = _EMPTY_META,
+    #: The work item's brief, for the description when the agent wrote none.
+    brief: str = "",
     has_rebase_bounce: bool = False,
     reviewers: Reviewers = (),
     #: The repository's `ci_checks:`; False skips both CI waits.
@@ -863,7 +865,7 @@ async def _run_one(
     """
     findings: list[dict] | None = None
     note: WaitNote | None = None
-    body = mr_ops.mr_body(work_item_id, branch, await git.commits_on(repo, branch, base), meta)
+    body = mr_ops.mr_body(work_item_id, meta, title=title, brief=brief)
     # Kraft-vz8e: an MR with no commits runs no CI, so `mr_checks` would wait
     # out its cap on a pipeline that never starts. Refused before it is
     # opened or readied, as a `config_error`: a fix loop has nothing to fix.
@@ -1892,7 +1894,8 @@ async def run_task(
     # (`work-item-target-selection-is-immutable`).
     item = db.read(
         lambda c: c.execute(
-            "SELECT materialized_chain, root_merge_policy FROM work_items WHERE id = ?",
+            "SELECT materialized_chain, root_merge_policy, description "
+            "FROM work_items WHERE id = ?",
             (work_item_id,),
         ).fetchone()
     )
@@ -2092,6 +2095,7 @@ async def run_task(
                     handler=handler,
                     hook_point=hook_point,
                     meta=meta,
+                    brief=(item["description"] or "") if item is not None else "",
                     has_rebase_bounce=has_rebase_bounce,
                     reviewers=reviewers,
                     ci_checks=ci_checks,
@@ -2465,7 +2469,13 @@ async def _bump_pointer_only_root(
         branch=branch,
         base=base,
         title=f"chore: bump submodule pointers for {title}",
-        body=f"Moves {', '.join(bumped)} to the revisions merged for work item {work_item_id}.",
+        body=mr_ops.mr_body(
+            work_item_id,
+            mr_ops.MRMeta(
+                description=f"Moves {', '.join(bumped)} to the revisions merged for "
+                f"work item {work_item_id}."
+            ),
+        ),
     )
     await db.write(
         lambda c: store.update_repo_state(

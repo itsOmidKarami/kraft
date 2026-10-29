@@ -237,18 +237,20 @@ async def test_open_mr_uses_the_authored_title_labels_and_description(run_forge,
     assert fake.opened_bodies[number].startswith("## What this introduces")
 
 
-async def test_open_mr_without_the_artifact_opens_the_default_body(run_forge):
-    """Spec §5: no artifact at all -- an install that never ran `on.mr.describe`,
-    or one that failed to write it -- must open exactly today's MR, not fail
-    the node."""
+async def test_open_mr_without_the_artifact_opens_the_default_body(run_forge, item_on, tmp_path):
+    """Spec §5: with no describe artifact the MR still opens, from the full title and brief."""
     fake = forge.FakeForge()
-
-    assert await run_forge(fake, "open_mr", "x8", title="the work item title") == ("done", "done")
+    run_forge.item = await item_on(back_half(), repo=tmp_path, description="The hall needs a door.")
+    title = "Add a door\nand a window"
+    assert await run_forge(fake, "open_mr", "x8", title=title) == ("done", "done")
 
     (number,) = fake.opened
-    assert fake.opened_titles[number] == "the work item title"
+    assert fake.opened_titles[number] == "Add a door"
     assert fake.opened_meta[number] == forge.MRMeta()
-    assert fake.opened_bodies[number] == forge.mr_body("w1", "kraft/w1", ())
+    assert fake.opened_bodies[number] == (
+        "Add a door\nand a window\n\nThe hall needs a door.\n\n---\n"
+        "_Opened by [Kraft](https://kraft-sdlc.dev/) for work item `w1`._"
+    )
 
 
 async def test_sync_mr_republishes_the_authored_description(run_forge, tmp_path):

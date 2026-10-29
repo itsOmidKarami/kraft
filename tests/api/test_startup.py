@@ -313,6 +313,21 @@ def test_startup_local_link_boot_fails_after_the_link(no_link_installed, tmp_pat
     assert ended == [True]
 
 
+def test_start_up_applies_the_policys_mr_attribution(tmp_path, monkeypatch, templates_dir):
+    """A restart with `attribution.mr: false` keeps the footer off; only a
+    reload set it before."""
+    from support import api as api_support
+
+    from kraft.adapters.forge import mr as forge_mr
+
+    policy = templates_dir / "policy.yaml"
+    policy.write_text(policy.read_text() + "\nattribution: { mr: false }\n")
+    monkeypatch.setattr(forge_mr, "ATTRIBUTION", True)
+
+    with api_support._client(tmp_path, monkeypatch, templates_dir=templates_dir):
+        assert forge_mr.ATTRIBUTION is False
+
+
 def test_boot_deletes_a_stop_now_marker_no_server_read(tmp_path, client_factory):
     """`kraft admin stop --now` writes the marker before the SIGTERM; one that never reached a
     server must not turn the next, clean stop into a `--now`."""
