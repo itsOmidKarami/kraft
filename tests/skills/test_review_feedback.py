@@ -65,7 +65,7 @@ def test_it_lists_what_it_declined_in_the_summary(text):
 def test_the_seeded_triage_task_selects_this_skill_and_reads_the_feedback():
     task = yaml.safe_load(LIBRARY.read_text())["tasks"]["triage_review_feedback"]
     assert task["skill"] == "kraft:review-feedback"
-    assert task["inputs"] == ["bot_feedback", "previous_review"]
+    assert task["inputs"] == ["bot_feedback", "previous_review", "pr_rules"]
     assert task["profile"] == "fast"
 
 
