@@ -25,12 +25,12 @@ export function Housekeeping({ ctx }: { ctx: Ctx }) {
       <section className="pol-card" aria-label="Runs">
         <h3 className="pol-h2">Runs</h3>
         {row("concurrent", "max active items", max, `${ctx.active != null ? `${ctx.active} of ${max ?? "—"} slots in use now. ` : ""}Counts every active item, however it was started. Starting past it is refused; Auto-intake only fills free slots.`)}
-        {row("relaunch", "rate-limit relaunches", num(p.retries.rate_limit_retries?.value), "Relaunches after a rate limit before the item stops for a person.")}
+        {row("relaunch", "rate-limit relaunches", num(p.retries.rate_limit_retries?.value), "Relaunches after a rate limit before the item stops for a person. An item already being relaunched keeps the number it started with.")}
       </section>
       <section className="pol-card" aria-label={BOARD_AND_FORGE}>
         <h3 className="pol-h2">{BOARD_AND_FORGE}</h3>
         {row("archive", "archive after", p.housekeeping.archive_after_days.value, "Completed and abandoned items older than this are archived. Blank never archives. The board's Done group states this number.")}
-        {row("forge", "forge call timeout", num(p.retries.forge_cli_timeout_s?.value), "How long one gh, glab or git call may run before it counts as a forge error. Read at startup.")}
+        {row("forge", "forge call timeout", num(p.retries.forge_cli_timeout_s?.value), "How long one gh, glab or git call may run before it counts as a forge error.")}
         <div className="pol-one">
           <span className="pol-k">merge request footer</span>
           <span className="pol-chips" role="group" aria-label="Kraft footer on merge requests">

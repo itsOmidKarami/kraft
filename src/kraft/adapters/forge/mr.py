@@ -28,6 +28,11 @@ from kraft.worker.worktree_read import read_worktree_file
 #: from the smaller one, not from whichever forge this item happens to use.
 MR_BODY_MAX_CHARS = 65_536
 
+#: gh and glab take the body as one argument, and Linux refuses an argument over
+#: 128 KiB (MAX_ARG_STRLEN) before either starts. A character can be four bytes,
+#: so the character cap alone lets a long non-ASCII body through to that refusal.
+MR_BODY_MAX_BYTES = 100_000
+
 #: Where the footer every merge request is signed with points: the docs site.
 KRAFT_URL = "https://kraft-sdlc.dev/"
 
@@ -186,15 +191,19 @@ def mr_body(
     footer = f"\n\n---\n{sign}" if ATTRIBUTION else ""
 
     room = MR_BODY_MAX_CHARS - len(footer)
-    if len(body) > room:
-        cut = room - len(_TRUNCATION_MARKER)
+    room_bytes = MR_BODY_MAX_BYTES - len(footer.encode())
+    if len(body) > room or len(body.encode()) > room_bytes:
+        head = body[: room - len(_TRUNCATION_MARKER)]
+        # The byte cut may end mid-character; `ignore` drops that partial one.
+        head = head.encode()[: room_bytes - len(_TRUNCATION_MARKER.encode())]
+        head = head.decode(errors="ignore")
         # Land on a newline rather than mid-line, if one is close enough to be
         # worth it -- cosmetic only, so a body with no newline in the last
-        # stretch just cuts at `cut` rather than searching arbitrarily far back.
-        newline = body.rfind("\n", 0, cut)
-        if newline > cut - 200:
-            cut = newline
-        body = body[:cut] + _TRUNCATION_MARKER
+        # stretch just cuts where it is rather than searching arbitrarily far back.
+        newline = head.rfind("\n")
+        if newline > len(head) - 200:
+            head = head[:newline]
+        body = head + _TRUNCATION_MARKER
 
     return body + footer
 

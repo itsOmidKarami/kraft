@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from kraft.adapters import subprocess as _subprocess
+from kraft.adapters.forge import git as forge_git
 from kraft.adapters.forge import mr as forge_mr
 from kraft.api import deps
 
@@ -21,6 +22,17 @@ def test_apply_policy_sets_the_idle_limit(tmp_path, monkeypatch):
     deps.apply_policy(SimpleNamespace(), *deps.read_policy(tmp_path))
 
     assert _subprocess.IDLE_MINUTES == 7
+
+
+def test_apply_policy_sets_the_forge_timeout(tmp_path, monkeypatch):
+    """A reload that changes `forge_cli_timeout_s` reaches the next forge call,
+    as Settings tells a person when they publish one."""
+    (tmp_path / "policy.yaml").write_text(_BASE + "forge_cli_timeout_s: 45\n")
+    monkeypatch.setattr(forge_git, "CLI_TIMEOUT_S", 120.0)
+
+    deps.apply_policy(SimpleNamespace(), *deps.read_policy(tmp_path))
+
+    assert forge_git.CLI_TIMEOUT_S == 45.0
 
 
 @pytest.mark.parametrize(

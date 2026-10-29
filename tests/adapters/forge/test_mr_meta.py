@@ -157,9 +157,17 @@ def test_mr_body_is_unsigned_with_attribution_off(monkeypatch, meta, kw, expecte
     assert mr_ops.mr_body(WID, *meta, **kw) == expected
 
 
-def test_mr_body_truncates_a_runaway_description_with_a_visible_marker():
-    body = mr_ops.mr_body(WID, MRMeta(description="x" * 200_000))
+@pytest.mark.parametrize(
+    "description",
+    # Characters, then bytes: 60k Arabic letters fit the character cap at
+    # 120 KB, over what Linux lets gh or glab take as one argument.
+    ["x" * 200_000, "\u0627" * 60_000, "\u0627\n" * 40_000],
+    ids=["too-many-characters", "too-many-bytes", "too-many-bytes-with-lines"],
+)
+def test_mr_body_truncates_a_runaway_description_with_a_visible_marker(description):
+    body = mr_ops.mr_body(WID, MRMeta(description=description))
     assert len(body) <= mr_ops.MR_BODY_MAX_CHARS
+    assert len(body.encode()) <= mr_ops.MR_BODY_MAX_BYTES < 128 * 1024
     assert body.endswith(f"*(truncated -- read the diff, this description did not fit)*{_FOOTER}")
 
 
