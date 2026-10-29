@@ -402,11 +402,12 @@ async def test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by
 
 
 @pytest.mark.parametrize(
-    "threads, summary, findings",
+    "threads, summary, mount, findings",
     [
         # A file-level comment has no line to name.
         (
             [{"id": "d1", "file": "calc.py", "line": None, "body": "split this file"}],
+            None,
             None,
             ["calc.py: split this file"],
         ),
@@ -415,12 +416,15 @@ async def test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by
         (
             [{"id": "d1", "file": "calc.py", "line": 3, "body": "unused x"}],
             "walkthrough",
+            None,
             ["calc.py:3: unused x"],
         ),
+        # A member's finding with no path of its own still names the member.
+        ([], "split this", "repos/pkg", ["[repos/pkg] split this"]),
     ],
-    ids=["file-without-line", "changes-requested-with-threads"],
+    ids=["file-without-line", "changes-requested-with-threads", "a-member-s-pathless-finding"],
 )
-def test_kraft_s_own_verdict_names_each_finding_once(threads, summary, findings):
+def test_kraft_s_own_verdict_names_each_finding_once(threads, summary, mount, findings):
     review = {"kind": "review", "state": "CHANGES_REQUESTED", "body": summary, "updated_at": ""}
     entry = {
         "reviewer": "bot:a",
@@ -430,7 +434,7 @@ def test_kraft_s_own_verdict_names_each_finding_once(threads, summary, findings)
         "check": None,
     }
 
-    assert forge.run._verdict([entry]) == (findings, [], [])
+    assert forge.run._verdict([entry], mount) == (findings, [], [])
 
 
 async def test_a_check_with_nothing_reading_it_takes_the_direct_path_and_its_timeout_stops(
@@ -454,6 +458,17 @@ async def test_a_check_with_nothing_reading_it_takes_the_direct_path_and_its_tim
     assert got == "capped_out"
 
 
+async def _both_halves_changed(item_on, database, run_dirs, tmp_path):
+    """A workspace item whose member (`repos/pkg`) and root both changed, so
+    each opens a merge request and the review wait reads both."""
+    it, worktree, branch = await _multi_repo_item(item_on, database, run_dirs, tmp_path, "ignore")
+    _with_origin(tmp_path, it, worktree)
+    for where, name in ((worktree / "repos" / "pkg", "pkg"), (worktree, "root")):
+        write(where, f"{name}.txt", "x\n")
+        commit_all(where)
+    return it, worktree, branch
+
+
 @pytest.mark.parametrize(
     "checks, again, ended",
     [
@@ -473,11 +488,7 @@ async def test_a_multi_repo_item_settles_each_repository_s_bot_on_its_own_memory
     repository's head, remembering its own threads between checks: here each
     bot's only activity is resolving the thread it had open, which a check
     sees only against what it remembered of that repository."""
-    it, worktree, branch = await _multi_repo_item(item_on, database, run_dirs, tmp_path, "ignore")
-    _with_origin(tmp_path, it, worktree)
-    for where, name in ((worktree / "repos" / "pkg", "pkg"), (worktree, "root")):
-        write(where, f"{name}.txt", "x\n")
-        commit_all(where)
+    it, worktree, branch = await _both_halves_changed(item_on, database, run_dirs, tmp_path)
     reads: dict[str, int] = {}
 
     async def feedback(*, repo, branch, reviewers, since):
@@ -510,6 +521,74 @@ async def test_a_multi_repo_item_settles_each_repository_s_bot_on_its_own_memory
         [kept] = [m for repo, m in wait.last["memory"].items() if not repo.endswith("pkg")]
         resolved = wait_clock.start + timedelta(seconds=120)
         assert kept["bot:a"]["activity_at"] == resolved.isoformat()
+
+
+@pytest.mark.parametrize(
+    "opened, checks, finding",
+    [
+        # The member's bot opens a thread: its path is given from the item's
+        # checkout, where the fix loop works.
+        ({"pkg": [[], ["pkg1"]]}, (0, 30, 90), "repos/pkg/calc.py:1: fix pkg1"),
+        # The root's is the checkout itself.
+        (
+            {"pkg": [["pkg0"], []], "root": [[], ["root1"]]},
+            (0, 30, 90, 120, 180),
+            "calc.py:1: fix root1",
+        ),
+    ],
+    ids=["a-member-s-thread", "the-root-s-thread"],
+)
+async def test_a_multi_repo_item_s_bot_findings_reach_the_fix_loop_named_from_its_checkout(
+    item_on, database, run_dirs, tmp_path, monkeypatch, wait_clock, opened, checks, finding
+):
+    it, worktree, branch = await _both_halves_changed(item_on, database, run_dirs, tmp_path)
+    reads: dict[str, int] = {}
+
+    async def feedback(*, repo, branch, reviewers, since):
+        name = "pkg" if repo.name == "pkg" else "root"
+        reads[name] = reads.get(name, 0) + 1
+        script = opened.get(name, [[]])
+        return [_feedback(_A, threads=script[min(reads[name], len(script)) - 1])]
+
+    fake = forge.FakeForge()
+    monkeypatch.setattr(fake, "reviewer_feedback", feedback)
+    ask = {
+        "handler": "automated_review",
+        "reviewers": (_A,),
+        "wait": forge.WaitBounds.from_seconds(timeout=600, initial=30, maximum=120),
+    }
+
+    got = []
+    for at in checks:
+        wait_clock.now = wait_clock.start + timedelta(seconds=at)
+        got.append(
+            await _run_task(database, run_dirs, it, worktree, branch, fake, monkeypatch, **ask)
+        )
+
+    assert got[-1] == "failed"
+    result = Path(it.sessions()[-1]["result_path"])
+    assert [f["message"] for f in json.loads(result.read_text())["findings"]] == [finding]
+
+
+async def test_a_member_s_check_finding_reaches_the_fix_loop_tagged_with_the_member(
+    item_on, database, run_dirs, tmp_path, monkeypatch
+):
+    """Check-only reviewers take the direct path; a member's failed check is
+    still this item's finding, tagged with the member it was read on."""
+    it, worktree, branch = await _both_halves_changed(item_on, database, run_dirs, tmp_path)
+    fake = forge.FakeForge(
+        review_results=[forge.ReviewResult("actionable", findings=("scan failed: 2 issues",))]
+    )
+
+    status = await _run_task(
+        database, run_dirs, it, worktree, branch, fake, monkeypatch,
+        handler="automated_review", reviewers=(_SCAN,),
+    )  # fmt: skip
+
+    assert status == "failed"
+    result = Path(it.sessions()[-1]["result_path"])
+    findings = json.loads(result.read_text())["findings"]
+    assert [f["message"] for f in findings] == ["[repos/pkg] scan failed: 2 issues"]
 
 
 _FLAGGED = {
