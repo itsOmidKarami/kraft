@@ -325,10 +325,8 @@ def test_cron_due_matches_star_and_lists():
         pytest.param("", "agent_idle_minutes", 30, id="agent-idle-default"),
         pytest.param("forge_poll_s: 60\n", "forge_poll_s", 60, id="forge-poll"),
         pytest.param("", "forge_poll_s", 300, id="forge-poll-default"),
-        pytest.param(
-            "attribution: { mr: false }\n", "mr_attribution", False, id="mr-attribution-off"
-        ),
-        pytest.param("", "mr_attribution", True, id="mr-attribution-default"),
+        pytest.param("attribution: {mr: false}\n", "mr_attribution", False, id="mr-attr-off"),
+        pytest.param("", "mr_attribution", True, id="mr-attr-default"),
         pytest.param("", "triggers", [], id="triggers-default"),
     ],
 )
