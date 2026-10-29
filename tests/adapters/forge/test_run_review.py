@@ -347,6 +347,12 @@ _SCAN = AutomatedReview(check="scan")
 _RUNNING = forge.ReviewerFeedback(
     _SCAN, None, check={"name": "scan", "finished": False, "conclusion": None, "output": ""}
 )
+#: A check that finished red.
+_FAILED = forge.ReviewerFeedback(
+    _SCAN,
+    None,
+    check={"name": "scan", "finished": True, "conclusion": "failed", "output": "2 issues"},
+)
 
 
 @pytest.mark.parametrize(
@@ -362,6 +368,8 @@ _RUNNING = forge.ReviewerFeedback(
         ([_said(_A, 1, body="LGTM")], 61, "done", "not read: the summary from bot:a"),
         # Never active: the deadline settles it, and the item carries on.
         ([_feedback(_A)], 601, "done", "settled at the wait's deadline"),
+        # A check beside the bot that finished red is a finding, like the bot's.
+        ([_feedback(_A, 1), _FAILED], 61, "failed", "scan failed: 2 issues"),
         # A check beside the bot is never skipped: unfinished at the deadline,
         # it stops for a person as it would alone.
         ([_feedback(_A), _RUNNING], 601, "capped_out", "not finished by the deadline: scan"),
@@ -372,6 +380,7 @@ _RUNNING = forge.ReviewerFeedback(
         "changes-requested",
         "summary-unread",
         "silent",
+        "failed-check-beside-the-bot",
         "unfinished-check-stops",
     ],
 )
