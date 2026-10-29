@@ -1453,8 +1453,8 @@ async def _review_bots_check() -> dict:
     except ValueError:  # a server older than the route
         return _check("review bots", True, "skipped: the server cannot say", skipped=True)
     lines = [
-        f"`{r['bot']}` on {r['repo']} has never posted, across {found['run']} items or more "
-        f"({', '.join(r['items'])}): check the login, and that the bot is on that project"
+        f"`{r['bot']}` on {r['repo']} has never posted (items {', '.join(r['items'])}): "
+        "check the login, and that the bot is on that project"
         for r in found["reviewers"]
     ]
     triage = next(c for c in capabilities.MANIFEST if c.name == "triage_review_feedback")
@@ -1472,7 +1472,7 @@ async def _review_bots_check() -> dict:
                 "step: a bot's summary is never read (the capabilities row has the edit)"
             )
     if not lines:
-        return _check("review bots", True, "every review bot has posted in its repos")
+        return _check("review bots", True, f"no review bot silent across {found['run']} items")
     return _check("review bots", True, "\n".join(lines), warn=True)
 
 
