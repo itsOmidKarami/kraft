@@ -184,6 +184,10 @@ def test_a_wrapped_line_of_words_is_still_the_bullets_words(wrapped):
             "Branch `kraft/a-thing-7pnggtdp`. Review the diff and the pipeline before merging.\n",
             id="kraft-merge-request",
         ),
+        pytest.param(
+            "---\n_Opened by [Kraft](https://kraft-sdlc.dev/) for work item `abc123`._\n",
+            id="kraft-footer",
+        ),
     ],
 )
 def test_a_changelog_last_in_the_body_leaves_its_footer_out(footer):

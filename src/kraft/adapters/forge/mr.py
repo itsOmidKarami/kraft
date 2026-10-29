@@ -28,6 +28,9 @@ from kraft.worker.worktree_read import read_worktree_file
 #: from the smaller one, not from whichever forge this item happens to use.
 MR_BODY_MAX_CHARS = 65_536
 
+#: Where the footer every merge request is signed with points: the docs site.
+KRAFT_URL = "https://kraft-sdlc.dev/"
+
 _TRUNCATION_MARKER = "\n\n*(truncated -- read the diff, this description did not fit)*"
 
 #: One agent-authored scalar's ceiling. A label or a username is short; 200
@@ -156,7 +159,8 @@ def mr_body(
 ) -> str:
     """The merge request description: the agent's own, as written, or, when
     there is none, the work item's brief under its full title (only when the
-    MR title had to clip it) and a line naming the item.
+    MR title had to clip it). Always signed with a footer naming Kraft and the
+    work item, kept whole when the rest is truncated.
 
     No commit list and no branch line: the forge already shows both, and every
     sync rewrote them back over a person's edit. Rebuilt on every call all the
@@ -167,18 +171,18 @@ def mr_body(
     path that failed containment) hands in an empty `MRMeta` and still gets a
     body: this is the one path with no filesystem or database of its own.
     """
-    body = meta.description
+    sign = f"_Opened by [Kraft]({KRAFT_URL}) for work item `{work_item_id}`._"
+    body = meta.description.strip()
     if not body:
         head = title.strip()
-        parts = (
-            head if head != mr_title(head) else "",
-            brief.strip(),
-            f"Opened by Kraft for work item {work_item_id}.",
-        )
-        body = "\n\n".join(p for p in parts if p)
+        body = "\n\n".join(p for p in (head if head != mr_title(head) else "", brief.strip()) if p)
+    if not body:
+        return sign
+    footer = f"\n\n---\n{sign}"
 
-    if len(body) > MR_BODY_MAX_CHARS:
-        cut = MR_BODY_MAX_CHARS - len(_TRUNCATION_MARKER)
+    room = MR_BODY_MAX_CHARS - len(footer)
+    if len(body) > room:
+        cut = room - len(_TRUNCATION_MARKER)
         # Land on a newline rather than mid-line, if one is close enough to be
         # worth it -- cosmetic only, so a body with no newline in the last
         # stretch just cuts at `cut` rather than searching arbitrarily far back.
@@ -187,7 +191,7 @@ def mr_body(
             cut = newline
         body = body[:cut] + _TRUNCATION_MARKER
 
-    return body
+    return body + footer
 
 
 #: A forge title is a headline; a Kraft work item title is a paragraph (the

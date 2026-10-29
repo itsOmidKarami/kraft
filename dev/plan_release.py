@@ -56,6 +56,8 @@ _KRAFT_COMMITS = re.compile(
     r"^<details>\s*<summary>Commits on this branch</summary>.*?</details>[ \t]*$",
     re.MULTILINE | re.DOTALL,
 )
+#: The footer Kraft signs every merge request with now.
+_KRAFT_FOOTER = re.compile(r"^---[ \t]*\n(?:[ \t]*\n)*_Opened by \[Kraft\]\(.*$", re.MULTILINE)
 _KRAFT_BRANCH = re.compile(
     r"^Branch `[^`\n]+`\. Review the diff and the pipeline before merging\.[ \t]*$", re.MULTILINE
 )
@@ -141,7 +143,14 @@ def changelog_entry(pr: dict) -> str:
     from (R10h-06)."""
     match = _SECTION.search(pr.get("body") or "")
     text = _COMMENT.sub("", match.group(1)) if match else ""
-    for footer in (_FOOTER, _ATTRIBUTION, _SESSION_LINK, _KRAFT_COMMITS, _KRAFT_BRANCH):
+    for footer in (
+        _FOOTER,
+        _ATTRIBUTION,
+        _SESSION_LINK,
+        _KRAFT_COMMITS,
+        _KRAFT_BRANCH,
+        _KRAFT_FOOTER,
+    ):
         text = footer.sub("", text)
     text = text.strip() or pr["title"]
     if not _TOP_ITEM.match(text):

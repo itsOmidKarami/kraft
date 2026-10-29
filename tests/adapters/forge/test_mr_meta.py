@@ -100,7 +100,8 @@ def test_read_mr_meta_drops_an_over_long_scalar(tmp_path):
     assert mr_ops.read_mr_meta(tmp_path, WID, _run(tmp_path)).labels == ("keep",)
 
 
-_OPENED = f"Opened by Kraft for work item {WID}."
+_SIGN = f"_Opened by [Kraft](https://kraft-sdlc.dev/) for work item `{WID}`._"
+_FOOTER = f"\n\n---\n{_SIGN}"
 
 
 @pytest.mark.parametrize(
@@ -109,37 +110,37 @@ _OPENED = f"Opened by Kraft for work item {WID}."
         (
             (MRMeta(description="## What\n\nA new door."),),
             {"title": "Add a door", "brief": "The hall needs one."},
-            "## What\n\nA new door.",
+            f"## What\n\nA new door.{_FOOTER}",
         ),
         # Spec §5: a missing artifact still opens the MR -- the one path
         # `open_mr` must never fail on.
-        ((), {}, _OPENED),
-        ((MRMeta(),), {}, _OPENED),
+        ((), {}, _SIGN),
+        ((MRMeta(),), {}, _SIGN),
         (
             (),
             {"title": "Add a door", "brief": "  The hall needs one.\n"},
-            f"The hall needs one.\n\n{_OPENED}",
+            f"The hall needs one.{_FOOTER}",
         ),
         (
             (),
             {"title": "Add a door\nand a window", "brief": ""},
-            f"Add a door\nand a window\n\n{_OPENED}",
+            f"Add a door\nand a window{_FOOTER}",
         ),
     ],
     ids=["authored", "no-meta", "empty-meta", "brief", "clipped-title-in-full"],
 )
 def test_mr_body_is_the_description_as_written_or_the_brief(meta, kw, expected):
-    """No commit list or branch line after it: the forge shows both, and each
-    sync wrote them back over a person's edit. With no description, the brief
-    says what the change is for; the title only repeats when the MR's clipped
-    it."""
+    """No commit list or branch line: the forge shows both, and each sync wrote
+    them back over a person's edit. With no description, the brief says what
+    the change is for; the title only repeats when the MR's clipped it. Every
+    body is signed, with no rule above the footer when nothing else is there."""
     assert mr_ops.mr_body(WID, *meta, **kw) == expected
 
 
 def test_mr_body_truncates_a_runaway_description_with_a_visible_marker():
     body = mr_ops.mr_body(WID, MRMeta(description="x" * 200_000))
     assert len(body) <= mr_ops.MR_BODY_MAX_CHARS
-    assert body.endswith("*(truncated -- read the diff, this description did not fit)*")
+    assert body.endswith(f"*(truncated -- read the diff, this description did not fit)*{_FOOTER}")
 
 
 @pytest.mark.parametrize(

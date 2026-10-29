@@ -145,4 +145,4 @@ def test_with_no_merge_request_metadata_the_draft_opens_with_the_default_body(
 
     assert fake.opened_titles[1] == title
     assert fake.opened_meta[1] == forge.MRMeta()
-    assert fake.opened_bodies[1].startswith(f"Opened by Kraft for work item {r.json()['id']}.")
+    assert fake.opened_bodies[1] == forge.mr_body(r.json()["id"])
