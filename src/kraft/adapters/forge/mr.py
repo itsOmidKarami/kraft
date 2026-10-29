@@ -151,50 +151,20 @@ def meta_flags(meta: MRMeta) -> list[str]:
     return flags
 
 
-def _default_body(work_item_id: str, branch: str, commits: tuple[str, ...]) -> str:
-    """Today's body: a fixed preamble and the commit list. What `mr_body`
-    falls back to whenever there is no summary prose worth leading with --
-    this must stay byte-for-byte what it always was (spec §5's "done when")."""
-    lines = [f"Opened by Kraft for work item {work_item_id}.", ""]
-    if commits:
-        lines.append("Commits on this branch:")
-        lines.append("")
-        lines += [f"- {c}" for c in commits]
-        lines.append("")
-    lines.append(f"Branch `{branch}`. Review the diff and the pipeline before merging.")
-    return "\n".join(lines)
+def mr_body(work_item_id: str, meta: MRMeta = _EMPTY_META) -> str:
+    """The merge request description: the agent's own, as written, or one line
+    naming the work item when there is none.
 
+    No commit list and no branch line: the forge already shows both, and every
+    sync rewrote them back over a person's edit. Rebuilt on every call all the
+    same, so an authored body re-read after a repair replaces the old one
+    (Kraft-c09h).
 
-def mr_body(
-    work_item_id: str,
-    branch: str,
-    commits: tuple[str, ...],
-    meta: MRMeta = _EMPTY_META,
-) -> str:
-    """The merge request description, rebuilt from the branch as it stands.
-
-    Rebuilt and not appended: `open_mr` runs before verify and mr_checks add
-    their commits, so a description written once describes a branch that no
-    longer exists (Kraft-c09h). An authored body goes stale the same way, for
-    the same reason -- every call rebuilds from scratch.
-
-    Falls back to today's fixed body when there is no authored description to
-    lead with: this is the one path with no filesystem or database of its
-    own, so a caller that could not resolve the artifact (missing node,
-    missing file, a path that failed containment) hands in an empty `MRMeta`
-    and gets exactly what `open_mr` has always produced.
+    A caller that could not resolve the artifact (missing node, missing file, a
+    path that failed containment) hands in an empty `MRMeta` and still gets a
+    body: this is the one path with no filesystem or database of its own.
     """
-    if not meta.description:
-        return _default_body(work_item_id, branch, commits)
-
-    parts = [meta.description]
-    if commits:
-        commit_list = "\n".join(f"- {c}" for c in commits)
-        parts.append(
-            f"<details>\n<summary>Commits on this branch</summary>\n\n{commit_list}\n\n</details>"
-        )
-    parts.append(f"Branch `{branch}`. Review the diff and the pipeline before merging.")
-    body = "\n\n".join(parts)
+    body = meta.description or f"Opened by Kraft for work item {work_item_id}."
 
     if len(body) > MR_BODY_MAX_CHARS:
         cut = MR_BODY_MAX_CHARS - len(_TRUNCATION_MARKER)

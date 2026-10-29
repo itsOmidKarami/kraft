@@ -795,7 +795,7 @@ async def _run_one(
     """
     findings: list[dict] | None = None
     note: WaitNote | None = None
-    body = mr_ops.mr_body(work_item_id, branch, await git.commits_on(repo, branch, base), meta)
+    body = mr_ops.mr_body(work_item_id, meta)
     # Kraft-vz8e: an MR with no commits runs no CI, so `mr_checks` would wait
     # out its cap on a pipeline that never starts. Refused before it is
     # opened or readied, as a `config_error`: a fix loop has nothing to fix.

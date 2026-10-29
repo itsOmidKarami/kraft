@@ -783,28 +783,14 @@ async def committed_at(repo: Path, sha: str) -> datetime:
     return datetime.fromisoformat(raw.strip())
 
 
-async def commits_on(repo: Path, branch: str, base: str) -> tuple[str, ...]:
-    """Subjects of the commits this branch adds to `base`, the branch its
-    merge request targets, newest last.
+async def commits_ahead(repo: Path, branch: str, base: str) -> int | None:
+    """How many commits `branch` adds to `origin/<base>`, the branch its
+    merge request targets; None when git cannot say (no origin), which is no
+    evidence the branch is empty.
 
     `origin/<base>` and not the local one: a Kraft worktree is cut from
     whatever the local checkout happened to be at, which may be behind.
-    Returns empty rather than raising — a description is not worth failing a
-    node over.
     """
-    try:
-        raw = await run_git(
-            repo, ["git", "log", "--reverse", "--format=%s", f"origin/{base}..{branch}"]
-        )
-    except ForgeError:
-        return ()
-    return tuple(line for line in raw.splitlines() if line.strip())
-
-
-async def commits_ahead(repo: Path, branch: str, base: str) -> int | None:
-    """How many commits `branch` adds to `origin/<base>`, as `commits_on`
-    reads them; None when git cannot say (no origin), which is no evidence
-    the branch is empty."""
     try:
         raw = await run_git(repo, ["git", "rev-list", "--count", f"origin/{base}..{branch}"])
     except ForgeError:
@@ -816,7 +802,7 @@ async def source_changed(repo: Path, branch: str, *, base: str, exclude: set[str
     """Whether `branch` changes any path of `repo` outside `exclude` -- a
     workspace root's member mount paths, so a commit that only moves a
     member's pointer is not a source change. Against `origin/<base>`, as
-    `commits_on` reads; False when git cannot say (no origin), like it."""
+    `commits_ahead` reads; False when git cannot say (no origin), like it."""
     try:
         raw = await run_git(repo, ["git", "diff", "--name-only", f"origin/{base}...{branch}"])
     except ForgeError:

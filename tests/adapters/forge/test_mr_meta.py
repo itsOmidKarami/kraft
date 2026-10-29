@@ -100,48 +100,25 @@ def test_read_mr_meta_drops_an_over_long_scalar(tmp_path):
     assert mr_ops.read_mr_meta(tmp_path, WID, _run(tmp_path)).labels == ("keep",)
 
 
-def test_mr_body_leads_with_the_description_and_demotes_the_commits():
-    meta = MRMeta(description="## What\n\nA new door.")
-    body = mr_ops.mr_body(WID, "kraft/abc", ("first commit",), meta)
-    assert body.startswith("## What\n\nA new door.")
-    assert body.index("A new door.") < body.index("<details>") < body.index("- first commit")
-    assert "<summary>Commits on this branch</summary>" in body
-    assert "Branch `kraft/abc`" in body
-    assert body.rstrip().endswith("Review the diff and the pipeline before merging.")
-    assert "Opened by Kraft for work item" not in body
-
-
-_TAIL = "Branch `kraft/abc`. Review the diff and the pipeline before merging."
-
-
 @pytest.mark.parametrize(
-    "commits, expected",
+    "meta, expected",
     [
-        (
-            ("first commit",),
-            f"Opened by Kraft for work item {WID}.\n\n"
-            f"Commits on this branch:\n\n- first commit\n\n{_TAIL}",
-        ),
-        (
-            ("spec: batch", "plan: batch", "the work"),
-            f"Opened by Kraft for work item {WID}.\n\n"
-            f"Commits on this branch:\n\n- spec: batch\n- plan: batch\n- the work\n\n{_TAIL}",
-        ),
-        # `git log` returning nothing (`commits_on` swallows a git failure)
-        # must not leave a dangling "Commits:" header.
-        ((), f"Opened by Kraft for work item {WID}.\n\n{_TAIL}"),
+        ((MRMeta(description="## What\n\nA new door."),), "## What\n\nA new door."),
+        # Spec §5: a missing artifact still opens the MR -- the one path
+        # `open_mr` must never fail on.
+        ((), f"Opened by Kraft for work item {WID}."),
+        ((MRMeta(),), f"Opened by Kraft for work item {WID}."),
     ],
-    ids=["one-commit", "oldest-first", "no-commits-no-header"],
+    ids=["authored", "no-meta", "empty-meta"],
 )
-@pytest.mark.parametrize("meta", [(), (MRMeta(),)], ids=["no-meta", "empty-meta"])
-def test_mr_body_without_meta_is_the_old_default_body(commits, expected, meta):
-    """Spec §5: a missing artifact produces today's body, byte for byte -- the
-    one path `open_mr` must never fail on."""
-    assert mr_ops.mr_body(WID, "kraft/abc", commits, *meta) == expected
+def test_mr_body_is_the_description_as_written_or_one_line(meta, expected):
+    """No commit list or branch line after it: the forge shows both, and each
+    sync wrote them back over a person's edit."""
+    assert mr_ops.mr_body(WID, *meta) == expected
 
 
 def test_mr_body_truncates_a_runaway_description_with_a_visible_marker():
-    body = mr_ops.mr_body(WID, "kraft/abc", (), MRMeta(description="x" * 200_000))
+    body = mr_ops.mr_body(WID, MRMeta(description="x" * 200_000))
     assert len(body) <= mr_ops.MR_BODY_MAX_CHARS
     assert body.endswith("*(truncated -- read the diff, this description did not fit)*")
 

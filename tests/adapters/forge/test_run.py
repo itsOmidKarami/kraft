@@ -248,7 +248,7 @@ async def test_open_mr_without_the_artifact_opens_the_default_body(run_forge):
     (number,) = fake.opened
     assert fake.opened_titles[number] == "the work item title"
     assert fake.opened_meta[number] == forge.MRMeta()
-    assert fake.opened_bodies[number] == forge.mr_body("w1", "kraft/w1", ())
+    assert fake.opened_bodies[number] == forge.mr_body("w1")
 
 
 async def test_sync_mr_republishes_the_authored_description(run_forge, tmp_path):

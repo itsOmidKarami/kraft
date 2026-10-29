@@ -651,13 +651,6 @@ def test_assert_clean_sees_a_submodule_with_ignore_all(tmp_path):
         asyncio.run(forge.assert_clean(root, "main"))
 
 
-def test_commits_on_a_branch_without_origin_main_is_empty_not_an_error(tmp_path):
-    """A description is not worth failing a node over."""
-    repo = make_repo(tmp_path)
-
-    assert asyncio.run(forge.commits_on(repo, "kraft/nope", "main")) == ()
-
-
 def test_a_hanging_cli_call_is_killed_and_raises(tmp_path):
     """A wait's deadline never reached the subprocess inside it: a stalled gh
     blocked forever and a 300s cap ran for 16 minutes."""
