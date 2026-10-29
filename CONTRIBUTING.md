@@ -280,7 +280,7 @@ them unless you use the same tools:
 | `.github/` | CI workflows, issue and PR templates, CODEOWNERS | Yes: CI lives here |
 | `.claude-plugin/` | the marketplace manifest that publishes `plugins/` to Claude Code and Codex | Only to rename a plugin or add one |
 | `.cursor-plugin/` | the same marketplace for Cursor | Only to rename a plugin or add one |
-| `.claude/` | Claude Code settings: a hook that blocks raw `pytest` (needs `jq`), the plugins it turns on (superpowers, impeccable, ponytail, techdocs-authoring, engineering, design), and a hook that turns superpowers and ponytail off in Kraft workers | Only with Claude Code |
+| `.claude/` | Claude Code settings: a hook that blocks raw `pytest` (needs `jq`), the plugins it turns on (superpowers, impeccable, ponytail, techdocs-authoring, engineering, design), a hook that turns superpowers and ponytail off in Kraft workers, and two skills: `release` cuts a release, `steward` is what a Claude Code session reads before driving a pull request to green | Only with Claude Code |
 | `.beads/` | beads config and git hooks for the maintainer's private tracker | No |
 | `.agents/` | a beads skill for agent sessions; `just setup-plugins` adds superpowers and impeccable beside it, gitignored | Only with an agent other than Claude Code |
 | `.codex/` | Codex hooks that call `bd`; they fail without beads installed | No |
