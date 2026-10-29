@@ -243,7 +243,7 @@ What the wait does with them depends on the chain.
 - **The collect path.** When a later task in the same node declares the `bot_feedback` input, as the shipped triage step does, the wait holds until every reviewer has finished with the latest push, then hands what they said to that task. The wait never fails on feedback; the triage agent decides what needs a change.
 - **Nothing reads the feedback.** When the node has no such task, as in a chain from before the triage step, or the item covers several repos, a bot is still waited for until it has finished with the push, as on the collect path. On a multi-repo item, each repo's bot is waited for against that repo's own push. Kraft then judges what was said itself:
   - Each unresolved thread, a newest review that requests changes (when the bot left no thread), and a check that finished without passing fail the wait and go to the fix loop. Anything else is clean.
-  - On a multi-repo item, a failed wait goes to the node's `on_failure` without its findings, not to the fix loop.
+  - On a multi-repo item, a member repo's findings give its paths from the item's own checkout, such as `repos/pkg/calc.py:3`, so the fix loop finds the file.
   - Kraft cannot tell what a bot's summary says, so a summary alone reads as clean, and the node's log names it as not read. `kraft admin doctor`'s `triage_review_feedback` row shows the edit that adds the triage step.
   - A check still unfinished at the timeout stops the item for you, as it would alone.
 - **The direct path.** Reviewers that are only checks, when nothing collects them, are each read once per look. Any actionable feedback fails the wait at once, with every finding read in that check, and goes to the fix loop. A timeout stops the item for you.

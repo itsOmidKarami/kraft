@@ -753,31 +753,43 @@ async def _settle_review(
     return log, "done", note, decided.collection
 
 
-def _verdict(collection: list[dict]) -> tuple[list[str], list[str], list[str]]:
+def _verdict(
+    collection: list[dict], mount: str | None = None
+) -> tuple[list[str], list[str], list[str]]:
     """What a settled review asks to change, with nothing in the node to read
     it: each bot's unresolved threads, its newest review when that requests
     changes and left no thread, and a check that finished without passing.
     Also the reviewers whose summaries went unread (only an agent can tell
-    what one says), and the checks the deadline settled unfinished."""
+    what one says), and the checks the deadline settled unfinished. A
+    multi-repo member's findings name its `mount`, so a path reads from the
+    item's own checkout."""
     findings: list[str] = []
     unread: list[str] = []
     unfinished: list[str] = []
     for entry in collection:
         for t in entry["threads"]:
-            where = ":".join(str(x) for x in (t.get("file"), t.get("line")) if x)
-            findings.append(f"{where}: {t['body']}" if where else t["body"])
+            file = t.get("file") and "/".join(x for x in (mount, t["file"]) if x)
+            where = ":".join(str(x) for x in (file, t.get("line")) if x)
+            findings.append(f"{where}: {t['body']}" if where else _in(mount, t["body"]))
         for s in entry["summaries"]:
             if s.get("state") == "CHANGES_REQUESTED":
                 if not entry["threads"]:
-                    findings.append(s["body"] or f"{entry['reviewer']} requested changes")
+                    asked = s["body"] or f"{entry['reviewer']} requested changes"
+                    findings.append(_in(mount, asked))
             elif s["body"].strip():
                 unread.append(entry["reviewer"])
         check = entry["check"]
         if check is not None and check.get("finished"):
-            findings.append(f"{check['name']} {check['conclusion']}: {check.get('output') or ''}")
+            failed = f"{check['name']} {check['conclusion']}: {check.get('output') or ''}"
+            findings.append(_in(mount, failed))
         elif check is not None:
             unfinished.append(check["name"])
     return findings, sorted(set(unread)), unfinished
+
+
+def _in(mount: str | None, message: str) -> str:
+    """A finding with no path of its own, named for the member it is about."""
+    return f"[{mount}] {message}" if mount else message
 
 
 def _as_findings(messages: Iterable[str]) -> list[dict]:
@@ -835,6 +847,9 @@ async def _run_one(
     collect: bool = False,
     #: Where a multi-repo item keeps this repository's review memory.
     scope: str | None = None,
+    #: A workspace member's folder in the item's checkout, which its review
+    #: findings' paths are given from; None for the root or a single repo.
+    mount: str | None = None,
     grace: timedelta = DEFAULT_GRACE,
     bounds: WaitBounds = DEFAULT_WAIT,
     session_id: str = "",
@@ -1094,7 +1109,7 @@ async def _run_one(
                 bounds=bounds, grace=grace, scope=scope,
             )  # fmt: skip
             if collection is not None:
-                found, unread, unfinished = _verdict(collection)
+                found, unread, unfinished = _verdict(collection, mount)
                 log += "".join(f"  {f}\n" for f in found)
                 if unread:
                     log += (
@@ -1140,7 +1155,8 @@ async def _run_one(
                 # Actionable feedback is a failed task *with findings*, which is
                 # what enters the node's recovery and fix loop
                 # (`post-draft-feedback-uses-node-recovery-controls`).
-                status, findings = "failed", _as_findings(review.findings)
+                status = "failed"
+                findings = _as_findings(_in(mount, f) for f in review.findings)
             else:
                 # The reviewer itself errored. That says nothing about the
                 # code, so it must not spend a repair or a fix cycle (Ruling
@@ -2027,6 +2043,8 @@ async def run_task(
     #: over from the last check, so a repository this check does not reach
     #: keeps what it had.
     memories: dict = {}
+    #: Each member's folder in the item's checkout, by its row.
+    mounts_by_row = {r["id"]: r["submodule_path"] for r in rows if r["role"] == "submodule"}
     if multi and handler == "automated_review":
         last = db.read(lambda c: waits.open_wait(c, work_item_id, hook_point))
         memories = dict(((last.last if last is not None else None) or {}).get("memory", {}))
@@ -2118,6 +2136,7 @@ async def run_task(
                     run_dirs=run_dirs,
                     collect=collect,
                     scope=str(target_repo) if multi else None,
+                    mount=mounts_by_row.get(row_id),
                     grace=grace,
                     bounds=wait or DEFAULT_WAIT,
                     session_id=session_id,
@@ -2129,7 +2148,9 @@ async def run_task(
                 note = one_note or note
             else:
                 one_log, one_status, one_findings = "", settled, None
-            if not multi:
+            # A review's findings are this item's, whichever repository they
+            # name (their paths start at its mount); CI's stay single-repo.
+            if not multi or handler == "automated_review":
                 findings = one_findings
             log += (f"[{target_repo.name}] " if multi else "") + one_log
             if row_id is not None:
