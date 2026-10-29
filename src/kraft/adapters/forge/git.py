@@ -27,6 +27,12 @@ class UnsafeWorktree(ForgeError):
     a conflict, which an agent is sent to resolve: a person looks first."""
 
 
+class CliUnavailable(ForgeError):
+    """A forge CLI or git that never started: not installed, not executable,
+    an argument list the OS refused, or a working directory that is gone.
+    Nothing a commit could fix, so the forge task stops for a person."""
+
+
 #: What a git operation in progress leaves in a worktree's own gitdir. A worker
 #: can write any of it, naming any branch or commit: `git rebase --abort` over
 #: a planted `rebase-merge/` resets the branch it names, and a checkout or a
@@ -106,10 +112,10 @@ async def run_git(
 ) -> str:
     """One forge CLI call.
 
-    FileNotFoundError becomes ForgeError so a binary that is missing, or a
-    backend name that was never installed, reads as the configuration problem it
-    is rather than as a traceback from three frames up. Any other OSError from
-    starting it (E2BIG, a binary that is not executable) does the same.
+    A CLI that never started (FileNotFoundError, E2BIG, a binary that is not
+    executable, a working directory that is gone) becomes `CliUnavailable`, so
+    it reads as the configuration problem it is rather than as a traceback from
+    three frames up.
 
     `env` defaults to `None`, meaning inherit the process env unchanged --
     which carries `sandbox.harden_host_git_env`'s pinned `core.hooksPath`.
@@ -132,10 +138,13 @@ async def run_git(
     except subprocess.TimeoutExpired as exc:
         raise ForgeError(f"{_shown(args)} timed out after {timeout:g}s") from exc
     except FileNotFoundError as exc:
-        raise ForgeError(f"{args[0]} is not installed or not on PATH") from exc
+        # The same error for a missing working directory as for a missing binary.
+        if not Path(repo).is_dir():
+            raise CliUnavailable(f"{args[0]} cannot run in {repo}: it does not exist") from exc
+        raise CliUnavailable(f"{args[0]} is not installed or not on PATH") from exc
     except OSError as exc:
-        # E2BIG and the like: the CLI never started, which is a forge error too.
-        raise ForgeError(f"{args[0]} could not start: {exc.strerror or exc}") from exc
+        # E2BIG and the like: the CLI never started.
+        raise CliUnavailable(f"{args[0]} could not start: {exc.strerror or exc}") from exc
     if done.returncode != 0:
         detail = done.stderr.strip() or done.stdout.strip()
         raise ForgeError(f"{_shown(args)} failed: {detail}")

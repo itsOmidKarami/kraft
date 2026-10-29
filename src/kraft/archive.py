@@ -10,6 +10,7 @@ so nothing here needs finer than an hour).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from datetime import datetime, timedelta
 
@@ -53,10 +54,20 @@ async def tick(app) -> list[str]:
     return archived
 
 
+def wake(st) -> None:
+    """Tick now rather than at the hour: a published `archive_after_days`
+    archives what it makes due at once. Before the poller starts, nothing."""
+    if (event := getattr(st, "archive_wake", None)) is not None:
+        event.set()
+
+
 async def poller(app) -> None:
-    """`tick` on a fixed interval until cancelled."""
+    """`tick` on a fixed interval, or as soon as `wake` asks, until cancelled."""
+    event = app.state.archive_wake = asyncio.Event()
     while True:
-        await asyncio.sleep(_INTERVAL_S)
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(event.wait(), _INTERVAL_S)
+        event.clear()
         try:
             await tick(app)
         except asyncio.CancelledError:

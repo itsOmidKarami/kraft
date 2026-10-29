@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -33,6 +34,16 @@ def test_apply_policy_sets_the_forge_timeout(tmp_path, monkeypatch):
     deps.apply_policy(SimpleNamespace(), *deps.read_policy(tmp_path))
 
     assert forge_git.CLI_TIMEOUT_S == 45.0
+
+
+def test_apply_policy_wakes_the_archive_sweep(tmp_path):
+    """So a new `archive.after_days` applies on publish, as Settings says it does."""
+    (tmp_path / "policy.yaml").write_text(_BASE + "archive: { after_days: 1 }\n")
+    st = SimpleNamespace(archive_wake=asyncio.Event())
+
+    deps.apply_policy(st, *deps.read_policy(tmp_path))
+
+    assert st.archive_wake.is_set()
 
 
 @pytest.mark.parametrize(

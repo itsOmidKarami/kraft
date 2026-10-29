@@ -2214,7 +2214,7 @@ async def run_task(
             status = "done"
     except ForgeError as exc:
         log, status, findings = f"{hook_point} failed: {exc}\n", "failed", None
-        if isinstance(exc, git.UnsafeWorktree):
+        if isinstance(exc, (git.UnsafeWorktree, git.CliUnavailable)):
             # Nothing a fix loop may touch: a person looks first (Kraft-xngty).
             status = "config_error"
         unobserved = str(exc)

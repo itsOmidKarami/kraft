@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from unittest.mock import AsyncMock
 
 import pytest
 from support.harness import make_repo, own_files
@@ -147,18 +148,23 @@ def test_every_v1_forge_target_maps_to_a_handler():
     assert waits == set(forge.run._WAITS)
 
 
-class _Exploding(forge.FakeForge):
-    async def ci_status(self, *, repo, mr, branch="", pipeline_id=""):
-        raise forge.ForgeError("glab fell over")
-
-
-async def test_a_forge_error_mid_poll_fails_the_node_rather_than_escaping(run_forge):
-    """A flaky CLI still lands as a failed node -- and, since a wait left no
-    record of how it ended (Kraft-vzq2q), as the wait's `error` outcome."""
-    assert await run_forge(_Exploding(), "ci_poll", "s7") == ("failed", "failed")
-    assert "glab fell over" in run_forge.log("s7")
+@pytest.mark.parametrize(
+    "error, status",
+    [
+        (forge.ForgeError("glab fell over"), "failed"),
+        (forge.CliUnavailable("glab is not installed or not on PATH"), "config_error"),
+    ],
+    ids=["flaky", "cannot-start"],
+)
+async def test_a_forge_error_mid_poll_fails_the_node_rather_than_escaping(run_forge, error, status):
+    """A flaky CLI lands as a failed node, a CLI that never started as a stop for a
+    person -- and, since a wait left no record of its end (Kraft-vzq2q), as its `error`."""
+    fake = forge.FakeForge()
+    fake.ci_status = AsyncMock(side_effect=error)
+    assert await run_forge(fake, "ci_poll", "s7") == (status, status)
+    assert str(error) in run_forge.log("s7")
     (ended,) = run_forge.events("external_wait_ended")
-    assert ended["outcome"] == "error" and "glab fell over" in ended["result"]
+    assert ended["outcome"] == "error" and str(error) in ended["result"]
 
 
 # --- open_mr / sync_mr / mark_ready --------------------------------------------
@@ -235,6 +241,9 @@ async def test_open_mr_uses_the_authored_title_labels_and_description(run_forge,
     assert fake.opened_titles[number] == "Authored title"
     assert fake.opened_meta[number].labels == ("release::minor",)
     assert fake.opened_bodies[number].startswith("## What this introduces")
+    fake.bodies["kraft/w1"] = "edited"
+    await run_forge(fake, "sync_mr", "x9")
+    assert fake.bodies["kraft/w1"].startswith("## What this introduces"), "sync_mr republishes it"
 
 
 async def test_open_mr_without_the_artifact_opens_the_default_body(run_forge, item_on, tmp_path):
@@ -251,15 +260,6 @@ async def test_open_mr_without_the_artifact_opens_the_default_body(run_forge, it
         "Add a door\nand a window\n\nThe hall needs a door.\n\n---\n"
         "_Opened by [Kraft](https://kraft-sdlc.dev/) for work item `w1`._"
     )
-
-
-async def test_sync_mr_republishes_the_authored_description(run_forge, tmp_path):
-    _write_meta(tmp_path, "")
-    fake = await _opened(forge.FakeForge(), tmp_path)
-
-    await run_forge(fake, "sync_mr", "x9")
-
-    assert fake.bodies["kraft/w1"].startswith("## What this introduces")
 
 
 async def test_mark_ready_undrafts_the_merge_request(run_forge, tmp_path):
