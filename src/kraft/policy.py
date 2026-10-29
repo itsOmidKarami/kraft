@@ -225,7 +225,7 @@ class PolicyInput(BaseModel):
     max_concurrent: PositiveInt = 3
     archive: ArchiveInput | None = None
     storage: StorageInput | None = None
-    attribution: AttributionInput = Field(default_factory=AttributionInput)
+    attribution: AttributionInput | None = None
     auto_escalate_stuck: StrictBool = True
     auto_escalate_stuck_cap: PositiveInt = DEFAULT_AUTO_ESCALATE_STUCK_CAP
     auto_escalate_delay_s: Annotated[StrictInt, Field(ge=0)] = 0
@@ -441,7 +441,7 @@ class Policy:
             forge_cli_timeout_s=float(parsed.forge_cli_timeout_s),
             agent_idle_minutes=parsed.agent_idle_minutes,
             forge_poll_s=parsed.forge_poll_s,
-            mr_attribution=parsed.attribution.mr,
+            mr_attribution=parsed.attribution.mr if parsed.attribution else True,
         )
 
     def cap_for(self, key: str, override: CapOverride | dict | None = None) -> Cap:

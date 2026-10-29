@@ -186,12 +186,16 @@ describe("Policy housekeeping (N.1)", () => {
     expect(screen.getByRole("button", { name: /^forge call timeout/ })).toHaveTextContent("120 s");
   });
 
-  it("the Kraft footer is a switch, on by default, that sends attribution.mr", async () => {
-    const { calls } = open("housekeeping");
+  it.each([
+    [true, /Opened by Kraft/],
+    [false, /Kraft adds no footer/],
+  ])("the Kraft footer switch reads %s from the file and sends the opposite", async (on, sub) => {
+    const { calls } = open("housekeeping", ans(policyView({}, resolved({ housekeeping: { ...RESOLVED.housekeeping, mr_attribution: { value: on, source: "policy" } } }))));
     const sw = await screen.findByRole("switch", { name: /^merge request footer/ });
-    expect(sw).toBeChecked();
+    expect(sw).toHaveAttribute("aria-checked", String(on));
+    expect(screen.getByText(sub)).toBeInTheDocument();
     await userEvent.click(sw);
-    await waitFor(() => expect(ops(calls)).toEqual([{ op: "set_value", scope: "housekeeping", key: "attribution.mr", value: false }]));
+    await waitFor(() => expect(ops(calls)).toEqual([{ op: "set_value", scope: "housekeeping", key: "attribution.mr", value: !on }]));
   });
 
   it("archive after: null reads never, zero is legal", async () => {

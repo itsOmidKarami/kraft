@@ -2469,7 +2469,13 @@ async def _bump_pointer_only_root(
         branch=branch,
         base=base,
         title=f"chore: bump submodule pointers for {title}",
-        body=f"Moves {', '.join(bumped)} to the revisions merged for work item {work_item_id}.",
+        body=mr_ops.mr_body(
+            work_item_id,
+            mr_ops.MRMeta(
+                description=f"Moves {', '.join(bumped)} to the revisions merged for "
+                f"work item {work_item_id}."
+            ),
+        ),
     )
     await db.write(
         lambda c: store.update_repo_state(

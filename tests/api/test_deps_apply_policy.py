@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.forge import mr as forge_mr
 from kraft.api import deps
@@ -21,11 +23,20 @@ def test_apply_policy_sets_the_idle_limit(tmp_path, monkeypatch):
     assert _subprocess.IDLE_MINUTES == 7
 
 
-def test_apply_policy_sets_mr_attribution(tmp_path, monkeypatch):
-    """A reload that turns `attribution.mr` off reaches the next description."""
-    (tmp_path / "policy.yaml").write_text(_BASE + "attribution: { mr: false }\n")
-    monkeypatch.setattr(forge_mr, "ATTRIBUTION", True)
+@pytest.mark.parametrize(
+    "tail, signed",
+    [
+        ("attribution: { mr: false }\n", False),
+        # A bare key, as uncommenting only its first line leaves it, loads as on.
+        ("attribution:\n", True),
+    ],
+    ids=["off", "bare-key-is-on"],
+)
+def test_apply_policy_sets_mr_attribution(tmp_path, monkeypatch, tail, signed):
+    """A reload that changes `attribution.mr` reaches the next description."""
+    (tmp_path / "policy.yaml").write_text(_BASE + tail)
+    monkeypatch.setattr(forge_mr, "ATTRIBUTION", not signed)
 
     deps.apply_policy(SimpleNamespace(), *deps.read_policy(tmp_path))
 
-    assert forge_mr.ATTRIBUTION is False
+    assert forge_mr.ATTRIBUTION is signed

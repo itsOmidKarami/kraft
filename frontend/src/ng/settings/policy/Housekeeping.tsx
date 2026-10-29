@@ -33,12 +33,12 @@ export function Housekeeping({ ctx }: { ctx: Ctx }) {
         {row("forge", "forge call timeout", num(p.retries.forge_cli_timeout_s?.value), "How long one gh, glab or git call may run before it counts as a forge error. Read at startup.")}
         <div className="pol-one">
           <span className="pol-k">merge request footer</span>
-          <span className="pol-chips" role="group" aria-label="merge request footer">
+          <span className="pol-chips" role="group" aria-label="Kraft footer on merge requests">
             {[true, false].map((on) => (
               <Chip key={String(on)} pressed={signed === on} changed={changes.has(ATTRIBUTION_KEY.key)} onClick={() => void setValue(draft, ATTRIBUTION_KEY, on)}>{on ? "on" : "off"}</Chip>
             ))}
           </span>
-          <span className="pol-help">{signed ? "Every merge request description Kraft writes ends with an “Opened by Kraft” footer naming its work item." : "Off: merge request descriptions say nothing about Kraft."}</span>
+          <span className="pol-help">{signed ? "Every merge request description Kraft writes ends with an “Opened by Kraft” footer naming its work item." : "Off: Kraft adds no footer to merge request descriptions."}</span>
         </div>
       </section>
       <section className="pol-card" aria-label="Storage">

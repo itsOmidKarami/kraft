@@ -126,8 +126,13 @@ _FOOTER = f"\n\n---\n{_SIGN}"
             {"title": "Add a door\nand a window", "brief": ""},
             f"Add a door\nand a window{_FOOTER}",
         ),
+        (
+            (),
+            {"title": "Add a door\nand a window", "brief": "The hall needs one."},
+            f"Add a door\nand a window\n\nThe hall needs one.{_FOOTER}",
+        ),
     ],
-    ids=["authored", "no-meta", "empty-meta", "brief", "clipped-title-in-full"],
+    ids=["authored", "no-meta", "empty-meta", "brief", "clipped-title-in-full", "title-then-brief"],
 )
 def test_mr_body_is_the_description_as_written_or_the_brief(meta, kw, expected):
     """No commit list or branch line: the forge shows both, and each sync wrote
