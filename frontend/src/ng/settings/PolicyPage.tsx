@@ -76,13 +76,13 @@ function Editor({ draft, section }: { draft: ConfigDraft; section: Section }) {
   const area = useMemo(() => ({
     crumb: "Policy",
     files: ["policy.yaml"],
-    toast: "Published policy · applies to items filed from now",
+    toast: "Published policy",
     label: limitLabel,
     affects: () => (
       <>
         <Kv k="new items" v="use the published policy from now on" />
         <Kv k="running" v={`${active ?? 0} ${active === 1 ? "item keeps" : "items keep"} the policy they froze at intake`} />
-        <Kv k="housekeeping" v="applies as soon as you publish" />
+        <Kv k="housekeeping" v="applies as soon as you publish; an item already being relaunched keeps its relaunch cap" />
       </>
     ),
   }), [active]);
