@@ -35,6 +35,9 @@ class ForgeEvent(StrEnum):
     POST_MERGE_CI_MOVED = "post_merge_ci_moved"
     AUTOMATED_REVIEW_NOT_CONFIGURED = "automated_review_not_configured"
     AUTOMATED_REVIEW_ERRORED = "automated_review_errored"
+    #: A review wait settled: which bots were heard since the push and which
+    #: never posted. `kraft admin doctor` reads a bot's run of silences.
+    AUTOMATED_REVIEW_SETTLED = "automated_review_settled"
     MERGE_QUEUE_DROPPED = "merge_queue_dropped"
     #: Kraft rewrote the head the final review approved itself -- a clean
     #: rebase, a pointer bump -- and pinned the new one (`kraft.reviewed_head`).
@@ -67,6 +70,7 @@ FORGE_EVENT_TRAITS = total(
         ForgeEvent.POST_MERGE_CI_MOVED: _PLAIN,
         ForgeEvent.AUTOMATED_REVIEW_NOT_CONFIGURED: _PLAIN,
         ForgeEvent.AUTOMATED_REVIEW_ERRORED: _PLAIN,
+        ForgeEvent.AUTOMATED_REVIEW_SETTLED: _PLAIN,
         ForgeEvent.MERGE_QUEUE_DROPPED: _PLAIN,
         ForgeEvent.REVIEWED_HEAD_REPINNED: _PLAIN,
         ForgeEvent.MERGE_REFUSED_UNREVIEWED: _PLAIN,

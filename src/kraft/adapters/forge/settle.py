@@ -10,12 +10,18 @@ keeps what comes back (`waits.observe(extra=)`).
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Literal
 
 from kraft.adapters.forge.models import ReviewerFeedback
-from kraft.automated_review import AutomatedReview
+from kraft.automated_review import AutomatedReview, Reviewers
+from kraft.vocab import ForgeEvent
+
+#: How many reviews in a row a bot must have stayed silent on in one repository
+#: before `kraft admin doctor` says so: one silence is a bot with nothing to say.
+SILENT_RUN = 3
 
 #: The conclusions of a check that has nothing to say, on either forge.
 _PASSED = ("success", "neutral", "skipped")
@@ -115,3 +121,38 @@ def _collected(item: ReviewerFeedback, how: str | None) -> dict:
         "threads": list(item.threads),
         "check": item.check if failed else None,
     }
+
+
+def heard_and_silent(reviewers: Reviewers, memory: dict) -> tuple[list[str], list[str]]:
+    """The bots active since the push, and the ones that never posted, as
+    `decide`'s settled memory has them."""
+    bots = [r.bot for r in reviewers if r.bot is not None]
+    active = {b for b in bots if (memory.get(f"bot:{b}") or {}).get("activity_at")}
+    return [b for b in bots if b in active], [b for b in bots if b not in active]
+
+
+def silent_runs(conn, at_least: int = SILENT_RUN) -> list[dict]:
+    """Each bot whose last `at_least` settled reviews in a repository all
+    found it silent: most likely a login no account has, or a bot not
+    installed there. Newest item first."""
+    seen: dict[tuple[str, str], list[tuple[bool, str]]] = {}
+    # Keyed by the item's own repository, and a workspace member's folder in
+    # it: the path the wait read is that item's own checkout.
+    rows = conn.execute(
+        "SELECT e.work_item_id, e.payload, w.repo FROM events e "
+        "JOIN work_items w ON w.id = e.work_item_id WHERE e.type = ? ORDER BY e.seq DESC",
+        (ForgeEvent.AUTOMATED_REVIEW_SETTLED,),
+    )
+    for row in rows:
+        payload = json.loads(row["payload"])
+        repo = "/".join(x for x in (row["repo"], payload.get("mount")) if x)
+        for silent, key in ((False, "heard"), (True, "silent")):
+            for bot in payload.get(key) or []:
+                run = seen.setdefault((repo, bot), [])
+                if len(run) < at_least:
+                    run.append((silent, row["work_item_id"]))
+    return [
+        {"repo": repo, "bot": bot, "items": [item for _, item in run]}
+        for (repo, bot), run in sorted(seen.items())
+        if len(run) == at_least and all(silent for silent, _ in run)
+    ]

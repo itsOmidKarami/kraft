@@ -1,7 +1,8 @@
 """When each automated reviewer has finished with the latest push
 (`settle.decide`): a bot by its quiet after its last activity, a check by
 completing, either by the wait's timeout. Pure: the clock and the memory the
-last check left are arguments."""
+last check left are arguments. Last, which bots a run of settled reviews found
+silent (`silent_runs`), read off the events."""
 
 from __future__ import annotations
 
@@ -9,9 +10,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from kraft import events
 from kraft.adapters.forge import settle
 from kraft.adapters.forge.models import ReviewerFeedback
 from kraft.automated_review import AutomatedReview
+from kraft.vocab import ForgeEvent
 
 SINCE = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 GRACE = timedelta(seconds=60)
@@ -156,3 +159,39 @@ def test_a_collection_names_each_reviewer_with_its_threads_and_failed_check():
 
 def test_a_check_that_succeeded_is_collected_without_its_output():
     assert decide([check(True, "success")], now=5).collection[0]["check"] is None
+
+
+_ONE_NODE = [
+    {"id": "n", "kind": "exec", "tasks": [{"id": "t", "kind": "subprocess", "command": "true"}]}
+]
+
+
+@pytest.mark.parametrize(
+    "reviews, named",
+    [
+        # Oldest first: (what the bot did, the workspace member it reviewed).
+        ([("silent", None)] * 3, ["w3", "w2", "w1"]),
+        ([("silent", None), ("silent", None), ("heard", None)], None),
+        ([("heard", None)] + [("silent", None)] * 3, ["w4", "w3", "w2"]),
+        ([("silent", None)] * 2, None),
+        # A member's reviews are counted apart from the root's.
+        ([("silent", "repos/pkg"), ("silent", None), ("silent", "repos/pkg")], None),
+    ],
+    ids=["three-silent", "heard-last", "heard-before-three", "only-two", "a-member-apart"],
+)
+async def test_a_bot_is_named_only_when_its_last_reviews_in_a_repository_were_silent(
+    item_on, database, reviews, named
+):
+    for n, (did, mount) in enumerate(reviews, 1):
+        it = await item_on(_ONE_NODE, wid=f"w{n}")
+        payload = {"repo": "checkout", "mount": mount, "heard": [], "silent": []}
+        payload[did] = ["ccr"]
+        await database.write(
+            lambda c, w=it.id, p=payload: events.append(
+                c, w, ForgeEvent.AUTOMATED_REVIEW_SETTLED, p
+            )
+        )
+
+    got = database.read(settle.silent_runs)
+
+    assert got == ([] if named is None else [{"repo": str(it.repo), "bot": "ccr", "items": named}])

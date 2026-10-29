@@ -25,6 +25,7 @@ from kraft import skill as skill_mod
 from kraft.adapters import forge
 from kraft.addons import load as addons_load
 from kraft.api import config_check
+from kraft.automated_review import as_reviewers
 from kraft.executor import fallback
 from kraft.paths import (
     BUNDLED,
@@ -115,9 +116,11 @@ async def run_checks() -> list[dict]:
     if health is None:
         checks.append(_check("repos", True, "skipped: no server", skipped=True))
         checks.append(_check("worktrees", True, "skipped: no server", skipped=True))
+        checks.append(_check("review bots", True, "skipped: no server", skipped=True))
     else:
         checks.extend(await _repo_checks())
         checks.append(await _orphan_check())
+        checks.append(await _review_bots_check())
     checks.append(_old_documents_check())
     return checks
 
@@ -1438,6 +1441,39 @@ def _tests_check(repo: config.RepoEntry, probed: detect.Proposal | None) -> dict
     return _check(
         name, True, f"no test command, so its work items stop at verify; {advice}", warn=True
     )
+
+
+async def _review_bots_check() -> dict:
+    """Review bots that may not be reviewing at all. Always `ok`: a silence is
+    a bot with nothing to say until it repeats, and a missing triage step is a
+    choice the capabilities row offers. A warn when either holds, so neither
+    passes as a clean row."""
+    try:
+        found = await client.silent_reviewers()
+    except ValueError:  # a server older than the route
+        return _check("review bots", True, "skipped: the server cannot say", skipped=True)
+    lines = [
+        f"`{r['bot']}` on {r['repo']} never posted on its last {found['run']} reviews "
+        f"({', '.join(r['items'])}): check the login, and that the bot is on that project"
+        for r in found["reviewers"]
+    ]
+    triage = next(c for c in capabilities.MANIFEST if c.name == "triage_review_feedback")
+    if not capabilities.adopted(triage, config_dir()):
+        quiet = {"unrecognised_keys_reported": True}  # as `_repo_checks` reads them
+        entries = [config.RepoEntry.model_validate(r, context=quiet) for r in await client.repos()]
+        named = [
+            _label(repo)
+            for repo in entries
+            if any(r.bot is not None for r in as_reviewers(repo.automated_review))
+        ]
+        if named:
+            lines.append(
+                f"{', '.join(named)} name a review bot, but the library has no triage "
+                "step: a bot's summary is never read (the capabilities row has the edit)"
+            )
+    if not lines:
+        return _check("review bots", True, f"none silent on its last {found['run']} reviews")
+    return _check("review bots", True, "\n".join(lines), warn=True)
 
 
 def _label(repo: config.RepoEntry) -> str:
