@@ -220,7 +220,7 @@ _Added in 2.1_
 
 `automated_review` names one reviewer, or a list of them, each named one of two ways. They are the reviewers a chain's `mr.automated_review` task waits for.
 
-- `bot: <login>` settles when that forge login has reviewed the merge request's current head.
+- `bot: <login>` settles when that forge login has finished with the merge request's current head. How Kraft tells, and what it reads, depends on the chain: see [Waiting for several reviewers](#waiting-for-several-reviewers). On a multi-repo item:
   - On GitHub, changes requested or any inline comment is actionable (one finding per comment), and anything else is clean. A dismissed review does not count.
   - On GitLab, the bot's unresolved discussions are actionable and its approval is clean. A GitLab approval is not tied to a commit, so a bot's approval of an earlier head still reads as clean, unless the project resets approvals on push.
 - `check: <name>` settles when that check run or commit status on the head completes. Success is clean. Failure is actionable, with its output as the finding.
@@ -243,11 +243,15 @@ Reviewers can be named in three places. The nearest wins, and its list is the wh
 What the wait does with them depends on the chain.
 
 - **The collect path.** When a later task in the same node declares the `bot_feedback` input, as the shipped triage step does, the wait holds until every reviewer has finished with the latest push, then hands what they said to that task. The wait never fails on feedback; the triage agent decides what needs a change.
-- **The direct path.** Otherwise, any reviewer's actionable feedback fails the wait at once, with every finding read in that check, and goes to the fix loop. A timeout stops the item for you. A multi-repo item always takes this path, as does a chain from before the triage step.
+- **Nothing reads the feedback.** On a single-repo item whose node has no such task, as in a chain from before the triage step, a bot is still waited for until it has finished with the push, as on the collect path. Kraft then judges what was said itself:
+  - Each unresolved thread, a newest review that requests changes (when the bot left no thread), and a check that finished without passing go to the fix loop. Anything else is clean.
+  - Kraft cannot tell what a bot's summary says, so a summary alone reads as clean, and the node's log names it as not read. `kraft admin doctor`'s `triage_review_feedback` row shows the edit that adds the triage step.
+  - A check still unfinished at the timeout stops the item for you, as it would alone.
+- **The direct path.** A multi-repo item, and a node whose reviewers are only checks with nothing reading them, read each reviewer once per check. Any actionable feedback fails the wait at once, with every finding read in that check, and goes to the fix loop. A timeout stops the item for you.
 
-A bot is finished with a push when it has been active since Kraft pushed that head and then quiet for the grace period, `wait.grace_period` on the task (60 seconds by default). Its activity is a new or edited comment, a review, an inline comment, or a thread it resolved. Threads already open on the first check set a baseline and are not activity. A check is finished when it completes.
+A bot is finished with a push when it has been active since Kraft pushed that head and then quiet for the grace period, `wait.grace_period` on the task (60 seconds by default). Its activity is a new or edited comment, a review, an inline comment, a thread it resolved, or, on GitLab, an approval it gave or withdrew. Threads already open on the first check set a baseline and are not activity. A check is finished when it completes.
 
-On the collect path the timeout settles the wait: a bot that never posted had nothing to say, and the item goes on with what was collected. The timeout is recorded in the wait's events as `timed_out`.
+On the collect path, and for a bot that nothing reads, the timeout settles the wait: a bot that never posted had nothing to say, and the item goes on with what was collected. The timeout is recorded in the wait's events as `timed_out`.
 
 Forge clocks are compared with Kraft's push time as they are, with no allowance for skew. A bot that posts a placeholder and edits it long after the grace period is read early; a longer `grace_period` on that chain is the fix.
 

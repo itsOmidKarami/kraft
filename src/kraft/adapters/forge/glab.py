@@ -25,6 +25,9 @@ from kraft.adapters.forge.models import (
 )
 from kraft.automated_review import Reviewers
 
+#: The system notes GitLab writes when someone approves or withdraws approval.
+_APPROVAL_NOTES = ("approved this merge request", "unapproved this merge request")
+
 
 #: glab's pipeline vocabulary, from `glab ci list --help` (glab 1.116.0).
 #: 'skipped' is deliberately not success: nothing proved the branch green, and
@@ -44,6 +47,11 @@ def _bot_feedback(reviewer, notes: list[dict], discussions: list[dict], since) -
     summaries: list[dict] = []
     seen: list[datetime | None] = []
     for n in notes:
+        # An approval, or its withdrawal, is activity, dated by its system
+        # note: GitLab's approvals list says who approved, not when.
+        if n.get("system") and mine(n) and n.get("body") in _APPROVAL_NOTES:
+            seen.append(mr_ops.forge_time(n.get("updated_at")))
+            continue
         # A system note ("added 1 commit") and an inline one (a discussion's,
         # read below) are not the bot's summary.
         if n.get("system") or n.get("position") or n.get("type") == "DiffNote" or not mine(n):

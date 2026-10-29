@@ -332,38 +332,126 @@ async def test_no_reviewer_named_settles_with_an_empty_collection(rig):
     assert rig.triaged == [], "nothing was collected, so nothing is triaged"
 
 
-@pytest.mark.parametrize(
-    "result, advance, status",
-    [
-        # Nothing in the node reads a collection: feedback fails the wait now.
-        (forge.ReviewResult("actionable", findings=("calc.py:1: fix a1",)), 0, "failed"),
-        # And a silence is still a timeout that stops the item for a person.
-        (forge.ReviewResult("pending"), 61, "capped_out"),
-    ],
-    ids=["no-reader-feedback-fails-now", "no-reader-timeout-stops"],
+def _said(reviewer, active, *, state=None, body=""):
+    """`_feedback` with one summary: a comment, or a review in `state`."""
+    from dataclasses import replace
+
+    at = _feedback(reviewer, active).last_activity.isoformat()
+    kind = "comment" if state is None else "review"
+    summary = {"kind": kind, "state": state, "body": body, "updated_at": at}
+    return replace(_feedback(reviewer, active), summaries=(summary,))
+
+
+_SCAN = AutomatedReview(check="scan")
+#: A check still running.
+_RUNNING = forge.ReviewerFeedback(
+    _SCAN, None, check={"name": "scan", "finished": False, "conclusion": None, "output": ""}
 )
-async def test_a_node_nothing_reads_takes_the_direct_path(
-    item_on, database, run_dirs, monkeypatch, wait_clock, result, advance, status
+#: A check that finished red.
+_FAILED = forge.ReviewerFeedback(
+    _SCAN,
+    None,
+    check={"name": "scan", "finished": True, "conclusion": "failed", "output": "2 issues"},
+)
+
+
+@pytest.mark.parametrize(
+    "said, advance, status, logged",
+    [
+        # The bot left a thread and went quiet: Kraft reads it as a finding.
+        ([_feedback(_A, 1, threads=["a1"])], 61, "failed", "calc.py:1: fix a1"),
+        # Active (an approval, a thread it resolved), quiet, nothing open: clean.
+        ([_feedback(_A, 1)], 61, "done", "1 reviewer(s) finished"),
+        # A review that requests changes, with no inline comment.
+        ([_said(_A, 1, state="CHANGES_REQUESTED", body="split this")], 61, "failed", "split this"),
+        # A summary only an agent could read: clean, and the log says so.
+        ([_said(_A, 1, body="LGTM")], 61, "done", "not read: the summary from bot:a"),
+        # Never active: the deadline settles it, and the item carries on.
+        ([_feedback(_A)], 601, "done", "settled at the wait's deadline"),
+        # A check beside the bot that finished red is a finding, like the bot's.
+        ([_feedback(_A, 1), _FAILED], 61, "failed", "scan failed: 2 issues"),
+        # A check beside the bot is never skipped: unfinished at the deadline,
+        # it stops for a person as it would alone.
+        ([_feedback(_A), _RUNNING], 601, "capped_out", "not finished by the deadline: scan"),
+    ],
+    ids=[
+        "thread-fails",
+        "quiet-is-clean",
+        "changes-requested",
+        "summary-unread",
+        "silent",
+        "failed-check-beside-the-bot",
+        "unfinished-check-stops",
+    ],
+)
+async def test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft(
+    rig, said, advance, status, logged
 ):
-    it = await item_on([_review_node(1, reads=False)])
-    fake = forge.FakeForge(review_results=[result])
+    fake = forge.FakeForge(feedback_script=[said])
+    await rig(_review_node(10, reads=False, reviewers=tuple(f.reviewer for f in said)), fake)
+
+    rig.clock(0)
+    assert await rig.walk() == "waiting", "a bot is waited for until it has finished with the head"
+    rig.clock(advance)
+    await rig.walk()
+
+    session = rig.wait_session()
+    assert session["status"] == status
+    assert logged in Path(session["log_path"]).read_text()
+    assert rig.collection() is None, "nothing reads a collection, so none is written"
+
+
+@pytest.mark.parametrize(
+    "threads, summary, findings",
+    [
+        # A file-level comment has no line to name.
+        (
+            [{"id": "d1", "file": "calc.py", "line": None, "body": "split this file"}],
+            None,
+            ["calc.py: split this file"],
+        ),
+        # Changes requested with inline comments: the comments are the findings,
+        # not the walkthrough above them.
+        (
+            [{"id": "d1", "file": "calc.py", "line": 3, "body": "unused x"}],
+            "walkthrough",
+            ["calc.py:3: unused x"],
+        ),
+    ],
+    ids=["file-without-line", "changes-requested-with-threads"],
+)
+def test_kraft_s_own_verdict_names_each_finding_once(threads, summary, findings):
+    review = {"kind": "review", "state": "CHANGES_REQUESTED", "body": summary, "updated_at": ""}
+    entry = {
+        "reviewer": "bot:a",
+        "finished": "activity",
+        "summaries": [review] if summary else [],
+        "threads": threads,
+        "check": None,
+    }
+
+    assert forge.run._verdict([entry]) == (findings, [], [])
+
+
+async def test_a_check_with_nothing_reading_it_takes_the_direct_path_and_its_timeout_stops(
+    item_on, database, run_dirs, monkeypatch, wait_clock
+):
+    check = AutomatedReview(check="scan")
+    it = await item_on([_review_node(1, reads=False, reviewers=(check,))])
+    fake = forge.FakeForge(review_results=[forge.ReviewResult("pending")])
     ask = {
         "handler": "automated_review",
-        "reviewers": (_A,),
+        "reviewers": (check,),
         "reads_feedback": False,
         "wait": forge.WaitBounds.from_seconds(timeout=60, initial=30, maximum=120),
     }
 
     got = await _run_task(database, run_dirs, it, it.worktree, "kraft/w1", fake, monkeypatch, **ask)
-    if advance:
-        assert got == "waiting"
-        wait_clock.advance(advance)
-        got = await _run_task(
-            database, run_dirs, it, it.worktree, "kraft/w1", fake, monkeypatch, **ask
-        )
+    assert got == "waiting"
+    wait_clock.advance(61)
+    got = await _run_task(database, run_dirs, it, it.worktree, "kraft/w1", fake, monkeypatch, **ask)
 
-    assert got == status
-    assert not list(run_dirs.base.rglob("bot_feedback.json"))
+    assert got == "capped_out"
 
 
 async def test_a_multi_repo_item_takes_the_direct_path_whatever_its_node_reads(
