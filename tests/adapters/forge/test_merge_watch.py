@@ -413,6 +413,13 @@ async def test_an_unresolved_merge_commit_pins_nothing(run_forge, repo, wait_clo
     assert fake.asked == [merged]
 
 
+async def test_a_cli_that_cannot_start_stops_the_watch_for_a_person(run_forge, repo):
+    """Not a read to retry until the wait times out: no retry installs `gh`."""
+    fake = _Merged(_head(repo), finds=[forge.CliUnavailable("gh is not installed or not on PATH")])
+
+    assert await run_forge(fake, "merge_watch", "s1", repo=repo) == ("config_error", "config_error")
+
+
 def _an_hour_ago() -> str:
     from datetime import UTC, datetime, timedelta
 

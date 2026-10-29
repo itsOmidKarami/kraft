@@ -361,6 +361,10 @@ async def test_pointer_bump_falls_back_to_merge_request_when_push_is_denied(
     assert git(origin, "rev-parse", "main") == before, "the refused push changed nothing"
     (pointer_mr,) = [n for n, r in fake._opened_repo.items() if r == str(worktree)]
     assert fake.opened[pointer_mr] == store.branch_for(row)
+    assert fake.opened_bodies[pointer_mr] == (
+        f"Moves repos/pkg to the revisions merged for work item {row['id']}.\n\n---\n"
+        f"_Opened by [Kraft](https://kraft-sdlc.dev/) for work item `{row['id']}`._"
+    )
     assert git(worktree, "rev-parse", "HEAD:repos/pkg") == git(
         tmp_path / "pkg", "rev-parse", "main"
     )

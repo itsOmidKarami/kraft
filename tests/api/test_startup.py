@@ -313,19 +313,31 @@ def test_startup_local_link_boot_fails_after_the_link(no_link_installed, tmp_pat
     assert ended == [True]
 
 
-def test_start_up_applies_the_policys_mr_attribution(tmp_path, monkeypatch, templates_dir):
-    """A restart with `attribution.mr: false` keeps the footer off; only a
-    reload set it before."""
+@pytest.mark.parametrize(
+    "module, name, tail, before, after",
+    [
+        ("kraft.adapters.forge.mr", "ATTRIBUTION", "attribution: { mr: false }", True, False),
+        ("kraft.adapters.forge.git", "CLI_TIMEOUT_S", "forge_cli_timeout_s: 45", 120.0, 45.0),
+        ("kraft.adapters.subprocess", "IDLE_MINUTES", "agent_idle_minutes: 7", 30, 7),
+    ],
+    ids=["mr-attribution", "forge-timeout", "idle-minutes"],
+)
+def test_start_up_applies_the_policys_process_wide_settings(
+    tmp_path, monkeypatch, templates_dir, module, name, tail, before, after
+):
+    """A restart keeps what `policy.yaml` sets for the whole process; before,
+    only a reload set it."""
+    import importlib
+
     from support import api as api_support
 
-    from kraft.adapters.forge import mr as forge_mr
-
+    mod = importlib.import_module(module)
     policy = templates_dir / "policy.yaml"
-    policy.write_text(policy.read_text() + "\nattribution: { mr: false }\n")
-    monkeypatch.setattr(forge_mr, "ATTRIBUTION", True)
+    policy.write_text(policy.read_text() + f"\n{tail}\n")
+    monkeypatch.setattr(mod, name, before)
 
     with api_support._client(tmp_path, monkeypatch, templates_dir=templates_dir):
-        assert forge_mr.ATTRIBUTION is False
+        assert getattr(mod, name) == after
 
 
 def test_boot_deletes_a_stop_now_marker_no_server_read(tmp_path, client_factory):

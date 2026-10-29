@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -35,6 +37,29 @@ async def test_tick_archives_a_completed_item_past_after_days(tmp_path, repo, st
     )
     assert row["archived_by"] == "auto"
     assert not worktree.exists()
+
+
+async def test_the_poller_ticks_as_soon_as_it_is_woken(tmp_path, repo, stub_app):
+    """A published `archive_after_days` (`deps.apply_policy`) archives what it
+    makes due at once, not at the next hourly tick."""
+    app = stub_app(**_state(tmp_path, archive_after_days=30))
+    await seed_completed_item(app, repo, updated_at=days_ago(31))
+    task = asyncio.ensure_future(archive.poller(app))
+    try:
+        await asyncio.sleep(0)
+        archive.wake(app.state)
+        for _ in range(100):
+            row = app.state.db.read(
+                lambda c: c.execute("SELECT archived_by FROM work_items WHERE id='w1'").fetchone()
+            )
+            if row["archived_by"]:
+                break
+            await asyncio.sleep(0.05)
+        assert row["archived_by"] == "auto"
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 async def test_tick_archives_an_abandoned_item_past_after_days(tmp_path, repo, stub_app):

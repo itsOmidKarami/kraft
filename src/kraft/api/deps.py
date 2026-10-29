@@ -22,9 +22,9 @@ from typing import cast
 
 from fastapi import FastAPI, HTTPException
 
+from kraft import archive, executor, ids, storage, store, when_free
 from kraft import builtins as builtins_mod
 from kraft import config as config_mod
-from kraft import executor, ids, storage, store, when_free
 from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.forge import git as forge_git
 from kraft.adapters.forge import mr as forge_mr
@@ -442,6 +442,7 @@ def apply_policy(st, policy: Policy, instance: InstancePolicy) -> None:
     forge_git.CLI_TIMEOUT_S = policy.forge_cli_timeout_s
     _subprocess.IDLE_MINUTES = policy.agent_idle_minutes
     forge_mr.ATTRIBUTION = policy.mr_attribution
+    archive.wake(st)
 
 
 def reload_policy(st) -> str | None:
