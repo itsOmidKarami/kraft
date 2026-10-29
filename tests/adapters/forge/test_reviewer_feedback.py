@@ -220,8 +220,8 @@ def _comment(body, at):
             [{"id": "d1", "file": "calc.py", "line": 3, "body": "unused x"}],
             None,
         ),
-        # An approval is activity, dated by its system note; a person's is not
-        # the bot's, and an approval withdrawn is not one.
+        # An approval, or its withdrawal, is the bot's activity, dated by its
+        # system note; a person's approval is not the bot's.
         (
             GLAB,
             {
@@ -254,7 +254,7 @@ def _comment(body, at):
                 ),
             },
             BOT,
-            datetime(2026, 1, 1, 12, 1, 0, tzinfo=UTC),
+            datetime(2026, 1, 1, 12, 3, 0, tzinfo=UTC),
             [_comment("walkthrough", "2026-01-01T12:00:30Z")],
             [{"id": "d1", "file": "calc.py", "line": 3, "body": "unused x"}],
             None,

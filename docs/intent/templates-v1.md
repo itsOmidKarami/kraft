@@ -2023,11 +2023,12 @@ WHERE no later task of an automated-review task's node declares the
 `bot_feedback` input and its item has one repository, the system SHALL hold the
 wait for a bot reviewer until every named reviewer has finished with the latest
 pushed head, as on the collect path. It SHALL then report actionable each bot's
-unresolved threads, a newest review that requests changes, and a check that
-finished without passing, and clean otherwise. A bot's approval SHALL count as
-its activity. The wait's timeout SHALL settle it the same way, and SHALL NOT
-stop the item for human action.
-enforced-by: tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[thread-fails], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[quiet-is-clean], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[changes-requested], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[summary-unread], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[silent], tests/adapters/forge/test_reviewer_feedback.py::test_reviewer_feedback_reads[glab-bot-approved]
+unresolved threads, a newest review that requests changes when the bot left no
+thread, and a check that finished without passing, and clean otherwise. A bot's
+approval SHALL count as its activity. The wait's timeout SHALL settle it the
+same way, and SHALL NOT stop the item for human action, unless a named check is
+still unfinished then: that SHALL stop for human action, as a check alone does.
+enforced-by: tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[thread-fails], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[quiet-is-clean], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[changes-requested], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[summary-unread], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[silent], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[unfinished-check-stops], tests/adapters/forge/test_run_review.py::test_kraft_s_own_verdict_names_each_finding_once[file-without-line], tests/adapters/forge/test_run_review.py::test_kraft_s_own_verdict_names_each_finding_once[changes-requested-with-threads], tests/adapters/forge/test_reviewer_feedback.py::test_reviewer_feedback_reads[glab-bot-approved]
 origin: src/kraft/adapters/forge/run.py §_verdict -- Omid, 2026-10-29: a GitLab bot that only comments never approves, so on a chain without the triage step every item waited out the 30 minutes and stopped. Support every bot configuration; a bot silent until the timeout means carry on.
 
 ## REQ automated-review-timeout-settles-the-collect-path

@@ -342,27 +342,44 @@ def _said(reviewer, active, *, state=None, body=""):
     return replace(_feedback(reviewer, active), summaries=(summary,))
 
 
+_SCAN = AutomatedReview(check="scan")
+#: A check still running.
+_RUNNING = forge.ReviewerFeedback(
+    _SCAN, None, check={"name": "scan", "finished": False, "conclusion": None, "output": ""}
+)
+
+
 @pytest.mark.parametrize(
     "said, advance, status, logged",
     [
         # The bot left a thread and went quiet: Kraft reads it as a finding.
-        (_feedback(_A, 1, threads=["a1"]), 61, "failed", "calc.py:1: fix a1"),
+        ([_feedback(_A, 1, threads=["a1"])], 61, "failed", "calc.py:1: fix a1"),
         # Active (an approval, a thread it resolved), quiet, nothing open: clean.
-        (_feedback(_A, 1), 61, "done", "1 reviewer(s) finished"),
+        ([_feedback(_A, 1)], 61, "done", "1 reviewer(s) finished"),
         # A review that requests changes, with no inline comment.
-        (_said(_A, 1, state="CHANGES_REQUESTED", body="split this"), 61, "failed", "split this"),
+        ([_said(_A, 1, state="CHANGES_REQUESTED", body="split this")], 61, "failed", "split this"),
         # A summary only an agent could read: clean, and the log says so.
-        (_said(_A, 1, body="LGTM"), 61, "done", "not read: the summary from bot:a"),
+        ([_said(_A, 1, body="LGTM")], 61, "done", "not read: the summary from bot:a"),
         # Never active: the deadline settles it, and the item carries on.
-        (_feedback(_A), 601, "done", "settled at the wait's deadline"),
+        ([_feedback(_A)], 601, "done", "settled at the wait's deadline"),
+        # A check beside the bot is never skipped: unfinished at the deadline,
+        # it stops for a person as it would alone.
+        ([_feedback(_A), _RUNNING], 601, "capped_out", "not finished by the deadline: scan"),
     ],
-    ids=["thread-fails", "quiet-is-clean", "changes-requested", "summary-unread", "silent"],
+    ids=[
+        "thread-fails",
+        "quiet-is-clean",
+        "changes-requested",
+        "summary-unread",
+        "silent",
+        "unfinished-check-stops",
+    ],
 )
 async def test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft(
     rig, said, advance, status, logged
 ):
-    fake = forge.FakeForge(feedback_script=[[said]])
-    await rig(_review_node(10, reads=False, reviewers=(_A,)), fake)
+    fake = forge.FakeForge(feedback_script=[said])
+    await rig(_review_node(10, reads=False, reviewers=tuple(f.reviewer for f in said)), fake)
 
     rig.clock(0)
     assert await rig.walk() == "waiting", "a bot is waited for until it has finished with the head"
@@ -373,6 +390,38 @@ async def test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by
     assert session["status"] == status
     assert logged in Path(session["log_path"]).read_text()
     assert rig.collection() is None, "nothing reads a collection, so none is written"
+
+
+@pytest.mark.parametrize(
+    "threads, summary, findings",
+    [
+        # A file-level comment has no line to name.
+        (
+            [{"id": "d1", "file": "calc.py", "line": None, "body": "split this file"}],
+            None,
+            ["calc.py: split this file"],
+        ),
+        # Changes requested with inline comments: the comments are the findings,
+        # not the walkthrough above them.
+        (
+            [{"id": "d1", "file": "calc.py", "line": 3, "body": "unused x"}],
+            "walkthrough",
+            ["calc.py:3: unused x"],
+        ),
+    ],
+    ids=["file-without-line", "changes-requested-with-threads"],
+)
+def test_kraft_s_own_verdict_names_each_finding_once(threads, summary, findings):
+    review = {"kind": "review", "state": "CHANGES_REQUESTED", "body": summary, "updated_at": ""}
+    entry = {
+        "reviewer": "bot:a",
+        "finished": "activity",
+        "summaries": [review] if summary else [],
+        "threads": threads,
+        "check": None,
+    }
+
+    assert forge.run._verdict([entry]) == (findings, [], [])
 
 
 async def test_a_check_with_nothing_reading_it_takes_the_direct_path_and_its_timeout_stops(

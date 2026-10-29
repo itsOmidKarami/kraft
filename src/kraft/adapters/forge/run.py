@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -748,28 +749,39 @@ async def _settle_review(
     return log, "done", note, decided.collection
 
 
-def _verdict(collection: list[dict]) -> tuple[list[str], list[str]]:
+def _verdict(collection: list[dict]) -> tuple[list[str], list[str], list[str]]:
     """What a settled review asks to change, with nothing in the node to read
     it: each bot's unresolved threads, its newest review when that requests
-    changes, and a check that finished without passing. Also, for the log, the
-    reviewers whose summaries went unread -- only an agent can tell what one
-    says."""
+    changes and left no thread, and a check that finished without passing.
+    Also the reviewers whose summaries went unread (only an agent can tell
+    what one says), and the checks the deadline settled unfinished."""
     findings: list[str] = []
     unread: list[str] = []
+    unfinished: list[str] = []
     for entry in collection:
         for t in entry["threads"]:
-            where = f"{t['file']}:{t['line']}: " if t.get("file") else ""
-            findings.append(where + t["body"])
+            where = ":".join(str(x) for x in (t.get("file"), t.get("line")) if x)
+            findings.append(f"{where}: {t['body']}" if where else t["body"])
         for s in entry["summaries"]:
             if s.get("state") == "CHANGES_REQUESTED":
-                findings.append(s["body"] or f"{entry['reviewer']} requested changes")
+                if not entry["threads"]:
+                    findings.append(s["body"] or f"{entry['reviewer']} requested changes")
             elif s["body"].strip():
                 unread.append(entry["reviewer"])
         check = entry["check"]
-        # Unfinished here means the deadline settled it: nothing failed.
         if check is not None and check.get("finished"):
             findings.append(f"{check['name']} {check['conclusion']}: {check.get('output') or ''}")
-    return findings, sorted(set(unread))
+        elif check is not None:
+            unfinished.append(check["name"])
+    return findings, sorted(set(unread)), unfinished
+
+
+def _as_findings(messages: Iterable[str]) -> list[dict]:
+    """An automated review's findings, as the node's recovery reads them."""
+    return [
+        {"severity": "important", "message": m, "source_plugin": "mr.automated_review"}
+        for m in messages
+    ]
 
 
 def _write_collection(destination: Path, head: str, round: int, collection: list[dict]) -> None:
@@ -831,9 +843,9 @@ async def _run_one(
 
     The third element is None for every handler but a code-red `ci_poll`: one
     finding per failed job, for the fix-loop plumbing `on.ci.poll` now feeds
-    (Kraft-cbr §3). The fourth is None for every handler but the review wait's
-    collect path: what it decided about when to look again and what to remember
-    (`WaitNote`).
+    (Kraft-cbr §3). The fourth is None for every handler but a review wait
+    that settles on its bots (`collect` or `settle_bots`): what it decided
+    about when to look again and what to remember (`WaitNote`).
 
     `meta` is resolved once by the caller against the item's own worktree,
     not `repo` -- a multi-repo item's submodule targets are not where the
@@ -1075,7 +1087,7 @@ async def _run_one(
                 bounds=bounds, grace=grace,
             )  # fmt: skip
             if collection is not None:
-                found, unread = _verdict(collection)
+                found, unread, unfinished = _verdict(collection)
                 log += "".join(f"  {f}\n" for f in found)
                 if unread:
                     log += (
@@ -1083,15 +1095,12 @@ async def _run_one(
                         "reads bot_feedback (see `kraft admin doctor`, triage_review_feedback)\n"
                     )
                 if found:
-                    status = "failed"
-                    findings = [
-                        {
-                            "severity": "important",
-                            "message": f,
-                            "source_plugin": "mr.automated_review",
-                        }
-                        for f in found
-                    ]
+                    status, findings = "failed", _as_findings(found)
+                elif unfinished:
+                    # A check is never skipped: its timeout stops for a person,
+                    # as it does with no bot beside it.
+                    log += f"not finished by the deadline: {', '.join(unfinished)}\n"
+                    status = "waiting"
         case "automated_review":
             # One read. Which reviewer, which webhook or check, is the
             # backend's (`automated-review-implementation-is-not-template-
@@ -1123,15 +1132,7 @@ async def _run_one(
                 # Actionable feedback is a failed task *with findings*, which is
                 # what enters the node's recovery and fix loop
                 # (`post-draft-feedback-uses-node-recovery-controls`).
-                status = "failed"
-                findings = [
-                    {
-                        "severity": "important",
-                        "message": f,
-                        "source_plugin": "mr.automated_review",
-                    }
-                    for f in review.findings
-                ]
+                status, findings = "failed", _as_findings(review.findings)
             else:
                 # The reviewer itself errored. That says nothing about the
                 # code, so it must not spend a repair or a fix cycle (Ruling
@@ -2248,8 +2249,8 @@ async def _observed(
     made at all (`unobserved`, the forge's error) ends the wait as an `error`
     and keeps its status -- a failure stays a failure.
 
-    The review wait's collect path hands a `note`: its next check, its memory,
-    and the instant it decided at. Settled by the deadline, it is recorded as
+    A review wait that settles on its bots hands a `note`: its next check, its
+    memory, and the instant it decided at. Settled by the deadline, it is recorded as
     the pending observation `observe` turns into `timed_out` at that same
     instant, and the session still ends `done`: for this wait the deadline is a
     settle (`automated-review-timeout-settles-the-collect-path`), not a stop."""
