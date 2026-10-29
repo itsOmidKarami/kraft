@@ -44,6 +44,11 @@ def _bot_feedback(reviewer, notes: list[dict], discussions: list[dict], since) -
     summaries: list[dict] = []
     seen: list[datetime | None] = []
     for n in notes:
+        # An approval is activity, dated by its system note: GitLab's approvals
+        # list says who approved, not when.
+        if n.get("system") and mine(n) and n.get("body") == "approved this merge request":
+            seen.append(mr_ops.forge_time(n.get("updated_at")))
+            continue
         # A system note ("added 1 commit") and an inline one (a discussion's,
         # read below) are not the bot's summary.
         if n.get("system") or n.get("position") or n.get("type") == "DiffNote" or not mine(n):

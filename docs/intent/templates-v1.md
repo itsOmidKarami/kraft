@@ -1878,8 +1878,9 @@ enforced-by: tests/test_waits.py::test_interval_grows_from_initial_to_max_while_
 
 When an external-wait task reaches its configured timeout, the system SHALL
 stop for human action and SHALL NOT classify the timeout as a code failure,
-except an `mr.automated_review` wait on its collect path, which settles.
-enforced-by: tests/adapters/forge/test_run_review.py::test_a_node_nothing_reads_takes_the_direct_path[no-reader-timeout-stops], tests/test_waits.py::test_wait_timeout_stops_for_human_and_is_not_a_code_failure, tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human[a-pending-run-times-out], tests/test_waits.py::test_a_wait_timeout_and_a_loop_cap_are_reported_apart, tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-declared], tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-undeclared], tests/templates/test_workspace_publication.py::test_a_root_approval_that_never_comes_times_out_for_a_human
+except an `mr.automated_review` wait on its collect path, or one waiting for a
+bot on a single-repository item, which settles.
+enforced-by: tests/adapters/forge/test_run_review.py::test_a_check_with_nothing_reading_it_takes_the_direct_path_and_its_timeout_stops, tests/test_waits.py::test_wait_timeout_stops_for_human_and_is_not_a_code_failure, tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human[a-pending-run-times-out], tests/test_waits.py::test_a_wait_timeout_and_a_loop_cap_are_reported_apart, tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-declared], tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-undeclared], tests/templates/test_workspace_publication.py::test_a_root_approval_that_never_comes_times_out_for_a_human
 
 ## REQ post-merge-wait-ends-when-no-ci-runs
 
@@ -1991,13 +1992,12 @@ enforced-by: tests/test_waits.py::test_a_chain_without_an_automated_review_task_
 
 ## REQ automated-review-task-uses-ordinary-task-results
 
-Unless a later task of its node declares the `bot_feedback` input or its item
-has several repositories, an automated-review task SHALL report ordinary
-pending, clean, actionable, or error results. Actionable feedback SHALL enter
+An automated-review task SHALL report ordinary pending, clean, actionable, or
+error results. Actionable feedback SHALL enter
 the declaring execution node's recovery or fix-loop controls; on the collect
 path the wait reports pending, settled, or error instead, and actionable
 feedback comes from the reading task.
-enforced-by: tests/adapters/forge/test_run_review.py::test_a_node_nothing_reads_takes_the_direct_path[no-reader-feedback-fails-now], tests/adapters/forge/test_run_review.py::test_a_multi_repo_item_takes_the_direct_path_whatever_its_node_reads, tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[pending], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[clean], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[actionable], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[error], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[on_failure], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[fix_loop], tests/adapters/forge/test_automated_review.py::test_a_bot_s_unresolved_feedback_is_actionable[gh], tests/adapters/forge/test_automated_review.py::test_a_bot_s_unresolved_feedback_is_actionable[glab], tests/adapters/forge/test_automated_review.py::test_a_review_check_still_running_is_pending[gh], tests/adapters/forge/test_automated_review.py::test_a_review_check_still_running_is_pending[glab], tests/test_waits.py::test_a_reviewer_error_stops_for_a_human_and_spends_no_repair, tests/adapters/forge/test_automated_review.py::test_a_withdrawn_bot_review_does_not_count[gh-dismissed-only], tests/adapters/forge/test_automated_review.py::test_a_withdrawn_bot_review_does_not_count[gh-dismissed-over-an-earlier-review], tests/adapters/forge/test_automated_review.py::test_a_withdrawn_bot_review_does_not_count[glab-resolved-only]
+enforced-by: tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[thread-fails], tests/adapters/forge/test_run_review.py::test_a_multi_repo_item_takes_the_direct_path_whatever_its_node_reads, tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[pending], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[clean], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[actionable], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[error], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[on_failure], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[fix_loop], tests/adapters/forge/test_automated_review.py::test_a_bot_s_unresolved_feedback_is_actionable[gh], tests/adapters/forge/test_automated_review.py::test_a_bot_s_unresolved_feedback_is_actionable[glab], tests/adapters/forge/test_automated_review.py::test_a_review_check_still_running_is_pending[gh], tests/adapters/forge/test_automated_review.py::test_a_review_check_still_running_is_pending[glab], tests/test_waits.py::test_a_reviewer_error_stops_for_a_human_and_spends_no_repair, tests/adapters/forge/test_automated_review.py::test_a_withdrawn_bot_review_does_not_count[gh-dismissed-only], tests/adapters/forge/test_automated_review.py::test_a_withdrawn_bot_review_does_not_count[gh-dismissed-over-an-earlier-review], tests/adapters/forge/test_automated_review.py::test_a_withdrawn_bot_review_does_not_count[glab-resolved-only]
 
 ## REQ automated-review-implementation-is-not-template-configuration
 
@@ -2016,6 +2016,19 @@ has finished with the latest pushed head, then write what the reviewers said for
 that task and report the wait settled, whatever they said.
 enforced-by: tests/adapters/forge/test_run_review.py::test_the_collect_path_settles_then_hands_on_the_collection[both-settle], tests/adapters/forge/test_run_review.py::test_the_next_check_comes_when_a_bots_grace_period_ends_not_at_the_backoff, tests/adapters/forge/test_run_review.py::test_no_reviewer_named_settles_with_an_empty_collection
 origin: config/library.yaml §await_automated_review
+
+## REQ automated-review-settles-a-bot-nothing-reads
+
+WHERE no later task of an automated-review task's node declares the
+`bot_feedback` input and its item has one repository, the system SHALL hold the
+wait for a bot reviewer until every named reviewer has finished with the latest
+pushed head, as on the collect path. It SHALL then report actionable each bot's
+unresolved threads, a newest review that requests changes, and a check that
+finished without passing, and clean otherwise. A bot's approval SHALL count as
+its activity. The wait's timeout SHALL settle it the same way, and SHALL NOT
+stop the item for human action.
+enforced-by: tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[thread-fails], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[quiet-is-clean], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[changes-requested], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[summary-unread], tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[silent], tests/adapters/forge/test_reviewer_feedback.py::test_reviewer_feedback_reads[glab-bot-approved]
+origin: src/kraft/adapters/forge/run.py §_verdict -- Omid, 2026-10-29: a GitLab bot that only comments never approves, so on a chain without the triage step every item waited out the 30 minutes and stopped. Support every bot configuration; a bot silent until the timeout means carry on.
 
 ## REQ automated-review-timeout-settles-the-collect-path
 
