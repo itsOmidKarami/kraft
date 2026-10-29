@@ -458,6 +458,17 @@ async def test_a_check_with_nothing_reading_it_takes_the_direct_path_and_its_tim
     assert got == "capped_out"
 
 
+async def _both_halves_changed(item_on, database, run_dirs, tmp_path):
+    """A workspace item whose member (`repos/pkg`) and root both changed, so
+    each opens a merge request and the review wait reads both."""
+    it, worktree, branch = await _multi_repo_item(item_on, database, run_dirs, tmp_path, "ignore")
+    _with_origin(tmp_path, it, worktree)
+    for where, name in ((worktree / "repos" / "pkg", "pkg"), (worktree, "root")):
+        write(where, f"{name}.txt", "x\n")
+        commit_all(where)
+    return it, worktree, branch
+
+
 @pytest.mark.parametrize(
     "checks, again, ended",
     [
@@ -477,11 +488,7 @@ async def test_a_multi_repo_item_settles_each_repository_s_bot_on_its_own_memory
     repository's head, remembering its own threads between checks: here each
     bot's only activity is resolving the thread it had open, which a check
     sees only against what it remembered of that repository."""
-    it, worktree, branch = await _multi_repo_item(item_on, database, run_dirs, tmp_path, "ignore")
-    _with_origin(tmp_path, it, worktree)
-    for where, name in ((worktree / "repos" / "pkg", "pkg"), (worktree, "root")):
-        write(where, f"{name}.txt", "x\n")
-        commit_all(where)
+    it, worktree, branch = await _both_halves_changed(item_on, database, run_dirs, tmp_path)
     reads: dict[str, int] = {}
 
     async def feedback(*, repo, branch, reviewers, since):
@@ -534,11 +541,7 @@ async def test_a_multi_repo_item_settles_each_repository_s_bot_on_its_own_memory
 async def test_a_multi_repo_item_s_bot_findings_reach_the_fix_loop_named_from_its_checkout(
     item_on, database, run_dirs, tmp_path, monkeypatch, wait_clock, opened, checks, finding
 ):
-    it, worktree, branch = await _multi_repo_item(item_on, database, run_dirs, tmp_path, "ignore")
-    _with_origin(tmp_path, it, worktree)
-    for where, name in ((worktree / "repos" / "pkg", "pkg"), (worktree, "root")):
-        write(where, f"{name}.txt", "x\n")
-        commit_all(where)
+    it, worktree, branch = await _both_halves_changed(item_on, database, run_dirs, tmp_path)
     reads: dict[str, int] = {}
 
     async def feedback(*, repo, branch, reviewers, since):
@@ -565,6 +568,27 @@ async def test_a_multi_repo_item_s_bot_findings_reach_the_fix_loop_named_from_it
     assert got[-1] == "failed"
     result = Path(it.sessions()[-1]["result_path"])
     assert [f["message"] for f in json.loads(result.read_text())["findings"]] == [finding]
+
+
+async def test_a_member_s_check_finding_reaches_the_fix_loop_tagged_with_the_member(
+    item_on, database, run_dirs, tmp_path, monkeypatch
+):
+    """Check-only reviewers take the direct path; a member's failed check is
+    still this item's finding, tagged with the member it was read on."""
+    it, worktree, branch = await _both_halves_changed(item_on, database, run_dirs, tmp_path)
+    fake = forge.FakeForge(
+        review_results=[forge.ReviewResult("actionable", findings=("scan failed: 2 issues",))]
+    )
+
+    status = await _run_task(
+        database, run_dirs, it, worktree, branch, fake, monkeypatch,
+        handler="automated_review", reviewers=(_SCAN,),
+    )  # fmt: skip
+
+    assert status == "failed"
+    result = Path(it.sessions()[-1]["result_path"])
+    findings = json.loads(result.read_text())["findings"]
+    assert [f["message"] for f in findings] == ["[repos/pkg] scan failed: 2 issues"]
 
 
 _FLAGGED = {

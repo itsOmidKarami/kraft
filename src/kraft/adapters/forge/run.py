@@ -2057,9 +2057,10 @@ async def run_task(
     #: The forge merged one.
     landed_unreviewed = False
     checkout_stopped = False
-    # Findings only ever reach `finish_session` for a single-target run: a
+    # CI findings only ever reach `finish_session` for a single-target run: a
     # submodule's own CI is not this item's `mr_checks` node, and findings
-    # from it would double-count against the wrong job (Kraft-cbr §3).
+    # from it would double-count against the wrong job (Kraft-cbr §3). A
+    # review's findings reach it from any target (see the loop below).
     findings: list[dict] | None = None
     try:
         # Resolved once against the item's own worktree (`repo`, not whichever
