@@ -201,6 +201,7 @@ def test_the_default_loop_block_housekeeping_and_findings_keys_write_and_prune(c
         set_value("housekeeping", "archive.after_days", 14),
         set_value("housekeeping", "storage.worktrees.limit", "10G"),
         set_value("housekeeping", "storage.worktrees.auto_cleanup.min_age", "2d"),
+        set_value("housekeeping", "attribution.mr", False),
         set_value("findings", "findings.loop_severities", ["critical", "minor"]),
     )
     data = written(client)
@@ -209,6 +210,7 @@ def test_the_default_loop_block_housekeeping_and_findings_keys_write_and_prune(c
     assert data["archive"] == {"after_days": 14}
     assert data["storage"] == {"worktrees": {"limit": "10G", "auto_cleanup": {"min_age": "2d"}}}
     assert data["findings"] == {"loop_severities": ["critical", "minor"]}
+    assert data["attribution"] == {"mr": False}
     r = body["resolved"]
     assert r["housekeeping"] == {
         "max_concurrent": {"value": 7, "source": "policy"},
@@ -217,6 +219,7 @@ def test_the_default_loop_block_housekeeping_and_findings_keys_write_and_prune(c
         "storage_quota": {"value": None, "source": "default"},
         "storage_quota_default": "8G",
         "storage_auto_cleanup": {"value": "2d", "source": "policy"},
+        "mr_attribution": {"value": False, "source": "policy"},
     }
     assert r["findings"]["loop_severities"] == {"value": ["critical", "minor"], "source": "policy"}
     assert r["loops"]["default"] == {"attempts": 4, "wall_clock_s": 900}
@@ -226,10 +229,12 @@ def test_the_default_loop_block_housekeeping_and_findings_keys_write_and_prune(c
         set_value("housekeeping", "archive.after_days", None),
         set_value("housekeeping", "storage.worktrees.auto_cleanup.min_age", None),
         set_value("housekeeping", "storage.worktrees.limit", None),
+        set_value("housekeeping", "attribution.mr", None),
         set_value("findings", "findings.loop_severities", None),
     )
     data = written(client)
     assert "archive" not in data and "findings" not in data and "storage" not in data
+    assert "attribution" not in data
 
 
 @pytest.mark.parametrize(
@@ -240,6 +245,7 @@ def test_the_default_loop_block_housekeeping_and_findings_keys_write_and_prune(c
         ("findings", "findings.loop_severities", ["info"], "loops"),
         ("housekeeping", "storage.worktrees.quota", "8G", "housekeeping"),
         ("housekeeping", "storage.worktrees.auto_cleanup.min_age", "1w", "housekeeping"),
+        ("housekeeping", "attribution.mr", "maybe", "housekeeping"),
     ],
 )
 def test_a_value_put_policy_refuses_is_a_problem_in_its_group(client, scope, key, value, group):

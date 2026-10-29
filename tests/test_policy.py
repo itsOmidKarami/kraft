@@ -83,6 +83,8 @@ _BASE = "default: { attempts: 1, wall_clock_s: 1 }\n"
         pytest.param(_BASE + 'agent_idle_minutes: "30"\n', id="agent-idle-not-int"),
         pytest.param(_BASE + "forge_poll_s: 29\n", id="forge-poll-below-30"),
         pytest.param(_BASE + "forge_poll_s: soon\n", id="forge-poll-not-int"),
+        pytest.param(_BASE + "attribution: { mr: maybe }\n", id="mr-attribution-not-bool"),
+        pytest.param(_BASE + "attribution: { pr: false }\n", id="attribution-unknown-key"),
     ],
 )
 def test_load_policy_rejects_malformed(tmp_path, doc):
@@ -323,6 +325,10 @@ def test_cron_due_matches_star_and_lists():
         pytest.param("", "agent_idle_minutes", 30, id="agent-idle-default"),
         pytest.param("forge_poll_s: 60\n", "forge_poll_s", 60, id="forge-poll"),
         pytest.param("", "forge_poll_s", 300, id="forge-poll-default"),
+        pytest.param(
+            "attribution: { mr: false }\n", "mr_attribution", False, id="mr-attribution-off"
+        ),
+        pytest.param("", "mr_attribution", True, id="mr-attribution-default"),
         pytest.param("", "triggers", [], id="triggers-default"),
     ],
 )

@@ -237,6 +237,15 @@ describe("Policy page: Housekeeping", () => {
     await waitFor(() => expect(sent()).toContainEqual({ op: "set_value", scope: "retries", key: "forge_cli_timeout_s", value: 60 }));
   });
 
+  it("the Kraft footer is on by default, and off sends attribution.mr false", async () => {
+    mount("/settings/policy/housekeeping");
+    const card = await screen.findByRole("region", { name: "Board and forge" });
+    const footer = within(card).getByRole("group", { name: "merge request footer" });
+    expect(within(footer).getByRole("button", { name: "on" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(within(footer).getByRole("button", { name: "off" }));
+    await waitFor(() => expect(sent()).toContainEqual({ op: "set_value", scope: "housekeeping", key: "attribution.mr", value: false }));
+  });
+
   it("sends the storage limit and quota as sizes, and refuses a bare number", async () => {
     mount("/settings/policy/housekeeping");
     await screen.findByRole("region", { name: "Storage" });

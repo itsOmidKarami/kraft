@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from kraft.adapters import subprocess as _subprocess
+from kraft.adapters.forge import mr as forge_mr
 from kraft.api import deps
 
 _BASE = "default: { attempts: 3, wall_clock_s: 60 }\n"
@@ -18,3 +19,13 @@ def test_apply_policy_sets_the_idle_limit(tmp_path, monkeypatch):
     deps.apply_policy(SimpleNamespace(), *deps.read_policy(tmp_path))
 
     assert _subprocess.IDLE_MINUTES == 7
+
+
+def test_apply_policy_sets_mr_attribution(tmp_path, monkeypatch):
+    """A reload that turns `attribution.mr` off reaches the next description."""
+    (tmp_path / "policy.yaml").write_text(_BASE + "attribution: { mr: false }\n")
+    monkeypatch.setattr(forge_mr, "ATTRIBUTION", True)
+
+    deps.apply_policy(SimpleNamespace(), *deps.read_policy(tmp_path))
+
+    assert forge_mr.ATTRIBUTION is False

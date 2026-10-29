@@ -137,6 +137,21 @@ def test_mr_body_is_the_description_as_written_or_the_brief(meta, kw, expected):
     assert mr_ops.mr_body(WID, *meta, **kw) == expected
 
 
+@pytest.mark.parametrize(
+    "meta, kw, expected",
+    [
+        ((MRMeta(description="## What\n\nA new door."),), {}, "## What\n\nA new door."),
+        ((), {"title": "Add a door", "brief": "The hall needs one."}, "The hall needs one."),
+        # Nothing else to say: the title, never a blank description.
+        ((), {"title": "Add a door"}, "Add a door"),
+    ],
+    ids=["authored", "brief", "title-alone"],
+)
+def test_mr_body_is_unsigned_with_attribution_off(monkeypatch, meta, kw, expected):
+    monkeypatch.setattr(mr_ops, "ATTRIBUTION", False)
+    assert mr_ops.mr_body(WID, *meta, **kw) == expected
+
+
 def test_mr_body_truncates_a_runaway_description_with_a_visible_marker():
     body = mr_ops.mr_body(WID, MRMeta(description="x" * 200_000))
     assert len(body) <= mr_ops.MR_BODY_MAX_CHARS

@@ -37,6 +37,7 @@ export const KEYS = {
 export const SEVERITIES = ["critical", "important", "minor"] as const;
 export const SEVERITY_KEY = { scope: "findings", key: "findings.loop_severities" } as const;
 export const STUCK_KEY = { scope: "escalation", key: "auto_escalate_stuck" } as const;
+export const ATTRIBUTION_KEY = { scope: "housekeeping", key: "attribution.mr" } as const;
 
 /** A cap cell's key: `defaults.<level>.<cap>` or `maxima.<level>.<cap>`. */
 export const capKey = (kind: "default" | "maximum", level: string, cap: string): KeySpec => ({

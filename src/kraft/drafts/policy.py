@@ -39,6 +39,7 @@ HOUSEKEEPING = (
     "storage.worktrees.limit",
     "storage.worktrees.quota",
     "storage.worktrees.auto_cleanup.min_age",
+    "attribution.mr",
 )
 FINDINGS = ("findings.loop_severities",)
 SECTION_FIELDS = ("max_attempts", "timeout_minutes")
@@ -242,7 +243,7 @@ def _group(field: str | None) -> tuple[str, str | None]:
     level = parts[1] if len(parts) > 1 and parts[1] in CAP_LEVELS else None
     if top in ("loops", "default", "findings"):
         return "loops", None
-    if top in ("max_concurrent", "archive", "storage"):
+    if top in ("max_concurrent", "archive", "storage", "attribution"):
         return "housekeeping", None
     if top in ESCALATION:
         return "escalation", None
@@ -352,6 +353,7 @@ def resolve(st, key, raw, files, published) -> dict:
                 "worktrees",
                 "auto_cleanup",
             ),
+            "mr_attribution": _leaf(data, policy.mr_attribution, "attribution", "mr"),
         },
         "findings": {
             "loop_severities": _leaf(

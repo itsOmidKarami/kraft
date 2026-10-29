@@ -35,6 +35,7 @@ from kraft import update as update_mod
 from kraft.adapters import hook_install
 from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.forge import git as forge_git
+from kraft.adapters.forge import mr as forge_mr
 from kraft.addons import load as addons_load
 from kraft.api import deps
 from kraft.db import Database
@@ -455,6 +456,7 @@ async def _lifespan(app: FastAPI):
     if policy_obj:
         forge_git.CLI_TIMEOUT_S = policy_obj.forge_cli_timeout_s
         _subprocess.IDLE_MINUTES = policy_obj.agent_idle_minutes
+        forge_mr.ATTRIBUTION = policy_obj.mr_attribution
     app.state.access = access
     # What the server is really listening on. __main__ reads access.yaml for this,
     # so they normally agree — until someone saves a new bind and has not restarted.

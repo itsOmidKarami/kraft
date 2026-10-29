@@ -45,7 +45,7 @@ export interface PolicyResolved {
   };
   escalation: Record<string, Leaf>;
   retries: Record<string, Leaf>;
-  housekeeping: { max_concurrent: Leaf<number>; archive_after_days: Leaf<number>; storage_limit: Leaf<string>; storage_quota: Leaf<string>; storage_quota_default: string | null; storage_auto_cleanup: Leaf<string> };
+  housekeeping: { max_concurrent: Leaf<number>; archive_after_days: Leaf<number>; storage_limit: Leaf<string>; storage_quota: Leaf<string>; storage_quota_default: string | null; storage_auto_cleanup: Leaf<string>; mr_attribution?: Leaf<boolean> };
   findings: { loop_severities: Leaf<string[]> };
 }
 

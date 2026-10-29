@@ -186,6 +186,14 @@ describe("Policy housekeeping (N.1)", () => {
     expect(screen.getByRole("button", { name: /^forge call timeout/ })).toHaveTextContent("120 s");
   });
 
+  it("the Kraft footer is a switch, on by default, that sends attribution.mr", async () => {
+    const { calls } = open("housekeeping");
+    const sw = await screen.findByRole("switch", { name: /^merge request footer/ });
+    expect(sw).toBeChecked();
+    await userEvent.click(sw);
+    await waitFor(() => expect(ops(calls)).toEqual([{ op: "set_value", scope: "housekeeping", key: "attribution.mr", value: false }]));
+  });
+
   it("archive after: null reads never, zero is legal", async () => {
     const { calls } = open("housekeeping", ans(policyView({}, resolved({ housekeeping: { max_concurrent: { value: 5, source: "policy" }, archive_after_days: { value: null, source: null } } }))));
     const row = await screen.findByRole("button", { name: /^archive after/ });

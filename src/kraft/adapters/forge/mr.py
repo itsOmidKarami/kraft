@@ -31,6 +31,10 @@ MR_BODY_MAX_CHARS = 65_536
 #: Where the footer every merge request is signed with points: the docs site.
 KRAFT_URL = "https://kraft-sdlc.dev/"
 
+#: Whether `mr_body` signs the description, set from `policy.attribution.mr`
+#: at startup and on reload.
+ATTRIBUTION = True
+
 _TRUNCATION_MARKER = "\n\n*(truncated -- read the diff, this description did not fit)*"
 
 #: One agent-authored scalar's ceiling. A label or a username is short; 200
@@ -159,8 +163,8 @@ def mr_body(
 ) -> str:
     """The merge request description: the agent's own, as written, or, when
     there is none, the work item's brief under its full title (only when the
-    MR title had to clip it). Always signed with a footer naming Kraft and the
-    work item, kept whole when the rest is truncated.
+    MR title had to clip it). Signed with a footer naming Kraft and the work
+    item, kept whole when the rest is truncated, unless `ATTRIBUTION` is off.
 
     No commit list and no branch line: the forge already shows both, and every
     sync rewrote them back over a person's edit. Rebuilt on every call all the
@@ -177,8 +181,9 @@ def mr_body(
         head = title.strip()
         body = "\n\n".join(p for p in (head if head != mr_title(head) else "", brief.strip()) if p)
     if not body:
-        return sign
-    footer = f"\n\n---\n{sign}"
+        # Never blank: unsigned and with nothing else to say, it is the title.
+        return sign if ATTRIBUTION else title.strip() or f"Work item {work_item_id}"
+    footer = f"\n\n---\n{sign}" if ATTRIBUTION else ""
 
     room = MR_BODY_MAX_CHARS - len(footer)
     if len(body) > room:
