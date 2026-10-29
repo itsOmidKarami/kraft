@@ -831,11 +831,6 @@ async def _run_one(
     #: multi-repo item), with the grace period, wait bounds, session and round
     #: it records its collection under.
     collect: bool = False,
-    #: A review wait that does not collect (nothing in the node reads it, or a
-    #: multi-repo item): a bot reviewer is still waited for until it has
-    #: finished with the head, as on the collect path, and Kraft reads the
-    #: verdict itself.
-    settle_bots: bool = False,
     #: Where a multi-repo item keeps this repository's review memory.
     scope: str | None = None,
     grace: timedelta = DEFAULT_GRACE,
@@ -851,7 +846,7 @@ async def _run_one(
     The third element is None for every handler but a code-red `ci_poll`: one
     finding per failed job, for the fix-loop plumbing `on.ci.poll` now feeds
     (Kraft-cbr §3). The fourth is None for every handler but a review wait
-    that settles on its bots (`collect` or `settle_bots`): what it decided
+    that settles on its bots (collecting or not): what it decided
     about when to look again and what to remember (`WaitNote`).
 
     `meta` is resolved once by the caller against the item's own worktree,
@@ -1086,7 +1081,10 @@ async def _run_one(
                 session_id=session_id,
                 round=round,
             )
-        case "automated_review" if settle_bots and any(r.bot is not None for r in reviewers):
+        case "automated_review" if any(r.bot is not None for r in reviewers):
+            # Not collecting (nothing in the node reads it, or a multi-repo
+            # item): a bot is still waited for until it has finished with the
+            # head, as on the collect path, and Kraft reads the verdict itself.
             head = await git._head_sha(repo, branch)
             log, status, note, collection = await _settle_review(
                 forge, db, repo=repo, orig_repo=orig_repo, branch=branch, head=head,
@@ -1098,8 +1096,9 @@ async def _run_one(
                 log += "".join(f"  {f}\n" for f in found)
                 if unread:
                     log += (
-                        f"not read: the summary from {', '.join(unread)}; nothing in this node "
-                        "reads bot_feedback (see `kraft admin doctor`, triage_review_feedback)\n"
+                        f"not read: the summary from {', '.join(unread)}; only a triage step "
+                        "reads one, on a single-repo item (see `kraft admin doctor`, "
+                        "triage_review_feedback)\n"
                     )
                 if found:
                     status, findings = "failed", _as_findings(found)
@@ -2020,13 +2019,12 @@ async def run_task(
     awaiting_landing = next((t[0] for t in targets if t[0] not in merged_rows), None)
     log, status = "", "done"
     collect = handler == "automated_review" and reads_feedback and not multi
-    settle_bots = handler == "automated_review"
     note: WaitNote | None = None
     #: A multi-repo review wait's memory, one entry per repository. Carried
     #: over from the last check, so a repository this check does not reach
     #: keeps what it had.
     memories: dict = {}
-    if multi and settle_bots:
+    if multi and handler == "automated_review":
         last = db.read(lambda c: waits.open_wait(c, work_item_id, hook_point))
         memories = dict(((last.last if last is not None else None) or {}).get("memory", {}))
     #: The members a conflict rebase moved (Kraft-puqxq).
@@ -2115,19 +2113,15 @@ async def run_task(
                     moved=moved if member else None,
                     run_dirs=run_dirs,
                     collect=collect,
-                    settle_bots=settle_bots,
                     scope=str(target_repo) if multi else None,
                     grace=grace,
                     bounds=wait or DEFAULT_WAIT,
                     session_id=session_id,
                     round=round,
                 )
-                if multi and settle_bots and one_note is not None:
+                if multi and handler == "automated_review" and one_note is not None:
                     memories[str(target_repo)] = one_note.extra["memory"]
-                    wakes = [n.next_at for n in (note, one_note) if n and n.next_at]
-                    one_note = replace(
-                        one_note, extra={"memory": memories}, next_at=min(wakes, default=None)
-                    )
+                    one_note = replace(one_note, extra={"memory": memories})
                 note = one_note or note
             else:
                 one_log, one_status, one_findings = "", settled, None
