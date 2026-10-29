@@ -84,7 +84,7 @@ def assert_on_branch(worktree: Path, branch: str) -> None:
         raise UnsafeWorktree(f"{worktree} is not on {branch}; check it out by hand, then retry")
 
 
-#: Per-call cap, set from `policy.forge_cli_timeout_s` at startup. `subprocess.run`
+#: Per-call cap, set from `policy.forge_cli_timeout_s` at startup and on reload. `subprocess.run`
 #: with no timeout blocks its thread forever on a stalled `gh`, and no deadline
 #: outside that thread reaches into it.
 CLI_TIMEOUT_S = 120.0
@@ -125,6 +125,9 @@ async def run_git(
         raise ForgeError(f"{' '.join(args)} timed out after {timeout:g}s") from exc
     except FileNotFoundError as exc:
         raise ForgeError(f"{args[0]} is not installed or not on PATH") from exc
+    except OSError as exc:
+        # E2BIG and the like: the CLI never started, which is a forge error too.
+        raise ForgeError(f"{args[0]} could not start: {exc.strerror or exc}") from exc
     if done.returncode != 0:
         detail = done.stderr.strip() or done.stdout.strip()
         raise ForgeError(f"{' '.join(args)} failed: {detail}")

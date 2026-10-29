@@ -319,6 +319,7 @@ describe("Policy page: the section tabs and problems", () => {
     await screen.findByRole("region", { name: "Runs" });
     await userEvent.click(screen.getByRole("button", { name: "Review & publish" }));
     expect(await screen.findByRole("button", { name: "Publish" })).toBeDisabled();
+    expect(screen.getByText("applies as soon as you publish")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Fix →" }));
     expect(where).toBe("/settings/policy/limits");
     const row = await screen.findByRole("group", { name: "tasks running" });

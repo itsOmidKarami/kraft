@@ -264,7 +264,7 @@ function Housekeeping(e: Edits) {
       ]} />
       <Group title={BOARD_AND_FORGE} rows={[
         single(e, KEYS.archive, "archive after", p.housekeeping.archive_after_days.value, { never: "never", sub: "completed and abandoned items; empty never archives" }),
-        single(e, KEYS.forge, "forge call timeout", num(p.retries.forge_cli_timeout_s?.value), { sub: "read at startup" }),
+        single(e, KEYS.forge, "forge call timeout", num(p.retries.forge_cli_timeout_s?.value), { sub: "one gh, glab or git call" }),
         { label: "merge request footer", sub: signed ? "ends each description with “Opened by Kraft”" : "off: Kraft adds no footer", sw: signed, changed: ctx.changes.has(ATTRIBUTION_KEY.key), onSwitch: (on) => void sendValue(ctx.draft, ATTRIBUTION_KEY, on) },
       ]} />
       <Group title="Storage" rows={[

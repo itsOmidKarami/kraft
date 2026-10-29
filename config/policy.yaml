@@ -58,7 +58,8 @@ rate_limit_retries: 5
 
 # Seconds one forge CLI call (gh/glab/git) may run before it is killed and
 # reported as a forge error. Bounds a single call, not a wait (that is the
-# task's own total_time_cap_minutes). Raise it on a slow forge. Read at startup.
+# task's own total_time_cap_minutes). Raise it on a slow forge. Read at startup
+# and on reload.
 forge_cli_timeout_s: 120
 
 # Minutes an agent session may write nothing to its log before Kraft kills it

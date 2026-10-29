@@ -651,11 +651,21 @@ def test_assert_clean_sees_a_submodule_with_ignore_all(tmp_path):
         asyncio.run(forge.assert_clean(root, "main"))
 
 
-def test_a_hanging_cli_call_is_killed_and_raises(tmp_path):
-    """A wait's deadline never reached the subprocess inside it: a stalled gh
-    blocked forever and a 300s cap ran for 16 minutes."""
-    with pytest.raises(forge.ForgeError, match="timed out"):
-        asyncio.run(forge_git.run_git(tmp_path, ["sleep", "30"], timeout=0.5))
+@pytest.mark.parametrize(
+    "args, match",
+    [
+        # A wait's deadline never reached the subprocess inside it: a stalled gh
+        # blocked forever and a 300s cap ran for 16 minutes.
+        (["sleep", "30"], "timed out"),
+        (["kraft-no-such-cli"], "not installed"),
+        # One argument over Linux's 128 KiB: the exec itself is refused (E2BIG).
+        (["true", "\u0627" * 70_000], "could not start"),
+    ],
+    ids=["hangs", "missing", "argument-too-long"],
+)
+def test_a_cli_call_that_cannot_finish_raises_a_forge_error(tmp_path, args, match):
+    with pytest.raises(forge.ForgeError, match=match):
+        asyncio.run(forge_git.run_git(tmp_path, args, timeout=0.5))
 
 
 @pytest.mark.parametrize(
