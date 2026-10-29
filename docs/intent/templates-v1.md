@@ -431,6 +431,18 @@ verdict.
 enforced-by: tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[a-triage-ran], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[only-a-skip-row], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[a-skip-after-a-verdict], tests/executor/test_round_prompts.py::test_the_brief_is_told_where_the_triage_verdict_is[chain-without-triage], tests/executor/test_agent_inputs.py::test_the_triage_verdict_reaches_only_a_task_that_declares_it[declared], tests/executor/test_agent_inputs.py::test_the_triage_verdict_reaches_only_a_task_that_declares_it[undeclared], tests/skills/test_review_feedback.py::test_the_review_brief_is_told_to_report_what_the_triage_declined
 origin: src/kraft/templates/models.py §AgentInput -- declared as `inputs: [triage_verdict]` on the seeded `write_summary` and delivered by `executor/dispatch.py` §dispatch_node through `prompts.triage_verdict_note`, the verdict being the triage session `prompts.last_review_session` returns.
 
+## REQ pr-rules-are-pointed-at-by-path
+
+An agent task that declares the `pr_rules` input SHALL be told, by path, where
+the repository keeps its own rules for driving a pull request: the first of
+`.claude/skills/steward/SKILL.md`, `.agents/skills/steward/SKILL.md`,
+`.claude/skills/babysit/SKILL.md` and `.agents/skills/babysit/SKILL.md`
+committed on the item's branch, on its own pass and a fix loop's alike. A file
+that is not committed SHALL NOT count, the file's text SHALL NOT reach the
+prompt, and a task that does not declare the input SHALL NOT be told.
+enforced-by: tests/executor/test_agent_inputs.py::test_pr_rules_reach_only_a_task_that_declares_them[declared], tests/executor/test_agent_inputs.py::test_pr_rules_reach_only_a_task_that_declares_them[fix-loop-override], tests/executor/test_agent_inputs.py::test_pr_rules_reach_only_a_task_that_declares_them[undeclared], tests/executor/test_prompts.py::test_the_first_committed_pr_rules_file_is_pointed_at[claude-steward-first], tests/executor/test_prompts.py::test_the_first_committed_pr_rules_file_is_pointed_at[steward-before-babysit], tests/executor/test_prompts.py::test_the_first_committed_pr_rules_file_is_pointed_at[claude-before-agents], tests/executor/test_prompts.py::test_the_first_committed_pr_rules_file_is_pointed_at[agents-babysit-last], tests/executor/test_prompts.py::test_the_first_committed_pr_rules_file_is_pointed_at[none], tests/executor/test_prompts.py::test_an_uncommitted_pr_rules_file_is_not_the_repositorys, tests/executor/test_prompts.py::test_an_in_place_pr_rules_note_reads_the_items_branch
+origin: src/kraft/templates/models.py §AgentInput -- declared as `inputs: [pr_rules]` on the seeded merge-request tasks and delivered by `executor/dispatch.py` §dispatch_node through `prompts.pr_rules_note`, which names the file and never reads it (the context-injection boundary).
+
 ## REQ carried-findings-are-delivered-to-a-reviewing-task
 
 A reviewing agent task SHALL be shown the findings its previous round

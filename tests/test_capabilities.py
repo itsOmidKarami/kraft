@@ -88,7 +88,7 @@ def test_the_triage_entry_gives_the_exact_shipped_yaml():
         "    prompt: Decide which of the review bots' feedback on this merge request needs a "
         "change.\n"
         "    skill: kraft:review-feedback\n"
-        "    inputs: [bot_feedback, previous_review]\n"
+        "    inputs: [bot_feedback, previous_review, pr_rules]\n"
     )
     step = (
         "      - id: review_feedback\n"

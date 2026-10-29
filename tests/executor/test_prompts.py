@@ -340,3 +340,62 @@ def test_the_merge_rejection_repair_is_told_what_happened_by_cause(cause, told, 
     assert note.startswith("A merge train or merge queue rejected this merge request. Branch")
     assert told in note
     assert not_told not in note
+
+
+# -- pr_rules_note (pr-rules-are-pointed-at-by-path) ------------------------------
+
+#: The lookup order, written out: read off `prompts.PR_RULES_PATHS`, a reordered
+#: tuple would pass.
+_RULES = (
+    ".claude/skills/steward/SKILL.md",
+    ".agents/skills/steward/SKILL.md",
+    ".claude/skills/babysit/SKILL.md",
+    ".agents/skills/babysit/SKILL.md",
+)
+
+
+@pytest.mark.parametrize(
+    ("committed", "pointed"),
+    [
+        pytest.param(list(_RULES), _RULES[0], id="claude-steward-first"),
+        pytest.param(_RULES[1:], _RULES[1], id="steward-before-babysit"),
+        pytest.param(_RULES[2:], _RULES[2], id="claude-before-agents"),
+        pytest.param(_RULES[3:], _RULES[3], id="agents-babysit-last"),
+        pytest.param([], None, id="none"),
+    ],
+)
+async def test_the_first_committed_pr_rules_file_is_pointed_at(
+    item_on, run_dirs, repo, committed, pointed
+):
+    """Steward before babysit, `.claude` before `.agents`, and the file is named,
+    never read into the prompt (the context-injection boundary)."""
+    it = await item_on(v1_named_chain(run_dirs.base / "t"), "implementation")
+    for path in committed:
+        write(repo, path, f"Rule from {path}: never squash.\n")
+    commit_all(repo, "pr rules")
+
+    note = prompts.pr_rules_note(repo, it.row())
+
+    assert (f"`{pointed}`" in note) if pointed else note == ""
+    assert "never squash" not in note
+
+
+async def test_an_uncommitted_pr_rules_file_is_not_the_repositorys(item_on, run_dirs, repo):
+    """Setup copies skills into an ignored `.agents/skills/`: a file on disk but
+    not committed is not the repository's rules."""
+    it = await item_on(v1_named_chain(run_dirs.base / "t"), "implementation")
+    write(repo, ".agents/skills/steward/SKILL.md", "dropped by setup\n")
+
+    assert prompts.pr_rules_note(repo, it.row()) == ""
+
+
+async def test_an_in_place_pr_rules_note_reads_the_items_branch(item_on, run_dirs, repo):
+    """In place the checkout may be the person's: the rules are the ones on the
+    item's branch, as `progress_note` reads the plan."""
+    it = await item_on(v1_named_chain(run_dirs.base / "t"), "implementation", target=IN_PLACE)
+    git(repo, "checkout", "-q", "-b", store.branch_for(it.row()))
+    write(repo, _RULES[1], "the item's\n")
+    commit_all(repo, "pr rules")
+    git(repo, "checkout", "-q", "main")
+
+    assert f"`{_RULES[1]}`" in prompts.pr_rules_note(repo, it.row())
