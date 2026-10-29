@@ -385,8 +385,8 @@ async def repo_library_accept(body: LibraryAccept, request: Request, path: str):
 
 @api_router.get("/repos/silent-reviewers")
 async def silent_reviewers(request: Request):
-    """Each review bot whose last few settled reviews in a repository were all
-    silent (`settle.silent_runs`), for `kraft admin doctor`."""
+    """Each review bot that has never posted in a repository across its
+    reviews of several items (`settle.silent_runs`), for `kraft admin doctor`."""
     runs = request.app.state.db.read(settle.silent_runs)
     return {"reviewers": runs, "run": settle.SILENT_RUN}
 

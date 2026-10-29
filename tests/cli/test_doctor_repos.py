@@ -309,8 +309,8 @@ def _seed_silent_reviews(run_dir, bot: str, count: int) -> None:
 @pytest.mark.parametrize(
     "silences, triage, warned, says",
     [
-        (3, True, True, "`ccr` on /r never posted on its last 3 reviews (w3, w2, w1)"),
-        (2, True, False, "none silent on its last 3 reviews"),
+        (3, True, True, "`ccr` on /r has never posted, across 3 items or more (w3, w2, w1)"),
+        (2, True, False, "every review bot has posted in its repos"),
         (0, False, True, "/r name a review bot, but the library has no triage step"),
     ],
     ids=["silent-three-times", "silent-twice", "no-triage-step"],

@@ -19,8 +19,9 @@ from kraft.adapters.forge.models import ReviewerFeedback
 from kraft.automated_review import AutomatedReview, Reviewers
 from kraft.vocab import ForgeEvent
 
-#: How many reviews in a row a bot must have stayed silent on in one repository
-#: before `kraft admin doctor` says so: one silence is a bot with nothing to say.
+#: How many items a bot must have reviewed in one repository, never once
+#: posting, before `kraft admin doctor` says so. A bot that posts only when it
+#: finds something is silent on clean code, but not on every item, ever.
 SILENT_RUN = 3
 
 #: The conclusions of a check that has nothing to say, on either forge.
@@ -132,10 +133,14 @@ def heard_and_silent(reviewers: Reviewers, memory: dict) -> tuple[list[str], lis
 
 
 def silent_runs(conn, at_least: int = SILENT_RUN) -> list[dict]:
-    """Each bot whose last `at_least` settled reviews in a repository all
-    found it silent: most likely a login no account has, or a bot not
-    installed there. Newest item first."""
-    seen: dict[tuple[str, str], list[tuple[bool, str]]] = {}
+    """Each bot that has never posted in a repository, across reviews of at
+    least `at_least` items: most likely a login no account has, or a bot not
+    installed there. Its last `at_least` items, newest first. Only a bot the
+    repository's newest review still waited for: a login since corrected, or a
+    bot since removed, no longer reviews there."""
+    heard: set[tuple[str, str]] = set()
+    current: dict[str, set[str]] = {}
+    items: dict[tuple[str, str], list[str]] = {}
     # Keyed by the item's own repository, and a workspace member's folder in
     # it: the path the wait read is that item's own checkout.
     rows = conn.execute(
@@ -146,13 +151,14 @@ def silent_runs(conn, at_least: int = SILENT_RUN) -> list[dict]:
     for row in rows:
         payload = json.loads(row["payload"])
         repo = "/".join(x for x in (row["repo"], payload.get("mount")) if x)
-        for silent, key in ((False, "heard"), (True, "silent")):
-            for bot in payload.get(key) or []:
-                run = seen.setdefault((repo, bot), [])
-                if len(run) < at_least:
-                    run.append((silent, row["work_item_id"]))
+        current.setdefault(repo, {*(payload.get("heard") or []), *(payload.get("silent") or [])})
+        heard |= {(repo, bot) for bot in payload.get("heard") or []}
+        for bot in payload.get("silent") or []:
+            seen = items.setdefault((repo, bot), [])
+            if row["work_item_id"] not in seen:
+                seen.append(row["work_item_id"])
     return [
-        {"repo": repo, "bot": bot, "items": [item for _, item in run]}
-        for (repo, bot), run in sorted(seen.items())
-        if len(run) == at_least and all(silent for silent, _ in run)
+        {"repo": repo, "bot": bot, "items": seen[:at_least]}
+        for (repo, bot), seen in sorted(items.items())
+        if bot in current[repo] and (repo, bot) not in heard and len(seen) >= at_least
     ]

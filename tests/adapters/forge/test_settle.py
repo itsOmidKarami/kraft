@@ -169,29 +169,54 @@ _ONE_NODE = [
 @pytest.mark.parametrize(
     "reviews, named",
     [
-        # Oldest first: (what the bot did, the workspace member it reviewed).
-        ([("silent", None)] * 3, ["w3", "w2", "w1"]),
-        ([("silent", None), ("silent", None), ("heard", None)], None),
-        ([("heard", None)] + [("silent", None)] * 3, ["w4", "w3", "w2"]),
-        ([("silent", None)] * 2, None),
+        # Oldest first: (item, what the bot did, the workspace member it reviewed).
+        (
+            [("w1", "silent", None), ("w2", "silent", None), ("w3", "silent", None)],
+            ["w3", "w2", "w1"],
+        ),
+        ([(f"w{n}", "silent", None) for n in range(1, 5)], ["w4", "w3", "w2"]),
+        # A bot that has posted there even once is one that posts only on findings.
+        ([("w1", "heard", None)] + [(f"w{n}", "silent", None) for n in range(2, 5)], None),
+        ([("w1", "silent", None), ("w2", "silent", None), ("w3", "heard", None)], None),
+        ([("w1", "silent", None), ("w2", "silent", None)], None),
+        # Three heads of one item, through its fix loop, are one item.
+        ([("w1", "silent", None)] * 3, None),
         # A member's reviews are counted apart from the root's.
-        ([("silent", "repos/pkg"), ("silent", None), ("silent", "repos/pkg")], None),
+        (
+            [("w1", "silent", "repos/pkg"), ("w2", "silent", None), ("w3", "silent", "repos/pkg")],
+            None,
+        ),
+        # The login was corrected: the newest review waits for another bot.
+        (
+            [(f"w{n}", "silent", None) for n in range(1, 4)] + [("w4", "heard", None, "ccr-bot")],
+            None,
+        ),
     ],
-    ids=["three-silent", "heard-last", "heard-before-three", "only-two", "a-member-apart"],
+    ids=[
+        "three-items",
+        "more-than-three",
+        "heard-once-before",
+        "heard-last",
+        "only-two-items",
+        "one-item-three-heads",
+        "a-member-apart",
+        "since-corrected",
+    ],
 )
-async def test_a_bot_is_named_only_when_its_last_reviews_in_a_repository_were_silent(
+async def test_a_bot_is_named_only_when_it_never_posted_in_a_repository_across_items(
     item_on, database, reviews, named
 ):
-    for n, (did, mount) in enumerate(reviews, 1):
-        it = await item_on(_ONE_NODE, wid=f"w{n}")
+    filed = {}
+    for wid, did, mount, *login in reviews:
+        if wid not in filed:
+            filed[wid] = await item_on(_ONE_NODE, wid=wid)
         payload = {"repo": "checkout", "mount": mount, "heard": [], "silent": []}
-        payload[did] = ["ccr"]
+        payload[did] = login or ["ccr"]
         await database.write(
-            lambda c, w=it.id, p=payload: events.append(
-                c, w, ForgeEvent.AUTOMATED_REVIEW_SETTLED, p
-            )
+            lambda c, w=wid, p=payload: events.append(c, w, ForgeEvent.AUTOMATED_REVIEW_SETTLED, p)
         )
 
     got = database.read(settle.silent_runs)
 
-    assert got == ([] if named is None else [{"repo": str(it.repo), "bot": "ccr", "items": named}])
+    repo = str(filed["w1"].repo)
+    assert got == ([] if named is None else [{"repo": repo, "bot": "ccr", "items": named}])

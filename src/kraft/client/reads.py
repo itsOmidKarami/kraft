@@ -539,8 +539,8 @@ async def repos() -> list[dict]:
 
 
 async def silent_reviewers() -> dict:
-    """Review bots silent on their last few settled reviews in a repository:
-    `{"reviewers": [{"repo", "bot", "items"}], "run": N}`."""
+    """Review bots that have never posted in a repository across at least `run`
+    items: `{"reviewers": [{"repo", "bot", "items"}], "run": N}`."""
     return await transport._get("/repos/silent-reviewers")
 
 
