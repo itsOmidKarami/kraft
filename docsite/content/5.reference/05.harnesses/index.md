@@ -52,7 +52,7 @@ What the columns mean:
 - **Resume**: the harness declares `resume`, so Kraft can continue an earlier session by id.
 - **Fallback**: a rate limit on this harness can trigger a switch to the next entry of a [`fallback:` list](/reference/harnesses/fallback-and-escalation).
 
-Only `claude` declares `restrict_tools`, `approval_channel`, `autocompact` and `mcp_config`, and only `codex` declares `writable_dirs`. A task or harness profile that sets an option whose capability its harness lacks is rejected at load. [Harness definition files](/reference/harnesses/harness-files#capabilities) lists every capability.
+Only `claude` declares `restrict_tools`, `approval_channel`, `autocompact`, `mcp_config` and `extra_mcp_config`, and only `codex` declares `writable_dirs`. A task or harness profile that sets an option whose capability its harness lacks is rejected at load. [Harness definition files](/reference/harnesses/harness-files#capabilities) lists every capability.
 
 ## The harnesses in detail
 

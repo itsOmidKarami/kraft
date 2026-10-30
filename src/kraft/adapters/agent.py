@@ -1455,13 +1455,14 @@ async def _run_agent_task(
                 f"server, and nothing registers it for Claude Code: {_registration.FIX}"
             )
         options["approval_channel"] = found[0]
-        # Claude approves a checkout's own servers per folder, never the copy's.
+        # Claude keys a checkout's own servers by its folder, never the copy's:
+        # handed beside whatever else loads there, not instead of it.
         if (
             in_copy
-            and h.supports("mcp_config")
-            and (entry := _registration.checkout_entry(checkout_dir, found[1])) is not None
+            and h.supports("extra_mcp_config")
+            and (servers := _registration.copy_servers(checkout_dir, found[1]))
         ):
-            options["mcp_config"] = json.dumps({"mcpServers": {"kraft": entry}})
+            options["extra_mcp_config"] = json.dumps({"mcpServers": servers})
     cmd = _harness.build_argv(
         h,
         command=command or None,

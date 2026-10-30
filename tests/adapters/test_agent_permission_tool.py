@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 from support.harness import commit_all, make_repo, write
 
+from kraft import registration
 from kraft.adapters import agent
 
 
@@ -38,40 +39,57 @@ def test_a_claude_launch_with_no_kraft_server_is_refused_naming_the_fix(run):
 
 KRAFT = {"command": "kraft", "args": ["admin", "mcp"]}
 LOCAL = {"command": "/opt/kraft/bin/kraft", "args": ["admin", "mcp"]}
+DOCS = {"command": "docs-mcp"}
+#: Committed beside `kraft`: Claude asks to approve it per folder, so it is never handed.
+TEAM = {"command": "team-mcp"}
 
 
 @pytest.mark.parametrize(
-    ("scope", "handed"),
+    ("scope", "local", "handed"),
     [
-        pytest.param("committed-mcp-json", KRAFT, id="committed-mcp-json"),
-        pytest.param("local-scope", LOCAL, id="local-scope"),
-        pytest.param("user-scope", None, id="user-scope"),
+        pytest.param("committed-mcp-json", None, {"kraft": KRAFT}, id="committed-mcp-json"),
+        pytest.param("local-scope", {"kraft": LOCAL}, {"kraft": LOCAL}, id="local-scope"),
+        pytest.param(
+            "local-scope",
+            {"kraft": LOCAL, "docs": DOCS},
+            {"kraft": LOCAL, "docs": DOCS},
+            id="local-scope-and-another",
+        ),
+        pytest.param("user-scope", None, None, id="user-scope"),
+        pytest.param("user-scope", {"docs": DOCS}, {"docs": DOCS}, id="user-scope-local-another"),
+        # Only its own servers load, in the checkout too.
+        pytest.param("managed", {"docs": DOCS}, None, id="managed"),
     ],
 )
 def test_a_copy_launch_finds_the_checkouts_registration_and_is_handed_it(
-    run, in_place, tmp_path, scope, handed
+    run, in_place, tmp_path, scope, local, handed
 ):
-    """The copy is empty at launch and Claude approves a project's servers per
-    folder path: the lookup is of the person's checkout, and a registration
-    tied to it rides in the argv. One that loads anywhere is left alone, even
+    """The copy is empty at launch and Claude keys a project's servers by its
+    folder path: the lookup is of the person's checkout, and the servers tied
+    to it ride in the argv, beside the ones that load anywhere rather than
+    instead of them. A registration that loads anywhere is left alone, even
     beside a committed `.mcp.json`."""
     repo = make_repo(tmp_path)
-    write(repo, ".mcp.json", json.dumps({"mcpServers": {"kraft": KRAFT}}))
+    write(repo, ".mcp.json", json.dumps({"mcpServers": {"kraft": KRAFT, "team": TEAM}}))
     commit_all(repo)
     user = Path.home() / ".claude.json"
     if scope == "committed-mcp-json":
         user.unlink()
-    elif scope == "local-scope":
-        projects = {"projects": {str(repo.resolve()): {"mcpServers": {"kraft": LOCAL}}}}
-        user.write_text(json.dumps(projects))
+    elif scope == "managed":
+        registration.MANAGED_MCP.write_text(json.dumps({"mcpServers": {"kraft": KRAFT}}))
+    if local is not None:
+        config = json.loads(user.read_text()) if scope != "local-scope" else {}
+        config["projects"] = {str(repo.resolve()): {"mcpServers": local}}
+        user.write_text(json.dumps(config))
     row = {"id": "w1", "branch": None, "repo": str(repo)}
 
     copy = str(tmp_path / "copy")
     cmd = run(db=SimpleNamespace(read=lambda fn: row), cwd=copy, in_copy=True)["cmd"]
 
     assert cmd[cmd.index("--permission-prompt-tool") + 1] == "mcp__kraft__permission_request"
+    assert "--strict-mcp-config" not in cmd
     if handed:
         config = json.loads(cmd[cmd.index("--mcp-config") + 1])
-        assert config == {"mcpServers": {"kraft": handed}}
+        assert config == {"mcpServers": handed}
     else:
         assert "--mcp-config" not in cmd

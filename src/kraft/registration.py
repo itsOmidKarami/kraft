@@ -132,16 +132,19 @@ def permission_tool(repo: Path | None) -> tuple[str, str] | None:
     return PLUGIN, str(user_settings)
 
 
-def checkout_entry(repo: Path, where: str) -> dict | None:
-    """The `kraft` server's entry as registered for `repo`'s own folder, given
-    `where` `permission_tool(repo)` found it: its local scope or its committed
-    `.mcp.json`. Claude Code approves a project's servers per folder path, so a
-    launch in a copy of `repo` loads neither and is handed this entry instead.
-    None for a managed, user or plugin registration, which loads anywhere."""
-    if where == f"{Path.home() / '.claude.json'} (local scope)":
-        config = _local_scope(_read(Path.home() / ".claude.json"), repo)
-    elif where == str(repo / ".mcp.json"):
-        config = _committed(repo, ".mcp.json")
-    else:
-        return None
-    return config["mcpServers"]["kraft"]
+def copy_servers(repo: Path, where: str) -> dict:
+    """The MCP servers a launch in a copy of `repo` is handed, given `where`
+    `permission_tool(repo)` found the `kraft` server. Claude Code keys a
+    project's servers by its folder path, so the copy loads none of `repo`'s:
+    it is handed the person's local-scope servers for `repo`, and `kraft`
+    from the committed `.mcp.json` when that is where it is registered. The
+    `.mcp.json`'s other servers are not: Claude asks to approve those per
+    folder. Nothing under a `managed-mcp.json`, which only its own servers
+    pass; user and plugin servers load anywhere already."""
+    if where == str(MANAGED_MCP):
+        return {}
+    local = _local_scope(_read(Path.home() / ".claude.json"), repo).get("mcpServers")
+    servers = dict(local) if isinstance(local, dict) else {}
+    if where == str(repo / ".mcp.json"):
+        servers["kraft"] = _committed(repo, ".mcp.json")["mcpServers"]["kraft"]
+    return servers
