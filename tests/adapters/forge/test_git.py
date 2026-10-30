@@ -26,7 +26,7 @@ from kraft.adapters.forge import git as forge_git
 from kraft.worker import sandbox
 
 from . import outputs
-from .outputs import GLAB_MR_VIEW
+from .outputs import GLAB_MR_VIEW, glab_mr
 
 BRANCH = "kraft/abc"
 
@@ -82,7 +82,7 @@ def test_open_mr_refuses_a_dirty_worktree_against_real_git(tmp_path, glab):
 @pytest.mark.parametrize(
     "name, cls, view, create",
     [
-        ("glab", forge.GlabCli, outputs.GLAB_MR_VIEW, "create"),
+        ("glab", forge.GlabCli, outputs.GLAB_MR_VIEW, "projects/:id/merge_requests"),
         ("gh", forge.GhCli, '{"number": 7, "html_url": "u"}', "repos/{owner}/{repo}/pulls"),
     ],
     ids=["glab", "gh"],
@@ -117,7 +117,7 @@ def test_open_mr_ignores_gitignored_paths_against_real_git(tmp_path, glab):
     )
 
     assert mr.number == 54
-    assert glab.argv("glab")[:2] == ["mr", "create"]
+    assert glab.argv("glab")[:4] == ["api", "projects/:id/merge_requests", "-X", "POST"]
 
 
 def test_open_mr_accepts_a_worktree_whose_attachment_was_copied_in(tmp_path, glab):
@@ -138,7 +138,7 @@ def test_open_mr_accepts_a_worktree_whose_attachment_was_copied_in(tmp_path, gla
     )
 
     assert mr.number == 54
-    assert glab.argv("glab")[:2] == ["mr", "create"]
+    assert glab.argv("glab")[:4] == ["api", "projects/:id/merge_requests", "-X", "POST"]
 
 
 def test_merge_refuses_an_unpushed_head_against_real_git(tmp_path, glab):
@@ -166,12 +166,14 @@ def test_merge_accepts_a_pushed_head_against_real_git(tmp_path, glab, elsewhere)
         git(repo, "checkout", "-q", "main")
         git(repo, "commit", "-q", "--allow-empty", "-m", "the person's own")
 
+    glab.stub("glab", routes=glab_mr(GLAB_MR_VIEW), default=GLAB_MR_VIEW)
+
     asyncio.run(forge.GlabCli().merge(repo=repo, branch=BRANCH, mr=forge.MR(0, ""), head="a" * 40))
 
     # glab first asks the project whether it merges through a train (it does
     # not: the stub's answer has no such field); the merge itself runs once.
-    assert [c for c in glab.calls("glab") if c.startswith("mr merge")] == [
-        f"mr merge {BRANCH} --yes --sha {'a' * 40}"
+    assert [c for c in glab.calls("glab") if c.endswith("/merge -X PUT -i -f sha=" + "a" * 40)] == [
+        "api projects/:id/merge_requests/54/merge -X PUT -i -f sha=" + "a" * 40
     ]
     assert not any("merge_trains" in c for c in glab.calls("glab"))
 

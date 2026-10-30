@@ -261,7 +261,7 @@ class _Counting(forge.FakeForge):
 async def test_a_merge_that_has_not_landed_is_observed_again_never_requested_again(
     run_forge, tmp_path, no_sleeping
 ):
-    """`glab mr merge` exits 0 for "merge when checks pass" and merges nothing
+    """GitLab's `auto_merge` answers 200 for "merge when checks pass" and merges nothing
     (Kraft-79x3): the landing is read off the forge. A second observation
     reads it again; it does not ask for a second merge."""
 
