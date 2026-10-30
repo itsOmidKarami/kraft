@@ -802,11 +802,12 @@ def scoped_chain_or_422(st, entry: RepoEntry, chain_template: str | None):
     return chain
 
 
-def authored_mapping(text: str, what: str) -> dict:
+def authored_mapping(text: str, what: str, nodes: int = ADDON_YAML_NODES) -> dict:
     """A chain or library file's text as the mapping a save checks, or the 422
-    that says why it cannot be one."""
+    that says why it cannot be one. `nodes` bounds the YAML it may expand to:
+    a one-off chain's default, `LIBRARY_SAVE_YAML_NODES` for a library save."""
     try:
-        data = config_mod.bounded_yaml(text, [ADDON_YAML_NODES])
+        data = config_mod.bounded_yaml(text, [nodes])
     except config_mod.YamlTooLarge as exc:
         raise HTTPException(422, f"{what} YAML is too large: {exc}") from exc
     except yaml.YAMLError as exc:

@@ -27,6 +27,7 @@ from kraft.templates import catalogue, positions
 from kraft.templates.library import (
     CHAINS_DIR,
     LIBRARY_FILE,
+    LIBRARY_SAVE_YAML_NODES,
     TemplateIssue,
     TemplateLibrary,
     TemplateLibraryError,
@@ -138,7 +139,7 @@ async def put_library(body: LibraryText, request: Request):
     st = request.app.state
     library = deps.library_or_503(st)
     path = st.templates_dir / LIBRARY_FILE
-    data = deps.authored_mapping(body.text, "library")
+    data = deps.authored_mapping(body.text, "library", LIBRARY_SAVE_YAML_NODES)
     # A repos.yaml broken for another reason is not this save's to refuse.
     try:
         repos = config_mod.load_repos(deps.repos_path(st))
@@ -424,7 +425,7 @@ async def put_template(tid: str, body: ChainText, request: Request):
         if tid in library.chain_ids
         else st.templates_dir / CHAINS_DIR / f"{tid}.yaml"
     )
-    chain = deps.authored_mapping(body.text, "chain")
+    chain = deps.authored_mapping(body.text, "chain", LIBRARY_SAVE_YAML_NODES)
     issues = config_check.chain_issues(
         library, path, tid, chain, getattr(st, "instance_policy", None)
     )
