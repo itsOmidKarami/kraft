@@ -86,7 +86,7 @@ async def approve_one_off(wid: str, body: ApproveOneOff, request: Request):
     if row["current_node_id"] is not None:
         raise HTTPException(409, "work item has already started")
     approval = {
-        "digest": body.digest,
+        "digest": None,
         "by": "human",
         "door": body.door,
         "at": datetime.now(UTC).isoformat(),

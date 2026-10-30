@@ -215,9 +215,15 @@ def approve_one_off(conn: sqlite3.Connection, work_item_id, approval: dict, dige
     row = conn.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     if row is None or one_off_of(row) is None or review_digest(row) != digest:
         return False
+    # `digest` is the authored chain's wherever an approval is recorded; the review's is beside it.
+    approval.update(digest=one_off_of(row)["digest"], review_digest=digest)
     done = (
         conn.execute(
-            "UPDATE work_items SET one_off_approval = ?, one_off_pending = 0 "
+            # An item the walk stopped for a chain that changed after its claim
+            # (`needs_human`, never started) goes back to paused: a person starts it.
+            "UPDATE work_items SET one_off_approval = ?, one_off_pending = 0, "
+            "status = CASE WHEN status = 'needs_human' AND stop_kind = 'config' "
+            "THEN 'paused' ELSE status END "
             "WHERE id = ? AND current_node_id IS NULL AND one_off_pending = 1",
             (json.dumps(approval), work_item_id),
         ).rowcount

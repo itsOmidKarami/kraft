@@ -2903,7 +2903,8 @@ async def run_once(
                 c,
                 work_item_id,
                 nodes[0].id,
-                "its one-off chain changed after it was started and needs approval again",
+                "this item's one-off chain changed before it started and needs approval "
+                "again: a person approves it in the web UI or the phone app, then starts it",
                 kind=StopKind.CONFIG,
             )
         )

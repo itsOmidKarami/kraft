@@ -129,6 +129,34 @@ def test_change_reopens_review(client, repo, change):
     assert _resume(client, wid).status_code == 409
 
 
+def test_the_walk_stops_an_item_whose_chain_changed_after_the_claim(client, repo):
+    """The walk itself, not `load_chain` alone: an item claimed `active` whose chain then
+    changed stops `needs_human` before its first node, runs nothing, and starts again once
+    a person approves the new chain."""
+    from functools import partial
+
+    from kraft.executor import walk
+
+    wid = _one_off(client, repo, CUSTOM)
+    assert _approve(client, wid).status_code == 200
+    _set_status(wid, "active")
+    (repo / "spec.md").write_text("# spec\n")
+    r = client.patch(f"/api/work-items/{wid}", json={"attachments": {"spec": "spec.md"}})
+    assert r.status_code == 200, r.text
+    st = client.app.state
+    done = client.portal.call(partial(walk.run_once, st.db, st.run_dirs, work_item_id=wid))
+    row = _item_row(wid)
+    assert done == "needs_human"
+    assert (row["status"], row["stop_kind"], row["current_node_id"]) == (
+        "needs_human",
+        "config",
+        None,
+    )
+    assert client.get(f"/api/work-items/{wid}").json()["worker_sessions"] == []
+    assert _approve(client, wid).status_code == 200
+    assert _resume(client, wid).status_code == 200
+
+
 def test_approve_refuses_a_chain_changed_since_the_review(client, repo):
     """[draft-before-approve] The digest a person approves covers the chain that will
     run, so a draft applied after they opened the review cannot ride on their approval."""
@@ -191,3 +219,31 @@ def test_start_queue_refuses_unapproved(client, repo):
     assert "no one has approved" in event["payload"]["detail"]
     item = client.get(f"/api/work-items/{wid}").json()
     assert item["status"] != "active" and item["worker_sessions"] == []
+
+
+def test_a_queued_start_on_a_pending_item_is_refused(client, repo):
+    from functools import partial
+
+    wid = _one_off(client, repo, CUSTOM)
+    st = client.app.state
+    queued = client.portal.call(
+        partial(
+            st.db.write,
+            lambda c: store.queue_work_item(
+                c, wid, verb="start", body={}, headers={}, from_statuses=["paused"]
+            ),
+        )
+    )
+    assert queued is True
+    _queue_tick(client)
+    events = client.get(f"/api/work-items/{wid}/events").json()
+    [event] = [e for e in events if e["type"] == "work_item_dequeued"]
+    assert event["payload"]["why"] == "refused"
+    assert "no one has approved" in event["payload"]["detail"]
+    assert _item_row(wid)["status"] != "active"
+
+
+def test_retry_refuses_a_pending_item(client, repo):
+    wid = _one_off(client, repo, CUSTOM)
+    r = client.post(f"/api/work-items/{wid}/retry", json={})
+    assert r.status_code == 409 and "no one has approved" in r.json()["detail"]
