@@ -85,12 +85,16 @@ async def _published_unanswered_thread(it, *, body="why a list?"):
 
 
 @pytest.mark.parametrize("final", [False, True], ids=["a-gate", "the-final-gate"])
-async def test_the_reply_agent_runs_under_the_gate_with_edit_denied(
+async def test_the_reply_agent_runs_under_the_gate_told_to_change_nothing(
     item_on, run_dirs, tmp_path, monkeypatch, final
 ):
     """At the final gate its session records the head it starts over, so a
     person's approval that stops it pins only a head it did not move
-    (`reviewed_head.moved_under`)."""
+    (`reviewed_head.moved_under`).
+
+    It is told to change nothing, and never to commit or run tests; it is
+    denied no tool, which a harness without a deny list would refuse to
+    launch -- the before/after comparison is what catches a write."""
     prompts, argv = _seed(tmp_path, monkeypatch)
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
     if final:
@@ -118,10 +122,23 @@ async def test_the_reply_agent_runs_under_the_gate_with_edit_denied(
 
     argv_lines = argv.read_text().splitlines()
     assert argv_lines, "the fake agent was never launched"
-    deny_line = next(line for line in argv_lines if "--disallowed-tools" in line)
-    assert "Edit" in deny_line and "NotebookEdit" in deny_line
+    # The harness's own denials (Monitor) stay; the reply agent adds none.
+    launches = [json.loads(line) for line in argv_lines]
+    denied = {
+        tool
+        for a in launches
+        for i, flag in enumerate(a[:-1])
+        if flag == "--disallowed-tools"
+        for tool in a[i + 1].split(",")
+    }
+    assert "Monitor" in denied
+    assert not denied & {"Edit", "NotebookEdit"}
 
     prompt = prompts.read_text()
+    launched = argv.read_text() + prompt
+    assert "Kraft compares it after you" in launched
+    assert "Commit everything you change" not in launched
+    assert "Run the tests your change touches" not in launched
     assert tid in prompt
     assert "why is this a list, not a set?" in prompt
 

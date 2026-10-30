@@ -85,7 +85,7 @@ origin: src/kraft/store/review.py
 ## REQ comment-review-at-a-gate-launches-a-reply-agent
 WHEN a `comment` review is submitted at a pending gate, the system SHALL
 launch a reply agent under that gate and leave the gate pending.
-enforced-by: tests/api/test_review.py::test_a_comment_review_gets_answers_and_leaves_the_gate_pending, tests/test_review_reply.py::test_the_reply_agent_runs_under_the_gate_with_edit_denied[a-gate]
+enforced-by: tests/api/test_review.py::test_a_comment_review_gets_answers_and_leaves_the_gate_pending, tests/test_review_reply.py::test_the_reply_agent_runs_under_the_gate_told_to_change_nothing[a-gate]
 origin: src/kraft/review_reply.py
 
 ## REQ reply-agent-failure-is-recorded-not-escalated
