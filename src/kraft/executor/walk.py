@@ -2894,8 +2894,21 @@ async def run_once(
     # branch in `kraft.executor.resuming.resume`), and the WS gets fewer
     # events than a client waiting on this chain to progress at all is
     # entitled to expect.
-    if start_index == 0:
-        await db.write(lambda c: store.load_chain(c, work_item_id, nodes[0].id))
+    if start_index == 0 and not await db.write(
+        lambda c: store.load_chain(c, work_item_id, nodes[0].id)
+    ):
+        # Its one-off chain changed after the claim and awaits a person again.
+        await db.write(
+            lambda c: store.mark_needs_human(
+                c,
+                work_item_id,
+                nodes[0].id,
+                "this item's one-off chain changed before it started and needs approval "
+                "again: a person approves it in the web UI or the phone app, then starts it",
+                kind=StopKind.CONFIG,
+            )
+        )
+        return "needs_human"
 
     # Kraft-tsfpk: a bd dependency the tracker already knows about (`bd dep
     # add ... --type blocks`) must stop this walk before it spends a paid

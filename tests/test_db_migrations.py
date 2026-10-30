@@ -274,6 +274,8 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         )
     if version < 57:
         drop_lines = (*drop_lines, "runner         TEXT")
+    if version < 58:
+        drop_lines = (*drop_lines, "one_off_chain", "one_off_approval", "one_off_pending")
     if version < 56:
         old = "                    'waiting', 'conflict', 'infra', 'infra_stop')),"
         replace = (*replace, ("'infra_stop', 'merge_rejected')),", old))
@@ -526,7 +528,12 @@ def test_a_fresh_schema_and_a_fully_migrated_one_agree(tmp_path):
     assert (
         triggers(old)
         == triggers(fresh)
-        == {"run_forks_immutable", "run_forks_undeletable", "work_items_stop_kind_clear"}
+        == {
+            "run_forks_immutable",
+            "run_forks_undeletable",
+            "work_items_stop_kind_clear",
+            "work_items_one_off_reopen",
+        }
     )
 
 
@@ -578,6 +585,9 @@ ADDED_COLUMNS = [
     (52, "work_items", ("queued_request",), None),
     # NULL: a row written before dependencies existed comes after nothing
     (53, "work_items", ("depends_on",), None),
+    # NULL and 0: a row written before one-off chains has none, and needs no review
+    (57, "work_items", ("one_off_chain", "one_off_approval"), None),
+    (57, "work_items", ("one_off_pending",), 0),
 ]
 
 

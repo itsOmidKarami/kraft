@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import sqlite3
 
@@ -8,7 +9,10 @@ from kraft import events
 from kraft.policy import RETIRED_WAIT_TIMEOUT, deprecated
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import write_status
+from kraft.templates.one_off import ONE_OFF_TEMPLATE
 from kraft.vocab import (
+    ENDED,
+    HOLDS_SLOT,
     ChainEvent,
     GateEvent,
     SandboxEvent,
@@ -16,6 +20,7 @@ from kraft.vocab import (
     SessionStatus,
     SettingsEvent,
 )
+from kraft.vocab.sql import in_list
 
 #: Node fields a per-item override may touch (UI v2 · 04, point 1). Anything
 #: else in a `node_overrides` patch is rejected by the route before it gets
@@ -38,11 +43,19 @@ OVERRIDABLE_NODE_FIELDS = frozenset(
 )
 
 
-def load_chain(conn: sqlite3.Connection, work_item_id, first_node_id) -> None:
-    conn.execute(
-        "UPDATE work_items SET current_node_id = ?, updated_at = ? WHERE id = ?",
-        (first_node_id, _now(), work_item_id),
-    )
+def load_chain(conn: sqlite3.Connection, work_item_id, first_node_id) -> bool:
+    """Put the item on its first node. False, writing nothing, when its one-off
+    chain changed after it was claimed and awaits approval again: nothing
+    unreviewed runs from that window."""
+    if (
+        conn.execute(
+            "UPDATE work_items SET current_node_id = ?, updated_at = ? "
+            "WHERE id = ? AND one_off_pending = 0",
+            (first_node_id, _now(), work_item_id),
+        ).rowcount
+        != 1
+    ):
+        return False
     # The add-on versions the item runs on, so its history shows them: a
     # retried item's `run_chain` first, as `materialized_chain_of` reads it.
     row = conn.execute(
@@ -51,6 +64,7 @@ def load_chain(conn: sqlite3.Connection, work_item_id, first_node_id) -> None:
     stored = (row[1] or row[0]) if row else None
     pins = json.loads(stored).get("addons") if stored else None
     events.append(conn, work_item_id, ChainEvent.CHAIN_LOADED, {"addons": pins} if pins else {})
+    return True
 
 
 def enter_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
@@ -96,9 +110,13 @@ def complete_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
     events.append(conn, work_item_id, ChainEvent.NODE_COMPLETED, {"node_id": node_id})
 
 
+#: A chain can be set only before the item starts, and only while nothing runs it.
+_CHAIN_SETTABLE = f"current_node_id IS NULL AND status NOT IN ({in_list((*HOLDS_SLOT, *ENDED))})"
+
+
 def set_chain_template(
     conn: sqlite3.Connection, work_item_id, template_id: str, materialized_chain: str
-) -> None:
+) -> bool:
     """Switch a not-yet-started item onto a different chain
     (Kraft-gwn6): the caller has already 404'd an unknown chain and 409'd a
     started item, and already re-run `ResolvedChain.materialize` the same way
@@ -108,21 +126,112 @@ def set_chain_template(
     chain-review splice path touched the row; this means intake's own
     materialization ran again against a different template, which is a
     different question to answer from the timeline.
+
+    Clears a one-off chain and its approval. False, writing nothing, when the
+    item started since the caller looked.
     """
     old_template_id = conn.execute(
         "SELECT chain_template FROM work_items WHERE id = ?", (work_item_id,)
     ).fetchone()[0]
-    conn.execute(
-        "UPDATE work_items SET chain_template = ?, materialized_chain = ?, updated_at = ? "
-        "WHERE id = ?",
+    done = conn.execute(
+        "UPDATE work_items SET chain_template = ?, materialized_chain = ?, updated_at = ?, "
+        "one_off_chain = NULL, one_off_approval = NULL, one_off_pending = 0 "
+        f"WHERE id = ? AND {_CHAIN_SETTABLE}",
         (template_id, materialized_chain, _now(), work_item_id),
     )
+    if done.rowcount != 1:
+        return False
     events.append(
         conn,
         work_item_id,
         SettingsEvent.CHAIN_TEMPLATE_CHANGED,
         {"from": old_template_id, "to": template_id},
     )
+    return True
+
+
+def set_one_off_chain(
+    conn: sqlite3.Connection, work_item_id, record: dict, materialized_chain: str
+) -> bool:
+    """Replace a not-yet-started item's chain with the one-off chain `record`
+    describes (`deps.OneOff.record`), already re-materialized by the caller.
+    Any approval is dropped: it belonged to the chain that is gone. False,
+    writing nothing, when the item started since the caller looked."""
+    old_template_id = conn.execute(
+        "SELECT chain_template FROM work_items WHERE id = ?", (work_item_id,)
+    ).fetchone()[0]
+    done = conn.execute(
+        "UPDATE work_items SET chain_template = ?, one_off_chain = ?, one_off_approval = NULL, "
+        "one_off_pending = ?, materialized_chain = ?, updated_at = ? "
+        f"WHERE id = ? AND {_CHAIN_SETTABLE}",
+        (
+            ONE_OFF_TEMPLATE,
+            json.dumps(record),
+            1 if record["custom"] else 0,
+            materialized_chain,
+            _now(),
+            work_item_id,
+        ),
+    )
+    if done.rowcount != 1:
+        return False
+    events.append(
+        conn,
+        work_item_id,
+        SettingsEvent.CHAIN_TEMPLATE_CHANGED,
+        {"from": old_template_id, "to": ONE_OFF_TEMPLATE},
+    )
+    return True
+
+
+def one_off_of(row) -> dict | None:
+    """`row`'s one-off chain record (`deps.OneOff.record`), or None for an item
+    filed with a library chain."""
+    raw = row["one_off_chain"] if "one_off_chain" in row.keys() else None
+    return json.loads(raw) if raw else None
+
+
+def one_off_unapproved(row) -> bool:
+    """Whether `row` holds custom content in a one-off chain that no one has
+    approved: it never starts."""
+    return row["one_off_pending"] == 1
+
+
+def review_digest(row) -> str:
+    """What a reviewer approves: the authored chain and the chains that will run,
+    so a draft or a re-trim applied after the review changes it."""
+    return hashlib.sha256(
+        json.dumps(
+            [one_off_of(row)["digest"], row["materialized_chain"], row["run_chain"]]
+        ).encode()
+    ).hexdigest()
+
+
+def approve_one_off(conn: sqlite3.Connection, work_item_id, approval: dict, digest: str) -> bool:
+    """Record `approval` of the chain whose `review_digest` is `digest`. False
+    when the item has started, has nothing pending, or its chain is no longer
+    the one the caller saw -- nothing is approved then. The digest is checked in
+    the same transaction as the write."""
+    row = conn.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    if row is None or one_off_of(row) is None or review_digest(row) != digest:
+        return False
+    # `digest` is the authored chain's wherever an approval is recorded; the review's is beside it.
+    approval.update(digest=one_off_of(row)["digest"], review_digest=digest)
+    done = (
+        conn.execute(
+            # An item the walk stopped for a chain that changed after its claim
+            # (`needs_human`, never started) goes back to paused: a person starts it.
+            "UPDATE work_items SET one_off_approval = ?, one_off_pending = 0, "
+            "status = CASE WHEN status = 'needs_human' AND stop_kind = 'config' "
+            "THEN 'paused' ELSE status END "
+            "WHERE id = ? AND current_node_id IS NULL AND one_off_pending = 1",
+            (json.dumps(approval), work_item_id),
+        ).rowcount
+        == 1
+    )
+    if done:
+        events.append(conn, work_item_id, SettingsEvent.ONE_OFF_CHAIN_APPROVED, approval)
+    return done
 
 
 def replace_sandbox(
@@ -596,6 +705,10 @@ def node_overrides_of(row) -> dict:
     return json.loads(raw) if raw else {}
 
 
+#: Raw one-off columns: read through `one_off_of`, never carried in a payload.
+_ONE_OFF_COLUMNS = ("one_off_chain", "one_off_approval", "one_off_pending")
+
+
 def work_item_payload(row) -> dict:
     """A `work_items` row as every API answer that hands one back carries it:
     the item's detail and the action and gate echoes alike. The columns are
@@ -603,7 +716,7 @@ def work_item_payload(row) -> dict:
     are decoded, so a client reads the same object at every door:
     `agent_overrides` and `policy_override` (`None` when unset) and
     `node_overrides` (`{}` when unset)."""
-    payload = {k: row[k] for k in row.keys()}
+    payload = {k: row[k] for k in row.keys() if k not in _ONE_OFF_COLUMNS}
     payload["agent_overrides"] = json.loads(row["agent_overrides"] or "null")
     payload["policy_override"] = json.loads(row["policy_override"] or "null")
     payload["node_overrides"] = node_overrides_of(row)

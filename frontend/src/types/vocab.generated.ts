@@ -132,7 +132,7 @@ export type SandboxEvent = (typeof SANDBOX_EVENTS)[number];
 export const REMOTE_EVENTS = ["remote_step_waiting", "remote_docs_conflict", "remote_step_given_up", "remote_machine_disconnected", "remote_machine_reconnected"] as const;
 export type RemoteEvent = (typeof REMOTE_EVENTS)[number];
 
-export const SETTINGS_EVENTS = ["chain_template_changed", "attachments_changed", "agent_overrides_changed", "node_overrides_changed", "policy_override_changed", "notification_failed"] as const;
+export const SETTINGS_EVENTS = ["chain_template_changed", "attachments_changed", "agent_overrides_changed", "node_overrides_changed", "policy_override_changed", "notification_failed", "one_off_chain_approved"] as const;
 export type SettingsEvent = (typeof SETTINGS_EVENTS)[number];
 
 export const EVENT_TYPES = [...WORK_ITEM_EVENTS, ...CHAIN_EVENTS, ...GATE_EVENTS, ...SESSION_EVENTS, ...LIMIT_EVENTS, ...ESCALATION_EVENTS, ...FORGE_EVENTS, ...SANDBOX_EVENTS, ...REMOTE_EVENTS, ...SETTINGS_EVENTS] as const;
