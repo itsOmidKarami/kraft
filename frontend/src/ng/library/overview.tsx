@@ -1,5 +1,5 @@
 import { Head, Kv, Note, PauseText } from "../templates/panes/controls";
-import { Overview, type PaneCtx } from "../templates/panes/Overview";
+import { Overview, ReviewerMode, type PaneCtx } from "../templates/panes/Overview";
 import { authoredAt, normalise, valueAt, type NodeA, type Step, type Task } from "../templates/draft/view";
 import type { LibDescription } from "./describe";
 import { UsedBy } from "./UsedBy";
@@ -48,6 +48,7 @@ export function LibraryOverview({ d, ctx, uses }: { d: LibDescription; ctx: Pane
             <PauseText label="message" long rows={2} value={str(valueAt(r, scope, path, "message"))} placeholder="What the reviewer should decide" onText={(t) => draft.field(path, "message", t, true)} onBlur={draft.flush} />
             <PauseText label="timeout" mono value={str(valueAt(r, scope, path, "timeout"))} placeholder="none · e.g. 2d" onText={(t) => draft.field(path, "timeout", t.trim() || null, true)} onBlur={draft.flush} />
             <Kv k="auto review" v={own?.auto_review ? `${str((own.auto_review as Task).id) || "reviewer"}` : "none"} muted={!own?.auto_review} onClick={own?.auto_review ? () => goTo(`${path}.auto_review`) : undefined} />
+            {!!own?.auto_review && <ReviewerMode ctx={ctx} />}
             <Note>Which document it asks about, and where Reject goes, are set in the chain that uses it.</Note>
           </>
         );

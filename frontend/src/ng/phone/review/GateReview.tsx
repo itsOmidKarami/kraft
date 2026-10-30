@@ -4,6 +4,8 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { docBody } from "../../../format";
 import type { KraftEvent, ReviewThread } from "../../../types";
 import { gateMessage, materialized } from "../../item/chainValues";
+import { OUTCOME, reviewOutcome } from "../../item/reviewOutcome";
+import { CHIP_TONE } from "../../graph/types";
 import { rejectTarget } from "../../item/graph";
 import { admits } from "../../item/status";
 import { useEvents } from "../../item/useEvents";
@@ -29,14 +31,6 @@ import { ActionBar } from "../ui/Rows";
 import "./review.css";
 import { LINES_COMMENTED_ON, ON_THE_WHOLE_CHANGE } from "../../review/sharedWords";
 import { Badge } from "../ui/Badge";
-
-/** The agent reviewer's verdict at a gate, from its own event (never invented). */
-function autoVerdict(events: KraftEvent[], gate: string) {
-  const e = [...events].reverse().find((x) => (x.type === "gate_approved" || x.type === "gate_rejected") && (x.payload.gate ?? x.node_id) === gate && x.payload.by === "agent");
-  if (!e) return null;
-  const text = String(e.payload.note ?? e.payload.reason ?? e.payload.summary ?? "").trim();
-  return { approve: e.type === "gate_approved", text };
-}
 
 /** What became of a gate the item no longer waits at, from its own event. */
 function decided(events: KraftEvent[], gate: string | null) {
@@ -91,7 +85,7 @@ export function GateReview({ item, events, reload }: { item: ItemDetail; events:
   // Your comments not sent yet: Approve would send them as the gate passes, where no agent acts on them (R9b-04 on the phone).
   const pending = drafts(threads).length;
   const sheet = useSheet();
-  const verdict = gate ? autoVerdict(events, gate) : null;
+  const verdict = gate ? reviewOutcome(events, gate) : null;
   const block = approveBlock(item, gate, threads);
   const blockId = useId();
   const waiting = !!gate && item.pending_gate === gate;
@@ -160,8 +154,8 @@ export function GateReview({ item, events, reload }: { item: ItemDetail; events:
         </div>
         {verdict && (
           <section className="ph-autocard" aria-label="Agent review">
-            <span className={`ph-autocard-title ${verdict.approve ? "ph-tone-ok" : "ph-tone-bad"}`}>auto_review · {verdict.approve ? "approve" : "reject"}</span>
-            {verdict.text && <span className="ph-autocard-text">{verdict.text}</span>}
+            <span className={`ph-autocard-title ph-tone-${CHIP_TONE[OUTCOME[verdict.kind].tone]}`}>auto_review · {OUTCOME[verdict.kind].word}</span>
+            {verdict.note && <span className="ph-autocard-text">{verdict.note}</span>}
           </section>
         )}
         {hasDoc && (

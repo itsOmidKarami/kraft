@@ -167,6 +167,21 @@ MANIFEST: tuple[Capability, ...] = (
         ),
         present=("library.yaml", "tasks", "repair_mr_feedback", "inputs", "pr_rules"),
     ),
+    Capability(
+        version="2.5.0",
+        name="gate_reviewer",
+        what="a library task for a gate's `auto_review`; with `auto_review_mode: checks_first` "
+        "on the gate it can only reject the work or hand it to the person, never approve",
+        how=(
+            "in library.yaml, under tasks:, add\n"
+            "  gate_reviewer:\n"
+            "    kind: agent\n"
+            "    harness: claude\n"
+            "    prompt: Check this gate before the person decides.\n"
+            "    skill: kraft:gate-review"
+        ),
+        present=("library.yaml", "tasks", "gate_reviewer"),
+    ),
 )
 
 

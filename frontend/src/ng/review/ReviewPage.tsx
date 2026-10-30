@@ -9,6 +9,7 @@ import { placeUrl } from "../item/url";
 import { openBudgetEditor } from "../item/Workspace";
 import { openLimitEditor } from "../item/RaiseLimit";
 import { useItem, type ItemDetail } from "../item/useItem";
+import { useEvents } from "../item/useEvents";
 import { materialized, producerOf } from "../item/chainValues";
 import { useOverlay, useWidth } from "../graph/useResizable";
 import { useListWidth } from "../library/listWidth";
@@ -46,10 +47,11 @@ export function ReviewPage() {
   if (loaded.state === "loading") return <div className="review-page" aria-busy="true" />;
   if (loaded.state === "missing")
     return <Placeholder label="Work item not found" note={`There is no work item ${id}. It may have been removed.`} />;
-  return <Review item={loaded.item} reload={loaded.reload} />;
+  return <Review item={loaded.item} version={loaded.version} reload={loaded.reload} />;
 }
 
-function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
+function Review({ item, version, reload }: { item: ItemDetail; version: string; reload: () => void }) {
+  const events = useEvents(item.id, version);
   const ended = item.display_status === "done" || item.display_status === "cancelled" || item.display_status === "archived";
   const navigate = useNavigate();
   const toItem = (p: Parameters<typeof placeUrl>[1]) => navigate(placeUrl(item.id, p));
@@ -239,6 +241,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
         <GateReview
           item={item}
           gate={place.gate}
+          events={events}
           files={files}
           threads={threadList}
           isViewed={viewed.isViewed}

@@ -54,6 +54,25 @@ describe("gateView", () => {
     expect(v.reviewer?.chip).toBeUndefined();
   });
 
+  it.each([
+    ["a pass in this round reads ready for you, not an earlier reject", [["gate_rejected", { by: "agent" }], ["gate_requested", {}], ["gate_auto_review_skipped", { reason: "passed" }]], { chip: "ready for you", chipTone: "green" }],
+    ["an undecided review reads could not decide", [["gate_requested", {}], ["gate_auto_review_skipped", { reason: "undecided", note: "x" }]], { chip: "could not decide", chipTone: "amber" }],
+  ] as const)("%s", (_, raw, want) => {
+    const frozen = JSON.stringify({ chain: { nodes: [{ id: "plan", kind: "exec" }, { id: "plan_approval", kind: "gate", auto_review: { id: "check", kind: "agent" } }] } });
+    const events = raw.map(([type, payload], i): KraftEvent => ({ seq: i + 1, work_item_id: "w1", type, payload: { gate: "plan_approval", ...payload }, node_id: "plan_approval", created_at: "t" }));
+    const v = gateView(detail({ materialized_chain: frozen, current_node_id: "plan_approval", pending_gate: "plan_approval" }), V1[1], events, 0, { kind: "chain" }, on);
+    expect(v.reviewer).toMatchObject(want);
+  });
+
+  it.each([
+    ["checks_first", "checks_first"],
+    ["decides", "decides"],
+    [undefined, "decides"],
+  ] as const)("hands the canvas the reviewer's mode from the frozen chain (%s)", (mode, want) => {
+    const frozen = JSON.stringify({ chain: { nodes: [{ id: "plan", kind: "exec" }, { id: "plan_approval", kind: "gate", auto_review: { id: "check", kind: "agent" }, ...(mode && { auto_review_mode: mode }) }] } });
+    expect(gateView(detail({ materialized_chain: frozen, current_node_id: "plan" }), V1[1], [], 0, { kind: "chain" }, on).reviewer?.mode).toBe(want);
+  });
+
   it("has no reviewer for a gate that declares none", () => {
     expect(gateView(detail(), V1[1], [], 0, { kind: "chain" }, on).reviewer).toBeUndefined();
   });

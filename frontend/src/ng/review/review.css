@@ -200,6 +200,10 @@ body:has(.rv-bar) { --toast-bottom: 88px; }
 .rv-chips { display: inline-flex; gap: 4px; }
 .rv-gate-title { margin: 0; color: var(--text); font-size: var(--fs-body); font-weight: 600; }
 .rv-gate-next { flex: none; margin: 0; padding: 6px 16px; border-bottom: 1px solid var(--line); font-size: var(--fs-meta); color: var(--text-sub); }
+.rv-gate-auto { display: flex; align-items: baseline; gap: 8px; }
+/* The label and the outcome stay put; a long note scrolls on its own beside them. */
+.rv-gate-auto > :first-child { flex: none; }
+.rv-gate-auto-note { min-width: 0; max-height: 8lh; overflow: auto; white-space: pre-line; overflow-wrap: anywhere; }
 .rv-gate-body { flex: 1 1 0; min-height: 0; display: flex; }
 .rv-gate-doc { flex: 1 1 0; min-width: 0; overflow: auto; padding: 24px 32px; font-size: var(--fs-meta); line-height: 1.65; }
 .rv-gate-doc > .md { max-width: 760px; }

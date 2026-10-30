@@ -513,13 +513,22 @@ async def review_gates(
             )
             return status_of(db, work_item_id)
 
-        # Why the review itself left the gate to a person (a refused launch,
-        # a spent cap, the agent's own concerns), for the event below. Not an
-        # approval's note that a must-fix then overrode.
+        # A checks-first reviewer never clears its gate, whatever `review()`
+        # returned: an allowlist here, not trust in the mapping there.
+        if gate_review.checks_first(node):
+            if verdict == "approve":
+                verdict = "pass"
+            elif verdict not in ("reject", "pass", "undecided"):
+                verdict = "undecided"
+
+        # Why the review left the gate to a person (a refused launch, a spent
+        # cap, the agent's own concerns, an open must-fix), for the event below.
+        # Never an approval's own note.
         why = note if verdict == "undecided" and note.strip() else None
         if verdict == "approve" and db.read(lambda c: store.open_must_fix(c, work_item_id)):
             # A person's must-fix outranks an agent's approval (review flow §3).
             verdict = "undecided"
+            why = "a must-fix thread is open: a person decides"
         if (
             verdict == "approve"
             and read_tips is not None
@@ -540,6 +549,19 @@ async def review_gates(
                     work_item_id,
                     GateEvent.AUTO_REVIEW_SKIPPED,
                     {"gate": gate, "reason": "undecided", **({"note": why} if why else {})},
+                    node_id=gate,
+                )
+            )
+            return status
+        if verdict == "pass":
+            # Ready for the person: the gate stays theirs, and this round's
+            # review is over (`_passed_this_round`).
+            await db.write(
+                lambda c, gate=gate, note=note: events.append(
+                    c,
+                    work_item_id,
+                    GateEvent.AUTO_REVIEW_SKIPPED,
+                    {"gate": gate, "reason": "passed", **({"note": note} if note.strip() else {})},
                     node_id=gate,
                 )
             )
@@ -733,7 +755,8 @@ def auto_check_due(row, gate: str | None, evts: list, policy) -> bool:
     Deliberately not the *whole* precondition set: the reason check, the
     running-escalation check, budget and cap all stay where they are, since
     each needs work this pre-filter has no business doing twice. This is the
-    cheap "is anything armed and due" half.
+    cheap "is anything armed and due" half. A checks-first `passed` skip also
+    ends the round, whatever attempts remain (`_passed_this_round`).
     """
     delay = store.effective_auto_escalate_delay_s(
         row, policy.auto_escalate_delay_s if policy else 0
@@ -752,6 +775,8 @@ def auto_check_due(row, gate: str | None, evts: list, policy) -> bool:
             return False
         attempts = policy.auto_review_attempts if policy else 1
         if _gate_review_attempts(evts, gate) >= attempts:
+            return False
+        if _passed_this_round(evts, gate):
             return False
         elapsed = _seconds_since(
             evts,
@@ -836,7 +861,9 @@ def _gate_review_attempts(evts: list, gate: str) -> int:
     non-agent `auto_review` guard in `gate_review.review`) left the tally at zero
     and the delay poller re-arming the same dead gate every tick forever. The
     structural pairing cannot be got wrong by a caller, so the reason is now
-    documentation rather than load-bearing.
+    documentation rather than load-bearing for this count. One reason is read
+    elsewhere: `passed` ends the round in `auto_check_due`, through
+    `_passed_this_round`, not through this tally.
     """
     # Chronological, not the reverse scan the boundary search wants, because
     # pairing a skip with the `_started` before it needs the events in order.
@@ -862,6 +889,23 @@ def _gate_review_attempts(evts: list, gate: str) -> int:
         else:
             attempts += 1
     return attempts
+
+
+def _passed_this_round(evts: list, gate: str) -> bool:
+    """Whether a checks-first reviewer passed `gate` since its latest
+    `gate_requested`, bounded by `RUN_BOUNDARY` as `_gate_review_attempts` is."""
+    for e in reversed(evts):
+        if e["type"] in RUN_BOUNDARY or (
+            e["type"] == GateEvent.REQUESTED and e["payload"].get("gate") == gate
+        ):
+            return False
+        if (
+            e["type"] == GateEvent.AUTO_REVIEW_SKIPPED
+            and e["payload"].get("gate") == gate
+            and e["payload"].get("reason") == "passed"
+        ):
+            return True
+    return False
 
 
 def _seconds_since(evts: list, predicate) -> float | None:

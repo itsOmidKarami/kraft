@@ -49,6 +49,9 @@ export function noRestart(meta: FieldMeta, at: At): string | null {
  *  its repair too (the server's `_RESTARTS`). */
 export const unsetLabel = (field: string, current: unknown) => (field === "on_merge_rejected" && current != null ? "remove (drops the repair)" : "not set");
 
+/** A closed set as a picker lists it, the empty choice first and each value in the field's words. */
+export const pickerOptions = (meta: FieldMeta, list: string[], field: string, current: unknown) => [{ value: "", label: unsetLabel(field, current) }, ...list.map((value) => ({ value, label: meta.labels?.[value] ?? value }))];
+
 /** What one value of each closed set is, for its refusal. */
 export const NOUN: Record<ChoiceSource, string> = {
   ref: "action",

@@ -11,6 +11,7 @@ import { request } from "../../http";
 import { act } from "../actions";
 import { TestsLine } from "../TestsLine";
 import { gateSkipped } from "../events";
+import { OUTCOME, reviewOutcome } from "../reviewOutcome";
 import { rejectTarget } from "../graph";
 import { totals, useDiffFiles } from "../Top";
 import { runVersion, type ItemDetail } from "../useItem";
@@ -37,6 +38,9 @@ export function GateBody({ item, version, gate, events }: { item: ItemDetail; ve
   const open = threads.filter((t) => t.state !== "resolved");
   const pending = item.pending_gate === gate.id;
   const decided = gateDecision(events, gate.id);
+  const outcome = reviewOutcome(events, gate.id);
+  // The reviewer's own concern is usually its outcome's note, shown below.
+  const concerns = (item.concerns ?? []).filter((c) => c.trim() !== outcome?.note);
   const to = rejectTarget(item.chain_definition.nodes, gate.id);
   const t = files && totals(files);
   return (
@@ -56,10 +60,17 @@ export function GateBody({ item, version, gate, events }: { item: ItemDetail; ve
           <ul className="ip-notes">{open.slice(0, 3).map((x) => <li key={x.id}>{x.comments?.[0]?.body ?? x.file_path ?? "a thread"}</li>)}</ul>
         </>
       )}
-      {pending && !!item.concerns?.length && (
+      {pending && concerns.length > 0 && (
         <>
-          <h3 className="ip-h">Concerns · {item.concerns.length}</h3>
-          <ul className="ip-notes">{item.concerns.map((c, i) => <li key={i}>{c}</li>)}</ul>
+          <h3 className="ip-h">Concerns · {concerns.length}</h3>
+          <ul className="ip-notes">{concerns.map((c, i) => <li key={i}>{c}</li>)}</ul>
+        </>
+      )}
+      {/* Kraft's note on the reviewer's outcome, such as the files it changed, which void its verdict. */}
+      {outcome?.note && (
+        <>
+          <h3 className="ip-h">Reviewer: {OUTCOME[outcome.kind].word}</h3>
+          <p className="ip-review-note">{outcome.note}</p>
         </>
       )}
       <dl className="item-facts ip-facts ip-gap">

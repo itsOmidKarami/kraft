@@ -6,6 +6,7 @@ import { detailOf, request } from "../../http";
 import { useConfigDraft } from "../../templates/draft/useConfigDraft";
 import { authoredAt, normalise, type NodeA } from "../../templates/draft/view";
 import { fieldMeta, POLICIES, ROUTE_LABEL, routeOf } from "../../templates/fields";
+import { pickerOptions } from "../../templates/fieldChoices";
 import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, type RowSpec } from "./kit";
 import { TabStrip } from "../ui/Rows";
@@ -40,7 +41,7 @@ export function ownRows(own: Record<string, unknown> | null): { field: string; v
   return rows;
 }
 
-const show = (v: unknown) => (v == null ? "not set" : Array.isArray(v) ? v.map(String).join(", ") : String(v));
+const show = (v: unknown, labels?: Record<string, string>) => (v == null ? "not set" : Array.isArray(v) ? v.map(String).join(", ") : typeof v === "string" && labels && Object.hasOwn(labels, v) ? labels[v] : String(v));
 
 /** `/templates/library`: Nodes · Steps · Tasks · Steering (Steps added, GAP §5.1), a filter, and one row per component (W17 brief L.2). */
 export function LibraryList() {
@@ -108,16 +109,21 @@ export function LibraryComponentView() {
 
   const settings: RowSpec[] = ownRows(own).map(({ field, value }): RowSpec => {
     // The label is the desktop's own for the field (`ref` is the action, `scope` what it runs over).
-    const label = fieldMeta(field).label;
+    const meta = fieldMeta(field);
+    const { label, labels } = meta;
     const base: RowSpec = { key: field, label, mono: true, changed: changed(field) };
-    if (shipped) return { ...base, value: show(value) };
+    if (shipped) return { ...base, value: show(value, labels) };
     if (typeof value === "boolean") return { ...base, sw: value, onSwitch: (on) => void setField(field, on) };
+    // A closed set (`auto_review_mode`, `scope`, `suite`) is picked as the chain node's settings pick it.
+    const closedSet = Array.isArray(meta.options) ? meta.options : null;
+    if (closedSet && typeof value === "string")
+      return { ...base, value: show(value, labels), onEdit: () => edit({ kind: "choice", title: label, options: pickerOptions(meta, closedSet, field, value), value, set: (v) => setField(field, v || null) }) };
     // An action or a target is one of the values the draft lists, not free text.
     const choices = field === "ref" || field === "target" ? draft.view?.result.choices?.[field] ?? [] : [];
     const listed = choices.length ? { choices, closed: true, noun: field === "ref" ? "action" : "target" } : undefined;
     if (typeof value === "string" || typeof value === "number")
-      return { ...base, value: show(value), onEdit: () => edit({ kind: "text", title: label, value: String(value), listed, set: (v) => (typeof value === "number" ? (v.trim() && Number.isFinite(Number(v)) ? setField(field, Number(v)) : Promise.resolve("Enter a number.")) : setField(field, v)) }) };
-    return { ...base, value: show(value) };
+      return { ...base, value: show(value, labels), onEdit: () => edit({ kind: "text", title: label, value: String(value), listed, set: (v) => (typeof value === "number" ? (v.trim() && Number.isFinite(Number(v)) ? setField(field, Number(v)) : Promise.resolve("Enter a number.")) : setField(field, v)) }) };
+    return { ...base, value: show(value, labels) };
   });
   // An agent task's route is how it picks its model, not a key of its own; a node's structure is its steps and handlers.
   const agent = !!own && (own.kind === "agent" || !!own.prompt || !!own.profile || !!own.model || !!own.effort);

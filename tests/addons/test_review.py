@@ -85,6 +85,14 @@ def _auto_review(spec):
     _nodes(spec)[1]["auto_review"] = {**AGENT, "id": "reviewer"}
 
 
+def _auto_review_mode(spec):
+    _auto_review(spec)
+    _nodes(spec)[1]["auto_review_mode"] = "checks_first"
+
+
+_auto_review_mode.was = _auto_review
+
+
 def _merge_step(spec):
     spec["library"]["tasks"]["merge"] = {"kind": "forge", "target": "mr.merge"}
     _nodes(spec).append(
@@ -236,6 +244,7 @@ def _downgrade(spec):
         (_gate_removed, "reach", "release:ship.nodes[approve]: gate removed"),
         (_gate_replaced, "reach", "release:ship.nodes[approve]: gate removed, now exec"),
         (_auto_review, "reach", "a gate's own agent review changed"),
+        (_auto_review_mode, "reach", "review changed: auto_review_mode set to 'checks_first'"),
         (_merge_step, "reach", "mr.merge step set to 'mr.merge'; a gate comes before it"),
         (_forge_target, "reach", "forge target 'mr.sync', which this chain did not use before"),
         (
@@ -270,6 +279,7 @@ def _downgrade(spec):
         "gate-removed",
         "gate-replaced",
         "auto-review",
+        "auto-review-mode",
         "merge-step",
         "forge-target",
         "target-used-by-a-sibling-chain",

@@ -7,7 +7,8 @@ import type { Op } from "./draft/types";
 export type FieldKind = "bool" | "enum" | "int" | "minutes" | "number" | "duration" | "list" | "long" | "text";
 /** `restart`: this and the earlier exec nodes, for `on_base_changed.restart_from` (Decisions §9 Node settings);
  *  `rejectRestart`: the earlier exec nodes, before the final gate when it comes first, for `on_merge_rejected.restart_from`. */
-export type FieldMeta = { label: string; kind: FieldKind; options?: string[] | "harness" | "effort" | "profile" | "restart" | "rejectRestart"; choices?: ChoiceSource; suggest?: "model"; elsewhere?: string };
+/** `labels`: a closed set's values in words, where the raw value would not say what it does. */
+export type FieldMeta = { label: string; kind: FieldKind; options?: string[] | "harness" | "effort" | "profile" | "restart" | "rejectRestart"; labels?: Record<string, string>; choices?: ChoiceSource; suggest?: "model"; elsewhere?: string };
 /** Where a typed field's closed set comes from: the draft's `choices` (`ref`,
  *  `target`, `inputs`, `grants`), the library's steering profiles, the
  *  harnesses, the documents a gate can ask about, or the nodes before it. */
@@ -37,6 +38,7 @@ const META: Record<string, FieldMeta> = {
   artifact: { label: "document", kind: "text", choices: "documents" },
   artifact_required: { label: "document required", kind: "bool" },
   reject_to: { label: "reject to", kind: "text", choices: "earlier" },
+  auto_review_mode: { label: "reviewer may", kind: "enum", options: ["checks_first", "decides"], labels: { checks_first: "check first (reject, or hand it to you)", decides: "decide (can approve)" } },
   timeout: { label: "timeout", kind: "duration" },
   chain_finalized: { label: "final review", kind: "bool" },
   max_attempts: { label: "attempts", kind: "int" },
@@ -80,7 +82,7 @@ export const fieldMeta = (field: string): FieldMeta => META[field] ?? { label: f
 export const RECOVERY_NOTE = "applies to its on-failure recovery";
 
 /** A value as a row shows it. */
-export function show(value: unknown, kind: FieldKind): string {
+export function show(value: unknown, kind: FieldKind, labels?: Record<string, string>): string {
   if (value === null || value === undefined || value === "") return "not set";
   if (typeof value === "boolean") return value ? "yes" : "no";
   if (Array.isArray(value)) return value.length ? value.map((v) => (typeof v === "string" ? v : v && typeof v === "object" && !Array.isArray(v) ? entryText(v as Entry) : JSON.stringify(v))).join(", ") : "none";
@@ -88,6 +90,7 @@ export function show(value: unknown, kind: FieldKind): string {
     const from = (value as { restart_from?: unknown }).restart_from;
     return typeof from === "string" ? `restart from ${from}` : JSON.stringify(value);
   }
+  if (labels && typeof value === "string" && Object.hasOwn(labels, value)) return labels[value];
   return kind === "minutes" ? `${value}m` : String(value);
 }
 

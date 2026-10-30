@@ -10,7 +10,7 @@ type Pol = Record<string, unknown> | null | undefined;
 export type MTask = { id: string; kind: string; ref?: string | null; execution?: string | null; skill?: string | null; produces?: string | null; harness?: string | null; model?: string | null; effort?: string | null; profile?: string | null; prompt?: string | null; command?: unknown; policy?: Pol; on_failure?: MLoop | null };
 type MStep = { id: string; tasks: MTask[]; policy?: Pol; on_failure?: MLoop | null };
 export type MLoop = { max_attempts?: number | null; tasks?: MTask[] | null; steps?: MStep[] | null; judge?: MTask | null };
-export type MNode = { id: string; kind: string; tasks?: MTask[] | null; steps?: MStep[] | null; policy?: Pol; fix_loop?: MLoop | null; on_failure?: MLoop | null; auto_review?: MTask | null; message?: string | null; artifact?: string | null };
+export type MNode = { id: string; kind: string; tasks?: MTask[] | null; steps?: MStep[] | null; policy?: Pol; fix_loop?: MLoop | null; on_failure?: MLoop | null; auto_review?: MTask | null; auto_review_mode?: "decides" | "checks_first" | null; message?: string | null; artifact?: string | null };
 /** What the item runs against, frozen at intake: a workspace's root and its members, in the order a fanned-out task visits them. */
 export type MTarget = { kind: string; root?: string | null; mounts?: Record<string, { repository: string; path: string }> };
 export type Materialized = {

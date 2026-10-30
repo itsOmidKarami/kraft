@@ -229,6 +229,29 @@ def test_a_gate_cannot_be_armed_with_a_bare_boolean():
         tm.GateNode.model_validate({"id": "g", "kind": "gate", "auto_escalate": True})
 
 
+@pytest.mark.parametrize(
+    ("reviewer", "given", "mode"),
+    [
+        pytest.param(True, None, None, id="unset-is-none"),
+        pytest.param(True, "checks_first", tm.CHECKS_FIRST, id="checks-first"),
+        pytest.param(True, "maybe", ValidationError, id="unknown-refused"),
+        pytest.param(False, "checks_first", "checks_first", id="no-reviewer-is-inert"),
+    ],
+)
+def test_a_gates_auto_review_mode(reviewer, given, mode):
+    """None means `decides`, so a gate stored before the key existed reads the
+    same; a mode on a gate with no reviewer loads and does nothing."""
+    raw = {"id": "g", "kind": "gate"}
+    raw |= {"auto_review": agent("reviewer")} if reviewer else {}
+    raw |= {"auto_review_mode": given} if given else {}
+    if mode is ValidationError:
+        # The Literal's own wording, not "extra inputs are not permitted".
+        with pytest.raises(ValidationError, match="'decides' or 'checks_first'"):
+            tm.GateNode.model_validate(raw)
+        return
+    assert tm.GateNode.model_validate(raw).auto_review_mode == mode
+
+
 def test_a_gates_reviewing_task_resolves_to_its_own_canonical_path():
     resolved = tm.ResolvedChain.from_chain(
         tm.Chain.model_validate(
