@@ -32,7 +32,9 @@ Read the failed jobs the prompt names, then their logs. `kraft view
 pipelines` lists this merge request's pipelines; the train's has kind `train`
 (GitLab) and the merge queue's `merge_group` (GitHub). `kraft view jobs
 --pipeline <id>` lists its jobs and `kraft view job-log --pipeline <id> --job
-<job-id>` prints one job's log tail (`-n` for more lines).
+<job-id>` prints one job's log tail (`-n` for more lines). When the prompt
+links to a pipeline (`.../pipelines/<id>`) or a run (`.../actions/runs/<id>`),
+that number is the `--pipeline` value.
 
 In a workspace item a failure names its repository (`[name] ...` in the log);
 for a member, add `--repo <its folder, relative to the worktree root>` to each
