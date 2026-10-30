@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>Coverage for src/kraft/executor/gates.py: 98%</title>
+    <title>Coverage for src/kraft/executor/gates.py: 97%</title>
     <link rel="icon" sizes="32x32" href="favicon_32_cb_c827f16f.png">
     <link rel="stylesheet" href="style_cb_4667309f.css" type="text/css">
     <script src="coverage_html_cb_54cfdca1.js" defer></script>
@@ -12,7 +12,7 @@
     <div class="content">
         <h1>
             <span class="text">Coverage for </span><b>src<span class="sep">/</span>kraft<span class="sep">/</span>executor<span class="sep">/</span>gates.py</b>:
-            <span class="pc_cov">98%</span>
+            <span class="pc_cov">97%</span>
         </h1>
         <aside id="help_panel_wrapper">
             <input id="help_panel_state" type="checkbox">
@@ -55,8 +55,8 @@
         </aside>
         <h2>
             <span class="text">415 statements &nbsp;</span>
-            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">405<span class="text"> run</span></button>
-            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">10<span class="text"> missing</span></button>
+            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">404<span class="text"> run</span></button>
+            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">11<span class="text"> missing</span></button>
             <button type="button" class="exc show_exc button_toggle_exc" value="exc" data-shortcut="x" title="Toggle lines excluded">0<span class="text"> excluded</span></button>
         </h2>
         <p class="text">
@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_b5a89f03f870f995_prompts_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.0">coverage.py v7.17.0</a>,
-            created at 2026-10-30 17:06 +0000
+            created at 2026-10-30 17:37 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -1018,7 +1018,7 @@
     <p class="run"><span class="n"><a id="t936" href="#t936">936</a></span><span class="t">    <span class="key">for</span> <span class="nam">e</span> <span class="key">in</span> <span class="nam">reversed</span><span class="op">(</span><span class="nam">evts</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t937" href="#t937">937</a></span><span class="t">        <span class="key">if</span> <span class="nam">e</span><span class="op">[</span><span class="str">&quot;type&quot;</span><span class="op">]</span> <span class="op">==</span> <span class="nam">WorkItemEvent</span><span class="op">.</span><span class="nam">NEEDS_HUMAN</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t938" href="#t938">938</a></span><span class="t">            <span class="key">return</span> <span class="nam">e</span><span class="op">[</span><span class="str">&quot;payload&quot;</span><span class="op">]</span><span class="op">.</span><span class="nam">get</span><span class="op">(</span><span class="str">&quot;stuck&quot;</span><span class="op">)</span> <span class="key">is</span> <span class="key">True</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t939" href="#t939">939</a></span><span class="t">    <span class="key">return</span> <span class="key">False</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis show_mis"><span class="n"><a id="t939" href="#t939">939</a></span><span class="t">    <span class="key">return</span> <span class="key">False</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t940" href="#t940">940</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t941" href="#t941">941</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t942" href="#t942">942</a></span><span class="t"><span class="com"># The set is `kraft.vocab.RUN_BOUNDARY` (`EventTraits.run_boundary`): the event</span>&nbsp;</span><span class="r"></span></p>
@@ -1579,7 +1579,7 @@
             <a class="nav" href="z_b5a89f03f870f995_prompts_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.0">coverage.py v7.17.0</a>,
-            created at 2026-10-30 17:06 +0000
+            created at 2026-10-30 17:37 +0000
         </p>
     </div>
 </footer>
