@@ -15,11 +15,12 @@ import pytest
 from kraft.adapters import forge
 from kraft.adapters.forge import gh as gh_adapter
 from kraft.adapters.forge import glab as glab_adapter
+from kraft.adapters.forge import transport
 from kraft.adapters.forge.gh import _QUEUE_QUERY, _THREADS_QUERY
 from kraft.adapters.forge.mr import MRMeta
 from kraft.automated_review import AutomatedReview
 
-from . import outputs
+from . import api_outputs, outputs
 from .nodes import Api, FailWith
 
 #: The full sha a merge is asked to land.
@@ -42,6 +43,7 @@ GLAB = SimpleNamespace(
     merged_head="",
     merged_list=outputs.GLAB_MR_LIST_MERGED,
     queued_list=outputs.GLAB_MR_LIST_AUTO_MERGE,
+    find_route="mr list",
     find_args={"mr": "list", "--all": None, "--source-branch": "kraft/abc"},
     close_argv=["mr", "close", "54"],
     reopen_argv=["mr", "reopen", "54"],
@@ -54,22 +56,11 @@ GH = SimpleNamespace(
     url="https://github.com/o/r/pull/7",
     body_flag="--body",
     base_flag="--base",
-    ready_argv=["pr", "ready", "7"],
-    update_argv=["pr", "edit", "kraft/abc", "--body", "fresh"],
-    merge_verb="pr merge",
-    head_flag="--match-head-commit",
-    head_moved="GraphQL: Head branch was modified. Review and try the merge again.",
     merged_head="c0ffee0",
-    merged_list=outputs.GH_PR_LIST_MERGED,
-    queued_list=outputs.GH_PR_LIST_AUTO_MERGE,
-    find_args={
-        "pr": "list",
-        "--state": "all",
-        "--head": "kraft/abc",
-        "--json": "number,url,state,autoMergeRequest,mergeCommit,headRefOid",
-    },
-    close_argv=["pr", "close", "7"],
-    reopen_argv=["pr", "reopen", "7"],
+    merged_list=api_outputs.FIND_MERGED,
+    queued_list=api_outputs.FIND_AUTO_MERGE,
+    find_route=api_outputs.FIND,
+    find_args={"owner={owner}": None, "name={repo}": None, "b=kraft/abc": None},
 )
 
 
@@ -83,6 +74,7 @@ def be(request, cli):
     return b
 
 
+@pytest.mark.parametrize("be", [GLAB], ids=["glab"], indirect=True)
 async def test_open_mr_opens_a_draft_titled_with_the_work_item(be, cli, tmp_path):
     """Every MR Kraft opens starts as a draft -- human_review decides when it
     is ready (draft-MR workflow spec). `--fill` titled it from the commits,
@@ -102,6 +94,7 @@ async def test_open_mr_opens_a_draft_titled_with_the_work_item(be, cli, tmp_path
     assert not {"--label", "--assignee", "--reviewer"} & set(argv)
 
 
+@pytest.mark.parametrize("be", [GLAB], ids=["glab"], indirect=True)
 async def test_open_mr_targets_the_base_it_is_given(be, cli, tmp_path):
     """Kraft-v9gbi: the item's base branch, never the forge's default."""
     await be.cls().open_mr(repo=tmp_path, branch="kraft/abc", base="release", title="T", body="B")
@@ -110,6 +103,7 @@ async def test_open_mr_targets_the_base_it_is_given(be, cli, tmp_path):
     assert argv[argv.index(be.base_flag) + 1] == "release"
 
 
+@pytest.mark.parametrize("be", [GLAB], ids=["glab"], indirect=True)
 async def test_open_mr_passes_the_authored_metadata(be, cli, tmp_path):
     meta = MRMeta(labels=("release::minor",), assignees=("omid",), reviewers=("ada", "grace"))
 
@@ -183,10 +177,12 @@ async def test_every_merge_request_call_names_the_branch(be, cli, tmp_path, op):
     cli.stub(
         be.name,
         routes={
+            api_outputs.READ_BRANCH: api_outputs.pr_by_branch(api_outputs.pull_request()),
             "pr view": json.dumps(pr),
             "mr view": json.dumps(pr),
             "ci list": outputs.GLAB_CI_SUCCESS,
             "api graphql": json.dumps(_NO_THREADS),
+            "api*/pulls -X POST*": json.dumps({"number": 7, "html_url": "u"}),
         },
     )
 
@@ -195,17 +191,26 @@ async def test_every_merge_request_call_names_the_branch(be, cli, tmp_path, op):
     # A GraphQL query's own lines are calls of no words, so only the first line
     # of each call is read.
     calls = [c.split() for c in cli.calls(be.name) if c.split()[:1] in (["pr"], ["mr"])]
-    assert calls
+    argv = cli.argv(be.name)
+    assert calls or argv.count("graphql") or "head=kraft/abc" in argv
     for call in calls:
         assert "kraft/abc" in call, call
+    if be is GH:
+        # Each GraphQL call carries the branch (`b`) or the number it read from
+        # the branch (`n`) as a variable, and none asked git for the current one.
+        named = [x for x in argv if x in ("b=kraft/abc", "n=7", "id=PR_kwDO7")]
+        assert len(named) == argv.count("graphql"), argv
+        assert not [c for c in cli.calls("git") if "symbolic-ref" in c]
 
 
+@pytest.mark.parametrize("be", [GLAB], ids=["glab"], indirect=True)
 async def test_mark_ready_unsets_draft(be, cli, tmp_path):
     await be.cls().mark_ready(repo=tmp_path, branch="kraft/abc", mr=forge.MR(be.number, "u"))
 
     assert cli.argv(be.name) == be.ready_argv
 
 
+@pytest.mark.parametrize("be", [GLAB], ids=["glab"], indirect=True)
 async def test_close_mr_runs_the_forges_close_command(be, cli, tmp_path):
     """B4: cancel closing the item's merge request, the same shape as
     `merge`'s own runner and timeout."""
@@ -214,6 +219,7 @@ async def test_close_mr_runs_the_forges_close_command(be, cli, tmp_path):
     assert cli.argv(be.name) == be.close_argv
 
 
+@pytest.mark.parametrize("be", [GLAB], ids=["glab"], indirect=True)
 async def test_reopen_mr_runs_the_forges_reopen_command(be, cli, tmp_path):
     """B8 (E), tested here with the rest of this pair: `reopen-mr` undoing an
     externally-closed merge request."""
@@ -222,6 +228,7 @@ async def test_reopen_mr_runs_the_forges_reopen_command(be, cli, tmp_path):
     assert cli.argv(be.name) == be.reopen_argv
 
 
+@pytest.mark.parametrize("be", [GLAB], ids=["glab"], indirect=True)
 async def test_update_mr_rewrites_the_description(be, cli, tmp_path):
     """`open_mr` runs before verify and mr_checks commit, so the description it
     wrote describes a branch that no longer exists (Kraft-c09h)."""
@@ -230,6 +237,7 @@ async def test_update_mr_rewrites_the_description(be, cli, tmp_path):
     assert cli.argv(be.name) == be.update_argv
 
 
+@pytest.mark.parametrize("be", [GLAB], ids=["glab"], indirect=True)
 async def test_merge_resolves_from_the_branch_when_no_number_is_known(be, cli, tmp_path):
     """`run_task` never threads the MR number between nodes -- it passes 0 and
     the CLI resolves the item's branch. `mr merge 0` would target a merge
@@ -257,6 +265,7 @@ async def test_a_merge_with_no_head_to_name_is_refused_before_any_cli_call(be, c
     assert cli.calls(be.name) == []
 
 
+@pytest.mark.parametrize("be", [GLAB], ids=["glab"], indirect=True)
 async def test_a_merge_the_forge_refuses_for_a_moved_head_raises_head_moved(be, cli, tmp_path):
     """Each forge's own words for "the head is not the one you named" become
     `HeadMoved`, with the head the forge holds when it can be read: the merge
@@ -268,8 +277,7 @@ async def test_a_merge_the_forge_refuses_for_a_moved_head_raises_head_moved(be, 
         routes={
             be.merge_verb: FailWith(be.head_moved),
             "api projects/:id": '{"id":1}',
-            "pr list": be.queued_list,
-            "mr list": be.queued_list,
+            be.find_route: be.queued_list,
         },
     )
 
@@ -347,8 +355,10 @@ async def test_gh_cancel_merge_undoes_only_what_holds_the_pull_request(
     )
 
     argv = cli.argv("gh")
-    assert ("--disable-auto" in argv) is disabled
-    assert ("id=PR_1" in argv) is dequeued
+    mutations = "\n".join(argv)
+    assert ("disablePullRequestAutoMerge(input: {pullRequestId: $id})" in mutations) is disabled
+    assert ("dequeuePullRequest(input: {id: $id})" in mutations) is dequeued
+    assert argv.count("id=PR_1") == disabled + dequeued
 
 
 @pytest.mark.parametrize(
@@ -417,18 +427,19 @@ async def test_glab_cancel_merge_that_fails_raises_unless_nothing_was_queued(
     "backend, view, reason, mergeable",
     [
         (GLAB, outputs.GLAB_MR_VIEW_CONFLICT, "conflict", False),
-        (GH, outputs.GH_PR_VIEW_CONFLICT, "conflict", False),
+        (GH, api_outputs.pr_by_branch(api_outputs.CONFLICT_PR), "conflict", False),
         # A conflict is a code problem; a missing approval is a person's to
         # grant on the forge. `merge` has to tell them apart, and mr_checks
         # (pre-gate) must read the approval as undecided, not fail on it.
         (GLAB, outputs.GLAB_MR_VIEW_NOT_APPROVED, "not_approved", None),
-        (GH, outputs.GH_PR_VIEW_NEEDS_APPROVAL, "not_approved", None),
+        (GH, api_outputs.pr_by_branch(api_outputs.NEEDS_APPROVAL_PR), "not_approved", None),
     ],
     ids=["glab-conflict", "gh-conflict", "glab-missing-approval", "gh-missing-approval"],
 )
 async def test_ci_status_names_the_block_reason(cli, tmp_path, backend, view, reason, mergeable):
     cli.stub(
-        backend.name, routes={"mr view": view, "ci list": outputs.GLAB_CI_SUCCESS, "pr view": view}
+        backend.name,
+        routes={"mr view": view, "ci list": outputs.GLAB_CI_SUCCESS, api_outputs.READ_BRANCH: view},
     )
 
     status = await backend.cls().ci_status(repo=tmp_path, mr=forge.MR(0, ""), branch="kraft/abc")
@@ -509,23 +520,30 @@ def test_gh_merge_queue_fields_exist(record_property):
 
 @pytest.mark.e2e("gh")
 def test_gh_refuses_a_merge_naming_a_head_the_pull_request_does_not_have(record_property):
-    """`gh pr merge --match-head-commit` with a sha the pull request is not at is
-    refused, in the words `GhCli.merge` reads as `HeadMoved`. Needs a pull request
-    of `KRAFT_E2E_GH_REPO` (`owner/name`) at `KRAFT_E2E_GH_PR`. It never merges:
+    """The merge mutation `GhCli.merge` sends, with an `expectedHeadOid` the
+    pull request is not at, is refused in words `graphql_reason` reads as
+    `head_moved`, so it becomes `HeadMoved`. Needs a pull request of
+    `KRAFT_E2E_GH_REPO` (`owner/name`) at `KRAFT_E2E_GH_PR`. It never merges:
     no pull request has a head of all zeros."""
     slug, number = os.environ.get("KRAFT_E2E_GH_REPO"), os.environ.get("KRAFT_E2E_GH_PR")
     if not (slug and number):
         pytest.skip("e2e: set KRAFT_E2E_GH_REPO (owner/name) and KRAFT_E2E_GH_PR")
-    done = subprocess.run(
-        ["gh", "pr", "merge", number, "--squash", "--repo", slug]
-        + ["--match-head-commit", "0" * 40],
+    node = subprocess.run(
+        ["gh", "pr", "view", number, "--repo", slug, "--json", "id", "-q", ".id"],
         capture_output=True,
         text=True,
     )
-    said = done.stdout + done.stderr
-    record_property("gh_match_head_commit_refusal", said[-500:])
-    assert done.returncode != 0
-    assert gh_adapter._HEAD_MODIFIED in said.lower()
+    assert node.returncode == 0, node.stderr
+    done = subprocess.run(
+        ["gh", "api", "graphql", "-f", f"query={gh_adapter._MERGE_MUTATION}"]
+        + ["-f", f"id={node.stdout.strip()}", "-f", f"head={'0' * 40}"],
+        capture_output=True,
+        text=True,
+    )
+    record_property("gh_expected_head_oid_refusal", (done.stdout + done.stderr)[-500:])
+    errors = json.loads(done.stdout).get("errors") or []
+    assert errors, done.stdout
+    assert transport.graphql_reason(errors) == "head_moved"
 
 
 @pytest.mark.e2e("glab")

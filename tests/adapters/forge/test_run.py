@@ -13,7 +13,7 @@ from support.harness import make_repo, own_files
 
 from kraft.adapters import forge
 
-from . import outputs
+from . import api_outputs, outputs
 from .nodes import back_half
 
 RED = [(forge.FailedJob("test", "failed", "script_failure"),)]
@@ -427,7 +427,7 @@ async def test_a_node_treats_an_already_merged_mr_as_done(run_forge, tmp_path, h
         (
             "gh",
             forge.GhCli,
-            outputs.GH_PR_LIST_MERGED,
+            api_outputs.FIND_MERGED,
             "done",
             "already merged (!7)",
         ),

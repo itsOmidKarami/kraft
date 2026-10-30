@@ -28,7 +28,7 @@ _PLACEHOLDERS = frozenset({"{owner}", "{repo}", "{branch}"})
 _CLIP = 200
 _STATUS_LINE = re.compile(r"^HTTP/\S+\s+(\d{3})")
 
-Field = str | int | bool
+Field = str | int | bool | list[str]
 
 
 @dataclass(frozen=True)
@@ -165,6 +165,10 @@ def _retry_after(headers: Mapping[str, str]) -> float | None:
 def _flags(fields: Mapping[str, Field] | None) -> list[str]:
     flags: list[str] = []
     for key, value in (fields or {}).items():
+        if isinstance(value, list | tuple):
+            # A list is gh's repeated `key[]=v`; raw, as every string is.
+            flags += [x for item in value for x in ("-f", f"{key}[]={item}")]
+            continue
         typed = not isinstance(value, str) or value in _PLACEHOLDERS
         if isinstance(value, bool):
             value = "true" if value else "false"

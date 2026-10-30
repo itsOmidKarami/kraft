@@ -154,8 +154,16 @@ def test_an_html_error_body_is_clipped_not_a_traceback(cli, tmp_path):
         ({"draft": True}, ["-F", "draft=true"]),
         ({"owner": "{owner}"}, ["-F", "owner={owner}"]),
         ({"sha": "123"}, ["-f", "sha=123"]),
+        ({"labels": ["a", "7"]}, ["-f", "labels[]=a", "-f", "labels[]=7"]),
     ],
-    ids=["str-raw", "int-typed", "bool-typed", "placeholder-typed", "numeric-string-stays-raw"],
+    ids=[
+        "str-raw",
+        "int-typed",
+        "bool-typed",
+        "placeholder-typed",
+        "numeric-string-stays-raw",
+        "list-repeats-bracketed",
+    ],
 )
 def test_field_typing(cli, tmp_path, fields, flags):
     cli.stub("gh", "{}")
