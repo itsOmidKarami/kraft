@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from kraft import caps, events, executor, inplace, item_paths, store
+from kraft import caps, events, executor, inplace, item_paths, review_reply, store
 from kraft import harness as _harness
 from kraft import overrides as _overrides
 from kraft.adapters import agent as _agent
@@ -24,19 +24,17 @@ from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.profiles import HarnessUnavailable, harness_table
 from kraft.executor.fallback import fallback_list
 from kraft.remote import placement as _placement
-from kraft.templates.models import AgentTask, ResolvedNode
+from kraft.templates.models import CHECKS_FIRST, AgentTask, GateNode, ResolvedNode
 from kraft.vocab import ADVANCING, GateEvent
 from kraft.worker import steering as _steering
 
-#: The only strings a verdict may be. Anything else -- a typo, a sentence, a
+#: The only strings a deciding reviewer's verdict may be (one that checks
+#: first has its own two, in `review`). Anything else -- a typo, a sentence, a
 #: missing key -- is `undecided`, which leaves the gate pending for a human.
 VERDICTS = frozenset({"approve", "reject", "fixed", "undecided"})
 
-_PROMPT = (
-    "This is a gate review. A Kraft work item has reached the gate "
-    "{gate!r} on node {node_id!r}, and is waiting for a decision. You are "
-    "deciding whether it needs a person.\n"
-    "\n"
+#: The item under review and how to report on it, in both modes.
+_ITEM = (
     "Title: {title}\n"
     "{description_line}"
     "{artifact_line}"
@@ -45,12 +43,25 @@ _PROMPT = (
     "the gate yourself -- and must not try. Report your decision by writing "
     "`verdict` into your result file, with your reasoning in `concerns`:\n"
     "\n"
-    '  "verdict": "approve"   -- the gate should clear; you are confident.\n'
+)
+_OPENING = (
+    "This is a gate review. A Kraft work item has reached the gate "
+    "{gate!r} on node {node_id!r}, and is waiting for a decision. "
+)
+_REJECT = (
     '  "verdict": "reject"    -- send it back to be redone. `concerns` becomes '
     "the steering note for the agent that redoes it, so write it as an "
     "instruction, not a complaint. Required: a rejection with no reasoning is "
     "discarded.\n"
-    '  "verdict": "fixed"     -- you repaired something in this worktree. You '
+)
+
+_PROMPT = (
+    _OPENING
+    + "You are deciding whether it needs a person.\n\n"
+    + _ITEM
+    + '  "verdict": "approve"   -- the gate should clear; you are confident.\n'
+    + _REJECT
+    + '  "verdict": "fixed"     -- you repaired something in this worktree. You '
     "may edit and commit here, but you may not then approve your own edit: the "
     "node re-runs and is measured again. `concerns` says what you changed. Note "
     "what that costs: the whole node runs again and is reviewed again, so this "
@@ -62,6 +73,31 @@ _PROMPT = (
     "Prefer `undecided` whenever you are unsure. A gate wrongly cleared is "
     "expensive and a gate wrongly held costs a human one glance."
 )
+
+#: For a reviewer that checks first (`auto_review_mode: checks_first`): it
+#: cannot approve, and the person decides after it whatever it reports.
+_CHECKS_FIRST_PROMPT = (
+    _OPENING
+    + "You check it before a person does: you cannot approve it.\n\n"
+    + _ITEM
+    + _REJECT
+    + '  "verdict": "pass"      -- hand it to the person. `concerns` is required '
+    "here too: it is what they read first, so say what you checked and any "
+    "doubts you have.\n"
+    "\n"
+    "A person decides after you, whatever you report. Report `pass` whenever "
+    "you are unsure: the person reads the work next anyway, and a rejection "
+    "costs a full re-run of the node.\n"
+    "\n"
+    "Do not edit anything. Read the worktree; do not change, write or commit "
+    "any file in it."
+)
+
+
+def checks_first(node: ResolvedNode) -> bool:
+    """True for a gate whose reviewer only checks first: it may reject, or
+    `pass` the gate to the person, and never approve."""
+    return isinstance(node.node, GateNode) and node.node.auto_review_mode == CHECKS_FIRST
 
 
 def _artifact_line(path: Path | None) -> str:
@@ -210,7 +246,8 @@ async def review(
 
     session_id = db.read(lambda c: store.new_session_id(c, work_item_id))
     rel = executor.gate_artifact(run_dirs, row, gate)
-    task_instruction = _PROMPT.format(
+    cf = checks_first(node)
+    task_instruction = (_CHECKS_FIRST_PROMPT if cf else _PROMPT).format(
         gate=gate,
         node_id=node.id,
         title=row["title"],
@@ -358,7 +395,11 @@ async def review(
             harness=inv.harness,
             model=inv.model,
             effort=inv.effort,
-            deny_tools=inv.deny_tools,
+            # A reviewer that checks first must not edit (spec "The prompt"):
+            # the denial is a cheap extra defence, as for `review_reply`.
+            deny_tools=tuple(dict.fromkeys([*inv.deny_tools, *review_reply.DENIED]))
+            if cf
+            else inv.deny_tools,
             allowed_tools=inv.allowed_tools,
             grants=inv.grants,
             permission_mode=inv.permission_mode,
@@ -409,7 +450,15 @@ async def review(
     # A verdict counts only from a session that finished thinking (`vocab.ADVANCING`),
     # the same rule the fix-loop judge applies. One written beside any other status
     # (failed, capped_out, paused, unknown, ...) is not a judgement, whatever it says.
-    if status not in ADVANCING or verdict not in VERDICTS:
+    if status not in ADVANCING:
+        return "undecided", note
+    if cf:
+        # Only `reject` or `pass`; an `approve` meant "good", and the person
+        # still decides. It may not edit, so it has nothing to have `fixed`.
+        verdict = "pass" if verdict == "approve" else verdict
+        if verdict not in ("reject", "pass"):
+            return "undecided", note
+    elif verdict not in VERDICTS:
         return "undecided", note
     if verdict in ("reject", "fixed") and not note.strip():
         # The note is the steering instruction for the re-run. Without one there

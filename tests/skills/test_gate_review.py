@@ -49,16 +49,16 @@ def _reviewer(**extra):
     return {"id": "reviewer", "kind": "agent", "harness": "claude", "prompt": "Review it.", **extra}
 
 
-def _chain(rd):
-    """spec (exec) -> spec_approval (gate, artifact: spec, reviewed)."""
+def _chain(rd, **keys):
+    """spec (exec) -> spec_approval (gate, artifact: spec, reviewed, plus `keys`)."""
     gate = v1_node(
-        "spec_approval", "gate", artifact="spec", reject_to="spec", auto_review=_reviewer()
+        "spec_approval", "gate", artifact="spec", reject_to="spec", auto_review=_reviewer(), **keys
     )
     return v1_chain([v1_node("spec", tasks=[v1_task("author")]), gate], repo=rd.base)
 
 
-def _gate(rd):
-    return _chain(rd).chain.nodes[1]
+def _gate(rd, **keys):
+    return _chain(rd, **keys).chain.nodes[1]
 
 
 async def _seed(database, rd, wid):
