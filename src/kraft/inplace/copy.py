@@ -20,6 +20,7 @@ import logging
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from kraft import item_paths, store
@@ -45,6 +46,25 @@ def copy_path(run_dirs, wid: str, sid: str) -> Path:
 def remove_copy(path: Path) -> None:
     # A global `core.fsmonitor` may have started a daemon in it: best effort.
     shutil.rmtree(path, ignore_errors=True)
+
+
+def watch_copy(db, row, launch, copy: Path, folder: Path) -> Callable[[], list[str]] | None:
+    """Snapshot `copy` whole, and the item's branch tip in the person's
+    `folder`, which a commit by any route moves (a push from the copy, or the
+    person). Returns what lists the files changed in either since, or None
+    when either cannot be read."""
+    from kraft.executor import read_only  # it imports this package
+
+    was = (
+        read_only.snapshot(db, row, launch, copy, full=True),
+        read_only.snapshot(db, row, launch, folder),
+    )
+    if None in was:
+        return None
+    return lambda: (
+        read_only.changed(db, row, launch, copy, was[0], full=True)
+        + read_only.changed(db, row, launch, folder, was[1])
+    )
 
 
 def _empty(dest: Path) -> None:

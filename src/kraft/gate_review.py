@@ -465,11 +465,7 @@ async def review(
         # branch tip, which a commit by any other route moves. Never sandboxed,
         # so the live-session guard cannot refuse here; a None is judged below.
         nonlocal before, doc_was
-        snaps = (
-            read_only.snapshot(db, row, launch, copy, full=True),
-            read_only.snapshot(db, row, launch, worktree),
-        )
-        before = None if None in snaps else snaps
+        before = inplace.watch_copy(db, row, launch, copy, worktree)
         doc_was = await asyncio.to_thread(_document, run_dirs, work_item_id, watched)
 
     try:
@@ -556,10 +552,7 @@ async def review(
                     )
             else:
                 if copy:
-                    # The whole copy, and the person's branch tip: a commit
-                    # pushed there from the copy, or made by anyone, moves it.
-                    files = read_only.changed(db, row, launch, copy, before[0], full=True)
-                    files += read_only.changed(db, row, launch, worktree, before[1])
+                    files = before()  # the whole copy, and the person's branch tip
                     voided = _VOIDED_IN_COPY
                 else:
                     files = read_only.changed(db, row, launch, worktree, before)

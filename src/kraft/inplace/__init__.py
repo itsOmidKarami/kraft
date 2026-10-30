@@ -28,6 +28,7 @@ from kraft.inplace.copy import copy_path as copy_path
 from kraft.inplace.copy import drop_dead_copies as drop_dead_copies
 from kraft.inplace.copy import make_copy as make_copy
 from kraft.inplace.copy import remove_copy as remove_copy
+from kraft.inplace.copy import watch_copy as watch_copy
 from kraft.inplace.rebasing import _rebase_in_checkout as _rebase_in_checkout
 from kraft.inplace.rebasing import drop_stale_scratch as drop_stale_scratch
 from kraft.inplace.rebasing import rebase as rebase

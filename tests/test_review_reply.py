@@ -20,7 +20,7 @@ from support.harness import (
     write_harness_profiles,
 )
 
-from kraft import executor, inplace, review_reply, reviewed_head, store
+from kraft import executor, inplace, item_paths, review_reply, reviewed_head, store
 
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 FAKE_AGENT_COMMAND = f"{sys.executable} {_FAKE_AGENT}"
@@ -367,23 +367,17 @@ async def test_the_comment_reviews_summary_reaches_the_reply_agent(
     assert "Mostly fine; one question." in prompts.read_text()
 
 
-@pytest.mark.parametrize(
-    ("busy", "refusal", "match"),
-    [(True, store.CheckoutBusy, "in use by A"), (False, inplace.CheckoutRefused, "is gone")],
-    ids=["another-item-uses-it", "it-cannot-be-taken"],
-)
+@pytest.mark.parametrize("_", [None], ids=["another-item-uses-it"])
 async def test_no_reply_agent_starts_without_its_checkout(
-    item_on, run_dirs, tmp_path, monkeypatch, busy, refusal, match
+    item_on, run_dirs, tmp_path, monkeypatch, _
 ):
-    """Refused where its session would be written, or where the checkout is
-    switched to the item's branch (here, gone); the caller queues or skips it."""
+    """Refused where its session would be written; the caller queues or skips it."""
     _seed(tmp_path, monkeypatch)
-    if busy:
-        await item_on(NODES, GATE, wid="a", target=IN_PLACE, title="A")
+    await item_on(NODES, GATE, wid="a", target=IN_PLACE, title="A")
     it = await item_on(NODES, GATE, wid="b", target=IN_PLACE, status="needs_human")
     await _published_unanswered_thread(it)
 
-    with pytest.raises(refusal, match=match):
+    with pytest.raises(store.CheckoutBusy, match="in use by A"):
         await review_reply.run(
             it.database,
             it.run_dirs,
@@ -393,8 +387,91 @@ async def test_no_reply_agent_starts_without_its_checkout(
             launch=LAUNCH,
         )
 
-    assert [s["status"] for s in it.sessions()] == ([] if busy else ["config_error"])
+    assert it.sessions() == []
     assert not it.events("reply_agent_failed")
+
+
+def _copies(run_dirs, it):
+    """What is left in any of the item's session copies of its branch."""
+    return list((run_dirs.base / item_paths.ITEMS / it.id / "sessions").glob("*/copy/*"))
+
+
+_ID = "git -c user.email=t@t -c user.name=t"
+
+
+@pytest.mark.parametrize(
+    "shell,files",
+    [
+        pytest.param("echo agent >> calc.py", ["calc.py"], id="dirty-file"),
+        pytest.param(
+            f"echo x > tip.txt && git add tip.txt && {_ID} commit -qm tip"
+            " && git push -q {repo} HEAD:{branch} && git reset -q --hard HEAD~1",
+            ["tip.txt"],
+            id="moved-tip",
+        ),
+    ],
+)
+async def test_an_in_place_reply_never_touches_the_persons_checkout(
+    item_on, run_dirs, repo, tmp_path, monkeypatch, shell, files
+):
+    """It works in a copy of the item's branch: the person, on `main` with
+    unsaved work, keeps both. A write in the copy, or a commit pushed to their
+    branch, is still recorded."""
+    _seed(tmp_path, monkeypatch)
+    it = await item_on(NODES, GATE, target=IN_PLACE, status="needs_human")
+    branch = f"refs/heads/{store.branch_for(it.row())}"
+    git(repo, "branch", store.branch_for(it.row()))
+    write(repo, "calc.py", "the person's unsaved work\n")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_SHELL", shell.format(repo=repo, branch=branch))
+    await _published_unanswered_thread(it)
+
+    status = await review_reply.run(
+        it.database,
+        it.run_dirs,
+        work_item_id=it.id,
+        gate=GATE,
+        nodes=it.chain.chain.nodes,
+        launch=LAUNCH,
+    )
+
+    assert status == "wrote"
+    [event] = it.events("reply_agent_wrote")
+    assert event["payload"]["files"] == files
+    assert git(repo, "symbolic-ref", "HEAD") == "refs/heads/main"
+    assert (repo / "calc.py").read_text() == "the person's unsaved work\n"
+    assert git(repo, "status", "--porcelain") == "M calc.py"
+    assert _copies(run_dirs, it) == []
+
+
+async def test_a_reply_agent_whose_copy_fails_records_a_failure(
+    item_on, run_dirs, repo, tmp_path, monkeypatch
+):
+    """The item's branch is gone: no agent runs anywhere, the failure is
+    recorded, and the item is not stopped nor the branch made again."""
+    prompts, _argv = _seed(tmp_path, monkeypatch)
+    it = await item_on(NODES, GATE, target=IN_PLACE, status="needs_human")
+    branch = store.branch_for(it.row())
+    await _published_unanswered_thread(it)
+
+    status = await review_reply.run(
+        it.database,
+        it.run_dirs,
+        work_item_id=it.id,
+        gate=GATE,
+        nodes=it.chain.chain.nodes,
+        launch=LAUNCH,
+    )
+
+    assert status == "failed"
+    [event] = it.events("reply_agent_failed")
+    assert f"could not make a copy of {branch} to work in" in event["payload"]["error"]
+    assert not prompts.exists()
+    assert [s["status"] for s in it.sessions()] == ["config_error"]
+    assert it.status() == "needs_human"
+    assert it.events("work_item_needs_human") == []
+    assert git(repo, "for-each-ref", f"refs/heads/{branch}") == ""
+    assert _copies(run_dirs, it) == []
 
 
 async def test_an_in_place_reply_agent_that_writes_nothing_did_not_write(
