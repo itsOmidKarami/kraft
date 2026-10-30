@@ -219,6 +219,8 @@ _IGNORED = (
     "worktree: "
 )
 _25 = "for i in $(seq 25); do echo x > f$i.txt; done"
+#: An old-place document, there before the review in place of `doc`.
+_LEGACY = object()
 
 
 @pytest.mark.parametrize(
@@ -314,6 +316,27 @@ _25 = "for i in $(seq 25); do echo x > f$i.txt; done"
             ("undecided", _IGNORED + "{doc}"),
             id="creates-the-gate-document",
         ),
+        # Where an item from before the upgrade kept it: read there when the new
+        # place has none, and unseen by git in a repo that ignores the folder.
+        pytest.param(
+            CHECKS_FIRST,
+            False,
+            None,
+            "mkdir -p .engineering/reviews && echo x > .engineering/reviews/w1.md",
+            _PASS,
+            ("undecided", _IGNORED + "{legacy}"),
+            id="creates-an-old-place-gate-document",
+        ),
+        # The new place is read first, so writing there replaces the old one.
+        pytest.param(
+            CHECKS_FIRST,
+            False,
+            _LEGACY,
+            'echo x > "$KRAFT_DOCS_DIR/review.md"',
+            _PASS,
+            ("undecided", _IGNORED + "{doc}"),
+            id="shadows-an-old-place-gate-document",
+        ),
         # Hashed whole, not as far as a person's read of it goes.
         pytest.param(
             CHECKS_FIRST,
@@ -351,13 +374,27 @@ async def test_checks_first_edits_void_the_verdict(
     database, run_dirs, tmp_path, repo, monkeypatch, mode, in_place, doc, edit, result, expected
 ):
     gate = await _at_gate(
-        database, run_dirs, tmp_path, repo, edit, result, mode=mode, in_place=in_place, doc=doc
+        database,
+        run_dirs,
+        tmp_path,
+        repo,
+        edit,
+        result,
+        mode=mode,
+        in_place=in_place,
+        doc=None if doc is _LEGACY else doc,
     )
+    # As Kraft's own repo does: an old-place document is no file git sees.
+    (repo / ".git" / "info" / "exclude").write_text(".engineering/\n")
+    legacy = item_paths.path_of(run_dirs, "w1", item_paths.legacy_document_name("w1", "review"))
+    if doc is _LEGACY:
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text(_DOC)
     reads = []
     _spy_snapshots(monkeypatch, reads)
 
     verdict, note = await _run(database, run_dirs, gate)
-    assert (verdict, note) == (expected[0], expected[1].format(doc=_doc(run_dirs)))
+    assert (verdict, note) == (expected[0], expected[1].format(doc=_doc(run_dirs), legacy=legacy))
     assert reads == (["snapshot"] if mode else [])
 
 
