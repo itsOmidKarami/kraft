@@ -198,16 +198,33 @@ async def test_gh_reads_send_these_requests(cli, tmp_path, call, routes, calls, 
     assert got == expected
 
 
-async def test_gh_pipelines_keeps_only_this_prs_merge_group_runs(cli, tmp_path):
+_FORK = {"head_repository": {"id": 2}}
+
+
+@pytest.mark.parametrize(
+    "group, branch",
+    [
+        pytest.param(
+            [
+                workflow_run(8, head_branch="gh-readonly-queue/main/pr-8-bbb"),
+                workflow_run(17, head_branch="gh-readonly-queue/main/pr-77-ccc"),
+            ],
+            [],
+            id="other-prs-merge-group",
+        ),
+        pytest.param(
+            [], [workflow_run(9, head_branch="kraft/abc", **_FORK)], id="fork-branch-of-same-name"
+        ),
+        pytest.param([], [workflow_run(9, head_branch="kraft/abc", repository=None)], id="no-repo"),
+    ],
+)
+async def test_gh_pipelines_keeps_only_this_items_runs(cli, tmp_path, group, branch):
     cli.stub(
         "gh",
         routes={
             FIND: _OPEN,
-            "api*event=merge_group*": runs(
-                workflow_run(8, head_branch="gh-readonly-queue/main/pr-8-bbb"),
-                workflow_run(17, head_branch="gh-readonly-queue/main/pr-77-ccc"),
-            ),
-            "api*branch=kraft/abc*": runs(),
+            "api*event=merge_group*": runs(*group),
+            "api*branch=kraft/abc*": runs(*branch),
         },
     )
     assert await forge.GhCli().pipelines(repo=tmp_path, branch="kraft/abc", base="main") == ()

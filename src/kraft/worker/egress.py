@@ -511,8 +511,6 @@ class EgressProxy:
                 return
             form = dict(parse_qsl(body.decode("utf-8", "replace"), keep_blank_values=True))
             scope = callback.scope_for_channel(session)
-            if "?" in form.get("id", ""):
-                return await _answer(writer, 400, "Bad Request", "an id has no query")
             call = verb(form, scope)
             if isinstance(call, str):
                 return await _answer(writer, 400, "Bad Request", call)
@@ -523,6 +521,10 @@ class EgressProxy:
                 return await self._refuse_route(
                     writer, session, f"{api_method} {path}", "not this session's to call"
                 )
+            # The id is spliced into the path, so one carrying `/` or `?` can name
+            # another of the item's own routes than the verb's, which the allowlist passes.
+            if form.get("id") and not _ID.fullmatch(form["id"]):
+                return await _answer(writer, 400, "Bad Request", "id must be an item id")
             try:
                 reply = await self._worker_call(api_method, path, _caller(scope), json=payload)
             except TimeoutError:

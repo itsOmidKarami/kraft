@@ -416,10 +416,16 @@ def threads(items: list) -> str:
     return "\n".join(out)
 
 
+def _forge_text(text: str) -> str:
+    """What a forge read prints: every line without the controls a terminal
+    would obey (a CI log or an MR title can carry an OSC clipboard write)."""
+    return "\n".join(plain_text(line) for line in text.split("\n"))
+
+
 def forge_mr(mr: dict) -> str:
     labels = ",".join(mr["labels"])
     parts = [f"!{mr['number']} {mr['title']} [{mr['state']}]", labels, mr["url"]]
-    return " ".join(filter(None, parts))
+    return _forge_text(" ".join(filter(None, parts)))
 
 
 def forge_rows(rows: list) -> str:
@@ -427,25 +433,30 @@ def forge_rows(rows: list) -> str:
     if not rows:
         return "none"
     cols = ("id", "kind", "name", "status", "ref", "url")
-    return "\n".join(" ".join(str(r[c]) or "-" for c in cols if c in r) for r in rows)
+    return _forge_text("\n".join(" ".join(str(r[c]) or "-" for c in cols if c in r) for r in rows))
 
 
 def forge_log(payload: dict) -> str:
     note = "[earlier lines cut]\n" if payload["truncated"] else ""
-    return note + payload["log"]
+    return note + _forge_text(payload["log"])
 
 
 def forge_merged(items: list) -> str:
     if not items:
         return "no merged merge requests"
-    return "\n".join(
-        " ".join(filter(None, [f"!{m['number']} {m['title']}", ",".join(m["labels"]), m["url"]]))
-        for m in items
+    return _forge_text(
+        "\n".join(
+            " ".join(
+                filter(None, [f"!{m['number']} {m['title']}", ",".join(m["labels"]), m["url"]])
+            )
+            for m in items
+        )
     )
 
 
 def forge_labels(items: list) -> str:
-    return "\n".join(f"{x['name']}  {x['description']}".rstrip() for x in items) or "no labels"
+    text = "\n".join(f"{x['name']}  {x['description']}".rstrip() for x in items)
+    return _forge_text(text) or "no labels"
 
 
 def _compare_head(payload: dict) -> str:

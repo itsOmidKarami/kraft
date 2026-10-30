@@ -112,6 +112,7 @@ async def run_cli(
     env: dict[str, str] | None = None,
     timeout: float | None = None,
     stdin: str | None = None,
+    errors: str = "strict",
 ) -> subprocess.CompletedProcess[str]:
     """One forge CLI call, returned whatever its exit code.
 
@@ -136,9 +137,7 @@ async def run_cli(
             input=stdin,
             capture_output=True,
             text=True,
-            # A job log can hold bytes that are not UTF-8 (a binary cat, a Latin-1
-            # compiler); strict decoding would raise past every ForgeError handler.
-            errors="replace",
+            errors=errors,
             env=env,
             timeout=timeout,
         )

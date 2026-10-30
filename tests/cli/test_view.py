@@ -309,8 +309,16 @@ _MR = {"number": 7, "title": "T", "state": "open", "labels": ["a", "b"], "url": 
         (["merged", "--limit", "3"], "forge_merged_mrs", ("w1", 3, None), [], "no merged"),
         (["labels", "--repo", "libs/core"], "forge_labels", ("w1", "libs/core"), [], "no labels"),
         (["mr", "--repo", "libs/core"], "forge_mr", ("w1", "libs/core"), _MR, "!7"),
+        (
+            ["job-log", "--pipeline", "5", "--job", "9"],
+            "forge_job_log",
+            ("5", "9", "w1", 200, None),
+            {"log": "\x1b]52;c;ZXZpbA==\x07ok", "truncated": False},
+            "]52;c;ZXZpbA==ok",
+        ),
+        (["mr"], "forge_mr", ("w1", None), {**_MR, "title": "T\x9b2J"}, "!7 T2J [open]"),
     ],
-    ids=["mr", "pipelines", "jobs", "job-log", "merged", "labels", "repo"],
+    ids=["mr", "pipelines", "jobs", "job-log", "merged", "labels", "repo", "log-osc", "title-c1"],
 )
 @pytest.mark.parametrize("as_json", [False, True], ids=["text", "json"])
 def test_the_forge_view_verbs_call_their_client_read(

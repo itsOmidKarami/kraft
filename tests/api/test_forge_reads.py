@@ -196,3 +196,26 @@ def test_the_job_log_is_its_tail_without_ansi(client, repo, monkeypatch):
     assert (len(lines), lines[-1], body["truncated"]) == (200, "line 9999", True)
     assert "\x1b" not in body["log"]
     assert [client.get(url, params={"lines": n}).status_code for n in (0, 5001)] == [422, 422]
+
+
+@pytest.mark.parametrize(
+    "log, lines, expected",
+    [
+        pytest.param(
+            "section_start:1:build\r\x1b[0KBuilding\n10%\r50%\r100%\nsection_end:1:build\r\x1b[0K\n",
+            3,
+            {"log": "Building\n100%\n", "truncated": False},
+            id="gitlab-sections-and-a-progress-bar",
+        ),
+        pytest.param("a\r\nb\r\n", 1, {"log": "b", "truncated": True}, id="crlf"),
+        pytest.param("", 5, {"log": "", "truncated": False}, id="empty"),
+    ],
+)
+def test_the_job_log_keeps_what_a_carriage_return_left(
+    client, repo, monkeypatch, log, lines, expected
+):
+    fake = _spy()
+    fake.logs_seen["j1"] = log
+    wid = _item(client, repo, monkeypatch, fake)
+    url = f"/api/work-items/{wid}/forge/pipelines/p1/jobs/j1/log"
+    assert client.get(url, params={"lines": lines}).json() == expected

@@ -101,7 +101,7 @@ async def _own_jobs(forge: Forge, checkout: Path, branch: str, base: str, pid: s
     """The pipeline's jobs, once `pid` is one of the item's pipelines."""
     own = await _read(forge.pipelines(repo=checkout, branch=branch, base=base))
     if pid not in {p.id for p in own}:
-        raise HTTPException(404, f"pipeline {pid} is not one of this item's")
+        raise HTTPException(404, f"pipeline {pid} is not among this item's newest")
     return await _read(forge.jobs(repo=checkout, pipeline_id=pid))
 
 
@@ -123,9 +123,13 @@ async def forge_job_log(
     forge, checkout, branch, base = await _item_forge(request.app.state, wid, repo)
     if jid not in {j.id for j in await _own_jobs(forge, checkout, branch, base, pid)}:
         raise HTTPException(404, f"job {jid} is not in pipeline {pid}")
-    text = _ANSI.sub("", await _read(forge.job_log(repo=checkout, job_id=jid)))
+    text = await _read(forge.job_log(repo=checkout, job_id=jid))
     # shortcut: the whole log is fetched, then cut; fine until a forge offers a ranged read.
-    all_lines = text.splitlines()
+    # A `\r` rewrites its line on a terminal (a progress bar, GitLab's section
+    # markers): keep what was left showing, not every overwritten fragment. Before
+    # the colour codes go, or `\r\x1b[0K\n` would read as a plain line ending.
+    lines_in = text.replace("\r\n", "\n").removesuffix("\n").split("\n")
+    all_lines = [_ANSI.sub("", ln.rsplit("\r", 1)[-1]) for ln in lines_in]
     return {"log": "\n".join(all_lines[-lines:]), "truncated": len(all_lines) > lines}
 
 

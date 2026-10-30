@@ -210,6 +210,8 @@ def workflow_run(run_id: int, **fields) -> dict:
         "html_url": f"https://github.com/o/r/actions/runs/{run_id}",
         "created_at": "2026-09-19T05:51:00Z",
         "updated_at": "2026-09-19T05:51:09Z",
+        "repository": {"id": 1},
+        "head_repository": {"id": 1},
         **fields,
     }
 

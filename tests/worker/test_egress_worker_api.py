@@ -317,6 +317,7 @@ async def test_events_with_an_after_that_is_no_whole_number_is_a_400(worker_api,
         ("jobs", {"pipeline": "a" * 65}),
         ("job-log", {"pipeline": "5", "job": "..%2Fx"}),
         ("show", {"id": "w-own?x=1"}),
+        ("show", {"id": "w-own/forge/pipelines/x/jobs/y/log"}),
     ],
     ids=[
         "lines-0",
@@ -331,6 +332,7 @@ async def test_events_with_an_after_that_is_no_whole_number_is_a_400(worker_api,
         "pipeline-long",
         "job-encoded",
         "id-with-query",
+        "id-with-slash",
     ],
 )
 async def test_a_forge_read_with_a_bad_field_is_a_400(worker_api, verb, form):

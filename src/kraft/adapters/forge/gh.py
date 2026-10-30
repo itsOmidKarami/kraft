@@ -137,6 +137,13 @@ def _cancelled_at(rows: list[dict], *, at: str) -> str:
 
 _RUN_ID_RE = re.compile(r"/actions/runs/(\d+)")
 
+
+def _this_repos(run: dict) -> bool:
+    """A run whose head is in the repository it ran in: never a fork's."""
+    head = (run.get("head_repository") or {}).get("id")
+    return head is not None and head == (run.get("repository") or {}).get("id")
+
+
 #: `MergeQueueEntryState` onto the forge-neutral queue states. UNMERGEABLE is
 #: queued: GitHub is about to remove the entry, and the next read sees the drop.
 _GH_QUEUE_STATES: dict[str, QueueState] = {
@@ -1097,12 +1104,14 @@ class GhCli(mr_ops.CliWaits):
 
     async def pipelines(self, *, repo: Path, branch: str, base: str) -> tuple[Pipeline, ...]:
         runs = "repos/{owner}/{repo}/actions/runs"
+        # `branch=` matches a fork's branch of the same name too: its run is a fork's CI.
         found = [
             ("branch", r)
             for r in (await self._api(repo, runs, fields={"branch": branch, "per_page": 20})).get(
                 "workflow_runs"
             )
             or []
+            if _this_repos(r)
         ]
         if ref := await self.find_mr(repo=repo, branch=branch):
             prefix = _QUEUE_BRANCH.format(base=base, number=ref.number)
@@ -1110,7 +1119,7 @@ class GhCli(mr_ops.CliWaits):
             found += [
                 ("merge_group", r)
                 for r in group.get("workflow_runs") or []
-                if str(r.get("head_branch") or "").startswith(prefix)
+                if str(r.get("head_branch") or "").startswith(prefix) and _this_repos(r)
             ][:20]
         rows = [
             Pipeline(
