@@ -41,7 +41,7 @@ origin: src/kraft/db.py §_WORK_ITEMS_ONE_OFF_REOPEN_TRIGGER -- a trigger on `ma
 
 WHILE an item is claimed to run and has not loaded its first node, the system
 SHALL refuse any change to its chain or documents.
-enforced-by: tests/api/test_one_off_approval.py::test_change_reopens_review[draft-after-approval-claimed], tests/api/test_one_off_approval.py::test_change_reopens_review[attachment-retrim-claimed]
+enforced-by: tests/api/test_one_off_approval.py::test_change_reopens_review[draft-after-approval-claimed], tests/api/test_one_off_approval.py::test_change_reopens_review[attachment-retrim-claimed], tests/api/test_one_off_replace.py::test_patch_refuses_a_chain_switch_once_fixed[active-not-started-library], tests/api/test_one_off_replace.py::test_patch_refuses_a_chain_switch_once_fixed[active-not-started-one-off]
 origin: src/kraft/store/chain.py §_refuse_if_starting -- `set_attachments` and `revise_chain` refuse that window, so the walk's `load_chain` backstop is left for a crash and no item is stranded `needs_human` with no node.
 
 ## REQ duplicate-of-a-one-off-is-unapproved

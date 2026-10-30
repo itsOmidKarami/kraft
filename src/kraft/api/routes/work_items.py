@@ -1246,8 +1246,7 @@ def _retrimmed(row, filed_kinds: frozenset[str], kinds: frozenset[str]) -> str:
 
 
 #: `store._CHAIN_SETTABLE` refused the switch. A started or ended item is
-#: refused before this point, so here it was claimed to run (or, in a race,
-#: started or ended since the PATCH read it).
+#: refused before this point, so here it was claimed to run.
 _CHAIN_FIXED = store.STARTING_REFUSAL
 
 
