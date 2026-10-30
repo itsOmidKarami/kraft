@@ -103,10 +103,11 @@ _VOIDED = (
     "still in the worktree: "
 )
 _VOIDED_IN_COPY = (
-    "The reviewer changed files in its copy of the branch, or on the branch itself, so "
-    "its verdict was ignored; Kraft removed the copy and left your working files as "
-    "they were: "
+    "The reviewer changed files in its copy of the branch, so its verdict was ignored; "
+    "Kraft removed the copy and left your working files as they were: "
 )
+#: Whoever moved it: the reviewer, by a push from its copy, or the person.
+_TIP_MOVED = "The item's branch moved during the review, so the verdict was ignored: "
 
 
 def checks_first(node: ResolvedNode) -> bool:
@@ -552,15 +553,22 @@ async def review(
                         "so its verdict was ignored"
                     )
             else:
+                written = [str(item_paths.path_of(run_dirs, work_item_id, d)) for d in sorted(docs)]
                 if copy:
-                    files = before()  # the whole copy, and the person's branch tip
-                    voided = _VOIDED_IN_COPY
+                    edited, moved = before()  # the whole copy, and the person's branch tip
+                    notes = [
+                        voided + read_only.named(files)
+                        for voided, files in (
+                            (_VOIDED_IN_COPY, edited + written),
+                            (_TIP_MOVED, moved),
+                        )
+                        if files
+                    ]
                 else:
-                    files = read_only.changed(db, row, launch, worktree, before)
-                    voided = _VOIDED
-                files += [str(item_paths.path_of(run_dirs, work_item_id, d)) for d in sorted(docs)]
-                if files:
-                    return "undecided", voided + read_only.named(files)
+                    files = read_only.changed(db, row, launch, worktree, before) + written
+                    notes = [_VOIDED + read_only.named(files)] if files else []
+                if notes:
+                    return "undecided", ". ".join(notes)
     finally:
         if copy is not None:
             await _subprocess.uncancellable(asyncio.to_thread(inplace.remove_copy, copy))

@@ -219,7 +219,8 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
         if not copy:
             files = read_only.changed(db, row, launch, worktree, before)
         elif since:
-            files = since()
+            edited, moved = since()
+            files = edited + moved
         elif copied:  # it ran, and nothing can say what it changed: never "replied"
             files = [_NOT_COMPARED]
         else:  # refused before its copy was made, so nothing ran in it

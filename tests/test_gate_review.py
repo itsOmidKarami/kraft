@@ -397,10 +397,10 @@ async def test_checks_first_gate_with_no_document_checks_the_checkout(
 
 
 _IN_PLACE_IGNORED = (
-    "The reviewer changed files in its copy of the branch, or on the branch itself, so "
-    "its verdict was ignored; Kraft removed the copy and left your working files as "
-    "they were: "
+    "The reviewer changed files in its copy of the branch, so its verdict was ignored; "
+    "Kraft removed the copy and left your working files as they were: "
 )
+_TIP_MOVED = "The item's branch moved during the review, so the verdict was ignored: "
 _PERSONS = "# the person's edit\n"
 #: A commit on the person's branch by a route around the copy, which it then undoes.
 _PUSH = (
@@ -429,8 +429,14 @@ _PUSH = (
         pytest.param(
             False,
             _PUSH,
-            ("undecided", _IN_PLACE_IGNORED + "tip.txt"),
+            ("undecided", _TIP_MOVED + "tip.txt"),
             id="in-place-moves-the-branch-tip",
+        ),
+        pytest.param(
+            False,
+            _PUSH + " && echo agent >> calc.py",
+            ("undecided", _IN_PLACE_IGNORED + "calc.py. " + _TIP_MOVED + "tip.txt"),
+            id="in-place-edits-the-copy-and-moves-the-branch-tip",
         ),
     ],
 )
@@ -439,7 +445,8 @@ async def test_an_in_place_checks_first_reviewer_reads_a_copy_of_the_branch(
 ):
     """Never the person's checkout: it is not switched, their uncommitted work
     is not touched, and the copy is gone after. A write in the copy, or a
-    commit on their branch, voids the verdict without stopping the item."""
+    commit on their branch, voids the verdict without stopping the item, and
+    the note says which: a moved branch may be the person's own commit."""
     gate = await _at_gate(
         database,
         run_dirs,
