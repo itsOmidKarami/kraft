@@ -19,6 +19,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from kraft import config as config_mod
+from kraft import forges as forges_mod
 from kraft import intake as intake_mod
 from kraft import storage
 from kraft.api import config_check, deps
@@ -29,7 +30,14 @@ logger = logging.getLogger(__name__)
 WATCH_INTERVAL_S = 5
 #: What `kraft admin addon` writes; a reload of only these touches nothing else.
 ADDON_FILES = ("addons.yaml", "addons.lock", "repo-libraries.lock")
-CONFIG_FILES = ("library.yaml", "policy.yaml", "intake.yaml", "workers.yaml", *ADDON_FILES)
+CONFIG_FILES = (
+    "library.yaml",
+    "policy.yaml",
+    "intake.yaml",
+    "workers.yaml",
+    "forges.yaml",
+    *ADDON_FILES,
+)
 
 
 def _digest(path: Path) -> str | None:
@@ -182,6 +190,7 @@ async def reload(app, only: Sequence[str] | None = None) -> str | None:
         set_loaded(st, "intake.yaml", digest)
     await intake_mod.restart(app)
     _reload_workers(st)
+    _reload_forges(st)
     notify(app)
     # A lock pulled into config/ may name a store this machine does not have.
     # In the background: a restore may fetch for longer than a caller waits.
@@ -203,6 +212,20 @@ def _reload_workers(st) -> None:
     st.workers_hub.apply(file)
     st.invalid_workers = None
     set_loaded(st, workers_registry.FILE, digest)
+
+
+def _reload_forges(st) -> None:
+    """`forges.yaml` reread. One that does not load keeps the running accounts,
+    its reason kept as `st.invalid_forges`, and stays pending."""
+    digest = _digest(st.templates_dir / forges_mod.ForgesFile.FILE)
+    try:
+        file = forges_mod.ForgesFile.load(st.templates_dir / forges_mod.ForgesFile.FILE)
+    except config_mod.ConfigError as exc:
+        st.invalid_forges = str(exc)
+        return
+    st.forges = file
+    st.invalid_forges = None
+    set_loaded(st, forges_mod.ForgesFile.FILE, digest)
 
 
 def managed() -> bool:

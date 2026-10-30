@@ -485,6 +485,8 @@ async def reload_templates_endpoint(request: Request, body: ReloadBody | None = 
         "refused_intake": getattr(st, "invalid_intake", None),
         # A `workers.yaml` that does not load: the running machines are kept.
         "refused_workers": getattr(st, "invalid_workers", None),
+        # A `forges.yaml` that does not load: the running accounts are kept.
+        "refused_forges": getattr(st, "invalid_forges", None),
     }
 
 

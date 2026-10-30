@@ -119,13 +119,17 @@ async def health(request: Request):
     # An `intake.yaml` that does not load leaves auto-intake off and its
     # schedules unfired, which nothing else would say (R12E-03).
     invalid_intake = getattr(st, "invalid_intake", None)
+    invalid_forges = getattr(st, "invalid_forges", None)
     storage_health = storage.health(st)
     held = (storage_health or {}).get("state") == "held"
     return {
-        "status": "degraded" if (invalid or invalid_policy or invalid_intake or held) else "ok",
+        "status": "degraded"
+        if (invalid or invalid_policy or invalid_intake or invalid_forges or held)
+        else "ok",
         "invalid_templates": invalid,
         "invalid_policy": invalid_policy,
         "invalid_intake": invalid_intake,
+        "invalid_forges": invalid_forges,
         # public: each auto-updating add-on's last outcome and kind, not its
         # message (refusal and git error text). `doctor` reads the message from
         # status.json. A held or failed one is not degraded: the locked

@@ -298,3 +298,27 @@ def test_publishing_a_draft_announces_what_is_left_pending(client, templates_dir
         {"restart": 0, "reload": 1}
     ]
     assert yaml.safe_load((templates_dir / "intake.yaml").read_text())["interval_s"] == 90
+
+
+_TWO_DEFAULTS = (
+    "accounts:\n"
+    "  a: {forge: gitlab, web_url: 'https://g.example', default_for_host: true}\n"
+    "  b: {forge: gitlab, web_url: 'https://g.example', default_for_host: true}\n"
+)
+
+
+def test_a_hand_edited_forges_yaml_is_reloaded_and_a_broken_one_degrades_health(client):
+    st = client.app.state
+    path = st.templates_dir / "forges.yaml"
+    path.write_text("accounts:\n  a: {forge: github, web_url: 'https://github.com'}\n")
+    assert client.post("/api/templates/reload").json()["refused_forges"] is None
+    assert list(st.forges.accounts) == ["a"]
+    path.write_text(_TWO_DEFAULTS)
+    refused = client.post("/api/templates/reload").json()["refused_forges"]
+    assert refused and "forges.yaml" in refused
+    assert list(st.forges.accounts) == ["a"]
+    health = client.get("/api/health").json()
+    assert health["status"] == "degraded" and health["invalid_forges"] == refused
+    path.write_text("accounts: {}\n")
+    assert client.post("/api/templates/reload").json()["refused_forges"] is None
+    assert client.get("/api/health").json()["invalid_forges"] is None

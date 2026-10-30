@@ -324,6 +324,8 @@ class RepoEntry(BaseModel):
     #: say. None falls back to `"default"`. `default_chain_template` before 2.0.
     default_chain: str | None = None
     forge: str | None = None
+    #: A name in `forges.yaml`; None: the host's default account, else the CLI.
+    forge_account: str | None = None
     project: str | None = None
     # True, not False: every entry that predates this field was connected by a
     # human, and `managed` is what keeps a human-connected repo out of

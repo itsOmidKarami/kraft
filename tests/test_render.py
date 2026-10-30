@@ -203,6 +203,7 @@ def test_health_block_names_each_degraded_reason():
         "invalid_templates": {"broken.yaml": "no nodes"},
         "invalid_policy": "unknown key: foo",
         "invalid_intake": "intake.yaml: 'interval_s': not a number",
+        "invalid_forges": "forges.yaml: two defaults",
         "reattach_summary": {
             "scanned": 2,
             "adopted": ["w1/s1"],
@@ -228,6 +229,7 @@ def test_health_block_names_each_degraded_reason():
     assert "broken.yaml" in out and "no nodes" in out
     assert "unknown key: foo" in out
     assert "invalid intake" in out and "'interval_s': not a number" in out
+    assert "invalid forges" in out and "forges.yaml: two defaults" in out
     assert "12" in out  # documents
     assert "fastembed not installed" in out
     assert "1 adopted" in out and "2 scanned" in out

@@ -127,6 +127,8 @@ def summary(health: dict, release: dict | None, *, answered: bool = True) -> Con
         _mark(health.get("invalid_policy")),
         "  intake ",
         _mark(health.get("invalid_intake")),
+        "  forges ",
+        _mark(health.get("invalid_forges")),
         ("  ·  Index  ", "$kraft-muted"),
         f"{(index.get('embeddings') or {}).get('state') or '-'}\n",
         ("Storage  ", "$kraft-muted"),
