@@ -18,20 +18,23 @@ export function OneOffSheet({ itemId, sheet, tapped, start, onReading }: { itemI
     else setError(detailOf(a.body));
   };
   useEffect(() => {
-    onReading?.(true);
-    void read().finally(() => onReading?.(false));
-    return () => onReading?.(false);
+    void read();
   }, [itemId]); // eslint-disable-line react-hooks/exhaustive-deps
   // Nothing left to approve (a library-only chain, or someone approved since the screen read the item): a tap starts at once.
   const clear = !!data && !data.needs_review;
   const auto = clear && tapped;
   const settled = useRef(false);
+  const [started, setStarted] = useState(false);
   useEffect(() => {
     if (auto && !settled.current) {
       settled.current = true;
-      void start(false).then(() => sheet.close());
+      void start(false).finally(() => { setStarted(true); sheet.close(); });
     }
   }, [auto]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Start stays busy while the read is out, and on through the start it leads to: a tap in between would open this again.
+  const holding = (!data && !error) || (auto && !started);
+  useEffect(() => onReading?.(holding), [holding]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => onReading?.(false), []); // eslint-disable-line react-hooks/exhaustive-deps
   // Nothing until the read answers: a chain with nothing to approve never flashes a sheet.
   if (auto || (!data && !error)) return null;
   const changes = changedNodes(data?.provenance ?? null);

@@ -100,6 +100,9 @@ describe("the server's actions decide which doors the header offers (F4)", () =>
     // A gate is a view with its own decisions: Open gate stays.
     ["a gate, the server admitting nothing", { display_status: "needs_you", current_node_id: "n", stop: { kind: "gate", node: "n", resume_at: null, reason: null }, actions: [] }, "gate", ["archive"]],
     ["not started, the server refusing resume and cancel", { display_status: "paused", current_node_id: null, stop: null, actions: without("not_started", "resume", "cancel") }, null, []],
+    // Stranded before its first node with its chain unapproved: no node to retry, and /resume refuses it until the
+    // review's approve puts it back to paused, so Start (which opens that review) stands whatever the server lists.
+    ["a one-off stranded before its first node, its chain unapproved: Start", { display_status: "needs_you", current_node_id: null, stop: { kind: "stuck", node: null, resume_at: null, reason: null }, one_off: { extends: "default", custom: 1, needs_review: true, approval: null }, actions: ["cancel"] }, "start", ["cancel"]],
     ["archived, the server refusing restore", { display_status: "archived", current_node_id: "n", stop: null, actions: [] }, null, []],
     ["a closed merge request, the server's own list: Reopen", { display_status: "needs_you", current_node_id: "n", stop: { kind: "mr_closed", node: "n", resume_at: null, reason: null }, actions: serverActions("mr_closed") }, "reopen", FULL],
     // No merge request on file to reopen: Retry, the next way on.

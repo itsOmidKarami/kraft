@@ -1,7 +1,7 @@
 import { REQUEST_CHANGES } from "../../review/finish";
 import { ago, elapsed, plural, until, usd } from "../../../format";
 import type { ItemAction, KraftEvent, StopLimit } from "../../../types";
-import { admits, budgetRaise, headerState, archivable, NOT_RAISABLE, offersRaise, RAISE_REFUSED, RELEASED } from "../../item/status";
+import { admits, budgetRaise, headerState, archivable, NOT_RAISABLE, offersRaise, RAISE_REFUSED, RELEASED, strandedOneOff } from "../../item/status";
 import { doneText, gateMessage, materialized } from "../../item/chainValues";
 import { taskName } from "../../item/paths";
 import { BROKEN_BASE_TEXT, brokenBase, FORGE_LOGIN_HINT, failedFix, keptLine } from "../../item/cause";
@@ -186,7 +186,8 @@ const actDoor = (item: ItemDetail, id: ActId): ItemAction | null => {
   switch (id) {
     case "pause": case "unblock": case "resume": case "retry": case "escalate": case "cancel": case "restore": case "reject": return id;
     case "steer": return steerDoor(item);
-    case "start": case "answer": return "resume";
+    case "start": return strandedOneOff(item) ? null : "resume";
+    case "answer": return "resume";
     case "reopen-mr": return "reopen_mr";
     case "raise": return "retry";
     default: return null;
@@ -214,6 +215,7 @@ export function pairOf(item: ItemDetail): { secondary: Act | null; primary: Act 
 function pairTable(item: ItemDetail): { secondary: Act | null; primary: Act | null } {
   const stop = item.stop;
   const none = { secondary: null, primary: null };
+  if (strandedOneOff(item)) return { secondary: null, primary: a("start", "Start") };
   switch (item.display_status) {
     case "running": return { secondary: a("pause", "Pause"), primary: a("steer", "Steer") };
     // An escalation turn runs: /pause, /steer and /escalate refuse it; a human's Retry outranks the turn (R11b-01).

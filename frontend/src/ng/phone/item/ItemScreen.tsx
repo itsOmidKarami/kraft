@@ -218,7 +218,7 @@ function ItemSheets({ item, node, sheet, reload, startLines = [], tapped, onRead
             // The draft may have changed the chain: its custom content is read before anything starts.
             if (item.one_off) {
               tapped.current = true;
-              return sheet.open("one-off");
+              return sheet.swap("one-off");
             }
             const r = await act.resume(item.id);
             if (!r.ok) return void showToast(r.error, { tone: "error" });
@@ -232,7 +232,8 @@ function ItemSheets({ item, node, sheet, reload, startLines = [], tapped, onRead
         onClose={sheet.close}
       />
     );
-  if (sheet.is("one-off"))
+  // Only while it can still start: Forward onto this entry over a running item shows nothing.
+  if (sheet.is("one-off") && pairOf(item).primary?.id === "start")
     return (
       <OneOffSheet itemId={item.id} sheet={sheet} tapped={tapped.current} onReading={onReading} start={async (approved) => {
         const r = await act.resume(item.id);

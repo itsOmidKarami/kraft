@@ -208,6 +208,51 @@ describe("the item screen (C)", () => {
       expect(posts(calls)).toEqual([]);
     });
 
+    it("Start without them, then Approve and start, leaves no sheet behind: the chain's sheet took the draft's place", async () => {
+      const calls = mount(PENDING(), "/work-items/w1", { ...ROUTES, "GET /work-items/w1/draft": [200, { ops: [{ op: "override", path: "implementation", policy: { budget_usd: 2 }, passed: false }] }], "POST /work-items/w1/resume": [200, {}] });
+      await userEvent.click(await screen.findByRole("button", { name: "Start" }));
+      await userEvent.click(within(await screen.findByRole("dialog", { name: "Start with unapplied changes?" })).getByRole("button", { name: "Start without them" }));
+      await userEvent.click(within(await screen.findByRole("dialog", { name: "Approve this chain, then start?" })).getByRole("button", { name: "Approve and start" }));
+      await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/one-off/approve", "POST /work-items/w1/resume"]));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    });
+
+    it("shows no sheet when Forward brings its entry back over an item that has started", async () => {
+      const calls = mount(item("running", null, { one_off: { extends: "default", custom: 1, needs_review: false, approval: null } }), { pathname: "/work-items/w1", state: { phSheet: "one-off" } }, { ...ROUTES, "GET /work-items/w1/one-off": [200, { ...(ROUTES["GET /work-items/w1/one-off"][1] as object), needs_review: false }] });
+      await screen.findByRole("button", { name: "Pause" });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(calls.some((c) => c.path.endsWith("/one-off"))).toBe(false);
+    });
+
+    it("keeps Start busy until the start a clear read leads to answers", async () => {
+      let release!: () => void;
+      const held = new Promise<void>((r) => (release = r));
+      let resumed = false;
+      const calls = mount(PENDING(), "/work-items/w1", { ...ROUTES, "GET /work-items/w1/one-off": [200, { ...(ROUTES["GET /work-items/w1/one-off"][1] as object), needs_review: false }], "POST /work-items/w1/resume": [200, {}] });
+      const base = vi.mocked(fetch).getMockImplementation()!;
+      vi.mocked(fetch).mockImplementation(async (input, init) => {
+        if (String(input).endsWith("/resume")) { resumed = true; await held; }
+        return base(input as string, init);
+      });
+      await userEvent.click(await screen.findByRole("button", { name: "Start" }));
+      await waitFor(() => expect(resumed).toBe(true));
+      expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+      release();
+      await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/resume"]));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Start" })).toBeEnabled());
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("a one-off stranded before its first node offers Start, not a Retry with no node to retry: approve, then start", async () => {
+      const calls = mount(item("needs_you", stop("stuck", { node: null }), { current_node_id: null, worker_sessions: [], one_off: { extends: "default", custom: 1, needs_review: true, approval: null }, actions: ["cancel"] }), "/work-items/w1", { ...ROUTES, "POST /work-items/w1/resume": [200, {}] });
+      const start = await screen.findByRole("button", { name: "Start" });
+      expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+      await userEvent.click(start);
+      await userEvent.click(within(await screen.findByRole("dialog", { name: "Approve this chain, then start?" })).getByRole("button", { name: "Approve and start" }));
+      await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/one-off/approve", "POST /work-items/w1/resume"]));
+    });
+
     it("opens a sheet with the custom content in full and what changed since filing, and Approve and start posts the digest as the phone door, then starts", async () => {
       const calls = mount(PENDING(), "/work-items/w1", { ...ROUTES, "GET /work-items/w1/one-off": [200, { ...(ROUTES["GET /work-items/w1/one-off"][1] as object), redrafted: [{ diff: ["  implementation", "+ k6"] }] }] });
       await userEvent.click(await screen.findByRole("button", { name: "Start" }));
