@@ -511,6 +511,8 @@ class EgressProxy:
                 return
             form = dict(parse_qsl(body.decode("utf-8", "replace"), keep_blank_values=True))
             scope = callback.scope_for_channel(session)
+            if "?" in form.get("id", ""):
+                return await _answer(writer, 400, "Bad Request", "an id has no query")
             call = verb(form, scope)
             if isinstance(call, str):
                 return await _answer(writer, 400, "Bad Request", call)
@@ -741,6 +743,13 @@ def _events(form, scope) -> _Call | str:
     return "GET", f"{_item(form, scope)}/events", None
 
 
+def _segment(value: str) -> str:
+    """One path segment; a bare `.` or `..` is encoded so no one resolves it away."""
+    return (
+        quote(value, safe="").replace(".", "%2E") if value in (".", "..") else quote(value, safe="")
+    )
+
+
 def _forge_query(form: dict, **bounds: tuple[int, int]) -> str:
     """`?repo=...&lines=...` from the form; a count outside its bounds is the 400 text."""
     query = {}
@@ -765,7 +774,7 @@ def _forge_read(tail: str, *, needs: tuple[str, ...] = (), **bounds: tuple[int, 
         query = _forge_query(form, **bounds)
         if not query.startswith("?") and query:
             return query
-        path = tail.format(**{n: quote(form[n], safe="") for n in needs})
+        path = tail.format(**{n: _segment(form[n]) for n in needs})
         return "GET", f"{_item(form, scope)}/forge/{path}{query}", None
 
     return verb
