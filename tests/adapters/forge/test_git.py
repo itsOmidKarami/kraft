@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import errno
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -260,7 +261,10 @@ def test_push_needs_git_lfs_only_for_a_repo_that_uses_lfs(
     machine with no git-lfs refuses, as git-lfs's own pre-push did, rather
     than publish pointers to objects the forge never got. A repo that does
     not use LFS never asks for git-lfs."""
-    monkeypatch.setattr(forge_git.lfs, "available", lambda: False)
+    which = shutil.which
+    monkeypatch.setattr(
+        shutil, "which", lambda name, **kw: None if name == "git-lfs" else which(name, **kw)
+    )
     repo = _repo_with_origin(tmp_path)
     (repo / ".gitattributes").write_text(attributes)
     commit_all(repo, "attributes")

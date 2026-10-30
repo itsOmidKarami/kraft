@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import subprocess
 from collections.abc import Collection, Mapping
 from datetime import datetime
@@ -773,7 +774,8 @@ async def _push_lfs_objects(repo: Path, branch: str, env: dict[str, str]) -> Non
     refuses, as the hook did."""
     if not await asyncio.to_thread(lfs.uses_lfs, repo):
         return
-    if not await asyncio.to_thread(lfs.available):
+    # Not `lfs.available()`: it is cached, and the message says install, then retry.
+    if shutil.which("git-lfs") is None:
         raise ForgeError(
             "the repo uses Git LFS, and this machine has no git-lfs to upload the "
             "branch's LFS objects with: install git-lfs, then retry"
