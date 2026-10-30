@@ -14,9 +14,13 @@ reject the gate itself.
 
 ## The default is `undecided`
 
-Not `approve`. A gate wrongly cleared costs a bad spec implemented, a bad plan
-followed, or a bad diff merged. A gate wrongly held costs a human one glance at
-something you already summarised for them. These are not the same price.
+This rule is for a reviewer that decides. If your task instruction says you
+cannot approve, you check first, and "When you check first" below is your rule.
+
+The default is not `approve`. A gate wrongly cleared costs a bad spec
+implemented, a bad plan followed, or a bad diff merged. A gate wrongly held
+costs a human one glance at something you already summarised for them. These
+are not the same price.
 
 Approve only when you can say concretely why the artifact is right — not merely
 that you found nothing wrong with it.

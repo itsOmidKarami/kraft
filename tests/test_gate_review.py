@@ -145,10 +145,12 @@ _PASS = {"verdict": "pass", "concerns": "read it all"}
 _DOC = "# the review\n"
 
 
-async def _at_gate(database, run_dirs, tmp_path, repo, edit, result, *, mode, in_place, doc=_DOC):
+async def _at_gate(
+    database, run_dirs, tmp_path, repo, edit, result, *, mode, in_place, doc=_DOC, artifact="review"
+):
     """An item at a reviewed gate whose reviewer runs `edit` in its checkout,
-    then reports `result`. The gate decides its `review` document, which reads
-    `doc` (None: not written yet). In place it
+    then reports `result`. The gate decides its `artifact` document (None: it
+    has none), which reads `doc` (None: not written yet). In place it
     is on its first take, with a spec to commit; otherwise in its own
     worktree. Returns the gate."""
     script = (
@@ -157,7 +159,10 @@ async def _at_gate(database, run_dirs, tmp_path, repo, edit, result, *, mode, in
     # A harness that cannot deny tools still runs a checks-first reviewer: the
     # snapshot, not a tool denial, is what catches an edit.
     fake_harness_home(tmp_path, ["sh", "-c", script])
-    keys = {"artifact": "review", **({"auto_review_mode": mode} if mode else {})}
+    keys = {
+        **({"artifact": artifact} if artifact else {}),
+        **({"auto_review_mode": mode} if mode else {}),
+    }
     _doc(run_dirs).parent.mkdir(parents=True, exist_ok=True)
     if doc is not None:
         _doc(run_dirs).write_text(doc)
@@ -320,6 +325,16 @@ _25 = "for i in $(seq 25); do echo x > f$i.txt; done"
             ("undecided", _IGNORED + "{doc}"),
             id="edits-past-the-read-limit",
         ),
+        # No longer a file it can read without a link: changed all the same.
+        pytest.param(
+            CHECKS_FIRST,
+            False,
+            _DOC,
+            'ln -sf /dev/null "$KRAFT_DOCS_DIR/review.md"',
+            _PASS,
+            ("undecided", _IGNORED + "{doc}"),
+            id="links-the-gate-document",
+        ),
         # A reviewer that decides may edit (`fixed`): no check, no "before" read.
         pytest.param(
             None,
@@ -344,6 +359,52 @@ async def test_checks_first_edits_void_the_verdict(
     verdict, note = await _run(database, run_dirs, gate)
     assert (verdict, note) == (expected[0], expected[1].format(doc=_doc(run_dirs)))
     assert reads == (["snapshot"] if mode else [])
+
+
+async def test_checks_first_gate_with_no_document_checks_the_checkout(
+    database, run_dirs, tmp_path, repo, monkeypatch
+):
+    gate = await _at_gate(
+        database,
+        run_dirs,
+        tmp_path,
+        repo,
+        "echo x > new.txt",
+        _PASS,
+        mode=CHECKS_FIRST,
+        in_place=False,
+        artifact=None,
+    )
+    assert await _run(database, run_dirs, gate) == ("undecided", _IGNORED + "new.txt")
+
+
+_TOLD_TO_EDIT = ("Commit everything you change", "Run the tests your change touches")
+
+
+@pytest.mark.parametrize(
+    "mode,told",
+    [pytest.param(CHECKS_FIRST, False, id="checks-first"), pytest.param(None, True, id="decides")],
+)
+async def test_only_a_reviewer_that_may_edit_is_told_to_commit_and_test(
+    database, run_dirs, tmp_path, repo, monkeypatch, mode, told
+):
+    """Its own instruction says do not edit; the session's context must not
+    then say commit, or run tests that can leave files behind."""
+    argv = tmp_path / "argv.txt"
+    gate = await _at_gate(
+        database,
+        run_dirs,
+        tmp_path,
+        repo,
+        f"printf '%s' \"$*\" > {argv}",
+        _PASS,
+        mode=mode,
+        in_place=False,
+    )
+    await _run(database, run_dirs, gate)
+    context = argv.read_text()
+    assert "You are working on a Kraft work item." in context
+    assert [line in context for line in _TOLD_TO_EDIT] == [told, told]
 
 
 @pytest.mark.parametrize(

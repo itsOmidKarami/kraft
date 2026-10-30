@@ -80,11 +80,17 @@ _CTX = (
     "This session ends the moment your turn ends: nothing runs after you stop "
     "responding, and a turn that ends with a background job still running fails, "
     "naming the job. Run every command to completion in the foreground before you "
-    "report status (the Monitor tool is disabled for the same reason). Run the "
-    "tests your change touches, by path or name as this repo's own instructions "
-    "say, not the whole suite: the verification after you runs that.\n"
+    "report status (the Monitor tool is disabled for the same reason).{edits}"
+)
+
+#: `_CTX`'s `{edits}`, for every launch but a read-only one (`context_sections`'
+#: `read_only`): `_TESTS`, `_WORKTREE` or `_IN_PLACE`, then `_GITIGNORED`.
+_TESTS = (
+    " Run the tests your change touches, by path or name as this repo's own "
+    "instructions say, not the whole suite: the verification after you runs that.\n"
     "\n"
-    "{checkout}"
+)
+_GITIGNORED = (
     "\n"
     "Exception: `.engineering/` (any spec/plan/review document an earlier "
     "run left there) is gitignored on purpose. Kraft reads those files "
@@ -103,7 +109,7 @@ _RESUMED_FILES = (
     "write there, Kraft no longer reads it."
 )
 
-#: Where an item's agent works: `_CTX`'s `{checkout}`, a worktree's or a person's own.
+#: Where an item's agent works, in `_CTX`'s `{edits}`: a worktree, or a person's own checkout.
 _WORKTREE = (
     "You are working in a git worktree cut for this work item, on its own "
     "branch. Commit everything you change before you exit — `git add` and "
@@ -124,6 +130,14 @@ _IN_PLACE = (
     "before you exit: work left uncommitted never reaches the merge request. Do "
     "not push and do not merge: Kraft pushes the branch and opens, updates and "
     "merges the merge request itself.\n"
+)
+#: `_CTX`'s `{edits}` for an agent that must change nothing (a gate reviewer
+#: that checks first): no word of committing or testing, which its instruction forbids.
+_READ_ONLY = (
+    "\n"
+    "\n"
+    "You are reading this work item's checkout. Change, write and commit "
+    "nothing in it, and leave no file behind: Kraft compares it after you.\n"
 )
 
 #: Intent-process design §4. Kraft-authored, and its only input is the repo's
@@ -626,6 +640,8 @@ def context_sections(
     #: The item runs in a person's own checkout, on `branch`.
     in_place: bool = False,
     branch: str = "<branch>",
+    #: The agent must change nothing: told neither to commit nor to run tests.
+    read_only: bool = False,
 ) -> list[tuple[str, str, str]]:
     """A launch's context as `(kind, source, text)` sections, in the order the
     agent reads them; joined, they are exactly `build_context`'s text."""
@@ -642,7 +658,11 @@ def context_sections(
                 hook_point=hook_point,
                 session_id=session_id,
                 summary_path=summary_path or "<session summary path>",
-                checkout=_IN_PLACE.format(branch=branch) if in_place else _WORKTREE,
+                edits=_READ_ONLY
+                if read_only
+                else _TESTS
+                + (_IN_PLACE.format(branch=branch) if in_place else _WORKTREE)
+                + _GITIGNORED,
             ),
         )
     ]
@@ -1100,6 +1120,8 @@ async def _run_agent_task(
     runner: str | None = None,
     #: The slot `launch.placed` took for a step whose runner is a group.
     placed_claim: Claim | None = None,
+    #: `context_sections`' `read_only`: a gate reviewer that checks first.
+    read_only: bool = False,
 ) -> str:
     runner = None if runner == "local" else runner
     # An update holds the moment: no session starts until the server restarts.
@@ -1157,6 +1179,7 @@ async def _run_agent_task(
         documents=documents_note(run_dirs, item_row, worktree=Path(cwd)),
         in_place=in_place,
         branch=store.branch_for(item_row) if in_place else "<branch>",
+        read_only=read_only,
     )
     options = {
         k: v

@@ -13,6 +13,7 @@ so that a human's escalation agent *can* act.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -114,7 +115,8 @@ def _document(run_dirs, work_item_id: str, rel: str | None) -> str | None:
     """A hash of the whole of the gate's document as it stands, `"absent"` when
     nothing is there and `"unreadable"` when it is no regular file reached
     without a link; None for a gate with none. The reviewer may write here, so
-    it is opened as `read_document` opens it: no link followed, no FIFO waited on."""
+    it is opened as `read_document` opens it: no link followed, no FIFO waited on.
+    Blocking and unbounded: callers run it in a thread, off the event loop."""
     if rel is None:
         return None
     try:
@@ -425,7 +427,7 @@ async def review(
         # Before the launch: once the reviewer's session row exists it counts
         # as live, and a sandboxed item's guard would refuse every read.
         before = read_only.snapshot(db, row, launch, worktree)
-        doc_was = _document(run_dirs, work_item_id, watched)
+        doc_was = await asyncio.to_thread(_document, run_dirs, work_item_id, watched)
         if before is None:
             why = "Kraft could not read the checkout safely, so no reviewer ran: a person decides"
             await start()
@@ -450,7 +452,7 @@ async def review(
         # the live-session guard cannot refuse here; a None is judged below.
         nonlocal before, doc_was
         before = read_only.snapshot(db, row, launch, worktree)
-        doc_was = _document(run_dirs, work_item_id, watched)
+        doc_was = await asyncio.to_thread(_document, run_dirs, work_item_id, watched)
 
     try:
         status = await _agent.run_agent_task(
@@ -486,6 +488,8 @@ async def review(
             tips=tips,
             on_session=start,
             after_checkout=after_checkout if cf and in_place else None,
+            # Its instruction forbids edits: its context must not ask for commits.
+            read_only=cf,
             runner=_placement.remote(_placement.runner_for(row, auto_review.runner, node.id)),
         )
     except store.CheckoutBusy:
@@ -514,6 +518,7 @@ async def review(
     if cf:
         # Even a reject: its reasoning was about work it then changed. A remote
         # run's commits are already in this worktree (`remote.runs._publish`).
+        doc_is = await asyncio.to_thread(_document, run_dirs, work_item_id, watched)
         if before is None:
             # In place, a launch refused before its take never read the
             # checkout: that is a run that did not finish, judged below.
@@ -523,9 +528,7 @@ async def review(
                     "so its verdict was ignored"
                 )
         elif files := read_only.changed(db, row, launch, worktree, before) + (
-            [str(item_paths.path_of(run_dirs, work_item_id, watched))]
-            if _document(run_dirs, work_item_id, watched) != doc_was
-            else []
+            [str(item_paths.path_of(run_dirs, work_item_id, watched))] if doc_is != doc_was else []
         ):
             return "undecided", (
                 "The reviewer changed files, so its verdict was ignored; its changes are "
