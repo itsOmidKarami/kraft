@@ -102,12 +102,32 @@ _VOIDED = (
     "The reviewer changed files, so its verdict was ignored; its changes are "
     "still in the worktree: "
 )
-_VOIDED_IN_COPY = (
-    "The reviewer changed files in its copy of the branch, so its verdict was ignored; "
-    "Kraft removed the copy and left your working files as they were: "
-)
-#: Whoever moved it: the reviewer, by a push from its copy, or the person.
-_TIP_MOVED = "The item's branch moved during the review, so the verdict was ignored: "
+#: `read_only.changed`'s answers for what it could not compare, not files.
+_UNREAD = ("(not compared", "(git could not read it)")
+
+
+def _voided_in_copy(edited: list[str], moved: list[str]) -> str | None:
+    """Why a review in a copy is ignored: what the reviewer changed in its copy,
+    and the item's branch, moved by whoever moved it (a push from the copy, or
+    the person) or not readable after. None when neither changed."""
+    parts = []
+    if edited:
+        parts.append(
+            f"the reviewer changed files in its copy of the branch ({read_only.named(edited)})"
+        )
+    if unread := [f.strip("()") for f in moved if f.startswith(_UNREAD)]:
+        parts.append(
+            f"Kraft could not compare the item's branch after the review ({'; '.join(unread)})"
+        )
+    elif moved:
+        parts.append(f"the item's branch moved during the review ({read_only.named(moved)})")
+    if not parts:
+        return None
+    note = " and ".join(parts) + ", so the reviewer's verdict was ignored"
+    note = note[0].upper() + note[1:]
+    if edited:
+        return note + "; Kraft removed the copy and left your working files as they were."
+    return note + "."
 
 
 def checks_first(node: ResolvedNode) -> bool:
@@ -556,19 +576,12 @@ async def review(
                 written = [str(item_paths.path_of(run_dirs, work_item_id, d)) for d in sorted(docs)]
                 if copy:
                     edited, moved = before()  # the whole copy, and the person's branch tip
-                    notes = [
-                        voided + read_only.named(files)
-                        for voided, files in (
-                            (_VOIDED_IN_COPY, edited + written),
-                            (_TIP_MOVED, moved),
-                        )
-                        if files
-                    ]
+                    voided = _voided_in_copy(edited + written, moved)
                 else:
                     files = read_only.changed(db, row, launch, worktree, before) + written
-                    notes = [_VOIDED + read_only.named(files)] if files else []
-                if notes:
-                    return "undecided", ". ".join(notes)
+                    voided = _VOIDED + read_only.named(files) if files else None
+                if voided:
+                    return "undecided", voided
     finally:
         if copy is not None:
             await _subprocess.uncancellable(asyncio.to_thread(inplace.remove_copy, copy))

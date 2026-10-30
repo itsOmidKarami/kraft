@@ -396,11 +396,13 @@ async def test_checks_first_gate_with_no_document_checks_the_checkout(
     assert await _run(database, run_dirs, gate) == ("undecided", _IGNORED + "new.txt")
 
 
-_IN_PLACE_IGNORED = (
-    "The reviewer changed files in its copy of the branch, so its verdict was ignored; "
-    "Kraft removed the copy and left your working files as they were: "
-)
-_TIP_MOVED = "The item's branch moved during the review, so the verdict was ignored: "
+#: What a reviewer in a copy is told its verdict was ignored for.
+_COPY_EDITED = "The reviewer changed files in its copy of the branch ({})"
+_TIP_MOVED = "the item's branch moved during the review ({})"
+_IGNORED_IN_COPY = ", so the reviewer's verdict was ignored"
+_COPY_REMOVED = "; Kraft removed the copy and left your working files as they were."
+#: `edit` for a row whose branch tip Kraft cannot read after the review.
+_UNREAD_TIP = "unread-tip"
 _PERSONS = "# the person's edit\n"
 #: A commit on the person's branch by a route around the copy, which it then undoes.
 _PUSH = (
@@ -416,27 +418,47 @@ _PUSH = (
         pytest.param(
             False,
             _COMMIT,
-            ("undecided", _IN_PLACE_IGNORED + "new.txt"),
+            ("undecided", _COPY_EDITED.format("new.txt") + _IGNORED_IN_COPY + _COPY_REMOVED),
             id="in-place-commits-in-the-copy",
         ),
         pytest.param(
             True,
             "echo agent >> calc.py",
-            ("undecided", _IN_PLACE_IGNORED + "calc.py"),
+            ("undecided", _COPY_EDITED.format("calc.py") + _IGNORED_IN_COPY + _COPY_REMOVED),
             id="in-place-edits-a-file-the-person-had-dirty",
         ),
         pytest.param(True, ":", ("pass", "read it all"), id="in-place-person-mid-work"),
         pytest.param(
             False,
             _PUSH,
-            ("undecided", _TIP_MOVED + "tip.txt"),
+            (
+                "undecided",
+                "The item's branch moved during the review (tip.txt)" + _IGNORED_IN_COPY + ".",
+            ),
             id="in-place-moves-the-branch-tip",
         ),
         pytest.param(
             False,
             _PUSH + " && echo agent >> calc.py",
-            ("undecided", _IN_PLACE_IGNORED + "calc.py. " + _TIP_MOVED + "tip.txt"),
+            (
+                "undecided",
+                _COPY_EDITED.format("calc.py")
+                + " and "
+                + _TIP_MOVED.format("tip.txt")
+                + _IGNORED_IN_COPY
+                + _COPY_REMOVED,
+            ),
             id="in-place-edits-the-copy-and-moves-the-branch-tip",
+        ),
+        pytest.param(
+            False,
+            _UNREAD_TIP,
+            (
+                "undecided",
+                "Kraft could not compare the item's branch after the review "
+                "(git could not read it)" + _IGNORED_IN_COPY + ".",
+            ),
+            id="in-place-branch-tip-unread",
         ),
     ],
 )
@@ -447,12 +469,20 @@ async def test_an_in_place_checks_first_reviewer_reads_a_copy_of_the_branch(
     is not touched, and the copy is gone after. A write in the copy, or a
     commit on their branch, voids the verdict without stopping the item, and
     the note says which: a moved branch may be the person's own commit."""
+    if edit == _UNREAD_TIP:
+        watch = inplace.watch_copy
+
+        def unread_tip(*a):
+            since = watch(*a)
+            return lambda: (since()[0], ["(git could not read it)"])
+
+        monkeypatch.setattr(inplace, "watch_copy", unread_tip)
     gate = await _at_gate(
         database,
         run_dirs,
         tmp_path,
         repo,
-        edit.replace("{repo}", str(repo)),
+        ":" if edit == _UNREAD_TIP else edit.replace("{repo}", str(repo)),
         _PASS,
         mode=CHECKS_FIRST,
         in_place=True,
