@@ -2,16 +2,19 @@
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
+import time
 
 import psutil
 import pytest
 from support.harness import IN_PLACE, git, make_item, make_repo, v1_named_chain, write
 
-from kraft import db, store
+from kraft import db, inplace, store
 from kraft.adapters import hook_install
 from kraft.paths import RunDirs
+from kraft.worker import reattach
 
 _OLD = [sys.executable, "-m", "kraft", "admin", "permission-hook", "cursor"]
 
@@ -78,6 +81,32 @@ def test_start_up_removes_the_rebase_worktrees_a_killed_server_left(stale_scratc
     scratch = stale_scratch.parent / "run/scratch"
     assert [p.name for p in scratch.iterdir()] == ["w3-0dead0ff"], "a link is never Kraft's"
     assert (stale_scratch.parent / "mine/keep.txt").exists()
+
+
+@pytest.fixture
+def dead_copy(tmp_path, monkeypatch):
+    """The copy of a session with no row left, made before the server
+    started, and whether it was still there when reattach ran."""
+    copy = inplace.copy_path(RunDirs(tmp_path / "run"), "w1", "s1")
+    write(copy, "f", "x\n")
+    os.utime(copy, (time.time() - 3600,) * 2)
+    seen = []
+    real = reattach.reattach
+
+    async def watched(*args, **kwargs):
+        seen.append(copy.exists())
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(reattach, "reattach", watched)
+    return copy, seen
+
+
+def test_start_up_removes_a_dead_sessions_copy_after_reattach(dead_copy, client):
+    """After reattach, which may adopt a session that still uses its copy."""
+    copy, seen = dead_copy
+    assert client.get("/api/health").status_code == 200
+    assert seen == [True]
+    assert not copy.exists()
 
 
 @pytest.fixture
