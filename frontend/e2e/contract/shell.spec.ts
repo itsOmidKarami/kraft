@@ -58,7 +58,11 @@ const ROWS: Row[] = [
     run: async (p) => {
       await app(p, "/"); await appToggle(p); await away(p);
       await p.mouse.move(3, 420); await pause(p); expect(await sideEdge(p)).toBeLessThan(OPEN);
-      await p.getByRole("button", { name: "Pin sidebar" }).hover(); await pause(p); expect(await sideEdge(p)).toBeGreaterThan(OPEN);
+      const pin = p.getByRole("button", { name: "Pin sidebar" }); const dot = pin.locator(".ng-side-dot");
+      await expect(dot).toBeVisible();
+      await pin.hover(); await pause(p, 900); expect(await sideEdge(p)).toBeGreaterThan(OPEN);
+      // What it opened answers the hover: no tip over the Search row, and the Board row has the dot.
+      await expect(tipOf(p)).toBeHidden(); await expect(dot).toBeHidden();
     },
   },
   {

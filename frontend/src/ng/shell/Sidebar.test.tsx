@@ -108,9 +108,12 @@ describe("ng Sidebar", () => {
     expect(pin.parentElement).toHaveClass("ng-side");
     expect(pin.closest(".ng-sidebar")).toBeNull();
     expect(pin).toHaveAttribute("data-tip", "Collapse sidebar");
+    expect(pin).not.toHaveAttribute("data-tip-off");
     expect(pin.querySelector(".lucide-panel-left-close")).not.toBeNull();
     await userEvent.click(pin);
     expect(pin).toHaveAttribute("data-tip", "Pin sidebar");
+    // Collapsed, its hover opens the sidebar instead, so no tip drops over the Search row.
+    expect(pin).toHaveAttribute("data-tip-off");
     expect(pin.querySelector(".lucide-panel-left-open")).not.toBeNull();
   });
 

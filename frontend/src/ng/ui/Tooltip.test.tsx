@@ -35,13 +35,17 @@ describe("Tooltip (TT-1)", () => {
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
-  it("does not show for a button with no data-tip, nor after a press", () => {
+  it("does not show for a button with no data-tip, nor after a press, nor one marked data-tip-off", () => {
     const b = mount();
     fireEvent.mouseOver(screen.getByRole("button", { name: "other" }));
     wait(TIP_DELAY_MS + 10);
     expect(screen.queryByRole("tooltip")).toBeNull();
     fireEvent.mouseOver(b);
     fireEvent.pointerDown(b);
+    wait(TIP_DELAY_MS + 10);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    b.setAttribute("data-tip-off", "");
+    fireEvent.mouseOver(b);
     wait(TIP_DELAY_MS + 10);
     expect(screen.queryByRole("tooltip")).toBeNull();
   });

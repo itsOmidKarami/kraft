@@ -108,6 +108,8 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
         aria-pressed={mode === "pinned"}
         // One name, its state in aria-pressed: a label that swapped with it read "Collapse sidebar, pressed" (R8b-11). The tooltip says what a press does.
         {...tip("Pin sidebar", mode === "pinned" ? "Collapse sidebar" : "Pin sidebar")}
+        // Collapsed, hovering it opens the sidebar right where its tip would cover the Search row.
+        data-tip-off={mode === "rail" ? "" : undefined}
         onClick={toggle}
       >
         {mode === "pinned" ? <PanelLeftClose size={16} aria-hidden /> : <PanelLeftOpen size={16} aria-hidden />}

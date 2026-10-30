@@ -13,7 +13,9 @@ export const tip = (label: string, text = label) => ({ "aria-label": label, "dat
 /** The tooltip of a button whose visible text already names it: the tip adds information, so a screen reader gets it as the description too. */
 export const hint = (text: string) => ({ "data-tip": text, "aria-description": text }) as const;
 
-const HOST = "[data-tip]";
+/** `data-tip-off` keeps the tip (and the audit's check) on a button whose hover already answers itself, as the
+ *  collapsed sidebar's pin does by opening the sidebar under where the tip would sit. */
+const HOST = "[data-tip]:not([data-tip-off])";
 
 /** The one tooltip, mounted once per app. It shows the `data-tip` of the button under the pointer or holding
  *  keyboard focus after TIP_DELAY_MS, just under that button (above it when there is no room) so it never

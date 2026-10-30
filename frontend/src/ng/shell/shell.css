@@ -80,6 +80,8 @@
 /* Over the panel's head and the page's header alike, its icon in line with the rows' icons. */
 .ng-side-pin { position: absolute; top: 9px; left: 7px; z-index: 1; display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--text-muted); cursor: pointer; }
 .ng-side-pin .ng-side-dot { position: absolute; top: 3px; right: 3px; margin: 0; box-shadow: 0 0 0 1.5px var(--bg); }
+/* Revealed, the Board row shows the dot itself. */
+.ng-side:is(:hover, :has(:focus-visible)) .ng-side-pin .ng-side-dot { display: none; }
 .ng-side-pin:hover { color: var(--text); background: var(--surface-2); }
 .ng-side-pin[aria-pressed="true"] { color: var(--text); }
 .ng-offline { flex: none; display: flex; align-items: center; gap: 12px; padding: 9px 14px; border-bottom: 1px solid color-mix(in oklab, var(--bad) 40%, transparent); background: color-mix(in oklab, var(--bad) 10%, var(--bg)); font-size: var(--fs-meta); }
