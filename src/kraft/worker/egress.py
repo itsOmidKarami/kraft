@@ -743,11 +743,7 @@ def _events(form, scope) -> _Call | str:
     return "GET", f"{_item(form, scope)}/events", None
 
 
-def _segment(value: str) -> str:
-    """One path segment; a bare `.` or `..` is encoded so no one resolves it away."""
-    return (
-        quote(value, safe="").replace(".", "%2E") if value in (".", "..") else quote(value, safe="")
-    )
+_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 def _forge_query(form: dict, **bounds: tuple[int, int]) -> str:
@@ -771,10 +767,12 @@ def _forge_read(tail: str, *, needs: tuple[str, ...] = (), **bounds: tuple[int, 
         for name in needs:
             if not form.get(name):
                 return f"needs --{name}"
+            if not _ID.fullmatch(form[name]):
+                return f"{name} must be an id"
         query = _forge_query(form, **bounds)
         if not query.startswith("?") and query:
             return query
-        path = tail.format(**{n: _segment(form[n]) for n in needs})
+        path = tail.format(**{n: form[n] for n in needs})
         return "GET", f"{_item(form, scope)}/forge/{path}{query}", None
 
     return verb
