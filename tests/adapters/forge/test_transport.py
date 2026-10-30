@@ -199,6 +199,15 @@ def test_gh_names_the_enterprise_host(cli, repo, origin, ssh_says, host_args):
     assert cli.argv("gh")[5:] == host_args
 
 
+def test_the_host_is_worked_out_once_per_repo_not_once_per_transport(cli, repo):
+    git(repo, "remote", "add", "origin", "git@github-work:o/r.git")
+    cli.stub("ssh", "hostname github.com")
+    cli.stub("gh", "{}")
+    rest("gh", "user", repo)
+    rest("gh", "user", repo)
+    assert len(cli.calls("ssh")) == 1
+
+
 def test_glab_never_gets_a_hostname(cli, repo):
     git(repo, "remote", "add", "origin", "https://gitlab.example.com/a/b.git")
     cli.stub("glab", "{}")

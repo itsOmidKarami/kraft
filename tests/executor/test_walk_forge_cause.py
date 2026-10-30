@@ -1,8 +1,11 @@
 """A forge task's failure names its cause (`forge_auth`, `forge_unreachable`) in
 the stop's facts (Kraft-9d8b2.67)."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
+from kraft import waits
 from kraft.adapters import forge as _forge
 
 from .test_walk import (
@@ -98,3 +101,23 @@ async def test_a_forge_task_failure_names_its_cause_in_the_stops_facts(
         assert ("Reinstall" in stop["reason"]) == (cause is None)
         # Plain text on the card: a backtick would show literally.
         assert "`" not in stop["reason"]
+
+
+async def test_a_forge_rate_limit_parks_the_item_until_the_forge_allows_it(
+    item_on, tmp_path, fake_agent, monkeypatch
+):
+    """The walk routes a forge task's `rate_limited` session to
+    `stops.stop_for_rate_limit`: the item is rate limited with the retry time the
+    forge named, not failed and not waiting on a person."""
+    moment = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(waits, "now", lambda: moment)
+    error = {"status": 403, "reason": "rate_limited", "retry_after": 30}
+    monkeypatch.setattr(_forge.run, "resolve", lambda name: _RaisingWith("slow down", **error))
+    it = await item_on([_exec("checks", _forge_task("open", "mr.open_draft"))])
+
+    assert await _walk(it, repo_entry=FORGE_REPO, policy=_loop_policy(tmp_path)) == "rate_limited"
+
+    row = it.row()
+    assert (row["status"], row["stop_kind"]) == ("rate_limited", "rate_limit")
+    assert row["retry_at"] == (moment + timedelta(seconds=30)).isoformat()
+    assert not it.events("work_item_needs_human")

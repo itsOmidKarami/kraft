@@ -8,12 +8,14 @@ line and headers before the body, so the status, `Retry-After` and
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import subprocess
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
@@ -106,7 +108,8 @@ def origin_host(repo: Path) -> str | None:
     return match["host"].lower() if match else None
 
 
-def gh_host(repo: Path) -> str | None:
+@lru_cache(maxsize=256)
+def _gh_host(repo: Path) -> str | None:
     """The host `gh api` should be told about, as gh itself reads the remote: an
     scp-style or `ssh://` origin goes through `ssh -G`, which turns an alias
     (`github-work`) into its real host, and GitHub's SSH-over-443 host is
@@ -135,6 +138,12 @@ def gh_host(repo: Path) -> str | None:
             host,
         )
     return "github.com" if host == "ssh.github.com" else host
+
+
+async def gh_host(repo: Path) -> str | None:
+    """`_gh_host`, asked off the event loop and remembered per repo: it runs
+    git and maybe `ssh -G`, and a moved remote is a restart-level change."""
+    return await asyncio.to_thread(_gh_host, repo)
 
 
 def _now() -> float:
@@ -171,7 +180,6 @@ def _sso_url(header: str) -> str:
 class CliTransport:
     def __init__(self, cli: Literal["gh", "glab"], repo: Path):
         self.cli, self.repo = cli, repo
-        self._host_args: list[str] | None = None
 
     async def _call(
         self, label: str, args: list[str], *, graphql: bool = False
@@ -201,20 +209,18 @@ class CliTransport:
             )
         return resp, done.returncode
 
-    def _host(self) -> list[str]:
-        if self._host_args is None:  # once per transport: it asks git, and maybe ssh
-            host = gh_host(self.repo) if self.cli == "gh" else None
-            self._host_args = ["--hostname", host] if host and host != "github.com" else []
-        return self._host_args
+    async def _host(self) -> list[str]:
+        host = await gh_host(self.repo) if self.cli == "gh" else None
+        return ["--hostname", host] if host and host != "github.com" else []
 
     async def rest(
         self, method: str, path: str, *, fields: Mapping[str, Field] | None = None
     ) -> ApiResponse:
-        args = [path, "-X", method, "-i", *_flags(fields), *self._host()]
+        args = [path, "-X", method, "-i", *_flags(fields), *await self._host()]
         return (await self._call(f"{method} {path}", args))[0]
 
     async def graphql(self, query: str, variables: Mapping[str, Field] | None = None) -> dict:
-        args = ["graphql", "-i", "-f", f"query={query}", *_flags(variables), *self._host()]
+        args = ["graphql", "-i", "-f", f"query={query}", *_flags(variables), *await self._host()]
         resp, rc = await self._call("graphql", args, graphql=True)
         body = resp.json()
         if not isinstance(body, dict):
