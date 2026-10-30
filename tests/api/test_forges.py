@@ -9,6 +9,7 @@ from support.harness import connect_repo
 
 from kraft.adapters.forge import git as forge_git
 from kraft.adapters.forge.git import CliUnavailable
+from kraft.adapters.forge.models import ForgeError
 from kraft.config import read_yaml
 
 GL = {"name": "corp", "forge": "gitlab", "web_url": "https://code.corp.example/"}
@@ -31,6 +32,7 @@ def test_add_list_remove_round_trip(client):
     assert list(client.get("/api/forges").json()["accounts"]) == ["corp"]
     assert "corp" in client.app.state.forges.accounts
     assert client.delete("/api/forges/corp").status_code == 204
+    assert "corp" not in client.app.state.forges.accounts
     assert client.get("/api/forges").json() == {"accounts": {}}
     assert client.delete("/api/forges/corp").status_code == 404
 
@@ -111,8 +113,9 @@ def _done(code, out="", err=""):
             False,
             "not installed",
         ),
+        ("github", ForgeError("gh auth status timed out after 30s"), None, False, "timed out"),
     ],
-    ids=["gh-ok", "glab-failed", "cli-missing"],
+    ids=["gh-ok", "glab-failed", "cli-missing", "timeout"],
 )
 def test_test_runs_the_cli_auth_status_for_the_host(
     client, monkeypatch, forge, answer, argv, ok, text
@@ -151,3 +154,26 @@ def test_an_unreadable_file_never_lets_remove_through_and_never_hides_the_runnin
         _file(client).write_text("accounts: [not: closed")
         reply = client.get("/api/forges")
         assert reply.status_code == status and list(reply.json()["accounts"]) == ["corp"]
+
+
+@pytest.mark.parametrize("write", ["add", "remove"])
+def test_a_write_is_applied_and_clears_a_stale_invalid_mark(client, write):
+    client.post("/api/forges", json={**GL, "name": "other", "web_url": "https://o.example"})
+    client.app.state.invalid_forges = "stale"
+    if write == "add":
+        client.post("/api/forges", json=GL)
+    else:
+        client.delete("/api/forges/other")
+    assert client.app.state.invalid_forges is None
+    pending = client.get("/api/apply").json()
+    assert "forges.yaml" not in str(pending)
+
+
+def test_a_refused_add_names_the_field(client):
+    reply = client.post("/api/forges", json={**GL, "forge": "bitbucket"})
+    assert reply.status_code == 422 and "forge:" in reply.text
+
+
+def test_the_403_names_forge_accounts(client):
+    reply = client.get("/api/forges", headers={"X-Kraft-Session-Id": "w1/s1"})
+    assert "forge accounts" in reply.text

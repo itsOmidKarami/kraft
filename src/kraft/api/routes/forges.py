@@ -48,10 +48,11 @@ async def _load(st) -> forges.ForgesFile:
         raise HTTPException(409, f"{exc}; fix the file first") from exc
 
 
-async def _naming(st, name: str) -> list[str]:
-    """The connected repos whose `forge_account` is `name`."""
+def _naming(st, name: str) -> list[str]:
+    """The connected repos whose `forge_account` is `name`. Read in the event loop, not a
+    thread: a repos.yaml save cannot land between this and the caller's `_save`."""
     try:
-        entries = await asyncio.to_thread(config_mod.load_repos, st.templates_dir / "repos.yaml")
+        entries = config_mod.load_repos(st.templates_dir / "repos.yaml")
     except config_mod.ConfigError as exc:
         # An unreadable repos.yaml may name the account: never remove past it.
         raise HTTPException(409, f"{exc}; fix repos.yaml first") from exc
@@ -59,8 +60,8 @@ async def _naming(st, name: str) -> list[str]:
 
 
 def _save(st, updated: forges.ForgesFile) -> None:
-    """Written, recorded as loaded and running. Nothing awaits between the callers' checks
-    and here, so the file reflects the check."""
+    """Written, recorded as loaded and running. The callers hold `forges_lock` and await
+    nothing between their last check and here, so the file reflects the check."""
     updated.save(_file_path(st))
     apply_mod.record(st, forges.ForgesFile.FILE)
     st.forges = updated
@@ -77,14 +78,14 @@ async def _read(st) -> forges.ForgesFile:
 
 @api_router.get("/forges")
 async def list_forges(request: Request):
-    _forbid_sessions(request)
+    _forbid_sessions(request, "forge accounts")
     current = await _read(request.app.state)
     return {"accounts": {name: _row(a) for name, a in current.accounts.items()}}
 
 
 @api_router.post("/forges", status_code=201)
 async def add_forge(body: AddForge, request: Request):
-    _forbid_sessions(request)
+    _forbid_sessions(request, "forge accounts")
     st = request.app.state
     if not _NAME.fullmatch(body.name):
         raise HTTPException(422, "name: lowercase letters, digits, . - and _, starting with one")
@@ -99,7 +100,12 @@ async def add_forge(body: AddForge, request: Request):
             )
         except ValidationError as exc:
             raise HTTPException(
-                422, "; ".join(e["msg"].removeprefix("Value error, ") for e in exc.errors())
+                422,
+                "; ".join(
+                    (f"{e['loc'][-1]}: " if e["loc"] else "")
+                    + e["msg"].removeprefix("Value error, ")
+                    for e in exc.errors()
+                ),
             ) from exc
         _save(st, updated)
     apply_mod.notify(request.app)
@@ -108,13 +114,13 @@ async def add_forge(body: AddForge, request: Request):
 
 @api_router.delete("/forges/{name}", status_code=204)
 async def remove_forge(name: str, request: Request):
-    _forbid_sessions(request)
+    _forbid_sessions(request, "forge accounts")
     st = request.app.state
     async with st.forges_lock:
         current = await _load(st)
         if name not in current.accounts:
             raise HTTPException(404, f"no forge account named {name!r}")
-        if repos := await _naming(st, name):
+        if repos := _naming(st, name):
             return JSONResponse(
                 {
                     "detail": f"forge account {name!r} is named by: {', '.join(repos)}",
@@ -130,7 +136,7 @@ async def remove_forge(name: str, request: Request):
 
 @api_router.post("/forges/{name}/test")
 async def test_forge(name: str, request: Request):
-    _forbid_sessions(request)
+    _forbid_sessions(request, "forge accounts")
     st = request.app.state
     account = (await _read(st)).accounts.get(name)
     if account is None:
@@ -143,6 +149,6 @@ async def test_forge(name: str, request: Request):
     )
     try:
         done = await git.run_cli(st.templates_dir, argv, errors="replace")
-    except ForgeError as exc:  # CliUnavailable is one
+    except ForgeError as exc:  # a timeout, or CliUnavailable
         return {"ok": False, "output": str(exc)}
     return {"ok": done.returncode == 0, "output": done.stdout + done.stderr}
