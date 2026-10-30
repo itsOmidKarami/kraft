@@ -11,7 +11,7 @@ import pytest
 
 from kraft.adapters import forge
 
-from .nodes import FAIL, NOT_FOUND, FailWith
+from .nodes import FAIL, NOT_FOUND, Api, FailWith
 from .outputs import GLAB_CI_GET_FAILED, GLAB_CI_TRACE
 
 _MR_URL = "https://gitlab.com/o/r/-/merge_requests/7"
@@ -87,7 +87,7 @@ def _car(status: str) -> dict:
             {"api projects/:id": '{"id":1}'}, forge.QueueRead(), None, id="no-train-field-absent"
         ),
         pytest.param(
-            {"api projects/:id": FailWith("glab: 403 Forbidden")},
+            {"api projects/:id": Api(403, '{"message": "403 Forbidden"}')},
             forge.QueueRead(),
             None,
             id="no-train-403",
@@ -105,7 +105,7 @@ def _car(status: str) -> dict:
             id="no-train-without-merged-results-pipelines",
         ),
         pytest.param(
-            {**_car("fresh"), _TRAIN_CAR: FailWith("glab: 403 Forbidden")},
+            {**_car("fresh"), _TRAIN_CAR: Api(403, '{"message": "403 Forbidden"}')},
             forge.QueueRead(),
             None,
             id="no-train-car-endpoint-403",
@@ -349,7 +349,9 @@ async def test_merge_queue_reads_the_train(cli, tmp_path, routes, expected, fail
     assert (got.failure is not None) == (failure_state is not None)
     assert replace(got, failure=None) == expected
     if expected.kind == "none" and "403" not in str(routes.get(_TRAIN_CAR)):
-        assert cli.calls("glab") == ["api projects/:id"], "asked more of a repo with no train"
+        assert cli.calls("glab") == ["api projects/:id -X GET -i"], (
+            "asked more of a repo with no train"
+        )
 
 
 def _iid_routes(iid: int, car) -> dict:
@@ -365,7 +367,7 @@ def _iid_routes(iid: int, car) -> dict:
 @pytest.mark.parametrize(
     "failure",
     [
-        pytest.param(FailWith("glab: 500 Internal Server Error"), id="500"),
+        pytest.param(Api(500, '{"message": "500 Internal Server Error"}'), id="500"),
         pytest.param(FailWith("glab: dial tcp: connection refused"), id="network"),
         pytest.param("timeout", id="timeout"),
     ],
@@ -398,7 +400,9 @@ async def test_merge_queue_does_not_read_a_failed_call_as_a_drop(
     "not_found",
     [
         pytest.param(NOT_FOUND, id="404-not-found"),
-        pytest.param(FailWith("glab: 404 Merge Train Merge Request Not Found"), id="gitlab-words"),
+        pytest.param(
+            Api(404, '{"message": "404 Merge Train Merge Request Not Found"}'), id="gitlab-words"
+        ),
     ],
 )
 async def test_merge_queue_reads_the_forges_own_404_as_a_drop_whatever_the_iid(
@@ -434,9 +438,10 @@ async def test_merge_on_a_train_project_posts_to_the_train_with_the_reviewed_sha
 
     assert cli.calls("glab")[-1].split() == [
         "api",
+        "projects/:id/merge_trains/merge_requests/7",
         "-X",
         "POST",
-        "projects/:id/merge_trains/merge_requests/7",
+        "-i",
         "-f",
         "auto_merge=true",
         "-f",
@@ -451,7 +456,7 @@ async def test_merge_on_a_train_project_posts_to_the_train_with_the_reviewed_sha
         pytest.param('{"id":1}', id="fields-absent"),
         pytest.param('{"merge_trains_enabled":false,"merge_pipelines_enabled":true}', id="off"),
         pytest.param(NOT_FOUND, id="404"),
-        pytest.param(FailWith("glab: 403 Forbidden"), id="403"),
+        pytest.param(Api(403, '{"message": "403 Forbidden"}'), id="403"),
     ],
 )
 async def test_merge_off_a_train_project_still_runs_glab_mr_merge(cli, tmp_path, project):
@@ -469,7 +474,7 @@ async def test_merge_off_a_train_project_still_runs_glab_mr_merge(cli, tmp_path,
 
 
 _UNREAD_PROJECT = [
-    pytest.param(FailWith("glab: 500 Internal Server Error"), id="500"),
+    pytest.param(Api(500, '{"message": "500 Internal Server Error"}'), id="500"),
     pytest.param(FailWith("glab: dial tcp: connection refused"), id="network"),
     pytest.param("timeout", id="timeout"),
     pytest.param("not json", id="unparseable"),

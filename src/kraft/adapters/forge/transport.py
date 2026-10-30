@@ -164,6 +164,8 @@ class CliTransport:
         args = ["graphql", "-i", "-f", f"query={query}", *_flags(variables), *self._host()]
         resp, rc = await self._call("graphql", args, graphql=True)
         body = resp.json()
+        if not isinstance(body, dict):
+            raise ForgeError(f"graphql: answered without an object: {_clip(resp.text)}")
         if errors := body.get("errors"):
             message = "; ".join(str(e.get("message", e)) for e in errors)
             raise ForgeError(

@@ -20,7 +20,7 @@ from kraft.adapters.forge.mr import MRMeta
 from kraft.automated_review import AutomatedReview
 
 from . import outputs
-from .nodes import FailWith
+from .nodes import Api, FailWith
 
 #: The full sha a merge is asked to land.
 HEAD = "a" * 40
@@ -358,18 +358,20 @@ async def test_gh_cancel_merge_undoes_only_what_holds_the_pull_request(
             '{"id":1}',
             [
                 "api",
+                "projects/:id/merge_requests/54/cancel_merge_when_pipeline_succeeds",
                 "-X",
                 "POST",
-                "projects/:id/merge_requests/54/cancel_merge_when_pipeline_succeeds",
+                "-i",
             ],
         ),
         (
             '{"merge_trains_enabled":true,"merge_pipelines_enabled":true}',
             [
                 "api",
+                "projects/:id/merge_requests/54/cancel_merge_when_pipeline_succeeds",
                 "-X",
                 "POST",
-                "projects/:id/merge_requests/54/cancel_merge_when_pipeline_succeeds",
+                "-i",
             ],
         ),
     ],
@@ -390,7 +392,7 @@ async def test_glab_cancel_merge_cancels_the_merge_when_pipeline_succeeds_or_the
 @pytest.mark.parametrize(
     "failure",
     [
-        FailWith("glab: 406 Not Acceptable"),
+        Api(406, '{"message": "406 Not Acceptable"}'),
         # `glab api` exits 0 on this: the endpoint answers 201 with the error in the body.
         '{"status":"error","message":"Cannot cancel the automatic merge","http_status":406}',
     ],

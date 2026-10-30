@@ -48,7 +48,7 @@ class Api:
 
 
 #: What `glab api` says of an endpoint with nothing at it.
-NOT_FOUND = FailWith("glab: 404 Not Found")
+NOT_FOUND = Api(404, '{"message": "404 Not Found"}')
 
 
 def forge_node(node_id: str, target: str, **task) -> dict:

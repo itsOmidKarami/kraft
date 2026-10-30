@@ -12,7 +12,7 @@ import pytest
 
 from kraft.adapters import forge
 
-from .nodes import FAIL, FailWith
+from .nodes import FAIL, Api, FailWith
 
 _PR_URL = "https://github.com/o/r/pull/7"
 _RUN_URL = "https://github.com/o/r/actions/runs/555"
@@ -475,7 +475,7 @@ async def test_merge_queue_a_failed_run_whose_jobs_cannot_be_read_is_not_infra(c
     routes = _queue_routes(
         _graphql(removal="Required status checks failed"),
         [_merge_group_run()],
-        **{_JOBS: FailWith("gh: HTTP 502")},
+        **{_JOBS: Api(502, '{"message": "502"}')},
     )
     cli.stub("gh", routes=routes, default=FAIL)
 
@@ -489,8 +489,8 @@ async def test_merge_queue_a_failed_run_whose_jobs_cannot_be_read_is_not_infra(c
 @pytest.mark.parametrize(
     "broken, answer",
     [
-        pytest.param("api graphql", FailWith("gh: HTTP 404 not found"), id="graphql-404"),
-        pytest.param("api graphql", FailWith("gh: HTTP 502 Bad Gateway"), id="graphql-502"),
+        pytest.param("api graphql", Api(404, '{"message": "Not Found"}'), id="graphql-404"),
+        pytest.param("api graphql", Api(502, '{"message": "Bad Gateway"}'), id="graphql-502"),
         pytest.param("api graphql", FAIL, id="graphql-exit-1"),
         pytest.param("pr list", FailWith("gh: HTTP 502 Bad Gateway"), id="pr-list-502"),
         pytest.param("pr list", FAIL, id="pr-list-exit-1"),

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import re
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +23,7 @@ from kraft.adapters.forge.models import (
     ReviewerFeedback,
     ReviewResult,
 )
+from kraft.adapters.forge.transport import CliTransport, Transport
 from kraft.automated_review import Reviewers
 
 #: The system notes GitLab writes when someone approves or withdraws approval.
@@ -177,6 +178,24 @@ _ENQUEUE_NOTES = (
 
 class GlabCli(mr_ops.CliWaits):
     """GitLab through `glab`. Credentials stay in glab's own keyring."""
+
+    def __init__(self, transport: Transport | None = None):
+        self._injected = transport
+
+    def _transport(self, repo: Path) -> Transport:
+        return self._injected or CliTransport("glab", repo)
+
+    async def _api(
+        self,
+        repo: Path,
+        path: str,
+        *,
+        method: str = "GET",
+        fields: Mapping[str, str | int | bool] | None = None,
+    ):
+        """The parsed JSON of one REST call; an empty body is None."""
+        resp = await self._transport(repo).rest(method, path, fields=fields)
+        return resp.json() if resp.text.strip() else None
 
     async def open_mr(
         self,
@@ -507,10 +526,7 @@ class GlabCli(mr_ops.CliWaits):
         project = str(top.get("project_id") or ":id")
         name = f"pipeline {top.get('id')} on {ref}"
         try:
-            raw = await git.run_git(
-                repo, ["glab", "api", f"projects/{project}/repository/commits/{sha}"]
-            )
-            commit = mr_ops.parse_json(raw, "glab api commit")
+            commit = await self._api(repo, f"projects/{project}/repository/commits/{sha}")
         except ForgeError as exc:
             return None, f"{name}: could not read merge commit {sha[:7]}: {exc}"
         parents = commit.get("parent_ids") if isinstance(commit, dict) else None
@@ -608,10 +624,8 @@ class GlabCli(mr_ops.CliWaits):
         # keeps approvals across pushes lets an old approval settle a new head.
         mr = await self._json(repo, ["mr", "view", branch, "-F", "json"], "glab mr view")
         iid = mr["iid"]
-        discussions = await self._json(
-            repo,
-            ["api", f"projects/:id/merge_requests/{iid}/discussions?per_page=100"],
-            "glab api discussions",
+        discussions = await self._api(
+            repo, f"projects/:id/merge_requests/{iid}/discussions?per_page=100"
         )
         findings = tuple(
             f"{(n.get('position') or {}).get('new_path')}:"
@@ -626,9 +640,7 @@ class GlabCli(mr_ops.CliWaits):
         )
         if findings:
             return ReviewResult("actionable", findings=findings, detail=f"{bot}: unresolved")
-        approvals = await self._json(
-            repo, ["api", f"projects/:id/merge_requests/{iid}/approvals"], "glab api approvals"
-        )
+        approvals = await self._api(repo, f"projects/:id/merge_requests/{iid}/approvals")
         approved = any(
             mr_ops.same_login(str((a.get("user") or {}).get("username", "")), bot)
             for a in approvals.get("approved_by") or []
@@ -657,10 +669,8 @@ class GlabCli(mr_ops.CliWaits):
                 commits.append((project, str(head_pipeline["sha"])))
         statuses: list = []
         for project, sha in commits:
-            got = await self._json(
-                repo,
-                ["api", f"projects/{project}/repository/commits/{sha}/statuses?per_page=100"],
-                "glab api statuses",
+            got = await self._api(
+                repo, f"projects/{project}/repository/commits/{sha}/statuses?per_page=100"
             )
             statuses += got if isinstance(got, list) else []
         mine = sorted((s for s in statuses if s.get("name") == check), key=lambda s: s["id"])
@@ -694,15 +704,11 @@ class GlabCli(mr_ops.CliWaits):
         notes = discussions = []
         if any(r.bot is not None for r in reviewers):
             # ponytail: one page of 100 of each -- paginate if an MR ever has more.
-            notes = await self._json(
-                repo,
-                ["api", f"projects/:id/merge_requests/{mr['iid']}/notes?per_page=100"],
-                "glab api notes",
+            notes = await self._api(
+                repo, f"projects/:id/merge_requests/{mr['iid']}/notes?per_page=100"
             )
-            discussions = await self._json(
-                repo,
-                ["api", f"projects/:id/merge_requests/{mr['iid']}/discussions?per_page=100"],
-                "glab api discussions",
+            discussions = await self._api(
+                repo, f"projects/:id/merge_requests/{mr['iid']}/discussions?per_page=100"
             )
         out = []
         for r in reviewers:
@@ -732,9 +738,7 @@ class GlabCli(mr_ops.CliWaits):
         speculatively ahead of a re-poll (Kraft-h81i) is safe."""
         if not ci.pipeline_ref:
             return
-        await git.run_git(
-            repo, ["glab", "api", "-X", "POST", f"projects/:id/pipelines/{ci.pipeline_ref}/retry"]
-        )
+        await self._api(repo, f"projects/:id/pipelines/{ci.pipeline_ref}/retry", method="POST")
 
     async def set_labels(self, *, repo: Path, branch: str, mr: MR, labels: tuple[str, ...]) -> None:
         """Label the merge request, then start a pipeline that can see it.
@@ -772,10 +776,7 @@ class GlabCli(mr_ops.CliWaits):
     async def _new_mr_pipeline(self, repo: Path, number: int) -> None:
         # `projects/:id` is glab's own placeholder for the repo the command is
         # run in, so this stays as repo-agnostic as every other call here.
-        await git.run_git(
-            repo,
-            ["glab", "api", "-X", "POST", f"projects/:id/merge_requests/{number}/pipelines"],
-        )
+        await self._api(repo, f"projects/:id/merge_requests/{number}/pipelines", method="POST")
 
     async def rerun_after_description_change(
         self, *, repo: Path, branch: str, ci: CIStatus
@@ -829,22 +830,16 @@ class GlabCli(mr_ops.CliWaits):
         `{"status": "error"}` when it cancelled nothing, which `glab api` takes
         for success, so the body is read."""
         try:
-            raw = await git.run_git(
+            body = await self._api(
                 repo,
-                [
-                    "glab",
-                    "api",
-                    "-X",
-                    "POST",
-                    f"projects/:id/merge_requests/{mr.number}/cancel_merge_when_pipeline_succeeds",
-                ],
+                f"projects/:id/merge_requests/{mr.number}/cancel_merge_when_pipeline_succeeds",
+                method="POST",
             )
         except ForgeError as exc:
-            gone = _http_status(exc) == 404 or "406" in str(exc)
+            gone = exc.status in (404, 406)
             if mr.merge_queued or not gone:
                 raise
             return
-        body = mr_ops.parse_json(raw, "glab cancel merge") if raw.strip() else {}
         if isinstance(body, dict) and body.get("status") == "error" and mr.merge_queued:
             raise ForgeError(
                 f"glab could not cancel the merge of !{mr.number}: {body.get('message', body)}"
@@ -860,19 +855,11 @@ class GlabCli(mr_ops.CliWaits):
             iid = int(view.get("iid") or 0)
         if iid <= 0:
             raise ForgeError(f"cannot queue {branch} on the merge train: no merge request")
-        await git.run_git(
+        await self._api(
             repo,
-            [
-                "glab",
-                "api",
-                "-X",
-                "POST",
-                f"projects/:id/merge_trains/merge_requests/{iid}",
-                "-f",
-                "auto_merge=true",
-                "-f",
-                f"sha={head}",
-            ],
+            f"projects/:id/merge_trains/merge_requests/{iid}",
+            method="POST",
+            fields={"auto_merge": "true", "sha": head},
         )
 
     async def _train_enabled(self, repo: Path) -> bool:
@@ -885,9 +872,9 @@ class GlabCli(mr_ops.CliWaits):
         nothing about a train and raises: read as none, `merge` would fall back
         to `glab mr merge` and could merge round the train."""
         try:
-            project = await self._json(repo, ["api", "projects/:id"], "glab api project")
+            project = await self._api(repo, "projects/:id")
         except ForgeError as exc:
-            if _http_status(exc) in (403, 404):
+            if exc.status in (403, 404):
                 return False
             raise
         if not isinstance(project, dict):
@@ -909,11 +896,9 @@ class GlabCli(mr_ops.CliWaits):
         if not iid:
             return QueueRead(kind="train")
         try:
-            car = await self._json(
-                repo, ["api", f"projects/:id/merge_trains/merge_requests/{iid}"], "glab api car"
-            )
+            car = await self._api(repo, f"projects/:id/merge_trains/merge_requests/{iid}")
         except ForgeError as exc:
-            status = _http_status(exc)
+            status = exc.status
             if status == 403:
                 return QueueRead()
             if status != 404:
@@ -988,14 +973,9 @@ class GlabCli(mr_ops.CliWaits):
         written why it left yet, and an older leaving note is an earlier
         drop's, so no note either."""
         try:
-            notes = await self._json(
+            notes = await self._api(
                 repo,
-                [
-                    "api",
-                    f"projects/:id/merge_requests/{iid}/notes"
-                    "?sort=desc&order_by=created_at&per_page=20",
-                ],
-                "glab api notes",
+                f"projects/:id/merge_requests/{iid}/notes?sort=desc&order_by=created_at&per_page=20",
             )
         except ForgeError:
             return ""
@@ -1042,26 +1022,6 @@ class GlabCli(mr_ops.CliWaits):
 #: What GitLab answers (409) to a merge request merged with a `sha` that is not its
 #: source branch's head.
 _HEAD_MOVED = "sha does not match head of source branch"
-
-#: `HTTP 404`, or a status that GitLab's own message follows with its name
-#: later on the line ("404 Merge Train Merge Request Not Found").
-_HTTP_STATUS = re.compile(
-    r"\bHTTP (40[34])\b|\b(40[34])\b[^\n]*?\b(?:Not Found|Forbidden)\b", re.IGNORECASE
-)
-
-
-def _http_status(exc: ForgeError) -> int | None:
-    """The 403 or 404 a failed `glab api` call reports, else None.
-
-    Only what the CLI said, after `run_git`'s `<argv> failed: `: the argv holds
-    the merge request's iid, which can contain "404" itself, and a timeout has
-    no detail at all. A 500, a network error or a timeout is not a status here.
-    """
-    _, sep, detail = str(exc).partition(" failed: ")
-    if not sep:
-        return None
-    found = _HTTP_STATUS.search(detail)
-    return int(next(g for g in found.groups() if g)[:3]) if found else None
 
 
 def _pipeline_number(top: dict) -> int:
