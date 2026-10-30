@@ -7,10 +7,7 @@ import re
 
 import pytest
 from support.api import CUSTOM_ONE_OFF as CUSTOM
-from support.api import _item_row, _one_off, _paused
-
-LIBRARY_ONLY = "extends: default\nremove: [work_brief]\n"
-MCP = {"X-Kraft-Client": "mcp"}
+from support.api import LIBRARY_ONLY_ONE_OFF, MCP_HEADERS, _item_row, _one_off, _paused
 
 
 def _nested(depth):
@@ -35,7 +32,7 @@ def _digest(client, repo, text):
 
 
 def test_files_a_library_only_one_off(client, repo):
-    r = _create(client, repo, LIBRARY_ONLY)
+    r = _create(client, repo, LIBRARY_ONLY_ONE_OFF)
     assert r.status_code == 201, r.text
     one_off = r.json()["one_off"]
     assert re.fullmatch(r"[0-9a-f]{64}", one_off.pop("digest"))
@@ -72,6 +69,9 @@ def test_files_a_custom_one_off_paused(client, repo):
         pytest.param("extends: default\ndescription: 2024-01-01", "plain YAML values", id="date"),
         pytest.param("extends: default\non: x", "plain YAML values", id="on-key"),
         pytest.param("#" * (257 * 1024), "256 KiB", id="oversize"),
+        pytest.param("extends: default\ndescription: 2024-02-30", "not YAML", id="bad-date"),
+        pytest.param("extends: default\npolicy: {budget_usd: .inf}", "plain YAML values", id="inf"),
+        pytest.param("id: [x]\nextends: default", "id is a string", id="id-not-a-string"),
     ],
 )
 def test_refuses_a_bad_one_off_chain(client, repo, text, words):
@@ -95,14 +95,15 @@ def test_refuses_a_hostile_one_off_object(client, repo, chain, words):
 
 
 def test_refuses_two_chains(client, repo):
-    r = _create(client, repo, LIBRARY_ONLY, chain="default")
+    r = _create(client, repo, LIBRARY_ONLY_ONE_OFF, chain="default")
     assert r.status_code == 422
     assert "not both" in json.dumps(r.json())
 
 
 def test_a_trigger_takes_no_one_off_chain(client, repo):
     r = client.post(
-        "/api/triggers", json={"repo": str(repo), "title": "t", "one_off_chain": LIBRARY_ONLY}
+        "/api/triggers",
+        json={"repo": str(repo), "title": "t", "one_off_chain": LIBRARY_ONLY_ONE_OFF},
     )
     assert r.status_code == 422
 
@@ -112,8 +113,8 @@ def test_a_trigger_takes_no_one_off_chain(client, repo):
     [
         pytest.param({}, False, 201, CUSTOM, id="browser"),
         pytest.param({}, True, 409, CUSTOM, id="stale-digest"),
-        pytest.param(MCP, False, 403, CUSTOM, id="mcp"),
-        pytest.param({}, False, 201, LIBRARY_ONLY, id="library-only-ignored"),
+        pytest.param(MCP_HEADERS, False, 403, CUSTOM, id="mcp"),
+        pytest.param({}, False, 201, LIBRARY_ONLY_ONE_OFF, id="library-only-ignored"),
     ],
 )
 def test_create_approval(client, repo, headers, stale, status, text):

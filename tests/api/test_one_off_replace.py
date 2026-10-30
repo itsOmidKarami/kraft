@@ -6,22 +6,19 @@ import json
 
 import pytest
 from support.api import CUSTOM_ONE_OFF as CUSTOM
-from support.api import _item_row, _one_off, _orchestrator_db, _paused
+from support.api import (
+    LIBRARY_ONLY_ONE_OFF,
+    _approve,
+    _item_row,
+    _one_off,
+    _orchestrator_db,
+    _paused,
+    _review,
+    _set_status,
+)
 
 OTHER = CUSTOM.replace("run k6", "run k7")
-LIBRARY_ONLY = "extends: default\nremove: [work_brief]\n"
 EXTENDS_QUICK = "extends: quick-task\n"
-
-
-def _review(client, wid) -> dict:
-    return client.get(f"/api/work-items/{wid}/one-off").json()
-
-
-def _approve(client, wid):
-    digest = _review(client, wid)["digest"]
-    client.post(
-        f"/api/work-items/{wid}/one-off/approve", json={"digest": digest}
-    ).raise_for_status()
 
 
 def _drop_quick_task(templates_dir, client):
@@ -37,6 +34,7 @@ def _drop_quick_task(templates_dir, client):
         pytest.param("one-off-to-library", id="one-off-to-library"),
         pytest.param("one-off-to-library-base-gone", id="one-off-to-library-base-gone"),
         pytest.param("started", id="started"),
+        pytest.param("needs-human-unstarted", id="needs-human-unstarted"),
         pytest.param("nothing-else", id="nothing-else"),
     ],
 )
@@ -49,11 +47,13 @@ def test_patch_replaces_one_off(client, repo, templates_dir, case):
     else:
         wid = _one_off(client, repo, CUSTOM)
     if case == "drops-approval":
-        _approve(client, wid)
+        _approve(client, wid).raise_for_status()
         assert _review(client, wid)["needs_review"] is False
     if case == "started":
         with _orchestrator_db() as c, c:
             c.execute("UPDATE work_items SET current_node_id = 'spec' WHERE id = ?", (wid,))
+    if case == "needs-human-unstarted":
+        _set_status(wid, "needs_human")
     to_library = case.startswith("one-off-to-library")
     body = {"chain": "default"} if to_library else {"one_off_chain": OTHER}
     r = client.patch(f"/api/work-items/{wid}", json=body)
@@ -78,7 +78,7 @@ def test_patch_replaces_one_off(client, repo, templates_dir, case):
 
 
 def test_patch_with_only_a_one_off_chain_is_something_to_patch(client, repo):
-    wid = _one_off(client, repo, LIBRARY_ONLY)
+    wid = _one_off(client, repo, LIBRARY_ONLY_ONE_OFF)
     assert client.patch(f"/api/work-items/{wid}", json={"one_off_chain": CUSTOM}).status_code == 200
     assert client.patch(f"/api/work-items/{wid}", json={}).status_code == 422
 
@@ -95,7 +95,7 @@ def test_patch_refuses_two_chains(client, repo):
 def test_duplicate_one_off(client, repo, templates_dir, text):
     wid = _one_off(client, repo, text)
     if text is CUSTOM:
-        _approve(client, wid)
+        _approve(client, wid).raise_for_status()
     else:
         _drop_quick_task(templates_dir, client)
     r = client.post(f"/api/work-items/{wid}/duplicate")
@@ -107,3 +107,11 @@ def test_duplicate_one_off(client, repo, templates_dir, text):
     assert copy["chain_template"] == "@one-off"
     assert json.loads(copy["one_off_chain"])["authored"] == _review(client, wid)["authored"]
     assert (copy["one_off_approval"], copy["one_off_pending"]) == (None, 1)
+
+
+def test_duplicate_refuses_a_one_off_row_with_no_record(client, repo):
+    wid = _one_off(client, repo, CUSTOM)
+    with _orchestrator_db() as c, c:
+        c.execute("UPDATE work_items SET one_off_chain = NULL WHERE id = ?", (wid,))
+    r = client.post(f"/api/work-items/{wid}/duplicate")
+    assert r.status_code == 409 and "record is missing" in r.json()["detail"]

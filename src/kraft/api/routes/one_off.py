@@ -61,7 +61,7 @@ async def get_one_off(wid: str, request: Request):
         "authored": record["authored"],
         "custom": record["custom"],
         "provenance": provenance,
-        "digest": record["digest"],
+        "digest": store.review_digest(row),
         "approval": json.loads(row["one_off_approval"]) if row["one_off_approval"] else None,
         "needs_review": store.one_off_unapproved(row),
         "added": added,

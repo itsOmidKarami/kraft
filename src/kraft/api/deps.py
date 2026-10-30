@@ -47,7 +47,12 @@ from kraft.templates.environment import (
     WorkItemTarget,
     branch_name_problem,
 )
-from kraft.templates.library import LIBRARY_FILE, TemplateLibrary, TemplateLibraryError
+from kraft.templates.library import (
+    ADDON_YAML_NODES,
+    LIBRARY_FILE,
+    TemplateLibrary,
+    TemplateLibraryError,
+)
 from kraft.vocab import ENDED, ChainEvent, StopKind
 from kraft.worker import steering as steering_mod
 
@@ -797,18 +802,16 @@ def scoped_chain_or_422(st, entry: RepoEntry, chain_template: str | None):
     return chain
 
 
-#: Nodes a chain or library file may hold when it is parsed (`config.bounded_yaml`).
-_YAML_NODES = 20_000
-
-
 def authored_mapping(text: str, what: str) -> dict:
     """A chain or library file's text as the mapping a save checks, or the 422
     that says why it cannot be one."""
     try:
-        data = config_mod.bounded_yaml(text, [_YAML_NODES])
+        data = config_mod.bounded_yaml(text, [ADDON_YAML_NODES])
     except config_mod.YamlTooLarge as exc:
         raise HTTPException(422, f"{what} YAML is too large: {exc}") from exc
     except yaml.YAMLError as exc:
+        raise HTTPException(422, f"not YAML: {exc}") from exc
+    except ValueError as exc:  # a scalar that looks like a date and is not one
         raise HTTPException(422, f"not YAML: {exc}") from exc
     if not isinstance(data, dict):
         raise HTTPException(422, f"a {what} file is a mapping")
@@ -839,7 +842,9 @@ class OneOff:
     record: dict
 
 
-def one_off_chain_or_422(st, repo: str, source: str | dict, *, skips: list[str] = ()) -> OneOff:
+def one_off_chain_or_422(
+    st, repo: str, source: str | dict, *, skips: list[str] | None = None
+) -> OneOff:
     """A one-off chain checked exactly as strictly as a library chain: the same
     resolver, lint, policy maxima and add-on scope. Every refusal is a 422 with
     one sentence."""
@@ -853,18 +858,22 @@ def one_off_chain_or_422(st, repo: str, source: str | dict, *, skips: list[str] 
         data = authored_mapping(source, "chain")
     else:
         data = source
+    plain = "a one-off chain holds only plain YAML values: strings, numbers, lists and mappings"
     if not _is_plain(data):
-        raise HTTPException(
-            422,
-            "a one-off chain holds only plain YAML values: strings, numbers, lists and mappings",
-        )
-    if len(json.dumps(data)) > one_off.MAX_TEXT:
+        raise HTTPException(422, plain)
+    try:
+        size = len(json.dumps(data, allow_nan=False))  # .inf and .nan cannot be answered as JSON
+    except ValueError as exc:
+        raise HTTPException(422, plain) from exc
+    if size > one_off.MAX_TEXT:
         raise HTTPException(422, "a one-off chain is at most 256 KiB")
-    if why := config_check.retired_message(data):
+    if isinstance(source, dict) and (why := config_check.retired_message(data)):
         raise HTTPException(422, why)
     authored, digest = one_off.prepare(data)
     id = authored["id"]
-    if not isinstance(id, str) or id in library.chain_ids:
+    if not isinstance(id, str):
+        raise HTTPException(422, "a one-off chain's id is a string")
+    if id in library.chain_ids:
         raise HTTPException(
             422, f"one-off chain id {id!r} names a library chain; give it its own id"
         )
@@ -888,7 +897,7 @@ def one_off_chain_or_422(st, repo: str, source: str | dict, *, skips: list[str] 
             "authored": authored,
             "custom": [p.view() for p in custom],
             "provenance": candidate.provenance(id),
-            "skips": list(skips),
+            "skips": list(skips or []),
             "digest": digest,
         },
     )

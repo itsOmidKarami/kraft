@@ -283,6 +283,28 @@ add:
 """
 
 
+LIBRARY_ONLY_ONE_OFF = "extends: default\nremove: [work_brief]\n"
+#: The caller headers `routes.gates._decided_by` reads as an MCP session and as a worker.
+MCP_HEADERS = {"X-Kraft-Client": "mcp"}
+WORKER_HEADERS = {"X-Kraft-Session-Id": "other/abc123"}
+
+
+def _review(client, wid) -> dict:
+    """`GET /work-items/{wid}/one-off`: what a person reads before starting it."""
+    r = client.get(f"/api/work-items/{wid}/one-off")
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _approve(client, wid, digest=None, headers=None, **body):
+    """Approve the item's one-off chain as shown (`digest` defaults to the one now shown)."""
+    return client.post(
+        f"/api/work-items/{wid}/one-off/approve",
+        json={"digest": digest or _review(client, wid)["digest"], **body},
+        headers=headers or {},
+    )
+
+
 def _one_off(client, repo, text, **body) -> str:
     """File a not-yet-started item with the one-off chain `text` (a chain file's
     text); its id. `body` adds to or overrides the create body."""

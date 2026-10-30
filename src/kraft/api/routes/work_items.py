@@ -754,7 +754,10 @@ async def duplicate_work_item(wid: str, request: Request):
     one = None
     if row["chain_template"] == one_off.ONE_OFF_TEMPLATE:
         # Resolved again from what was authored, as a fresh filing, and unapproved.
-        one = deps.one_off_chain_or_422(st, row["repo"], store.one_off_of(row)["authored"])
+        record = store.one_off_of(row)
+        if record is None:
+            raise HTTPException(409, "this item's one-off chain record is missing")
+        one = deps.one_off_chain_or_422(st, row["repo"], record["authored"])
         chain_template, chain = one_off.ONE_OFF_TEMPLATE, one.chain
     elif row["chain_template"] is None:
         # Not the repo library's `default` now: the copy runs what the original ran.
@@ -1236,7 +1239,7 @@ def _retrimmed(row, filed_kinds: frozenset[str], kinds: frozenset[str]) -> str:
     ).to_json()
 
 
-_STARTED = "work item has already started; its chain is fixed for its life"
+_STARTED = "work item has already started or is running; its chain is fixed for its life"
 
 
 @api_router.patch("/work-items/{wid}")

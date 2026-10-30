@@ -6,32 +6,27 @@ import sqlite3
 
 import pytest
 from support.api import CUSTOM_ONE_OFF as CUSTOM
-from support.api import _come_after, _item_row, _one_off, _orchestrator_db, _queue_tick, _set_status
+from support.api import (
+    LIBRARY_ONLY_ONE_OFF,
+    MCP_HEADERS,
+    WORKER_HEADERS,
+    _approve,
+    _come_after,
+    _item_row,
+    _one_off,
+    _orchestrator_db,
+    _queue_tick,
+    _review,
+    _set_status,
+)
 
 from kraft import store
 
-MCP = {"X-Kraft-Client": "mcp"}
-WORKER = {"X-Kraft-Session-Id": "other/abc123"}
-LIBRARY_ONLY = "extends: default\nremove: [work_brief]\n"
 EDIT_PROMPT = {
     "op": "override",
     "path": "implementation.main.implement",
     "task_config": {"prompt": "do something else"},
 }
-
-
-def _review(client, wid) -> dict:
-    r = client.get(f"/api/work-items/{wid}/one-off")
-    assert r.status_code == 200, r.text
-    return r.json()
-
-
-def _approve(client, wid, digest=None, headers=None, **body):
-    return client.post(
-        f"/api/work-items/{wid}/one-off/approve",
-        json={"digest": digest or _review(client, wid)["digest"], **body},
-        headers=headers or {},
-    )
 
 
 def _resume(client, wid, headers=None):
@@ -42,8 +37,8 @@ def _resume(client, wid, headers=None):
     "headers",
     [
         pytest.param({}, id="browser"),
-        pytest.param(MCP, id="mcp"),
-        pytest.param(WORKER, id="worker"),
+        pytest.param(MCP_HEADERS, id="mcp"),
+        pytest.param(WORKER_HEADERS, id="worker"),
     ],
 )
 def test_resume_refuses_unapproved_custom(client, repo, headers):
@@ -73,7 +68,7 @@ def test_resume_starts_after_approval(client, repo):
 
 
 def test_library_only_one_off_starts_without_review(client, repo):
-    wid = _one_off(client, repo, LIBRARY_ONLY)
+    wid = _one_off(client, repo, LIBRARY_ONLY_ONE_OFF)
     assert _review(client, wid)["needs_review"] is False
     assert _resume(client, wid).status_code == 200
 
@@ -81,8 +76,8 @@ def test_library_only_one_off_starts_without_review(client, repo):
 @pytest.mark.parametrize(
     ("headers", "text", "digest", "status"),
     [
-        pytest.param(MCP, CUSTOM, None, 403, id="mcp"),
-        pytest.param({}, LIBRARY_ONLY, None, 409, id="library-only"),
+        pytest.param(MCP_HEADERS, CUSTOM, None, 403, id="mcp"),
+        pytest.param({}, LIBRARY_ONLY_ONE_OFF, None, 409, id="library-only"),
         pytest.param({}, CUSTOM, "0" * 64, 409, id="stale-digest"),
         pytest.param({}, CUSTOM, None, 200, id="ok"),
     ],
@@ -134,15 +129,32 @@ def test_change_reopens_review(client, repo, change):
     assert _resume(client, wid).status_code == 409
 
 
-def test_a_change_after_the_claim_leaves_the_approval_alone(client, repo):
-    """Once `claim_for_run` made the item active, a late re-trim must not reopen the
-    review of an item that is already running: nothing could approve it again."""
+def test_approve_refuses_a_chain_changed_since_the_review(client, repo):
+    """[draft-before-approve] The digest a person approves covers the chain that will
+    run, so a draft applied after they opened the review cannot ride on their approval."""
+    wid = _one_off(client, repo, CUSTOM)
+    shown = _review(client, wid)["digest"]
+    client.put(f"/api/work-items/{wid}/draft", json={"ops": [EDIT_PROMPT]}).raise_for_status()
+    client.post(f"/api/work-items/{wid}/draft/apply").raise_for_status()
+    assert _approve(client, wid, shown).status_code == 409
+    assert _review(client, wid)["approval"] is None
+    assert _approve(client, wid).status_code == 200
+
+
+def test_a_change_after_the_claim_stops_the_walk_before_it_loads(client, repo):
+    """The item was claimed `active` and then its chain changed: the first
+    `load_chain` refuses, so nothing unreviewed runs, and the review is open again."""
     wid = _one_off(client, repo, CUSTOM)
     assert _approve(client, wid).status_code == 200
     _set_status(wid, "active")
     (repo / "spec.md").write_text("# spec\n")
-    client.patch(f"/api/work-items/{wid}", json={"attachments": {"spec": "spec.md"}})
-    assert _item_row(wid)["one_off_pending"] == 0
+    r = client.patch(f"/api/work-items/{wid}", json={"attachments": {"spec": "spec.md"}})
+    assert r.status_code == 200, r.text
+    assert _item_row(wid)["one_off_pending"] == 1
+    with _orchestrator_db() as conn, conn:
+        conn.row_factory = sqlite3.Row
+        assert store.load_chain(conn, wid, "spec") is False
+    assert _item_row(wid)["current_node_id"] is None
 
 
 def test_review_shows_filed_provenance(client, repo, templates_dir):
@@ -168,7 +180,9 @@ def test_start_queue_refuses_unapproved(client, repo):
     _come_after(wid, [dep])
     assert _resume(client, wid).json()["status"] == "blocked"
     other = CUSTOM.replace("run k6", "run k7")
-    assert client.patch(f"/api/work-items/{wid}", json={"one_off_chain": other}).status_code == 200
+    r = client.patch(f"/api/work-items/{wid}", json={"one_off_chain": other})
+    assert r.status_code == 200, r.text
+    assert _item_row(wid)["current_node_id"] is None
     _set_status(dep, "completed")
     _queue_tick(client)
     events = client.get(f"/api/work-items/{wid}/events").json()
