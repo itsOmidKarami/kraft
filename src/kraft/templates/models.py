@@ -298,13 +298,17 @@ class AgentInput(StrEnum):
       (`automated-review-collects-when-a-later-task-reads-it`).
     * `triage_verdict` -- where the node's triage of that feedback wrote its
       latest verdict, by path, for the review brief to report what the triage
-      declined (`triage-verdict-is-delivered-to-the-review-brief`)."""
+      declined (`triage-verdict-is-delivered-to-the-review-brief`).
+    * `pr_rules` -- where the repository keeps its own rules for driving a pull
+      request, by path: its committed steward or babysit skill
+      (`pr-rules-are-pointed-at-by-path`)."""
 
     REVIEW_PACKAGE = "review_package"
     CARRIED_FINDINGS = "carried_findings"
     PREVIOUS_REVIEW = "previous_review"
     BOT_FEEDBACK = "bot_feedback"
     TRIAGE_VERDICT = "triage_verdict"
+    PR_RULES = "pr_rules"
 
     @property
     def summary(self) -> str:
@@ -318,6 +322,7 @@ _INPUT_SUMMARIES = {
     AgentInput.PREVIOUS_REVIEW: "This task's previous result and summary",
     AgentInput.BOT_FEEDBACK: "What the review bots said on the merge request, once they settled",
     AgentInput.TRIAGE_VERDICT: "Where the triage of the review bots' feedback wrote its verdict",
+    AgentInput.PR_RULES: "Where the repository keeps its rules for pull requests, if it does",
 }
 
 

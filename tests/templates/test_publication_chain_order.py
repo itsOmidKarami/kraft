@@ -123,7 +123,11 @@ def test_the_seeded_default_chain_publishes_in_the_required_order():
     ]
     [triage] = feedback.steps[2].tasks
     assert (triage.task.skill, triage.task.profile) == ("kraft:review-feedback", "fast")
-    assert triage.task.inputs == [AgentInput.BOT_FEEDBACK, AgentInput.PREVIOUS_REVIEW]
+    assert triage.task.inputs == [
+        AgentInput.BOT_FEEDBACK,
+        AgentInput.PREVIOUS_REVIEW,
+        AgentInput.PR_RULES,
+    ]
 
 
 async def test_a_pre_draft_gate_keeps_the_work_local(item_on, database, run_dirs, monkeypatch):

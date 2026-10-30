@@ -644,3 +644,50 @@ def scope_note(task: AgentTask, repo_entry: RepoEntry | None) -> str:
     if not (repo_entry.test_scopes or repo_entry.test_command):
         return ""
     return _SCOPE_NOTE
+
+
+#: Where a repository keeps its rules for driving a pull request, first match
+#: wins: steward before babysit (as a Claude Code cloud session reads them),
+#: `.claude` before `.agents` within each.
+PR_RULES_PATHS = (
+    ".claude/skills/steward/SKILL.md",
+    ".agents/skills/steward/SKILL.md",
+    ".claude/skills/babysit/SKILL.md",
+    ".agents/skills/babysit/SKILL.md",
+)
+
+_PR_RULES_NOTE = (
+    "\n\nThis repository keeps its own rules for driving a pull request in `{path}`: "
+    "the checks to run before a change, how to regenerate generated files, and what "
+    "its reviews and CI expect. Read it before you start and follow it. Where it "
+    "tells you to push, merge or post to the pull request yourself, don't: Kraft "
+    "does those steps."
+)
+
+
+def pr_rules_note(worktree: Path, work_item_row) -> str:
+    """Point the agent at the repo's own pull-request rules, by path
+    (`pr-rules-are-pointed-at-by-path`). Kraft names the file and never reads
+    it into the prompt, the context-injection boundary. Only a file committed
+    on the item's branch counts: setup copies skills into an ignored
+    `.agents/skills/`, and those are not the repository's rules. In place, the
+    branch by name, as `progress_note` reads the plan: the checkout may be the
+    person's."""
+    head = (
+        f"refs/heads/{_store.branch_for(work_item_row)}"
+        if _store.is_in_place(work_item_row)
+        else "HEAD"
+    )
+    listed = git_read(
+        Path(worktree),
+        "ls-tree",
+        "-r",
+        "--name-only",
+        head,
+        "--",
+        *PR_RULES_PATHS,
+        expected_failure=True,
+    )
+    committed = set((listed or "").splitlines())
+    path = next((p for p in PR_RULES_PATHS if p in committed), None)
+    return _PR_RULES_NOTE.format(path=path) if path else ""
