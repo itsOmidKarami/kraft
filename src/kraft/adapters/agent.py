@@ -1093,6 +1093,9 @@ async def _run_agent_task(
     #: caller records only for a session that holds its checkout, never for
     #: one `CheckoutBusy` refused (an escalation's message, a review's start).
     on_session: Callable[[], Awaitable[None]] | None = None,
+    #: Awaited last before the agent starts, an in-place checkout taken and
+    #: marked by then. It must not raise: the session row already exists.
+    after_checkout: Callable[[], Awaitable[None]] | None = None,
     #: The machine this launch runs on (`kraft.remote.placement`), or None for the server.
     runner: str | None = None,
     #: The slot `launch.placed` took for a step whose runner is a group.
@@ -1437,6 +1440,8 @@ async def _run_agent_task(
         if borrows:
             await inplace.take(db, run_dirs, item_row, attachments=inplace.attachments_of(item_row))
             await inplace.mark_task(db, run_dirs, item_row, Path(cwd), node_id, hook_point)
+        if after_checkout is not None:
+            await after_checkout()
 
     status = await _subprocess.run_task(
         db,
@@ -1488,7 +1493,7 @@ async def _run_agent_task(
         tips=tips,
         model=model,
         ro_paths=(*rules_files, *remote_ro),
-        before_launch=before_launch if borrows or on_session else None,
+        before_launch=before_launch if borrows or on_session or after_checkout else None,
         runner=runner,
         codex_hook=codex_hook,
         placed_claim=placed_claim,

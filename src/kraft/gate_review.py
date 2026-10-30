@@ -22,6 +22,7 @@ from kraft import overrides as _overrides
 from kraft.adapters import agent as _agent
 from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.profiles import HarnessUnavailable, harness_table
+from kraft.executor import read_only
 from kraft.executor.fallback import fallback_list
 from kraft.remote import placement as _placement
 from kraft.templates.models import CHECKS_FIRST, AgentTask, GateNode, ResolvedNode
@@ -90,7 +91,7 @@ _CHECKS_FIRST_PROMPT = (
     "costs a full re-run of the node.\n"
     "\n"
     "Do not edit anything. Read the worktree; do not change, write or commit "
-    "any file in it."
+    "any file in it. If you do, Kraft ignores your verdict."
 )
 
 
@@ -383,6 +384,40 @@ async def review(
     except Exception:
         await start()  # a disabled profile (`HarnessUnavailable`) is an attempt too
         raise
+    # A reviewer that checks first must leave the work as it found it (spec
+    # "If the reviewer edits the work"): read the checkout before, compare after.
+    worktree = inplace.item_folder(run_dirs, row)
+    in_place = store.is_in_place(row)
+    before = None
+    if cf and not in_place:
+        # Before the launch: once the reviewer's session row exists it counts
+        # as live, and a sandboxed item's guard would refuse every read.
+        before = read_only.snapshot(db, row, launch, worktree)
+        if before is None:
+            why = "Kraft could not read the checkout safely, so no reviewer ran: a person decides"
+            await start()
+            await executor.config_error_session(
+                db,
+                run_dirs,
+                dict(
+                    session_id=session_id,
+                    work_item_id=work_item_id,
+                    node_id=node.id,
+                    hook_point=auto_review.path,
+                    round=0,
+                    head_sha=None,
+                ),
+                f"{auto_review.path}: {why}\n",
+            )
+            return "undecided", why
+
+    async def after_checkout() -> None:
+        # In place, after the launch's take: the first one commits the
+        # attachments, which are not the reviewer's edit. Never sandboxed, so
+        # the live-session guard cannot refuse here; a None is judged below.
+        nonlocal before
+        before = read_only.snapshot(db, row, launch, worktree)
+
     try:
         status = await _agent.run_agent_task(
             db,
@@ -406,19 +441,18 @@ async def review(
             method_text=inv.method_text,
             steering_texts=inv.steering_texts,
             sandbox=sandbox,
-            checkout=executor.sandbox_checkout(row, launch, inplace.item_folder(run_dirs, row))
-            if sandbox
-            else None,
+            checkout=executor.sandbox_checkout(row, launch, worktree) if sandbox else None,
             task_instruction=task_instruction,
             title=row["title"],
             repo_path=row["repo"],
-            cwd=inplace.item_folder(run_dirs, row),
+            cwd=worktree,
             repo_entry=launch.repo_entry,
             time_cap=time_cap,
             harness_id=auto_review.task.harness,
             takes_checkout=True,
             tips=tips,
             on_session=start,
+            after_checkout=after_checkout if cf and in_place else None,
             runner=_placement.remote(_placement.runner_for(row, auto_review.runner, node.id)),
         )
     except store.CheckoutBusy:
@@ -444,6 +478,17 @@ async def review(
         )
         return "undecided", str(exc)
 
+    if cf:
+        # Even a reject: its reasoning was about work it then changed. A remote
+        # run's commits are already in this worktree (`remote.runs._publish`).
+        if before is None:
+            return "undecided", (
+                "Kraft could not read the checkout before the review, so its verdict was ignored"
+            )
+        if files := read_only.changed(db, row, launch, worktree, before):
+            return "undecided", (
+                "The reviewer changed files, so its verdict was ignored: " + read_only.named(files)
+            )
     result_path = item_paths.session_files(run_dirs, work_item_id, session_id).result
     note = _subprocess.read_concerns(result_path) or ""
     verdict = _subprocess.read_verdict(result_path)
