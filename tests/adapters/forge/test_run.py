@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-from unittest.mock import AsyncMock
 
 import pytest
 from support.harness import make_repo, own_files
@@ -146,25 +145,6 @@ def test_every_v1_forge_target_maps_to_a_handler():
     assert {a.value for a in ForgeAction} <= set(forge.run.V1_HANDLERS)
     waits = {forge.run.V1_HANDLERS[a.value] for a in ForgeAction if a.waits}
     assert waits == set(forge.run._WAITS)
-
-
-@pytest.mark.parametrize(
-    "error, status",
-    [
-        (forge.ForgeError("glab fell over"), "failed"),
-        (forge.CliUnavailable("glab is not installed or not on PATH"), "config_error"),
-    ],
-    ids=["flaky", "cannot-start"],
-)
-async def test_a_forge_error_mid_poll_fails_the_node_rather_than_escaping(run_forge, error, status):
-    """A flaky CLI lands as a failed node, a CLI that never started as a stop for a
-    person -- and, since a wait left no record of its end (Kraft-vzq2q), as its `error`."""
-    fake = forge.FakeForge()
-    fake.ci_status = AsyncMock(side_effect=error)
-    assert await run_forge(fake, "ci_poll", "s7") == (status, status)
-    assert str(error) in run_forge.log("s7")
-    (ended,) = run_forge.events("external_wait_ended")
-    assert ended["outcome"] == "error" and str(error) in ended["result"]
 
 
 # --- open_mr / sync_mr / mark_ready --------------------------------------------

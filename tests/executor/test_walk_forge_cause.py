@@ -17,40 +17,67 @@ from .test_walk import (
 
 
 class _RaisingWith(_RaisingForge):
-    def __init__(self, message):
-        self.message = message
+    def __init__(self, message, **error):
+        self.message, self.error = message, error
 
     async def open_mr(self, **kwargs):
-        raise _forge.ForgeError(self.message)
+        raise _forge.ForgeError(self.message, **self.error)
 
 
 @pytest.mark.parametrize(
-    ("message", "cause", "reason_ends"),
+    ("message", "cause", "reason_ends", "error"),
     [
         (
             "gh pr create failed: HTTP 401: Bad credentials",
             "forge_auth",
             "Fix them, then retry.",
+            {},
         ),
         (
             "git push failed: fatal: Authentication failed for 'https://x'",
             "forge_auth",
             "Fix them, then retry.",
+            {},
         ),
         (
             "gh pr create failed: dial tcp: Could not resolve host: github.com",
             "forge_unreachable",
             "Check its network, then retry.",
+            {},
         ),
-        ("boom: no capacity", None, "Reinstall and restart, or skip the node."),
+        ("boom: no capacity", None, "Reinstall and restart, or skip the node.", {}),
+        # The record the task left decides, not its log's wording.
+        ("boom: no capacity", "forge_auth", "Fix them, then retry.", {"reason": "forbidden"}),
+        (
+            "401 Unauthorized",
+            None,
+            "Reinstall and restart, or skip the node.",
+            {"reason": "conflict"},
+        ),
     ],
-    ids=["gh-401", "git-push-auth", "unreachable", "neither"],
+    ids=[
+        "gh-401",
+        "git-push-auth",
+        "unreachable",
+        "neither",
+        "record-forbidden",
+        "record-beats-text",
+    ],
 )
 @pytest.mark.parametrize(
     ("fix_loop", "stop_kind"), [(True, "infra"), (False, "failed")], ids=["fix-loop", "no-loop"]
 )
 async def test_a_forge_task_failure_names_its_cause_in_the_stops_facts(
-    item_on, tmp_path, fake_agent, monkeypatch, message, cause, reason_ends, fix_loop, stop_kind
+    item_on,
+    tmp_path,
+    fake_agent,
+    monkeypatch,
+    message,
+    cause,
+    reason_ends,
+    error,
+    fix_loop,
+    stop_kind,
 ):
     """Kraft-9d8b2.67: a forge CLI failure is a failed task, not a stop of its
     own -- an `infra` one when its node has a fix loop (a worker commit cannot
@@ -58,7 +85,7 @@ async def test_a_forge_task_failure_names_its_cause_in_the_stops_facts(
     says, which is what the card's action is chosen from. An `infra` stop's
     reason ends with what to do about that cause, never with "Reinstall and
     restart" beside a credential the forge refused."""
-    monkeypatch.setattr(_forge.run, "resolve", lambda name: _RaisingWith(message))
+    monkeypatch.setattr(_forge.run, "resolve", lambda name: _RaisingWith(message, **error))
     extra = {"fix_loop": {"tasks": [_agent("repair")]}} if fix_loop else {}
     it = await item_on([_exec("checks", _forge_task("open", "mr.open_draft"), **extra)])
 

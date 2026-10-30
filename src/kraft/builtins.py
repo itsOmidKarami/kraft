@@ -2282,8 +2282,14 @@ async def finish_session(
     log: str,
     findings: list[dict] | None = None,
     reused: bool = False,
+    forge_error: dict | None = None,
 ) -> str:
     """Write the log and close out a session `start_session` already created.
+
+    `forge_error` (`{"status", "reason", "retry_after", "sso_url"}`) is written
+    beside the log as `<log>.forge.json`, so `forge.failure_cause` can read why
+    a forge task failed after the exception is gone. Without one, a record left
+    by an earlier run of a reused session is removed.
 
     `findings` is None for every caller that predates this (an agent/
     subprocess task writes its own result file, and every existing builtin
@@ -2303,6 +2309,10 @@ async def finish_session(
     log_path.write_text(previous + log if previous else log)
     if findings is not None:
         result_path.write_text(json.dumps({"findings": findings}))
+    if forge_error is not None:
+        log_path.with_suffix(".forge.json").write_text(json.dumps(forge_error))
+    else:
+        log_path.with_suffix(".forge.json").unlink(missing_ok=True)
     # A subprocess session gets its per-line timestamps from the adapter's drain
     # thread (`adapters/subprocess._watch_log`), which stamps each line as it
     # appears. A builtin writes its whole log in one call and has no drain

@@ -136,12 +136,31 @@ _UNREACHABLE_MARKERS = (
 _LOCAL_GIT = ("git rebase ", "git worktree add timed out")
 
 
-def failure_cause(text: str) -> Literal["forge_auth", "forge_unreachable"] | None:
-    """Why a forge or git failure's message says it failed, when it says: a
-    credential the forge refused (`forge_auth`, fixed by signing the forge CLI in
-    on the server's machine, not in the repo's settings)
-    or a forge that could not be reached (`forge_unreachable`). None when the
-    text names neither."""
+#: What each `ForgeError.reason` means for a stop. A reason missing here (a rate
+#: limit, a missing project, a conflict, a moved head) is no auth or network
+#: cause.
+_CAUSE_OF_REASON: dict[str, Literal["forge_auth", "forge_unreachable"]] = {
+    "auth": "forge_auth",
+    "forbidden": "forge_auth",
+    "unreachable": "forge_unreachable",
+    "tls": "forge_unreachable",
+}
+
+
+def failure_cause(
+    text: str, record: Mapping[str, object] | None = None
+) -> Literal["forge_auth", "forge_unreachable"] | None:
+    """Why a forge or git failure says it failed, when it says: a credential the
+    forge refused (`forge_auth`, fixed by signing the forge CLI in on the
+    server's machine, not in the repo's settings) or a forge that could not be
+    reached (`forge_unreachable`). None when it names neither.
+
+    `record` is the failed task's forge-error record (`{"reason": ...}`); one
+    with a reason decides. Without one -- a row written before the record, or an
+    error from a call that made no request, like a CLI that is not signed in --
+    the text's markers decide."""
+    if record and record.get("reason"):
+        return _CAUSE_OF_REASON.get(str(record["reason"]))
     low = text.lower()
     if any(m in low for m in _LOCAL_GIT):
         return None
