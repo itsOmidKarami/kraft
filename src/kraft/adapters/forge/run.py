@@ -2305,7 +2305,8 @@ async def run_task(
         await inplace.stop_refused(db, work_item_id, node_id, exc)
         checkout_stopped = True
 
-    if handler in _WAITS:
+    # A rate-limited wait stays open as it was: ending it would restart its deadline.
+    if handler in _WAITS and status != "rate_limited":
         status, log = await _observed(
             db,
             work_item_id=work_item_id,

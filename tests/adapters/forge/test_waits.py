@@ -79,6 +79,7 @@ async def test_a_forge_rate_limit_stops_the_item_until_the_forge_allows_it(
 
     (hit,) = run_forge.events("rate_limit_hit")
     assert hit["resets_at_iso"] == (moment + timedelta(seconds=30)).isoformat()
+    assert not run_forge.events("external_wait_ended"), "the wait and its deadline stay open"
     record = json.loads(own_files(run_dirs, "s8").log.with_suffix(".forge.json").read_text())
     assert (record["status"], record["reason"], record["retry_after"]) == (403, "rate_limited", 30)
 
