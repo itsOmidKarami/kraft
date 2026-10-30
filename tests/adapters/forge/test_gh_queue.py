@@ -556,3 +556,151 @@ async def test_merge_queue_asks_for_the_base_branch_queue_of_this_pull_request(c
     assert argv[argv.index("n=7") - 1] == "-F"
     assert (fields["owner"], fields["name"]) == ("{owner}", "{repo}")
     assert "mergeQueue(branch: $base)" in "\n".join(argv)
+
+
+_HEAD = "a" * 40
+_MERGE_READ = "api*graphql*isInMergeQueue*"
+_MUTATION = "api*graphql*mutation*"
+_MERGE_INPUT = {"pullRequestId": "PR_kwDO7", "mergeMethod": "SQUASH", "expectedHeadOid": _HEAD}
+
+
+def _mutations(argv: list[str]) -> list[tuple[str, dict]]:
+    """Each GraphQL mutation `gh` was asked to send: its name and its input,
+    the `$variables` filled from the call's `-f`/`-F` fields."""
+    calls: list[list[str]] = []
+    for arg in argv:
+        if arg == "api":
+            calls.append([])
+        calls[-1].append(arg)
+    sent = []
+    for call in calls:
+        text = "\n".join(call)
+        if not (m := re.search(r"(\w+)\(input: \{([^}]*)\}\)", text)) or "mutation" not in text:
+            continue
+        values = {
+            k: v
+            for flag, field in zip(call, call[1:], strict=False)
+            if flag in ("-f", "-F")
+            for k, _, v in [field.partition("=")]
+        }
+        fields = dict(f.strip().split(": ") for f in m[2].split(","))
+        sent.append(
+            (m[1], {k: values.get(v[1:], v) if v[0] == "$" else v for k, v in fields.items()})
+        )
+    return sent
+
+
+@pytest.mark.parametrize(
+    "read, number, sent, refused",
+    [
+        pytest.param(api_outputs.merge_state("CLEAN"), 7, "mergePullRequest", None, id="clean"),
+        pytest.param(
+            api_outputs.merge_state("UNSTABLE"), 7, "mergePullRequest", None, id="unstable"
+        ),
+        pytest.param(
+            api_outputs.merge_state("HAS_HOOKS"), 7, "mergePullRequest", None, id="has-hooks"
+        ),
+        pytest.param(api_outputs.merge_state("UNKNOWN"), 7, "mergePullRequest", None, id="unknown"),
+        # merge.go:243-253: a queue repo skips the state check, so BLOCKED is queued too.
+        pytest.param(
+            api_outputs.merge_state("BLOCKED", queue=True),
+            7,
+            "enablePullRequestAutoMerge",
+            None,
+            id="on-a-queue",
+        ),
+        pytest.param(
+            api_outputs.merge_state("CLEAN", queue=True, queued=True),
+            7,
+            None,
+            None,
+            id="already-queued",
+        ),
+        pytest.param(
+            api_outputs.merge_state("BLOCKED"),
+            7,
+            None,
+            "pull request #7 is not mergeable: the base branch policy prohibits the merge",
+            id="blocked",
+        ),
+        pytest.param(
+            api_outputs.merge_state("BEHIND"),
+            7,
+            None,
+            "pull request #7 is not mergeable: the head branch is not up to date with the base",
+            id="behind",
+        ),
+        pytest.param(
+            api_outputs.merge_state("DIRTY"),
+            7,
+            None,
+            "pull request #7 is not mergeable: the merge commit cannot be cleanly created",
+            id="dirty",
+        ),
+        # `run_task` passes 0 and the branch names the pull request.
+        pytest.param(
+            api_outputs.merge_state("CLEAN", by_branch=True),
+            0,
+            "mergePullRequest",
+            None,
+            id="by-branch",
+        ),
+    ],
+)
+async def test_merge_sends_what_gh_pr_merge_sends(cli, tmp_path, read, number, sent, refused):
+    """merge.go:151-304: the one mutation gh sends for `pr merge --squash
+    --match-head-commit H` in each case it tells apart, with exactly its input
+    (http.go:47-103), and none where gh refuses or the pull request is queued."""
+    cli.stub("git", "0")
+    cli.stub("gh", routes={_MERGE_READ: read, _MUTATION: api_outputs.MERGED}, default=FAIL)
+
+    merging = forge.GhCli().merge(
+        repo=tmp_path, branch="kraft/abc", mr=forge.MR(number=number, url=""), head=_HEAD
+    )
+    if refused:
+        with pytest.raises(forge.ForgeError, match=re.escape(refused)):
+            await merging
+    else:
+        await merging
+
+    argv = cli.argv("gh")
+    assert _mutations(argv) == ([(sent, _MERGE_INPUT)] if sent else [])
+    assert "n=0" not in argv
+    assert ("b=kraft/abc" if number == 0 else "n=7") in argv
+
+
+@pytest.mark.parametrize(
+    "answer, moved",
+    [
+        pytest.param(api_outputs.HEAD_MODIFIED, True, id="stale-head"),
+        pytest.param(
+            json.dumps({"errors": [{"type": "UNPROCESSABLE", "message": "Merge conflict"}]}),
+            False,
+            id="another-graphql-error",
+        ),
+        pytest.param(Api(502, '{"message": "Bad Gateway"}'), False, id="graphql-502"),
+    ],
+)
+async def test_a_merge_github_refuses_for_a_moved_head_raises_head_moved(
+    cli, tmp_path, answer, moved
+):
+    """The GraphQL error for an `expectedHeadOid` that is not the head becomes
+    `HeadMoved`, with the head GitHub holds: the merge path holds it for
+    another review instead of failing the node. Any other refusal stays a
+    plain `ForgeError`."""
+    cli.stub("git", "0")
+    routes = {
+        _MERGE_READ: api_outputs.merge_state(),
+        _MUTATION: answer,
+        api_outputs.FIND: api_outputs.FIND_AUTO_MERGE,
+    }
+    cli.stub("gh", routes=routes, default=FAIL)
+
+    with pytest.raises(forge.ForgeError) as refused:
+        await forge.GhCli().merge(
+            repo=tmp_path, branch="kraft/abc", mr=forge.MR(number=7, url=""), head=_HEAD
+        )
+
+    assert isinstance(refused.value, forge.HeadMoved) is moved
+    if moved:
+        assert refused.value.current == "f0reign1"

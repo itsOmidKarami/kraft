@@ -154,20 +154,18 @@ NEEDS_APPROVAL_PR = pull_request(
 
 
 def merge_state(
-    state: str = "CLEAN", *, queue: bool = False, queued: bool = False, id: str = "PR_kwDO7"
+    state: str = "CLEAN", *, queue: bool = False, queued: bool = False, by_branch: bool = False
 ) -> str:
-    """What the merge reads before it picks a mutation (merge.go:172, 194-196)."""
-    pull = {
-        "id": id,
-        "mergeStateStatus": state,
-        "isMergeQueueEnabled": queue,
-        "isInMergeQueue": queued,
-    }
-    return gql({"repository": {"pullRequest": pull}})
+    """What the merge reads before it picks a mutation (merge.go:172, 194-196),
+    looked up by number or, `by_branch`, by its head branch."""
+    pull = pull_request(
+        None, mergeStateStatus=state, isMergeQueueEnabled=queue, isInMergeQueue=queued
+    )
+    return pr_by_branch(pull) if by_branch else pr_by_number(pull)
 
 
-#: `gh pr merge` answered with: the mutation's payload (`PullRequestMerge`).
-MERGED = gql({"mergePullRequest": {"pullRequest": {"id": "PR_kwDO7", "state": "MERGED"}}})
+#: What either merge mutation answers (`PullRequestMerge`, `PullRequestAutoMerge`).
+MERGED = gql({"mergePullRequest": {"pullRequest": {"id": "PR_kwDO7"}}})
 AUTO_MERGE_ENABLED = gql({"enablePullRequestAutoMerge": {"pullRequest": {"id": "PR_kwDO7"}}})
 
 #: GitHub's GraphQL error for an `expectedHeadOid` that is not the head: HTTP 200

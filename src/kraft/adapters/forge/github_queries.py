@@ -35,6 +35,9 @@ _ROLLUP = f"""commits(last: 1) {{ nodes {{ commit {{ oid statusCheckRollup {{
 PR_CORE_FIELDS: str = _CORE
 #: Core fields and the head commit's check/status rollup, first page.
 PR_FIELDS: str = f"{_CORE}\n{_ROLLUP}"
+#: What `merge` reads (merge.go:172-196). The queue fields are asked for on a
+#: merge only: older GitHub Enterprise Server lacks them (gh feature-detects).
+MERGE_FIELDS: str = f"{_CORE}\nisMergeQueueEnabled isInMergeQueue"
 
 _BY_NUMBER = """
 query($owner: String!, $name: String!, $n: Int!) {
@@ -150,15 +153,17 @@ async def _all_contexts(transport: Transport, pr: dict) -> tuple[str, list[dict]
 
 
 async def read_pr(
-    transport: Transport, repo: Path, target: list[str], *, checks: bool = True
+    transport: Transport, repo: Path, target: list[str], *, checks: bool = True, fields: str = ""
 ) -> dict:
     """The pull request `target` names (`mr_ops.target`: a number, a branch, or
     nothing for the checkout's own branch), as the GraphQL node.
 
     With `checks` the node carries `statusCheckRollup` (a flat `rollup_rows`
     list, every page read) and `headCommitOid`; without, the rollup is not asked
-    for at all. Raises `ForgeError` when there is no such pull request."""
-    fields = PR_FIELDS if checks else PR_CORE_FIELDS
+    for at all. `fields` (`MERGE_FIELDS`) selects those instead, with no rollup.
+    Raises `ForgeError` when there is no such pull request."""
+    checks = checks and not fields
+    fields = fields or (PR_FIELDS if checks else PR_CORE_FIELDS)
     if target and target[0].isdigit():
         data = await transport.graphql(
             _BY_NUMBER.replace("@FIELDS", fields), owner_vars(n=int(target[0]))

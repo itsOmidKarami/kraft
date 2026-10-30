@@ -15,6 +15,7 @@ import pytest
 from kraft.adapters import forge
 from kraft.adapters.forge import gh as gh_adapter
 from kraft.adapters.forge import glab as glab_adapter
+from kraft.adapters.forge import transport
 from kraft.adapters.forge.gh import _QUEUE_QUERY, _THREADS_QUERY
 from kraft.adapters.forge.mr import MRMeta
 from kraft.automated_review import AutomatedReview
@@ -55,9 +56,6 @@ GH = SimpleNamespace(
     url="https://github.com/o/r/pull/7",
     body_flag="--body",
     base_flag="--base",
-    merge_verb="pr merge",
-    head_flag="--match-head-commit",
-    head_moved="GraphQL: Head branch was modified. Review and try the merge again.",
     merged_head="c0ffee0",
     merged_list=api_outputs.FIND_MERGED,
     queued_list=api_outputs.FIND_AUTO_MERGE,
@@ -239,6 +237,7 @@ async def test_update_mr_rewrites_the_description(be, cli, tmp_path):
     assert cli.argv(be.name) == be.update_argv
 
 
+@pytest.mark.parametrize("be", [GLAB], ids=["glab"], indirect=True)
 async def test_merge_resolves_from_the_branch_when_no_number_is_known(be, cli, tmp_path):
     """`run_task` never threads the MR number between nodes -- it passes 0 and
     the CLI resolves the item's branch. `mr merge 0` would target a merge
@@ -266,6 +265,7 @@ async def test_a_merge_with_no_head_to_name_is_refused_before_any_cli_call(be, c
     assert cli.calls(be.name) == []
 
 
+@pytest.mark.parametrize("be", [GLAB], ids=["glab"], indirect=True)
 async def test_a_merge_the_forge_refuses_for_a_moved_head_raises_head_moved(be, cli, tmp_path):
     """Each forge's own words for "the head is not the one you named" become
     `HeadMoved`, with the head the forge holds when it can be read: the merge
@@ -520,23 +520,30 @@ def test_gh_merge_queue_fields_exist(record_property):
 
 @pytest.mark.e2e("gh")
 def test_gh_refuses_a_merge_naming_a_head_the_pull_request_does_not_have(record_property):
-    """`gh pr merge --match-head-commit` with a sha the pull request is not at is
-    refused, in the words `GhCli.merge` reads as `HeadMoved`. Needs a pull request
-    of `KRAFT_E2E_GH_REPO` (`owner/name`) at `KRAFT_E2E_GH_PR`. It never merges:
+    """The merge mutation `GhCli.merge` sends, with an `expectedHeadOid` the
+    pull request is not at, is refused in words `graphql_reason` reads as
+    `head_moved`, so it becomes `HeadMoved`. Needs a pull request of
+    `KRAFT_E2E_GH_REPO` (`owner/name`) at `KRAFT_E2E_GH_PR`. It never merges:
     no pull request has a head of all zeros."""
     slug, number = os.environ.get("KRAFT_E2E_GH_REPO"), os.environ.get("KRAFT_E2E_GH_PR")
     if not (slug and number):
         pytest.skip("e2e: set KRAFT_E2E_GH_REPO (owner/name) and KRAFT_E2E_GH_PR")
-    done = subprocess.run(
-        ["gh", "pr", "merge", number, "--squash", "--repo", slug]
-        + ["--match-head-commit", "0" * 40],
+    node = subprocess.run(
+        ["gh", "pr", "view", number, "--repo", slug, "--json", "id", "-q", ".id"],
         capture_output=True,
         text=True,
     )
-    said = done.stdout + done.stderr
-    record_property("gh_match_head_commit_refusal", said[-500:])
-    assert done.returncode != 0
-    assert gh_adapter._HEAD_MODIFIED in said.lower()
+    assert node.returncode == 0, node.stderr
+    done = subprocess.run(
+        ["gh", "api", "graphql", "-f", f"query={gh_adapter._MERGE_MUTATION}"]
+        + ["-f", f"id={node.stdout.strip()}", "-f", f"head={'0' * 40}"],
+        capture_output=True,
+        text=True,
+    )
+    record_property("gh_expected_head_oid_refusal", (done.stdout + done.stderr)[-500:])
+    errors = json.loads(done.stdout).get("errors") or []
+    assert errors, done.stdout
+    assert transport.graphql_reason(errors) == "head_moved"
 
 
 @pytest.mark.e2e("glab")

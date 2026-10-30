@@ -174,9 +174,6 @@ _REMOVED_BY_HAND = re.compile(
     ),
     re.IGNORECASE,
 )
-#: What `gh pr merge --match-head-commit` prints when the head is not the one named
-#: (GitHub: "Head branch was modified. Review and try the merge again.").
-_HEAD_MODIFIED = "head branch was modified"
 
 #: What `cancel_merge` reads: the pull request's id, its auto-merge request and
 #: its merge queue entry.
@@ -220,6 +217,25 @@ mutation($id: ID!) {
   disablePullRequestAutoMerge(input: {pullRequestId: $id}) { pullRequest { id } }
 }
 """
+#: What `merge` sends, as gh does for `pr merge --squash --match-head-commit`
+#: (http.go:47-103): the same input to either mutation, and nothing more.
+_MERGE_INPUT = "input: {pullRequestId: $id, mergeMethod: SQUASH, expectedHeadOid: $head}"
+_MERGE_MUTATION = f"""
+mutation($id: ID!, $head: GitObjectID!) {{
+  mergePullRequest({_MERGE_INPUT}) {{ pullRequest {{ id }} }}
+}}
+"""
+_AUTO_MERGE_MUTATION = f"""
+mutation($id: ID!, $head: GitObjectID!) {{
+  enablePullRequestAutoMerge({_MERGE_INPUT}) {{ pullRequest {{ id }} }}
+}}
+"""
+#: merge.go:379-397: the states gh refuses to merge without `--auto`/`--admin`.
+_BLOCKED = {
+    "BLOCKED": "the base branch policy prohibits the merge",
+    "BEHIND": "the head branch is not up to date with the base branch",
+    "DIRTY": "the merge commit cannot be cleanly created",
+}
 _DEQUEUE_MUTATION = """
 mutation($id: ID!) {
   dequeuePullRequest(input: {id: $id}) { mergeQueueEntry { id } }
@@ -496,10 +512,13 @@ class GhCli(mr_ops.CliWaits):
             cancelled_at=_cancelled_at(checks, at="completedAt"),
         )
 
-    async def _pr(self, repo: Path, target: list[str], *, checks: bool = True) -> dict:
+    async def _pr(
+        self, repo: Path, target: list[str], *, checks: bool = True, fields: str = ""
+    ) -> dict:
         """The pull request `target` names (`mr_ops.target`), read through the
-        transport; `checks=False` leaves the check rollup unread."""
-        return await gq.read_pr(self._transport(repo), repo, target, checks=checks)
+        transport; `checks=False` leaves the check rollup unread, and `fields`
+        selects those instead (no rollup)."""
+        return await gq.read_pr(self._transport(repo), repo, target, checks=checks, fields=fields)
 
     async def _bot_review(self, repo: Path, branch: str, bot: str) -> ReviewResult:
         """`bot`'s latest review of the PR's current head, dismissed ones
@@ -781,20 +800,28 @@ class GhCli(mr_ops.CliWaits):
             )
 
     async def merge(self, *, repo: Path, branch: str, mr: MR, head: str) -> None:
-        """`gh pr merge` at `head` only (`--match-head-commit`, which gh carries
-        into the auto-merge and merge-queue paths too): GitHub refuses a pull
-        request whose head is any other, however long after this call it would
-        have merged."""
+        """Squash-merge at `head` only, as gh decides (merge.go:151-304): an
+        already queued pull request is left alone, one whose base has a merge
+        queue is queued through auto-merge, a blocked, behind or conflicting one
+        is refused with nothing sent, and any other is merged. GitHub refuses a
+        pull request whose head is not `head`, however long after this call it
+        would have merged: that is `HeadMoved`, with the head GitHub holds."""
         if not head:
             raise ForgeError("cannot merge without the head to merge")
         await git._assert_pushed(repo, branch)
-        target = mr_ops.target(mr.number, branch)
+        pr = await self._pr(repo, mr_ops.target(mr.number, branch), fields=gq.MERGE_FIELDS)
+        if pr.get("isInMergeQueue"):
+            return
+        if pr.get("isMergeQueueEnabled"):
+            mutation = _AUTO_MERGE_MUTATION
+        elif refused := _BLOCKED.get(str(pr.get("mergeStateStatus"))):
+            raise ForgeError(f"pull request #{pr.get('number')} is not mergeable: {refused}")
+        else:
+            mutation = _MERGE_MUTATION
         try:
-            await git.run_git(
-                repo, ["gh", "pr", "merge", *target, "--squash", "--match-head-commit", head]
-            )
+            await self._gql(repo, mutation, {"id": pr["id"], "head": head})
         except ForgeError as exc:
-            if _HEAD_MODIFIED in str(exc).lower():
+            if exc.reason == "head_moved":
                 raise HeadMoved(str(exc), await self._forge_head(repo, branch)) from exc
             raise
 
