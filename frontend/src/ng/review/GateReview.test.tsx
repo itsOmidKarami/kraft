@@ -23,7 +23,7 @@ afterEach(() => vi.restoreAllMocks());
 
 const overlay = (o: { threads?: ReviewThread[] } = {}) => {
   const p = { approve: vi.fn(async () => null), onReviewChanges: vi.fn(), onRequestChanges: vi.fn(), onClose: vi.fn() };
-  render(<GateReview item={AT} gate="final_review" doc={{ state: "ready", data: DOC }} files={FILES} threads={o.threads ?? []} isViewed={() => true} {...p} />);
+  render(<GateReview item={AT} gate="final_review" events={[]} doc={{ state: "ready", data: DOC }} files={FILES} threads={o.threads ?? []} isViewed={() => true} {...p} />);
   return p;
 };
 
@@ -41,7 +41,7 @@ describe("GateReview", () => {
   });
 
   it("colours a fenced block in the document", async () => {
-    render(<GateReview item={AT} gate="final_review" doc={{ state: "ready", data: { ...DOC, content: "```ruby\ndef x = 1\n```" } }} files={FILES} threads={[]} isViewed={() => true} approve={vi.fn(async () => null)} onReviewChanges={vi.fn()} onRequestChanges={vi.fn()} onClose={vi.fn()} />);
+    render(<GateReview item={AT} gate="final_review" events={[]} doc={{ state: "ready", data: { ...DOC, content: "```ruby\ndef x = 1\n```" } }} files={FILES} threads={[]} isViewed={() => true} approve={vi.fn(async () => null)} onReviewChanges={vi.fn()} onRequestChanges={vi.fn()} onClose={vi.fn()} />);
     expect(await screen.findByText("def", {}, { timeout: 3000 })).toHaveClass("tok-kw");
   });
 
@@ -55,13 +55,13 @@ describe("GateReview", () => {
     ] as KraftEvent[];
     render(<GateReview item={AT} gate="final_review" events={events} doc={{ state: "ready", data: DOC }} files={FILES} threads={[]} isViewed={() => true} approve={vi.fn(async () => null)} onReviewChanges={vi.fn()} onRequestChanges={vi.fn()} onClose={vi.fn()} />);
     const card = await screen.findByRole("region", { name: "Agent review" });
-    expect(card).toHaveTextContent(word);
+    expect(card).toHaveTextContent(new RegExp(`^Reviewer:\\s*${word}`));
     expect(card).toHaveTextContent(note);
   });
 
   it("shows the document's title once and who wrote it (GR-6)", async () => {
     const p = { approve: vi.fn(async () => null), onReviewChanges: vi.fn(), onRequestChanges: vi.fn(), onClose: vi.fn() };
-    render(<GateReview item={AT} gate="final_review" doc={{ state: "ready", data: { ...DOC, content: "# Review brief\n\n## Summary\n\nAdds it." } }} by="work_item_summary.main.author" files={FILES} threads={[]} isViewed={() => true} {...p} />);
+    render(<GateReview item={AT} gate="final_review" events={[]} doc={{ state: "ready", data: { ...DOC, content: "# Review brief\n\n## Summary\n\nAdds it." } }} by="work_item_summary.main.author" files={FILES} threads={[]} isViewed={() => true} {...p} />);
     expect(await screen.findAllByText("Review brief")).toHaveLength(1);
     expect(screen.queryByRole("heading", { level: 1, name: "Review brief" })).toBeNull();
     expect(screen.getByText(/^written by/)).toHaveTextContent("written by work_item_summary.main.author");
@@ -76,7 +76,7 @@ describe("GateReview", () => {
     const writeText = vi.fn(async () => {});
     Object.assign(navigator, { clipboard: { writeText } });
     const p = { approve: vi.fn(async () => null), onReviewChanges: vi.fn(), onRequestChanges: vi.fn(), onClose: vi.fn() };
-    render(<GateReview item={AT} gate="final_review" doc={{ state: "ready", data: { ...DOC, absolute_path: "/runs/w1/.engineering/reviews/kraft-cb59.md" } }} files={FILES} threads={[]} isViewed={() => true} {...p} />);
+    render(<GateReview item={AT} gate="final_review" events={[]} doc={{ state: "ready", data: { ...DOC, absolute_path: "/runs/w1/.engineering/reviews/kraft-cb59.md" } }} files={FILES} threads={[]} isViewed={() => true} {...p} />);
     const open = await screen.findByRole("button", { name: "Open in editor" });
     await vi.waitFor(() => expect(open).toHaveAttribute("title", "Open in VS Code"));
     await act(async () => fireEvent.click(open));
@@ -93,7 +93,7 @@ describe("GateReview", () => {
     const on = (e: Event) => toasts.push((e as CustomEvent<{ message: string }>).detail.message);
     window.addEventListener("kraft:toast", on);
     const p = { approve: vi.fn(async () => null), onReviewChanges: vi.fn(), onRequestChanges: vi.fn(), onClose: vi.fn() };
-    render(<GateReview item={AT} gate="final_review" doc={{ state: "ready", data: { ...DOC, absolute_path: "/runs/w1/.engineering/reviews/kraft-cb59.md" } }} files={FILES} threads={[]} isViewed={() => true} {...p} />);
+    render(<GateReview item={AT} gate="final_review" events={[]} doc={{ state: "ready", data: { ...DOC, absolute_path: "/runs/w1/.engineering/reviews/kraft-cb59.md" } }} files={FILES} threads={[]} isViewed={() => true} {...p} />);
     await act(async () => fireEvent.click(await screen.findByRole("button", { name: "Copy path" })));
     window.removeEventListener("kraft:toast", on);
     vi.unstubAllGlobals();

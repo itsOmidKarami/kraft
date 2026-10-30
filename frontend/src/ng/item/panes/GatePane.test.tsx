@@ -187,6 +187,21 @@ describe("GateBody", () => {
     expect(screen.queryByText("Concerns · 1") !== null).toBe(shown);
   });
 
+  // Kraft's note on the reviewer's outcome is owed to whoever decides the gate, the changed-files warning above all.
+  const reviewed = (reason: string, note: string): KraftEvent[] => [
+    { seq: 1, work_item_id: "w1", type: "gate_requested", payload: { gate: "plan_approval" }, node_id: "plan_approval", created_at: "t" },
+    { seq: 2, work_item_id: "w1", type: "gate_auto_review_skipped", payload: { gate: "plan_approval", reason, note }, node_id: "plan_approval", created_at: "t" },
+  ];
+  it.each([
+    ["could not decide", "undecided", "The reviewer changed files, so its verdict was ignored; its changes are still in the worktree: a.py"],
+    ["ready for you", "passed", "Every task is covered."],
+  ])("shows the reviewer's note: %s", (word, reason, note) => {
+    stubFetch();
+    render(<GateBody item={pending} version="1" gate={gate} events={reviewed(reason, note)} />);
+    expect(screen.getByText(`Reviewer: ${word}`)).toBeInTheDocument();
+    expect(screen.getByText(note)).toBeInTheDocument();
+  });
+
   it("reads the threads again on each read of the item, and an older read that answers late does not win", async () => {
     const reads = holdFetch(/\/work-items\/w1\/threads/);
     const at = (version: string) => <MemoryRouter><GateBody item={pending} version={version} gate={gate} events={[]} /></MemoryRouter>;

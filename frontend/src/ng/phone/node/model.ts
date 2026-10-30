@@ -58,7 +58,7 @@ function nodeTable(item: ItemDetail, node: ApiNode, graph: ChainNode): { seconda
 export interface PathRow {
   title: string;
   text: string;
-  chip?: { word: string; tone: "ok" | "bad" | "muted" };
+  chip?: { word: string; tone: "ok" | "bad" | "warn" };
 }
 
 /** A gate's review path (prototype `flow`): the agent reviewer when the gate has one, you, and where a rejection goes. The verdict is the agent's own event, never invented. */

@@ -298,16 +298,18 @@ async def test_checks_first_edits_void_the_verdict(
 
 
 @pytest.mark.parametrize(
-    "in_place,sessions,ran",
+    "in_place,refused,sessions,ran,unreadable",
     [
         # Refused before launch, as a session of its own: nothing paid for.
-        pytest.param(False, ["config_error"], False, id="worktree-launches-nothing"),
+        pytest.param(False, False, ["config_error"], False, True, id="worktree-launches-nothing"),
         # The hook cannot refuse a launch under way: the verdict is ignored.
-        pytest.param(True, ["done"], True, id="in-place-verdict-ignored"),
+        pytest.param(True, False, ["done"], True, True, id="in-place-verdict-ignored"),
+        # Refused before the checkout was read (a machine's refusal): no review, no read to blame.
+        pytest.param(True, True, [], False, False, id="in-place-refused-before-the-read"),
     ],
 )
 async def test_checks_first_unreadable_checkout_is_never_clean(
-    database, run_dirs, tmp_path, repo, monkeypatch, in_place, sessions, ran
+    database, run_dirs, tmp_path, repo, monkeypatch, in_place, refused, sessions, ran, unreadable
 ):
     gate = await _at_gate(
         database,
@@ -320,10 +322,13 @@ async def test_checks_first_unreadable_checkout_is_never_clean(
         in_place=in_place,
     )
     _spy_snapshots(monkeypatch, [], result=None)
+    if refused:
+        fake = _fake_agent({"status": "config_error"}, {})
+        monkeypatch.setattr(gate_review._agent, "run_agent_task", fake)
 
     verdict, note = await _run(database, run_dirs, gate)
 
-    assert (verdict, "could not read the checkout" in note) == ("undecided", True), note
+    assert (verdict, "could not read the checkout" in note) == ("undecided", unreadable), note
     ran_in = inplace.item_folder(run_dirs, _row(database))
     assert (_sessions(database), (ran_in / "ran").exists()) == (sessions, ran)
 

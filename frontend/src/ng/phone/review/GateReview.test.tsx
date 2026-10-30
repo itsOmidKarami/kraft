@@ -163,15 +163,15 @@ describe("the gate review (F)", () => {
   });
 
   it.each([
-    ["ready for you", "passed", "Every task is covered."],
-    ["could not decide", "undecided", "The reviewer changed files, so its verdict was ignored: a.py"],
-  ])("shows a checks-first reviewer's %s with its note", async (word, reason, note) => {
+    ["ready for you", "passed", "Every task is covered.", "ph-tone-ok"],
+    ["could not decide", "undecided", "The reviewer changed files, so its verdict was ignored: a.py", "ph-tone-warn"],
+  ])("shows a checks-first reviewer's %s with its note", async (word, reason, note, tone) => {
     const events = [
       { seq: 1, work_item_id: "w1", type: "gate_requested", payload: { gate: "plan_approval" }, node_id: "plan_approval", created_at: "2026-09-13T09:00:00Z" },
       { seq: 2, work_item_id: "w1", type: "gate_auto_review_skipped", payload: { gate: "plan_approval", reason, note }, node_id: "plan_approval", created_at: "2026-09-13T09:00:00Z" },
     ];
     mount(gateItem(), "/work-items/w1/review", { "GET /work-items/w1/events": [200, events] });
-    expect(await screen.findByText(`auto_review · ${word}`)).toBeInTheDocument();
+    expect(await screen.findByText(`auto_review · ${word}`)).toHaveClass(tone);
     expect(screen.getByText(note)).toBeInTheDocument();
   });
 });

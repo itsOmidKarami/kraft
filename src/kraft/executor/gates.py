@@ -521,13 +521,14 @@ async def review_gates(
             elif verdict not in ("reject", "pass", "undecided"):
                 verdict = "undecided"
 
-        # Why the review itself left the gate to a person (a refused launch,
-        # a spent cap, the agent's own concerns), for the event below. Not an
-        # approval's note that a must-fix then overrode.
+        # Why the review left the gate to a person (a refused launch, a spent
+        # cap, the agent's own concerns, an open must-fix), for the event below.
+        # Never an approval's own note.
         why = note if verdict == "undecided" and note.strip() else None
         if verdict == "approve" and db.read(lambda c: store.open_must_fix(c, work_item_id)):
             # A person's must-fix outranks an agent's approval (review flow §3).
             verdict = "undecided"
+            why = "a must-fix thread is open: a person decides"
         if (
             verdict == "approve"
             and read_tips is not None

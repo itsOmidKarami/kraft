@@ -11,6 +11,7 @@ import { request } from "../../http";
 import { act } from "../actions";
 import { TestsLine } from "../TestsLine";
 import { gateSkipped } from "../events";
+import { OUTCOME, reviewOutcome } from "../reviewOutcome";
 import { rejectTarget } from "../graph";
 import { totals, useDiffFiles } from "../Top";
 import { runVersion, type ItemDetail } from "../useItem";
@@ -37,6 +38,7 @@ export function GateBody({ item, version, gate, events }: { item: ItemDetail; ve
   const open = threads.filter((t) => t.state !== "resolved");
   const pending = item.pending_gate === gate.id;
   const decided = gateDecision(events, gate.id);
+  const outcome = reviewOutcome(events, gate.id);
   const to = rejectTarget(item.chain_definition.nodes, gate.id);
   const t = files && totals(files);
   return (
@@ -60,6 +62,13 @@ export function GateBody({ item, version, gate, events }: { item: ItemDetail; ve
         <>
           <h3 className="ip-h">Concerns · {item.concerns.length}</h3>
           <ul className="ip-notes">{item.concerns.map((c, i) => <li key={i}>{c}</li>)}</ul>
+        </>
+      )}
+      {/* Kraft's note on the reviewer's outcome, such as the files it changed, which void its verdict. */}
+      {outcome?.note && (
+        <>
+          <h3 className="ip-h">Reviewer: {OUTCOME[outcome.kind].word}</h3>
+          <p className="ip-review-note">{outcome.note}</p>
         </>
       )}
       <dl className="item-facts ip-facts ip-gap">

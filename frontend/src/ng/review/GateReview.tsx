@@ -23,11 +23,11 @@ import { OUTCOME, reviewOutcome } from "../item/reviewOutcome";
  *  document beside the list of what changed, with the gate's decision. A
  *  full-page layer over the review page, with its own header; Escape closes it
  *  to the page. */
-export function GateReview({ item, gate, events = [], doc, by, files, threads, isViewed, approve, onReviewChanges, onRequestChanges, onClose }: {
+export function GateReview({ item, gate, events, doc, by, files, threads, isViewed, approve, onReviewChanges, onRequestChanges, onClose }: {
   item: Pick<WorkItem, "id" | "pending_gate" | "chain_definition" | "budget_cap" | "running_time">;
   gate: string;
   /** The item's recent events: the agent reviewer's outcome at this gate. */
-  events?: KraftEvent[];
+  events: KraftEvent[];
   /** GET /artifact, read by the page (its digest also rides on the page's Approve). */
   doc: Fetched<WorkItemArtifact> | null;
   /** The task that wrote the document, by path, when the chain says. */
@@ -75,6 +75,7 @@ export function GateReview({ item, gate, events = [], doc, by, files, threads, i
       </div>
       {outcome && (
         <section className="rv-gate-next rv-gate-auto" aria-label="Agent review">
+          <span>Reviewer:</span>
           <Badge tone={CHIP_TONE[OUTCOME[outcome.kind].tone]}>{capitalise(OUTCOME[outcome.kind].word)}</Badge>
           {outcome.note && <span>{outcome.note}</span>}
         </section>

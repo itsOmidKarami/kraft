@@ -1087,10 +1087,10 @@ class GateNode(BaseModel):
     #: here, and that check is now genuinely defence rather than the only door.
     auto_review: AgentTask | None = None
     #: What `auto_review`'s verdict may do: `decides` (approve, reject, fix) or
-    #: `CHECKS_FIRST` (reject, or leave the gate to the person). None means
-    #: `decides`; a string default would stamp the key on every stored gate,
-    #: since `MaterializedChain.to_json` writes every field. A mode on a gate
-    #: with no reviewer is inert rather than an error, so no validator.
+    #: `CHECKS_FIRST` (reject, or leave the gate to the person). None (unset)
+    #: means `decides`; `MaterializedChain.to_json` writes every field, so a
+    #: stored gate carries `null` for it. A mode on a gate with no reviewer is
+    #: inert rather than an error, so no validator.
     auto_review_mode: Literal["decides", "checks_first"] | None = None
     #: `chain-finalized-remains-a-dedicated-marker`.
     chain_finalized: StrictBool = False

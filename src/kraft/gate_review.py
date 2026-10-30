@@ -481,10 +481,14 @@ async def review(
         # Even a reject: its reasoning was about work it then changed. A remote
         # run's commits are already in this worktree (`remote.runs._publish`).
         if before is None:
-            return "undecided", (
-                "Kraft could not read the checkout before the review, so its verdict was ignored"
-            )
-        if files := read_only.changed(db, row, launch, worktree, before):
+            # In place, a launch refused before its take never read the
+            # checkout: that is a run that did not finish, judged below.
+            if status in ADVANCING:
+                return "undecided", (
+                    "Kraft could not read the checkout before the review, "
+                    "so its verdict was ignored"
+                )
+        elif files := read_only.changed(db, row, launch, worktree, before):
             return "undecided", (
                 "The reviewer changed files, so its verdict was ignored; its changes are "
                 "still in the worktree: " + read_only.named(files)

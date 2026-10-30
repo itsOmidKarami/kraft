@@ -227,6 +227,7 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 .ip-files li { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; color: var(--text-sub); }
 .ip-files .is-mono { overflow-wrap: anywhere; }
 .ip-notes { margin: 0; padding-left: 16px; font-size: var(--fs-meta); color: var(--text); }
+.ip-review-note { margin: 0; font-size: var(--fs-meta); color: var(--text); white-space: pre-line; overflow-wrap: anywhere; }
 
 /* Document viewer (prototype lines 278–283): a full-height drawer on the right over a scrim. */
 .dv-scrim { position: fixed; inset: 0; z-index: 60; background: var(--scrim); }
