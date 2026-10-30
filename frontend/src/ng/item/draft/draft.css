@@ -42,3 +42,8 @@
   .idr-full { display: none; }
   .idr-short { display: inline; }
 }
+.idr-custom { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.idr-custom-what { margin: 0 0 4px; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-label); color: var(--text); }
+.idr-custom-where { font-size: var(--fs-meta); color: var(--text-muted); }
+.idr-custom-value { margin: 0; max-height: 280px; overflow: auto; }
+.idr-custom-value:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }

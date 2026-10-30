@@ -29,11 +29,13 @@ export interface DraftState {
   /** Workspace members picked (member ids), and the root-pointer policy. */
   members: string[];
   pointer: "ignore" | "bump";
+  /** The chain's YAML while this item runs a one-off chain of its own (`chain` is then ignored); null for a library chain. */
+  oneOff: string | null;
 }
 
 export const emptyDraft = (p: Partial<DraftState> = {}): DraftState => ({
   title: "", brief: "", repo: "", chain: "", spec: "", plan: "", bead: "", after: [], skip: [], autoEscalate: false, autoGate: true,
-  budget: "", attempts: "", wallMin: "", nodeAttempts: {}, nodeWallMin: {}, members: [], pointer: "ignore", ...p,
+  budget: "", attempts: "", wallMin: "", nodeAttempts: {}, nodeWallMin: {}, members: [], pointer: "ignore", oneOff: null, ...p,
 });
 
 const num = (s: string | undefined) => {
@@ -62,7 +64,7 @@ export function nodeOverrides(d: DraftState, nodes: ChainNode[]): Record<string,
 }
 
 /** `POST /work-items`' body for the draft (and, with autostart false, its dry run). */
-export function draftBody(d: DraftState, nodes: ChainNode[], workspace: string | null, autostart: boolean) {
+export function draftBody(d: DraftState, nodes: ChainNode[], workspace: string | null, autostart: boolean, digest: string | null = null) {
   const attachments = (["spec", "plan"] as const).filter((k) => d[k].trim()).map((k) => ({ kind: k, path: d[k].trim() }));
   const budget = num(d.budget);
   const overrides = nodeOverrides(d, nodes);
@@ -70,7 +72,7 @@ export function draftBody(d: DraftState, nodes: ChainNode[], workspace: string |
     title: d.title.trim(),
     description: d.brief.trim(),
     repo: d.repo,
-    chain_template: d.chain,
+    ...(d.oneOff != null ? { one_off_chain: d.oneOff, ...(digest ? { approve_one_off: digest } : {}) } : { chain_template: d.chain }),
     attachments,
     ...(d.bead.trim() ? { implements_beads: [d.bead.trim()] } : {}),
     ...(d.after.length ? { depends_on: d.after } : {}),

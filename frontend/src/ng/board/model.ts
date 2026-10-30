@@ -1,5 +1,6 @@
 import { repoName } from "../../format";
 import type { DisplayStatus, WorkItem } from "../../types";
+import { ONE_OFF } from "../item/chainName";
 
 /** Every list decision of the board, once (W6 brief A.4). Reads the server's
  *  `display_status` and the raw row; nothing is derived on the client. */
@@ -52,7 +53,15 @@ export const gateOf = (i: Pick<WorkItem, "display_status" | "stop" | "pending_ga
 export const stopOf = (i: Pick<WorkItem, "display_status" | "stop">) =>
   i.display_status === "needs_you" || i.display_status === "failed" ? (i.stop?.kind ?? "") : "";
 
+/** What a chain key reads as on screen. The key itself (`@one-off`) stays the filter and grouping value. */
+export const chainLabel = (key: string) => (key === ONE_OFF ? "one-off" : key);
+
+/** The chain an item runs, as a key: the board's filters and groups use it raw. */
 export const chainOf = (i: Pick<WorkItem, "chain_template"> & { chain_definition?: { template_id?: string } | null }) => (i.chain_template || i.chain_definition?.template_id) ?? "default";
+
+/** The chains the items run, as keys, in the order their labels read (`@one-off` sorts as "one-off"). */
+export const chainKeys = (items: Parameters<typeof chainOf>[0][]) =>
+  [...new Set(items.map(chainOf))].sort((a, b) => chainLabel(a).localeCompare(chainLabel(b)));
 
 export function matches(i: WorkItem, f: Filter): boolean {
   if (f.repo && i.repo !== f.repo) return false;
@@ -110,12 +119,12 @@ export function groupsOf(items: WorkItem[], v: BoardView): Group[] {
   const needs = shown.filter((i) => groupOf(i) === "needs");
   const rest = shown.filter((i) => groupOf(i) !== "needs");
   const keyOf = (i: WorkItem) => (v.group === "repo" ? i.repo : chainOf(i));
-  const keys = [...new Set(rest.map(keyOf))].sort((a, b) => a.localeCompare(b));
+  const keys = [...new Set(rest.map(keyOf))].sort((a, b) => (v.group === "repo" ? a.localeCompare(b) : chainLabel(a).localeCompare(chainLabel(b))));
   return [
     ...(needs.length ? [{ key: "needs", label: "Needs you", rows: needs, total: needs.length, done: false }] : []),
     ...keys.map((k) => {
       const rows = rest.filter((i) => keyOf(i) === k);
-      return { key: `${v.group}:${k}`, label: v.group === "repo" ? repoName(k) : k, rows, total: rows.length, done: false };
+      return { key: `${v.group}:${k}`, label: v.group === "repo" ? repoName(k) : chainLabel(k), rows, total: rows.length, done: false };
     }),
   ];
 }

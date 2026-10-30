@@ -335,3 +335,65 @@ def test_the_forge_view_verbs_call_their_client_read(
     assert seen == [args]
     out = capsys.readouterr().out
     assert (json.loads(out) == payload) if as_json else line in out
+
+
+@pytest.mark.parametrize(
+    ("one_off", "line"),
+    [
+        (
+            {"extends": "default", "custom": 0, "needs_review": False, "approval": None},
+            "one-off · extends default · library-only",
+        ),
+        (
+            {"extends": "default", "custom": 2, "needs_review": True, "approval": None},
+            "one-off · extends default · awaiting review",
+        ),
+        (
+            {
+                "extends": "default",
+                "custom": 1,
+                "needs_review": False,
+                "approval": {"by": "human", "door": "web", "at": "2026-10-09T09:00:00+00:00"},
+            },
+            "one-off · extends default · approved by human (web) 2026-10-09T09:00:00+00:00",
+        ),
+    ],
+    ids=["library-only", "awaiting-review", "approved"],
+)
+def test_show_names_a_one_off_chain_and_where_it_stands(monkeypatch, capsys, one_off, line):
+    from kraft.client import transport
+
+    async def get(path, **_):
+        return {
+            "id": "w1",
+            "status": "paused",
+            "title": "t",
+            "chain_definition": {"nodes": []},
+            "one_off": one_off,
+        }
+
+    monkeypatch.setattr(transport, "_get", get)
+    cli.main(["view", "show", "w1"])
+    assert line in capsys.readouterr().out
+
+
+def test_show_keeps_the_raise_hint_after_the_stop_with_a_one_off_chain(monkeypatch, capsys):
+    from kraft.client import transport
+
+    async def get(path, **_):
+        return {
+            "id": "w1",
+            "status": "needs_human",
+            "current_node_id": "plan",
+            "stop_reason": "budget cap reached",
+            "suggested_action": None,
+            "stop": {"kind": "budget", "scope": "work_item"},
+            "chain_definition": {"nodes": []},
+            "one_off": {"extends": "default", "custom": 0, "needs_review": False, "approval": None},
+        }
+
+    monkeypatch.setattr(transport, "_get", get)
+    cli.main(["view", "show", "w1"])
+    keys = [line.split()[0] for line in capsys.readouterr().out.splitlines() if line.strip()]
+    assert keys.index("stop_reason") < keys.index("stop_kind") < keys.index("next")
+    assert keys.index("status") < keys.index("chain")

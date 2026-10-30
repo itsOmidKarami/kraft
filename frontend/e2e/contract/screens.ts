@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import type { Scenario, Variant } from "./mocks/fixtures";
-import { withCapLimit, withFixRoundOutcome, withProducer, withReviewer, withScopes, withStop, withTestResult } from "./mocks/fixtures";
+import { withCapLimit, withFixRoundOutcome, withOneOffPending, withProducer, withReviewer, withScopes, withStop, withTestResult } from "./mocks/fixtures";
 import { app, editorsRoute, item, type AppOpts } from "./kit";
 
 /**
@@ -43,6 +43,20 @@ const appSearch = (q: string, then?: (p: Page) => Promise<unknown>) => async (p:
   if (q) await p.getByRole("combobox", { name: /search/i }).fill(q);
   await p.waitForTimeout(700);
   if (then) await then(p);
+};
+/** The new-item page with its chain customized into a one-off chain, then `then`. */
+const appOneOff = (then?: (p: Page) => Promise<unknown>) => async (p: Page) => {
+  await app(p, `/work-items/new?${new URLSearchParams({ repo: "/Users/dev/code/kraft-plugins", chain: "default", title: "Load test it" })}`, { ready: (pg) => pg.getByText(/nodes run ·/).first().waitFor() });
+  await p.getByRole("button", { name: /^default/ }).click();
+  await p.getByRole("menuitem", { name: "Customize for this item" }).click();
+  await p.waitForTimeout(800);
+  if (then) await then(p);
+};
+const addCustomNode = async (p: Page) => {
+  await p.locator(".seam").first().click();
+  await p.getByRole("menuitem", { name: /Custom agent node/ }).click();
+  await p.getByRole("textbox", { name: "Node id" }).fill("load_test");
+  await p.getByRole("textbox", { name: "Prompt" }).fill("run k6 against staging");
 };
 /** The item header's parts: the main button's menu, ⋮, the four cards. */
 const appHeader = (sc: string, then: (p: Page) => Promise<unknown>) => async (p: Page) => { await app(p, item(sc)); await then(p); await p.waitForTimeout(500); };
@@ -164,6 +178,11 @@ export const STATES: State[] = [
   { area: "new-item", state: "composer-filled", app: async (p) => { await app(p, "/?new=1", { ready: (pg) => pg.getByText(/nodes run ·/).waitFor() }); await p.getByRole("textbox", { name: "Title" }).fill("Design the caching layer for document search"); await p.getByRole("textbox", { name: "Brief" }).fill("Cache embeddings by content hash; invalidate on reindex."); await p.waitForTimeout(600); } },
   { area: "new-item", state: "chain-menu", app: async (p) => { await app(p, "/?new=1", { ready: (pg) => pg.getByText(/nodes run ·/).waitFor() }); await p.getByRole("button", { name: /^default/ }).click(); await p.waitForTimeout(400); } },
   { area: "new-item", state: "draft-page", app: (p) => app(p, `/work-items/new?${new URLSearchParams({ repo: "/Users/dev/code/kraft-plugins", chain: "default", title: "Design the caching layer for document search" })}`) },
+  { area: "new-item", state: "one-off", app: appOneOff() },
+  { area: "new-item", state: "one-off-add", app: appOneOff(addCustomNode) },
+  { area: "new-item", state: "one-off-yaml", app: appOneOff((p) => p.getByRole("tab", { name: "YAML" }).click()) },
+  { area: "new-item", state: "one-off-review", app: appOneOff(async (p) => { await addCustomNode(p); await p.getByRole("button", { name: "Create & open →" }).click(); await p.waitForTimeout(800); await p.getByRole("button", { name: "Create paused" }).click(); await p.waitForTimeout(500); }) },
+  { area: "item", state: "start-review", app: async (p) => { await app(p, item("paused"), { tweak: withOneOffPending }); { const s = p.getByRole("banner").getByRole("button", { name: "Start" }); await s.focus(); await p.keyboard.press("Enter"); } await p.waitForTimeout(700); } },
   { area: "new-item", state: "draft-node", app: async (p) => { await app(p, `/work-items/new?${new URLSearchParams({ repo: "/Users/dev/code/kraft-plugins", chain: "default", title: "Design the caching layer for document search" })}`, { ready: (pg) => pg.getByText(/nodes run ·/).first().waitFor() }); await p.waitForTimeout(500); { const n = p.getByRole("button", { name: /^approve spec,/ }).last(); await n.focus(); await p.keyboard.press("Enter"); } await p.waitForTimeout(600); } },
 
   // Chain / node graph (CG-): Templates › Chains, and the item's chain at the wide width
@@ -213,6 +232,7 @@ export const STATES: State[] = [
   { area: "phone", state: "scope", viewport: "phone", app: appPhone(item("running", `/nodes/verification?sel=verification.test.unit_tests&${new URLSearchParams({ scope: ":just test-unit" })}`), { tweak: withScopes, ready: (pg) => pg.getByRole("heading", { level: 1, name: "just test-unit" }).waitFor({ timeout: 8000 }) }) },
   { area: "phone", state: "gate-node", viewport: "phone", app: appPhone(item("needs-gate", "/nodes/final_review")) },
   { area: "phone", state: "gate-review", viewport: "phone", app: appPhone(item("needs-gate", "/review"), { ready: (pg) => pg.locator("main").first().waitFor() }) },
+  { area: "phone", state: "start-review", viewport: "phone", app: async (p) => { await appPhone(item("paused"), { tweak: withOneOffPending })(p); await p.getByRole("button", { name: "Start", exact: true }).click(); await p.waitForTimeout(700); } },
   { area: "phone", state: "new-item", viewport: "phone", app: appPhone("/work-items/new") },
   { area: "phone", state: "search", viewport: "phone", app: appPhone("/search") },
   { area: "phone", state: "analytics", viewport: "phone", app: appPhone("/analytics") },

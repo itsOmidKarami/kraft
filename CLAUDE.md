@@ -18,6 +18,11 @@ test` (add `-k pattern` or a path to target specific tests; use
 `--no-testmon` for a full run). Calling pytest raw skips testmon's
 change-tracking and burns the full ~14min suite.
 
+**With no `.testmondata`, `just test` is a full run too.** testmon has no
+record yet of which tests touch which code: a fresh clone, worktree or
+container runs the whole suite on a bare `just test`. Name the paths you
+changed (`just test tests/<pkg> -n auto`) until it has one.
+
 **Testing guideline:** see `docs/testing.md`. Two tiers (unmarked unit,
 mocked at the adapter seam; `@pytest.mark.e2e("<cli>")` for a real CLI's
 contract) and one rule for every pin: mutate the code it covers and confirm
@@ -57,7 +62,7 @@ ignores it).
 kraft console                               # the terminal UI; needs a terminal, refused in a worker
 kraft view list [--all] [--status=paused]   # the board, scoped to the cwd's repo
 kraft view show [ID]                        # ID defaults to the worktree you are in
-kraft item create "title" [--description "..."] [--spec P] [--plan P] [--no-auto-gate] [--after ID] [--autostart] [--in-place|--worktree]  # files it paused unless --autostart; auto-gate is on unless --no-auto-gate; --in-place runs it in the repo's own checkout
+kraft item create "title" [--description "..."] [--spec P] [--plan P] [--no-auto-gate] [--after ID] [--autostart] [--in-place|--worktree] [--chain-file P]  # files it paused unless --autostart; auto-gate is on unless --no-auto-gate; --in-place runs it in the repo's own checkout
 kraft item set-attachments [ID] [--spec P] [--plan P] [--drop KIND]  # revise a not-yet-started item's documents
 kraft item approve [ID] [--head H] / kraft item reject [ID] --note "why"  # --head: the final review's, from `kraft view show`
 kraft item pause [ID] / kraft item resume [ID] --steer "..."
@@ -70,7 +75,7 @@ kraft item complete [ID] --reason "..." / kraft item cancel [ID] --reason "..."
 kraft item abandon [ID] --reason "..." --yes  # drop an item, deleting its worktree and branch; the reason is kept and closes its bead
 kraft item archive [ID ...] [--reclaimable] [--yes]  # archive finished items, deleting their worktrees; previews, then needs --yes
 kraft item restore [ID]                     # put an archived item back under Done
-kraft item set-chain [ID] --chain C      # a not-yet-started item's chain
+kraft item set-chain [ID] --chain C | --chain-file P  # a not-yet-started item's chain
 kraft item set-overrides [ID] [--model M] [--effort E] / kraft item set-node-override [ID] --node N [...]
 kraft item set-policy [ID] --policy KEY=VALUE [--clear]
 kraft item mr-label LABEL...                # label this item's merge request

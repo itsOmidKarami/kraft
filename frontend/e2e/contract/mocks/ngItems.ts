@@ -122,7 +122,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
   const item: any = {
     id, title, repo: "/Users/dev/code/kraft-plugins",
     description: long ? LONG_DESCRIPTION : "Search re-embeds every candidate document on every query, so large repos take 2–4 s per search. Cache embeddings keyed by document content hash, invalidate them when reindex sees a new hash, and keep the cache bounded. The public search API stays unchanged.",
-    status: "active", chain_template: "default",
+    status: "active", chain_template: "default", one_off: null,
     chain_definition: { template_id: "default", nodes: NG_NODES },
     effective_chain: { template_id: "default", nodes: NG_NODES },
     materialized_chain: FROZEN,

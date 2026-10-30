@@ -352,7 +352,7 @@ async def list_work_items(request: Request):
 
     def _read(c):
         rows = c.execute(
-            "SELECT * FROM work_items WHERE (? OR status != ?) "
+            f"SELECT *, {store.ONE_OFF_SUMMARY_COLUMNS} FROM work_items WHERE (? OR status != ?) "
             "AND (archived_at IS NOT NULL) = ? ORDER BY created_at",
             (include_abandoned, WorkItemStatus.ABANDONED, archived),
         ).fetchall()
@@ -524,6 +524,7 @@ async def list_work_items(request: Request):
             "repo": r["repo"],
             "status": r["status"],
             "chain_template": r["chain_template"],
+            "one_off": store.one_off_view(r),
             # `store.chain_view`, not the raw column: a V1 row's
             # `chain_definition` is `"{}"`, and the board draws its stage bar
             # and names the current node from `chain_definition.nodes`.

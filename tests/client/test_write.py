@@ -208,3 +208,59 @@ def test_filing_without_a_runner_does_not_send_one(tmp_path, monkeypatch):
     monkeypatch.setattr(client.transport, "_send", send)
     asyncio.run(client.create_work_item("t", repo=str(tmp_path)))
     assert "runner" not in sent[0]
+
+
+@pytest.mark.parametrize(
+    "text", ["extends: x", ""], ids=["never-sends-approval", "create-empty-file"]
+)
+def test_create_work_item_files_a_one_off_chain_and_never_approves_it(tmp_path, monkeypatch, text):
+    """A person approves custom content in the web UI; no agent door asks for it."""
+    sent = {}
+
+    async def post(path, payload=None, **kw):
+        sent.update(payload)
+        return 201, {"id": "w1", "status": "paused", "one_off": {"custom": 1}}
+
+    monkeypatch.setattr(client.transport, "_post", post)
+    made = asyncio.run(client.create_work_item("t", repo=str(tmp_path), one_off_chain=text))
+    assert sent["one_off_chain"] == text
+    assert "chain_template" not in sent
+    assert "approve_one_off" not in sent
+    assert made["one_off"] == {"custom": 1}
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "sent"),
+    [
+        pytest.param({"chain": "quick"}, {"chain_template": "quick"}, id="library-chain"),
+        pytest.param(
+            {"one_off_chain": "extends: x"}, {"one_off_chain": "extends: x"}, id="one-off-body"
+        ),
+    ],
+)
+def test_set_chain_sends_exactly_one_of_the_two(monkeypatch, kwargs, sent):
+    seen = {}
+
+    async def patch(path, payload=None, **kw):
+        seen.update(payload)
+        return {"id": "w1"}
+
+    async def resolve(_id=None):
+        return "w1"
+
+    monkeypatch.setattr(client.transport, "_patch", patch)
+    monkeypatch.setattr(client.context, "resolve_work_item", resolve)
+    chain = kwargs.pop("chain", None)
+    asyncio.run(client.set_chain(chain, "w1", **kwargs))
+    assert seen == sent
+
+
+@pytest.mark.parametrize(
+    "both",
+    [("quick", "extends: x"), (None, None)],
+    ids=["both", "neither"],
+)
+def test_set_chain_refuses_both_or_neither(both):
+    chain, text = both
+    with pytest.raises(client.transport.ClientError):
+        asyncio.run(client.set_chain(chain, "w1", one_off_chain=text))

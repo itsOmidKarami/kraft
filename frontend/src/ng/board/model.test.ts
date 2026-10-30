@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DisplayStatus, WorkItem } from "../../types";
 import { DISPLAY_STATUSES } from "../../types/vocab.generated";
 import { detail } from "../item/testkit";
-import { groupOf, groupsOf, type BoardView } from "./model";
+import { chainKeys, groupOf, groupsOf, type BoardView } from "./model";
 
 const item = (id: string, display_status: DisplayStatus, over: Partial<WorkItem> = {}): WorkItem =>
   detail({ id, title: `t-${id}`, display_status, updated_at: `2026-09-13T0${id.length % 10}:00:00Z`, ...over });
@@ -105,5 +105,16 @@ describe("groupsOf", () => {
     expect(g.rows.map((r) => r.id)).toEqual(["333", "4444"]);
     expect(groupsOf(done, view({ doneCap: null }))[0].rows).toHaveLength(4);
     expect(groupsOf(done, view({ group: "repo", doneCap: 2 }))[0].rows).toHaveLength(4);
+  });
+
+  it("reads a one-off chain as one-off, in its place among the labels, and keeps the raw key to filter by", () => {
+    const items = [
+      item("a", "running", { chain_template: "quick-task" }),
+      item("b", "running", { chain_template: "@one-off" }),
+      item("c", "running", { chain_template: "default" }),
+    ];
+    expect(chainKeys(items)).toEqual(["default", "@one-off", "quick-task"]);
+    expect(labels(items, view({ group: "chain" }))).toEqual(["default:c", "one-off:b", "quick-task:a"]);
+    expect(groupsOf(items, view({ filter: { q: "", repo: "", chain: "@one-off", gate: "", stop: "" } })).flatMap((g) => g.rows.map((r) => r.id))).toEqual(["b"]);
   });
 });

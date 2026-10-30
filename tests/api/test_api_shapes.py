@@ -15,7 +15,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 import pytest
-from support.api import _poll_events, _post_default
+from support.api import CUSTOM_ONE_OFF, _one_off, _poll_events, _post_default
 from support.harness import connect_repo
 
 from kraft.api import app
@@ -109,6 +109,7 @@ PROBES: dict[str, dict[str, str]] = {
         "sid": "$SESSION",
         "format": "jsonl",
     },
+    "GET /api/work-items/{wid}/one-off": {"wid": "$ONE_OFF"},
     "GET /api/work-items/{wid}/threads": {"wid": "$ITEM"},
     "GET /api/workers": {},
 }
@@ -160,9 +161,9 @@ def _url(route: str, ids: dict[str, str]) -> str:
     return f"{path}?{urlencode(query)}" if query else path
 
 
-def collect(client, wid: str, filed: str) -> dict[str, dict]:
+def collect(client, wid: str, filed: str, one_off: str) -> dict[str, dict]:
     """Each probed route's parameters and answer, `{"params", "shape"}`, the item `wid`
-    standing in for `$ITEM` and `filed` for `$FILED`."""
+    standing in for `$ITEM`, `filed` for `$FILED` and `one_off` for `$ONE_OFF`."""
     item = client.get(f"/api/work-items/{wid}").json()
     docs = []
     for _ in range(100):  # the index links the spec node's documents a moment after its gate
@@ -173,6 +174,7 @@ def collect(client, wid: str, filed: str) -> dict[str, dict]:
     ids = {
         "$ITEM": wid,
         "$FILED": filed,
+        "$ONE_OFF": one_off,
         "$SESSION": item["worker_sessions"][0]["id"],
         "$DOC": docs[0]["document_id"],
         "$REPO": item["repo"],
@@ -210,7 +212,8 @@ def shapes(client, repo) -> dict[str, dict]:
         f"/api/drafts/chains/default/files/{chain}",
         json={"text": text.replace("approve the specification", "approve the spec")},
     ).raise_for_status()
-    return collect(client, wid, filed)
+    one_off = _one_off(client, repo, CUSTOM_ONE_OFF)
+    return collect(client, wid, filed, one_off)
 
 
 @pytest.mark.parametrize(

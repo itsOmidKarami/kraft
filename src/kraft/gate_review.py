@@ -519,6 +519,11 @@ async def review(
         # Even a reject: its reasoning was about work it then changed. A remote
         # run's commits are already in this worktree (`remote.runs._publish`).
         doc_is = await asyncio.to_thread(_document, run_dirs, work_item_id, watched)
+        # The document the person would now read: one the reviewer wrote where
+        # an older item kept it, or in the new place over that, is an edit too.
+        now = await asyncio.to_thread(executor.gate_artifact, run_dirs, row, gate)
+        docs = {watched} if doc_is != doc_was else set()
+        docs |= {now} if now not in (None, watched) else set()
         if before is None:
             # In place, a launch refused before its take never read the
             # checkout: that is a run that did not finish, judged below.
@@ -528,7 +533,7 @@ async def review(
                     "so its verdict was ignored"
                 )
         elif files := read_only.changed(db, row, launch, worktree, before) + (
-            [str(item_paths.path_of(run_dirs, work_item_id, watched))] if doc_is != doc_was else []
+            [str(item_paths.path_of(run_dirs, work_item_id, d)) for d in sorted(docs)]
         ):
             return "undecided", (
                 "The reviewer changed files, so its verdict was ignored; its changes are "

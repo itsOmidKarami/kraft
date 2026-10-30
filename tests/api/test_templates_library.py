@@ -184,6 +184,27 @@ def test_a_library_save_refuses_what_the_chain_save_refuses(client, templates_di
     assert snapshot(templates_dir) == before
 
 
+def _expanding_to(nodes: int) -> str:
+    """A few lines of YAML that expand to about `nodes` nodes through one alias."""
+    return (
+        "a: &a [" + ",".join(["1"] * 1000) + "]\nb: [" + ",".join(["*a"] * (nodes // 1000)) + "]\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("nodes", "refused"),
+    [
+        pytest.param(30_000, False, id="past-a-one-off-bound"),
+        pytest.param(300_000, True, id="bomb"),
+    ],
+)
+@pytest.mark.parametrize("url", ["/api/templates/library", "/api/templates/chains/scratch"])
+def test_a_save_is_bounded_far_above_a_one_off_chain(client, templates_dir, url, nodes, refused):
+    response = client.put(url, json={"text": _expanding_to(nodes)})
+    assert response.status_code == 422
+    assert ("too large" in response.json()["detail"]) is refused
+
+
 def test_a_library_save_is_written_verbatim_and_live(client, templates_dir):
     path = templates_dir / "library.yaml"
     text = path.read_text() + "\n# a comment survives\n"

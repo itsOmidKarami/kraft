@@ -10,7 +10,8 @@ import { useDraft } from "../draft/context";
 import { lines } from "../draft/view";
 import { age, recent as recentLines } from "../events";
 import type { ItemDetail } from "../useItem";
-import { chainName } from "../chainName";
+import { chainName, chainTitle } from "../chainName";
+import { approvalLine } from "../oneOff";
 import { DocViewer } from "../DocViewer";
 import { gateName, nameOf } from "../../board/rowText";
 import { budgetRaise, neverStarted, spentLine } from "../status";
@@ -75,6 +76,7 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc, onMore
           </div>
         )}
         {cap && <div><dt>spent</dt><dd>{spentLine(item)}</dd></div>}
+        {item.one_off && item.one_off.custom > 0 && <div><dt>one-off chain</dt><dd>{approvalLine(item.one_off.approval, now)}</dd></div>}
         {/* The header chip's path is a hover tip, which a tap closes: here touch reads it too. */}
         {item.in_place && <div><dt>checkout</dt><dd className="is-mono">{breakable(item.worktree_path ?? item.repo)}</dd></div>}
         {/* Off the item page (the board's peek), which chain and repo: the page's crumb says them there. */}
@@ -288,7 +290,7 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget, ap
           </ol>
         </>
       )}
-      <p className="ip-foot is-mono">{chainName(item)} chain · {repoName(item.repo)} · frozen at intake</p>
+      <p className="ip-foot is-mono">{chainTitle(item)} · {repoName(item.repo)} · frozen at intake</p>
     </>
   );
 }

@@ -85,6 +85,12 @@ export const RELEASED = { where: "nothing left to wait for", text: "Kraft queues
  *  yet" that decides whether its config can still be edited. */
 export const neverStarted = (item: Pick<WorkItem, "display_status" | "current_node_id">) => item.display_status === "paused" && !item.current_node_id;
 
+/** A one-off item the walk stopped before its first node with its chain still unapproved (rare; it fails closed): there
+ *  is no node to retry, so Start opens the review, whose approval leaves it paused for the resume that starts it. The
+ *  server's own rule (`approve_one_off` takes only a `config` stop): a queued or blocked item with no node is not one. */
+export const strandedOneOff = (item: Pick<WorkItem, "current_node_id"> & Partial<Pick<WorkItem, "one_off" | "stop">>) =>
+  !!item.one_off?.needs_review && !item.current_node_id && item.stop?.kind === "config";
+
 /** What `escalatable` reads: the detail's sessions and pending gate are optional, a board row has neither. */
 type EscalateFields = Pick<WorkItem, "display_status" | "current_node_id"> & Partial<Pick<WorkItem, "pending_gate" | "stop">> & Doors & { worker_sessions?: { status: string; hook_point: string }[] };
 
@@ -176,11 +182,12 @@ function mainAdmitted(item: Pick<WorkItem, "stop"> & Doors, main: Main): boolean
  *  (`budgetRaise`) has Retry instead. A never-started item (`neverStarted`) has
  *  Start, and nothing to escalate or mark complete. Pause only where `/pause`
  *  takes it (`pausable`); an escalated item has Retry, which outranks its turn. */
-export function headerState(item: Pick<WorkItem, "display_status" | "stop" | "current_node_id"> & Omit<EscalateFields, "display_status" | "current_node_id">): HeaderState {
+export function headerState(item: Pick<WorkItem, "display_status" | "stop" | "current_node_id"> & Partial<Pick<WorkItem, "one_off">> & Omit<EscalateFields, "display_status" | "current_node_id">): HeaderState {
   const status = item.display_status ?? "running";
   const first = (ways: Main[]) => ways.find((m) => mainAdmitted(item, m)) ?? null;
   if (neverStarted(item)) return { badge: "NOT STARTED", tone: "muted", main: first(["start"]), panel: admits(item, "cancel", true) ? ["cancel"] : [] };
-  const main = first(
+  // Its door is the review's approve, not /resume, which refuses it until then; its badge stays its stop's.
+  const main = strandedOneOff(item) ? "start" : first(
     status === "paused" ? ["resume"]
     : status === "needs_you" ? needsYouMain(item)
     : status === "failed" || status === "escalated" ? ["retry"]

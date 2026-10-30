@@ -245,6 +245,10 @@ async def intake(
     #: `in_place_by`'s answer for this item: with no `target`, whether the
     #: single-repository one runs in place, and the words a refusal names.
     in_place_by: str | None = None,
+    #: A one-off chain's record and any approval given with it, stored as
+    #: `store.create_work_item` takes them. `chain_template` is then `@one-off`.
+    one_off_chain: dict | None = None,
+    one_off_approval: dict | None = None,
 ) -> str:
     title, description = one_line_title(title, description)
     # Drawn before the row is written, since attachments are stored under it
@@ -367,6 +371,8 @@ async def intake(
             policy_override=policy_override,
             source=source,
             bead_priority=bead_priority,
+            one_off_chain=one_off_chain,
+            one_off_approval=one_off_approval,
         )
         if bead_warning:
             # Same transaction as the row: an item with no bead and no record of

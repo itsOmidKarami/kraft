@@ -7,10 +7,14 @@ so it cannot clear the gate), its session filed under the *gate's* node id so
 task -- harness, model, profile -- is the one the gate would re-run on
 rejection, the agent that wrote the code.
 
-It must not change the worktree. Edit and NotebookEdit are denied; Write and
-Bash cannot be, because every agent writes its result file and calls
-`kraft item reply` with them. So the worktree is compared before and after,
-and a change is recorded as `reply_agent_wrote` -- deliberately not a stop:
+It must not change the worktree. It is launched read-only, so its context
+tells it to change nothing and never to commit or run tests. No tool is denied:
+it needs Write and Bash for its result file and `kraft item reply`, and a
+harness that cannot express a deny list would refuse the launch. So the
+worktree is compared before and after, and a change is recorded as
+`reply_agent_wrote`. In place only the branch tip is compared: an uncommitted
+write is reported as `left_uncommitted`, or not at all on a path the person
+already had dirty. A change is deliberately not a stop:
 `read_only.stop` would `mark_needs_human`, which notifies, and this agent
 failing is not a person's problem.
 """
@@ -32,8 +36,6 @@ from kraft.worker import callback as _callback
 from kraft.worker import steering as _steering
 
 logger = logging.getLogger(__name__)
-
-DENIED = ("Edit", "NotebookEdit")
 
 _PROMPT = (
     "A reviewer left comments on this Kraft work item's change, and wants answers "
@@ -171,13 +173,14 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
         harness=inv.harness,
         model=inv.model,
         effort=inv.effort,
-        deny_tools=tuple(dict.fromkeys([*inv.deny_tools, *DENIED])),
+        deny_tools=inv.deny_tools,
         allowed_tools=inv.allowed_tools,
         grants=inv.grants,
         permission_mode=inv.permission_mode,
         method_text=inv.method_text,
         steering_texts=inv.steering_texts,
         sandbox=sandbox,
+        read_only=True,
         checkout=executor.sandbox_checkout(row, launch, worktree) if sandbox else None,
         task_instruction=_PROMPT.format(
             title=row["title"], threads=store.render_note(threads, summary)

@@ -652,6 +652,7 @@
       "id": "_",
       "in_place": "_",
       "mr_ref": "_",
+      "one_off": "_",
       "pending_gate": "_",
       "progress": "_",
       "queued": "_",
@@ -748,6 +749,7 @@
     "node_overrides": {},
     "node_overrides_count": "_",
     "node_passes": {},
+    "one_off": "_",
     "pending_gate": "_",
     "pending_rewind": "_",
     "pending_steer_context": "_",
@@ -1061,6 +1063,48 @@
      "n": "_"
     },
     "then": []
+   }
+  },
+  "GET /api/work-items/{wid}/one-off": {
+   "params": {
+    "wid": "$ONE_OFF"
+   },
+   "shape": {
+    "added": [
+     {
+      "estimate_runs": "_",
+      "estimate_usd": "_",
+      "harnesses": [
+       "_"
+      ],
+      "node": "_"
+     }
+    ],
+    "approval": "_",
+    "authored": {
+     "add": [
+      "_"
+     ],
+     "extends": "_",
+     "id": "_"
+    },
+    "custom": [
+     {
+      "path": "_",
+      "value": "_",
+      "what": "_"
+     }
+    ],
+    "digest": "_",
+    "extends": "_",
+    "needs_review": "_",
+    "provenance": {
+     "nodes": "_",
+     "overrides": "_",
+     "parent": "_",
+     "removed": []
+    },
+    "redrafted": []
    }
   },
   "GET /api/work-items/{wid}/sessions/{sid}/log": {

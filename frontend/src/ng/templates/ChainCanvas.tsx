@@ -1,4 +1,4 @@
-import { useContext, useMemo, useRef, useState } from "react";
+import { useContext, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { ChainArc, ChainNode, Seam } from "../graph/layout";
 import { EDITOR_FIT } from "../graph/camera";
 import { StageGraph } from "../graph/StageGraph";
@@ -31,6 +31,14 @@ type Props = {
   /** Drag to reorder, and the strip that checks the move live (Decisions §9 Reorder). */
   onDrag?: { over: (id: string, to: number) => void; drop: (id: string, to: number) => void; end: () => void };
   strip?: { ok: boolean; text: string } | null;
+  /** A one-off chain's custom nodes: dashed accent ring. */
+  custom?: string[];
+  /** The menu behind a seam, in place of the Templates editor's. */
+  addMenu?: (a: { anchor: RefObject<HTMLElement | null>; at: number; taken: string[]; refused?: string | null; onClose: () => void }) => ReactNode;
+  /** A new item's canvas: nodes by display name, as the item page draws them. */
+  names?: boolean;
+  /** A new item's skips: the node dims and says why ("covered", "skipped"), as on the item page; a problem still wins. */
+  skips?: Record<string, string>;
 };
 
 /** The node an op touches, for the pending highlight (Decided 3). */
@@ -56,7 +64,7 @@ function backArc(r: Result, nodes: NodeA[], i: number): ChainArc[] {
 }
 
 /** Level 1 of the editor: the chain drawn from the draft's model (brief B.2). */
-export function ChainCanvas({ scope, result: r, selected, pending, reserve, refused, onSelect, onOpen, onFocusNode, onEscape, onBackground, onAdd, review, marked = [], onDrag, strip }: Props) {
+export function ChainCanvas({ scope, result: r, selected, pending, reserve, refused, onSelect, onOpen, onFocusNode, onEscape, onBackground, onAdd, review, marked = [], onDrag, strip, custom, addMenu, names, skips }: Props) {
   const authored = authoredNodes(r, scope);
   // An extending chain: each node marked by where it comes from, its parent's removed ones ghosts.
   const parent = extendsOf(r, scope);
@@ -80,7 +88,8 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
       icon: typeof n.icon === "string" ? n.icon : r.resolved?.nodes.find((x) => x.id === n.id)?.icon ?? glyph.icon,
       taskKind: glyph.taskKind,
       state: "plain",
-      mark: change?.kind === "add" ? "add" : change?.kind === "change" || inside ? "change" : undefined,
+      // A one-off chain has no published file to differ from: every node would read as added.
+      mark: custom ? undefined : change?.kind === "add" ? "add" : change?.kind === "change" || inside ? "change" : undefined,
       prob: probs.length > 0 || marked.includes(n.id),
       // Gates on the chain show only the diamond and name (Decisions §9); a gate's origin or inheritance mark still shows, in the tone of that mark.
       ...(probs.length && !gate
@@ -90,7 +99,9 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
           : inhMeta
             ? { meta: inhMeta, metaTone: inh!.origin === "added" ? "green" as const : "amber" as const }
             : {}),
+      ...(skips?.[n.id] && !probs.length ? { skipped: true, meta: skips[n.id], metaTone: "amber" as const } : {}),
       pending: busy.has(n.id),
+      custom: custom?.includes(n.id),
     };
   });
   if (parent && !review) {
@@ -142,6 +153,7 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
         fit={EDITOR_FIT}
         // A long chain draws under its overview; its nodes keep their ids, which are what an author edits.
         overview
+        names={names}
         readMeta
         onDrag={review || readOnly ? undefined : drag}
         reserve={reserve}
@@ -157,7 +169,8 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
       />
       {!nodes.length && !readOnly && !unapplied && <Empty className="tpl-empty-chain">Add the first node with +</Empty>}
       {strip && <p className={`tpl-strip${strip.ok ? "" : " is-bad"}`} role="status">{strip.text}</p>}
-      {menu !== null && (
+      {menu !== null && addMenu && addMenu({ anchor, at: parent ? live(menu) : menu, taken: [...authored.map((n) => n.id), ...(r.extending?.removed.map((g) => g.id) ?? [])], refused, onClose: close })}
+      {menu !== null && !addMenu && (
         <SeamMenu
           anchor={anchor}
           taken={[...authored.map((n) => n.id), ...(r.extending?.removed.map((g) => g.id) ?? [])]}

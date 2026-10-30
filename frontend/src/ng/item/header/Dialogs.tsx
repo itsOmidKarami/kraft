@@ -43,7 +43,7 @@ export function EscalateCard({ id, anchor, threads, onClose, onDone }: CardProps
         <h2 className="item-pop-title">Escalate this item</h2>
         <p className="item-muted">The escalation agent reads the whole item: every node, round, finding and earlier turn. It either decides and resumes, or comes back to you with a question. The run keeps going meanwhile.</p>
         <Field label="Message" error={error}>
-          <textarea className="item-input" rows={3} placeholder={`What should it look at? (required) e.g. "the review keeps flagging the same race; decide if it's real"`} value={message} onChange={(e) => setMessage(e.target.value)} onKeyDown={sendOnModEnter(go, !busy && !!message.trim())} />
+          <textarea className="item-input" rows={3} placeholder={`What should it look at? (required) e.g. "the review keeps flagging the same race; decide if it's real"`} value={message} onChange={(e) => setMessage(e.target.value)} aria-invalid={false} onKeyDown={sendOnModEnter(go, !busy && !!message.trim())} />
         </Field>
         {last && <label className="item-check"><input type="checkbox" checked={fresh} onChange={(e) => setFresh(e.target.checked)} /> Start a new thread</label>}
         {threadHint && <p className="item-muted">{threadHint}</p>}
@@ -81,7 +81,7 @@ export function CompleteCard({ id, anchor, onClose, onDone }: CardProps) {
         <EndFacts rows={rows} />
         <label className="item-check"><input type="checkbox" checked={beads} onChange={(e) => setBeads(e.target.checked)} /> Also close its beads</label>
         <Field label="Reason" hint={GOES_IN_THE_RUN_LOG} error={error}>
-          <textarea className="item-input" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} onKeyDown={sendOnModEnter(go, !busy && !!reason.trim())} />
+          <textarea className="item-input" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} onKeyDown={sendOnModEnter(go, !busy && !!reason.trim())} aria-invalid={false} />
         </Field>
         <div className="item-actions">
           <Button variant="primary" disabled={busy || !reason.trim()} onClick={go}>Mark complete</Button>
