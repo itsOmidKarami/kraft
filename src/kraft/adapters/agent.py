@@ -1190,9 +1190,12 @@ async def _run_agent_task(
     )
     in_place = item_row is not None and store.is_in_place(item_row)
     in_copy = in_copy and in_place
+    probe_cwd = cwd
     if in_copy:
-        # Empty until `before_launch` fills it; everything before runs in it.
+        # Empty until `before_launch` fills it, which refuses a folder that is not:
+        # a CLI asked something before then runs in the session's own folder.
         Path(cwd).mkdir(parents=True, exist_ok=True)
+        probe_cwd = Path(cwd).parent
     reach = _harness_reach(item_row, h)
     ctx = build_context(
         usage_source=h.capabilities["usage"].source,
@@ -1341,7 +1344,7 @@ async def _run_agent_task(
         except _sandbox.SandboxNotReady:
             found = None  # the backend's own probe refuses this launch, by name
         else:
-            found = await _cli_version(exe, h.id, cwd, oneshot_runner)
+            found = await _cli_version(exe, h.id, probe_cwd, oneshot_runner)
         if found is not None and _harness.version_key(found) < _harness.version_key(h.min_version):
             raise LaunchRefused(
                 f"harness {harness!r} ({h.path}) needs {shlex.join(exe)} {h.min_version} or newer, "
@@ -1400,7 +1403,7 @@ async def _run_agent_task(
                     else None
                 )
                 hook_argv = await _hook_install.codex_hook_flags(
-                    exe, _hook_install.hook_argv(h.id, sandbox), Path(cwd), oneshot_runner
+                    exe, _hook_install.hook_argv(h.id, sandbox), Path(probe_cwd), oneshot_runner
                 )
             except (_hook_install.CodexTrustError, _sandbox.SandboxNotReady) as exc:
                 # Never launched unenforced, never with every hook trusted.

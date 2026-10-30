@@ -180,6 +180,43 @@ async def test_a_copy_that_fails_ends_the_session_and_raises(item_on, monkeypatc
     assert git(it.repo, "for-each-ref", branch) == ""
 
 
+@pytest.mark.parametrize(
+    ("harness", "probe", "kw"),
+    [
+        ("opencode", "_cli_version", {}),
+        ("codex", "_hook_install.codex_hook_flags", {"deny_tools": ("Bash",)}),
+    ],
+    ids=["version-probe", "codex-hook-probe"],
+)
+async def test_a_copy_launchs_cli_probes_run_outside_the_empty_copy(
+    item_on, monkeypatch, harness, probe, kw
+):
+    """The copy is empty until the lease is taken, and is refused if it is not:
+    a CLI asked something before then, which may leave a file where it runs, is
+    asked in the session's own folder, never the copy."""
+    it = await item_on([v1_node()], status="needs_human", target=IN_PLACE)
+    git(it.repo, "branch", store.branch_for(it.row()))
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    copy = inplace.copy_path(it.run_dirs, it.id, "s1")
+    asked = []
+
+    async def probe_writing_its_cwd(exe, name, cwd, runner=None):
+        asked.append(Path(cwd))
+        (Path(cwd) / "probed").write_text("")
+        return () if harness == "codex" else None
+
+    monkeypatch.setattr(f"kraft.adapters.agent.{probe}", probe_writing_its_cwd)
+
+    status = await _outside_the_walk(
+        it, harness=harness, cwd=copy, in_copy=True, read_only=True, **kw
+    )
+
+    assert status == "done"
+    assert (copy / ".git").is_dir()
+    assert asked == [copy.parent]
+    assert not (copy / "probed").exists()
+
+
 def _outside_the_walk(it, **kw):
     return agent.run_agent_task(
         it.database,
