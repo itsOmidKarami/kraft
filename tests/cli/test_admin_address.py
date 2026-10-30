@@ -3,6 +3,7 @@ refuses one already answering, and a port lost after that probe."""
 
 from __future__ import annotations
 
+import logging
 import socket
 import subprocess
 import sys
@@ -116,11 +117,18 @@ def _has_ipv6_loopback() -> bool:
 
 
 _IPV6 = pytest.mark.skipif(not _has_ipv6_loopback(), reason="no IPv6 loopback for localhost")
-#: Two addresses one name gives, each its own socket: any 127/8 address binds on Linux.
-_TWO = [
-    (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0)),
-    (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.2", 0)),
-]
+
+
+def _infos(*addresses):
+    return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", a) for a in addresses]
+
+
+#: Any 127/8 address binds on Linux: a name's second address on loopback.
+_LINUX = pytest.mark.skipif(sys.platform != "linux", reason="127.0.0.2 binds on Linux")
+#: An address no interface here has (TEST-NET-1): its bind is EADDRNOTAVAIL.
+_ELSEWHERE = ("192.0.2.1", 0)
+#: The port a listening socket holds on 127.0.0.2 when the row runs.
+_HELD = -1
 
 
 @pytest.mark.parametrize(
@@ -129,24 +137,62 @@ _TWO = [
         pytest.param("127.0.0.1", None, {("127.0.0.1", False)}, id="one-address"),
         pytest.param(
             "two-addresses",
-            _TWO,
+            _infos(("127.0.0.1", 0), ("127.0.0.2", 0)),
             {("127.0.0.1", False), ("127.0.0.2", False)},
             id="a-name-with-two-addresses",
-            marks=pytest.mark.skipif(sys.platform != "linux", reason="127.0.0.2 binds on Linux"),
+            marks=_LINUX,
         ),
         pytest.param(
             "localhost", None, {("127.0.0.1", False), ("::1", True)}, id="localhost", marks=_IPV6
         ),
         pytest.param("::", None, {("::", True)}, id="ipv6-wildcard-is-ipv6-only", marks=_IPV6),
+        pytest.param(
+            "moved",
+            _infos(("127.0.0.1", 0), _ELSEWHERE),
+            {("127.0.0.1", False)},
+            id="an-address-not-on-this-machine-is-skipped",
+        ),
+        # Never started with nothing to serve: a `bind:` address DHCP has moved.
+        pytest.param(
+            "moved", _infos(_ELSEWHERE), "could not bind on any address", id="no-address-binds"
+        ),
+        pytest.param(
+            "taken",
+            _infos(("127.0.0.1", _HELD), ("127.0.0.2", _HELD)),
+            "address already in use",
+            id="a-taken-address-closes-the-ones-bound",
+            marks=_LINUX,
+        ),
     ],
 )
 def test_a_start_listens_on_every_address_its_host_names(monkeypatch, host, found, want):
     """As asyncio's `create_server` binds, which uvicorn's own start used: one
     socket per address the host resolves to, an IPv6 one never taking IPv4
-    too, each listening before the lifespan runs."""
-    if found is not None:
-        monkeypatch.setattr(cli.admin.socket, "getaddrinfo", lambda *a, **k: found)
-    sockets = cli.admin._listen(host, 0, backlog=8)
+    too, an address this machine lacks skipped, each listening before the
+    lifespan runs. One that cannot bind, or none at all, exits 3 with every
+    socket it bound closed."""
+    with socket.socket() as squatter:
+        bound_first = None
+        if found is not None and found[0][4][1] == _HELD:
+            squatter.bind(("127.0.0.2", 0))
+            squatter.listen(1)
+            port = squatter.getsockname()[1]
+            found = _infos(*((address, port) for address, _ in (i[4] for i in found)))
+            bound_first = found[0][4]
+        if found is not None:
+            monkeypatch.setattr(cli.admin.socket, "getaddrinfo", lambda *a, **k: found)
+        if isinstance(want, str):
+            logged = []
+            monkeypatch.setattr(logging.getLogger("uvicorn.error"), "error", logged.append)
+            with pytest.raises(SystemExit) as stopped:
+                cli.admin._listen(host, 0, backlog=8)
+            assert stopped.value.code == 3
+            assert want in str(logged[0])
+            if bound_first is not None:
+                with socket.socket() as again:  # what it bound first was closed
+                    again.bind(bound_first)
+            return
+        sockets = cli.admin._listen(host, 0, backlog=8)
     try:
         got = set()
         for s in sockets:
