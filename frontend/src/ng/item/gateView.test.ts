@@ -67,7 +67,7 @@ describe("gateView", () => {
   it.each([
     ["checks_first", "checks_first"],
     ["decides", "decides"],
-    [undefined, undefined],
+    [undefined, "decides"],
   ] as const)("hands the canvas the reviewer's mode from the frozen chain (%s)", (mode, want) => {
     const frozen = JSON.stringify({ chain: { nodes: [{ id: "plan", kind: "exec" }, { id: "plan_approval", kind: "gate", auto_review: { id: "check", kind: "agent" }, ...(mode && { auto_review_mode: mode }) }] } });
     expect(gateView(detail({ materialized_chain: frozen, current_node_id: "plan" }), V1[1], [], 0, { kind: "chain" }, on).reviewer?.mode).toBe(want);

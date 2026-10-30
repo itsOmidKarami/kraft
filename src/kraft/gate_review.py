@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from kraft import caps, events, executor, inplace, item_paths, review_reply, store
+from kraft import caps, events, executor, inplace, item_paths, store
 from kraft import harness as _harness
 from kraft import overrides as _overrides
 from kraft.adapters import agent as _agent
@@ -430,11 +430,10 @@ async def review(
             harness=inv.harness,
             model=inv.model,
             effort=inv.effort,
-            # A reviewer that checks first must not edit (spec "The prompt"):
-            # the denial is a cheap extra defence, as for `review_reply`.
-            deny_tools=tuple(dict.fromkeys([*inv.deny_tools, *review_reply.DENIED]))
-            if cf
-            else inv.deny_tools,
+            # No extra tool denial for a reviewer that checks first: most
+            # harnesses cannot hold one and would refuse the launch. The
+            # before/after snapshot is what catches an edit.
+            deny_tools=inv.deny_tools,
             allowed_tools=inv.allowed_tools,
             grants=inv.grants,
             permission_mode=inv.permission_mode,
@@ -487,7 +486,8 @@ async def review(
             )
         if files := read_only.changed(db, row, launch, worktree, before):
             return "undecided", (
-                "The reviewer changed files, so its verdict was ignored: " + read_only.named(files)
+                "The reviewer changed files, so its verdict was ignored; its changes are "
+                "still in the worktree: " + read_only.named(files)
             )
     result_path = item_paths.session_files(run_dirs, work_item_id, session_id).result
     note = _subprocess.read_concerns(result_path) or ""

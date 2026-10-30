@@ -95,7 +95,7 @@ export function NodeView({ scope, node, libStep, draft, selected, reserve, onPic
         <div className={areaClass}>
           <GateView
             gate={{ id: node, mark: markOf(changeAt(r, node)?.kind), prob: problemsAt(r, node).length > 0, sel: selected.kind === "node" }}
-            reviewer={rev ? { id: String(rev.id ?? "reviewer"), icon: typeof rev.icon === "string" ? rev.icon : undefined, sel: (selected as TSel).path === revPath, prob: problemsAt(r, revPath).length > 0, mark: markOf(changeAt(r, revPath)?.kind), mode: g.auto_review_mode as "decides" | "checks_first" | undefined } : undefined}
+            reviewer={rev ? { id: String(rev.id ?? "reviewer"), icon: typeof rev.icon === "string" ? rev.icon : undefined, sel: (selected as TSel).path === revPath, prob: problemsAt(r, revPath).length > 0, mark: markOf(changeAt(r, revPath)?.kind), mode: (g.auto_review_mode ?? "decides") as "decides" | "checks_first" } : undefined}
             message={typeof g.message === "string" ? g.message : undefined}
             doc={typeof g.artifact === "string" ? { label: g.artifact, onClick: () => onOpen(node) } : undefined}
             reject={target ? { id: target, onClick: () => onFocusNode(target) } : undefined}

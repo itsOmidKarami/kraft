@@ -40,7 +40,7 @@ export function gateView(item: ItemDetail, gate: ChainNode, events: KraftEvent[]
   return {
     gate: { id: gate.id, state: pending ? "current" : decided ? "done" : "todo", sel: sel.kind === "node" && sel.node === gate.id },
     reviewer: path
-      ? { id: taskName(path), state: sessionLook(last, now).state, sel: sel.kind === "task" && sel.task === taskName(path), mode: own?.auto_review_mode ?? undefined, ...(outcome ? { chip: OUTCOME[outcome.kind].word, chipTone: OUTCOME[outcome.kind].tone } : ahead ? { chip: "runs first when reached" } : {}) }
+      ? { id: taskName(path), state: sessionLook(last, now).state, sel: sel.kind === "task" && sel.task === taskName(path), mode: own?.auto_review_mode ?? "decides", ...(outcome ? { chip: OUTCOME[outcome.kind].word, chipTone: OUTCOME[outcome.kind].tone } : ahead ? { chip: "runs first when reached" } : {}) }
       : undefined,
     message: gateMessage(frozen, gate.id),
     doc: pending && item.gate_artifact ? { label: item.gate_artifact.split("/").pop()!, onClick: on.doc } : undefined,

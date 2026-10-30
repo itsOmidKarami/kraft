@@ -108,26 +108,24 @@ async def test_checks_first_verdict_resolution(
 
 
 @pytest.mark.parametrize(
-    "mode,offered,withheld,denies_edits",
+    "mode,offered,withheld",
     [
         pytest.param(
             CHECKS_FIRST,
             ('"verdict": "reject"', '"verdict": "pass"'),
             ('"verdict": "approve"', '"verdict": "fixed"'),
-            True,
             id="checks-first",
         ),
         pytest.param(
             None,
             ('"verdict": "approve"', '"verdict": "fixed"', '"verdict": "reject"'),
             ('"verdict": "pass"',),
-            False,
             id="decides",
         ),
     ],
 )
 async def test_checks_first_instruction_offers_only_reject_and_pass(
-    monkeypatch, database, run_dirs, mode, offered, withheld, denies_edits
+    monkeypatch, database, run_dirs, mode, offered, withheld
 ):
     *_, seen = await _review(
         monkeypatch, database, run_dirs, {"verdict": "pass", "concerns": "ok"}, mode=mode
@@ -135,8 +133,6 @@ async def test_checks_first_instruction_offers_only_reject_and_pass(
     instruction = seen["kwargs"]["task_instruction"]
     assert all(v in instruction for v in offered), instruction
     assert not any(v in instruction for v in withheld), instruction
-    deny = seen["kwargs"]["deny_tools"]
-    assert ("Edit" in deny, "NotebookEdit" in deny) == (denies_edits, denies_edits), deny
 
 
 # -- a reviewer that edits the work ------------------------------------------------------
@@ -155,10 +151,9 @@ async def _at_gate(database, run_dirs, tmp_path, repo, edit, result, *, mode, in
     script = (
         f"{edit}\nprintf '%s' '{json.dumps({'status': 'done', **result})}' > \"$KRAFT_RESULT_PATH\""
     )
-    home = fake_harness_home(tmp_path, ["sh", "-c", script])
-    # A checks-first launch denies edit tools, so the fake must say it can.
-    with (home / "config" / "harnesses" / "fake.yaml").open("a") as harness:
-        harness.write('  deny_tools: { cli: ["--disallowed-tools", "{csv}"] }\n')
+    # A harness that cannot deny tools still runs a checks-first reviewer: the
+    # snapshot, not a tool denial, is what catches an edit.
+    fake_harness_home(tmp_path, ["sh", "-c", script])
     keys = {"auto_review_mode": mode} if mode else {}
     chain = _chain2(run_dirs, target=_IN_PLACE if in_place else None, harness="fake", **keys)
     await _seed_at_gate(database, run_dirs, "w1", chain, auto_gate=True, repo=repo)
@@ -204,7 +199,10 @@ def _sessions(database):
     ]
 
 
-_IGNORED = "The reviewer changed files, so its verdict was ignored: "
+_IGNORED = (
+    "The reviewer changed files, so its verdict was ignored; its changes are still in the "
+    "worktree: "
+)
 _25 = "for i in $(seq 25); do echo x > f$i.txt; done"
 
 
