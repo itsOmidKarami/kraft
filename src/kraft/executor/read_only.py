@@ -72,13 +72,16 @@ def _read(cwd: Path, *, branch: str | None = None) -> tuple[str | None, str | No
     )
 
 
-def snapshot(db, row, launch: LaunchContext | None, worktree) -> Snapshot | None:
+def snapshot(
+    db, row, launch: LaunchContext | None, worktree, *, full: bool = False
+) -> Snapshot | None:
     """The worktree as it stands, or None when it cannot be read safely (the
-    tasks' own dispatch then stops on the same guard)."""
+    tasks' own dispatch then stops on the same guard). `full`: compare an
+    in-place item's folder as a worktree's, for a copy of its branch."""
     if worktree is None or _guard(db, row, launch, Path(worktree)) is not None:
         return None
     return {
-        rel: _read(Path(worktree) / rel, branch=_branch(row))
+        rel: _read(Path(worktree) / rel, branch=None if full else _branch(row))
         for rel in ["", *_builtins.item_mounts(row)]
     }
 
@@ -117,15 +120,18 @@ def _changed_in(cwd: Path, before, after) -> list[str]:
     return sorted(names or {path for _, path in now})
 
 
-def changed(db, row, launch: LaunchContext | None, worktree, before: Snapshot) -> list[str]:
-    """What changed since `before`, repository-relative to the checkout root."""
+def changed(
+    db, row, launch: LaunchContext | None, worktree, before: Snapshot, *, full: bool = False
+) -> list[str]:
+    """What changed since `before`, repository-relative to the checkout root.
+    `full` as `snapshot`'s."""
     refused = _guard(db, row, launch, Path(worktree))
     if refused is not None:
         return [f"(not compared: {refused})"]
     files = []
     for rel, was in before.items():
         cwd = Path(worktree) / rel
-        now = _read(cwd, branch=_branch(row))
+        now = _read(cwd, branch=None if full else _branch(row))
         files += [f"{rel}/{f}" if rel else f for f in _changed_in(cwd, was, now)]
     return files
 

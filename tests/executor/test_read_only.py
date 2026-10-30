@@ -18,7 +18,7 @@ from support.harness import entry_of, git, v1_node, write
 from support.workspace import workspace_item
 
 from kraft import store
-from kraft.executor import dispatch, walk
+from kraft.executor import dispatch, read_only, walk
 from kraft.executor.context import READ_ONLY_VIOLATED, LaunchContext
 from kraft.templates import models as tm
 from kraft.templates.environment import WorkItemTarget
@@ -118,6 +118,20 @@ async def test_a_persons_edit_during_an_in_place_read_only_step_is_not_a_violati
 
     assert it.events("read_only_violated") == []
     assert git(it.repo, "status", "--porcelain") == "M calc.py"
+
+
+@pytest.mark.parametrize(
+    ("full", "files"), [(False, []), (True, ["calc.py"])], ids=["tip-only", "full"]
+)
+async def test_an_in_place_folder_compared_fully_sees_an_uncommitted_write(item_on, full, files):
+    """In place only the branch tip is compared, unless asked for the full
+    comparison: a copy of the branch is Kraft's, never a person's."""
+    it = await item_on([v1_node()], target=_IN_PLACE)
+    git(it.repo, "branch", store.branch_for(it.row()))
+    before = read_only.snapshot(it.database, it.row(), NO_SETUP, it.repo, full=full)
+    write(it.repo, "calc.py", "edited\n")
+
+    assert read_only.changed(it.database, it.row(), NO_SETUP, it.repo, before, full=full) == files
 
 
 def _commits_the_persons_file(cwd: Path) -> None:
@@ -348,8 +362,6 @@ def test_a_recovery_or_fix_loop_step_cannot_be_read_only(fields):
 
 def test_git_failing_the_same_way_twice_still_counts_as_a_change(tmp_path):
     """Unverified is not read-only: identical failed reads must not compare equal."""
-    from kraft.executor import read_only
-
     failed = (None, None, None)
     assert read_only._changed_in(tmp_path, failed, failed) == ["(git could not read it)"]
 
