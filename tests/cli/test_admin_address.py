@@ -61,6 +61,7 @@ async def test_a_start_that_loses_its_port_leaves_running_sessions_alone(
         )
 
     assert proc.returncode == 3, proc.stdout + proc.stderr
+    assert "address already in use" in proc.stderr, "what the troubleshooting page says"
     assert [s["status"] for s in it.sessions()] == ["pending"]
     assert it.status() == "active"
 
@@ -103,3 +104,59 @@ def test_serve_proceeds_when_the_address_is_free(tmp_path, monkeypatch):
     )
     cli.admin._serve()
     assert started == [True]
+
+
+def _has_ipv6_loopback() -> bool:
+    try:
+        with socket.socket(socket.AF_INET6) as s:
+            s.bind(("::1", 0))
+    except OSError:
+        return False
+    return any(i[0] == socket.AF_INET6 for i in socket.getaddrinfo("localhost", 0))
+
+
+_IPV6 = pytest.mark.skipif(not _has_ipv6_loopback(), reason="no IPv6 loopback for localhost")
+#: Two addresses one name gives, each its own socket: any 127/8 address binds on Linux.
+_TWO = [
+    (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0)),
+    (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.2", 0)),
+]
+
+
+@pytest.mark.parametrize(
+    ("host", "found", "want"),
+    [
+        pytest.param("127.0.0.1", None, {("127.0.0.1", False)}, id="one-address"),
+        pytest.param(
+            "two-addresses",
+            _TWO,
+            {("127.0.0.1", False), ("127.0.0.2", False)},
+            id="a-name-with-two-addresses",
+            marks=pytest.mark.skipif(sys.platform != "linux", reason="127.0.0.2 binds on Linux"),
+        ),
+        pytest.param(
+            "localhost", None, {("127.0.0.1", False), ("::1", True)}, id="localhost", marks=_IPV6
+        ),
+        pytest.param("::", None, {("::", True)}, id="ipv6-wildcard-is-ipv6-only", marks=_IPV6),
+    ],
+)
+def test_a_start_listens_on_every_address_its_host_names(monkeypatch, host, found, want):
+    """As asyncio's `create_server` binds, which uvicorn's own start used: one
+    socket per address the host resolves to, an IPv6 one never taking IPv4
+    too, each listening before the lifespan runs."""
+    if found is not None:
+        monkeypatch.setattr(cli.admin.socket, "getaddrinfo", lambda *a, **k: found)
+    sockets = cli.admin._listen(host, 0, backlog=8)
+    try:
+        got = set()
+        for s in sockets:
+            assert s.getsockopt(socket.SOL_SOCKET, socket.SO_ACCEPTCONN) == 1
+            assert not s.get_inheritable()
+            v6only = s.family == socket.AF_INET6 and bool(
+                s.getsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY)
+            )
+            got.add((s.getsockname()[0], v6only))
+        assert got == want
+    finally:
+        for s in sockets:
+            s.close()
