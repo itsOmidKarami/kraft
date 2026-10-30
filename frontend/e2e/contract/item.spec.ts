@@ -1,6 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import type { Scenario } from "./mocks/fixtures";
-import { withBeads, withCapLimit, withEscalationThread, withFailedTests, withFixRoundOutcome, withReviewer, withScopes, withStop, withTestResult } from "./mocks/fixtures";
+import { withBeads, withCapLimit, withEscalationThread, withFailedTests, withFixRoundOutcome, withOneOffPending, withReviewer, withScopes, withStop, withTestResult } from "./mocks/fixtures";
 import { app, away, contract, dragPaneEdge, focusedName, item, pause, type Row } from "./kit";
 
 /** The item page: the side pane, the header's card menu, the log viewer, the chain graph, a gate's pane, and what a stop says. */
@@ -215,6 +215,21 @@ const ROWS: Row[] = [
       expect(body.approve_one_off).toBe("a".repeat(64));
       expect(body.chain_template).toBeUndefined();
       expect(body.one_off_chain).toContain("# add:load_test:");
+    },
+  },
+  {
+    name: "one-off chain: Start on an item with unapproved custom content reads it first, and Approve and start sends the digest it showed, then starts",
+    run: async (p) => {
+      await app(p, item("paused"), { tweak: withOneOffPending });
+      const approve = p.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/one-off/approve"));
+      await p.getByRole("banner").getByRole("button", { name: "Start" }).click();
+      const dialog = p.getByRole("dialog", { name: /Approve this chain, then start/ });
+      await expect(dialog.getByText("run k6").first()).toBeVisible();
+      await expect(dialog.getByText("Custom: read these")).toBeVisible();
+      const resumed = p.waitForRequest((r) => r.method() === "POST" && r.url().includes("/resume"));
+      await dialog.getByRole("button", { name: "Approve and start" }).click();
+      expect((await approve).postDataJSON()).toEqual({ digest: "0".repeat(64), door: "web" });
+      await resumed;
     },
   },
   {

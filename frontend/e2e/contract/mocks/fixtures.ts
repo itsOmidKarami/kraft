@@ -936,6 +936,11 @@ function scoped(b: ItemBundle) {
 
 const testScopes = (n: number, red: number) => Array.from({ length: n }, (_, i) => ({ command: `pytest tests/s${i}`, scope: `tests/s${i}`, passed: i >= red, exit_code: i >= red ? 0 : 1, session_id: `${(i + 1).toString(16).padStart(32, "0")}` }));
 
+/** The paused item never ran, and its one-off chain has custom content nobody approved. */
+export const withOneOffPending = (S: Scenario) => {
+  Object.assign(ngBundle("paused", S).item, { current_node_id: null, one_off: { extends: "default", custom: 1, needs_review: true, approval: null } });
+};
+
 /** The gate's item ran `n` test scopes, the first `red` of them failing. */
 export const withTestResult = (n: number, red: number) => (S: Scenario) => { Object.assign(ngBundle("needs-gate", S).item, { test_result: { scopes: testScopes(n, red), passed: red === 0 } }); };
 

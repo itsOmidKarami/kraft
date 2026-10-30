@@ -13,6 +13,7 @@ import { DraftState, ReviewButton } from "../draft/DraftBar";
 import { retryBody } from "../paths";
 import { archivable, bodyOffers, headerState, menuDoors, neverStarted, type PanelItem } from "../status";
 import type { ItemDetail } from "../useItem";
+import { OneOffReview } from "../OneOffReview";
 import { CancelCard } from "./CancelCard";
 import { CompleteCard, EscalateCard, PauseConfirm } from "./Dialogs";
 import { MainButton, PANEL_LABEL } from "./MainButton";
@@ -99,7 +100,10 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
   const draft = useDraft();
   const node = item.chain_definition.nodes.find((n) => n.id === (item.stop?.node ?? item.current_node_id));
   // Start is a resume from node zero: a never-started item has no current node.
-  const start = () => void run(act.resume(item.id));
+  const startRun = () => void run(act.resume(item.id));
+  // A one-off chain whose custom content nobody approved is read first: Approve and start approves, then resumes.
+  const [reviewing, setReviewing] = useState(false);
+  const start = () => (item.one_off?.needs_review ? setReviewing(true) : startRun());
   // Start never applies a draft, so with one it asks first: Apply and start, or start without it.
   const asksFirst = () => hs.main === "start" && !!draft?.ops.some((o) => !o.passed);
   // `?start=1`: a Start pressed elsewhere (the board's peek, the phone) found a draft and
@@ -108,9 +112,10 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
   const askedHere = params.get("start") === "1";
   const draftStatus = draft?.draft.status;
   useEffect(() => {
-    if (!askedHere || !draft || draftStatus === "loading") return;
+    if (!askedHere || (draft && draftStatus === "loading")) return;
     setParams((p) => { const n = new URLSearchParams(p); n.delete("start"); return n; }, { replace: true });
-    if (asksFirst()) draft.setReviewing(true, start);
+    if (draft && asksFirst()) draft.setReviewing(true, start);
+    else if (item.one_off?.needs_review) setReviewing(true);
     // Once per arrival: the param is gone after this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [askedHere, draftStatus]);
@@ -196,6 +201,7 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
       <Popover anchor={group} open={pausing} notch onClose={() => setPausing(false)} role="dialog" label={queued ? REMOVE_FROM_QUEUE_TITLE : PAUSE_THIS_ITEM}>
         <PauseConfirm queued={queued} busy={busy} error={error} onClose={() => setPausing(false)} onPause={async () => { if (await run(act.pause(item.id))) { setPausing(false); toMain(); } }} />
       </Popover>
+      {reviewing && <OneOffReview itemId={item.id} onClose={() => setReviewing(false)} onApproved={() => { setReviewing(false); startRun(); }} />}
       {cancelling && <CancelCard id={item.id} anchor={group} onClose={() => setCancelling(false)} onDone={() => { setCancelling(false); reload(); toMain(); }} />}
       {escalating && <EscalateCard id={item.id} anchor={group} threads={item.escalation_threads} onClose={() => setEscalating(false)} onDone={() => { setEscalating(false); reload(); toMain(); }} />}
       {completing && <CompleteCard id={item.id} anchor={group} onClose={() => setCompleting(false)} onDone={() => { setCompleting(false); reload(); toMain(); }} />}

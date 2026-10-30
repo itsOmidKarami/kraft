@@ -476,6 +476,14 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
         redrafted: [],
       });
     }
+    if ((m = p.match(/^\/work-items\/([^/]+)\/one-off\/approve$/)) && method === "POST") {
+      const b = req.json() ?? {};
+      if (b.digest !== "0".repeat(64)) return json({ detail: "the one-off chain changed since it was reviewed; review it again" }, 409);
+      const it = S.bundles[m[1]].item;
+      const approval = { by: "human", door: b.door, at: "2026-09-13T10:09:00.000Z", digest: b.digest };
+      it.one_off = { ...it.one_off, needs_review: false, approval };
+      return json({ id: m[1], approval });
+    }
     /* ux2-W8: review threads and comments, kept for the test's life */
     if ((m = p.match(/^\/work-items\/([^/]+)\/threads$/))) {
       const list = threadsOf(m[1]);

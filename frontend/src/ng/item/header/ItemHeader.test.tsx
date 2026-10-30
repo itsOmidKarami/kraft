@@ -105,6 +105,34 @@ describe("ItemHeader", () => {
     expect(writes(calls)).toEqual([{ method: "POST", path: "/work-items/w1/resume", body: { steer: null } }]);
   });
 
+  describe("Start on a one-off chain nobody approved", () => {
+    const NEVER = { status: "paused", display_status: "paused", current_node_id: null, one_off: { extends: "default", custom: 1, needs_review: true, approval: null } } as const;
+    const REVIEW = { custom: [{ path: "add[0].node", what: "adds k6", value: "run k6" }], provenance: null, extends: "default", digest: "d".repeat(64), needs_review: true, added: [], redrafted: [] };
+    const ROUTES = { ...WRITES, "GET /work-items/w1/one-off": [200, REVIEW] as [number, unknown], "POST /work-items/w1/one-off/approve": [200, {}] as [number, unknown] };
+    const sends = (calls: { method: string; path: string }[]) => calls.filter((c) => c.method !== "GET").map((c) => `${c.method} ${c.path}`);
+
+    it("opens the review and resumes nothing until Approve and start", async () => {
+      const calls = stubFetch(ROUTES);
+      show(NEVER);
+      await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
+      const d = await screen.findByRole("dialog", { name: /Approve this chain, then start/ });
+      expect(sends(calls)).toEqual([]);
+      await userEvent.click(within(d).getByRole("button", { name: "Approve and start" }));
+      await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/one-off/approve", "POST /work-items/w1/resume"]));
+    });
+
+    it("the draft's Apply and start approves before it resumes", async () => {
+      const calls = stubFetch({ ...ROUTES, "GET /work-items/w1/draft": answer([ov("implementation", undefined, { budget_usd: 2 })]), "POST /work-items/w1/draft/apply": answer([]) });
+      const it = detail(NEVER);
+      inShell(<ItemDraftProvider item={it} reload={() => {}}><ItemHeader item={it} reload={() => {}} onSettings={() => {}} /><ReviewDialog /></ItemDraftProvider>);
+      await screen.findByText("DRAFT · 1 CHANGE");
+      await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
+      await userEvent.click(within(await screen.findByRole("dialog", { name: "Start with 1 unapplied change?" })).getByRole("button", { name: "Apply and start" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Approve and start" }));
+      await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/draft/apply", "POST /work-items/w1/one-off/approve", "POST /work-items/w1/resume"]));
+    });
+  });
+
   describe("Start with a draft", () => {
     const NEVER = { status: "paused", display_status: "paused", current_node_id: null } as const;
     const DRAFT = { ...WRITES, "GET /work-items/w1/draft": answer([ov("implementation", undefined, { budget_usd: 2 })]), "POST /work-items/w1/draft/apply": answer([]) };
