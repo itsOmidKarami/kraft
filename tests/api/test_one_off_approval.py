@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 from support.api import CUSTOM_ONE_OFF as CUSTOM
-from support.api import _one_off, _orchestrator_db
+from support.api import _come_after, _one_off, _orchestrator_db, _queue_tick, _set_status
 
 from kraft import store
 
@@ -148,3 +148,21 @@ def test_review_shows_filed_provenance(client, repo, templates_dir):
     review = _review(client, wid)
     assert review["provenance"] == before
     assert [a["node"] for a in review["added"]] == ["k6"]
+
+
+def test_start_queue_refuses_unapproved(client, repo):
+    dep = client.post("/api/work-items", json={"title": "dep", "repo": str(repo)}).json()["id"]
+    wid = _one_off(client, repo, CUSTOM)
+    assert _approve(client, wid).status_code == 200
+    _come_after(wid, [dep])
+    assert _resume(client, wid).json()["status"] == "blocked"
+    other = CUSTOM.replace("run k6", "run k7")
+    assert client.patch(f"/api/work-items/{wid}", json={"one_off_chain": other}).status_code == 200
+    _set_status(dep, "completed")
+    _queue_tick(client)
+    events = client.get(f"/api/work-items/{wid}/events").json()
+    [event] = [e for e in events if e["type"] == "work_item_dequeued"]
+    assert event["payload"]["why"] == "refused"
+    assert "no one has approved" in event["payload"]["detail"]
+    item = client.get(f"/api/work-items/{wid}").json()
+    assert item["status"] != "active" and item["worker_sessions"] == []

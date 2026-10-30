@@ -8,6 +8,7 @@ from kraft import events
 from kraft.policy import RETIRED_WAIT_TIMEOUT, deprecated
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import write_status
+from kraft.templates.one_off import ONE_OFF_TEMPLATE
 from kraft.vocab import (
     ChainEvent,
     GateEvent,
@@ -96,9 +97,13 @@ def complete_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
     events.append(conn, work_item_id, ChainEvent.NODE_COMPLETED, {"node_id": node_id})
 
 
+#: A chain can be set only before the item starts, and only while nothing runs it.
+_CHAIN_SETTABLE = "current_node_id IS NULL AND status IN ('paused', 'blocked', 'queued')"
+
+
 def set_chain_template(
     conn: sqlite3.Connection, work_item_id, template_id: str, materialized_chain: str
-) -> None:
+) -> bool:
     """Switch a not-yet-started item onto a different chain
     (Kraft-gwn6): the caller has already 404'd an unknown chain and 409'd a
     started item, and already re-run `ResolvedChain.materialize` the same way
@@ -108,21 +113,62 @@ def set_chain_template(
     chain-review splice path touched the row; this means intake's own
     materialization ran again against a different template, which is a
     different question to answer from the timeline.
+
+    Clears a one-off chain and its approval. False, writing nothing, when the
+    item started since the caller looked.
     """
     old_template_id = conn.execute(
         "SELECT chain_template FROM work_items WHERE id = ?", (work_item_id,)
     ).fetchone()[0]
-    conn.execute(
-        "UPDATE work_items SET chain_template = ?, materialized_chain = ?, updated_at = ? "
-        "WHERE id = ?",
+    done = conn.execute(
+        "UPDATE work_items SET chain_template = ?, materialized_chain = ?, updated_at = ?, "
+        "one_off_chain = NULL, one_off_approval = NULL, one_off_pending = 0 "
+        f"WHERE id = ? AND {_CHAIN_SETTABLE}",
         (template_id, materialized_chain, _now(), work_item_id),
     )
+    if done.rowcount != 1:
+        return False
     events.append(
         conn,
         work_item_id,
         SettingsEvent.CHAIN_TEMPLATE_CHANGED,
         {"from": old_template_id, "to": template_id},
     )
+    return True
+
+
+def set_one_off_chain(
+    conn: sqlite3.Connection, work_item_id, record: dict, materialized_chain: str
+) -> bool:
+    """Replace a not-yet-started item's chain with the one-off chain `record`
+    describes (`deps.OneOff.record`), already re-materialized by the caller.
+    Any approval is dropped: it belonged to the chain that is gone. False,
+    writing nothing, when the item started since the caller looked."""
+    old_template_id = conn.execute(
+        "SELECT chain_template FROM work_items WHERE id = ?", (work_item_id,)
+    ).fetchone()[0]
+    done = conn.execute(
+        "UPDATE work_items SET chain_template = ?, one_off_chain = ?, one_off_approval = NULL, "
+        "one_off_pending = ?, materialized_chain = ?, updated_at = ? "
+        f"WHERE id = ? AND {_CHAIN_SETTABLE}",
+        (
+            ONE_OFF_TEMPLATE,
+            json.dumps(record),
+            1 if record["custom"] else 0,
+            materialized_chain,
+            _now(),
+            work_item_id,
+        ),
+    )
+    if done.rowcount != 1:
+        return False
+    events.append(
+        conn,
+        work_item_id,
+        SettingsEvent.CHAIN_TEMPLATE_CHANGED,
+        {"from": old_template_id, "to": ONE_OFF_TEMPLATE},
+    )
+    return True
 
 
 def one_off_of(row) -> dict | None:

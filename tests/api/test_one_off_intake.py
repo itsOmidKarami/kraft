@@ -4,20 +4,13 @@ from __future__ import annotations
 
 import json
 import re
-import sqlite3
 
 import pytest
 from support.api import CUSTOM_ONE_OFF as CUSTOM
-from support.api import _one_off, _orchestrator_db, _paused
+from support.api import _item_row, _one_off, _paused
 
 LIBRARY_ONLY = "extends: default\nremove: [work_brief]\n"
 MCP = {"X-Kraft-Client": "mcp"}
-
-
-def _row(client, wid):
-    with _orchestrator_db() as c:
-        c.row_factory = sqlite3.Row
-        return dict(c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone())
 
 
 def _create(client, repo, text, *, headers=None, query="", **body):
@@ -40,7 +33,7 @@ def test_files_a_library_only_one_off(client, repo):
     one_off = r.json()["one_off"]
     assert re.fullmatch(r"[0-9a-f]{64}", one_off.pop("digest"))
     assert one_off == {"custom": 0, "approved": False}
-    row = _row(client, r.json()["id"])
+    row = _item_row(r.json()["id"])
     assert row["chain_template"] == "@one-off"
     assert row["one_off_pending"] == 0
     nodes = json.loads(row["materialized_chain"])["chain"]["nodes"]
@@ -51,7 +44,7 @@ def test_files_a_custom_one_off_paused(client, repo):
     r = _create(client, repo, CUSTOM)
     assert r.status_code == 201, r.text
     assert r.json()["one_off"]["custom"] == 1
-    row = _row(client, r.json()["id"])
+    row = _item_row(r.json()["id"])
     assert (row["status"], row["one_off_pending"]) == ("paused", 1)
 
 
@@ -110,7 +103,7 @@ def test_create_approval(client, repo, headers, stale, status, text):
     assert len(items) == (1 if status == 201 else 0)
     if status != 201:
         return
-    row = _row(client, r.json()["id"])
+    row = _item_row(r.json()["id"])
     approved = text is CUSTOM
     assert r.json()["one_off"]["approved"] is approved
     assert row["one_off_pending"] == 0
@@ -124,7 +117,7 @@ def test_custom_one_off_autostart_files_paused(client, repo):
     r = _create(client, repo, CUSTOM, autostart=True)
     assert r.status_code == 201, r.text
     assert r.json()["status"] == "paused"
-    assert _row(client, r.json()["id"])["status"] == "paused"
+    assert _item_row(r.json()["id"])["status"] == "paused"
 
 
 def test_dry_run_one_off(client, repo):

@@ -36,3 +36,11 @@ WHEN the chain a not-yet-started one-off item will run changes, whatever changed
 it, the system SHALL withdraw any approval and SHALL require the review again.
 enforced-by: tests/api/test_one_off_approval.py::test_change_reopens_review[draft-after-approval], tests/api/test_one_off_approval.py::test_change_reopens_review[attachment-retrim]
 origin: src/kraft/db.py §_WORK_ITEMS_ONE_OFF_REOPEN_TRIGGER -- a trigger on `materialized_chain`, so no writer has to remember: a draft applied, an attachment re-trim and a replacement all reopen it.
+
+## REQ duplicate-of-a-one-off-is-unapproved
+
+WHEN a one-off item is duplicated, the system SHALL resolve its authored chain
+again as a fresh filing and SHALL file the copy with no approval, so custom
+content goes through the review again.
+enforced-by: tests/api/test_one_off_replace.py::test_duplicate_one_off[custom], tests/api/test_one_off_replace.py::test_duplicate_one_off[base-gone]
+origin: src/kraft/api/routes/work_items.py §duplicate_work_item -- the copy is a new item and approval belongs to one item's chain. A base chain that has gone gives the resolver's 422 rather than a copy of a frozen snapshot.

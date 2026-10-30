@@ -364,6 +364,13 @@ def _blocked_after(client, repo) -> tuple[str, str]:
     return dep, wid
 
 
+def _item_row(wid: str) -> dict:
+    """The work item's row as stored, every column."""
+    with _orchestrator_db() as c:
+        c.row_factory = sqlite3.Row
+        return dict(c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone())
+
+
 def _orchestrator_db():
     """The running client's database, opened directly: `with _orchestrator_db() as c, c:`."""
     return closing(sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"))

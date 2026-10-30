@@ -751,7 +751,12 @@ async def duplicate_work_item(wid: str, request: Request):
         detail = "; ".join(st.invalid_policy)
         raise HTTPException(503, f"policy config invalid, refusing work: {detail}")
     row = deps._work_item_row(st, wid)
-    if row["chain_template"] is None:
+    one = None
+    if row["chain_template"] == one_off.ONE_OFF_TEMPLATE:
+        # Resolved again from what was authored, as a fresh filing, and unapproved.
+        one = deps.one_off_chain_or_422(st, row["repo"], store.one_off_of(row)["authored"])
+        chain_template, chain = one_off.ONE_OFF_TEMPLATE, one.chain
+    elif row["chain_template"] is None:
         # Not the repo library's `default` now: the copy runs what the original ran.
         deps.library_or_503(st)
         repo_entry = deps.connected_or_422(st, row["repo"])
@@ -822,6 +827,7 @@ async def duplicate_work_item(wid: str, request: Request):
             if item_policy is not None
             else None,
             in_place_by=in_place_by,
+            one_off_chain=one.record if one is not None else None,
         )
     except Exception as exc:  # noqa: BLE001 -- executor.intake raises several unrelated types
         raise HTTPException(502, f"intake failed: {exc}") from exc
@@ -981,6 +987,9 @@ class WorkItemPatch(_OneChain):
     chain_template: str | None = Field(
         default=None, validation_alias=AliasChoices("chain_template", "chain")
     )
+    #: A chain for this item alone, as `POST /work-items` takes it. Exclusive
+    #: with `chain`; drops any approval of the chain it replaces.
+    one_off_chain: str | dict | None = None
     #: `None` (default) leaves the override alone. `{}` clears every field
     #: back to the template's own binding; a non-empty object *replaces* the
     #: whole stored override, as in 1.4 -- a field it does not name, or sends
@@ -1183,6 +1192,10 @@ def _kept_skips(st, row, repo_entry, previous, filed_kinds, new_chain) -> frozen
     skip there."""
     if previous is None:
         return frozenset()
+    if row["chain_template"] == one_off.ONE_OFF_TEMPLATE:
+        # Its own record, never a re-resolve: a switch away still works once the base is gone.
+        recorded = (store.one_off_of(row) or {}).get("skips", [])
+        return frozenset(recorded) & {n.id for n in new_chain.nodes}
     old = deps.scoped_chain_or_422(st, repo_entry, row["chain_template"])
     filed = {n.id for n in old.trim_for_attachments(filed_kinds).nodes}
     skipped = filed - {n.id for n in previous.chain.nodes}
@@ -1223,6 +1236,9 @@ def _retrimmed(row, filed_kinds: frozenset[str], kinds: frozenset[str]) -> str:
     ).to_json()
 
 
+_STARTED = "work item has already started; its chain is fixed for its life"
+
+
 @api_router.patch("/work-items/{wid}")
 async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
     st = request.app.state
@@ -1244,6 +1260,7 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         body.title is None
         and body.description is None
         and body.chain_template is None
+        and body.one_off_chain is None
         and body.agent_overrides is None
         and body.node_overrides is None
         and body.policy is None
@@ -1252,7 +1269,7 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
     ):
         raise HTTPException(
             422,
-            "nothing to patch: send a title, description, chain, agent_overrides, "
+            "nothing to patch: send a title, description, chain, one_off_chain, agent_overrides, "
             "node_overrides, policy, attachments, or budget_usd",
         )
     if body.title is not None and not body.title.strip():
@@ -1290,8 +1307,12 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         added = _validated_attachments(row["repo"], wanted, body.cwd)
         kinds = (kinds - body.attachments.keys()) | {a["kind"] for a in added}
 
+    if body.one_off_chain is not None and row["current_node_id"] is not None:
+        raise HTTPException(409, "work item has already started; its chain is fixed for its life")
+
     new_materialized = None
-    if body.chain_template is not None:
+    new_one_off = None
+    if body.chain_template is not None or body.one_off_chain is not None:
         # Re-materialized the way intake would have, attachments included: a
         # switch that re-authored a document the item already carries would
         # undo the trim it was filed with. The one door that reads the live
@@ -1299,7 +1320,11 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         previous = store.materialized_chain_of(row)
         target = previous.target if previous is not None else None
         repo_entry = deps.connected_or_422(st, row["repo"])
-        new_chain = deps.scoped_chain_or_422(st, repo_entry, body.chain_template)
+        if body.one_off_chain is not None:
+            new_one_off = deps.one_off_chain_or_422(st, row["repo"], body.one_off_chain)
+            new_chain = new_one_off.chain
+        else:
+            new_chain = deps.scoped_chain_or_422(st, repo_entry, body.chain_template)
         try:
             new_materialized = new_chain.materialize(
                 target=target or entry.single_repo_target(row["repo"]),
@@ -1313,8 +1338,12 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
                 # filed with stays frozen across a template switch.
                 repository_steering=previous.repository_steering if previous else None,
                 attachment_kinds=kinds,
-                skip_nodes=_kept_skips(st, row, repo_entry, previous, filed_kinds, new_chain),
+                skip_nodes=(
+                    kept := _kept_skips(st, row, repo_entry, previous, filed_kinds, new_chain)
+                ),
             )
+            if new_one_off is not None:
+                new_one_off.record["skips"] = sorted(kept)
             if previous is not None:
                 # Frozen with the sandbox, so kept across a switch like steering.
                 new_materialized = dataclasses.replace(
@@ -1363,8 +1392,14 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
                 new_materialized,
                 seen=(row["attachments"], row["materialized_chain"]),
             )
-        if body.chain_template is not None:
-            store.set_chain_template(c, wid, body.chain_template, new_materialized)
+        if body.chain_template is not None and not store.set_chain_template(
+            c, wid, body.chain_template, new_materialized
+        ):
+            raise HTTPException(409, _STARTED)
+        if new_one_off is not None and not store.set_one_off_chain(
+            c, wid, new_one_off.record, new_materialized
+        ):
+            raise HTTPException(409, _STARTED)
         if agent_overrides is not None:
             written["agent_overrides"] = store.replace_agent_overrides(c, wid, agent_overrides)
         if body.node_overrides is not None:
