@@ -421,9 +421,9 @@ async def review_gates(
         if gate is None or not row["auto_gate"]:
             return status
         if row["stop_kind"] == StopKind.CHECKOUT or row["status"] == WorkItemStatus.QUEUED:
-            # A reply agent's after-check stopped it: a reviewer would take the
-            # checkout straight back from the person. Or its reply waits for
-            # the checkout (`follow_up`), and the review runs after it.
+            # A checkout stop left it to the person: a reviewer would take the
+            # checkout straight back from them. Or its reply waits for the
+            # checkout (`follow_up`), and the review runs after it.
             return row["status"]
         # The item's own chain, node overrides folded in (UI v2 · 04 point 1):
         # an `auto_escalate` override must suppress review here the same way it

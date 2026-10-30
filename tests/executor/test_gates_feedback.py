@@ -173,9 +173,8 @@ async def test_a_gate_with_only_unanswered_questions_opens_with_the_reply_agent(
     )
 
 
-@pytest.mark.parametrize("_", [None], ids=["another-item-uses-it"])
-async def test_a_reply_agent_refused_its_checkout_leaves_the_gate_open_and_says_why(
-    item_on, tmp_path, monkeypatch, _
+async def test_a_reply_agent_waits_for_a_checkout_in_use_with_the_gate_open(
+    item_on, tmp_path, monkeypatch
 ):
     """Another in-place item using the checkout: the reply waits for it,
     queued as Kraft's own follow-up, and the gate stays open."""
