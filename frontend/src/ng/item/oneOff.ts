@@ -1,4 +1,4 @@
-import { usd } from "../../format";
+import { ago, usd } from "../../format";
 
 /** A one-off chain's custom content, as the editor and the Start review show it.
  *  Pure: the desktop review, the new-item page's create review and the phone sheet all read it. */
@@ -12,8 +12,8 @@ export interface CustomPart {
 
 export interface CustomRow {
   key: string;
+  /** What it is and where it sits, in words: the raw path (`add[0].node`) is not shown. */
   what: string;
-  where: string;
   /** The part in full: a prompt or command as written, anything else as JSON. */
   text: string;
 }
@@ -41,12 +41,19 @@ function indent(value: unknown, pad: string): string[] {
 export const customText = (value: unknown): string => (typeof value === "string" ? value : indent(value, "").join("\n"));
 
 export const customRows = (custom: CustomPart[]): CustomRow[] =>
-  custom.map((p, i) => ({ key: `${i}:${p.path}`, what: p.what, where: p.path || "the whole chain", text: customText(p.value) }));
+  custom.map((p, i) => ({ key: `${i}:${p.path}`, what: p.what, text: customText(p.value) }));
 
-const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
+/** The word for `n`: one or many. The review dialogs all say it this way. */
+export const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
+
+/** What every review of a one-off chain says first: the create review, the Start review and the sheet on a phone. */
+export const reviewSentence = (base: string | null, custom: boolean) =>
+  `This item runs a chain of its own${base ? `, extending ${base}` : ""}.${custom ? " Its agents do what the custom parts below say: read them before you approve." : ""}`;
+
+export type AddedCheck = { node: string; harnesses: string[]; estimate_usd: number | null; estimate_runs: number | null };
 
 /** What the checks say about a node an item adds: which harnesses it runs and what it should cost. */
-export const addedCheckText = (a: { node: string; harnesses: string[]; estimate_usd: number | null; estimate_runs: number | null }) =>
+export const addedCheckText = (a: AddedCheck) =>
   `${a.node}: ${a.harnesses.length === 0 ? "runs no agent" : `${plural(a.harnesses.length, "harness", "harnesses")} ${a.harnesses.join(", ")} ${plural(a.harnesses.length, "is", "are")} allowed`} · ${a.estimate_usd == null ? "no estimate yet" : `≈ +${usd(a.estimate_usd)} (avg of ${a.estimate_runs ?? 1} ${plural(a.estimate_runs ?? 1, "run", "runs")})`}`;
 
 /** `GET /work-items/{id}/one-off`: what a person reads before approving. */
@@ -57,8 +64,9 @@ export interface OneOffReviewData {
   /** The review digest: what an approval names. */
   digest: string;
   needs_review: boolean;
-  added: { node: string; harnesses: string[]; estimate_usd: number | null; estimate_runs: number | null }[];
-  redrafted: { diff?: unknown; changes?: unknown[] }[];
+  added: AddedCheck[];
+  /** Each time a draft revised the chain after filing: the revision as lines (`templates.revision.diff`). */
+  redrafted: { diff: string[] }[];
 }
 
 /** The nodes by what this chain did to them, from its provenance. */
@@ -67,5 +75,15 @@ export function changedNodes(p: OneOffReviewData["provenance"]) {
   return { added: ids("added"), overridden: ids("overridden"), removed: p?.removed ?? [] };
 }
 
+/** The same, from the new-item editor's answer (`result.extending`), before the item exists. */
+export const changedFromExtending = (e: { origins: Record<string, string>; removed: { id: string }[] } | null | undefined) =>
+  changedNodes(e ? { parent: "", nodes: e.origins as Record<string, "inherited" | "added" | "overridden">, overrides: {}, removed: e.removed.map((r) => r.id) } : null);
+
 /** Approve what was shown: the digest of this read, the door it came through. */
 export const approveBody = (r: OneOffReviewData, door: "web" | "phone") => ({ digest: r.digest, door });
+
+const DOOR: Record<string, string> = { web: "in the web UI", phone: "on a phone" };
+
+/** Who approved a one-off chain's custom content, through which door, and when; "just now" never breaks across lines. */
+export const approvalLine = (a: { by: string; door: string; at: string } | null, now = Date.now()) =>
+  a ? `approved by ${a.by === "human" ? "you" : a.by} ${DOOR[a.door] ?? `through the ${a.door}`} · ${ago(a.at, now).replace(/ /g, "\u00a0")}` : "custom content, not approved yet";

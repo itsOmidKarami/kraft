@@ -146,6 +146,51 @@ describe("ItemHeader", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
 
+    it("keeps Start busy while the chain is read", async () => {
+      let release!: () => void;
+      const held = new Promise<void>((r) => (release = r));
+      stubFetch(ROUTES);
+      const base = vi.mocked(fetch).getMockImplementation()!;
+      vi.mocked(fetch).mockImplementation(async (input, init) => {
+        if (String(input).endsWith("/one-off")) await held;
+        return base(input as string, init);
+      });
+      show(NEVER);
+      const startButton = screen.getByRole("button", { name: /^Start$/ });
+      await userEvent.click(startButton);
+      await waitFor(() => expect(startButton).toHaveAttribute("aria-disabled", "true"));
+      release();
+      await screen.findByRole("dialog", { name: /Approve this chain, then start/ });
+      expect(startButton).not.toHaveAttribute("aria-disabled");
+    });
+
+    // A link must never start anything: `?start=1` is an address anyone can send.
+    it("arriving with ?start=1 opens the review but never starts, even when the read says nothing needs approving", async () => {
+      const calls = stubFetch({ ...ROUTES, "GET /work-items/w1/one-off": [200, { ...REVIEW, needs_review: false }] });
+      inShell(<ItemHeader item={detail(NEVER)} reload={() => {}} onSettings={() => {}} />, "/work-items/w1?start=1");
+      const d = await screen.findByRole("dialog", { name: "Start this item?" });
+      expect(sends(calls)).toEqual([]);
+      await userEvent.click(within(d).getByRole("button", { name: "Start" }));
+      await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/resume"]));
+    });
+
+    it("arriving from the peek's Start (router state) starts at once when the read says nothing needs approving", async () => {
+      const calls = stubFetch({ ...ROUTES, "GET /work-items/w1/one-off": [200, { ...REVIEW, needs_review: false }] });
+      inShell(<ItemHeader item={detail(NEVER)} reload={() => {}} onSettings={() => {}} />, { pathname: "/work-items/w1", state: { start: true } });
+      await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/resume"]));
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("?start=1 on an item whose way on is not Start opens nothing and sends nothing", async () => {
+      const calls = stubFetch(ROUTES);
+      inShell(<ItemHeader item={detail({ ...NEVER, current_node_id: "implementation" })} reload={() => {}} onSettings={() => {}} />, "/work-items/w1?start=1");
+      await screen.findByRole("button", { name: /Resume/ });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(calls.some((c) => c.path.endsWith("/one-off"))).toBe(false);
+      expect(sends(calls)).toEqual([]);
+    });
+
     it("the draft's Apply and start approves before it resumes", async () => {
       const calls = stubFetch({ ...ROUTES, "GET /work-items/w1/draft": answer([ov("implementation", undefined, { budget_usd: 2 })]), "POST /work-items/w1/draft/apply": answer([]) });
       const it = detail(NEVER);
@@ -161,7 +206,7 @@ describe("ItemHeader", () => {
   describe("Start with a draft", () => {
     const NEVER = { status: "paused", display_status: "paused", current_node_id: null } as const;
     const DRAFT = { ...WRITES, "GET /work-items/w1/draft": answer([ov("implementation", undefined, { budget_usd: 2 })]), "POST /work-items/w1/draft/apply": answer([]) };
-    const mount = (reload = vi.fn(), path?: string) => {
+    const mount = (reload = vi.fn(), path?: Parameters<typeof inShell>[1]) => {
       const it = detail(NEVER);
       inShell(<ItemDraftProvider item={it} reload={reload}><ItemHeader item={it} reload={reload} onSettings={() => {}} /><ReviewDialog /></ItemDraftProvider>, path);
       return reload;
@@ -191,9 +236,12 @@ describe("ItemHeader", () => {
       await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/resume"]));
     });
 
-    it("arriving with ?start=1 (a Start from the peek) asks the same question, once, and starts only when told", async () => {
+    it.each([
+      { id: "the peek's Start, in router state", at: { pathname: "/work-items/w1", state: { start: true } } },
+      { id: "?start=1", at: "/work-items/w1?start=1" },
+    ])("arriving with $id asks the same question, once, and starts only when told", async ({ at }) => {
       const calls = stubFetch(DRAFT);
-      mount(vi.fn(), "/work-items/w1?start=1");
+      mount(vi.fn(), at);
       const d = await screen.findByRole("dialog", { name: "Start with 1 unapplied change?" });
       expect(sends(calls)).toEqual([]);
       await userEvent.click(within(d).getByRole("button", { name: "Start without them" }));

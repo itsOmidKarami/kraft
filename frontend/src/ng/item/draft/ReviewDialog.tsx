@@ -3,15 +3,13 @@ import { usd } from "../../../format";
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
 import { showToast } from "../../ui/Toast";
-import { addedCheckText } from "../oneOff";
+import { addedCheckText, plural } from "../oneOff";
 import { useApply } from "./apply";
 import { useDraft } from "./context";
 import { useSelect } from "./select";
 import { lines, PASSED } from "./view";
 import { APPLY_AND_START, DRAFT_HOLDS_CHANGES } from "../sharedWords";
 import { LinkButton } from "../../ui/LinkButton";
-
-const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 /** Review & apply (Decisions §5): the exact change, the checks, when the run
  *  reaches it, then Apply, Back to editing or Discard draft. Opened by Start on
@@ -53,7 +51,7 @@ function Review() {
   const close = () => d.setReviewing(false);
   const start = d.starting;
   const primary = useRef<HTMLButtonElement>(null);
-  // Opened from an address (the peek's Start sends `?start=1`) nothing had focus, and
+  // Opened on arrival (the peek's Start, or `?start=1`) nothing had focus, and
   // Review & apply goes once its draft is empty: either way focus goes to the header's
   // main button, not to the page (R10b-04).
   const returnTo = () => document.querySelector<HTMLElement>(".item-main-action");

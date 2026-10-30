@@ -17,8 +17,8 @@ const DATA: OneOffReviewData = {
 const GET = "GET /work-items/w1/one-off";
 const POST = "POST /work-items/w1/one-off/approve";
 afterEach(() => vi.unstubAllGlobals());
-const show = (over: Partial<{ onApproved: () => void; onClose: () => void }> = {}) =>
-  inShell(<OneOffReview itemId="w1" onApproved={over.onApproved ?? (() => {})} onClose={over.onClose ?? (() => {})} />);
+const show = (over: Partial<{ onApproved: () => void; onClose: () => void; fromLink: boolean }> = {}) =>
+  inShell(<OneOffReview itemId="w1" fromLink={over.fromLink} onApproved={over.onApproved ?? (() => {})} onClose={over.onClose ?? (() => {})} />);
 const writes = (calls: { method: string }[]) => calls.filter((c) => c.method !== "GET");
 
 describe("OneOffReview", () => {
@@ -26,7 +26,11 @@ describe("OneOffReview", () => {
     stubFetch({ [GET]: [200, DATA] });
     show();
     const d = await screen.findByRole("dialog", { name: /Approve this chain, then start/ });
-    expect(within(d).getByText("Custom: read these")).toBeInTheDocument();
+    expect(within(d).getByText("custom content")).toBeInTheDocument();
+    // The part is named in words: its raw path in the chain is not shown.
+    expect(within(d).queryByText(/add\[0\]/)).toBeNull();
+    // A long part scrolls in a box a keyboard can reach.
+    expect(within(d).getByRole("region", { name: DATA.custom[0].what })).toHaveAttribute("tabindex", "0");
     expect(within(d).getByText(/run k6 against staging, then report p95/)).toBeInTheDocument();
     expect(within(d).getByText("work_brief")).toBeInTheDocument();
     expect(within(d).getByText(/k6: harness claude is allowed · no estimate yet/)).toBeInTheDocument();
@@ -51,10 +55,32 @@ describe("OneOffReview", () => {
     expect(calls.filter((c) => c.method === "GET" && c.path === "/work-items/w1/one-off")).toHaveLength(2);
   });
 
-  it("lists what changed since filing when a draft revised the chain", async () => {
-    stubFetch({ [GET]: [200, { ...DATA, redrafted: [{ diff: "+ k6 prompt changed" }] }] });
+  it("lists what changed since filing when a draft revised the chain, one line of the revision per line", async () => {
+    stubFetch({ [GET]: [200, { ...DATA, redrafted: [{ diff: ["  implementation", "+ k6"] }] }] });
     show();
-    expect(await screen.findByText("Changed since filing")).toBeInTheDocument();
-    expect(screen.getByText("+ k6 prompt changed")).toBeInTheDocument();
+    expect(await screen.findByText("changed since filing")).toBeInTheDocument();
+    expect(document.querySelector("pre.idr-lines:not(.idr-custom-value)")!.textContent).toBe("  implementation\n+ k6");
+  });
+
+  it.each([
+    { id: "a Start pressed: starts at once, no dialog", fromLink: false, dialog: false, started: true },
+    { id: "opened from an address: asks, starts nothing", fromLink: true, dialog: true, started: false },
+  ])("a read that needs no approval ($id)", async ({ fromLink, dialog, started }) => {
+    const calls = stubFetch({ [GET]: [200, { ...DATA, needs_review: false }] });
+    const onApproved = vi.fn();
+    show({ onApproved, fromLink });
+    await waitFor(() => expect(calls.some((c) => c.path === "/work-items/w1/one-off")).toBe(true));
+    if (dialog) expect(await screen.findByRole("dialog", { name: "Start this item?" })).toBeInTheDocument();
+    else await waitFor(() => expect(onApproved).toHaveBeenCalled());
+    expect(onApproved).toHaveBeenCalledTimes(started ? 1 : 0);
+    expect(screen.queryByRole("dialog") !== null).toBe(dialog);
+    expect(writes(calls)).toEqual([]);
+  });
+
+  it("a failed read says why in place of the chain, and Approve and start stays off", async () => {
+    stubFetch({ [GET]: [404, { detail: "this work item has no one-off chain" }] });
+    show();
+    expect(await screen.findByRole("alert")).toHaveTextContent("no one-off chain");
+    expect(screen.getByRole("button", { name: "Approve and start" })).toBeDisabled();
   });
 });

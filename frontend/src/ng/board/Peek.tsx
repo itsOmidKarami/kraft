@@ -6,7 +6,7 @@ import type { KraftEvent, Policy } from "../../types";
 import { Inspector } from "../graph/Inspector";
 import type { useResizable } from "../graph/useResizable";
 import { request } from "../http";
-import { act, askStartUrl, draftWaits, type Done } from "../item/actions";
+import { act, askStart, draftWaits, type Done } from "../item/actions";
 import { Banner, QuestionCard } from "../item/Banner";
 import { age, cancelsOwn, eventLine } from "../item/events";
 import { CancelCard } from "../item/header/CancelCard";
@@ -208,7 +208,7 @@ function Footer({ cards, item, reload, offline, onOpen, onRaise, onAnswer }: { c
     const waits = await draftWaits(item.id);
     setBusy(false);
     // The item page asks what its header's Start asks: Apply and start, or Start without them.
-    if (waits || item.one_off) return navigate(askStartUrl(item.id));
+    if (waits || item.one_off) return navigate(...askStart(item.id));
     await run(act.resume(item.id));
   };
   const main = () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approveBody, changedNodes, customText } from "./oneOff";
+import { approvalLine, approveBody, changedNodes, customText } from "./oneOff";
 
 describe("customText", () => {
   it("writes a prompt as a block, so it reads as it was written", () => {
@@ -20,5 +20,15 @@ describe("the review model", () => {
   });
   it("sorts nodes by what the chain did to them", () => {
     expect(changedNodes({ parent: "d", nodes: { a: "added", b: "overridden", c: "inherited" }, overrides: {}, removed: ["z"] })).toEqual({ added: ["a"], overridden: ["b"], removed: ["z"] });
+  });
+});
+
+describe("approvalLine", () => {
+  it.each([
+    { id: "just now, never broken across lines", ms: 10_000, text: "approved by you in the web UI · just\u00a0now" },
+    { id: "minutes ago", ms: 3 * 60_000, text: "approved by you in the web UI · 3m\u00a0ago" },
+  ])("$id", ({ ms, text }) => {
+    const now = Date.parse("2026-09-13T10:10:00Z");
+    expect(approvalLine({ by: "human", door: "web", at: new Date(now - ms).toISOString() }, now)).toBe(text);
   });
 });

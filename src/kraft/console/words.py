@@ -656,6 +656,8 @@ def event_line(
             return "title edited"
         case "work_item_description_edited":
             return "brief edited"
+        case "one_off_chain_approved":
+            return "one-off chain approved"
         case _:
             return kind.replace("_", " ")
 

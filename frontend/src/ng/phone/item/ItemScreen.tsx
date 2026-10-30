@@ -20,6 +20,7 @@ import { ChoiceSheet, EditSheet, useSheet } from "../nav/Sheet";
 import { ScreenHeader } from "../nav/ScreenHeader";
 import { ActionBar, Block } from "../ui/Rows";
 import { ChainList } from "./ChainList";
+import { approvalLine } from "../../item/oneOff";
 import { OneOffSheet } from "./OneOffSheet";
 import { PauseSheet } from "./PauseSheet";
 import { cardOf, kebabOf, limitPatch, limitWords, pairOf, stopLimitOf, type Act, type ActId } from "./model";
@@ -128,6 +129,8 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
           <h1 className="ph-item-title">{item.title}</h1>
           {text && <p className={`ph-brief${brief ? " ph-is-open" : ""}`}>{text}</p>}
           {longBrief && <button type="button" className="ph-linkbtn" aria-expanded={brief} onClick={() => setBrief(!brief)}>{brief ? "less" : "more"}</button>}
+          {/* As the desktop's Chain pane says it: a chain of this item's own, and who approved what is custom in it. */}
+          {item.one_off && <p className="ph-item-meta">one-off chain{item.one_off.custom > 0 && ` · ${approvalLine(item.one_off.approval, now)}`}</p>}
           {!!item.attachments?.length && (
             <p className="ph-attached">
               <span className="ph-item-meta">attached</span>

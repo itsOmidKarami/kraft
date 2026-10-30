@@ -18,7 +18,8 @@
 .glyph-box.mark-change { border: 1.5px solid var(--mark-change-line); color: var(--text); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mark-change-line) 18%, transparent); }
 .glyph-slot .glyph-box { border: 1.5px dashed var(--ok); color: var(--ok); }
 .graph-node.one-off-custom .glyph-box { border: 1.5px dashed var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg)); color: var(--accent); }
-.graph-node.one-off-custom .glyph-box.is-prob { border-color: var(--bad); }
+/* A problem on a custom node tints it as the added-node mark does. */
+.graph-node.one-off-custom .glyph-box.is-prob { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 8%, var(--bg)); color: var(--bad); }
 .glyph-box.is-prob { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--bad); }
 .glyph-box.is-sel { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--selection); }
 .glyph-box.is-capped { border-color: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 25%, transparent); }

@@ -24,7 +24,7 @@ describe("ChainOverview: a one-off chain's approval", () => {
     return screen.queryByText("one-off chain")?.closest("div");
   };
   it.each([
-    { id: "approved on the phone", approval: { by: "human", door: "phone", at: new Date(NOW - 3 * 60_000).toISOString(), digest: "d" }, text: "approved by you on the phone · 3m ago" },
+    { id: "approved on a phone", approval: { by: "human", door: "phone", at: new Date(NOW - 3 * 60_000).toISOString(), digest: "d" }, text: "approved by you on a phone · 3m ago" },
     { id: "approved in the web UI", approval: { by: "human", door: "web", at: new Date(NOW - 2 * 3600_000).toISOString(), digest: "d" }, text: "approved by you in the web UI · 2h ago" },
     { id: "not approved yet", approval: null, text: "custom content, not approved yet" },
   ])("says who approved it, through which door and when ($id)", ({ approval, text }) => {

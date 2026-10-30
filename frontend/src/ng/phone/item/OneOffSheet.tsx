@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { detailOf, jsonBody, request } from "../../http";
-import { addedCheckText, approveBody, changedNodes, customRows, type OneOffReviewData } from "../../item/oneOff";
-import { ChoiceSheet, type useSheet } from "../nav/Sheet";
+import { addedCheckText, approveBody, changedNodes, customRows, reviewSentence, type OneOffReviewData } from "../../item/oneOff";
+import { ConfirmSheet, type useSheet } from "../nav/Sheet";
 
 /** Start on an item whose one-off chain holds custom content nobody approved: the
  *  custom parts in full, then Approve and start, which names the digest this read
@@ -9,7 +9,7 @@ import { ChoiceSheet, type useSheet } from "../nav/Sheet";
 export function OneOffSheet({ itemId, sheet, start }: { itemId: string; sheet: ReturnType<typeof useSheet>; start: (approved: boolean) => Promise<boolean> }) {
   const [data, setData] = useState<OneOffReviewData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const busy = useRef(false);
+  const [busy, setBusy] = useState(false);
   const read = async () => {
     const a = await request<OneOffReviewData>(`/work-items/${encodeURIComponent(itemId)}/one-off`);
     if (a.status === 200) setData(a.body);
@@ -25,29 +25,33 @@ export function OneOffSheet({ itemId, sheet, start }: { itemId: string; sheet: R
       void start(false).then(() => sheet.close());
     }
   }, [clear]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (clear) return null;
+  // Nothing until the read answers: a chain with nothing to approve never flashes a sheet.
+  if (clear || (!data && !error)) return null;
   const changes = changedNodes(data?.provenance ?? null);
   const touched = [["Added", changes.added], ["Overridden", changes.overridden], ["Removed", changes.removed]] as const;
+  const approve = async () => {
+    if (!data || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const a = await request(`/work-items/${encodeURIComponent(itemId)}/one-off/approve`, jsonBody("POST", approveBody(data, "phone")));
+      if (a.status !== 200) {
+        setError(detailOf(a.body));
+        if (a.status === 409) await read();
+        return;
+      }
+      if (await start(true)) sheet.close();
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <ChoiceSheet
+    <ConfirmSheet
       title="Approve this chain, then start?"
-      text={data ? `This item runs a chain of its own${data.extends ? `, extending ${data.extends}` : ""}. Read what is custom in it before it starts.` : "Reading the chain…"}
-      options={data ? [{ value: "approve", label: "Approve and start" }] : []}
-      onPick={async () => {
-        if (!data || busy.current) return;
-        busy.current = true;
-        try {
-          const a = await request(`/work-items/${encodeURIComponent(itemId)}/one-off/approve`, jsonBody("POST", approveBody(data, "phone")));
-          if (a.status !== 200) {
-            setError(detailOf(a.body));
-            if (a.status === 409) await read();
-            return;
-          }
-          if (await start(true)) sheet.close();
-        } finally {
-          busy.current = false;
-        }
-      }}
+      text={data ? reviewSentence(data.extends, data.custom.length > 0) : undefined}
+      confirm={{ label: "Approve and start", disabled: !data, run: () => void approve() }}
+      busy={busy}
+      error={error}
       onClose={sheet.close}
     >
       {data && (
@@ -56,14 +60,12 @@ export function OneOffSheet({ itemId, sheet, start }: { itemId: string; sheet: R
           {customRows(data.custom).map((r) => (
             <section key={r.key} className="ph-oneoff-part">
               <p className="ph-help">{r.what}</p>
-              <p className="ph-target">{r.where}</p>
               <pre className="ph-start-lines">{r.text}</pre>
             </section>
           ))}
           {data.added.map((a) => <p key={a.node} className="ph-target">✓ {addedCheckText(a)}</p>)}
         </div>
       )}
-      {error && <p className="ph-error" role="alert">{error}</p>}
-    </ChoiceSheet>
+    </ConfirmSheet>
   );
 }

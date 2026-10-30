@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type Ref } from "react";
-import { ago, dollars, DOLLARS_HINT, dollarsText, repoName, tokenText, tokenTip, usd } from "../../../format";
+import { dollars, DOLLARS_HINT, dollarsText, repoName, tokenText, tokenTip, usd } from "../../../format";
 import type { KraftEvent, Policy, WorkItemDocument } from "../../../types";
 import { Button } from "../../ui/Button";
 import { showToast } from "../../ui/Toast";
@@ -11,6 +11,7 @@ import { lines } from "../draft/view";
 import { age, recent as recentLines } from "../events";
 import type { ItemDetail } from "../useItem";
 import { chainName, chainTitle } from "../chainName";
+import { approvalLine } from "../oneOff";
 import { DocViewer } from "../DocViewer";
 import { gateName, nameOf } from "../../board/rowText";
 import { budgetRaise, neverStarted, spentLine } from "../status";
@@ -21,11 +22,6 @@ import { tip } from "../../ui/Tooltip";
 import { breakable } from "../../ui/breakable";
 import { BUDGET_IN_DOLLARS } from "../sharedWords";
 import { LinkButton } from "../../ui/LinkButton";
-
-const DOOR = { web: "in the web UI", phone: "on the phone" } as Record<string, string>;
-/** Who approved a one-off chain's custom content, through which door, and when. */
-export const approvalLine = (a: { by: string; door: string; at: string } | null, now = Date.now()) =>
-  a ? `approved by ${a.by === "human" ? "you" : a.by} ${DOOR[a.door] ?? `through the ${a.door}`} · ${ago(a.at, now)}` : "custom content, not approved yet";
 
 const statusLine = (item: ItemDetail) => {
   const st = item.display_status ?? "running";

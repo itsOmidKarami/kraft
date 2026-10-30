@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { elapsedBetween } from "../../../format";
 import { useGroupCount } from "../../board/counts";
 import { Clock, EllipsisVertical } from "../../icons";
@@ -103,21 +103,31 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
   const startRun = () => void run(act.resume(item.id));
   // An item with a one-off chain reads it first, however the page last saw it (a draft applied since may have changed it):
   // the review starts it at once when nothing needs approving, else Approve and start approves, then resumes.
-  const [reviewing, setReviewing] = useState(false);
-  const start = () => (item.one_off ? setReviewing(true) : startRun());
+  // "pressed": a Start someone clicked, which starts at once when the read finds nothing to approve; "link": an address, which never does.
+  const [reviewing, setReviewing] = useState<false | "pressed" | "link">(false);
+  const [reading, setReading] = useState(false);
+  const start = () => (item.one_off ? setReviewing("pressed") : startRun());
   // Start never applies a draft, so with one it asks first: Apply and start, or start without it.
   const asksFirst = () => hs.main === "start" && !!draft?.ops.some((o) => !o.passed);
-  // `?start=1`: a Start pressed elsewhere (the board's peek, the phone) found a draft and
-  // came here to ask the same question, once the draft is read (`startUrl`).
-  const [params, setParams] = useSearchParams();
-  const askedHere = params.get("start") === "1";
+  // A Start pressed elsewhere (the board's peek) found a draft or a one-off chain and came here, carrying
+  // `{ start: true }` in router state, to ask the same question once the draft is read. `?start=1`, an
+  // address anyone can send, still opens the question, but only on an item whose main way on is Start,
+  // and nothing it opens starts without a click here.
+  const location = useLocation();
+  const [params] = useSearchParams();
+  const pressed = (location.state as { start?: boolean } | null)?.start === true;
+  const askedHere = pressed || params.get("start") === "1";
   const draftStatus = draft?.draft.status;
   useEffect(() => {
     if (!askedHere || (draft && draftStatus === "loading")) return;
-    setParams((p) => { const n = new URLSearchParams(p); n.delete("start"); return n; }, { replace: true });
+    const search = new URLSearchParams(params);
+    search.delete("start");
+    const q = search.toString();
+    navigate({ pathname: location.pathname, search: q ? `?${q}` : "", hash: location.hash }, { replace: true, state: { ...(location.state as object | null), start: undefined } });
+    if (hs.main !== "start") return;
     if (draft && asksFirst()) draft.setReviewing(true, start);
-    else if (item.one_off) setReviewing(true);
-    // Once per arrival: the param is gone after this.
+    else if (item.one_off) setReviewing(pressed ? "pressed" : "link");
+    // Once per arrival: the param and the state are gone after this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [askedHere, draftStatus]);
   // The draft this page read can be stale: one made in another tab or from the CLI since
@@ -196,14 +206,14 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
       <Badge tone={hs.tone} mono>{hs.badge}</Badge>
       {/* Without a main button the group anchors the cards (pause, cancel, escalate) itself. */}
       <div className="item-main-group" ref={hs.main ? undefined : group}>
-        {hs.main && <MainButton main={hs.main} panel={hs.panel} archivable={archivable(item)} queued={queued} busy={busy} onMain={onMain} onItem={onItem} groupRef={group} />}
+        {hs.main && <MainButton main={hs.main} panel={hs.panel} archivable={archivable(item)} queued={queued} busy={busy || reading} onMain={onMain} onItem={onItem} groupRef={group} />}
         <Menu label="Item menu" trigger={<EllipsisVertical size={16} aria-hidden />} items={menu} />
       </div>
       {error && !pausing && <span className="item-error item-header-error" role="alert">{error}</span>}
       <Popover anchor={group} open={pausing} notch onClose={() => setPausing(false)} role="dialog" label={queued ? REMOVE_FROM_QUEUE_TITLE : PAUSE_THIS_ITEM}>
         <PauseConfirm queued={queued} busy={busy} error={error} onClose={() => setPausing(false)} onPause={async () => { if (await run(act.pause(item.id))) { setPausing(false); toMain(); } }} />
       </Popover>
-      {reviewing && <OneOffReview itemId={item.id} onClose={() => setReviewing(false)} onApproved={() => { setReviewing(false); startRun(); }} />}
+      {reviewing && <OneOffReview itemId={item.id} fromLink={reviewing === "link"} onReading={setReading} onClose={() => { setReviewing(false); setReading(false); }} onApproved={() => { setReviewing(false); startRun(); }} />}
       {cancelling && <CancelCard id={item.id} anchor={group} onClose={() => setCancelling(false)} onDone={() => { setCancelling(false); reload(); toMain(); }} />}
       {escalating && <EscalateCard id={item.id} anchor={group} threads={item.escalation_threads} onClose={() => setEscalating(false)} onDone={() => { setEscalating(false); reload(); toMain(); }} />}
       {completing && <CompleteCard id={item.id} anchor={group} onClose={() => setCompleting(false)} onDone={() => { setCompleting(false); reload(); toMain(); }} />}

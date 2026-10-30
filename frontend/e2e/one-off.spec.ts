@@ -46,7 +46,7 @@ test("Start reads a one-off chain's custom content first, and Approve and start 
   await page.goto(`/work-items/${id}`);
   await page.getByRole("banner").getByRole("button", { name: "Start" }).click();
   const review = page.getByRole("dialog", { name: /Approve this chain, then start/ });
-  await expect(review.getByText("Custom: read these")).toBeVisible();
+  await expect(review.getByText("custom content")).toBeVisible();
   await expect(review.getByText(/run k6 against staging/)).toBeVisible();
   await review.getByRole("button", { name: "Approve and start" }).click();
   await expect(status(page, "DONE")).toBeVisible({ timeout: scaledTimeout(90_000) });

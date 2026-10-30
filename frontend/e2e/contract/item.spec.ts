@@ -204,7 +204,7 @@ const ROWS: Row[] = [
       await p.getByRole("menuitem", { name: /Custom agent node/ }).click();
       await p.getByRole("textbox", { name: "Node id" }).fill("load_test");
       await p.getByRole("textbox", { name: "Prompt" }).fill("run k6 against staging");
-      await p.getByRole("button", { name: /Add node/ }).click(); await pause(p, 800);
+      await p.getByRole("button", { name: "Create & open →" }).click(); await pause(p, 800);
       await expect(p.locator(".graph-node.one-off-custom")).toHaveCount(1);
       await p.getByRole("button", { name: "Create paused" }).click();
       const dialog = p.getByRole("dialog", { name: /Approve this chain/ });
@@ -225,7 +225,7 @@ const ROWS: Row[] = [
       await p.getByRole("banner").getByRole("button", { name: "Start" }).click();
       const dialog = p.getByRole("dialog", { name: /Approve this chain, then start/ });
       await expect(dialog.getByText("run k6").first()).toBeVisible();
-      await expect(dialog.getByText("Custom: read these")).toBeVisible();
+      await expect(dialog.getByText("custom content")).toBeVisible();
       const resumed = p.waitForRequest((r) => r.method() === "POST" && r.url().includes("/resume"));
       await dialog.getByRole("button", { name: "Approve and start" }).click();
       expect((await approve).postDataJSON()).toEqual({ digest: "0".repeat(64), door: "web" });

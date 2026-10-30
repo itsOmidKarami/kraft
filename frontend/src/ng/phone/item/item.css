@@ -52,4 +52,5 @@
 /* The one-off review sheet: each custom part, its place, then its text in full. */
 .ph-oneoff { display: flex; flex-direction: column; gap: 10px; margin: 0 0 10px; }
 .ph-oneoff-part { display: flex; flex-direction: column; gap: 2px; }
-.ph-oneoff-part .ph-start-lines { margin: 4px 0 0; max-height: 40vh; overflow: auto; }
+/* No box of its own: the sheet scrolls, so a long prompt reads by touch and by keyboard alike. */
+.ph-oneoff-part .ph-start-lines { margin: 4px 0 0; }
