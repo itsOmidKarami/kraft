@@ -134,7 +134,9 @@ async def test_int_pauses_and_kill_ends_even_a_command_that_ignores_both(tmp_pat
         tmp_path / "second", _spec(["sh", "-c", "trap '' INT TERM; sleep 30"]), kill_grace_s=0.2
     )
     task = asyncio.create_task(stubborn.run(emit))
-    await asyncio.sleep(0.3)
+    while sum(f["t"] == "started" for f in frames) < 2:  # a KILL before it starts is dropped
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.2)  # time for the shell to set its trap
     stubborn.signal("KILL")
     assert (await asyncio.wait_for(task, 5)).code == 137
 
