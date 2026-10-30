@@ -19,7 +19,12 @@ from kraft.adapters.forge.models import (
     FailedJob,
     ForgeError,
     HeadMoved,
+    Job,
+    Label,
+    MergedMR,
+    MRDetails,
     MRRef,
+    Pipeline,
     QueueRead,
     QueueState,
     ReviewerFeedback,
@@ -1135,6 +1140,124 @@ class GlabCli(mr_ops.CliWaits):
                 for r in rows or []
             ]
         )
+
+    async def mr_details(self, *, repo: Path, branch: str) -> MRDetails | None:
+        ref = await self.find_mr(repo=repo, branch=branch)
+        if ref is None:
+            return None
+        r = await self._api(repo, f"projects/:id/merge_requests/{ref.number}")
+        return MRDetails(
+            number=ref.number,
+            url=str(r.get("web_url") or ref.url),
+            state=_GLAB_MR_STATES.get(str(r.get("state", "")), "closed"),
+            title=str(r.get("title") or ""),
+            body=str(r.get("description") or ""),
+            # `work_in_progress` is what servers before `draft` (GitLab 13.x) say.
+            draft=bool(r.get("draft", r.get("work_in_progress"))),
+            labels=tuple(str(x) for x in r.get("labels") or ()),
+            source_branch=str(r.get("source_branch") or ""),
+            target_branch=str(r.get("target_branch") or ""),
+            head_sha=str(r.get("sha") or ""),
+        )
+
+    async def pipelines(self, *, repo: Path, branch: str, base: str) -> tuple[Pipeline, ...]:
+        mr = await self.find_mr(repo=repo, branch=branch)
+        if mr:
+            path, fields = f"projects/:id/merge_requests/{mr.number}/pipelines", {"per_page": 20}
+        else:
+            path, fields = "projects/:id/pipelines", {"ref": branch, "per_page": 20}
+        kinds = (
+            {
+                _TRAIN_REF.format(iid=mr.number): "train",
+                f"refs/merge-requests/{mr.number}/head": "merge_request",
+                f"refs/merge-requests/{mr.number}/merge": "merge_request",
+            }
+            if mr
+            else {}
+        )
+        return tuple(
+            Pipeline(
+                id=str(p["id"]),
+                kind=kinds.get(str(p.get("ref", "")), "branch"),
+                ref=str(p.get("ref") or ""),
+                sha=str(p.get("sha") or ""),
+                status=str(p.get("status") or ""),
+                url=str(p.get("web_url") or ""),
+                created_at=str(p.get("created_at") or ""),
+            )
+            for p in await self._api(repo, path, fields=fields) or ()
+        )
+
+    async def jobs(self, *, repo: Path, pipeline_id: str) -> tuple[Job, ...]:
+        rows = await self._api(
+            repo,
+            f"projects/:id/pipelines/{pipeline_id}/jobs",
+            fields={"per_page": 100, "include_retried": False},
+        )
+        return tuple(
+            Job(
+                id=str(j["id"]),
+                name=str(j.get("name") or ""),
+                stage=str(j.get("stage") or ""),
+                status=str(j.get("status") or ""),
+                failure_reason=str(j["failure_reason"]) if j.get("failure_reason") else None,
+                url=str(j.get("web_url") or ""),
+            )
+            for j in rows or ()
+        )
+
+    async def job_log(self, *, repo: Path, job_id: str) -> str:
+        return (await self._transport(repo).rest("GET", f"projects/:id/jobs/{job_id}/trace")).text
+
+    async def merged_mrs(self, *, repo: Path, base: str, limit: int) -> tuple[MergedMR, ...]:
+        fields = {
+            "state": "merged",
+            "target_branch": base,
+            "order_by": "merged_at",
+            "sort": "desc",
+            "per_page": min(limit, 100),
+        }
+        try:
+            rows = await self._api(repo, "projects/:id/merge_requests", fields=fields)
+        except ForgeError as exc:
+            if exc.status != 400:
+                raise
+            # Before GitLab 17.2 `merged_at` is not an `order_by` value.
+            rows = await self._api(
+                repo,
+                "projects/:id/merge_requests",
+                fields={**fields, "order_by": "updated_at"},
+            )
+        return tuple(
+            MergedMR(
+                number=int(r["iid"]),
+                title=str(r.get("title") or ""),
+                labels=tuple(str(x) for x in r.get("labels") or ()),
+                url=str(r.get("web_url") or ""),
+                merged_at=str(r.get("merged_at") or ""),
+            )
+            for r in (rows or ())[:limit]
+        )
+
+    async def labels(self, *, repo: Path) -> tuple[Label, ...]:
+        out: list[Label] = []
+        for page in range(1, 11):
+            rows = await self._api(
+                repo,
+                "projects/:id/labels",
+                fields={"per_page": 100, "include_ancestor_groups": True, "page": page},
+            )
+            out += [
+                Label(
+                    name=str(r["name"]),
+                    description=str(r.get("description") or ""),
+                    color=str(r.get("color") or ""),
+                )
+                for r in rows or ()
+            ]
+            if len(rows or ()) < 100:
+                break
+        return tuple(out)
 
 
 #: How GitLab marks a draft: the title's prefix, which `mark_ready` strips as
