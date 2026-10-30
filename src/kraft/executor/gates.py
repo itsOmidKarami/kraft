@@ -673,7 +673,7 @@ async def reply_at_gate(db, run_dirs, *, work_item_id: str, gate: str, nodes, la
     """The reply agent for every thread left unanswered at `gate`, which the
     walk opening the gate runs (`walk.run_once`), and its queued replay
     (`follow_up`). While another in-place item uses the checkout it waits for
-    it, queued; a checkout that cannot be switched is said and skipped."""
+    it, queued."""
     from kraft import review_reply  # local: avoids an import cycle through kraft.executor
 
     if launch is None or not db.read(lambda c: store.unanswered(c, work_item_id)):
@@ -684,16 +684,6 @@ async def reply_at_gate(db, run_dirs, *, work_item_id: str, gate: str, nodes, la
         )
     except store.CheckoutBusy as exc:
         await db.write(lambda c, h=exc.holder: store.queue_follow_up(c, work_item_id, h))
-    except inplace.CheckoutRefused as exc:
-        await db.write(
-            lambda c, why=str(exc): events.append(
-                c,
-                work_item_id,
-                GateEvent.REPLY_AGENT_SKIPPED,
-                {"gate": gate, "reason": why},
-                node_id=gate,
-            )
-        )
 
 
 async def follow_up(

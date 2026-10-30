@@ -3129,8 +3129,7 @@ async def run_once(
             await gates.reply_at_gate(
                 db, run_dirs, work_item_id=work_item_id, gate=node.id, nodes=nodes, launch=launch
             )
-            # The reply's after-check (`inplace.check_task`) may have stopped it.
-            return "needs_human" if inplace.stopped(db, work_item_id) else "awaiting_gate"
+            return "awaiting_gate"
         if isinstance(node.node, GateNode):
             # Cleared: its approval already completed it (`store.approve_gate`),
             # and entering it again would stamp a second `node_started` on a
