@@ -709,8 +709,6 @@ def test_a_v1_item_lists_and_renders_its_chain_nodes(client, repo):
             ["verification.review.code_review"],
         ]
         assert nodes[1]["auto_escalate"] is False
-        assert nodes[1]["auto_review_mode"] is None, "no reviewer, no mode"
-        assert nodes[0]["auto_review_mode"] is None, "an exec node has no reviewer"
         assert payload["chain_definition"]["template_id"] == "default"
 
     # And the third door: `POST /work-items`' own 201 body, which only
@@ -725,27 +723,6 @@ def test_a_v1_item_lists_and_renders_its_chain_nodes(client, repo):
         "spec_approval",
     ]
     assert started["current_node_id"] == "spec"
-
-
-_REVIEWER = {"auto_review": {"id": "r", "kind": "agent", "harness": "codex", "prompt": "p"}}
-
-
-@pytest.mark.parametrize(
-    ("gate", "mode"),
-    [
-        pytest.param(_REVIEWER, "decides", id="reviewer-decides-by-default"),
-        pytest.param(
-            {**_REVIEWER, "auto_review_mode": "checks_first"}, "checks_first", id="checks-first"
-        ),
-        pytest.param({"auto_review_mode": "checks_first"}, None, id="no-reviewer-is-inert"),
-    ],
-)
-def test_a_gate_node_carries_its_auto_review_mode(gate, mode):
-    """So the views can word a reviewer before it runs; None with no reviewer."""
-    from support.harness import v1_resolved
-
-    node = v1_resolved([{"id": "g", "kind": "gate", **gate}]).nodes[0]
-    assert store.node_view(node)["auto_review_mode"] == mode
 
 
 def _append(wid: str, type: str, payload: dict) -> int:

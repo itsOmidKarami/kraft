@@ -16,7 +16,7 @@ import { approveBlock, drafts, gateConsequence } from "./finish";
 import { codeBlock } from "./Thread";
 import type { Fetched } from "./useReview";
 import { Badge } from "../ui/Badge";
-import { CHIP_TONE } from "../graph/GateView";
+import { CHIP_TONE } from "../graph/types";
 import { OUTCOME, reviewOutcome } from "../item/reviewOutcome";
 
 /** The gate review overlay (prototype 292–321, `openGateReview`): the gate's
@@ -76,7 +76,7 @@ export function GateReview({ item, gate, events, doc, by, files, threads, isView
       {outcome && (
         <section className="rv-gate-next rv-gate-auto" aria-label="Agent review">
           <span>Reviewer:</span>
-          <Badge tone={CHIP_TONE[OUTCOME[outcome.kind].tone]}>{capitalise(OUTCOME[outcome.kind].word)}</Badge>
+          <Badge tone={CHIP_TONE[OUTCOME[outcome.kind].tone]}>{OUTCOME[outcome.kind].word}</Badge>
           {outcome.note && <span>{outcome.note}</span>}
         </section>
       )}

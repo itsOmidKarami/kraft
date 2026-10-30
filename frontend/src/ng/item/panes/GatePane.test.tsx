@@ -192,14 +192,17 @@ describe("GateBody", () => {
     { seq: 1, work_item_id: "w1", type: "gate_requested", payload: { gate: "plan_approval" }, node_id: "plan_approval", created_at: "t" },
     { seq: 2, work_item_id: "w1", type: "gate_auto_review_skipped", payload: { gate: "plan_approval", reason, note }, node_id: "plan_approval", created_at: "t" },
   ];
+  // The reviewer's `concerns` are usually its note too: shown once, under the outcome.
   it.each([
-    ["could not decide", "undecided", "The reviewer changed files, so its verdict was ignored; its changes are still in the worktree: a.py"],
-    ["ready for you", "passed", "Every task is covered."],
-  ])("shows the reviewer's note: %s", (word, reason, note) => {
+    ["could not decide", "undecided", "The reviewer changed files, so its verdict was ignored; its changes are still in the worktree: a.py", []],
+    ["ready for you", "passed", "Every task is covered.", []],
+    ["ready for you", "passed", "Every task is covered.", [" Every task is covered.\n"]],
+  ])("shows the reviewer's note: %s, %s, %s, concerns %j", (word, reason, note, concerns) => {
     stubFetch();
-    render(<GateBody item={pending} version="1" gate={gate} events={reviewed(reason, note)} />);
+    render(<GateBody item={{ ...pending, concerns }} version="1" gate={gate} events={reviewed(reason, note)} />);
     expect(screen.getByText(`Reviewer: ${word}`)).toBeInTheDocument();
     expect(screen.getByText(note)).toBeInTheDocument();
+    expect(screen.queryByText(/^Concerns/)).toBeNull();
   });
 
   it("reads the threads again on each read of the item, and an older read that answers late does not win", async () => {

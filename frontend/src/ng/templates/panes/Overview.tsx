@@ -8,7 +8,7 @@ import type { PaneKind } from "./describe";
 import { useProviders } from "../../harnesses/useProviders";
 import { effortsFor, useHarnessOptions } from "./useHarnessOptions";
 import { autoEscalates } from "../escalateWords";
-import { ROUTE_LABEL, routeOf } from "../fields";
+import { fieldMeta, ROUTE_LABEL, routeOf } from "../fields";
 import { STEPS_IN_ORDER } from "../../library/sharedWords";
 import { breakable } from "../../ui/breakable";
 
@@ -72,7 +72,7 @@ function ChainOverview({ ctx }: { ctx: PaneCtx }) {
   );
 }
 
-const MODES: Option[] = [{ value: "checks_first", label: "check first (reject, or hand it to you)" }, { value: "decides", label: "decide (can approve)" }];
+const MODES: Option[] = Object.entries(fieldMeta("auto_review_mode").labels ?? {}).map(([value, label]) => ({ value, label }));
 
 /** What a gate's reviewer may do (`auto_review_mode`), for a gate that has one. Unset decides, as before the key. */
 export function ReviewerMode({ ctx }: { ctx: PaneCtx }) {

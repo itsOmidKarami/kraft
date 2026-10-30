@@ -9,6 +9,7 @@ import { attemptsAt, capAt, materialized } from "../../item/chainValues";
 import { passOf } from "../../item/nodeGraph";
 import { taskName } from "../../item/paths";
 import { OUTCOME, reviewOutcome } from "../../item/reviewOutcome";
+import { CHIP_TONE } from "../../graph/types";
 import { elapsed, nodeRunSpan } from "../../../format";
 
 /** The node screen's decisions, pure (W17 brief D). */
@@ -69,7 +70,7 @@ export function reviewPath(item: ItemDetail, gate: ApiNode, events: KraftEvent[]
   const decided = [...events].reverse().find((e) => e.type === "gate_approved" && (e.payload.gate ?? e.node_id) === gate.id && e.payload.by !== "agent");
   return [
     ...(gate.auto_escalate
-      ? [{ title: "auto_review", text: "An agent reads it before you do. A decision you make meanwhile wins.", ...(outcome && { chip: { word: OUTCOME[outcome.kind].word, tone: OUTCOME[outcome.kind].phone } }) }]
+      ? [{ title: "auto_review", text: "An agent reads it before you do. A decision you make meanwhile wins.", ...(outcome && { chip: { word: OUTCOME[outcome.kind].word, tone: CHIP_TONE[OUTCOME[outcome.kind].tone] } }) }]
       : []),
     { title: "you", text: decided ? "approved" : waiting ? "waiting for your decision" : gateSkipped(events, gate.id) ? "skipped, no decision needed" : "decides when the chain reaches it" },
     { title: "on reject", text: target ? `Goes back to ${nameOf(item.chain_definition.nodes, target)} with your note.` : "Reopens the gate with your note." },

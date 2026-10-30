@@ -546,7 +546,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
         const problems = draftProblems(marked);
         const live = marked.filter((op, i) => !op.passed && !problems.some((x) => x.op === i));
         const cap = b.item.budget_cap ?? { spent_usd: 1.2, cap_usd: 10 };
-        return { ops: marked, problems, checks: { budget: { spent_usd: cap.spent_usd, cap_usd: cap.cap_usd }, added: [] }, nodes: draftChain(nodes, live).map((n: any) => ({ covered_by: null, auto_review_mode: null, icon: null, ...n })), base_seq: ops.length ? 42 : null, updated_at: ops.length ? "2026-10-01T09:12:00Z" : null };
+        return { ops: marked, problems, checks: { budget: { spent_usd: cap.spent_usd, cap_usd: cap.cap_usd }, added: [] }, nodes: draftChain(nodes, live).map((n: any) => ({ covered_by: null, icon: null, ...n })), base_seq: ops.length ? 42 : null, updated_at: ops.length ? "2026-10-01T09:12:00Z" : null };
       };
       if (method === "DELETE") { const had = stored().length > 0; itemDrafts.set(m[1], []); return had ? { status: 204 } : json({ detail: "this work item has no draft" }, 404); }
       if (method === "PUT") { itemDrafts.set(m[1], req.json()?.ops ?? []); return json(answer(stored())); }

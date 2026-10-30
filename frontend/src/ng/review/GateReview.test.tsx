@@ -46,8 +46,8 @@ describe("GateReview", () => {
   });
 
   it.each([
-    ["Ready for you", "passed", "Every finding is addressed."],
-    ["Could not decide", "undecided", "The reviewer changed files, so its verdict was ignored: a.py"],
+    ["ready for you", "passed", "Every finding is addressed."],
+    ["could not decide", "undecided", "The reviewer changed files, so its verdict was ignored: a.py"],
   ])("shows the reviewer's outcome, %s, with its note above the decision", async (word, reason, note) => {
     const events = [
       { seq: 1, work_item_id: "w1", type: "gate_requested", payload: { gate: "final_review" }, node_id: "final_review", created_at: "t" },

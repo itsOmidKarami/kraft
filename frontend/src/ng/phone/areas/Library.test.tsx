@@ -7,7 +7,7 @@ import { mountAt, posts, problem, view, where } from "./testkit";
 
 const MODEL = {
   "library.yaml": {
-    nodes: { verification: { kind: "exec", steps: [{ id: "checks", tasks: ["lint"] }] } },
+    nodes: { verification: { kind: "exec", steps: [{ id: "checks", tasks: ["lint"] }] }, spec_check: { kind: "gate", auto_review_mode: "checks_first" } },
     steps: { checks: { tasks: [] } },
     tasks: {
       implementer: { kind: "agent", profile: "strong", auto: true, policy: { time_cap_minutes: 120 }, tags: ["a", "b"] },
@@ -80,6 +80,11 @@ describe("Library component (L.2)", () => {
     const used = await screen.findByRole("region", { name: "Used in" });
     expect(within(used).getByRole("link", { name: /default/ })).toHaveAttribute("href", "/templates/chains/default");
     expect(within(used).getByRole("link", { name: /docs_only/ })).toHaveTextContent("via nodes.implementation");
+  });
+
+  it("a gate's reviewer mode reads in the desktop's words", async () => {
+    open("nodes.spec_check");
+    expect(await screen.findByRole("button", { name: /^reviewer may/ })).toHaveTextContent("check first (reject, or hand it to you)");
   });
 
   it("a missing component says so and does not claim to be unused", async () => {

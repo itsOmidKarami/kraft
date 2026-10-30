@@ -13,6 +13,7 @@ so that a human's escalation agent *can* act.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -105,6 +106,16 @@ def _artifact_line(path: Path | None) -> str:
     if path is None:
         return "There is no artifact document for this gate; read the worktree.\n"
     return f"The document this gate is about: {path}\n"
+
+
+def _document(run_dirs, work_item_id: str, rel: str | None) -> str | None:
+    """A hash of the gate's document as it stands, `"absent"` once it cannot be
+    read (gone, or no longer a regular file); None for a gate with none. Read
+    no-follow and bounded, as a person reads it: the reviewer may write here."""
+    if rel is None:
+        return None
+    text = item_paths.read_document(run_dirs, work_item_id, rel)
+    return "absent" if text is None else hashlib.sha256(text.encode()).hexdigest()
 
 
 def _profile_fallback_refusal(
@@ -247,6 +258,7 @@ async def review(
 
     session_id = db.read(lambda c: store.new_session_id(c, work_item_id))
     rel = executor.gate_artifact(run_dirs, row, gate)
+    doc = item_paths.path_of(run_dirs, work_item_id, rel) if rel is not None else None
     cf = checks_first(node)
     task_instruction = (_CHECKS_FIRST_PROMPT if cf else _PROMPT).format(
         gate=gate,
@@ -254,9 +266,7 @@ async def review(
         title=row["title"],
         description_line=f"Brief: {row['description']}\n" if row["description"] else "",
         # Absolute: a new document is in the item's folder, not this worktree.
-        artifact_line=_artifact_line(
-            item_paths.path_of(run_dirs, work_item_id, rel) if rel is not None else None
-        ),
+        artifact_line=_artifact_line(doc),
     )
 
     started = False
@@ -386,13 +396,16 @@ async def review(
         raise
     # A reviewer that checks first must leave the work as it found it (spec
     # "If the reviewer edits the work"): read the checkout before, compare after.
+    # The gate's document too, which is outside the checkout and git's sight.
     worktree = inplace.item_folder(run_dirs, row)
     in_place = store.is_in_place(row)
     before = None
+    doc_was = None
     if cf and not in_place:
         # Before the launch: once the reviewer's session row exists it counts
         # as live, and a sandboxed item's guard would refuse every read.
         before = read_only.snapshot(db, row, launch, worktree)
+        doc_was = _document(run_dirs, work_item_id, rel)
         if before is None:
             why = "Kraft could not read the checkout safely, so no reviewer ran: a person decides"
             await start()
@@ -415,8 +428,9 @@ async def review(
         # In place, after the launch's take: the first one commits the
         # attachments, which are not the reviewer's edit. Never sandboxed, so
         # the live-session guard cannot refuse here; a None is judged below.
-        nonlocal before
+        nonlocal before, doc_was
         before = read_only.snapshot(db, row, launch, worktree)
+        doc_was = _document(run_dirs, work_item_id, rel)
 
     try:
         status = await _agent.run_agent_task(
@@ -488,7 +502,9 @@ async def review(
                     "Kraft could not read the checkout before the review, "
                     "so its verdict was ignored"
                 )
-        elif files := read_only.changed(db, row, launch, worktree, before):
+        elif files := read_only.changed(db, row, launch, worktree, before) + (
+            [str(doc)] if _document(run_dirs, work_item_id, rel) != doc_was else []
+        ):
             return "undecided", (
                 "The reviewer changed files, so its verdict was ignored; its changes are "
                 "still in the worktree: " + read_only.named(files)

@@ -28,7 +28,7 @@ from skills.test_gate_review import (  # noqa: F401
 from support.harness import fake_harness_home, git, write
 from support.worktree import ensure
 
-from kraft import events, executor, gate_review, inplace, store
+from kraft import events, executor, gate_review, inplace, item_paths, store
 from kraft import policy as _policy
 from kraft.executor import gates
 from kraft.templates.models import CHECKS_FIRST
@@ -146,15 +146,18 @@ _PASS = {"verdict": "pass", "concerns": "read it all"}
 
 async def _at_gate(database, run_dirs, tmp_path, repo, edit, result, *, mode, in_place):
     """An item at a reviewed gate whose reviewer runs `edit` in its checkout,
-    then reports `result`. In place it is on its first take, with a spec to
-    commit; otherwise in its own worktree. Returns the gate."""
+    then reports `result`. The gate decides its `review` document. In place it
+    is on its first take, with a spec to commit; otherwise in its own
+    worktree. Returns the gate."""
     script = (
         f"{edit}\nprintf '%s' '{json.dumps({'status': 'done', **result})}' > \"$KRAFT_RESULT_PATH\""
     )
     # A harness that cannot deny tools still runs a checks-first reviewer: the
     # snapshot, not a tool denial, is what catches an edit.
     fake_harness_home(tmp_path, ["sh", "-c", script])
-    keys = {"auto_review_mode": mode} if mode else {}
+    keys = {"artifact": "review", **({"auto_review_mode": mode} if mode else {})}
+    _doc(run_dirs).parent.mkdir(parents=True, exist_ok=True)
+    _doc(run_dirs).write_text("# the review\n")
     chain = _chain2(run_dirs, target=_IN_PLACE if in_place else None, harness="fake", **keys)
     await _seed_at_gate(database, run_dirs, "w1", chain, auto_gate=True, repo=repo)
     if in_place:
@@ -164,6 +167,10 @@ async def _at_gate(database, run_dirs, tmp_path, repo, edit, result, *, mode, in
     else:
         await ensure(database, run_dirs, repo)
     return chain.chain.nodes[1]
+
+
+def _doc(run_dirs):
+    return item_paths.docs_dir(run_dirs, "w1") / "review.md"
 
 
 def _row(database):
@@ -273,6 +280,15 @@ _25 = "for i in $(seq 25); do echo x > f$i.txt; done"
             ("undecided", _IGNORED + "new.txt"),
             id="in-place-commits",
         ),
+        # Outside the checkout, so git never sees it.
+        pytest.param(
+            CHECKS_FIRST,
+            False,
+            'echo x > "$KRAFT_DOCS_DIR/review.md"',
+            _PASS,
+            ("undecided", _IGNORED + "{doc}"),
+            id="rewrites-the-gate-document",
+        ),
         # A reviewer that decides may edit (`fixed`): no check, no "before" read.
         pytest.param(
             None,
@@ -293,7 +309,8 @@ async def test_checks_first_edits_void_the_verdict(
     reads = []
     _spy_snapshots(monkeypatch, reads)
 
-    assert await _run(database, run_dirs, gate) == expected
+    verdict, note = await _run(database, run_dirs, gate)
+    assert (verdict, note) == (expected[0], expected[1].format(doc=_doc(run_dirs)))
     assert reads == (["snapshot"] if mode else [])
 
 

@@ -5,6 +5,7 @@ import { docBody } from "../../../format";
 import type { KraftEvent, ReviewThread } from "../../../types";
 import { gateMessage, materialized } from "../../item/chainValues";
 import { OUTCOME, reviewOutcome } from "../../item/reviewOutcome";
+import { CHIP_TONE } from "../../graph/types";
 import { rejectTarget } from "../../item/graph";
 import { admits } from "../../item/status";
 import { useEvents } from "../../item/useEvents";
@@ -153,7 +154,7 @@ export function GateReview({ item, events, reload }: { item: ItemDetail; events:
         </div>
         {verdict && (
           <section className="ph-autocard" aria-label="Agent review">
-            <span className={`ph-autocard-title ph-tone-${OUTCOME[verdict.kind].phone}`}>auto_review · {OUTCOME[verdict.kind].word}</span>
+            <span className={`ph-autocard-title ph-tone-${CHIP_TONE[OUTCOME[verdict.kind].tone]}`}>auto_review · {OUTCOME[verdict.kind].word}</span>
             {verdict.note && <span className="ph-autocard-text">{verdict.note}</span>}
           </section>
         )}

@@ -44,3 +44,6 @@ export function accessibleName(item: GraphItem & { wait?: string; sub?: string }
 
 /** Ids break after underscores, so `approve_spec` wraps in a 138px column. */
 export const breakable = (s: string) => s.replace(/_/g, "_​");
+
+/** A reviewer chip's tone as a badge's: one mapping for every view of a reviewer's outcome. */
+export const CHIP_TONE = { green: "ok", red: "bad", amber: "warn" } as const;

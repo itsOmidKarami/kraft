@@ -30,10 +30,6 @@ export interface ChainNode {
   /** Whether an agent may review this node's gate before a human sees it
    *  (Kraft-zr3s). Only meaningful beside `gate_after`. */
   auto_escalate?: boolean | null;
-  /** What the gate's reviewer may do: `decides` (it can approve) or
-   *  `checks_first` (reject, or hand the gate to the person). Null when the
-   *  gate has no reviewer, and on an exec node. */
-  auto_review_mode?: "decides" | "checks_first" | null;
   /** Whether a `needs_human` stop that is *not* a pending gate — a fix loop
    *  out of attempts — auto-dispatches an escalation turn. Independent of
    *  `auto_escalate`: different mechanism, different trigger. */

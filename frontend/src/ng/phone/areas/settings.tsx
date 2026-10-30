@@ -34,7 +34,7 @@ export function useSettingRows(draft: ConfigDraft, edit: (e: Edit) => void, read
       const own = x.source === "chain" || x.source === undefined;
       // A policy key is reported by the group (`fields: ["policy"]`), so one this node sets stands for it.
       const changed = rowChanged(r, path, x.field, x.source);
-      const base: RowSpec = { key: x.field, label, mono: true, changed, sub: x.locked ?? (x.recovery ? RECOVERY_NOTE : x.source === undefined ? undefined : own ? "set here" : `from ${sourceWord(x.source)}`), value: show(x.value, meta.kind) };
+      const base: RowSpec = { key: x.field, label, mono: true, changed, sub: x.locked ?? (x.recovery ? RECOVERY_NOTE : x.source === undefined ? undefined : own ? "set here" : `from ${sourceWord(x.source)}`), value: show(x.value, meta.kind, meta.labels) };
       if (readOnly || x.locked) return base;
       if (meta.elsewhere) return { ...base, sub: meta.elsewhere };
       // A merge rejection with no node to restart from only reads: anything typed would be refused.
@@ -45,7 +45,7 @@ export function useSettingRows(draft: ConfigDraft, edit: (e: Edit) => void, read
       const current = editedValue(x.field, x.value);
       const list = optionsFor(meta, at, opts);
       if (list?.length)
-        return { ...base, onEdit: () => edit({ kind: "choice", title: label, options: [{ value: "", label: unsetLabel(x.field, x.value) }, ...list.map((value) => ({ value, label: value }))], value: typeof current === "string" ? current : "", set: (v) => send(x.field, v || null, x.value) }) };
+        return { ...base, onEdit: () => edit({ kind: "choice", title: label, options: [{ value: "", label: unsetLabel(x.field, x.value) }, ...list.map((value) => ({ value, label: meta.labels?.[value] ?? value }))], value: typeof current === "string" ? current : "", set: (v) => send(x.field, v || null, x.value) }) };
       const choices = choicesFor(meta, at, harnesses, library);
       const closed = !!choices?.length;
       const suggested = meta.suggest === "model" ? modelsFor(providers, harnesses, harness) : [];

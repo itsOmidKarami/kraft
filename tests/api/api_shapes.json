@@ -1008,7 +1008,6 @@
      {
       "artifact": "_",
       "auto_escalate": "_",
-      "auto_review_mode": "_",
       "covered_by": "_",
       "fix_loop": "_",
       "gate_after": "_",

@@ -3,11 +3,11 @@ import type { KraftEvent } from "../../types";
 export type ReviewKind = "approve" | "reject" | "ready" | "undecided";
 
 /** Each outcome's word and tone, the same in every view. Never "passed": the item page already says that of an agent clearing a gate. */
-export const OUTCOME: Record<ReviewKind, { word: string; tone: "green" | "red" | "amber"; phone: "ok" | "bad" | "warn" }> = {
-  approve: { word: "approve", tone: "green", phone: "ok" },
-  reject: { word: "reject", tone: "red", phone: "bad" },
-  ready: { word: "ready for you", tone: "green", phone: "ok" },
-  undecided: { word: "could not decide", tone: "amber", phone: "warn" },
+export const OUTCOME: Record<ReviewKind, { word: string; tone: "green" | "red" | "amber" }> = {
+  approve: { word: "approve", tone: "green" },
+  reject: { word: "reject", tone: "red" },
+  ready: { word: "ready for you", tone: "green" },
+  undecided: { word: "could not decide", tone: "amber" },
 };
 
 /** The agent reviewer's latest outcome at a gate since it was last requested, from its own events (never invented): an older round's verdict does not hide this one's. */
