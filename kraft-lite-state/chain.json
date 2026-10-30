@@ -4,6 +4,48 @@
   "source": "bundled",
   "nodes": [
     {
+      "id": "plan",
+      "kind": "exec",
+      "policy": null,
+      "steps": [
+        {
+          "id": "main",
+          "tasks": [
+            {
+              "id": "author",
+              "path": "plan.main.author",
+              "kind": "agent",
+              "components": [
+                "plan_author"
+              ],
+              "prompt": "Produce an executable implementation plan from the approved spec.",
+              "skill": "kraft:plan",
+              "produces": "plan",
+              "profile": null,
+              "model": null,
+              "effort": null,
+              "ref": null,
+              "target": null,
+              "command": null,
+              "steering": []
+            }
+          ]
+        }
+      ],
+      "on_failure": null,
+      "fix_loop": null,
+      "on_base_changed": null,
+      "on_merge_rejected": null
+    },
+    {
+      "id": "plan_approval",
+      "kind": "gate",
+      "message": "Review and approve the implementation plan.",
+      "artifact": "plan",
+      "reject_to": "plan",
+      "chain_finalized": false
+    },
+    {
       "id": "chain_revision",
       "kind": "exec",
       "policy": null,
