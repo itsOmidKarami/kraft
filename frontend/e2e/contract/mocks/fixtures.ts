@@ -294,6 +294,7 @@ function buildItem(state: DisplayState, seed: number, variant: Variant): ItemBun
     description: long ? LONG_DESCRIPTION : seed % 2 === 0 ? "Carry the verify node's findings into the fix agent's prompt instead of re-running every plugin per cycle." : null,
     status: "active",
     chain_template: quick ? "quick-task" : "default",
+    one_off: null,
     chain_definition: { template_id: quick ? "quick-task" : "default", nodes },
     current_node_id: currentNode,
     bead_id: `kraft-${hex(seed + 9).slice(0, 4)}`,

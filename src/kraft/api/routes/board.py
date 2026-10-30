@@ -524,6 +524,7 @@ async def list_work_items(request: Request):
             "repo": r["repo"],
             "status": r["status"],
             "chain_template": r["chain_template"],
+            "one_off": store.one_off_view(r),
             # `store.chain_view`, not the raw column: a V1 row's
             # `chain_definition` is `"{}"`, and the board draws its stage bar
             # and names the current node from `chain_definition.nodes`.
@@ -1361,6 +1362,7 @@ async def get_work_item(wid: str, request: Request):
     return {
         # The override columns decoded, as every action and gate echo has them.
         **payload,
+        "one_off": store.one_off_view(row),
         "chain_definition": chain,
         # The Config tab's "effective chain" (UI v2 · 04 point 3): node
         # overrides folded over the template-shaped chain, plus the raw

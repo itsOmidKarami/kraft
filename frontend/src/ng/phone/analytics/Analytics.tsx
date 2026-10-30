@@ -6,7 +6,7 @@ import { elapsed, repoName, usd } from "../../../format";
 import { useStore } from "../../../store";
 import type { Analytics as Report } from "../../../types";
 import { boardHref, DEFAULT_RANGE, gateLabel, gateRows, HOW_COUNTED, measured, RANGES, EMPTY_RANGE, scopeLine, stopFilter, stopLabel, waitingKpi } from "../../analytics/shared";
-import { chainOf } from "../../board/model";
+import { chainKeys, chainLabel, chainOf } from "../../board/model";
 import { ChoiceSheet, useSheet } from "../nav/Sheet";
 import { RootHeader } from "../nav/ScreenHeader";
 import { Block } from "../ui/Rows";
@@ -34,7 +34,7 @@ export function Analytics() {
   const t = report?.totals;
   const delta = t?.completed_prev != null ? t.completed - t.completed_prev : null;
   const repos = [...new Set(items.map((i) => i.repo))].sort((a, b) => repoName(a).localeCompare(repoName(b)));
-  const chains = [...new Set(items.map(chainOf))].sort();
+  const chains = chainKeys(items);
   const gates = report ? gateRows(report) : [];
   const empty = !!report && t!.completed === 0 && report.by_node.length === 0;
   const rangeLabel = RANGES.find((r) => r.value === range)!.label;
@@ -44,7 +44,7 @@ export function Analytics() {
       <div className="ph-chips" role="group" aria-label="Filters">
         <Chip onClick={() => sheet.open("range")}>{rangeLabel}<ChevronDown size={14} aria-hidden="true" /></Chip>
         <Chip onClick={() => sheet.open("repo")}>{repo ? repoName(repo) : "All repos"}<ChevronDown size={14} aria-hidden="true" /></Chip>
-        <Chip onClick={() => sheet.open("chain")}>{chain || "All chains"}<ChevronDown size={14} aria-hidden="true" /></Chip>
+        <Chip onClick={() => sheet.open("chain")}>{chain ? chainLabel(chain) : "All chains"}<ChevronDown size={14} aria-hidden="true" /></Chip>
       </div>
       <div className="ph-content" tabIndex={0} role="region" aria-label="Analytics figures">
         {error && <p className="ph-error" role="alert">{error}</p>}
@@ -130,7 +130,7 @@ export function Analytics() {
         <ChoiceSheet title="Repo" value={repo} options={[{ value: "", label: "All repos", hint: String(items.length) }, ...repos.map((r) => ({ value: r, label: repoName(r), hint: String(items.filter((i) => i.repo === r).length) }))]} onPick={(v) => sheet.closeThen(() => setRepo(v))} onClose={sheet.close} />
       )}
       {sheet.is("chain") && (
-        <ChoiceSheet title="Chain" value={chain} options={[{ value: "", label: "All chains", hint: String(items.length) }, ...chains.map((c) => ({ value: c, label: c, hint: String(items.filter((i) => chainOf(i) === c).length) }))]} onPick={(v) => sheet.closeThen(() => setChain(v))} onClose={sheet.close} />
+        <ChoiceSheet title="Chain" value={chain} options={[{ value: "", label: "All chains", hint: String(items.length) }, ...chains.map((c) => ({ value: c, label: chainLabel(c), hint: String(items.filter((i) => chainOf(i) === c).length) }))]} onPick={(v) => sheet.closeThen(() => setChain(v))} onClose={sheet.close} />
       )}
     </>
   );

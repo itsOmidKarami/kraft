@@ -72,6 +72,14 @@ def _budget(raw: str) -> float | None:
         raise argparse.ArgumentTypeError(str(exc)) from None
 
 
+def _chain_text(path: str) -> str:
+    """`--chain-file`: the file's text, read here so a bad path is a usage error."""
+    try:
+        return Path(path).expanduser().read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise argparse.ArgumentTypeError(f"cannot read chain file {path}: {exc}") from None
+
+
 def _cmd_create(ns: argparse.Namespace) -> None:
     attachments = client.attachment_paths(ns.spec, ns.plan)
     common.emit(
@@ -93,6 +101,7 @@ def _cmd_create(ns: argparse.Namespace) -> None:
                 node_overrides=_node_overrides(ns.node_override),
                 autostart=ns.autostart,
                 runner=ns.runner,
+                one_off_chain=ns.chain_file,
             )
         ),
         _render_created,
@@ -100,11 +109,19 @@ def _cmd_create(ns: argparse.Namespace) -> None:
     )
 
 
+ONE_OFF_REVIEW = (
+    "filed paused: its one-off chain has custom content, "
+    "which a person reviews in the web UI before it can start"
+)
+
+
 def _render_created(result: dict) -> str:
     """The created item, and, when an --autostart found every slot busy, why:
     what the board's composer says too."""
     shown = common._render_action({k: v for k, v in result.items() if k not in answers.QUEUED_KEYS})
     said = answers.filed(result)
+    if (result.get("one_off") or {}).get("custom"):
+        said = "\n".join(filter(None, [said, ONE_OFF_REVIEW]))
     return f"{shown}\n{said}" if said else shown
 
 
@@ -382,7 +399,11 @@ def _set_chain(result: dict) -> str:
 
 
 def _cmd_set_chain(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.set_chain(ns.chain, ns.id)), _set_chain, ns.json)
+    common.emit(
+        asyncio.run(client.set_chain(ns.chain, ns.id, one_off_chain=ns.chain_file)),
+        _set_chain,
+        ns.json,
+    )
 
 
 def _cmd_set_attachments(ns: argparse.Namespace) -> None:
@@ -542,9 +563,17 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         help="the brief: what the work actually is, which the spec is written from",
     )
     create.add_argument("--repo", help="default: the repo you are standing in")
-    create.add_argument(
+    which = create.add_mutually_exclusive_group()
+    which.add_argument(
         "--chain",
         help="the chain to run (default: the repo's default_chain, else `default`)",
+    )
+    which.add_argument(
+        "--chain-file",
+        type=_chain_text,
+        metavar="PATH",
+        help="a chain file for this item only; custom content in it is reviewed in the web UI "
+        "before the item can start",
     )
     create.add_argument(
         "--base-branch",
@@ -837,8 +866,14 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     # given with no id.
     set_chain.add_argument("id", nargs="?")
     # `--template` was the 1.x spelling; still accepted, with no warning.
-    set_chain.add_argument(
-        "--chain", "--template", dest="chain", required=True, help="a chain id", metavar="CHAIN"
+    which = set_chain.add_mutually_exclusive_group(required=True)
+    which.add_argument("--chain", "--template", dest="chain", help="a chain id", metavar="CHAIN")
+    which.add_argument(
+        "--chain-file",
+        type=_chain_text,
+        metavar="PATH",
+        help="a chain file for this item only; custom content in it is reviewed in the web UI "
+        "before the item can start",
     )
     set_chain.set_defaults(func=_cmd_set_chain)
 

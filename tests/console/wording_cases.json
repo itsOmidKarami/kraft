@@ -333,6 +333,11 @@
       "tail": "agent asks: is the plan's scope right?"
     }
   ],
+  "chains": [
+    { "name": "library-chain", "row": { "chain_template": "quick-task" }, "label": "quick-task" },
+    { "name": "no-chain-named", "row": { "chain_definition": { "template_id": "default" } }, "label": "default" },
+    { "name": "one-off", "row": { "chain_template": "@one-off" }, "label": "one-off" }
+  ],
   "order": {
     "rows": [
       { "id": "old-running", "display_status": "running", "current_node_id": "plan", "updated_at": "2026-10-15T09:00:00+00:00" },
