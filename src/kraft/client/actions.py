@@ -30,6 +30,7 @@ async def create_work_item(
     node_overrides: dict | None = None,
     autostart: bool = False,
     runner: str | None = None,
+    one_off_chain: str | None = None,
 ) -> dict:
     """Create a work item. It lands paused: an agent files work, a human starts it.
 
@@ -65,6 +66,10 @@ async def create_work_item(
 
     `runner` is where the item's steps run: a machine or a group from workers.yaml, `any`,
     or `local`; unset, the chain decides.
+
+    `one_off_chain` is the text of a chain file used by this item only. Custom
+    content in it waits for a person's approval in the web UI: this door never
+    sends one.
     """
     if repo is None:
         work_item_id, _origin = await context.standing_item()
@@ -94,6 +99,7 @@ async def create_work_item(
             **({"budget_usd": budget_usd} if budget_usd is not ... else {}),
             **({"node_overrides": node_overrides} if node_overrides else {}),
             **({"runner": runner} if runner else {}),
+            **({"one_off_chain": one_off_chain} if one_off_chain else {}),
             **({"description": description} if description else {}),
             **({"attachments": attachments, "cwd": str(Path.cwd())} if attachments else {}),
         },
@@ -108,6 +114,7 @@ async def create_work_item(
         "repo_warning",
         "bead_warning",
         "duplicate_warning",
+        "one_off",
     ):
         if body.get(told):
             result[told] = body[told]
@@ -549,18 +556,30 @@ async def mr_labels(labels: list[str], work_item_id: str | None = None) -> dict:
     )
 
 
-async def set_chain(chain: str, work_item_id: str | None = None) -> dict:
+async def set_chain(
+    chain: str | None,
+    work_item_id: str | None = None,
+    *,
+    one_off_chain: str | None = None,
+) -> dict:
     """Switch a not-yet-started Kraft work item onto a different chain
     (Kraft-gwn6). 404s on an unknown chain id; 409s once the item has a
     `current_node_id` -- the chain is fixed for the life of a started item.
 
+    Exactly one of `chain` (a library chain's id) and `one_off_chain` (a chain
+    file's text, for this item only) is sent.
+
     `resolve_work_item`, not `_forbid_self_action`: this is not a gate
     decision, the same reasoning `mr_labels` above gives for its own door.
     """
+    if (chain is None) == (one_off_chain is None):
+        raise transport.ClientError(
+            "name either a chain or a one-off chain, not both and not neither",
+            kind=transport.Failure.REFUSED,
+        )
     target = await context.resolve_work_item(work_item_id)
-    return await transport._patch(
-        f"/work-items/{transport.segment(target)}", {"chain_template": chain}
-    )
+    body = {"chain_template": chain} if chain is not None else {"one_off_chain": one_off_chain}
+    return await transport._patch(f"/work-items/{transport.segment(target)}", body)
 
 
 async def set_attachments(
