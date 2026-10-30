@@ -129,7 +129,11 @@ describe("Chains page: the node view", () => {
     const menu = await screen.findByRole("dialog", { name: "Add a reviewer" });
     expect(within(menu).queryByRole("menuitem", { name: "Blank builtin task" })).toBeNull();
     await userEvent.click(within(menu).getByRole("menuitem", { name: "Blank agent task" }));
-    await waitFor(() => expect(post.mock.calls[0][2]).toEqual([{ op: "add_task", slot: "auto_review", node: "spec_approval", kind: "agent" }]));
+    await waitFor(() => expect(post.mock.calls[0][2]).toEqual([
+      { op: "add_task", slot: "auto_review", node: "spec_approval", kind: "agent" },
+      // A reviewer added in the editor starts as one that checks first: it never approves on its own.
+      { op: "set_field", path: "spec_approval", field: "auto_review_mode", value: "checks_first" },
+    ]));
   });
 
   it("draws the last resolved steps of a node while the draft does not resolve", async () => {

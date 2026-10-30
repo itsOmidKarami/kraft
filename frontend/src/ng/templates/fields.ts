@@ -37,6 +37,7 @@ const META: Record<string, FieldMeta> = {
   artifact: { label: "document", kind: "text", choices: "documents" },
   artifact_required: { label: "document required", kind: "bool" },
   reject_to: { label: "reject to", kind: "text", choices: "earlier" },
+  auto_review_mode: { label: "reviewer may", kind: "enum", options: ["checks_first", "decides"] },
   timeout: { label: "timeout", kind: "duration" },
   chain_finalized: { label: "final review", kind: "bool" },
   max_attempts: { label: "attempts", kind: "int" },

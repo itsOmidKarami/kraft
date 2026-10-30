@@ -38,7 +38,7 @@ export function GateView({ gate, reviewer: r, message, doc, reject, note, youSub
               <button type="button" className={`gateview-item${r.sel ? " is-sel" : ""}`} aria-label={accessibleName({ ...r, id: r.id ?? "auto_review" }, "reviewer task")} {...hint("The gate's auto_review task · runs before you decide")} onClick={onReviewer}>
                 <NodeGlyph size="gv" icon={r.icon ?? "bot"} state={r.state} mark={r.mark} prob={r.prob} sel={r.sel} running={r.state === "current"} />
                 <span className={`gateview-label${r.mark === "add" ? " is-add" : ""}`}>{r.id ?? "auto_review"}</span>
-                <Badge tone={r.chipTone && CHIP_TONE[r.chipTone]}>{r.chip ?? "runs first, before you"}</Badge>
+                <Badge tone={r.chipTone && CHIP_TONE[r.chipTone]}>{r.chip ?? (r.mode === "checks_first" ? "checks first" : r.mode === "decides" ? "decides first" : "runs first, before you")}</Badge>
               </button>
               <span className={`gateview-line${ran ? " is-ran" : ""}`} aria-hidden="true" />
             </>

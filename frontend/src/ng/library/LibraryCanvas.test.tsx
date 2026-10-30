@@ -48,6 +48,19 @@ describe("Library canvas: a node", () => {
     expect(screen.getByLabelText("message")).toHaveValue("Approve.");
   });
 
+  it.each([
+    { id: "checks first", gate: { kind: "gate", message: "Approve.", auto_review: { id: "check", kind: "agent" }, auto_review_mode: "checks_first" }, row: "check first (reject, or hand it to you)" },
+    { id: "no mode", gate: { kind: "gate", message: "Approve.", auto_review: { id: "check", kind: "agent" } }, row: "decide (can approve)" },
+    { id: "no reviewer", gate: { kind: "gate", message: "Approve." }, row: null },
+  ])("says what a gate's reviewer may do: $id", async ({ gate, row }) => {
+    draftWith({ model: { "library.yaml": { ...LIB_MODEL, nodes: { ...LIB_MODEL.nodes, approval: gate } } } });
+    mount("/templates/library/nodes.approval");
+    await screen.findAllByText("Approve.");
+    const shown = screen.queryByRole("button", { name: /^reviewer may, / });
+    if (row) expect(shown).toHaveTextContent(row);
+    else expect(shown).toBeNull();
+  });
+
   it("adds a task beside one in a step with one add_task at the library path", async () => {
     const u = userEvent.setup();
     const post = vi.spyOn(d, "postOps").mockImplementation(() => ok({ ...libView(), ops: [{ op: "add_task" }] }) as never);
