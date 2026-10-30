@@ -12,7 +12,7 @@ from support.harness import own_files
 from kraft import events
 from kraft.adapters import forge
 
-from .nodes import FAIL, FailWith, back_half
+from .nodes import FAIL, Api, FailWith, back_half
 
 
 class Cli:
@@ -30,26 +30,57 @@ class Cli:
 
     def stub(self, name: str, stdout: str = "", *, rc: int = 0, routes=None, default="{}"):
         """Install `name`. Without `routes` every call prints `stdout` and exits
-        `rc`. With `routes` (`{"mr view": stdout, "ci get": FAIL}`, keyed on
-        the first two arguments) the answer depends on the subcommand, and an
-        unrouted call prints `default` (`FAIL`: exit 1; a `FailWith` exits 1
-        saying its text)."""
+        `rc`. With `routes` (`{"mr view": stdout, "ci get": FAIL}`) the answer
+        depends on the call, and an unrouted call prints `default` (`FAIL`: exit
+        1; a `FailWith` exits 1 saying its text; an `Api` answers like
+        `<cli> api`). A key without `*` matches the first two arguments; a key
+        with `*` globs the whole argv (`"api*pulls/7*"`). Routes are tried in
+        order. Asked `api ... -i`, a plain string answer comes back as a 200
+        envelope, unless it already is one."""
+
+        def quote(text):
+            return "'" + text.replace("'", "'\\''") + "'"
+
+        def doc(text):
+            return f"cat <<'STUBEOF'\n{text}\nSTUBEOF\n"
 
         def answer(out):
             if out is FAIL:
                 return "echo 'stub: failed' >&2; exit 1"
             if isinstance(out, FailWith):
                 return f"echo '{out}' >&2; exit 1"
-            return f"cat <<'STUBEOF'\n{out}\nSTUBEOF\n  exit {rc}"
+            if isinstance(out, Api):
+                err = f"echo {quote(out.message(name))} >&2; " if out.status >= 400 else ""
+                return (
+                    f'if [ -n "$INC" ]; then {doc(out.envelope())}  else {doc(out.body)}  {err}fi; '
+                    f"exit {out.exit_code}"
+                )
+            wrap = name != "git" and not out.startswith("HTTP/")
+            head = 'printf "HTTP/2.0 200 OK\\n\\n"; ' if wrap else ""
+            gate = '[ "$1" = api ] && [ -n "$INC" ]'
+            return (
+                f"{'if ' + gate + '; then ' + head + 'fi; ' if wrap else ''}{doc(out)}  exit {rc}"
+            )
 
         if routes is None:
             routes, default = {}, stdout
-        cases = "".join(f"  '{k}') {answer(v)} ;;\n" for k, v in routes.items())
+        cases = ""
+        for key, out in routes.items():
+            subject, pat = (
+                ('"$*"', "*".join(map(quote, key.split("*"))))
+                if "*" in key
+                else (
+                    '"$1 $2"',
+                    quote(key),
+                )
+            )
+            cases += f"case {subject} in\n  {pat}) {answer(out)} ;;\nesac\n"
         p = self.bindir / name
         p.write_text(
             f'#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a" >> {self.bindir / name}.argv; done\n'
             f'echo "$@" >> {self.bindir / name}.calls\n'
-            f'case "$1 $2" in\n{cases}  *) {answer(default)} ;;\nesac\n'
+            f'INC=; for a in "$@"; do [ "$a" = -i ] && INC=1; done\n'
+            f"{cases}{answer(default)}\n"
         )
         p.chmod(0o755)
 
