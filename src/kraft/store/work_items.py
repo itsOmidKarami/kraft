@@ -1292,6 +1292,10 @@ def claim_for_run(
 
     False too while another in-place item works in this item's checkout
     (`checkout_holder`); a caller tells that apart by reading it again.
+
+    Never claims an item whose one-off chain has custom content nobody has
+    approved (`one_off_pending`): whatever started it, a start nobody pressed
+    included, it stays as it was.
     """
     from_statuses = [WorkItemStatus(s) for s in from_statuses]
     to_status = WorkItemStatus(to_status)
@@ -1309,7 +1313,7 @@ def claim_for_run(
     return write_status(
         conn,
         f"UPDATE work_items SET status = ?, retry_at = NULL, updated_at = ? "
-        f"WHERE id = ? AND status IN ({placeholders}){capacity_clause}",
+        f"WHERE id = ? AND status IN ({placeholders}) AND one_off_pending = 0{capacity_clause}",
         params,
     )
 

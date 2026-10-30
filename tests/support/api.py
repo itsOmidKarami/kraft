@@ -267,6 +267,22 @@ def _paused(client, repo, **body) -> str:
     return r.json()["id"]
 
 
+#: A one-off chain with custom content: a library chain plus an inline agent prompt.
+CUSTOM_ONE_OFF = """\
+extends: default
+add:
+  - after: verification
+    node:
+      id: k6
+      kind: exec
+      tasks:
+        - id: run
+          kind: agent
+          harness: claude
+          prompt: run k6
+"""
+
+
 def _one_off(client, repo, text, **body) -> str:
     """File a not-yet-started item with the one-off chain `text` (a chain file's
     text); its id. `body` adds to or overrides the create body."""

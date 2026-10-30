@@ -125,6 +125,37 @@ def set_chain_template(
     )
 
 
+def one_off_of(row) -> dict | None:
+    """`row`'s one-off chain record (`deps.OneOff.record`), or None for an item
+    filed with a library chain."""
+    raw = row["one_off_chain"] if "one_off_chain" in row.keys() else None
+    return json.loads(raw) if raw else None
+
+
+def one_off_unapproved(row) -> bool:
+    """Whether `row` holds custom content in a one-off chain that no one has
+    approved: it never starts."""
+    return "one_off_pending" in row.keys() and row["one_off_pending"] == 1
+
+
+def approve_one_off(conn: sqlite3.Connection, work_item_id, approval: dict, digest: str) -> bool:
+    """Record `approval` of the one-off chain whose digest is `digest`. False
+    when the item has started, has nothing pending, or its chain is no longer
+    the one the caller saw -- nothing is approved then."""
+    done = (
+        conn.execute(
+            "UPDATE work_items SET one_off_approval = ?, one_off_pending = 0 "
+            "WHERE id = ? AND current_node_id IS NULL AND one_off_pending = 1 "
+            "AND json_extract(one_off_chain, '$.digest') = ?",
+            (json.dumps(approval), work_item_id, digest),
+        ).rowcount
+        == 1
+    )
+    if done:
+        events.append(conn, work_item_id, SettingsEvent.ONE_OFF_CHAIN_APPROVED, approval)
+    return done
+
+
 def replace_sandbox(
     conn: sqlite3.Connection,
     work_item_id,

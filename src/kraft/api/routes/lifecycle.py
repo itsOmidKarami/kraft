@@ -1013,6 +1013,8 @@ async def continue_held(wid: str, body: dict, request: Request) -> None:
     the slot or the checkout is still taken."""
     st = request.app.state
     row = deps._live_work_item_row(st, wid)
+    if store.one_off_unapproved(row):
+        return  # stays paused: `claim_for_run` would refuse it, and queueing it again would loop
     limit = st.policy.max_concurrent if st.policy else 1
     paused = [WorkItemStatus.PAUSED]
     if deps.task_is_live(request.app, wid):
@@ -1285,6 +1287,12 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     # Ahead of the claim: a walk spawned for a legacy row would raise in
     # `walk.chain_of` and `claimed_or_stopped` would stop it `needs_human`.
     chain_or_409(row)
+    if store.one_off_unapproved(row):
+        raise HTTPException(
+            409,
+            "this item's one-off chain has custom content no one has approved: a person "
+            "reviews it in the web UI or the phone app, then starts it",
+        )
     running = escalate.escalation_running(st.db, wid)
     if running is not None:
         raise HTTPException(409, f"an escalation turn ({running}) is already running")

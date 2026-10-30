@@ -7,21 +7,9 @@ import re
 import sqlite3
 
 import pytest
+from support.api import CUSTOM_ONE_OFF as CUSTOM
 from support.api import _one_off, _orchestrator_db, _paused
 
-CUSTOM = """\
-extends: default
-add:
-  - after: verification
-    node:
-      id: k6
-      kind: exec
-      tasks:
-        - id: run
-          kind: agent
-          harness: claude
-          prompt: run k6
-"""
 LIBRARY_ONLY = "extends: default\nremove: [work_brief]\n"
 MCP = {"X-Kraft-Client": "mcp"}
 

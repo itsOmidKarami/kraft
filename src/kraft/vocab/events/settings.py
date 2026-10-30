@@ -17,6 +17,7 @@ class SettingsEvent(StrEnum):
     NODE_OVERRIDES_CHANGED = "node_overrides_changed"
     POLICY_OVERRIDE_CHANGED = "policy_override_changed"
     NOTIFICATION_FAILED = "notification_failed"
+    ONE_OFF_CHAIN_APPROVED = "one_off_chain_approved"
 
 
 _PLAIN = EventTraits()
@@ -30,6 +31,7 @@ SETTINGS_EVENT_TRAITS = total(
         SettingsEvent.NODE_OVERRIDES_CHANGED: _PLAIN,
         SettingsEvent.POLICY_OVERRIDE_CHANGED: _PLAIN,
         SettingsEvent.NOTIFICATION_FAILED: _PLAIN,
+        SettingsEvent.ONE_OFF_CHAIN_APPROVED: _PLAIN,
     },
     name="SETTINGS_EVENT_TRAITS",
 )
