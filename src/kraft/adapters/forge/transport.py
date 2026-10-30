@@ -191,7 +191,9 @@ class CliTransport:
         """Run `<cli> api … -i`; the response and exit code, or the `ForgeError` it
         earned. A GraphQL 200 is returned whatever the exit code: its `errors[]`
         hold the reason."""
-        done = await git.run_cli(self.repo, [self.cli, "api", *args])
+        # A job log can hold bytes that are not UTF-8 (a binary cat, a Latin-1
+        # compiler); strict decoding would raise past every ForgeError handler.
+        done = await git.run_cli(self.repo, [self.cli, "api", *args], errors="replace")
         resp = parse_included(done.stdout)
         if resp is None:
             if done.returncode == 0:

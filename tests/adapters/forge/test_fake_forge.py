@@ -95,7 +95,7 @@ async def test_fake_forge_records_labels_and_retries():
     await f.set_labels(repo="/r", branch="b", mr=mr, labels=("release::patch",))
     await f.retry_jobs(repo="/r", ci=forge.CIStatus(state="failed", url="http://x/1"))
 
-    assert (f.labels, f.retried) == (["release::patch"], ["http://x/1"])
+    assert (f.labeled, f.retried) == (["release::patch"], ["http://x/1"])
 
 
 _DROP = forge.QueueRead(kind="train", state="dropped", cause="code", reason="pipeline failed")
@@ -178,3 +178,38 @@ async def test_the_fake_refuses_a_push_the_forge_has_commits_for():
         await f.push(repo="/r", branch="kraft/abc")
 
     assert (refused.value.remote, f.pushed) == ("c" * 40, [])
+
+
+async def test_fake_forge_reads_what_it_holds():
+    job = forge.Job(id="j1", name="t", stage="test", status="failed", failure_reason=None, url="u")
+    pipe = forge.Pipeline(
+        id="p1", kind="branch", ref="b", sha="s", status="failed", url="u", created_at="c"
+    )
+    merged = forge.MergedMR(number=9, title="m", labels=("a",), url="u", merged_at="t")
+    label = forge.Label(name="x", description="d", color="fff")
+    f = forge.FakeForge(
+        pipelines_seen=(pipe,),
+        jobs_seen={"p1": (job,)},
+        logs_seen={"j1": "log"},
+        merged_seen=(merged,),
+        labels_seen=(label,),
+    )
+    await f.open_mr(
+        repo="/r", branch="b", base="main", title="t", body="bd", meta=forge.MRMeta(labels=("x",))
+    )
+
+    mr = await f.mr_details(repo="/r", branch="b")
+    assert (mr.number, mr.title, mr.body, mr.labels, mr.state, mr.draft) == (
+        1, "t", "bd", ("x",), "open", True,
+    )  # fmt: skip
+    assert (mr.source_branch, mr.target_branch) == ("b", "main")
+    assert await f.mr_details(repo="/r", branch="other") is None
+    assert await f.pipelines(repo="/r", branch="b", base="main") == (pipe,)
+    assert await f.jobs(repo="/r", pipeline_id="p1") == (job,)
+    assert await f.jobs(repo="/r", pipeline_id="nope") == ()
+    assert await f.job_log(repo="/r", job_id="j1") == "log"
+    assert await f.merged_mrs(repo="/r", base="main", limit=5) == (merged,)
+    assert await f.labels(repo="/r") == (label,)
+    with pytest.raises(forge.ForgeError) as err:
+        await f.job_log(repo="/r", job_id="nope")
+    assert err.value.reason == "not_found"

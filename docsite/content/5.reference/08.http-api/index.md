@@ -171,6 +171,7 @@ The pages can change in any release. A script that must keep working calls the [
 | Route | What it does |
 |---|---|
 | [`POST /api/work-items`](/reference/http-api/work-items#post-apiwork-items) | Files a work item, paused unless the body starts it. |
+| [`GET /api/work-items/{id}/forge/...`](/reference/http-api/work-items#forge-reads) | Reads the item's merge request, pipelines, jobs, job logs, merged requests and labels. _Added in next_ |
 | [`POST /api/work-items/{id}/duplicate`](/reference/http-api/work-items#post-apiwork-itemsidduplicate) | Files a fresh paused item from an existing one. |
 | [`GET /api/work-items`](/reference/http-api/work-items#get-apiwork-items) | Lists the items on the board. |
 | [`GET /api/work-items/{id}`](/reference/http-api/work-items#get-apiwork-itemsid) | Answers one item in full. |

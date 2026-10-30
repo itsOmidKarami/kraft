@@ -125,6 +125,8 @@ SHALLOW: dict[str, str] = {
     "GET /api/work-items/{wid}/events": "each event type has its own `payload` keys",
 }
 
+_FORGE_READ = "a live forge read, and the SPA never calls it (`kraft view`)"
+
 #: Every other GET route, and why it has no shape here.
 SKIPS: dict[str, str] = {
     "GET /{path}": "the SPA's own pages, HTML rather than JSON",
@@ -137,6 +139,12 @@ SKIPS: dict[str, str] = {
     "GET /api/templates/library/{ref}": "the SPA never calls it: it reads the whole library",
     "GET /api/templates/lint": "the SPA never calls it (`kraft admin templates lint`)",
     "GET /api/work-items/{wid}/sandbox-from-config": "the SPA never calls it (`kraft item retry`)",
+    "GET /api/work-items/{wid}/forge/labels": _FORGE_READ,
+    "GET /api/work-items/{wid}/forge/merged": _FORGE_READ,
+    "GET /api/work-items/{wid}/forge/mr": _FORGE_READ,
+    "GET /api/work-items/{wid}/forge/pipelines": _FORGE_READ,
+    "GET /api/work-items/{wid}/forge/pipelines/{pid}/jobs": _FORGE_READ,
+    "GET /api/work-items/{wid}/forge/pipelines/{pid}/jobs/{jid}/log": _FORGE_READ,
     "GET /api/worker-sessions/{sid}/log": "the SPA never calls it: it reads the item-scoped log",
 }
 

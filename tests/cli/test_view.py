@@ -290,6 +290,53 @@ def test_show_and_artifact_name_the_head_the_final_review_takes(monkeypatch, cap
     assert "--head" not in render.artifact_body({"content": "doc"})
 
 
+_MR = {"number": 7, "title": "T", "state": "open", "labels": ["a", "b"], "url": "u"}
+
+
+@pytest.mark.parametrize(
+    ("argv", "fn", "args", "payload", "line"),
+    [
+        (["mr"], "forge_mr", ("w1", None), _MR, "!7 T [open] a,b u"),
+        (["pipelines"], "forge_pipelines", ("w1", None), [], "none"),
+        (["jobs", "--pipeline", "5"], "forge_jobs", ("5", "w1", None), [], "none"),
+        (
+            ["job-log", "--pipeline", "5", "--job", "9", "-n", "50"],
+            "forge_job_log",
+            ("5", "9", "w1", 50, None),
+            {"log": "boom", "truncated": False},
+            "boom",
+        ),
+        (["merged", "--limit", "3"], "forge_merged_mrs", ("w1", 3, None), [], "no merged"),
+        (["labels", "--repo", "libs/core"], "forge_labels", ("w1", "libs/core"), [], "no labels"),
+        (["mr", "--repo", "libs/core"], "forge_mr", ("w1", "libs/core"), _MR, "!7"),
+        (
+            ["job-log", "--pipeline", "5", "--job", "9"],
+            "forge_job_log",
+            ("5", "9", "w1", 200, None),
+            {"log": "\x1b]52;c;ZXZpbA==\x07ok", "truncated": False},
+            "]52;c;ZXZpbA==ok",
+        ),
+        (["mr"], "forge_mr", ("w1", None), {**_MR, "title": "T\x9b2J"}, "!7 T2J [open]"),
+    ],
+    ids=["mr", "pipelines", "jobs", "job-log", "merged", "labels", "repo", "log-osc", "title-c1"],
+)
+@pytest.mark.parametrize("as_json", [False, True], ids=["text", "json"])
+def test_the_forge_view_verbs_call_their_client_read(
+    monkeypatch, capsys, argv, fn, args, payload, line, as_json
+):
+    seen = []
+
+    async def read(*a):
+        seen.append(a)
+        return payload
+
+    monkeypatch.setattr(f"kraft.client.{fn}", read)
+    cli.main(["view", argv[0], "w1", *argv[1:], *(["--json"] if as_json else [])])
+    assert seen == [args]
+    out = capsys.readouterr().out
+    assert (json.loads(out) == payload) if as_json else line in out
+
+
 @pytest.mark.parametrize(
     ("one_off", "line"),
     [

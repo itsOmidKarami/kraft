@@ -21,6 +21,12 @@ _OWN_ITEM = [
     ("GET", "/api/work-items/{}/events"),
     ("POST", "/api/work-items/{}/progress"),
     ("POST", "/api/work-items/{}/retry"),
+    ("GET", "/api/work-items/{}/forge/mr"),
+    ("GET", "/api/work-items/{}/forge/pipelines"),
+    ("GET", "/api/work-items/{}/forge/pipelines/p1/jobs"),
+    ("GET", "/api/work-items/{}/forge/pipelines/p1/jobs/j1/log"),
+    ("GET", "/api/work-items/{}/forge/merged"),
+    ("GET", "/api/work-items/{}/forge/labels"),
 ]
 #: A session launched before per-item ids, which the flat routes are kept for.
 _OLD = "8cbfe6e27c1044b3e445c0f0d726357d"

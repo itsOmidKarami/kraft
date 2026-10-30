@@ -369,6 +369,66 @@ def _cmd_threads(ns: argparse.Namespace) -> None:
     common.emit(payload, render.threads, ns.json)
 
 
+def _forge(read, shape):
+    def run(ns: argparse.Namespace) -> None:
+        common.emit(asyncio.run(read(ns)), shape, ns.json)
+
+    return run
+
+
+def _add_forge_verbs(subs, common) -> None:
+    def verb(name, help_, read, shape, *extra):
+        p = subs.add_parser(name, parents=[common], help=help_)
+        p.add_argument("id", nargs="?")
+        p.add_argument("--repo", help="a workspace member's mount path; default the root")
+        for args, kw in extra:
+            p.add_argument(*args, **kw)
+        p.set_defaults(func=_forge(read, shape))
+
+    pipeline = (("--pipeline",), {"required": True, "help": "a pipeline id from `view pipelines`"})
+    verb(
+        "mr",
+        "the item's merge request as the forge has it",
+        lambda ns: client.forge_mr(ns.id, ns.repo),
+        render.forge_mr,
+    )
+    verb(
+        "pipelines",
+        "the item's pipelines or workflow runs",
+        lambda ns: client.forge_pipelines(ns.id, ns.repo),
+        render.forge_rows,
+    )
+    verb(
+        "jobs",
+        "the jobs of one pipeline",
+        lambda ns: client.forge_jobs(ns.pipeline, ns.id, ns.repo),
+        render.forge_rows,
+        pipeline,
+    )
+    verb(
+        "job-log",
+        "the tail of one job's log",
+        lambda ns: client.forge_job_log(ns.pipeline, ns.job, ns.id, ns.lines, ns.repo),
+        render.forge_log,
+        pipeline,
+        (("--job",), {"required": True, "help": "a job id from `view jobs`"}),
+        (("-n", "--lines"), {"type": int, "default": 200, "help": "last N lines, 1-5000"}),
+    )
+    verb(
+        "merged",
+        "recently merged merge requests into the base branch",
+        lambda ns: client.forge_merged_mrs(ns.id, ns.limit, ns.repo),
+        render.forge_merged,
+        (("--limit",), {"type": int, "default": 20, "help": "how many, 1-100"}),
+    )
+    verb(
+        "labels",
+        "the project's labels",
+        lambda ns: client.forge_labels(ns.id, ns.repo),
+        render.forge_labels,
+    )
+
+
 def _cmd_compare(ns: argparse.Namespace) -> None:
     payload = asyncio.run(client.compare(ns.id, ns.from_, ns.to, ns.nodes, **_ws(ns)))
     if ns.json:
@@ -515,6 +575,8 @@ def _add_view(subs, common: argparse.ArgumentParser) -> None:
         "--open", dest="open_only", action="store_true", help="only unresolved threads"
     )
     threads.set_defaults(func=_cmd_threads)
+
+    _add_forge_verbs(subs, common)
 
     compare = subs.add_parser("compare", parents=[common], help="diff two review targets")
     compare.add_argument("id", nargs="?")

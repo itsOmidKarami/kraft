@@ -95,6 +95,20 @@ _ODD = "a & b=c+d %20\nnext line é"
             "events",
             {"id": "w-x", "after": "7", "type": "judge_verdict"},
         ),
+        (["view", "mr", "--repo", "libs/core"], "mr", {"id": "", "repo": "libs/core"}),
+        (["view", "pipelines", "w-x"], "pipelines", {"id": "w-x", "repo": ""}),
+        (
+            ["view", "jobs", "--pipeline=5"],
+            "jobs",
+            {"id": "", "repo": "", "pipeline": "5"},
+        ),
+        (
+            ["view", "job-log", "--pipeline", "5", "--job", "9", "-n", "50"],
+            "job-log",
+            {"id": "", "repo": "", "pipeline": "5", "job": "9", "lines": "50"},
+        ),
+        (["view", "merged", "--limit", "3"], "merged", {"id": "", "repo": "", "limit": "3"}),
+        (["view", "labels", "--json"], "labels", {"id": "", "repo": ""}),
     ],
     ids=[
         "progress",
@@ -105,6 +119,12 @@ _ODD = "a & b=c+d %20\nnext line é"
         "show",
         "threads",
         "events",
+        "mr",
+        "pipelines",
+        "jobs",
+        "job-log",
+        "merged",
+        "labels",
     ],
 )
 def test_a_verb_posts_its_fields_url_encoded_and_prints_the_answer(
