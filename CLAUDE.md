@@ -18,6 +18,11 @@ test` (add `-k pattern` or a path to target specific tests; use
 `--no-testmon` for a full run). Calling pytest raw skips testmon's
 change-tracking and burns the full ~14min suite.
 
+**With no `.testmondata`, `just test` is a full run too.** testmon has no
+record yet of which tests touch which code: a fresh clone, worktree or
+container runs the whole suite on a bare `just test`. Name the paths you
+changed (`just test tests/<pkg> -n auto`) until it has one.
+
 **Testing guideline:** see `docs/testing.md`. Two tiers (unmarked unit,
 mocked at the adapter seam; `@pytest.mark.e2e("<cli>")` for a real CLI's
 contract) and one rule for every pin: mutate the code it covers and confirm
