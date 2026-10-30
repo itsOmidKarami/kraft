@@ -145,6 +145,8 @@ def copy_servers(repo: Path, where: str) -> dict:
         return {}
     local = _local_scope(_read(Path.home() / ".claude.json"), repo).get("mcpServers")
     servers = dict(local) if isinstance(local, dict) else {}
-    if where == str(repo / ".mcp.json"):
-        servers["kraft"] = _committed(repo, ".mcp.json")["mcpServers"]["kraft"]
+    committed = _committed(repo, ".mcp.json").get("mcpServers")
+    # Read again: a commit since `permission_tool` may have dropped it.
+    if where == str(repo / ".mcp.json") and isinstance(committed, dict) and "kraft" in committed:
+        servers["kraft"] = committed["kraft"]
     return servers

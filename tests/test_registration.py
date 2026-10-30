@@ -169,3 +169,12 @@ def test_a_marketplace_install_is_found_and_names_the_tool_as_expected(home, tmp
         )
         session.kill()
     assert PLUGIN in init["tools"]
+
+
+def test_a_copy_is_handed_no_kraft_a_commit_dropped_since_it_was_found(home, tmp_path):
+    """`permission_tool` and `copy_servers` read HEAD apart: a commit between
+    them that drops `kraft` leaves it out, rather than failing the launch."""
+    repo = make_repo(tmp_path)
+    _json(repo / ".mcp.json", {"mcpServers": {"other": {"command": "x"}}})
+    commit_all(repo)
+    assert registration.copy_servers(repo, str(repo / ".mcp.json")) == {}

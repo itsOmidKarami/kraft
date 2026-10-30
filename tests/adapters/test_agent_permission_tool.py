@@ -4,13 +4,17 @@ these take it away."""
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import shlex
+import stat
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from support.harness import commit_all, make_repo, write
 
+from kraft import harness as _harness
 from kraft import registration
 from kraft.adapters import agent
 
@@ -39,36 +43,51 @@ def test_a_claude_launch_with_no_kraft_server_is_refused_naming_the_fix(run):
 
 KRAFT = {"command": "kraft", "args": ["admin", "mcp"]}
 LOCAL = {"command": "/opt/kraft/bin/kraft", "args": ["admin", "mcp"]}
-DOCS = {"command": "docs-mcp"}
+SECRET = "s3cret-token"
+#: A person's own servers carry tokens: none may reach the argv, which the
+#: session's row, the API and /proc all show.
+DOCS = {"command": "docs-mcp", "env": {"DOCS_TOKEN": SECRET}}
+API = {"type": "http", "url": "https://api.example", "headers": {"Authorization": SECRET}}
 #: Committed beside `kraft`: Claude asks to approve it per folder, so it is never handed.
 TEAM = {"command": "team-mcp"}
+#: A harness file written before `extra_mcp_config` existed.
+OLD_FILE = "refused"
 
 
 @pytest.mark.parametrize(
-    ("scope", "local", "handed"),
+    ("scope", "local", "handed", "old_file"),
     [
-        pytest.param("committed-mcp-json", None, {"kraft": KRAFT}, id="committed-mcp-json"),
-        pytest.param("local-scope", {"kraft": LOCAL}, {"kraft": LOCAL}, id="local-scope"),
+        pytest.param("committed-mcp-json", None, {"kraft": KRAFT}, False, id="committed-mcp-json"),
+        pytest.param("local-scope", {"kraft": LOCAL}, {"kraft": LOCAL}, False, id="local-scope"),
         pytest.param(
             "local-scope",
-            {"kraft": LOCAL, "docs": DOCS},
-            {"kraft": LOCAL, "docs": DOCS},
-            id="local-scope-and-another",
+            {"kraft": LOCAL, "docs": DOCS, "api": API},
+            {"kraft": LOCAL, "docs": DOCS, "api": API},
+            False,
+            id="local-scope-and-others",
         ),
-        pytest.param("user-scope", None, None, id="user-scope"),
-        pytest.param("user-scope", {"docs": DOCS}, {"docs": DOCS}, id="user-scope-local-another"),
+        pytest.param("user-scope", None, None, False, id="user-scope"),
+        pytest.param(
+            "user-scope", {"docs": DOCS}, {"docs": DOCS}, False, id="user-scope-local-another"
+        ),
         # Only its own servers load, in the checkout too.
-        pytest.param("managed", {"docs": DOCS}, None, id="managed"),
+        pytest.param("managed", {"docs": DOCS}, None, False, id="managed"),
+        # Without `kraft` the session fails its first permission ask: refused at start.
+        pytest.param(
+            "local-scope", {"kraft": LOCAL}, OLD_FILE, True, id="old-harness-file-needs-kraft"
+        ),
+        # Kraft loads anywhere; only the person's own servers are missed.
+        pytest.param("user-scope", {"docs": DOCS}, None, True, id="old-harness-file-only-others"),
     ],
 )
 def test_a_copy_launch_finds_the_checkouts_registration_and_is_handed_it(
-    run, in_place, tmp_path, scope, local, handed
+    run, in_place, tmp_path, scope, local, handed, old_file
 ):
     """The copy is empty at launch and Claude keys a project's servers by its
     folder path: the lookup is of the person's checkout, and the servers tied
-    to it ride in the argv, beside the ones that load anywhere rather than
-    instead of them. A registration that loads anywhere is left alone, even
-    beside a committed `.mcp.json`."""
+    to it are handed in a file only Kraft's user reads, beside the ones that
+    load anywhere rather than instead of them. A registration that loads
+    anywhere is left alone, even beside a committed `.mcp.json`."""
     repo = make_repo(tmp_path)
     write(repo, ".mcp.json", json.dumps({"mcpServers": {"kraft": KRAFT, "team": TEAM}}))
     commit_all(repo)
@@ -82,14 +101,29 @@ def test_a_copy_launch_finds_the_checkouts_registration_and_is_handed_it(
         config["projects"] = {str(repo.resolve()): {"mcpServers": local}}
         user.write_text(json.dumps(config))
     row = {"id": "w1", "branch": None, "repo": str(repo)}
+    kw = {}
+    if old_file:
+        hs = _harness.load(None)
+        claude = hs.valid["claude"]
+        caps = {k: v for k, v in claude.capabilities.items() if k != "extra_mcp_config"}
+        hs.valid["claude"] = dataclasses.replace(claude, capabilities=caps)
+        kw["harnesses"] = hs
 
-    copy = str(tmp_path / "copy")
-    cmd = run(db=SimpleNamespace(read=lambda fn: row), cwd=copy, in_copy=True)["cmd"]
+    copy = tmp_path / "copy"
+    launch = dict(db=SimpleNamespace(read=lambda fn: row), cwd=str(copy), in_copy=True, **kw)
+    if handed == OLD_FILE:
+        with pytest.raises(agent.LaunchRefused, match="extra_mcp_config"):
+            run(**launch)
+        return
+    cmd = run(**launch)["cmd"]
 
     assert cmd[cmd.index("--permission-prompt-tool") + 1] == "mcp__kraft__permission_request"
     assert "--strict-mcp-config" not in cmd
+    assert SECRET not in shlex.join(cmd)
     if handed:
-        config = json.loads(cmd[cmd.index("--mcp-config") + 1])
-        assert config == {"mcpServers": handed}
+        handed_at = Path(cmd[cmd.index("--mcp-config") + 1])
+        assert handed_at.parent == copy.parent, "the session's own folder, never the copy"
+        assert stat.S_IMODE(handed_at.stat().st_mode) == 0o600
+        assert json.loads(handed_at.read_text()) == {"mcpServers": handed}
     else:
         assert "--mcp-config" not in cmd

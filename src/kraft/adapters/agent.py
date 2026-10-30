@@ -39,6 +39,7 @@ from kraft.worker import backends as _backends
 from kraft.worker import callback as _callback
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
+from kraft.worker.ca import write_whole
 from kraft.worker.worktree_read import open_dir_no_symlinks
 
 if TYPE_CHECKING:
@@ -47,6 +48,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _NETWORK_DOCS = "https://kraft-sdlc.dev/reference/configuration/sandbox/network-policy"
+#: The MCP servers a launch in a copy is handed (`extra_mcp_config`), in its
+#: session's own folder: never in the copy, which stays a clean clone.
+_COPY_MCP_SERVERS = "copy-mcp-servers.json"
 
 _CTX = (
     "You are working on a Kraft work item.\n"
@@ -1457,12 +1461,26 @@ async def _run_agent_task(
         options["approval_channel"] = found[0]
         # Claude keys a checkout's own servers by its folder, never the copy's:
         # handed beside whatever else loads there, not instead of it.
-        if (
-            in_copy
-            and h.supports("extra_mcp_config")
-            and (servers := _registration.copy_servers(checkout_dir, found[1]))
-        ):
-            options["extra_mcp_config"] = json.dumps({"mcpServers": servers})
+        servers = (
+            await asyncio.to_thread(_registration.copy_servers, checkout_dir, found[1])
+            if in_copy
+            else {}
+        )
+        if "kraft" in servers and not h.supports("extra_mcp_config"):
+            # Without it the session fails its first permission ask.
+            raise LaunchRefused(
+                f"harness {harness!r} ({h.path}) declares no 'extra_mcp_config' capability, "
+                f"so a copy of the checkout cannot be handed the `kraft` server registered "
+                f'for it; add `extra_mcp_config: {{ cli: ["--mcp-config", "{{value}}"] }}` '
+                f"to that file's capabilities, or remove the file to use Kraft's own"
+            )
+        if servers and h.supports("extra_mcp_config"):
+            # In a file only this user reads, never the argv: a person's servers carry
+            # tokens, and the argv is in /proc, the session's row and the API.
+            handed = Path(cwd).parent / _COPY_MCP_SERVERS
+            text = json.dumps({"mcpServers": servers})
+            await asyncio.to_thread(write_whole, handed, text.encode(), 0o600)
+            options["extra_mcp_config"] = str(handed)
     cmd = _harness.build_argv(
         h,
         command=command or None,
