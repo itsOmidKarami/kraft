@@ -129,13 +129,37 @@ def test_rate_limited_403_carries_retry_after_and_the_sso_url(cli, tmp_path):
     assert exc.value.sso_url == "https://github.com/sso?x=1"
 
 
-def test_a_spent_quota_waits_until_the_reset_the_forge_names(cli, tmp_path, monkeypatch):
+_SPENT = {"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1000600"}
+
+
+@pytest.mark.parametrize(
+    "answer, call, retry_after",
+    [
+        pytest.param(
+            Api(403, '{"message": "rate limit exceeded"}', _SPENT), rest, 600.0, id="rest"
+        ),
+        pytest.param(
+            Api(200, '{"errors": [{"type": "RATE_LIMITED", "message": "limit"}]}', _SPENT),
+            gql,
+            600.0,
+            id="graphql-200",
+        ),
+        pytest.param(
+            Api(403, '{"message": "You have exceeded a secondary rate limit."}'),
+            rest,
+            None,
+            id="secondary-limit-with-no-header",
+        ),
+    ],
+)
+def test_a_spent_quota_waits_until_the_reset_the_forge_names(
+    cli, tmp_path, monkeypatch, answer, call, retry_after
+):
     monkeypatch.setattr(transport, "_now", lambda: 1_000_000.0)
-    headers = {"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1000600"}
-    cli.stub("gh", routes={"api *": Api(403, '{"message": "rate limit exceeded"}', headers)})
+    cli.stub("gh", routes={"api *": answer})
     with pytest.raises(forge.ForgeError) as exc:
-        rest("gh", "user", tmp_path)
-    assert (exc.value.reason, exc.value.retry_after) == ("rate_limited", 600.0)
+        call("gh", "user", tmp_path) if call is rest else call("gh", tmp_path)
+    assert (exc.value.reason, exc.value.retry_after) == ("rate_limited", retry_after)
 
 
 def test_an_html_error_body_is_clipped_not_a_traceback(cli, tmp_path):

@@ -893,8 +893,12 @@ class GlabCli(mr_ops.CliWaits):
                         raise
                     await asyncio.sleep(_MERGE_RETRY_DELAY)
         except ForgeError as exc:
+            # A 409 is a moved head only when GitLab's head is another one: the
+            # train POST also answers 409 for states that move nothing.
             if exc.status == 409:
-                raise HeadMoved(str(exc), await self._forge_head(repo, branch)) from exc
+                current = await self._forge_head(repo, branch)
+                if current != head:
+                    raise HeadMoved(str(exc), current) from exc
             raise
 
     async def _forge_head(self, repo: Path, branch: str) -> str:

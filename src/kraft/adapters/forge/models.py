@@ -58,15 +58,21 @@ class ForgeError(RuntimeError):
         self.sso_url = sso_url
 
 
-def reason_for(status: int, headers: Mapping[str, str]) -> Reason | None:
+def reason_for(status: int, headers: Mapping[str, str], message: str = "") -> Reason | None:
     """The `Reason` an HTTP status means; header names are lower-cased. A 403 is
-    a rate limit only when the forge says so, otherwise a refused permission."""
+    a rate limit only when the forge says so, otherwise a refused permission:
+    by its headers, or by its message, as GitHub's secondary limit can send
+    neither `Retry-After` nor a spent quota."""
     if status == 401:
         return "auth"
     if status == 429:
         return "rate_limited"
     if status == 403:
-        limited = headers.get("x-ratelimit-remaining") == "0" or "retry-after" in headers
+        limited = (
+            headers.get("x-ratelimit-remaining") == "0"
+            or "retry-after" in headers
+            or "rate limit" in message.lower()
+        )
         return "rate_limited" if limited else "forbidden"
     if status == 404:
         return "not_found"

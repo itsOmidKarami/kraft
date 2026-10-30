@@ -1974,7 +1974,7 @@ async def run_task(
     # (`work-item-target-selection-is-immutable`).
     item = db.read(
         lambda c: c.execute(
-            "SELECT materialized_chain, root_merge_policy, description, submodules "
+            "SELECT id, materialized_chain, root_merge_policy, description, submodules "
             "FROM work_items WHERE id = ?",
             (work_item_id,),
         ).fetchone()

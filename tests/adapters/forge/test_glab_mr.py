@@ -369,18 +369,29 @@ async def test_glab_merge_puts_the_fields_glab_sends_for_the_head_pipeline(
 
 
 @pytest.mark.parametrize(
-    "refusal, head_moved",
+    "refusal, forge_head, head_moved",
     [
-        pytest.param(Api(409, '{"message": "SHA mismatch"}'), True, id="409-is-a-head-that-moved"),
         pytest.param(
-            Api(405, '{"message": "Method Not Allowed"}'), False, id="405-stays-a-forge-error"
+            Api(409, '{"message": "SHA mismatch"}'), "b" * 40, True, id="409-is-a-head-that-moved"
+        ),
+        pytest.param(
+            Api(409, '{"message": "conflict"}'),
+            _HEAD,
+            False,
+            id="409-at-the-reviewed-head-stays-a-forge-error",
+        ),
+        pytest.param(
+            Api(405, '{"message": "Method Not Allowed"}'),
+            "b" * 40,
+            False,
+            id="405-stays-a-forge-error",
         ),
     ],
 )
 async def test_glab_merge_409_is_a_head_that_moved_and_names_the_forges(
-    cli, tmp_path, refusal, head_moved
+    cli, tmp_path, refusal, forge_head, head_moved
 ):
-    moved = '[{"iid":54,"state":"opened","sha":"%s"}]' % ("b" * 40)
+    moved = json.dumps([{"iid": 54, "state": "opened", "sha": forge_head}])
     cli.stub(
         "glab",
         routes={
@@ -400,7 +411,7 @@ async def test_glab_merge_409_is_a_head_that_moved_and_names_the_forges(
 
     assert isinstance(caught.value, forge.HeadMoved) is head_moved
     if head_moved:
-        assert caught.value.current == "b" * 40
+        assert caught.value.current == forge_head
     else:
         assert caught.value.status == refusal.status
 

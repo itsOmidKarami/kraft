@@ -70,22 +70,34 @@ def test_failure_cause_reads_the_forge_error_record_before_the_text(text, record
 
 
 @pytest.mark.parametrize(
-    ("status", "headers", "reason"),
+    ("status", "headers", "reason", "message"),
     [
-        (401, {}, "auth"),
-        (403, {}, "forbidden"),
-        (403, {"x-ratelimit-remaining": "0"}, "rate_limited"),
-        (403, {"retry-after": "30"}, "rate_limited"),
-        (429, {}, "rate_limited"),
-        (404, {}, "not_found"),
-        (409, {}, "conflict"),
-        (502, {}, "unreachable"),
-        (200, {}, None),
+        (401, {}, "auth", ""),
+        (403, {}, "forbidden", ""),
+        (403, {"x-ratelimit-remaining": "0"}, "rate_limited", ""),
+        (403, {"retry-after": "30"}, "rate_limited", ""),
+        (403, {}, "rate_limited", "You have exceeded a secondary rate limit."),
+        (429, {}, "rate_limited", ""),
+        (404, {}, "not_found", ""),
+        (409, {}, "conflict", ""),
+        (502, {}, "unreachable", ""),
+        (200, {}, None, ""),
     ],
-    ids=["401", "403", "403-ratelimit", "403-retry-after", "429", "404", "409", "5xx", "ok"],
+    ids=[
+        "401",
+        "403",
+        "403-ratelimit",
+        "403-retry-after",
+        "403-secondary-limit-message",
+        "429",
+        "404",
+        "409",
+        "5xx",
+        "ok",
+    ],
 )
-def test_reason_for_maps_status_and_headers(status, headers, reason):
-    assert forge.reason_for(status, headers) == reason
+def test_reason_for_maps_status_and_headers(status, headers, reason, message):
+    assert forge.reason_for(status, headers, message) == reason
 
 
 def test_head_moved_carries_its_reason():

@@ -207,7 +207,7 @@ class CliTransport:
             raise ForgeError(
                 f"{label}: {message or _clip(resp.text or done.stderr)} (HTTP {resp.status})",
                 status=resp.status,
-                reason=reason_for(resp.status, resp.headers),
+                reason=reason_for(resp.status, resp.headers, message),
                 retry_after=_retry_after(resp.headers),
                 sso_url=_sso_url(resp.headers.get("x-github-sso", "")),
             )
@@ -232,7 +232,11 @@ class CliTransport:
         if errors := body.get("errors"):
             message = "; ".join(str(e.get("message", e)) for e in errors)
             raise ForgeError(
-                f"graphql: {_clip(message)}", status=resp.status, reason=graphql_reason(errors)
+                f"graphql: {_clip(message)}",
+                status=resp.status,
+                reason=graphql_reason(errors),
+                retry_after=_retry_after(resp.headers),
+                sso_url=_sso_url(resp.headers.get("x-github-sso", "")),
             )
         if rc != 0:
             raise ForgeError(f"graphql: {self.cli} exited {rc}", status=resp.status)
