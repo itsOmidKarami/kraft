@@ -33,7 +33,12 @@ def _dest(tmp_path):
 
 
 async def test_a_copy_is_the_branch_tip_detached(item_on, run_dirs, repo, tmp_path):
+    """With the checkout's branches and origin/* refs, for `git diff
+    main...HEAD`, the person on a branch of their own."""
     row, branch = await _item(item_on, run_dirs, repo)
+    git(repo, "update-ref", "refs/remotes/origin/main", "main")
+    git(repo, "checkout", "-q", "-b", "theirs")
+    refs = git(repo, "for-each-ref")
     dest = _dest(tmp_path)
 
     await inplace.make_copy(row, dest, timeout_s=None)
@@ -41,6 +46,10 @@ async def test_a_copy_is_the_branch_tip_detached(item_on, run_dirs, repo, tmp_pa
     assert git(dest, "rev-parse", "HEAD") == git(repo, "rev-parse", f"refs/heads/{branch}")
     assert subprocess.run(["git", "-C", str(dest), "symbolic-ref", "-q", "HEAD"]).returncode != 0
     assert git(dest, "remote") == ""
+    for rev in ["main", "origin/main", "theirs"]:
+        assert git(dest, "rev-parse", rev) == git(repo, "rev-parse", rev)
+    assert git(dest, "merge-base", "main", "HEAD") == git(repo, "merge-base", "main", branch)
+    assert git(repo, "for-each-ref") == refs
     assert (dest / "item.txt").read_text() == "the item's\n"
     assert git(repo, "worktree", "list", "--porcelain").count("worktree ") == 1
 

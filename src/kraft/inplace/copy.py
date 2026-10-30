@@ -106,6 +106,11 @@ async def make_copy(row, dest: Path, *, timeout_s: float | None) -> None:
         )
         await git("clone", "-q", "--shared", "--no-checkout", repo, str(dest))
         await git("-C", str(dest), "remote", "remove", "origin")
+        # The checkout's branches and origin/* refs, for `git diff main...HEAD`:
+        # read from the person's repository, objects through alternates, no
+        # remote left behind.
+        refs = [f"+refs/{kind}/*:refs/{kind}/*" for kind in ("heads", "remotes", "tags")]
+        await git("-C", str(dest), "fetch", "-q", "--no-tags", "--update-head-ok", repo, *refs)
         await git("-C", str(dest), "checkout", "-q", "--detach", sha)
     except asyncio.CancelledError:
         await _subprocess.uncancellable(asyncio.to_thread(_empty, dest))
