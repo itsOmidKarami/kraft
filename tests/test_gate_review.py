@@ -397,8 +397,9 @@ async def test_checks_first_gate_with_no_document_checks_the_checkout(
 
 
 _IN_PLACE_IGNORED = (
-    "The reviewer changed files in its copy of the branch, so its verdict was ignored; "
-    "Kraft removed the copy and your checkout was not touched: "
+    "The reviewer changed files in its copy of the branch, or on the branch itself, so "
+    "its verdict was ignored; Kraft removed the copy and left your working files as "
+    "they were: "
 )
 _PERSONS = "# the person's edit\n"
 #: A commit on the person's branch by a route around the copy, which it then undoes.

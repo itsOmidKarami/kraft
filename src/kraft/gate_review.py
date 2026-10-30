@@ -103,8 +103,9 @@ _VOIDED = (
     "still in the worktree: "
 )
 _VOIDED_IN_COPY = (
-    "The reviewer changed files in its copy of the branch, so its verdict was ignored; "
-    "Kraft removed the copy and your checkout was not touched: "
+    "The reviewer changed files in its copy of the branch, or on the branch itself, so "
+    "its verdict was ignored; Kraft removed the copy and left your working files as "
+    "they were: "
 )
 
 

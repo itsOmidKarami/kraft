@@ -47,8 +47,9 @@ def test_an_in_place_agent_is_told_whose_checkout_it_is(run, in_place):
 async def test_an_in_place_session_outside_the_walk_takes_marks_and_checks_its_checkout(
     item_on, monkeypatch, script, stop
 ):
-    """An escalation, reply or gate-review agent runs the steps a walk task
-    does: the checkout switched to the item's branch, marked, checked after."""
+    """An escalation agent, or a gate reviewer that decides, runs the steps a
+    walk task does: the checkout switched to the item's branch, marked, checked
+    after. A reply agent and a checks-first reviewer read a copy instead."""
     it = await item_on([v1_node()], status="needs_human", target=IN_PLACE)
     branch = store.branch_for(it.row())
     git(it.repo, "branch", branch)
