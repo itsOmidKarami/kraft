@@ -84,6 +84,7 @@
           "node_skipped",
           "node_started",
           "notification_failed",
+          "one_off_chain_approved",
           "pause_requested",
           "paused_by_broken_base",
           "permission_decision",

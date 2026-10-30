@@ -143,7 +143,8 @@ export function holdFetch(held: RegExp, answers: Record<string, [number, unknown
   return calls;
 }
 
-export const inShell = (ui: ReactElement, path = "/work-items/w1") =>
+/** `path` may carry router state (`{ pathname, state }`), as a navigate from another page does. */
+export const inShell = (ui: ReactElement, path: string | { pathname: string; search?: string; state?: unknown } = "/work-items/w1") =>
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>

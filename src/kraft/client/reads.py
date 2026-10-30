@@ -647,3 +647,49 @@ async def harness_status() -> list[dict]:
     """Each harness provider, with whether its CLI is on the server's PATH
     (`GET /harnesses`, `executable_found`)."""
     return await transport._get("/harnesses")
+
+
+async def _forge(work_item_id: str | None, tail: str, **params):
+    wid = await context.resolve_work_item(work_item_id)
+    return await transport._get(f"/work-items/{transport.segment(wid)}/forge/{tail}", **params)
+
+
+async def forge_mr(work_item_id: str | None = None, repo: str | None = None) -> dict:
+    """The item's merge request as the forge has it: title, body, labels, state, branches."""
+    return await _forge(work_item_id, "mr", repo=repo)
+
+
+async def forge_pipelines(work_item_id: str | None = None, repo: str | None = None) -> list:
+    """The item's pipelines (or workflow runs), newest first as the forge lists them."""
+    return await _forge(work_item_id, "pipelines", repo=repo)
+
+
+async def forge_jobs(
+    pipeline: str, work_item_id: str | None = None, repo: str | None = None
+) -> list:
+    """The jobs of one of the item's pipelines."""
+    return await _forge(work_item_id, f"pipelines/{transport.segment(pipeline)}/jobs", repo=repo)
+
+
+async def forge_job_log(
+    pipeline: str,
+    job: str,
+    work_item_id: str | None = None,
+    lines: int = 200,
+    repo: str | None = None,
+) -> dict:
+    """The last `lines` lines of one job's log: `{"log": str, "truncated": bool}`."""
+    tail = f"pipelines/{transport.segment(pipeline)}/jobs/{transport.segment(job)}/log"
+    return await _forge(work_item_id, tail, lines=lines, repo=repo)
+
+
+async def forge_merged_mrs(
+    work_item_id: str | None = None, limit: int = 20, repo: str | None = None
+) -> list:
+    """The most recently merged merge requests into the item's base branch."""
+    return await _forge(work_item_id, "merged", limit=limit, repo=repo)
+
+
+async def forge_labels(work_item_id: str | None = None, repo: str | None = None) -> list:
+    """The labels the project defines."""
+    return await _forge(work_item_id, "labels", repo=repo)

@@ -13,11 +13,13 @@ export const tip = (label: string, text = label) => ({ "aria-label": label, "dat
 /** The tooltip of a button whose visible text already names it: the tip adds information, so a screen reader gets it as the description too. */
 export const hint = (text: string) => ({ "data-tip": text, "aria-description": text }) as const;
 
-const HOST = "[data-tip]";
+/** `data-tip-off` keeps the tip (and the audit's check) on a button whose hover already answers itself, as the
+ *  collapsed sidebar's pin does by opening the sidebar under where the tip would sit. */
+const HOST = "[data-tip]:not([data-tip-off])";
 
 /** The one tooltip, mounted once per app. It shows the `data-tip` of the button under the pointer or holding
  *  keyboard focus after TIP_DELAY_MS, just under that button (above it when there is no room) so it never
- *  covers it, and goes on leave, blur, press, scroll or Escape. One layer rather than a wrapper per button:
+ *  covers it, and goes on leave, blur, press, scroll or any key. One layer rather than a wrapper per button:
  *  a diff has a button on every line. The button keeps its own aria-label, so a screen reader hears it once. */
 export function Tooltip() {
   const [on, setOn] = useState<{ label: string; rect: DOMRect } | null>(null);
@@ -33,14 +35,16 @@ export function Tooltip() {
       if (el === host) return;
       hide();
       host = el;
-      timer = setTimeout(() => setOn({ label: el.getAttribute("data-tip") ?? "", rect: el.getBoundingClientRect() }), TIP_DELAY_MS);
+      // Checked again when it fires: a press in the meantime can mark the button data-tip-off.
+      timer = setTimeout(() => el.matches(HOST) && setOn({ label: el.getAttribute("data-tip") ?? "", rect: el.getBoundingClientRect() }), TIP_DELAY_MS);
     };
     const hostOf = (t: EventTarget | null) => (t instanceof Element ? t.closest(HOST) : null);
     const over = (e: MouseEvent) => { const h = hostOf(e.target); if (h) arm(h); };
     const out = (e: MouseEvent) => { if (host && hostOf(e.relatedTarget) !== host) hide(); };
     // Keyboard focus only: a click's focus is the click's business, and it hides the tip.
     const focus = (e: FocusEvent) => { const h = hostOf(e.target); if (h?.matches(":focus-visible")) arm(h); };
-    const key = (e: KeyboardEvent) => e.key === "Escape" && hide();
+    // Any key: Escape dismisses, and Enter, Space or a shortcut is a press that can change what the tip says.
+    const key = () => hide();
     document.addEventListener("mouseover", over);
     document.addEventListener("mouseout", out);
     document.addEventListener("focusin", focus);

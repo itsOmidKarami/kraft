@@ -210,6 +210,8 @@ body:has(.draft-page) { --toast-bottom: 88px; }
 /* A long chain's overview starts under the chain menu, and the canvas grows to hold the menu, the overview and the row. */
 .draft-canvas:has(.chain-mapped) { flex-basis: 380px; }
 .draft-canvas .chain-mapped { top: 40px; }
+/* A one-off chain not read yet, or unreadable: under the chain button, not behind it. */
+.draft-canvas > .draft-chain-state { padding-top: 56px; }
 .draft-chain-btn { background: var(--bg); }
 .draft-pane-body { display: flex; flex-direction: column; gap: 14px; }
 .draft-section { display: flex; flex-direction: column; gap: 4px; }
@@ -239,3 +241,5 @@ body:has(.draft-page) { --toast-bottom: 88px; }
 @media (max-width: 1023px) { .draft-page { padding: 14px 16px; } }
 /* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
 .board-row, .sk-row { padding-block: calc(8px + var(--row-pad-add)); }
+.oneoff-agent { display: flex; flex-direction: column; gap: 10px; width: 340px; padding: 8px; }
+.oneoff-agent textarea { line-height: 1.5; }

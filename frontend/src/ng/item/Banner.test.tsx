@@ -121,7 +121,11 @@ describe("Banner", () => {
       await userEvent.click(screen.getByRole("button", { name: "Raise cap" }));
       await userEvent.type(screen.getByRole("spinbutton"), "{backspace}6");
       await userEvent.click(screen.getByRole("button", { name: "Save & retry" }));
-      expect(await screen.findByRole("alert")).toHaveTextContent("6 exceeds the maximum 5");
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("6 exceeds the maximum 5");
+      // The server's refusal describes the field, but what was typed is not invalid.
+      expect(screen.getByRole("spinbutton")).not.toHaveAttribute("aria-invalid", "true");
+      expect(screen.getByRole("spinbutton")).toHaveAttribute("aria-describedby", alert.id);
       expect(writes(calls).map((c) => c.method)).toEqual(["PATCH"]);
       expect(reload).not.toHaveBeenCalled();
       expect(screen.getByRole("dialog")).toBeInTheDocument();

@@ -184,6 +184,27 @@ def test_a_library_save_refuses_what_the_chain_save_refuses(client, templates_di
     assert snapshot(templates_dir) == before
 
 
+def _expanding_to(nodes: int) -> str:
+    """A few lines of YAML that expand to about `nodes` nodes through one alias."""
+    return (
+        "a: &a [" + ",".join(["1"] * 1000) + "]\nb: [" + ",".join(["*a"] * (nodes // 1000)) + "]\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("nodes", "refused"),
+    [
+        pytest.param(30_000, False, id="past-a-one-off-bound"),
+        pytest.param(300_000, True, id="bomb"),
+    ],
+)
+@pytest.mark.parametrize("url", ["/api/templates/library", "/api/templates/chains/scratch"])
+def test_a_save_is_bounded_far_above_a_one_off_chain(client, templates_dir, url, nodes, refused):
+    response = client.put(url, json={"text": _expanding_to(nodes)})
+    assert response.status_code == 422
+    assert ("too large" in response.json()["detail"]) is refused
+
+
 def test_a_library_save_is_written_verbatim_and_live(client, templates_dir):
     path = templates_dir / "library.yaml"
     text = path.read_text() + "\n# a comment survives\n"
@@ -260,6 +281,40 @@ def test_the_steering_preview_shows_a_task_launch_section_by_section(client, che
     assert "Work item: <work item id>" in contract and "Worker session: <session id>" in contract
     assert checkout in contract
     assert "Keep changes focused." in task_steering
+
+
+def _reviewed_chain(templates_dir, mode):
+    """`reviewed`: the default chain with an agent reviewing `spec_approval` in `mode`."""
+    _demo_repo(templates_dir)
+    reviewer = {"id": "reviewer", "kind": "agent", "harness": "claude", "prompt": "Check it."}
+    gate = {"auto_review": reviewer} | ({"auto_review_mode": mode} if mode else {})
+    chain = {"id": "reviewed", "extends": "default", "overrides": {"spec_approval": gate}}
+    (templates_dir / "chains" / "reviewed.yaml").write_text(yaml.safe_dump(chain))
+
+
+@pytest.mark.parametrize(
+    "read_only",
+    [
+        pytest.param(
+            True,
+            marks=pytest.mark.api_client(
+                edit_templates=partial(_reviewed_chain, mode="checks_first")
+            ),
+            id="checks-first",
+        ),
+        pytest.param(
+            False,
+            marks=pytest.mark.api_client(edit_templates=partial(_reviewed_chain, mode=None)),
+            id="decides",
+        ),
+    ],
+)
+def test_the_steering_preview_shows_a_gate_reviewer_what_it_launches_with(client, read_only):
+    response = _preview(client, chain="reviewed", task="spec_approval.auto_review")
+    assert response.status_code == 200, response.text
+    contract = response.json()["sections"][0]["text"]
+    told = ("Commit everything you change" in contract, "Kraft compares it after you" in contract)
+    assert told == (not read_only, read_only)
 
 
 @pytest.mark.api_client(edit_templates=_demo_repo)

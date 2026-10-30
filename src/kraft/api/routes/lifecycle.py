@@ -145,6 +145,16 @@ class Escalate(BaseModel):
     new_thread: bool = False
 
 
+def refuse_unapproved_one_off(row) -> None:
+    """409 for an item whose one-off chain holds custom content no one approved."""
+    if store.one_off_unapproved(row):
+        raise HTTPException(
+            409,
+            "this item's one-off chain has custom content no one has approved: a person "
+            "reviews it in the web UI, on a computer or a phone, then starts it",
+        )
+
+
 def chain_or_409(row):
     """The item's frozen chain, for a door that walks it. A legacy row has
     none: `walk.chain_of` would raise LookupError and the route would 500, so
@@ -1013,6 +1023,7 @@ async def continue_held(wid: str, body: dict, request: Request) -> None:
     the slot or the checkout is still taken."""
     st = request.app.state
     row = deps._live_work_item_row(st, wid)
+    refuse_unapproved_one_off(row)
     limit = st.policy.max_concurrent if st.policy else 1
     paused = [WorkItemStatus.PAUSED]
     if deps.task_is_live(request.app, wid):
@@ -1285,6 +1296,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     # Ahead of the claim: a walk spawned for a legacy row would raise in
     # `walk.chain_of` and `claimed_or_stopped` would stop it `needs_human`.
     chain_or_409(row)
+    refuse_unapproved_one_off(row)
     running = escalate.escalation_running(st.db, wid)
     if running is not None:
         raise HTTPException(409, f"an escalation turn ({running}) is already running")
@@ -1721,6 +1733,7 @@ async def _retry(wid: str, body: Retry, request: Request):
     if held := held_refusal(row):
         # Ahead of the node check: an item held before it ever started has none.
         raise HTTPException(409, held)
+    refuse_unapproved_one_off(row)
     if row["current_node_id"] not in store.chain_node_ids(row):
         raise HTTPException(409, "work item has no current node to retry")
     if row["status"] not in admitting(Verb.RETRY):

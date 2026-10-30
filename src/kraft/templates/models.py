@@ -99,6 +99,9 @@ JUDGE_SEGMENT = "judge"
 #: execution shape at all, so there is no authored step id that could collide
 #: with it.
 AUTO_REVIEW_SEGMENT = "auto_review"
+#: `GateNode.auto_review_mode`'s value for a reviewer that may only reject or
+#: hand the gate to the person, never approve it.
+CHECKS_FIRST = "checks_first"
 
 #: `resolved-chain-identifiers-are-unique` (no `.`, no whitespace, nothing else
 #: that would make a resolved path ambiguous) is `Identifier`, imported from
@@ -1083,6 +1086,12 @@ class GateNode(BaseModel):
     #: kind check for a snapshot that reached the row without passing through
     #: here, and that check is now genuinely defence rather than the only door.
     auto_review: AgentTask | None = None
+    #: What `auto_review`'s verdict may do: `decides` (approve, reject, fix) or
+    #: `CHECKS_FIRST` (reject, or leave the gate to the person). None (unset)
+    #: means `decides`; `MaterializedChain.to_json` writes every field, so a
+    #: stored gate carries `null` for it. A mode on a gate with no reviewer is
+    #: inert rather than an error, so no validator.
+    auto_review_mode: Literal["decides", "checks_first"] | None = None
     #: `chain-finalized-remains-a-dedicated-marker`.
     chain_finalized: StrictBool = False
     #: The gate scope's policy, inherited by `auto_review`. A task's fields

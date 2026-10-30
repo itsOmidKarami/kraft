@@ -12,6 +12,9 @@ needs an e2e check) and GitHub's REST/GraphQL docs:
   `pkg/cmd/run/view/view_test.go:2726-2730`
 - run lists: `pkg/cmd/run/shared/shared.go:91-112` and the REST docs for
   `GET /repos/{owner}/{repo}/actions/runs`
+- the item-scoped reads (`rest_pull`, `rest_label`; 2026-10-30): the REST docs for
+  `GET /repos/{owner}/{repo}/pulls[/{n}]` (`merged_at` is null for a closed,
+  unmerged pull request) and `GET /repos/{owner}/{repo}/labels`
 """
 
 from __future__ import annotations
@@ -207,6 +210,8 @@ def workflow_run(run_id: int, **fields) -> dict:
         "html_url": f"https://github.com/o/r/actions/runs/{run_id}",
         "created_at": "2026-09-19T05:51:00Z",
         "updated_at": "2026-09-19T05:51:09Z",
+        "repository": {"id": 1},
+        "head_repository": {"id": 1},
         **fields,
     }
 
@@ -269,3 +274,25 @@ SAD_JOB_LOG_FAILED = (
     "sad job\tquux the barf\t2026-10-21T10:00:07.4000000Z log line 2\n"
     "sad job\tquux the barf\t2026-10-21T10:00:29.5000000Z log line 3\n"
 )
+
+
+def rest_pull(number: int = 7, **fields) -> dict:
+    """A pull request as the REST `pulls` endpoints return it, trimmed to what the
+    reads use. `merged_at` is None until it merges."""
+    return {
+        "number": number,
+        "html_url": f"https://github.com/o/r/pull/{number}",
+        "state": "open",
+        "title": "Teach it",
+        "body": "why",
+        "draft": True,
+        "merged_at": None,
+        "labels": [{"name": "bug"}],
+        "head": {"ref": "kraft/abc", "sha": "abc123"},
+        "base": {"ref": "main"},
+        **fields,
+    }
+
+
+def rest_label(name: str, *, description: str | None = "", color: str = "d73a4a") -> dict:
+    return {"name": name, "description": description, "color": color}

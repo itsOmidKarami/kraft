@@ -27,6 +27,8 @@ export type GraphItem = {
   pending?: boolean;
   /** Unchanged while a draft is reviewed (Decisions §9 Publish). */
   faded?: boolean;
+  /** Custom content of a one-off chain: drawn with a dashed accent ring. */
+  custom?: boolean;
 };
 
 const STATE_WORD: Record<GlyphState, string> = { plain: "", done: "done", current: "running", todo: "not started", failed: "failed", esc: "escalated", ghost: "removed", amber: "waiting", paused: "paused" };
@@ -39,8 +41,11 @@ const STATE_WORD: Record<GlyphState, string> = { plain: "", done: "done", curren
 export function accessibleName(item: GraphItem & { wait?: string; sub?: string }, kind: string): string {
   const idle = item.state === "current" && !item.running;
   const word = (idle && (item.wait ?? item.sub ?? item.meta)) || (item.meta === "skipped" && "skipped") || STATE_WORD[item.state ?? "plain"];
-  return [item.id, kind, word, item.attempt && item.attempt >= 2 ? `attempt ${item.attempt}` : ""].filter(Boolean).join(", ");
+  return [item.id, kind, word, item.attempt && item.attempt >= 2 ? `attempt ${item.attempt}` : "", item.custom ? "custom" : ""].filter(Boolean).join(", ");
 }
 
 /** Ids break after underscores, so `approve_spec` wraps in a 138px column. */
 export const breakable = (s: string) => s.replace(/_/g, "_​");
+
+/** A reviewer chip's tone as a badge's: one mapping for every view of a reviewer's outcome. */
+export const CHIP_TONE = { green: "ok", red: "bad", amber: "warn" } as const;

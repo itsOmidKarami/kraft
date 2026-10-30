@@ -288,3 +288,112 @@ def test_show_and_artifact_name_the_head_the_final_review_takes(monkeypatch, cap
     body = render.artifact_body({"content": "doc", "head": "a" * 40, "work_item_id": "w1"})
     assert body.endswith(f"kraft item approve --head {'a' * 40} w1")
     assert "--head" not in render.artifact_body({"content": "doc"})
+
+
+_MR = {"number": 7, "title": "T", "state": "open", "labels": ["a", "b"], "url": "u"}
+
+
+@pytest.mark.parametrize(
+    ("argv", "fn", "args", "payload", "line"),
+    [
+        (["mr"], "forge_mr", ("w1", None), _MR, "!7 T [open] a,b u"),
+        (["pipelines"], "forge_pipelines", ("w1", None), [], "none"),
+        (["jobs", "--pipeline", "5"], "forge_jobs", ("5", "w1", None), [], "none"),
+        (
+            ["job-log", "--pipeline", "5", "--job", "9", "-n", "50"],
+            "forge_job_log",
+            ("5", "9", "w1", 50, None),
+            {"log": "boom", "truncated": False},
+            "boom",
+        ),
+        (["merged", "--limit", "3"], "forge_merged_mrs", ("w1", 3, None), [], "no merged"),
+        (["labels", "--repo", "libs/core"], "forge_labels", ("w1", "libs/core"), [], "no labels"),
+        (["mr", "--repo", "libs/core"], "forge_mr", ("w1", "libs/core"), _MR, "!7"),
+        (
+            ["job-log", "--pipeline", "5", "--job", "9"],
+            "forge_job_log",
+            ("5", "9", "w1", 200, None),
+            {"log": "\x1b]52;c;ZXZpbA==\x07ok", "truncated": False},
+            "]52;c;ZXZpbA==ok",
+        ),
+        (["mr"], "forge_mr", ("w1", None), {**_MR, "title": "T\x9b2J"}, "!7 T2J [open]"),
+    ],
+    ids=["mr", "pipelines", "jobs", "job-log", "merged", "labels", "repo", "log-osc", "title-c1"],
+)
+@pytest.mark.parametrize("as_json", [False, True], ids=["text", "json"])
+def test_the_forge_view_verbs_call_their_client_read(
+    monkeypatch, capsys, argv, fn, args, payload, line, as_json
+):
+    seen = []
+
+    async def read(*a):
+        seen.append(a)
+        return payload
+
+    monkeypatch.setattr(f"kraft.client.{fn}", read)
+    cli.main(["view", argv[0], "w1", *argv[1:], *(["--json"] if as_json else [])])
+    assert seen == [args]
+    out = capsys.readouterr().out
+    assert (json.loads(out) == payload) if as_json else line in out
+
+
+@pytest.mark.parametrize(
+    ("one_off", "line"),
+    [
+        (
+            {"extends": "default", "custom": 0, "needs_review": False, "approval": None},
+            "one-off · extends default · library-only",
+        ),
+        (
+            {"extends": "default", "custom": 2, "needs_review": True, "approval": None},
+            "one-off · extends default · awaiting review",
+        ),
+        (
+            {
+                "extends": "default",
+                "custom": 1,
+                "needs_review": False,
+                "approval": {"by": "human", "door": "web", "at": "2026-10-09T09:00:00+00:00"},
+            },
+            "one-off · extends default · approved by human (web) 2026-10-09T09:00:00+00:00",
+        ),
+    ],
+    ids=["library-only", "awaiting-review", "approved"],
+)
+def test_show_names_a_one_off_chain_and_where_it_stands(monkeypatch, capsys, one_off, line):
+    from kraft.client import transport
+
+    async def get(path, **_):
+        return {
+            "id": "w1",
+            "status": "paused",
+            "title": "t",
+            "chain_definition": {"nodes": []},
+            "one_off": one_off,
+        }
+
+    monkeypatch.setattr(transport, "_get", get)
+    cli.main(["view", "show", "w1"])
+    assert line in capsys.readouterr().out
+
+
+def test_show_keeps_the_raise_hint_after_the_stop_with_a_one_off_chain(monkeypatch, capsys):
+    from kraft.client import transport
+
+    async def get(path, **_):
+        return {
+            "id": "w1",
+            "status": "needs_human",
+            "current_node_id": "plan",
+            "stop_reason": "budget cap reached",
+            "suggested_action": None,
+            "stop": {"kind": "budget", "scope": "work_item"},
+            "chain_definition": {"nodes": []},
+            "one_off": {"extends": "default", "custom": 0, "needs_review": False, "approval": None},
+        }
+
+    monkeypatch.setattr(transport, "_get", get)
+    cli.main(["view", "show", "w1"])
+    keys = [line.split()[0] for line in capsys.readouterr().out.splitlines() if line.strip()]
+    assert keys.index("stop_reason") < keys.index("stop_kind") < keys.index("next")
+    assert keys.index("status") < keys.index("chain")

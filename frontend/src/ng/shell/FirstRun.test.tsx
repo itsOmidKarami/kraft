@@ -306,9 +306,25 @@ describe("FirstRun", () => {
     await user.type(screen.getByLabelText(/Path to a local git checkout/), "/nope");
     await user.click(screen.getByRole("button", { name: "+ Add repo" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Not a git repository: /nope");
+    expect(screen.getByLabelText(/Path to a local git checkout/)).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByRole("button", { name: "+ Add repo" })).toBeEnabled();
     expect(screen.getByRole("heading", { name: "Connect a repo" })).toBeInTheDocument();
     expect(api.addRepo).not.toHaveBeenCalled();
+  });
+
+  it("says why when the add fails, without marking the probed path invalid", async () => {
+    vi.spyOn(api, "addRepo").mockRejectedValue(new Error("server error"));
+    const user = setup();
+    mount();
+    await user.type(screen.getByLabelText(/Path to a local git checkout/), "/code/acme");
+    await user.click(screen.getByRole("button", { name: "+ Add repo" }));
+    await reveal();
+    await user.click(screen.getByRole("button", { name: "Add repo" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("server error");
+    const path = screen.getByLabelText(/Path to a local git checkout/);
+    expect(path).not.toHaveAttribute("aria-invalid", "true");
+    expect(path).toHaveAttribute("aria-describedby", alert.id);
   });
 
   it("step 2 shows the numbers the server has, and reads…/errors without inventing any", async () => {

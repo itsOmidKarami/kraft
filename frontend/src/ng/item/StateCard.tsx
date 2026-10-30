@@ -10,7 +10,7 @@ import { Ban, ChevronDown, ChevronRight, CircleCheck, CircleHelp, Clock, Pause, 
 import { Button } from "../ui/Button";
 import { act } from "./actions";
 import { CHECKOUT_FREES, IN_USE_BY, nameOf, WAITING_FOR_CHECKOUT } from "../board/rowText";
-import { admits, neverStarted, RELEASED, spentLine } from "./status";
+import { admits, neverStarted, RELEASED, spentLine, strandedOneOff } from "./status";
 import { actionPath, taskName } from "./paths";
 import { pathSel, placeUrl } from "./url";
 import { useLogLines } from "./useLogLines";
@@ -147,7 +147,8 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
     const kept = keptLine(item, h.files?.length);
     const keptFact: [string, ReactNode][] = kept ? [["work kept", kept]] : [];
     // A stop that names no cause says why it failed in the agent's own words: the end of its log.
-    const unexplained = !rows.length && !/ — /.test(stop.reason ?? "");
+    // A one-off stopped before its first node says what to do, and has no log.
+    const unexplained = !rows.length && !/ — /.test(stop.reason ?? "") && !strandedOneOff(item);
     const retry = retryFrom(item, node, run, h.steer);
     const retries = admits(item, "retry", true);
     return {

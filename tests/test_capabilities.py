@@ -190,3 +190,18 @@ def test_pr_rules_is_adopted_once_the_task_lists_it(tmp_path, inputs, adopted):
     (tmp_path / "library.yaml").write_text(yaml.safe_dump(library))
 
     assert capabilities.adopted(entry, tmp_path) is adopted
+
+
+@pytest.mark.parametrize(
+    ("tasks", "listed"),
+    [({"code_review": {}}, True), ({"gate_reviewer": {}}, False)],
+    ids=["without-it", "with-it"],
+)
+def test_an_install_at_2_4_is_told_about_gate_reviewer_until_its_library_has_it(
+    tmp_path, tasks, listed
+):
+    (tmp_path / "library.yaml").write_text(yaml.safe_dump({"tasks": tasks}))
+    new = capabilities.added_since("2.4.0")
+    missing = [c.name for c in new if not capabilities.adopted(c, tmp_path)]
+
+    assert ("gate_reviewer" in missing) is listed

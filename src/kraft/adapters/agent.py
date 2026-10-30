@@ -11,8 +11,8 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
+from kraft import caps, ids, inplace, item_paths, store, when_free
 from kraft import harness as _harness
-from kraft import ids, inplace, item_paths, store, when_free
 from kraft import permission_rules as _permission_rules
 from kraft import policy as _policy
 from kraft import registration as _registration
@@ -80,11 +80,17 @@ _CTX = (
     "This session ends the moment your turn ends: nothing runs after you stop "
     "responding, and a turn that ends with a background job still running fails, "
     "naming the job. Run every command to completion in the foreground before you "
-    "report status (the Monitor tool is disabled for the same reason). Run the "
-    "tests your change touches, by path or name as this repo's own instructions "
-    "say, not the whole suite: the verification after you runs that.\n"
+    "report status (the Monitor tool is disabled for the same reason).{edits}"
+)
+
+#: `_CTX`'s `{edits}`, for every launch but a read-only one (`context_sections`'
+#: `read_only`): `_TESTS`, `_WORKTREE` or `_IN_PLACE`, then `_GITIGNORED`.
+_TESTS = (
+    " Run the tests your change touches, by path or name as this repo's own "
+    "instructions say, not the whole suite: the verification after you runs that.\n"
     "\n"
-    "{checkout}"
+)
+_GITIGNORED = (
     "\n"
     "Exception: `.engineering/` (any spec/plan/review document an earlier "
     "run left there) is gitignored on purpose. Kraft reads those files "
@@ -103,7 +109,7 @@ _RESUMED_FILES = (
     "write there, Kraft no longer reads it."
 )
 
-#: Where an item's agent works: `_CTX`'s `{checkout}`, a worktree's or a person's own.
+#: Where an item's agent works, in `_CTX`'s `{edits}`: a worktree, or a person's own checkout.
 _WORKTREE = (
     "You are working in a git worktree cut for this work item, on its own "
     "branch. Commit everything you change before you exit — `git add` and "
@@ -124,6 +130,20 @@ _IN_PLACE = (
     "before you exit: work left uncommitted never reaches the merge request. Do "
     "not push and do not merge: Kraft pushes the branch and opens, updates and "
     "merges the merge request itself.\n"
+)
+#: `_CTX`'s `{edits}` for an agent that must change nothing (a gate reviewer
+#: that checks first): no word of committing or testing, which its instruction forbids.
+_READ_ONLY = (
+    "\n"
+    "\n"
+    "You are reading this work item's checkout. Change, write and commit "
+    "nothing in it, and leave no file behind: Kraft compares it after you."
+)
+#: Added to `_READ_ONLY` in place: such an agent runs in a copy of the branch
+#: (`run_agent_task(in_copy=True)`), never the person's checkout.
+_READ_ONLY_COPY = (
+    " It is a throwaway copy of this work item's branch `{branch}`, made for"
+    " this session and deleted when it ends: nothing you change here is kept."
 )
 
 #: Intent-process design §4. Kraft-authored, and its only input is the repo's
@@ -206,9 +226,9 @@ _DOCUMENTS = "\n\nThis work item's documents so far, by path:\n{lines}\n"
 def documents_note(run_dirs, work_item_row, *, worktree: Path | None = None) -> str:
     """Where this item's documents are: each kind its chain produces or a gate
     decides that is on disk, by absolute path (`item_paths.document`, the new
-    place first), then each document attached at intake, by its path in the
-    worktree, where `_copy_attachments` puts it. A later node used to find a
-    gate-written document by its place in the worktree; it is not there now.
+    place first), then each document attached at intake (`_attachment_at`).
+    A later node used to find a gate-written document by its place in the
+    worktree; it is not there now.
     "" when there is none, or no row."""
     if work_item_row is None:
         return ""
@@ -226,10 +246,20 @@ def documents_note(run_dirs, work_item_row, *, worktree: Path | None = None) -> 
     ]
     raw = work_item_row["attachments"] if "attachments" in work_item_row.keys() else None
     lines += [
-        f"{a['kind']}, attached at intake: {a['path']} in the worktree"
+        f"{a['kind']}, attached at intake: {_attachment_at(run_dirs, work_item_row, a, worktree)}"
         for a in (json.loads(raw) if raw else [])
     ]
     return _DOCUMENTS.format(lines="\n".join(lines)) if lines else ""
+
+
+def _attachment_at(run_dirs, row, a: dict, worktree: Path | None) -> str:
+    """Where the agent can read attachment `a`: in the worktree, where
+    `_copy_attachments` puts it; or, when it is not there, the copy intake
+    stored. A launch in a copy of an in-place branch always names the stored
+    one: this runs before `before_launch` fills the copy."""
+    if worktree is not None and a.get("source") and not (worktree / a["path"]).exists():
+        return str(item_paths.stored_attachment(run_dirs, row["id"], a, row["repo"]))
+    return f"{a['path']} in the worktree"
 
 
 class Invocation(NamedTuple):
@@ -626,6 +656,8 @@ def context_sections(
     #: The item runs in a person's own checkout, on `branch`.
     in_place: bool = False,
     branch: str = "<branch>",
+    #: The agent must change nothing: told neither to commit nor to run tests.
+    read_only: bool = False,
 ) -> list[tuple[str, str, str]]:
     """A launch's context as `(kind, source, text)` sections, in the order the
     agent reads them; joined, they are exactly `build_context`'s text."""
@@ -642,7 +674,11 @@ def context_sections(
                 hook_point=hook_point,
                 session_id=session_id,
                 summary_path=summary_path or "<session summary path>",
-                checkout=_IN_PLACE.format(branch=branch) if in_place else _WORKTREE,
+                edits=_READ_ONLY + (_READ_ONLY_COPY.format(branch=branch) if in_place else "")
+                if read_only
+                else _TESTS
+                + (_IN_PLACE.format(branch=branch) if in_place else _WORKTREE)
+                + _GITIGNORED,
             ),
         )
     ]
@@ -747,7 +783,9 @@ def context_sections(
 INSTRUCTION_MAX_BYTES = 24 * 1024
 
 
-def _writable_dirs(run_dirs, files: item_paths.SessionFiles, work_item_id: str, cwd) -> str:
+def _writable_dirs(
+    run_dirs, files: item_paths.SessionFiles, work_item_id: str, cwd, *, in_copy: bool = False
+) -> str:
     """The `writable_dirs` value: a JSON array (also a TOML inline array) of
     the directories outside the worktree a worker must write (Kraft-rs9pk).
 
@@ -758,10 +796,20 @@ def _writable_dirs(run_dirs, files: item_paths.SessionFiles, work_item_id: str, 
     (`harnesses/codex.yaml`), so a worker granted it could plant a link
     there. And the worktree's git common dir, where every commit writes --
     the main checkout's `.git`, outside a linked worktree -- asked of git
-    rather than guessed, and left out when git has none to give."""
+    rather than guessed, and left out when git has none to give. A copy's
+    is its own `.git`, never asked: the folder is empty at launch, and git
+    would walk up to whatever repository holds it."""
     dirs = [str(files.writable), str(item_paths.docs_dir(run_dirs, work_item_id))]
-    common = git_read(
-        Path(cwd), "rev-parse", "--path-format=absolute", "--git-common-dir", expected_failure=True
+    common = (
+        str(Path(cwd) / ".git")
+        if in_copy
+        else git_read(
+            Path(cwd),
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+            expected_failure=True,
+        )
     )
     if common:
         dirs.append(common)
@@ -1093,10 +1141,19 @@ async def _run_agent_task(
     #: caller records only for a session that holds its checkout, never for
     #: one `CheckoutBusy` refused (an escalation's message, a review's start).
     on_session: Callable[[], Awaitable[None]] | None = None,
+    #: Awaited last before the agent starts, an in-place checkout taken and
+    #: marked, or its copy made (`in_copy`), by then. It must not raise: the
+    #: session row already exists.
+    after_checkout: Callable[[], Awaitable[None]] | None = None,
     #: The machine this launch runs on (`kraft.remote.placement`), or None for the server.
     runner: str | None = None,
     #: The slot `launch.placed` took for a step whose runner is a group.
     placed_claim: Claim | None = None,
+    #: `context_sections`' `read_only`: a gate reviewer that checks first.
+    read_only: bool = False,
+    #: In place: `cwd` is this session's copy of the branch (`inplace.copy_path`), made once
+    #: the session holds the checkout's lease, instead of taking the checkout itself.
+    in_copy: bool = False,
 ) -> str:
     runner = None if runner == "local" else runner
     # An update holds the moment: no session starts until the server restarts.
@@ -1132,6 +1189,10 @@ async def _run_agent_task(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )
     in_place = item_row is not None and store.is_in_place(item_row)
+    in_copy = in_copy and in_place
+    if in_copy:
+        # Empty until `before_launch` fills it; everything before runs in it.
+        Path(cwd).mkdir(parents=True, exist_ok=True)
     reach = _harness_reach(item_row, h)
     ctx = build_context(
         usage_source=h.capabilities["usage"].source,
@@ -1154,6 +1215,7 @@ async def _run_agent_task(
         documents=documents_note(run_dirs, item_row, worktree=Path(cwd)),
         in_place=in_place,
         branch=store.branch_for(item_row) if in_place else "<branch>",
+        read_only=read_only,
     )
     options = {
         k: v
@@ -1369,7 +1431,9 @@ async def _run_agent_task(
         rules_files = _permission_rules.files_in(rules_argv, rules_dir)
     # Kraft's own value, not a task's, so the check above never sees it.
     if h.supports("writable_dirs"):
-        options["writable_dirs"] = _writable_dirs(run_dirs, files, work_item_id, cwd)
+        options["writable_dirs"] = _writable_dirs(
+            run_dirs, files, work_item_id, cwd, in_copy=in_copy
+        )
     if channel and h.supports("mcp_config"):
         # Its only MCP server is the session's own, through the channel: the
         # host's registration is not in the sandbox (spike 5.5).
@@ -1378,14 +1442,23 @@ async def _run_agent_task(
     elif not sandbox and asks is not None and asks.always == _registration.DIRECT:
         # On the host the tool's name is whatever registered the server: a
         # plugin-only install namespaces it, and a name that does not exist
-        # fails the session's first permission ask, not its start.
-        found = await asyncio.to_thread(_registration.permission_tool, Path(cwd))
+        # fails the session's first permission ask, not its start. A copy is
+        # empty until `before_launch`: ask of the person's checkout instead.
+        checkout_dir = Path(item_row["repo"]) if in_copy else Path(cwd)
+        found = await asyncio.to_thread(_registration.permission_tool, checkout_dir)
         if found is None:
             raise LaunchRefused(
                 f"harness {harness!r} asks Kraft's permission gate through the `kraft` MCP "
                 f"server, and nothing registers it for Claude Code: {_registration.FIX}"
             )
         options["approval_channel"] = found[0]
+        # Claude approves a checkout's own servers per folder, never the copy's.
+        if (
+            in_copy
+            and h.supports("mcp_config")
+            and (entry := _registration.checkout_entry(checkout_dir, found[1])) is not None
+        ):
+            options["mcp_config"] = json.dumps({"mcpServers": {"kraft": entry}})
     cmd = _harness.build_argv(
         h,
         command=command or None,
@@ -1409,8 +1482,11 @@ async def _run_agent_task(
     )
     # An agent outside the walk does, in place, what the walk does around a
     # task (`dispatch._dispatch_task`): take the checkout once the session
-    # holds its lease, mark it, and check it after.
-    borrows = takes_checkout and in_place
+    # holds its lease, mark it, and check it after. One in a copy only leases it.
+    borrows = takes_checkout and in_place and not in_copy
+    # Measured now: `run_task` moves `time_cap` on by its wait for a slot, which this
+    # closure's `time_cap` does not see.
+    copy_s = None if time_cap is None else max(time_cap.at - caps.monotonic(), 0.0)
     # Files a machine must be given because they live outside git: the cursor hook, and the
     # harness config the CLI reads (its chats stay where they were made).
     remote_ro: tuple[str, ...] = ()
@@ -1437,6 +1513,10 @@ async def _run_agent_task(
         if borrows:
             await inplace.take(db, run_dirs, item_row, attachments=inplace.attachments_of(item_row))
             await inplace.mark_task(db, run_dirs, item_row, Path(cwd), node_id, hook_point)
+        elif in_copy:
+            await inplace.make_copy(item_row, Path(cwd), timeout_s=copy_s)
+        if after_checkout is not None:
+            await after_checkout()
 
     status = await _subprocess.run_task(
         db,
@@ -1488,7 +1568,7 @@ async def _run_agent_task(
         tips=tips,
         model=model,
         ro_paths=(*rules_files, *remote_ro),
-        before_launch=before_launch if borrows or on_session else None,
+        before_launch=before_launch if borrows or in_copy or on_session or after_checkout else None,
         runner=runner,
         codex_hook=codex_hook,
         placed_claim=placed_claim,

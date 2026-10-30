@@ -50,16 +50,24 @@ describe("YAML view", () => {
     expect(within(screen.getByRole("list")).getByRole("button", { name: /line 3 · chain · chain cap is under a task's own/ })).toBeInTheDocument();
   });
 
-  it("on a syntax error says the canvas keeps the last valid draft, and Revert puts that text back", async () => {
+  it.each([
+    ["a library chain", false, TEXT, "draft", `${FILE}, YAML`],
+    // Its published file not read yet: the legend is there already, never popping in once the read answers.
+    ["a library chain still reading its published file", false, undefined, "draft", `${FILE}, YAML`],
+    ["a one-off chain", true, undefined, "chain", "One-off chain, YAML"],
+  ] as const)("%s: on a syntax error says the canvas keeps the last valid one, and Revert puts that text back", async (_, oneOff, published, what, name) => {
     const draft = fake(viewWith(TEXT));
-    const { rerender } = render(<YamlView draft={draft} scope={{ area: "chains", key: "default" }} published={TEXT} />);
+    const { rerender } = render(<YamlView draft={draft} scope={{ area: "chains", key: "default" }} published={published} oneOff={oneOff} />);
     const broken = "id: default\nnodes: [\n";
-    rerender(<YamlView draft={Object.assign(draft, { view: viewWith(broken, { yaml_error: { file: FILE, line: 3, col: 1, message: "expected ']'" } }) })} scope={{ area: "chains", key: "default" }} published={TEXT} />);
-    expect(screen.getByRole("status")).toHaveTextContent("syntax error · the canvas keeps the last valid draft");
+    rerender(<YamlView draft={Object.assign(draft, { view: viewWith(broken, { yaml_error: { file: FILE, line: 3, col: 1, message: "expected ']'" } }) })} scope={{ area: "chains", key: "default" }} published={published} oneOff={oneOff} />);
+    expect(screen.getByRole("status")).toHaveTextContent(`syntax error · the canvas keeps the last valid ${what}`);
     expect(screen.getByRole("alert")).toHaveTextContent("Line 3: expected ']'");
-    await userEvent.click(screen.getByRole("button", { name: "Revert to last valid draft" }));
+    // A one-off chain has no file and nothing published: neither its name nor the +/~ legend shows.
+    expect(screen.queryByText(FILE) === null).toBe(oneOff);
+    expect(screen.queryByText(/added/) === null).toBe(oneOff);
+    await userEvent.click(screen.getByRole("button", { name: `Revert to last valid ${what}` }));
     expect(draft.text).toHaveBeenLastCalledWith(FILE, TEXT);
-    expect(area()).toHaveValue(TEXT);
+    expect(screen.getByRole("textbox", { name })).toHaveValue(TEXT);
   });
 
   it("inserts two spaces for Tab instead of leaving the field", async () => {

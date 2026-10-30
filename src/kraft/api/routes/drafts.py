@@ -432,6 +432,30 @@ def _chain(row):
     return chain
 
 
+def node_check(st, node) -> dict:
+    """The harnesses `node`'s agent tasks run on, and what the instance's runs of
+    a node of its id cost per item (`estimate_usd`, over `estimate_runs`
+    items). Both are null for an id nothing has run yet."""
+    node_id = node.id
+    harnesses = sorted({t.task.harness for t in node.tasks() if isinstance(t.task, AgentTask)})
+    estimate, runs = st.db.read(
+        lambda c: tuple(
+            c.execute(
+                "SELECT AVG(spent), COUNT(spent) FROM (SELECT SUM(cost_usd) AS spent "
+                "FROM worker_sessions WHERE node_id = ? AND cost_usd IS NOT NULL "
+                "GROUP BY work_item_id)",
+                (node_id,),
+            ).fetchone()
+        )
+    )
+    return {
+        "node": node_id,
+        "harnesses": harnesses,
+        "estimate_usd": None if estimate is None else round(float(estimate), 2),
+        "estimate_runs": runs or None,
+    }
+
+
 def _added_checks(st, evaluated: item.Evaluated) -> list[dict]:
     """What Review & apply says of each node the draft adds that resolved: the
     harnesses its agent tasks run on (materializing the chain already refused one
@@ -445,29 +469,7 @@ def _added_checks(st, evaluated: item.Evaluated) -> list[dict]:
     for i, op in enumerate(evaluated.ops):
         if op["op"] != "add_node" or op["passed"] or i in failed or op["node"]["id"] not in nodes:
             continue
-        node_id = op["node"]["id"]
-        harnesses = sorted(
-            {t.task.harness for t in nodes[node_id].tasks() if isinstance(t.task, AgentTask)}
-        )
-        estimate, runs = st.db.read(
-            lambda c, node_id=node_id: tuple(
-                c.execute(
-                    "SELECT AVG(spent), COUNT(spent) FROM (SELECT SUM(cost_usd) AS spent "
-                    "FROM worker_sessions WHERE node_id = ? AND cost_usd IS NOT NULL "
-                    "GROUP BY work_item_id)",
-                    (node_id,),
-                ).fetchone()
-            )
-        )
-        out.append(
-            {
-                "op": i,
-                "node": node_id,
-                "harnesses": harnesses,
-                "estimate_usd": None if estimate is None else round(float(estimate), 2),
-                "estimate_runs": runs or None,
-            }
-        )
+        out.append({"op": i, **node_check(st, nodes[op["node"]["id"]])})
     return out
 
 
@@ -565,13 +567,16 @@ async def apply_item_draft(wid: str, request: Request):
                 "diff": revision.diff(chain.chain, evaluated.chain.chain),
                 "source": "draft",
             }
-            items.revise_chain(
-                c,
-                wid,
-                evaluated.chain.to_json(),
-                payload,
-                seen=(row["materialized_chain"], row["run_chain"]),
-            )
+            try:
+                items.revise_chain(
+                    c,
+                    wid,
+                    evaluated.chain.to_json(),
+                    payload,
+                    seen=(row["materialized_chain"], row["run_chain"]),
+                )
+            except ValueError as exc:
+                return 409, {"detail": str(exc)}
         for path in evaluated.skips:
             items.skip_scope(c, wid, path, item.EVIDENCE)
         store.delete_item(c, wid)

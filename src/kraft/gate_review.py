@@ -13,7 +13,10 @@ so that a human's escalation agent *can* act.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
+import os
 from pathlib import Path
 
 from kraft import caps, events, executor, inplace, item_paths, store
@@ -22,21 +25,21 @@ from kraft import overrides as _overrides
 from kraft.adapters import agent as _agent
 from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.profiles import HarnessUnavailable, harness_table
+from kraft.executor import read_only
 from kraft.executor.fallback import fallback_list
 from kraft.remote import placement as _placement
-from kraft.templates.models import AgentTask, ResolvedNode
+from kraft.templates.models import CHECKS_FIRST, AgentTask, GateNode, ResolvedNode
 from kraft.vocab import ADVANCING, GateEvent
 from kraft.worker import steering as _steering
+from kraft.worker.worktree_read import open_no_symlinks
 
-#: The only strings a verdict may be. Anything else -- a typo, a sentence, a
+#: The only strings a deciding reviewer's verdict may be (one that checks
+#: first has its own two, in `review`). Anything else -- a typo, a sentence, a
 #: missing key -- is `undecided`, which leaves the gate pending for a human.
 VERDICTS = frozenset({"approve", "reject", "fixed", "undecided"})
 
-_PROMPT = (
-    "This is a gate review. A Kraft work item has reached the gate "
-    "{gate!r} on node {node_id!r}, and is waiting for a decision. You are "
-    "deciding whether it needs a person.\n"
-    "\n"
+#: The item under review and how to report on it, in both modes.
+_ITEM = (
     "Title: {title}\n"
     "{description_line}"
     "{artifact_line}"
@@ -45,12 +48,25 @@ _PROMPT = (
     "the gate yourself -- and must not try. Report your decision by writing "
     "`verdict` into your result file, with your reasoning in `concerns`:\n"
     "\n"
-    '  "verdict": "approve"   -- the gate should clear; you are confident.\n'
+)
+_OPENING = (
+    "This is a gate review. A Kraft work item has reached the gate "
+    "{gate!r} on node {node_id!r}, and is waiting for a decision. "
+)
+_REJECT = (
     '  "verdict": "reject"    -- send it back to be redone. `concerns` becomes '
     "the steering note for the agent that redoes it, so write it as an "
     "instruction, not a complaint. Required: a rejection with no reasoning is "
     "discarded.\n"
-    '  "verdict": "fixed"     -- you repaired something in this worktree. You '
+)
+
+_PROMPT = (
+    _OPENING
+    + "You are deciding whether it needs a person.\n\n"
+    + _ITEM
+    + '  "verdict": "approve"   -- the gate should clear; you are confident.\n'
+    + _REJECT
+    + '  "verdict": "fixed"     -- you repaired something in this worktree. You '
     "may edit and commit here, but you may not then approve your own edit: the "
     "node re-runs and is measured again. `concerns` says what you changed. Note "
     "what that costs: the whole node runs again and is reviewed again, so this "
@@ -63,11 +79,68 @@ _PROMPT = (
     "expensive and a gate wrongly held costs a human one glance."
 )
 
+#: For a reviewer that checks first (`auto_review_mode: checks_first`): it
+#: cannot approve, and the person decides after it whatever it reports.
+_CHECKS_FIRST_PROMPT = (
+    _OPENING
+    + "You check it before a person does: you cannot approve it.\n\n"
+    + _ITEM
+    + _REJECT
+    + '  "verdict": "pass"      -- hand it to the person. `concerns` is required '
+    "here too: it is what they read first, so say what you checked and any "
+    "doubts you have.\n"
+    "\n"
+    "A person decides after you, whatever you report. Report `pass` whenever "
+    "you are unsure: the person reads the work next anyway, and a rejection "
+    "costs a full re-run of the node.\n"
+    "\n"
+    "Do not edit anything. Read the worktree; do not change, write or commit "
+    "any file in it. If you do, Kraft ignores your verdict."
+)
+
+_VOIDED = (
+    "The reviewer changed files, so its verdict was ignored; its changes are "
+    "still in the worktree: "
+)
+_VOIDED_IN_COPY = (
+    "The reviewer changed files in its copy of the branch, or on the branch itself, so "
+    "its verdict was ignored; Kraft removed the copy and left your working files as "
+    "they were: "
+)
+
+
+def checks_first(node: ResolvedNode) -> bool:
+    """True for a gate whose reviewer only checks first: it may reject, or
+    `pass` the gate to the person, and never approve."""
+    return isinstance(node.node, GateNode) and node.node.auto_review_mode == CHECKS_FIRST
+
 
 def _artifact_line(path: Path | None) -> str:
     if path is None:
         return "There is no artifact document for this gate; read the worktree.\n"
     return f"The document this gate is about: {path}\n"
+
+
+def _document(run_dirs, work_item_id: str, rel: str | None) -> str | None:
+    """A hash of the whole of the gate's document as it stands, `"absent"` when
+    nothing is there and `"unreadable"` when it is no regular file reached
+    without a link; None for a gate with none. The reviewer may write here, so
+    it is opened as `read_document` opens it: no link followed, no FIFO waited on.
+    Blocking and unbounded: callers run it in a thread, off the event loop."""
+    if rel is None:
+        return None
+    try:
+        fd = open_no_symlinks(*item_paths.locate(run_dirs, work_item_id, rel))
+    except FileNotFoundError:
+        return "absent"
+    except (OSError, ValueError, IndexError):
+        return "unreadable"
+    try:
+        # Whole, not `read_document`'s first 1 MB: an edit past it is still an edit.
+        with os.fdopen(fd, "rb") as fh:
+            return hashlib.file_digest(fh, "sha256").hexdigest()
+    except OSError:
+        return "unreadable"
 
 
 def _profile_fallback_refusal(
@@ -144,8 +217,11 @@ async def review(
     Never raises for an agent that misbehaved: every degraded outcome is
     `("undecided", note)`, which the caller turns into "leave the gate pending".
     Raises `store.CheckoutBusy`, having started nothing, while another
-    in-place item uses the checkout, and `inplace.CheckoutRefused` when the
-    checkout cannot be switched to the item's branch.
+    in-place item uses the checkout, and, for a deciding reviewer,
+    `inplace.CheckoutRefused` when the checkout cannot be switched to the
+    item's branch. In place, a reviewer that checks first holds the checkout's
+    lease but reads a throwaway copy of the branch (`inplace.copy`), never the
+    person's checkout; a copy that cannot be made is `undecided`.
     """
     auto_review = node.auto_review
     if auto_review is None or not isinstance(auto_review.task, AgentTask):
@@ -210,15 +286,22 @@ async def review(
 
     session_id = db.read(lambda c: store.new_session_id(c, work_item_id))
     rel = executor.gate_artifact(run_dirs, row, gate)
-    task_instruction = _PROMPT.format(
+    doc = item_paths.path_of(run_dirs, work_item_id, rel) if rel is not None else None
+    cf = checks_first(node)
+    # What a checks-first review must leave as it was: the gate's document, or
+    # where it is written while there is none yet, since the reviewer may create it.
+    watched = rel or (
+        item_paths.document_name(work_item_id, node.node.artifact)
+        if cf and node.node.artifact
+        else None
+    )
+    task_instruction = (_CHECKS_FIRST_PROMPT if cf else _PROMPT).format(
         gate=gate,
         node_id=node.id,
         title=row["title"],
         description_line=f"Brief: {row['description']}\n" if row["description"] else "",
         # Absolute: a new document is in the item's folder, not this worktree.
-        artifact_line=_artifact_line(
-            item_paths.path_of(run_dirs, work_item_id, rel) if rel is not None else None
-        ),
+        artifact_line=_artifact_line(doc),
     )
 
     started = False
@@ -346,6 +429,46 @@ async def review(
     except Exception:
         await start()  # a disabled profile (`HarnessUnavailable`) is an attempt too
         raise
+    # A reviewer that checks first must leave the work as it found it (spec
+    # "If the reviewer edits the work"): read the checkout before, compare after.
+    # The gate's document too, which is outside the checkout and git's sight.
+    worktree = inplace.item_folder(run_dirs, row)
+    in_place = store.is_in_place(row)
+    # In place it reads a copy of the branch, never the person's checkout.
+    copy = inplace.copy_path(run_dirs, work_item_id, session_id) if cf and in_place else None
+    before = None
+    doc_was = None
+    if cf and not in_place:
+        # Before the launch: once the reviewer's session row exists it counts
+        # as live, and a sandboxed item's guard would refuse every read.
+        before = read_only.snapshot(db, row, launch, worktree)
+        doc_was = await asyncio.to_thread(_document, run_dirs, work_item_id, watched)
+        if before is None:
+            why = "Kraft could not read the checkout safely, so no reviewer ran: a person decides"
+            await start()
+            await executor.config_error_session(
+                db,
+                run_dirs,
+                dict(
+                    session_id=session_id,
+                    work_item_id=work_item_id,
+                    node_id=node.id,
+                    hook_point=auto_review.path,
+                    round=0,
+                    head_sha=None,
+                ),
+                f"{auto_review.path}: {why}\n",
+            )
+            return "undecided", why
+
+    async def after_checkout() -> None:
+        # In place, once the copy is made: the copy whole, and the person's
+        # branch tip, which a commit by any other route moves. Never sandboxed,
+        # so the live-session guard cannot refuse here; a None is judged below.
+        nonlocal before, doc_was
+        before = inplace.watch_copy(db, row, launch, copy, worktree)
+        doc_was = await asyncio.to_thread(_document, run_dirs, work_item_id, watched)
+
     try:
         status = await _agent.run_agent_task(
             db,
@@ -358,6 +481,9 @@ async def review(
             harness=inv.harness,
             model=inv.model,
             effort=inv.effort,
+            # No extra tool denial for a reviewer that checks first: most
+            # harnesses cannot hold one and would refuse the launch. The
+            # before/after snapshot is what catches an edit.
             deny_tools=inv.deny_tools,
             allowed_tools=inv.allowed_tools,
             grants=inv.grants,
@@ -365,25 +491,30 @@ async def review(
             method_text=inv.method_text,
             steering_texts=inv.steering_texts,
             sandbox=sandbox,
-            checkout=executor.sandbox_checkout(row, launch, inplace.item_folder(run_dirs, row))
-            if sandbox
-            else None,
+            checkout=executor.sandbox_checkout(row, launch, worktree) if sandbox else None,
             task_instruction=task_instruction,
             title=row["title"],
-            repo_path=row["repo"],
-            cwd=inplace.item_folder(run_dirs, row),
+            repo_path=str(copy) if copy else row["repo"],
+            cwd=copy or worktree,
             repo_entry=launch.repo_entry,
             time_cap=time_cap,
             harness_id=auto_review.task.harness,
             takes_checkout=True,
             tips=tips,
             on_session=start,
+            after_checkout=after_checkout if copy else None,
+            in_copy=copy is not None,
+            # Its instruction forbids edits: its context must not ask for commits.
+            read_only=cf,
             runner=_placement.remote(_placement.runner_for(row, auto_review.runner, node.id)),
         )
     except store.CheckoutBusy:
         raise
     except Exception as exc:
         await start()  # an attempt all the same
+        if isinstance(exc, inplace.CopyFailed):
+            # Its session already ended `config_error`; never the person's checkout instead.
+            return "undecided", str(exc)
         if not isinstance(exc, _agent.LaunchRefused):
             raise
         # Refused before anything started: recorded as the reviewer's own
@@ -402,14 +533,52 @@ async def review(
             f"{auto_review.path}: {exc}\n",
         )
         return "undecided", str(exc)
-
+    else:
+        if cf:
+            # Even a reject: its reasoning was about work it then changed. A remote
+            # run's commits are already in this worktree (`remote.runs._publish`).
+            doc_is = await asyncio.to_thread(_document, run_dirs, work_item_id, watched)
+            # The document the person would now read: one the reviewer wrote where
+            # an older item kept it, or in the new place over that, is an edit too.
+            now = await asyncio.to_thread(executor.gate_artifact, run_dirs, row, gate)
+            docs = {watched} if doc_is != doc_was else set()
+            docs |= {now} if now not in (None, watched) else set()
+            if before is None:
+                # In place, a launch refused before its copy never read it:
+                # that is a run that did not finish, judged below.
+                if status in ADVANCING:
+                    return "undecided", (
+                        "Kraft could not read the checkout before the review, "
+                        "so its verdict was ignored"
+                    )
+            else:
+                if copy:
+                    files = before()  # the whole copy, and the person's branch tip
+                    voided = _VOIDED_IN_COPY
+                else:
+                    files = read_only.changed(db, row, launch, worktree, before)
+                    voided = _VOIDED
+                files += [str(item_paths.path_of(run_dirs, work_item_id, d)) for d in sorted(docs)]
+                if files:
+                    return "undecided", voided + read_only.named(files)
+    finally:
+        if copy is not None:
+            await _subprocess.uncancellable(asyncio.to_thread(inplace.remove_copy, copy))
     result_path = item_paths.session_files(run_dirs, work_item_id, session_id).result
     note = _subprocess.read_concerns(result_path) or ""
     verdict = _subprocess.read_verdict(result_path)
     # A verdict counts only from a session that finished thinking (`vocab.ADVANCING`),
     # the same rule the fix-loop judge applies. One written beside any other status
     # (failed, capped_out, paused, unknown, ...) is not a judgement, whatever it says.
-    if status not in ADVANCING or verdict not in VERDICTS:
+    if status not in ADVANCING:
+        return "undecided", note
+    if cf:
+        # Only `reject` or `pass`; an `approve` meant "good", and the person
+        # still decides. It may not edit, so it has nothing to have `fixed`.
+        verdict = "pass" if verdict == "approve" else verdict
+        if verdict not in ("reject", "pass"):
+            return "undecided", note
+    elif verdict not in VERDICTS:
         return "undecided", note
     if verdict in ("reject", "fixed") and not note.strip():
         # The note is the steering instruction for the re-run. Without one there

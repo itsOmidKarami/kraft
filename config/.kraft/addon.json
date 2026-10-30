@@ -1,7 +1,7 @@
 {
   "$schema": "https://kraft-sdlc.dev/schemas/addon.schema.json",
   "name": "kraft-default",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Kraft's shipped chains and library, from spec to merged pull request",
   "requires": { "kraft": "2.5", "harnesses": ["claude"], "profiles": ["strong", "fast"] }
 }

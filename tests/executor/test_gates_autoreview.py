@@ -432,8 +432,8 @@ async def test_a_published_must_fix_thread_downgrades_an_approve_to_undecided(
     assert it.events("chain_revised") == []
     [skipped] = it.events("gate_auto_review_skipped")
     assert skipped["payload"]["reason"] == "undecided"
-    # The approval's own note ("looks right") is not why it went to a person.
-    assert "note" not in skipped["payload"]
+    # The open must-fix is why it went to a person, not the approval's own note ("looks right").
+    assert skipped["payload"].get("note") == "a must-fix thread is open: a person decides"
 
 
 async def test_a_review_that_refused_to_launch_says_why_in_its_skipped_event(

@@ -28,20 +28,17 @@ So the failure comes from one or both of:
 If the prompt tells you to rebase this branch first, do that before anything
 else: the rest of this method assumes the branch already sits on the target.
 
-Read the failed jobs the prompt names, then their logs, with the forge's own
-read-only CLI or its web page. When the prompt links to a pipeline
-(`.../pipelines/<id>`) or a run (`.../actions/runs/<id>`), that number is the
-id below. When it links only to the merge request, there is no failed
-pipeline to hand: find the train pipeline in `glab mr view <iid> -F json`
-(its `head_pipeline`, whose `ref` ends in `/train`), or the merge group's run
-in `gh run list --event merge_group` (a `gh-readonly-queue/<base>/pr-<n>-`
-branch).
+Read the failed jobs the prompt names, then their logs. `kraft view
+pipelines` lists this merge request's pipelines; the train's has kind `train`
+(GitLab) and the merge queue's `merge_group` (GitHub). `kraft view jobs
+--pipeline <id>` lists its jobs and `kraft view job-log --pipeline <id> --job
+<job-id>` prints one job's log tail (`-n` for more lines). When the prompt
+links to a pipeline (`.../pipelines/<id>`) or a run (`.../actions/runs/<id>`),
+that number is the `--pipeline` value.
 
-- GitLab: `glab ci get --pipeline-id <id> -F json` lists the train
-  pipeline's jobs, and `glab ci trace <job> --pipeline-id <id>` prints one
-  job's log. Always pass `--pipeline-id`: without it both read this branch's
-  latest pipeline, not the train's.
-- GitHub: `gh run view <run-id> --log-failed`.
+In a workspace item a failure names its repository (`[name] ...` in the log);
+for a member, add `--repo <its folder, relative to the worktree root>` to each
+`kraft view` call. Without `--repo` they read the root repository.
 
 A log names the failing test or check far more precisely than a job name
 does; read it before you change anything.

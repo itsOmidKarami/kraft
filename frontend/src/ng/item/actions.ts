@@ -45,9 +45,10 @@ export async function cancelPreview(id: string) {
 }
 
 /** Where a Start pressed outside the item page goes when the item's draft
- *  holds changes: the item page, which asks there what its header's Start
- *  asks (Apply and start, or Start without them). */
-export const askStartUrl = (id: string) => `${at(id)}?start=1`;
+ *  holds changes or its chain is a one-off: the item page, which asks there
+ *  what its header's Start asks. The press rides in router state, never in the
+ *  address, so a link alone never starts anything: `navigate(...askStart(id))`. */
+export const askStart = (id: string) => [at(id), { state: { start: true } }] as const;
 
 /** Whether a Start pressed outside the item page must ask first (the board's
  *  peek, the phone): Start never applies a draft, so with an op in it the run

@@ -16,7 +16,11 @@ import { Peek, type PeekTab } from "./Peek";
 /** The writes these pages send; any other write is refused. */
 const WRITES = acceptWrites("POST /work-items/w1/archive", "POST /work-items/w1/resume");
 
-const Where = () => <span data-testid="where">{useLocation().pathname + useLocation().search}</span>;
+const Where = () => {
+  const l = useLocation();
+  // The Start a person pressed rides in router state, shown after the address.
+  return <span data-testid="where">{l.pathname + l.search + ((l.state as { start?: boolean } | null)?.start ? " (start pressed)" : "")}</span>;
+};
 
 function Harness({ start = "overview", budget = false }: { start?: PeekTab; budget?: boolean }) {
   const [tab, setTab] = useState<PeekTab>(start);
@@ -178,8 +182,23 @@ describe("Peek", () => {
     const calls = mount({ status: "paused", display_status: "paused", current_node_id: null }, { draft: [ov("implementation", undefined, { budget_usd: 2 })] });
     fireEvent.click(await screen.findByRole("button", { name: "Start" }));
     await act(async () => {});
-    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1?start=1");
+    expect(screen.getByTestId("where")).toHaveTextContent(/^\/work-items\/w1 \(start pressed\)$/);
     expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
+  });
+
+  it("Start on a one-off chain nobody approved starts nothing here: the item page reads it first", async () => {
+    const calls = mount({ status: "paused", display_status: "paused", current_node_id: null, one_off: { extends: "default", custom: 1, needs_review: true, approval: null } });
+    fireEvent.click(await screen.findByRole("button", { name: "Start" }));
+    await act(async () => {});
+    expect(screen.getByTestId("where")).toHaveTextContent(/^\/work-items\/w1 \(start pressed\)$/);
+    expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
+  });
+
+  it("Resume on a one-off item that already ran resumes here, not through the item page", async () => {
+    const calls = mount({ status: "paused", display_status: "paused", current_node_id: "implementation", one_off: { extends: "default", custom: 1, needs_review: false, approval: null } });
+    fireEvent.click(await screen.findByRole("button", { name: "Resume" }));
+    await act(async () => {});
+    expect(calls.filter((c) => c.method !== "GET").map((c) => c.path)).toEqual(["/work-items/w1/resume"]);
   });
 
   it("Start with only passed edits in the draft starts as before", async () => {

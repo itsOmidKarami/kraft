@@ -61,6 +61,12 @@ def test_the_tools_are_registered():
         "set_node_overrides",
         "set_work_item_policy",
         "list_threads",
+        "forge_mr",
+        "forge_pipelines",
+        "forge_jobs",
+        "forge_job_log",
+        "forge_merged_mrs",
+        "forge_labels",
         "compare_changes",
         "add_review_comment",
         "resolve_thread",
@@ -180,6 +186,38 @@ def test_create_work_item_offers_a_description_and_says_what_it_is_for():
     create = next(t for t in _tools() if t.name == "create_work_item")
     assert "description" in create.input_schema["properties"]
     assert "brief" in create.description.lower()
+
+
+def test_create_work_item_says_a_person_reviews_custom_chains():
+    """An agent that files a chain with its own prompts must know it cannot start."""
+    create = next(t for t in _tools() if t.name == "create_work_item")
+    assert "chain_yaml" in create.input_schema["properties"]
+    assert "a person must review it in the web UI" in create.description
+    set_chain = next(t for t in _tools() if t.name == "set_chain")
+    assert "a person must review it in the web UI" in set_chain.description
+    assert "chain" not in set_chain.input_schema.get("required", [])
+
+
+def test_chain_yaml_is_sent_as_the_one_off_chain(monkeypatch):
+    seen = {}
+
+    async def create(*args, **kwargs):
+        seen["create"] = kwargs
+        return {"id": "w1", "status": "paused", "title": "t"}
+
+    async def set_chain(*args, **kwargs):
+        seen["set"] = (args, kwargs)
+        return {"id": "w1"}
+
+    monkeypatch.setattr(mcp.client, "create_work_item", create)
+    monkeypatch.setattr(mcp.client, "set_chain", set_chain)
+    server = mcp.build()
+    asyncio.run(
+        server.call_tool("create_work_item", {"title": "t", "repo": "/r", "chain_yaml": "a: 1"})
+    )
+    asyncio.run(server.call_tool("set_chain", {"chain_yaml": "a: 1", "work_item_id": "w1"}))
+    assert seen["create"]["one_off_chain"] == "a: 1"
+    assert seen["set"] == ((None, "w1"), {"one_off_chain": "a: 1"})
 
 
 def test_create_work_item_offers_attachments_and_says_what_they_are_for():
@@ -599,6 +637,20 @@ def test_submit_review_says_only_a_human_should_decide():
                 "quote": "-a\n+b",
             },
         ),
+        ("forge_mr", "forge_mr", {"work_item_id": "w1", "repo": "libs/core"}),
+        ("forge_pipelines", "forge_pipelines", {"work_item_id": "w1", "repo": "libs/core"}),
+        ("forge_jobs", "forge_jobs", {"pipeline": "5", "work_item_id": "w1", "repo": "x"}),
+        (
+            "forge_job_log",
+            "forge_job_log",
+            {"pipeline": "5", "job": "9", "work_item_id": "w1", "lines": 30, "repo": "x"},
+        ),
+        (
+            "forge_merged_mrs",
+            "forge_merged_mrs",
+            {"work_item_id": "w1", "limit": 5, "repo": "x"},
+        ),
+        ("forge_labels", "forge_labels", {"work_item_id": "w1", "repo": "x"}),
     ],
 )
 def test_each_review_tool_delegates_to_its_client_function(monkeypatch, tool, client_fn, args):
@@ -607,7 +659,7 @@ def test_each_review_tool_delegates_to_its_client_function(monkeypatch, tool, cl
     dropped parameter must show up in the real function's own bound names)."""
     real = getattr(client, client_fn)
     seen = {}
-    result = [] if tool == "list_threads" else {"id": "w1"}
+    result = [] if tool == "list_threads" or tool.startswith("forge_") else {"id": "w1"}
 
     async def fake(*fn_args, **fn_kwargs):
         bound = inspect.signature(real).bind(*fn_args, **fn_kwargs)

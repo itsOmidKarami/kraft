@@ -248,6 +248,15 @@ describe("StateCard", () => {
       show(failed({ worker_sessions: [] }));
       expect((await tail()).getByText("No session log to show for this stop.")).toBeInTheDocument();
     });
+
+    it("a one-off stranded before its first node shows its reason and no log tail", async () => {
+      stubFetch();
+      const reason = "this item's one-off chain changed before it started and needs approval again: a person approves it in the web UI, on a computer or a phone, then starts it";
+      show(failed({ worker_sessions: [], current_node_id: null, stop: stop("config", { node: null, task: null, attempt: null, reason }), one_off: { extends: "default", custom: 1, needs_review: true, approval: null } }));
+      const card = await tail();
+      expect(card.getByText(reason)).toBeInTheDocument();
+      expect(card.queryByText("No session log to show for this stop.")).toBeNull();
+    });
   });
 
   it("Retry says what it restarts and that the branch is kept", () => {

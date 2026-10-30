@@ -301,7 +301,7 @@ def test_default_profile_reproduces_todays_command_line(run):
         hook_point="on.implementation.start",
         session_id="s1",
         summary_path="/kraft/run/items/w1/sessions/s1/out/summary.md",
-        checkout=agent._WORKTREE,
+        edits=agent._TESTS + agent._WORKTREE + agent._GITIGNORED,
     )
 
     assert run()["cmd"] == [

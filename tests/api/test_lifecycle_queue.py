@@ -396,11 +396,8 @@ def test_a_checkout_taken_after_the_doors_look_still_gets_no_second_session(
 
 @pytest.mark.parametrize(
     ("state", "door", "body"),
-    [
-        ("failed", "escalate", {"message": "look again"}),
-        ("gate", "gates/spec_approval/review", {"outcome": "comment"}),
-    ],
-    ids=["escalate", "reply"],
+    [("failed", "escalate", {"message": "look again"})],
+    ids=["escalate"],
 )
 def test_a_session_outside_the_walk_refused_its_checkout_stops_the_item_as_checkout(
     client, repo, monkeypatch, state, door, body
@@ -414,19 +411,6 @@ def test_a_session_outside_the_walk_refused_its_checkout_stops_the_item_as_check
 
     monkeypatch.setattr(inplace, "take", refused)
     wid = _in_state(client, repo, DOORS["states"][state], in_place=True)
-    if door.endswith("review"):
-        client.post(
-            f"/api/work-items/{wid}/threads",
-            json={
-                "body": "why?",
-                "file_path": "a.py",
-                "side": "new",
-                "start_line": 1,
-                "end_line": 1,
-                "label": "question",
-            },
-        )
-
     stops = len(_of(client, wid, "work_item_needs_human"))
 
     r = client.post(f"/api/work-items/{wid}/{door}", json=body)

@@ -14,8 +14,9 @@ const tipOf = (p: Page) => p.locator('[role="tooltip"]').first();
 const appToggle = (p: Page) => p.getByRole("button", { name: "Pin sidebar" }).click();
 /** Unpin from the pinned default, then move the pointer off so the sidebar hides. */
 const appUnpin = async (p: Page) => { await appToggle(p); await away(p); };
-const reveal = async (p: Page) => { await p.mouse.move(3, 420); await pause(p); await p.mouse.move(100, 420, { steps: 4 }); await pause(p, 300); };
-/** Unpinned and revealed by the pointer at the left edge. */
+/** Hover the pin in the top-left corner, then move down into the panel it revealed. */
+const reveal = async (p: Page) => { await p.getByRole("button", { name: "Pin sidebar" }).hover(); await pause(p); await p.mouse.move(100, 420, { steps: 4 }); await pause(p, 300); };
+/** Unpinned and revealed by hovering its pin. */
 const appRevealed = async (p: Page, tweak?: (S: Scenario) => void) => {
   await app(p, "/", { tweak });
   await appUnpin(p);
@@ -53,8 +54,16 @@ const ROWS: Row[] = [
     run: async (p) => { await app(p, "/"); await appUnpin(p); expect(await sideEdge(p)).toBeLessThan(20); expect((await p.locator("main").first().boundingBox())!.x).toBeLessThan(20); },
   },
   {
-    name: "sidebar: collapsed, the pointer at the left edge reveals it",
-    run: async (p) => { await app(p, "/"); await appToggle(p); await away(p); await p.mouse.move(3, 420); await pause(p); expect(await sideEdge(p)).toBeGreaterThan(OPEN); },
+    name: "sidebar: collapsed, hovering its pin reveals it and the window's left edge does not [decided]",
+    run: async (p) => {
+      await app(p, "/"); await appToggle(p); await away(p);
+      await p.mouse.move(3, 420); await pause(p); expect(await sideEdge(p)).toBeLessThan(OPEN);
+      const pin = p.getByRole("button", { name: "Pin sidebar" }); const dot = pin.locator(".ng-side-dot");
+      await expect(dot).toBeVisible();
+      await pin.hover(); await pause(p, 900); expect(await sideEdge(p)).toBeGreaterThan(OPEN);
+      // What it opened answers the hover: no tip over the Search row, and the Board row has the dot.
+      await expect(tipOf(p)).toBeHidden(); await expect(dot).toBeHidden();
+    },
   },
   {
     name: "sidebar: unpinned, keyboard focus on one of its controls reveals it",
@@ -93,8 +102,12 @@ const ROWS: Row[] = [
     run: async (p) => { await app(p, "/"); const f = p.getByRole("link", { name: /^Kraft v\d.*update available/ }); await expect(f).toBeVisible({ timeout: 4000 }); await expect(f).toContainText("update"); await f.click(); await pause(p); expect(p.url()).toContain("/settings/about"); },
   },
   {
-    name: "sidebar: the pin toggle sits top-right of the head, beside the brand [decided]",
-    run: async (p) => { await app(p, "/"); const b = (await p.getByRole("button", { name: "Pin sidebar" }).boundingBox())!; expect(b.y).toBeLessThan(80); expect(b.x).toBeGreaterThan(150); },
+    name: "sidebar: the pin sits in the top-left corner, in the same place pinned and collapsed [decided]",
+    run: async (p) => {
+      await app(p, "/"); const pin = p.getByRole("button", { name: "Pin sidebar" });
+      const a = (await pin.boundingBox())!; expect(a.y).toBeLessThan(44); expect(a.x).toBeLessThan(20);
+      await appUnpin(p); expect(await pin.boundingBox()).toEqual(a);
+    },
   },
 
   // Search

@@ -144,6 +144,133 @@ describe("the item screen (C)", () => {
     });
   });
 
+  describe("Start on a one-off chain nobody approved", () => {
+    const PENDING = () => item("paused", null, { status: "paused", current_node_id: null, worker_sessions: [], one_off: { extends: "default", custom: 1, needs_review: true, approval: null } });
+    const ROUTES = {
+      "GET /work-items/w1/one-off": [200, { extends: "default", custom: [{ path: "add[0].node", what: "adds k6", value: "run k6 against staging" }], provenance: null, digest: "e".repeat(64), needs_review: true, added: [], redrafted: [] }],
+      "POST /work-items/w1/one-off/approve": [200, {}],
+    } as Record<string, [number, unknown]>;
+
+    it("reads the chain on Start, so a draft applied since that added custom content still gets its sheet", async () => {
+      const calls = mount(item("paused", null, { status: "paused", current_node_id: null, worker_sessions: [], one_off: { extends: "default", custom: 0, needs_review: false, approval: null } }), "/work-items/w1", ROUTES);
+      await userEvent.click(await screen.findByRole("button", { name: "Start" }));
+      expect(await screen.findByRole("dialog", { name: "Approve this chain, then start?" })).toBeInTheDocument();
+      expect(posts(calls)).toEqual([]);
+    });
+
+    it("starts at once when the read says nothing needs approving", async () => {
+      const calls = mount(PENDING(), "/work-items/w1", { ...ROUTES, "GET /work-items/w1/one-off": [200, { ...(ROUTES["GET /work-items/w1/one-off"][1] as object), needs_review: false }], "POST /work-items/w1/resume": [200, {}] });
+      await userEvent.click(await screen.findByRole("button", { name: "Start" }));
+      await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/resume"]));
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("asks before starting when the sheet came back by Forward or a reload, not a tap", async () => {
+      const calls = mount(PENDING(), { pathname: "/work-items/w1", state: { phSheet: "one-off" } }, { ...ROUTES, "GET /work-items/w1/one-off": [200, { ...(ROUTES["GET /work-items/w1/one-off"][1] as object), needs_review: false }], "POST /work-items/w1/resume": [200, {}] });
+      const sheet = await screen.findByRole("dialog", { name: "Start this item?" });
+      expect(posts(calls)).toEqual([]);
+      await userEvent.click(within(sheet).getByRole("button", { name: "Start" }));
+      await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/resume"]));
+    });
+
+    it("says the item runs a one-off chain and who approved it, as the desktop's Chain pane does", async () => {
+      mount(item("paused", null, { status: "paused", current_node_id: null, worker_sessions: [], one_off: { extends: "default", custom: 1, needs_review: false, approval: { by: "human", door: "web", at: new Date(Date.now() - 2 * 3600_000).toISOString(), digest: "d", review_digest: "d" } } }));
+      expect(await screen.findByText("one-off chain · approved by you in the web UI · 2h ago")).toBeInTheDocument();
+    });
+
+    it("shows no sheet until the read answers", async () => {
+      let release!: () => void;
+      const held = new Promise<void>((r) => (release = r));
+      mount(PENDING(), "/work-items/w1", ROUTES);
+      const base = vi.mocked(fetch).getMockImplementation()!;
+      vi.mocked(fetch).mockImplementation(async (input, init) => {
+        if (String(input).endsWith("/one-off")) await held;
+        return base(input as string, init);
+      });
+      await userEvent.click(await screen.findByRole("button", { name: "Start" }));
+      await new Promise((r) => setTimeout(r, 20));
+      expect(screen.queryByRole("dialog")).toBeNull();
+      // Busy meanwhile, as the desktop's Start is: a second tap sends nothing.
+      expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+      release();
+      expect(await screen.findByRole("dialog", { name: "Approve this chain, then start?" })).toBeInTheDocument();
+    });
+
+    it("a failed read says why on the sheet, with Approve and start off and Cancel to leave", async () => {
+      const calls = mount(PENDING(), "/work-items/w1", { ...ROUTES, "GET /work-items/w1/one-off": [500, { detail: "could not read the chain" }] });
+      await userEvent.click(await screen.findByRole("button", { name: "Start" }));
+      const sheet = await screen.findByRole("dialog", { name: "Approve this chain, then start?" });
+      expect(within(sheet).getByRole("alert")).toHaveTextContent("could not read the chain");
+      expect(within(sheet).queryByText(/Reading/)).toBeNull();
+      expect(within(sheet).getByRole("button", { name: "Approve and start" })).toBeDisabled();
+      await userEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(posts(calls)).toEqual([]);
+    });
+
+    it("Start without them, then Approve and start, leaves no sheet behind: the chain's sheet took the draft's place", async () => {
+      const calls = mount(PENDING(), "/work-items/w1", { ...ROUTES, "GET /work-items/w1/draft": [200, { ops: [{ op: "override", path: "implementation", policy: { budget_usd: 2 }, passed: false }] }], "POST /work-items/w1/resume": [200, {}] });
+      await userEvent.click(await screen.findByRole("button", { name: "Start" }));
+      await userEvent.click(within(await screen.findByRole("dialog", { name: "Start with unapplied changes?" })).getByRole("button", { name: "Start without them" }));
+      await userEvent.click(within(await screen.findByRole("dialog", { name: "Approve this chain, then start?" })).getByRole("button", { name: "Approve and start" }));
+      await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/one-off/approve", "POST /work-items/w1/resume"]));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    });
+
+    it("shows no sheet when Forward brings its entry back over an item that has started", async () => {
+      const calls = mount(item("running", null, { one_off: { extends: "default", custom: 1, needs_review: false, approval: null } }), { pathname: "/work-items/w1", state: { phSheet: "one-off" } }, { ...ROUTES, "GET /work-items/w1/one-off": [200, { ...(ROUTES["GET /work-items/w1/one-off"][1] as object), needs_review: false }] });
+      await screen.findByRole("button", { name: "Pause" });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(calls.some((c) => c.path.endsWith("/one-off"))).toBe(false);
+    });
+
+    it("keeps Start busy until the start a clear read leads to answers", async () => {
+      let release!: () => void;
+      const held = new Promise<void>((r) => (release = r));
+      let resumed = false;
+      const calls = mount(PENDING(), "/work-items/w1", { ...ROUTES, "GET /work-items/w1/one-off": [200, { ...(ROUTES["GET /work-items/w1/one-off"][1] as object), needs_review: false }], "POST /work-items/w1/resume": [200, {}] });
+      const base = vi.mocked(fetch).getMockImplementation()!;
+      vi.mocked(fetch).mockImplementation(async (input, init) => {
+        if (String(input).endsWith("/resume")) { resumed = true; await held; }
+        return base(input as string, init);
+      });
+      await userEvent.click(await screen.findByRole("button", { name: "Start" }));
+      await waitFor(() => expect(resumed).toBe(true));
+      expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+      release();
+      await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/resume"]));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Start" })).toBeEnabled());
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("a one-off stranded before its first node offers Start under its FAILED badge, not a Retry with no node to retry: approve, then start", async () => {
+      // As the walk stops it (`mark_needs_human(..., kind=CONFIG)`); the API reads the stop's node from `current_node_id`, null here.
+      const stranded = stop("config", { node: null, reason: "this item's one-off chain changed before it started and needs approval again: a person approves it in the web UI, on a computer or a phone, then starts it" });
+      const calls = mount(item("failed", stranded, { status: "needs_human", current_node_id: null, worker_sessions: [], one_off: { extends: "default", custom: 1, needs_review: true, approval: null }, actions: ["complete", "cancel", "abandon"] }), "/work-items/w1", { ...ROUTES, "POST /work-items/w1/resume": [200, {}] });
+      const start = await screen.findByRole("button", { name: "Start" });
+      expect(screen.getByText("FAILED")).toBeInTheDocument();
+      expect(screen.queryByText("NOT STARTED")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+      await userEvent.click(start);
+      await userEvent.click(within(await screen.findByRole("dialog", { name: "Approve this chain, then start?" })).getByRole("button", { name: "Approve and start" }));
+      await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/one-off/approve", "POST /work-items/w1/resume"]));
+    });
+
+    it("opens a sheet with the custom content in full and what changed since filing, and Approve and start posts the digest as the phone door, then starts", async () => {
+      const calls = mount(PENDING(), "/work-items/w1", { ...ROUTES, "GET /work-items/w1/one-off": [200, { ...(ROUTES["GET /work-items/w1/one-off"][1] as object), redrafted: [{ diff: ["  implementation", "+ k6"] }] }] });
+      await userEvent.click(await screen.findByRole("button", { name: "Start" }));
+      const sheet = await screen.findByRole("dialog", { name: "Approve this chain, then start?" });
+      expect(await within(sheet).findByText("run k6 against staging")).toBeInTheDocument();
+      expect(within(sheet).getByText("changed since filing")).toBeInTheDocument();
+      expect(within(sheet).getByText(/\+ k6/)).toBeInTheDocument();
+      expect(posts(calls)).toEqual([]);
+      await userEvent.click(within(sheet).getByRole("button", { name: "Approve and start" }));
+      await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/one-off/approve", "POST /work-items/w1/resume"]));
+      expect(calls.find((c) => c.path.endsWith("/one-off/approve"))?.body).toEqual({ digest: "e".repeat(64), door: "phone" });
+    });
+  });
+
   it("a blocked item says what it waits on, and Unblock posts /unblock", async () => {
     const calls = mount(item("blocked", null, { status: "blocked", dependencies: [{ id: "a1", title: "Schema first", status: "active", met: false }] }));
     expect(await screen.findByText("Schema first")).toBeInTheDocument();

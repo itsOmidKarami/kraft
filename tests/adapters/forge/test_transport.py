@@ -100,6 +100,15 @@ def test_a_graphql_success_returns_its_data(cli, tmp_path):
     assert gql("gh", tmp_path) == {"viewer": 1}
 
 
+def test_a_byte_that_is_not_utf8_reads_as_a_replacement_not_a_traceback(cli, tmp_path):
+    """A GitLab job trace can carry one; strict decoding would raise past every
+    ForgeError handler and answer the job-log route with a 500."""
+    gh = cli.bindir / "gh"
+    gh.write_bytes(b"#!/bin/sh\nprintf 'HTTP/2.0 200 OK\\n\\nout \\377\\n'\n")
+    gh.chmod(0o755)
+    assert rest("gh", "x", tmp_path).text == "out \ufffd\n"
+
+
 def test_a_failed_call_names_method_and_path_not_argv(cli, tmp_path):
     cli.stub("gh", routes={"api *": Api(409, '{"message": "Head branch was modified"}')})
     with pytest.raises(forge.ForgeError) as exc:

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ago, elapsed, until } from "../../format";
 import type { WorkItem } from "../../types";
-import { groupOf, sorter } from "./model";
+import { chainLabel, chainOf, groupOf, sorter } from "./model";
 import { chainMarks, reasonTail } from "./rowText";
 
 /** The web's half of `tests/console/wording_cases.json`: the board wording the
@@ -12,6 +12,7 @@ type Cases = {
   now: string;
   chain: { nodes: { id: string; kind: string; artifact?: string }[] };
   rows: { name: string; row: Partial<WorkItem>; group: string; tail: string; marks?: string[] }[];
+  chains: { name: string; row: Partial<WorkItem>; label: string }[];
   order: { rows: Partial<WorkItem>[]; sorted: string[] };
   ago: [string | null, string][];
   until: [string | null, string][];
@@ -26,6 +27,10 @@ describe("the board's wording, as the console ports it", () => {
     expect(groupOf(row)).toBe(c.group);
     expect(reasonTail(row, NOW)).toBe(c.tail);
     if (c.marks) expect(chainMarks(row)).toEqual(CASES.chain.nodes.map((n, k) => ({ node: n.id, gate: n.kind === "gate", state: c.marks![k] })));
+  });
+
+  it.each(CASES.chains.map((c) => [c.name, c] as const))("labels the chain: %s", (_name, c) => {
+    expect(chainLabel(chainOf(c.row as WorkItem))).toBe(c.label);
   });
 
   it("sorts what needs you first, then the newest", () => {

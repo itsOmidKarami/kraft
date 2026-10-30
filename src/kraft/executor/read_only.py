@@ -18,7 +18,9 @@ A git that cannot answer is a change too: unverified is not read-only.
 An in-place item's checkout is a person's own, and their edits mid-step are
 not the step's: there only the item's branch tip is compared (the person may
 switch the checkout), so a commit still violates and an uncommitted write goes
-to the after-task leftovers event instead.
+to the after-task leftovers event instead. The checks-first gate reviewer and
+the review reply agent of an in-place item read a copy of its branch instead
+(`inplace.watch_copy`): the copy is compared fully (`full=`), plus that tip.
 
 On a sandboxed item no host git runs while a session is live or once the
 worktree holds a repository Kraft did not create (`stops.refuse_planted_repos`,
@@ -72,13 +74,16 @@ def _read(cwd: Path, *, branch: str | None = None) -> tuple[str | None, str | No
     )
 
 
-def snapshot(db, row, launch: LaunchContext | None, worktree) -> Snapshot | None:
+def snapshot(
+    db, row, launch: LaunchContext | None, worktree, *, full: bool = False
+) -> Snapshot | None:
     """The worktree as it stands, or None when it cannot be read safely (the
-    tasks' own dispatch then stops on the same guard)."""
+    tasks' own dispatch then stops on the same guard). `full`: compare an
+    in-place item's folder as a worktree's, for a copy of its branch."""
     if worktree is None or _guard(db, row, launch, Path(worktree)) is not None:
         return None
     return {
-        rel: _read(Path(worktree) / rel, branch=_branch(row))
+        rel: _read(Path(worktree) / rel, branch=None if full else _branch(row))
         for rel in ["", *_builtins.item_mounts(row)]
     }
 
@@ -117,15 +122,18 @@ def _changed_in(cwd: Path, before, after) -> list[str]:
     return sorted(names or {path for _, path in now})
 
 
-def changed(db, row, launch: LaunchContext | None, worktree, before: Snapshot) -> list[str]:
-    """What changed since `before`, repository-relative to the checkout root."""
+def changed(
+    db, row, launch: LaunchContext | None, worktree, before: Snapshot, *, full: bool = False
+) -> list[str]:
+    """What changed since `before`, repository-relative to the checkout root.
+    `full` as `snapshot`'s."""
     refused = _guard(db, row, launch, Path(worktree))
     if refused is not None:
         return [f"(not compared: {refused})"]
     files = []
     for rel, was in before.items():
         cwd = Path(worktree) / rel
-        now = _read(cwd, branch=_branch(row))
+        now = _read(cwd, branch=None if full else _branch(row))
         files += [f"{rel}/{f}" if rel else f for f in _changed_in(cwd, was, now)]
     return files
 
@@ -144,6 +152,12 @@ async def violation(db, row, launch, worktree, before: Snapshot | None, *, node_
     return bool(files)
 
 
+def named(files: list[str]) -> str:
+    """`files` for a person: the first twenty, then how many more."""
+    more = len(files) - _NAMED
+    return ", ".join(files[:_NAMED]) + (f" and {more} more" if more > 0 else "")
+
+
 async def stop(db, work_item_id: str, node_id: str) -> str:
     """The stop for a person, naming the scope and the files it changed. An
     in-place task's `checkout` stop already says what happened, and stays."""
@@ -157,10 +171,9 @@ async def stop(db, work_item_id: str, node_id: str) -> str:
         ).fetchone()
     )
     payload = json.loads(raw["payload"]) if raw else {"scope": node_id, "files": []}
-    files = payload["files"]
-    more = len(files) - _NAMED
-    named = ", ".join(files[:_NAMED]) + (f" and {more} more" if more > 0 else "")
-    reason = f"{payload['scope']} is read_only, but it changed the worktree: {named}"
+    reason = (
+        f"{payload['scope']} is read_only, but it changed the worktree: {named(payload['files'])}"
+    )
     await db.write(
         lambda c: store.mark_needs_human(c, work_item_id, node_id, reason, kind=StopKind.FAILED)
     )

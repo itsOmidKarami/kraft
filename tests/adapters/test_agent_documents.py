@@ -43,9 +43,14 @@ _CHAIN = [
             [{"kind": "plan", "path": "docs/p.md"}],
             ["plan, attached at intake: docs/p.md in the worktree"],
         ),
+        (
+            "items/{w}/filed/s.md",
+            [{"kind": "spec", "path": "docs/s.md", "source": "/gone/filed/s.md"}],
+            ["spec, attached at intake: {run}/items/{w}/filed/s.md"],
+        ),
         (None, None, []),
     ],
-    ids=["new-place", "older-worktree", "attached", "none-yet"],
+    ids=["new-place", "older-worktree", "attached", "attached-not-in-the-folder", "none-yet"],
 )
 async def test_every_agent_is_told_where_its_item_s_documents_are(
     item_on, run_dirs, where, attachments, lines

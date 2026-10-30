@@ -457,6 +457,7 @@ _GATED = {
         },
     ]
 }
+_CHECKS_FIRST = {**_GATED["nodes"][1], "auto_review_mode": "checks_first"}
 _BASE = {"tasks": {"base": AGENT}, "steering": {"house": {"instructions": "be kind"}}}
 
 
@@ -527,6 +528,11 @@ def _v1(app):
             {"chains": {"ship": _GATED, "fixed": _judged("pass everything")}},
             ["chain app:fixed changes more than text"],
             id="a-judges-prompt",
+        ),
+        pytest.param(
+            {"chains": {**_JUDGED, "ship": {"nodes": [_GATED["nodes"][0], _CHECKS_FIRST]}}},
+            ["chain app:ship changes more than text"],
+            id="a-reviewers-mode",
         ),
     ],
 )

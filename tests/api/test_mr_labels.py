@@ -25,7 +25,7 @@ def test_set_mr_labels_applies_and_records_them(client, repo, monkeypatch):
     r = client.post(f"/api/work-items/{wid}/mr-labels", json={"labels": ["release::patch"]})
     assert r.status_code == 200, r.text
     assert r.json() == {"work_item_id": wid, "labels": ["release::patch"]}
-    assert fake.labels == ["release::patch"]
+    assert fake.labeled == ["release::patch"]
 
     evs = client.get(f"/api/work-items/{wid}/events").json()
     assert any(
@@ -39,7 +39,7 @@ def test_set_mr_labels_strips_blanks_and_refuses_an_empty_list(client, repo, mon
 
     r = client.post(f"/api/work-items/{wid}/mr-labels", json={"labels": ["  ", ""]})
     assert r.status_code == 422, r.text
-    assert fake.labels == []
+    assert fake.labeled == []
 
 
 def test_set_mr_labels_404s_with_no_worktree(client):
@@ -88,7 +88,7 @@ def test_set_mr_labels_unpins_the_stale_pipeline(client, repo, monkeypatch):
 
     r = client.post(f"/api/work-items/{wid}/mr-labels", json={"labels": ["x"]})
     assert r.status_code == 200, r.text
-    assert fake.labels == ["x"]
+    assert fake.labeled == ["x"]
     row = client.portal.call(
         db.write,
         lambda c: c.execute(
@@ -112,7 +112,7 @@ def test_set_mr_labels_labels_through_the_items_own_forge(client, repo, monkeypa
     r = client.post(f"/api/work-items/{wid}/mr-labels", json={"labels": ["release::patch"]})
 
     assert r.status_code == 200, r.text
-    assert fake.labels == ["release::patch"]
+    assert fake.labeled == ["release::patch"]
 
 
 def test_set_mr_labels_on_a_malformed_repos_yaml_is_a_clean_error(client, repo, templates_dir):

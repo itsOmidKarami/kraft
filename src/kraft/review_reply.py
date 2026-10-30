@@ -7,10 +7,16 @@ so it cannot clear the gate), its session filed under the *gate's* node id so
 task -- harness, model, profile -- is the one the gate would re-run on
 rejection, the agent that wrote the code.
 
-It must not change the worktree. Edit and NotebookEdit are denied; Write and
-Bash cannot be, because every agent writes its result file and calls
-`kraft item reply` with them. So the worktree is compared before and after,
-and a change is recorded as `reply_agent_wrote` -- deliberately not a stop:
+It must not change the worktree. It is launched read-only, so its context
+tells it to change nothing and never to commit or run tests. No tool is denied:
+it needs Write and Bash for its result file and `kraft item reply`, and a
+harness that cannot express a deny list would refuse the launch. So the
+worktree is compared before and after, and a change is recorded as
+`reply_agent_wrote`. In place it holds the checkout's lease but works in a
+throwaway copy of the item's branch (`inplace.copy`), never the person's
+checkout: the copy is compared whole, plus the person's branch tip, which a
+commit pushed from the copy moves, and removed after. A copy that cannot be
+made is `reply_agent_failed`. A change is deliberately not a stop:
 `read_only.stop` would `mark_needs_human`, which notifies, and this agent
 failing is not a person's problem.
 """
@@ -24,6 +30,7 @@ import logging
 from kraft import caps, events, executor, inplace, reviewed_head, store
 from kraft import overrides as _overrides
 from kraft.adapters import agent as _agent
+from kraft.adapters import subprocess as _subprocess
 from kraft.executor import read_only
 from kraft.remote import placement as _placement
 from kraft.templates.models import AgentTask
@@ -33,7 +40,8 @@ from kraft.worker import steering as _steering
 
 logger = logging.getLogger(__name__)
 
-DENIED = ("Edit", "NotebookEdit")
+# `read_only.changed`'s style for a write it could not rule out.
+_NOT_COMPARED = "(not compared: Kraft could not read the copy or your branch before the reply)"
 
 _PROMPT = (
     "A reviewer left comments on this Kraft work item's change, and wants answers "
@@ -156,44 +164,69 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
         )
     except _steering.SteeringError:
         return "no_agent"
-    before = read_only.snapshot(db, row, launch, worktree)
+    session_id = db.read(lambda c: store.new_session_id(c, work_item_id))
+    # In place it reads a copy of the branch, never the person's checkout.
+    copy = inplace.copy_path(run_dirs, work_item_id, session_id) if store.is_in_place(row) else None
+    before = None if copy else read_only.snapshot(db, row, launch, worktree)
+    since = None
+    copied = False
+
+    async def after_checkout() -> None:
+        nonlocal since, copied
+        copied = True
+        since = inplace.watch_copy(db, row, launch, copy, worktree)
+
     # The head it starts over, at the final gate: a person's approval that
     # stops it pins only a head it did not move (`reviewed_head.moved_under`).
     tips = reviewed_head.pin_for(db, row, gate, worktree)
-    await _agent.run_agent_task(
-        db,
-        run_dirs,
-        session_id=db.read(lambda c: store.new_session_id(c, work_item_id)),
-        work_item_id=work_item_id,
-        node_id=gate,
-        hook_point=f"{gate}.reply",
-        command=inv.command,
-        harness=inv.harness,
-        model=inv.model,
-        effort=inv.effort,
-        deny_tools=tuple(dict.fromkeys([*inv.deny_tools, *DENIED])),
-        allowed_tools=inv.allowed_tools,
-        grants=inv.grants,
-        permission_mode=inv.permission_mode,
-        method_text=inv.method_text,
-        steering_texts=inv.steering_texts,
-        sandbox=sandbox,
-        checkout=executor.sandbox_checkout(row, launch, worktree) if sandbox else None,
-        task_instruction=_PROMPT.format(
-            title=row["title"], threads=store.render_note(threads, summary)
-        ),
-        title=row["title"],
-        repo_path=row["repo"],
-        cwd=worktree,
-        repo_entry=launch.repo_entry,
-        time_cap=time_cap,
-        harness_id=task.task.harness,
-        takes_checkout=True,
-        tips=tips,
-        runner=_placement.remote(_placement.node_runner(row, gate)),
-        follow_node=True,
-    )
-    files = read_only.changed(db, row, launch, worktree, before)
+    try:
+        await _agent.run_agent_task(
+            db,
+            run_dirs,
+            session_id=session_id,
+            work_item_id=work_item_id,
+            node_id=gate,
+            hook_point=f"{gate}.reply",
+            command=inv.command,
+            harness=inv.harness,
+            model=inv.model,
+            effort=inv.effort,
+            deny_tools=inv.deny_tools,
+            allowed_tools=inv.allowed_tools,
+            grants=inv.grants,
+            permission_mode=inv.permission_mode,
+            method_text=inv.method_text,
+            steering_texts=inv.steering_texts,
+            sandbox=sandbox,
+            read_only=True,
+            checkout=executor.sandbox_checkout(row, launch, worktree) if sandbox else None,
+            task_instruction=_PROMPT.format(
+                title=row["title"], threads=store.render_note(threads, summary)
+            ),
+            title=row["title"],
+            repo_path=str(copy) if copy else row["repo"],
+            cwd=copy or worktree,
+            repo_entry=launch.repo_entry,
+            time_cap=time_cap,
+            harness_id=task.task.harness,
+            takes_checkout=True,
+            tips=tips,
+            after_checkout=after_checkout if copy else None,
+            in_copy=copy is not None,
+            runner=_placement.remote(_placement.node_runner(row, gate)),
+            follow_node=True,
+        )
+        if not copy:
+            files = read_only.changed(db, row, launch, worktree, before)
+        elif since:
+            files = since()
+        elif copied:  # it ran, and nothing can say what it changed: never "replied"
+            files = [_NOT_COMPARED]
+        else:  # refused before its copy was made, so nothing ran in it
+            files = []
+    finally:
+        if copy is not None:
+            await _subprocess.uncancellable(asyncio.to_thread(inplace.remove_copy, copy))
     if files:
         await db.write(
             lambda c: events.append(

@@ -6,7 +6,8 @@
 .ph-autocard-title { font-size: var(--fs-meta); font-weight: 500; }
 .ph-autocard-title.ph-tone-ok { color: var(--ok); }
 .ph-autocard-title.ph-tone-bad { color: var(--bad); }
-.ph-autocard-text { font-size: var(--fs-meta); line-height: 1.5; color: var(--text-sub); overflow-wrap: anywhere; }
+.ph-autocard-title.ph-tone-warn { color: var(--warn); }
+.ph-autocard-text { font-size: var(--fs-meta); line-height: 1.5; color: var(--text-sub); white-space: pre-line; overflow-wrap: anywhere; }
 .ph-file-row { min-height: 48px; font-size: var(--fs-meta); }
 .ph-file-name { flex: 1; min-width: 0; font: var(--fs-meta) ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
 .ph-dot { flex: none; width: 8px; height: 8px; border-radius: 4px; background: var(--warn); }

@@ -28,12 +28,14 @@ const ALLOWED = [
   "item/paths",
   "item/limitPolicy", // the Raise cap PATCH body that keeps the rest of the override, one for both apps
   "item/chainName",
+  "item/oneOff", // the custom parts, the digest an approval names and the added-node check line: a pure model, as the desktop review reads it
   "item/chainValues", // the frozen chain and the caps it resolves to: a node's attempts, wall clock and YAML, read as the desktop reads them
   "item/nodeGraph",
   "item/scopeView", // isScopeTask and scopesView: a changed-test-scope task's scopes in a round, as the desktop's frame reads them
   "item/graph",
   "item/cause", // failedFix, the forge login words and the work-kept line: a failed card says one thing on both layouts (R15b-01)
   "item/TestsLine", // the gate's last test run, one line, as the desktop's gate pane reads it (R15b-01)
+  "item/reviewOutcome", // the agent reviewer's latest outcome at a gate and its words: one lookup for both layouts
   "item/events", // gateSkipped: a skipped gate reads as skipped on both layouts (R14b-05)
   "item/draft/applied", // appliedRows: what an applied draft set, as the desktop's Config lists it (R14b-04)
   "item/draft/useApplied", // the applied drafts, folded from the whole event log

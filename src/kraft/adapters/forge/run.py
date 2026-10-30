@@ -171,6 +171,14 @@ def _member_forges(item, backend: str, repo_forge: str | None) -> dict:
     return found
 
 
+def member_forge(item, repo_forge: str | None, mount: str) -> Forge:
+    """The backend for the workspace member mounted at `mount`: its own when
+    its repository records another forge than the root's, else the root's."""
+    return _member_forges(item, "auto", repo_forge).get(mount) or resolve(
+        backend_for("auto", repo_forge)
+    )
+
+
 async def _record_push(
     db, *, work_item_id: str, node_id: str | None, orig_repo: Path, repo: Path, branch: str
 ) -> None:

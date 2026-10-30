@@ -40,3 +40,13 @@ def test_a_shipped_skill_names_nothing_of_this_repo(path):
     text = path.read_text()
     found = {what: m.group(0) for what, rx in LEAKS.items() if (m := re.search(rx, text))}
     assert not found, f"{path.relative_to(ROOT)} names {found}"
+
+
+_SKILLS = sorted((ROOT / "src" / "kraft" / "skills").glob("*/SKILL.md"))
+
+
+@pytest.mark.parametrize("path", _SKILLS, ids=lambda p: p.parent.name)
+def test_a_worker_skill_never_calls_a_forge_cli(path):
+    """A worker holds no forge login: it reads the forge through `kraft view`."""
+    call = re.search(r"`(?:gh|glab) (?:pr|mr|run|ci|label|api|issue)\b", path.read_text())
+    assert call is None, f"{path.parent.name} calls {call.group(0)!r}"

@@ -47,6 +47,17 @@ def test_outside_a_repo_only_the_results_dir_is_granted(run, tmp_path):
     assert _roots(run(harness="codex", command="codex", cwd=str(tmp_path))["cmd"]) == [OUT, DOCS]
 
 
+def test_a_codex_copy_launch_is_granted_the_copys_own_git_dir(run, in_place, repo):
+    """A copy is empty at launch: git asked there would name whatever
+    repository holds the folder (`repo` here), never the copy's own."""
+    copy = repo / "copy"
+    copy.mkdir()
+
+    cmd = run(harness="codex", command="codex", cwd=str(copy), in_copy=True, **in_place)["cmd"]
+
+    assert _roots(cmd) == [OUT, DOCS, str(copy / ".git")]
+
+
 def test_a_harness_without_writable_dirs_is_given_no_directory(run):
     # The context names the summary's path in `out/`; only the list is a grant.
     granted = json.dumps([OUT, DOCS])[1:-1]

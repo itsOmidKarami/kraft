@@ -252,7 +252,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
  *  The toggle opens on focus or click, and focus stays on it; Enter, Space or
  *  ↓ there opens it with focus on Create and start, as the item page's main
  *  button does. Escape hands focus back to the toggle without reopening it. */
-export function CreateSplit({ disabled, describedBy, onCreate }: { disabled: boolean; describedBy?: string; onCreate: (start: boolean) => void }) {
+export function CreateSplit({ disabled, describedBy, onCreate }: { disabled: boolean; /** The badge that says why it is disabled. */ describedBy?: string; onCreate: (start: boolean) => void }) {
   const group = useRef<HTMLSpanElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);

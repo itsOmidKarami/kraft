@@ -35,7 +35,7 @@ describe("Tooltip (TT-1)", () => {
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
-  it("does not show for a button with no data-tip, nor after a press", () => {
+  it("does not show for a button with no data-tip, nor after a press, nor one marked data-tip-off", () => {
     const b = mount();
     fireEvent.mouseOver(screen.getByRole("button", { name: "other" }));
     wait(TIP_DELAY_MS + 10);
@@ -43,6 +43,26 @@ describe("Tooltip (TT-1)", () => {
     fireEvent.mouseOver(b);
     fireEvent.pointerDown(b);
     wait(TIP_DELAY_MS + 10);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    b.setAttribute("data-tip-off", "");
+    fireEvent.mouseOver(b);
+    wait(TIP_DELAY_MS + 10);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  // The collapsed sidebar's pin: a key that pins or unpins it changes its tip, so a shown or pending one goes.
+  it.each([["Enter"], ["\\"]])("hides a shown tip on %s, and drops a pending one whose button turns data-tip-off", (key) => {
+    const b = mount();
+    fireEvent.mouseOver(b);
+    wait(TIP_DELAY_MS + 10);
+    expect(screen.getByRole("tooltip")).toBeInTheDocument();
+    fireEvent.keyDown(b, { key });
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    fireEvent.mouseOver(screen.getByRole("button", { name: "other" }));
+    fireEvent.mouseOver(b);
+    wait(100);
+    b.setAttribute("data-tip-off", "");
+    wait(TIP_DELAY_MS);
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 

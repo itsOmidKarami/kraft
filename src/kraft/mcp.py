@@ -147,6 +147,7 @@ def build() -> MCPServer:
         node_overrides: dict | None = None,
         chain_template: str | None = None,
         runner: str | None = None,
+        chain_yaml: str | None = None,
     ) -> dict:
         """File a new Kraft work item. It is created **paused** and does not run:
         a human starts it from the board. Use this to hand finished work off to
@@ -197,7 +198,12 @@ def build() -> MCPServer:
         `runner` is where the item's steps run: a machine or a group from
         workers.yaml, `any` or `local`. A name must be in workers.yaml; a sandboxed,
         in-place or workspace-member item is refused. Leave
-        it out unless a human asked for one."""
+        it out unless a human asked for one.
+
+        `chain_yaml` is a one-off chain, the same YAML a chain file holds, used by
+        this item only. If it has custom content (its own prompts, commands,
+        tools or gates), a person must review it in the web UI before the item
+        can start; you cannot approve it."""
         return await client.create_work_item(
             title,
             repo=repo,
@@ -213,6 +219,7 @@ def build() -> MCPServer:
             skip_nodes=skip_nodes,
             node_overrides=node_overrides,
             runner=runner,
+            one_off_chain=chain_yaml,
             **({"budget_usd": budget_usd} if budget_usd is not None else {}),
         )
 
@@ -500,11 +507,21 @@ def build() -> MCPServer:
         return await client.mr_labels(labels, work_item_id)
 
     @server.tool()
-    async def set_chain(chain: str, work_item_id: str | None = None) -> dict:
+    async def set_chain(
+        chain: str | None = None,
+        chain_yaml: str | None = None,
+        work_item_id: str | None = None,
+    ) -> dict:
         """Switch a not-yet-started Kraft work item onto a different chain.
         Only works before the chain has started (no current node set yet) --
-        404s on an unknown chain id, 409s once the item is running."""
-        return await client.set_chain(chain, work_item_id)
+        404s on an unknown chain id, 409s once the item is running. Name
+        exactly one of `chain` and `chain_yaml`.
+
+        `chain_yaml` is a one-off chain, the same YAML a chain file holds, used by
+        this item only. If it has custom content (its own prompts, commands,
+        tools or gates), a person must review it in the web UI before the item
+        can start; you cannot approve it."""
+        return await client.set_chain(chain, work_item_id, one_off_chain=chain_yaml)
 
     @server.tool()
     async def set_attachments(
@@ -617,6 +634,59 @@ def build() -> MCPServer:
         """Review threads on a Kraft work item, drafts included, oldest first.
         `open_only` drops resolved threads."""
         return await client.threads(work_item_id, open_only)
+
+    @server.tool()
+    async def forge_mr(work_item_id: str | None = None, repo: str | None = None) -> dict:
+        """The work item's merge request as the forge has it: number, url, state
+        (open|merged|closed), title, body, draft, labels, branches, head_sha.
+        Errors if the item has no merge request yet. `repo` is a workspace
+        member's mount path; left out, the root repository."""
+        return await client.forge_mr(work_item_id, repo)
+
+    @server.tool()
+    async def forge_pipelines(
+        work_item_id: str | None = None, repo: str | None = None
+    ) -> list[dict]:
+        """The work item's pipelines or workflow runs: id, kind (branch|
+        merge_request|train|merge_group), ref, sha, status (the forge's own
+        word), url, created_at. Its ids are what `forge_jobs` takes."""
+        return await client.forge_pipelines(work_item_id, repo)
+
+    @server.tool()
+    async def forge_jobs(
+        pipeline: str, work_item_id: str | None = None, repo: str | None = None
+    ) -> list[dict]:
+        """The jobs of one of the item's pipelines: id, name, stage, status,
+        failure_reason, url. `pipeline` is an id from `forge_pipelines`; its
+        job ids are what `forge_job_log` takes."""
+        return await client.forge_jobs(pipeline, work_item_id, repo)
+
+    @server.tool()
+    async def forge_job_log(
+        pipeline: str,
+        job: str,
+        work_item_id: str | None = None,
+        lines: int = 200,
+        repo: str | None = None,
+    ) -> dict:
+        """The last `lines` lines (1-5000) of one job's log, colour codes
+        removed: `{"log": str, "truncated": bool}`. `pipeline` is an id from
+        `forge_pipelines` and `job` one from `forge_jobs`."""
+        return await client.forge_job_log(pipeline, job, work_item_id, lines, repo)
+
+    @server.tool()
+    async def forge_merged_mrs(
+        work_item_id: str | None = None, limit: int = 20, repo: str | None = None
+    ) -> list[dict]:
+        """The latest `limit` (1-100) merge requests merged into the item's base
+        branch: number, title, labels, url, merged_at. Shows how this project
+        titles and labels its merges."""
+        return await client.forge_merged_mrs(work_item_id, limit, repo)
+
+    @server.tool()
+    async def forge_labels(work_item_id: str | None = None, repo: str | None = None) -> list[dict]:
+        """The labels the item's project defines: name, description, color."""
+        return await client.forge_labels(work_item_id, repo)
 
     @server.tool()
     async def compare_changes(
