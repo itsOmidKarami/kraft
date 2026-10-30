@@ -48,8 +48,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _NETWORK_DOCS = "https://kraft-sdlc.dev/reference/configuration/sandbox/network-policy"
-#: The MCP servers a launch in a copy is handed (`extra_mcp_config`), in its
-#: session's own folder: never in the copy, which stays a clean clone.
 
 _CTX = (
     "You are working on a Kraft work item.\n"
