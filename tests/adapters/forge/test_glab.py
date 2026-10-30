@@ -623,7 +623,9 @@ async def test_push_names_the_work_item_branch_and_sets_no_upstream(cli, tmp_pat
 
     await forge.GlabCli().push(repo=tmp_path, branch="kraft/abc")
 
-    assert [c for c in cli.calls("git") if c.startswith("push")] == ["push origin kraft/abc"]
+    assert [c for c in cli.calls("git") if c.startswith("push")] == [
+        "push --no-verify origin kraft/abc"
+    ]
 
 
 async def test_glab_merge_uses_the_number_when_one_is_known(cli, tmp_path):
