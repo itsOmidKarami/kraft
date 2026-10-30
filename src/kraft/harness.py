@@ -70,6 +70,10 @@ KNOWN = (
     # MCP servers, one JSON object `{"mcpServers": {...}}` naming the
     # session's own at `http://kraft/mcp`, reached through its channel.
     "mcp_config",
+    # Kraft fills it, never a task: MCP servers added to the ones the CLI
+    # loads anyway, for an in-place launch in a copy of the checkout, whose
+    # folder-keyed servers the copy's folder does not get.
+    "extra_mcp_config",
 )
 
 #: Without these three, no agent dispatch can be built at all.

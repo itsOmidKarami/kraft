@@ -23,6 +23,7 @@ from kraft.inplace.base import folder_for as folder_for
 from kraft.inplace.base import head_ref as head_ref
 from kraft.inplace.base import is_in_place as is_in_place
 from kraft.inplace.base import item_folder as item_folder
+from kraft.inplace.copy import MCP_SERVERS as MCP_SERVERS
 from kraft.inplace.copy import CopyFailed as CopyFailed
 from kraft.inplace.copy import copy_path as copy_path
 from kraft.inplace.copy import drop_dead_copies as drop_dead_copies

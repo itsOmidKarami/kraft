@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import errno
 import logging
 import os
 import plistlib
@@ -973,6 +974,59 @@ class _SignalLoggingServer(uvicorn.Server):
     def handle_exit(self, sig, frame):
         print(f"kraft: shutdown - signal {signal.Signals(sig).name}", file=sys.stderr, flush=True)
         super().handle_exit(sig, frame)
+
+    async def serve(self, sockets=None):
+        """Listen before the lifespan, not after it as uvicorn does: startup
+        reattaches, marking a live session `unknown` and stopping its item,
+        and a server that then lost its port to another process would exit
+        having done that. Listening, not only bound: on Linux two
+        `SO_REUSEADDR` sockets both bind a port until one listens."""
+        if sockets is None:
+            sockets = _listen(self.config.host, self.config.port, backlog=self.config.backlog)
+        await super().serve(sockets=sockets)
+
+
+def _listen(host: str, port: int, *, backlog: int) -> list[socket.socket]:
+    """A listening socket for every address `host` resolves to, bound the way
+    asyncio's `create_server` binds them, which is what uvicorn's own start
+    used: `SO_REUSEADDR`, an IPv6 socket for IPv6 only, a family the machine
+    lacks skipped. Any other failure closes them all and exits 3, logged as
+    uvicorn did. Not inheritable (Python's default): an agent Kraft starts
+    must not hold its port."""
+    failed = logging.getLogger("uvicorn.error")
+    sockets: list[socket.socket] = []
+    try:
+        infos = socket.getaddrinfo(
+            host or None, port, type=socket.SOCK_STREAM, flags=socket.AI_PASSIVE
+        )
+        for family, kind, proto, _, address in dict.fromkeys(infos):
+            try:
+                sock = socket.socket(family, kind, proto)
+            except OSError:
+                continue  # a family this machine does not have
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if family == socket.AF_INET6:
+                sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            try:
+                sock.bind(address)
+            except OSError as err:
+                sock.close()
+                if err.errno == errno.EADDRNOTAVAIL:
+                    continue  # the family is not enabled (bpo-30945), as asyncio skips it
+                raise OSError(
+                    err.errno,
+                    f"error while attempting to bind on address {address!r}: {str(err).lower()}",
+                ) from None
+            sockets.append(sock)
+            sock.listen(backlog)
+        if not sockets:
+            raise OSError(f"could not bind on any address out of {[i[4] for i in infos]!r}")
+    except OSError as exc:
+        for sock in sockets:
+            sock.close()
+        failed.error(exc)
+        sys.exit(uvicorn.config.STARTUP_FAILURE)
+    return sockets
 
 
 def prepare_home() -> Path:

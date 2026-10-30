@@ -301,3 +301,39 @@ def test_v1_task_at_finds_a_materialized_task_by_path(tmp_path):
     assert harness.v1_task_at(chain, "build.run.b").task.id == "b"
     with pytest.raises(StopIteration):
         harness.v1_task_at(chain, "build.run.c")
+
+
+@pytest.mark.slow
+def test_a_server_child_is_only_ready_when_its_own_process_answers(tmp_path, monkeypatch):
+    """`_free_port` frees its number before the child binds it, and another
+    Kraft (another xdist worker's) can take it meanwhile: its health answer is
+    not the child's, so `running_server` must not return on it."""
+    import http.server
+    import json
+    import threading
+
+    from support import server
+
+    class Foreign(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = json.dumps({"reattach_summary": {"unknown": []}, "pid": 1}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    foreign = http.server.HTTPServer(("127.0.0.1", 0), Foreign)
+    threading.Thread(target=foreign.serve_forever, daemon=True).start()
+    ports = iter([foreign.server_address[1]])
+    free_port = server._free_port
+    monkeypatch.setattr(server, "_free_port", lambda: next(ports, None) or free_port())
+    try:
+        templates = harness.fake_templates_dir(tmp_path, "true")
+        with server.running_server(run_dir=tmp_path / "run", templates_dir=templates) as srv:
+            assert srv.client.get("/api/health").json()["pid"] == srv.proc.pid
+    finally:
+        foreign.shutdown()
+        foreign.server_close()

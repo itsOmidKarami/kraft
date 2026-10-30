@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
-from kraft import caps, ids, inplace, item_paths, store, when_free
+from kraft import builtins, caps, ids, inplace, item_paths, store, when_free
 from kraft import harness as _harness
 from kraft import permission_rules as _permission_rules
 from kraft import policy as _policy
@@ -39,6 +39,7 @@ from kraft.worker import backends as _backends
 from kraft.worker import callback as _callback
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
+from kraft.worker.ca import write_whole
 from kraft.worker.worktree_read import open_dir_no_symlinks
 
 if TYPE_CHECKING:
@@ -1190,9 +1191,12 @@ async def _run_agent_task(
     )
     in_place = item_row is not None and store.is_in_place(item_row)
     in_copy = in_copy and in_place
+    probe_cwd = cwd
     if in_copy:
-        # Empty until `before_launch` fills it; everything before runs in it.
+        # Empty until `before_launch` fills it, which refuses a folder that is not:
+        # a CLI asked something before then runs in the session's own folder.
         Path(cwd).mkdir(parents=True, exist_ok=True)
+        probe_cwd = Path(cwd).parent
     reach = _harness_reach(item_row, h)
     ctx = build_context(
         usage_source=h.capabilities["usage"].source,
@@ -1341,7 +1345,7 @@ async def _run_agent_task(
         except _sandbox.SandboxNotReady:
             found = None  # the backend's own probe refuses this launch, by name
         else:
-            found = await _cli_version(exe, h.id, cwd, oneshot_runner)
+            found = await _cli_version(exe, h.id, probe_cwd, oneshot_runner)
         if found is not None and _harness.version_key(found) < _harness.version_key(h.min_version):
             raise LaunchRefused(
                 f"harness {harness!r} ({h.path}) needs {shlex.join(exe)} {h.min_version} or newer, "
@@ -1400,7 +1404,7 @@ async def _run_agent_task(
                     else None
                 )
                 hook_argv = await _hook_install.codex_hook_flags(
-                    exe, _hook_install.hook_argv(h.id, sandbox), Path(cwd), oneshot_runner
+                    exe, _hook_install.hook_argv(h.id, sandbox), Path(probe_cwd), oneshot_runner
                 )
             except (_hook_install.CodexTrustError, _sandbox.SandboxNotReady) as exc:
                 # Never launched unenforced, never with every hook trusted.
@@ -1452,13 +1456,28 @@ async def _run_agent_task(
                 f"server, and nothing registers it for Claude Code: {_registration.FIX}"
             )
         options["approval_channel"] = found[0]
-        # Claude approves a checkout's own servers per folder, never the copy's.
-        if (
-            in_copy
-            and h.supports("mcp_config")
-            and (entry := _registration.checkout_entry(checkout_dir, found[1])) is not None
-        ):
-            options["mcp_config"] = json.dumps({"mcpServers": {"kraft": entry}})
+        # Claude keys a checkout's own servers by its folder, never the copy's:
+        # handed beside whatever else loads there, not instead of it.
+        servers = (
+            await asyncio.to_thread(_registration.copy_servers, checkout_dir, found[1])
+            if in_copy
+            else {}
+        )
+        if "kraft" in servers and not h.supports("extra_mcp_config"):
+            # Without it the session fails its first permission ask.
+            raise LaunchRefused(
+                f"harness {harness!r} ({h.path}) declares no 'extra_mcp_config' capability, "
+                f"so a copy of the checkout cannot be handed the `kraft` server registered "
+                f'for it; add `extra_mcp_config: {{ cli: ["--mcp-config", "{{value}}"] }}` '
+                f"to that file's capabilities, or remove the file to use Kraft's own"
+            )
+        if servers and h.supports("extra_mcp_config"):
+            # In a file only this user reads, never the argv: a person's servers carry
+            # tokens, and the argv is in /proc, the session's row and the API.
+            handed = Path(cwd).parent / inplace.MCP_SERVERS
+            text = json.dumps({"mcpServers": servers})
+            await asyncio.to_thread(write_whole, handed, text.encode(), 0o600)
+            options["extra_mcp_config"] = str(handed)
     cmd = _harness.build_argv(
         h,
         command=command or None,
@@ -1485,8 +1504,12 @@ async def _run_agent_task(
     # holds its lease, mark it, and check it after. One in a copy only leases it.
     borrows = takes_checkout and in_place and not in_copy
     # Measured now: `run_task` moves `time_cap` on by its wait for a slot, which this
-    # closure's `time_cap` does not see.
-    copy_s = None if time_cap is None else max(time_cap.at - caps.monotonic(), 0.0)
+    # closure's `time_cap` does not see. With no cap, a clone gets what a worktree does.
+    copy_s = (
+        builtins.WORKTREE_ADD_TIMEOUT_S
+        if time_cap is None
+        else max(time_cap.at - caps.monotonic(), 0.0)
+    )
     # Files a machine must be given because they live outside git: the cursor hook, and the
     # harness config the CLI reads (its chats stay where they were made).
     remote_ro: tuple[str, ...] = ()

@@ -122,7 +122,8 @@ def _try_start(run_dir: Path, templates_dir: Path, bd_cwd: Path | None, env: dic
 
     `_free_port` closes its socket before uvicorn binds the number, so anything
     else on the machine can take the port in between. That shows up as an
-    immediate exit, and a fresh port is all it needs.
+    early exit, and a fresh port is all it needs; until then a health answer
+    from the taker is not the child's.
     """
     port = _free_port()
     proc = subprocess.Popen(
@@ -149,8 +150,10 @@ def _try_start(run_dir: Path, templates_dir: Path, bd_cwd: Path | None, env: dic
         if proc.poll() is not None:
             client.close()
             return proc.returncode
-        with contextlib.suppress(httpx.TransportError):
-            if client.get("/api/health").status_code == 200:
+        # Its own answer, not one from whatever took the port after `_free_port`
+        # let it go: another worker's Kraft answers health just as well.
+        with contextlib.suppress(httpx.TransportError, ValueError):
+            if client.get("/api/health").json().get("pid") == proc.pid:
                 return Server(proc, base, port, client)
         time.sleep(0.02)
     client.close()

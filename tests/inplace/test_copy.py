@@ -106,6 +106,7 @@ async def test_a_copy_that_cannot_be_made_leaves_nothing(
 ):
     row, branch = await _item(item_on, run_dirs, repo)
     dest = _dest(tmp_path)
+    write(dest.parent, inplace.MCP_SERVERS, "{}")  # written for the launch before the copy
     if how == "missing-branch":
         git(repo, "branch", "-q", "-D", branch)
     elif how == "not-a-repo":
@@ -131,6 +132,7 @@ async def test_a_copy_that_cannot_be_made_leaves_nothing(
 
     # A folder it did not fill is never emptied.
     assert [p.name for p in dest.iterdir()] == (["theirs.txt"] if how == "not-empty" else [])
+    assert (dest.parent / inplace.MCP_SERVERS).exists(), "emptying the copy keeps the launch's file"
     if how == "missing-branch":
         gone = subprocess.run(["git", "-C", str(repo), "rev-parse", "-q", "--verify", branch])
         assert gone.returncode != 0, "a failed copy never makes the branch"
@@ -163,6 +165,7 @@ async def test_dead_copies_go_and_live_ones_stay(item_on, database, run_dirs):
     for sid, mtime in [("running", -10), ("finished", -10), ("no-row", -10), ("fresh", 10)]:
         copy = inplace.copy_path(run_dirs, it.id, sid)
         write(copy, "f", "x\n")
+        write(copy.parent, inplace.MCP_SERVERS, "{}")
         os.utime(copy, (before + mtime, before + mtime))
 
     removed = await inplace.drop_dead_copies(database, run_dirs, before=before)
@@ -171,3 +174,6 @@ async def test_dead_copies_go_and_live_ones_stay(item_on, database, run_dirs):
     sids = ["running", "finished", "no-row", "fresh"]
     left = [sid for sid in sids if inplace.copy_path(run_dirs, it.id, sid).exists()]
     assert left == ["running", "fresh"]
+    servers = [inplace.copy_path(run_dirs, it.id, sid).parent / inplace.MCP_SERVERS for sid in sids]
+    handed = [sid for sid, f in zip(sids, servers, strict=True) if f.exists()]
+    assert handed == ["running", "fresh"]  # the servers file, tokens and all, goes with its copy

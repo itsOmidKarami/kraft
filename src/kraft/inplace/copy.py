@@ -43,16 +43,23 @@ def copy_path(run_dirs, wid: str, sid: str) -> Path:
     return item_paths.session_files(run_dirs, wid, sid).folder / "copy"
 
 
+#: Beside the copy, never in it: the servers a copy launch is handed, tokens included.
+MCP_SERVERS = "copy-mcp-servers.json"
+
+
 def remove_copy(path: Path) -> None:
     # A global `core.fsmonitor` may have started a daemon in it: best effort.
     shutil.rmtree(path, ignore_errors=True)
+    (path.parent / MCP_SERVERS).unlink(missing_ok=True)
 
 
-def watch_copy(db, row, launch, copy: Path, folder: Path) -> Callable[[], list[str]] | None:
+def watch_copy(
+    db, row, launch, copy: Path, folder: Path
+) -> Callable[[], tuple[list[str], list[str]]] | None:
     """Snapshot `copy` whole, and the item's branch tip in the person's
     `folder`, which a commit by any route moves (a push from the copy, or the
-    person). Returns what lists the files changed in either since, or None
-    when either cannot be read."""
+    person). Returns what lists the files changed since in the copy, and on
+    the tip, or None when either cannot be read."""
     from kraft.executor import read_only  # it imports this package
 
     was = (
@@ -62,13 +69,13 @@ def watch_copy(db, row, launch, copy: Path, folder: Path) -> Callable[[], list[s
     if None in was:
         return None
     return lambda: (
-        read_only.changed(db, row, launch, copy, was[0], full=True)
-        + read_only.changed(db, row, launch, folder, was[1])
+        read_only.changed(db, row, launch, copy, was[0], full=True),
+        read_only.changed(db, row, launch, folder, was[1]),
     )
 
 
 def _empty(dest: Path) -> None:
-    remove_copy(dest)
+    shutil.rmtree(dest, ignore_errors=True)  # not remove_copy: the launch's servers file stays
     dest.mkdir(parents=True, exist_ok=True)
 
 

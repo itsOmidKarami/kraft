@@ -645,66 +645,6 @@ def test_kraft_9oab_sigterm_stops_the_real_server(tmp_path):
             proc.wait()
 
 
-@pytest.mark.parametrize(
-    "squatter_host",
-    # the wildcard is the exact Kraft-kquf shape: an existing daemon bound
-    # *:PORT, and we are about to bind the specific loopback address next to it
-    ["127.0.0.1", "0.0.0.0"],
-    ids=["same-address", "wildcard-probed-from-loopback"],
-)
-def test_serve_refuses_when_the_address_already_answers(tmp_path, monkeypatch, squatter_host):
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as squatter:
-        squatter.bind((squatter_host, 0))
-        squatter.listen(1)
-        port = squatter.getsockname()[1]
-        monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
-        monkeypatch.setenv("KRAFT_PORT", str(port))
-        with pytest.raises(SystemExit, match="already answering"):
-            cli.admin._serve()
-
-
-def test_serve_probes_127_0_0_1_when_its_own_bind_is_a_wildcard(tmp_path, monkeypatch):
-    """The other direction: we are about to bind wildcard ourselves, and
-    something already sits on loopback -- connecting to 0.0.0.0 itself is
-    not a reliable client target, so the probe has to translate."""
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    templates_dir = fake_templates_dir(tmp_path, "true")
-    # A wildcard bind is refused outright without a password (_bind, unrelated
-    # to this test) -- set one so the address check is what actually runs.
-    (templates_dir / "access.yaml").write_text("password_hash: x\n")
-    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates_dir))
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as squatter:
-        squatter.bind(("127.0.0.1", 0))
-        squatter.listen(1)
-        port = squatter.getsockname()[1]
-        monkeypatch.setenv("KRAFT_HOST", "0.0.0.0")
-        monkeypatch.setenv("KRAFT_PORT", str(port))
-        with pytest.raises(SystemExit, match="already answering"):
-            cli.admin._serve()
-
-
-def test_serve_proceeds_when_the_address_is_free(tmp_path, monkeypatch):
-    """A free ephemeral port (nothing bound it) must not be refused."""
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))
-    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    probe.bind(("127.0.0.1", 0))
-    port = probe.getsockname()[1]
-    probe.close()  # freed before _serve ever runs
-    monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
-    monkeypatch.setenv("KRAFT_PORT", str(port))
-    started = []
-    monkeypatch.setattr(
-        cli.admin._SignalLoggingServer,
-        "run",
-        lambda self, *a, **k: started.append(True),
-    )
-    cli.admin._serve()
-    assert started == [True]
-
-
 def test_shutdown_logs_the_signal(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))

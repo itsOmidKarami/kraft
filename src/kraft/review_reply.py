@@ -79,8 +79,8 @@ async def run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> s
         return await _run(
             db, run_dirs, work_item_id=work_item_id, gate=gate, nodes=nodes, launch=launch
         )
-    except (asyncio.CancelledError, AssertionError, store.CheckoutBusy, inplace.CheckoutRefused):
-        raise  # nothing started: the caller queues, skips or stops on it
+    except (asyncio.CancelledError, AssertionError, store.CheckoutBusy):
+        raise  # nothing started: the caller queues it
     except Exception as exc:  # noqa: BLE001
         logger.exception("reply agent failed for %s at gate %s", work_item_id, gate)
         error = repr(exc)
@@ -219,7 +219,8 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
         if not copy:
             files = read_only.changed(db, row, launch, worktree, before)
         elif since:
-            files = since()
+            edited, moved = since()
+            files = edited + moved
         elif copied:  # it ran, and nothing can say what it changed: never "replied"
             files = [_NOT_COMPARED]
         else:  # refused before its copy was made, so nothing ran in it
