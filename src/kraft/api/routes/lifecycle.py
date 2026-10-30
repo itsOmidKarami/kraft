@@ -1765,8 +1765,8 @@ async def _retry(wid: str, body: Retry, request: Request):
     if beyond and (who := _decided_by(request)) != "human":
         raise HTTPException(
             403,
-            f"task_config: only a person changes a task's {', '.join(beyond)}, not an "
-            f"{who}; an agent's retry may change its model and effort",
+            f"task_config: changing a task's {', '.join(beyond)} is a person's call, not an "
+            f"{who}'s; an {who}'s retry may change only the task's model and effort",
         )
     # The node the rerun starts at: what a steer has to reach from, whose
     # findings seed one, and which counters the retry clears (Kraft-bzwi: a

@@ -976,7 +976,9 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         help="where its steps run: a machine or a group from workers.yaml, any, or local",
     )
     set_node_override.add_argument(
-        "--extra-prompt", help="text appended to every agent task's instruction in this node"
+        "--extra-prompt",
+        help="text appended to every agent task's instruction in this node "
+        "(a person's to set: refused in a worker)",
     )
     set_node_override.add_argument(
         "--reviewer",

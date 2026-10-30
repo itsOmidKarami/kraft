@@ -159,17 +159,23 @@ def test_a_node_whose_op_cannot_apply_has_no_added_check(client, repo):
 
 
 PROMPT = {"op": "override", "path": "work_brief.main.author", "task_config": {"prompt": "x"}}
-_AGENTS = {"assistant": {"x-kraft-client": "mcp"}, "worker": {"x-kraft-session-id": "w-o/abc123"}}
+_CALLERS = {
+    "assistant": {"x-kraft-client": "mcp"},
+    "worker": {"x-kraft-session-id": "w-o/abc123"},
+    "person": {},
+}
 
 
 @pytest.mark.parametrize(
-    ("caller", "verb", "ops", "started"),
+    ("caller", "verb", "ops", "started", "status"),
     [
-        ("assistant", "put", [PROMPT], False),
-        ("assistant", "put", [ADD], True),
-        ("worker", "put", [OVERRIDE], False),
-        ("assistant", "apply", [PROMPT], False),
-        ("worker", "apply", [ADD], True),
+        ("assistant", "put", [PROMPT], False, 403),
+        ("assistant", "put", [ADD], True, 403),
+        ("worker", "put", [OVERRIDE], False, 403),
+        ("assistant", "apply", [PROMPT], False, 403),
+        ("worker", "apply", [ADD], True, 403),
+        ("person", "apply", [PROMPT], False, 200),
+        ("person", "apply", [ADD], True, 200),
     ],
     ids=[
         "assistant-writes-a-prompt",
@@ -177,15 +183,17 @@ _AGENTS = {"assistant": {"x-kraft-client": "mcp"}, "worker": {"x-kraft-session-i
         "another-items-worker-writes-an-override",
         "assistant-applies-a-persons-prompt",
         "worker-applies-a-persons-added-node-to-a-started-item",
+        "person-applies-a-prompt",
+        "person-applies-an-added-node-to-a-started-item",
     ],
 )
 def test_an_items_chain_draft_is_a_persons_to_write_and_apply(
-    client, repo, caller, verb, ops, started
+    client, repo, caller, verb, ops, started, status
 ):
     """#1190: a draft's ops change the chain the item runs, started or not, and
     an override can set a task's prompt, so only a person writes or applies
     one. An agent still reads it; the chain-revision gate is another door
-    (tests/api/test_gates.py)."""
+    (tests/api/test_chain_revision_gate.py)."""
     wid = _filed(client, repo)
     url = f"/api/work-items/{wid}/draft"
     if verb == "apply":
@@ -195,32 +203,21 @@ def test_an_items_chain_draft_is_a_persons_to_write_and_apply(
         conn.execute("UPDATE work_items SET current_node_id = 'spec' WHERE id = ?", (wid,))
         conn.commit()
         conn.close()
-    headers = _AGENTS[caller]
+    headers = _CALLERS[caller]
 
     if verb == "put":
         r = client.put(url, json={"ops": ops}, headers=headers)
     else:
         r = client.post(f"{url}/apply", headers=headers)
 
-    assert r.status_code == 403, r.text
+    assert r.status_code == status, r.text
+    events = client.get(f"/api/work-items/{wid}/events").json()
+    revised = [e for e in events if e["type"] == "chain_revised"]
+    if status == 200:
+        assert len(revised) == 1
+        return
     assert "a person's to write and apply" in r.json()["detail"]
     assert client.get(url, headers=headers).json()["ops"] == (
         [] if verb == "put" else [{**op, "passed": False} for op in ops]
     )
-    events = client.get(f"/api/work-items/{wid}/events").json()
-    assert not [e for e in events if e["type"] == "chain_revised"]
-
-
-def test_a_persons_draft_with_a_prompt_applies(client, repo):
-    """#1190's other half: a person's own draft, prompt included, still applies."""
-    wid = _filed(client, repo)
-    client.put(f"/api/work-items/{wid}/draft", json={"ops": [PROMPT]})
-
-    r = client.post(f"/api/work-items/{wid}/draft/apply")
-
-    assert r.status_code == 200, r.text
-    chain = MaterializedChain.from_json(
-        client.get(f"/api/work-items/{wid}").json()["materialized_chain"]
-    )
-    [author] = [t for n in chain.chain.nodes for t in n.tasks() if t.path == PROMPT["path"]]
-    assert author.task.prompt == "x"
+    assert revised == []

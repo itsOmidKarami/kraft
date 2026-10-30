@@ -214,6 +214,6 @@ def test_a_node_extra_prompt_is_a_persons_to_set(client, repo, door, caller, ext
 
     assert r.status_code == status, r.text
     if status == 403:
-        assert "only a person sets an extra_prompt" in r.json()["detail"]
+        assert "an extra_prompt is a person's to set" in r.json()["detail"]
         if door == "patch":
             assert client.get(f"/api/work-items/{wid}").json()["node_overrides"] in (None, {})

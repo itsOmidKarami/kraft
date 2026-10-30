@@ -518,8 +518,8 @@ async def get_item_draft(wid: str, request: Request):
 async def put_item_draft(wid: str, body: Ops, request: Request):
     """Replace the whole op list (an empty one deletes the draft)."""
     st = request.app.state
-    _person_only(request)
     row = _item_row(st, request, wid)
+    _person_only(request)
     try:
         ops_ = item.OPS.dump_python(
             item.OPS.validate_python(body.ops), mode="json", exclude_none=True
@@ -546,8 +546,8 @@ async def apply_item_draft(wid: str, request: Request):
     Otherwise the revised chain replaces the item's (`chain_revised`, `source:
     "draft"`), each `skip` is recorded as `scope_skipped`, and the draft goes."""
     st = request.app.state
-    _person_only(request)
     _item_row(st, request, wid)
+    _person_only(request)
     library = st.library
 
     def apply(c) -> tuple[int, dict | None]:

@@ -424,7 +424,7 @@ def test_a_retry_that_changes_more_than_a_tasks_model_is_a_persons(
 
     assert r.status_code == status, r.text
     if status == 403:
-        assert "only a person changes a task's prompt" in r.json()["detail"]
+        assert "changing a task's prompt is a person's call" in r.json()["detail"]
         assert _forks(client, wid)[0] == []
         assert _self_retry_requests(client, wid) == []
         assert retried == {}

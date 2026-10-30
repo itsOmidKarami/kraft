@@ -1124,12 +1124,13 @@ def _refuse_agent_extra_prompt(request: Request, overrides: dict[str, dict]) -> 
     """403 when an agent or an MCP session sets a node's `extra_prompt`: it
     reaches every agent task of that node, so it is a person's text, as a
     one-off chain's custom content is (#1188). Dropping one stays open."""
+    who = gates._decided_by(request)
     for node_id, fields in overrides.items():
-        if fields.get("extra_prompt") is not None and gates._decided_by(request) != "human":
+        if fields.get("extra_prompt") is not None and who != "human":
             raise HTTPException(
                 403,
-                f"node {node_id!r}: only a person sets an extra_prompt, in the web UI or "
-                "a terminal; an agent's text does not reach a task unreviewed",
+                f"node {node_id!r}: an extra_prompt is a person's to set, not an {who}'s; "
+                "it reaches the node's tasks with nobody reviewing it",
             )
 
 
@@ -1304,8 +1305,8 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
     _check_text("description", body.description)
 
     if body.node_overrides is not None:
-        _refuse_agent_extra_prompt(request, body.node_overrides)
         _validate_node_overrides(st, row, body.node_overrides)
+        _refuse_agent_extra_prompt(request, body.node_overrides)
 
     filed_kinds = frozenset(a["kind"] for a in entry.attachments_of(row))
     kinds, added = filed_kinds, []
