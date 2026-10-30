@@ -299,7 +299,7 @@ def _latest_by_name(rows: list[dict], *, name: str, started: str) -> list[dict]:
 
     `test.yml` deliberately re-triggers on `labeled`/`unlabeled` (release-impact
     needs to see label changes), so a label Kraft sets mid-check starts a
-    second workflow run on the same PR. `statusCheckRollup` and `gh run list`
+    second workflow run on the same PR. `statusCheckRollup` and the workflow-run list
     both then carry entries from *both* runs -- the superseded run's jobs
     (often `CANCELLED` by the `cancel-in-progress` concurrency group) alongside
     the new run's real result, same name, two conclusions. Without this, a
@@ -669,9 +669,9 @@ class GhCli(mr_ops.CliWaits):
         """The target branch's own CI, not a pull request's.
 
         `merge_watch` calls this once the merge has landed: the checkout's
-        current branch normally has no open PR left for `ci_status`'s `gh pr
-        view` to resolve, and it would raise instead of reading the branch's
-        runs at all. `gh run list --branch` reads the branch's own workflow
+        current branch normally has no open PR left for `ci_status`'s pull-request
+        read to resolve, and it would raise instead of reading the branch's
+        runs at all. The branch run list reads the branch's own workflow
         runs directly, no PR involved, those of `head_sha` alone. `pipeline_id`
         is unused, same reason as in `ci_status`: gh's checks are per-commit,
         not per-pipeline.
@@ -810,7 +810,8 @@ class GhCli(mr_ops.CliWaits):
             raise ForgeError("cannot merge without the head to merge")
         await git._assert_pushed(repo, branch)
         pr = await self._pr(repo, mr_ops.target(mr.number, branch), fields=gq.MERGE_FIELDS)
-        if pr.get("isInMergeQueue"):
+        # merge.go:590,257,282-284: a pull request that landed since it was read is done.
+        if pr.get("isInMergeQueue") or pr.get("state") == "MERGED":
             return
         if pr.get("isMergeQueueEnabled"):
             mutation = _AUTO_MERGE_MUTATION
@@ -821,9 +822,14 @@ class GhCli(mr_ops.CliWaits):
         try:
             await self._gql(repo, mutation, {"id": pr["id"], "head": head})
         except ForgeError as exc:
-            if exc.reason == "head_moved":
-                raise HeadMoved(str(exc), await self._forge_head(repo, branch)) from exc
-            raise
+            if exc.reason != "head_moved":
+                raise
+            # GitHub's wording is matched, not known: an error that names the head
+            # but leaves the pull request at `head` is not a head that moved.
+            current = await self._forge_head(repo, branch)
+            if current == head:
+                raise
+            raise HeadMoved(str(exc), current) from exc
 
     async def _forge_head(self, repo: Path, branch: str) -> str:
         """The pull request's head as GitHub holds it, "" when it cannot be read."""

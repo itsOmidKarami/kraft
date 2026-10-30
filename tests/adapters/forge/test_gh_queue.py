@@ -616,6 +616,14 @@ def _mutations(argv: list[str]) -> list[tuple[str, dict]]:
             None,
             id="already-queued",
         ),
+        # merge.go:257,282-284: landed since it was read (auto-merge, the queue, a person).
+        pytest.param(
+            api_outputs.merge_state("BLOCKED", pr_state="MERGED"),
+            7,
+            None,
+            None,
+            id="already-merged",
+        ),
         pytest.param(
             api_outputs.merge_state("BLOCKED"),
             7,
@@ -670,19 +678,22 @@ async def test_merge_sends_what_gh_pr_merge_sends(cli, tmp_path, read, number, s
 
 
 @pytest.mark.parametrize(
-    "answer, moved",
+    "answer, moved, forge_head",
     [
-        pytest.param(api_outputs.HEAD_MODIFIED, True, id="stale-head"),
+        pytest.param(api_outputs.HEAD_MODIFIED, True, "f0reign1", id="stale-head"),
+        # The wording is matched, not known: PR still at the reviewed head is no move.
+        pytest.param(api_outputs.HEAD_MODIFIED, False, _HEAD, id="head-modified-wording-same-head"),
         pytest.param(
             json.dumps({"errors": [{"type": "UNPROCESSABLE", "message": "Merge conflict"}]}),
             False,
+            "f0reign1",
             id="another-graphql-error",
         ),
-        pytest.param(Api(502, '{"message": "Bad Gateway"}'), False, id="graphql-502"),
+        pytest.param(Api(502, '{"message": "Bad Gateway"}'), False, "f0reign1", id="graphql-502"),
     ],
 )
 async def test_a_merge_github_refuses_for_a_moved_head_raises_head_moved(
-    cli, tmp_path, answer, moved
+    cli, tmp_path, answer, moved, forge_head
 ):
     """The GraphQL error for an `expectedHeadOid` that is not the head becomes
     `HeadMoved`, with the head GitHub holds: the merge path holds it for
@@ -692,7 +703,7 @@ async def test_a_merge_github_refuses_for_a_moved_head_raises_head_moved(
     routes = {
         _MERGE_READ: api_outputs.merge_state(),
         _MUTATION: answer,
-        api_outputs.FIND: api_outputs.FIND_AUTO_MERGE,
+        api_outputs.FIND: api_outputs.find_result(api_outputs.listed(headRefOid=forge_head)),
     }
     cli.stub("gh", routes=routes, default=FAIL)
 

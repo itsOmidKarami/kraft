@@ -90,29 +90,6 @@ GH_PR_VIEW = (
     '{"name":"lint","conclusion":"FAILURE"}]}'
 )
 
-GH_PR_VIEW_CONFLICT = (
-    '{"number":7,"url":"https://github.com/o/r/pull/7","mergeable":"CONFLICTING",'
-    '"mergeStateStatus":"DIRTY","statusCheckRollup":[{"name":"build","conclusion":"SUCCESS"}]}'
-)
-
-GH_PR_VIEW_NEEDS_APPROVAL = (
-    '{"number":7,"url":"https://github.com/o/r/pull/7","mergeable":"UNKNOWN",'
-    '"mergeStateStatus":"BLOCKED","reviewDecision":"REVIEW_REQUIRED",'
-    '"statusCheckRollup":[{"name":"build","conclusion":"SUCCESS"}]}'
-)
-
-GH_PR_LIST_MERGED = (
-    '[{"number":7,"url":"https://github.com/o/r/pull/7","state":"MERGED",'
-    '"mergeCommit":{"oid":"c0ffee1"},"headRefOid":"c0ffee0"}]'
-)
-#: An open pull request with auto-merge enabled: GitHub merges it itself once
-#: its checks pass (`gh pr list --json autoMergeRequest`).
-GH_PR_LIST_AUTO_MERGE = (
-    '[{"number":7,"url":"https://github.com/o/r/pull/7","state":"OPEN",'
-    '"autoMergeRequest":{"enabledAt":"2026-09-22T10:00:00Z","mergeMethod":"SQUASH"},'
-    '"headRefOid":"f0reign1"}]'
-)
-
 # `glab ci get -F json` for the pipeline in GLAB_CI_FAILED, trimmed to the
 # fields this code reads: the pipeline object carries its jobs inline, so one
 # call names every job (glab 1.117.0, 2026-09-09).

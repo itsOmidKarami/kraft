@@ -154,12 +154,21 @@ NEEDS_APPROVAL_PR = pull_request(
 
 
 def merge_state(
-    state: str = "CLEAN", *, queue: bool = False, queued: bool = False, by_branch: bool = False
+    state: str = "CLEAN",
+    *,
+    queue: bool = False,
+    queued: bool = False,
+    by_branch: bool = False,
+    pr_state: str = "OPEN",
 ) -> str:
     """What the merge reads before it picks a mutation (merge.go:172, 194-196),
     looked up by number or, `by_branch`, by its head branch."""
     pull = pull_request(
-        None, mergeStateStatus=state, isMergeQueueEnabled=queue, isInMergeQueue=queued
+        None,
+        state=pr_state,
+        mergeStateStatus=state,
+        isMergeQueueEnabled=queue,
+        isInMergeQueue=queued,
     )
     return pr_by_branch(pull) if by_branch else pr_by_number(pull)
 

@@ -67,13 +67,17 @@ async def _open(tmp_path, **kw):
         pytest.param(None, [f"{_CREATE} -F draft=true"], id="a-draft-with-no-metadata"),
         pytest.param(
             MRMeta(
-                labels=("release::minor", "bug"), assignees=("omid",), reviewers=("ada", "core/x")
+                labels=("release::minor", "bug", "area/ui"),
+                assignees=("omid",),
+                reviewers=("ada", "core/x"),
             ),
             [
                 _label("release%3A%3Aminor"),
                 _label("bug"),
+                _label("area%2Fui"),
                 f"{_CREATE} -F draft=true",
-                f"api {_ISSUES}/labels -X POST -i -f labels[]=release::minor -f labels[]=bug",
+                f"api {_ISSUES}/labels -X POST -i"
+                " -f labels[]=release::minor -f labels[]=bug -f labels[]=area/ui",
                 f"api {_ISSUES}/assignees -X POST -i -f assignees[]=omid",
                 f"api {_PULLS}/7/requested_reviewers -X POST -i"
                 " -f reviewers[]=ada -f team_reviewers[]=x",
