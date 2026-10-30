@@ -40,6 +40,9 @@ from kraft.worker import steering as _steering
 
 logger = logging.getLogger(__name__)
 
+# `read_only.changed`'s style for a write it could not rule out.
+_NOT_COMPARED = "(not compared: Kraft could not read the copy or your branch before the reply)"
+
 _PROMPT = (
     "A reviewer left comments on this Kraft work item's change, and wants answers "
     "before deciding. You wrote this code. Do not change any file in this "
@@ -166,9 +169,11 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
     copy = inplace.copy_path(run_dirs, work_item_id, session_id) if store.is_in_place(row) else None
     before = None if copy else read_only.snapshot(db, row, launch, worktree)
     since = None
+    copied = False
 
     async def after_checkout() -> None:
-        nonlocal since
+        nonlocal since, copied
+        copied = True
         since = inplace.watch_copy(db, row, launch, copy, worktree)
 
     # The head it starts over, at the final gate: a person's approval that
@@ -211,11 +216,14 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
             runner=_placement.remote(_placement.node_runner(row, gate)),
             follow_node=True,
         )
-        if copy:
-            # None: refused before its copy was made, so nothing ran in it.
-            files = since() if since else []
-        else:
+        if not copy:
             files = read_only.changed(db, row, launch, worktree, before)
+        elif since:
+            files = since()
+        elif copied:  # it ran, and nothing can say what it changed: never "replied"
+            files = [_NOT_COMPARED]
+        else:  # refused before its copy was made, so nothing ran in it
+            files = []
     finally:
         if copy is not None:
             await _subprocess.uncancellable(asyncio.to_thread(inplace.remove_copy, copy))

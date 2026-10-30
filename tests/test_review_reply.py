@@ -400,24 +400,34 @@ _ID = "git -c user.email=t@t -c user.name=t"
 
 
 @pytest.mark.parametrize(
-    "shell,files",
+    "shell,files,unread",
     [
-        pytest.param("echo agent >> calc.py", ["calc.py"], id="dirty-file"),
+        pytest.param("echo agent >> calc.py", ["calc.py"], False, id="dirty-file"),
         pytest.param(
             f"echo x > tip.txt && git add tip.txt && {_ID} commit -qm tip"
             " && git push -q {repo} HEAD:{branch} && git reset -q --hard HEAD~1",
             ["tip.txt"],
+            False,
             id="moved-tip",
+        ),
+        pytest.param(
+            "true",
+            ["(not compared: Kraft could not read the copy or your branch before the reply)"],
+            True,
+            id="copy-unread",
         ),
     ],
 )
 async def test_an_in_place_reply_never_touches_the_persons_checkout(
-    item_on, run_dirs, repo, tmp_path, monkeypatch, shell, files
+    item_on, run_dirs, repo, tmp_path, monkeypatch, shell, files, unread
 ):
     """It works in a copy of the item's branch: the person, on `main` with
     unsaved work, keeps both. A write in the copy, or a commit pushed to their
-    branch, is still recorded."""
+    branch, is still recorded, and a copy Kraft could not read is never
+    "replied"."""
     _seed(tmp_path, monkeypatch)
+    if unread:
+        monkeypatch.setattr(inplace, "watch_copy", lambda *a: None)
     it = await item_on(NODES, GATE, target=IN_PLACE, status="needs_human")
     branch = f"refs/heads/{store.branch_for(it.row())}"
     git(repo, "branch", store.branch_for(it.row()))
