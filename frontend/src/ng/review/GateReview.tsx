@@ -77,7 +77,7 @@ export function GateReview({ item, gate, events, doc, by, files, threads, isView
         <section className="rv-gate-next rv-gate-auto" aria-label="Agent review">
           <span>Reviewer:</span>
           <Badge tone={CHIP_TONE[OUTCOME[outcome.kind].tone]}>{OUTCOME[outcome.kind].word}</Badge>
-          {outcome.note && <span>{outcome.note}</span>}
+          {outcome.note && <span className="rv-gate-auto-note">{outcome.note}</span>}
         </section>
       )}
       {next && <p className="rv-gate-next">{next}</p>}
