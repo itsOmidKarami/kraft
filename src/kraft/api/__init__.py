@@ -78,6 +78,7 @@ from kraft.api.routes import (  # noqa: E402,F401
     gates,
     harnesses,
     lifecycle,
+    one_off,
     repos,
     review,
     search,

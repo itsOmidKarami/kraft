@@ -436,6 +436,21 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       viewedMarks[method === "PUT" ? "add" : "delete"](`${m[1]}|${file}`);
       return json({ file, to: q.get("to") ?? "latest", viewed: method === "PUT" });
     }
+    /* one-off chains: what Start reviews before an item with custom content runs */
+    if ((m = p.match(/^\/work-items\/([^/]+)\/one-off$/)) && method === "GET") {
+      const node = { id: "k6", kind: "exec", tasks: [{ id: "run", kind: "agent", harness: "claude", prompt: "run k6" }] };
+      return json({
+        extends: "default",
+        authored: { id: "one-off", extends: "default", add: [{ after: "verification", node }] },
+        custom: [{ path: "add[0].node", what: "adds 'k6', a node with its own content rather than library parts", value: node }],
+        provenance: { parent: "default", nodes: { k6: "added" }, overrides: {}, removed: [] },
+        digest: "0".repeat(64),
+        approval: null,
+        needs_review: true,
+        added: [{ node: "k6", harnesses: ["claude"], estimate_usd: null, estimate_runs: null }],
+        redrafted: [],
+      });
+    }
     /* ux2-W8: review threads and comments, kept for the test's life */
     if ((m = p.match(/^\/work-items\/([^/]+)\/threads$/))) {
       const list = threadsOf(m[1]);

@@ -267,6 +267,50 @@ def _paused(client, repo, **body) -> str:
     return r.json()["id"]
 
 
+#: A one-off chain with custom content: a library chain plus an inline agent prompt.
+CUSTOM_ONE_OFF = """\
+extends: default
+add:
+  - after: verification
+    node:
+      id: k6
+      kind: exec
+      tasks:
+        - id: run
+          kind: agent
+          harness: claude
+          prompt: run k6
+"""
+
+
+LIBRARY_ONLY_ONE_OFF = "extends: default\nremove: [work_brief]\n"
+#: The caller headers `routes.gates._decided_by` reads as an MCP session and as a worker.
+MCP_HEADERS = {"X-Kraft-Client": "mcp"}
+WORKER_HEADERS = {"X-Kraft-Session-Id": "other/abc123"}
+
+
+def _review(client, wid) -> dict:
+    """`GET /work-items/{wid}/one-off`: what a person reads before starting it."""
+    r = client.get(f"/api/work-items/{wid}/one-off")
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _approve(client, wid, digest=None, headers=None, **body):
+    """Approve the item's one-off chain as shown (`digest` defaults to the one now shown)."""
+    return client.post(
+        f"/api/work-items/{wid}/one-off/approve",
+        json={"digest": digest or _review(client, wid)["digest"], **body},
+        headers=headers or {},
+    )
+
+
+def _one_off(client, repo, text, **body) -> str:
+    """File a not-yet-started item with the one-off chain `text` (a chain file's
+    text); its id. `body` adds to or overrides the create body."""
+    return _paused(client, repo, one_off_chain=text, **body)
+
+
 def _held_at(client, repo, node_id, monkeypatch, *, delay="5", **body) -> str:
     """Start an item and return its id once `node_id` has started, with every
     fake agent task sleeping `delay` seconds first (`KRAFT_FAKE_CLAUDE=slow`,
@@ -340,6 +384,13 @@ def _blocked_after(client, repo) -> tuple[str, str]:
     _come_after(wid, [dep])
     assert client.post(f"/api/work-items/{wid}/resume", json={}).json()["status"] == "blocked"
     return dep, wid
+
+
+def _item_row(wid: str) -> dict:
+    """The work item's row as stored, every column."""
+    with _orchestrator_db() as c:
+        c.row_factory = sqlite3.Row
+        return dict(c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone())
 
 
 def _orchestrator_db():

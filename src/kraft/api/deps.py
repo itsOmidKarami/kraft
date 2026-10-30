@@ -17,9 +17,11 @@ import logging
 import os
 import re
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+import yaml
 from fastapi import FastAPI, HTTPException
 
 from kraft import archive, executor, ids, storage, store, when_free
@@ -38,14 +40,19 @@ from kraft.policy import (
     PolicyInput,
     TemplatePolicyOverride,
 )
-from kraft.templates import revision
+from kraft.templates import one_off, revision
 from kraft.templates.environment import (
     RootPointerPolicy,
     TemplateEnvironmentError,
     WorkItemTarget,
     branch_name_problem,
 )
-from kraft.templates.library import LIBRARY_FILE, TemplateLibrary, TemplateLibraryError
+from kraft.templates.library import (
+    ADDON_YAML_NODES,
+    LIBRARY_FILE,
+    TemplateLibrary,
+    TemplateLibraryError,
+)
 from kraft.vocab import ENDED, ChainEvent, StopKind
 from kraft.worker import steering as steering_mod
 
@@ -793,6 +800,107 @@ def scoped_chain_or_422(st, entry: RepoEntry, chain_template: str | None):
     if why := addons_load.scope_problem(chain.addons, entry.id):
         raise HTTPException(422, f"chain {chain_template or 'default'!r}: {why}")
     return chain
+
+
+def authored_mapping(text: str, what: str) -> dict:
+    """A chain or library file's text as the mapping a save checks, or the 422
+    that says why it cannot be one."""
+    try:
+        data = config_mod.bounded_yaml(text, [ADDON_YAML_NODES])
+    except config_mod.YamlTooLarge as exc:
+        raise HTTPException(422, f"{what} YAML is too large: {exc}") from exc
+    except yaml.YAMLError as exc:
+        raise HTTPException(422, f"not YAML: {exc}") from exc
+    except ValueError as exc:  # a scalar that looks like a date and is not one
+        raise HTTPException(422, f"not YAML: {exc}") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(422, f"a {what} file is a mapping")
+    from kraft.api import config_check
+
+    if why := config_check.retired_message(data):
+        raise HTTPException(422, why)
+    return data
+
+
+def _is_plain(value: object, depth: int = 64) -> bool:
+    """Strings, numbers, booleans, null, lists, and mappings keyed by strings,
+    nested at most `depth` deep."""
+    if depth == 0:
+        return False
+    if isinstance(value, dict):
+        return all(isinstance(k, str) and _is_plain(v, depth - 1) for k, v in value.items())
+    if isinstance(value, list):
+        return all(_is_plain(v, depth - 1) for v in value)
+    return value is None or isinstance(value, str | int | float | bool)
+
+
+@dataclass(frozen=True)
+class OneOff:
+    #: The one-off chain resolved: what an item filed with it materializes.
+    chain: object
+    #: What the work item stores (`one_off_chain`): authored, custom, provenance, skips, digest.
+    record: dict
+
+
+def one_off_chain_or_422(
+    st, repo: str, source: str | dict, *, skips: list[str] | None = None
+) -> OneOff:
+    """A one-off chain checked exactly as strictly as a library chain: the same
+    resolver, lint, policy maxima and add-on scope. Every refusal is a 422 with
+    one sentence."""
+    from kraft.api import config_check
+
+    library = library_or_503(st)
+    entry = connected_or_422(st, repo)
+    if isinstance(source, str):
+        if len(source) > one_off.MAX_TEXT:
+            raise HTTPException(422, "a one-off chain is at most 256 KiB")
+        data = authored_mapping(source, "chain")
+    else:
+        data = source
+    plain = "a one-off chain holds only plain YAML values: strings, numbers, lists and mappings"
+    if not _is_plain(data):
+        raise HTTPException(422, plain)
+    try:
+        size = len(json.dumps(data, allow_nan=False))  # .inf and .nan cannot be answered as JSON
+    except ValueError as exc:
+        raise HTTPException(422, plain) from exc
+    if size > one_off.MAX_TEXT:
+        raise HTTPException(422, "a one-off chain is at most 256 KiB")
+    if isinstance(source, dict) and (why := config_check.retired_message(data)):
+        raise HTTPException(422, why)
+    authored, digest = one_off.prepare(data)
+    id = authored["id"]
+    if not isinstance(id, str):
+        raise HTTPException(422, "a one-off chain's id is a string")
+    if id in library.chain_ids:
+        raise HTTPException(
+            422, f"one-off chain id {id!r} names a library chain; give it its own id"
+        )
+    try:
+        candidate, id = library.with_chain(Path("<unsaved>") / "chains" / f"{id}.yaml", authored)
+        resolved = candidate.resolve_chain(id)
+        extends = authored.get("extends")
+        parent = candidate.resolve_chain(extends) if isinstance(extends, str) else None
+    except TemplateLibraryError as exc:
+        raise HTTPException(422, f"one-off chain: {exc}") from exc
+    if problems := [
+        i.message for i in candidate.lint(getattr(st, "instance_policy", None)) if i.chain == id
+    ]:
+        raise HTTPException(422, f"one-off chain: {problems[0]}")
+    if why := addons_load.scope_problem(resolved.addons, entry.id):
+        raise HTTPException(422, f"one-off chain: {why}")
+    custom = one_off.custom_parts(authored, parent, resolved)
+    return OneOff(
+        resolved,
+        {
+            "authored": authored,
+            "custom": [p.view() for p in custom],
+            "provenance": candidate.provenance(id),
+            "skips": list(skips or []),
+            "digest": digest,
+        },
+    )
 
 
 def intake_chain_or_422(st, repo: str, chain_template: str | None):
