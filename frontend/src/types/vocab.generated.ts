@@ -123,7 +123,7 @@ export type LimitEvent = (typeof LIMIT_EVENTS)[number];
 export const ESCALATION_EVENTS = ["escalation_message", "stuck_escalation_started", "stuck_escalation_finished", "work_item_auto_escalate_skipped", "work_item_auto_escalate_capped", "work_item_self_retry_requested", "work_item_self_retry_dropped"] as const;
 export type EscalationEvent = (typeof ESCALATION_EVENTS)[number];
 
-export const FORGE_EVENTS = ["mr_opened", "mr_closed", "mr_reopened", "mr_labels_set", "branch_pushed", "external_wait_started", "external_wait_observed", "external_wait_rebounded", "external_wait_ended", "ci_infra_exhausted", "ci_run_abandoned", "ci_not_configured", "post_merge_ci_absent", "post_merge_ci_moved", "automated_review_not_configured", "automated_review_errored", "merge_queue_dropped", "reviewed_head_repinned", "merge_refused_unreviewed", "merge_landed_unreviewed"] as const;
+export const FORGE_EVENTS = ["mr_opened", "mr_closed", "mr_reopened", "mr_labels_set", "branch_pushed", "external_wait_started", "external_wait_observed", "external_wait_rebounded", "external_wait_ended", "ci_infra_exhausted", "ci_run_abandoned", "ci_not_configured", "post_merge_ci_absent", "post_merge_ci_moved", "automated_review_not_configured", "automated_review_errored", "automated_review_settled", "merge_queue_dropped", "reviewed_head_repinned", "merge_refused_unreviewed", "merge_landed_unreviewed"] as const;
 export type ForgeEvent = (typeof FORGE_EVENTS)[number];
 
 export const SANDBOX_EVENTS = ["sandbox_egress_refused", "sandbox_oom_killed", "sandbox_branch_not_synced", "sandbox_kit_resolved", "sandbox_session_outlived", "sandbox_reread"] as const;

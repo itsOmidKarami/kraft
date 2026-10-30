@@ -1,7 +1,8 @@
 """When each automated reviewer has finished with the latest push
 (`settle.decide`): a bot by its quiet after its last activity, a check by
 completing, either by the wait's timeout. Pure: the clock and the memory the
-last check left are arguments."""
+last check left are arguments. Last, which bots a run of settled reviews found
+silent (`silent_runs`), read off the events."""
 
 from __future__ import annotations
 
@@ -9,9 +10,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from kraft import events
 from kraft.adapters.forge import settle
 from kraft.adapters.forge.models import ReviewerFeedback
 from kraft.automated_review import AutomatedReview
+from kraft.vocab import ForgeEvent
 
 SINCE = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 GRACE = timedelta(seconds=60)
@@ -156,3 +159,64 @@ def test_a_collection_names_each_reviewer_with_its_threads_and_failed_check():
 
 def test_a_check_that_succeeded_is_collected_without_its_output():
     assert decide([check(True, "success")], now=5).collection[0]["check"] is None
+
+
+_ONE_NODE = [
+    {"id": "n", "kind": "exec", "tasks": [{"id": "t", "kind": "subprocess", "command": "true"}]}
+]
+
+
+@pytest.mark.parametrize(
+    "reviews, named",
+    [
+        # Oldest first: (item, what the bot did, the workspace member it reviewed).
+        (
+            [("w1", "silent", None), ("w2", "silent", None), ("w3", "silent", None)],
+            ["w3", "w2", "w1"],
+        ),
+        ([(f"w{n}", "silent", None) for n in range(1, 5)], ["w4", "w3", "w2"]),
+        # A bot that has posted there even once is one that posts only on findings.
+        ([("w1", "heard", None)] + [(f"w{n}", "silent", None) for n in range(2, 5)], None),
+        ([("w1", "silent", None), ("w2", "silent", None), ("w3", "heard", None)], None),
+        ([("w1", "silent", None), ("w2", "silent", None)], None),
+        # Three heads of one item, through its fix loop, are one item.
+        ([("w1", "silent", None)] * 3, None),
+        # A member's reviews are counted apart from the root's.
+        (
+            [("w1", "silent", "repos/pkg"), ("w2", "silent", None), ("w3", "silent", "repos/pkg")],
+            None,
+        ),
+        # The login was corrected: the newest review waits for another bot.
+        (
+            [(f"w{n}", "silent", None) for n in range(1, 4)] + [("w4", "heard", None, "ccr-bot")],
+            None,
+        ),
+    ],
+    ids=[
+        "three-items",
+        "more-than-three",
+        "heard-once-before",
+        "heard-last",
+        "only-two-items",
+        "one-item-three-heads",
+        "a-member-apart",
+        "since-corrected",
+    ],
+)
+async def test_a_bot_is_named_only_when_it_never_posted_in_a_repository_across_items(
+    item_on, database, reviews, named
+):
+    filed = {}
+    for wid, did, mount, *login in reviews:
+        if wid not in filed:
+            filed[wid] = await item_on(_ONE_NODE, wid=wid)
+        payload = {"repo": "checkout", "mount": mount, "heard": [], "silent": []}
+        payload[did] = login or ["ccr"]
+        await database.write(
+            lambda c, w=wid, p=payload: events.append(c, w, ForgeEvent.AUTOMATED_REVIEW_SETTLED, p)
+        )
+
+    got = database.read(settle.silent_runs)
+
+    repo = str(filed["w1"].repo)
+    assert got == ([] if named is None else [{"repo": repo, "bot": "ccr", "items": named}])

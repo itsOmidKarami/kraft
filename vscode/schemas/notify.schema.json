@@ -32,6 +32,7 @@
           "attachments_changed",
           "automated_review_errored",
           "automated_review_not_configured",
+          "automated_review_settled",
           "background_jobs_abandoned",
           "base_change_restart",
           "bead_not_filed",

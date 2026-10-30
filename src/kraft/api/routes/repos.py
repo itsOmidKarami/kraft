@@ -17,6 +17,7 @@ from pydantic import AfterValidator, AliasChoices, BaseModel, Field
 from kraft import apply as apply_mod
 from kraft import config as config_mod
 from kraft import detect
+from kraft.adapters.forge import settle
 from kraft.addons import repo_library
 from kraft.addons import review as addon_review
 from kraft.addons import update as addon_update
@@ -380,6 +381,14 @@ async def repo_library_accept(body: LibraryAccept, request: Request, path: str):
     await deps.reload_templates(st)
     apply_mod.notify(request.app)
     return {**_library_view(entry, found), "outcome": "accepted"}
+
+
+@api_router.get("/repos/silent-reviewers")
+async def silent_reviewers(request: Request):
+    """Each review bot that has never posted in a repository across its
+    reviews of several items (`settle.silent_runs`), for `kraft admin doctor`."""
+    runs = request.app.state.db.read(settle.silent_runs)
+    return {"reviewers": runs, "run": settle.SILENT_RUN}
 
 
 @api_router.get("/repos")

@@ -269,6 +269,8 @@ A bot is finished with a push when it has been active since Kraft pushed that he
 
 On the collect path, and for a bot that nothing reads, the timeout settles the wait: a bot that never posted had nothing to say, and the item goes on with what was collected. The timeout is recorded in the wait's events as `timed_out`.
 
+Every settled review records which bots posted and which never did (`automated_review_settled`). A bot that has never posted in a repo, across three items or more, is likely misconfigured, and `kraft admin doctor`'s `review bots` row names it.
+
 Forge clocks are compared with Kraft's push time as they are, with no allowance for skew. A bot that posts a placeholder and edits it long after the grace period is read early; a longer `grace_period` on that chain is the fix.
 
 ### `ci_checks`
