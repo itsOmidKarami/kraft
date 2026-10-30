@@ -1427,14 +1427,23 @@ async def _run_agent_task(
     elif not sandbox and asks is not None and asks.always == _registration.DIRECT:
         # On the host the tool's name is whatever registered the server: a
         # plugin-only install namespaces it, and a name that does not exist
-        # fails the session's first permission ask, not its start.
-        found = await asyncio.to_thread(_registration.permission_tool, Path(cwd))
+        # fails the session's first permission ask, not its start. A copy is
+        # empty until `before_launch`: ask of the person's checkout instead.
+        checkout_dir = Path(item_row["repo"]) if in_copy else Path(cwd)
+        found = await asyncio.to_thread(_registration.permission_tool, checkout_dir)
         if found is None:
             raise LaunchRefused(
                 f"harness {harness!r} asks Kraft's permission gate through the `kraft` MCP "
                 f"server, and nothing registers it for Claude Code: {_registration.FIX}"
             )
         options["approval_channel"] = found[0]
+        # Claude approves a checkout's own servers per folder, never the copy's.
+        if (
+            in_copy
+            and h.supports("mcp_config")
+            and (entry := _registration.checkout_entry(checkout_dir, found[1])) is not None
+        ):
+            options["mcp_config"] = json.dumps({"mcpServers": {"kraft": entry}})
     cmd = _harness.build_argv(
         h,
         command=command or None,

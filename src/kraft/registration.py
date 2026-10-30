@@ -130,3 +130,18 @@ def permission_tool(repo: Path | None) -> tuple[str, str] | None:
     if _kraft_on(project_plugins, installed):
         return PLUGIN, str(repo / ".claude" / "settings.json")
     return PLUGIN, str(user_settings)
+
+
+def checkout_entry(repo: Path, where: str) -> dict | None:
+    """The `kraft` server's entry as registered for `repo`'s own folder, given
+    `where` `permission_tool(repo)` found it: its local scope or its committed
+    `.mcp.json`. Claude Code approves a project's servers per folder path, so a
+    launch in a copy of `repo` loads neither and is handed this entry instead.
+    None for a managed, user or plugin registration, which loads anywhere."""
+    if where == f"{Path.home() / '.claude.json'} (local scope)":
+        config = _local_scope(_read(Path.home() / ".claude.json"), repo)
+    elif where == str(repo / ".mcp.json"):
+        config = _committed(repo, ".mcp.json")
+    else:
+        return None
+    return config["mcpServers"]["kraft"]
