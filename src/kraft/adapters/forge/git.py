@@ -103,19 +103,19 @@ def _shown(args: list[str]) -> str:
     return " ".join(a if len(a) <= 200 else f"{a[:200]}… ({len(a)} chars)" for a in args)
 
 
-async def run_git(
+async def run_cli(
     repo: Path,
     args: list[str],
     *,
     env: dict[str, str] | None = None,
     timeout: float | None = None,
-) -> str:
-    """One forge CLI call.
+) -> subprocess.CompletedProcess[str]:
+    """One forge CLI call, returned whatever its exit code.
 
     A CLI that never started (FileNotFoundError, E2BIG, a binary that is not
     executable, a working directory that is gone) becomes `CliUnavailable`, so
     it reads as the configuration problem it is rather than as a traceback from
-    three frames up.
+    three frames up. A timeout is a `ForgeError`: no output can exist.
 
     `env` defaults to `None`, meaning inherit the process env unchanged --
     which carries `sandbox.harden_host_git_env`'s pinned `core.hooksPath`.
@@ -126,7 +126,7 @@ async def run_git(
     try:
         # `to_thread` can't be cancelled, so the kill has to be subprocess.run's
         # own. Every call here is a read or idempotent, so abandoning one is safe.
-        done = await asyncio.to_thread(
+        return await asyncio.to_thread(
             subprocess.run,
             args,
             cwd=repo,
@@ -145,6 +145,17 @@ async def run_git(
     except OSError as exc:
         # E2BIG and the like: the CLI never started.
         raise CliUnavailable(f"{args[0]} could not start: {exc.strerror or exc}") from exc
+
+
+async def run_git(
+    repo: Path,
+    args: list[str],
+    *,
+    env: dict[str, str] | None = None,
+    timeout: float | None = None,
+) -> str:
+    """`run_cli`, raising a `ForgeError` on a non-zero exit."""
+    done = await run_cli(repo, args, env=env, timeout=timeout)
     if done.returncode != 0:
         detail = done.stderr.strip() or done.stdout.strip()
         raise ForgeError(f"{_shown(args)} failed: {detail}")
