@@ -6,6 +6,7 @@ Host workers call these unscoped, like every loopback route."""
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import asdict
 from pathlib import Path
@@ -25,7 +26,7 @@ def _mapped(exc: ForgeError) -> HTTPException:
     """A forge failure as a status: a rate limit the caller can wait out, a
     missing thing, or the forge being unusable (which includes no CLI)."""
     if exc.reason == "rate_limited":
-        headers = {"Retry-After": str(int(exc.retry_after))} if exc.retry_after else None
+        headers = {"Retry-After": str(math.ceil(exc.retry_after))} if exc.retry_after else None
         return HTTPException(429, str(exc), headers=headers)
     return HTTPException(404 if exc.reason == "not_found" else 502, str(exc))
 
