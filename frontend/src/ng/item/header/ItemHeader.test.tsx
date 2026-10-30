@@ -111,9 +111,16 @@ describe("ItemHeader", () => {
     const ROUTES = { ...WRITES, "GET /work-items/w1/one-off": [200, REVIEW] as [number, unknown], "POST /work-items/w1/one-off/approve": [200, {}] as [number, unknown] };
     const sends = (calls: { method: string; path: string }[]) => calls.filter((c) => c.method !== "GET").map((c) => `${c.method} ${c.path}`);
 
-    it("opens the review and resumes nothing until Approve and start", async () => {
+    // Stranded: the walk stopped it before its first node (`mark_needs_human(..., kind=CONFIG)`); /resume refuses it
+    // until the approve puts it back to paused, and its badge stays the stop's.
+    const STRANDED = { ...NEVER, status: "needs_human", display_status: "failed", actions: ["cancel"], stop: { kind: "config", node: "plan", resume_at: null, reason: "this item's one-off chain changed before it started and needs approval again: a person approves it in the web UI, on a computer or a phone, then starts it" } } satisfies Parameters<typeof detail>[0];
+    it.each<{ id: string; over: Parameters<typeof detail>[0]; badge: string }>([
+      { id: "never started", over: NEVER, badge: "NOT STARTED" },
+      { id: "stranded before its first node", over: STRANDED, badge: "FAILED" },
+    ])("opens the review and resumes nothing until Approve and start ($id)", async ({ over, badge }) => {
       const calls = stubFetch(ROUTES);
-      show(NEVER);
+      show(over);
+      expect(screen.getByText(badge)).toBeInTheDocument();
       await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
       const d = await screen.findByRole("dialog", { name: /Approve this chain, then start/ });
       expect(sends(calls)).toEqual([]);

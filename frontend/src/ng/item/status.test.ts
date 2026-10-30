@@ -9,7 +9,7 @@ import { chainGraph } from "./graph";
 import { footerState } from "./nodeGraph";
 import { footerActs } from "./panes/PathFooter";
 import { ITEM_ACTIONS, type ItemAction } from "../../types/vocab.generated";
-import { admits, archivable, bodyOffers, budgetRaise, headerState, offersRaise, MAIN_LABEL, menuDoors, spentLine, type Main, type PanelItem } from "./status";
+import { admits, archivable, bodyOffers, budgetRaise, headerState, offersRaise, MAIN_LABEL, menuDoors, spentLine, type HeaderState, type Main, type PanelItem } from "./status";
 import { detail } from "./testkit";
 import type { ItemDetail } from "./useItem";
 
@@ -32,6 +32,12 @@ type Scope = WorkItemStop["scope"];
 const at = (display_status: DisplayStatus, kind?: StopKind, scope: Scope = "work_item") =>
   headerState({ display_status, current_node_id: "n", stop: kind ? { kind, node: "n", resume_at: null, reason: null, ...(kind === "budget" && { scope }) } : null });
 const FULL = ["escalate", "complete", "archive", "cancel"];
+const UNREVIEWED = { current_node_id: null, one_off: { extends: "default", custom: 1, needs_review: true, approval: null } } satisfies Partial<ItemDetail>;
+/** What the server sends a one-off the walk stopped before its first node (`mark_needs_human(..., kind=CONFIG)`). */
+const STRANDED = {
+  ...UNREVIEWED, display_status: "failed", status: "needs_human", actions: ["cancel"],
+  stop: { kind: "config", node: "plan", resume_at: null, reason: "this item's one-off chain changed before it started and needs approval again: a person approves it in the web UI, on a computer or a phone, then starts it" },
+} satisfies Partial<ItemDetail>;
 // /escalate refuses a running or waiting item, and one whose escalation turn already runs.
 const NO_ESC = ["complete", "archive", "cancel"];
 
@@ -100,15 +106,29 @@ describe("the server's actions decide which doors the header offers (F4)", () =>
     // A gate is a view with its own decisions: Open gate stays.
     ["a gate, the server admitting nothing", { display_status: "needs_you", current_node_id: "n", stop: { kind: "gate", node: "n", resume_at: null, reason: null }, actions: [] }, "gate", ["archive"]],
     ["not started, the server refusing resume and cancel", { display_status: "paused", current_node_id: null, stop: null, actions: without("not_started", "resume", "cancel") }, null, []],
-    // Stranded before its first node with its chain unapproved: no node to retry, and /resume refuses it until the
-    // review's approve puts it back to paused, so Start (which opens that review) stands whatever the server lists.
-    ["a one-off stranded before its first node, its chain unapproved: Start", { display_status: "needs_you", current_node_id: null, stop: { kind: "stuck", node: null, resume_at: null, reason: null }, one_off: { extends: "default", custom: 1, needs_review: true, approval: null }, actions: ["cancel"] }, "start", ["cancel"]],
     ["archived, the server refusing restore", { display_status: "archived", current_node_id: "n", stop: null, actions: [] }, null, []],
     ["a closed merge request, the server's own list: Reopen", { display_status: "needs_you", current_node_id: "n", stop: { kind: "mr_closed", node: "n", resume_at: null, reason: null }, actions: serverActions("mr_closed") }, "reopen", FULL],
     // No merge request on file to reopen: Retry, the next way on.
     ["a closed merge request with none on file, the server's own list: Retry", { display_status: "needs_you", current_node_id: "n", stop: { kind: "mr_closed", node: "n", resume_at: null, reason: null }, actions: serverActions("mr_closed_no_ref") }, "retry", FULL],
   ])("%s", (_name, item, main, panel) => {
     expect(headerState(item)).toMatchObject({ main, panel });
+  });
+
+  // Stranded before its first node with its chain unapproved (the walk's `config` stop): no node to retry, and /resume
+  // refuses it until the review's approve puts it back to paused, so Start (which opens that review) stands whatever
+  // the server lists, under the stop's own badge. A queued or blocked one-off with no node yet is not stranded.
+  it.each<[string, Parameters<typeof headerState>[0], HeaderState]>([
+    ["a one-off stranded before its first node: FAILED, with Start", STRANDED, { badge: "FAILED", tone: "bad", main: "start", panel: ["archive", "cancel"] }],
+    ["a one-off queued before its first node: QUEUED, with Remove from queue", { ...UNREVIEWED, display_status: "queued", stop: null, actions: serverActions("queued") }, { badge: "QUEUED", tone: "info", main: "pause", panel: NO_ESC as PanelItem[] }],
+    ["a one-off blocked before its first node: BLOCKED, with Pause", { ...UNREVIEWED, display_status: "blocked", stop: null, actions: serverActions("blocked") }, { badge: "BLOCKED", tone: "info", main: "pause", panel: NO_ESC as PanelItem[] }],
+  ])("%s", (_name, item, want) => expect(headerState(item)).toEqual(want));
+  it.each<[string, Partial<ItemDetail>, (string | null)[]]>([
+    ["a one-off stranded before its first node: Start", STRANDED, [null, "start"]],
+    ["a one-off queued before its first node: Remove from queue", { ...UNREVIEWED, display_status: "queued", status: "queued", stop: null, actions: serverActions("queued") }, [null, "pause"]],
+    ["a one-off blocked before its first node: Pause", { ...UNREVIEWED, display_status: "blocked", status: "blocked", stop: null, dependencies: [], actions: serverActions("blocked") }, [null, "pause"]],
+  ])("pairOf: %s", (_name, over, want) => {
+    const p = pairOf(detail(over));
+    expect([p.secondary?.id ?? null, p.primary?.id ?? null]).toEqual(want);
   });
 
   // The phone's bar on the server's own lists: Steer is the composer's pause-then-resume or retry, never `steer`.
