@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -88,6 +90,8 @@ def graphql_reason(errors: list[dict]) -> Reason | None:
             return "not_found"
         if kind == "FORBIDDEN":
             return "forbidden"
+        if kind == "RATE_LIMITED":
+            return "rate_limited"
         if "expectedheadoid" in msg or (
             "head" in msg and ("out of date" in msg or "modified" in msg)
         ):
@@ -100,6 +104,53 @@ def origin_host(repo: Path) -> str | None:
     remote = git_read(repo, "remote", "get-url", "origin", expected_failure=True)
     match = next((m for rx in _REMOTE if remote and (m := rx.match(remote.strip()))), None)
     return match["host"].lower() if match else None
+
+
+def gh_host(repo: Path) -> str | None:
+    """The host `gh api` should be told about, as gh itself reads the remote: an
+    scp-style or `ssh://` origin goes through `ssh -G`, which turns an alias
+    (`github-work`) into its real host, and GitHub's SSH-over-443 host is
+    github.com. None without an origin."""
+    host = origin_host(repo)
+    if host is None or host.startswith("-"):
+        return None
+    remote = git_read(repo, "remote", "get-url", "origin", expected_failure=True) or ""
+    if not remote.strip().lower().startswith(("http://", "https://", "git://")):
+        try:
+            out = subprocess.run(
+                ["ssh", "-G", host],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                stdin=subprocess.DEVNULL,
+            ).stdout
+        except (OSError, subprocess.SubprocessError):
+            out = ""  # no ssh to ask: the host as written
+        host = next(
+            (
+                ln.split(None, 1)[1].strip().lower()
+                for ln in out.splitlines()
+                if ln.startswith("hostname ")
+            ),
+            host,
+        )
+    return "github.com" if host == "ssh.github.com" else host
+
+
+def _now() -> float:
+    return time.time()
+
+
+def _retry_after(headers: Mapping[str, str]) -> float | None:
+    """Seconds to wait: `Retry-After`, else the time left until GitHub's
+    `x-ratelimit-reset` (epoch seconds) when its quota is spent."""
+    retry = headers.get("retry-after", "")
+    if retry.replace(".", "", 1).isdigit():
+        return float(retry)
+    reset = headers.get("x-ratelimit-reset", "")
+    if headers.get("x-ratelimit-remaining") == "0" and reset.isdigit():
+        return max(0.0, int(reset) - _now())
+    return None
 
 
 def _flags(fields: Mapping[str, Field] | None) -> list[str]:
@@ -120,6 +171,7 @@ def _sso_url(header: str) -> str:
 class CliTransport:
     def __init__(self, cli: Literal["gh", "glab"], repo: Path):
         self.cli, self.repo = cli, repo
+        self._host_args: list[str] | None = None
 
     async def _call(
         self, label: str, args: list[str], *, graphql: bool = False
@@ -140,19 +192,20 @@ class CliTransport:
                 message = str(resp.json().get("message", ""))
             except (ForgeError, AttributeError):
                 message = ""
-            retry = resp.headers.get("retry-after", "")
             raise ForgeError(
                 f"{label}: {message or _clip(resp.text or done.stderr)} (HTTP {resp.status})",
                 status=resp.status,
                 reason=reason_for(resp.status, resp.headers),
-                retry_after=float(retry) if retry.replace(".", "", 1).isdigit() else None,
+                retry_after=_retry_after(resp.headers),
                 sso_url=_sso_url(resp.headers.get("x-github-sso", "")),
             )
         return resp, done.returncode
 
     def _host(self) -> list[str]:
-        host = origin_host(self.repo) if self.cli == "gh" else None
-        return ["--hostname", host] if host and host != "github.com" else []
+        if self._host_args is None:  # once per transport: it asks git, and maybe ssh
+            host = gh_host(self.repo) if self.cli == "gh" else None
+            self._host_args = ["--hostname", host] if host and host != "github.com" else []
+        return self._host_args
 
     async def rest(
         self, method: str, path: str, *, fields: Mapping[str, Field] | None = None
