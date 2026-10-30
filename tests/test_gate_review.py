@@ -36,8 +36,8 @@ from kraft.templates.models import CHECKS_FIRST
 
 def _no_edits(monkeypatch):
     """A faked run has no checkout to compare: it reads as one nobody edited."""
-    monkeypatch.setattr(gate_review.read_only, "snapshot", lambda *a: {})
-    monkeypatch.setattr(gate_review.read_only, "changed", lambda *a: [])
+    monkeypatch.setattr(gate_review.read_only, "snapshot", lambda *a, **kw: {})
+    monkeypatch.setattr(gate_review.read_only, "changed", lambda *a, **kw: [])
 
 
 async def _review(monkeypatch, database, run_dirs, result, *, mode=CHECKS_FIRST):
@@ -139,7 +139,9 @@ async def test_checks_first_instruction_offers_only_reject_and_pass(
 # These run the real `run_agent_task` on a fake harness in a real checkout:
 # when the "before" is read is the whole point, and `_fake_agent` skips it.
 
-_COMMIT = "echo x > new.txt && git add new.txt && git commit -qm reviewer"
+#: A copy of an in-place item's branch has no identity of its own to commit as.
+_ID = "git -c user.email=t@t -c user.name=t"
+_COMMIT = f"echo x > new.txt && git add new.txt && {_ID} commit -qm reviewer"
 _REJECT = {"verdict": "reject", "concerns": "redo it"}
 _PASS = {"verdict": "pass", "concerns": "read it all"}
 _DOC = "# the review\n"
@@ -150,9 +152,9 @@ async def _at_gate(
 ):
     """An item at a reviewed gate whose reviewer runs `edit` in its checkout,
     then reports `result`. The gate decides its `artifact` document (None: it
-    has none), which reads `doc` (None: not written yet). In place it
-    is on its first take, with a spec to commit; otherwise in its own
-    worktree. Returns the gate."""
+    has none), which reads `doc` (None: not written yet). In place its
+    branch is made, with a spec attached, and the person's checkout stays on
+    `main`; otherwise it is in its own worktree. Returns the gate."""
     script = (
         f"{edit}\nprintf '%s' '{json.dumps({'status': 'done', **result})}' > \"$KRAFT_RESULT_PATH\""
     )
@@ -200,11 +202,20 @@ def _spy_snapshots(monkeypatch, calls: list, *, result=...):
     """Record each "before" read (`result`, if given, stands in for it)."""
     real = gate_review.read_only.snapshot
 
-    def snapshot(*a):
+    def snapshot(*a, **kw):
         calls.append("snapshot")
-        return real(*a) if result is ... else result
+        return real(*a, **kw) if result is ... else result
 
     monkeypatch.setattr(gate_review.read_only, "snapshot", snapshot)
+
+
+def _copies(run_dirs):
+    """What is left in any session's copy of the branch."""
+    return list((run_dirs.base / item_paths.ITEMS / "w1" / "sessions").glob("*/copy/*"))
+
+
+def _types(database):
+    return [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
 
 
 def _sessions(database):
@@ -224,11 +235,10 @@ _LEGACY = object()
 
 
 @pytest.mark.parametrize(
-    "mode,in_place,doc,edit,result,expected",
+    "mode,doc,edit,result,expected",
     [
         pytest.param(
             CHECKS_FIRST,
-            False,
             _DOC,
             _COMMIT,
             _REJECT,
@@ -237,7 +247,6 @@ _LEGACY = object()
         ),
         pytest.param(
             CHECKS_FIRST,
-            False,
             _DOC,
             _COMMIT,
             _PASS,
@@ -246,7 +255,6 @@ _LEGACY = object()
         ),
         pytest.param(
             CHECKS_FIRST,
-            False,
             _DOC,
             "echo x > new.txt",
             _REJECT,
@@ -255,7 +263,6 @@ _LEGACY = object()
         ),
         pytest.param(
             CHECKS_FIRST,
-            False,
             _DOC,
             "echo x > new.txt",
             _PASS,
@@ -265,7 +272,6 @@ _LEGACY = object()
         # Sorted, so f3 is the twentieth.
         pytest.param(
             CHECKS_FIRST,
-            False,
             _DOC,
             _25,
             _PASS,
@@ -277,30 +283,10 @@ _LEGACY = object()
             ),
             id="names-at-most-twenty",
         ),
-        pytest.param(CHECKS_FIRST, False, _DOC, ":", _PASS, ("pass", "read it all"), id="no-edit"),
-        # The first take commits the spec on the branch: Kraft's, not the reviewer's.
-        pytest.param(
-            CHECKS_FIRST,
-            True,
-            _DOC,
-            ":",
-            _PASS,
-            ("pass", "read it all"),
-            id="in-place-first-take-is-not-an-edit",
-        ),
-        pytest.param(
-            CHECKS_FIRST,
-            True,
-            _DOC,
-            _COMMIT,
-            _PASS,
-            ("undecided", _IGNORED + "new.txt"),
-            id="in-place-commits",
-        ),
+        pytest.param(CHECKS_FIRST, _DOC, ":", _PASS, ("pass", "read it all"), id="no-edit"),
         # Outside the checkout, so git never sees it.
         pytest.param(
             CHECKS_FIRST,
-            False,
             _DOC,
             'echo x > "$KRAFT_DOCS_DIR/review.md"',
             _PASS,
@@ -309,7 +295,6 @@ _LEGACY = object()
         ),
         pytest.param(
             CHECKS_FIRST,
-            False,
             None,
             'echo x > "$KRAFT_DOCS_DIR/review.md"',
             _PASS,
@@ -320,7 +305,6 @@ _LEGACY = object()
         # place has none, and unseen by git in a repo that ignores the folder.
         pytest.param(
             CHECKS_FIRST,
-            False,
             None,
             "mkdir -p .engineering/reviews && echo x > .engineering/reviews/w1.md",
             _PASS,
@@ -330,7 +314,6 @@ _LEGACY = object()
         # The new place is read first, so writing there replaces the old one.
         pytest.param(
             CHECKS_FIRST,
-            False,
             _LEGACY,
             'echo x > "$KRAFT_DOCS_DIR/review.md"',
             _PASS,
@@ -340,7 +323,6 @@ _LEGACY = object()
         # Hashed whole, not as far as a person's read of it goes.
         pytest.param(
             CHECKS_FIRST,
-            False,
             "x" * (item_paths.DOC_MAX_BYTES + 10),
             f'printf y | dd of="$KRAFT_DOCS_DIR/review.md" bs=1 seek={item_paths.DOC_MAX_BYTES + 5}'
             " conv=notrunc 2>/dev/null",
@@ -351,7 +333,6 @@ _LEGACY = object()
         # No longer a file it can read without a link: changed all the same.
         pytest.param(
             CHECKS_FIRST,
-            False,
             _DOC,
             'ln -sf /dev/null "$KRAFT_DOCS_DIR/review.md"',
             _PASS,
@@ -361,7 +342,6 @@ _LEGACY = object()
         # A reviewer that decides may edit (`fixed`): no check, no "before" read.
         pytest.param(
             None,
-            False,
             _DOC,
             _COMMIT,
             {"verdict": "approve"},
@@ -371,7 +351,7 @@ _LEGACY = object()
     ],
 )
 async def test_checks_first_edits_void_the_verdict(
-    database, run_dirs, tmp_path, repo, monkeypatch, mode, in_place, doc, edit, result, expected
+    database, run_dirs, tmp_path, repo, monkeypatch, mode, doc, edit, result, expected
 ):
     gate = await _at_gate(
         database,
@@ -381,7 +361,7 @@ async def test_checks_first_edits_void_the_verdict(
         edit,
         result,
         mode=mode,
-        in_place=in_place,
+        in_place=False,
         doc=None if doc is _LEGACY else doc,
     )
     # As Kraft's own repo does: an old-place document is no file git sees.
@@ -416,6 +396,102 @@ async def test_checks_first_gate_with_no_document_checks_the_checkout(
     assert await _run(database, run_dirs, gate) == ("undecided", _IGNORED + "new.txt")
 
 
+_IN_PLACE_IGNORED = (
+    "The reviewer changed files in its copy of the branch, or on the branch itself, so "
+    "its verdict was ignored; Kraft removed the copy and left your working files as "
+    "they were: "
+)
+_PERSONS = "# the person's edit\n"
+#: A commit on the person's branch by a route around the copy, which it then undoes.
+_PUSH = (
+    f"echo x > tip.txt && git add tip.txt && {_ID} commit -qm tip"
+    " && git push -q {repo} HEAD:refs/heads/kraft/the-widget-w1 && git reset -q --hard HEAD~1"
+)
+
+
+@pytest.mark.parametrize(
+    "dirty,edit,expected",
+    [
+        pytest.param(False, ":", ("pass", "read it all"), id="in-place-copy-no-edit"),
+        pytest.param(
+            False,
+            _COMMIT,
+            ("undecided", _IN_PLACE_IGNORED + "new.txt"),
+            id="in-place-commits-in-the-copy",
+        ),
+        pytest.param(
+            True,
+            "echo agent >> calc.py",
+            ("undecided", _IN_PLACE_IGNORED + "calc.py"),
+            id="in-place-edits-a-file-the-person-had-dirty",
+        ),
+        pytest.param(True, ":", ("pass", "read it all"), id="in-place-person-mid-work"),
+        pytest.param(
+            False,
+            _PUSH,
+            ("undecided", _IN_PLACE_IGNORED + "tip.txt"),
+            id="in-place-moves-the-branch-tip",
+        ),
+    ],
+)
+async def test_an_in_place_checks_first_reviewer_reads_a_copy_of_the_branch(
+    database, run_dirs, tmp_path, repo, monkeypatch, dirty, edit, expected
+):
+    """Never the person's checkout: it is not switched, their uncommitted work
+    is not touched, and the copy is gone after. A write in the copy, or a
+    commit on their branch, voids the verdict without stopping the item."""
+    gate = await _at_gate(
+        database,
+        run_dirs,
+        tmp_path,
+        repo,
+        edit.replace("{repo}", str(repo)),
+        _PASS,
+        mode=CHECKS_FIRST,
+        in_place=True,
+    )
+    if dirty:
+        write(repo, "calc.py", _PERSONS)
+    status = _row(database)["status"]
+    branch = f"refs/heads/{store.branch_for(_row(database))}"
+    tip = git(repo, "rev-parse", branch)
+    reads = []
+    _spy_snapshots(monkeypatch, reads)
+
+    assert await _run(database, run_dirs, gate) == expected
+    assert reads == ["snapshot", "snapshot"]
+    assert git(repo, "symbolic-ref", "HEAD") == "refs/heads/main"
+    assert git(repo, "status", "--porcelain") == ("M calc.py" if dirty else "")
+    assert ((repo / "calc.py").read_text() == _PERSONS) == dirty
+    assert (git(repo, "rev-parse", branch) == tip) == ("tip.txt" not in expected[1])
+    assert "checkout_switched" not in _types(database)
+    assert _row(database)["status"] == status
+    assert _copies(run_dirs) == []
+
+
+async def test_an_in_place_review_whose_copy_fails_is_undecided(database, run_dirs, tmp_path, repo):
+    """The person deleted the item's branch: no reviewer runs anywhere, the
+    attempt counts, the item is not stopped and the branch is not made again."""
+    ran = tmp_path / "ran"
+    gate = await _at_gate(
+        database, run_dirs, tmp_path, repo, f"touch {ran}", _PASS, mode=CHECKS_FIRST, in_place=True
+    )
+    status = _row(database)["status"]
+    branch = store.branch_for(_row(database))
+    git(repo, "branch", "-D", branch)
+
+    verdict, note = await _run(database, run_dirs, gate)
+
+    assert verdict == "undecided"
+    assert note.startswith(f"Kraft could not make a copy of {branch} to work in: "), note
+    assert not ran.exists()
+    assert _types(database).count("gate_auto_review_started") == 1
+    assert _sessions(database) == ["config_error"]
+    assert _row(database)["status"] == status
+    assert git(repo, "for-each-ref", f"refs/heads/{branch}") == ""
+    assert _copies(run_dirs) == []
+
+
 _TOLD_TO_EDIT = ("Commit everything you change", "Run the tests your change touches")
 
 
@@ -431,8 +507,8 @@ async def test_only_a_reviewer_that_may_edit_is_told_to_commit_and_test(
     database, run_dirs, tmp_path, repo, monkeypatch, mode, in_place, told
 ):
     """Its own instruction says do not edit; the session's context must not
-    then say commit, or run tests that can leave files behind. In a person's
-    own checkout it is still warned off the git commands that move their work."""
+    then say commit, or run tests that can leave files behind. In place it is
+    told it works in a throwaway copy of the branch, never the person's checkout."""
     argv = tmp_path / "argv.txt"
     gate = await _at_gate(
         database,
@@ -448,10 +524,12 @@ async def test_only_a_reviewer_that_may_edit_is_told_to_commit_and_test(
     context = argv.read_text()
     assert "You are working on a Kraft work item." in context
     assert [line in context for line in _TOLD_TO_EDIT] == [told, told]
-    assert ("`git stash`" in context) == in_place
+    assert ("throwaway copy of this work item's branch" in context) == in_place
+    assert "`git stash`" not in context
     # The read-only paragraph ends the contract: one blank line, not two, before the next.
     after = context.partition("Kraft compares it after you.")[2]
-    assert not after.partition("`git reset`.")[2 if in_place else 0].startswith("\n\n\n")
+    assert ("is kept." in after) == in_place
+    assert not after.partition("is kept.")[2 if in_place else 0].startswith("\n\n\n")
 
 
 @pytest.mark.parametrize(
@@ -473,7 +551,7 @@ async def test_checks_first_unreadable_checkout_is_never_clean(
         run_dirs,
         tmp_path,
         repo,
-        "touch ran",
+        f"touch {tmp_path / 'ran'}",
         _PASS,
         mode=CHECKS_FIRST,
         in_place=in_place,
@@ -486,8 +564,8 @@ async def test_checks_first_unreadable_checkout_is_never_clean(
     verdict, note = await _run(database, run_dirs, gate)
 
     assert (verdict, "could not read the checkout" in note) == ("undecided", unreadable), note
-    ran_in = inplace.item_folder(run_dirs, _row(database))
-    assert (_sessions(database), (ran_in / "ran").exists()) == (sessions, ran)
+    assert (_sessions(database), (tmp_path / "ran").exists()) == (sessions, ran)
+    assert _copies(run_dirs) == []
 
 
 async def test_checks_first_snapshots_a_worktree_item_before_its_session_exists(

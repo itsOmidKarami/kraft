@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 
 import psutil
 import pytest
@@ -160,3 +161,61 @@ async def test_a_reattached_in_place_escalation_is_checked_before_its_self_retry
     )
     assert len(it.events("work_item_self_retry_dropped")) == 1
     assert not it.events("work_item_retried")
+
+
+_GATED = (
+    _CHAIN
+    + """
+- id: review
+  kind: gate
+  auto_review: {id: rv, kind: agent, harness: fake, prompt: p}
+  auto_review_mode: checks_first
+"""
+)
+
+
+@pytest.mark.parametrize(
+    "found,reviewer",
+    [("adopted", False), ("dead", False), ("adopted", True)],
+    ids=["reply-adopted", "reply-dead", "reviewer-adopted"],
+)
+async def test_a_reattached_copy_session_removes_its_copy_and_checks_nothing(
+    item_on, database, run_dirs, repo, found, reviewer
+):
+    """In place, the reply agent and a checks-first reviewer work in a copy of
+    the branch, never the checkout: once one a restart found has ended, its
+    copy is gone and the person's checkout is not checked, even against a
+    mark an older Kraft left under its hook point."""
+    it = await item_on(_GATED, "review", target=_IN_PLACE, status="needs_human")
+    [path] = [n.auto_review.path for n in it.chain.chain.nodes if n.auto_review]
+    hook = path if reviewer else "review.reply"
+    await inplace.prepare(database, run_dirs, it.row(), base="main")
+    await inplace.take(database, run_dirs, it.row(), attachments=[])
+    write(repo, "calc.py", "# the person's edit\n")
+    await inplace.mark_task(database, run_dirs, it.row(), repo, "review", hook)
+    _agent_commits(repo, "commit", "-q", "-m", "agent", "--", "calc.py")
+    copy = inplace.copy_path(run_dirs, it.id, "s1")
+    write(copy, "calc.py", "the copy's\n")
+    (run_dirs.results / "s1.json").write_text('{"status": "done"}')
+
+    if found == "adopted":
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import sys; sys.stdin.read()"],
+            stdin=subprocess.PIPE,
+            start_new_session=True,
+        )
+        await it.session("s1", hook, running=(child.pid, psutil.Process(child.pid).create_time()))
+        _summary, adopted = await reattach.reattach(database, run_dirs)
+        assert copy.is_dir(), "a live session keeps its copy"
+        child.stdin.close()
+        child.wait()
+        await adopted["w1-s1"]
+    else:
+        await it.session("s1", hook, running=(2_000_000_000, 123.0))
+        await reattach.reattach(database, run_dirs, grace_retry_delay_s=0)
+        # What startup runs after reattach.
+        await inplace.drop_dead_copies(database, run_dirs, before=time.time())
+
+    assert not copy.exists()
+    assert it.row()["stop_kind"] != "checkout"
+    assert it.events("left_uncommitted") == []

@@ -1,7 +1,8 @@
 """`kraft.adapters.agent.run_agent_task` for an in-place item, which runs in a
 person's own checkout: what its agent is told, and the take, mark and check
 an agent outside the walk (an escalation, reply or gate review) runs around
-itself, as `dispatch` does around a walk task."""
+itself, as `dispatch` does around a walk task, or the copy of the branch a
+read-only one runs in instead (`in_copy`)."""
 
 from pathlib import Path
 
@@ -46,8 +47,9 @@ def test_an_in_place_agent_is_told_whose_checkout_it_is(run, in_place):
 async def test_an_in_place_session_outside_the_walk_takes_marks_and_checks_its_checkout(
     item_on, monkeypatch, script, stop
 ):
-    """An escalation, reply or gate-review agent runs the steps a walk task
-    does: the checkout switched to the item's branch, marked, checked after."""
+    """An escalation agent, or a gate reviewer that decides, runs the steps a
+    walk task does: the checkout switched to the item's branch, marked, checked
+    after. A reply agent and a checks-first reviewer read a copy instead."""
     it = await item_on([v1_node()], status="needs_human", target=IN_PLACE)
     branch = store.branch_for(it.row())
     git(it.repo, "branch", branch)
@@ -89,32 +91,93 @@ async def test_an_in_place_session_refused_its_checkout_never_launches(item_on, 
     assert it.events("task_marked") == []
 
 
-@pytest.mark.parametrize("busy", [False, True], ids=["holds-it", "another-item-uses-it"])
-async def test_a_sessions_own_record_waits_for_its_session(item_on, monkeypatch, busy):
+@pytest.mark.parametrize(
+    ("busy", "in_copy"),
+    [(False, False), (True, False), (False, True), (True, True)],
+    ids=["holds-it", "another-item-uses-it", "in-copy", "in-copy-another-item-uses-it"],
+)
+async def test_a_sessions_own_record_waits_for_its_session(item_on, monkeypatch, busy, in_copy):
     """`on_session` runs once the session is written and holds the checkout,
     before the agent, and `after_checkout` once the checkout is taken and
-    marked; neither for one refused it, which started nothing."""
+    marked, or its copy made; neither for one refused it, which started nothing.
+    A launch in a copy still takes the lease: it waits for another item as any does."""
     it = await item_on([v1_node()], status="needs_human", target=IN_PLACE)
-    git(it.repo, "branch", store.branch_for(it.row()))
+    branch = store.branch_for(it.row())
+    git(it.repo, "branch", branch)
     if busy:
         await item_on([v1_node()], wid="a", target=IN_PLACE, title="A")
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    copy = inplace.copy_path(it.run_dirs, it.id, "s1")
     seen = []
 
     async def on_session():
         seen.append(len(it.sessions()))
 
     async def after_checkout():
-        seen.append((len(it.events("task_marked")), git(it.repo, "symbolic-ref", "HEAD")))
+        seen.append(
+            (
+                len(it.events("task_marked")),
+                git(it.repo, "symbolic-ref", "HEAD"),
+                (copy / ".git").is_dir(),
+            )
+        )
 
     hooks = {"on_session": on_session, "after_checkout": after_checkout}
+    if in_copy:
+        hooks |= {"in_copy": True, "read_only": True, "cwd": copy}
     if busy:
         with pytest.raises(store.CheckoutBusy):
             await _outside_the_walk(it, **hooks)
     else:
         assert await _outside_the_walk(it, **hooks) == "done"
 
-    assert seen == ([] if busy else [1, (1, f"refs/heads/{store.branch_for(it.row())}")])
+    taken = (0, "refs/heads/main", True) if in_copy else (1, f"refs/heads/{branch}", False)
+    assert seen == ([] if busy else [1, taken])
+    assert (copy / ".git").is_dir() == (in_copy and not busy), "refused: no copy made"
+
+
+async def test_a_session_in_a_copy_never_borrows_the_checkout(item_on, monkeypatch, tmp_path):
+    """In a copy of the branch tip, not the person's checkout: nothing
+    switches it, marks it or checks it."""
+    it = await item_on([v1_node()], status="needs_human", target=IN_PLACE)
+    branch = store.branch_for(it.row())
+    git(it.repo, "checkout", "-q", "-b", branch)
+    git(it.repo, "commit", "-q", "--allow-empty", "-m", "the item's own")
+    tip = git(it.repo, "rev-parse", "HEAD")
+    git(it.repo, "checkout", "-q", "main")
+    head = tmp_path / "head"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_SHELL", f"git rev-parse HEAD > {head}")
+
+    status = await _outside_the_walk(
+        it, cwd=inplace.copy_path(it.run_dirs, it.id, "s1"), in_copy=True, read_only=True
+    )
+
+    assert status == "done"
+    assert head.read_text().strip() == tip
+    assert git(it.repo, "symbolic-ref", "HEAD") == "refs/heads/main"
+    assert it.events("checkout_switched") == []
+    assert inplace.load_mark(it.run_dirs, it.id, "escalation") is None
+
+
+async def test_a_copy_that_fails_ends_the_session_and_raises(item_on, monkeypatch, tmp_path):
+    """The branch is gone: no copy, the agent never runs, nothing is created
+    in the person's repository, and the session ends `config_error`."""
+    it = await item_on([v1_node()], status="needs_human", target=IN_PLACE)
+    ran = tmp_path / "ran"
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_SHELL", f"touch {ran}")
+
+    with pytest.raises(inplace.CopyFailed, match="could not make a copy"):
+        await _outside_the_walk(
+            it, cwd=inplace.copy_path(it.run_dirs, it.id, "s1"), in_copy=True, read_only=True
+        )
+
+    assert not ran.exists()
+    [session] = it.sessions()
+    assert session["status"] == "config_error"
+    assert "could not make a copy" in Path(session["log_path"]).read_text()
+    branch = f"refs/heads/{store.branch_for(it.row())}"
+    assert git(it.repo, "for-each-ref", branch) == ""
 
 
 def _outside_the_walk(it, **kw):
@@ -129,7 +192,7 @@ def _outside_the_walk(it, **kw):
         title="t",
         task_instruction="look again",
         repo_path=str(it.repo),
-        cwd=it.repo,
+        cwd=kw.pop("cwd", it.repo),
         takes_checkout=True,
         **kw,
     )

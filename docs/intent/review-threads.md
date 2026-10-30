@@ -95,9 +95,10 @@ enforced-by: tests/test_review_reply.py::test_a_crashing_reply_agent_leaves_the_
 origin: src/kraft/review_reply.py
 
 ## REQ reply-agent-worktree-write-is-recorded
-IF the reply agent changes the worktree, THEN the system SHALL record the
-files it changed and SHALL NOT stop the work item.
-enforced-by: tests/test_review_reply.py::test_a_write_to_the_worktree_is_recorded_not_escalated
+IF the reply agent changes the worktree, or its copy of an in-place item's
+branch, THEN the system SHALL record the files it changed and SHALL NOT stop
+the work item.
+enforced-by: tests/test_review_reply.py::test_a_write_to_the_worktree_is_recorded_not_escalated, tests/test_review_reply.py::test_an_in_place_reply_never_touches_the_persons_checkout[dirty-file]
 origin: src/kraft/review_reply.py
 
 ## REQ every-gate-attempt-is-pinned-and-survives-a-rebase

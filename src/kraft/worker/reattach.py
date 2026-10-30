@@ -12,7 +12,7 @@ from pathlib import Path
 
 import psutil
 
-from kraft import caps, events, ids, inplace, item_paths, store
+from kraft import caps, events, gate_review, ids, inplace, item_paths, store
 from kraft import harness as _harness
 from kraft import policy as _policy
 from kraft import usage as _usage
@@ -487,10 +487,19 @@ async def _sweep_after(db, run_dirs, row, launch_factory) -> None:
     snapshot = store.materialized_chain_of(item) if item is not None else None
     if snapshot is None or item["status"] in ENDED:
         return
-    task = next(
-        (t for n in snapshot.chain.nodes for t in n.tasks() if t.path == row["hook_point"]),
-        None,
-    )
+    hook = row["hook_point"]
+    if store.is_in_place(item) and (
+        hook == f"{row['node_id']}.reply"
+        or any(
+            gate_review.checks_first(n) and n.auto_review is not None and n.auto_review.path == hook
+            for n in snapshot.chain.nodes
+        )
+    ):
+        # The reply agent or a checks-first reviewer: it ran in a copy of the
+        # branch, never the checkout, so nothing there is its to check, and a
+        # mark an older Kraft left under its hook point is never applied.
+        return
+    task = next((t for n in snapshot.chain.nodes for t in n.tasks() if t.path == hook), None)
     if task is None and store.is_in_place(item):
         # An agent outside the walk (an escalation, a reply): the after-check
         # its own launch runs, from the mark it left under its hook point.
@@ -767,6 +776,9 @@ async def _guarded_adopt(
             # path got missed twice.
             await asyncio.shield(_close_sandbox(sandbox, work_item_id, session_id, egress=egress))
             if run_dirs is not None:
+                # An in-place reply agent's or checks-first reviewer's copy of the branch.
+                copy = inplace.copy_path(run_dirs, work_item_id, session_id)
+                await asyncio.shield(asyncio.to_thread(inplace.remove_copy, copy))
                 await asyncio.shield(_sync_item_refs(db, run_dirs, work_item_id))
     # After the sandbox is closed, as dispatch sweeps once its launch is over;
     # before the resumed walk, which awaits this task, moves past the node.

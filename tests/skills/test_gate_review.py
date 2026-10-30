@@ -473,7 +473,7 @@ async def test_a_reviewer_that_moves_the_checkout_stops_the_item_and_its_verdict
 
 
 async def test_no_reviewer_starts_at_a_gate_its_checkout_stopped(database, run_dirs, monkeypatch):
-    """A reply's after-check stopped it at the gate: no reviewer takes the checkout back."""
+    """A checkout stop at the gate: no reviewer takes the checkout back."""
     calls = []
 
     async def reviewed(db, rd, **kw):

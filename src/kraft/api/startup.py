@@ -380,6 +380,7 @@ async def _lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001 -- never a refused boot
         logger.exception("could not stop the process groups stopped sessions left")
 
+    booted_at = time.time()
     summary, adopted = await reattach.reattach(
         database,
         run_dirs,
@@ -388,6 +389,12 @@ async def _lifespan(app: FastAPI):
         bd_cwd=deps.bd_cwd(),
         on_approve=deps._on_approve(app.state),
     )
+    # After reattach: a session it adopted is live, and keeps its copy.
+    try:
+        await inplace.drop_dead_copies(database, run_dirs, before=booted_at)
+    except Exception:  # noqa: BLE001 -- a leftover never refuses the boot
+        logger.exception("could not remove the copies stopped sessions left")
+
     # Not `.update(adopted)` alone: unlike `deps.spawn`'s tasks, nothing else
     # ever pops a session-keyed entry, so an adopted task would sit in
     # app.state.tasks forever, live or dead (Kraft-mjwz). Keyed by the

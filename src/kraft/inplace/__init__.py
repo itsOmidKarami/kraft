@@ -6,8 +6,9 @@ Whether an item runs in place is frozen on its chain snapshot at intake
 Split by job: `base` (where the work happens, refusals, the checkout's lock
 and git reads), `taking` (the take and its switch), `task_check` (the mark
 before an agent task and the check after it), `rebasing` (the rebase, in the
-checkout or a throwaway worktree, and its autostash). Every name callers use
-is read from here.
+checkout or a throwaway worktree, and its autostash), `copy` (the throwaway
+shared clone a read-only agent works in instead of the checkout). Every name
+callers use is read from here.
 """
 
 from __future__ import annotations
@@ -22,6 +23,12 @@ from kraft.inplace.base import folder_for as folder_for
 from kraft.inplace.base import head_ref as head_ref
 from kraft.inplace.base import is_in_place as is_in_place
 from kraft.inplace.base import item_folder as item_folder
+from kraft.inplace.copy import CopyFailed as CopyFailed
+from kraft.inplace.copy import copy_path as copy_path
+from kraft.inplace.copy import drop_dead_copies as drop_dead_copies
+from kraft.inplace.copy import make_copy as make_copy
+from kraft.inplace.copy import remove_copy as remove_copy
+from kraft.inplace.copy import watch_copy as watch_copy
 from kraft.inplace.rebasing import _rebase_in_checkout as _rebase_in_checkout
 from kraft.inplace.rebasing import drop_stale_scratch as drop_stale_scratch
 from kraft.inplace.rebasing import rebase as rebase
