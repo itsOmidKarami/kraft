@@ -13,6 +13,13 @@ LIBRARY_ONLY = "extends: default\nremove: [work_brief]\n"
 MCP = {"X-Kraft-Client": "mcp"}
 
 
+def _nested(depth):
+    chain = {"extends": "default"}
+    for _ in range(depth):
+        chain = {"a": chain}
+    return chain
+
+
 def _create(client, repo, text, *, headers=None, query="", **body):
     return client.post(
         f"/api/work-items{query}",
@@ -71,6 +78,20 @@ def test_refuses_a_bad_one_off_chain(client, repo, text, words):
     r = _create(client, repo, text)
     assert r.status_code == 422, r.text
     assert isinstance(r.json()["detail"], str) and words in r.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("chain", "words"),
+    [
+        pytest.param(_nested(500), "plain YAML values", id="deeply-nested"),
+        pytest.param(
+            {"extends": "default", "description": "x" * (257 * 1024)}, "256 KiB", id="big"
+        ),
+    ],
+)
+def test_refuses_a_hostile_one_off_object(client, repo, chain, words):
+    r = _create(client, repo, chain)
+    assert r.status_code == 422 and words in r.json()["detail"]
 
 
 def test_refuses_two_chains(client, repo):

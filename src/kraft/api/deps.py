@@ -819,12 +819,15 @@ def authored_mapping(text: str, what: str) -> dict:
     return data
 
 
-def _is_plain(value: object) -> bool:
-    """Strings, numbers, booleans, null, lists, and mappings keyed by strings."""
+def _is_plain(value: object, depth: int = 64) -> bool:
+    """Strings, numbers, booleans, null, lists, and mappings keyed by strings,
+    nested at most `depth` deep."""
+    if depth == 0:
+        return False
     if isinstance(value, dict):
-        return all(isinstance(k, str) and _is_plain(v) for k, v in value.items())
+        return all(isinstance(k, str) and _is_plain(v, depth - 1) for k, v in value.items())
     if isinstance(value, list):
-        return all(_is_plain(v) for v in value)
+        return all(_is_plain(v, depth - 1) for v in value)
     return value is None or isinstance(value, str | int | float | bool)
 
 
@@ -845,18 +848,20 @@ def one_off_chain_or_422(st, repo: str, source: str | dict, *, skips: list[str] 
     library = library_or_503(st)
     entry = connected_or_422(st, repo)
     if isinstance(source, str):
-        if len(source.encode()) > one_off.MAX_TEXT:
+        if len(source) > one_off.MAX_TEXT:
             raise HTTPException(422, "a one-off chain is at most 256 KiB")
         data = authored_mapping(source, "chain")
     else:
         data = source
-        if why := config_check.retired_message(data):
-            raise HTTPException(422, why)
     if not _is_plain(data):
         raise HTTPException(
             422,
             "a one-off chain holds only plain YAML values: strings, numbers, lists and mappings",
         )
+    if len(json.dumps(data)) > one_off.MAX_TEXT:
+        raise HTTPException(422, "a one-off chain is at most 256 KiB")
+    if why := config_check.retired_message(data):
+        raise HTTPException(422, why)
     authored, digest = one_off.prepare(data)
     id = authored["id"]
     if not isinstance(id, str) or id in library.chain_ids:

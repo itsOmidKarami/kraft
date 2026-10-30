@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 from support.api import CUSTOM_ONE_OFF as CUSTOM
-from support.api import _come_after, _one_off, _orchestrator_db, _queue_tick, _set_status
+from support.api import _come_after, _item_row, _one_off, _orchestrator_db, _queue_tick, _set_status
 
 from kraft import store
 
@@ -132,6 +132,17 @@ def test_change_reopens_review(client, repo, change):
     assert _review(client, wid)["needs_review"] is True
     assert _review(client, wid)["approval"] is None
     assert _resume(client, wid).status_code == 409
+
+
+def test_a_change_after_the_claim_leaves_the_approval_alone(client, repo):
+    """Once `claim_for_run` made the item active, a late re-trim must not reopen the
+    review of an item that is already running: nothing could approve it again."""
+    wid = _one_off(client, repo, CUSTOM)
+    assert _approve(client, wid).status_code == 200
+    _set_status(wid, "active")
+    (repo / "spec.md").write_text("# spec\n")
+    client.patch(f"/api/work-items/{wid}", json={"attachments": {"spec": "spec.md"}})
+    assert _item_row(wid)["one_off_pending"] == 0
 
 
 def test_review_shows_filed_provenance(client, repo, templates_dir):

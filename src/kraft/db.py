@@ -459,6 +459,7 @@ _MIGRATION_44_STOP_KIND_CLEAR_TRIGGER = (
 _WORK_ITEMS_ONE_OFF_REOPEN_TRIGGER = (
     "CREATE TRIGGER work_items_one_off_reopen AFTER UPDATE OF materialized_chain ON work_items "
     "WHEN NEW.one_off_chain IS NOT NULL AND NEW.current_node_id IS NULL "
+    "AND NEW.status != 'active' "
     "AND json_array_length(json_extract(NEW.one_off_chain, '$.custom')) > 0 "
     "BEGIN UPDATE work_items SET one_off_pending = 1, one_off_approval = NULL "
     "WHERE id = NEW.id; END"
