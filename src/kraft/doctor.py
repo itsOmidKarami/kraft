@@ -107,7 +107,7 @@ async def run_checks() -> list[dict]:
     checks.extend(_worker_checks(listed))
     checks.append(_pidfile_check())
     checks.extend(_agent_checks())
-    checks.append(await _mcp_check(health is not None))
+    checks.append(await _mcp_check(health))
     checks.append(_path_check())
     checks.append(_completion_check())
     checks.append(_bundle_check())
@@ -983,7 +983,7 @@ _MCP_SCOPE = (
 )
 
 
-async def _mcp_check(server_up: bool) -> dict:
+async def _mcp_check(health: dict | None) -> dict:
     """Is the Kraft MCP server registered with Claude Code?
 
     Next to `_agent_checks` because it answers the same question: can this
@@ -998,8 +998,29 @@ async def _mcp_check(server_up: bool) -> dict:
 
     Rejected, as the bead records: passing `--mcp-config` on every launch, which
     would make Kraft write the operator's agent config.
+
+    A registration whose command is not on the PATH workers get fails too: the
+    launch refuses it. Only the server knows its PATH (`/health`); without one
+    this shell's is checked, which may differ, so a miss there only warns.
     """
+    server_up = health is not None
     found = registration.permission_tool(None)
+    if health is not None:
+        on_path = health.get("mcp_command_on_path")  # None from a server before it
+    else:
+        on_path = (
+            None if found is None or found[2] is None else registration.on_path(found[2], None)
+        )
+    if on_path is False and found is not None:
+        path = "the server's PATH" if server_up else "this shell's PATH (the server's may differ)"
+        return _check(
+            "mcp server",
+            not server_up,
+            f"the kraft MCP server registered in {found[1]} runs {found[2]!r}, which is not on "
+            f"{path}, so Claude cannot start it and unsandboxed Claude workers are refused; "
+            f"{registration.PATH_FIX} ({_MCP_SCOPE})",
+            warn=not server_up,
+        )
     asking = sorted(_direct_askers(harness.load(None)))
     needed = True
     if server_up:

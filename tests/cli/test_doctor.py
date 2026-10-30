@@ -7,6 +7,7 @@ import dataclasses
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -23,6 +24,9 @@ def _names(rows):
 
 def _by_name(rows, name):
     return next(row for row in rows if row["name"] == name)
+
+
+_ABSOLUTE = {"command": sys.executable, "args": ["-m", "kraft", "admin", "mcp"]}
 
 
 def _prime(tmp_path):
@@ -509,13 +513,16 @@ def test_mcp_check_passes_on_a_committed_repo_scope_mcp_json(app, tmp_path):
 
 
 @pytest.mark.parametrize("plugins, ok", [({"kraft@kraft": True}, True), ({}, False)])
-def test_mcp_check_passes_on_the_plugin_alone_and_fails_on_nothing(app, plugins, ok):
+def test_mcp_check_passes_on_the_plugin_alone_and_fails_on_nothing(app, tmp_path, plugins, ok):
     """The plugin alone is the recommended install, no `kraft admin init`; with
     nothing registered a Claude launch is refused, a real failure."""
     (Path.home() / ".claude.json").unlink()
     (Path.home() / ".claude" / "plugins").mkdir(parents=True)
     (Path.home() / ".claude" / "settings.json").write_text(json.dumps({"enabledPlugins": plugins}))
-    installs = {"version": 2, "plugins": {key: [{"scope": "user"}] for key in plugins}}
+    # Its `.mcp.json` runs this Python, by absolute path: on any machine's PATH.
+    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": {"kraft": _ABSOLUTE}}))
+    install = {"scope": "user", "installPath": str(tmp_path)}
+    installs = {"version": 2, "plugins": {key: [install] for key in plugins}}
     (Path.home() / ".claude/plugins/installed_plugins.json").write_text(json.dumps(installs))
     check = _by_name(asyncio.run(doctor.run_checks()), "mcp server")
     assert check["ok"] is ok

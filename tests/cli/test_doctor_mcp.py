@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -114,3 +115,32 @@ def test_mcp_check_only_warns_when_every_connected_repo_is_sandboxed(app, tmp_pa
     repos.write_text(yaml.safe_dump(data))
     check = next(r for r in asyncio.run(doctor.run_checks()) if r["name"] == "mcp server")
     assert check["ok"] is True and check["warn"] is True
+
+
+@pytest.mark.parametrize(
+    ("server_up", "present", "ok", "warn"),
+    [
+        # Its workers get the server's PATH: the server's own answer decides.
+        pytest.param(True, False, False, False, id="server-says-not-on-its-path"),
+        # Present with the server up is `test_mcp_check_passes_on_a_user_scope_registration`.
+        # This shell's PATH may not be the server's, a service's above all: only a warning.
+        pytest.param(False, False, True, True, id="no-server-not-on-this-path"),
+        pytest.param(False, True, True, False, id="no-server-on-this-path"),
+    ],
+)
+def test_mcp_check_says_when_claude_cannot_start_the_registered_server(
+    request, tmp_path, server_up, present, ok, warn
+):
+    """Registered, but by a command Claude cannot find: the server never
+    starts, and every unsandboxed Claude worker is refused at launch."""
+    if server_up:
+        request.getfixturevalue("app")
+    command = sys.executable if present else str(tmp_path / "nowhere" / "kraft")
+    registered = Path.home() / ".claude.json"
+    registered.write_text(json.dumps({"mcpServers": {"kraft": {"command": command}}}))
+    check = next(r for r in asyncio.run(doctor.run_checks()) if r["name"] == "mcp server")
+    assert (check["ok"], check["warn"]) == (ok, warn)
+    if not present:
+        assert repr(command) in check["detail"] and str(registered) in check["detail"]
+        assert "absolute path" in check["detail"]
+        assert ("the server's may differ" in check["detail"]) is (not server_up)
