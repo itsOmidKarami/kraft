@@ -163,6 +163,8 @@ def test_ops_refuse_hostile_text_with_one_sentence(client, text, words):
 def test_ops_answer_the_custom_parts(client):
     body = _ops(client, CUSTOM_LOAD_TEST).json()
     assert [p["path"] for p in body["custom"]] == ["add[0].node"]
+    assert [(a["node"], a["harnesses"]) for a in body["added"]] == [("load_test", ["claude"])]
+    assert _ops(client, LIBRARY_ONLY_ONE_OFF).json()["added"] == []
     assert _ops(client, LIBRARY_ONLY_ONE_OFF).json()["custom"] == []
 
 

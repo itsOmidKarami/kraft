@@ -45,9 +45,10 @@ def _custom_nodes(parts, nodes: list[dict]) -> list[str]:
     return [n for n in dict.fromkeys(named) if isinstance(n, str)]
 
 
-def _resolve(st, authored: dict) -> tuple[list[dict], list[dict], list[str]]:
+def _resolve(st, authored: dict) -> tuple[list[dict], list[dict], list[str], list[dict]]:
     """The one-off chain's nodes in the board's `ChainNode` shape, its custom
-    parts and the nodes they name; all empty while it does not resolve."""
+    parts, the nodes they name, and a `drafts.node_check` for each added node;
+    all empty while it does not resolve."""
     library = deps.library_or_503(st)
     try:
         candidate, id = library.with_chain(
@@ -57,10 +58,12 @@ def _resolve(st, authored: dict) -> tuple[list[dict], list[dict], list[str]]:
         extends = authored.get("extends")
         parent = candidate.resolve_chain(extends) if isinstance(extends, str) else None
         parts = one_off.custom_parts(authored, parent, resolved)
+        origins = (candidate.provenance(id) or {}).get("nodes", {})
     except (TemplateLibraryError, ValueError, TypeError):
-        return [], [], []
+        return [], [], [], []
     nodes = [store.node_view(n) for n in resolved.nodes]
-    return nodes, [p.view() for p in parts], _custom_nodes(parts, nodes)
+    added = [drafts.node_check(st, n) for n in resolved.nodes if origins.get(n.id) == "added"]
+    return nodes, [p.view() for p in parts], _custom_nodes(parts, nodes), added
 
 
 def _parse(text: str) -> dict | None:
@@ -80,7 +83,8 @@ def _parse(text: str) -> dict | None:
 async def one_off_chain_ops(body: OneOffOps, request: Request):
     """Apply editor `ops` to the text of a chain used by one work item, and
     answer the draft view of the result with the chain's review digest, its resolved
-    nodes, its custom parts and the nodes they name. Nothing is stored. A text
+    nodes, its custom parts, the nodes they name and, for each added node,
+    its harnesses and cost estimate (`added`). Nothing is stored. A text
     that is not YAML is answered with its error and no ops applied."""
     st = request.app.state
     if len(body.text) > one_off.MAX_TEXT:
@@ -92,7 +96,7 @@ async def one_off_chain_ops(body: OneOffOps, request: Request):
     deps.own_id_or_422(library, key)
     files = {f"chains/{key}.yaml": body.text}
     answers: list[dict] = []
-    nodes, custom, custom_nodes = [], [], []
+    nodes, custom, custom_nodes, added = [], [], [], []
     if parsed is not None:
         working = ops.Draft(st, key, files, exists=True)
         if any(
@@ -119,7 +123,7 @@ async def one_off_chain_ops(body: OneOffOps, request: Request):
         if after is not None:
             authored, digest = one_off.prepare(after)
             deps.own_id_or_422(library, authored["id"])
-            nodes, custom, custom_nodes = _resolve(st, authored)
+            nodes, custom, custom_nodes, added = _resolve(st, authored)
             # What the create review shows and `approve_one_off` names (`one_off.review_digest`).
             digest = one_off.review_digest(digest, custom)
     files_now, _, result = drafts._state(st, "chains", key, {"files": files, "serialized": []}, [])
@@ -138,5 +142,6 @@ async def one_off_chain_ops(body: OneOffOps, request: Request):
         "digest": digest,
         "custom": custom,
         "custom_nodes": custom_nodes,
+        "added": added,
         "nodes": nodes,
     }
