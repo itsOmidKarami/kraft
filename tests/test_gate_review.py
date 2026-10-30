@@ -18,13 +18,19 @@ from skills.test_gate_review import (  # noqa: F401
     _claude_profile,
     _fake_agent,
     _gate,
+    _passthrough_approve,
+    _review_from_gate,
     _seed,
     _seed_at_gate,
+    _stub_review,
+    _stub_walk,
 )
 from support.harness import fake_harness_home, git, write
 from support.worktree import ensure
 
-from kraft import executor, gate_review, inplace, store
+from kraft import events, executor, gate_review, inplace, store
+from kraft import policy as _policy
+from kraft.executor import gates
 from kraft.templates.models import CHECKS_FIRST
 
 
@@ -368,3 +374,90 @@ async def test_checks_first_compares_a_remote_review_on_the_servers_worktree(
     monkeypatch.setattr(gate_review._agent, "run_agent_task", remote_run)
 
     assert await _run(database, run_dirs, gate) == ("undecided", _IGNORED + "new.txt")
+
+
+_GATE = "human_review_approval"
+
+
+def _skips(database):
+    return [
+        e["payload"]
+        for e in database.read(lambda c: events.read_after(c, 0, "w1"))
+        if e["type"] == "gate_auto_review_skipped"
+    ]
+
+
+@pytest.mark.parametrize(
+    "verdict,note,status,walked,skip",
+    [
+        # However `review()` got it wrong, nothing but a reject moves the gate.
+        pytest.param("approve", "", "awaiting_gate", [], {"reason": "passed"}, id="approve"),
+        pytest.param(
+            "pass",
+            "read it",
+            "awaiting_gate",
+            [],
+            {"reason": "passed", "note": "read it"},
+            id="pass",
+        ),
+        pytest.param(
+            "fixed",
+            "tidied",
+            "awaiting_gate",
+            [],
+            {"reason": "undecided", "note": "tidied"},
+            id="fixed",
+        ),
+        pytest.param("reject", "redo it", "completed", [(0, "redo it")], None, id="reject"),
+    ],
+)
+async def test_checks_first_never_clears_the_gate(
+    monkeypatch, database, run_dirs, verdict, note, status, walked, skip
+):
+    calls = []
+    _stub_review(monkeypatch, verdict, note)
+    _stub_walk(monkeypatch, calls)
+    chain = _chain2(run_dirs, auto_review_mode=CHECKS_FIRST)
+
+    assert await _review_from_gate(database, run_dirs, chain, auto_gate=True) == status
+    assert calls == walked
+    assert _skips(database)[-1:] == ([{"gate": _GATE, **skip}] if skip else [])
+    types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
+    assert "gate_approved" not in types
+
+
+async def test_a_pass_ends_the_round(monkeypatch, database, run_dirs):
+    """A pass spends the request's remaining attempts: no second paid review of
+    work the person is reading. A new request, or a run boundary, starts fresh."""
+    _stub_review(monkeypatch, "pass", "")
+    _stub_walk(monkeypatch, [])
+    policy = _policy.Policy(
+        loops={}, default=_policy.Cap(attempts=2, wall_clock_s=3600), auto_review_attempts=2
+    )
+    chain = _chain2(run_dirs, auto_review_mode=CHECKS_FIRST)
+    await _seed_at_gate(database, run_dirs, "w1", chain, auto_gate=True)
+    status = await executor.review_gates(
+        "awaiting_gate",
+        database,
+        run_dirs,
+        work_item_id="w1",
+        policy=policy,
+        launch=executor.LaunchContext(repo_entry=None, skills_dir=None),
+        on_approve=_passthrough_approve,
+    )
+    assert status == "awaiting_gate"
+
+    def due():
+        evts = database.read(lambda c: events.read_after(c, 0, "w1"))
+        return gates.auto_check_due(_row(database), _GATE, evts, policy)
+
+    assert not due()
+    for later, payload in [("gate_requested", {"gate": _GATE}), ("work_item_resumed", {})]:
+        await database.write(lambda c, t=later, p=payload: events.append(c, "w1", t, p))
+        assert due(), later
+        await database.write(
+            lambda c: events.append(
+                c, "w1", "gate_auto_review_skipped", {"gate": _GATE, "reason": "passed"}
+            )
+        )
+        assert not due(), later
