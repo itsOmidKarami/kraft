@@ -448,6 +448,8 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       const file = v.result.model["chains/one-off.yaml"];
       file.id = "one-off";
       file.nodes.push(...added.map((a) => ({ id: a.id, kind: "exec", steps: [{ id: "run", tasks: [{ id: "agent", kind: "agent", harness: "claude", prompt: a.prompt }] }] })));
+      file.extends = "default";
+      v.result.extending = { parent: "default", nodes: file.nodes, origins: Object.fromEntries(added.map((a) => [a.id, "added"])), removed: [] };
       v.key = "one-off";
       v.draft = true;
       v.files = { "chains/one-off.yaml": text };
