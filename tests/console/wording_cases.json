@@ -333,6 +333,11 @@
       "tail": "agent asks: is the plan's scope right?"
     }
   ],
+  "chains": [
+    { "name": "library-chain", "row": { "chain_template": "quick-task" }, "label": "quick-task" },
+    { "name": "no-chain-named", "row": { "chain_definition": { "template_id": "default" } }, "label": "default" },
+    { "name": "one-off", "row": { "chain_template": "@one-off" }, "label": "one-off" }
+  ],
   "order": {
     "rows": [
       { "id": "old-running", "display_status": "running", "current_node_id": "plan", "updated_at": "2026-10-15T09:00:00+00:00" },
@@ -611,6 +616,7 @@
     { "name": "budget-raised", "event": { "type": "budget_raised", "node_id": null, "payload": { "budget_usd": 5.0 } }, "line": "budget set to $5" },
     { "name": "budget-changed", "event": { "type": "budget_changed", "node_id": null, "payload": { "budget_usd": 7.5 } }, "line": "budget set to $7.5" },
     { "name": "title-edited", "event": { "type": "work_item_title_edited", "node_id": null, "payload": {} }, "line": "title edited" },
+    { "name": "one-off-chain-approved", "event": { "type": "one_off_chain_approved", "node_id": null, "payload": {} }, "line": "one-off chain approved" },
     { "name": "brief-edited", "event": { "type": "work_item_description_edited", "node_id": null, "payload": {} }, "line": "brief edited" },
     { "name": "node-started-named", "event": {"type": "node_started", "node_id": "spec_approval", "payload": {}}, "line": "approve spec started" },
     { "name": "node-completed-named", "event": {"type": "node_completed", "node_id": "sign_off", "payload": {}}, "line": "approve sign off finished" },

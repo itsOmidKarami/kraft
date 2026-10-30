@@ -28,6 +28,7 @@ const ALLOWED = [
   "item/paths",
   "item/limitPolicy", // the Raise cap PATCH body that keeps the rest of the override, one for both apps
   "item/chainName",
+  "item/oneOff", // the custom parts, the digest an approval names and the added-node check line: a pure model, as the desktop review reads it
   "item/chainValues", // the frozen chain and the caps it resolves to: a node's attempts, wall clock and YAML, read as the desktop reads them
   "item/nodeGraph",
   "item/scopeView", // isScopeTask and scopesView: a changed-test-scope task's scopes in a round, as the desktop's frame reads them

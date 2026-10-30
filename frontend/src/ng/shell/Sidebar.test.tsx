@@ -19,6 +19,7 @@ const ITEM: WorkItem = {
   status: "needs_human",
   pending_gate: "human_review",
   display_status: "needs_you",
+  one_off: null,
   chain_template: "default",
   chain_definition: { template_id: "default", nodes: [] },
   current_node_id: "verify",

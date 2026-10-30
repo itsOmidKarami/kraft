@@ -1,6 +1,6 @@
 import { ago, repoName, shortId } from "../../../format";
 import type { WorkItem } from "../../../types";
-import { chainOf, groupOf } from "../../board/model";
+import { chainLabel, chainOf, groupOf } from "../../board/model";
 import { CUE_ICON } from "../../board/cue";
 import { reasonTail, stopCueOf, ticksOf } from "../../board/rowText";
 import { IN_YOUR_CHECKOUT } from "../../board/sharedWords";
@@ -35,7 +35,7 @@ export function Card({ item, now, offline, busy, error, onOpen, onButton }: Card
           <NodeGlyph kind={g.kind} size="sm" state={g.state} icon={g.icon} />
           <span className="ph-card-text">
             <span className="ph-card-title">{item.title}</span>
-            <span className="ph-card-meta">{repoName(item.repo)}{item.in_place && <> · <span className="ph-card-inplace">{IN_YOUR_CHECKOUT}</span></>} · {item.bead_id || shortId(item.id)} · {chainOf(item)} · {ago(item.updated_at, now)}</span>
+            <span className="ph-card-meta">{repoName(item.repo)}{item.in_place && <> · <span className="ph-card-inplace">{IN_YOUR_CHECKOUT}</span></>} · {item.bead_id || shortId(item.id)} · {chainLabel(chainOf(item))} · {ago(item.updated_at, now)}</span>
           </span>
         </span>
         <span className="ph-ticks" aria-hidden="true">

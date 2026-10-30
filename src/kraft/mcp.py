@@ -147,6 +147,7 @@ def build() -> MCPServer:
         node_overrides: dict | None = None,
         chain_template: str | None = None,
         runner: str | None = None,
+        chain_yaml: str | None = None,
     ) -> dict:
         """File a new Kraft work item. It is created **paused** and does not run:
         a human starts it from the board. Use this to hand finished work off to
@@ -197,7 +198,12 @@ def build() -> MCPServer:
         `runner` is where the item's steps run: a machine or a group from
         workers.yaml, `any` or `local`. A name must be in workers.yaml; a sandboxed,
         in-place or workspace-member item is refused. Leave
-        it out unless a human asked for one."""
+        it out unless a human asked for one.
+
+        `chain_yaml` is a one-off chain, the same YAML a chain file holds, used by
+        this item only. If it has custom content (its own prompts, commands,
+        tools or gates), a person must review it in the web UI before the item
+        can start; you cannot approve it."""
         return await client.create_work_item(
             title,
             repo=repo,
@@ -213,6 +219,7 @@ def build() -> MCPServer:
             skip_nodes=skip_nodes,
             node_overrides=node_overrides,
             runner=runner,
+            one_off_chain=chain_yaml,
             **({"budget_usd": budget_usd} if budget_usd is not None else {}),
         )
 
@@ -500,11 +507,21 @@ def build() -> MCPServer:
         return await client.mr_labels(labels, work_item_id)
 
     @server.tool()
-    async def set_chain(chain: str, work_item_id: str | None = None) -> dict:
+    async def set_chain(
+        chain: str | None = None,
+        chain_yaml: str | None = None,
+        work_item_id: str | None = None,
+    ) -> dict:
         """Switch a not-yet-started Kraft work item onto a different chain.
         Only works before the chain has started (no current node set yet) --
-        404s on an unknown chain id, 409s once the item is running."""
-        return await client.set_chain(chain, work_item_id)
+        404s on an unknown chain id, 409s once the item is running. Name
+        exactly one of `chain` and `chain_yaml`.
+
+        `chain_yaml` is a one-off chain, the same YAML a chain file holds, used by
+        this item only. If it has custom content (its own prompts, commands,
+        tools or gates), a person must review it in the web UI before the item
+        can start; you cannot approve it."""
+        return await client.set_chain(chain, work_item_id, one_off_chain=chain_yaml)
 
     @server.tool()
     async def set_attachments(

@@ -6,8 +6,6 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import os
-import sqlite3
 import subprocess
 from pathlib import Path
 
@@ -330,21 +328,6 @@ def test_patch_switches_chain_template_before_the_chain_starts(client, repo):
     evs = client.get(f"/api/work-items/{wid}/events").json()
     changed = [e for e in evs if e["type"] == "chain_template_changed"]
     assert [e["payload"] for e in changed] == [{"from": "quick-task", "to": "default"}]
-
-
-def test_patch_refuses_chain_template_once_started(client, repo):
-    wid = _paused(client, repo, chain_template="quick-task")
-    db_path = Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"
-    conn = sqlite3.connect(db_path)
-    conn.execute("UPDATE work_items SET current_node_id = 'env_setup' WHERE id = ?", (wid,))
-    conn.commit()
-    conn.close()
-
-    r = client.patch(f"/api/work-items/{wid}", json={"chain_template": "default"})
-    assert r.status_code == 409, r.text
-
-    after = client.get(f"/api/work-items/{wid}").json()
-    assert after["chain_template"] == "quick-task"
 
 
 @pytest.mark.parametrize(

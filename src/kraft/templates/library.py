@@ -60,6 +60,10 @@ _CHAINS = "chains"
 #: How many YAML nodes one add-on file may expand to (`config.bounded_yaml`):
 #: the same budget a repository's own config gets.
 ADDON_YAML_NODES = 20_000
+#: The same bound for a save of the operator's own library or a library chain
+#: from the Templates screen: far above any real library, still short of an
+#: alias bomb.
+LIBRARY_SAVE_YAML_NODES = 200_000
 
 
 def is_pre_v1(path: str | Path) -> bool:

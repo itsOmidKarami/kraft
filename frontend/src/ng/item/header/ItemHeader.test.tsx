@@ -105,10 +105,115 @@ describe("ItemHeader", () => {
     expect(writes(calls)).toEqual([{ method: "POST", path: "/work-items/w1/resume", body: { steer: null } }]);
   });
 
+  describe("Start on a one-off chain nobody approved", () => {
+    const NEVER = { status: "paused", display_status: "paused", current_node_id: null, one_off: { extends: "default", custom: 1, needs_review: true, approval: null } } as const;
+    const REVIEW = { custom: [{ path: "add[0].node", what: "adds k6", value: "run k6" }], provenance: null, extends: "default", digest: "d".repeat(64), needs_review: true, added: [], redrafted: [] };
+    const ROUTES = { ...WRITES, "GET /work-items/w1/one-off": [200, REVIEW] as [number, unknown], "POST /work-items/w1/one-off/approve": [200, {}] as [number, unknown] };
+    const sends = (calls: { method: string; path: string }[]) => calls.filter((c) => c.method !== "GET").map((c) => `${c.method} ${c.path}`);
+
+    // Stranded: the walk stopped it before its first node (`mark_needs_human(..., kind=CONFIG)`); /resume refuses it
+    // until the approve puts it back to paused, and its badge stays the stop's.
+    const STRANDED = { ...NEVER, status: "needs_human", display_status: "failed", actions: ["complete", "cancel", "abandon"], stop: { kind: "config", node: null, resume_at: null, reason: "this item's one-off chain changed before it started and needs approval again: a person approves it in the web UI, on a computer or a phone, then starts it" } } satisfies Parameters<typeof detail>[0];
+    it.each<{ id: string; over: Parameters<typeof detail>[0]; badge: string }>([
+      { id: "never started", over: NEVER, badge: "NOT STARTED" },
+      { id: "stranded before its first node", over: STRANDED, badge: "FAILED" },
+    ])("opens the review and resumes nothing until Approve and start ($id)", async ({ over, badge }) => {
+      const calls = stubFetch(ROUTES);
+      show(over);
+      expect(screen.getByText(badge)).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
+      const d = await screen.findByRole("dialog", { name: /Approve this chain, then start/ });
+      expect(sends(calls)).toEqual([]);
+      await userEvent.click(within(d).getByRole("button", { name: "Approve and start" }));
+      await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/one-off/approve", "POST /work-items/w1/resume"]));
+    });
+
+    it("reads the chain on Start whatever the page last saw: a prop that says approved, a read that says not, opens the review with no resume", async () => {
+      const calls = stubFetch(ROUTES);
+      show({ ...NEVER, one_off: { extends: "default", custom: 1, needs_review: false, approval: null } });
+      await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
+      await screen.findByRole("dialog", { name: /Approve this chain, then start/ });
+      expect(sends(calls)).toEqual([]);
+    });
+
+    it("starts at once, with no dialog, when the read says nothing needs approving", async () => {
+      const calls = stubFetch({ ...ROUTES, "GET /work-items/w1/one-off": [200, { ...REVIEW, needs_review: false }] });
+      show(NEVER);
+      await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
+      await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/resume"]));
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("Resume on a one-off item that already ran resumes in place: no chain read, no review", async () => {
+      const calls = stubFetch(ROUTES);
+      show({ status: "paused", display_status: "paused", current_node_id: "implementation", one_off: { extends: "default", custom: 1, needs_review: false, approval: null } });
+      await userEvent.click(screen.getByRole("button", { name: /Resume/ }));
+      await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/resume"]));
+      expect(calls.some((c) => c.path.endsWith("/one-off"))).toBe(false);
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("keeps Start busy while the chain is read", async () => {
+      let release!: () => void;
+      const held = new Promise<void>((r) => (release = r));
+      stubFetch(ROUTES);
+      const base = vi.mocked(fetch).getMockImplementation()!;
+      vi.mocked(fetch).mockImplementation(async (input, init) => {
+        if (String(input).endsWith("/one-off")) await held;
+        return base(input as string, init);
+      });
+      show(NEVER);
+      const startButton = screen.getByRole("button", { name: /^Start$/ });
+      await userEvent.click(startButton);
+      await waitFor(() => expect(startButton).toHaveAttribute("aria-disabled", "true"));
+      release();
+      await screen.findByRole("dialog", { name: /Approve this chain, then start/ });
+      expect(startButton).not.toHaveAttribute("aria-disabled");
+    });
+
+    // A link must never start anything: `?start=1` is an address anyone can send.
+    it("arriving with ?start=1 opens the review but never starts, even when the read says nothing needs approving", async () => {
+      const calls = stubFetch({ ...ROUTES, "GET /work-items/w1/one-off": [200, { ...REVIEW, needs_review: false }] });
+      inShell(<ItemHeader item={detail(NEVER)} reload={() => {}} onSettings={() => {}} />, "/work-items/w1?start=1");
+      const d = await screen.findByRole("dialog", { name: "Start this item?" });
+      expect(sends(calls)).toEqual([]);
+      await userEvent.click(within(d).getByRole("button", { name: "Start" }));
+      await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/resume"]));
+    });
+
+    it("arriving from the peek's Start (router state) starts at once when the read says nothing needs approving", async () => {
+      const calls = stubFetch({ ...ROUTES, "GET /work-items/w1/one-off": [200, { ...REVIEW, needs_review: false }] });
+      inShell(<ItemHeader item={detail(NEVER)} reload={() => {}} onSettings={() => {}} />, { pathname: "/work-items/w1", state: { start: true } });
+      await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/resume"]));
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("?start=1 on an item whose way on is not Start opens nothing and sends nothing", async () => {
+      const calls = stubFetch(ROUTES);
+      inShell(<ItemHeader item={detail({ ...NEVER, current_node_id: "implementation" })} reload={() => {}} onSettings={() => {}} />, "/work-items/w1?start=1");
+      await screen.findByRole("button", { name: /Resume/ });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(calls.some((c) => c.path.endsWith("/one-off"))).toBe(false);
+      expect(sends(calls)).toEqual([]);
+    });
+
+    it("the draft's Apply and start approves before it resumes", async () => {
+      const calls = stubFetch({ ...ROUTES, "GET /work-items/w1/draft": answer([ov("implementation", undefined, { budget_usd: 2 })]), "POST /work-items/w1/draft/apply": answer([]) });
+      const it = detail(NEVER);
+      inShell(<ItemDraftProvider item={it} reload={() => {}}><ItemHeader item={it} reload={() => {}} onSettings={() => {}} /><ReviewDialog /></ItemDraftProvider>);
+      await screen.findByText("DRAFT · 1 CHANGE");
+      await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
+      await userEvent.click(within(await screen.findByRole("dialog", { name: "Start with 1 unapplied change?" })).getByRole("button", { name: "Apply and start" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Approve and start" }));
+      await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/draft/apply", "POST /work-items/w1/one-off/approve", "POST /work-items/w1/resume"]));
+    });
+  });
+
   describe("Start with a draft", () => {
     const NEVER = { status: "paused", display_status: "paused", current_node_id: null } as const;
     const DRAFT = { ...WRITES, "GET /work-items/w1/draft": answer([ov("implementation", undefined, { budget_usd: 2 })]), "POST /work-items/w1/draft/apply": answer([]) };
-    const mount = (reload = vi.fn(), path?: string) => {
+    const mount = (reload = vi.fn(), path?: Parameters<typeof inShell>[1]) => {
       const it = detail(NEVER);
       inShell(<ItemDraftProvider item={it} reload={reload}><ItemHeader item={it} reload={reload} onSettings={() => {}} /><ReviewDialog /></ItemDraftProvider>, path);
       return reload;
@@ -138,9 +243,12 @@ describe("ItemHeader", () => {
       await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/resume"]));
     });
 
-    it("arriving with ?start=1 (a Start from the peek) asks the same question, once, and starts only when told", async () => {
+    it.each([
+      { id: "the peek's Start, in router state", at: { pathname: "/work-items/w1", state: { start: true } } },
+      { id: "?start=1", at: "/work-items/w1?start=1" },
+    ])("arriving with $id asks the same question, once, and starts only when told", async ({ at }) => {
       const calls = stubFetch(DRAFT);
-      mount(vi.fn(), "/work-items/w1?start=1");
+      mount(vi.fn(), at);
       const d = await screen.findByRole("dialog", { name: "Start with 1 unapplied change?" });
       expect(sends(calls)).toEqual([]);
       await userEvent.click(within(d).getByRole("button", { name: "Start without them" }));

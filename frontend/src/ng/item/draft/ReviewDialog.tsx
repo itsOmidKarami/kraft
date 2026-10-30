@@ -1,16 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { usd } from "../../../format";
+import { plural, usd } from "../../../format";
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
 import { showToast } from "../../ui/Toast";
+import { addedCheckText } from "../oneOff";
 import { useApply } from "./apply";
 import { useDraft } from "./context";
 import { useSelect } from "./select";
 import { lines, PASSED } from "./view";
 import { APPLY_AND_START, DRAFT_HOLDS_CHANGES } from "../sharedWords";
 import { LinkButton } from "../../ui/LinkButton";
-
-const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 /** Review & apply (Decisions §5): the exact change, the checks, when the run
  *  reaches it, then Apply, Back to editing or Discard draft. Opened by Start on
@@ -52,7 +51,7 @@ function Review() {
   const close = () => d.setReviewing(false);
   const start = d.starting;
   const primary = useRef<HTMLButtonElement>(null);
-  // Opened from an address (the peek's Start sends `?start=1`) nothing had focus, and
+  // Opened on arrival (the peek's Start, or `?start=1`) nothing had focus, and
   // Review & apply goes once its draft is empty: either way focus goes to the header's
   // main button, not to the page (R10b-04).
   const returnTo = () => document.querySelector<HTMLElement>(".item-main-action");
@@ -90,7 +89,7 @@ function Review() {
   };
 
   return (
-    <Dialog title={start ? `Start with ${n} unapplied ${plural(n, "change", "changes")}?` : `Apply ${n} ${plural(n, "change", "changes")} to this item?`} onClose={close} className="idr-review" returnTo={returnTo}
+    <Dialog title={start ? `Start with ${plural(n, "unapplied change")}?` : `Apply ${plural(n, "change")} to this item?`} onClose={close} className="idr-review" returnTo={returnTo}
       footer={asking ? (
         <>
           <span className="idr-ask">Discard this draft? It cannot be brought back.</span>
@@ -123,9 +122,9 @@ function Review() {
       </pre>
       <p className="idr-h">checked against policy</p>
       <ul className="idr-checks">
-        <li className={problems.length ? "is-bad" : "is-ok"}>{problems.length ? `✕ ${problems.length} ${plural(problems.length, "problem", "problems")} to fix first` : "✓ resolves"}</li>
+        <li className={problems.length ? "is-bad" : "is-ok"}>{problems.length ? `✕ ${plural(problems.length, "problem")} to fix first` : "✓ resolves"}</li>
         <li className={passed.length ? "is-bad" : "is-ok"}>
-          {passed.length ? `✕ ${passed.length} ${plural(passed.length, "edit", "edits")} the run has passed, which can no longer apply` : "✓ only nodes that have not run"}
+          {passed.length ? `✕ ${plural(passed.length, "edit")} the run has passed, which can no longer apply` : "✓ only nodes that have not run"}
           {passed.length > 0 && <> <LinkButton disabled={busy} onClick={dropPassed}>Remove {passed.length === 1 ? "it" : "them"} from the draft</LinkButton></>}
         </li>
         {overrides.length > 0 && (overrun.length
@@ -133,12 +132,12 @@ function Review() {
           : <li className="is-ok">✓ within policy maxima</li>)}
         {(view.checks.added ?? []).map((a) => (
           <li key={a.op} className="is-ok">
-            ✓ {a.node}: {a.harnesses.length === 0 ? "runs no agent" : `${plural(a.harnesses.length, "harness", "harnesses")} ${a.harnesses.join(", ")} ${plural(a.harnesses.length, "is", "are")} allowed`} · {a.estimate_usd == null ? "no estimate yet" : `≈ +${usd(a.estimate_usd)} (avg of ${a.estimate_runs ?? 1} ${plural(a.estimate_runs ?? 1, "run", "runs")})`}
+            ✓ {addedCheckText(a)}
           </li>
         ))}
         <li className="is-ok">{budget.cap_usd == null ? "✓ no dollar cap on this item" : `✓ spent ${usd(budget.spent_usd ?? 0)} of the ${usd(budget.cap_usd)} budget`}</li>
       </ul>
-      {moved > 0 && <p className="idr-moved" role="alert">The run moved past {moved} {plural(moved, "edit", "edits")} while you were reviewing. {PASSED}</p>}
+      {moved > 0 && <p className="idr-moved" role="alert">The run moved past {plural(moved, "edit")} while you were reviewing. {PASSED}</p>}
       <p className="idr-note">{adds.length ? `The run reaches ${adds.map((a) => a.node.id).join(", ")} after ${adds[0].after}.` : "They apply as the run reaches each node."}</p>
     </Dialog>
   );

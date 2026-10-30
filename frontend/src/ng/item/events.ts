@@ -92,6 +92,7 @@ export function eventLine(e: KraftEvent, nodes?: Nodes, before?: KraftEvent): st
     case "work_item_abandoned": return "abandoned";
     case "work_item_archived": return p.kept_branch ? `archived · kept ${s(p.kept_branch)}: ${s(p.unpushed_commits)} unpushed commit${p.unpushed_commits === 1 ? "" : "s"}` : "archived";
     case "work_item_restored": return "restored";
+    case "one_off_chain_approved": return "one-off chain approved";
     case "mr_opened": return `MR !${s(p.number)} opened`;
     case "mr_closed": return `MR !${s(p.ref)} closed${p.by && p.by !== "cancel" ? ` by ${s(p.by)}` : ""}`;
     case "mr_reopened": return `MR !${s(p.ref)} reopened`;

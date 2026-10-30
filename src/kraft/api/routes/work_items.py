@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import unicodedata
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -29,6 +30,7 @@ from kraft.overrides import (
 )
 from kraft.policy import PolicyError, PolicyMaximaInput
 from kraft.remote import placement
+from kraft.templates import one_off
 from kraft.templates.environment import RootPointerPolicy
 from kraft.templates.models import ExecNode, GateNode, MaterializedChain, ResolvedChain
 from kraft.vocab import HOLDS_SLOT, WorkItemStatus
@@ -56,6 +58,14 @@ def _one_chain(data: object) -> object:
             "send `chain` alone",
             {"chain": repr(data["chain"]), "chain_template": repr(data["chain_template"])},
         )
+    if (
+        isinstance(data, dict)
+        and data.get("one_off_chain") is not None
+        and (data.get("chain") is not None or data.get("chain_template") is not None)
+    ):
+        raise PydanticCustomError(
+            SENTENCE_ERROR, "send either `chain` or `one_off_chain`, not both", {}
+        )
     return data
 
 
@@ -80,6 +90,14 @@ class NewWorkItem(_OneChain):
     chain_template: str | None = Field(
         default=None, validation_alias=AliasChoices("chain_template", "chain")
     )
+    #: A chain for this item alone, as a chain file's text or its mapping
+    #: (`templates.one_off`). Exclusive with `chain`. Custom content in it
+    #: waits for a person's approval before the item can start.
+    one_off_chain: str | dict | None = None
+    #: The review digest of the one-off chain a person reviewed
+    #: (`one_off.review_digest`, as `POST /one-off-chain/ops` answers it), sent
+    #: by the web UI when it creates. Accepted only from a person.
+    approve_one_off: str | None = None
     #: A workspace item (design 1g "Advanced · cross-repo"): the workspace
     #: `repo` is the root of, the members it selects, and the root-pointer
     #: policy -- the workspace's `root_pointer_default` when unset. Frozen into
@@ -327,6 +345,38 @@ def repo_warning(entry) -> str | None:
     )
 
 
+def _one_off_summary(record: dict, approval: dict | None) -> dict:
+    return {
+        "custom": len(record["custom"]),
+        "approved": approval is not None,
+        "digest": record["digest"],
+        "review_digest": one_off.review_digest(record["digest"], record["custom"]),
+    }
+
+
+def _one_off_approval(request: Request, body: NewWorkItem, record: dict) -> dict | None:
+    """The approval a create carries, or None. Only a person approves custom
+    content, and only the chain they were shown."""
+    if body.approve_one_off is None or not record["custom"]:
+        return None
+    if gates._decided_by(request) != "human":
+        raise HTTPException(
+            403, "only a person approves a one-off chain's custom content, in the web UI"
+        )
+    # Recomputed from this request's own resolution: a library reload since the
+    # editor answered can change what is custom under the same text.
+    reviewed = one_off.review_digest(record["digest"], record["custom"])
+    if body.approve_one_off != reviewed:
+        raise HTTPException(409, "the one-off chain changed since it was reviewed; review it again")
+    return {
+        "digest": record["digest"],
+        "review_digest": reviewed,
+        "by": "human",
+        "door": "web",
+        "at": datetime.now(UTC).isoformat(),
+    }
+
+
 @api_router.post("/work-items", status_code=201)
 async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = False):
     st = request.app.state
@@ -344,10 +394,19 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
             "an agent cannot start the work it files: file it paused (no autostart) "
             "and a human starts it from the board",
         )
-    if body.autostart:
+    one = approval = None
+    if body.one_off_chain is not None:
+        one = deps.one_off_chain_or_422(st, body.repo, body.one_off_chain, skips=body.skip_nodes)
+        chain, chain_template = one.chain, one_off.ONE_OFF_TEMPLATE
+        approval = _one_off_approval(request, body, one.record)
+    else:
+        chain_template, chain = deps.intake_chain_or_422(st, body.repo, body.chain_template)
+    # Custom content nobody approved is filed paused, whoever asked to start it.
+    pending = one is not None and bool(one.record["custom"]) and approval is None
+    autostart = body.autostart and not pending
+    if autostart:
         # Filed paused otherwise, which starts nothing: only a start waits.
         when_free.refuse_if_claimed()
-    chain_template, chain = deps.intake_chain_or_422(st, body.repo, body.chain_template)
     # Before `executor.intake`, which no longer 502s on a bd failure (Kraft-7gy)
     # and would file the item with no bead and a warning nobody reads. An
     # explicit check rather than `Field(max_length=...)`: pydantic's 422 body is
@@ -430,6 +489,8 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
         # nothing is written -- no row, no bead, no attachment copy, no spawn.
         # 200, not this route's default 201: nothing was created.
         content = _dry_run_response(st, body, chain, materialized, attachment_kinds)
+        if one is not None:
+            content["one_off"] = _one_off_summary(one.record, approval)
         return JSONResponse(status_code=200, content=content)
     # Before intake: a lookup after it could answer 422 for an item filed.
     repo_entry = deps.connected_or_422(st, body.repo)
@@ -446,7 +507,7 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
     # An autostart behind an unfinished item is filed and then blocked: it
     # must not take a slot, so it is not handed to `intake` as active.
     waits = st.db.read(lambda c: store.any_unfinished(c, depends_on))
-    start_now = body.autostart and not waits
+    start_now = autostart and not waits
     duplicates = st.db.read(
         lambda c: store.open_duplicates(c, body.repo, body.title, body.implements_beads)
     )
@@ -499,6 +560,8 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
             if item_policy is not None
             else None,
             in_place_by=in_place_by,
+            one_off_chain=one.record if one is not None else None,
+            one_off_approval=approval,
         )
     except Exception as exc:  # noqa: BLE001 -- executor.intake raises several unrelated types
         # No longer reachable for a bd failure — `executor.intake` degrades
@@ -523,8 +586,10 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
         )
     if cannot_run := repo_warning(repo_entry):
         extra["repo_warning"] = cannot_run
+    if one is not None:
+        extra["one_off"] = _one_off_summary(one.record, approval)
 
-    if body.autostart and waits:
+    if autostart and waits:
         await st.db.write(
             lambda c: store.block_work_item(
                 c,
@@ -538,7 +603,7 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
         waiting_on = st.db.read(lambda c: store.unmet_dependencies(c, wid))
         return {"id": wid, "status": WorkItemStatus.BLOCKED, "waiting_on": waiting_on, **extra}
 
-    if not body.autostart:
+    if not autostart:
         # Created, not started. `/resume` begins it at node zero, because a NULL
         # current_node_id falls through that handler's `next(..., 0)` default.
         return {"id": wid, "status": WorkItemStatus.PAUSED, **extra}
@@ -692,7 +757,15 @@ async def duplicate_work_item(wid: str, request: Request):
         detail = "; ".join(st.invalid_policy)
         raise HTTPException(503, f"policy config invalid, refusing work: {detail}")
     row = deps._work_item_row(st, wid)
-    if row["chain_template"] is None:
+    one = None
+    if row["chain_template"] == one_off.ONE_OFF_TEMPLATE:
+        # Resolved again from what was authored, as a fresh filing, and unapproved.
+        record = store.one_off_of(row)
+        if record is None:
+            raise HTTPException(409, "this item's one-off chain record is missing")
+        one = deps.one_off_chain_or_422(st, row["repo"], record["authored"])
+        chain_template, chain = one_off.ONE_OFF_TEMPLATE, one.chain
+    elif row["chain_template"] is None:
         # Not the repo library's `default` now: the copy runs what the original ran.
         deps.library_or_503(st)
         repo_entry = deps.connected_or_422(st, row["repo"])
@@ -763,6 +836,7 @@ async def duplicate_work_item(wid: str, request: Request):
             if item_policy is not None
             else None,
             in_place_by=in_place_by,
+            one_off_chain=one.record if one is not None else None,
         )
     except Exception as exc:  # noqa: BLE001 -- executor.intake raises several unrelated types
         raise HTTPException(502, f"intake failed: {exc}") from exc
@@ -831,6 +905,8 @@ class TriggerBody(_OneChain):
     chain: str | None = Field(
         default=None, validation_alias=AliasChoices("chain", "chain_template")
     )
+    #: Read only to refuse it: a trigger files a library chain.
+    one_off_chain: str | dict | None = None
 
 
 # Kraft-859.
@@ -843,6 +919,8 @@ async def fire_trigger(body: TriggerBody, request: Request):
     if st.invalid_policy:
         detail = "; ".join(st.invalid_policy)
         raise HTTPException(503, f"policy config invalid, refusing work: {detail}")
+    if body.one_off_chain is not None:
+        raise HTTPException(422, "a trigger files a library chain, not a one-off chain")
     chain_template, chain = deps.intake_chain_or_422(st, body.repo, body.chain)
     _check_title(body.title)
     _check_text("description", body.description)
@@ -918,6 +996,9 @@ class WorkItemPatch(_OneChain):
     chain_template: str | None = Field(
         default=None, validation_alias=AliasChoices("chain_template", "chain")
     )
+    #: A chain for this item alone, as `POST /work-items` takes it. Exclusive
+    #: with `chain`; drops any approval of the chain it replaces.
+    one_off_chain: str | dict | None = None
     #: `None` (default) leaves the override alone. `{}` clears every field
     #: back to the template's own binding; a non-empty object *replaces* the
     #: whole stored override, as in 1.4 -- a field it does not name, or sends
@@ -1120,6 +1201,10 @@ def _kept_skips(st, row, repo_entry, previous, filed_kinds, new_chain) -> frozen
     skip there."""
     if previous is None:
         return frozenset()
+    if row["chain_template"] == one_off.ONE_OFF_TEMPLATE:
+        # Its own record, never a re-resolve: a switch away still works once the base is gone.
+        recorded = (store.one_off_of(row) or {}).get("skips", [])
+        return frozenset(recorded) & {n.id for n in new_chain.nodes}
     old = deps.scoped_chain_or_422(st, repo_entry, row["chain_template"])
     filed = {n.id for n in old.trim_for_attachments(filed_kinds).nodes}
     skipped = filed - {n.id for n in previous.chain.nodes}
@@ -1160,6 +1245,11 @@ def _retrimmed(row, filed_kinds: frozenset[str], kinds: frozenset[str]) -> str:
     ).to_json()
 
 
+#: `store._CHAIN_SETTABLE` refused the switch. A started or ended item is
+#: refused before this point, so here it was claimed to run.
+_CHAIN_FIXED = store.STARTING_REFUSAL
+
+
 @api_router.patch("/work-items/{wid}")
 async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
     st = request.app.state
@@ -1181,6 +1271,7 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         body.title is None
         and body.description is None
         and body.chain_template is None
+        and body.one_off_chain is None
         and body.agent_overrides is None
         and body.node_overrides is None
         and body.policy is None
@@ -1189,7 +1280,7 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
     ):
         raise HTTPException(
             422,
-            "nothing to patch: send a title, description, chain, agent_overrides, "
+            "nothing to patch: send a title, description, chain, one_off_chain, agent_overrides, "
             "node_overrides, policy, attachments, or budget_usd",
         )
     if body.title is not None and not body.title.strip():
@@ -1227,8 +1318,12 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         added = _validated_attachments(row["repo"], wanted, body.cwd)
         kinds = (kinds - body.attachments.keys()) | {a["kind"] for a in added}
 
+    if body.one_off_chain is not None and row["current_node_id"] is not None:
+        raise HTTPException(409, "work item has already started; its chain is fixed for its life")
+
     new_materialized = None
-    if body.chain_template is not None:
+    new_one_off = None
+    if body.chain_template is not None or body.one_off_chain is not None:
         # Re-materialized the way intake would have, attachments included: a
         # switch that re-authored a document the item already carries would
         # undo the trim it was filed with. The one door that reads the live
@@ -1236,7 +1331,11 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         previous = store.materialized_chain_of(row)
         target = previous.target if previous is not None else None
         repo_entry = deps.connected_or_422(st, row["repo"])
-        new_chain = deps.scoped_chain_or_422(st, repo_entry, body.chain_template)
+        if body.one_off_chain is not None:
+            new_one_off = deps.one_off_chain_or_422(st, row["repo"], body.one_off_chain)
+            new_chain = new_one_off.chain
+        else:
+            new_chain = deps.scoped_chain_or_422(st, repo_entry, body.chain_template)
         try:
             new_materialized = new_chain.materialize(
                 target=target or entry.single_repo_target(row["repo"]),
@@ -1250,8 +1349,12 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
                 # filed with stays frozen across a template switch.
                 repository_steering=previous.repository_steering if previous else None,
                 attachment_kinds=kinds,
-                skip_nodes=_kept_skips(st, row, repo_entry, previous, filed_kinds, new_chain),
+                skip_nodes=(
+                    kept := _kept_skips(st, row, repo_entry, previous, filed_kinds, new_chain)
+                ),
             )
+            if new_one_off is not None:
+                new_one_off.record["skips"] = sorted(kept)
             if previous is not None:
                 # Frozen with the sandbox, so kept across a switch like steering.
                 new_materialized = dataclasses.replace(
@@ -1300,8 +1403,19 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
                 new_materialized,
                 seen=(row["attachments"], row["materialized_chain"]),
             )
-        if body.chain_template is not None:
-            store.set_chain_template(c, wid, body.chain_template, new_materialized)
+        if body.chain_template is not None and not store.set_chain_template(
+            c, wid, body.chain_template, new_materialized
+        ):
+            raise HTTPException(409, _CHAIN_FIXED)
+        if new_one_off is not None and not store.set_one_off_chain(
+            c, wid, new_one_off.record, new_materialized
+        ):
+            raise HTTPException(409, _CHAIN_FIXED)
+        if new_one_off is not None:
+            # The summary as stored, never the submitted text, as every door shows it.
+            fresh = c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            written["chain_template"] = one_off.ONE_OFF_TEMPLATE
+            written["one_off"] = store.one_off_view(fresh)
         if agent_overrides is not None:
             written["agent_overrides"] = store.replace_agent_overrides(c, wid, agent_overrides)
         if body.node_overrides is not None:
@@ -1347,4 +1461,5 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
     # null` along with every untouched field, so build the echo from
     # `fields_set` (what the caller actually sent) instead. For the overrides
     # the echo is what is now stored, as the detail shows it.
-    return {"id": wid, **{f: getattr(body, f) for f in fields_set}, **written}
+    sent = {f: getattr(body, f) for f in fields_set if f != "one_off_chain"}
+    return {"id": wid, **sent, **written}

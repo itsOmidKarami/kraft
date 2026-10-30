@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { SCREENS, type Card, type Tap } from "../../src/ng/phone/screens";
 import { app, item } from "./kit";
-import { withScopes } from "./mocks/fixtures";
+import { withOneOffPending, withScopes } from "./mocks/fixtures";
 
 /**
  * The phone: every screen whose taps need seeded data (a card, a row) is reached by tapping from the board.
@@ -45,4 +45,17 @@ test("phone: resizing to a desktop window swaps the app and keeps the node open,
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator(".ph-strip")).toBeVisible({ timeout: 8000 });
   expect(at()).toMatch(/nodes\/verification$/);
+});
+
+test("phone: Start on an item with unapproved custom content opens a sheet that shows it in full, and Approve and start posts the digest and the phone door", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await app(page, item("paused"), { noShell: true, tweak: withOneOffPending });
+  const approve = page.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/one-off/approve"));
+  await page.getByRole("button", { name: "Start", exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: "Approve this chain, then start?" });
+  await expect(sheet.getByText("run k6").first()).toBeVisible();
+  const resumed = page.waitForRequest((r) => r.method() === "POST" && r.url().includes("/resume"));
+  await sheet.getByRole("button", { name: "Approve and start" }).click();
+  expect((await approve).postDataJSON()).toEqual({ digest: "0".repeat(64), door: "phone" });
+  await resumed;
 });

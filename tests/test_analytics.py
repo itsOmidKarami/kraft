@@ -249,6 +249,14 @@ def test_the_default_filter_counts_items_stored_with_no_chain_named(conn):
     assert after["completed_prev"] == before["completed_prev"] + 1
 
 
+def test_the_one_off_bucket_is_filtered_by_its_raw_key_not_its_label(conn):
+    """The board labels `@one-off` as "one-off"; the filter stays on the stored key."""
+    _item(conn, "o1", template="@one-off", created=_at(1))
+    raw = analytics.compute(conn, range_="7d", template="@one-off", now=NOW)["totals"]
+    label = analytics.compute(conn, range_="7d", template="one-off", now=NOW)["totals"]
+    assert (raw["work_items"], label["work_items"]) == (1, 0)
+
+
 def test_endpoint_serves_it_and_rejects_a_bad_range(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
     from support.harness import fake_templates_dir, isolated_bd
