@@ -416,6 +416,38 @@ def threads(items: list) -> str:
     return "\n".join(out)
 
 
+def forge_mr(mr: dict) -> str:
+    labels = ",".join(mr["labels"])
+    parts = [f"!{mr['number']} {mr['title']} [{mr['state']}]", labels, mr["url"]]
+    return " ".join(filter(None, parts))
+
+
+def forge_rows(rows: list) -> str:
+    """Pipelines and jobs: one line each, `id kind status ref url`, `-` for what a row lacks."""
+    if not rows:
+        return "none"
+    cols = ("id", "kind", "name", "status", "ref", "url")
+    return "\n".join(" ".join(str(r[c]) or "-" for c in cols if c in r) for r in rows)
+
+
+def forge_log(payload: dict) -> str:
+    note = "[earlier lines cut]\n" if payload["truncated"] else ""
+    return note + payload["log"]
+
+
+def forge_merged(items: list) -> str:
+    if not items:
+        return "no merged merge requests"
+    return "\n".join(
+        " ".join(filter(None, [f"!{m['number']} {m['title']}", ",".join(m["labels"]), m["url"]]))
+        for m in items
+    )
+
+
+def forge_labels(items: list) -> str:
+    return "\n".join(f"{x['name']}  {x['description']}".rstrip() for x in items) or "no labels"
+
+
 def _compare_head(payload: dict) -> str:
     head = f"{payload['from']['target']} -> {payload['to']['target']}"
     if payload.get("rebased"):

@@ -33,7 +33,7 @@ import urllib.request
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from urllib.parse import parse_qsl, quote, unquote, urlsplit
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit
 
 import httpx
 
@@ -511,11 +511,15 @@ class EgressProxy:
                 return
             form = dict(parse_qsl(body.decode("utf-8", "replace"), keep_blank_values=True))
             scope = callback.scope_for_channel(session)
+            if "?" in form.get("id", ""):
+                return await _answer(writer, 400, "Bad Request", "an id has no query")
             call = verb(form, scope)
             if isinstance(call, str):
                 return await _answer(writer, 400, "Bad Request", call)
             api_method, path, payload = call
-            if not callback.allowed(scope, api_method, path, thread_owner=self._owner(scope)):
+            if not callback.allowed(
+                scope, api_method, path.partition("?")[0], thread_owner=self._owner(scope)
+            ):
                 return await self._refuse_route(
                     writer, session, f"{api_method} {path}", "not this session's to call"
                 )
@@ -739,6 +743,41 @@ def _events(form, scope) -> _Call | str:
     return "GET", f"{_item(form, scope)}/events", None
 
 
+_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def _forge_query(form: dict, **bounds: tuple[int, int]) -> str:
+    """`?repo=...&lines=...` from the form; a count outside its bounds is the 400 text."""
+    query = {}
+    if form.get("repo"):
+        query["repo"] = form["repo"]
+    for name, (low, high) in bounds.items():
+        if form.get(name):
+            # the same whole-number rule `_events` applies to `after`
+            if not (form[name].isascii() and form[name].isdigit() and len(form[name]) <= 18):
+                return f"{name} must be a whole number {low}-{high}"
+            if not low <= int(form[name]) <= high:
+                return f"{name} must be a whole number {low}-{high}"
+            query[name] = form[name]
+    return ("?" + urlencode(query)) if query else ""
+
+
+def _forge_read(tail: str, *, needs: tuple[str, ...] = (), **bounds: tuple[int, int]):
+    def verb(form, scope) -> _Call | str:
+        for name in needs:
+            if not form.get(name):
+                return f"needs --{name}"
+            if not _ID.fullmatch(form[name]):
+                return f"{name} must be an id"
+        query = _forge_query(form, **bounds)
+        if not query.startswith("?") and query:
+            return query
+        path = tail.format(**{n: form[n] for n in needs})
+        return "GET", f"{_item(form, scope)}/forge/{path}{query}", None
+
+    return verb
+
+
 def _permission_hook(form, scope) -> _Call | str:
     if not form.get("harness") or "stdin" not in form:
         return "permission-hook needs a harness and its stdin"
@@ -768,6 +807,14 @@ _VERBS: dict[str, Callable[[dict, callback.SessionScope], _Call | str]] = {
     "show": _show,
     "threads": _threads,
     "events": _events,
+    "mr": _forge_read("mr"),
+    "pipelines": _forge_read("pipelines"),
+    "jobs": _forge_read("pipelines/{pipeline}/jobs", needs=("pipeline",)),
+    "job-log": _forge_read(
+        "pipelines/{pipeline}/jobs/{job}/log", needs=("pipeline", "job"), lines=(1, 5000)
+    ),
+    "merged": _forge_read("merged", limit=(1, 100)),
+    "labels": _forge_read("labels"),
     "permission-hook": _permission_hook,
 }
 
