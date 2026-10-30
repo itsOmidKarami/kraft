@@ -99,6 +99,12 @@ def access_fields() -> set[str]:
     return set(config.Access.model_fields)
 
 
+def forge_account_fields() -> set[str]:
+    from kraft import forges
+
+    return set(forges.ForgeAccount.model_fields)
+
+
 def sandbox_fields() -> set[str]:
     from kraft import config
 
@@ -157,6 +163,11 @@ CHECKS: list[tuple[str, Callable[[], set[str]], str]] = [
     ("environment variables", env_vars, "5.reference/03.configuration/11.environment-variables.md"),
     ("policy.yaml fields", policy_fields, "5.reference/03.configuration/03.policy.md"),
     ("access.yaml fields", access_fields, "5.reference/03.configuration/06.access.md"),
+    (
+        "forges.yaml fields",
+        forge_account_fields,
+        "5.reference/03.configuration/16.forges.md",
+    ),
     (
         "sandbox.yaml fields",
         sandbox_fields,

@@ -50,6 +50,7 @@ class RepoBody(BaseModel):
     test_scopes: list[dict] | None = None
     setup_command: str | None = None
     forge: str | None = None
+    forge_account: str | None = None
     project: str | None = None
     # None means "pick a safe default": enabled if a test command was given or
     # probed, disabled otherwise. An explicit True/False always wins, so a
@@ -562,6 +563,7 @@ async def _add_repo(body: RepoBody, st) -> dict:
         "setup_command": setup_command,
         "forge": body.forge or probed["forge"],
         "project": body.project or probed["project"],
+        **({"forge_account": body.forge_account} if body.forge_account else {}),
         "enabled": body.enabled
         if body.enabled is not None
         else _has_tests({"test_command": test_command, "test_scopes": test_scopes}),
@@ -625,6 +627,7 @@ class RepoPatch(BaseModel):
     test_scopes: list[dict] | None = None
     setup_command: str | None = None
     forge: str | None = None
+    forge_account: str | None = None
     project: str | None = None
     enabled: bool | None = None
     models: dict[str, str] | None = None

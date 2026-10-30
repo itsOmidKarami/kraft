@@ -264,12 +264,14 @@ def reload_summary(result: dict) -> str:
     refused = result.get("refused_policy")
     refused_intake = result.get("refused_intake")
     refused_workers = result.get("refused_workers")
+    refused_forges = result.get("refused_forges")
     files = [
         n
         for n, bad in (
             ("policy.yaml", refused),
             ("intake.yaml", refused_intake),
             ("workers.yaml", refused_workers),
+            ("forges.yaml", refused_forges),
         )
         if not bad
     ]
@@ -286,6 +288,8 @@ def reload_summary(result: dict) -> str:
         )
     if refused_workers:
         lines.append(f"  refused: {refused_workers} (the running machines are kept)")
+    if refused_forges:
+        lines.append(f"  refused: {refused_forges} (the running accounts are kept)")
     return "\n".join(lines)
 
 
@@ -297,4 +301,5 @@ def reload_refused(result: dict) -> bool:
         or result.get("refused_policy")
         or result.get("refused_intake")
         or result.get("refused_workers")
+        or result.get("refused_forges")
     )

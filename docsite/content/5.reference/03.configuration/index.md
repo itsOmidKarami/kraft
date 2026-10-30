@@ -20,6 +20,7 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 | `notify.yaml` | The notification webhook. | The first save in Settings | [notify.yaml](/reference/configuration/notify) |
 | `update.yaml` | Automatic updates, restarting when Kraft is free, and the hours Kraft may do either in. _Added in 2.3_ | The first save in Settings | [update.yaml](/reference/configuration/update) |
 | `workers.yaml` | The machines that may run work item steps, and how each connects. _Added in 2.4_ | `kraft admin worker`, or you | [workers.yaml](/reference/configuration/workers) |
+| `forges.yaml` | Named forge accounts: a host's forge and web address, so connect stops asking. _Added in next_ | `kraft admin forge`, or you | [forges.yaml](/reference/configuration/forges) |
 | `machine.yaml` | On a machine, not the server: how many steps that machine runs at once. _Added in 2.4_ | You | [The machine's own limit](/reference/configuration/workers#the-machines-own-limit) |
 | `theme.yaml` | UI appearance. | The first save in Settings | [theme.yaml](/reference/configuration/theme) |
 | `sandbox.yaml` | Which container CLI runs [sandboxed](/concepts/vocabulary#sandbox) tasks, SELinux, and an extra CA. | You | [sandbox.yaml](/reference/configuration/sandbox/sandbox-yaml) |
@@ -40,7 +41,7 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 Three commands check and reload the files:
 
 - `kraft admin doctor` reports anything that does not parse.
-- `kraft admin reload` rereads `policy.yaml`, `library.yaml` with its chains, `intake.yaml`, `workers.yaml`, and `addons.yaml` with `addons.lock`, without a restart. A change to `access.yaml`'s `bind` or `port` needs a restart, and a hand edit of `notify.yaml` takes effect at the next save in Settings or a restart.
+- `kraft admin reload` rereads `policy.yaml`, `library.yaml` with its chains, `intake.yaml`, `workers.yaml`, `forges.yaml`, and `addons.yaml` with `addons.lock`, without a restart. A change to `access.yaml`'s `bind` or `port` needs a restart, and a hand edit of `notify.yaml` takes effect at the next save in Settings or a restart.
 - `kraft admin templates lint` checks the whole library and every chain at once, and writes nothing.
 
 ## In this section
@@ -59,3 +60,4 @@ Three commands check and reload the files:
 - [Repo libraries](/reference/configuration/repo-libraries): a repository's own `.kraft/` library, where it is read from, how a person accepts it, and `repo-libraries.lock`.
 - [update.yaml](/reference/configuration/update): every field in `update.yaml`: automatic updates, restarting when Kraft is free, the channel and the allowed hours.
 - [workers.yaml](/reference/configuration/workers): every field in `workers.yaml`: the machines that may run steps, how each connects, and why one is offline.
+- [forges.yaml](/reference/configuration/forges): every field in `forges.yaml`: the named forge accounts, which one a repo uses, and what is not there yet.

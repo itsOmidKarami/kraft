@@ -20,6 +20,7 @@ from pathlib import Path
 import yaml
 
 from kraft import auth, capabilities, client, config, detect, harness, pidfile, registration, render
+from kraft import forges as forges_mod
 from kraft import policy as policy_mod
 from kraft import skill as skill_mod
 from kraft.adapters import forge
@@ -178,6 +179,11 @@ def _health_checks(payload: dict) -> list[dict]:
             else f"invalid intake.yaml, not applied: the running auto-intake and schedules are "
             f"kept; fix the file and reload: {payload['invalid_intake']}"
         )
+    if payload.get("invalid_forges"):
+        reasons.append(
+            f"invalid forges.yaml, not applied: the running accounts are kept; "
+            f"fix the file and reload: {payload['invalid_forges']}"
+        )
     reasons.extend(f"index: {error}" for error in index.get("errors") or [])
     orphaned = (payload.get("reattach_summary") or {}).get("unknown") or []
     if orphaned:
@@ -311,6 +317,7 @@ def _config_checks() -> list[dict]:
             _check("capabilities", True, "skipped: no config dir", skipped=True),
             _check("detectors.yaml", True, "skipped: no config dir", skipped=True),
             _check("notify.yaml", True, "skipped: no config dir", skipped=True),
+            _check("forges.yaml", True, "skipped: no config dir", skipped=True),
             _check("add-ons", True, "skipped: no config dir", skipped=True),
             _check("add-on updates", True, "skipped: no config dir", skipped=True),
             _token_check(),
@@ -348,6 +355,7 @@ def _config_checks() -> list[dict]:
         checks.append(_check("access.yaml", False, str(exc)))
     checks.append(_detectors_check(templates))
     checks.append(_notify_check(templates))
+    checks.append(_forges_check(templates))
     checks.append(_moved_keys_check(templates))
     checks.append(_chain_templates_check())
     checks.append(_chains_check(templates))
@@ -468,6 +476,16 @@ def _notify_check(templates: Path) -> dict:
     if not cfg["enabled"]:
         return _check("notify.yaml", True, "parses (enabled: false)")
     return _check("notify.yaml", True, f"parses (enabled, {len(cfg['events'])} event type(s))")
+
+
+def _forges_check(templates: Path) -> dict:
+    """`forges.yaml`: this reads the file, so a hand edit the server has not
+    reloaded yet shows here."""
+    try:
+        file = forges_mod.ForgesFile.load(templates / forges_mod.ForgesFile.FILE)
+    except config.ConfigError as exc:
+        return _check("forges.yaml", False, f"{exc}; fix it, then kraft admin reload")
+    return _check("forges.yaml", True, f"parses ({len(file.accounts)} account(s))")
 
 
 def _pidfile_check() -> dict:

@@ -27,6 +27,7 @@ from kraft import (
 from kraft import auth as auth_mod
 from kraft import builtins as _builtins
 from kraft import config as config_mod
+from kraft import forges as forges_mod
 from kraft import intake as intake_mod
 from kraft import notify as notify_mod
 from kraft import policy as policy_mod
@@ -137,6 +138,7 @@ def start_background(app: FastAPI) -> None:
     # installs and restarts only what a person marked, or `update.yaml` allows.
     app.state.when_free_task = asyncio.ensure_future(when_free.loop(app))
     load_workers(app)
+    load_forges(app)
 
 
 def load_workers(app: FastAPI) -> None:
@@ -152,6 +154,20 @@ def load_workers(app: FastAPI) -> None:
     else:
         app.state.invalid_workers = None
     app.state.workers_hub.apply(file)
+
+
+def load_forges(app: FastAPI) -> None:
+    """The accounts `forges.yaml` names; a file that does not load means none,
+    named by `invalid_forges`."""
+    path = app.state.templates_dir / forges_mod.ForgesFile.FILE
+    try:
+        app.state.forges = forges_mod.ForgesFile.load(path)
+    except config_mod.ConfigError as exc:
+        logger.warning("forges.yaml is unreadable, no accounts are used: %s", exc)
+        app.state.forges = forges_mod.ForgesFile()
+        app.state.invalid_forges = str(exc)
+    else:
+        app.state.invalid_forges = None
 
 
 async def _probation_timer(app: FastAPI) -> None:
@@ -487,6 +503,9 @@ async def _lifespan(app: FastAPI):
     app.state.workers_watch_task = asyncio.create_task(hub.runs.watch())
     app.state.workers_lock = asyncio.Lock()
     app.state.invalid_workers = None
+    app.state.forges = forges_mod.ForgesFile()
+    app.state.invalid_forges = None
+    app.state.forges_lock = asyncio.Lock()
 
     dist = Path(os.environ.get("KRAFT_FRONTEND_DIST") or DEFAULT_FRONTEND_DIST)
     app.state.frontend_dist = dist if dist.is_dir() else None

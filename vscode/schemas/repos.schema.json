@@ -193,6 +193,18 @@
           "default": null,
           "title": "Forge"
         },
+        "forge_account": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Forge Account"
+        },
         "id": {
           "anyOf": [
             {

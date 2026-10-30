@@ -27,6 +27,7 @@ from kraft import detect as detect_mod
 from kraft import policy as policy_mod
 from kraft.addons.config import ADDON_ID_PATTERN, AddonsConfig
 from kraft.addons.inherit import REMOVABLE
+from kraft.forges import ForgesFile
 from kraft.remote.registry import WorkersFile
 from kraft.templates import extension
 from kraft.templates import models as models_mod
@@ -190,6 +191,7 @@ SCHEMAS: dict[str, Callable[[], dict]] = {
     "notify.schema.json": lambda: _model(config_mod.Notify, "Kraft notifications"),
     "update.schema.json": lambda: _model(config_mod.Update, "Kraft updates"),
     "detectors.schema.json": lambda: _model(detect_mod.DetectorFile, "Kraft repo detectors"),
+    "forges.schema.json": lambda: _model(ForgesFile, "Kraft forge accounts"),
     "workers.schema.json": lambda: _model(WorkersFile, "Kraft remote workers"),
     # The shape and the typos; what compares entries only the loader checks.
     "addons.schema.json": lambda: _model(AddonsConfig, "Kraft add-ons"),

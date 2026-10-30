@@ -19,6 +19,7 @@ import yaml
 from pydantic import BaseModel, Field, ValidationError
 
 from kraft import config as config_mod
+from kraft import forges as forges_mod
 from kraft import harness as harness_mod
 from kraft import policy as policy_mod
 from kraft.adapters.agent import HarnessUnavailable, select_profile
@@ -65,6 +66,7 @@ FILES = frozenset(
         "addons.lock",
         "repo-libraries.lock",
         "workers.yaml",
+        "forges.yaml",
     }
 )
 CHAIN_FILE = re.compile(r"chains/([a-z][a-z0-9_-]*)\.yaml")
@@ -436,6 +438,14 @@ def _check_access(path, data, ctx):
         for index, entry in enumerate(data.get("allowed_hosts") or [])
         if (why := config_mod.host_entry_problem(entry))
     ]
+
+
+def _check_forges(path, data, ctx):
+    try:
+        forges_mod.ForgesFile.model_validate(data)
+    except ValidationError as exc:
+        return [_pydantic_issue(path, exc)]
+    return []
 
 
 def _check_workers(path, data, ctx):
@@ -962,4 +972,5 @@ _CHECKERS: dict[str, Callable[[Path, dict, CheckContext], list[TemplateIssue]]] 
     "addons.lock": _check_lock,
     "repo-libraries.lock": _check_repo_lock,
     "workers.yaml": _check_workers,
+    "forges.yaml": _check_forges,
 }
