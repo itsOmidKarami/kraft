@@ -74,6 +74,7 @@ export function DraftItemPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [review, setReview] = useState<{ autostart: boolean } | null>(null);
+  const [refused, setRefused] = useState<string | null>(null);
   const [frame, canvasW] = useWidth();
   const size = useResizable("draft", canvasW);
   const set = (p: Partial<DraftState>) => setD((x) => ({ ...x, ...p }));
@@ -186,8 +187,17 @@ export function DraftItemPage() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
+  const creating = useRef(false);
   const create = async (autostart: boolean) => {
-    if (!d.title.trim() || busy) return;
+    if (!d.title.trim() || busy || creating.current) return;
+    creating.current = true;
+    try {
+      await createOnce(autostart);
+    } finally {
+      creating.current = false;
+    }
+  };
+  const createOnce = async (autostart: boolean) => {
     if (own) {
       // The text and the digest must come from the same answer: wait for every edit to land.
       await oo.flush();
@@ -202,7 +212,10 @@ export function DraftItemPage() {
     setBusy(true);
     setError(null);
     const l = own ? oo.latest() : null;
-    const body = l ? draftBody({ ...d, oneOff: l.view.text }, l.view.nodes, ws?.id ?? null, autostart, l.view.custom.length ? l.view.digest : null) : draftBody(d, full, ws?.id ?? null, autostart);
+    // What the last answer left of the chain: a node it no longer has takes its skip and caps with it.
+    const ids = new Set(l?.view.nodes.map((n) => n.id));
+    const keep = (r: Record<string, string>) => Object.fromEntries(Object.entries(r).filter(([k]) => ids.has(k)));
+    const body = l ? draftBody({ ...d, oneOff: l.view.text, skip: d.skip.filter((i) => ids.has(i)), nodeAttempts: keep(d.nodeAttempts), nodeWallMin: keep(d.nodeWallMin) }, l.view.nodes, ws?.id ?? null, autostart, l.view.custom.length ? l.view.digest : null) : draftBody(d, full, ws?.id ?? null, autostart);
     const r = await request<Created>("/work-items", jsonBody("POST", body));
     setBusy(false);
     if (r.status !== 201 && r.status !== 200) return setError(detailOf(r.body));
@@ -299,9 +312,10 @@ export function DraftItemPage() {
               onFocusNode={(id) => { setSel(id); setPaneOpen(true); }}
               onEscape={() => setSel(null)}
               onBackground={() => setSel(null)}
+              refused={refused}
               onAdd={async () => false}
               addMenu={({ anchor, at, taken, refused, onClose }) => (
-                <OneOffAddMenu anchor={anchor} at={at} taken={taken} refused={refused} onClose={onClose} send={async (ops) => (await oo.ops(ops, { quiet: true })).status === 200} />
+                <OneOffAddMenu anchor={anchor} at={at} taken={taken} refused={refused} onClose={onClose} send={async (ops) => { const a = await oo.ops(ops, { quiet: true }); setRefused(a.status === 200 ? null : detailOf(a.body)); return a.status === 200; }} />
               )}
             />
           )

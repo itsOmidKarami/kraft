@@ -84,4 +84,18 @@ describe("useOneOffDraft", () => {
     expect(calls.at(-1)).toEqual({ text: "id: one-off\nextends: x\n", ops: [] });
     vi.useRealTimers();
   });
+
+  it("an answer that lands after the chain was left changes nothing", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const onText = vi.fn();
+    const h = renderHook(({ t }) => useOneOffDraft(t, onText), { initialProps: { t: "id: one-off\n" } });
+    await waitFor(() => expect(h.result.current.status).toBe("ready"));
+    onText.mockClear();
+    h.result.current.text("chains/one-off.yaml", "id: one-off\nextends: x\n");
+    h.rerender({ t: "" });
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    expect(onText).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(1);
+    vi.useRealTimers();
+  });
 });
