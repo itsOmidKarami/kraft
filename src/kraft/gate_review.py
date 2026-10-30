@@ -523,7 +523,7 @@ async def review(
         # an older item kept it, or in the new place over that, is an edit too.
         now = await asyncio.to_thread(executor.gate_artifact, run_dirs, row, gate)
         docs = {watched} if doc_is != doc_was else set()
-        docs |= {now} if now not in (None, rel, watched) else set()
+        docs |= {now} if now not in (None, watched) else set()
         if before is None:
             # In place, a launch refused before its take never read the
             # checkout: that is a run that did not finish, judged below.

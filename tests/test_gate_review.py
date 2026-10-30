@@ -385,7 +385,8 @@ async def test_checks_first_edits_void_the_verdict(
         doc=None if doc is _LEGACY else doc,
     )
     # As Kraft's own repo does: an old-place document is no file git sees.
-    (repo / ".git" / "info" / "exclude").write_text(".engineering/\n")
+    with (repo / ".git" / "info" / "exclude").open("a") as fh:
+        fh.write(".engineering/\n")
     legacy = item_paths.path_of(run_dirs, "w1", item_paths.legacy_document_name("w1", "review"))
     if doc is _LEGACY:
         legacy.parent.mkdir(parents=True)
