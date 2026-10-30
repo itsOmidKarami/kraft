@@ -194,6 +194,30 @@ const ROWS: Row[] = [
     },
   },
   {
+    name: "new item: Customize for this item draws a custom node with a dashed ring, and Approve and create sends the digest it was shown",
+    run: async (p) => {
+      await app(p, `/work-items/new?${new URLSearchParams({ repo: "/Users/dev/code/kraft-plugins", chain: "default", title: "Load test it" })}`, { ready: (pg) => pg.getByText(/nodes run ·/).first().waitFor() });
+      await p.getByRole("button", { name: /^default/ }).click();
+      await p.getByRole("menuitem", { name: "Customize for this item" }).click(); await pause(p, 800);
+      await expect(p.getByRole("button", { name: /^one-off · extends default/ })).toBeVisible();
+      await p.locator(".seam").first().click();
+      await p.getByRole("menuitem", { name: /Custom agent node/ }).click();
+      await p.getByRole("textbox", { name: "Node id" }).fill("load_test");
+      await p.getByRole("textbox", { name: "Prompt" }).fill("run k6 against staging");
+      await p.getByRole("button", { name: /Add node/ }).click(); await pause(p, 800);
+      await expect(p.locator(".graph-node.one-off-custom")).toHaveCount(1);
+      await p.getByRole("button", { name: "Create paused" }).click();
+      const dialog = p.getByRole("dialog", { name: /Approve this chain/ });
+      await expect(dialog.getByText("run k6 against staging")).toBeVisible();
+      const sent = p.waitForRequest((r) => r.method() === "POST" && new URL(r.url()).pathname === "/api/work-items" && !r.url().includes("dry_run"));
+      await dialog.getByRole("button", { name: "Approve and create" }).click();
+      const body = (await sent).postDataJSON();
+      expect(body.approve_one_off).toBe("a".repeat(64));
+      expect(body.chain_template).toBeUndefined();
+      expect(body.one_off_chain).toContain("# add:load_test:");
+    },
+  },
+  {
     name: "gate: clicking a gate's auto_review opens its own task pane with attempts and Log, and no Skip or Retry",
     run: async (p) => {
       await app(p, item("needs-gate", "/nodes/final_review"), { tweak: withReviewer });

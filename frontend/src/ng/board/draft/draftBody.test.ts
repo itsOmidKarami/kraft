@@ -51,4 +51,10 @@ describe("draftBody", () => {
     expect(draftBody(emptyDraft({ ...base, members: ["kraft-lite"], pointer: "bump" }), NODES, "plugins-ws", false)).toMatchObject({ workspace: "plugins-ws", members: ["kraft-lite"], root_pointer_policy: "bump" });
     expect("workspace" in draftBody(emptyDraft(base), NODES, "plugins-ws", false)).toBe(false);
   });
+
+  it("[one-off] sends the chain's text and the digest it was approved at, and no chain", () => {
+    const b = draftBody(emptyDraft({ ...base, oneOff: "id: one-off\nextends: default\n" }), NODES, null, false, "abc123");
+    expect(b).toMatchObject({ one_off_chain: "id: one-off\nextends: default\n", approve_one_off: "abc123" });
+    expect("chain_template" in b).toBe(false);
+  });
 });

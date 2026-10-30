@@ -27,6 +27,8 @@ export type GraphItem = {
   pending?: boolean;
   /** Unchanged while a draft is reviewed (Decisions §9 Publish). */
   faded?: boolean;
+  /** Custom content of a one-off chain: drawn with a dashed accent ring. */
+  custom?: boolean;
 };
 
 const STATE_WORD: Record<GlyphState, string> = { plain: "", done: "done", current: "running", todo: "not started", failed: "failed", esc: "escalated", ghost: "removed", amber: "waiting", paused: "paused" };

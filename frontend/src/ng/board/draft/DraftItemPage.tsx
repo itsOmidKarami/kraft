@@ -17,6 +17,11 @@ import { Menu } from "../../ui/Menu";
 import { Switch } from "../../ui/Switch";
 import { showToast } from "../../ui/Toast";
 import { Attach, CreateSplit, sayIfFiledPaused, type Created } from "../Composer";
+import { ChainCanvas } from "../../templates/ChainCanvas";
+import { YamlView } from "../../templates/YamlView";
+import { OneOffAddMenu } from "./OneOffAddMenu";
+import { OneOffCreateReview } from "./OneOffCreateReview";
+import { useOneOffDraft } from "./useOneOffDraft";
 import { draftBody, emptyDraft, nodeOverrides, type DraftState } from "./draftBody";
 import "../board.css";
 import { coveredText } from "../../item/chainName";
@@ -27,13 +32,15 @@ import { DISCARD_THIS_DRAFT } from "../sharedWords";
 import { Badge } from "../../ui/Badge";
 import { chipClass } from "../../ui/Chip";
 
+const FIX_CHAIN = "Fix the chain's problems first";
 export const DRAFT_KEY = "kraft.ng.newItem";
 type DryRun = { nodes: ChainNode[]; skipped: { node: string; why: string; kind?: string }[]; gates: string[]; caps: { budget_usd: number | null; budget_source: string; nodes: Record<string, { attempts: number; wall_clock_s: number }> } };
 type Tab = "overview" | "config" | "yaml";
 
 function loadDraft(state: unknown, q: URLSearchParams): DraftState {
   const carried = (state as { draft?: Partial<DraftState> } | null)?.draft;
-  if (carried) return emptyDraft(carried);
+  // A one-off chain is never carried in: it is written on this page and read before anything starts.
+  if (carried) return emptyDraft({ ...carried, oneOff: null });
   try {
     const saved = sessionStorage.getItem(DRAFT_KEY);
     // A bead or a title in the URL (VS Code's More options) is a fresh start,
@@ -66,9 +73,12 @@ export function DraftItemPage() {
   const [addOpen, setAddOpen] = useState(!!(location.state as { members?: boolean } | null)?.members);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [review, setReview] = useState<{ autostart: boolean } | null>(null);
   const [frame, canvasW] = useWidth();
   const size = useResizable("draft", canvasW);
   const set = (p: Partial<DraftState>) => setD((x) => ({ ...x, ...p }));
+  const oo = useOneOffDraft(d.oneOff ?? "", (t) => set({ oneOff: t }));
+  const own = d.oneOff != null;
   const dirty = !!(d.title.trim() || d.brief.trim());
   const setPageItem = usePageItem((s) => s.set);
   const items = useStore((s) => s.workItems);
@@ -103,13 +113,24 @@ export function DraftItemPage() {
     return () => setPageItem(null);
   }, [d.repo, d.title, setPageItem]);
 
-  const full = chains.find((c) => c.id === d.chain)?.nodes ?? [];
+  const full = own ? oo.nodes : chains.find((c) => c.id === d.chain)?.nodes ?? [];
+  // A node the editor removed leaves its skip and caps behind: drop them with it.
+  useEffect(() => {
+    if (!own || !oo.nodes.length) return;
+    const ids = new Set(oo.nodes.map((n) => n.id));
+    const keep = (r: Record<string, string>) => Object.fromEntries(Object.entries(r).filter(([k]) => ids.has(k)));
+    setD((x) => {
+      const skip = x.skip.filter((i) => ids.has(i)), a = keep(x.nodeAttempts), w = keep(x.nodeWallMin);
+      const same = skip.length === x.skip.length && Object.keys(a).length === Object.keys(x.nodeAttempts).length && Object.keys(w).length === Object.keys(x.nodeWallMin).length;
+      return same ? x : { ...x, skip, nodeAttempts: a, nodeWallMin: w };
+    });
+  }, [own, oo.nodes]);
   const byId = (id: string) => repos.find((r) => r.id === id);
   const ws = Object.values(workspaces).find((w) => byId(w.root)?.path === d.repo) ?? null;
   const memberRows = ws ? Object.entries(ws.members).filter(([, m]) => byId(m.repository)).map(([id, m]) => ({ id, path: m.path, test: byId(m.repository)?.test_command ?? null })) : [];
 
   // B33, read again 300ms after anything that changes what runs.
-  const key = JSON.stringify([d.repo, d.chain, d.spec, d.plan, d.skip, d.attempts, d.wallMin, d.nodeAttempts, d.nodeWallMin, d.autoEscalate, d.budget, d.members, d.pointer]);
+  const key = JSON.stringify([d.repo, d.chain, d.spec, d.plan, d.skip, d.attempts, d.wallMin, d.nodeAttempts, d.nodeWallMin, d.autoEscalate, d.budget, d.members, d.pointer, d.oneOff]);
   useEffect(() => {
     if (!d.repo || !d.chain || !full.length) return;
     const t = setTimeout(async () => {
@@ -167,9 +188,22 @@ export function DraftItemPage() {
 
   const create = async (autostart: boolean) => {
     if (!d.title.trim() || busy) return;
+    if (own) {
+      // The text and the digest must come from the same answer: wait for every edit to land.
+      await oo.flush();
+      const l = oo.latest();
+      if (!l?.valid) return;
+      if (l.view.custom.length) return setReview({ autostart });
+    }
+    await submit(autostart);
+  };
+  const submit = async (autostart: boolean) => {
+    setReview(null);
     setBusy(true);
     setError(null);
-    const r = await request<Created>("/work-items", jsonBody("POST", draftBody(d, full, ws?.id ?? null, autostart)));
+    const l = own ? oo.latest() : null;
+    const body = l ? draftBody({ ...d, oneOff: l.view.text }, l.view.nodes, ws?.id ?? null, autostart, l.view.custom.length ? l.view.digest : null) : draftBody(d, full, ws?.id ?? null, autostart);
+    const r = await request<Created>("/work-items", jsonBody("POST", body));
     setBusy(false);
     if (r.status !== 201 && r.status !== 200) return setError(detailOf(r.body));
     if (r.body.duplicate_warning) showToast(r.body.duplicate_warning, 6000);
@@ -179,7 +213,7 @@ export function DraftItemPage() {
     navigate(`/?sel=${encodeURIComponent(r.body.id)}`);
   };
 
-  const ok = !!d.title.trim() && !busy && !(dry && "error" in dry);
+  const ok = !!d.title.trim() && !busy && !(dry && "error" in dry) && (!own || oo.valid);
   const node = sel ? full.find((n) => n.id === sel) ?? null : null;
   const overrides = nodeOverrides(d, full);
   const configBadge = (d.autoEscalate ? 1 : 0) + (d.autoGate ? 0 : 1) + (d.budget.trim() ? 1 : 0) + (d.attempts.trim() ? 1 : 0) + (d.wallMin.trim() ? 1 : 0);
@@ -193,7 +227,7 @@ export function DraftItemPage() {
       <HeaderActions>
         <Badge id={tagId} mono tone={d.title.trim() ? "muted" : "change"}>{d.title.trim() ? "DRAFT · NOT CREATED" : "ADD A TITLE TO CREATE"}</Badge>
         <button type="button" className="btn btn-secondary" onClick={() => leave("/")}>Cancel</button>
-        <CreateSplit disabled={!ok} describedBy={d.title.trim() ? undefined : tagId} onCreate={create} />
+        <CreateSplit disabled={!ok} describedBy={d.title.trim() ? undefined : tagId} title={own && !oo.valid ? FIX_CHAIN : undefined} onCreate={create} />
       </HeaderActions>
       {error && <p className="item-error" role="alert">{error}</p>}
       <h1 className="board-visually-hidden">New work item</h1>
@@ -211,7 +245,7 @@ export function DraftItemPage() {
           label="Repo"
           triggerClass={chipClass()}
           trigger={<>{d.repo ? repoName(d.repo) : "repo"} <span aria-hidden className="board-caret">▾</span></>}
-          items={repos.map((r) => ({ label: repoName(r.path), checked: r.path === d.repo, hint: r.default_chain, onSelect: () => set({ repo: r.path, chain: r.default_chain, skip: [], members: [], spec: "", plan: "" }) }))}
+          items={repos.map((r) => ({ label: repoName(r.path), checked: r.path === d.repo, hint: r.default_chain, onSelect: () => set({ repo: r.path, chain: r.default_chain, skip: [], members: [], spec: "", plan: "", oneOff: null }) }))}
         />
         <span className="draft-gap" />
         <span>Start from existing</span>
@@ -248,29 +282,57 @@ export function DraftItemPage() {
           </button>
         )}
       </div>
+      {own && oo.error && <p className="item-error" role="alert">{oo.error}</p>}
       {dry && "error" in dry && <p className="item-error" role="alert">{dry.error}</p>}
       <div className="draft-canvas" ref={frame}>
-        <StageGraph
-          name={d.chain || "chain"}
-          nodes={nodes}
-          selected={sel ?? undefined}
-          reserve={size.overlay ? 0 : paneOpen ? size.width : 40}
-          // The item page's fit and overview: labels stay readable, and a long chain shows whole above them.
-          fit={ITEM_FIT}
-          overview
-          names
-          onSelect={(id) => { setSel(id); setTab((t) => (sel === id ? t : "overview")); }}
-          onOpen={(id) => { setSel(id); setPaneOpen(true); }}
-          onEscape={() => setSel(null)}
-          onBackground={() => setSel(null)}
-        />
+        {own ? (
+          oo.view && (
+            <ChainCanvas
+              scope={oo.scope}
+              result={oo.view.result}
+              pending={oo.pending}
+              selected={sel ?? undefined}
+              reserve={size.overlay ? 0 : paneOpen ? size.width : 40}
+              custom={oo.customNodes}
+              onSelect={(id) => { setSel(id); setTab((t) => (sel === id ? t : "overview")); }}
+              onOpen={(id) => { setSel(id); setPaneOpen(true); }}
+              onFocusNode={(id) => { setSel(id); setPaneOpen(true); }}
+              onEscape={() => setSel(null)}
+              onBackground={() => setSel(null)}
+              onAdd={async () => false}
+              addMenu={({ anchor, at, taken, refused, onClose }) => (
+                <OneOffAddMenu anchor={anchor} at={at} taken={taken} refused={refused} onClose={onClose} send={async (ops) => (await oo.ops(ops, { quiet: true })).status === 200} />
+              )}
+            />
+          )
+        ) : (
+          <StageGraph
+            name={d.chain || "chain"}
+            nodes={nodes}
+            selected={sel ?? undefined}
+            reserve={size.overlay ? 0 : paneOpen ? size.width : 40}
+            // The item page's fit and overview: labels stay readable, and a long chain shows whole above them.
+            fit={ITEM_FIT}
+            overview
+            names
+            onSelect={(id) => { setSel(id); setTab((t) => (sel === id ? t : "overview")); }}
+            onOpen={(id) => { setSel(id); setPaneOpen(true); }}
+            onEscape={() => setSel(null)}
+            onBackground={() => setSel(null)}
+          />
+        )}
         <div className="draft-canvas-head">
           <Menu
             label="Chain"
             description={repos.find((r) => r.path === d.repo)?.default_chain ? defaultChainNote(repos.find((r) => r.path === d.repo)!.default_chain!) : undefined}
             triggerClass={chipClass("composer-mono draft-chain-btn")}
-            trigger={<>{d.chain || "chain"} <span aria-hidden className="board-caret">▾</span></>}
-            items={chainsForRepo(chains, repos.find((r) => r.path === d.repo)?.id).filter((c) => !c.error).map((c) => ({ label: chainOptionText(c), checked: c.id === d.chain, onSelect: () => { set({ chain: c.id, skip: [] }); setSel(null); } }))}
+            trigger={<>{own ? `one-off · extends ${oo.view?.result.extending?.parent ?? d.chain}` : d.chain || "chain"} <span aria-hidden className="board-caret">▾</span></>}
+            items={[
+              ...chainsForRepo(chains, repos.find((r) => r.path === d.repo)?.id).filter((c) => !c.error).map((c) => ({ label: chainOptionText(c), checked: !own && c.id === d.chain, onSelect: () => { set({ chain: c.id, skip: [], oneOff: null }); setSel(null); } })),
+              ...(own
+                ? [{ label: `Back to ${d.chain}`, group: "This item", onSelect: () => { set({ oneOff: null }); setSel(null); } }]
+                : d.chain ? [{ label: "Customize for this item", group: "This item", onSelect: () => { set({ oneOff: `id: one-off\nextends: ${d.chain}\n` }); setSel(null); } }] : []),
+            ]}
           />
           <span>{runText}</span>
         </div>
@@ -278,11 +340,11 @@ export function DraftItemPage() {
           id="draft-pane"
           open={paneOpen}
           size={size}
-          crumbs={node ? [{ label: "new item", onClick: () => setSel(null) }, { label: d.chain, onClick: () => setSel(null) }] : [{ label: repoName(d.repo || "") || "repo" }, { label: "new item" }]}
+          crumbs={node ? [{ label: "new item", onClick: () => setSel(null) }, { label: own ? "one-off chain" : d.chain, onClick: () => setSel(null) }] : [{ label: repoName(d.repo || "") || "repo" }, { label: "new item" }]}
           icon={node ? undefined : "workflow"}
           gate={node?.kind === "gate"}
-          title={node ? node.id : d.chain || "chain"}
-          sub={node ? `${node.kind === "gate" ? "gate" : "exec node"} · ${skipped(node.id) ? "skipped" : "will run"}` : `Draft item · ${runText}`}
+          title={node ? node.id : own ? "one-off chain" : d.chain || "chain"}
+          sub={node ? `${node.kind === "gate" ? "gate" : "exec node"} · ${skipped(node.id) ? "skipped" : "will run"}` : own ? `Extends ${oo.view?.result.extending?.parent ?? d.chain} · ${oo.customNodes.length} custom · ${runText}` : `Draft item · ${runText}`}
           tabs={[{ value: "overview", label: "Overview" }, { value: "config", label: configBadge && !node ? `Config · ${configBadge}` : "Config" }, { value: "yaml", label: "YAML" }]}
           tab={tab}
           onTab={(t) => setTab(t as Tab)}
@@ -299,9 +361,13 @@ export function DraftItemPage() {
           {tab === "config" && node && (
             <NodeConfig d={d} set={set} node={node} covered={covered.get(node.id) ?? null} cap={run?.caps.nodes[node.id] ?? null} />
           )}
-          {tab === "yaml" && <Yaml chain={d.chain} rows={yamlRows(d, node ? { [node.id]: overrides[node.id] ?? {} } : overrides, node?.id ?? null)} />}
+          {tab === "yaml" && own && oo.view && <div className="draft-pane-body"><YamlView draft={oo} scope={oo.scope} published={undefined} /></div>}
+          {tab === "yaml" && !own && <Yaml chain={d.chain} rows={yamlRows(d, node ? { [node.id]: overrides[node.id] ?? {} } : overrides, node?.id ?? null)} />}
         </Inspector>
       </div>
+      {review && own && (
+        <OneOffCreateReview base={oo.view?.result.extending?.parent ?? d.chain} custom={oo.latest()?.view.custom ?? []} busy={busy} onApprove={() => void submit(review.autostart)} onClose={() => setReview(null)} />
+      )}
       {ask && (
         <div className="draft-ask" role="alertdialog" aria-label={DISCARD_THIS_DRAFT}>
           <b>{DISCARD_THIS_DRAFT}</b>
