@@ -15,7 +15,7 @@ test("design a one-off chain on the new-item page, approve it and create the ite
   await page.getByRole("menuitem", { name: /Custom agent node/ }).click();
   await page.getByRole("textbox", { name: "Node id" }).fill("load_test");
   await page.getByRole("textbox", { name: "Prompt" }).fill("run k6 against staging");
-  await page.getByRole("button", { name: /Add node/ }).click();
+  await page.getByRole("button", { name: "Create & open →" }).click();
   await expect(page.locator(".graph-node.one-off-custom")).toHaveCount(1);
 
   await page.getByRole("button", { name: "Create paused" }).click();
