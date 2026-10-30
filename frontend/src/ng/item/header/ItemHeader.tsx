@@ -150,7 +150,8 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
     if (hs.main === "reopen") return void run(act.reopenMr(item.id));
     if (asksFirst()) return draft!.setReviewing(true, start);
     if (hs.main === "start") return void startFresh();
-    if (hs.main === "resume") return start();
+    // Only an item that never started can need its chain approved: a resume goes straight to the server.
+    if (hs.main === "resume") return startRun();
     if (hs.main === "retry") return void run(act.retry(item.id, retryBody(node, item.stop)));
     if (hs.main === "archive") return void run(act.archive(item.id));
     return void run(act.restore(item.id));

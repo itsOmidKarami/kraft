@@ -24,8 +24,8 @@ import { LinkButton } from "../../ui/LinkButton";
 
 const DOOR = { web: "in the web UI", phone: "on the phone" } as Record<string, string>;
 /** Who approved a one-off chain's custom content, through which door, and when. */
-export const approvalLine = (a: { by: string; door: string; at: string } | null) =>
-  a ? `approved by ${a.by === "human" ? "you" : a.by} ${DOOR[a.door] ?? `through the ${a.door}`} · ${ago(a.at)}` : "custom content, not approved yet";
+export const approvalLine = (a: { by: string; door: string; at: string } | null, now = Date.now()) =>
+  a ? `approved by ${a.by === "human" ? "you" : a.by} ${DOOR[a.door] ?? `through the ${a.door}`} · ${ago(a.at, now)}` : "custom content, not approved yet";
 
 const statusLine = (item: ItemDetail) => {
   const st = item.display_status ?? "running";
@@ -80,7 +80,7 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc, onMore
           </div>
         )}
         {cap && <div><dt>spent</dt><dd>{spentLine(item)}</dd></div>}
-        {item.one_off && item.one_off.custom > 0 && <div><dt>one-off chain</dt><dd>{approvalLine(item.one_off.approval)}</dd></div>}
+        {item.one_off && item.one_off.custom > 0 && <div><dt>one-off chain</dt><dd>{approvalLine(item.one_off.approval, now)}</dd></div>}
         {/* The header chip's path is a hover tip, which a tap closes: here touch reads it too. */}
         {item.in_place && <div><dt>checkout</dt><dd className="is-mono">{breakable(item.worktree_path ?? item.repo)}</dd></div>}
         {/* Off the item page (the board's peek), which chain and repo: the page's crumb says them there. */}

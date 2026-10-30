@@ -52,7 +52,8 @@ export function OneOffReview({ itemId, onApproved, onClose }: { itemId: string; 
     if (a.status === 409) await read();
   };
 
-  if (clear) return null;
+  // Nothing is shown until the read answers, so a chain with nothing to approve never flashes a dialog.
+  if (clear || (!data && !error)) return null;
   return (
     <Dialog title="Approve this chain, then start?" onClose={onClose} className="idr-review"
       footer={<>

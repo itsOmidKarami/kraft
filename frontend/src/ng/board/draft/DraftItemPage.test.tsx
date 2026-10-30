@@ -388,6 +388,32 @@ describe("DraftItemPage", () => {
       expect(screen.getByRole("dialog", { name: /Approve this chain/ })).toBeInTheDocument();
     });
 
+    it("the review is read again when what is custom changed under it, though the text did not", async () => {
+      const calls = stub();
+      oneOff.custom = [{ path: "add[0]", what: "adds k6", value: "run k6" }];
+      await customize();
+      fireEvent.click(screen.getByRole("button", { name: "Create paused" }));
+      await settle();
+      oneOff.custom = [{ path: "add[0]", what: "adds k6", value: "run k6 --everywhere" }];
+      fireEvent.click(within(screen.getByRole("dialog", { name: /Approve this chain/ })).getByRole("button", { name: "Approve and create" }));
+      await settle();
+      expect(creates(calls)).toEqual([]);
+      expect(screen.getByText(/--everywhere/)).toBeInTheDocument();
+    });
+
+    it("two quick presses of Approve and create file one item", async () => {
+      const calls = stub();
+      oneOff.custom = [{ path: "add[0]", what: "adds k6", value: "run k6" }];
+      await customize();
+      fireEvent.click(screen.getByRole("button", { name: "Create paused" }));
+      await settle();
+      const approve = within(screen.getByRole("dialog", { name: /Approve this chain/ })).getByRole("button", { name: "Approve and create" });
+      fireEvent.click(approve);
+      fireEvent.click(approve);
+      await settle();
+      expect(creates(calls)).toHaveLength(1);
+    });
+
     it("says nothing is extended once extends is out of the YAML", async () => {
       stub();
       oneOff.parent = false;

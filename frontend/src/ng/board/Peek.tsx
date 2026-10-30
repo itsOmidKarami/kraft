@@ -221,7 +221,7 @@ function Footer({ cards, item, reload, offline, onOpen, onRaise, onAnswer }: { c
     }
     if (hs.main === "conflicts") return navigate(`/work-items/${encodeURIComponent(item.id)}/review${item.stop?.node ? `?nodes=${encodeURIComponent(item.stop.node)}` : ""}`);
     if (hs.main === "reopen") return void run(act.reopenMr(item.id));
-    if (hs.main === "resume") return item.one_off ? navigate(askStartUrl(item.id)) : void run(act.resume(item.id));
+    if (hs.main === "resume") return void run(act.resume(item.id));
     // Start never applies a draft: with one, the item page asks first (R9b-01's other door).
     if (hs.main === "start") return void startHere();
     if (hs.main === "retry") return void run(act.retry(item.id, retryBody(node, item.stop)));

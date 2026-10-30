@@ -76,7 +76,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
       case "review": return navigate(reviewUrl(item.id, gate ? `?gate=${encodeURIComponent(gate)}` : ""));
       case "conflicts": return navigate(reviewUrl(item.id, item.stop?.node ? `?nodes=${encodeURIComponent(item.stop.node)}` : ""));
       case "unblock": return void run(act.unblock(item.id), "Unblocked. It starts when a slot is free.");
-      case "resume": return item.one_off ? sheet.open("one-off") : void run(act.resume(item.id), "Resumed.");
+      case "resume": return void run(act.resume(item.id), "Resumed.");
       // Start never applies a draft: with one, the sheet asks first, as the desktop's Review & apply does.
       case "start": return void draftToStart(item.id).then(({ waits, ops }) => {
         // The sheet lists what it would apply, as the desktop's dialog does (R10b-12).
@@ -224,10 +224,10 @@ function ItemSheets({ item, node, sheet, reload, startLines = [] }: { item: Item
     );
   if (sheet.is("one-off"))
     return (
-      <OneOffSheet itemId={item.id} sheet={sheet} start={async () => {
+      <OneOffSheet itemId={item.id} sheet={sheet} start={async (approved) => {
         const r = await act.resume(item.id);
         if (!r.ok) { showToast(r.error, { tone: "error" }); return false; }
-        showToast("Approved and started.");
+        showToast(approved ? "Approved and started." : "Started.");
         reload();
         return true;
       }} />

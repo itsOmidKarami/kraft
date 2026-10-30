@@ -6,7 +6,7 @@ import { ChoiceSheet, type useSheet } from "../nav/Sheet";
 /** Start on an item whose one-off chain holds custom content nobody approved: the
  *  custom parts in full, then Approve and start, which names the digest this read
  *  answered. A chain that changed since is read again, never approved from the old read. */
-export function OneOffSheet({ itemId, sheet, start }: { itemId: string; sheet: ReturnType<typeof useSheet>; start: () => Promise<boolean> }) {
+export function OneOffSheet({ itemId, sheet, start }: { itemId: string; sheet: ReturnType<typeof useSheet>; start: (approved: boolean) => Promise<boolean> }) {
   const [data, setData] = useState<OneOffReviewData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const busy = useRef(false);
@@ -22,7 +22,7 @@ export function OneOffSheet({ itemId, sheet, start }: { itemId: string; sheet: R
   useEffect(() => {
     if (clear && !settled.current) {
       settled.current = true;
-      void start().then(() => sheet.close());
+      void start(false).then(() => sheet.close());
     }
   }, [clear]); // eslint-disable-line react-hooks/exhaustive-deps
   if (clear) return null;
@@ -43,7 +43,7 @@ export function OneOffSheet({ itemId, sheet, start }: { itemId: string; sheet: R
             if (a.status === 409) await read();
             return;
           }
-          if (await start()) sheet.close();
+          if (await start(true)) sheet.close();
         } finally {
           busy.current = false;
         }

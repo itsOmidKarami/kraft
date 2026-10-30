@@ -137,6 +137,15 @@ describe("ItemHeader", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
 
+    it("Resume on a one-off item that already ran resumes in place: no chain read, no review", async () => {
+      const calls = stubFetch(ROUTES);
+      show({ status: "paused", display_status: "paused", current_node_id: "implementation", one_off: { extends: "default", custom: 1, needs_review: false, approval: null } });
+      await userEvent.click(screen.getByRole("button", { name: /Resume/ }));
+      await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/resume"]));
+      expect(calls.some((c) => c.path.endsWith("/one-off"))).toBe(false);
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
     it("the draft's Apply and start approves before it resumes", async () => {
       const calls = stubFetch({ ...ROUTES, "GET /work-items/w1/draft": answer([ov("implementation", undefined, { budget_usd: 2 })]), "POST /work-items/w1/draft/apply": answer([]) });
       const it = detail(NEVER);

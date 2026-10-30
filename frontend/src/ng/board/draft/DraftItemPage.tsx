@@ -189,15 +189,20 @@ export function DraftItemPage() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
+  // One create at a time, whichever button or review step it comes from: a fast second press sends nothing.
   const creating = useRef(false);
-  const create = async (autostart: boolean) => {
-    if (!d.title.trim() || busy || creating.current) return;
+  const once = async (go: () => Promise<unknown>) => {
+    if (creating.current) return;
     creating.current = true;
     try {
-      await createOnce(autostart);
+      await go();
     } finally {
       creating.current = false;
     }
+  };
+  const create = async (autostart: boolean) => {
+    if (!d.title.trim() || busy) return;
+    await once(() => createOnce(autostart));
   };
   const createOnce = async (autostart: boolean) => {
     if (own) {
@@ -211,11 +216,11 @@ export function DraftItemPage() {
   };
   const submit = async (autostart: boolean, seen?: OneOffView) => {
     if (own && seen) {
-      // The review showed `seen`: an edit that landed since is read again, never filed unread.
-      await oo.flush();
+      // The review showed `seen`: the chain is read once more (typed text first), and anything that moved since is shown again, never filed unread.
+      await oo.ops([], { quiet: true });
       const now = oo.latest();
       if (!now?.valid) return setReview(null);
-      if (now.view.text !== seen.text) return setReview({ autostart, view: now.view });
+      if (now.view.text !== seen.text || JSON.stringify(now.view.custom) !== JSON.stringify(seen.custom)) return setReview({ autostart, view: now.view });
     }
     setReview(null);
     setBusy(true);
@@ -389,7 +394,7 @@ export function DraftItemPage() {
         </Inspector>
       </div>
       {review && own && (
-        <OneOffCreateReview base={review.view.result.extending?.parent ?? null} custom={review.view.custom} busy={busy} onApprove={() => void submit(review.autostart, review.view)} onClose={() => setReview(null)} />
+        <OneOffCreateReview base={review.view.result.extending?.parent ?? null} custom={review.view.custom} busy={busy} onApprove={() => void once(() => submit(review.autostart, review.view))} onClose={() => setReview(null)} />
       )}
       {ask && (
         <div className="draft-ask" role="alertdialog" aria-label={DISCARD_THIS_DRAFT}>
