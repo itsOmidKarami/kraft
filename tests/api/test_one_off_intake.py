@@ -111,6 +111,8 @@ def test_create_approval(client, repo, headers, stale, status, text):
     if approved:
         approval = json.loads(row["one_off_approval"])
         assert (approval["by"], approval["door"], approval["digest"]) == ("human", "web", digest)
+        events = client.get(f"/api/work-items/{r.json()['id']}/events").json()
+        assert "one_off_chain_approved" in [e["type"] for e in events]
 
 
 def test_custom_one_off_autostart_files_paused(client, repo):

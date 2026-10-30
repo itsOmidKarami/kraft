@@ -196,6 +196,8 @@ def create_work_item(
         if bead_priority is not None:
             payload["priority"] = bead_priority
     events.append(conn, id, WorkItemEvent.CREATED, payload)
+    if one_off_approval:
+        events.append(conn, id, SettingsEvent.ONE_OFF_CHAIN_APPROVED, one_off_approval)
     if attachments:
         # Its own event, not a field on work_item_created: the timeline has to
         # explain why this item's chain has no spec node.
