@@ -182,6 +182,21 @@ describe("Peek", () => {
     expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
   });
 
+  it("Start on a one-off chain nobody approved starts nothing here: the item page reads it first", async () => {
+    const calls = mount({ status: "paused", display_status: "paused", current_node_id: null, one_off: { extends: "default", custom: 1, needs_review: true, approval: null } });
+    fireEvent.click(await screen.findByRole("button", { name: "Start" }));
+    await act(async () => {});
+    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1?start=1");
+    expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
+  });
+
+  it("Resume on a one-off item that already ran resumes here, not through the item page", async () => {
+    const calls = mount({ status: "paused", display_status: "paused", current_node_id: "implementation", one_off: { extends: "default", custom: 1, needs_review: false, approval: null } });
+    fireEvent.click(await screen.findByRole("button", { name: "Resume" }));
+    await act(async () => {});
+    expect(calls.filter((c) => c.method !== "GET").map((c) => c.path)).toEqual(["/work-items/w1/resume"]);
+  });
+
   it("Start with only passed edits in the draft starts as before", async () => {
     const calls = mount({ status: "paused", display_status: "paused", current_node_id: null }, { draft: [ov("plan", undefined, { budget_usd: 2 }, true)] });
     fireEvent.click(await screen.findByRole("button", { name: "Start" }));

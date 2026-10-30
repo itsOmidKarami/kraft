@@ -252,7 +252,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
  *  The toggle opens on focus or click, and focus stays on it; Enter, Space or
  *  ↓ there opens it with focus on Create and start, as the item page's main
  *  button does. Escape hands focus back to the toggle without reopening it. */
-export function CreateSplit({ disabled, describedBy, onCreate }: { disabled: boolean; describedBy?: string; onCreate: (start: boolean) => void }) {
+export function CreateSplit({ disabled, describedBy, title, onCreate }: { disabled: boolean; describedBy?: string; /** Why it is disabled, on both buttons. */ title?: string; onCreate: (start: boolean) => void }) {
   const group = useRef<HTMLSpanElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -271,7 +271,7 @@ export function CreateSplit({ disabled, describedBy, onCreate }: { disabled: boo
   };
   return (
     <span ref={group} className="composer-split">
-      <button type="button" className="btn btn-secondary composer-create" disabled={disabled} aria-describedby={describedBy} onClick={() => onCreate(false)}>Create paused</button>
+      <button type="button" className="btn btn-secondary composer-create" disabled={disabled} title={disabled ? title : undefined} aria-describedby={describedBy} onClick={() => onCreate(false)}>Create paused</button>
       <button
         ref={toggle}
         type="button"
@@ -280,6 +280,7 @@ export function CreateSplit({ disabled, describedBy, onCreate }: { disabled: boo
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={disabled}
+        title={disabled ? title : undefined}
         aria-describedby={describedBy}
         onFocus={() => (quiet.current ? (quiet.current = false) : setOpen(true))}
         onClick={() => setOpen(true)}

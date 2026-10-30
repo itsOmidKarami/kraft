@@ -20,6 +20,7 @@ import { ChoiceSheet, EditSheet, useSheet } from "../nav/Sheet";
 import { ScreenHeader } from "../nav/ScreenHeader";
 import { ActionBar, Block } from "../ui/Rows";
 import { ChainList } from "./ChainList";
+import { OneOffSheet } from "./OneOffSheet";
 import { PauseSheet } from "./PauseSheet";
 import { cardOf, kebabOf, limitPatch, limitWords, pairOf, stopLimitOf, type Act, type ActId } from "./model";
 import { useDo } from "./useDo";
@@ -81,6 +82,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
         // The sheet lists what it would apply, as the desktop's dialog does (R10b-12).
         setStartLines(draftLines(ops as Parameters<typeof draftLines>[0]).map((l) => l.text));
         if (waits) sheet.open("start-draft");
+        else if (item.one_off) sheet.open("one-off");
         else void run(act.resume(item.id), "Started.");
       });
       case "retry": return void run(act.retry(item.id, retryBody(node, item.stop)), "Retrying.");
@@ -206,6 +208,8 @@ function ItemSheets({ item, node, sheet, reload, startLines = [] }: { item: Item
               const a = await act.applyDraft(item.id);
               if (!a.ok) return void showToast(a.error, { tone: "error" });
             }
+            // The draft may have changed the chain: its custom content is read before anything starts.
+            if (item.one_off) return sheet.open("one-off");
             const r = await act.resume(item.id);
             if (!r.ok) return void showToast(r.error, { tone: "error" });
             showToast(v === "apply" ? "Applied the draft and started." : "Started. The draft is kept.");
@@ -217,6 +221,16 @@ function ItemSheets({ item, node, sheet, reload, startLines = [] }: { item: Item
         }}
         onClose={sheet.close}
       />
+    );
+  if (sheet.is("one-off"))
+    return (
+      <OneOffSheet itemId={item.id} sheet={sheet} start={async (approved) => {
+        const r = await act.resume(item.id);
+        if (!r.ok) { showToast(r.error, { tone: "error" }); return false; }
+        showToast(approved ? "Approved and started." : "Started.");
+        reload();
+        return true;
+      }} />
     );
   if (sheet.is("kebab"))
     return (

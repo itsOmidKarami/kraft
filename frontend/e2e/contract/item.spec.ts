@@ -1,6 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import type { Scenario } from "./mocks/fixtures";
-import { withBeads, withCapLimit, withEscalationThread, withFailedTests, withFixRoundOutcome, withReviewer, withScopes, withStop, withTestResult } from "./mocks/fixtures";
+import { withBeads, withCapLimit, withEscalationThread, withFailedTests, withFixRoundOutcome, withOneOffPending, withReviewer, withScopes, withStop, withTestResult } from "./mocks/fixtures";
 import { app, away, contract, dragPaneEdge, focusedName, item, pause, type Row } from "./kit";
 
 /** The item page: the side pane, the header's card menu, the log viewer, the chain graph, a gate's pane, and what a stop says. */
@@ -191,6 +191,45 @@ const ROWS: Row[] = [
     run: async (p) => {
       await app(p, `/work-items/new?${new URLSearchParams({ repo: "/Users/dev/code/kraft-plugins", chain: "default", title: "Design the caching layer" })}`, { ready: (pg) => pg.getByText(/nodes run ·/).first().waitFor() });
       await pause(p, 500); await clickNodeByMouse(p, p.locator(".graph-node"));
+    },
+  },
+  {
+    name: "new item: Customize for this item draws a custom node with a dashed ring, and Approve and create sends the digest it was shown",
+    run: async (p) => {
+      await app(p, `/work-items/new?${new URLSearchParams({ repo: "/Users/dev/code/kraft-plugins", chain: "default", title: "Load test it" })}`, { ready: (pg) => pg.getByText(/nodes run ·/).first().waitFor() });
+      await p.getByRole("button", { name: /^default/ }).click();
+      await p.getByRole("menuitem", { name: "Customize for this item" }).click(); await pause(p, 800);
+      await expect(p.getByRole("button", { name: /^one-off · extends default/ })).toBeVisible();
+      await p.locator(".seam").first().click();
+      await p.getByRole("menuitem", { name: /Custom agent node/ }).click();
+      await p.getByRole("textbox", { name: "Node id" }).fill("load_test");
+      await p.getByRole("textbox", { name: "Prompt" }).fill("run k6 against staging");
+      await p.getByRole("button", { name: /Add node/ }).click(); await pause(p, 800);
+      await expect(p.locator(".graph-node.one-off-custom")).toHaveCount(1);
+      await p.getByRole("button", { name: "Create paused" }).click();
+      const dialog = p.getByRole("dialog", { name: /Approve this chain/ });
+      await expect(dialog.getByText("run k6 against staging")).toBeVisible();
+      const sent = p.waitForRequest((r) => r.method() === "POST" && new URL(r.url()).pathname === "/api/work-items" && !r.url().includes("dry_run"));
+      await dialog.getByRole("button", { name: "Approve and create" }).click();
+      const body = (await sent).postDataJSON();
+      expect(body.approve_one_off).toBe("a".repeat(64));
+      expect(body.chain_template).toBeUndefined();
+      expect(body.one_off_chain).toContain("# add:load_test:");
+    },
+  },
+  {
+    name: "one-off chain: Start on an item with unapproved custom content reads it first, and Approve and start sends the digest it showed, then starts",
+    run: async (p) => {
+      await app(p, item("paused"), { tweak: withOneOffPending });
+      const approve = p.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/one-off/approve"));
+      await p.getByRole("banner").getByRole("button", { name: "Start" }).click();
+      const dialog = p.getByRole("dialog", { name: /Approve this chain, then start/ });
+      await expect(dialog.getByText("run k6").first()).toBeVisible();
+      await expect(dialog.getByText("Custom: read these")).toBeVisible();
+      const resumed = p.waitForRequest((r) => r.method() === "POST" && r.url().includes("/resume"));
+      await dialog.getByRole("button", { name: "Approve and start" }).click();
+      expect((await approve).postDataJSON()).toEqual({ digest: "0".repeat(64), door: "web" });
+      await resumed;
     },
   },
   {

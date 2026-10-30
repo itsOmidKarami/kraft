@@ -208,7 +208,7 @@ function Footer({ cards, item, reload, offline, onOpen, onRaise, onAnswer }: { c
     const waits = await draftWaits(item.id);
     setBusy(false);
     // The item page asks what its header's Start asks: Apply and start, or Start without them.
-    if (waits) return navigate(askStartUrl(item.id));
+    if (waits || item.one_off) return navigate(askStartUrl(item.id));
     await run(act.resume(item.id));
   };
   const main = () => {
