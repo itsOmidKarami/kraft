@@ -223,7 +223,7 @@ export interface OneOffSummary {
   extends: string | null;
   custom: number;
   needs_review: boolean;
-  approval: { by: string; door: string; at: string; digest: string } | null;
+  approval: { by: string; door: string; at: string; digest: string; review_digest?: string } | null;
 }
 
 export interface WorkItem {

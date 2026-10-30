@@ -121,13 +121,15 @@ def _render_show(item: dict, full: dict | None = None) -> str:
         if full.get("in_place"):
             at = next((i + 1 for i, (key, _) in enumerate(pairs) if key == "repo"), len(pairs))
             pairs.insert(at, ("in_place", "yes"))
+        if full.get("one_off"):
+            after_status = next(
+                (i + 1 for i, (key, _) in enumerate(pairs) if key == "status"), len(pairs)
+            )
+            pairs.insert(after_status, ("chain", _one_off_line(full["one_off"])))
         at = next((i + 1 for i, (key, _) in enumerate(pairs) if key == "stop_reason"), len(pairs))
         if kind := (full.get("stop") or {}).get("kind"):
             pairs.insert(at, ("stop_kind", kind))
             at += 1
-        if full.get("one_off"):
-            at = next((i + 1 for i, (key, _) in enumerate(pairs) if key == "status"), len(pairs))
-            pairs.insert(at, ("chain", _one_off_line(full["one_off"])))
         if (hint := _raise_hint(full)) and not item.get("suggested_action"):
             pairs.insert(at, ("next", hint))
     return render.kv(pairs)

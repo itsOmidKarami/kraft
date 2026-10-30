@@ -99,7 +99,7 @@ async def create_work_item(
             **({"budget_usd": budget_usd} if budget_usd is not ... else {}),
             **({"node_overrides": node_overrides} if node_overrides else {}),
             **({"runner": runner} if runner else {}),
-            **({"one_off_chain": one_off_chain} if one_off_chain else {}),
+            **({"one_off_chain": one_off_chain} if one_off_chain is not None else {}),
             **({"description": description} if description else {}),
             **({"attachments": attachments, "cwd": str(Path.cwd())} if attachments else {}),
         },

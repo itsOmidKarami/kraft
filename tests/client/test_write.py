@@ -210,10 +210,10 @@ def test_filing_without_a_runner_does_not_send_one(tmp_path, monkeypatch):
     assert "runner" not in sent[0]
 
 
-@pytest.mark.parametrize("approving", [False], ids=["never-sends-approval"])
-def test_create_work_item_files_a_one_off_chain_and_never_approves_it(
-    tmp_path, monkeypatch, approving
-):
+@pytest.mark.parametrize(
+    "text", ["extends: x", ""], ids=["never-sends-approval", "create-empty-file"]
+)
+def test_create_work_item_files_a_one_off_chain_and_never_approves_it(tmp_path, monkeypatch, text):
     """A person approves custom content in the web UI; no agent door asks for it."""
     sent = {}
 
@@ -222,10 +222,10 @@ def test_create_work_item_files_a_one_off_chain_and_never_approves_it(
         return 201, {"id": "w1", "status": "paused", "one_off": {"custom": 1}}
 
     monkeypatch.setattr(client.transport, "_post", post)
-    made = asyncio.run(client.create_work_item("t", repo=str(tmp_path), one_off_chain="extends: x"))
-    assert sent["one_off_chain"] == "extends: x"
+    made = asyncio.run(client.create_work_item("t", repo=str(tmp_path), one_off_chain=text))
+    assert sent["one_off_chain"] == text
     assert "chain_template" not in sent
-    assert ("approve_one_off" in sent) is approving
+    assert "approve_one_off" not in sent
     assert made["one_off"] == {"custom": 1}
 
 

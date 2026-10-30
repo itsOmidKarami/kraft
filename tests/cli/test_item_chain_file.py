@@ -85,3 +85,11 @@ def test_create_prints_the_review_line_for_custom_content(
     cli.main(["item", "create", "t", "--repo", "/r", "--chain-file", chain_file])
     out = capsys.readouterr().out
     assert ("which a person reviews in the web UI before it can start" in out) is said
+
+
+def test_an_empty_chain_file_is_sent_so_the_server_refuses_it(monkeypatch, tmp_path):
+    empty = tmp_path / "empty.yaml"
+    empty.write_text("")
+    seen = _fake(monkeypatch, "create_work_item", {"id": "w1", "status": "paused", "title": "t"})
+    cli.main(["item", "create", "t", "--repo", "/r", "--chain-file", str(empty)])
+    assert seen["kwargs"]["one_off_chain"] == ""

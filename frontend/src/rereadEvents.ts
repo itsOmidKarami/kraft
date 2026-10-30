@@ -24,6 +24,10 @@ export const REREAD_EVENTS: ReadonlySet<EventType> = new Set<EventType>([
   // A one-off chain approved, or the chain an item runs swapped, moves `one_off` and the chain it shows.
   "one_off_chain_approved",
   "chain_template_changed",
+  // Each of these rewrites the chain an item runs, which can reopen the review.
+  "attachments_changed",
+  "sandbox_reread",
+  "chain_revised",
   // store.mark_reentered flips waiting/rate_limited to active and clears retry_at with no event of its own; the reducer leaves status alone here.
   "node_started",
   // An escalation turn going live or ending flips escalated, which the reducer never patches.

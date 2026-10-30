@@ -74,6 +74,9 @@ def test_ops_bad_yaml(client):
             {"op": "move_to_library", "path": "work_brief", "name": "w"}, id="move-to-library"
         ),
         pytest.param({"op": "new_chain"}, id="new-chain"),
+        pytest.param({"op": "delete_chain"}, id="delete-chain"),
+        pytest.param({"op": "add_component"}, id="add-component"),
+        pytest.param({"op": "copy_component"}, id="copy-component"),
         pytest.param({"op": "rename", "path": "", "id": "other"}, id="rename-the-chain"),
     ],
 )
@@ -137,3 +140,37 @@ def test_ops_digest_is_accepted_at_create(client, repo, text):
     assert r.status_code == 201, r.text
     assert r.json()["one_off"]["approved"] is True
     assert r.json()["one_off"]["digest"] == digest
+
+
+@pytest.mark.parametrize(
+    ("text", "words"),
+    [
+        pytest.param("id: ../x\nextends: default\n", "lowercase letter", id="id-traversal"),
+        pytest.param("id: A b\nextends: default\n", "lowercase letter", id="id-bad-chars"),
+        pytest.param("id: default\nextends: default\n", "names a library chain", id="library-id"),
+        pytest.param("a: 2020-01-01\n", "plain YAML values", id="date"),
+        pytest.param("1: x\nb: y\n", "plain YAML values", id="int-key"),
+        pytest.param("a: .inf\n", "plain YAML values", id="inf"),
+        pytest.param("a: 2020-13-45\n", "not YAML", id="bad-date"),
+    ],
+)
+def test_ops_refuse_hostile_text_with_one_sentence(client, text, words):
+    r = _ops(client, text)
+    assert r.status_code == 422, r.text
+    assert words in r.json()["detail"]
+
+
+def test_ops_answer_the_custom_parts(client):
+    body = _ops(client, CUSTOM_LOAD_TEST).json()
+    assert [p["path"] for p in body["custom"]] == ["add[0].node"]
+    assert _ops(client, LIBRARY_ONLY_ONE_OFF).json()["custom"] == []
+
+
+def test_ops_a_chain_with_no_base_is_custom_throughout(client):
+    text = (
+        "id: mine\nnodes:\n  - id: a\n    kind: exec\n    tasks:\n"
+        "      - id: t\n        kind: agent\n        harness: claude\n        prompt: x\n"
+    )
+    body = _ops(client, text).json()
+    assert [p["path"] for p in body["custom"]] == [""]
+    assert body["custom_nodes"] == [n["id"] for n in body["nodes"]] != []
