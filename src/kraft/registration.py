@@ -25,6 +25,7 @@ operator's agent config (`doctor._mcp_check`).
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -46,6 +47,15 @@ MANAGED_MCP = (
 
 #: What an operator is told when nothing registers the server.
 FIX = "install the Kraft plugin (then `/kraft:onboard`), or run `kraft admin init`"
+
+#: What an operator is told when the registered command is not on the PATH a
+#: worker gets: Claude then cannot start the server, and the first ask fails.
+PATH_FIX = (
+    "put `kraft` on that PATH (install it as the install docs say, or `just install` in a "
+    "checkout), register the server by its absolute path (`claude mcp add --scope user kraft "
+    "-- /path/to/kraft admin mcp`), or give the service a PATH that has it (`kraft admin "
+    "uninstall-service`, then `kraft admin install-service` from a shell where `kraft` runs)"
+)
 
 
 def _json(text: str | None) -> dict:
@@ -91,31 +101,64 @@ def _plugins(settings: dict) -> dict:
     return plugins if isinstance(plugins, dict) else {}
 
 
-def _kraft_on(plugins: dict, installed: dict) -> bool:
-    """A `kraft@<marketplace>` key switched on and installed. Both formats of
-    `installed_plugins.json` (v1 and v2) key `plugins` by `plugin@marketplace`."""
-    return any(
-        key.split("@")[0] == "kraft" and on is True and bool(installed.get(key))
-        for key, on in plugins.items()
+def _kraft_on(plugins: dict, installed: dict) -> str | None:
+    """The `kraft@<marketplace>` key switched on and installed, if any. Both
+    formats of `installed_plugins.json` (v1 and v2) key `plugins` by
+    `plugin@marketplace`."""
+    return next(
+        (
+            key
+            for key, on in plugins.items()
+            if key.split("@")[0] == "kraft" and on is True and bool(installed.get(key))
+        ),
+        None,
     )
 
 
-def permission_tool(repo: Path | None) -> tuple[str, str] | None:
-    """`(tool name, where it is registered)` for a worker in `repo`, or None
-    when nothing registers the `kraft` server. `repo` None asks about the
-    machine- and user-scope files only."""
+def _command(config: dict) -> str | None:
+    """The command `config`'s `kraft` server runs; None for one with nothing
+    to check here: an `http` or `sse` server (a `url`), or a `${VAR}` Claude
+    Code expands at its own launch."""
+    entry = config.get("mcpServers", {}).get("kraft")
+    command = entry.get("command") if isinstance(entry, dict) else None
+    return command if isinstance(command, str) and command and "$" not in command else None
+
+
+def _plugin_command(installs, scope: str) -> str:
+    """The command of the installed plugin's own `.mcp.json`: of the install
+    in `scope` first (v2 lists one per scope, v1 has the one), and the bare
+    `kraft` the plugin ships when no install says otherwise."""
+    installs = installs if isinstance(installs, list) else [installs]
+    for install in sorted(
+        installs, key=lambda i: not isinstance(i, dict) or i.get("scope") != scope
+    ):
+        path = install.get("installPath") if isinstance(install, dict) else None
+        if isinstance(path, str):
+            config = _read(Path(path) / ".mcp.json")
+            return _command(config) if _names_kraft(config) else "kraft"
+    return "kraft"
+
+
+def permission_tool(repo: Path | None) -> tuple[str, str, str | None] | None:
+    """`(tool name, where it is registered, the command it runs)` for a worker
+    in `repo`, or None when nothing registers the `kraft` server. The command
+    is None for a server with none to run (`http`, `sse`). `repo` None asks
+    about the machine- and user-scope files only."""
     if MANAGED_MCP.exists():
         # Exclusive while it exists, even unreadable: nothing else loads.
-        return (DIRECT, str(MANAGED_MCP)) if _names_kraft(_read(MANAGED_MCP)) else None
+        managed = _read(MANAGED_MCP)
+        return (DIRECT, str(MANAGED_MCP), _command(managed)) if _names_kraft(managed) else None
     home = Path.home()
     user = home / ".claude.json"
     user_config = _read(user)
     if _names_kraft(user_config):
-        return DIRECT, str(user)
-    if repo is not None and _names_kraft(_local_scope(user_config, repo)):
-        return DIRECT, f"{user} (local scope)"
-    if repo is not None and _names_kraft(_committed(repo, ".mcp.json")):
-        return DIRECT, str(repo / ".mcp.json")
+        return DIRECT, str(user), _command(user_config)
+    local = _local_scope(user_config, repo) if repo is not None else {}
+    if _names_kraft(local):
+        return DIRECT, f"{user} (local scope)", _command(local)
+    committed = _committed(repo, ".mcp.json") if repo is not None else {}
+    if _names_kraft(committed):
+        return DIRECT, str(repo / ".mcp.json"), _command(committed)
     # Claude Code merges `enabledPlugins` key by key (`plugin@marketplace`),
     # a project's value overriding the user's: a repo that turns
     # `kraft@kraft` off wins over a user who turned it on, while a repo that
@@ -125,11 +168,21 @@ def permission_tool(repo: Path | None) -> tuple[str, str] | None:
     project_plugins = _plugins(_committed(repo, ".claude/settings.json")) if repo else {}
     installed = _read(home / ".claude" / "plugins" / "installed_plugins.json").get("plugins")
     installed = installed if isinstance(installed, dict) else {}
-    if not _kraft_on(user_plugins | project_plugins, installed):
-        return None
-    if _kraft_on(project_plugins, installed):
-        return PLUGIN, str(repo / ".claude" / "settings.json")
-    return PLUGIN, str(user_settings)
+    if key := _kraft_on(project_plugins, installed):
+        return (
+            PLUGIN,
+            str(repo / ".claude" / "settings.json"),
+            _plugin_command(installed[key], "project"),
+        )
+    if key := _kraft_on(user_plugins | project_plugins, installed):
+        return PLUGIN, str(user_settings), _plugin_command(installed[key], "user")
+    return None
+
+
+def on_path(command: str, path: str | None) -> bool:
+    """Whether `command` runs on `path` (a `PATH` value): looked up there by
+    name, or checked as a file when it names a directory."""
+    return shutil.which(command, path=path) is not None
 
 
 def copy_servers(repo: Path, where: str) -> dict:
