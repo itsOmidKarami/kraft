@@ -38,8 +38,14 @@ def gql(cli_name, repo, query="query { x }", **kw):
             "{}",
         ),
         ("HTTP/1.1 502 Bad Gateway\n\n<html>oops</html>", 502, None, "<html>oops</html>"),
+        (
+            "HTTP/2.0 200 OK\nContent-Type: text/plain\n\nintro\n\nHTTP/1.1 404 Not Found\nmore",
+            200,
+            ("content-type", "text/plain"),
+            "intro\n\nHTTP/1.1 404 Not Found\nmore",
+        ),
     ],
-    ids=["http2", "continue-crlf", "html-502"],
+    ids=["http2", "continue-crlf", "html-502", "body-quotes-a-status-line"],
 )
 def test_parse_included(stdout, status, header, body):
     got = transport.parse_included(stdout)

@@ -58,12 +58,20 @@ def _clip(text: str) -> str:
 
 
 def parse_included(stdout: str) -> ApiResponse | None:
-    """The last response in `api -i` output (a `100 Continue` precedes the real
-    one), or None when stdout holds no status line."""
+    """The response in `api -i` output, or None when stdout holds no status line.
+
+    Read from the start: only a 1xx block (`100 Continue`) followed by another
+    status block is skipped, so a body that quotes a status line stays the body."""
     blocks = stdout.replace("\r\n", "\n").split("\n\n")
-    start = next((i for i in range(len(blocks) - 1, -1, -1) if _STATUS_LINE.match(blocks[i])), None)
-    if start is None:
+    start = 0
+    if not _STATUS_LINE.match(blocks[0]):
         return None
+    while (
+        start + 1 < len(blocks)
+        and _STATUS_LINE.match(blocks[start])[1].startswith("1")  # type: ignore[index]
+        and _STATUS_LINE.match(blocks[start + 1])
+    ):
+        start += 1
     head, *rest = blocks[start].split("\n")
     headers = {
         k.strip().lower(): v.strip() for k, _, v in (line.partition(":") for line in rest) if _
