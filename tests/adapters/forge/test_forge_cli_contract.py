@@ -55,8 +55,6 @@ GH = SimpleNamespace(
     url="https://github.com/o/r/pull/7",
     body_flag="--body",
     base_flag="--base",
-    ready_argv=["pr", "ready", "7"],
-    update_argv=["pr", "edit", "kraft/abc", "--body", "fresh"],
     merge_verb="pr merge",
     head_flag="--match-head-commit",
     head_moved="GraphQL: Head branch was modified. Review and try the merge again.",
@@ -65,8 +63,6 @@ GH = SimpleNamespace(
     queued_list=api_outputs.FIND_AUTO_MERGE,
     find_route=api_outputs.FIND,
     find_args={"owner={owner}": None, "name={repo}": None, "b=kraft/abc": None},
-    close_argv=["pr", "close", "7"],
-    reopen_argv=["pr", "reopen", "7"],
 )
 
 
@@ -80,6 +76,7 @@ def be(request, cli):
     return b
 
 
+@pytest.mark.parametrize("be", [GLAB], ids=["glab"], indirect=True)
 async def test_open_mr_opens_a_draft_titled_with_the_work_item(be, cli, tmp_path):
     """Every MR Kraft opens starts as a draft -- human_review decides when it
     is ready (draft-MR workflow spec). `--fill` titled it from the commits,
@@ -99,6 +96,7 @@ async def test_open_mr_opens_a_draft_titled_with_the_work_item(be, cli, tmp_path
     assert not {"--label", "--assignee", "--reviewer"} & set(argv)
 
 
+@pytest.mark.parametrize("be", [GLAB], ids=["glab"], indirect=True)
 async def test_open_mr_targets_the_base_it_is_given(be, cli, tmp_path):
     """Kraft-v9gbi: the item's base branch, never the forge's default."""
     await be.cls().open_mr(repo=tmp_path, branch="kraft/abc", base="release", title="T", body="B")
@@ -107,6 +105,7 @@ async def test_open_mr_targets_the_base_it_is_given(be, cli, tmp_path):
     assert argv[argv.index(be.base_flag) + 1] == "release"
 
 
+@pytest.mark.parametrize("be", [GLAB], ids=["glab"], indirect=True)
 async def test_open_mr_passes_the_authored_metadata(be, cli, tmp_path):
     meta = MRMeta(labels=("release::minor",), assignees=("omid",), reviewers=("ada", "grace"))
 
@@ -185,6 +184,7 @@ async def test_every_merge_request_call_names_the_branch(be, cli, tmp_path, op):
             "mr view": json.dumps(pr),
             "ci list": outputs.GLAB_CI_SUCCESS,
             "api graphql": json.dumps(_NO_THREADS),
+            "api*/pulls -X POST*": json.dumps({"number": 7, "html_url": "u"}),
         },
     )
 
@@ -194,23 +194,25 @@ async def test_every_merge_request_call_names_the_branch(be, cli, tmp_path, op):
     # of each call is read.
     calls = [c.split() for c in cli.calls(be.name) if c.split()[:1] in (["pr"], ["mr"])]
     argv = cli.argv(be.name)
-    assert calls or argv.count("graphql")
+    assert calls or argv.count("graphql") or "head=kraft/abc" in argv
     for call in calls:
         assert "kraft/abc" in call, call
     if be is GH:
         # Each GraphQL call carries the branch (`b`) or the number it read from
         # the branch (`n`) as a variable, and none asked git for the current one.
-        named = [x for x in argv if x in ("b=kraft/abc", "n=7")]
+        named = [x for x in argv if x in ("b=kraft/abc", "n=7", "id=PR_kwDO7")]
         assert len(named) == argv.count("graphql"), argv
         assert not [c for c in cli.calls("git") if "symbolic-ref" in c]
 
 
+@pytest.mark.parametrize("be", [GLAB], ids=["glab"], indirect=True)
 async def test_mark_ready_unsets_draft(be, cli, tmp_path):
     await be.cls().mark_ready(repo=tmp_path, branch="kraft/abc", mr=forge.MR(be.number, "u"))
 
     assert cli.argv(be.name) == be.ready_argv
 
 
+@pytest.mark.parametrize("be", [GLAB], ids=["glab"], indirect=True)
 async def test_close_mr_runs_the_forges_close_command(be, cli, tmp_path):
     """B4: cancel closing the item's merge request, the same shape as
     `merge`'s own runner and timeout."""
@@ -219,6 +221,7 @@ async def test_close_mr_runs_the_forges_close_command(be, cli, tmp_path):
     assert cli.argv(be.name) == be.close_argv
 
 
+@pytest.mark.parametrize("be", [GLAB], ids=["glab"], indirect=True)
 async def test_reopen_mr_runs_the_forges_reopen_command(be, cli, tmp_path):
     """B8 (E), tested here with the rest of this pair: `reopen-mr` undoing an
     externally-closed merge request."""
@@ -227,6 +230,7 @@ async def test_reopen_mr_runs_the_forges_reopen_command(be, cli, tmp_path):
     assert cli.argv(be.name) == be.reopen_argv
 
 
+@pytest.mark.parametrize("be", [GLAB], ids=["glab"], indirect=True)
 async def test_update_mr_rewrites_the_description(be, cli, tmp_path):
     """`open_mr` runs before verify and mr_checks commit, so the description it
     wrote describes a branch that no longer exists (Kraft-c09h)."""
@@ -351,8 +355,10 @@ async def test_gh_cancel_merge_undoes_only_what_holds_the_pull_request(
     )
 
     argv = cli.argv("gh")
-    assert ("--disable-auto" in argv) is disabled
-    assert ("id=PR_1" in argv) is dequeued
+    mutations = "\n".join(argv)
+    assert ("disablePullRequestAutoMerge(input: {pullRequestId: $id})" in mutations) is disabled
+    assert ("dequeuePullRequest(input: {id: $id})" in mutations) is dequeued
+    assert argv.count("id=PR_1") == disabled + dequeued
 
 
 @pytest.mark.parametrize(

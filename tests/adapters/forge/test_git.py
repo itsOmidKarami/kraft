@@ -80,11 +80,14 @@ def test_open_mr_refuses_a_dirty_worktree_against_real_git(tmp_path, glab):
 
 
 @pytest.mark.parametrize(
-    "name, cls, view",
-    [("glab", forge.GlabCli, outputs.GLAB_MR_VIEW), ("gh", forge.GhCli, outputs.GH_PR_VIEW)],
+    "name, cls, view, create",
+    [
+        ("glab", forge.GlabCli, outputs.GLAB_MR_VIEW, "create"),
+        ("gh", forge.GhCli, '{"number": 7, "html_url": "u"}', "repos/{owner}/{repo}/pulls"),
+    ],
     ids=["glab", "gh"],
 )
-def test_open_mr_in_place_ignores_a_dirty_checkout(tmp_path, cli, name, cls, view):
+def test_open_mr_in_place_ignores_a_dirty_checkout(tmp_path, cli, name, cls, view, create):
     """The in-place counterpart: the person's own uncommitted edits in their
     checkout are no reason to refuse; only the branch and its commits reach
     the merge request."""
@@ -96,7 +99,7 @@ def test_open_mr_in_place_ignores_a_dirty_checkout(tmp_path, cli, name, cls, vie
         cls().open_mr(repo=repo, branch=BRANCH, base="main", title="t", body="b", check_clean=False)
     )
 
-    assert cli.argv(name)[1] == "create"
+    assert cli.argv(name)[1] == create
 
 
 def test_open_mr_ignores_gitignored_paths_against_real_git(tmp_path, glab):

@@ -3,6 +3,8 @@ the lookup that picks the pull request the way `gh pr view` does (finder.go)."""
 
 from __future__ import annotations
 
+import re
+from datetime import UTC, datetime
 from pathlib import Path
 
 from kraft.adapters.forge import git
@@ -182,3 +184,67 @@ async def read_pr(
         pr = {k: v for k, v in pr.items() if k != "commits"}
         pr["headCommitOid"], pr["statusCheckRollup"] = oid, rollup_rows(contexts)
     return pr
+
+
+#: `GET .../actions/runs` keys onto the names `gh run list --json` gave them,
+#: which the parsers read. Values are never rewritten.
+_RUN_KEYS = {
+    "id": "databaseId",
+    "head_sha": "headSha",
+    "head_branch": "headBranch",
+    "html_url": "url",
+    "created_at": "createdAt",
+    "updated_at": "updatedAt",
+}
+
+
+def run_rows(data: object) -> list[dict]:
+    """The `workflow_runs` of a runs answer, keys renamed as `gh run list` does."""
+    runs = data.get("workflow_runs") if isinstance(data, dict) else None
+    return [
+        {_RUN_KEYS.get(k, k): v for k, v in r.items()} for r in runs or [] if isinstance(r, dict)
+    ]
+
+
+#: shared.go:318-325: the conclusions `gh run view --log-failed` calls failed.
+_FAILED_STEP = frozenset({"action_required", "failure", "startup_failure", "timed_out"})
+_LOG_TIME = re.compile(r"^\ufeff?(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)")
+
+
+def _second(stamp: str) -> datetime:
+    """`stamp` in UTC, cut to the whole second."""
+    return datetime.fromisoformat(stamp).astimezone(UTC).replace(microsecond=0)
+
+
+def failed_step_log(job: dict, log: str) -> str:
+    """`log` (a job's whole log, every line stamped) cut the way `gh run view
+    --log-failed` prints it: `job<TAB>step<TAB>line` for the lines of each failed
+    step, in step order. A line belongs to a step whose [start, end] seconds
+    (both inclusive) hold its stamp. With no failed step to cut by, or no line
+    in any window, the whole log goes under `UNKNOWN STEP` (gh's own fallback
+    when a step has no log of its own)."""
+    lines = [
+        (m and _second(m[1] + "+00:00"), line)
+        for line in log.splitlines()
+        if (m := _LOG_TIME.match(line))
+    ]
+    windows: list[tuple[str, datetime, datetime]] = []
+    for s in sorted(job.get("steps") or [], key=lambda s: s.get("number") or 0):
+        if (
+            str(s.get("conclusion") or "").lower() in _FAILED_STEP
+            and s.get("started_at")
+            and s.get("completed_at")
+        ):
+            windows.append(
+                (str(s.get("name") or ""), _second(s["started_at"]), _second(s["completed_at"]))
+            )
+    out: list[str] = []
+    taken: set[int] = set()
+    for step, start, end in windows:
+        for i, (at, line) in enumerate(lines):
+            if i not in taken and start <= at <= end:
+                taken.add(i)
+                out.append(f"{job.get('name')}\t{step}\t{line}\n")
+    if out:
+        return "".join(out)
+    return "".join(f"{job.get('name')}\tUNKNOWN STEP\t{line}\n" for line in log.splitlines())

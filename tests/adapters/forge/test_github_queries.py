@@ -15,6 +15,9 @@ from .api_outputs import (
     READ_BRANCH,
     READ_MORE,
     READ_NUMBER,
+    SAD_JOB,
+    SAD_JOB_LOG,
+    SAD_JOB_LOG_FAILED,
     check_run,
     checks_page,
     contexts_page,
@@ -24,6 +27,8 @@ from .api_outputs import (
     pr_by_number,
     pull_request,
     status_context,
+    step,
+    workflow_run,
 )
 from .nodes import FAIL
 
@@ -251,3 +256,110 @@ async def test_find_mr_asks_for_every_state_of_the_branch(cli, tmp_path):
         "-F",
     )
     assert "first: 5" in "\n".join(argv)
+
+
+def _line(second: str, text: str) -> str:
+    return f"2026-10-21T10:00:{second}Z {text}\n"
+
+
+def _out(job: str, step_name: str, *lines: str) -> str:
+    return "".join(f"{job}\t{step_name}\t{line}" for line in lines)
+
+
+_L = [_line(f"{n:02d}.5000000", f"line {n}") for n in range(0, 40, 10)]
+
+
+@pytest.mark.parametrize(
+    "job, log, expected",
+    [
+        pytest.param(SAD_JOB, SAD_JOB_LOG, SAD_JOB_LOG_FAILED, id="gh-sad-job"),
+        # Both ends are whole seconds, inclusive: 10..30 holds lines 10, 20, 30.
+        pytest.param(
+            {"name": "j", "steps": [step(1, "s", "failure", "10:00:10", "10:00:30")]},
+            "".join(_L),
+            _out("j", "s", *_L[1:]),
+            id="window-ends-are-inclusive-seconds",
+        ),
+        pytest.param(
+            {"name": "j", "steps": [step(1, "s", "failure", "10:00:10.9", "10:00:20.1")]},
+            "".join(_L),
+            _out("j", "s", *_L[1:3]),
+            id="start-is-floored-end-is-its-second",
+        ),
+        # Step order, not the order the API listed them in; a cancelled step is no failure.
+        pytest.param(
+            {
+                "name": "j",
+                "steps": [
+                    step(3, "late", "TIMED_OUT", "10:00:30", "10:00:30"),
+                    step(2, "mid", "cancelled", "10:00:20", "10:00:20"),
+                    step(1, "early", "action_required", "10:00:00", "10:00:00"),
+                ],
+            },
+            "".join(_L),
+            _out("j", "early", _L[0]) + _out("j", "late", _L[3]),
+            id="failed-steps-in-step-order-cancelled-skipped",
+        ),
+        # gh's fallback: no step log to cut, the whole job log under UNKNOWN STEP.
+        pytest.param(
+            {"name": "j", "steps": [step(1, "s", "success", "10:00:00", "10:00:40")]},
+            "".join(_L),
+            _out("j", "UNKNOWN STEP", *_L),
+            id="no-failed-step",
+        ),
+        pytest.param(
+            {"name": "j", "steps": [step(1, "s", "cancelled", "10:00:00", "10:00:40")]},
+            "".join(_L),
+            _out("j", "UNKNOWN STEP", *_L),
+            id="a-cancelled-step-is-not-failed",
+        ),
+        pytest.param(
+            {"name": "j", "steps": [step(1, "s", "failure", "10:05:00", "10:05:10")]},
+            "".join(_L),
+            _out("j", "UNKNOWN STEP", *_L),
+            id="no-line-in-the-window",
+        ),
+        pytest.param(
+            {"name": "j", "steps": [{"name": "s", "number": 1, "conclusion": "failure"}]},
+            "".join(_L),
+            _out("j", "UNKNOWN STEP", *_L),
+            id="a-failed-step-without-times",
+        ),
+        pytest.param({"name": "j"}, "", "", id="no-log-no-output"),
+        # A line carries one step, and a log may start with a byte order mark.
+        pytest.param(
+            {
+                "name": "j",
+                "steps": [
+                    step(1, "a", "failure", "10:00:00", "10:00:10"),
+                    step(2, "b", "failure", "10:00:10", "10:00:20"),
+                ],
+            },
+            "\ufeff" + "".join(_L),
+            _out("j", "a", "\ufeff" + _L[0], _L[1]) + _out("j", "b", _L[2]),
+            id="a-boundary-line-goes-to-the-first-step",
+        ),
+    ],
+)
+def test_failed_step_log_cuts_the_log_as_gh_log_failed_prints_it(job, log, expected):
+    assert gq.failed_step_log(job, log) == expected
+
+
+def test_run_rows_rename_keys_only():
+    data = {"workflow_runs": [workflow_run(5, name="t", conclusion="failure"), "junk"]}
+
+    assert gq.run_rows(data) == [
+        {
+            "databaseId": 5,
+            "name": "t",
+            "headBranch": "main",
+            "headSha": "deadbeef",
+            "event": "push",
+            "status": "completed",
+            "conclusion": "failure",
+            "url": "https://github.com/o/r/actions/runs/5",
+            "createdAt": "2026-09-19T05:51:00Z",
+            "updatedAt": "2026-09-19T05:51:09Z",
+        }
+    ]
+    assert gq.run_rows({}) == gq.run_rows([]) == []

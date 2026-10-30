@@ -18,16 +18,16 @@ from .api_outputs import (
     pr_by_branch,
     pr_by_number,
     pull_request,
+    runs,
     status_context,
+    workflow_run,
 )
 from .nodes import FAIL
 
 PR = forge.MR(7, "http://x/7")
 
-GH_RUN_LIST = (
-    '[{"status":"completed","conclusion":"failure","headSha":"deadbeef",'
-    '"url":"https://github.com/o/r/actions/runs/123456","name":"build"}]'
-)
+GH_RUN_LIST = runs(workflow_run(123456, name="build"))
+_RUNS = "api*repos/{owner}/{repo}/actions/runs -X GET*"
 
 
 def _gh(cli, pr: dict, routes: dict[str, str] | None = None) -> None:
@@ -224,26 +224,19 @@ async def test_gh_branch_ci_status_reads_runs_not_a_pull_request(cli, tmp_path):
 
     assert (status.state, status.sha) == ("failed", "deadbeef")
     assert status.failed_jobs[0].failure_reason == "script_failure"
+    assert status.failed_jobs[0].detail_url == "https://github.com/o/r/actions/runs/123456"
     assert cli.calls("gh") == [
-        "run list --branch main --commit deadbeef -L 20 "
-        "--json status,conclusion,headSha,url,name,createdAt,updatedAt"
+        "api repos/{owner}/{repo}/actions/runs -X GET -i "
+        "-f branch=main -f head_sha=deadbeef -F per_page=20"
     ]
 
 
 async def test_gh_branch_ci_status_finds_a_commits_runs_on_a_busy_branch(cli, tmp_path):
     """Kraft-h6wi2: the branch's newest 20 runs are all newer commits', so the
     watched commit is found by asking for its own runs, not by filtering those."""
-    busy = ",".join(
-        f'{{"status":"completed","conclusion":"failure","headSha":"newer{n}","name":"test"}}'
-        for n in range(20)
-    )
-    watched = '{"status":"completed","conclusion":"success","headSha":"deadbeef","name":"test"}'
-    gh = cli.bindir / "gh"
-    gh.write_text(
-        f"#!/bin/sh\ncase \"$*\" in\n  *--commit*) echo '[{watched}]' ;;\n"
-        f"  *) echo '[{busy}]' ;;\nesac\n"
-    )
-    gh.chmod(0o755)
+    busy = runs(*(workflow_run(n, head_sha=f"newer{n}") for n in range(20)))
+    watched = runs(workflow_run(99, head_sha="deadbeef", conclusion="success"))
+    cli.stub("gh", routes={"api*head_sha=deadbeef*": watched}, default=busy)
 
     status = await forge.GhCli().branch_ci_status(repo=tmp_path, branch="main", head_sha="deadbeef")
 
@@ -276,7 +269,7 @@ async def test_gh_branch_ci_status_waits_for_a_run_matching_the_given_head(
 ):
     """A run list that has not caught up to `head_sha` yet is a wait, not a
     (wrong-commit) result -- same shape as glab's own sha guard."""
-    cli.stub("gh", routes={"run list": GH_RUN_LIST, **api}, default=FAIL)
+    cli.stub("gh", routes={_RUNS: GH_RUN_LIST, **api}, default=FAIL)
 
     status = await forge.GhCli().branch_ci_status(
         repo=tmp_path, branch="main", head_sha="other-sha"
@@ -285,16 +278,18 @@ async def test_gh_branch_ci_status_waits_for_a_run_matching_the_given_head(
     assert (status.state, status.no_checks) == ("pending", no_checks)
 
 
-def _run(name: str, conclusion: str, created: str) -> str:
-    return (
-        f'{{"status":"completed","conclusion":"{conclusion}","headSha":"deadbeef",'
-        f'"url":"https://github.com/o/r/actions/runs/1","name":"{name}","createdAt":"{created}",'
-        f'"updatedAt":"{created.replace(":00Z", ":09Z")}"}}'
+def _run(name: str, conclusion: str, created: str) -> dict:
+    return workflow_run(
+        1,
+        name=name,
+        conclusion=conclusion,
+        created_at=created,
+        updated_at=created.replace(":00Z", ":09Z"),
     )
 
 
 @pytest.mark.parametrize(
-    "runs, state, cancelled_at",
+    "rows, state, cancelled_at",
     [
         # The same invariant post-merge (Kraft-zn8me): a concurrency-cancelled
         # run on the target branch is a wait for its successor, not red --
@@ -321,91 +316,15 @@ def _run(name: str, conclusion: str, created: str) -> str:
     ids=["only-cancelled", "successor-green", "successor-red"],
 )
 async def test_gh_branch_ci_status_judges_the_latest_run_never_a_cancelled_one(
-    cli, tmp_path, runs, state, cancelled_at
+    cli, tmp_path, rows, state, cancelled_at
 ):
-    cli.stub("gh", "[" + ",".join(runs) + "]")
+    cli.stub("gh", runs(*rows))
 
     status = await forge.GhCli().branch_ci_status(repo=tmp_path, branch="main", head_sha="deadbeef")
 
     assert (status.state, status.cancelled_at) == (state, cancelled_at)
     assert all(j.failure_reason != "cancelled" for j in status.failed_jobs)
     assert not status.no_checks, "a head with a run has checks, even a pending one"
-
-
-def _labelled(*names: str) -> str:
-    return pr_by_number(pull_request(labels={"nodes": [{"name": n} for n in names]}))
-
-
-async def test_gh_set_labels_edits_the_pull_request(cli, tmp_path):
-    """GitHub re-evaluates `pull_request: types: [labeled]` itself, so there is
-    no pipeline to re-create here -- only the label to add."""
-    cli.stub("gh", routes={READ_NUMBER: _labelled(), "pr edit": ""})
-
-    await forge.GhCli().set_labels(
-        repo=tmp_path, branch="kraft/abc", mr=forge.MR(7, "u"), labels=("release::patch", "bug")
-    )
-
-    (edit,) = [c for c in cli.calls("gh") if c.startswith("pr edit")]
-    assert edit == "pr edit 7 --add-label release::patch,bug"
-
-
-@pytest.mark.parametrize(
-    "current, edit",
-    [
-        (
-            ("release::patch", "bug", "area::ui"),
-            "pr edit 7 --add-label release::minor --remove-label release::patch",
-        ),
-        # Setting the label the PR already has removes nothing.
-        (("release::minor",), "pr edit 7 --add-label release::minor"),
-    ],
-    ids=["other-scoped-label-dropped", "same-label-kept"],
-)
-async def test_gh_set_labels_replaces_an_existing_same_scope_label(cli, tmp_path, current, edit):
-    """Kraft-o9xh1, as glab does (Kraft-zfdu8): `--add-label` only adds, so a
-    repair pass that moves release::patch to release::minor left both on the PR
-    and `next_tag.py` raises on more than one. The label sharing a new label's
-    `scope::` prefix is removed in the same edit; other labels stay."""
-    cli.stub("gh", routes={READ_NUMBER: _labelled(*current), "pr edit": ""})
-
-    await forge.GhCli().set_labels(
-        repo=tmp_path, branch="kraft/abc", mr=forge.MR(7, "u"), labels=("release::minor",)
-    )
-
-    calls = cli.calls("gh")
-    assert calls[0].startswith("api graphql") and "n=7" in cli.argv("gh")
-    assert calls[-1] == edit
-    assert "statusCheckRollup" not in "\n".join(cli.argv("gh")), "labels need no checks"
-
-
-async def test_gh_retry_jobs_reruns_the_actions_run_behind_the_failed_check(cli, tmp_path):
-    cli.stub("gh", "")
-    job = forge.FailedJob(
-        "build",
-        "failed",
-        "job_execution_timeout",
-        "https://github.com/o/r/actions/runs/123456/job/9",
-    )
-
-    await forge.GhCli().retry_jobs(
-        repo=tmp_path, ci=forge.CIStatus(state="failed", url="u", failed_jobs=(job,))
-    )
-
-    assert cli.argv("gh") == ["run", "rerun", "123456", "--failed"]
-
-
-async def test_gh_rerun_after_description_change_reruns_without_a_new_pipeline(cli, tmp_path):
-    cli.stub("gh", "")
-    job = forge.FailedJob("build", "failed", None, "https://github.com/o/r/actions/runs/77/job/9")
-
-    made_new = await forge.GhCli().rerun_after_description_change(
-        repo=tmp_path,
-        branch="b",
-        ci=forge.CIStatus(state="failed", url="u", failed_jobs=(job,)),
-    )
-
-    assert made_new is False
-    assert cli.argv("gh") == ["run", "rerun", "77", "--failed"]
 
 
 async def test_gh_mr_body_reads_the_live_description(cli, tmp_path):

@@ -19,6 +19,9 @@ _PR_URL = "https://github.com/o/r/pull/7"
 _RUN_URL = "https://github.com/o/r/actions/runs/555"
 _QUEUE_BRANCH = "gh-readonly-queue/main/pr-7-" + "a" * 40
 _JOBS = "api repos/{owner}/{repo}/actions/runs/555/jobs?per_page=100"
+_RUNS = "api*repos/{owner}/{repo}/actions/runs -X GET*"
+_LOGS = "api*repos/{owner}/{repo}/actions/jobs/*/logs*"
+_RUNS_CALL = "api repos/{owner}/{repo}/actions/runs -X GET -i -f event=merge_group -F per_page=100"
 
 
 def _graphql(
@@ -53,13 +56,9 @@ def _merge_group_run(
     id: int = 555,
     created_at: str = "2026-10-21T09:30:00Z",
 ):
-    return {
-        "createdAt": created_at,
-        "databaseId": id,
-        "headBranch": branch,
-        "conclusion": conclusion,
-        "url": f"https://github.com/o/r/actions/runs/{id}",
-    }
+    return api_outputs.workflow_run(
+        id, head_branch=branch, conclusion=conclusion, created_at=created_at
+    )
 
 
 #: The merge group's failed run (09:30), and when GitHub rebuilt it after.
@@ -72,7 +71,7 @@ def _queue_routes(graphql: str, runs: list[dict] | None = None, **routes: str) -
     return {
         api_outputs.FIND: api_outputs.find_result(api_outputs.listed()),
         "api graphql": graphql,
-        "run list": json.dumps(runs or []),
+        _RUNS: api_outputs.runs(*(runs or [])),
         _JOBS: json.dumps(
             {
                 "jobs": [
@@ -81,7 +80,7 @@ def _queue_routes(graphql: str, runs: list[dict] | None = None, **routes: str) -
                 ]
             }
         ),
-        "run view": "test\tRun tests\t2026-10-21T10:00:00Z FAILED tests/test_x.py::test_y",
+        _LOGS: "2026-10-21T10:00:00.0000000Z FAILED tests/test_x.py::test_y",
         **routes,
     }
 
@@ -366,7 +365,7 @@ async def test_merge_queue_reads_the_queue(cli, tmp_path, routes, expected, fail
     assert got.failure is None or got.failure.state == failure_state
     assert replace(got, failure=None) == expected
     if expected.kind == "none":
-        assert not any(c.startswith("run ") for c in cli.calls("gh")), "asked a repo with no queue"
+        assert _RUNS_CALL not in cli.calls("gh"), "asked a repo with no queue"
 
 
 def _run_for(branch: str, conclusion: str = "failure", id: int = 900) -> dict:
@@ -427,11 +426,8 @@ async def test_merge_queue_blames_the_failed_merge_group_run_of_this_pull_reques
     else:
         assert got.failure is not None and got.failure.url.endswith(f"/runs/{run_id}")
         assert got.cause == "code"
-    run_lists = [c for c in cli.calls("gh") if c.startswith("run list")]
-    assert len(run_lists) == 1 and "--event merge_group" in run_lists[0]
-    assert "createdAt" in run_lists[0]
-    # `gh run list` is repo-wide: thirty runs is a busy hour on another branch.
-    assert "-L 100" in run_lists[0]
+    # The runs list is repo-wide: thirty runs is a busy hour on another branch.
+    assert cli.calls("gh").count(_RUNS_CALL) == 1
 
 
 async def test_merge_queue_hands_over_the_failed_jobs_with_two_log_tails_of_fifteen_lines(
@@ -446,11 +442,12 @@ async def test_merge_queue_hands_over_the_failed_jobs_with_two_log_tails_of_fift
         ]
         + [{"id": 4, "name": "lint", "conclusion": "success"}]
     }
-    log = "\n".join(f"job1\tstep\t2026-10-21T10:00:00Z line {n}" for n in range(1, 31))
+    jobs["jobs"][0]["steps"] = [api_outputs.step(1, "step", "failure", "10:00:00", "10:00:59")]
+    log = "\n".join(f"2026-10-21T10:00:{n:02d}.0000000Z line {n}" for n in range(1, 31))
     routes = _queue_routes(
         _graphql(removal="Required status checks failed"),
         [_merge_group_run()],
-        **{_JOBS: json.dumps(jobs), "run view": log},
+        **{_JOBS: json.dumps(jobs), _LOGS: log},
     )
     cli.stub("gh", routes=routes, default=FAIL)
 
@@ -461,12 +458,35 @@ async def test_merge_queue_hands_over_the_failed_jobs_with_two_log_tails_of_fift
     assert [j.name for j in failure.failed_jobs] == ["job1", "job2", "job3"]
     assert all(j.failure_reason == "script_failure" for j in failure.failed_jobs)
     assert failure.failed_jobs[0].detail_url == f"{_RUN_URL}/job/1"
-    views = [c for c in cli.calls("gh") if c.startswith("run view")]
-    assert views == [f"run view 555 --log-failed --job {i}" for i in (1, 2)]
+    logs = [c for c in cli.calls("gh") if "/logs" in c]
+    assert logs == [f"api repos/{{owner}}/{{repo}}/actions/jobs/{i}/logs -X GET -i" for i in (1, 2)]
     tails = [line for line in failure.jobs if line.startswith("  ")]
     assert len(tails) == 30
-    assert tails[0].endswith("line 16") and tails[14].endswith("line 30")
+    # job1 has a failed step, job2 none: its whole log goes under UNKNOWN STEP
+    assert tails[0] == "  job1\tstep\t2026-10-21T10:00:16.0000000Z line 16"
+    assert tails[14].endswith("line 30")
+    assert tails[15] == "  job2\tUNKNOWN STEP\t2026-10-21T10:00:16.0000000Z line 16"
     assert not any("line 15" in line for line in failure.jobs)
+
+
+async def test_merge_queue_cuts_a_job_log_to_its_failed_step_as_gh_does(cli, tmp_path):
+    """The log tail and the `jobs` text are what `gh run view --log-failed`
+    printed for gh's own sad job (view_test.go:2726-2730)."""
+    routes = _queue_routes(
+        _graphql(removal="Required status checks failed"),
+        [_merge_group_run()],
+        **{_JOBS: json.dumps({"jobs": [api_outputs.SAD_JOB]}), _LOGS: api_outputs.SAD_JOB_LOG},
+    )
+    cli.stub("gh", routes=routes, default=FAIL)
+
+    got = await forge.GhCli().merge_queue(repo=tmp_path, branch="kraft/abc", base="main")
+
+    assert got.failure is not None
+    assert got.failure.jobs == (
+        "run 555: failure",
+        "job sad job: failed (script_failure)",
+        *(f"  {line}" for line in api_outputs.SAD_JOB_LOG_FAILED.splitlines()),
+    )
 
 
 async def test_merge_queue_a_failed_run_whose_jobs_cannot_be_read_is_not_infra(cli, tmp_path):

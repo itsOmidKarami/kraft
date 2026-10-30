@@ -6,6 +6,7 @@ import re
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote as urlquote
 
 from kraft.adapters.forge import git
 from kraft.adapters.forge import github_queries as gq
@@ -24,7 +25,7 @@ from kraft.adapters.forge.models import (
     ReviewerFeedback,
     ReviewResult,
 )
-from kraft.adapters.forge.transport import CliTransport, Transport
+from kraft.adapters.forge.transport import CliTransport, Field, Transport
 from kraft.automated_review import Reviewers
 
 _GH_MR_STATES: dict[str, str] = {"OPEN": "open", "MERGED": "merged", "CLOSED": "closed"}
@@ -209,6 +210,16 @@ query($owner: String!, $name: String!, $n: Int!) {
   }
 }
 """
+_READY_MUTATION = """
+mutation($id: ID!) {
+  markPullRequestReadyForReview(input: {pullRequestId: $id}) { pullRequest { id } }
+}
+"""
+_DISABLE_AUTO_MUTATION = """
+mutation($id: ID!) {
+  disablePullRequestAutoMerge(input: {pullRequestId: $id}) { pullRequest { id } }
+}
+"""
 _DEQUEUE_MUTATION = """
 mutation($id: ID!) {
   dequeuePullRequest(input: {id: $id}) { mergeQueueEntry { id } }
@@ -303,10 +314,27 @@ class GhCli(mr_ops.CliWaits):
         path: str,
         *,
         method: str = "GET",
-        fields: Mapping[str, str | int | bool] | None = None,
+        fields: Mapping[str, Field] | None = None,
     ):
         """The parsed JSON of one REST call."""
         return (await self._transport(repo).rest(method, path, fields=fields)).json()
+
+    async def _send(
+        self, repo: Path, path: str, *, method: str, fields: Mapping[str, Field] | None = None
+    ) -> None:
+        """One REST write whose answer is not read (some have an empty body)."""
+        await self._transport(repo).rest(method, path, fields=fields)
+
+    async def _require_labels(self, repo: Path, labels: tuple[str, ...]) -> None:
+        """Refuse a label the repository does not have, as gh does before it
+        writes anything; GitHub would not create it."""
+        for name in labels:
+            try:
+                await self._api(repo, f"repos/{{owner}}/{{repo}}/labels/{urlquote(name, safe='')}")
+            except ForgeError as exc:
+                if exc.status == 404:
+                    raise ForgeError(f"could not add label: '{name}' not found") from exc
+                raise
 
     async def _gql(self, repo: Path, query: str, variables: Mapping[str, str | int | bool]) -> dict:
         """The `data` of one GraphQL call."""
@@ -326,40 +354,72 @@ class GhCli(mr_ops.CliWaits):
         if check_clean:
             await git.assert_clean(repo, base)
         await self.push(repo=repo, branch=branch)
-        # `--fill` titles the PR from the commits; see GlabCli.open_mr.
-        await git.run_git(
+        meta = meta or mr_ops.MRMeta()
+        await self._require_labels(repo, meta.labels)
+        made = await self._api(
             repo,
-            [
-                "gh",
-                "pr",
-                "create",
-                # See GlabCli.open_mr.
-                "--draft",
-                "--head",
-                branch,
-                "--base",
-                base,
-                "--title",
-                mr_ops.mr_title(title),
-                "--body",
-                body,
-                *mr_ops.meta_flags(meta or mr_ops.MRMeta()),
-            ],
+            "repos/{owner}/{repo}/pulls",
+            method="POST",
+            # Draft: see GlabCli.open_mr.
+            fields={
+                "head": branch,
+                "base": base,
+                "title": mr_ops.mr_title(title),
+                "body": body,
+                "draft": True,
+            },
         )
-        raw = await git.run_git(repo, ["gh", "pr", "view", branch, "--json", "number,url"])
-        data = mr_ops.parse_json(raw, "gh pr view")
-        return MR(number=int(data["number"]), url=str(data["url"]))
+        try:
+            number, url = int(made["number"]), str(made["html_url"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ForgeError(f"gh api answered without the pull request: {made!r:.200}") from exc
+        # Create metadata is follow-up calls in gh too.
+        if meta.labels:
+            await self._send(
+                repo,
+                f"repos/{{owner}}/{{repo}}/issues/{number}/labels",
+                method="POST",
+                fields={"labels": list(meta.labels)},
+            )
+        if meta.assignees:
+            await self._send(
+                repo,
+                f"repos/{{owner}}/{{repo}}/issues/{number}/assignees",
+                method="POST",
+                fields={"assignees": list(meta.assignees)},
+            )
+        if meta.reviewers:
+            people = [r for r in meta.reviewers if "/" not in r]
+            teams = [r.split("/", 1)[1] for r in meta.reviewers if "/" in r]
+            await self._send(
+                repo,
+                f"repos/{{owner}}/{{repo}}/pulls/{number}/requested_reviewers",
+                method="POST",
+                fields={
+                    **({"reviewers": people} if people else {}),
+                    **({"team_reviewers": teams} if teams else {}),
+                },
+            )
+        return MR(number=number, url=url)
 
     async def mark_ready(self, *, repo: Path, branch: str, mr: MR) -> None:
-        """`gh pr ready` is a no-op on an already-ready PR (gh's own docs),
-        same reasoning as `GlabCli.mark_ready`."""
-        await git.run_git(repo, ["gh", "pr", "ready", *mr_ops.target(mr.number, branch)])
+        """Nothing to do for a pull request that is not a draft, as `gh pr
+        ready` (same reasoning as `GlabCli.mark_ready`)."""
+        pr = await self._pr(repo, mr_ops.target(mr.number, branch), checks=False)
+        if pr.get("isDraft"):
+            await self._gql(repo, _READY_MUTATION, {"id": pr["id"]})
 
     async def push(self, *, repo: Path, branch: str) -> None:
         await git.push(repo, branch)
 
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None:
-        await git.run_git(repo, ["gh", "pr", "edit", branch, "--body", body])
+        pr = await self._pr(repo, mr_ops.target(0, branch), checks=False)
+        await self._send(
+            repo,
+            f"repos/{{owner}}/{{repo}}/pulls/{pr['number']}",
+            method="PATCH",
+            fields={"body": body},
+        )
 
     async def mr_body(self, *, repo: Path, branch: str) -> str:
         data = await self._pr(repo, mr_ops.target(0, branch), checks=False)
@@ -440,9 +500,6 @@ class GhCli(mr_ops.CliWaits):
         """The pull request `target` names (`mr_ops.target`), read through the
         transport; `checks=False` leaves the check rollup unread."""
         return await gq.read_pr(self._transport(repo), repo, target, checks=checks)
-
-    async def _json(self, repo: Path, args: list[str], what: str):
-        return mr_ops.parse_json(await git.run_git(repo, ["gh", *args]), what)
 
     async def _bot_review(self, repo: Path, branch: str, bot: str) -> ReviewResult:
         """`bot`'s latest review of the PR's current head, dismissed ones
@@ -603,27 +660,16 @@ class GhCli(mr_ops.CliWaits):
         checkout's possibly-stale local HEAD, so it is what runs are matched
         against here.
         """
-        raw = await git.run_git(
-            repo,
-            [
-                "gh",
-                "run",
-                "list",
-                "--branch",
-                branch,
-                # That commit's own runs, not the branch's newest 20: on a busy
-                # branch the commit a caller keeps watching falls out of that
-                # window and would read as never having run (Kraft-h6wi2).
-                "--commit",
-                head_sha,
-                "-L",
-                "20",
-                "--json",
-                "status,conclusion,headSha,url,name,createdAt,updatedAt",
-            ],
+        # That commit's own runs, not the branch's newest 20: on a busy
+        # branch the commit a caller keeps watching falls out of that
+        # window and would read as never having run (Kraft-h6wi2).
+        runs = gq.run_rows(
+            await self._api(
+                repo,
+                "repos/{owner}/{repo}/actions/runs",
+                fields={"branch": branch, "head_sha": head_sha, "per_page": 20},
+            )
         )
-        rows = mr_ops.parse_json(raw, "gh run list")
-        runs = [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
         # The latest run of each workflow for this head, so a cancelled
         # superseded run is outvoted by its successor, as in `ci_status`.
         current = _latest_by_name(
@@ -679,7 +725,7 @@ class GhCli(mr_ops.CliWaits):
             return True
 
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None:
-        """`gh run rerun <id> --failed` for every distinct Actions run behind
+        """Rerun the failed jobs of every distinct Actions run behind
         `ci`'s failed checks. Best-effort: a check with no `/actions/runs/<id>/`
         in its `detailsUrl` (a non-Actions status check) is skipped."""
         run_ids = {
@@ -688,7 +734,11 @@ class GhCli(mr_ops.CliWaits):
             if job.detail_url and (m := _RUN_ID_RE.search(job.detail_url))
         }
         for run_id in run_ids:
-            await git.run_git(repo, ["gh", "run", "rerun", run_id, "--failed"])
+            await self._send(
+                repo,
+                f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/rerun-failed-jobs",
+                method="POST",
+            )
 
     async def rerun_after_description_change(
         self, *, repo: Path, branch: str, ci: CIStatus
@@ -715,10 +765,20 @@ class GhCli(mr_ops.CliWaits):
         current = [
             str(label.get("name", "")) for label in (data.get("labels") or {}).get("nodes") or []
         ]
-        args = ["gh", "pr", "edit", *target, "--add-label", ",".join(labels)]
+        await self._require_labels(repo, labels)
+        number = data["number"]
+        await self._send(
+            repo,
+            f"repos/{{owner}}/{{repo}}/issues/{number}/labels",
+            method="POST",
+            fields={"labels": list(labels)},
+        )
         for label in mr_ops.same_scope_labels(current, labels):
-            args += ["--remove-label", label]
-        await git.run_git(repo, args)
+            await self._send(
+                repo,
+                f"repos/{{owner}}/{{repo}}/issues/{number}/labels/{urlquote(label, safe='')}",
+                method="DELETE",
+            )
 
     async def merge(self, *, repo: Path, branch: str, mr: MR, head: str) -> None:
         """`gh pr merge` at `head` only (`--match-head-commit`, which gh carries
@@ -761,15 +821,25 @@ class GhCli(mr_ops.CliWaits):
                 f"gh api graphql answered without the pull request: {data!r:.200}"
             ) from exc
         if auto:
-            await git.run_git(repo, ["gh", "pr", "merge", str(mr.number), "--disable-auto"])
+            await self._gql(repo, _DISABLE_AUTO_MUTATION, {"id": node})
         if queued:
             await self._gql(repo, _DEQUEUE_MUTATION, {"id": node})
 
     async def close_mr(self, *, repo: Path, mr: MRRef) -> None:
-        await git.run_git(repo, ["gh", "pr", "close", str(mr.number)])
+        await self._send(
+            repo,
+            f"repos/{{owner}}/{{repo}}/pulls/{mr.number}",
+            method="PATCH",
+            fields={"state": "closed"},
+        )
 
     async def reopen_mr(self, *, repo: Path, mr: MRRef) -> None:
-        await git.run_git(repo, ["gh", "pr", "reopen", str(mr.number)])
+        await self._send(
+            repo,
+            f"repos/{{owner}}/{{repo}}/pulls/{mr.number}",
+            method="PATCH",
+            fields={"state": "open"},
+        )
 
     async def merge_queue(self, *, repo: Path, branch: str, base: str) -> QueueRead:
         """Where this branch's pull request stands in `base`'s merge queue.
@@ -859,28 +929,19 @@ class GhCli(mr_ops.CliWaits):
         so only the newest run is a verdict, whatever its status: a running
         or cancelled one is none (`_GH_RED`), never a reason to look past it.
 
-        `gh run list` is repo-wide, so it reads a hundred runs, not a few.
+        The runs list is repo-wide, so it reads a hundred runs, not a few.
 
         Best effort: a drop was already established, and a run that cannot be
         listed leaves GitHub's own removal reason as the only finding."""
         try:
-            rows = await self._json(
-                repo,
-                [
-                    "run",
-                    "list",
-                    "--event",
-                    "merge_group",
-                    "--json",
-                    "databaseId,headBranch,conclusion,url,createdAt",
-                    "-L",
-                    "100",
-                ],
-                "gh run list",
+            rows = gq.run_rows(
+                await self._api(
+                    repo,
+                    "repos/{owner}/{repo}/actions/runs",
+                    fields={"event": "merge_group", "per_page": 100},
+                )
             )
         except ForgeError:
-            return None
-        if not isinstance(rows, list):
             return None
         prefix = _QUEUE_BRANCH.format(base=base, number=number)
         entry_runs = [
@@ -934,11 +995,12 @@ class GhCli(mr_ops.CliWaits):
             reason = job.failure_reason
             detail += (f"job {job.name}: failed" + (f" ({reason})" if reason else ""),)
             try:
-                log = await git.run_git(
-                    repo, ["gh", "run", "view", run_id, "--log-failed", "--job", str(row.get("id"))]
+                whole = await self._transport(repo).rest(
+                    "GET", f"repos/{{owner}}/{{repo}}/actions/jobs/{row.get('id')}/logs"
                 )
             except ForgeError:
                 continue
+            log = gq.failed_step_log(row, whole.text)
             detail += tuple(f"  {line}" for line in log.strip().splitlines()[-15:])
         return detail, failed_jobs
 
