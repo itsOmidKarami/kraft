@@ -56,10 +56,13 @@ async def make_copy(row, dest: Path, *, timeout_s: float | None) -> None:
     """Fill the empty folder `dest` with `row`'s branch tip, detached. Raises
     `CopyFailed` (with `dest` empty again) when the branch is gone, git fails
     or `timeout_s` runs out; None means no limit of its own. A cancel stops
-    git at once, empties `dest` and is re-raised."""
+    git at once, empties `dest` and is re-raised. A `dest` that is not empty
+    is refused untouched: the failure path empties it."""
     from kraft import builtins  # builtins imports this package
 
     branch = store.branch_for(row)
+    if dest.exists() and any(dest.iterdir()):
+        raise CopyFailed(branch, f"{dest} is not empty")
     repo = str(row["repo"])
     # Hooks off, and LFS pointers left as they are: nothing is fetched into the
     # person's object store, and no hook of theirs runs.

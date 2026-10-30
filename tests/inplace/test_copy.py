@@ -89,7 +89,7 @@ def _fails_at(monkeypatch, step: str, script: str) -> None:
     monkeypatch.setattr(builtins, "_git_group", _git_group)
 
 
-@pytest.mark.parametrize("how", ["missing-branch", "not-a-repo", "checkout-fails"])
+@pytest.mark.parametrize("how", ["missing-branch", "not-a-repo", "checkout-fails", "not-empty"])
 async def test_a_copy_that_cannot_be_made_leaves_nothing(
     item_on, run_dirs, repo, tmp_path, monkeypatch, how
 ):
@@ -100,13 +100,16 @@ async def test_a_copy_that_cannot_be_made_leaves_nothing(
     elif how == "not-a-repo":
         row["repo"] = str(tmp_path / "plain")
         (tmp_path / "plain").mkdir()
+    elif how == "not-empty":
+        write(dest, "theirs.txt", "not Kraft's\n")
     else:
         _fails_at(monkeypatch, "checkout", f"touch '{dest}/half'; exit 1")
 
     with pytest.raises(inplace.CopyFailed, match=f"could not make a copy of {branch} to work in"):
         await inplace.make_copy(row, dest, timeout_s=None)
 
-    assert list(dest.iterdir()) == []
+    # A folder it did not fill is never emptied.
+    assert [p.name for p in dest.iterdir()] == (["theirs.txt"] if how == "not-empty" else [])
     if how == "missing-branch":
         gone = subprocess.run(["git", "-C", str(repo), "rev-parse", "-q", "--verify", branch])
         assert gone.returncode != 0, "a failed copy never makes the branch"
