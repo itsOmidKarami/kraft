@@ -32,6 +32,8 @@ from kraft.adapters.forge.models import (
     QueueRead,
 )
 from kraft.automated_review import Reviewers
+from kraft.config import ConfigError, load_repos
+from kraft.paths import config_dir
 from kraft.templates.environment import RootPointerPolicy
 from kraft.templates.models import DEFAULT_GRACE, DEFAULT_WAIT, WaitBounds
 from kraft.vocab import RUNNING, ForgeEvent
@@ -144,6 +146,25 @@ def backend_for(backend: str, repo_forge: str | None) -> str:
             "that opens nothing"
         )
     return cli
+
+
+def _member_forges(item, backend: str, repo_forge: str | None) -> dict:
+    """A backend per workspace member whose repository records another forge
+    than the root's, by mount path: a GitLab member of a GitHub root is talked
+    to with `glab`. A member with no recorded forge (or an explicit `backend`)
+    uses the root's, as before."""
+    if backend != "auto" or item is None:
+        return {}
+    try:
+        by_id = {r.id: r for r in load_repos(config_dir() / "repos.yaml") if r.id}
+    except ConfigError:
+        return {}
+    found: dict = {}
+    for mount, rid in _builtins.item_members(item):
+        entry = by_id.get(rid) if rid is not None else None
+        if entry is not None and entry.forge and entry.forge != repo_forge:
+            found[mount] = resolve(backend_for(backend, entry.forge))
+    return found
 
 
 async def _record_push(
@@ -1949,7 +1970,7 @@ async def run_task(
     # (`work-item-target-selection-is-immutable`).
     item = db.read(
         lambda c: c.execute(
-            "SELECT materialized_chain, root_merge_policy, description "
+            "SELECT materialized_chain, root_merge_policy, description, submodules "
             "FROM work_items WHERE id = ?",
             (work_item_id,),
         ).fetchone()
@@ -2038,6 +2059,7 @@ async def run_task(
         )
     try:
         live_forge = resolve(backend_for(backend, repo_forge))
+        member_forges = _member_forges(item, backend, repo_forge)
     except ForgeError as exc:
         # No forge this repo can reach: nothing was launched, so this is a
         # configuration stop naming its cause, never a failed task a fix loop
@@ -2141,7 +2163,7 @@ async def run_task(
             member = role == "submodule" and handler != "merge_watch"
             if settled is None:
                 one_log, one_status, one_findings, one_note = await _run_one(
-                    live_forge,
+                    member_forges.get(mounts_by_row.get(row_id), live_forge),
                     db,
                     repo=target_repo,
                     # A member is its own source repository: its conflict
