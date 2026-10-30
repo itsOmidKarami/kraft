@@ -26,7 +26,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 58
+SCHEMA_VERSION = 59
 
 _SCHEMA_TEMPLATE = """
 CREATE TABLE work_items (
@@ -143,6 +143,8 @@ CREATE TABLE work_items (
   one_off_approval TEXT,
   -- one_off_pending: 1 while custom content awaits approval, so `claim_for_run` skips it
   one_off_pending  INTEGER NOT NULL DEFAULT 0,
+  -- {mount: {account, backend}} the item started with, NULL until pinned
+  forge_pins       TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -1439,6 +1441,8 @@ SELECT rowid, id, work_item_id, node_id, hook_point, pid, pid_start_time, log_pa
         "ALTER TABLE work_items ADD COLUMN one_off_pending INTEGER NOT NULL DEFAULT 0",
         _MIGRATION_57_ONE_OFF_REOPEN_TRIGGER,
     ],
+    # The forge account and backend an item started with, by mount: JSON, NULL = none pinned.
+    58: ["ALTER TABLE work_items ADD COLUMN forge_pins TEXT"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins

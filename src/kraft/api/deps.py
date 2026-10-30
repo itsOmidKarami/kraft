@@ -1309,6 +1309,7 @@ def launch(st, repo: str) -> executor.LaunchContext:
             repositories=cast("dict[str, RepoEntry]", _PoisonedRepoEntry(exc)),
             library_steering=steering,
             chain_revision_digest=digest,
+            forges=getattr(st, "forges", None),
         )
     entry = _connected(repos, repo)
     repo_id = entry.id if entry is not None else None
@@ -1319,4 +1320,5 @@ def launch(st, repo: str) -> executor.LaunchContext:
         library_steering=steering,
         chain_revision_digest=functools.partial(digest, repo_id=repo_id),
         item_repo_id=repo_id,
+        forges=getattr(st, "forges", None),
     )

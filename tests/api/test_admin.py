@@ -322,3 +322,16 @@ def test_a_hand_edited_forges_yaml_is_reloaded_and_a_broken_one_degrades_health(
     path.write_text("accounts: {}\n")
     assert client.post("/api/templates/reload").json()["refused_forges"] is None
     assert client.get("/api/health").json()["invalid_forges"] is None
+
+
+def test_a_forges_yaml_that_leaves_a_repo_without_its_account_is_refused_on_reload(client):
+    st = client.app.state
+    (st.templates_dir / "repos.yaml").write_text(
+        "repos:\n  - path: /r\n    forge: github\n    forge_account: a\n"
+    )
+    (st.templates_dir / "forges.yaml").write_text(
+        "accounts:\n  b: {forge: github, web_url: 'https://github.com'}\n"
+    )
+    refused = client.post("/api/templates/reload").json()["refused_forges"]
+    assert refused and "'a' names no account" in refused
+    assert list(st.forges.accounts) == []

@@ -223,6 +223,13 @@ def _reload_forges(st) -> None:
     except config_mod.ConfigError as exc:
         st.invalid_forges = str(exc)
         return
+    try:
+        repos = config_mod.load_repos(st.templates_dir / "repos.yaml")
+    except config_mod.ConfigError:
+        repos = []  # repos.yaml's own reload says why
+    if problems := forges_mod.account_problems(file, repos):
+        st.invalid_forges = "; ".join(problems)
+        return
     st.forges = file
     st.invalid_forges = None
     set_loaded(st, forges_mod.ForgesFile.FILE, digest)

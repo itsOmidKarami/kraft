@@ -6,6 +6,8 @@ import pytest
 import yaml
 from support.harness import make_repo
 
+from kraft.forges import ForgesFile
+
 pytestmark = pytest.mark.api_client(default_setup=False)
 
 
@@ -53,3 +55,36 @@ def test_a_save_turning_a_sandboxed_repo_in_place_is_refused(client, templates_d
     assert reply.status_code == 422, reply.text
     assert "'worktrees: false'" in reply.json()["detail"]
     assert "drop 'sandbox'" in reply.json()["detail"]
+
+
+_ACCOUNTS = {"gl": {"forge": "gitlab", "web_url": "https://code.example"}}
+
+
+@pytest.mark.parametrize(
+    ("account", "says"),
+    [("ghost", "names no account"), ("gl", "says forge: gitlab")],
+    ids=["unknown-account", "forge-mismatch"],
+)
+def test_a_save_naming_a_bad_forge_account_is_422(client, templates_dir, account, says):
+    client.app.state.forges = ForgesFile.model_validate({"accounts": _ACCOUNTS})
+    text = yaml.safe_dump({"repos": [{"path": "/r", "forge": "github"}]})
+    (templates_dir / "repos.yaml").write_text(text)
+    reply = client.patch("/api/repos?path=/r", json={"forge_account": account})
+    assert reply.status_code == 422, reply.text
+    assert account in reply.json()["detail"] and says in reply.json()["detail"]
+    assert (templates_dir / "repos.yaml").read_text() == text
+
+
+def test_an_old_bad_forge_account_does_not_block_another_save(client, templates_dir):
+    (templates_dir / "repos.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "repos": [
+                    {"path": "/r", "forge": "github", "forge_account": "ghost"},
+                    {"path": "/other", "forge": "github"},
+                ]
+            }
+        )
+    )
+    reply = client.patch("/api/repos?path=/other", json={"setup_command": "uv sync"})
+    assert reply.status_code == 200, reply.text

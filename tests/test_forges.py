@@ -6,7 +6,7 @@ import pytest
 import yaml
 
 from kraft import forges
-from kraft.config import ConfigError
+from kraft.config import ConfigError, RepoEntry
 
 
 def _load(tmp_path, text):
@@ -153,3 +153,44 @@ def test_a_save_round_trips_at_0600_without_defaults(tmp_path):
     assert "client" not in text and "api_url" not in text
     assert forges.ForgesFile.load(path) == file
     assert path.stat().st_mode & 0o777 == 0o600
+
+
+_GH = forges.ForgeAccount(forge="github", web_url="https://git.corp.example", default_for_host=True)
+_GL = forges.ForgeAccount(forge="gitlab", web_url="https://git.corp.example", default_for_host=True)
+_OTHER = forges.ForgeAccount(forge="github", web_url="https://github.com")
+
+
+@pytest.mark.parametrize(
+    ("accounts", "entry", "host", "expected"),
+    [
+        ({"gh": _GH, "o": _OTHER}, {"forge_account": "o"}, "git.corp.example", "o"),
+        ({"gh": _GH}, {}, "git.corp.example", "gh"),
+        ({"gl": _GL}, {}, "git.corp.example", None),
+        ({"gh": _GH}, {}, "github-work", None),
+        ({}, {}, "git.corp.example", None),
+        ({"gh": _GH}, {"forge_account": "ghost"}, "git.corp.example", None),
+    ],
+    ids=[
+        "named",
+        "host-default",
+        "default-other-forge-skipped",
+        "ssh-other-host-none",
+        "no-file-none",
+        "unknown-name-none",
+    ],
+)
+def test_account_for_picks_named_then_host_default_then_none(accounts, entry, host, expected):
+    repo = RepoEntry(path="/r", forge="github", **entry)
+    found = forges.account_for(repo, forges.ForgesFile(accounts=accounts), host)
+    assert (found[0] if found else None) == expected
+
+
+@pytest.mark.parametrize(
+    ("forge_account", "says"),
+    [("ghost", "names no account"), ("gl", "says forge: gitlab")],
+    ids=["unknown-account", "forge-mismatch"],
+)
+def test_account_problems_names_each(forge_account, says):
+    repo = RepoEntry(path="/r", forge="github", forge_account=forge_account)
+    problems = forges.account_problems(forges.ForgesFile(accounts={"gl": _GL}), [repo])
+    assert len(problems) == 1 and forge_account in problems[0] and says in problems[0]

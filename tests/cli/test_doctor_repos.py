@@ -159,6 +159,45 @@ def test_doctor_reports_the_resolved_forge_cli(app, tmp_path, monkeypatch):
     assert row["detail"] == "gitlab · glab"
 
 
+@pytest.mark.parametrize(
+    ("accounts", "named", "detail"),
+    [
+        (
+            {"a": {"forge": "gitlab", "web_url": "https://gitlab.com", "default_for_host": True}},
+            None,
+            "gitlab · glab · account a",
+        ),
+        (
+            {"a": {"forge": "github", "web_url": "https://gitlab.com", "default_for_host": True}},
+            None,
+            "gitlab · glab · default account a skipped: it says forge: github, "
+            "the repo says forge: gitlab",
+        ),
+        ({}, None, "gitlab · glab"),
+    ],
+    ids=["names-the-account", "default-other-forge-skipped", "no-account-as-today"],
+)
+def test_the_forge_row_names_the_account_or_why_the_default_was_skipped(
+    app, tmp_path, monkeypatch, accounts, named, detail
+):
+    repo = make_repo(tmp_path, name="onforge")
+    subprocess.run(
+        ["git", "remote", "add", "origin", "git@gitlab.com:group/repo.git"], cwd=repo, check=True
+    )
+    asyncio.run(client.ensure_repo(str(repo)))
+    (tmp_path / "templates" / "forges.yaml").write_text(yaml.safe_dump({"accounts": accounts}))
+    stub_dir = tmp_path / "bin"
+    stub_dir.mkdir()
+    glab = stub_dir / "glab"
+    glab.write_text("#!/bin/sh\nexit 0\n")
+    glab.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{stub_dir}:{os.environ['PATH']}")
+
+    row = _by_name(asyncio.run(doctor.run_checks()), "forge onforge")
+
+    assert row["ok"] and row["detail"] == detail
+
+
 def test_doctor_warns_on_a_repo_on_the_dev_only_fake_forge(app, tmp_path):
     """Ruling 147: `forge: fake` resolves to the in-process `FakeForge`, so
     there is no `fake` binary to look for on PATH -- failing the check would

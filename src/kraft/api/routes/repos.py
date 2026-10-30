@@ -17,6 +17,7 @@ from pydantic import AfterValidator, AliasChoices, BaseModel, Field
 from kraft import apply as apply_mod
 from kraft import config as config_mod
 from kraft import detect
+from kraft import forges as forges_mod
 from kraft.adapters.forge import settle
 from kraft.addons import repo_library
 from kraft.addons import review as addon_review
@@ -276,13 +277,24 @@ def _validate_repos(
         candidate = Path(tmp) / "repos.yaml"
         candidate.write_text(yaml.safe_dump({"repos": repos, "workspaces": workspaces}))
         try:
+            entries = None
             if steering:
                 # Against the library's profiles; with no library loaded
                 # there is nothing to name, and intake refuses the item.
-                config_mod.load_repos(candidate, steering=deps.library_steering(st))
+                entries = config_mod.load_repos(candidate, steering=deps.library_steering(st))
             config_mod.load_workspaces(candidate)
         except config_mod.ConfigError as exc:
             raise HTTPException(422, str(exc)) from exc
+    if entries is not None:
+        # Only a problem this save adds is refused; an old hand edit is doctor's.
+        forges = getattr(st, "forges", None) or forges_mod.ForgesFile()
+        try:
+            current = config_mod.load_repos(deps.repos_path(st))
+        except config_mod.ConfigError:
+            current = []
+        old = set(forges_mod.account_problems(forges, current))
+        if added := [p for p in forges_mod.account_problems(forges, entries) if p not in old]:
+            raise HTTPException(422, added[0])
     if steering:
         # An entry may name its own repo library and no other. Only what this
         # change adds is refused: a hand edit already on disk is not this

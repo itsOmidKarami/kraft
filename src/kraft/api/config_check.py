@@ -442,10 +442,14 @@ def _check_access(path, data, ctx):
 
 def _check_forges(path, data, ctx):
     try:
-        forges_mod.ForgesFile.model_validate(data)
+        file = forges_mod.ForgesFile.model_validate(data)
     except ValidationError as exc:
         return [_pydantic_issue(path, exc)]
-    return []
+    try:
+        repos = config_mod.load_repos(ctx.templates_dir / "repos.yaml")
+    except config_mod.ConfigError:
+        return []  # repos.yaml's own check says why
+    return [TemplateIssue(path, None, why) for why in forges_mod.account_problems(file, repos)]
 
 
 def _check_workers(path, data, ctx):
@@ -951,11 +955,24 @@ def _check_repos(path, data, ctx):
                 loc = loc or _first_loc(config_mod.RepoEntry, entry, ("repos", index))
             message = str(exc).replace(str(candidate), str(path))
             return [TemplateIssue(path, None, message, loc=loc)]
-    return [
-        TemplateIssue(path, None, f"would leave {_what(addon)} out: {why}")
-        for addon in ctx.addons
-        if addon.left_out is None and (why := _unmet_requires(addon, ctx, repos=data)) is not None
-    ] + scope_issues(path, data, ctx)
+        try:
+            forges = forges_mod.ForgesFile.load(ctx.templates_dir / forges_mod.ForgesFile.FILE)
+        except config_mod.ConfigError:
+            forges = forges_mod.ForgesFile()  # the forges.yaml check says why
+        issues = [
+            TemplateIssue(path, None, why)
+            for why in forges_mod.account_problems(forges, config_mod.load_repos(candidate))
+        ]
+    return (
+        issues
+        + [
+            TemplateIssue(path, None, f"would leave {_what(addon)} out: {why}")
+            for addon in ctx.addons
+            if addon.left_out is None
+            and (why := _unmet_requires(addon, ctx, repos=data)) is not None
+        ]
+        + scope_issues(path, data, ctx)
+    )
 
 
 _CHECKERS: dict[str, Callable[[Path, dict, CheckContext], list[TemplateIssue]]] = {

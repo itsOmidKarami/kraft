@@ -10,6 +10,7 @@ from kraft.vocab import ADVANCING
 
 if TYPE_CHECKING:
     from kraft.config import RepoEntry
+    from kraft.forges import ForgesFile
 
 #: `_dispatch` returned without launching because a spend cap was already over.
 #: It is not "failed" — the agent never ran, so nothing about it failed — and it
@@ -198,6 +199,8 @@ class LaunchContext:
     #: fanned out to a workspace member reads instead of `repo_entry` (its
     #: setup, test scopes, sandbox). Empty when nothing has an id.
     repositories: Mapping[str, RepoEntry] = field(default_factory=dict)
+    #: The accounts `forges.yaml` names (`st.forges`); None where nothing loaded it.
+    forges: ForgesFile | None = None
     #: The live library's steering profiles, name to instructions: read only
     #: by an item whose snapshot predates frozen repository steering
     #: (`steering.for_repository`). Everything else runs on its snapshot's.
