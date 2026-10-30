@@ -131,7 +131,7 @@ def test_duplicate_refuses_a_one_off_row_with_no_record(client, repo):
     ("node", "status", "words"),
     [
         pytest.param("spec", "paused", "already started", id="started"),
-        pytest.param(None, "active", "is running", id="active-not-started"),
+        pytest.param(None, "active", "is starting", id="active-not-started"),
         pytest.param(None, "abandoned", "is abandoned", id="ended-never-started"),
     ],
 )

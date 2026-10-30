@@ -114,14 +114,15 @@ def complete_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
 
 #: A chain can be set only before the item starts, and only while nothing runs it.
 _CHAIN_SETTABLE = f"current_node_id IS NULL AND status NOT IN ({in_list((*HOLDS_SLOT, *ENDED))})"
-_STARTING = "work item is starting; its chain can't change now"
+#: The refusal for an item claimed to run that has not loaded its first node.
+STARTING_REFUSAL = "work item is starting; its chain and documents can't change now"
 
 
 def _refuse_if_starting(row) -> None:
     """`ValueError` for an item claimed to run that has not loaded its first
     node: a change then would land under the walk's feet (`load_chain`)."""
     if row["current_node_id"] is None and row["status"] in HOLDS_SLOT:
-        raise ValueError(_STARTING)
+        raise ValueError(STARTING_REFUSAL)
 
 
 def set_chain_template(

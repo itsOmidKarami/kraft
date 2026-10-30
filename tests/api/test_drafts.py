@@ -348,6 +348,8 @@ WIDE = "a: &a [" + ",".join(["1"] * 1000) + "]\nb: [" + ",".join(["*a"] * 30) + 
 def test_a_fragment_yaml_bomb_is_refused_not_built(client, fragment, refused):
     r = post_ops(client, {"op": "set_fragment", "path": "spec", "yaml": fragment + "id: spec\n"})
     assert ("not usable YAML" in json.dumps(r.json())) is refused
+    if not refused:
+        assert r.status_code == 200, r.text
 
 
 def test_a_move_to_library_publishes_the_chain_and_the_library_together(client, templates_dir):

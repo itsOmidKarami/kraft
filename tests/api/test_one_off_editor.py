@@ -7,6 +7,8 @@ import re
 import pytest
 from support.api import LIBRARY_ONLY_ONE_OFF
 
+from api.test_drafts import WIDE
+
 CUSTOM_LOAD_TEST = """\
 extends: default
 add:
@@ -188,6 +190,7 @@ BOMB = "".join(
     ("fragment", "words"),
     [
         pytest.param(BOMB + "id: load_test\n", "not usable YAML", id="set-fragment-bomb"),
+        pytest.param(WIDE + "id: load_test\n", "not usable YAML", id="set-fragment-wide"),
         pytest.param(
             "id: load_test\ndescription: .inf\n", "plain YAML values", id="set-fragment-inf"
         ),

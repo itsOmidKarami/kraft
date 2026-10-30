@@ -1248,7 +1248,7 @@ def _retrimmed(row, filed_kinds: frozenset[str], kinds: frozenset[str]) -> str:
 #: `store._CHAIN_SETTABLE` refused the switch. A started or ended item is
 #: refused before this point, so here it was claimed to run (or, in a race,
 #: started or ended since the PATCH read it).
-_CHAIN_FIXED = "work item is running; its chain can change only while it is not"
+_CHAIN_FIXED = store.STARTING_REFUSAL
 
 
 @api_router.patch("/work-items/{wid}")
