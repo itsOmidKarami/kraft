@@ -62,6 +62,11 @@ export function eventLine(e: KraftEvent, nodes?: Nodes, before?: KraftEvent): st
     case "gate_requested": return `${gate} is waiting for you`;
     case "gate_approved": return `${gate} · ${p.by === "agent" || p.by === "kraft" ? "passed on its own" : "approved by you"}`;
     case "gate_rejected": return `${gate} · rejected${p.note ? `: ${cut(s(p.note), 50)}` : ""}`;
+    // A checks-first reviewer's outcome; any other skip reason keeps the type's own words.
+    case "gate_auto_review_skipped":
+      if (p.reason === "passed") return `${gate} · reviewer: ready for you`;
+      if (p.reason === "undecided") return `${gate} · reviewer could not decide`;
+      return e.type.replaceAll("_", " ");
     // An approved gate a retry, a base-change restart, or a merge node sending the item back opened again: the rerun asks it anew.
     case "gate_reopened": return `${gate} · reopened${typeof p.reason === "string" && Object.hasOwn(REOPENED_WHY, p.reason) ? REOPENED_WHY[p.reason] : ""}`;
     case "fix_cycle_started": return `${at} · fix loop round ${Number(p.cycle ?? 0) + 1}`;

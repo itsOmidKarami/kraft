@@ -8,7 +8,7 @@ import type { PaneKind } from "./describe";
 import { useProviders } from "../../harnesses/useProviders";
 import { effortsFor, useHarnessOptions } from "./useHarnessOptions";
 import { autoEscalates } from "../escalateWords";
-import { ROUTE_LABEL, routeOf } from "../fields";
+import { fieldMeta, ROUTE_LABEL, routeOf } from "../fields";
 import { STEPS_IN_ORDER } from "../../library/sharedWords";
 import { breakable } from "../../ui/breakable";
 
@@ -72,6 +72,14 @@ function ChainOverview({ ctx }: { ctx: PaneCtx }) {
   );
 }
 
+const MODES: Option[] = Object.entries(fieldMeta("auto_review_mode").labels ?? {}).map(([value, label]) => ({ value, label }));
+
+/** What a gate's reviewer may do (`auto_review_mode`), for a gate that has one. Unset decides, as before the key. */
+export function ReviewerMode({ ctx }: { ctx: PaneCtx }) {
+  const { r, scope, path, draft } = ctx;
+  return <SelectRow label="reviewer may" value={str(valueAt(r, scope, path, "auto_review_mode")) || "decides"} options={MODES} onPick={(x) => draft.field(path, "auto_review_mode", x)} />;
+}
+
 function GateOverview({ ctx }: { ctx: PaneCtx }) {
   const { r, scope, path, draft } = ctx;
   const nodes = authoredNodes(r, scope);
@@ -112,6 +120,7 @@ function GateOverview({ ctx }: { ctx: PaneCtx }) {
       />
       <PauseText label="timeout" mono value={str(v("timeout"))} placeholder="none · e.g. 2d" bad={bad("timeout")} onText={(t) => draft.field(path, "timeout", t.trim() || null, true)} onBlur={draft.flush} />
       <Kv k="auto review" v={reviewer ? `${str(reviewer.id) || "reviewer"} · ${str(reviewer.kind) || "agent"}` : "none · + add"} mono={!!reviewer} muted={!reviewer} onClick={() => ctx.goTo(reviewer ? `${path}.auto_review` : path)} />
+      {reviewer && <ReviewerMode ctx={ctx} />}
     </>
   );
 }

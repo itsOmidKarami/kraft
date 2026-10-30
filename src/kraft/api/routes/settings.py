@@ -14,11 +14,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from kraft import apply as apply_mod
 from kraft import auth as auth_mod
 from kraft import config as config_mod
+from kraft import gate_review, storage, store
 from kraft import harness as harness_mod
 from kraft import intake as intake_mod
 from kraft import policy as policy_mod
 from kraft import skill as skill_mod
-from kraft import storage, store
 from kraft.adapters import agent, beads
 from kraft.addons import load as addons_load
 from kraft.api import api_router, config_check, deps, perimeter
@@ -307,6 +307,8 @@ async def steering_preview(chain: str, task: str, repo: str, request: Request):
         intent_dir=entry.intent_dir,
         steering=list(zip(names, inv.steering_texts, strict=True)),
         in_place=not entry.worktrees,
+        # As `gate_review` launches it: a reviewer that checks first is told to change nothing.
+        read_only=rt is node.auto_review and gate_review.checks_first(node),
     )
     return {"sections": [{"kind": k, "source": s, "text": t} for k, s, t in sections]}
 

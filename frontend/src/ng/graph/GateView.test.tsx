@@ -37,6 +37,15 @@ describe("GateView", () => {
     expect(screen.queryByText("add a reviewer")).toBeNull();
   });
 
+  it.each([
+    ["checks_first", "checks first"],
+    ["decides", "decides first"],
+    [undefined, "runs first, before you"],
+  ] as const)("words a reviewer with no run state by its mode (%s)", (mode, badge) => {
+    render(<GateView gate={{ id: "approve_plan" }} reviewer={{ id: "check", mode }} />);
+    expect(screen.getByRole("button", { name: /check, reviewer task/ })).toHaveTextContent(badge);
+  });
+
   it("offers the add-a-reviewer slot in the editor", async () => {
     const onAdd = vi.fn();
     render(<GateView gate={{ id: "approve_plan" }} onAdd={onAdd} />);

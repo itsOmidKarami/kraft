@@ -144,6 +144,12 @@ async def violation(db, row, launch, worktree, before: Snapshot | None, *, node_
     return bool(files)
 
 
+def named(files: list[str]) -> str:
+    """`files` for a person: the first twenty, then how many more."""
+    more = len(files) - _NAMED
+    return ", ".join(files[:_NAMED]) + (f" and {more} more" if more > 0 else "")
+
+
 async def stop(db, work_item_id: str, node_id: str) -> str:
     """The stop for a person, naming the scope and the files it changed. An
     in-place task's `checkout` stop already says what happened, and stays."""
@@ -157,10 +163,9 @@ async def stop(db, work_item_id: str, node_id: str) -> str:
         ).fetchone()
     )
     payload = json.loads(raw["payload"]) if raw else {"scope": node_id, "files": []}
-    files = payload["files"]
-    more = len(files) - _NAMED
-    named = ", ".join(files[:_NAMED]) + (f" and {more} more" if more > 0 else "")
-    reason = f"{payload['scope']} is read_only, but it changed the worktree: {named}"
+    reason = (
+        f"{payload['scope']} is read_only, but it changed the worktree: {named(payload['files'])}"
+    )
     await db.write(
         lambda c: store.mark_needs_human(c, work_item_id, node_id, reason, kind=StopKind.FAILED)
     )

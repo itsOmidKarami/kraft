@@ -92,7 +92,8 @@ async def test_an_in_place_session_refused_its_checkout_never_launches(item_on, 
 @pytest.mark.parametrize("busy", [False, True], ids=["holds-it", "another-item-uses-it"])
 async def test_a_sessions_own_record_waits_for_its_session(item_on, monkeypatch, busy):
     """`on_session` runs once the session is written and holds the checkout,
-    before the agent; never for one refused it, which started nothing."""
+    before the agent, and `after_checkout` once the checkout is taken and
+    marked; neither for one refused it, which started nothing."""
     it = await item_on([v1_node()], status="needs_human", target=IN_PLACE)
     git(it.repo, "branch", store.branch_for(it.row()))
     if busy:
@@ -103,13 +104,17 @@ async def test_a_sessions_own_record_waits_for_its_session(item_on, monkeypatch,
     async def on_session():
         seen.append(len(it.sessions()))
 
+    async def after_checkout():
+        seen.append((len(it.events("task_marked")), git(it.repo, "symbolic-ref", "HEAD")))
+
+    hooks = {"on_session": on_session, "after_checkout": after_checkout}
     if busy:
         with pytest.raises(store.CheckoutBusy):
-            await _outside_the_walk(it, on_session=on_session)
+            await _outside_the_walk(it, **hooks)
     else:
-        assert await _outside_the_walk(it, on_session=on_session) == "done"
+        assert await _outside_the_walk(it, **hooks) == "done"
 
-    assert seen == ([] if busy else [1])
+    assert seen == ([] if busy else [1, (1, f"refs/heads/{store.branch_for(it.row())}")])
 
 
 def _outside_the_walk(it, **kw):

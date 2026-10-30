@@ -217,6 +217,31 @@ describe("Overview tab", () => {
     expect(screen.queryByRole("menu", { name: "document" })).toBeNull();
   });
 
+  /** The default chain with an agent reviewer on local_review, in the given mode. */
+  const reviewed = (mode?: string) => {
+    const resolved = structuredClone(DEFAULT_VIEW.result.resolved!);
+    const gate = (resolved.chain.nodes as Record<string, unknown>[]).find((n) => n.id === "local_review")!;
+    Object.assign(gate, { auto_review: { id: "check", kind: "agent" }, ...(mode && { auto_review_mode: mode }) });
+    return { resolved };
+  };
+  it.each([
+    { id: "checks first", mode: "checks_first", shown: "check first (reject, or hand it to you)", other: "decides" },
+    { id: "decides", mode: "decides", shown: "decide (can approve)", other: "checks_first" },
+    { id: "no mode reads as decides", mode: undefined, shown: "decide (can approve)", other: "checks_first" },
+  ])("picks what a gate's reviewer may do: $id", async ({ mode, shown, other }) => {
+    const { draft } = mount("local_review", reviewed(mode));
+    expect(screen.getByRole("button", { name: /^reviewer may, / })).toHaveTextContent(shown);
+    const menu = await editing("reviewer may");
+    expect(labels(menu)).toEqual(["check first (reject, or hand it to you)", "decide (can approve)"]);
+    await userEvent.click(within(menu).getByRole("menuitemradio", { name: other === "decides" ? /decide \(can/ : /check first/ }));
+    expect(draft.field).toHaveBeenCalledWith("local_review", "auto_review_mode", other);
+  });
+
+  it("has no reviewer-may row on a gate without a reviewer", () => {
+    mount("local_review");
+    expect(screen.queryByText("reviewer may")).toBeNull();
+  });
+
   it("has no required box on a gate that needs no document", () => {
     const sources = structuredClone(DEFAULT_VIEW.result.sources);
     sources.local_review.artifact = { value: null, source: "default" };

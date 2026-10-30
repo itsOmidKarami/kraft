@@ -41,7 +41,7 @@ describe("Chains (L.1)", () => {
   const SOURCES = {
     "": {},
     verification: { read_only: src(false), skippable: src(true, "chain"), model: src(null), effort: src("high", "chain"), "policy.time_cap_minutes": src(null), "policy.token_budget": src(5000, "chain"), "policy.timeout_minutes": { value: null, source: "default", recovery: true } },
-    spec_approval: { reject_to: src("spec", "chain"), message: src("Review the spec.", "chain") },
+    spec_approval: { reject_to: src("spec", "chain"), message: src("Review the spec.", "chain"), auto_review_mode: src("checks_first", "chain") },
     "verification.checks.lint": { command: src("just lint", "chain") },
   };
   const DRAFT = (r = {}) => view("chains", "default", { draft: true, files: { "chains/default.yaml": "id: default\n" } }, { sources: SOURCES as never, model: { "chains/default.yaml": { id: "default", nodes: [{ id: "spec", kind: "exec" }, { id: "spec_approval", kind: "gate" }, { id: "verification", kind: "exec" }] } } as never, changes: [{ path: "verification", kind: "change", summary: "effort high", fields: ["effort", "policy"] }, { path: "spec", kind: "change", summary: "x" }], ...r });
@@ -110,6 +110,15 @@ describe("Chains (L.1)", () => {
     await userEvent.click(await screen.findByRole("button", { name: /^reject to/ }));
     await userEvent.type(screen.getByLabelText("reject to", { selector: "input" }), "nope{Enter}");
     expect(await screen.findByRole("alert")).toHaveTextContent(/exec node before this gate/);
+  });
+
+  it("a gate's reviewer mode reads and is picked in the desktop's words, and sends the value", async () => {
+    const { calls } = open("/templates/chains/default/nodes/spec_approval");
+    const row = await screen.findByRole("button", { name: /^reviewer may/ });
+    expect(row).toHaveTextContent("check first (reject, or hand it to you)");
+    await userEvent.click(row);
+    await userEvent.click(await screen.findByRole("radio", { name: /^decide \(can approve\)/ }));
+    await waitFor(() => expect(posts(calls).map((c) => c.body)).toEqual([{ ops: [{ op: "set_field", path: "spec_approval", field: "auto_review_mode", value: "decides" }] }]));
   });
 
   describe("a merge node's on merge rejected", () => {

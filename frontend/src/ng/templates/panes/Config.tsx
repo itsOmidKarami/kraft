@@ -118,7 +118,7 @@ export function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
         // A yes/no field is a switch: one click sets it.
         <span className="cfg-v"><Switch label={label} checked={!!row.value} disabled={!!row.locked} onChange={(on) => ctx.draft.field(ctx.path, row.field, on)} /></span>
       ) : editing === null ? (
-        <span className={`cfg-v${meta.kind === "long" ? " is-prose" : ""}${row.value == null || row.value === "" ? " is-unset" : ""}`}>{POLICIES.has(row.field) ? breakable(show(row.value, meta.kind)) : show(row.value, meta.kind)}</span>
+        <span className={`cfg-v${meta.kind === "long" ? " is-prose" : ""}${row.value == null || row.value === "" ? " is-unset" : ""}`}>{POLICIES.has(row.field) ? breakable(show(row.value, meta.kind)) : show(row.value, meta.kind, meta.labels)}</span>
       ) : (
         <Editor meta={meta} field={row.field} value={editing} unset={unsetLabel(row.field, row.value)} ctx={ctx} onSave={save} onRefuse={(m) => setErr(`${label}: ${m}`)} onCancel={() => { setEditing(null); setErr(null); }} label={label} />
       )}
@@ -170,7 +170,7 @@ function Editor({ meta, field, value, unset, label, ctx, onSave, onRefuse, onCan
     return (
       <Select autoFocus aria-label={label} className="cfg-pick" mono value={text} onKeyDown={keys} onBlur={() => onSave(text)} onChange={(e) => { setText(e.target.value); onSave(e.target.value); }}>
         <option value="">{unset}</option>
-        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+        {options.map((o) => <option key={o} value={o}>{meta.labels?.[o] ?? o}</option>)}
       </Select>
     );
   if (meta.kind === "long") return <textarea autoFocus aria-label={label} className="cfg-edit is-long" rows={4} value={text} onKeyDown={keys} onBlur={() => onSave(text)} onChange={(e) => setText(e.target.value)} />;

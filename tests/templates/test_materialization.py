@@ -563,6 +563,21 @@ def test_a_pre_rename_snapshot_loads_its_pins_under_addons():
     assert "plugins" not in json.loads(snapshot.to_json())  # pre-rename key is not written back
 
 
+def test_a_stored_chain_keeps_checks_first():
+    """`to_json` writes the mode like every other gate field, on both the
+    chain and its untrimmed copy: an exclusion would turn it back into
+    `decides` on the way through the item's row."""
+    from support.harness import v1_chain, v1_resolved
+
+    gate = {"id": "g", "kind": "gate", "auto_review_mode": "checks_first"}
+    resolved = v1_resolved([{**gate, "auto_review": agent_task(id="reviewer")}])
+    stored = dataclasses.replace(v1_chain(resolved, repo="r"), untrimmed=resolved.chain)
+    restored = MaterializedChain.from_json(stored.to_json())
+
+    assert restored.chain.chain.nodes[0].auto_review_mode == "checks_first"
+    assert restored.untrimmed.nodes[0].auto_review_mode == "checks_first"
+
+
 def test_a_snapshot_with_both_pin_keys_is_refused_not_merged():
     stored = _pre_rename_snapshot()
     stored["addons"] = _PINS
