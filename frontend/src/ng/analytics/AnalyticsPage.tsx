@@ -3,7 +3,7 @@ import * as api from "../../api";
 import { elapsed, repoName, tokens, usd } from "../../format";
 import { useStore } from "../../store";
 import type { Analytics } from "../../types";
-import { chainOf } from "../board/model";
+import { chainLabel, chainOf } from "../board/model";
 import { Link } from "react-router-dom";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { Menu } from "../ui/Menu";
@@ -85,8 +85,8 @@ export function AnalyticsPage() {
       <Menu
         label="Chain"
         triggerClass="an-menu-btn"
-        trigger={<><span className="an-menu-key">Chain</span> {chain ?? "all"} <span aria-hidden className="an-caret">▾</span></>}
-        items={[{ label: "All chains", checked: !chain, hint: String(items.length), onSelect: () => setChain(null) }, ...chains.map((c) => ({ label: c, checked: chain === c, hint: count((i) => chainOf(i) === c), onSelect: () => setChain(c) }))]}
+        trigger={<><span className="an-menu-key">Chain</span> {chain ? chainLabel(chain) : "all"} <span aria-hidden className="an-caret">▾</span></>}
+        items={[{ label: "All chains", checked: !chain, hint: String(items.length), onSelect: () => setChain(null) }, ...chains.map((c) => ({ label: chainLabel(c), checked: chain === c, hint: count((i) => chainOf(i) === c), onSelect: () => setChain(c) }))]}
       />
     </HeaderActions>
   );

@@ -219,6 +219,13 @@ export interface EscalationThread {
   status: SessionStatus;
 }
 
+export interface OneOffSummary {
+  extends: string | null;
+  custom: number;
+  needs_review: boolean;
+  approval: { by: string; door: string; at: string; digest: string } | null;
+}
+
 export interface WorkItem {
   id: string;
   title: string;
@@ -229,6 +236,9 @@ export interface WorkItem {
   status: WorkItemStatus;
   /** Null for an item filed with no chain: the repo's default chain runs (see ng/item/chainName). */
   chain_template: string | null;
+  /** Set for a chain filed with this item alone (`chain_template` is `@one-off`); null for a library chain.
+   *  `custom` counts the parts a person reviews before it can start. */
+  one_off: OneOffSummary | null;
   chain_definition: ChainDefinition;
   current_node_id: string | null;
   bead_id: string | null;

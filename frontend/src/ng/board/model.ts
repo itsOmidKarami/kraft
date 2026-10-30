@@ -52,6 +52,10 @@ export const gateOf = (i: Pick<WorkItem, "display_status" | "stop" | "pending_ga
 export const stopOf = (i: Pick<WorkItem, "display_status" | "stop">) =>
   i.display_status === "needs_you" || i.display_status === "failed" ? (i.stop?.kind ?? "") : "";
 
+/** What a chain key reads as on screen. The key itself (`@one-off`) stays the filter and grouping value. */
+export const chainLabel = (key: string) => (key === "@one-off" ? "one-off" : key);
+
+/** The chain an item runs, as a key: the board's filters and groups use it raw. */
 export const chainOf = (i: Pick<WorkItem, "chain_template"> & { chain_definition?: { template_id?: string } | null }) => (i.chain_template || i.chain_definition?.template_id) ?? "default";
 
 export function matches(i: WorkItem, f: Filter): boolean {
@@ -115,7 +119,7 @@ export function groupsOf(items: WorkItem[], v: BoardView): Group[] {
     ...(needs.length ? [{ key: "needs", label: "Needs you", rows: needs, total: needs.length, done: false }] : []),
     ...keys.map((k) => {
       const rows = rest.filter((i) => keyOf(i) === k);
-      return { key: `${v.group}:${k}`, label: v.group === "repo" ? repoName(k) : k, rows, total: rows.length, done: false };
+      return { key: `${v.group}:${k}`, label: v.group === "repo" ? repoName(k) : chainLabel(k), rows, total: rows.length, done: false };
     }),
   ];
 }

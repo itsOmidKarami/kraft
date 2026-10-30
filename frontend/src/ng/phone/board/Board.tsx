@@ -8,7 +8,7 @@ import { tip } from "../../ui/Tooltip";
 import { useStore } from "../../../store";
 import type { WorkItem } from "../../../types";
 import { act } from "../../item/actions";
-import { chainOf, groupOf, groupsOf, matches, type GroupKey } from "../../board/model";
+import { chainLabel, chainOf, groupOf, groupsOf, matches, type GroupKey } from "../../board/model";
 import { ALL_GATES, ALL_STOPS, gateChip, nodeWords, stopChip, stopFilterOptions, stopWords } from "../../board/rowText";
 import { useBoardPrefs } from "../../board/prefs";
 import { ChoiceSheet, useSheet } from "../nav/Sheet";
@@ -119,7 +119,7 @@ export function Board() {
         ))}
       </div>
       <div className="ph-chips ph-filters" role="group" aria-label="Filter">
-        <Chip set={!!chain} onClick={() => sheet.open("chain")}>{chain ? `Chain · ${chain}` : "Chain"}<ChevronDown size={14} aria-hidden="true" /></Chip>
+        <Chip set={!!chain} onClick={() => sheet.open("chain")}>{chain ? `Chain · ${chainLabel(chain)}` : "Chain"}<ChevronDown size={14} aria-hidden="true" /></Chip>
         <Chip set={!!gate} onClick={() => sheet.open("gate")}>{gate ? gateChip(gateLabel) : "Gate"}<ChevronDown size={14} aria-hidden="true" /></Chip>
         <Chip set={!!stop} onClick={() => sheet.open("stop")}>{stop ? stopChip(stopLabel) : "Stop reason"}<ChevronDown size={14} aria-hidden="true" /></Chip>
       </div>
@@ -159,7 +159,7 @@ export function Board() {
         <ChoiceSheet
           title="Chain"
           value={chain}
-          options={[{ value: "", label: "All chains", hint: String(items.length) }, ...chains.map((c) => ({ value: c, label: c, hint: String(items.filter((i) => chainOf(i) === c).length) }))]}
+          options={[{ value: "", label: "All chains", hint: String(items.length) }, ...chains.map((c) => ({ value: c, label: chainLabel(c), hint: String(items.filter((i) => chainOf(i) === c).length) }))]}
           onPick={(v) => sheet.closeThen(() => set({ chain: v }))}
           onClose={sheet.close}
         />

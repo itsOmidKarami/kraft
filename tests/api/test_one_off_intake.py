@@ -159,3 +159,33 @@ def test_item_payload_hides_raw_columns(client, repo):
     wid = _one_off(client, repo, CUSTOM)
     item = client.get(f"/api/work-items/{wid}").json()
     assert not {"one_off_chain", "one_off_approval", "one_off_pending"} & item.keys()
+
+
+@pytest.mark.parametrize(
+    ("text", "approve", "want"),
+    [
+        pytest.param(None, False, None, id="library-chain"),
+        pytest.param(LIBRARY_ONLY_ONE_OFF, False, (0, False, False), id="library-only"),
+        pytest.param(CUSTOM, False, (1, True, False), id="awaiting-review"),
+        pytest.param(CUSTOM, True, (1, False, True), id="approved"),
+    ],
+)
+def test_the_board_and_the_detail_say_what_a_one_off_chain_is(client, repo, text, approve, want):
+    from support.api import _approve
+
+    wid = _one_off(client, repo, text) if text else _paused(client, repo)
+    if approve:
+        assert _approve(client, wid).status_code == 200
+    detail = client.get(f"/api/work-items/{wid}").json()["one_off"]
+    row = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
+    assert row["one_off"] == detail
+    if want is None:
+        assert detail is None
+        return
+    custom, needs_review, approved = want
+    assert detail["extends"] == "default"
+    assert (detail["custom"], detail["needs_review"], detail["approval"] is not None) == (
+        custom,
+        needs_review,
+        approved,
+    )

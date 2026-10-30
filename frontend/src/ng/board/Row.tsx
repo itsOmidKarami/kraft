@@ -5,7 +5,7 @@ import { NodeGlyph } from "../graph/NodeGlyph";
 import { breakPaths } from "../ui/breakable";
 import { useSingleClick } from "../ui/singleClick";
 import { CUE_ICON } from "./cue";
-import { chainOf, groupOf } from "./model";
+import { chainLabel, chainOf, groupOf } from "./model";
 import { actionVariant, admittedRowAction, glyphOf, reasonTail, stopCueOf, ticksOf, type RowAction } from "./rowText";
 import { IN_YOUR_CHECKOUT } from "./sharedWords";
 import { Ticks } from "./Ticks";
@@ -77,7 +77,7 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
           {item.in_place && <><span className={`board-sep${saysCheckout ? " is-said" : ""}`} aria-hidden>·</span><span className={`board-meta-inplace${saysCheckout ? " is-said" : ""}`} title={item.repo}>{IN_YOUR_CHECKOUT}</span></>}
           <span className="board-sep" aria-hidden>·</span>
           <span className="board-meta-id">{id}</span>
-          {!hideChain && <><span className="board-sep" aria-hidden>·</span><span className="board-meta-chain">{chainOf(item)}</span></>}
+          {!hideChain && <><span className="board-sep" aria-hidden>·</span><span className="board-meta-chain">{chainLabel(chainOf(item))}</span></>}
           <span className="board-sep" aria-hidden>·</span>
           <span className="board-meta-age">{own?.age ?? ago(item.updated_at, now)}</span>
           {ticks.length > 0 && <span className="board-visually-hidden">, {ticks.filter((t) => t.state === "done").length} of {ticks.length} nodes done</span>}

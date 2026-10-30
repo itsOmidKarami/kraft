@@ -288,3 +288,43 @@ def test_show_and_artifact_name_the_head_the_final_review_takes(monkeypatch, cap
     body = render.artifact_body({"content": "doc", "head": "a" * 40, "work_item_id": "w1"})
     assert body.endswith(f"kraft item approve --head {'a' * 40} w1")
     assert "--head" not in render.artifact_body({"content": "doc"})
+
+
+@pytest.mark.parametrize(
+    ("one_off", "line"),
+    [
+        (
+            {"extends": "default", "custom": 0, "needs_review": False, "approval": None},
+            "one-off · extends default · library-only",
+        ),
+        (
+            {"extends": "default", "custom": 2, "needs_review": True, "approval": None},
+            "one-off · extends default · awaiting review",
+        ),
+        (
+            {
+                "extends": "default",
+                "custom": 1,
+                "needs_review": False,
+                "approval": {"by": "human", "door": "web", "at": "2026-10-09T09:00:00+00:00"},
+            },
+            "one-off · extends default · approved by human (web) 2026-10-09T09:00:00+00:00",
+        ),
+    ],
+    ids=["library-only", "awaiting-review", "approved"],
+)
+def test_show_names_a_one_off_chain_and_where_it_stands(monkeypatch, capsys, one_off, line):
+    from kraft.client import transport
+
+    async def get(path, **_):
+        return {
+            "id": "w1",
+            "status": "paused",
+            "title": "t",
+            "chain_definition": {"nodes": []},
+            "one_off": one_off,
+        }
+
+    monkeypatch.setattr(transport, "_get", get)
+    cli.main(["view", "show", "w1"])
+    assert line in capsys.readouterr().out

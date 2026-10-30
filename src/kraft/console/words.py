@@ -60,9 +60,10 @@ def sort_rows(rows: list[dict]) -> list[dict]:
 
 
 def chain_of(row: dict) -> str:
-    """`chainOf`: the chain an item runs, `default` when it names none."""
+    """`chainLabel(chainOf)`: the chain an item runs, `default` when it names none,
+    `one-off` for a chain filed with that item alone."""
     named = row.get("chain_template") or (row.get("chain_definition") or {}).get("template_id")
-    return _or(named, "default")
+    return "one-off" if named == "@one-off" else _or(named, "default")
 
 
 def node_words(node: str) -> str:

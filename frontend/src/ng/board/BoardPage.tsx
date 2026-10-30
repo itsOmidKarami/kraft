@@ -15,7 +15,7 @@ import { Kbd } from "../ui/Kbd";
 import { Menu } from "../ui/Menu";
 import { tip } from "../ui/Tooltip";
 import { NoMatch } from "../ui/NoMatch";
-import { chainOf, groupsOf, type GroupBy, type SortBy } from "./model";
+import { chainLabel, chainOf, groupsOf, type GroupBy, type SortBy } from "./model";
 import { useBoardPrefs } from "./prefs";
 import { Row } from "./Row";
 import { showToast } from "../ui/Toast";
@@ -313,10 +313,10 @@ export function BoardPage() {
         <Menu
           label="Chain"
           triggerClass={`board-menu-btn${query.chain ? " is-set" : ""}`}
-          trigger={<>{query.chain ? `Chain · ${query.chain}` : "Chain"} <span aria-hidden className="board-caret">▾</span></>}
+          trigger={<>{query.chain ? `Chain · ${chainLabel(query.chain)}` : "Chain"} <span aria-hidden className="board-caret">▾</span></>}
           items={[
             { label: "All chains", checked: !query.chain, hint: String(items.length), onSelect: () => setQuery({ chain: "" }) },
-            ...chains.map((c) => ({ label: c, checked: query.chain === c, hint: count((i) => chainOf(i) === c), onSelect: () => setQuery({ chain: c }) })),
+            ...chains.map((c) => ({ label: chainLabel(c), checked: query.chain === c, hint: count((i) => chainOf(i) === c), onSelect: () => setQuery({ chain: c }) })),
           ]}
         />
         <Menu
