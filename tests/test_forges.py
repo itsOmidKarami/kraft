@@ -77,6 +77,21 @@ def test_remote_hosts_compare_without_case_port_or_dot(remote, host):
 
 
 @pytest.mark.parametrize(
+    ("forge", "web_url", "api_url"),
+    [
+        ("github", "https://github.com", "https://api.github.com"),
+        ("github", "https://acme.ghe.com", "https://api.acme.ghe.com"),
+        ("gitlab", "https://g.example:8443", "https://g.example:8443/api/v4"),
+    ],
+    ids=["github-com-api-host", "ghe-data-residency-api-host", "same-host-with-port"],
+)
+def test_an_explicit_api_url_on_an_allowed_host_loads(tmp_path, forge, web_url, api_url):
+    acct = {"forge": forge, "web_url": web_url, "api_url": api_url}
+    file = _load(tmp_path, yaml.safe_dump({"accounts": {"a": acct}}))
+    assert file.accounts["a"].api() == api_url
+
+
+@pytest.mark.parametrize(
     ("text", "says"),
     [
         ("accounts:\n  a: {forge: github, web_url: 'http://github.com'}\n", "https://"),
@@ -90,7 +105,7 @@ def test_remote_hosts_compare_without_case_port_or_dot(remote, host):
             "accounts:\n  a: {forge: github, web_url: 'https://github.com', client: api}\n",
             "`client: api` arrives with the API backends; use `client: cli`",
         ),
-        ("accounts:\n  a: {forge: gitea, web_url: 'https://g.example'}\n", "forge"),
+        ("accounts:\n  a: {forge: gitea, web_url: 'https://g.example'}\n", "'github' or 'gitlab'"),
         (
             "accounts:\n"
             "  a: {forge: gitlab, web_url: 'https://g.example', default_for_host: true}\n"

@@ -177,13 +177,15 @@ def test_degraded_health_is_spelled_out_one_reason_per_line(app, monkeypatch, in
             "invalid_policy": "budget: not a number",
             "invalid_intake": "intake.yaml: 'schedules'.0.cron: field '61': ...",
             "intake_off": intake_off,
+            "invalid_forges": "forges.yaml: two defaults",
             "index": {"errors": ["scan failed"], "embeddings": {"available": True}},
             "reattach_summary": {"unknown": []},
         }
 
     monkeypatch.setattr(client, "health", degraded)
     details = [row["detail"] for row in asyncio.run(doctor.run_checks()) if row["name"] == "health"]
-    assert len(details) == 4
+    assert len(details) == 5
+    assert any("invalid forges.yaml" in d and "two defaults" in d for d in details)
     assert any("quick-task.yaml" in d for d in details)
     (line,) = [d for d in details if d.startswith("invalid intake.yaml")]
     assert "'61'" in line and said in line and ("policy.yaml still fires" in line) is intake_off

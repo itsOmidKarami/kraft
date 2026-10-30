@@ -41,6 +41,7 @@ DEGRADED = {
     "uptime_s": 59,
     "invalid_templates": {"chain broken": "no [/] such node"},
     "invalid_policy": "bad key",
+    "invalid_forges": "forges.yaml: two defaults",
     "index": {"embeddings": {"state": "not installed"}, "errors": ["disk [/] full"]},
     "storage": None,
     "addon_updates": {},
@@ -99,7 +100,7 @@ def _reading_release(app) -> bool:
             [
                 "● degraded · v2.4.0 (2.5.0 installed, R finishes it) · up 59s"
                 " · pid 4120 · 127.0.0.1:8765",
-                "Config  templates ✗  policy ✗  intake ✓  forges ✓  ·  Index  not installed",
+                "Config  templates ✗  policy ✗  intake ✓  forges ✗  ·  Index  not installed",
                 "Storage  not limited  ·  Add-ons  none waiting",
                 "  invalid template: chain broken: no [/] such node",
                 "  invalid policy: bad key",
@@ -245,12 +246,25 @@ def test_the_servers_keys_run_their_verbs_after_the_consoles_confirm(
             True,
         ),
         (
+            {
+                "valid": ["a"],
+                "invalid_templates": {},
+                "refused_policy": None,
+                "refused_intake": None,
+                "refused_workers": None,
+                "refused_forges": "forges.yaml: two defaults",
+            },
+            "reloaded 1 template(s) and policy.yaml and intake.yaml and workers.yaml\n"
+            "  refused: forges.yaml: two defaults (the running accounts are kept)",
+            True,
+        ),
+        (
             client.status_error(422, "the server refused the reload [/]"),
             "422: the server refused the reload [/]",
             True,
         ),
     ],
-    ids=["all-taken", "some-refused", "refused-by-the-server"],
+    ids=["all-taken", "some-refused", "forges-refused", "refused-by-the-server"],
 )
 def test_l_reloads_and_says_what_the_cli_says(console, monkeypatch, answer, toast, error):
     """`l` is `kraft admin reload` read here: the CLI's sentence, from
