@@ -98,6 +98,15 @@ _CHECKS_FIRST_PROMPT = (
     "any file in it. If you do, Kraft ignores your verdict."
 )
 
+_VOIDED = (
+    "The reviewer changed files, so its verdict was ignored; its changes are "
+    "still in the worktree: "
+)
+_VOIDED_IN_COPY = (
+    "The reviewer changed files in its copy of the branch, so its verdict was ignored; "
+    "Kraft removed the copy and your checkout was not touched: "
+)
+
 
 def checks_first(node: ResolvedNode) -> bool:
     """True for a gate whose reviewer only checks first: it may reject, or
@@ -207,8 +216,11 @@ async def review(
     Never raises for an agent that misbehaved: every degraded outcome is
     `("undecided", note)`, which the caller turns into "leave the gate pending".
     Raises `store.CheckoutBusy`, having started nothing, while another
-    in-place item uses the checkout, and `inplace.CheckoutRefused` when the
-    checkout cannot be switched to the item's branch.
+    in-place item uses the checkout, and, for a deciding reviewer,
+    `inplace.CheckoutRefused` when the checkout cannot be switched to the
+    item's branch. In place, a reviewer that checks first holds the checkout's
+    lease but reads a throwaway copy of the branch (`inplace.copy`), never the
+    person's checkout; a copy that cannot be made is `undecided`.
     """
     auto_review = node.auto_review
     if auto_review is None or not isinstance(auto_review.task, AgentTask):
@@ -421,6 +433,8 @@ async def review(
     # The gate's document too, which is outside the checkout and git's sight.
     worktree = inplace.item_folder(run_dirs, row)
     in_place = store.is_in_place(row)
+    # In place it reads a copy of the branch, never the person's checkout.
+    copy = inplace.copy_path(run_dirs, work_item_id, session_id) if cf and in_place else None
     before = None
     doc_was = None
     if cf and not in_place:
@@ -447,11 +461,15 @@ async def review(
             return "undecided", why
 
     async def after_checkout() -> None:
-        # In place, after the launch's take: the first one commits the
-        # attachments, which are not the reviewer's edit. Never sandboxed, so
-        # the live-session guard cannot refuse here; a None is judged below.
+        # In place, once the copy is made: the copy whole, and the person's
+        # branch tip, which a commit by any other route moves. Never sandboxed,
+        # so the live-session guard cannot refuse here; a None is judged below.
         nonlocal before, doc_was
-        before = read_only.snapshot(db, row, launch, worktree)
+        snaps = (
+            read_only.snapshot(db, row, launch, copy, full=True),
+            read_only.snapshot(db, row, launch, worktree),
+        )
+        before = None if None in snaps else snaps
         doc_was = await asyncio.to_thread(_document, run_dirs, work_item_id, watched)
 
     try:
@@ -479,15 +497,16 @@ async def review(
             checkout=executor.sandbox_checkout(row, launch, worktree) if sandbox else None,
             task_instruction=task_instruction,
             title=row["title"],
-            repo_path=row["repo"],
-            cwd=worktree,
+            repo_path=str(copy) if copy else row["repo"],
+            cwd=copy or worktree,
             repo_entry=launch.repo_entry,
             time_cap=time_cap,
             harness_id=auto_review.task.harness,
             takes_checkout=True,
             tips=tips,
             on_session=start,
-            after_checkout=after_checkout if cf and in_place else None,
+            after_checkout=after_checkout if copy else None,
+            in_copy=copy is not None,
             # Its instruction forbids edits: its context must not ask for commits.
             read_only=cf,
             runner=_placement.remote(_placement.runner_for(row, auto_review.runner, node.id)),
@@ -496,6 +515,9 @@ async def review(
         raise
     except Exception as exc:
         await start()  # an attempt all the same
+        if isinstance(exc, inplace.CopyFailed):
+            # Its session already ended `config_error`; never the person's checkout instead.
+            return "undecided", str(exc)
         if not isinstance(exc, _agent.LaunchRefused):
             raise
         # Refused before anything started: recorded as the reviewer's own
@@ -514,31 +536,40 @@ async def review(
             f"{auto_review.path}: {exc}\n",
         )
         return "undecided", str(exc)
-
-    if cf:
-        # Even a reject: its reasoning was about work it then changed. A remote
-        # run's commits are already in this worktree (`remote.runs._publish`).
-        doc_is = await asyncio.to_thread(_document, run_dirs, work_item_id, watched)
-        # The document the person would now read: one the reviewer wrote where
-        # an older item kept it, or in the new place over that, is an edit too.
-        now = await asyncio.to_thread(executor.gate_artifact, run_dirs, row, gate)
-        docs = {watched} if doc_is != doc_was else set()
-        docs |= {now} if now not in (None, watched) else set()
-        if before is None:
-            # In place, a launch refused before its take never read the
-            # checkout: that is a run that did not finish, judged below.
-            if status in ADVANCING:
-                return "undecided", (
-                    "Kraft could not read the checkout before the review, "
-                    "so its verdict was ignored"
-                )
-        elif files := read_only.changed(db, row, launch, worktree, before) + (
-            [str(item_paths.path_of(run_dirs, work_item_id, d)) for d in sorted(docs)]
-        ):
-            return "undecided", (
-                "The reviewer changed files, so its verdict was ignored; its changes are "
-                "still in the worktree: " + read_only.named(files)
-            )
+    else:
+        if cf:
+            # Even a reject: its reasoning was about work it then changed. A remote
+            # run's commits are already in this worktree (`remote.runs._publish`).
+            doc_is = await asyncio.to_thread(_document, run_dirs, work_item_id, watched)
+            # The document the person would now read: one the reviewer wrote where
+            # an older item kept it, or in the new place over that, is an edit too.
+            now = await asyncio.to_thread(executor.gate_artifact, run_dirs, row, gate)
+            docs = {watched} if doc_is != doc_was else set()
+            docs |= {now} if now not in (None, watched) else set()
+            if before is None:
+                # In place, a launch refused before its copy never read it:
+                # that is a run that did not finish, judged below.
+                if status in ADVANCING:
+                    return "undecided", (
+                        "Kraft could not read the checkout before the review, "
+                        "so its verdict was ignored"
+                    )
+            else:
+                if copy:
+                    # The whole copy, and the person's branch tip: a commit
+                    # pushed there from the copy, or made by anyone, moves it.
+                    files = read_only.changed(db, row, launch, copy, before[0], full=True)
+                    files += read_only.changed(db, row, launch, worktree, before[1])
+                    voided = _VOIDED_IN_COPY
+                else:
+                    files = read_only.changed(db, row, launch, worktree, before)
+                    voided = _VOIDED
+                files += [str(item_paths.path_of(run_dirs, work_item_id, d)) for d in sorted(docs)]
+                if files:
+                    return "undecided", voided + read_only.named(files)
+    finally:
+        if copy is not None:
+            await _subprocess.uncancellable(asyncio.to_thread(inplace.remove_copy, copy))
     result_path = item_paths.session_files(run_dirs, work_item_id, session_id).result
     note = _subprocess.read_concerns(result_path) or ""
     verdict = _subprocess.read_verdict(result_path)
