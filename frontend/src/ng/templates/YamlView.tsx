@@ -78,7 +78,7 @@ export function YamlView({ draft, scope, published, file: named, oneOff = false 
         {!oneOff && <span className="yv-file">{file}</span>}
         <span className={`yv-status${err || r.problems.length ? " is-bad" : ""}`} role="status">{status}</span>
         <span className="bp-gap" />
-        {readOnly ? <span className="yv-legend">read-only · it comes from an add-on</span> : <span className="yv-legend">{published !== undefined && <><span className="yv-plus">+</span> added <span className="yv-tilde">~</span> changed · </>}edits apply to the {where} as you type</span>}
+        {readOnly ? <span className="yv-legend">read-only · it comes from an add-on</span> : <span className="yv-legend">{!oneOff && <><span className="yv-plus">+</span> added <span className="yv-tilde">~</span> changed · </>}edits apply to the {where} as you type</span>}
       </div>
       {err && (
         <div className="yv-err" role="alert">

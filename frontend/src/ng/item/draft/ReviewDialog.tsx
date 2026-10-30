@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { usd } from "../../../format";
+import { plural, usd } from "../../../format";
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
 import { showToast } from "../../ui/Toast";
-import { addedCheckText, plural } from "../oneOff";
+import { addedCheckText } from "../oneOff";
 import { useApply } from "./apply";
 import { useDraft } from "./context";
 import { useSelect } from "./select";
@@ -89,7 +89,7 @@ function Review() {
   };
 
   return (
-    <Dialog title={start ? `Start with ${n} unapplied ${plural(n, "change", "changes")}?` : `Apply ${n} ${plural(n, "change", "changes")} to this item?`} onClose={close} className="idr-review" returnTo={returnTo}
+    <Dialog title={start ? `Start with ${plural(n, "unapplied change")}?` : `Apply ${plural(n, "change")} to this item?`} onClose={close} className="idr-review" returnTo={returnTo}
       footer={asking ? (
         <>
           <span className="idr-ask">Discard this draft? It cannot be brought back.</span>
@@ -122,9 +122,9 @@ function Review() {
       </pre>
       <p className="idr-h">checked against policy</p>
       <ul className="idr-checks">
-        <li className={problems.length ? "is-bad" : "is-ok"}>{problems.length ? `✕ ${problems.length} ${plural(problems.length, "problem", "problems")} to fix first` : "✓ resolves"}</li>
+        <li className={problems.length ? "is-bad" : "is-ok"}>{problems.length ? `✕ ${plural(problems.length, "problem")} to fix first` : "✓ resolves"}</li>
         <li className={passed.length ? "is-bad" : "is-ok"}>
-          {passed.length ? `✕ ${passed.length} ${plural(passed.length, "edit", "edits")} the run has passed, which can no longer apply` : "✓ only nodes that have not run"}
+          {passed.length ? `✕ ${plural(passed.length, "edit")} the run has passed, which can no longer apply` : "✓ only nodes that have not run"}
           {passed.length > 0 && <> <LinkButton disabled={busy} onClick={dropPassed}>Remove {passed.length === 1 ? "it" : "them"} from the draft</LinkButton></>}
         </li>
         {overrides.length > 0 && (overrun.length
@@ -137,7 +137,7 @@ function Review() {
         ))}
         <li className="is-ok">{budget.cap_usd == null ? "✓ no dollar cap on this item" : `✓ spent ${usd(budget.spent_usd ?? 0)} of the ${usd(budget.cap_usd)} budget`}</li>
       </ul>
-      {moved > 0 && <p className="idr-moved" role="alert">The run moved past {moved} {plural(moved, "edit", "edits")} while you were reviewing. {PASSED}</p>}
+      {moved > 0 && <p className="idr-moved" role="alert">The run moved past {plural(moved, "edit")} while you were reviewing. {PASSED}</p>}
       <p className="idr-note">{adds.length ? `The run reaches ${adds.map((a) => a.node.id).join(", ")} after ${adds[0].after}.` : "They apply as the run reaches each node."}</p>
     </Dialog>
   );

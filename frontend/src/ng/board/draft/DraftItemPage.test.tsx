@@ -31,7 +31,7 @@ function stub(created = "new1") {
   return calls;
 }
 /** The editor's answer for the default chain extended: `custom` is what the test sets, `problem` breaks the chain. */
-let oneOff: { parent?: boolean; fail?: boolean; custom: { path: string; what: string; value: unknown }[]; customNodes: string[]; problem: boolean; nodes: ChainNode[] };
+let oneOff: { parent?: boolean; fail?: boolean; added?: unknown[]; custom: { path: string; what: string; value: unknown }[]; customNodes: string[]; problem: boolean; nodes: ChainNode[] };
 const oneOffAnswer = (body: { text: string; ops: { op: string; id?: string }[] }) => {
   const added = body.ops.some((o) => o.op === "add_node") ? [...oneOff.nodes, N("k6")] : oneOff.nodes;
   const authored = added.map((n) => ({ id: n.id, kind: n.kind, steps: [{ id: "main", tasks: [] }] }));
@@ -40,7 +40,7 @@ const oneOffAnswer = (body: { text: string; ops: { op: string; id?: string }[] }
     result: { ...DEFAULT_VIEW.result, model: { "chains/one-off.yaml": { id: "one-off", extends: "default" } }, resolved: null, changes: [], sources: {},
       problems: oneOff.problem ? [{ path: "k6", field: "prompt", message: "needs a prompt", file: "chains/one-off.yaml", line: 1, col: 1 }] : [],
       extending: oneOff.parent === false ? null : { parent: "default", nodes: authored, origins: {}, removed: [] } },
-    ops: body.ops.map((o) => ({ op: o.op })), text: body.ops.length ? `${body.text}# edited\n` : body.text, digest: oneOff.problem ? null : "d1gest", custom: oneOff.custom, custom_nodes: oneOff.customNodes, nodes: added, added: [],
+    ops: body.ops.map((o) => ({ op: o.op })), text: body.ops.length ? `${body.text}# edited\n` : body.text, digest: oneOff.problem ? null : "d1gest", custom: oneOff.custom, custom_nodes: oneOff.customNodes, nodes: added, added: oneOff.added ?? [],
   };
 };
 const creates = (calls: Call[]) => calls.filter((c) => c.method === "POST" && c.url.endsWith("/work-items"));
@@ -364,18 +364,26 @@ describe("DraftItemPage", () => {
       expect(screen.getByRole("button", { name: /^one-off · extends default/ })).toBeInTheDocument();
     });
 
-    it("⌘Z outside a text field undoes the chain's last edit", async () => {
+    it.each([
+      { id: "nothing open: undoes", dialog: null, text: 'id: one-off\nextends: "default"\n' },
+      { id: "under the discard dialog: leaves the chain alone", dialog: "discard", text: "id: one-off\nextends: default\n# typed\n" },
+      { id: "under the create review: leaves the chain alone", dialog: "review", text: "id: one-off\nextends: default\n# typed\n" },
+    ])("⌘Z outside a text field undoes the chain's last edit ($id)", async ({ dialog, text }) => {
       const calls = stub();
+      if (dialog === "review") oneOff.custom = [{ path: "add[0]", what: "adds k6", value: "x" }];
       await customize();
       fireEvent.click(screen.getByRole("tab", { name: "YAML" }));
       const ta = screen.getByRole("textbox", { name: "One-off chain, YAML" });
       fireEvent.change(ta, { target: { value: "id: one-off\nextends: default\n# typed\n" } });
       fireEvent.blur(ta);
       await settle();
+      if (dialog === "discard") fireEvent.keyDown(window, { key: "Escape" });
+      if (dialog === "review") fireEvent.click(screen.getByRole("button", { name: "Create paused" }));
+      if (dialog) await settle();
       fireEvent.keyDown(document.body, { key: "z", metaKey: true });
       await settle();
       const ops = calls.filter((c) => c.url.endsWith("/one-off-chain/ops"));
-      expect(ops.at(-1)!.body.text).toBe('id: one-off\nextends: "default"\n');
+      expect(ops.at(-1)!.body.text).toBe(text);
     });
 
     it("reads like the item page on the canvas: names, skips and covered nodes; the Overview names the one-off chain", async () => {
@@ -433,12 +441,15 @@ describe("DraftItemPage", () => {
       const calls = stub();
       oneOff.custom = [{ path: "add[0]", what: "adds the node k6, running an agent", value: "run k6 against staging" }];
       oneOff.customNodes = ["k6"];
+      oneOff.added = [{ node: "k6", harnesses: ["claude"], estimate_usd: null, estimate_runs: null }];
       await customize();
       fireEvent.click(screen.getByRole("button", { name: "Create paused" }));
       await settle();
       expect(creates(calls)).toEqual([]);
       const dialog = screen.getByRole("dialog", { name: /Approve this chain/ });
       expect(within(dialog).getByText("run k6 against staging")).toBeInTheDocument();
+      // The editor's checks on the added node reach the review.
+      expect(within(dialog).getByText("✓ k6: harness claude is allowed · no estimate yet")).toBeInTheDocument();
       fireEvent.click(within(dialog).getByRole("button", { name: "Approve and create" }));
       await settle();
       expect(creates(calls).at(-1)!.body).toMatchObject({ approve_one_off: "d1gest" });

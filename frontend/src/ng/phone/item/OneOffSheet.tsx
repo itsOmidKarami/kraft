@@ -5,8 +5,10 @@ import { ConfirmSheet, type useSheet } from "../nav/Sheet";
 
 /** Start on an item whose one-off chain holds custom content nobody approved: the
  *  custom parts in full, then Approve and start, which names the digest this read
- *  answered. A chain that changed since is read again, never approved from the old read. */
-export function OneOffSheet({ itemId, sheet, start }: { itemId: string; sheet: ReturnType<typeof useSheet>; start: (approved: boolean) => Promise<boolean> }) {
+ *  answered. A chain that changed since is read again, never approved from the old read.
+ *  `tapped`: a Start tap opened it, not Forward or a reload onto the sheet's history entry,
+ *  so only then does a chain with nothing to approve start without asking. */
+export function OneOffSheet({ itemId, sheet, tapped, start, onReading }: { itemId: string; sheet: ReturnType<typeof useSheet>; tapped: boolean; start: (approved: boolean) => Promise<boolean>; onReading?: (reading: boolean) => void }) {
   const [data, setData] = useState<OneOffReviewData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -15,18 +17,23 @@ export function OneOffSheet({ itemId, sheet, start }: { itemId: string; sheet: R
     if (a.status === 200) setData(a.body);
     else setError(detailOf(a.body));
   };
-  useEffect(() => { void read(); }, [itemId]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Nothing left to approve (a library-only chain, or someone approved since the screen read the item): start at once.
+  useEffect(() => {
+    onReading?.(true);
+    void read().finally(() => onReading?.(false));
+    return () => onReading?.(false);
+  }, [itemId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Nothing left to approve (a library-only chain, or someone approved since the screen read the item): a tap starts at once.
   const clear = !!data && !data.needs_review;
+  const auto = clear && tapped;
   const settled = useRef(false);
   useEffect(() => {
-    if (clear && !settled.current) {
+    if (auto && !settled.current) {
       settled.current = true;
       void start(false).then(() => sheet.close());
     }
-  }, [clear]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [auto]); // eslint-disable-line react-hooks/exhaustive-deps
   // Nothing until the read answers: a chain with nothing to approve never flashes a sheet.
-  if (clear || (!data && !error)) return null;
+  if (auto || (!data && !error)) return null;
   const changes = changedNodes(data?.provenance ?? null);
   const touched = [["Added", changes.added], ["Overridden", changes.overridden], ["Removed", changes.removed]] as const;
   const approve = async () => {
@@ -34,6 +41,10 @@ export function OneOffSheet({ itemId, sheet, start }: { itemId: string; sheet: R
     setBusy(true);
     setError(null);
     try {
+      if (clear) {
+        if (await start(false)) sheet.close();
+        return;
+      }
       const a = await request(`/work-items/${encodeURIComponent(itemId)}/one-off/approve`, jsonBody("POST", approveBody(data, "phone")));
       if (a.status !== 200) {
         setError(detailOf(a.body));
@@ -47,9 +58,9 @@ export function OneOffSheet({ itemId, sheet, start }: { itemId: string; sheet: R
   };
   return (
     <ConfirmSheet
-      title="Approve this chain, then start?"
+      title={clear ? "Start this item?" : "Approve this chain, then start?"}
       text={data ? reviewSentence(data.extends, data.custom.length > 0) : undefined}
-      confirm={{ label: "Approve and start", disabled: !data, run: () => void approve() }}
+      confirm={{ label: clear ? "Start" : "Approve and start", disabled: !data, run: () => void approve() }}
       busy={busy}
       error={error}
       onClose={sheet.close}
@@ -64,6 +75,12 @@ export function OneOffSheet({ itemId, sheet, start }: { itemId: string; sheet: R
             </section>
           ))}
           {data.added.map((a) => <p key={a.node} className="ph-target">✓ {addedCheckText(a)}</p>)}
+          {data.redrafted.length > 0 && (
+            <section className="ph-oneoff-part">
+              <p className="ph-help"><b>changed since filing</b></p>
+              {data.redrafted.map((r, i) => <pre key={i} className="ph-start-lines">{r.diff.join("\n")}</pre>)}
+            </section>
+          )}
         </div>
       )}
     </ConfirmSheet>

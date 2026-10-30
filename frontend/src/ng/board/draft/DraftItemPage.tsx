@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import * as api from "../../../api";
-import { repoName, shortId } from "../../../format";
+import { plural, repoName, shortId } from "../../../format";
 import { useStore } from "../../../store";
 import type { ChainNode, Repo, TemplateSummary, Workspace } from "../../../types";
 import { chainOptionText, chainsForRepo, defaultChainNote } from "../../library/types";
@@ -25,7 +25,6 @@ import { useOneOffDraft, type OneOffView } from "./useOneOffDraft";
 import { draftBody, emptyDraft, nodeOverrides, type DraftState } from "./draftBody";
 import "../board.css";
 import { coveredText } from "../../item/chainName";
-import { plural } from "../../item/oneOff";
 import "../../item/item.css";
 import { isTextField, sendOnModEnter } from "../../keys";
 import { tip } from "../../ui/Tooltip";
@@ -172,10 +171,10 @@ export function DraftItemPage() {
     setSel(null);
     showToast("One-off chain dropped", { ms: 6000, action: { label: "Undo", run: () => set(was) } });
   };
-  // ⌘Z undoes the chain's last edit, outside a text field, as in the Chains editor.
+  // ⌘Z undoes the chain's last edit, outside a text field, as in the Chains editor; never under an open dialog.
   const undo = oo.undo;
   useEffect(() => {
-    if (!own) return;
+    if (!own || review || ask) return;
     const on = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "z" || isTextField(e.target)) return;
       e.preventDefault();
@@ -183,7 +182,7 @@ export function DraftItemPage() {
     };
     window.addEventListener("keydown", on);
     return () => window.removeEventListener("keydown", on);
-  }, [own, undo]);
+  }, [own, undo, review, ask]);
 
   // Leaving with a title or brief asks first (Decisions §7b Leaving): the
   // crumbs, the sidebar, Cancel and Esc all come through here.
@@ -416,7 +415,7 @@ export function DraftItemPage() {
           icon={node ? undefined : "workflow"}
           gate={node?.kind === "gate"}
           title={node ? node.id : own ? "one-off chain" : d.chain || "chain"}
-          sub={node ? `${node.kind === "gate" ? "gate" : "exec node"} · ${skipped(node.id) ? "skipped" : "will run"}` : own ? `${parent ? `Extends ${parent} · ` : ""}${oo.customNodes.length} ${plural(oo.customNodes.length, "custom node", "custom nodes")} · ${runText}` : `Draft item · ${runText}`}
+          sub={node ? `${node.kind === "gate" ? "gate" : "exec node"} · ${skipped(node.id) ? "skipped" : "will run"}` : own ? `${parent ? `Extends ${parent} · ` : ""}${plural(oo.customNodes.length, "custom node")} · ${runText}` : `Draft item · ${runText}`}
           tabs={[{ value: "overview", label: "Overview" }, { value: "config", label: configBadge && !node ? `Config · ${configBadge}` : "Config" }, { value: "yaml", label: "YAML" }]}
           tab={tab}
           onTab={(t) => setTab(t as Tab)}

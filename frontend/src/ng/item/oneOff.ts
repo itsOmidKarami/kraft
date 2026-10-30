@@ -1,4 +1,4 @@
-import { ago, usd } from "../../format";
+import { ago, plural, usd } from "../../format";
 
 /** A one-off chain's custom content, as the editor and the Start review show it.
  *  Pure: the desktop review, the new-item page's create review and the phone sheet all read it. */
@@ -43,9 +43,6 @@ export const customText = (value: unknown): string => (typeof value === "string"
 export const customRows = (custom: CustomPart[]): CustomRow[] =>
   custom.map((p, i) => ({ key: `${i}:${p.path}`, what: p.what, text: customText(p.value) }));
 
-/** The word for `n`: one or many. The review dialogs all say it this way. */
-export const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
-
 /** What every review of a one-off chain says first: the create review, the Start review and the sheet on a phone. */
 export const reviewSentence = (base: string | null, custom: boolean) =>
   `This item runs a chain of its own${base ? `, extending ${base}` : ""}.${custom ? " Its agents do what the custom parts below say: read them before you approve." : ""}`;
@@ -54,7 +51,7 @@ export type AddedCheck = { node: string; harnesses: string[]; estimate_usd: numb
 
 /** What the checks say about a node an item adds: which harnesses it runs and what it should cost. */
 export const addedCheckText = (a: AddedCheck) =>
-  `${a.node}: ${a.harnesses.length === 0 ? "runs no agent" : `${plural(a.harnesses.length, "harness", "harnesses")} ${a.harnesses.join(", ")} ${plural(a.harnesses.length, "is", "are")} allowed`} · ${a.estimate_usd == null ? "no estimate yet" : `≈ +${usd(a.estimate_usd)} (avg of ${a.estimate_runs ?? 1} ${plural(a.estimate_runs ?? 1, "run", "runs")})`}`;
+  `${a.node}: ${a.harnesses.length === 0 ? "runs no agent" : a.harnesses.length === 1 ? `harness ${a.harnesses[0]} is allowed` : `harnesses ${a.harnesses.join(", ")} are allowed`} · ${a.estimate_usd == null ? "no estimate yet" : `≈ +${usd(a.estimate_usd)} (avg of ${plural(a.estimate_runs ?? 1, "run")})`}`;
 
 /** `GET /work-items/{id}/one-off`: what a person reads before approving. */
 export interface OneOffReviewData {

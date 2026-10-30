@@ -52,6 +52,8 @@ describe("YAML view", () => {
 
   it.each([
     ["a library chain", false, TEXT, "draft", `${FILE}, YAML`],
+    // Its published file not read yet: the legend is there already, never popping in once the read answers.
+    ["a library chain still reading its published file", false, undefined, "draft", `${FILE}, YAML`],
     ["a one-off chain", true, undefined, "chain", "One-off chain, YAML"],
   ] as const)("%s: on a syntax error says the canvas keeps the last valid one, and Revert puts that text back", async (_, oneOff, published, what, name) => {
     const draft = fake(viewWith(TEXT));

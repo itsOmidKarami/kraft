@@ -5,8 +5,15 @@ import "./ui.css";
  *  control goes in `children`; the label element wraps it, so it is named. */
 export function Field({ label, hint, error, children }: { label: string; hint?: ReactNode; error?: ReactNode; children: ReactNode }) {
   const errId = useId();
-  // One control: an error marks it invalid and describes it.
-  const control = error && isValidElement<Record<string, unknown>>(children) ? cloneElement(children, { "aria-invalid": true, "aria-describedby": errId }) : children;
+  // One control: an error describes it, and marks it invalid unless the control decides that itself
+  // (a server failure is an error about the form, not about what was typed).
+  const control =
+    error && isValidElement<Record<string, unknown>>(children)
+      ? cloneElement(children, {
+          "aria-invalid": "aria-invalid" in children.props ? children.props["aria-invalid"] : true,
+          "aria-describedby": [children.props["aria-describedby"], errId].filter(Boolean).join(" "),
+        })
+      : children;
   return (
     <label className="field">
       <span className="field-label">{label}</span>

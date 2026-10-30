@@ -51,6 +51,10 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
   const { busy, run } = useDo(reload);
   const [brief, setBrief] = useState(false);
   const [startLines, setStartLines] = useState<string[]>([]);
+  // A Start tap, not a history entry (Forward, a reload), opened the one-off sheet; and while it reads, Start is busy.
+  const tapped = useRef(false);
+  const [reading, setReading] = useState(false);
+  useEffect(() => { if (sheet.openId === null) tapped.current = false; }, [sheet.openId]);
   const status = item.display_status ?? "running";
   const hs = headerState(item);
   const bar = pairOf(item);
@@ -83,7 +87,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
         // The sheet lists what it would apply, as the desktop's dialog does (R10b-12).
         setStartLines(draftLines(ops as Parameters<typeof draftLines>[0]).map((l) => l.text));
         if (waits) sheet.open("start-draft");
-        else if (item.one_off) sheet.open("one-off");
+        else if (item.one_off) { tapped.current = true; sheet.open("one-off"); }
         else void run(act.resume(item.id), "Started.");
       });
       case "retry": return void run(act.retry(item.id, retryBody(node, item.stop)), "Retrying.");
@@ -109,7 +113,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
   }, [params]);
   const button = (a: Act | null, primary: boolean) =>
     a && (
-      <Button key={a.id} className={`ph-btn${primary ? " ph-btn-primary" : ""}`} variant={a.danger ? "danger" : primary ? "primary" : "secondary"} disabled={busy} onClick={() => go(a.id)}>
+      <Button key={a.id} className={`ph-btn${primary ? " ph-btn-primary" : ""}`} variant={a.danger ? "danger" : primary ? "primary" : "secondary"} disabled={busy || reading} onClick={() => go(a.id)}>
         {a.label}
       </Button>
     );
@@ -130,7 +134,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
           {text && <p className={`ph-brief${brief ? " ph-is-open" : ""}`}>{text}</p>}
           {longBrief && <button type="button" className="ph-linkbtn" aria-expanded={brief} onClick={() => setBrief(!brief)}>{brief ? "less" : "more"}</button>}
           {/* As the desktop's Chain pane says it: a chain of this item's own, and who approved what is custom in it. */}
-          {item.one_off && <p className="ph-item-meta">one-off chain{item.one_off.custom > 0 && ` · ${approvalLine(item.one_off.approval, now)}`}</p>}
+          {item.one_off && <div className="ph-item-meta">one-off chain{item.one_off.custom > 0 && ` · ${approvalLine(item.one_off.approval, now)}`}</div>}
           {!!item.attachments?.length && (
             <p className="ph-attached">
               <span className="ph-item-meta">attached</span>
@@ -179,13 +183,13 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
         )}
       </div>
       {(bar.secondary || bar.primary) && <ActionBar>{button(bar.secondary, false)}{button(bar.primary, true)}</ActionBar>}
-      <ItemSheets item={item} node={node?.id ?? null} sheet={sheet} reload={reload} startLines={startLines} />
+      <ItemSheets item={item} node={node?.id ?? null} sheet={sheet} reload={reload} startLines={startLines} tapped={tapped} onReading={setReading} />
     </>
   );
 }
 
 /** The sheets over the item: pause, ⋮, and the budget raise. */
-function ItemSheets({ item, node, sheet, reload, startLines = [] }: { item: ItemDetail; node: string | null; sheet: ReturnType<typeof useSheet>; reload: () => void; startLines?: string[] }) {
+function ItemSheets({ item, node, sheet, reload, startLines = [], tapped, onReading }: { item: ItemDetail; node: string | null; sheet: ReturnType<typeof useSheet>; reload: () => void; startLines?: string[]; tapped: { current: boolean }; onReading: (reading: boolean) => void }) {
   const { busy, run } = useDo(reload);
   // One start per sheet: a second tap while the first is in flight sends nothing.
   const starting = useRef(false);
@@ -212,7 +216,10 @@ function ItemSheets({ item, node, sheet, reload, startLines = [] }: { item: Item
               if (!a.ok) return void showToast(a.error, { tone: "error" });
             }
             // The draft may have changed the chain: its custom content is read before anything starts.
-            if (item.one_off) return sheet.open("one-off");
+            if (item.one_off) {
+              tapped.current = true;
+              return sheet.open("one-off");
+            }
             const r = await act.resume(item.id);
             if (!r.ok) return void showToast(r.error, { tone: "error" });
             showToast(v === "apply" ? "Applied the draft and started." : "Started. The draft is kept.");
@@ -227,7 +234,7 @@ function ItemSheets({ item, node, sheet, reload, startLines = [] }: { item: Item
     );
   if (sheet.is("one-off"))
     return (
-      <OneOffSheet itemId={item.id} sheet={sheet} start={async (approved) => {
+      <OneOffSheet itemId={item.id} sheet={sheet} tapped={tapped.current} onReading={onReading} start={async (approved) => {
         const r = await act.resume(item.id);
         if (!r.ok) { showToast(r.error, { tone: "error" }); return false; }
         showToast(approved ? "Approved and started." : "Started.");

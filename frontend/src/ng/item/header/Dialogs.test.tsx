@@ -117,6 +117,20 @@ describe("item cards", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ["Escalate", EscalateCard, "Message", "POST /work-items/w1/escalate"],
+    ["Mark complete", CompleteCard, "Reason", "POST /work-items/w1/complete"],
+  ])("%s says a server failure under its box without marking what was typed invalid", async (_, Card, field, route) => {
+    stubFetch({ ...ANSWERS, [route]: [500, { detail: "the server broke" }] });
+    render(<Card id="w1" anchor={anchor()} onClose={() => {}} onDone={() => {}} />);
+    const box = screen.getByRole("textbox", { name: new RegExp(field) });
+    await userEvent.type(box, "why");
+    await userEvent.keyboard("{Control>}{Enter}{/Control}");
+    const alert = await screen.findByRole("alert");
+    expect(box).toHaveAccessibleDescription(alert.textContent!);
+    expect(box).not.toHaveAttribute("aria-invalid", "true");
+  });
+
   // R12b-05: Escape closed the card and dropped what was typed; empty, it still closes.
   it.each([
     ["Escalate", EscalateCard, "Message"],

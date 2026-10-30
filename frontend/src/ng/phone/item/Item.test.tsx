@@ -165,6 +165,14 @@ describe("the item screen (C)", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
 
+    it("asks before starting when the sheet came back by Forward or a reload, not a tap", async () => {
+      const calls = mount(PENDING(), { pathname: "/work-items/w1", state: { phSheet: "one-off" } }, { ...ROUTES, "GET /work-items/w1/one-off": [200, { ...(ROUTES["GET /work-items/w1/one-off"][1] as object), needs_review: false }], "POST /work-items/w1/resume": [200, {}] });
+      const sheet = await screen.findByRole("dialog", { name: "Start this item?" });
+      expect(posts(calls)).toEqual([]);
+      await userEvent.click(within(sheet).getByRole("button", { name: "Start" }));
+      await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/resume"]));
+    });
+
     it("says the item runs a one-off chain and who approved it, as the desktop's Chain pane does", async () => {
       mount(item("paused", null, { status: "paused", current_node_id: null, worker_sessions: [], one_off: { extends: "default", custom: 1, needs_review: false, approval: { by: "human", door: "web", at: new Date(Date.now() - 2 * 3600_000).toISOString(), digest: "d", review_digest: "d" } } }));
       expect(await screen.findByText("one-off chain · approved by you in the web UI · 2h ago")).toBeInTheDocument();
@@ -182,6 +190,8 @@ describe("the item screen (C)", () => {
       await userEvent.click(await screen.findByRole("button", { name: "Start" }));
       await new Promise((r) => setTimeout(r, 20));
       expect(screen.queryByRole("dialog")).toBeNull();
+      // Busy meanwhile, as the desktop's Start is: a second tap sends nothing.
+      expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
       release();
       expect(await screen.findByRole("dialog", { name: "Approve this chain, then start?" })).toBeInTheDocument();
     });
@@ -198,11 +208,13 @@ describe("the item screen (C)", () => {
       expect(posts(calls)).toEqual([]);
     });
 
-    it("opens a sheet with the custom content in full, and Approve and start posts the digest as the phone door, then starts", async () => {
-      const calls = mount(PENDING(), "/work-items/w1", ROUTES);
+    it("opens a sheet with the custom content in full and what changed since filing, and Approve and start posts the digest as the phone door, then starts", async () => {
+      const calls = mount(PENDING(), "/work-items/w1", { ...ROUTES, "GET /work-items/w1/one-off": [200, { ...(ROUTES["GET /work-items/w1/one-off"][1] as object), redrafted: [{ diff: ["  implementation", "+ k6"] }] }] });
       await userEvent.click(await screen.findByRole("button", { name: "Start" }));
       const sheet = await screen.findByRole("dialog", { name: "Approve this chain, then start?" });
       expect(await within(sheet).findByText("run k6 against staging")).toBeInTheDocument();
+      expect(within(sheet).getByText("changed since filing")).toBeInTheDocument();
+      expect(within(sheet).getByText(/\+ k6/)).toBeInTheDocument();
       expect(posts(calls)).toEqual([]);
       await userEvent.click(within(sheet).getByRole("button", { name: "Approve and start" }));
       await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/one-off/approve", "POST /work-items/w1/resume"]));
