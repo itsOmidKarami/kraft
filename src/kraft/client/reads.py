@@ -538,6 +538,12 @@ async def repos() -> list[dict]:
     return (await transport._get("/repos")).get("repos", [])
 
 
+async def silent_reviewers() -> dict:
+    """Review bots that have never posted in a repository across at least `run`
+    items: `{"reviewers": [{"repo", "bot", "items"}], "run": N}`."""
+    return await transport._get("/repos/silent-reviewers")
+
+
 async def health() -> dict:
     """The server's own view of itself: invalid config, index state, reattach.
 

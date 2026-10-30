@@ -693,7 +693,8 @@ async def _collect_review(
         return "automated review: no reviewer configured; nothing to collect\n", "done", None
     log, status, note, collection = await _settle_review(
         forge, db, repo=repo, orig_repo=orig_repo, branch=branch, head=head,
-        work_item_id=work_item_id, hook_point=hook_point, reviewers=reviewers,
+        work_item_id=work_item_id, node_id=node_id, hook_point=hook_point,
+        reviewers=reviewers,
         bounds=bounds, grace=grace,
     )  # fmt: skip
     if collection is not None:
@@ -710,11 +711,13 @@ async def _settle_review(
     branch: str,
     head: str,
     work_item_id: str,
+    node_id: str,
     hook_point: str,
     reviewers: Reviewers,
     bounds: WaitBounds,
     grace: timedelta,
     scope: str | None = None,
+    mount: str | None = None,
 ) -> tuple[str, str, WaitNote, list[dict] | None]:
     """One check of whether every reviewer has finished with `head`
     (`settle.decide`): `waiting` with no collection yet, or `done` with what
@@ -749,8 +752,35 @@ async def _settle_review(
         note = WaitNote(decided.next_at, {"memory": decided.memory}, False, now)
         return log, "waiting", note, None
     log = f"automated review: {len(reviewers)} reviewer(s) finished with {head[:7]}\n"
+    heard, silent = settle.heard_and_silent(reviewers, decided.memory)
+    if silent:
+        log += f"never posted on {head[:7]}: {', '.join(silent)}\n"
+    if heard or silent:
+        payload = {"node_id": node_id, "task": hook_point, "repo": str(orig_repo)}
+        payload |= {"mount": mount, "head": head, "heard": heard, "silent": silent}
+        await db.write(lambda c: _record_settled(c, work_item_id, payload))
     note = WaitNote(None, {"memory": decided.memory}, timed_out, now)
     return log, "done", note, decided.collection
+
+
+def _record_settled(c, work_item_id: str, payload: dict) -> None:
+    """Record a settled review once per head: a multi-repo item re-reads a
+    repository that already settled on every check until the rest do, and a
+    count of silences must not grow with them."""
+    seen = c.execute(
+        "SELECT 1 FROM events WHERE work_item_id = ? AND type = ? "
+        "AND json_extract(payload, '$.task') = ? AND json_extract(payload, '$.head') = ? "
+        "AND json_extract(payload, '$.mount') IS ?",
+        (
+            work_item_id,
+            ForgeEvent.AUTOMATED_REVIEW_SETTLED,
+            payload["task"],
+            payload["head"],
+            payload["mount"],
+        ),
+    ).fetchone()
+    if seen is None:
+        events.append(c, work_item_id, ForgeEvent.AUTOMATED_REVIEW_SETTLED, payload)
 
 
 def _verdict(
@@ -1105,8 +1135,9 @@ async def _run_one(
             head = await git._head_sha(repo, branch)
             log, status, note, collection = await _settle_review(
                 forge, db, repo=repo, orig_repo=orig_repo, branch=branch, head=head,
-                work_item_id=work_item_id, hook_point=hook_point, reviewers=reviewers,
-                bounds=bounds, grace=grace, scope=scope,
+                work_item_id=work_item_id, node_id=node_id, hook_point=hook_point,
+                reviewers=reviewers,
+                bounds=bounds, grace=grace, scope=scope, mount=mount,
             )  # fmt: skip
             if collection is not None:
                 found, unread, unfinished = _verdict(collection, mount)

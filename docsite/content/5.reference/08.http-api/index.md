@@ -282,6 +282,7 @@ _Added in 2.4_
 | Route | What it does |
 |---|---|
 | [`GET /api/repos`](/reference/http-api/repos-chains-harnesses-and-server#get-apirepos) | Lists the connected repos and workspaces. |
+| [`GET /api/repos/silent-reviewers`](/reference/http-api/repos-chains-harnesses-and-server#get-apirepossilent-reviewers) | Lists review bots that have never posted in a repo, across three items or more. _Added in next_ |
 | [`POST /api/repos/probe`](/reference/http-api/repos-chains-harnesses-and-server#post-apireposprobe) | Reads a repository and proposes how to connect it. |
 | [`POST /api/repos`](/reference/http-api/repos-chains-harnesses-and-server#post-apirepos) | Connects a repository. |
 | [`PATCH /api/repos?path=`](/reference/http-api/repos-chains-harnesses-and-server#patch-apirepospath) | Changes a connected repo's entry in `repos.yaml`. |
