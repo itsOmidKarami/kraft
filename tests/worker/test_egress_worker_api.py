@@ -115,6 +115,25 @@ async def worker_api():
         ("show", {"id": "w-own"}, ("GET", "/api/work-items/w-own", None)),
         ("threads", {}, ("GET", "/api/work-items/w-own/threads", None)),
         ("events", {}, ("GET", "/api/work-items/w-own/events", None)),
+        ("mr", {}, ("GET", "/api/work-items/w-own/forge/mr", None)),
+        (
+            "mr",
+            {"repo": "libs/core"},
+            ("GET", "/api/work-items/w-own/forge/mr?repo=libs%2Fcore", None),
+        ),
+        ("pipelines", {}, ("GET", "/api/work-items/w-own/forge/pipelines", None)),
+        (
+            "jobs",
+            {"pipeline": "5"},
+            ("GET", "/api/work-items/w-own/forge/pipelines/5/jobs", None),
+        ),
+        (
+            "job-log",
+            {"pipeline": "5", "job": "9", "lines": "50"},
+            ("GET", "/api/work-items/w-own/forge/pipelines/5/jobs/9/log?lines=50", None),
+        ),
+        ("merged", {"limit": "3"}, ("GET", "/api/work-items/w-own/forge/merged?limit=3", None)),
+        ("labels", {}, ("GET", "/api/work-items/w-own/forge/labels", None)),
         (
             "permission-hook",
             {"harness": "cursor", "stdin": '{"tool_name": "Shell"}'},
@@ -125,7 +144,23 @@ async def worker_api():
             ),
         ),
     ],
-    ids=["progress", "retry", "retry-steered", "reply", "show", "threads", "events", "hook"],
+    ids=[
+        "progress",
+        "retry",
+        "retry-steered",
+        "reply",
+        "show",
+        "threads",
+        "events",
+        "mr",
+        "mr-repo",
+        "pipelines",
+        "jobs",
+        "job-log",
+        "merged",
+        "labels",
+        "hook",
+    ],
 )
 async def test_a_verb_is_its_api_call_made_as_the_channel_session(worker_api, verb, form, call):
     """The session and the credential are the channel's and the daemon's,
@@ -142,7 +177,8 @@ async def test_a_verb_is_its_api_call_made_as_the_channel_session(worker_api, ve
     )
     assert status == 200
     [seen] = api.calls
-    assert (seen["method"], seen["path"], seen["json"]) == call
+    query = "?" + urlencode(seen["query"]) if seen["query"] else ""
+    assert (seen["method"], seen["path"] + query, seen["json"]) == call
     assert (seen["session"], seen["authorization"]) == ("w-own/s-own", "Bearer daemon-token")
     assert events == []
 
@@ -154,6 +190,7 @@ async def test_a_verb_is_its_api_call_made_as_the_channel_session(worker_api, ve
         ("reply", {"thread": "t-gone", "body": "x"}, "POST /api/threads/t-gone/replies"),
         ("show", {"id": "w-other"}, "GET /api/work-items/w-other"),
         ("events", {"id": "w-other"}, "GET /api/work-items/w-other/events"),
+        ("mr", {"id": "w-other"}, "GET /api/work-items/w-other/forge/mr"),
         ("progress", {"task": "1", "id": "w-other"}, "POST /api/work-items/w-other/progress"),
         ("progress", {"task": "1", "id": "w-own/../w-other"}, None),
     ],
@@ -162,6 +199,7 @@ async def test_a_verb_is_its_api_call_made_as_the_channel_session(worker_api, ve
         "no-such-thread",
         "another-item",
         "another-item-events",
+        "another-item-forge",
         "another-item-act",
         "traversal",
     ],
@@ -259,6 +297,35 @@ async def test_events_after_and_type_leave_out_the_rest(worker_api, form, seqs):
 async def test_events_with_an_after_that_is_no_whole_number_is_a_400(worker_api, after):
     api, ask = worker_api
     status, body, events = await ask("events", {"after": after})
+    assert status == 400, body
+    assert api.calls == []
+    assert events == []
+
+
+@pytest.mark.parametrize(
+    ("verb", "form"),
+    [
+        ("job-log", {"pipeline": "5", "job": "9", "lines": "0"}),
+        ("job-log", {"pipeline": "5", "job": "9", "lines": "5001"}),
+        ("job-log", {"pipeline": "5", "job": "9", "lines": "x"}),
+        ("job-log", {"pipeline": "5", "lines": "5"}),
+        ("merged", {"limit": "101"}),
+        ("merged", {"limit": "-1"}),
+        ("jobs", {}),
+    ],
+    ids=[
+        "lines-0",
+        "lines-big",
+        "lines-word",
+        "no-job",
+        "limit-big",
+        "limit-negative",
+        "no-pipeline",
+    ],
+)
+async def test_a_forge_read_with_a_bad_field_is_a_400(worker_api, verb, form):
+    api, ask = worker_api
+    status, body, events = await ask(verb, form)
     assert status == 400, body
     assert api.calls == []
     assert events == []

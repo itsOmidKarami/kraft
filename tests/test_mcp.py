@@ -61,6 +61,12 @@ def test_the_tools_are_registered():
         "set_node_overrides",
         "set_work_item_policy",
         "list_threads",
+        "forge_mr",
+        "forge_pipelines",
+        "forge_jobs",
+        "forge_job_log",
+        "forge_merged_mrs",
+        "forge_labels",
         "compare_changes",
         "add_review_comment",
         "resolve_thread",
@@ -572,6 +578,20 @@ def test_submit_review_says_only_a_human_should_decide():
     "tool, client_fn, args",
     [
         ("list_threads", "threads", {"work_item_id": "w1", "open_only": True}),
+        ("forge_mr", "forge_mr", {"work_item_id": "w1", "repo": "libs/core"}),
+        ("forge_pipelines", "forge_pipelines", {"work_item_id": "w1", "repo": "libs/core"}),
+        ("forge_jobs", "forge_jobs", {"pipeline": "5", "work_item_id": "w1", "repo": "x"}),
+        (
+            "forge_job_log",
+            "forge_job_log",
+            {"pipeline": "5", "job": "9", "work_item_id": "w1", "lines": 30, "repo": "x"},
+        ),
+        (
+            "forge_merged_mrs",
+            "forge_merged_mrs",
+            {"work_item_id": "w1", "limit": 5, "repo": "x"},
+        ),
+        ("forge_labels", "forge_labels", {"work_item_id": "w1", "repo": "x"}),
         (
             "compare_changes",
             "compare",
@@ -607,7 +627,7 @@ def test_each_review_tool_delegates_to_its_client_function(monkeypatch, tool, cl
     dropped parameter must show up in the real function's own bound names)."""
     real = getattr(client, client_fn)
     seen = {}
-    result = [] if tool == "list_threads" else {"id": "w1"}
+    result = [] if tool == "list_threads" or tool.startswith("forge_") else {"id": "w1"}
 
     async def fake(*fn_args, **fn_kwargs):
         bound = inspect.signature(real).bind(*fn_args, **fn_kwargs)

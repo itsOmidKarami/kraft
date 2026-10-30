@@ -619,6 +619,59 @@ def build() -> MCPServer:
         return await client.threads(work_item_id, open_only)
 
     @server.tool()
+    async def forge_mr(work_item_id: str | None = None, repo: str | None = None) -> dict:
+        """The work item's merge request as the forge has it: number, url, state
+        (open|merged|closed), title, body, draft, labels, branches, head_sha.
+        Errors if the item has no merge request yet. `repo` is a workspace
+        member's mount path; left out, the root repository."""
+        return await client.forge_mr(work_item_id, repo)
+
+    @server.tool()
+    async def forge_pipelines(
+        work_item_id: str | None = None, repo: str | None = None
+    ) -> list[dict]:
+        """The work item's pipelines or workflow runs: id, kind (branch|
+        merge_request|train|merge_group), ref, sha, status (the forge's own
+        word), url, created_at. Its ids are what `forge_jobs` takes."""
+        return await client.forge_pipelines(work_item_id, repo)
+
+    @server.tool()
+    async def forge_jobs(
+        pipeline: str, work_item_id: str | None = None, repo: str | None = None
+    ) -> list[dict]:
+        """The jobs of one of the item's pipelines: id, name, stage, status,
+        failure_reason, url. `pipeline` is an id from `forge_pipelines`; its
+        job ids are what `forge_job_log` takes."""
+        return await client.forge_jobs(pipeline, work_item_id, repo)
+
+    @server.tool()
+    async def forge_job_log(
+        pipeline: str,
+        job: str,
+        work_item_id: str | None = None,
+        lines: int = 200,
+        repo: str | None = None,
+    ) -> dict:
+        """The last `lines` lines (1-5000) of one job's log, colour codes
+        removed: `{"log": str, "truncated": bool}`. `pipeline` is an id from
+        `forge_pipelines` and `job` one from `forge_jobs`."""
+        return await client.forge_job_log(pipeline, job, work_item_id, lines, repo)
+
+    @server.tool()
+    async def forge_merged_mrs(
+        work_item_id: str | None = None, limit: int = 20, repo: str | None = None
+    ) -> list[dict]:
+        """The latest `limit` (1-100) merge requests merged into the item's base
+        branch: number, title, labels, url, merged_at. Shows how this project
+        titles and labels its merges."""
+        return await client.forge_merged_mrs(work_item_id, limit, repo)
+
+    @server.tool()
+    async def forge_labels(work_item_id: str | None = None, repo: str | None = None) -> list[dict]:
+        """The labels the item's project defines: name, description, color."""
+        return await client.forge_labels(work_item_id, repo)
+
+    @server.tool()
     async def compare_changes(
         work_item_id: str | None = None,
         from_: str = "base",
