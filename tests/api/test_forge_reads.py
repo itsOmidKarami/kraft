@@ -209,6 +209,9 @@ def test_the_job_log_is_its_tail_without_ansi(client, repo, monkeypatch):
         ),
         pytest.param("a\r\nb\r\n", 1, {"log": "b", "truncated": True}, id="crlf"),
         pytest.param("", 5, {"log": "", "truncated": False}, id="empty"),
+        pytest.param(
+            "a\r\r\nb\r", 5, {"log": "a\nb", "truncated": False}, id="double-cr-and-trailing-cr"
+        ),
     ],
 )
 def test_the_job_log_keeps_what_a_carriage_return_left(

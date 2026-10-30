@@ -129,7 +129,7 @@ async def forge_job_log(
     # markers): keep what was left showing, not every overwritten fragment. Before
     # the colour codes go, or `\r\x1b[0K\n` would read as a plain line ending.
     lines_in = text.replace("\r\n", "\n").removesuffix("\n").split("\n")
-    all_lines = [_ANSI.sub("", ln.rsplit("\r", 1)[-1]) for ln in lines_in]
+    all_lines = [_ANSI.sub("", ln.rstrip("\r").rsplit("\r", 1)[-1]) for ln in lines_in]
     return {"log": "\n".join(all_lines[-lines:]), "truncated": len(all_lines) > lines}
 
 
