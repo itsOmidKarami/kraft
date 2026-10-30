@@ -999,28 +999,13 @@ async def _mcp_check(health: dict | None) -> dict:
     Rejected, as the bead records: passing `--mcp-config` on every launch, which
     would make Kraft write the operator's agent config.
 
-    A registration whose command is not on the PATH workers get fails too: the
-    launch refuses it. Only the server knows its PATH (`/health`); without one
-    this shell's is checked, which may differ, so a miss there only warns.
+    A registration whose command is not on the PATH workers get fails too, as
+    nothing registered does: the launch refuses it. Only the server knows its
+    PATH (`/health`); without one this shell's is checked, which may differ,
+    so a miss there only warns.
     """
     server_up = health is not None
     found = registration.permission_tool(None)
-    if health is not None:
-        on_path = health.get("mcp_command_on_path")  # None from a server before it
-    else:
-        on_path = (
-            None if found is None or found[2] is None else registration.on_path(found[2], None)
-        )
-    if on_path is False and found is not None:
-        path = "the server's PATH" if server_up else "this shell's PATH (the server's may differ)"
-        return _check(
-            "mcp server",
-            not server_up,
-            f"the kraft MCP server registered in {found[1]} runs {found[2]!r}, which is not on "
-            f"{path}, so Claude cannot start it and unsandboxed Claude workers are refused; "
-            f"{registration.PATH_FIX} ({_MCP_SCOPE})",
-            warn=not server_up,
-        )
     asking = sorted(_direct_askers(harness.load(None)))
     needed = True
     if server_up:
@@ -1034,6 +1019,9 @@ async def _mcp_check(health: dict | None) -> dict:
         per_repo = {Path(e.path): registration.permission_tool(Path(e.path)) for e in entries}
         refused = [str(repo) for repo, tool in per_repo.items() if tool is None]
         needed = _launches_direct_asker(entries)
+        # None from a server older than the field.
+        if health.get("mcp_command_on_path") is False and found is not None:
+            return _cannot_start(found, asking, server_up=True, needed=needed)
         # Every repo refused and nothing at user scope is no registration at
         # all: it falls through to the same failure as no repo connected,
         # since the first such worker anywhere is refused -- when the chains
@@ -1056,6 +1044,8 @@ async def _mcp_check(health: dict | None) -> dict:
         # The repo-scope half needs `GET /repos`, like every other
         # server-dependent check here.
         return _check("mcp server", True, "skipped: no server", skipped=True)
+    elif found[2] is not None and not registration.on_path(found[2], None):
+        return _cannot_start(found, asking, server_up=False, needed=True)
     if found:
         return _check("mcp server", True, f"{found[0]}, registered in {found[1]} ({_MCP_SCOPE})")
     if not needed:
@@ -1073,6 +1063,26 @@ async def _mcp_check(health: dict | None) -> dict:
         f"no kraft MCP server registered, so Claude workers are refused; {registration.FIX} "
         f"({_MCP_SCOPE})",
     )
+
+
+def _cannot_start(found: tuple, asking: list[str], *, server_up: bool, needed: bool) -> dict:
+    """The `mcp server` row for a registration whose command is not on the
+    PATH workers get: a failure when the server says so and a launch needs
+    it, else a warning -- this shell's PATH may not be the server's."""
+    path = "the server's PATH" if server_up else "this shell's PATH (the server's may differ)"
+    detail = (
+        f"the kraft MCP server registered in {found[1]} runs {found[2]!r}, which is not on "
+        f"{path}, so Claude cannot start it"
+    )
+    if not needed:
+        detail += (
+            f": no chain launches an unsandboxed task on harness {' or '.join(asking)} here, "
+            f"which is the launch that needs it; {registration.PATH_FIX} before one does"
+        )
+    else:
+        detail += f" and unsandboxed Claude workers are refused; {registration.PATH_FIX}"
+    fails = server_up and needed
+    return _check("mcp server", not fails, f"{detail} ({_MCP_SCOPE})", warn=not fails)
 
 
 def _direct_askers(harnesses) -> set[str]:
