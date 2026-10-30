@@ -160,8 +160,8 @@ def _item_bytes(item: Path, seen: set[tuple[int, int]], stop) -> dict[str, int]:
         if part.name != "sessions" or not part.is_dir(follow_symlinks=False):
             sizes[kind] = sizes.get(kind, 0) + _bytes(part.path, seen, stop)
             continue
-        # Kraft makes `sessions/` and each session's folder, and no worker
-        # can write either; only `out/` in one is the worker's.
+        # Kraft makes `sessions/` and each session's folder; only `out/` in
+        # one is the worker's, and a live in-place `copy/` its agent's.
         logs = _bytes_of_folder_itself(part.path, seen)
         for session in _children(Path(part.path)):
             if not session.is_dir(follow_symlinks=False):
