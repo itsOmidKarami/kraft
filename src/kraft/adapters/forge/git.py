@@ -778,15 +778,23 @@ async def _push_lfs_objects(
     person's commits brought in without their objects included). Commits
     with no LFS pointer, read with plain git, never run git-lfs; ones with
     pointers, on a machine without git-lfs, refuse, as the hook did."""
-    tracked = git_read(
+    # A failed listing raises rather than reading as "no pointers", which would
+    # push pointers without their objects.
+    listing = await run_git(
         repo,
-        "for-each-ref",
-        "--format=%(objectname)",
-        "refs/remotes/origin/",
-        expected_failure=True,
+        [
+            "git",
+            "rev-list",
+            "--objects",
+            head,
+            "--not",
+            "--remotes=origin",
+            *([remote] if remote else []),
+        ],
+        env=env,
     )
-    known = [remote, *(tracked or "").split()]
-    if not await asyncio.to_thread(lfs.new_pointers, repo, head, known):
+    blobs = (line.split(" ", 1)[0] for line in listing.splitlines())
+    if not await asyncio.to_thread(lfs.pointers_among, repo, blobs):
         return
     # Not `lfs.available()`: it is cached, and the message says install, then retry.
     if shutil.which("git-lfs") is None:
@@ -799,7 +807,7 @@ async def _push_lfs_objects(
         repo,
         ["git", "lfs", "pre-push", "origin", target],
         env=env,
-        stdin=f"{ref} {head} {ref} {remote or '0' * 40}\n",
+        stdin=f"{ref} {head} {ref} {remote or '0' * len(head)}\n",
     )
 
 
