@@ -140,7 +140,7 @@ MANIFEST: tuple[Capability, ...] = (
             "    prompt: Decide which of the review bots' feedback on this merge request needs "
             "a change.\n"
             "    skill: kraft:review-feedback\n"
-            "    inputs: [bot_feedback, previous_review]\n"
+            "    inputs: [bot_feedback, previous_review, pr_rules]\n"
             "then add a third step to post_draft_feedback's `steps:` in library.yaml, after "
             "`automated_review`:\n"
             "      - id: review_feedback\n"
@@ -154,13 +154,27 @@ MANIFEST: tuple[Capability, ...] = (
         ),
         present=("library.yaml", "tasks", "triage_review_feedback"),
     ),
+    Capability(
+        version="2.5.0",
+        name="pr_rules",
+        what="the agents that work a merge request are pointed at the repository's own "
+        "rules for pull requests, its committed steward or babysit skill",
+        how=(
+            "in library.yaml, add `pr_rules` to the `inputs:` of repair_mr_feedback, "
+            "triage_review_feedback, repair_mr_checks, repair_merge_queue_failure and "
+            "describe_mr, e.g.\n"
+            "    inputs: [bot_feedback, previous_review, pr_rules]"
+        ),
+        present=("library.yaml", "tasks", "repair_mr_feedback", "inputs", "pr_rules"),
+    ),
 )
 
 
 def adopted(capability: Capability, live_dir: Path) -> bool:
     """Whether the live templates already hold what `capability` adds: its
-    `present` key path exists. An unreadable file is not adopted, so the row
-    says too much rather than too little."""
+    `present` key path exists, a list's step matching one of its items. An
+    unreadable file is not adopted, so the row says too much rather than too
+    little."""
     if not capability.present:
         return False
     file, *keys = capability.present
@@ -169,9 +183,12 @@ def adopted(capability: Capability, live_dir: Path) -> bool:
     except (OSError, yaml.YAMLError):
         return False
     for key in keys:
-        if not isinstance(node, dict) or key not in node:
+        if isinstance(node, list) and key in node:
+            node = key
+        elif isinstance(node, dict) and key in node:
+            node = node[key]
+        else:
             return False
-        node = node[key]
     return True
 
 
