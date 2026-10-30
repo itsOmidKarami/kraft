@@ -188,8 +188,8 @@ async def _pin_forge_accounts(
         ]
     for mount, entry in mounts:
         pin = pins.get(mount)
-        if entry is None:
-            # An unknown member falls back to the root's forge, as _member_forges does.
+        if entry is None or (mount and not entry.forge):
+            # An unknown member, or one with no forge, uses the root's (as _member_forges does).
             if pin is None:
                 await db.write(
                     lambda c, m=mount: store.set_forge_pin(
