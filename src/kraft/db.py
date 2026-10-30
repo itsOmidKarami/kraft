@@ -26,7 +26,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 57
+SCHEMA_VERSION = 58
 
 _SCHEMA_TEMPLATE = """
 CREATE TABLE work_items (
@@ -137,6 +137,12 @@ CREATE TABLE work_items (
   -- the work items this one comes after, a JSON list of ids. Set at intake
   -- and only ever shortened (`store.drop_dependencies`). NULL means none.
   depends_on       TEXT,
+  -- one_off_chain: a one-off chain's record (`store.one_off_of`), JSON, NULL otherwise
+  one_off_chain    TEXT,
+  -- one_off_approval: who approved its custom content, JSON, NULL until then
+  one_off_approval TEXT,
+  -- one_off_pending: 1 while custom content awaits approval, so `claim_for_run` skips it
+  one_off_pending  INTEGER NOT NULL DEFAULT 0,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -445,6 +451,17 @@ _MIGRATION_44_STOP_KIND_CLEAR_TRIGGER = (
     "CREATE TRIGGER work_items_stop_kind_clear AFTER UPDATE OF status ON work_items "
     "WHEN NEW.status NOT IN ('needs_human', 'waiting', 'rate_limited') "
     "BEGIN UPDATE work_items SET stop_kind = NULL WHERE id = NEW.id; END"
+)
+
+#: A not-yet-started one-off item with custom content reopens its review
+#: whenever the chain that will run changes, whoever changed it: a draft
+#: applied, an attachment re-trim, a replacement.
+_WORK_ITEMS_ONE_OFF_REOPEN_TRIGGER = (
+    "CREATE TRIGGER work_items_one_off_reopen AFTER UPDATE OF materialized_chain ON work_items "
+    "WHEN NEW.one_off_chain IS NOT NULL AND NEW.current_node_id IS NULL "
+    "AND json_array_length(json_extract(NEW.one_off_chain, '$.custom')) > 0 "
+    "BEGIN UPDATE work_items SET one_off_pending = 1, one_off_approval = NULL "
+    "WHERE id = NEW.id; END"
 )
 
 _MIGRATIONS: dict[int, list[str]] = {
@@ -1403,6 +1420,13 @@ SELECT rowid, id, work_item_id, node_id, hook_point, pid, pid_start_time, log_pa
     ],
     # The machine a remote step ran on (remote workers): NULL is the server itself.
     56: ["ALTER TABLE worker_sessions ADD COLUMN runner TEXT"],
+    # One-off chains: an item filed with its own chain, approved before it runs.
+    57: [
+        "ALTER TABLE work_items ADD COLUMN one_off_chain TEXT",
+        "ALTER TABLE work_items ADD COLUMN one_off_approval TEXT",
+        "ALTER TABLE work_items ADD COLUMN one_off_pending INTEGER NOT NULL DEFAULT 0",
+        _WORK_ITEMS_ONE_OFF_REOPEN_TRIGGER,
+    ],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins
@@ -1522,6 +1546,7 @@ def migrate(conn: sqlite3.Connection) -> None:
         for stmt in _RUN_FORK_TRIGGERS:
             conn.execute(stmt)
         conn.execute(_WORK_ITEMS_STOP_KIND_CLEAR_TRIGGER)
+        conn.execute(_WORK_ITEMS_ONE_OFF_REOPEN_TRIGGER)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
     except BaseException:

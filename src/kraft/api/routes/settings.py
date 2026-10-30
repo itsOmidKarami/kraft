@@ -138,7 +138,7 @@ async def put_library(body: LibraryText, request: Request):
     st = request.app.state
     library = deps.library_or_503(st)
     path = st.templates_dir / LIBRARY_FILE
-    data = _authored_mapping(body.text, "library")
+    data = deps.authored_mapping(body.text, "library")
     # A repos.yaml broken for another reason is not this save's to refuse.
     try:
         repos = config_mod.load_repos(deps.repos_path(st))
@@ -381,20 +381,6 @@ async def resolve_templates(body: ResolveBody, request: Request):
 _CHAIN_ID = re.compile(r"[a-z][a-z0-9_-]*")
 
 
-def _authored_mapping(text: str, what: str) -> dict:
-    """A chain or library file's text as the mapping a save checks, or the 422
-    that says why it cannot be one."""
-    try:
-        data = yaml.safe_load(text)
-    except yaml.YAMLError as exc:
-        raise HTTPException(422, f"not YAML: {exc}") from exc
-    if not isinstance(data, dict):
-        raise HTTPException(422, f"a {what} file is a mapping")
-    if why := config_check.retired_message(data):
-        raise HTTPException(422, why)
-    return data
-
-
 @api_router.get("/templates/chains/{tid}")
 async def get_template(tid: str, request: Request):
     """One saved chain as its author wrote it: the file's text, which is what
@@ -438,7 +424,7 @@ async def put_template(tid: str, body: ChainText, request: Request):
         if tid in library.chain_ids
         else st.templates_dir / CHAINS_DIR / f"{tid}.yaml"
     )
-    chain = _authored_mapping(body.text, "chain")
+    chain = deps.authored_mapping(body.text, "chain")
     issues = config_check.chain_issues(
         library, path, tid, chain, getattr(st, "instance_policy", None)
     )

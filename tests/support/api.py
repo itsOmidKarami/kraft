@@ -267,6 +267,12 @@ def _paused(client, repo, **body) -> str:
     return r.json()["id"]
 
 
+def _one_off(client, repo, text, **body) -> str:
+    """File a not-yet-started item with the one-off chain `text` (a chain file's
+    text); its id. `body` adds to or overrides the create body."""
+    return _paused(client, repo, one_off_chain=text, **body)
+
+
 def _held_at(client, repo, node_id, monkeypatch, *, delay="5", **body) -> str:
     """Start an item and return its id once `node_id` has started, with every
     fake agent task sleeping `delay` seconds first (`KRAFT_FAKE_CLAUDE=slow`,

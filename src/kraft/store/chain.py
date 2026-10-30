@@ -596,6 +596,10 @@ def node_overrides_of(row) -> dict:
     return json.loads(raw) if raw else {}
 
 
+#: Raw one-off columns: read through `one_off_of`, never carried in a payload.
+_ONE_OFF_COLUMNS = ("one_off_chain", "one_off_approval", "one_off_pending")
+
+
 def work_item_payload(row) -> dict:
     """A `work_items` row as every API answer that hands one back carries it:
     the item's detail and the action and gate echoes alike. The columns are
@@ -603,7 +607,7 @@ def work_item_payload(row) -> dict:
     are decoded, so a client reads the same object at every door:
     `agent_overrides` and `policy_override` (`None` when unset) and
     `node_overrides` (`{}` when unset)."""
-    payload = {k: row[k] for k in row.keys()}
+    payload = {k: row[k] for k in row.keys() if k not in _ONE_OFF_COLUMNS}
     payload["agent_overrides"] = json.loads(row["agent_overrides"] or "null")
     payload["policy_override"] = json.loads(row["policy_override"] or "null")
     payload["node_overrides"] = node_overrides_of(row)

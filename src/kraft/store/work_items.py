@@ -13,6 +13,7 @@ from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import joined, write_status
 from kraft.store.chain import materialized_chain_of
+from kraft.templates.one_off import ONE_OFF_TEMPLATE
 from kraft.vocab import (
     ENDED,
     HOLDS_SLOT,
@@ -122,6 +123,11 @@ def create_work_item(
     #: Defaulted so the legacy intake path is unchanged; NULL means this item
     #: runs off `chain_definition` (template schema V1, phase 2).
     materialized_chain: str | None = None,
+    #: A one-off chain's record (`templates.one_off`, `deps.OneOff.record`) and
+    #: the approval given at filing. Custom content with no approval files the
+    #: item pending, and a pending item is never started.
+    one_off_chain: dict | None = None,
+    one_off_approval: dict | None = None,
 ) -> None:
     """`submodules` are the cross-repo paths chosen at intake (06, design 1g).
 
@@ -136,14 +142,23 @@ def create_work_item(
     (Kraft-p8q1) -- closed alongside `bead_id` on completion.
     """
     status = WorkItemStatus(status)
+    # Failing closed: a one-off row with no record, or a record with custom
+    # content, waits for a person unless one approved it as it was filed.
+    pending = (
+        chain_template == ONE_OFF_TEMPLATE
+        and one_off_approval is None
+        and (one_off_chain is None or bool(one_off_chain["custom"]))
+    )
+    if pending and status == WorkItemStatus.ACTIVE:
+        status = WorkItemStatus.PAUSED
     now = _now()
     conn.execute(
         "INSERT INTO work_items (id, bead_id, title, description, repo, chain_template, "
         "chain_definition, current_node_id, status, created_at, updated_at, "
         "submodules, root_merge_policy, attachments, bead_cwd, branch, implements_beads, "
         "auto_gate, budget_set, budget_usd, node_overrides, "
-        "materialized_chain, policy_override) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "materialized_chain, policy_override, one_off_chain, one_off_approval, one_off_pending) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             id,
             bead_id,
@@ -167,9 +182,14 @@ def create_work_item(
             json.dumps(node_overrides) if node_overrides else None,
             materialized_chain,
             json.dumps(policy_override) if policy_override else None,
+            json.dumps(one_off_chain) if one_off_chain else None,
+            json.dumps(one_off_approval) if one_off_approval else None,
+            1 if pending else 0,
         ),
     )
     payload = {"title": title, "repo": repo, "chain_template": chain_template}
+    if chain_template == ONE_OFF_TEMPLATE:
+        payload["one_off"] = True
     if source:
         payload["source"] = source
         payload["bead_id"] = bead_id

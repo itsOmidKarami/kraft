@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import unicodedata
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -29,6 +30,7 @@ from kraft.overrides import (
 )
 from kraft.policy import PolicyError, PolicyMaximaInput
 from kraft.remote import placement
+from kraft.templates import one_off
 from kraft.templates.environment import RootPointerPolicy
 from kraft.templates.models import ExecNode, GateNode, MaterializedChain, ResolvedChain
 from kraft.vocab import HOLDS_SLOT, WorkItemStatus
@@ -56,6 +58,14 @@ def _one_chain(data: object) -> object:
             "send `chain` alone",
             {"chain": repr(data["chain"]), "chain_template": repr(data["chain_template"])},
         )
+    if (
+        isinstance(data, dict)
+        and data.get("one_off_chain") is not None
+        and (data.get("chain") is not None or data.get("chain_template") is not None)
+    ):
+        raise PydanticCustomError(
+            SENTENCE_ERROR, "send either `chain` or `one_off_chain`, not both", {}
+        )
     return data
 
 
@@ -80,6 +90,13 @@ class NewWorkItem(_OneChain):
     chain_template: str | None = Field(
         default=None, validation_alias=AliasChoices("chain_template", "chain")
     )
+    #: A chain for this item alone, as a chain file's text or its mapping
+    #: (`templates.one_off`). Exclusive with `chain`. Custom content in it
+    #: waits for a person's approval before the item can start.
+    one_off_chain: str | dict | None = None
+    #: The digest of the one-off chain a person reviewed (`one_off.digest`),
+    #: sent by the web UI when it creates. Accepted only from a person.
+    approve_one_off: str | None = None
     #: A workspace item (design 1g "Advanced · cross-repo"): the workspace
     #: `repo` is the root of, the members it selects, and the root-pointer
     #: policy -- the workspace's `root_pointer_default` when unset. Frozen into
@@ -327,6 +344,33 @@ def repo_warning(entry) -> str | None:
     )
 
 
+def _one_off_summary(record: dict, approval: dict | None) -> dict:
+    return {
+        "custom": len(record["custom"]),
+        "approved": approval is not None,
+        "digest": record["digest"],
+    }
+
+
+def _one_off_approval(request: Request, body: NewWorkItem, record: dict) -> dict | None:
+    """The approval a create carries, or None. Only a person approves custom
+    content, and only the chain they were shown."""
+    if body.approve_one_off is None or not record["custom"]:
+        return None
+    if gates._decided_by(request) != "human":
+        raise HTTPException(
+            403, "only a person approves a one-off chain's custom content, in the web UI"
+        )
+    if body.approve_one_off != record["digest"]:
+        raise HTTPException(409, "the one-off chain changed since it was reviewed; review it again")
+    return {
+        "digest": record["digest"],
+        "by": "human",
+        "door": "web",
+        "at": datetime.now(UTC).isoformat(),
+    }
+
+
 @api_router.post("/work-items", status_code=201)
 async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = False):
     st = request.app.state
@@ -347,7 +391,16 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
     if body.autostart:
         # Filed paused otherwise, which starts nothing: only a start waits.
         when_free.refuse_if_claimed()
-    chain_template, chain = deps.intake_chain_or_422(st, body.repo, body.chain_template)
+    one = approval = None
+    if body.one_off_chain is not None:
+        one = deps.one_off_chain_or_422(st, body.repo, body.one_off_chain, skips=body.skip_nodes)
+        chain, chain_template = one.chain, one_off.ONE_OFF_TEMPLATE
+        approval = _one_off_approval(request, body, one.record)
+    else:
+        chain_template, chain = deps.intake_chain_or_422(st, body.repo, body.chain_template)
+    # Custom content nobody approved is filed paused, whoever asked to start it.
+    pending = one is not None and bool(one.record["custom"]) and approval is None
+    autostart = body.autostart and not pending
     # Before `executor.intake`, which no longer 502s on a bd failure (Kraft-7gy)
     # and would file the item with no bead and a warning nobody reads. An
     # explicit check rather than `Field(max_length=...)`: pydantic's 422 body is
@@ -430,6 +483,8 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
         # nothing is written -- no row, no bead, no attachment copy, no spawn.
         # 200, not this route's default 201: nothing was created.
         content = _dry_run_response(st, body, chain, materialized, attachment_kinds)
+        if one is not None:
+            content["one_off"] = _one_off_summary(one.record, approval)
         return JSONResponse(status_code=200, content=content)
     # Before intake: a lookup after it could answer 422 for an item filed.
     repo_entry = deps.connected_or_422(st, body.repo)
@@ -446,7 +501,7 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
     # An autostart behind an unfinished item is filed and then blocked: it
     # must not take a slot, so it is not handed to `intake` as active.
     waits = st.db.read(lambda c: store.any_unfinished(c, depends_on))
-    start_now = body.autostart and not waits
+    start_now = autostart and not waits
     duplicates = st.db.read(
         lambda c: store.open_duplicates(c, body.repo, body.title, body.implements_beads)
     )
@@ -499,6 +554,8 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
             if item_policy is not None
             else None,
             in_place_by=in_place_by,
+            one_off_chain=one.record if one is not None else None,
+            one_off_approval=approval,
         )
     except Exception as exc:  # noqa: BLE001 -- executor.intake raises several unrelated types
         # No longer reachable for a bd failure — `executor.intake` degrades
@@ -523,8 +580,10 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
         )
     if cannot_run := repo_warning(repo_entry):
         extra["repo_warning"] = cannot_run
+    if one is not None:
+        extra["one_off"] = _one_off_summary(one.record, approval)
 
-    if body.autostart and waits:
+    if autostart and waits:
         await st.db.write(
             lambda c: store.block_work_item(
                 c,
@@ -538,7 +597,7 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
         waiting_on = st.db.read(lambda c: store.unmet_dependencies(c, wid))
         return {"id": wid, "status": WorkItemStatus.BLOCKED, "waiting_on": waiting_on, **extra}
 
-    if not body.autostart:
+    if not autostart:
         # Created, not started. `/resume` begins it at node zero, because a NULL
         # current_node_id falls through that handler's `next(..., 0)` default.
         return {"id": wid, "status": WorkItemStatus.PAUSED, **extra}
@@ -831,6 +890,8 @@ class TriggerBody(_OneChain):
     chain: str | None = Field(
         default=None, validation_alias=AliasChoices("chain", "chain_template")
     )
+    #: Read only to refuse it: a trigger files a library chain.
+    one_off_chain: str | dict | None = None
 
 
 # Kraft-859.
@@ -843,6 +904,8 @@ async def fire_trigger(body: TriggerBody, request: Request):
     if st.invalid_policy:
         detail = "; ".join(st.invalid_policy)
         raise HTTPException(503, f"policy config invalid, refusing work: {detail}")
+    if body.one_off_chain is not None:
+        raise HTTPException(422, "a trigger files a library chain, not a one-off chain")
     chain_template, chain = deps.intake_chain_or_422(st, body.repo, body.chain)
     _check_title(body.title)
     _check_text("description", body.description)
