@@ -37,7 +37,7 @@ def test_a_planted_hook_runs_without_the_hardened_env(tmp_path):
     execute, so the assertion there is pinning the hardening and not a repo
     that could never have run a hook in the first place.
 
-    Runs with `sandbox.unhardened_git_env()` rather than the inherited
+    Runs with every `GIT_CONFIG_*` pin dropped rather than the inherited
     process env: a test session started under Kraft is itself a child of a
     process that already called `harden_host_git_env` (Kraft-rki), so the
     ambient env cannot be trusted to be unhardened."""
@@ -48,7 +48,7 @@ def test_a_planted_hook_runs_without_the_hardened_env(tmp_path):
         check=True,
         capture_output=True,
         text=True,
-        env=sandbox.unhardened_git_env(),
+        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_CONFIG_")},
     )
     assert marker.exists()
 

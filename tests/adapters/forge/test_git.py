@@ -23,7 +23,6 @@ from support.harness import commit_all, git, make_repo, make_repo_with_submodule
 from kraft import builtins as kraft_builtins
 from kraft.adapters import forge
 from kraft.adapters.forge import git as forge_git
-from kraft.worker import sandbox
 
 from . import outputs
 from .outputs import GLAB_MR_VIEW, glab_mr
@@ -215,69 +214,78 @@ def test_push_publishes_a_rebased_branch_against_real_git(tmp_path, pushed):
     assert remote_head == git(repo, "rev-parse", "HEAD")
 
 
-@pytest.mark.parametrize(
-    ("hooks", "linked", "runs"),
-    [
-        pytest.param("gitdir", False, True, id="installed-in-the-gitdir-runs"),
-        pytest.param("in-tree", False, False, id="in-the-working-tree-does-not"),
-        pytest.param(
-            "in-tree-symlink", False, False, id="symlinked-from-the-working-tree-does-not"
-        ),
-        pytest.param("dotdot", False, False, id="dotdot-through-a-symlink-does-not"),
-        pytest.param("gitdir", True, True, id="linked-worktree-gitdir-runs"),
-        pytest.param("in-tree", True, False, id="linked-worktree-in-tree-does-not"),
-    ],
-)
-def test_push_runs_an_installed_pre_push_under_harden_host_git_env(tmp_path, hooks, linked, runs):
-    """Kraft-rki. `harden_host_git_env` pins `core.hooksPath=/dev/null` on
-    the process env so a worker's own commits can't fire a planted hook --
-    but by push time the commit is already made, and a real pre-push hook
-    (git-lfs's) uploading the objects a push's pointers reference must still
-    run. A pinned `core.hooksPath` that survives into `forge.push` would
-    silently drop those uploads.
-
-    A `core.hooksPath` in the working tree is the worker's to edit, so that
-    one stays pinned: a push that ran it would run the worker's code as the
-    person, outside any sandbox. A symlink there pointing out of the tree is
-    still the worker's file, and so is one under `a/../../x`, which reads as
-    outside the tree but lands inside it once the worker makes `a` a symlink
-    two levels down. A linked worktree, the layout Kraft pushes from, reads
-    the shared config and prints its gitdir paths absolute."""
+@pytest.mark.parametrize("linked", [False, True], ids=["checkout", "linked-worktree"])
+def test_push_runs_no_hook_even_one_the_person_installed(tmp_path, monkeypatch, linked):
+    """A hook in the git directory is the person's, but it can run what the
+    working tree says, and the worker writes the working tree: pre-commit's
+    pre-push runs whatever `.pre-commit-config.yaml` names. Kraft pushes from
+    the host, outside any sandbox, so its push runs no hook, even under a
+    process env nobody hardened. A linked worktree is the layout Kraft
+    pushes from; a plain `git push` after it shows the hooks are live."""
+    for k in [k for k in os.environ if k.startswith("GIT_CONFIG_")]:
+        monkeypatch.delenv(k)
     repo = _repo_with_origin(tmp_path)
     if linked:
         git(repo, "checkout", "-q", "main")
         git(repo, "worktree", "add", "-q", str(tmp_path / "wt"), BRANCH)
-        # `git config` from the worktree writes the shared config, as an operator's would.
         repo = tmp_path / "wt"
-    if hooks in ("in-tree", "in-tree-symlink"):
-        target = tmp_path / "outside-hooks" if hooks == "in-tree-symlink" else repo / ".hooks"
-        target.mkdir()
-        if hooks == "in-tree-symlink":
-            (repo / ".hooks").symlink_to(target)
-        git(repo, "config", "core.hooksPath", ".hooks")
-    if hooks == "dotdot":
-        (repo / "b" / "c").mkdir(parents=True)
-        (repo / "x").mkdir()
-        (repo / "a").symlink_to(repo / "b" / "c")
-        git(repo, "config", "core.hooksPath", "a/../../x")
-    # Unhardened: a suite run from inside a Kraft worker inherits the pinned
-    # `core.hooksPath=/dev/null`, and `--git-path hooks` would answer that.
-    hooks_dir = git(repo, "rev-parse", "--git-path", "hooks", env=sandbox.unhardened_git_env())
-    marker = tmp_path / "pre-push-ran"
-    pre_push = Path(repo) / hooks_dir / "pre-push"
-    pre_push.write_text(f"#!/bin/sh\ntouch {marker}\n")
-    pre_push.chmod(0o755)
-    # A push with nothing new to send never invokes pre-push at all.
-    (repo / "more-work.txt").write_text("more work\n")
-    commit_all(repo, "more work")
+    marker = tmp_path / "hook-ran"
+    (repo / "from-the-branch.sh").write_text(f"touch {marker}\n")
+    commit_all(repo, "the worker's script")
+    common = git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    for name in ("pre-push", "reference-transaction"):
+        hook = Path(common) / "hooks" / name
+        hook.write_text("#!/bin/sh\nexec sh ./from-the-branch.sh\n")
+        hook.chmod(0o755)
 
-    sandbox.harden_host_git_env(os.environ)
-    try:
+    asyncio.run(forge.push(repo, BRANCH))
+
+    assert git(tmp_path / "origin.git", "rev-parse", BRANCH) == git(repo, "rev-parse", "HEAD")
+    assert not marker.exists()
+    git(repo, "push", "-q", "origin", f"{BRANCH}:control")
+    assert marker.exists()
+
+
+@pytest.mark.parametrize(
+    ("attributes", "refused"),
+    [
+        pytest.param("", False, id="no-lfs-needs-no-git-lfs"),
+        pytest.param("*.bin filter=lfs diff=lfs merge=lfs -text\n", True, id="lfs-needs-git-lfs"),
+    ],
+)
+def test_push_needs_git_lfs_only_for_a_repo_that_uses_lfs(
+    tmp_path, monkeypatch, attributes, refused
+):
+    """The push uploads LFS objects itself, so a repo that uses LFS on a
+    machine with no git-lfs refuses, as git-lfs's own pre-push did, rather
+    than publish pointers to objects the forge never got. A repo that does
+    not use LFS never asks for git-lfs."""
+    monkeypatch.setattr(forge_git.lfs, "available", lambda: False)
+    repo = _repo_with_origin(tmp_path)
+    (repo / ".gitattributes").write_text(attributes)
+    commit_all(repo, "attributes")
+
+    if refused:
+        with pytest.raises(forge.ForgeError, match="no git-lfs"):
+            asyncio.run(forge.push(repo, BRANCH))
+    else:
         asyncio.run(forge.push(repo, BRANCH))
-    finally:
-        os.environ.pop("GIT_CONFIG_COUNT", None)
 
-    assert marker.exists() == runs
+
+@pytest.mark.e2e("git-lfs")
+def test_push_uploads_the_lfs_objects_the_branch_points_at(tmp_path):
+    """git-lfs's pre-push no longer runs on Kraft's push, so the push sends
+    the objects the branch's pointers name to the remote's LFS store itself."""
+    repo = _repo_with_origin(tmp_path)
+    git(repo, "lfs", "install", "--local", "--skip-repo")
+    git(repo, "lfs", "track", "*.bin")
+    (repo / "big.bin").write_bytes(os.urandom(64))
+    commit_all(repo, "an lfs file")
+    oid = git(repo, "show", "HEAD:big.bin").split("oid sha256:")[1].split()[0]
+
+    asyncio.run(forge.push(repo, BRANCH))
+
+    assert (tmp_path / "origin.git" / "lfs" / "objects" / oid[:2] / oid[2:4] / oid).is_file()
 
 
 @pytest.mark.parametrize(
