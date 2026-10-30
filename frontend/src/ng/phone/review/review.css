@@ -6,6 +6,7 @@
 .ph-autocard-title { font-size: var(--fs-meta); font-weight: 500; }
 .ph-autocard-title.ph-tone-ok { color: var(--ok); }
 .ph-autocard-title.ph-tone-bad { color: var(--bad); }
+.ph-autocard-title.ph-tone-muted { color: var(--text-sub); }
 .ph-autocard-text { font-size: var(--fs-meta); line-height: 1.5; color: var(--text-sub); overflow-wrap: anywhere; }
 .ph-file-row { min-height: 48px; font-size: var(--fs-meta); }
 .ph-file-name { flex: 1; min-width: 0; font: var(--fs-meta) ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }

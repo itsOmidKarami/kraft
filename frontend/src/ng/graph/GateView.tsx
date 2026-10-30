@@ -5,8 +5,8 @@ import { accessibleName, type GlyphState } from "./types";
 import "./graph.css";
 import { Badge } from "../ui/Badge";
 
-const CHIP_TONE = { green: "ok", red: "bad", amber: "warn" } as const;
-type Reviewer = { id?: string; icon?: string; state?: GlyphState; chip?: string; chipTone?: "green" | "red" | "amber"; sel?: boolean; mark?: "add" | "change"; prob?: boolean };
+export const CHIP_TONE = { green: "ok", red: "bad", amber: "warn" } as const;
+type Reviewer = { id?: string; icon?: string; state?: GlyphState; chip?: string; chipTone?: "green" | "red" | "amber"; sel?: boolean; mark?: "add" | "change"; prob?: boolean; mode?: "decides" | "checks_first" };
 type Props = {
   gate: { id: string; state?: GlyphState; mark?: "add" | "change"; prob?: boolean; sel?: boolean };
   /** The gate's auto_review task: it runs on the gate's path, before the person. */

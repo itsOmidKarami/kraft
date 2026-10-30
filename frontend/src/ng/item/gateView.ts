@@ -9,6 +9,7 @@ import { gateSkipped } from "./events";
 import { gateDecision } from "./panes/GatePane";
 import { ENDED, gateMessage, materialized, nodeAt } from "./chainValues";
 import { taskName } from "./paths";
+import { OUTCOME, reviewOutcome } from "./reviewOutcome";
 import type { ItemDetail } from "./useItem";
 
 type Props = ComponentProps<typeof GateView>;
@@ -34,12 +35,12 @@ export function gateView(item: ItemDetail, gate: ChainNode, events: KraftEvent[]
   const ids = item.chain_definition.nodes.map((n) => n.id);
   const ahead = !pending && !decided && !ENDED.has(item.display_status ?? "") && ids.indexOf(item.current_node_id ?? "") < ids.indexOf(gate.id);
   const last = path ? sessionsOf(item, path).at(-1) : undefined;
-  const verdict = [...events].reverse().find((e) => (e.type === "gate_approved" || e.type === "gate_rejected") && (e.payload.gate ?? e.node_id) === gate.id && e.payload.by === "agent");
+  const outcome = reviewOutcome(events, gate.id);
   const to = rejectTarget(item.chain_definition.nodes, gate.id);
   return {
     gate: { id: gate.id, state: pending ? "current" : decided ? "done" : "todo", sel: sel.kind === "node" && sel.node === gate.id },
     reviewer: path
-      ? { id: taskName(path), state: sessionLook(last, now).state, sel: sel.kind === "task" && sel.task === taskName(path), ...(verdict ? (verdict.type === "gate_approved" ? { chip: "approve", chipTone: "green" as const } : { chip: "reject", chipTone: "red" as const }) : ahead ? { chip: "runs first when reached" } : {}) }
+      ? { id: taskName(path), state: sessionLook(last, now).state, sel: sel.kind === "task" && sel.task === taskName(path), mode: own?.auto_review_mode ?? undefined, ...(outcome ? { chip: OUTCOME[outcome.kind].word, chipTone: OUTCOME[outcome.kind].tone } : ahead ? { chip: "runs first when reached" } : {}) }
       : undefined,
     message: gateMessage(frozen, gate.id),
     doc: pending && item.gate_artifact ? { label: item.gate_artifact.split("/").pop()!, onClick: on.doc } : undefined,

@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
-import type { CompareFile, ReviewThread } from "../../types";
+import type { CompareFile, KraftEvent, ReviewThread } from "../../types";
 import * as http from "../http";
 import { GateReview } from "./GateReview";
 import { DEFAULT_PREFS } from "./prefs";
@@ -43,6 +43,20 @@ describe("GateReview", () => {
   it("colours a fenced block in the document", async () => {
     render(<GateReview item={AT} gate="final_review" doc={{ state: "ready", data: { ...DOC, content: "```ruby\ndef x = 1\n```" } }} files={FILES} threads={[]} isViewed={() => true} approve={vi.fn(async () => null)} onReviewChanges={vi.fn()} onRequestChanges={vi.fn()} onClose={vi.fn()} />);
     expect(await screen.findByText("def", {}, { timeout: 3000 })).toHaveClass("tok-kw");
+  });
+
+  it.each([
+    ["Ready for you", "passed", "Every finding is addressed."],
+    ["Could not decide", "undecided", "The reviewer changed files, so its verdict was ignored: a.py"],
+  ])("shows the reviewer's outcome, %s, with its note above the decision", async (word, reason, note) => {
+    const events = [
+      { seq: 1, work_item_id: "w1", type: "gate_requested", payload: { gate: "final_review" }, node_id: "final_review", created_at: "t" },
+      { seq: 2, work_item_id: "w1", type: "gate_auto_review_skipped", payload: { gate: "final_review", reason, note }, node_id: "final_review", created_at: "t" },
+    ] as KraftEvent[];
+    render(<GateReview item={AT} gate="final_review" events={events} doc={{ state: "ready", data: DOC }} files={FILES} threads={[]} isViewed={() => true} approve={vi.fn(async () => null)} onReviewChanges={vi.fn()} onRequestChanges={vi.fn()} onClose={vi.fn()} />);
+    const card = await screen.findByRole("region", { name: "Agent review" });
+    expect(card).toHaveTextContent(word);
+    expect(card).toHaveTextContent(note);
   });
 
   it("shows the document's title once and who wrote it (GR-6)", async () => {

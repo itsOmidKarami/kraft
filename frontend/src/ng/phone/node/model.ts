@@ -8,6 +8,7 @@ import { admits, retryable, skippable } from "../../item/status";
 import { attemptsAt, capAt, materialized } from "../../item/chainValues";
 import { passOf } from "../../item/nodeGraph";
 import { taskName } from "../../item/paths";
+import { OUTCOME, reviewOutcome } from "../../item/reviewOutcome";
 import { elapsed, nodeRunSpan } from "../../../format";
 
 /** The node screen's decisions, pure (W17 brief D). */
@@ -62,13 +63,13 @@ export interface PathRow {
 
 /** A gate's review path (prototype `flow`): the agent reviewer when the gate has one, you, and where a rejection goes. The verdict is the agent's own event, never invented. */
 export function reviewPath(item: ItemDetail, gate: ApiNode, events: KraftEvent[]): PathRow[] {
-  const verdict = [...events].reverse().find((e) => (e.type === "gate_approved" || e.type === "gate_rejected") && (e.payload.gate ?? e.node_id) === gate.id && e.payload.by === "agent");
+  const outcome = reviewOutcome(events, gate.id);
   const target = rejectTarget(item.chain_definition.nodes, gate.id);
   const waiting = item.pending_gate === gate.id;
   const decided = [...events].reverse().find((e) => e.type === "gate_approved" && (e.payload.gate ?? e.node_id) === gate.id && e.payload.by !== "agent");
   return [
     ...(gate.auto_escalate
-      ? [{ title: "auto_review", text: "An agent reads it before you do. A decision you make meanwhile wins.", ...(verdict && { chip: verdict.type === "gate_approved" ? { word: "approve", tone: "ok" as const } : { word: "reject", tone: "bad" as const } }) }]
+      ? [{ title: "auto_review", text: "An agent reads it before you do. A decision you make meanwhile wins.", ...(outcome && { chip: { word: OUTCOME[outcome.kind].word, tone: OUTCOME[outcome.kind].phone } }) }]
       : []),
     { title: "you", text: decided ? "approved" : waiting ? "waiting for your decision" : gateSkipped(events, gate.id) ? "skipped, no decision needed" : "decides when the chain reaches it" },
     { title: "on reject", text: target ? `Goes back to ${nameOf(item.chain_definition.nodes, target)} with your note.` : "Reopens the gate with your note." },

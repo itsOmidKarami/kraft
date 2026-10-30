@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import type { CompareFile, ReviewThread, WorkItem, WorkItemArtifact } from "../../types";
+import type { CompareFile, KraftEvent, ReviewThread, WorkItem, WorkItemArtifact } from "../../types";
 import { docBody, plural } from "../../format";
 import { useModal } from "../../useModal";
 import { Button } from "../ui/Button";
@@ -16,14 +16,18 @@ import { approveBlock, drafts, gateConsequence } from "./finish";
 import { codeBlock } from "./Thread";
 import type { Fetched } from "./useReview";
 import { Badge } from "../ui/Badge";
+import { CHIP_TONE } from "../graph/GateView";
+import { OUTCOME, reviewOutcome } from "../item/reviewOutcome";
 
 /** The gate review overlay (prototype 292–321, `openGateReview`): the gate's
  *  document beside the list of what changed, with the gate's decision. A
  *  full-page layer over the review page, with its own header; Escape closes it
  *  to the page. */
-export function GateReview({ item, gate, doc, by, files, threads, isViewed, approve, onReviewChanges, onRequestChanges, onClose }: {
+export function GateReview({ item, gate, events = [], doc, by, files, threads, isViewed, approve, onReviewChanges, onRequestChanges, onClose }: {
   item: Pick<WorkItem, "id" | "pending_gate" | "chain_definition" | "budget_cap" | "running_time">;
   gate: string;
+  /** The item's recent events: the agent reviewer's outcome at this gate. */
+  events?: KraftEvent[];
   /** GET /artifact, read by the page (its digest also rides on the page's Approve). */
   doc: Fetched<WorkItemArtifact> | null;
   /** The task that wrote the document, by path, when the chain says. */
@@ -54,6 +58,7 @@ export function GateReview({ item, gate, doc, by, files, threads, isViewed, appr
   const add = files.reduce((n, f) => n + f.insertions, 0);
   const del = files.reduce((n, f) => n + f.deletions, 0);
   const onApprove = async () => setError(await approve());
+  const outcome = reviewOutcome(events, gate);
   return (
     <div ref={ref} className="rv-gate" role="dialog" aria-modal="true" aria-label={`Gate review: ${gate}`}>
       <div className="rv-gate-head">
@@ -68,6 +73,12 @@ export function GateReview({ item, gate, doc, by, files, threads, isViewed, appr
         <Button variant="primary" disabled={!!block} aria-describedby={block ? blockId : undefined} onClick={onApprove}>Approve</Button>
         <IconButton label="Close" onClick={onClose}><X size={16} aria-hidden /></IconButton>
       </div>
+      {outcome && (
+        <section className="rv-gate-next rv-gate-auto" aria-label="Agent review">
+          <Badge tone={CHIP_TONE[OUTCOME[outcome.kind].tone]}>{capitalise(OUTCOME[outcome.kind].word)}</Badge>
+          {outcome.note && <span>{outcome.note}</span>}
+        </section>
+      )}
       {next && <p className="rv-gate-next">{next}</p>}
       <div className="rv-gate-body">
         <article className="rv-gate-doc" aria-label="Document">
