@@ -18,7 +18,9 @@ A git that cannot answer is a change too: unverified is not read-only.
 An in-place item's checkout is a person's own, and their edits mid-step are
 not the step's: there only the item's branch tip is compared (the person may
 switch the checkout), so a commit still violates and an uncommitted write goes
-to the after-task leftovers event instead.
+to the after-task leftovers event instead. The checks-first gate reviewer and
+the review reply agent of an in-place item read a copy of its branch instead
+(`inplace.watch_copy`): the copy is compared fully (`full=`), plus that tip.
 
 On a sandboxed item no host git runs while a session is live or once the
 worktree holds a repository Kraft did not create (`stops.refuse_planted_repos`,
