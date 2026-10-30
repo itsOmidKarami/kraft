@@ -24,8 +24,8 @@ from kraft.drafts import authored, resolve, store
 from kraft.templates import catalogue, positions
 from kraft.templates.environment import Identifier
 from kraft.templates.library import (
-    ADDON_YAML_NODES,
     LIBRARY_FILE,
+    LIBRARY_SAVE_YAML_NODES,
     Namespace,
     TemplateLibrary,
     TemplateLibraryError,
@@ -164,8 +164,12 @@ class Draft:
         *,
         exists: bool,
         area: str = "chains",
+        yaml_nodes: int = LIBRARY_SAVE_YAML_NODES,
     ) -> None:
         self.st = st
+        #: How many YAML nodes a fragment an op brings may expand to: a library
+        #: save's bound, or a one-off chain's tighter one.
+        self.yaml_nodes = yaml_nodes
         self.files = dict(files)
         self.file = authored.LIBRARY if area == "library" else authored.CHAIN
         if self.file == authored.LIBRARY:
@@ -1074,7 +1078,7 @@ def set_fragment(d: Draft, path: str, yaml: str) -> None:
     component at `path`."""
     try:
         # Bounded like any YAML a person hands in: a merge-key bomb never builds.
-        fragment = config_mod.bounded_yaml(yaml, [ADDON_YAML_NODES])
+        fragment = config_mod.bounded_yaml(yaml, [d.yaml_nodes])
         fragment = {} if fragment is None else fragment
     except YAMLError as exc:
         line, col = positions.yaml_mark(exc) or (1, 1)

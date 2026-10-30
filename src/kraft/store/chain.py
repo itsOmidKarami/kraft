@@ -114,6 +114,14 @@ def complete_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
 
 #: A chain can be set only before the item starts, and only while nothing runs it.
 _CHAIN_SETTABLE = f"current_node_id IS NULL AND status NOT IN ({in_list((*HOLDS_SLOT, *ENDED))})"
+_STARTING = "work item is starting; its chain can't change now"
+
+
+def _refuse_if_starting(row) -> None:
+    """`ValueError` for an item claimed to run that has not loaded its first
+    node: a change then would land under the walk's feet (`load_chain`)."""
+    if row["current_node_id"] is None and row["status"] in HOLDS_SLOT:
+        raise ValueError(_STARTING)
 
 
 def set_chain_template(
@@ -310,15 +318,18 @@ def set_attachments(
     (Kraft-s7c04.28), both at once so the trim and the documents that justify
     it cannot disagree. A compare-and-set on `seen`, the `(attachments,
     materialized_chain)` the caller built this write from (Kraft-5pw3f):
-    `ValueError` if the item has started since, or another write changed
+    `ValueError` if the item has started or been claimed to start since, or
+    another write changed
     either column -- a stale write would put back a document the other one
     dropped, whose copy is already gone."""
     row = conn.execute(
-        "SELECT attachments, materialized_chain, current_node_id FROM work_items WHERE id = ?",
+        "SELECT attachments, materialized_chain, current_node_id, status FROM work_items "
+        "WHERE id = ?",
         (work_item_id,),
     ).fetchone()
     if row["current_node_id"] is not None:
         raise ValueError("work item has already started")
+    _refuse_if_starting(row)
     if (row["attachments"], row["materialized_chain"]) != seen:
         raise ValueError("its attachments or chain changed while this request was made")
     conn.execute(
@@ -360,11 +371,15 @@ def revise_chain(
     A compare-and-set on `seen`, the `(materialized_chain, run_chain)` the
     revision was computed from, as `set_attachments` is: `ValueError` if a
     write changed either since (a retry's fork, an attachment change, another
-    approval), which a revision of the old chain must not overwrite.
+    approval), which a revision of the old chain must not overwrite; and if
+    the item was claimed to start and has not loaded its first node.
     """
     row = conn.execute(
-        "SELECT materialized_chain, run_chain FROM work_items WHERE id = ?", (work_item_id,)
+        "SELECT materialized_chain, run_chain, current_node_id, status FROM work_items "
+        "WHERE id = ?",
+        (work_item_id,),
     ).fetchone()
+    _refuse_if_starting(row)
     if (row["materialized_chain"], row["run_chain"]) != seen:
         raise ValueError("the chain changed while this approval was made; approve it again")
     column = "run_chain" if row["run_chain"] is not None else "materialized_chain"

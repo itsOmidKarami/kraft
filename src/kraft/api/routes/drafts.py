@@ -567,13 +567,16 @@ async def apply_item_draft(wid: str, request: Request):
                 "diff": revision.diff(chain.chain, evaluated.chain.chain),
                 "source": "draft",
             }
-            items.revise_chain(
-                c,
-                wid,
-                evaluated.chain.to_json(),
-                payload,
-                seen=(row["materialized_chain"], row["run_chain"]),
-            )
+            try:
+                items.revise_chain(
+                    c,
+                    wid,
+                    evaluated.chain.to_json(),
+                    payload,
+                    seen=(row["materialized_chain"], row["run_chain"]),
+                )
+            except ValueError as exc:
+                return 409, {"detail": str(exc)}
         for path in evaluated.skips:
             items.skip_scope(c, wid, path, item.EVIDENCE)
         store.delete_item(c, wid)

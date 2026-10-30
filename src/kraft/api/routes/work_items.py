@@ -33,7 +33,7 @@ from kraft.remote import placement
 from kraft.templates import one_off
 from kraft.templates.environment import RootPointerPolicy
 from kraft.templates.models import ExecNode, GateNode, MaterializedChain, ResolvedChain
-from kraft.vocab import ENDED, HOLDS_SLOT, WorkItemStatus
+from kraft.vocab import HOLDS_SLOT, WorkItemStatus
 
 
 class Attachment(BaseModel):
@@ -1245,16 +1245,10 @@ def _retrimmed(row, filed_kinds: frozenset[str], kinds: frozenset[str]) -> str:
     ).to_json()
 
 
-def _chain_fixed(c, wid) -> str:
-    """Why a chain switch `store._CHAIN_SETTABLE` refused did not take, in this item's case."""
-    row = c.execute(
-        "SELECT status, current_node_id FROM work_items WHERE id = ?", (wid,)
-    ).fetchone()
-    if row["status"] in ENDED:
-        return "work item has ended; its chain can no longer change"
-    if row["current_node_id"] is not None:
-        return "work item has already started; its chain is fixed for its life"
-    return "work item is running; its chain can change only while it is not"
+#: `store._CHAIN_SETTABLE` refused the switch. A started or ended item is
+#: refused before this point, so here it was claimed to run (or, in a race,
+#: started or ended since the PATCH read it).
+_CHAIN_FIXED = "work item is running; its chain can change only while it is not"
 
 
 @api_router.patch("/work-items/{wid}")
@@ -1413,11 +1407,11 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         if body.chain_template is not None and not store.set_chain_template(
             c, wid, body.chain_template, new_materialized
         ):
-            raise HTTPException(409, _chain_fixed(c, wid))
+            raise HTTPException(409, _CHAIN_FIXED)
         if new_one_off is not None and not store.set_one_off_chain(
             c, wid, new_one_off.record, new_materialized
         ):
-            raise HTTPException(409, _chain_fixed(c, wid))
+            raise HTTPException(409, _CHAIN_FIXED)
         if new_one_off is not None:
             # The summary as stored, never the submitted text, as every door shows it.
             fresh = c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()

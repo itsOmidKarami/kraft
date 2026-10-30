@@ -118,22 +118,34 @@ def test_approve_refuses_a_library_item_and_a_started_one(client, repo):
 
 
 @pytest.mark.parametrize(
+    "claimed", [pytest.param(False, id="paused"), pytest.param(True, id="claimed")]
+)
+@pytest.mark.parametrize(
     "change",
     [
         pytest.param("draft", id="draft-after-approval"),
         pytest.param("attachment", id="attachment-retrim"),
     ],
 )
-def test_change_reopens_review(client, repo, change):
+def test_change_reopens_review(client, repo, change, claimed):
+    """A change reopens the review; once the item is claimed to start (active,
+    no node loaded yet) no writer may change its chain at all."""
     wid = _one_off(client, repo, CUSTOM)
     assert _approve(client, wid).status_code == 200
+    if claimed:
+        _set_status(wid, "active")
     if change == "draft":
         client.put(f"/api/work-items/{wid}/draft", json={"ops": [EDIT_PROMPT]}).raise_for_status()
-        client.post(f"/api/work-items/{wid}/draft/apply").raise_for_status()
+        r = client.post(f"/api/work-items/{wid}/draft/apply")
     else:
         (repo / "spec.md").write_text("# spec\n")
         r = client.patch(f"/api/work-items/{wid}", json={"attachments": {"spec": "spec.md"}})
-        assert r.status_code == 200, r.text
+    if claimed:
+        assert r.status_code == 409, r.text
+        assert "is starting" in r.json()["detail"]
+        assert _item_row(wid)["one_off_pending"] == 0
+        return
+    assert r.status_code == 200, r.text
     assert _review(client, wid)["needs_review"] is True
     assert _review(client, wid)["approval"] is None
     assert _resume(client, wid).status_code == 409
@@ -150,9 +162,13 @@ def test_the_walk_stops_an_item_whose_chain_changed_after_the_claim(client, repo
     wid = _one_off(client, repo, CUSTOM)
     assert _approve(client, wid).status_code == 200
     _set_status(wid, "active")
-    (repo / "spec.md").write_text("# spec\n")
-    r = client.patch(f"/api/work-items/{wid}", json={"attachments": {"spec": "spec.md"}})
-    assert r.status_code == 200, r.text
+    # No door changes a claimed item's chain; a write behind the doors' backs
+    # (the crash this backstop is for) still reopens the review.
+    with _orchestrator_db() as conn, conn:
+        conn.execute(
+            "UPDATE work_items SET materialized_chain = materialized_chain || ' ' WHERE id = ?",
+            (wid,),
+        )
     assert _item_row(wid)["one_off_pending"] == 1
     st = client.app.state
     done = client.portal.call(partial(walk.run_once, st.db, st.run_dirs, work_item_id=wid))

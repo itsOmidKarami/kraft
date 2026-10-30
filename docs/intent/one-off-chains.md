@@ -34,7 +34,7 @@ origin: src/kraft/store/chain.py §approve_one_off -- the review digest covers t
 
 WHEN the chain a not-yet-started one-off item will run changes, whatever changed
 it, the system SHALL withdraw any approval and SHALL require the review again.
-enforced-by: tests/api/test_one_off_approval.py::test_change_reopens_review[draft-after-approval], tests/api/test_one_off_approval.py::test_change_reopens_review[attachment-retrim], tests/api/test_one_off_approval.py::test_the_walk_stops_an_item_whose_chain_changed_after_the_claim
+enforced-by: tests/api/test_one_off_approval.py::test_change_reopens_review[draft-after-approval-paused], tests/api/test_one_off_approval.py::test_change_reopens_review[draft-after-approval-claimed], tests/api/test_one_off_approval.py::test_change_reopens_review[attachment-retrim-paused], tests/api/test_one_off_approval.py::test_change_reopens_review[attachment-retrim-claimed], tests/api/test_one_off_approval.py::test_the_walk_stops_an_item_whose_chain_changed_after_the_claim
 origin: src/kraft/db.py §_WORK_ITEMS_ONE_OFF_REOPEN_TRIGGER -- a trigger on `materialized_chain` and `run_chain`, so no writer has to remember: a draft applied, an attachment re-trim and a replacement all reopen it. `store.load_chain` refuses an item that reopened after it was claimed, so nothing unreviewed runs from that window.
 
 ## REQ duplicate-of-a-one-off-is-unapproved

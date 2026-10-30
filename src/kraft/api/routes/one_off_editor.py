@@ -15,7 +15,7 @@ from kraft.api import api_router, deps
 from kraft.api.routes import drafts
 from kraft.drafts import ops
 from kraft.templates import one_off
-from kraft.templates.library import LIBRARY_FILE, TemplateLibraryError
+from kraft.templates.library import ADDON_YAML_NODES, LIBRARY_FILE, TemplateLibraryError
 from kraft.templates.models import PATH_SEPARATOR
 
 #: Ops that write beyond the one chain being edited.
@@ -98,7 +98,7 @@ async def one_off_chain_ops(body: OneOffOps, request: Request):
     answers: list[dict] = []
     nodes, custom, custom_nodes, added = [], [], [], []
     if parsed is not None:
-        working = ops.Draft(st, key, files, exists=True)
+        working = ops.Draft(st, key, files, exists=True, yaml_nodes=ADDON_YAML_NODES)
         if any(
             isinstance(op, dict)
             and (
@@ -124,7 +124,9 @@ async def one_off_chain_ops(body: OneOffOps, request: Request):
             authored, digest = one_off.prepare(after)
             deps.own_id_or_422(library, authored["id"])
             nodes, custom, custom_nodes, added = _resolve(st, authored)
-            # What the create review shows and `approve_one_off` names (`one_off.review_digest`).
+            # The create-time review digest, which `approve_one_off` on create must
+            # equal. Not the item page's `store.review_digest`: that one hashes the
+            # chains that will run, so the two are never compared.
             digest = one_off.review_digest(digest, custom)
     files_now, _, result = drafts._state(st, "chains", key, {"files": files, "serialized": []}, [])
     text = files_now.get(f"chains/{key}.yaml", body.text)

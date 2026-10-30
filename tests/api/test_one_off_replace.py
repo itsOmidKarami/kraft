@@ -136,7 +136,8 @@ def test_duplicate_refuses_a_one_off_row_with_no_record(client, repo):
     ],
 )
 def test_patch_refuses_a_chain_switch_once_fixed(client, repo, body, node, status, words):
-    """`store._CHAIN_SETTABLE`, worded for the item's case."""
+    """A started or ended item is refused by the PATCH's own checks; only a
+    claimed one that has not started reaches `store._CHAIN_SETTABLE`."""
     wid = _paused(client, repo, chain_template="quick-task")
     with _orchestrator_db() as c, c:
         c.execute(
