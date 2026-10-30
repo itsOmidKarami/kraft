@@ -16,7 +16,7 @@ from kraft.automated_review import AutomatedReview, as_reviewers
 
 from .api_outputs import READ_BRANCH, pr_by_branch, pull_request
 from .nodes import FAIL
-from .outputs import glab_merged_results
+from .outputs import glab_merged_results, glab_mr
 
 HEAD = "abc123"
 
@@ -91,9 +91,9 @@ CHECK = AutomatedReview(check="review-bot")
         ),
         (
             GLAB,
-            {"mr view": GLAB_MR, GLAB_APPROVALS: '{"approved_by": []}', GLAB_DISCUSSIONS: "[]"},
+            {**glab_mr(GLAB_MR), GLAB_APPROVALS: '{"approved_by": []}', GLAB_DISCUSSIONS: "[]"},
             {
-                "mr view": GLAB_MR,
+                **glab_mr(GLAB_MR),
                 GLAB_APPROVALS: json.dumps(
                     {"approved_by": [{"user": {"username": "coderabbitai"}}]}
                 ),
@@ -126,7 +126,7 @@ async def test_a_bot_review_is_pending_until_the_bot_reviews_the_head_then_clean
         (
             GLAB,
             {
-                "mr view": GLAB_MR,
+                **glab_mr(GLAB_MR),
                 GLAB_APPROVALS: '{"approved_by": []}',
                 GLAB_DISCUSSIONS: json.dumps([_glab_note("rename `x` to `total`", resolved=False)]),
             },
@@ -173,7 +173,7 @@ async def test_a_bot_s_unresolved_feedback_is_actionable(cli, tmp_path, backend,
         (
             GLAB,
             {
-                "mr view": GLAB_MR,
+                **glab_mr(GLAB_MR),
                 GLAB_APPROVALS: '{"approved_by": []}',
                 GLAB_DISCUSSIONS: json.dumps([_glab_note("stale", resolved=True)]),
             },
@@ -215,7 +215,7 @@ async def test_a_withdrawn_bot_review_does_not_count(cli, tmp_path, backend, rou
         (
             GLAB,
             {
-                "mr view": GLAB_MR,
+                **glab_mr(GLAB_MR),
                 GLAB_STATUSES: json.dumps(
                     [
                         {"id": 1, "name": "review-bot", "status": "running", "description": ""},
@@ -233,7 +233,7 @@ async def test_a_withdrawn_bot_review_does_not_count(cli, tmp_path, backend, rou
         (
             GLAB,
             {
-                "mr view": json.dumps({"iid": 262611, "sha": HEAD, "head_pipeline": MERGED}),
+                **glab_mr(json.dumps({"iid": 262611, "sha": HEAD, "head_pipeline": MERGED})),
                 READ_MERGE_COMMIT: MERGE_COMMIT,
                 GLAB_STATUSES: "[]",
                 GLAB_MERGED_STATUSES: json.dumps(
@@ -276,7 +276,7 @@ async def test_a_failed_review_check_is_actionable_with_its_output(
         (
             GLAB,
             {
-                "mr view": GLAB_MR,
+                **glab_mr(GLAB_MR),
                 GLAB_STATUSES: json.dumps(
                     [{"id": 3, "name": "review-bot", "status": "running", "description": ""}]
                 ),
@@ -296,7 +296,7 @@ async def test_a_failed_review_check_is_actionable_with_its_output(
         (
             GLAB,
             {
-                "mr view": GLAB_MR,
+                **glab_mr(GLAB_MR),
                 GLAB_STATUSES: json.dumps(
                     [{"id": 3, "name": "review-bot", "status": "canceled", "description": ""}]
                 ),

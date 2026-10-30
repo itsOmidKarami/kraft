@@ -1539,8 +1539,8 @@ async def _run_one(
                         status = "unreviewed"
                     else:
                         # And a refusal the CLI reported as success does not get
-                        # through either: `glab mr merge` exits 0 for "merge when
-                        # checks pass" and merges nothing (Kraft-79x3). The landing
+                        # through either: a merge with `auto_merge` answers 200 for "merge
+                        # when checks pass" and merges nothing (Kraft-79x3). The landing
                         # is read off the forge, now and at every later
                         # observation.
                         landed = await forge.find_mr(repo=repo, branch=branch)

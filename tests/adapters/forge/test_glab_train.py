@@ -12,12 +12,13 @@ import pytest
 from kraft.adapters import forge
 
 from .nodes import FAIL, NOT_FOUND, Api, FailWith
-from .outputs import GLAB_CI_GET_FAILED, GLAB_CI_TRACE
+from .outputs import glab_mr, glab_pipeline
 
 _MR_URL = "https://gitlab.com/o/r/-/merge_requests/7"
 _REMOVED = "removed this merge request from the merge train because "
 TRAIN_PROJECT = '{"id":1,"merge_trains_enabled":true,"merge_pipelines_enabled":true}'
 _TRAIN_CAR = "api projects/:id/merge_trains/merge_requests/7"
+_TRAIN_POST = _TRAIN_CAR
 _TRAIN_NOTES = "api projects/:id/merge_requests/7/notes?sort=desc&order_by=created_at&per_page=20"
 _TRAIN_PIPELINE = {
     "id": 2826926700,
@@ -62,18 +63,17 @@ def _dropped(
     and `view` more of the merge request's own fields."""
     return {
         "api projects/:id": TRAIN_PROJECT,
-        "mr view": _train_view(state, head_pipeline, **view),
+        **glab_mr(_train_view(state, head_pipeline, **view)),
         _TRAIN_CAR: NOT_FOUND,
         _TRAIN_NOTES: notes or (_note(note) if note is not None else "[]"),
-        "ci get": GLAB_CI_GET_FAILED,
-        "ci trace": GLAB_CI_TRACE,
+        **glab_pipeline(),
     }
 
 
 def _car(status: str) -> dict:
     return {
         "api projects/:id": TRAIN_PROJECT,
-        "mr view": _train_view(),
+        **glab_mr(_train_view()),
         _TRAIN_CAR: json.dumps(
             {"status": status, "pipeline": {"ref": "refs/merge-requests/7/train"}}
         ),
@@ -357,7 +357,7 @@ async def test_merge_queue_reads_the_train(cli, tmp_path, routes, expected, fail
 def _iid_routes(iid: int, car) -> dict:
     return {
         "api projects/:id": TRAIN_PROJECT,
-        "mr view": json.dumps({"iid": iid, "state": "opened", "head_pipeline": None}),
+        **glab_mr(json.dumps({"iid": iid, "state": "opened", "head_pipeline": None})),
         f"api projects/:id/merge_trains/merge_requests/{iid}": car,
         _TRAIN_NOTES.replace("/7/", f"/{iid}/"): "[]",
     }
@@ -419,7 +419,7 @@ async def test_merge_queue_reads_a_merged_merge_request_as_merged_not_dropped(cl
     """A merged merge request's car is gone too; that is a merge, not a drop."""
     routes = {
         "api projects/:id": TRAIN_PROJECT,
-        "mr view": _train_view("merged"),
+        **glab_mr(_train_view("merged"), open=False),
         _TRAIN_CAR: NOT_FOUND,
     }
     cli.stub("glab", routes=routes, default=FAIL)
@@ -447,7 +447,7 @@ async def test_merge_on_a_train_project_posts_to_the_train_with_the_reviewed_sha
         "-f",
         f"sha={head}",
     ]
-    assert not any(c.startswith("mr merge") for c in cli.calls("glab")), "went round the train"
+    assert not any("/merge " in c for c in cli.calls("glab")), "went round the train"
 
 
 @pytest.mark.parametrize(
@@ -459,17 +459,19 @@ async def test_merge_on_a_train_project_posts_to_the_train_with_the_reviewed_sha
         pytest.param(Api(403, '{"message": "403 Forbidden"}'), id="403"),
     ],
 )
-async def test_merge_off_a_train_project_still_runs_glab_mr_merge(cli, tmp_path, project):
+async def test_merge_off_a_train_project_still_puts_the_merge(cli, tmp_path, project):
     """The project read says plainly there is no train -- or that this token
-    may not see one: `glab mr merge`, as before trains were read."""
+    may not see one: the merge endpoint, as before trains were read."""
     cli.stub("git", "0")
-    cli.stub("glab", routes={"api projects/:id": project}, default="")
+    cli.stub("glab", routes={"api projects/:id": project, **glab_mr(_train_view())}, default="{}")
 
     await forge.GlabCli().merge(
         repo=tmp_path, branch="kraft/abc", mr=forge.MR(7, ""), head="a" * 40
     )
 
-    assert cli.calls("glab")[-1] == f"mr merge 7 --yes --sha {'a' * 40}"
+    assert cli.calls("glab")[-1] == (
+        f"api projects/:id/merge_requests/7/merge -X PUT -i -f sha={'a' * 40}"
+    )
     assert not any("merge_trains" in c for c in cli.calls("glab"))
 
 
@@ -488,9 +490,9 @@ async def test_a_project_read_that_failed_is_not_read_as_no_train(
     cli, tmp_path, monkeypatch, call, project
 ):
     """A transient failure reading `projects/:id` says nothing about a train.
-    Read as none, `merge` would fall back to `glab mr merge`, which before
-    GitLab 19.1 can merge round the train: it raises, as a failed `glab mr
-    merge` does. `merge_queue` raises too, which the merge node reads as
+    Read as none, `merge` would fall back to the plain merge PUT, which before
+    GitLab 19.1 can merge round the train: it raises, as a failed
+    merge PUT does. `merge_queue` raises too, which the merge node reads as
     "keep waiting"."""
     cli.stub("git", "0")
     cli.stub("glab", routes={"api projects/:id": FAIL if project == "timeout" else project})
@@ -511,4 +513,25 @@ async def test_a_project_read_that_failed_is_not_read_as_no_train(
         else:
             await cli_.merge_queue(repo=tmp_path, branch="kraft/abc", base="main")
 
-    assert not any(c.startswith("mr merge") for c in cli.calls("glab")), "went round the train"
+    assert not any("/merge " in c for c in cli.calls("glab")), "went round the train"
+
+
+async def test_a_train_post_refused_with_409_is_a_head_that_moved(cli, tmp_path):
+    """The sha the train POST names is not the source branch's head."""
+    moved = '[{"iid":7,"state":"opened","sha":"%s"}]' % ("b" * 40)
+    cli.stub("git", "0")
+    cli.stub(
+        "glab",
+        routes={
+            "api projects/:id": TRAIN_PROJECT,
+            _TRAIN_POST: Api(409, '{"message": "SHA does not match HEAD of source branch"}'),
+            "api*state=all*": moved,
+        },
+    )
+
+    with pytest.raises(forge.HeadMoved) as caught:
+        await forge.GlabCli().merge(
+            repo=tmp_path, branch="kraft/abc", mr=forge.MR(7, ""), head="a" * 40
+        )
+
+    assert caught.value.current == "b" * 40

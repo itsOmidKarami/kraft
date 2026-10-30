@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import re
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime
@@ -30,7 +32,7 @@ from kraft.automated_review import Reviewers
 _APPROVAL_NOTES = ("approved this merge request", "unapproved this merge request")
 
 
-#: glab's pipeline vocabulary, from `glab ci list --help` (glab 1.116.0).
+#: GitLab's pipeline `status` vocabulary (as `glab ci list --help` listed it, 1.116.0).
 #: 'skipped' is deliberately not success: nothing proved the branch green, and
 #: the next node is merge. Anything unrecognised falls through to 'failed' for
 #: the same reason — guessing in the direction of merging is the one guess that
@@ -115,6 +117,11 @@ _GLAB_STATES: dict[str, CIState] = {
 }
 
 
+#: glab retries a merge answered 406 (not yet mergeable) 3 times, backing off
+#: from about 6s (mr_merge.go:247-271); Kraft keeps a fixed 6s. Nothing else is retried.
+_MERGE_ATTEMPTS = 3
+_MERGE_RETRY_DELAY = 6.0
+
 #: glab's merge request vocabulary (`glab mr list -F json`, glab 1.117.0).
 #: 'locked' is an open merge request with discussion locked, so it is open
 #: here; anything unrecognised is 'closed', which fails the merge node loudly
@@ -129,7 +136,7 @@ _GLAB_MR_STATES: dict[str, str] = {
 
 #: `_failure_detail` returns this in place of an empty tuple whenever the
 #: read itself failed (caught on review of this plan, the real form of
-#: Kraft-h81i's exposure) -- `ForgeError` from `glab ci get`, a non-dict JSON
+#: Kraft-h81i's exposure) -- `ForgeError` from the pipeline read, a non-dict JSON
 #: body, or no pipeline id to ask about at all. `failure_reason=None` is not
 #: a member of `ci._INFRA_REASONS`, so `ci.is_infra_red` reads this as
 #: code-red by default rather than as the forge's own zero-jobs case: a
@@ -181,6 +188,8 @@ class GlabCli(mr_ops.CliWaits):
 
     def __init__(self, transport: Transport | None = None):
         self._injected = transport
+        #: `(major, minor)` of each repo's GitLab, once read (`_version`).
+        self._versions: dict[str, tuple[int, int]] = {}
 
     def _transport(self, repo: Path) -> Transport:
         return self._injected or CliTransport("glab", repo)
@@ -210,57 +219,94 @@ class GlabCli(mr_ops.CliWaits):
     ) -> MR:
         if check_clean:
             await git.assert_clean(repo, base)
-        # Both forges refuse to create against an unpushed branch. `--fill --yes`
-        # would push too, but pushing explicitly keeps the failure legible when
-        # it is the push that fails rather than the create.
+        # The forge refuses to create against an unpushed branch.
         await self.push(repo=repo, branch=branch)
-        # Not `--fill`: it derives the title from the commits, and with more
-        # than one commit glab falls back to the branch name — which for Kraft
-        # is always the work item id, so every MR read as a hex string
-        # (Kraft-c09h).
-        await git.run_git(
-            repo,
-            [
-                "glab",
-                "mr",
-                "create",
-                # Every MR Kraft opens starts as a draft: `human_review` is
-                # the gate that decides it's ready, not this call (draft-MR
-                # workflow spec). `mark_ready` un-drafts it after the gate.
-                "--draft",
-                "--source-branch",
-                branch,
-                "--target-branch",
-                base,
-                "--title",
-                mr_ops.mr_title(title),
-                "--description",
-                body,
-                *mr_ops.meta_flags(meta or mr_ops.MRMeta()),
-                "--yes",
-            ],
+        meta = meta or mr_ops.MRMeta()
+        fields: dict[str, str] = {
+            "source_branch": branch,
+            "target_branch": base,
+            # Every MR Kraft opens starts as a draft: `human_review` is the gate
+            # that decides it's ready, not this call (draft-MR workflow spec).
+            # `mark_ready` un-drafts it after the gate. GitLab has no draft
+            # field: the title prefix is the draft (glab mr create, :668-669).
+            "title": _DRAFT + mr_ops.mr_title(title),
+            "description": body,
+        }
+        if meta.labels:
+            fields["labels"] = ",".join(meta.labels)  # GitLab creates unknown labels
+        for key, names in (("assignee_ids", meta.assignees), ("reviewer_ids", meta.reviewers)):
+            if names:
+                fields[key] = ",".join([await self._user_id(repo, n) for n in names])
+        resp = await self._transport(repo).rest(
+            "POST", "projects/:id/merge_requests", fields=fields
         )
-        # Read the MR back rather than parsing create's human-formatted output.
-        raw = await git.run_git(repo, ["glab", "mr", "view", branch, "-F", "json"])
-        data = mr_ops.parse_json(raw, "glab mr view")
+        data = resp.json()
         return MR(number=int(data["iid"]), url=str(data["web_url"]))
 
+    async def _user_id(self, repo: Path, username: str) -> str:
+        if username == "@me":  # glab's spelling for the authenticated user (user.go:16-19)
+            return str((await self._api(repo, "user"))["id"])
+        users = await self._api(repo, "users", fields={"username": username})
+        if not users or len(users) != 1:  # glab errors on anything but exactly one
+            raise ForgeError(f"GitLab has {len(users or [])} users named {username!r}, not 1")
+        return str(users[0]["id"])
+
+    async def _mr(self, repo: Path, branch: str = "") -> dict:
+        """The merge request on `branch`, an open one first (the checkout's when none is
+        named, as glab did), read whole: only the single-MR read carries
+        `head_pipeline`."""
+        if not branch:
+            branch = (await git.run_git(repo, ["git", "symbolic-ref", "--short", "HEAD"])).strip()
+        if not branch:
+            raise ForgeError("no branch to find a merge request for")
+        # Open first; a merged or closed one is still readable (glab applies no
+        # state filter, mrutils.go:321-331), so only both lists empty is none.
+        for state in ("opened", "all"):
+            rows = await self._api(
+                repo,
+                "projects/:id/merge_requests",
+                fields={"source_branch": branch, "state": state, "per_page": 1},
+            )
+            if rows:
+                break
+        else:
+            raise ForgeError(f"no merge request on {branch}")
+        return await self._api(repo, f"projects/:id/merge_requests/{rows[0]['iid']}")
+
     async def mark_ready(self, *, repo: Path, branch: str, mr: MR) -> None:
-        """Un-draft the merge request. `--ready` is a no-op on an
-        already-ready MR (glab's own docs), so this is safe to call
-        unconditionally rather than reading the MR back first to check."""
-        target = mr_ops.target(mr.number, branch)
-        await git.run_git(repo, ["glab", "mr", "update", *target, "--ready"])
+        """Un-draft the merge request: its title without the `Draft: ` prefix.
+        A title that has none is already ready, so nothing is sent."""
+        data = await self._view(repo, branch, mr.number)
+        title = str(data.get("title") or "")
+        ready = _DRAFT_PREFIX.sub("", title)
+        if ready != title:
+            await self._api(
+                repo,
+                f"projects/:id/merge_requests/{data['iid']}",
+                method="PUT",
+                fields={"title": ready},
+            )
+
+    async def _view(self, repo: Path, branch: str, number: int) -> dict:
+        """The merge request by `number` when it is known, else by `branch`."""
+        if number > 0:
+            return await self._api(repo, f"projects/:id/merge_requests/{number}")
+        return await self._mr(repo, branch)
 
     async def push(self, *, repo: Path, branch: str) -> None:
         await git.push(repo, branch)
 
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None:
-        await git.run_git(repo, ["glab", "mr", "update", branch, "--description", body])
+        iid = (await self._mr(repo, branch))["iid"]
+        await self._api(
+            repo,
+            f"projects/:id/merge_requests/{iid}",
+            method="PUT",
+            fields={"description": body},
+        )
 
     async def mr_body(self, *, repo: Path, branch: str) -> str:
-        data = await self._json(repo, ["mr", "view", branch, "-F", "json"], "glab mr view")
-        return str(data.get("description") or "")
+        return str((await self._mr(repo, branch)).get("description") or "")
 
     async def _merge_state(self, repo: Path, branch: str = "") -> str:
         """The merge request's own view of whether it can merge (`_merge_view`)."""
@@ -268,12 +314,12 @@ class GlabCli(mr_ops.CliWaits):
 
     async def _merge_view(self, repo: Path, branch: str = "") -> tuple[str, dict]:
         """The merge request's own view of whether it can merge, and the
-        `glab mr view` object it came from (`{}` when there is none to give:
+        merge request object it came from (`{}` when there is none to give:
         a payload that is not an object, or the `find_mr` fallback below).
         `ci_status` reads the object's `head_pipeline` and `iid` too, so the
         merge request is asked once per read.
 
-        `glab mr view <branch> -F json` is the call `open_mr` already makes.
+        `_mr` reads the merge request.
         `detailed_merge_status` says *why*; `merge_status` is the older,
         coarser field, kept as a fallback for an older GitLab. Anything else
         — including a payload that is not an object — is "the forge did not
@@ -282,19 +328,16 @@ class GlabCli(mr_ops.CliWaits):
         A merge request already merged out-of-band -- a person merges it in
         the GitLab UI while this node is still polling -- reads `"state":
         "merged"` here, checked ahead of either merge-status field: a merged
-        MR may not carry either (Kraft-v6ci). And if `glab mr view` itself
+        MR may not carry either (Kraft-v6ci). And if `_mr` itself
         raises -- the reported failure shape, the branch resolving to nothing
         when GitLab is asked for its current view -- fall back to `find_mr`,
-        the same `--all` lookup `merge`'s own "already merged" shortcut
+        the same all-states lookup `merge`'s own "already merged" shortcut
         already trusts (Kraft-xron), before giving up: this only reads as
         "merged" when `find_mr` confirms it, so a genuine outage or auth
         failure still raises rather than being read as "someone merged it".
         """
         try:
-            raw = await git.run_git(
-                repo, ["glab", "mr", "view", *mr_ops.target(0, branch), "-F", "json"]
-            )
-            data = mr_ops.parse_json(raw, "glab mr view")
+            data = await self._mr(repo, branch)
         except ForgeError:
             ref = await self.find_mr(repo=repo, branch=branch) if branch else None
             if ref is not None and ref.state == "merged":
@@ -380,13 +423,10 @@ class GlabCli(mr_ops.CliWaits):
         if pipeline_id:
             # Pinned to a pipeline the caller already resolved against the
             # current head (Kraft-ivh1): no re-resolving here, unlike
-            # `glab ci list` below, which can answer with the previous
+            # the newest-pipeline listing below, which can answer with the previous
             # commit's pipeline for a few seconds after a push.
             try:
-                raw = await git.run_git(
-                    repo, ["glab", "ci", "get", "--pipeline-id", pipeline_id, "-F", "json"]
-                )
-                top = mr_ops.parse_json(raw, "glab ci get")
+                top = await self._api(repo, f"projects/:id/pipelines/{pipeline_id}")
             except ForgeError:
                 top = None
             # A cancelled pin has a successor to find, so it falls through too.
@@ -418,9 +458,17 @@ class GlabCli(mr_ops.CliWaits):
             # rather than erroring the whole poll.
         # --ref, or this returns the newest pipeline in the whole project: a
         # green run on main would pass the gate for a red branch.
-        ref = ["--ref", branch] if branch else []
-        raw = await git.run_git(repo, ["glab", "ci", "list", "-F", "json", "-P", "1", *ref])
-        rows = mr_ops.parse_json(raw, "glab ci list")
+        # Newest first, one row (explicit order_by/sort below).
+        rows = await self._api(
+            repo,
+            "projects/:id/pipelines",
+            fields={
+                **({"ref": branch} if branch else {}),
+                "per_page": 1,
+                "order_by": "id",
+                "sort": "desc",
+            },
+        )
         row = rows[0] if rows and isinstance(rows[0], dict) else None
         # Two candidates, the merge request's head pipeline first so the list
         # row wins a tie. Both, because neither is enough alone: GitLab moves
@@ -553,7 +601,7 @@ class GlabCli(mr_ops.CliWaits):
         "could not fetch the diagnosis" and "the forge confirmed there is no
         diagnosis to fetch" are not the same fact, and returning the same
         `((), ())` for both was a real bug caught on review of this plan: a
-        genuine `script_failure` whose `glab ci get` call happens to fail (a
+        genuine `script_failure` whose pipeline read happens to fail (a
         transient CLI error, a malformed response) was indistinguishable from
         a pipeline the forge itself reports as having zero jobs, and
         `ci.is_infra_red` reads an empty `failed_jobs` tuple as infra-shaped
@@ -568,15 +616,30 @@ class GlabCli(mr_ops.CliWaits):
         if not pipeline_id:
             return (), _UNREADABLE_JOBS
         try:
-            raw = await git.run_git(
-                repo, ["glab", "ci", "get", "--pipeline-id", pipeline_id, "-F", "json"]
-            )
-            data = mr_ops.parse_json(raw, "glab ci get")
+            data = await self._api(repo, f"projects/:id/pipelines/{pipeline_id}")
+            jobs_all: list = []
+            page = 1
+            if isinstance(data, dict):
+                while True:
+                    # Until a short page, as glab follows X-Next-Page (get.go:117-124).
+                    got = await self._api(
+                        repo,
+                        f"projects/:id/pipelines/{pipeline_id}/jobs",
+                        fields={"per_page": 100, "page": page},
+                    )
+                    # A page >= 2 that errors (here or in the except below) drops the
+                    # failures already read from page 1: all-or-unreadable.
+                    if not isinstance(got, list):
+                        return (), _UNREADABLE_JOBS
+                    jobs_all += got
+                    if len(got) < 100:
+                        break
+                    page += 1
         except ForgeError:
             return (), _UNREADABLE_JOBS
         if not isinstance(data, dict):
             return (), _UNREADABLE_JOBS
-        jobs_raw = [j for j in (data.get("jobs") or []) if isinstance(j, dict)]
+        jobs_raw = [j for j in jobs_all if isinstance(j, dict)]
         failed_raw = [j for j in jobs_raw if str(j.get("status", "")) == "failed"]
         if not failed_raw:
             yaml_errors = data.get("yaml_errors")
@@ -595,12 +658,12 @@ class GlabCli(mr_ops.CliWaits):
             failed_jobs.append(FailedJob(name, "failed", str(reason) if reason else None))
             detail += (f"job {name}: failed" + (f" ({reason})" if reason else ""),)
             try:
-                trace = await git.run_git(
-                    repo, ["glab", "ci", "trace", name, "--pipeline-id", pipeline_id]
+                resp = await self._transport(repo).rest(
+                    "GET", f"projects/:id/jobs/{j.get('id')}/trace"
                 )
             except ForgeError:
                 continue
-            detail += tuple(f"  {line}" for line in trace.strip().splitlines()[-15:])
+            detail += tuple(f"  {line}" for line in resp.text.strip().splitlines()[-15:])
         # Any failed job past the first two still counts for classification,
         # even though its trace is not fetched.
         failed_jobs += [
@@ -613,16 +676,13 @@ class GlabCli(mr_ops.CliWaits):
         ]
         return detail, tuple(failed_jobs)
 
-    async def _json(self, repo: Path, args: list[str], what: str):
-        return mr_ops.parse_json(await git.run_git(repo, ["glab", *args]), what)
-
     async def _bot_review(self, repo: Path, branch: str, bot: str) -> ReviewResult:
         """GitLab has no review state: `bot`'s unresolved discussions are
         actionable, one finding each; its approval is clean; neither yet is
         pending."""
         # ponytail: an approval is not tied to a head here -- a project that
         # keeps approvals across pushes lets an old approval settle a new head.
-        mr = await self._json(repo, ["mr", "view", branch, "-F", "json"], "glab mr view")
+        mr = await self._mr(repo, branch)
         iid = mr["iid"]
         discussions = await self._api(
             repo, f"projects/:id/merge_requests/{iid}/discussions?per_page=100"
@@ -679,7 +739,7 @@ class GlabCli(mr_ops.CliWaits):
     async def _check_review(self, repo: Path, branch: str, check: str) -> ReviewResult:
         """The latest commit status named `check` on the MR's head: pending
         until it finishes, clean on success, actionable on a failure."""
-        mr = await self._json(repo, ["mr", "view", branch, "-F", "json"], "glab mr view")
+        mr = await self._mr(repo, branch)
         latest = await self._latest_status(repo, mr, check)
         if latest is None:
             return ReviewResult("pending", detail=f"waiting for {check} on {mr['sha'][:7]}")
@@ -700,7 +760,7 @@ class GlabCli(mr_ops.CliWaits):
         merge request, and for the bots its notes and discussions, are read once
         however many reviewers there are. GitLab has no review object, so a bot's
         summaries are its top-level notes."""
-        mr = await self._json(repo, ["mr", "view", branch, "-F", "json"], "glab mr view")
+        mr = await self._mr(repo, branch)
         notes = discussions = []
         if any(r.bot is not None for r in reviewers):
             # ponytail: one page of 100 of each -- paginate if an MR ever has more.
@@ -750,7 +810,7 @@ class GlabCli(mr_ops.CliWaits):
         homework (Kraft-xh0q).
 
         GitLab's free tier does not enforce a scoped label's exclusivity
-        server-side, so `--label` alone only adds: a second repair pass leaves
+        server-side, so `add_labels` alone only adds: a second repair pass leaves
         both `release::minor` and `release::patch` on the MR, and
         `next_tag.py` now raises on more than one `release::` label rather
         than picking one (Kraft-zfdu8). So any current label sharing a new
@@ -758,19 +818,16 @@ class GlabCli(mr_ops.CliWaits):
         """
         if not labels:
             return
-        target = mr_ops.target(mr.number, branch)
-        # Also the read that used to be sentinel-only (`mr.number <= 0`, to
-        # resolve the number for the pipeline re-create below): every caller
-        # now needs the MR's current labels too, so one `mr view` serves both.
-        raw = await git.run_git(repo, ["glab", "mr", "view", *target, "-F", "json"])
-        data = mr_ops.parse_json(raw, "glab mr view")
+        # Also the read that resolves the number for the pipeline re-create below:
+        # every caller needs the MR's current labels too, so one read serves both.
+        data = await self._view(repo, branch, mr.number)
         number = mr.number if mr.number > 0 else int(data["iid"])
         current = [str(label) for label in data.get("labels") or []]
         drop = mr_ops.same_scope_labels(current, labels)
-        args = ["glab", "mr", "update", *target, "--label", ",".join(labels)]
-        for label in drop:
-            args += ["--unlabel", label]
-        await git.run_git(repo, args)
+        fields = {"add_labels": ",".join(labels)}
+        if drop:
+            fields["remove_labels"] = ",".join(drop)
+        await self._api(repo, f"projects/:id/merge_requests/{number}", method="PUT", fields=fields)
         await self._new_mr_pipeline(repo, number)
 
     async def _new_mr_pipeline(self, repo: Path, number: int) -> None:
@@ -784,18 +841,25 @@ class GlabCli(mr_ops.CliWaits):
         """`CI_MERGE_REQUEST_DESCRIPTION` is fixed when a pipeline is created,
         so retrying jobs would re-read the old body: start a new pipeline, as
         `set_labels` does for labels."""
-        raw = await git.run_git(repo, ["glab", "mr", "view", branch, "-F", "json"])
-        await self._new_mr_pipeline(repo, int(mr_ops.parse_json(raw, "glab mr view")["iid"]))
+        await self._new_mr_pipeline(repo, int((await self._mr(repo, branch))["iid"]))
         return True
 
     async def merge(self, *, repo: Path, branch: str, mr: MR, head: str) -> None:
-        """Ask GitLab to merge, at `head` only (`--sha`): GitLab answers 409 to
+        """Ask GitLab to merge, at `head` only (`sha`): GitLab answers 409 to
         a merge request whose source branch is anywhere else, now or when its
         pipeline succeeds. On a merge train project the merge request is
-        added to the train. `glab mr merge` -- which on GitLab before 19.1 can
-        merge round a train -- runs only when `projects/:id` says plainly there
-        is none (`_train_enabled`); a read that failed raises, as a failed
-        `glab mr merge` does."""
+        added to the train. Otherwise `PUT .../merge`, as glab sends it
+        (mr_merge.go:221-231): the auto-merge flag whenever the head pipeline
+        exists (GitLab decides whether to wait for it), none when there is no
+        pipeline, and no request at all for a failed or canceled one; a 406 is
+        retried (:247-271). Where Kraft differs: glab 1.117 never sends
+        `merge_when_pipeline_succeeds`, but a self-managed GitLab before 17.11
+        has no `auto_merge` and would merge at once over a running pipeline,
+        so below 17.11 that older field is sent (an unreadable version sends
+        `auto_merge`, as glab). The pipeline is `head_pipeline` first where
+        glab reads `pipeline`; the two are one object on GitLab. A project
+        read that failed raises: read as no train, the PUT could merge round
+        one (before GitLab 19.1)."""
         if not head:
             raise ForgeError("cannot merge without the head to merge")
         await git._assert_pushed(repo, branch)
@@ -806,10 +870,30 @@ class GlabCli(mr_ops.CliWaits):
             # number 0 is "not known": `run_task` does not thread the MR between
             # nodes, so the branch names it. Passing a literal 0 would target a
             # merge request that does not exist.
-            target = mr_ops.target(mr.number, branch)
-            await git.run_git(repo, ["glab", "mr", "merge", *target, "--yes", "--sha", head])
+            data = await self._view(repo, branch, mr.number)
+            if data.get("draft"):  # mrutils.go:61-63: glab refuses a draft before any PUT
+                raise ForgeError(f"cannot merge !{data['iid']}: still a draft")
+            pipeline = data.get("head_pipeline") or data.get("pipeline")
+            fields: dict[str, str | bool] = {}
+            if isinstance(pipeline, dict):
+                if pipeline.get("status") in ("failed", "canceled"):
+                    raise ForgeError(
+                        f"cannot merge !{data['iid']}: its pipeline {pipeline['status']}"
+                    )
+                old = (await self._version(repo) or (99, 0)) < (17, 11)
+                fields["merge_when_pipeline_succeeds" if old else "auto_merge"] = True
+            fields["sha"] = head
+            path = f"projects/:id/merge_requests/{data['iid']}/merge"
+            for attempt in range(_MERGE_ATTEMPTS):
+                try:
+                    await self._api(repo, path, method="PUT", fields=fields)
+                    break
+                except ForgeError as exc:
+                    if exc.status != 406 or attempt == _MERGE_ATTEMPTS - 1:
+                        raise
+                    await asyncio.sleep(_MERGE_RETRY_DELAY)
         except ForgeError as exc:
-            if _HEAD_MOVED in str(exc).lower():
+            if exc.status == 409:
                 raise HeadMoved(str(exc), await self._forge_head(repo, branch)) from exc
             raise
 
@@ -826,17 +910,18 @@ class GlabCli(mr_ops.CliWaits):
         merge train (GitLab has no endpoint that removes one from a train
         alone). A merge request that was neither queued nor set to merge
         (`merge_queued` false) has nothing to cancel, and GitLab's refusal of
-        that is not a failure. The endpoint answers `201` with
-        `{"status": "error"}` when it cancelled nothing, which `glab api` takes
-        for success, so the body is read."""
+        that is not a failure. GitLab 19.5+ has `cancel_auto_merge` (409 when
+        there is nothing to cancel); before it, `cancel_merge_when_pipeline_succeeds`
+        answers `201` with `{"status": "error"}` when it cancelled nothing,
+        which the transport takes for success, so the body is read."""
+        new = await self._cancel_auto_merge_exists(repo)
+        endpoint = "cancel_auto_merge" if new else "cancel_merge_when_pipeline_succeeds"
         try:
             body = await self._api(
-                repo,
-                f"projects/:id/merge_requests/{mr.number}/cancel_merge_when_pipeline_succeeds",
-                method="POST",
+                repo, f"projects/:id/merge_requests/{mr.number}/{endpoint}", method="POST"
             )
         except ForgeError as exc:
-            gone = exc.status in (404, 406)
+            gone = exc.status in ((404, 409) if new else (404, 406))
             if mr.merge_queued or not gone:
                 raise
             return
@@ -844,6 +929,27 @@ class GlabCli(mr_ops.CliWaits):
             raise ForgeError(
                 f"glab could not cancel the merge of !{mr.number}: {body.get('message', body)}"
             )
+
+    async def _cancel_auto_merge_exists(self, repo: Path) -> bool:
+        """GitLab 19.5+ (the old endpoint is deprecated there, not removed, so
+        a version that cannot be read falls back to it)."""
+        version = await self._version(repo)
+        return version is not None and version >= (19, 5)
+
+    async def _version(self, repo: Path) -> tuple[int, int] | None:
+        """`(major, minor)` of the repo's GitLab, None when it cannot be read.
+        Never raises; only a read that worked is kept."""
+        key = str(repo)
+        if key not in self._versions:
+            try:
+                got = str((await self._api(repo, "version"))["version"])
+            except (ForgeError, TypeError, KeyError, ValueError):
+                return None
+            found = re.match(r"(\d+)\.(\d+)", got)
+            if not found:
+                return None
+            self._versions[key] = (int(found[1]), int(found[2]))
+        return self._versions[key]
 
     async def _add_to_train(self, repo: Path, branch: str, mr: MR, head: str) -> None:
         """Queue the merge request on the train explicitly. Before GitLab 19.1
@@ -870,7 +976,7 @@ class GlabCli(mr_ops.CliWaits):
         there is never a reason to stop an item. Anything else -- a 5xx, a dead
         network, a timeout, a body that is not the project object -- says
         nothing about a train and raises: read as none, `merge` would fall back
-        to `glab mr merge` and could merge round the train."""
+        to the plain merge PUT and could merge round the train."""
         try:
             project = await self._api(repo, "projects/:id")
         except ForgeError as exc:
@@ -990,18 +1096,26 @@ class GlabCli(mr_ops.CliWaits):
         return ""
 
     async def close_mr(self, *, repo: Path, mr: MRRef) -> None:
-        await git.run_git(repo, ["glab", "mr", "close", str(mr.number)])
+        await self._state_event(repo, mr, "close")
 
     async def reopen_mr(self, *, repo: Path, mr: MRRef) -> None:
-        await git.run_git(repo, ["glab", "mr", "reopen", str(mr.number)])
+        await self._state_event(repo, mr, "reopen")
+
+    async def _state_event(self, repo: Path, mr: MRRef, event: str) -> None:
+        await self._api(
+            repo,
+            f"projects/:id/merge_requests/{mr.number}",
+            method="PUT",
+            fields={"state_event": event},
+        )
 
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None:
-        # --all, or a merged merge request reads as no merge request at all.
-        raw = await git.run_git(
+        # state=all, or a merged merge request reads as no merge request at all.
+        rows = await self._api(
             repo,
-            ["glab", "mr", "list", "--all", "--source-branch", branch, "-F", "json", "-P", "5"],
+            "projects/:id/merge_requests",
+            fields={"source_branch": branch, "state": "all", "per_page": 5},
         )
-        rows = mr_ops.parse_json(raw, "glab mr list")
         return mr_ops.pick_mr(
             [
                 MRRef(
@@ -1014,14 +1128,15 @@ class GlabCli(mr_ops.CliWaits):
                     # fast-forward or rebase merge, which is not a head to compare.
                     head_sha=str(r.get("sha") or "") if r.get("state") == "opened" else "",
                 )
-                for r in rows
+                for r in rows or []
             ]
         )
 
 
-#: What GitLab answers (409) to a merge request merged with a `sha` that is not its
-#: source branch's head.
-_HEAD_MOVED = "sha does not match head of source branch"
+#: How GitLab marks a draft: the title's prefix, which `mark_ready` strips as
+#: glab's `mr update --ready` does (:234-238).
+_DRAFT = "Draft: "
+_DRAFT_PREFIX = re.compile(r"^(\s*(draft:|wip:)\s*)+", re.IGNORECASE)
 
 
 def _pipeline_number(top: dict) -> int:

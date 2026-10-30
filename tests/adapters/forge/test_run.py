@@ -613,7 +613,7 @@ async def test_infra_red_is_retried_across_entries_then_stops_with_the_reason(
 
 
 class _MergesOnlyOnGreen(forge.FakeForge):
-    """`glab mr merge --yes` against a still-running pipeline exits 0 but merges
+    """A GitLab merge with `auto_merge` against a still-running pipeline exits 0 but merges
     nothing (Kraft-79x3): this fake refuses unless the last read was green."""
 
     last = None
@@ -636,7 +636,7 @@ class _Refusing(forge.FakeForge):
 
 class _AutoMergeScheduled(forge.FakeForge):
     """Kraft-79x3, 0853ea31 / MR !76: with the head's pipeline still running,
-    GitLab's `mr merge` enables "merge when all checks pass", exits 0, and
+    GitLab's `auto_merge` enables "merge when all checks pass", exits 0, and
     merges nothing."""
 
     async def merge(self, *, repo, branch="", mr, head=""):
