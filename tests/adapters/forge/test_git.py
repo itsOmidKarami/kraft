@@ -247,42 +247,75 @@ def test_push_runs_no_hook_even_one_the_person_installed(tmp_path, monkeypatch, 
     assert marker.exists()
 
 
+_POINTER = "version https://git-lfs.github.com/spec/v1\noid sha256:" + "a" * 64 + "\nsize 12\n"
+
+
 @pytest.mark.parametrize(
-    ("attributes", "refused"),
+    ("content", "refused"),
     [
-        pytest.param("", False, id="no-lfs-needs-no-git-lfs"),
-        pytest.param("*.bin filter=lfs diff=lfs merge=lfs -text\n", True, id="lfs-needs-git-lfs"),
+        pytest.param("plain text\n", False, id="no-lfs-pointer-needs-no-git-lfs"),
+        pytest.param(_POINTER, True, id="an-lfs-pointer-needs-git-lfs"),
     ],
 )
-def test_push_needs_git_lfs_only_for_a_repo_that_uses_lfs(
-    tmp_path, monkeypatch, attributes, refused
+def test_push_needs_git_lfs_only_for_commits_that_add_lfs_pointers(
+    tmp_path, monkeypatch, content, refused
 ):
-    """The push uploads LFS objects itself, so a repo that uses LFS on a
-    machine with no git-lfs refuses, as git-lfs's own pre-push did, rather
-    than publish pointers to objects the forge never got. A repo that does
-    not use LFS never asks for git-lfs."""
+    """The push uploads LFS objects itself, so a branch that adds a pointer,
+    on a machine with no git-lfs, refuses before any of it is pushed, as
+    git-lfs's own pre-push did, rather than publish pointers to objects the
+    forge never got. Commits with no pointer never ask for git-lfs, whatever
+    `.gitattributes` says."""
     which = shutil.which
     monkeypatch.setattr(
         shutil, "which", lambda name, **kw: None if name == "git-lfs" else which(name, **kw)
     )
     repo = _repo_with_origin(tmp_path)
-    (repo / ".gitattributes").write_text(attributes)
-    commit_all(repo, "attributes")
+    # LFS for another pattern: the filter never runs on f.txt, wherever git-lfs is set up.
+    (repo / ".gitattributes").write_text("*.psd filter=lfs diff=lfs merge=lfs -text\n")
+    (repo / "f.txt").write_text(content)
+    commit_all(repo, "a file")
+    before = git(tmp_path / "origin.git", "rev-parse", BRANCH)
 
     if refused:
         with pytest.raises(forge.ForgeError, match="no git-lfs"):
             asyncio.run(forge.push(repo, BRANCH))
+        assert git(tmp_path / "origin.git", "rev-parse", BRANCH) == before
     else:
         asyncio.run(forge.push(repo, BRANCH))
 
 
 @pytest.mark.e2e("git-lfs")
-def test_push_uploads_the_lfs_objects_the_branch_points_at(tmp_path):
+@pytest.mark.parametrize("brought_in", [False, True], ids=["own-commit", "after-a-persons"])
+def test_push_uploads_the_lfs_objects_the_branch_points_at(tmp_path, brought_in):
     """git-lfs's pre-push no longer runs on Kraft's push, so the push sends
-    the objects the branch's pointers name to the remote's LFS store itself."""
+    the objects the new commits' pointers name to the remote's LFS store
+    itself. A person's commit brought in without its object (fetched with
+    `--refmap=`, as `bring_home` does, and never smudged) is already on
+    origin, so its missing object is not asked for."""
     repo = _repo_with_origin(tmp_path)
     git(repo, "lfs", "install", "--local", "--skip-repo")
     git(repo, "lfs", "track", "*.bin")
+    commit_all(repo, "lfs tracking")
+    git(repo, "push", "-q", "--no-verify", "origin", BRANCH)
+    if brought_in:
+        person = tmp_path / "person"
+        git(tmp_path, "clone", "-q", "-b", BRANCH, str(tmp_path / "origin.git"), str(person))
+        git(person, "lfs", "install", "--local", "--skip-repo")
+        (person / "theirs.bin").write_bytes(os.urandom(64))
+        commit_all(person, "a person's lfs file")
+        git(person, "lfs", "push", "origin", BRANCH)
+        git(person, "push", "-q", "--no-verify", "origin", BRANCH)
+        git(repo, "fetch", "-q", "--refmap=", "origin", BRANCH)
+        git(
+            repo,
+            "merge",
+            "-q",
+            "--ff-only",
+            "FETCH_HEAD",
+            env={**os.environ, "GIT_LFS_SKIP_SMUDGE": "1"},
+        )
+        theirs = git(repo, "show", "HEAD:theirs.bin").split("oid sha256:")[1].split()[0]
+        assert not (repo / ".git" / "lfs" / "objects" / theirs[:2] / theirs[2:4] / theirs).exists()
     (repo / "big.bin").write_bytes(os.urandom(64))
     commit_all(repo, "an lfs file")
     oid = git(repo, "show", "HEAD:big.bin").split("oid sha256:")[1].split()[0]
@@ -290,6 +323,7 @@ def test_push_uploads_the_lfs_objects_the_branch_points_at(tmp_path):
     asyncio.run(forge.push(repo, BRANCH))
 
     assert (tmp_path / "origin.git" / "lfs" / "objects" / oid[:2] / oid[2:4] / oid).is_file()
+    assert git(tmp_path / "origin.git", "rev-parse", BRANCH) == git(repo, "rev-parse", "HEAD")
 
 
 @pytest.mark.parametrize(
