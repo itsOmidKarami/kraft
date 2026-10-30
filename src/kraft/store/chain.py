@@ -19,6 +19,8 @@ from kraft.vocab import (
     SessionEvent,
     SessionStatus,
     SettingsEvent,
+    StopKind,
+    WorkItemStatus,
 )
 from kraft.vocab.sql import in_list
 
@@ -197,15 +199,30 @@ def one_off_unapproved(row) -> bool:
     return row["one_off_pending"] == 1
 
 
+#: The columns `one_off_view` reads on a board fetch instead of decoding the
+#: whole record: a select list adds them after `*`.
+ONE_OFF_SUMMARY_COLUMNS = (
+    "json_array_length(one_off_chain, '$.custom') AS one_off_custom, "
+    "json_extract(one_off_chain, '$.provenance.parent') AS one_off_extends"
+)
+
+
 def one_off_view(row) -> dict | None:
-    """What the board and the detail say of `row`'s one-off chain, None for a library chain."""
-    record = one_off_of(row)
-    if record is None:
+    """What the board and the detail say of `row`'s one-off chain, None for a
+    library chain. A row selected with `ONE_OFF_SUMMARY_COLUMNS` is read from
+    those, so a board fetch never decodes the record."""
+    if row["one_off_chain"] is None:
         return None
-    provenance = record["provenance"]
+    if "one_off_custom" in row.keys():
+        extends, custom = row["one_off_extends"], row["one_off_custom"]
+    else:
+        record = one_off_of(row)
+        provenance = record["provenance"]
+        extends = provenance["parent"] if provenance else None
+        custom = len(record["custom"])
     return {
-        "extends": provenance["parent"] if provenance else None,
-        "custom": len(record["custom"]),
+        "extends": extends,
+        "custom": custom,
         "needs_review": one_off_unapproved(row),
         "approval": json.loads(row["one_off_approval"]) if row["one_off_approval"] else None,
     }
@@ -221,31 +238,45 @@ def review_digest(row) -> str:
     ).hexdigest()
 
 
-def approve_one_off(conn: sqlite3.Connection, work_item_id, approval: dict, digest: str) -> bool:
-    """Record `approval` of the chain whose `review_digest` is `digest`. False
-    when the item has started, has nothing pending, or its chain is no longer
-    the one the caller saw -- nothing is approved then. The digest is checked in
-    the same transaction as the write."""
+ONE_OFF_CHANGED = "the one-off chain changed since it was reviewed; review it again"
+
+
+def approve_one_off(conn: sqlite3.Connection, work_item_id, approval: dict, digest: str) -> None:
+    """Record `approval` of the chain whose `review_digest` is `digest`, in one
+    transaction with every check. `ValueError`, with the sentence a person
+    reads, when nothing is approved: the item ended or started, its chain is
+    already approved, or its chain is no longer the one the caller saw."""
     row = conn.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
-    if row is None or one_off_of(row) is None or review_digest(row) != digest:
-        return False
+    if row is None or one_off_of(row) is None:
+        raise ValueError(ONE_OFF_CHANGED)
+    if row["status"] in ENDED:
+        raise ValueError("work item has ended; there is nothing to approve")
+    if row["current_node_id"] is not None:
+        raise ValueError("work item has already started")
+    if not one_off_unapproved(row):
+        raise ValueError(
+            "this one-off chain is already approved"
+            if row["one_off_approval"]
+            else "nothing to approve: this one-off chain is library-only"
+        )
+    if review_digest(row) != digest:
+        raise ValueError(ONE_OFF_CHANGED)
     # `digest` is the authored chain's wherever an approval is recorded; the review's is beside it.
     approval.update(digest=one_off_of(row)["digest"], review_digest=digest)
-    done = (
-        conn.execute(
-            # An item the walk stopped for a chain that changed after its claim
-            # (`needs_human`, never started) goes back to paused: a person starts it.
-            "UPDATE work_items SET one_off_approval = ?, one_off_pending = 0, "
-            "status = CASE WHEN status = 'needs_human' AND stop_kind = 'config' "
-            "THEN 'paused' ELSE status END "
-            "WHERE id = ? AND current_node_id IS NULL AND one_off_pending = 1",
-            (json.dumps(approval), work_item_id),
-        ).rowcount
-        == 1
+    conn.execute(
+        "UPDATE work_items SET one_off_approval = ?, one_off_pending = 0 WHERE id = ?",
+        (json.dumps(approval), work_item_id),
     )
-    if done:
-        events.append(conn, work_item_id, SettingsEvent.ONE_OFF_CHAIN_APPROVED, approval)
-    return done
+    if row["status"] == WorkItemStatus.NEEDS_HUMAN and row["stop_kind"] == StopKind.CONFIG:
+        # Stopped by the walk for a chain that changed after its claim, never
+        # started: back to paused, and a person starts it.
+        write_status(
+            conn,
+            "UPDATE work_items SET status = 'paused', updated_at = ? "
+            "WHERE id = ? AND status = 'needs_human'",
+            (_now(), work_item_id),
+        )
+    events.append(conn, work_item_id, SettingsEvent.ONE_OFF_CHAIN_APPROVED, approval)
 
 
 def replace_sandbox(
@@ -720,7 +751,13 @@ def node_overrides_of(row) -> dict:
 
 
 #: Raw one-off columns: read through `one_off_of`, never carried in a payload.
-_ONE_OFF_COLUMNS = ("one_off_chain", "one_off_approval", "one_off_pending")
+_ONE_OFF_COLUMNS = (
+    "one_off_chain",
+    "one_off_approval",
+    "one_off_pending",
+    "one_off_custom",
+    "one_off_extends",
+)
 
 
 def work_item_payload(row) -> dict:
@@ -729,11 +766,13 @@ def work_item_payload(row) -> dict:
     as stored, except the three override columns, which hold JSON text and
     are decoded, so a client reads the same object at every door:
     `agent_overrides` and `policy_override` (`None` when unset) and
-    `node_overrides` (`{}` when unset)."""
+    `node_overrides` (`{}` when unset). The one-off columns are summed up as
+    `one_off` (`one_off_view`)."""
     payload = {k: row[k] for k in row.keys() if k not in _ONE_OFF_COLUMNS}
     payload["agent_overrides"] = json.loads(row["agent_overrides"] or "null")
     payload["policy_override"] = json.loads(row["policy_override"] or "null")
     payload["node_overrides"] = node_overrides_of(row)
+    payload["one_off"] = one_off_view(row)
     return payload
 
 

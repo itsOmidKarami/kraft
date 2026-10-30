@@ -5,7 +5,22 @@ import pytest
 from kraft.templates import one_off
 from kraft.templates.library import TemplateLibrary
 
-LIBRARY = TemplateLibrary.from_yaml_dir(Path(__file__).parents[2] / "config")
+#: The shipped library, plus `pinned`: a chain with an exec node no one may skip.
+LIBRARY, _ = TemplateLibrary.from_yaml_dir(Path(__file__).parents[2] / "config").with_chain(
+    Path("<unsaved>/chains/pinned.yaml"),
+    {
+        "id": "pinned",
+        "nodes": [
+            {"id": "a", "kind": "exec", "tasks": [{"id": "t", "extends": "implementer"}]},
+            {
+                "id": "b",
+                "kind": "exec",
+                "skippable": False,
+                "tasks": [{"id": "u", "extends": "verify_changed_scopes"}],
+            },
+        ],
+    },
+)
 IMPLEMENT = "implementation.main.implement"
 AGENT = {"id": "t", "kind": "agent", "harness": "claude", "prompt": "run k6"}
 
@@ -55,6 +70,10 @@ def _parts(authored: dict):
         pytest.param(
             {"extends": "default", "remove": ["spec_approval"]}, ["remove[0]"], id="remove-gate"
         ),
+        pytest.param(
+            {"extends": "pinned", "remove": ["b"]}, ["remove[0]"], id="remove-unskippable-exec"
+        ),
+        pytest.param({"extends": "pinned", "remove": ["a"]}, [], id="remove-skippable-exec"),
         pytest.param(
             {"extends": "default", "remove": ["draft_merge_request"]},
             ["remove[0]"],

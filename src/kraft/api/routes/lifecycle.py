@@ -151,7 +151,7 @@ def refuse_unapproved_one_off(row) -> None:
         raise HTTPException(
             409,
             "this item's one-off chain has custom content no one has approved: a person "
-            "reviews it in the web UI or the phone app, then starts it",
+            "reviews it in the web UI, on a computer or a phone, then starts it",
         )
 
 

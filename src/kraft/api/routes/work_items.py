@@ -33,7 +33,7 @@ from kraft.remote import placement
 from kraft.templates import one_off
 from kraft.templates.environment import RootPointerPolicy
 from kraft.templates.models import ExecNode, GateNode, MaterializedChain, ResolvedChain
-from kraft.vocab import HOLDS_SLOT, WorkItemStatus
+from kraft.vocab import ENDED, HOLDS_SLOT, WorkItemStatus
 
 
 class Attachment(BaseModel):
@@ -94,8 +94,9 @@ class NewWorkItem(_OneChain):
     #: (`templates.one_off`). Exclusive with `chain`. Custom content in it
     #: waits for a person's approval before the item can start.
     one_off_chain: str | dict | None = None
-    #: The digest of the one-off chain a person reviewed (`one_off.digest`),
-    #: sent by the web UI when it creates. Accepted only from a person.
+    #: The review digest of the one-off chain a person reviewed
+    #: (`one_off.review_digest`, as `POST /one-off-chain/ops` answers it), sent
+    #: by the web UI when it creates. Accepted only from a person.
     approve_one_off: str | None = None
     #: A workspace item (design 1g "Advanced · cross-repo"): the workspace
     #: `repo` is the root of, the members it selects, and the root-pointer
@@ -349,6 +350,7 @@ def _one_off_summary(record: dict, approval: dict | None) -> dict:
         "custom": len(record["custom"]),
         "approved": approval is not None,
         "digest": record["digest"],
+        "review_digest": one_off.review_digest(record["digest"], record["custom"]),
     }
 
 
@@ -361,10 +363,14 @@ def _one_off_approval(request: Request, body: NewWorkItem, record: dict) -> dict
         raise HTTPException(
             403, "only a person approves a one-off chain's custom content, in the web UI"
         )
-    if body.approve_one_off != record["digest"]:
+    # Recomputed from this request's own resolution: a library reload since the
+    # editor answered can change what is custom under the same text.
+    reviewed = one_off.review_digest(record["digest"], record["custom"])
+    if body.approve_one_off != reviewed:
         raise HTTPException(409, "the one-off chain changed since it was reviewed; review it again")
     return {
         "digest": record["digest"],
+        "review_digest": reviewed,
         "by": "human",
         "door": "web",
         "at": datetime.now(UTC).isoformat(),
@@ -388,9 +394,6 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
             "an agent cannot start the work it files: file it paused (no autostart) "
             "and a human starts it from the board",
         )
-    if body.autostart:
-        # Filed paused otherwise, which starts nothing: only a start waits.
-        when_free.refuse_if_claimed()
     one = approval = None
     if body.one_off_chain is not None:
         one = deps.one_off_chain_or_422(st, body.repo, body.one_off_chain, skips=body.skip_nodes)
@@ -401,6 +404,9 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
     # Custom content nobody approved is filed paused, whoever asked to start it.
     pending = one is not None and bool(one.record["custom"]) and approval is None
     autostart = body.autostart and not pending
+    if autostart:
+        # Filed paused otherwise, which starts nothing: only a start waits.
+        when_free.refuse_if_claimed()
     # Before `executor.intake`, which no longer 502s on a bd failure (Kraft-7gy)
     # and would file the item with no bead and a warning nobody reads. An
     # explicit check rather than `Field(max_length=...)`: pydantic's 422 body is
@@ -1239,7 +1245,16 @@ def _retrimmed(row, filed_kinds: frozenset[str], kinds: frozenset[str]) -> str:
     ).to_json()
 
 
-_STARTED = "work item has already started or is running; its chain is fixed for its life"
+def _chain_fixed(c, wid) -> str:
+    """Why a chain switch `store._CHAIN_SETTABLE` refused did not take, in this item's case."""
+    row = c.execute(
+        "SELECT status, current_node_id FROM work_items WHERE id = ?", (wid,)
+    ).fetchone()
+    if row["status"] in ENDED:
+        return "work item has ended; its chain can no longer change"
+    if row["current_node_id"] is not None:
+        return "work item has already started; its chain is fixed for its life"
+    return "work item is running; its chain can change only while it is not"
 
 
 @api_router.patch("/work-items/{wid}")
@@ -1398,11 +1413,16 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         if body.chain_template is not None and not store.set_chain_template(
             c, wid, body.chain_template, new_materialized
         ):
-            raise HTTPException(409, _STARTED)
+            raise HTTPException(409, _chain_fixed(c, wid))
         if new_one_off is not None and not store.set_one_off_chain(
             c, wid, new_one_off.record, new_materialized
         ):
-            raise HTTPException(409, _STARTED)
+            raise HTTPException(409, _chain_fixed(c, wid))
+        if new_one_off is not None:
+            # The summary as stored, never the submitted text, as every door shows it.
+            fresh = c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            written["chain_template"] = one_off.ONE_OFF_TEMPLATE
+            written["one_off"] = store.one_off_view(fresh)
         if agent_overrides is not None:
             written["agent_overrides"] = store.replace_agent_overrides(c, wid, agent_overrides)
         if body.node_overrides is not None:
@@ -1448,4 +1468,5 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
     # null` along with every untouched field, so build the echo from
     # `fields_set` (what the caller actually sent) instead. For the overrides
     # the echo is what is now stored, as the detail shows it.
-    return {"id": wid, **{f: getattr(body, f) for f in fields_set}, **written}
+    sent = {f: getattr(body, f) for f in fields_set if f != "one_off_chain"}
+    return {"id": wid, **sent, **written}

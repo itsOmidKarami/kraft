@@ -28,7 +28,7 @@ def _create(client, repo, text, *, headers=None, query="", **body):
 def _digest(client, repo, text):
     r = _create(client, repo, text, query="?dry_run=1")
     assert r.status_code == 200, r.text
-    return r.json()["one_off"]["digest"]
+    return r.json()["one_off"]["review_digest"]
 
 
 def test_files_a_library_only_one_off(client, repo):
@@ -36,6 +36,7 @@ def test_files_a_library_only_one_off(client, repo):
     assert r.status_code == 201, r.text
     one_off = r.json()["one_off"]
     assert re.fullmatch(r"[0-9a-f]{64}", one_off.pop("digest"))
+    assert re.fullmatch(r"[0-9a-f]{64}", one_off.pop("review_digest"))
     assert one_off == {"custom": 0, "approved": False}
     row = _item_row(r.json()["id"])
     assert row["chain_template"] == "@one-off"
@@ -132,12 +133,24 @@ def test_create_approval(client, repo, headers, stale, status, text):
     assert (row["one_off_approval"] is not None) is approved
     if approved:
         approval = json.loads(row["one_off_approval"])
-        assert (approval["by"], approval["door"], approval["digest"]) == ("human", "web", digest)
+        assert (approval["by"], approval["door"], approval["review_digest"]) == (
+            "human",
+            "web",
+            digest,
+        )
+        assert approval["digest"] == r.json()["one_off"]["digest"]
         events = client.get(f"/api/work-items/{r.json()['id']}/events").json()
         assert "one_off_chain_approved" in [e["type"] for e in events]
 
 
-def test_custom_one_off_autostart_files_paused(client, repo):
+@pytest.mark.parametrize(
+    "held", [pytest.param(False, id="free"), pytest.param(True, id="when-free-hold")]
+)
+def test_custom_one_off_autostart_files_paused(client, repo, monkeypatch, held):
+    """Pending content starts nothing, so a when-free hold does not refuse it."""
+    from kraft import when_free
+
+    monkeypatch.setattr(when_free, "_claimed", held)
     r = _create(client, repo, CUSTOM, autostart=True)
     assert r.status_code == 201, r.text
     assert r.json()["status"] == "paused"
@@ -196,3 +209,21 @@ def test_create_refuses_an_id_the_designer_could_not_load(client, repo, id):
     r = _create(client, repo, f"id: {id!r}\n" + LIBRARY_ONLY_ONE_OFF)
     assert r.status_code == 422, r.text
     assert "lowercase letter" in r.json()["detail"]
+
+
+def test_a_library_reload_between_review_and_create_is_refused(client, repo, templates_dir):
+    """The approval covers the custom parts as the editor resolved them: a parent
+    change that makes the same text more custom is not approved by it."""
+    text = "extends: quick-task\nremove: [verify]\n" + CUSTOM.split("\n", 1)[1].replace(
+        "after: verification", "after: implementation"
+    )
+    reviewed = client.post("/api/one-off-chain/ops", json={"text": text}).json()
+    assert [p["path"] for p in reviewed["custom"]] == ["add[0].node"]
+    path = templates_dir / "chains" / "quick-task.yaml"
+    path.write_text(
+        path.read_text().replace("  - id: verify\n", "  - id: verify\n    skippable: false\n")
+    )
+    client.post("/api/templates/reload").raise_for_status()
+    r = _create(client, repo, text, approve_one_off=reviewed["digest"])
+    assert r.status_code == 409, r.text
+    assert client.get("/api/work-items").json()["items"] == []

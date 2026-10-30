@@ -79,7 +79,7 @@ def _parse(text: str) -> dict | None:
 @api_router.post("/one-off-chain/ops")
 async def one_off_chain_ops(body: OneOffOps, request: Request):
     """Apply editor `ops` to the text of a chain used by one work item, and
-    answer the draft view of the result with the chain's digest, its resolved
+    answer the draft view of the result with the chain's review digest, its resolved
     nodes, its custom parts and the nodes they name. Nothing is stored. A text
     that is not YAML is answered with its error and no ops applied."""
     st = request.app.state
@@ -120,6 +120,8 @@ async def one_off_chain_ops(body: OneOffOps, request: Request):
             authored, digest = one_off.prepare(after)
             deps.own_id_or_422(library, authored["id"])
             nodes, custom, custom_nodes = _resolve(st, authored)
+            # What the create review shows and `approve_one_off` names (`one_off.review_digest`).
+            digest = one_off.review_digest(digest, custom)
     files_now, _, result = drafts._state(st, "chains", key, {"files": files, "serialized": []}, [])
     text = files_now.get(f"chains/{key}.yaml", body.text)
     return {

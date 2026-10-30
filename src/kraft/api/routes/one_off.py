@@ -73,7 +73,8 @@ async def get_one_off(wid: str, request: Request):
 async def approve_one_off(wid: str, body: ApproveOneOff, request: Request):
     """Approve the custom content of an item's one-off chain, as shown. Only a
     person does; the digest ties the approval to the chain they read, so a
-    chain that changed since is refused (409) and nothing is approved."""
+    chain that changed since, or one already approved, is refused (409) and
+    nothing is approved."""
     st = request.app.state
     if gates._decided_by(request) != "human":
         raise HTTPException(
@@ -91,6 +92,8 @@ async def approve_one_off(wid: str, body: ApproveOneOff, request: Request):
         "door": body.door,
         "at": datetime.now(UTC).isoformat(),
     }
-    if not await st.db.write(lambda c: store.approve_one_off(c, wid, approval, body.digest)):
-        raise HTTPException(409, "the one-off chain changed since it was reviewed; review it again")
+    try:
+        await st.db.write(lambda c: store.approve_one_off(c, wid, approval, body.digest))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
     return {"id": wid, "approval": approval}

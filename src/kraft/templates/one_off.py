@@ -48,6 +48,15 @@ def digest(authored: Mapping) -> str:
     ).hexdigest()
 
 
+def review_digest(authored_digest: str, custom: list[dict]) -> str:
+    """What a person approves at creation: the authored chain and its custom
+    parts as resolved against the library then, so a library reload that changes
+    what is custom under the same text is not covered by the approval."""
+    return hashlib.sha256(
+        json.dumps([authored_digest, custom], sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
 def prepare(mapping: Mapping[str, object]) -> tuple[dict, str]:
     """The chain with its `id` filled in, and its digest: the only way one is made."""
     authored = {**mapping, "id": mapping.get("id") or DEFAULT_ID}

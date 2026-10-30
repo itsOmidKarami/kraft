@@ -139,7 +139,7 @@ def test_ops_digest_is_accepted_at_create(client, repo, text):
     )
     assert r.status_code == 201, r.text
     assert r.json()["one_off"]["approved"] is True
-    assert r.json()["one_off"]["digest"] == digest
+    assert r.json()["one_off"]["review_digest"] == digest
 
 
 @pytest.mark.parametrize(
@@ -188,6 +188,11 @@ BOMB = "".join(
         pytest.param(BOMB + "id: load_test\n", "not usable YAML", id="set-fragment-bomb"),
         pytest.param(
             "id: load_test\ndescription: .inf\n", "plain YAML values", id="set-fragment-inf"
+        ),
+        pytest.param(
+            "id: load_test\ndescription: 2020-13-45\n",
+            "can't be read, such as an impossible date",
+            id="set-fragment-bad-date",
         ),
     ],
 )

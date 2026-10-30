@@ -352,7 +352,7 @@ async def list_work_items(request: Request):
 
     def _read(c):
         rows = c.execute(
-            "SELECT * FROM work_items WHERE (? OR status != ?) "
+            f"SELECT *, {store.ONE_OFF_SUMMARY_COLUMNS} FROM work_items WHERE (? OR status != ?) "
             "AND (archived_at IS NOT NULL) = ? ORDER BY created_at",
             (include_abandoned, WorkItemStatus.ABANDONED, archived),
         ).fetchall()
@@ -1362,7 +1362,6 @@ async def get_work_item(wid: str, request: Request):
     return {
         # The override columns decoded, as every action and gate echo has them.
         **payload,
-        "one_off": store.one_off_view(row),
         "chain_definition": chain,
         # The Config tab's "effective chain" (UI v2 · 04 point 3): node
         # overrides folded over the template-shaped chain, plus the raw

@@ -74,19 +74,29 @@ def test_library_only_one_off_starts_without_review(client, repo):
 
 
 @pytest.mark.parametrize(
-    ("headers", "text", "digest", "status"),
+    ("headers", "text", "digest", "before", "status", "words"),
     [
-        pytest.param(MCP_HEADERS, CUSTOM, None, 403, id="mcp"),
-        pytest.param({}, LIBRARY_ONLY_ONE_OFF, None, 409, id="library-only"),
-        pytest.param({}, CUSTOM, "0" * 64, 409, id="stale-digest"),
-        pytest.param({}, CUSTOM, None, 200, id="ok"),
+        pytest.param(MCP_HEADERS, CUSTOM, None, None, 403, "only a person", id="mcp"),
+        pytest.param({}, LIBRARY_ONLY_ONE_OFF, None, None, 409, "library-only", id="library-only"),
+        pytest.param({}, CUSTOM, "0" * 64, None, 409, "changed since", id="stale-digest"),
+        pytest.param({}, CUSTOM, None, "approve", 409, "already approved", id="twice"),
+        pytest.param({}, CUSTOM, None, "end", 409, "has ended", id="ended"),
+        pytest.param({}, CUSTOM, None, None, 200, None, id="ok"),
     ],
 )
-def test_approve(client, repo, headers, text, digest, status):
+def test_approve(client, repo, headers, text, digest, before, status, words):
     wid = _one_off(client, repo, text)
+    if before == "approve":
+        assert _approve(client, wid).status_code == 200
+    elif before == "end":
+        _set_status(wid, "abandoned")
+    approved = _review(client, wid)["approval"]
     r = _approve(client, wid, digest, headers)
     assert r.status_code == status, r.text
-    assert (_review(client, wid)["approval"] is not None) is (status == 200)
+    if words:
+        assert words in r.json()["detail"]
+    after = _review(client, wid)["approval"]
+    assert after == approved if status != 200 else after is not None
 
 
 def test_approve_records_the_door(client, repo):
@@ -143,6 +153,7 @@ def test_the_walk_stops_an_item_whose_chain_changed_after_the_claim(client, repo
     (repo / "spec.md").write_text("# spec\n")
     r = client.patch(f"/api/work-items/{wid}", json={"attachments": {"spec": "spec.md"}})
     assert r.status_code == 200, r.text
+    assert _item_row(wid)["one_off_pending"] == 1
     st = client.app.state
     done = client.portal.call(partial(walk.run_once, st.db, st.run_dirs, work_item_id=wid))
     row = _item_row(wid)
@@ -167,22 +178,6 @@ def test_approve_refuses_a_chain_changed_since_the_review(client, repo):
     assert _approve(client, wid, shown).status_code == 409
     assert _review(client, wid)["approval"] is None
     assert _approve(client, wid).status_code == 200
-
-
-def test_a_change_after_the_claim_stops_the_walk_before_it_loads(client, repo):
-    """The item was claimed `active` and then its chain changed: the first
-    `load_chain` refuses, so nothing unreviewed runs, and the review is open again."""
-    wid = _one_off(client, repo, CUSTOM)
-    assert _approve(client, wid).status_code == 200
-    _set_status(wid, "active")
-    (repo / "spec.md").write_text("# spec\n")
-    r = client.patch(f"/api/work-items/{wid}", json={"attachments": {"spec": "spec.md"}})
-    assert r.status_code == 200, r.text
-    assert _item_row(wid)["one_off_pending"] == 1
-    with _orchestrator_db() as conn, conn:
-        conn.row_factory = sqlite3.Row
-        assert store.load_chain(conn, wid, "spec") is False
-    assert _item_row(wid)["current_node_id"] is None
 
 
 def test_review_shows_filed_provenance(client, repo, templates_dir):

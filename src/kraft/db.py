@@ -465,6 +465,17 @@ _WORK_ITEMS_ONE_OFF_REOPEN_TRIGGER = (
     "WHERE id = NEW.id; END"
 )
 
+#: Migration 57's trigger as it was written then. Frozen, like migration 44's:
+#: a later edit to the trigger above gets its own migration, not a new history.
+_MIGRATION_57_ONE_OFF_REOPEN_TRIGGER = (
+    "CREATE TRIGGER work_items_one_off_reopen "
+    "AFTER UPDATE OF materialized_chain, run_chain ON work_items "
+    "WHEN NEW.one_off_chain IS NOT NULL AND NEW.current_node_id IS NULL "
+    "AND json_array_length(json_extract(NEW.one_off_chain, '$.custom')) > 0 "
+    "BEGIN UPDATE work_items SET one_off_pending = 1, one_off_approval = NULL "
+    "WHERE id = NEW.id; END"
+)
+
 _MIGRATIONS: dict[int, list[str]] = {
     1: [
         """CREATE TABLE retry_counters (
@@ -1426,7 +1437,7 @@ SELECT rowid, id, work_item_id, node_id, hook_point, pid, pid_start_time, log_pa
         "ALTER TABLE work_items ADD COLUMN one_off_chain TEXT",
         "ALTER TABLE work_items ADD COLUMN one_off_approval TEXT",
         "ALTER TABLE work_items ADD COLUMN one_off_pending INTEGER NOT NULL DEFAULT 0",
-        _WORK_ITEMS_ONE_OFF_REOPEN_TRIGGER,
+        _MIGRATION_57_ONE_OFF_REOPEN_TRIGGER,
     ],
 }
 

@@ -1080,8 +1080,13 @@ def set_fragment(d: Draft, path: str, yaml: str) -> None:
         line, col = positions.yaml_mark(exc) or (1, 1)
         message = getattr(exc, "problem", None) or str(exc)
         raise OpError(f"line {line}, column {col}: {message}", line=line, col=col) from None
-    except (config_mod.YamlTooLarge, ValueError) as exc:
+    except config_mod.YamlTooLarge as exc:
         raise OpError(f"the fragment is not usable YAML: {exc}") from None
+    except ValueError:
+        # PyYAML's own text is not passed on: a fixed sentence says what is wrong.
+        raise OpError(
+            "the fragment holds a value that can't be read, such as an impossible date"
+        ) from None
     if not isinstance(fragment, dict):
         raise OpError("the fragment is not a mapping")
     target = d.at(path)

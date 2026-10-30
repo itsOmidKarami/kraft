@@ -393,8 +393,19 @@ def _cmd_mr_label(ns: argparse.Namespace) -> None:
     common.emit(asyncio.run(client.mr_labels(ns.labels, ns.id)), common._render_action, ns.json)
 
 
+ONE_OFF_SET_REVIEW = (
+    "its one-off chain has custom content, which a person reviews in the web UI before it can start"
+)
+
+
 def _set_chain(result: dict) -> str:
-    """The PATCH answers `{id, chain_template}`, the 1.x key; it is a chain."""
+    """The PATCH answers `{id, chain_template}`, the 1.x key; it is a chain,
+    or `@one-off` with the `one_off` summary."""
+    if result.get("one_off") is not None:
+        said = f"{result['id']} now runs a one-off chain"
+        if (result.get("one_off") or {}).get("custom"):
+            said += f"\n{ONE_OFF_SET_REVIEW}"
+        return said
     return f"{result['id']} now runs the {result.get('chain_template')} chain"
 
 

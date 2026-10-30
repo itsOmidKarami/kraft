@@ -62,11 +62,26 @@ def test_a_chain_and_a_chain_file_are_exclusive(capsys, chain_file, argv, words)
     assert words in capsys.readouterr().err
 
 
-def test_set_chain_sends_the_file(monkeypatch, capsys, chain_file):
-    seen = _fake(monkeypatch, "set_chain", {"id": "w1", "chain_template": "@one-off"})
+@pytest.mark.parametrize(
+    ("custom", "said"),
+    [(1, True), (0, False)],
+    ids=["custom-says-a-person-reviews-it", "library-only-says-nothing"],
+)
+def test_set_chain_sends_the_file(monkeypatch, capsys, chain_file, custom, said):
+    one_off = {
+        "extends": "default",
+        "custom": custom,
+        "needs_review": bool(custom),
+        "approval": None,
+    }
+    answer = {"id": "w1", "chain_template": "@one-off", "one_off": one_off}
+    seen = _fake(monkeypatch, "set_chain", answer)
     cli.main(["item", "set-chain", "w1", "--chain-file", chain_file])
     assert seen["args"] == (None, "w1")
     assert seen["kwargs"] == {"one_off_chain": TEXT}
+    out = capsys.readouterr().out
+    assert "w1 now runs a one-off chain" in out and "None" not in out
+    assert ("which a person reviews in the web UI before it can start" in out) is said
 
 
 @pytest.mark.parametrize(
