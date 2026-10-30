@@ -719,3 +719,12 @@ async def test_a_host_commit_never_lands_on_a_planted_head(tmp_path, database, s
 
     assert git(repo, "rev-parse", "main") == main
     assert f"is not on {BRANCH}" in stopped
+
+
+def test_run_cli_returns_a_failed_exit(tmp_path):
+    """`run_cli` hands back what a failing CLI printed; `run_git` raises on it."""
+    args = ["sh", "-c", "echo out; echo err >&2; exit 3"]
+    done = asyncio.run(forge_git.run_cli(tmp_path, args))
+    assert (done.returncode, done.stdout, done.stderr) == (3, "out\n", "err\n")
+    with pytest.raises(forge.ForgeError, match="failed: err"):
+        asyncio.run(forge_git.run_git(tmp_path, args))

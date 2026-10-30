@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     # the other way would be circular. `from __future__ import annotations`
     # already makes every annotation below lazy, so this is type-checking
     # only.
+    from collections.abc import Mapping
     from datetime import datetime
 
     from kraft.adapters.forge.mr import MRMeta
@@ -21,9 +22,59 @@ if TYPE_CHECKING:
 
 CIState = Literal["pending", "success", "failed"]
 
+#: Why a forge call failed, from the HTTP status (`reason_for`) or a GraphQL
+#: error's type. None on an error means no request was made or nothing is known.
+Reason = Literal[
+    "auth",
+    "forbidden",
+    "rate_limited",
+    "not_found",
+    "conflict",
+    "head_moved",
+    "unreachable",
+    "tls",
+]
+
 
 class ForgeError(RuntimeError):
-    """The forge could not be reached, or answered something unusable."""
+    """The forge could not be reached, or answered something unusable.
+
+    `status` and `reason` are set when a request was answered; `retry_after`
+    (seconds) and `sso_url` come from the response headers."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        reason: Reason | None = None,
+        retry_after: float | None = None,
+        sso_url: str = "",
+    ):
+        super().__init__(message)
+        self.status = status
+        self.reason = reason
+        self.retry_after = retry_after
+        self.sso_url = sso_url
+
+
+def reason_for(status: int, headers: Mapping[str, str]) -> Reason | None:
+    """The `Reason` an HTTP status means; header names are lower-cased. A 403 is
+    a rate limit only when the forge says so, otherwise a refused permission."""
+    if status == 401:
+        return "auth"
+    if status == 429:
+        return "rate_limited"
+    if status == 403:
+        limited = headers.get("x-ratelimit-remaining") == "0" or "retry-after" in headers
+        return "rate_limited" if limited else "forbidden"
+    if status == 404:
+        return "not_found"
+    if status == 409:
+        return "conflict"
+    if status >= 500:
+        return "unreachable"
+    return None
 
 
 class HeadMoved(ForgeError):
@@ -32,7 +83,7 @@ class HeadMoved(ForgeError):
     reviewed. `current` is the forge's head, "" when it could not be read."""
 
     def __init__(self, message: str, current: str = ""):
-        super().__init__(message)
+        super().__init__(message, reason="head_moved")
         self.current = current
 
 
