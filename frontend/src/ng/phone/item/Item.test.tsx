@@ -151,6 +151,19 @@ describe("the item screen (C)", () => {
       "POST /work-items/w1/one-off/approve": [200, {}],
     } as Record<string, [number, unknown]>;
 
+    it("reads the chain on Start, so a draft applied since that added custom content still gets its sheet", async () => {
+      const calls = mount(item("paused", null, { status: "paused", current_node_id: null, worker_sessions: [], one_off: { extends: "default", custom: 0, needs_review: false, approval: null } }), "/work-items/w1", ROUTES);
+      await userEvent.click(await screen.findByRole("button", { name: "Start" }));
+      expect(await screen.findByRole("dialog", { name: "Approve this chain, then start?" })).toBeInTheDocument();
+      expect(posts(calls)).toEqual([]);
+    });
+
+    it("starts at once when the read says nothing needs approving", async () => {
+      const calls = mount(PENDING(), "/work-items/w1", { ...ROUTES, "GET /work-items/w1/one-off": [200, { ...(ROUTES["GET /work-items/w1/one-off"][1] as object), needs_review: false }], "POST /work-items/w1/resume": [200, {}] });
+      await userEvent.click(await screen.findByRole("button", { name: "Start" }));
+      await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/resume"]));
+    });
+
     it("opens a sheet with the custom content in full, and Approve and start posts the digest as the phone door, then starts", async () => {
       const calls = mount(PENDING(), "/work-items/w1", ROUTES);
       await userEvent.click(await screen.findByRole("button", { name: "Start" }));

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { detailOf, jsonBody, request } from "../http";
@@ -30,6 +30,16 @@ export function OneOffReview({ itemId, onApproved, onClose }: { itemId: string; 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
+  // Nothing left to approve (a library-only chain, or someone approved since the page read the item): start at once, no dialog.
+  const settled = useRef(false);
+  const clear = !!data && !data.needs_review;
+  useEffect(() => {
+    if (clear && !settled.current) {
+      settled.current = true;
+      onApproved();
+    }
+  }, [clear]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const approve = async () => {
     if (!data) return;
     setBusy(true);
@@ -42,11 +52,12 @@ export function OneOffReview({ itemId, onApproved, onClose }: { itemId: string; 
     if (a.status === 409) await read();
   };
 
+  if (clear) return null;
   return (
     <Dialog title="Approve this chain, then start?" onClose={onClose} className="idr-review"
       footer={<>
         <Button onClick={onClose}>Close</Button>
-        <Button variant="primary" data-autofocus disabled={busy || !data?.needs_review} onClick={approve}>Approve and start</Button>
+        <Button variant="primary" data-autofocus disabled={busy || !data} onClick={approve}>Approve and start</Button>
       </>}>
       {data ? (
         <>

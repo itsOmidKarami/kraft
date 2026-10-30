@@ -98,4 +98,21 @@ describe("useOneOffDraft", () => {
     expect(calls).toHaveLength(1);
     vi.useRealTimers();
   });
+
+  it("a typed text the server refuses keeps Create off until a text is accepted, though the view still holds the text before it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { h } = await mount();
+    reply = () => ({ status: 422, body: { detail: "a one-off chain can't do that" } });
+    h.result.current.text("chains/one-off.yaml", "bad");
+    await act(async () => { await h.result.current.flush(); });
+    expect(h.result.current.error).toBe("a one-off chain can't do that");
+    expect(h.result.current.valid).toBe(false);
+    expect(h.result.current.latest()?.valid).toBe(false);
+    reply = (c) => ({ status: 200, body: view(c.text) });
+    h.result.current.text("chains/one-off.yaml", "id: one-off\n");
+    await act(async () => { await h.result.current.flush(); });
+    expect(h.result.current.valid).toBe(true);
+    expect(h.result.current.latest()?.valid).toBe(true);
+    vi.useRealTimers();
+  });
 });

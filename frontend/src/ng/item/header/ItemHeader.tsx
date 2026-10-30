@@ -101,9 +101,10 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
   const node = item.chain_definition.nodes.find((n) => n.id === (item.stop?.node ?? item.current_node_id));
   // Start is a resume from node zero: a never-started item has no current node.
   const startRun = () => void run(act.resume(item.id));
-  // A one-off chain whose custom content nobody approved is read first: Approve and start approves, then resumes.
+  // An item with a one-off chain reads it first, however the page last saw it (a draft applied since may have changed it):
+  // the review starts it at once when nothing needs approving, else Approve and start approves, then resumes.
   const [reviewing, setReviewing] = useState(false);
-  const start = () => (item.one_off?.needs_review ? setReviewing(true) : startRun());
+  const start = () => (item.one_off ? setReviewing(true) : startRun());
   // Start never applies a draft, so with one it asks first: Apply and start, or start without it.
   const asksFirst = () => hs.main === "start" && !!draft?.ops.some((o) => !o.passed);
   // `?start=1`: a Start pressed elsewhere (the board's peek, the phone) found a draft and
@@ -115,7 +116,7 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
     if (!askedHere || (draft && draftStatus === "loading")) return;
     setParams((p) => { const n = new URLSearchParams(p); n.delete("start"); return n; }, { replace: true });
     if (draft && asksFirst()) draft.setReviewing(true, start);
-    else if (item.one_off?.needs_review) setReviewing(true);
+    else if (item.one_off) setReviewing(true);
     // Once per arrival: the param is gone after this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [askedHere, draftStatus]);

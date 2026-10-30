@@ -16,13 +16,23 @@ export function OneOffSheet({ itemId, sheet, start }: { itemId: string; sheet: R
     else setError(detailOf(a.body));
   };
   useEffect(() => { void read(); }, [itemId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Nothing left to approve (a library-only chain, or someone approved since the screen read the item): start at once.
+  const clear = !!data && !data.needs_review;
+  const settled = useRef(false);
+  useEffect(() => {
+    if (clear && !settled.current) {
+      settled.current = true;
+      void start().then(() => sheet.close());
+    }
+  }, [clear]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (clear) return null;
   const changes = changedNodes(data?.provenance ?? null);
   const touched = [["Added", changes.added], ["Overridden", changes.overridden], ["Removed", changes.removed]] as const;
   return (
     <ChoiceSheet
       title="Approve this chain, then start?"
       text={data ? `This item runs a chain of its own${data.extends ? `, extending ${data.extends}` : ""}. Read what is custom in it before it starts.` : "Reading the chain…"}
-      options={data?.needs_review ? [{ value: "approve", label: "Approve and start" }] : []}
+      options={data ? [{ value: "approve", label: "Approve and start" }] : []}
       onPick={async () => {
         if (!data || busy.current) return;
         busy.current = true;

@@ -121,6 +121,22 @@ describe("ItemHeader", () => {
       await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/one-off/approve", "POST /work-items/w1/resume"]));
     });
 
+    it("reads the chain on Start whatever the page last saw: a prop that says approved, a read that says not, opens the review with no resume", async () => {
+      const calls = stubFetch(ROUTES);
+      show({ ...NEVER, one_off: { extends: "default", custom: 1, needs_review: false, approval: null } });
+      await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
+      await screen.findByRole("dialog", { name: /Approve this chain, then start/ });
+      expect(sends(calls)).toEqual([]);
+    });
+
+    it("starts at once, with no dialog, when the read says nothing needs approving", async () => {
+      const calls = stubFetch({ ...ROUTES, "GET /work-items/w1/one-off": [200, { ...REVIEW, needs_review: false }] });
+      show(NEVER);
+      await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
+      await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/resume"]));
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
     it("the draft's Apply and start approves before it resumes", async () => {
       const calls = stubFetch({ ...ROUTES, "GET /work-items/w1/draft": answer([ov("implementation", undefined, { budget_usd: 2 })]), "POST /work-items/w1/draft/apply": answer([]) });
       const it = detail(NEVER);

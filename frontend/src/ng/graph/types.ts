@@ -41,7 +41,7 @@ const STATE_WORD: Record<GlyphState, string> = { plain: "", done: "done", curren
 export function accessibleName(item: GraphItem & { wait?: string; sub?: string }, kind: string): string {
   const idle = item.state === "current" && !item.running;
   const word = (idle && (item.wait ?? item.sub ?? item.meta)) || (item.meta === "skipped" && "skipped") || STATE_WORD[item.state ?? "plain"];
-  return [item.id, kind, word, item.attempt && item.attempt >= 2 ? `attempt ${item.attempt}` : ""].filter(Boolean).join(", ");
+  return [item.id, kind, word, item.attempt && item.attempt >= 2 ? `attempt ${item.attempt}` : "", item.custom ? "custom" : ""].filter(Boolean).join(", ");
 }
 
 /** Ids break after underscores, so `approve_spec` wraps in a 138px column. */

@@ -18,6 +18,23 @@ afterEach(() => vi.unstubAllGlobals());
 const NOW = Date.parse("2026-09-13T10:10:00Z");
 const posts = (calls: { method: string }[]) => calls.filter((c) => c.method !== "GET");
 
+describe("ChainOverview: a one-off chain's approval", () => {
+  const row = (one_off: NonNullable<Parameters<typeof detail>[0]>["one_off"]) => {
+    render(<ChainOverview item={detail({ one_off })} events={[]} now={NOW} onSelect={() => {}} />);
+    return screen.queryByText("one-off chain")?.closest("div");
+  };
+  it.each([
+    { id: "approved on the phone", approval: { by: "human", door: "phone", at: new Date(Date.now() - 3 * 60_000).toISOString(), digest: "d" }, text: "approved by you on the phone · 3m ago" },
+    { id: "approved in the web UI", approval: { by: "human", door: "web", at: new Date(Date.now() - 2 * 3600_000).toISOString(), digest: "d" }, text: "approved by you in the web UI · 2h ago" },
+    { id: "not approved yet", approval: null, text: "custom content, not approved yet" },
+  ])("says who approved it, through which door and when ($id)", ({ approval, text }) => {
+    expect(row({ extends: "default", custom: 1, needs_review: !approval, approval })).toHaveTextContent(text);
+  });
+  it("has no row for a chain of library parts only, or an item with no one-off chain", () => {
+    expect(row({ extends: "default", custom: 0, needs_review: false, approval: null })).toBeUndefined();
+  });
+});
+
 describe("ChainOverview", () => {
   it("lists recent events newest first; a line about a node selects it", async () => {
     const onSelect = vi.fn();

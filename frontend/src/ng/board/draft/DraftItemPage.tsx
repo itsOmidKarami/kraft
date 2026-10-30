@@ -21,7 +21,7 @@ import { ChainCanvas } from "../../templates/ChainCanvas";
 import { YamlView } from "../../templates/YamlView";
 import { OneOffAddMenu } from "./OneOffAddMenu";
 import { OneOffCreateReview } from "./OneOffCreateReview";
-import { useOneOffDraft } from "./useOneOffDraft";
+import { useOneOffDraft, type OneOffView } from "./useOneOffDraft";
 import { draftBody, emptyDraft, nodeOverrides, type DraftState } from "./draftBody";
 import "../board.css";
 import { coveredText } from "../../item/chainName";
@@ -73,13 +73,15 @@ export function DraftItemPage() {
   const [addOpen, setAddOpen] = useState(!!(location.state as { members?: boolean } | null)?.members);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [review, setReview] = useState<{ autostart: boolean } | null>(null);
+  const [review, setReview] = useState<{ autostart: boolean; view: OneOffView } | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   const [frame, canvasW] = useWidth();
   const size = useResizable("draft", canvasW);
   const set = (p: Partial<DraftState>) => setD((x) => ({ ...x, ...p }));
   const oo = useOneOffDraft(d.oneOff ?? "", (t) => set({ oneOff: t }));
   const own = d.oneOff != null;
+  // What the chain extends now: gone once `extends:` is taken out of its YAML.
+  const parent = oo.view?.result.extending?.parent ?? null;
   const dirty = !!(d.title.trim() || d.brief.trim());
   const setPageItem = usePageItem((s) => s.set);
   const items = useStore((s) => s.workItems);
@@ -203,11 +205,18 @@ export function DraftItemPage() {
       await oo.flush();
       const l = oo.latest();
       if (!l?.valid) return;
-      if (l.view.custom.length) return setReview({ autostart });
+      if (l.view.custom.length) return setReview({ autostart, view: l.view });
     }
     await submit(autostart);
   };
-  const submit = async (autostart: boolean) => {
+  const submit = async (autostart: boolean, seen?: OneOffView) => {
+    if (own && seen) {
+      // The review showed `seen`: an edit that landed since is read again, never filed unread.
+      await oo.flush();
+      const now = oo.latest();
+      if (!now?.valid) return setReview(null);
+      if (now.view.text !== seen.text) return setReview({ autostart, view: now.view });
+    }
     setReview(null);
     setBusy(true);
     setError(null);
@@ -340,7 +349,7 @@ export function DraftItemPage() {
             label="Chain"
             description={repos.find((r) => r.path === d.repo)?.default_chain ? defaultChainNote(repos.find((r) => r.path === d.repo)!.default_chain!) : undefined}
             triggerClass={chipClass("composer-mono draft-chain-btn")}
-            trigger={<>{own ? `one-off · extends ${oo.view?.result.extending?.parent ?? d.chain}` : d.chain || "chain"} <span aria-hidden className="board-caret">▾</span></>}
+            trigger={<>{own ? `one-off${parent ? ` · extends ${parent}` : ""}` : d.chain || "chain"} <span aria-hidden className="board-caret">▾</span></>}
             items={[
               ...chainsForRepo(chains, repos.find((r) => r.path === d.repo)?.id).filter((c) => !c.error).map((c) => ({ label: chainOptionText(c), checked: !own && c.id === d.chain, onSelect: () => { set({ chain: c.id, skip: [], oneOff: null }); setSel(null); } })),
               ...(own
@@ -358,7 +367,7 @@ export function DraftItemPage() {
           icon={node ? undefined : "workflow"}
           gate={node?.kind === "gate"}
           title={node ? node.id : own ? "one-off chain" : d.chain || "chain"}
-          sub={node ? `${node.kind === "gate" ? "gate" : "exec node"} · ${skipped(node.id) ? "skipped" : "will run"}` : own ? `Extends ${oo.view?.result.extending?.parent ?? d.chain} · ${oo.customNodes.length} custom · ${runText}` : `Draft item · ${runText}`}
+          sub={node ? `${node.kind === "gate" ? "gate" : "exec node"} · ${skipped(node.id) ? "skipped" : "will run"}` : own ? `${parent ? `Extends ${parent} · ` : ""}${oo.customNodes.length} custom · ${runText}` : `Draft item · ${runText}`}
           tabs={[{ value: "overview", label: "Overview" }, { value: "config", label: configBadge && !node ? `Config · ${configBadge}` : "Config" }, { value: "yaml", label: "YAML" }]}
           tab={tab}
           onTab={(t) => setTab(t as Tab)}
@@ -380,7 +389,7 @@ export function DraftItemPage() {
         </Inspector>
       </div>
       {review && own && (
-        <OneOffCreateReview base={oo.view?.result.extending?.parent ?? d.chain} custom={oo.latest()?.view.custom ?? []} busy={busy} onApprove={() => void submit(review.autostart)} onClose={() => setReview(null)} />
+        <OneOffCreateReview base={review.view.result.extending?.parent ?? null} custom={review.view.custom} busy={busy} onApprove={() => void submit(review.autostart, review.view)} onClose={() => setReview(null)} />
       )}
       {ask && (
         <div className="draft-ask" role="alertdialog" aria-label={DISCARD_THIS_DRAFT}>

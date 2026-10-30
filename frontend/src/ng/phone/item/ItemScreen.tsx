@@ -76,13 +76,13 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
       case "review": return navigate(reviewUrl(item.id, gate ? `?gate=${encodeURIComponent(gate)}` : ""));
       case "conflicts": return navigate(reviewUrl(item.id, item.stop?.node ? `?nodes=${encodeURIComponent(item.stop.node)}` : ""));
       case "unblock": return void run(act.unblock(item.id), "Unblocked. It starts when a slot is free.");
-      case "resume": return item.one_off?.needs_review ? sheet.open("one-off") : void run(act.resume(item.id), "Resumed.");
+      case "resume": return item.one_off ? sheet.open("one-off") : void run(act.resume(item.id), "Resumed.");
       // Start never applies a draft: with one, the sheet asks first, as the desktop's Review & apply does.
       case "start": return void draftToStart(item.id).then(({ waits, ops }) => {
         // The sheet lists what it would apply, as the desktop's dialog does (R10b-12).
         setStartLines(draftLines(ops as Parameters<typeof draftLines>[0]).map((l) => l.text));
         if (waits) sheet.open("start-draft");
-        else if (item.one_off?.needs_review) sheet.open("one-off");
+        else if (item.one_off) sheet.open("one-off");
         else void run(act.resume(item.id), "Started.");
       });
       case "retry": return void run(act.retry(item.id, retryBody(node, item.stop)), "Retrying.");
@@ -209,7 +209,7 @@ function ItemSheets({ item, node, sheet, reload, startLines = [] }: { item: Item
               if (!a.ok) return void showToast(a.error, { tone: "error" });
             }
             // The draft may have changed the chain: its custom content is read before anything starts.
-            if (item.one_off?.needs_review) return sheet.open("one-off");
+            if (item.one_off) return sheet.open("one-off");
             const r = await act.resume(item.id);
             if (!r.ok) return void showToast(r.error, { tone: "error" });
             showToast(v === "apply" ? "Applied the draft and started." : "Started. The draft is kept.");

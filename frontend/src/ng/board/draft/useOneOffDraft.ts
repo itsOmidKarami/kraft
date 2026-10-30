@@ -27,6 +27,9 @@ export function useOneOffDraft(text: string, onText: (t: string) => void): OneOf
   const [status, setStatus] = useState<DraftStatus>("loading");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<Op[] | null>(null);
+  // The last typed text the server refused: the view still holds the text before it, so nothing may be filed until a text is accepted.
+  const [rejected, setRejected] = useState(false);
+  const rejectedRef = useRef(false);
   const current = useRef(text);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   const undoStack = useRef<string[]>([]);
@@ -50,13 +53,21 @@ export function useOneOffDraft(text: string, onText: (t: string) => void): OneOf
         if (!opts.undo && a.body.text !== current.current) undoStack.current.push(current.current);
         current.current = a.body.text;
         last.current = a.body;
+        rejectedRef.current = false;
         if (live.current) {
           setView(a.body);
+          setRejected(false);
           setStatus("ready");
           setError(null);
           onTextRef.current(a.body.text);
         }
-      } else if (a.status !== 200 && !opts.preview && !opts.quiet && live.current && g === gen.current) setError(detailOf(a.body));
+      } else if (a.status !== 200 && !opts.preview && live.current && g === gen.current) {
+        if (opts.text !== undefined && !opts.undo) {
+          rejectedRef.current = true;
+          setRejected(true);
+        }
+        if (!opts.quiet) setError(detailOf(a.body));
+      }
       return a;
     });
     queue.current = run.catch(() => {});
@@ -79,6 +90,8 @@ export function useOneOffDraft(text: string, onText: (t: string) => void): OneOf
     if (typed.current) clearTimeout(typed.current.timer);
     typed.current = null;
     undoStack.current = [];
+    rejectedRef.current = false;
+    setRejected(false);
     if (!active) {
       setView(null);
       last.current = null;
@@ -120,7 +133,7 @@ export function useOneOffDraft(text: string, onText: (t: string) => void): OneOf
 
   useEffect(() => () => { live.current = false; flushText(); }, [flushText]);
 
-  const valid = answerValid(view);
+  const valid = answerValid(view) && !rejected;
   const scope: Scope = useMemo(() => ({ area: "chains", key: view?.key ?? "one-off" }), [view?.key]);
   return useMemo(() => ({
     scope, view, status, error, pending, stale: null,
@@ -129,6 +142,6 @@ export function useOneOffDraft(text: string, onText: (t: string) => void): OneOf
     publish: async () => done, keepMine: async () => done, discard: async () => done, reload: async () => done,
     resolvedNode: (id: string) => (view?.result.resolved?.chain?.nodes as never as { id: string }[] | undefined)?.find((n) => n.id === id) ?? null,
     digest: view?.digest ?? null, valid, nodes: view?.nodes ?? [], customNodes: view?.custom_nodes ?? [], custom: view?.custom ?? [],
-    latest: () => (last.current ? { view: last.current, valid: answerValid(last.current) } : null),
+    latest: () => (last.current ? { view: last.current, valid: answerValid(last.current) && !rejectedRef.current } : null),
   }) as unknown as OneOffDraft, [scope, view, status, error, pending, ops, field, typedText, flush, undo, valid]);
 }

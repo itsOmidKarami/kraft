@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { Bot, Layers } from "lucide-react";
 import { Button } from "../../ui/Button";
+import { Select } from "../../ui/Select";
+import { sendOnModEnter } from "../../keys";
+import { useHarnessOptions } from "../../templates/panes/useHarnessOptions";
 import { Popover } from "../../ui/Popover";
 import { ExtendMenu } from "../../templates/menus/ExtendMenu";
 import { IdRow } from "../../templates/menus/IdRow";
@@ -50,7 +53,7 @@ export function OneOffAddMenu({ anchor, at, taken, refused, send, onClose }: {
     <Popover anchor={anchor} open onClose={onClose} role="menu" label="Add here">
       <div className="menu seam-menu">
         <button ref={first} type="button" role="menuitem" className="menu-item seam-item" onClick={() => setPick("library")}>
-          <Layers size={14} aria-hidden /><span><span className="seam-item-name">From the library</span><span className="seam-item-sub">a node others already review</span></span>
+          <Layers size={14} aria-hidden /><span><span className="seam-item-name">From the library</span><span className="seam-item-sub">no review, unless after the final approval</span></span>
         </button>
         <button type="button" role="menuitem" className="menu-item seam-item" onClick={() => setPick("custom")}>
           <Bot size={14} aria-hidden /><span><span className="seam-item-name">Custom agent node</span><span className="seam-item-sub">your own prompt, read before it runs</span></span>
@@ -62,17 +65,22 @@ export function OneOffAddMenu({ anchor, at, taken, refused, send, onClose }: {
 
 function CustomAgent({ anchor, taken, refused, onAdd, onClose }: { anchor: RefObject<HTMLElement | null>; taken: string[]; refused?: string | null; onAdd: (id: string, harness: string, prompt: string) => void; onClose: () => void }) {
   const [id, setId] = useState("");
+  const opts = useHarnessOptions();
   const [harness, setHarness] = useState("claude");
+  // The profiles harnesses.yaml declares; `claude` stands in until they are read, and when they cannot be.
+  const profiles = typeof opts === "string" ? [] : opts.harnesses.profiles.map((p) => p.id);
+  const names = profiles.includes(harness) || !profiles.length ? profiles : [harness, ...profiles];
   const [prompt, setPrompt] = useState("");
   const [sent, setSent] = useState<string | null>(null);
   const err = idError(id, taken) ?? (refused && sent === id ? refused : null);
   const can = !!id && !err && !!harness.trim() && !!prompt.trim();
+  const add = () => { setSent(id); onAdd(id, harness.trim(), prompt); };
   return (
     <Popover anchor={anchor} open onClose={onClose} role="dialog" label="New custom agent node">
-      <form className="seam-id oneoff-agent" onSubmit={(e) => { e.preventDefault(); if (can) { setSent(id); onAdd(id, harness.trim(), prompt); } }}>
-        <label className="oneoff-agent-f"><span>Node id</span><input aria-label="Node id" className="draft-input" autoFocus value={id} placeholder="e.g. load_test" onChange={(e) => setId(e.target.value)} /></label>
-        <label className="oneoff-agent-f"><span>Harness</span><input aria-label="Harness" className="draft-input" value={harness} onChange={(e) => setHarness(e.target.value)} /></label>
-        <label className="oneoff-agent-f"><span>Prompt</span><textarea aria-label="Prompt" className="draft-input" rows={5} value={prompt} placeholder="What this agent does. A person reads it before the item starts." onChange={(e) => setPrompt(e.target.value)} /></label>
+      <form className="seam-id oneoff-agent" onSubmit={(e) => { e.preventDefault(); if (can) add(); }}>
+        <label className="oneoff-agent-f"><span>Node id</span><input className="draft-input" autoFocus value={id} placeholder="e.g. load_test" onChange={(e) => setId(e.target.value)} /></label>
+        <label className="oneoff-agent-f"><span>Harness</span>{names.length ? <Select mono value={harness} onChange={(e) => setHarness(e.target.value)}>{names.map((n) => <option key={n} value={n}>{n}</option>)}</Select> : <input className="draft-input" value={harness} onChange={(e) => setHarness(e.target.value)} />}</label>
+        <label className="oneoff-agent-f"><span>Prompt</span><textarea className="draft-input" rows={5} onKeyDown={sendOnModEnter(add, can)} value={prompt} placeholder="What this agent does. A person reads it before the item starts." onChange={(e) => setPrompt(e.target.value)} /></label>
         {err && <p className="idrow-err" role="alert">{err}</p>}
         <Button variant="primary" type="submit" disabled={!can}>Add node →</Button>
       </form>

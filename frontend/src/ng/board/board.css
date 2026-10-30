@@ -244,4 +244,3 @@ body:has(.draft-page) { --toast-bottom: 88px; }
 .oneoff-agent .draft-input { width: 100%; box-sizing: border-box; }
 .oneoff-agent textarea { resize: vertical; font-family: inherit; line-height: 1.5; }
 .oneoff-agent .btn { align-self: flex-end; }
-.draft-oneoff-head { display: flex; align-items: center; gap: 8px; }
