@@ -578,6 +578,10 @@ def node_view(node) -> dict:
         # imported because `kraft.store` must not import the executor.
         "fix_loop": f"{node.id}.fix_loop" if node.fix_loop else None,
         "auto_escalate": node.auto_review is not None if gate is not None else None,
+        # None unless the gate has a reviewer; an unset mode is `decides`.
+        "auto_review_mode": (
+            (gate.auto_review_mode or "decides") if gate is not None and gate.auto_review else None
+        ),
         "on_failure": [task.path for step in node.on_failure for task in step.tasks] or None,
         # The attachment kind that would drop this node at intake -- what the
         # intake preview strikes through (Kraft-ene04). Declared, not decided:

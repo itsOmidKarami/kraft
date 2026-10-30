@@ -31,8 +31,8 @@ LIBRARY_KEYS = ("steering", "tasks", "steps", "nodes")
 NODE_KEYS = (
     "id", "kind", "extends", "runner", "icon", "message", "artifact", "artifact_required",
     "reject_to", "timeout", "chain_finalized", "tasks", "steps", "on_failure", "fix_loop",
-    "escalation", "on_base_changed", "on_merge_rejected", "auto_review", "policy", "skippable",
-    "read_only",
+    "escalation", "on_base_changed", "on_merge_rejected", "auto_review", "auto_review_mode",
+    "policy", "skippable", "read_only",
 )  # fmt: skip
 TASK_KEYS = (
     "id", "kind", "extends", "icon", "harness", "ref", "command", "target", "prompt", "skill",

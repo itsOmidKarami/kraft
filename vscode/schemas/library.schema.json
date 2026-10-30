@@ -862,6 +862,22 @@
           ],
           "default": null
         },
+        "auto_review_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "decides",
+                "checks_first"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Auto Review Mode"
+        },
         "chain_finalized": {
           "default": false,
           "title": "Chain Finalized",
