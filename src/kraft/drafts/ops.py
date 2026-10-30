@@ -813,6 +813,9 @@ def remove(d: Draft, path: str) -> dict:
         parent, last = parent.rpartition(PATH_SEPARATOR)[0], "escalation"
     if parent and last in _SLOTS:
         d.drop(parent, last)
+        if last == AUTO_REVIEW_SEGMENT:
+            # A mode is the reviewer's: it never stays behind without one.
+            d.drop(parent, "auto_review_mode")
         return {"broken": []}
     what, items = d.member(path)
     items.pop(_index(items, last))
