@@ -382,14 +382,19 @@ _TOLD_TO_EDIT = ("Commit everything you change", "Run the tests your change touc
 
 
 @pytest.mark.parametrize(
-    "mode,told",
-    [pytest.param(CHECKS_FIRST, False, id="checks-first"), pytest.param(None, True, id="decides")],
+    "mode,in_place,told",
+    [
+        pytest.param(CHECKS_FIRST, False, False, id="checks-first"),
+        pytest.param(CHECKS_FIRST, True, False, id="checks-first-in-place"),
+        pytest.param(None, False, True, id="decides"),
+    ],
 )
 async def test_only_a_reviewer_that_may_edit_is_told_to_commit_and_test(
-    database, run_dirs, tmp_path, repo, monkeypatch, mode, told
+    database, run_dirs, tmp_path, repo, monkeypatch, mode, in_place, told
 ):
     """Its own instruction says do not edit; the session's context must not
-    then say commit, or run tests that can leave files behind."""
+    then say commit, or run tests that can leave files behind. In a person's
+    own checkout it is still warned off the git commands that move their work."""
     argv = tmp_path / "argv.txt"
     gate = await _at_gate(
         database,
@@ -399,12 +404,16 @@ async def test_only_a_reviewer_that_may_edit_is_told_to_commit_and_test(
         f"printf '%s' \"$*\" > {argv}",
         _PASS,
         mode=mode,
-        in_place=False,
+        in_place=in_place,
     )
     await _run(database, run_dirs, gate)
     context = argv.read_text()
     assert "You are working on a Kraft work item." in context
     assert [line in context for line in _TOLD_TO_EDIT] == [told, told]
+    assert ("`git stash`" in context) == in_place
+    # The read-only paragraph ends the contract: one blank line, not two, before the next.
+    after = context.partition("Kraft compares it after you.")[2]
+    assert not after.partition("`git reset`.")[2 if in_place else 0].startswith("\n\n\n")
 
 
 @pytest.mark.parametrize(

@@ -137,7 +137,14 @@ _READ_ONLY = (
     "\n"
     "\n"
     "You are reading this work item's checkout. Change, write and commit "
-    "nothing in it, and leave no file behind: Kraft compares it after you.\n"
+    "nothing in it, and leave no file behind: Kraft compares it after you."
+)
+#: Added to `_READ_ONLY` in place: only the branch tip is compared there, so the
+#: person's uncommitted work is protected by this sentence alone.
+_READ_ONLY_IN_PLACE = (
+    " It is a person's own checkout, on this work item's branch `{branch}`, and "
+    "may hold their uncommitted changes: never `git stash`, `git checkout`, "
+    "`git switch` or `git reset`."
 )
 
 #: Intent-process design §4. Kraft-authored, and its only input is the repo's
@@ -658,7 +665,7 @@ def context_sections(
                 hook_point=hook_point,
                 session_id=session_id,
                 summary_path=summary_path or "<session summary path>",
-                edits=_READ_ONLY
+                edits=_READ_ONLY + (_READ_ONLY_IN_PLACE.format(branch=branch) if in_place else "")
                 if read_only
                 else _TESTS
                 + (_IN_PLACE.format(branch=branch) if in_place else _WORKTREE)

@@ -262,6 +262,40 @@ def test_the_steering_preview_shows_a_task_launch_section_by_section(client, che
     assert "Keep changes focused." in task_steering
 
 
+def _reviewed_chain(templates_dir, mode):
+    """`reviewed`: the default chain with an agent reviewing `spec_approval` in `mode`."""
+    _demo_repo(templates_dir)
+    reviewer = {"id": "reviewer", "kind": "agent", "harness": "claude", "prompt": "Check it."}
+    gate = {"auto_review": reviewer} | ({"auto_review_mode": mode} if mode else {})
+    chain = {"id": "reviewed", "extends": "default", "overrides": {"spec_approval": gate}}
+    (templates_dir / "chains" / "reviewed.yaml").write_text(yaml.safe_dump(chain))
+
+
+@pytest.mark.parametrize(
+    "read_only",
+    [
+        pytest.param(
+            True,
+            marks=pytest.mark.api_client(
+                edit_templates=partial(_reviewed_chain, mode="checks_first")
+            ),
+            id="checks-first",
+        ),
+        pytest.param(
+            False,
+            marks=pytest.mark.api_client(edit_templates=partial(_reviewed_chain, mode=None)),
+            id="decides",
+        ),
+    ],
+)
+def test_the_steering_preview_shows_a_gate_reviewer_what_it_launches_with(client, read_only):
+    response = _preview(client, chain="reviewed", task="spec_approval.auto_review")
+    assert response.status_code == 200, response.text
+    contract = response.json()["sections"][0]["text"]
+    told = ("Commit everything you change" in contract, "Kraft compares it after you" in contract)
+    assert told == (not read_only, read_only)
+
+
 @pytest.mark.api_client(edit_templates=_demo_repo)
 @pytest.mark.parametrize(
     "query",
