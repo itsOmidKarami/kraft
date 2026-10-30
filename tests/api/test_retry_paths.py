@@ -391,6 +391,7 @@ _MCP = {"x-kraft-client": "mcp"}
         ("other-worker", {"prompt": "do this instead"}, 403),
         ("mcp", {"effort": "low", "prompt": "and this"}, 403),
         ("mcp", {"effort": "low", "model": "claude-opus-4-1"}, 200),
+        ("mcp", {"kind": "subprocess", "prompt": "x"}, 422),
         ("person", {"prompt": "do this instead"}, 200),
     ],
     ids=[
@@ -399,6 +400,7 @@ _MCP = {"x-kraft-client": "mcp"}
         "another-items-worker-prompt",
         "assistant-effort-and-prompt",
         "assistant-model-and-effort",
+        "assistant-structural-field-is-still-the-bounds-422",
         "person-prompt",
     ],
 )
@@ -428,6 +430,8 @@ def test_a_retry_that_changes_more_than_a_tasks_model_is_a_persons(
         assert _forks(client, wid)[0] == []
         assert _self_retry_requests(client, wid) == []
         assert retried == {}
+    elif status == 422:
+        assert r.json()["detail"].startswith("task_config.kind: ")
     else:
         _wait_for(lambda: "target" in retried)
 

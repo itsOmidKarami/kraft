@@ -389,19 +389,15 @@ def test_a_worker_session_cannot_act_on_its_own_item(client, method, path, body,
             result_path="/tmp/kraft-test.json",
         )
     headers = {"X-Kraft-Session-Id": caller} if caller else {}
-    # Kraft-9efnk.16 / .29: a gate and a spending cap are a human's, not the
-    # escalation agent's.
+    # Kraft-9efnk.16 / .29, #1190: a gate, a spending cap and a chain draft are a person's.
     spending = path.endswith("/budget/raise") or (body or {}).keys() & {"budget_usd", "policy"}
     if caller == "w1/s-escalation" and (path.endswith(("/approve", "/reject")) or spending):
         refused = True
-    # #1190: any session's draft write is refused, as a person's to make.
     persons = caller not in (None, "w1/s-own") and method in ("PUT", "POST") and "/draft" in path
     r = client.request(method, path, json=body, headers=headers)
     assert (r.status_code == 403) is (refused or persons), r.text
-    if refused:
-        assert "cannot act on its own work item (w1)" in r.json()["detail"]
-    elif persons:
-        assert "a person's to write and apply" in r.json()["detail"]
+    if refused or persons:
+        assert ("person's to write" if persons else "own work item (w1)") in r.text
 
 
 def test_a_missing_worktree_says_removed_once_the_item_has_run(client, repo):

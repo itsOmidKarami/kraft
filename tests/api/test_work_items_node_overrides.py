@@ -176,6 +176,7 @@ _CALLERS = {
         ("create", "person", "Mind the migration order.", 201),
         ("patch", "assistant", "Also delete the tests.", 403),
         ("patch", "worker", "Also delete the tests.", 403),
+        ("patch", "own-escalation", "Also delete the tests.", 403),
         ("patch", "person", "Mind the migration order.", 200),
         ("patch", "assistant", None, 200),
     ],
@@ -185,6 +186,7 @@ _CALLERS = {
         "create-person",
         "patch-assistant",
         "patch-worker",
+        "patch-own-escalation",
         "patch-person",
         "patch-assistant-drops-it",
     ],
@@ -194,7 +196,7 @@ def test_a_node_extra_prompt_is_a_persons_to_set(client, repo, door, caller, ext
     only a person sets one; an agent may still drop one, and set the node's
     other fields."""
     fields = {"effort": "high", "extra_prompt": extra_prompt}
-    headers = _CALLERS[caller]
+    headers = _CALLERS.get(caller, {})
     if door == "create":
         r = client.post(
             "/api/work-items",
@@ -208,6 +210,16 @@ def test_a_node_extra_prompt_is_a_persons_to_set(client, repo, door, caller, ext
         )
     else:
         wid = _paused(client, repo)
+        if caller == "own-escalation":  # may act on its own item, but not set this
+            _run(
+                lambda c: c.execute(
+                    "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, "
+                    "log_path, result_path, status, created_at) VALUES ('s-esc', ?, "
+                    "'verification', 'escalation', 'x', 'x', 'running', datetime('now'))",
+                    (wid,),
+                )
+            )
+            headers = {"x-kraft-session-id": f"{wid}/s-esc"}
         r = client.patch(
             f"/api/work-items/{wid}", json={"node_overrides": {"spec": fields}}, headers=headers
         )
