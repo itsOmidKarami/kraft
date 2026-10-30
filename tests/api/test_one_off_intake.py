@@ -189,3 +189,10 @@ def test_the_board_and_the_detail_say_what_a_one_off_chain_is(client, repo, text
         needs_review,
         approved,
     )
+
+
+@pytest.mark.parametrize("id", ["A b", "LoadTest", "../x"])
+def test_create_refuses_an_id_the_designer_could_not_load(client, repo, id):
+    r = _create(client, repo, f"id: {id!r}\n" + LIBRARY_ONLY_ONE_OFF)
+    assert r.status_code == 422, r.text
+    assert "lowercase letter" in r.json()["detail"]

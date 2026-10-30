@@ -858,6 +858,15 @@ def plain_one_off_or_422(data: object) -> None:
 
 
 def own_id_or_422(library, id: str) -> None:
+    """422 unless `id` can be a one-off chain's: shaped like a chain id, and not
+    a library chain's. The designer loads the chain by this id."""
+    from kraft.drafts import store as draft_store
+
+    if not (isinstance(id, str) and draft_store.AREAS["chains"].valid(id)):
+        raise HTTPException(
+            422,
+            "a one-off chain's id is a lowercase letter, then lowercase letters, digits, - or _",
+        )
     if id in library.chain_ids:
         raise HTTPException(
             422, f"one-off chain id {id!r} names a library chain; give it its own id"

@@ -174,3 +174,25 @@ def test_ops_a_chain_with_no_base_is_custom_throughout(client):
     body = _ops(client, text).json()
     assert [p["path"] for p in body["custom"]] == [""]
     assert body["custom_nodes"] == [n["id"] for n in body["nodes"]] != []
+
+
+BOMB = "".join(
+    f"l{n}: &l{n} {{<<: [{','.join([f'*l{n - 1}'] * 10)}]}}\n" if n else "l0: &l0 {a: 1}\n"
+    for n in range(8)
+)
+
+
+@pytest.mark.parametrize(
+    ("fragment", "words"),
+    [
+        pytest.param(BOMB + "id: load_test\n", "not usable YAML", id="set-fragment-bomb"),
+        pytest.param(
+            "id: load_test\ndescription: .inf\n", "plain YAML values", id="set-fragment-inf"
+        ),
+    ],
+)
+def test_ops_check_the_yaml_an_op_brings(client, fragment, words):
+    op = {"op": "set_fragment", "path": "load_test", "yaml": fragment}
+    r = _ops(client, CUSTOM_LOAD_TEST, [op])
+    assert r.status_code == 422, r.text
+    assert words in r.json()["detail"]

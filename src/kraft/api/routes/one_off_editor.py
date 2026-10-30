@@ -14,7 +14,6 @@ from kraft import store
 from kraft.api import api_router, deps
 from kraft.api.routes import drafts
 from kraft.drafts import ops
-from kraft.drafts import store as draft_store
 from kraft.templates import one_off
 from kraft.templates.library import LIBRARY_FILE, TemplateLibraryError
 from kraft.templates.models import PATH_SEPARATOR
@@ -89,15 +88,11 @@ async def one_off_chain_ops(body: OneOffOps, request: Request):
     parsed = _parse(body.text)
     authored, digest = (None, None) if parsed is None else one_off.prepare(parsed)
     key = authored["id"] if authored is not None else one_off.DEFAULT_ID
-    if not isinstance(key, str) or not draft_store.AREAS["chains"].valid(key):
-        raise HTTPException(
-            422,
-            "a one-off chain's id is a lowercase letter, then lowercase letters, digits, - or _",
-        )
-    if parsed is not None:
-        deps.own_id_or_422(deps.library_or_503(st), key)
+    library = deps.library_or_503(st)
+    deps.own_id_or_422(library, key)
     files = {f"chains/{key}.yaml": body.text}
     answers: list[dict] = []
+    nodes, custom, custom_nodes = [], [], []
     if parsed is not None:
         working = ops.Draft(st, key, files, exists=True)
         if any(
@@ -118,17 +113,15 @@ async def one_off_chain_ops(body: OneOffOps, request: Request):
         # Defence in depth: the refusals above name every op that writes the library.
         if LIBRARY_FILE in working.dirty:
             raise HTTPException(422, _REFUSED)
-    files_now, _, result = drafts._state(st, "chains", key, {"files": files, "serialized": []}, [])
-    text = files_now.get(f"chains/{key}.yaml", body.text)
-    nodes, custom, custom_nodes = [], [], []
-    if parsed is not None:
-        try:
-            after = _parse(text)
-        except HTTPException:
-            after = None
+        # What the ops left is checked as strictly as what came in, before anything reads it.
+        after = _parse(files[working.name])
+        digest = None
         if after is not None:
             authored, digest = one_off.prepare(after)
+            deps.own_id_or_422(library, authored["id"])
             nodes, custom, custom_nodes = _resolve(st, authored)
+    files_now, _, result = drafts._state(st, "chains", key, {"files": files, "serialized": []}, [])
+    text = files_now.get(f"chains/{key}.yaml", body.text)
     return {
         "area": "chains",
         "key": key,
