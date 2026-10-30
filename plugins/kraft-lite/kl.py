@@ -2689,6 +2689,7 @@ TASK_KEYWORDS: dict[str, tuple[str, ...]] = {
     "revise_chain": ("chain-review",),
     "implementer": ("test-driven", "tdd", "implement"),
     "code_review": ("review",),
+    "gate_reviewer": ("gate-review",),
     # No candidates: the repair tasks and the judge act on what their node's
     # verification reported, not on anything an installed skill is for.
     "repair_verification": (),
