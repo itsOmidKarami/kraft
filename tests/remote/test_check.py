@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from kraft.remote import check
@@ -102,3 +105,30 @@ async def test_git_lfs_is_a_row_that_never_fails(monkeypatch, present):
     assert row["ok"] and row["skipped"] is (not present)
     assert row["detail"].startswith("/bin/git-lfs" if present else "not installed: LFS repos")
     assert ("restart the worker" in row["detail"]) is (not present)
+
+
+@pytest.mark.parametrize(
+    ("present", "row"),
+    [
+        (("claude", "kraft"), {"ok": True, "warn": False}),
+        # Only a warning: a machine may take sandboxed steps only.
+        (("claude",), {"ok": True, "warn": True}),
+        ((), None),
+    ],
+    ids=["on-path", "not-on-path", "no-claude"],
+)
+async def test_a_machine_with_claude_says_whether_its_kraft_mcp_server_can_start(
+    monkeypatch, present, row
+):
+    """An unsandboxed Claude step here names Kraft's permission tool, and this
+    machine's Claude starts the `kraft` server by its registered command, on
+    this machine's PATH: one missing fails the step at its first ask."""
+    registered = {"mcpServers": {"kraft": {"command": "kraft", "args": ["admin", "mcp"]}}}
+    (Path.home() / ".claude.json").write_text(json.dumps(registered))
+    monkeypatch.setattr(
+        check.shutil, "which", lambda exe: f"/bin/{exe}" if exe in present else None
+    )
+    got = _by_name(await check.run(kraft_version="2.3.0")).get("kraft MCP server")
+    assert (got and {k: got[k] for k in ("ok", "warn")}) == row
+    if row and row["warn"]:
+        assert "'kraft' is not on PATH" in got["detail"]
