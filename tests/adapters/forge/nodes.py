@@ -71,3 +71,9 @@ def back_half(*extra: dict, **ci_task) -> object:
             *extra,
         ]
     )
+
+
+def rest_calls(cli) -> list[str]:
+    """Every REST call made, as `api <path> -X <method> -i <fields>`; the
+    GraphQL ones span lines and are read from `cli.argv`."""
+    return [c for c in cli.calls("gh") if c.startswith("api repos/")]

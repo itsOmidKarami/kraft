@@ -19,7 +19,12 @@ from kraft.adapters.forge.models import (
     FailedJob,
     ForgeError,
     HeadMoved,
+    Job,
+    Label,
+    MergedMR,
+    MRDetails,
     MRRef,
+    Pipeline,
     QueueRead,
     QueueState,
     ReviewerFeedback,
@@ -1070,4 +1075,123 @@ class GhCli(mr_ops.CliWaits):
                 for r in rows
                 if isinstance(r, dict)
             ]
+        )
+
+    async def mr_details(self, *, repo: Path, branch: str) -> MRDetails | None:
+        ref = await self.find_mr(repo=repo, branch=branch)
+        if ref is None:
+            return None
+        pull = await self._api(repo, f"repos/{{owner}}/{{repo}}/pulls/{ref.number}")
+        return MRDetails(
+            number=ref.number,
+            url=ref.url,
+            state="merged" if pull.get("merged_at") else ref.state,
+            title=str(pull.get("title") or ""),
+            body=str(pull.get("body") or ""),
+            draft=bool(pull.get("draft")),
+            labels=tuple(str(x.get("name")) for x in pull.get("labels") or []),
+            source_branch=str((pull.get("head") or {}).get("ref") or ""),
+            target_branch=str((pull.get("base") or {}).get("ref") or ""),
+            head_sha=str((pull.get("head") or {}).get("sha") or ""),
+        )
+
+    async def pipelines(self, *, repo: Path, branch: str, base: str) -> tuple[Pipeline, ...]:
+        runs = "repos/{owner}/{repo}/actions/runs"
+        found = [
+            ("branch", r)
+            for r in (await self._api(repo, runs, fields={"branch": branch, "per_page": 20})).get(
+                "workflow_runs"
+            )
+            or []
+        ]
+        if ref := await self.find_mr(repo=repo, branch=branch):
+            prefix = _QUEUE_BRANCH.format(base=base, number=ref.number)
+            group = await self._api(repo, runs, fields={"event": "merge_group", "per_page": 100})
+            found += [
+                ("merge_group", r)
+                for r in group.get("workflow_runs") or []
+                if str(r.get("head_branch") or "").startswith(prefix)
+            ]
+        rows = [
+            Pipeline(
+                id=str(r.get("id")),
+                kind=kind,  # type: ignore[arg-type]
+                ref=str(r.get("head_branch") or ""),
+                sha=str(r.get("head_sha") or ""),
+                status=str(
+                    r.get("conclusion") if r.get("status") == "completed" else r.get("status")
+                ),
+                url=str(r.get("html_url") or ""),
+                created_at=str(r.get("created_at") or ""),
+            )
+            for kind, r in found
+        ]
+        return tuple(sorted(rows, key=lambda p: p.created_at, reverse=True))
+
+    async def jobs(self, *, repo: Path, pipeline_id: str) -> tuple[Job, ...]:
+        data = await self._api(
+            repo, f"repos/{{owner}}/{{repo}}/actions/runs/{pipeline_id}/jobs?per_page=100"
+        )
+        return tuple(
+            Job(
+                id=str(j.get("id")),
+                name=str(j.get("name") or ""),
+                stage="",
+                status=str(
+                    j.get("conclusion") if j.get("status") == "completed" else j.get("status")
+                ),
+                failure_reason=(
+                    str(j["conclusion"])
+                    if str(j.get("conclusion") or "").upper() in _GH_RED
+                    else None
+                ),
+                url=str(j.get("html_url") or ""),
+            )
+            for j in data.get("jobs") or []
+        )
+
+    async def job_log(self, *, repo: Path, job_id: str) -> str:
+        resp = await self._transport(repo).rest(
+            "GET", f"repos/{{owner}}/{{repo}}/actions/jobs/{job_id}/logs"
+        )
+        return resp.text
+
+    async def merged_mrs(self, *, repo: Path, base: str, limit: int) -> tuple[MergedMR, ...]:
+        pulls = await self._api(
+            repo,
+            "repos/{owner}/{repo}/pulls",
+            fields={
+                "state": "closed",
+                "base": base,
+                "sort": "updated",
+                "direction": "desc",
+                "per_page": min(100, limit * 3),
+            },
+        )
+        merged = sorted(
+            (p for p in pulls if p.get("merged_at")), key=lambda p: p["merged_at"], reverse=True
+        )
+        return tuple(
+            MergedMR(
+                number=int(p["number"]),
+                title=str(p.get("title") or ""),
+                labels=tuple(str(x.get("name")) for x in p.get("labels") or []),
+                url=str(p.get("html_url") or ""),
+                merged_at=str(p["merged_at"]),
+            )
+            for p in merged[:limit]
+        )
+
+    async def labels(self, *, repo: Path) -> tuple[Label, ...]:
+        rows: list[dict] = []
+        for page in range(1, 11):
+            got = await self._api(
+                repo, "repos/{owner}/{repo}/labels", fields={"per_page": 100, "page": page}
+            )
+            rows += got
+            if len(got) < 100:
+                break
+        return tuple(
+            Label(str(r.get("name")), str(r.get("description") or ""), str(r.get("color") or ""))
+            for r in rows
         )

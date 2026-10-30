@@ -21,18 +21,13 @@ from .api_outputs import (
     pull_request,
 )
 from .nodes import Api
+from .nodes import rest_calls as _rest
 
 PR = forge.MR(7, "http://x/7")
 _PULLS = "repos/{owner}/{repo}/pulls"
 _ISSUES = "repos/{owner}/{repo}/issues/7"
 _MADE = json.dumps({"number": 7, "html_url": URL})
 _CREATE = f"api {_PULLS} -X POST -i -f head=kraft/abc -f base=main -f title=Teach it -f body=why"
-
-
-def _rest(cli) -> list[str]:
-    """Every REST call made, as `api <path> -X <method> -i <fields>`; the
-    GraphQL ones span lines and are read from `cli.argv`."""
-    return [c for c in cli.calls("gh") if c.startswith("api repos/")]
 
 
 def _label(name: str) -> str:
