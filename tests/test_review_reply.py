@@ -123,8 +123,16 @@ async def test_the_reply_agent_runs_under_the_gate_told_to_change_nothing(
     argv_lines = argv.read_text().splitlines()
     assert argv_lines, "the fake agent was never launched"
     # The harness's own denials (Monitor) stay; the reply agent adds none.
-    denied = [line for line in argv_lines if "--disallowed-tools" in line]
-    assert not any('"Edit"' in line or "NotebookEdit" in line for line in denied)
+    launches = [json.loads(line) for line in argv_lines]
+    denied = {
+        tool
+        for a in launches
+        for i, flag in enumerate(a[:-1])
+        if flag == "--disallowed-tools"
+        for tool in a[i + 1].split(",")
+    }
+    assert "Monitor" in denied
+    assert not denied & {"Edit", "NotebookEdit"}
 
     prompt = prompts.read_text()
     launched = argv.read_text() + prompt

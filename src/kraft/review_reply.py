@@ -12,7 +12,9 @@ tells it to change nothing and never to commit or run tests. No tool is denied:
 it needs Write and Bash for its result file and `kraft item reply`, and a
 harness that cannot express a deny list would refuse the launch. So the
 worktree is compared before and after, and a change is recorded as
-`reply_agent_wrote` -- deliberately not a stop:
+`reply_agent_wrote`. In place only the branch tip is compared: an uncommitted
+write is reported as `left_uncommitted`, or not at all on a path the person
+already had dirty. A change is deliberately not a stop:
 `read_only.stop` would `mark_needs_human`, which notifies, and this agent
 failing is not a person's problem.
 """
