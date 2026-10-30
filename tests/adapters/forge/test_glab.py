@@ -533,8 +533,7 @@ async def test_glab_retry_jobs_posts_the_pipeline_retry(cli, tmp_path):
     )
 
     argv = cli.argv("glab")
-    assert argv[:3] == ["api", "-X", "POST"]
-    assert any("pipelines/123/retry" in a for a in argv)
+    assert argv[:4] == ["api", "projects/:id/pipelines/123/retry", "-X", "POST"]
 
 
 # --- the merge request's own state ---------------------------------------------------

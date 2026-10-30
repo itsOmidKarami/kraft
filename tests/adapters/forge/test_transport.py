@@ -76,12 +76,20 @@ def test_graphql_errors_raise_with_their_reason_whatever_the_exit_code(cli, tmp_
     ("errors", "reason"),
     [
         ([{"type": "FORBIDDEN"}], "forbidden"),
+        ([{"type": "RATE_LIMITED"}], "rate_limited"),
         ([{"message": "Expected head oid X did not match"}], None),
         ([{"message": "Head branch was modified. Review and try the merge again."}], "head_moved"),
         ([{"message": "expectedHeadOid does not match"}], "head_moved"),
         ([{"message": "something else"}], None),
     ],
-    ids=["forbidden", "oid-without-key", "modified", "expected-head-oid", "unmapped"],
+    ids=[
+        "forbidden",
+        "rate-limited",
+        "oid-without-key",
+        "modified",
+        "expected-head-oid",
+        "unmapped",
+    ],
 )
 def test_graphql_reason(errors, reason):
     assert transport.graphql_reason(errors) == reason
@@ -121,6 +129,15 @@ def test_rate_limited_403_carries_retry_after_and_the_sso_url(cli, tmp_path):
     assert exc.value.sso_url == "https://github.com/sso?x=1"
 
 
+def test_a_spent_quota_waits_until_the_reset_the_forge_names(cli, tmp_path, monkeypatch):
+    monkeypatch.setattr(transport, "_now", lambda: 1_000_000.0)
+    headers = {"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1000600"}
+    cli.stub("gh", routes={"api *": Api(403, '{"message": "rate limit exceeded"}', headers)})
+    with pytest.raises(forge.ForgeError) as exc:
+        rest("gh", "user", tmp_path)
+    assert (exc.value.reason, exc.value.retry_after) == ("rate_limited", 600.0)
+
+
 def test_an_html_error_body_is_clipped_not_a_traceback(cli, tmp_path):
     cli.stub("gh", routes={"api *": Api(502, "<html>" + "x" * 5000)})
     with pytest.raises(forge.ForgeError) as exc:
@@ -149,21 +166,46 @@ def test_field_typing(cli, tmp_path, fields, flags):
 
 
 @pytest.mark.parametrize(
-    ("origin", "host_args"),
+    ("origin", "ssh_says", "host_args"),
     [
-        ("https://github.example.com/a/b.git", ["--hostname", "github.example.com"]),
-        ("git@ghe.corp:a/b.git", ["--hostname", "ghe.corp"]),
-        ("https://github.com/a/b.git", []),
-        (None, []),
+        ("https://github.example.com/a/b.git", None, ["--hostname", "github.example.com"]),
+        ("git@ghe.corp:a/b.git", "ghe.corp", ["--hostname", "ghe.corp"]),
+        ("https://github.com/a/b.git", None, []),
+        (None, None, []),
+        # An ssh alias is whatever `ssh -G` resolves it to, as gh reads it.
+        ("git@github-work:o/r.git", "github.com", []),
+        ("git@ghe-alias:a/b.git", "github.example.com", ["--hostname", "github.example.com"]),
+        ("git@ssh.github.com:o/r.git", None, []),
+        ("ssh://git@ssh.github.com:443/o/r.git", None, []),
     ],
-    ids=["https-enterprise", "scp-enterprise", "github-com", "no-origin"],
+    ids=[
+        "https-enterprise",
+        "scp-enterprise",
+        "github-com",
+        "no-origin",
+        "alias-of-github-com",
+        "alias-of-enterprise",
+        "ssh-over-443-scp",
+        "ssh-over-443-url",
+    ],
 )
-def test_gh_names_the_enterprise_host(cli, repo, origin, host_args):
+def test_gh_names_the_enterprise_host(cli, repo, origin, ssh_says, host_args):
     if origin:
         git(repo, "remote", "add", "origin", origin)
+    if ssh_says:
+        cli.stub("ssh", f"hostname {ssh_says}")
     cli.stub("gh", "{}")
     rest("gh", "user", repo)
     assert cli.argv("gh")[5:] == host_args
+
+
+def test_the_host_is_worked_out_once_per_repo_not_once_per_transport(cli, repo):
+    git(repo, "remote", "add", "origin", "git@github-work:o/r.git")
+    cli.stub("ssh", "hostname github.com")
+    cli.stub("gh", "{}")
+    rest("gh", "user", repo)
+    rest("gh", "user", repo)
+    assert len(cli.calls("ssh")) == 1
 
 
 def test_glab_never_gets_a_hostname(cli, repo):

@@ -22,7 +22,7 @@ HEAD = "abc123"
 GH_PR = json.dumps({"number": 7, "headRefOid": HEAD})
 GH_REVIEWS = "api repos/{owner}/{repo}/pulls/7/reviews?per_page=100"
 GH_COMMENTS = "api repos/{owner}/{repo}/pulls/7/reviews/51/comments?per_page=100"
-GH_RUNS = f"api repos/{{owner}}/{{repo}}/commits/{HEAD}/check-runs?check_name=review-bot"
+GH_RUNS = f"api*commits/{HEAD}/check-runs*check_name=review-bot*"
 GH_STATUS = f"api repos/{{owner}}/{{repo}}/commits/{HEAD}/status"
 
 GLAB_MR = json.dumps({"iid": 9, "sha": HEAD})

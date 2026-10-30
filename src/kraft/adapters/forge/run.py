@@ -37,6 +37,7 @@ from kraft.paths import config_dir
 from kraft.templates.environment import RootPointerPolicy
 from kraft.templates.models import DEFAULT_GRACE, DEFAULT_WAIT, WaitBounds
 from kraft.vocab import RUNNING, ForgeEvent
+from kraft.vocab.events.limit import LimitEvent
 from kraft.vocab.sql import in_list
 
 logger = logging.getLogger(__name__)
@@ -111,6 +112,9 @@ def resolve(name: str) -> Forge:
         case _:
             raise ForgeError(f"unknown forge backend {name!r}; known: gh, glab, fake")
 
+
+#: How long a rate-limited forge call waits when the forge named no time.
+_RATE_LIMIT_WAIT_S = 60
 
 #: repos.yaml's `forge` (config._FORGES) -> the CLI that talks to it. Two
 #: vocabularies on purpose: `forge` is a fact about the remote, the backend is
@@ -2112,6 +2116,8 @@ async def run_task(
     #: The forge merged one.
     landed_unreviewed = False
     checkout_stopped = False
+    #: What the forge said when a call failed, for `failure_cause` to read later.
+    forge_error: dict | None = None
     # CI findings only ever reach `finish_session` for a single-target run: a
     # submodule's own CI is not this item's `mr_checks` node, and findings
     # from it would double-count against the wrong job (Kraft-cbr §3). A
@@ -2273,6 +2279,25 @@ async def run_task(
             # Nothing a fix loop may touch: a person looks first (Kraft-xngty).
             status = "config_error"
         unobserved = str(exc)
+        forge_error = {
+            "status": exc.status,
+            "reason": exc.reason,
+            "retry_after": exc.retry_after,
+            "sso_url": exc.sso_url,
+        }
+        if exc.reason == "rate_limited":
+            # The forge says when to come back: stop the item until then, as a
+            # rate-limited agent does, instead of failing the node.
+            status = "rate_limited"
+            resets_at = waits.now() + timedelta(seconds=exc.retry_after or _RATE_LIMIT_WAIT_S)
+            await db.write(
+                lambda c: events.append(
+                    c,
+                    work_item_id,
+                    LimitEvent.RATE_LIMIT_HIT,
+                    {"resets_at_iso": resets_at.isoformat(), "node_id": node_id, "forge": True},
+                )
+            )
     except (inplace.AutostashClash, inplace.CheckoutRefused) as exc:
         # The person's checkout: stopped for them, as a refused take is.
         log, status, findings = f"{hook_point} failed: {exc}\n", "config_error", None
@@ -2280,7 +2305,8 @@ async def run_task(
         await inplace.stop_refused(db, work_item_id, node_id, exc)
         checkout_stopped = True
 
-    if handler in _WAITS:
+    # A rate-limited wait stays open as it was: ending it would restart its deadline.
+    if handler in _WAITS and status != "rate_limited":
         status, log = await _observed(
             db,
             work_item_id=work_item_id,
@@ -2304,6 +2330,7 @@ async def run_task(
         log=log,
         findings=findings,
         reused=reused,
+        forge_error=forge_error,
     )
     # A member's move is a base change `base_ref` cannot show: report it, as
     # `builtins.mr_rebase` does, so the node's declared span re-verifies it.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from kraft.adapters.forge.models import (
     ReviewerFeedback,
     ReviewResult,
 )
+from kraft.adapters.forge.transport import CliTransport, Transport
 from kraft.automated_review import Reviewers
 
 _GH_MR_STATES: dict[str, str] = {"OPEN": "open", "MERGED": "merged", "CLOSED": "closed"}
@@ -288,6 +290,27 @@ def _latest_by_name(rows: list[dict], *, name: str, started: str) -> list[dict]:
 class GhCli(mr_ops.CliWaits):
     """GitHub through `gh`. For the public repo after the v0.1.0 split."""
 
+    def __init__(self, transport: Transport | None = None):
+        self._injected = transport
+
+    def _transport(self, repo: Path) -> Transport:
+        return self._injected or CliTransport("gh", repo)
+
+    async def _api(
+        self,
+        repo: Path,
+        path: str,
+        *,
+        method: str = "GET",
+        fields: Mapping[str, str | int | bool] | None = None,
+    ):
+        """The parsed JSON of one REST call."""
+        return (await self._transport(repo).rest(method, path, fields=fields)).json()
+
+    async def _gql(self, repo: Path, query: str, variables: Mapping[str, str | int | bool]) -> dict:
+        """The `data` of one GraphQL call."""
+        return await self._transport(repo).graphql(query, variables)
+
     async def open_mr(
         self,
         *,
@@ -431,10 +454,8 @@ class GhCli(mr_ops.CliWaits):
         )
         number, head = pr["number"], pr["headRefOid"]
         # ponytail: one page of 100 reviews -- paginate if a PR ever has more.
-        reviews = await self._json(
-            repo,
-            ["api", f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews?per_page=100"],
-            "gh api reviews",
+        reviews = await self._api(
+            repo, f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews?per_page=100"
         )
         mine = [
             r
@@ -449,13 +470,9 @@ class GhCli(mr_ops.CliWaits):
         if not mine:
             return ReviewResult("pending", detail=f"waiting for {bot} to review {head[:7]}")
         last = mine[-1]
-        comments = await self._json(
+        comments = await self._api(
             repo,
-            [
-                "api",
-                f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews/{last['id']}/comments?per_page=100",
-            ],
-            "gh api review comments",
+            f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews/{last['id']}/comments?per_page=100",
         )
         findings = tuple(
             f"{c.get('path')}:{c.get('line') or c.get('original_line')}: {c.get('body', '')}"
@@ -480,34 +497,17 @@ class GhCli(mr_ops.CliWaits):
         comments = reviews = threads = []
         if any(r.bot is not None for r in reviewers):
             # ponytail: one page of 100 of each -- paginate if a PR ever has more.
-            comments = await self._json(
-                repo,
-                ["api", f"repos/{{owner}}/{{repo}}/issues/{number}/comments?per_page=100"],
-                "gh api comments",
+            comments = await self._api(
+                repo, f"repos/{{owner}}/{{repo}}/issues/{number}/comments?per_page=100"
             )
-            reviews = await self._json(
-                repo,
-                ["api", f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews?per_page=100"],
-                "gh api reviews",
+            reviews = await self._api(
+                repo, f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews?per_page=100"
             )
-            data = await self._json(
-                repo,
-                [
-                    "api",
-                    "graphql",
-                    "-F",
-                    "owner={owner}",
-                    "-F",
-                    "name={repo}",
-                    "-F",
-                    f"n={number}",
-                    "-f",
-                    f"query={_THREADS_QUERY}",
-                ],
-                "gh api graphql",
+            data = await self._gql(
+                repo, _THREADS_QUERY, {"owner": "{owner}", "name": "{repo}", "n": number}
             )
             try:
-                threads = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+                threads = data["repository"]["pullRequest"]["reviewThreads"]["nodes"]
             except (KeyError, TypeError) as exc:
                 raise ForgeError(
                     f"gh api graphql answered without the review threads: {data!r:.200}"
@@ -524,10 +524,10 @@ class GhCli(mr_ops.CliWaits):
         name, as `{"name", "finished", "conclusion", "output"}`. A cancelled run
         is never finished: GitHub starts its successor a moment later."""
         runs = (
-            await self._json(
+            await self._api(
                 repo,
-                ["api", f"repos/{{owner}}/{{repo}}/commits/{head}/check-runs?check_name={check}"],
-                "gh api check-runs",
+                f"repos/{{owner}}/{{repo}}/commits/{head}/check-runs",
+                fields={"check_name": check},
             )
         ).get("check_runs") or []
         if runs:
@@ -542,11 +542,9 @@ class GhCli(mr_ops.CliWaits):
                     str(output[k]) for k in ("title", "summary", "text") if output.get(k)
                 ),
             }
-        statuses = (
-            await self._json(
-                repo, ["api", f"repos/{{owner}}/{{repo}}/commits/{head}/status"], "gh api status"
-            )
-        ).get("statuses") or []
+        statuses = (await self._api(repo, f"repos/{{owner}}/{{repo}}/commits/{head}/status")).get(
+            "statuses"
+        ) or []
         status = next((s for s in statuses if s.get("context") == check), None)
         state = None if status is None else status.get("state")
         return {
@@ -565,10 +563,10 @@ class GhCli(mr_ops.CliWaits):
         )
         head = pr["headRefOid"]
         runs = (
-            await self._json(
+            await self._api(
                 repo,
-                ["api", f"repos/{{owner}}/{{repo}}/commits/{head}/check-runs?check_name={check}"],
-                "gh api check-runs",
+                f"repos/{{owner}}/{{repo}}/commits/{head}/check-runs",
+                fields={"check_name": check},
             )
         ).get("check_runs") or []
         if runs:
@@ -583,11 +581,9 @@ class GhCli(mr_ops.CliWaits):
             output = run.get("output") or {}
             text = "\n".join(str(output[k]) for k in ("title", "summary", "text") if output.get(k))
             return ReviewResult("actionable", findings=(f"{check} {conclusion}: {text}",))
-        statuses = (
-            await self._json(
-                repo, ["api", f"repos/{{owner}}/{{repo}}/commits/{head}/status"], "gh api status"
-            )
-        ).get("statuses") or []
+        statuses = (await self._api(repo, f"repos/{{owner}}/{{repo}}/commits/{head}/status")).get(
+            "statuses"
+        ) or []
         status = next((s for s in statuses if s.get("context") == check), None)
         if status is None or status.get("state") == "pending":
             return ReviewResult("pending", detail=f"waiting for {check} on {head[:7]}")
@@ -707,16 +703,12 @@ class GhCli(mr_ops.CliWaits):
         wait pending instead of passing as "nothing checked". True when either
         read fails: an unreadable answer is a reason to wait, never to pass."""
         try:
-            runs = await self._json(
-                repo,
-                ["api", f"repos/{{owner}}/{{repo}}/commits/{sha}/check-runs?per_page=1"],
-                "gh api check-runs",
+            runs = await self._api(
+                repo, f"repos/{{owner}}/{{repo}}/commits/{sha}/check-runs?per_page=1"
             )
             if runs.get("check_runs"):
                 return True
-            status = await self._json(
-                repo, ["api", f"repos/{{owner}}/{{repo}}/commits/{sha}/status"], "gh api status"
-            )
+            status = await self._api(repo, f"repos/{{owner}}/{{repo}}/commits/{sha}/status")
             return bool(status.get("statuses"))
         except (ForgeError, AttributeError):
             return True
@@ -791,24 +783,11 @@ class GhCli(mr_ops.CliWaits):
         """Take the pull request out of whatever would merge it: auto-merge is
         disabled, and a merge queue entry dequeued. Each is read first, so a
         request that is neither is left alone, and a call that fails raises."""
-        data = await self._json(
-            repo,
-            [
-                "api",
-                "graphql",
-                "-F",
-                "owner={owner}",
-                "-F",
-                "name={repo}",
-                "-F",
-                f"n={mr.number}",
-                "-f",
-                f"query={_CANCEL_QUERY}",
-            ],
-            "gh api graphql",
+        data = await self._gql(
+            repo, _CANCEL_QUERY, {"owner": "{owner}", "name": "{repo}", "n": mr.number}
         )
         try:
-            pull = data["data"]["repository"]["pullRequest"]
+            pull = data["repository"]["pullRequest"]
             auto, queued, node = pull["autoMergeRequest"], pull["mergeQueueEntry"], pull["id"]
         except (KeyError, TypeError) as exc:
             raise ForgeError(
@@ -817,10 +796,7 @@ class GhCli(mr_ops.CliWaits):
         if auto:
             await git.run_git(repo, ["gh", "pr", "merge", str(mr.number), "--disable-auto"])
         if queued:
-            await git.run_git(
-                repo,
-                ["gh", "api", "graphql", "-f", f"id={node}", "-f", f"query={_DEQUEUE_MUTATION}"],
-            )
+            await self._gql(repo, _DEQUEUE_MUTATION, {"id": node})
 
     async def close_mr(self, *, repo: Path, mr: MRRef) -> None:
         await git.run_git(repo, ["gh", "pr", "close", str(mr.number)])
@@ -838,29 +814,14 @@ class GhCli(mr_ops.CliWaits):
         mr = await self.find_mr(repo=repo, branch=branch)
         if mr is None:
             return QueueRead()
-        data = await self._json(
+        data = await self._gql(
             repo,
-            [
-                "api",
-                "graphql",
-                # `-F` expands the `{owner}`/`{repo}` placeholders (`-f` does
-                # not) and types the number; the branch is `-f`, so a base
-                # named `123` or `null` stays a string.
-                "-F",
-                "owner={owner}",
-                "-F",
-                "name={repo}",
-                "-f",
-                f"base={base}",
-                "-F",
-                f"n={mr.number}",
-                "-f",
-                f"query={_QUEUE_QUERY}",
-            ],
-            "gh api graphql",
+            _QUEUE_QUERY,
+            # A `str` goes as `-f`, so a base named `123` or `null` stays a string.
+            {"owner": "{owner}", "name": "{repo}", "base": base, "n": mr.number},
         )
         try:
-            repository = data["data"]["repository"]
+            repository = data["repository"]
             queued = repository["mergeQueue"]
             pull = repository["pullRequest"]
         except (KeyError, TypeError) as exc:
@@ -988,10 +949,8 @@ class GhCli(mr_ops.CliWaits):
         if not run_id:
             return (), _UNREADABLE_JOBS
         try:
-            data = await self._json(
-                repo,
-                ["api", f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/jobs?per_page=100"],
-                "gh api run jobs",
+            data = await self._api(
+                repo, f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/jobs?per_page=100"
             )
         except ForgeError:
             return (), _UNREADABLE_JOBS

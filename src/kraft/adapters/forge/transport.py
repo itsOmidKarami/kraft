@@ -8,10 +8,14 @@ line and headers before the body, so the status, `Retry-After` and
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+import subprocess
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
@@ -88,6 +92,8 @@ def graphql_reason(errors: list[dict]) -> Reason | None:
             return "not_found"
         if kind == "FORBIDDEN":
             return "forbidden"
+        if kind == "RATE_LIMITED":
+            return "rate_limited"
         if "expectedheadoid" in msg or (
             "head" in msg and ("out of date" in msg or "modified" in msg)
         ):
@@ -100,6 +106,60 @@ def origin_host(repo: Path) -> str | None:
     remote = git_read(repo, "remote", "get-url", "origin", expected_failure=True)
     match = next((m for rx in _REMOTE if remote and (m := rx.match(remote.strip()))), None)
     return match["host"].lower() if match else None
+
+
+@lru_cache(maxsize=256)
+def _gh_host(repo: Path) -> str | None:
+    """The host `gh api` should be told about, as gh itself reads the remote: an
+    scp-style or `ssh://` origin goes through `ssh -G`, which turns an alias
+    (`github-work`) into its real host, and GitHub's SSH-over-443 host is
+    github.com. None without an origin."""
+    host = origin_host(repo)
+    if host is None or host.startswith("-"):
+        return None
+    remote = git_read(repo, "remote", "get-url", "origin", expected_failure=True) or ""
+    if not remote.strip().lower().startswith(("http://", "https://", "git://")):
+        try:
+            out = subprocess.run(
+                ["ssh", "-G", host],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                stdin=subprocess.DEVNULL,
+            ).stdout
+        except (OSError, subprocess.SubprocessError):
+            out = ""  # no ssh to ask: the host as written
+        host = next(
+            (
+                ln.split(None, 1)[1].strip().lower()
+                for ln in out.splitlines()
+                if ln.startswith("hostname ")
+            ),
+            host,
+        )
+    return "github.com" if host == "ssh.github.com" else host
+
+
+async def gh_host(repo: Path) -> str | None:
+    """`_gh_host`, asked off the event loop and remembered per repo: it runs
+    git and maybe `ssh -G`, and a moved remote is a restart-level change."""
+    return await asyncio.to_thread(_gh_host, repo)
+
+
+def _now() -> float:
+    return time.time()
+
+
+def _retry_after(headers: Mapping[str, str]) -> float | None:
+    """Seconds to wait: `Retry-After`, else the time left until GitHub's
+    `x-ratelimit-reset` (epoch seconds) when its quota is spent."""
+    retry = headers.get("retry-after", "")
+    if retry.replace(".", "", 1).isdigit():
+        return float(retry)
+    reset = headers.get("x-ratelimit-reset", "")
+    if headers.get("x-ratelimit-remaining") == "0" and reset.isdigit():
+        return max(0.0, int(reset) - _now())
+    return None
 
 
 def _flags(fields: Mapping[str, Field] | None) -> list[str]:
@@ -140,30 +200,31 @@ class CliTransport:
                 message = str(resp.json().get("message", ""))
             except (ForgeError, AttributeError):
                 message = ""
-            retry = resp.headers.get("retry-after", "")
             raise ForgeError(
                 f"{label}: {message or _clip(resp.text or done.stderr)} (HTTP {resp.status})",
                 status=resp.status,
                 reason=reason_for(resp.status, resp.headers),
-                retry_after=float(retry) if retry.replace(".", "", 1).isdigit() else None,
+                retry_after=_retry_after(resp.headers),
                 sso_url=_sso_url(resp.headers.get("x-github-sso", "")),
             )
         return resp, done.returncode
 
-    def _host(self) -> list[str]:
-        host = origin_host(self.repo) if self.cli == "gh" else None
+    async def _host(self) -> list[str]:
+        host = await gh_host(self.repo) if self.cli == "gh" else None
         return ["--hostname", host] if host and host != "github.com" else []
 
     async def rest(
         self, method: str, path: str, *, fields: Mapping[str, Field] | None = None
     ) -> ApiResponse:
-        args = [path, "-X", method, "-i", *_flags(fields), *self._host()]
+        args = [path, "-X", method, "-i", *_flags(fields), *await self._host()]
         return (await self._call(f"{method} {path}", args))[0]
 
     async def graphql(self, query: str, variables: Mapping[str, Field] | None = None) -> dict:
-        args = ["graphql", "-i", "-f", f"query={query}", *_flags(variables), *self._host()]
+        args = ["graphql", "-i", "-f", f"query={query}", *_flags(variables), *await self._host()]
         resp, rc = await self._call("graphql", args, graphql=True)
         body = resp.json()
+        if not isinstance(body, dict):
+            raise ForgeError(f"graphql: answered without an object: {_clip(resp.text)}")
         if errors := body.get("errors"):
             message = "; ".join(str(e.get("message", e)) for e in errors)
             raise ForgeError(
