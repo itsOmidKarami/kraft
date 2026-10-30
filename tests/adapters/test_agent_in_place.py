@@ -4,12 +4,13 @@ an agent outside the walk (an escalation, reply or gate review) runs around
 itself, as `dispatch` does around a walk task, or the copy of the branch a
 read-only one runs in instead (`in_copy`)."""
 
+import asyncio
 from pathlib import Path
 
 import pytest
 from support.harness import IN_PLACE, git, v1_node, write
 
-from kraft import inplace, store
+from kraft import builtins, caps, inplace, store
 from kraft.adapters import agent
 
 from .test_agent import PY_FAKE, _system_prompt
@@ -215,6 +216,37 @@ async def test_a_copy_launchs_cli_probes_run_outside_the_empty_copy(
     assert (copy / ".git").is_dir()
     assert asked == [copy.parent]
     assert not (copy / "probed").exists()
+
+
+@pytest.mark.parametrize(
+    ("cap_s", "bound"),
+    [(100.0, (99.0, 100.0)), (None, (builtins.WORKTREE_ADD_TIMEOUT_S,) * 2)],
+    ids=["time-cap", "no-time-cap"],
+)
+def test_making_a_copy_is_bounded_by_the_time_cap_or_a_worktrees(
+    run, in_place, monkeypatch, tmp_path, cap_s, bound
+):
+    """A clone that hangs never holds the checkout's lease for good: what is
+    left of the agent's time cap, or with none what a worktree is given."""
+    asked = []
+
+    async def make_copy(row, dest, *, timeout_s):
+        asked.append(timeout_s)
+
+    monkeypatch.setattr("kraft.inplace.make_copy", make_copy)
+    cap = None if cap_s is None else caps.Deadline(caps.monotonic() + cap_s, None)
+    seen = run(
+        **in_place,
+        harness="codex",
+        command="codex",
+        cwd=str(tmp_path / "copy"),
+        in_copy=True,
+        time_cap=cap,
+    )
+    asyncio.run(seen["before_launch"]())
+
+    [timeout_s] = asked
+    assert bound[0] <= timeout_s <= bound[1]
 
 
 def _outside_the_walk(it, **kw):

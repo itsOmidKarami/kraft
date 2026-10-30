@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
-from kraft import caps, ids, inplace, item_paths, store, when_free
+from kraft import builtins, caps, ids, inplace, item_paths, store, when_free
 from kraft import harness as _harness
 from kraft import permission_rules as _permission_rules
 from kraft import policy as _policy
@@ -1489,8 +1489,12 @@ async def _run_agent_task(
     # holds its lease, mark it, and check it after. One in a copy only leases it.
     borrows = takes_checkout and in_place and not in_copy
     # Measured now: `run_task` moves `time_cap` on by its wait for a slot, which this
-    # closure's `time_cap` does not see.
-    copy_s = None if time_cap is None else max(time_cap.at - caps.monotonic(), 0.0)
+    # closure's `time_cap` does not see. With no cap, a clone gets what a worktree does.
+    copy_s = (
+        builtins.WORKTREE_ADD_TIMEOUT_S
+        if time_cap is None
+        else max(time_cap.at - caps.monotonic(), 0.0)
+    )
     # Files a machine must be given because they live outside git: the cursor hook, and the
     # harness config the CLI reads (its chats stay where they were made).
     remote_ro: tuple[str, ...] = ()
