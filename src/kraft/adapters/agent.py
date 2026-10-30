@@ -254,8 +254,9 @@ def documents_note(run_dirs, work_item_row, *, worktree: Path | None = None) -> 
 
 def _attachment_at(run_dirs, row, a: dict, worktree: Path | None) -> str:
     """Where the agent can read attachment `a`: in the worktree, where
-    `_copy_attachments` puts it; or, when it is not there (a copy of an
-    in-place branch no task has taken yet), the copy intake stored."""
+    `_copy_attachments` puts it; or, when it is not there, the copy intake
+    stored. A launch in a copy of an in-place branch always names the stored
+    one: this runs before `before_launch` fills the copy."""
     if worktree is not None and a.get("source") and not (worktree / a["path"]).exists():
         return str(item_paths.stored_attachment(run_dirs, row["id"], a, row["repo"]))
     return f"{a['path']} in the worktree"
