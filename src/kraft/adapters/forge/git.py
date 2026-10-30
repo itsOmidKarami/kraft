@@ -777,8 +777,8 @@ async def _push_lfs_objects(repo: Path, branch: str, env: dict[str, str]) -> Non
     # Not `lfs.available()`: it is cached, and the message says install, then retry.
     if shutil.which("git-lfs") is None:
         raise ForgeError(
-            "the repo uses Git LFS, and this machine has no git-lfs to upload the "
-            "branch's LFS objects with: install git-lfs, then retry"
+            "the repo uses Git LFS and this machine has no git-lfs, so Kraft cannot "
+            "upload the branch's LFS objects or push it: install git-lfs, then retry"
         )
     await run_git(repo, ["git", "lfs", "push", "origin", branch], env=env)
 
