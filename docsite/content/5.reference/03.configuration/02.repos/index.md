@@ -201,7 +201,7 @@ It binds every work item filed in this repo, whatever its chain. A value `policy
 - A name the library does not define is refused when the repository is saved (Settings › Repos) and when an item is filed. A library save that removes a steering profile a repository still names is refused too.
 - You write steering profiles in Templates › Library, which edits `library.yaml`.
 
-This is not a place for target-repo files. Kraft never copies `CLAUDE.md`, `AGENTS.md`, or anything else from inside the repo being worked on into what it tells an agent. The agent reads those files itself, the way it would for a person.
+This is not a place for target-repo files. Kraft never copies `CLAUDE.md`, `AGENTS.md`, or anything else from inside the repo being worked on into what it tells an agent as a source of process context. The agent reads those files itself, the way it would for a person.
 
 ### Pull-request rules
 
