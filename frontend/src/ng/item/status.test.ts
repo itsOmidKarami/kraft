@@ -33,10 +33,11 @@ const at = (display_status: DisplayStatus, kind?: StopKind, scope: Scope = "work
   headerState({ display_status, current_node_id: "n", stop: kind ? { kind, node: "n", resume_at: null, reason: null, ...(kind === "budget" && { scope }) } : null });
 const FULL = ["escalate", "complete", "archive", "cancel"];
 const UNREVIEWED = { current_node_id: null, one_off: { extends: "default", custom: 1, needs_review: true, approval: null } } satisfies Partial<ItemDetail>;
-/** What the server sends a one-off the walk stopped before its first node (`mark_needs_human(..., kind=CONFIG)`). */
+/** What the server sends a one-off the walk stopped before its first node (`mark_needs_human(..., kind=CONFIG)`):
+ *  the API reads the stop's node from `current_node_id`, which is null here. */
 const STRANDED = {
-  ...UNREVIEWED, display_status: "failed", status: "needs_human", actions: ["cancel"],
-  stop: { kind: "config", node: "plan", resume_at: null, reason: "this item's one-off chain changed before it started and needs approval again: a person approves it in the web UI, on a computer or a phone, then starts it" },
+  ...UNREVIEWED, display_status: "failed", status: "needs_human", actions: ["complete", "cancel", "abandon"],
+  stop: { kind: "config", node: null, resume_at: null, reason: "this item's one-off chain changed before it started and needs approval again: a person approves it in the web UI, on a computer or a phone, then starts it" },
 } satisfies Partial<ItemDetail>;
 // /escalate refuses a running or waiting item, and one whose escalation turn already runs.
 const NO_ESC = ["complete", "archive", "cancel"];
@@ -118,7 +119,7 @@ describe("the server's actions decide which doors the header offers (F4)", () =>
   // refuses it until the review's approve puts it back to paused, so Start (which opens that review) stands whatever
   // the server lists, under the stop's own badge. A queued or blocked one-off with no node yet is not stranded.
   it.each<[string, Parameters<typeof headerState>[0], HeaderState]>([
-    ["a one-off stranded before its first node: FAILED, with Start", STRANDED, { badge: "FAILED", tone: "bad", main: "start", panel: ["archive", "cancel"] }],
+    ["a one-off stranded before its first node: FAILED, with Start", STRANDED, { badge: "FAILED", tone: "bad", main: "start", panel: ["complete", "archive", "cancel"] }],
     ["a one-off queued before its first node: QUEUED, with Remove from queue", { ...UNREVIEWED, display_status: "queued", stop: null, actions: serverActions("queued") }, { badge: "QUEUED", tone: "info", main: "pause", panel: NO_ESC as PanelItem[] }],
     ["a one-off blocked before its first node: BLOCKED, with Pause", { ...UNREVIEWED, display_status: "blocked", stop: null, actions: serverActions("blocked") }, { badge: "BLOCKED", tone: "info", main: "pause", panel: NO_ESC as PanelItem[] }],
   ])("%s", (_name, item, want) => expect(headerState(item)).toEqual(want));

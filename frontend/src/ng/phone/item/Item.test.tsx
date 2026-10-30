@@ -245,9 +245,9 @@ describe("the item screen (C)", () => {
     });
 
     it("a one-off stranded before its first node offers Start under its FAILED badge, not a Retry with no node to retry: approve, then start", async () => {
-      // As the walk stops it: `mark_needs_human(..., nodes[0].id, reason, kind=CONFIG)`.
-      const stranded = stop("config", { node: "plan", reason: "this item's one-off chain changed before it started and needs approval again: a person approves it in the web UI, on a computer or a phone, then starts it" });
-      const calls = mount(item("failed", stranded, { status: "needs_human", current_node_id: null, worker_sessions: [], one_off: { extends: "default", custom: 1, needs_review: true, approval: null }, actions: ["cancel"] }), "/work-items/w1", { ...ROUTES, "POST /work-items/w1/resume": [200, {}] });
+      // As the walk stops it (`mark_needs_human(..., kind=CONFIG)`); the API reads the stop's node from `current_node_id`, null here.
+      const stranded = stop("config", { node: null, reason: "this item's one-off chain changed before it started and needs approval again: a person approves it in the web UI, on a computer or a phone, then starts it" });
+      const calls = mount(item("failed", stranded, { status: "needs_human", current_node_id: null, worker_sessions: [], one_off: { extends: "default", custom: 1, needs_review: true, approval: null }, actions: ["complete", "cancel", "abandon"] }), "/work-items/w1", { ...ROUTES, "POST /work-items/w1/resume": [200, {}] });
       const start = await screen.findByRole("button", { name: "Start" });
       expect(screen.getByText("FAILED")).toBeInTheDocument();
       expect(screen.queryByText("NOT STARTED")).toBeNull();

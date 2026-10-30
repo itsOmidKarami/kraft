@@ -113,7 +113,7 @@ describe("ItemHeader", () => {
 
     // Stranded: the walk stopped it before its first node (`mark_needs_human(..., kind=CONFIG)`); /resume refuses it
     // until the approve puts it back to paused, and its badge stays the stop's.
-    const STRANDED = { ...NEVER, status: "needs_human", display_status: "failed", actions: ["cancel"], stop: { kind: "config", node: "plan", resume_at: null, reason: "this item's one-off chain changed before it started and needs approval again: a person approves it in the web UI, on a computer or a phone, then starts it" } } satisfies Parameters<typeof detail>[0];
+    const STRANDED = { ...NEVER, status: "needs_human", display_status: "failed", actions: ["complete", "cancel", "abandon"], stop: { kind: "config", node: null, resume_at: null, reason: "this item's one-off chain changed before it started and needs approval again: a person approves it in the web UI, on a computer or a phone, then starts it" } } satisfies Parameters<typeof detail>[0];
     it.each<{ id: string; over: Parameters<typeof detail>[0]; badge: string }>([
       { id: "never started", over: NEVER, badge: "NOT STARTED" },
       { id: "stranded before its first node", over: STRANDED, badge: "FAILED" },
