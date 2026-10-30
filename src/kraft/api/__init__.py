@@ -75,6 +75,7 @@ from kraft.api.routes import (  # noqa: E402,F401
     board,
     check,
     drafts,
+    forge_reads,
     gates,
     harnesses,
     lifecycle,
