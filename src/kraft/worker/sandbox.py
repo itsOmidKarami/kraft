@@ -358,74 +358,20 @@ def harden_host_git_env(env: MutableMapping[str, str] | None = None) -> None:
     the same thing `adapters.forge.git` already asked for explicitly with
     `--no-verify`.
 
-    `adapters.forge.git.push` is the one exception, running with
-    `unhardened_git_env()` instead: see that function for why.
+    Kraft's push and fetch run no hook either, even one the person installed in
+    the git directory: such a hook may read files from the working tree, which
+    the worker writes (pre-commit's reads `.pre-commit-config.yaml`). The push
+    uploads git-lfs objects itself instead; see `adapters.forge.git.push`.
     """
     _pin(os.environ if env is None else env, _HARDENED_GIT_CONFIG)
 
 
-def unhardened_git_env(repo: Path | None = None) -> dict[str, str]:
-    """A copy of the process env with `harden_host_git_env`'s hook pin lifted.
-
-    For `git push` alone: by the time Kraft pushes, the commit is already
-    made and the worktree gitdir's hooks are either read-only-mounted
-    (sandboxed) or none of a worker's business to have tampered with in the
-    first place (unsandboxed) -- so the pinned `core.hooksPath=/dev/null`
-    is no longer buying anything there, only breaking real hooks a human
-    installed, like git-lfs's pre-push (Kraft-rki).
-
-    That holds only for hooks in the gitdir. A `core.hooksPath` inside the
-    working tree (`.husky/`, `.beads/hooks/`) is files the worker writes, so
-    with `repo` given and its hooks there, the pin stays and no hook runs.
-
-    Only that pin: `_NO_RECURSION_PINS` stay, so an operator's
-    `push.recurseSubmodules=on-demand` still cannot make this push run
-    `git push` inside a repository the worker nested in its worktree, with
-    that repository's remotes and `core.sshCommand` (Kraft-nx4id).
-    """
+def hardened_git_env() -> dict[str, str]:
+    """A copy of the process env with `harden_host_git_env`'s pins, for a git
+    that must run hook-free even where the process env was never hardened."""
     env = dict(os.environ)
-    lifted = tuple(p for p in _HARDENED_GIT_CONFIG if p[0] != "core.hooksPath")
-    _pin(env, lifted)
-    if repo is not None and (hooks := _hooks_in_working_tree(repo, env)):
-        _pin(env, _HARDENED_GIT_CONFIG)
-        logger.warning(
-            "git runs no hook from %s: it is inside %s's working tree, which the agent "
-            "can edit; a pre-push there (git-lfs's, say) does not run on Kraft's push",
-            hooks,
-            repo,
-        )
+    harden_host_git_env(env)
     return env
-
-
-def _hooks_in_working_tree(repo: Path, env: dict[str, str]) -> str | None:
-    """Git's hooks directory for `repo` when it is inside the working tree
-    and outside the gitdir, files a worker can edit; None otherwise. Also
-    answers when git cannot say, or when the path has a `..` after a name
-    (`a/../../x`): a worker's symlink at `a` would move where it lands, so
-    a push it cannot read stays hook-free rather than hook-full.
-
-    shortcut: such a repo's own pre-push (git-lfs's under husky, say) no
-    longer runs on Kraft's push; teach the check an allowlist if one needs it.
-    """
-    # Relative output joined by hand, never `--path-format=absolute`: that
-    # resolves symlinks, and a worker can make an in-tree hooks dir a symlink
-    # to somewhere outside the tree, which would then read as "outside".
-    done = subprocess.run(
-        ["git", "rev-parse", "--show-cdup", "--git-common-dir", "--git-path", "hooks"],
-        cwd=repo,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-    lines = done.stdout.split("\n")[:3]
-    if done.returncode != 0 or len(lines) != 3:
-        return "an unreadable hooks path"
-    parts = Path(lines[2]).parts
-    lead = next((i for i, part in enumerate(parts) if part != ".."), len(parts))
-    if ".." in parts[lead:]:
-        return lines[2]
-    top, common, hooks = (Path(os.path.abspath(os.path.join(repo, p))) for p in lines)
-    return lines[2] if hooks.is_relative_to(top) and not hooks.is_relative_to(common) else None
 
 
 def _ls_files(worktree: Path, *args: str) -> list[str] | None:

@@ -530,7 +530,7 @@ async def _every_member_host_call(ws, database) -> None:
         lambda: forge.git._head_sha(ws.member),
         # M9: the root's coverage check, which describes each member.
         lambda: forge.git._assert_submodules_covered(ws.wt, {ws.member.resolve()}),
-        # M1: the push, unhardened, member and root.
+        # M1: the push, member and root.
         lambda: forge.git.push(ws.member, branch),
         lambda: forge.git.push(ws.wt, branch),
         # M5/M6: the member rebased onto its moved origin; forced, as

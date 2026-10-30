@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import subprocess
 from collections.abc import Collection, Mapping
 from datetime import datetime
@@ -16,6 +17,7 @@ from pathlib import Path
 
 from kraft.adapters.forge.models import ForeignCommits, ForgeError
 from kraft.config import KRAFT_ROOTS, base_ignore_args, git_read
+from kraft.remote import lfs
 from kraft.worker import sandbox
 
 logger = logging.getLogger(__name__)
@@ -109,6 +111,7 @@ async def run_cli(
     *,
     env: dict[str, str] | None = None,
     timeout: float | None = None,
+    stdin: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """One forge CLI call, returned whatever its exit code.
 
@@ -119,7 +122,7 @@ async def run_cli(
 
     `env` defaults to `None`, meaning inherit the process env unchanged --
     which carries `sandbox.harden_host_git_env`'s pinned `core.hooksPath`.
-    `push` is the one caller that overrides it.
+    `push` and the reviewed-head fetch pass a hardened copy of their own.
     """
     if timeout is None:
         timeout = CLI_TIMEOUT_S
@@ -130,6 +133,7 @@ async def run_cli(
             subprocess.run,
             args,
             cwd=repo,
+            input=stdin,
             capture_output=True,
             text=True,
             env=env,
@@ -153,9 +157,10 @@ async def run_git(
     *,
     env: dict[str, str] | None = None,
     timeout: float | None = None,
+    stdin: str | None = None,
 ) -> str:
     """`run_cli`, raising a `ForgeError` on a non-zero exit."""
-    done = await run_cli(repo, args, env=env, timeout=timeout)
+    done = await run_cli(repo, args, env=env, timeout=timeout, stdin=stdin)
     if done.returncode != 0:
         detail = done.stderr.strip() or done.stdout.strip()
         raise ForgeError(f"{_shown(args)} failed: {detail}")
@@ -650,7 +655,7 @@ def assert_lfsconfig_unmoved(
     repo: Path, step: str, *, rev: str = "HEAD", trusted: str | None = None
 ) -> None:
     """Raise `UnsafeWorktree` before a host git in `repo` that runs git-lfs
-    (a push's pre-push, a checkout's smudge) when the branch's own work
+    (a push's `git lfs pre-push`, a checkout's smudge) when the branch's own work
     changed `.lfsconfig`: git-lfs would talk to whatever server it names from
     this machine, outside any sandbox. `step` says what Kraft will not do.
     The dangerous git never runs; whether the item stops at once or later,
@@ -701,19 +706,17 @@ async def push(repo: Path, branch: str) -> None:
     local branch once pointed at it (its reflog): a person's commit pushed
     from elsewhere never was. With no reflog the push refuses, as before.
 
-    Run with `sandbox.unhardened_git_env()`, not the inherited, pinned
-    process env: by push time the commit is already made, so the pinned
-    `core.hooksPath=/dev/null` no longer stops a worker from planting
-    anything -- it only stops a real pre-push hook a human installed, like
-    git-lfs's, from uploading the objects this push's pointers reference
-    (Kraft-rki). Not for a hooks directory inside the working tree, which
-    the worker writes: that one stays pinned.
+    It runs no hook, even a pre-push the person installed in the git
+    directory: such a hook may read the working tree, which the worker writes,
+    and the push runs on the host, outside any sandbox. pre-commit's pre-push
+    runs whatever `.pre-commit-config.yaml` names. git-lfs's pre-push was the
+    one Kraft needed, so the push uploads the LFS objects itself first.
     """
-    # git-lfs's pre-push reads its server from `.lfsconfig`, which the worker
-    # writes: a changed one would send this push's LFS traffic from the host,
-    # outside any sandbox, to a URL the branch chose.
+    # git-lfs reads its server from `.lfsconfig`, which the worker writes: a
+    # changed one would send this push's LFS traffic from the host, outside
+    # any sandbox, to a URL the branch chose.
     assert_lfsconfig_unmoved(repo, "push it")
-    env = sandbox.unhardened_git_env(repo)
+    env = sandbox.hardened_git_env()
     pushed_ref = f"{PUSHED_REFS}/{branch}"
     head = git_read(repo, "rev-parse", "--verify", f"refs/heads/{branch}")
     # Where the push goes, which a `pushurl` or `pushInsteadOf` can make
@@ -757,12 +760,55 @@ async def push(repo: Path, branch: str) -> None:
             f"{pushed_ref}` and `git update-ref -d refs/remotes/origin/{branch}` in "
             "the item's worktree, then retry"
         )
-    args = ["git", "push"]
+    await _push_lfs_objects(repo, branch, head, remote, target, env)
+    args = ["git", "push", "--no-verify"]
     if remote:
         args.append(f"--force-with-lease={branch}:{remote}")
     args += ["origin", branch]
     await run_git(repo, args, env=env)
-    await run_git(repo, ["git", "update-ref", pushed_ref, head])
+    await run_git(repo, ["git", "update-ref", pushed_ref, head], env=env)
+
+
+async def _push_lfs_objects(
+    repo: Path, branch: str, head: str, remote: str, target: str, env: dict[str, str]
+) -> None:
+    """What git-lfs's pre-push did, run as git would run it: `git lfs
+    pre-push` told this push's one ref, so it uploads the objects the new
+    commits' pointers name and skips what origin's real tip already has (a
+    person's commits brought in without their objects included). Commits
+    with no LFS pointer, read with plain git, never run git-lfs; ones with
+    pointers, on a machine without git-lfs, refuse, as the hook did."""
+    # A failed listing raises rather than reading as "no pointers", which would
+    # push pointers without their objects.
+    listing = await run_git(
+        repo,
+        [
+            "git",
+            "rev-list",
+            "--objects",
+            head,
+            "--not",
+            "--remotes=origin",
+            *([remote] if remote else []),
+        ],
+        env=env,
+    )
+    blobs = (line.split(" ", 1)[0] for line in listing.splitlines())
+    if not await asyncio.to_thread(lfs.pointers_among, repo, blobs):
+        return
+    # Not `lfs.available()`: it is cached, and the message says install, then retry.
+    if shutil.which("git-lfs") is None:
+        raise ForgeError(
+            "the branch adds Git LFS files and this machine has no git-lfs, so Kraft "
+            "cannot upload them or push the branch: install git-lfs, then retry"
+        )
+    ref = f"refs/heads/{branch}"
+    await run_git(
+        repo,
+        ["git", "lfs", "pre-push", "origin", target],
+        env=env,
+        stdin=f"{ref} {head} {ref} {remote or '0' * len(head)}\n",
+    )
 
 
 def _was_local_tip(repo: Path, branch: str, sha: str) -> bool:

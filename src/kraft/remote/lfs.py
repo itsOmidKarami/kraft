@@ -77,7 +77,7 @@ def _env() -> dict[str, str]:
     return env
 
 
-def _pointers_among(repo: Path, candidates: Iterable[str]) -> dict[str, int]:
+def pointers_among(repo: Path, candidates: Iterable[str]) -> dict[str, int]:
     """The pointers among blob ids `candidates`: small blobs, read with one `cat-file --batch`."""
     ids = list(dict.fromkeys(candidates))
     if not ids:
@@ -137,14 +137,14 @@ def tree_pointers(repo: Path, rev: str) -> dict[str, int]:
             and int(meta[3]) <= POINTER_MAX
         ):
             blobs.append(meta[2])
-    return _pointers_among(repo, blobs)
+    return pointers_among(repo, blobs)
 
 
 def new_pointers(repo: Path, tip: str, exclude: Iterable[str]) -> dict[str, int]:
     """The pointers among the blobs `tip` has and `exclude` does not."""
     skip = [f"^{s}" for s in bundle.usable(repo, exclude)]
     listing = bundle._git(repo, "rev-list", "--objects", tip, *skip).stdout
-    return _pointers_among(repo, (line.split(" ", 1)[0] for line in listing.splitlines()))
+    return pointers_among(repo, (line.split(" ", 1)[0] for line in listing.splitlines()))
 
 
 def store(repo: Path) -> Path:
