@@ -578,20 +578,6 @@ def test_submit_review_says_only_a_human_should_decide():
     "tool, client_fn, args",
     [
         ("list_threads", "threads", {"work_item_id": "w1", "open_only": True}),
-        ("forge_mr", "forge_mr", {"work_item_id": "w1", "repo": "libs/core"}),
-        ("forge_pipelines", "forge_pipelines", {"work_item_id": "w1", "repo": "libs/core"}),
-        ("forge_jobs", "forge_jobs", {"pipeline": "5", "work_item_id": "w1", "repo": "x"}),
-        (
-            "forge_job_log",
-            "forge_job_log",
-            {"pipeline": "5", "job": "9", "work_item_id": "w1", "lines": 30, "repo": "x"},
-        ),
-        (
-            "forge_merged_mrs",
-            "forge_merged_mrs",
-            {"work_item_id": "w1", "limit": 5, "repo": "x"},
-        ),
-        ("forge_labels", "forge_labels", {"work_item_id": "w1", "repo": "x"}),
         (
             "compare_changes",
             "compare",
@@ -619,6 +605,20 @@ def test_submit_review_says_only_a_human_should_decide():
                 "quote": "-a\n+b",
             },
         ),
+        ("forge_mr", "forge_mr", {"work_item_id": "w1", "repo": "libs/core"}),
+        ("forge_pipelines", "forge_pipelines", {"work_item_id": "w1", "repo": "libs/core"}),
+        ("forge_jobs", "forge_jobs", {"pipeline": "5", "work_item_id": "w1", "repo": "x"}),
+        (
+            "forge_job_log",
+            "forge_job_log",
+            {"pipeline": "5", "job": "9", "work_item_id": "w1", "lines": 30, "repo": "x"},
+        ),
+        (
+            "forge_merged_mrs",
+            "forge_merged_mrs",
+            {"work_item_id": "w1", "limit": 5, "repo": "x"},
+        ),
+        ("forge_labels", "forge_labels", {"work_item_id": "w1", "repo": "x"}),
     ],
 )
 def test_each_review_tool_delegates_to_its_client_function(monkeypatch, tool, client_fn, args):

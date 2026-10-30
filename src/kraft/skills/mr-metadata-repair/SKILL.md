@@ -64,6 +64,10 @@ conflicts yourself: this worktree is the item's own, the next task after you
 resolves the merge request from whatever branch is checked out, and a merge
 left mid-conflict when your pass ends strands it there. If you need more than
 the log line gives you, use a read-only command that does
-not change what is checked out (`git merge-tree`, `git log`, `glab mr
-diff`) — and in any case there is nothing this task can do about a real
+not change what is checked out (`git merge-tree`, `git log`, `git diff
+origin/<base>...HEAD`) — and in any case there is nothing this task can do about a real
 conflict; say so and stop, the same as any other non-label failure.
+
+In a workspace item a failure names its repository (`[name] ...` in the log);
+for a member, add `--repo <its folder, relative to the worktree root>` to each
+`kraft view` call. Without `--repo` they read the root repository.
