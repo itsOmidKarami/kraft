@@ -41,7 +41,7 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
   const update = behind || restart || marked;
 
   // Unpinning only changes the mode: an unpinned sidebar is shown while the
-  // pointer is over it (or keyboard focus is in it) and hides when it leaves,
+  // pointer is over it or its button (or keyboard focus is in either) and hides when it leaves,
   // all in shell.css. Nothing here closes it for the pointer. From the
   // keyboard, Escape and a row chosen with Enter hand focus to the page, which
   // hides it: it stayed over the new page until every row was tabbed past (#502 review).
@@ -100,23 +100,25 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
   const SearchIcon = NAV_ICON.search;
 
   return (
-    <div className="ng-side">
-      <div className="ng-side-edge" aria-hidden />
-      <aside className="ng-sidebar" aria-label="Sidebar" onKeyDown={onSideKey}>
+    <div className="ng-side" onKeyDown={onSideKey}>
+      {/* Outside the panel, so it stays in the top-left corner pinned or not; hovering it reveals the panel. */}
+      <button
+        type="button"
+        className="ng-side-pin"
+        aria-pressed={mode === "pinned"}
+        // One name, its state in aria-pressed: a label that swapped with it read "Collapse sidebar, pressed" (R8b-11). The tooltip says what a press does.
+        {...tip("Pin sidebar", mode === "pinned" ? "Collapse sidebar" : "Pin sidebar")}
+        onClick={toggle}
+      >
+        {mode === "pinned" ? <PanelLeftClose size={16} aria-hidden /> : <PanelLeftOpen size={16} aria-hidden />}
+        {/* Collapsed, the Board row's dot is out of sight; the button carries it. */}
+        {mode === "rail" && needsYou > 0 && <span className="ng-side-dot" aria-hidden />}
+      </button>
+      <aside className="ng-sidebar" aria-label="Sidebar">
         <div className="ng-side-head">
           <span className={`ng-side-live-dot ${tone}`} role="img" aria-label={word} />
           <span className="ng-side-brand ng-side-label">Kraft</span>
           <span className={`ng-side-live ng-side-label ${tone}`}>{word}</span>
-          <button
-            type="button"
-            className="ng-side-pin"
-            aria-pressed={mode === "pinned"}
-            // One name, its state in aria-pressed: a label that swapped with it read "Collapse sidebar, pressed" (R8b-11). The tooltip says what a press does.
-            {...tip("Pin sidebar", mode === "pinned" ? "Collapse sidebar" : "Pin sidebar")}
-            onClick={toggle}
-          >
-            {mode === "pinned" ? <PanelLeftClose size={16} aria-hidden /> : <PanelLeftOpen size={16} aria-hidden />}
-          </button>
         </div>
         <nav className="ng-side-nav" aria-label="Pages">
           <button type="button" className="ng-side-row" aria-keyshortcuts="Meta+K Control+K" onClick={() => onSearch?.()}>

@@ -100,11 +100,13 @@ describe("ng Sidebar", () => {
     expect(document.documentElement.dataset.sidebar).toBe(now === "true" ? "pinned" : "rail");
   });
 
-  it("puts the pin in the head beside Kraft · live, its panel icon and title following the state", async () => {
+  // Outside the panel, so the panel's slide never moves it: the same corner pinned or collapsed.
+  it("puts the pin beside the panel, not in it, its panel icon and title following the state", async () => {
     localStorage.setItem(SIDEBAR_KEY, "pinned");
     mount();
     const pin = screen.getByRole("button", { name: "Pin sidebar" });
-    expect(pin.closest(".ng-side-head")).not.toBeNull();
+    expect(pin.parentElement).toHaveClass("ng-side");
+    expect(pin.closest(".ng-sidebar")).toBeNull();
     expect(pin).toHaveAttribute("data-tip", "Collapse sidebar");
     expect(pin.querySelector(".lucide-panel-left-close")).not.toBeNull();
     await userEvent.click(pin);
@@ -164,7 +166,7 @@ describe("ng Sidebar", () => {
     await act_();
     expect(screen.getByRole("button", { name: "Pin sidebar" })).toHaveAttribute("aria-pressed", "false");
     expect(document.querySelector(".ng-side")!.attributes).toHaveLength(1);
-    expect(document.querySelector(".ng-sidebar")).toContainElement(document.activeElement as HTMLElement);
+    expect(document.querySelector(".ng-side")).toContainElement(document.activeElement as HTMLElement);
   });
 
   // #502 review (WCAG 1.4.13): shown by focus, an unpinned sidebar could not be dismissed from the
@@ -195,6 +197,18 @@ describe("ng Sidebar", () => {
     mount();
     expect(countIn(Object.values(items) as never, "needs")).toBe(2);
     expect(screen.getByRole("link", { name: "Board, 2 need you" })).toBeInTheDocument();
+  });
+
+  // Collapsed, the Board row is out of sight, so the pin carries its dot.
+  it.each<["pinned" | "rail", number, boolean]>([
+    ["rail", 1, true],
+    ["rail", 0, false],
+    ["pinned", 1, false],
+  ])("puts the Needs you dot on the pin when %s with %i needing you: %s", (side, n, dot) => {
+    localStorage.setItem(SIDEBAR_KEY, side);
+    useStore.setState({ workItems: n ? { [ITEM.id]: ITEM } : {} } as never);
+    mount();
+    expect(screen.getByRole("button", { name: "Pin sidebar" }).querySelector(".ng-side-dot") !== null).toBe(dot);
   });
 
   it("marks the Board when an item needs you or failed, from the server's display_status", () => {

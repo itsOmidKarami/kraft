@@ -31,8 +31,9 @@
 
 /* Sidebar. Layout width comes from <html data-sidebar>, which boot sets before
    its first await; with the attribute absent it is pinned. Unpinned takes no
-   width at all: an 8px strip on the left edge reveals it as a 210px overlay,
-   which hides 180ms after the pointer leaves. Keyboard focus reveals it too,
+   width at all: its pin button, which stays in the top-left corner over the
+   page's header, reveals it as a 210px overlay, which hides 180ms after the
+   pointer leaves. Keyboard focus reveals it too,
    and a click's focus does not: a clicked row would otherwise hold it open
    after the pointer left. Hidden by transform, not visibility, so its rows
    stay in the tab order. */
@@ -40,14 +41,13 @@
 :root[data-sidebar="rail"] { --ng-side-w: 0px; }
 /* Held to the viewport: stretched to a tall page's height, it put the footer's version below the fold. */
 .ng-side { position: sticky; top: 0; height: 100vh; z-index: 20; flex: none; width: var(--ng-side-w); }
-.ng-side-edge { display: none; position: absolute; inset: 0 auto 0 0; width: 8px; }
-:root[data-sidebar="rail"] .ng-side-edge { display: block; }
 .ng-sidebar { position: absolute; inset: 0 auto 0 0; box-sizing: border-box; width: 210px; display: flex; flex-direction: column; overflow: hidden; background: var(--side); border-right: 1px solid var(--line); font-size: var(--fs-meta); }
 :root[data-sidebar="rail"] .ng-sidebar { transform: translateX(-100%); box-shadow: 0 0 0 1px transparent, 16px 0 40px transparent; transition: transform .12s ease .18s, box-shadow .16s ease .18s; }
 :root[data-sidebar="rail"] .ng-side:is(:hover, :has(:focus-visible)) .ng-sidebar { transform: none; transition-delay: 0s; box-shadow: 0 0 0 1px var(--border), 16px 0 40px var(--side-shade); }
 @media (prefers-reduced-motion: reduce) { :root[data-sidebar="rail"] .ng-sidebar { transition: none; } }
 .ng-side-label { white-space: nowrap; }
-.ng-side-head { display: flex; align-items: center; gap: 10px; height: 44px; flex: none; box-sizing: border-box; padding: 0 17px; border-bottom: 1px solid var(--line); }
+.ng-side-head { display: flex; align-items: center; gap: 10px; height: 44px; flex: none; box-sizing: border-box; padding: 0 17px 0 41px; border-bottom: 1px solid var(--line); }
+:root[data-sidebar="rail"] .ng-header { padding-left: 41px; }
 .ng-side-brand { font-weight: 600; font-size: var(--fs-meta); }
 .ng-side-live { font-size: var(--fs-meta); }
 .ng-side-live.ok, .ng-side-live-dot.ok { color: var(--ok); }
@@ -77,7 +77,9 @@
 .ng-side-ver { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ng-side-update { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; color: var(--warn); }
 .ng-side-update .ng-side-dot { margin-left: 0; }
-.ng-side-pin { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; margin-left: auto; margin-right: -9px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--text-muted); cursor: pointer; }
+/* Over the panel's head and the page's header alike, its icon in line with the rows' icons. */
+.ng-side-pin { position: absolute; top: 9px; left: 7px; z-index: 1; display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--text-muted); cursor: pointer; }
+.ng-side-pin .ng-side-dot { position: absolute; top: 3px; right: 3px; margin: 0; box-shadow: 0 0 0 1.5px var(--bg); }
 .ng-side-pin:hover { color: var(--text); background: var(--surface-2); }
 .ng-side-pin[aria-pressed="true"] { color: var(--text); }
 .ng-offline { flex: none; display: flex; align-items: center; gap: 12px; padding: 9px 14px; border-bottom: 1px solid color-mix(in oklab, var(--bad) 40%, transparent); background: color-mix(in oklab, var(--bad) 10%, var(--bg)); font-size: var(--fs-meta); }

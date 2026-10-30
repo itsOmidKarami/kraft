@@ -17,7 +17,7 @@ const click = (name: string | RegExp, exact = true) => async (p: Page) => {
   await p.waitForTimeout(600);
 };
 const away = async (p: Page) => { await p.mouse.move(700, 420); await p.waitForTimeout(600); };
-const hoverEdge = (x: number) => async (p: Page) => { await p.mouse.move(x, 420); await p.waitForTimeout(700); };
+const hoverPin = async (p: Page) => { await p.getByRole("button", { name: "Pin sidebar" }).hover(); await p.waitForTimeout(700); };
 
 /** The app's sidebar toggle: one button, its state in aria-pressed. */
 const appToggle = async (p: Page) => { await p.getByRole("button", { name: "Pin sidebar" }).click(); await p.waitForTimeout(400); };
@@ -85,7 +85,7 @@ const dragLastHandle = async (pg: Page) => {
   const g = (await pg.locator('[data-tip="Drag to change the last line"]').first().boundingBox())!, t = (await num(pg, "new", 8).boundingBox())!;
   await pg.mouse.move(g.x + g.width / 2, g.y + g.height / 2); await pg.mouse.down(); await pg.mouse.move(t.x + 4, t.y + t.height / 2, { steps: 6 }); await pg.mouse.up();
 };
-const reveal = async (pg: Page) => { await pg.mouse.move(3, 420); await pg.waitForTimeout(600); await pg.mouse.move(100, 420, { steps: 4 }); await pg.waitForTimeout(500); };
+const reveal = async (pg: Page) => { await pg.getByRole("button", { name: "Pin sidebar" }).hover(); await pg.waitForTimeout(600); await pg.mouse.move(100, 420, { steps: 4 }); await pg.waitForTimeout(500); };
 
 const at = (_name: string, url: ReturnType<typeof item> | string, o: AppOpts = {}): Pick<State, "app"> => ({ app: (p) => app(p, url, o) });
 
@@ -95,8 +95,8 @@ export const STATES: State[] = [
   // Sidebar
   { area: "sidebar", state: "expanded", app: (p) => app(p, "/") },
   { area: "sidebar", state: "collapsed", app: async (p) => { await app(p, "/"); await appToggle(p); await away(p); } },
-  { area: "sidebar", state: "hover-expand", app: async (p) => { await app(p, "/"); await appToggle(p); await away(p); await hoverEdge(3)(p); } },
-  { area: "sidebar", state: "pinned", app: async (p) => { await app(p, "/"); await appToggle(p); await away(p); await hoverEdge(3)(p); await appToggle(p); await away(p); } },
+  { area: "sidebar", state: "hover-expand", app: async (p) => { await app(p, "/"); await appToggle(p); await away(p); await hoverPin(p); } },
+  { area: "sidebar", state: "pinned", app: async (p) => { await app(p, "/"); await appToggle(p); await away(p); await hoverPin(p); await appToggle(p); await away(p); } },
   { area: "sidebar", state: "update", app: (p) => app(p, "/") },
 
   // Board
