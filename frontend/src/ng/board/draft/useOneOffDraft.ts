@@ -2,13 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Answer } from "../../http";
 import { detailOf, jsonBody, request } from "../../http";
 import type { ChainNode } from "../../../types";
-import type { CustomPart } from "../../item/oneOff";
+import type { AddedCheck, CustomPart } from "../../item/oneOff";
 import type { DraftStatus } from "../../templates/draft/useConfigDraft";
 import { TEXT_DEBOUNCE_MS, type ConfigDraft } from "../../templates/draft/useConfigDraft";
 import type { Op, OpsView, Scope } from "../../templates/draft/types";
 
 /** `POST /one-off-chain/ops`'s answer: the editor's draft view, plus the chain it resolves to. */
-export type OneOffView = OpsView & { text: string; digest: string | null; custom: CustomPart[]; custom_nodes: string[]; nodes: ChainNode[] };
+export type OneOffView = OpsView & { text: string; digest: string | null; custom: CustomPart[]; custom_nodes: string[]; nodes: ChainNode[];
+  /** Each added node's checks: its harnesses and what one run of it is estimated to cost. */ added: AddedCheck[] };
 
 export const answerValid = (v: OneOffView | null) => !!v && !v.result.yaml_error && v.result.problems.length === 0 && v.digest !== null;
 
@@ -131,7 +132,8 @@ export function useOneOffDraft(text: string, onText: (t: string) => void): OneOf
     return send([], { text: prev, undo: true }) as unknown as Promise<Answer<never>>;
   }, [send, flushText]);
 
-  useEffect(() => () => { live.current = false; flushText(); }, [flushText]);
+  // Leaving drops a typed edit still waiting: its answer would land on a page that is gone.
+  useEffect(() => () => { live.current = false; if (typed.current) clearTimeout(typed.current.timer); typed.current = null; }, []);
 
   const valid = answerValid(view) && !rejected;
   const scope: Scope = useMemo(() => ({ area: "chains", key: view?.key ?? "one-off" }), [view?.key]);

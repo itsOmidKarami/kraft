@@ -25,14 +25,16 @@ import { useOneOffDraft, type OneOffView } from "./useOneOffDraft";
 import { draftBody, emptyDraft, nodeOverrides, type DraftState } from "./draftBody";
 import "../board.css";
 import { coveredText } from "../../item/chainName";
+import { plural } from "../../item/oneOff";
 import "../../item/item.css";
-import { sendOnModEnter } from "../../keys";
+import { isTextField, sendOnModEnter } from "../../keys";
 import { tip } from "../../ui/Tooltip";
 import { DISCARD_THIS_DRAFT } from "../sharedWords";
 import { Badge } from "../../ui/Badge";
+import { Button } from "../../ui/Button";
+import { Empty } from "../../ui/Empty";
 import { chipClass } from "../../ui/Chip";
 
-const FIX_CHAIN = "Fix the chain's problems first";
 export const DRAFT_KEY = "kraft.ng.newItem";
 type DryRun = { nodes: ChainNode[]; skipped: { node: string; why: string; kind?: string }[]; gates: string[]; caps: { budget_usd: number | null; budget_source: string; nodes: Record<string, { attempts: number; wall_clock_s: number }> } };
 type Tab = "overview" | "config" | "yaml";
@@ -53,6 +55,8 @@ function loadDraft(state: unknown, q: URLSearchParams): DraftState {
   }
   return emptyDraft({ title: q.get("title") ?? "", brief: q.get("brief") ?? "", repo: q.get("repo") ?? "", chain: q.get("chain") ?? "", spec: q.get("spec") ?? "", plan: q.get("plan") ?? "", bead: q.get("bead") ?? "" });
 }
+/** The overrides a chain's own nodes keep: one for a node it no longer has goes with it. */
+const keepIds = (ids: Set<string>, r: Record<string, string>) => Object.fromEntries(Object.entries(r).filter(([k]) => ids.has(k)));
 const forget = () => { try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* nothing kept */ } };
 
 /** `/work-items/new` (W6 brief G): the item page for an item that does not
@@ -74,6 +78,8 @@ export function DraftItemPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [review, setReview] = useState<{ autostart: boolean; view: OneOffView } | null>(null);
+  // A re-read on Approve that failed: said in the review, which stays open.
+  const [reviewError, setReviewError] = useState<string | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   const [frame, canvasW] = useWidth();
   const size = useResizable("draft", canvasW);
@@ -82,7 +88,9 @@ export function DraftItemPage() {
   const own = d.oneOff != null;
   // What the chain extends now: gone once `extends:` is taken out of its YAML.
   const parent = oo.view?.result.extending?.parent ?? null;
-  const dirty = !!(d.title.trim() || d.brief.trim());
+  // A designed chain counts: leaving asks before it is lost.
+  const dirty = !!(d.title.trim() || d.brief.trim() || own);
+  const chainText = own ? `one-off${parent ? ` · extends ${parent}` : ""}` : d.chain || "chain";
   const setPageItem = usePageItem((s) => s.set);
   const items = useStore((s) => s.workItems);
   // What it can come after: every item that has not ended (the server refuses a cancelled one), less the ones picked.
@@ -121,9 +129,8 @@ export function DraftItemPage() {
   useEffect(() => {
     if (!own || !oo.nodes.length) return;
     const ids = new Set(oo.nodes.map((n) => n.id));
-    const keep = (r: Record<string, string>) => Object.fromEntries(Object.entries(r).filter(([k]) => ids.has(k)));
     setD((x) => {
-      const skip = x.skip.filter((i) => ids.has(i)), a = keep(x.nodeAttempts), w = keep(x.nodeWallMin);
+      const skip = x.skip.filter((i) => ids.has(i)), a = keepIds(ids, x.nodeAttempts), w = keepIds(ids, x.nodeWallMin);
       const same = skip.length === x.skip.length && Object.keys(a).length === Object.keys(x.nodeAttempts).length && Object.keys(w).length === Object.keys(x.nodeWallMin).length;
       return same ? x : { ...x, skip, nodeAttempts: a, nodeWallMin: w };
     });
@@ -148,13 +155,35 @@ export function DraftItemPage() {
   const run = dry && "run" in dry ? dry.run : null;
   const covered = new Map((run?.skipped ?? []).filter((s) => s.why === "covered_by").map((s) => [s.node, s.kind ?? ""]));
   const skipped = (id: string) => covered.has(id) || d.skip.includes(id);
+  const metaOf = (id: string) => (covered.has(id) ? "covered" : d.skip.includes(id) ? "skipped" : undefined);
   const ran = full.filter((n) => !skipped(n.id));
   const gates = ran.filter((n) => n.kind === "gate").length;
   const runText = `${ran.length} of ${full.length} nodes run · ${gates} gate${gates === 1 ? "" : "s"}`;
   const nodes: GraphNode[] = useMemo(() => full.map((n) => ({
     id: n.id, kind: n.kind === "gate" ? "gate" : "exec", icon: (n.steps?.length ?? 0) > 1 ? "layers" : undefined, state: "plain",
-    skipped: skipped(n.id), meta: covered.has(n.id) ? "covered" : d.skip.includes(n.id) ? "skipped" : undefined, metaTone: "amber",
+    skipped: skipped(n.id), meta: metaOf(n.id), metaTone: "amber",
   })), [full, run, d.skip]); // eslint-disable-line react-hooks/exhaustive-deps
+  const skips = Object.fromEntries(full.filter((n) => skipped(n.id)).map((n) => [n.id, metaOf(n.id)!]));
+
+  // Leaving the one-off chain drops it at once, with an Undo that puts it back.
+  const dropOneOff = (p: Partial<DraftState>) => {
+    const was = { oneOff: d.oneOff, chain: d.chain, skip: d.skip };
+    set({ ...p, oneOff: null });
+    setSel(null);
+    showToast("One-off chain dropped", { ms: 6000, action: { label: "Undo", run: () => set(was) } });
+  };
+  // ⌘Z undoes the chain's last edit, outside a text field, as in the Chains editor.
+  const undo = oo.undo;
+  useEffect(() => {
+    if (!own) return;
+    const on = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "z" || isTextField(e.target)) return;
+      e.preventDefault();
+      void undo();
+    };
+    window.addEventListener("keydown", on);
+    return () => window.removeEventListener("keydown", on);
+  }, [own, undo]);
 
   // Leaving with a title or brief asks first (Decisions §7b Leaving): the
   // crumbs, the sidebar, Cancel and Esc all come through here.
@@ -210,16 +239,20 @@ export function DraftItemPage() {
       await oo.flush();
       const l = oo.latest();
       if (!l?.valid) return;
-      if (l.view.custom.length) return setReview({ autostart, view: l.view });
+      if (l.view.custom.length) {
+        setReviewError(null);
+        return setReview({ autostart, view: l.view });
+      }
     }
     await submit(autostart);
   };
   const submit = async (autostart: boolean, seen?: OneOffView) => {
     if (own && seen) {
       // The review showed `seen`: the chain is read once more (typed text first), and anything that moved since is shown again, never filed unread.
-      await oo.ops([], { quiet: true });
+      const a = await oo.ops([], { quiet: true });
       const now = oo.latest();
-      if (!now?.valid) return setReview(null);
+      if (a.status !== 200 || !now?.valid) return setReviewError(a.status !== 200 ? detailOf(a.body) : "The chain has problems now. Fix them, then approve it again.");
+      setReviewError(null);
       if (now.view.text !== seen.text || JSON.stringify(now.view.custom) !== JSON.stringify(seen.custom)) return setReview({ autostart, view: now.view });
     }
     setReview(null);
@@ -228,8 +261,7 @@ export function DraftItemPage() {
     const l = own ? oo.latest() : null;
     // What the last answer left of the chain: a node it no longer has takes its skip and caps with it.
     const ids = new Set(l?.view.nodes.map((n) => n.id));
-    const keep = (r: Record<string, string>) => Object.fromEntries(Object.entries(r).filter(([k]) => ids.has(k)));
-    const body = l ? draftBody({ ...d, oneOff: l.view.text, skip: d.skip.filter((i) => ids.has(i)), nodeAttempts: keep(d.nodeAttempts), nodeWallMin: keep(d.nodeWallMin) }, l.view.nodes, ws?.id ?? null, autostart, l.view.custom.length ? l.view.digest : null) : draftBody(d, full, ws?.id ?? null, autostart);
+    const body = l ? draftBody({ ...d, oneOff: l.view.text, skip: d.skip.filter((i) => ids.has(i)), nodeAttempts: keepIds(ids, d.nodeAttempts), nodeWallMin: keepIds(ids, d.nodeWallMin) }, l.view.nodes, ws?.id ?? null, autostart, l.view.custom.length ? l.view.digest : null) : draftBody(d, full, ws?.id ?? null, autostart);
     const r = await request<Created>("/work-items", jsonBody("POST", body));
     setBusy(false);
     if (r.status !== 201 && r.status !== 200) return setError(detailOf(r.body));
@@ -241,6 +273,9 @@ export function DraftItemPage() {
   };
 
   const ok = !!d.title.trim() && !busy && !(dry && "error" in dry) && (!own || oo.valid);
+  // A problem only once the chain has been read: in flight or unreadable, the canvas says so instead.
+  const chainBad = own && !!oo.view && !oo.valid;
+  const repoChains = chainsForRepo(chains, repos.find((r) => r.path === d.repo)?.id).filter((c) => !c.error);
   const node = sel ? full.find((n) => n.id === sel) ?? null : null;
   const overrides = nodeOverrides(d, full);
   const configBadge = (d.autoEscalate ? 1 : 0) + (d.autoGate ? 0 : 1) + (d.budget.trim() ? 1 : 0) + (d.attempts.trim() ? 1 : 0) + (d.wallMin.trim() ? 1 : 0);
@@ -252,9 +287,9 @@ export function DraftItemPage() {
   return (
     <div className="draft-page" ref={page}>
       <HeaderActions>
-        <Badge id={tagId} mono tone={d.title.trim() ? "muted" : "change"}>{d.title.trim() ? "DRAFT · NOT CREATED" : "ADD A TITLE TO CREATE"}</Badge>
+        <Badge id={tagId} mono tone={d.title.trim() && !chainBad ? "muted" : "change"}>{!d.title.trim() ? "ADD A TITLE TO CREATE" : chainBad ? "FIX THE CHAIN TO CREATE" : "DRAFT · NOT CREATED"}</Badge>
         <button type="button" className="btn btn-secondary" onClick={() => leave("/")}>Cancel</button>
-        <CreateSplit disabled={!ok} describedBy={d.title.trim() ? undefined : tagId} title={own && !oo.valid ? FIX_CHAIN : undefined} onCreate={create} />
+        <CreateSplit disabled={!ok} describedBy={!d.title.trim() || chainBad ? tagId : undefined} onCreate={create} />
       </HeaderActions>
       {error && <p className="item-error" role="alert">{error}</p>}
       <h1 className="board-visually-hidden">New work item</h1>
@@ -309,11 +344,11 @@ export function DraftItemPage() {
           </button>
         )}
       </div>
-      {own && oo.error && <p className="item-error" role="alert">{oo.error}</p>}
+      {own && oo.error && oo.view && <p className="item-error" role="alert">{oo.error}</p>}
       {dry && "error" in dry && <p className="item-error" role="alert">{dry.error}</p>}
       <div className="draft-canvas" ref={frame}>
         {own ? (
-          oo.view && (
+          !oo.view ? <ChainState error={oo.error} retry={() => void oo.ops([])} /> : (
             <ChainCanvas
               scope={oo.scope}
               result={oo.view.result}
@@ -321,6 +356,8 @@ export function DraftItemPage() {
               selected={sel ?? undefined}
               reserve={size.overlay ? 0 : paneOpen ? size.width : 40}
               custom={oo.customNodes}
+              names
+              skips={skips}
               onSelect={(id) => { setSel(id); setTab((t) => (sel === id ? t : "overview")); }}
               onOpen={(id) => { setSel(id); setPaneOpen(true); }}
               onFocusNode={(id) => { setSel(id); setPaneOpen(true); }}
@@ -329,7 +366,13 @@ export function DraftItemPage() {
               refused={refused}
               onAdd={async () => false}
               addMenu={({ anchor, at, taken, refused, onClose }) => (
-                <OneOffAddMenu anchor={anchor} at={at} taken={taken} refused={refused} onClose={onClose} send={async (ops) => { const a = await oo.ops(ops, { quiet: true }); setRefused(a.status === 200 ? null : detailOf(a.body)); return a.status === 200; }} />
+                <OneOffAddMenu anchor={anchor} at={at} taken={taken} refused={refused} onClose={onClose} send={async (ops) => {
+                  const a = await oo.ops(ops, { quiet: true });
+                  setRefused(a.status === 200 ? null : detailOf(a.body));
+                  // The new node selected and its pane open, as the Chains editor opens one.
+                  if (a.status === 200) { setSel(String(ops[0].id)); setTab("overview"); setPaneOpen(true); }
+                  return a.status === 200;
+                }} />
               )}
             />
           )
@@ -354,15 +397,16 @@ export function DraftItemPage() {
             label="Chain"
             description={repos.find((r) => r.path === d.repo)?.default_chain ? defaultChainNote(repos.find((r) => r.path === d.repo)!.default_chain!) : undefined}
             triggerClass={chipClass("composer-mono draft-chain-btn")}
-            trigger={<>{own ? `one-off${parent ? ` · extends ${parent}` : ""}` : d.chain || "chain"} <span aria-hidden className="board-caret">▾</span></>}
+            trigger={<>{chainText} <span aria-hidden className="board-caret">▾</span></>}
             items={[
-              ...chainsForRepo(chains, repos.find((r) => r.path === d.repo)?.id).filter((c) => !c.error).map((c) => ({ label: chainOptionText(c), checked: !own && c.id === d.chain, onSelect: () => { set({ chain: c.id, skip: [], oneOff: null }); setSel(null); } })),
+              ...repoChains.map((c) => ({ label: chainOptionText(c), checked: !own && c.id === d.chain, onSelect: () => (own ? dropOneOff({ chain: c.id, skip: [] }) : (set({ chain: c.id, skip: [] }), setSel(null))) })),
               ...(own
-                ? [{ label: `Back to ${d.chain}`, group: "This item", onSelect: () => { set({ oneOff: null }); setSel(null); } }]
-                : d.chain ? [{ label: "Customize for this item", group: "This item", onSelect: () => { set({ oneOff: `id: one-off\nextends: ${d.chain}\n` }); setSel(null); } }] : []),
+                ? [{ label: `Back to ${d.chain}`, group: "This item", onSelect: () => dropOneOff({}) }]
+                // Only a library chain of this repo, quoted: the id came from the address and is never YAML of its own.
+                : repoChains.some((c) => c.id === d.chain) ? [{ label: "Customize for this item", group: "This item", onSelect: () => { set({ oneOff: `id: one-off\nextends: ${JSON.stringify(d.chain)}\n` }); setSel(null); } }] : []),
             ]}
           />
-          <span>{runText}</span>
+          {(!own || oo.view) && <span>{runText}</span>}
         </div>
         <Inspector
           id="draft-pane"
@@ -372,7 +416,7 @@ export function DraftItemPage() {
           icon={node ? undefined : "workflow"}
           gate={node?.kind === "gate"}
           title={node ? node.id : own ? "one-off chain" : d.chain || "chain"}
-          sub={node ? `${node.kind === "gate" ? "gate" : "exec node"} · ${skipped(node.id) ? "skipped" : "will run"}` : own ? `${parent ? `Extends ${parent} · ` : ""}${oo.customNodes.length} custom · ${runText}` : `Draft item · ${runText}`}
+          sub={node ? `${node.kind === "gate" ? "gate" : "exec node"} · ${skipped(node.id) ? "skipped" : "will run"}` : own ? `${parent ? `Extends ${parent} · ` : ""}${oo.customNodes.length} ${plural(oo.customNodes.length, "custom node", "custom nodes")} · ${runText}` : `Draft item · ${runText}`}
           tabs={[{ value: "overview", label: "Overview" }, { value: "config", label: configBadge && !node ? `Config · ${configBadge}` : "Config" }, { value: "yaml", label: "YAML" }]}
           tab={tab}
           onTab={(t) => setTab(t as Tab)}
@@ -380,7 +424,7 @@ export function DraftItemPage() {
           onExpand={() => setPaneOpen(true)}
         >
           {tab === "overview" && !node && (
-            <ChainOverview d={d} set={set} full={full} runText={runText} skippedIds={full.filter((n) => skipped(n.id)).map((n) => n.id)} ws={ws} memberRows={memberRows} addOpen={addOpen} setAddOpen={setAddOpen} />
+            <ChainOverview d={d} set={set} full={full} chainText={chainText} runText={runText} skippedIds={full.filter((n) => skipped(n.id)).map((n) => n.id)} ws={ws} memberRows={memberRows} addOpen={addOpen} setAddOpen={setAddOpen} />
           )}
           {tab === "overview" && node && (
             <NodeOverview node={node} full={full} covered={covered.get(node.id) ?? null} skippedByYou={d.skip.includes(node.id)} onToggle={() => set({ skip: d.skip.includes(node.id) ? d.skip.filter((x) => x !== node.id) : [...d.skip, node.id] })} />
@@ -389,17 +433,17 @@ export function DraftItemPage() {
           {tab === "config" && node && (
             <NodeConfig d={d} set={set} node={node} covered={covered.get(node.id) ?? null} cap={run?.caps.nodes[node.id] ?? null} />
           )}
-          {tab === "yaml" && own && oo.view && <div className="draft-pane-body"><YamlView draft={oo} scope={oo.scope} published={undefined} /></div>}
+          {tab === "yaml" && own && (oo.view ? <div className="draft-pane-body"><YamlView draft={oo} scope={oo.scope} published={undefined} oneOff /></div> : <ChainState error={oo.error} retry={() => void oo.ops([])} />)}
           {tab === "yaml" && !own && <Yaml chain={d.chain} rows={yamlRows(d, node ? { [node.id]: overrides[node.id] ?? {} } : overrides, node?.id ?? null)} />}
         </Inspector>
       </div>
       {review && own && (
-        <OneOffCreateReview base={review.view.result.extending?.parent ?? null} custom={review.view.custom} busy={busy} onApprove={() => void once(() => submit(review.autostart, review.view))} onClose={() => setReview(null)} />
+        <OneOffCreateReview base={review.view.result.extending?.parent ?? null} custom={review.view.custom} text={review.view.text} extending={review.view.result.extending} added={review.view.added} error={reviewError} busy={busy} onApprove={() => void once(() => submit(review.autostart, review.view))} onClose={() => setReview(null)} />
       )}
       {ask && (
         <div className="draft-ask" role="alertdialog" aria-label={DISCARD_THIS_DRAFT}>
           <b>{DISCARD_THIS_DRAFT}</b>
-          <span>Nothing has been created. The title, brief and settings you entered are lost.</span>
+          <span>Nothing has been created. The title, brief{own ? ", one-off chain" : ""} and settings you entered are lost.</span>
           <div className="item-actions">
             <button type="button" className="btn btn-danger" onClick={() => { const to = ask.to; setAsk(null); go(to); }}>Discard</button>
             <button type="button" className="btn btn-secondary" autoFocus onClick={() => setAsk(null)}>Keep editing</button>
@@ -410,8 +454,15 @@ export function DraftItemPage() {
   );
 }
 
-function ChainOverview({ d, set, full, runText, skippedIds, ws, memberRows, addOpen, setAddOpen }: {
-  d: DraftState; set: (p: Partial<DraftState>) => void; full: ChainNode[]; runText: string; skippedIds: string[];
+/** The one-off chain's canvas and YAML before its first answer: reading, or why it could not be read. */
+function ChainState({ error, retry }: { error: string | null; retry: () => void }) {
+  return error
+    ? <Empty variant="block" className="draft-chain-state" role="alert" action={<Button onClick={retry}>Try again</Button>}>Couldn't read this item's chain. {error}</Empty>
+    : <Empty variant="block" className="draft-chain-state" role="status">Reading the chain…</Empty>;
+}
+
+function ChainOverview({ d, set, full, chainText, runText, skippedIds, ws, memberRows, addOpen, setAddOpen }: {
+  d: DraftState; set: (p: Partial<DraftState>) => void; full: ChainNode[]; chainText: string; runText: string; skippedIds: string[];
   ws: Workspace | null; memberRows: { id: string; path: string; test: string | null }[]; addOpen: boolean; setAddOpen: (o: boolean) => void;
 }) {
   const [mq, setMq] = useState("");
@@ -422,7 +473,7 @@ function ChainOverview({ d, set, full, runText, skippedIds, ws, memberRows, addO
     <div className="draft-pane-body">
       <dl className="item-facts">
         <div><dt>repo</dt><dd>{repoName(d.repo)}</dd></div>
-        <div><dt>chain</dt><dd>{d.chain} · {full.length} nodes</dd></div>
+        <div><dt>chain</dt><dd>{chainText} · {full.length} nodes</dd></div>
         <div><dt>will run</dt><dd>{runText}</dd></div>
         <div><dt>skipped</dt><dd>{skippedIds.join(", ") || "none"}</dd></div>
         <div><dt>attached</dt><dd>{attached || "nothing"}</dd></div>

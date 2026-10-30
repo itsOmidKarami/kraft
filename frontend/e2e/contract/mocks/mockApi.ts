@@ -461,6 +461,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
         ...v, ops: (b.ops ?? []).map((o: any) => ({ op: o.op })), text, digest: "a".repeat(64), nodes,
         custom: added.map((a) => ({ path: `add[${a.id}].node`, what: `adds '${a.id}', a node with its own content rather than library parts`, value: a.prompt })),
         custom_nodes: added.map((a) => a.id),
+        added: added.map((a) => ({ node: a.id, harnesses: ["claude"], estimate_usd: null, estimate_runs: null })),
       });
     }
     /* one-off chains: what Start reviews before an item with custom content runs */

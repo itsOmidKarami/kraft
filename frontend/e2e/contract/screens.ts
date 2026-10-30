@@ -181,7 +181,7 @@ export const STATES: State[] = [
   { area: "new-item", state: "one-off", app: appOneOff() },
   { area: "new-item", state: "one-off-add", app: appOneOff(addCustomNode) },
   { area: "new-item", state: "one-off-yaml", app: appOneOff((p) => p.getByRole("tab", { name: "YAML" }).click()) },
-  { area: "new-item", state: "one-off-review", app: appOneOff(async (p) => { await addCustomNode(p); await p.getByRole("button", { name: /Add node/ }).click(); await p.waitForTimeout(800); await p.getByRole("button", { name: "Create paused" }).click(); await p.waitForTimeout(500); }) },
+  { area: "new-item", state: "one-off-review", app: appOneOff(async (p) => { await addCustomNode(p); await p.getByRole("button", { name: "Create & open →" }).click(); await p.waitForTimeout(800); await p.getByRole("button", { name: "Create paused" }).click(); await p.waitForTimeout(500); }) },
   { area: "item", state: "start-review", app: async (p) => { await app(p, item("paused"), { tweak: withOneOffPending }); await p.getByRole("banner").getByRole("button", { name: "Start" }).click(); await p.waitForTimeout(700); } },
   { area: "new-item", state: "draft-node", app: async (p) => { await app(p, `/work-items/new?${new URLSearchParams({ repo: "/Users/dev/code/kraft-plugins", chain: "default", title: "Design the caching layer for document search" })}`, { ready: (pg) => pg.getByText(/nodes run ·/).first().waitFor() }); await p.waitForTimeout(500); { const n = p.getByRole("button", { name: /^approve spec,/ }).last(); await n.focus(); await p.keyboard.press("Enter"); } await p.waitForTimeout(600); } },
 

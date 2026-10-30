@@ -25,7 +25,8 @@ export function jumpTo(ta: HTMLTextAreaElement | null, scroller: HTMLElement | n
  *  changed lines marked against the published file, problems on their line
  *  and in a docked pane, a syntax error keeping the canvas on the last valid
  *  draft. No autocomplete; Tab inserts two spaces. */
-export function YamlView({ draft, scope, published, file: named }: { draft: ConfigDraft; scope: Scope; published: string | null | undefined; /** An area's file (repos, policy, intake); a chain or the library finds its own. */ file?: string }) {
+export function YamlView({ draft, scope, published, file: named, oneOff = false }: { draft: ConfigDraft; scope: Scope; published: string | null | undefined; /** An area's file (repos, policy, intake); a chain or the library finds its own. */ file?: string;
+  /** A new item's own chain: no file, nothing published to differ from, and its words. */ oneOff?: boolean }) {
   const view = draft.view!;
   const readOnly = useContext(ReadOnly);
   const file = named ?? scopeFile(view.files, scope);
@@ -34,6 +35,7 @@ export function YamlView({ draft, scope, published, file: named }: { draft: Conf
   const stored = view.files[file] ?? "";
   const [text, setText] = useState(stored);
   const typing = useRef(false);
+  const what = oneOff ? "chain" : "draft";
   // The last text that parsed: what "Revert to last valid draft" puts back.
   const lastGood = useRef(stored);
   if (!r.yaml_error) lastGood.current = stored;
@@ -67,21 +69,21 @@ export function YamlView({ draft, scope, published, file: named }: { draft: Conf
     edit(`${text.slice(0, a)}  ${text.slice(b)}`);
     requestAnimationFrame(() => el.setSelectionRange(a + 2, a + 2));
   };
-  const status = readOnly ? "published" : err ? `syntax error · the ${where} keeps the last valid draft` : probs.length || r.problems.length ? `parsed · ${r.problems.length} problem${r.problems.length === 1 ? "" : "s"}` : view.draft ? "parsed · draft" : "parsed · matches published";
+  const status = readOnly ? "published" : err ? `syntax error · the ${where} keeps the last valid ${what}` : probs.length || r.problems.length ? `parsed · ${r.problems.length} problem${r.problems.length === 1 ? "" : "s"}` : oneOff ? "parsed" : view.draft ? "parsed · draft" : "parsed · matches published";
   const width = Math.max(40, ...lines.map((l, i) => l.length + (msgs.has(i) ? 60 : 0))) + 4;
 
   return (
-    <section className="yv" aria-label={`${file}, YAML`}>
+    <section className="yv" aria-label={oneOff ? "One-off chain, YAML" : `${file}, YAML`}>
       <div className="yv-head">
-        <span className="yv-file">{file}</span>
+        {!oneOff && <span className="yv-file">{file}</span>}
         <span className={`yv-status${err || r.problems.length ? " is-bad" : ""}`} role="status">{status}</span>
         <span className="bp-gap" />
-        {readOnly ? <span className="yv-legend">read-only · it comes from an add-on</span> : <span className="yv-legend"><span className="yv-plus">+</span> added <span className="yv-tilde">~</span> changed · edits apply to the {where} as you type</span>}
+        {readOnly ? <span className="yv-legend">read-only · it comes from an add-on</span> : <span className="yv-legend">{published !== undefined && <><span className="yv-plus">+</span> added <span className="yv-tilde">~</span> changed · </>}edits apply to the {where} as you type</span>}
       </div>
       {err && (
         <div className="yv-err" role="alert">
           <span>Line {err.line}: {err.message}</span>
-          <Button onClick={() => { typing.current = false; setText(lastGood.current); draft.text(file, lastGood.current); }}>Revert to last valid draft</Button>
+          <Button onClick={() => { typing.current = false; setText(lastGood.current); draft.text(file, lastGood.current); }}>Revert to last valid {what}</Button>
         </div>
       )}
       <div className="yv-scroll" ref={scroller}>
@@ -102,7 +104,7 @@ export function YamlView({ draft, scope, published, file: named }: { draft: Conf
             <textarea
               ref={ta}
               className="yv-ta"
-              aria-label={`${file}, YAML`}
+              aria-label={oneOff ? "One-off chain, YAML" : `${file}, YAML`}
               spellCheck={false}
               autoCapitalize="off"
               autoComplete="off"

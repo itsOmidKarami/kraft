@@ -1,5 +1,6 @@
 import { repoName } from "../../format";
 import type { DisplayStatus, WorkItem } from "../../types";
+import { ONE_OFF } from "../item/chainName";
 
 /** Every list decision of the board, once (W6 brief A.4). Reads the server's
  *  `display_status` and the raw row; nothing is derived on the client. */
@@ -53,7 +54,7 @@ export const stopOf = (i: Pick<WorkItem, "display_status" | "stop">) =>
   i.display_status === "needs_you" || i.display_status === "failed" ? (i.stop?.kind ?? "") : "";
 
 /** What a chain key reads as on screen. The key itself (`@one-off`) stays the filter and grouping value. */
-export const chainLabel = (key: string) => (key === "@one-off" ? "one-off" : key);
+export const chainLabel = (key: string) => (key === ONE_OFF ? "one-off" : key);
 
 /** The chain an item runs, as a key: the board's filters and groups use it raw. */
 export const chainOf = (i: Pick<WorkItem, "chain_template"> & { chain_definition?: { template_id?: string } | null }) => (i.chain_template || i.chain_definition?.template_id) ?? "default";

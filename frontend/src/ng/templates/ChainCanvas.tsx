@@ -35,6 +35,10 @@ type Props = {
   custom?: string[];
   /** The menu behind a seam, in place of the Templates editor's. */
   addMenu?: (a: { anchor: RefObject<HTMLElement | null>; at: number; taken: string[]; refused?: string | null; onClose: () => void }) => ReactNode;
+  /** A new item's canvas: nodes by display name, as the item page draws them. */
+  names?: boolean;
+  /** A new item's skips: the node dims and says why ("covered", "skipped"), as on the item page; a problem still wins. */
+  skips?: Record<string, string>;
 };
 
 /** The node an op touches, for the pending highlight (Decided 3). */
@@ -60,7 +64,7 @@ function backArc(r: Result, nodes: NodeA[], i: number): ChainArc[] {
 }
 
 /** Level 1 of the editor: the chain drawn from the draft's model (brief B.2). */
-export function ChainCanvas({ scope, result: r, selected, pending, reserve, refused, onSelect, onOpen, onFocusNode, onEscape, onBackground, onAdd, review, marked = [], onDrag, strip, custom, addMenu }: Props) {
+export function ChainCanvas({ scope, result: r, selected, pending, reserve, refused, onSelect, onOpen, onFocusNode, onEscape, onBackground, onAdd, review, marked = [], onDrag, strip, custom, addMenu, names, skips }: Props) {
   const authored = authoredNodes(r, scope);
   // An extending chain: each node marked by where it comes from, its parent's removed ones ghosts.
   const parent = extendsOf(r, scope);
@@ -95,6 +99,7 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
           : inhMeta
             ? { meta: inhMeta, metaTone: inh!.origin === "added" ? "green" as const : "amber" as const }
             : {}),
+      ...(skips?.[n.id] && !probs.length ? { skipped: true, meta: skips[n.id], metaTone: "amber" as const } : {}),
       pending: busy.has(n.id),
       custom: custom?.includes(n.id),
     };
@@ -148,6 +153,7 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
         fit={EDITOR_FIT}
         // A long chain draws under its overview; its nodes keep their ids, which are what an author edits.
         overview
+        names={names}
         readMeta
         onDrag={review || readOnly ? undefined : drag}
         reserve={reserve}

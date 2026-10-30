@@ -6,7 +6,7 @@ import { useOneOffDraft } from "./useOneOffDraft";
 type Call = { text: string; ops: unknown[]; preview?: boolean };
 let calls: Call[];
 let reply: (c: Call) => { status: number; body: unknown };
-const view = (text: string, more: object = {}) => ({ ...DEFAULT_VIEW, key: "one-off", text, digest: "d".repeat(64), custom: [], custom_nodes: [], nodes: [{ id: "implementation" }], ...more });
+const view = (text: string, more: object = {}) => ({ ...DEFAULT_VIEW, key: "one-off", text, digest: "d".repeat(64), custom: [], custom_nodes: [], nodes: [{ id: "implementation" }], added: [], ...more });
 
 beforeEach(() => {
   calls = [];
@@ -85,14 +85,17 @@ describe("useOneOffDraft", () => {
     vi.useRealTimers();
   });
 
-  it("an answer that lands after the chain was left changes nothing", async () => {
+  it.each([
+    ["the chain was left", (h: { rerender: (p: { t: string }) => void }) => h.rerender({ t: "" })],
+    ["the page was unmounted", (h: { unmount: () => void }) => h.unmount()],
+  ] as const)("a typed text still waiting when %s is never sent", async (_, leave) => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const onText = vi.fn();
     const h = renderHook(({ t }) => useOneOffDraft(t, onText), { initialProps: { t: "id: one-off\n" } });
     await waitFor(() => expect(h.result.current.status).toBe("ready"));
     onText.mockClear();
     h.result.current.text("chains/one-off.yaml", "id: one-off\nextends: x\n");
-    h.rerender({ t: "" });
+    leave(h as never);
     await act(async () => { await vi.advanceTimersByTimeAsync(600); });
     expect(onText).not.toHaveBeenCalled();
     expect(calls).toHaveLength(1);

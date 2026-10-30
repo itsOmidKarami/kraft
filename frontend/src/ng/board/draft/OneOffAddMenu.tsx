@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { Bot, Layers } from "lucide-react";
 import { Button } from "../../ui/Button";
+import { Field } from "../../ui/Field";
 import { Select } from "../../ui/Select";
 import { sendOnModEnter } from "../../keys";
 import { useHarnessOptions } from "../../templates/panes/useHarnessOptions";
@@ -36,7 +37,7 @@ export function OneOffAddMenu({ anchor, at, taken, refused, send, onClose }: {
     return (
       <Popover anchor={anchor} open onClose={onClose} role="dialog" label="New node">
         <div className="seam-id">
-          <IdRow label="Node id" initial={base.split(":").pop()!} taken={taken} placeholder="e.g. security_scan" go="Add node →" refused={refused}
+          <IdRow label="Node id" initial={base.split(":").pop()!} taken={taken} placeholder="e.g. security_scan" go="Create & open →" refused={refused}
             onGo={(id) => void done([{ op: "add_node", at, id, kind: "exec" }, { op: "extend", node: id, base }])} />
         </div>
       </Popover>
@@ -76,13 +77,15 @@ function CustomAgent({ anchor, taken, refused, onAdd, onClose }: { anchor: RefOb
   const can = !!id && !err && !!harness.trim() && !!prompt.trim();
   const add = () => { setSent(id); onAdd(id, harness.trim(), prompt); };
   return (
-    <Popover anchor={anchor} open onClose={onClose} role="dialog" label="New custom agent node">
-      <form className="seam-id oneoff-agent" onSubmit={(e) => { e.preventDefault(); if (can) add(); }}>
-        <label className="oneoff-agent-f"><span>Node id</span><input className="draft-input" autoFocus value={id} placeholder="e.g. load_test" onChange={(e) => setId(e.target.value)} /></label>
-        <label className="oneoff-agent-f"><span>Harness</span>{names.length ? <Select mono value={harness} onChange={(e) => setHarness(e.target.value)}>{names.map((n) => <option key={n} value={n}>{n}</option>)}</Select> : <input className="draft-input" value={harness} onChange={(e) => setHarness(e.target.value)} />}</label>
-        <label className="oneoff-agent-f"><span>Prompt</span><textarea className="draft-input" rows={5} onKeyDown={sendOnModEnter(add, can)} value={prompt} placeholder="What this agent does. A person reads it before the item starts." onChange={(e) => setPrompt(e.target.value)} /></label>
-        {err && <p className="idrow-err" role="alert">{err}</p>}
-        <Button variant="primary" type="submit" disabled={!can}>Add node →</Button>
+    <Popover anchor={anchor} open onClose={onClose} role="dialog" label="New custom agent node" dirty={!!(id || prompt.trim())}>
+      <form className="oneoff-agent" onSubmit={(e) => { e.preventDefault(); if (can) add(); }}>
+        <Field label="Node id" error={err}><input className="item-input" autoFocus spellCheck={false} value={id} placeholder="e.g. load_test" onChange={(e) => setId(e.target.value.trim())} /></Field>
+        <Field label="Harness">{names.length ? <Select mono value={harness} onChange={(e) => setHarness(e.target.value)}>{names.map((n) => <option key={n} value={n}>{n}</option>)}</Select> : <input className="item-input" value={harness} onChange={(e) => setHarness(e.target.value)} />}</Field>
+        <Field label="Prompt"><textarea className="item-input" rows={5} onKeyDown={sendOnModEnter(add, can)} value={prompt} placeholder="What this agent does. A person reads it before the item starts." onChange={(e) => setPrompt(e.target.value)} /></Field>
+        <div className="item-actions">
+          <Button variant="primary" type="submit" disabled={!can}>Create &amp; open →</Button>
+          <Button onClick={onClose}>Cancel</Button>
+        </div>
       </form>
     </Popover>
   );
