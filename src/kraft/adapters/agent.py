@@ -226,9 +226,9 @@ _DOCUMENTS = "\n\nThis work item's documents so far, by path:\n{lines}\n"
 def documents_note(run_dirs, work_item_row, *, worktree: Path | None = None) -> str:
     """Where this item's documents are: each kind its chain produces or a gate
     decides that is on disk, by absolute path (`item_paths.document`, the new
-    place first), then each document attached at intake, by its path in the
-    worktree, where `_copy_attachments` puts it. A later node used to find a
-    gate-written document by its place in the worktree; it is not there now.
+    place first), then each document attached at intake (`_attachment_at`).
+    A later node used to find a gate-written document by its place in the
+    worktree; it is not there now.
     "" when there is none, or no row."""
     if work_item_row is None:
         return ""
@@ -246,10 +246,19 @@ def documents_note(run_dirs, work_item_row, *, worktree: Path | None = None) -> 
     ]
     raw = work_item_row["attachments"] if "attachments" in work_item_row.keys() else None
     lines += [
-        f"{a['kind']}, attached at intake: {a['path']} in the worktree"
+        f"{a['kind']}, attached at intake: {_attachment_at(run_dirs, work_item_row, a, worktree)}"
         for a in (json.loads(raw) if raw else [])
     ]
     return _DOCUMENTS.format(lines="\n".join(lines)) if lines else ""
+
+
+def _attachment_at(run_dirs, row, a: dict, worktree: Path | None) -> str:
+    """Where the agent can read attachment `a`: in the worktree, where
+    `_copy_attachments` puts it; or, when it is not there (a copy of an
+    in-place branch no task has taken yet), the copy intake stored."""
+    if worktree is not None and a.get("source") and not (worktree / a["path"]).exists():
+        return str(item_paths.stored_attachment(run_dirs, row["id"], a, row["repo"]))
+    return f"{a['path']} in the worktree"
 
 
 class Invocation(NamedTuple):
