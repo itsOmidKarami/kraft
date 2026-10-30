@@ -338,6 +338,63 @@ class QueueRead:
     url: str = ""
 
 
+@dataclass(frozen=True)
+class MRDetails:
+    """A merge request's own words and state, for a worker that reads it."""
+
+    number: int
+    url: str
+    state: Literal["open", "merged", "closed"]
+    title: str
+    body: str
+    draft: bool
+    labels: tuple[str, ...]
+    source_branch: str
+    target_branch: str
+    head_sha: str
+
+
+@dataclass(frozen=True)
+class Pipeline:
+    """One pipeline or workflow run; `status` is the forge's own word."""
+
+    id: str
+    kind: Literal["branch", "merge_request", "train", "merge_group"]
+    ref: str
+    sha: str
+    status: str
+    url: str
+    created_at: str
+
+
+@dataclass(frozen=True)
+class Job:
+    """One job of a pipeline; `status` is the forge's own word."""
+
+    id: str
+    name: str
+    stage: str
+    status: str
+    failure_reason: str | None
+    url: str
+
+
+@dataclass(frozen=True)
+class MergedMR:
+    number: int
+    title: str
+    labels: tuple[str, ...]
+    url: str
+    merged_at: str
+
+
+@dataclass(frozen=True)
+class Label:
+    name: str
+    description: str
+    color: str
+
+
 class Forge(Protocol):
     async def open_mr(
         self,
@@ -401,6 +458,21 @@ class Forge(Protocol):
     async def reviewer_feedback(
         self, *, repo: Path, branch: str, reviewers: Reviewers, since: datetime
     ) -> list[ReviewerFeedback]: ...
+    async def mr_details(self, *, repo: Path, branch: str) -> MRDetails | None: ...
+    async def pipelines(self, *, repo: Path, branch: str, base: str) -> tuple[Pipeline, ...]:
+        """Newest first, at most 20 per kind."""
+        ...
+
+    async def jobs(self, *, repo: Path, pipeline_id: str) -> tuple[Job, ...]: ...
+    async def job_log(self, *, repo: Path, job_id: str) -> str:
+        """The whole log; the caller cuts it."""
+        ...
+
+    async def merged_mrs(self, *, repo: Path, base: str, limit: int) -> tuple[MergedMR, ...]:
+        """Newest merge first."""
+        ...
+
+    async def labels(self, *, repo: Path) -> tuple[Label, ...]: ...
 
 
 def _head(repo: Path) -> str | None:
@@ -473,7 +545,7 @@ class FakeForge:
     #: default, so tests that predate this are unaffected.
     block_reason: Literal["draft", "conflict", "not_approved"] | None = None
     #: Labels `set_labels` put on the merge request, in call order.
-    labels: list[str] = field(default_factory=list)
+    labeled: list[str] = field(default_factory=list)
     #: repo each `opened` number belongs to (Kraft-qlsf). The real CLIs
     #: disambiguate two repos sharing a branch name by their own cwd; a fake
     #: keyed on branch alone would let a submodule's `find_mr` "discover" the
@@ -558,6 +630,14 @@ class FakeForge:
     push_refused: str | None = None
     #: The head each merge request was last asked to merge at, by number.
     _asked_head: dict[int, str] = field(default_factory=dict)
+
+    #: What the read methods answer (`pipelines`, `jobs`, `merged_mrs`,
+    #: `labels`, `job_log`); empty by default.
+    pipelines_seen: tuple[Pipeline, ...] = ()
+    jobs_seen: dict[str, tuple[Job, ...]] = field(default_factory=dict)
+    logs_seen: dict[str, str] = field(default_factory=dict)
+    merged_seen: tuple[MergedMR, ...] = ()
+    labels_seen: tuple[Label, ...] = ()
 
     @staticmethod
     def _next(script: list):
@@ -711,7 +791,7 @@ class FakeForge:
         return self.edit_makes_new_pipeline
 
     async def set_labels(self, *, repo: Path, branch: str, mr: MR, labels: tuple[str, ...]) -> None:
-        self.labels.extend(labels)
+        self.labeled.extend(labels)
 
     async def merge(self, *, repo: Path, branch: str = "", mr: MR, head: str = "") -> None:
         # number 0 means "resolve from the branch", which is what `run_task`
@@ -808,3 +888,40 @@ class FakeForge:
         if number in self._landing:
             return QueueRead(kind=self.queue_kind, state="queued")
         return QueueRead(kind=self.queue_kind)
+
+    async def mr_details(self, *, repo: Path, branch: str) -> MRDetails | None:
+        ref = await self.find_mr(repo=repo, branch=branch)
+        if ref is None:
+            return None
+        n = ref.number
+        meta = self.opened_meta.get(n)
+        labels = tuple(dict.fromkeys((*(meta.labels if meta else ()), *self.labeled)))
+        return MRDetails(
+            number=n,
+            url=ref.url,
+            state=ref.state,
+            title=self.opened_titles.get(n, ""),
+            body=self.bodies.get(branch, self.opened_bodies.get(n, "")),
+            draft=self.opened_draft.get(n, False),
+            labels=labels,
+            source_branch=branch,
+            target_branch=self.opened_base.get(n, ""),
+            head_sha=ref.head_sha,
+        )
+
+    async def pipelines(self, *, repo: Path, branch: str, base: str) -> tuple[Pipeline, ...]:
+        return self.pipelines_seen
+
+    async def jobs(self, *, repo: Path, pipeline_id: str) -> tuple[Job, ...]:
+        return self.jobs_seen.get(pipeline_id, ())
+
+    async def job_log(self, *, repo: Path, job_id: str) -> str:
+        if job_id not in self.logs_seen:
+            raise ForgeError(f"no log for job {job_id}", reason="not_found")
+        return self.logs_seen[job_id]
+
+    async def merged_mrs(self, *, repo: Path, base: str, limit: int) -> tuple[MergedMR, ...]:
+        return self.merged_seen[:limit]
+
+    async def labels(self, *, repo: Path) -> tuple[Label, ...]:
+        return self.labels_seen
