@@ -6,5 +6,11 @@ import type { WorkItem } from "../../types";
 export const chainName = (i: Pick<WorkItem, "chain_template"> & { chain_definition?: { template_id?: string } | null }) =>
   i.chain_template === "@one-off" ? "one-off chain" : i.chain_template || i.chain_definition?.template_id || "unnamed chain";
 
+/** `chainName` as a noun phrase: "default chain", and no second "chain" after a name that already ends in one. */
+export const chainTitle = (i: Parameters<typeof chainName>[0]) => {
+  const name = chainName(i);
+  return name.endsWith(" chain") ? name : `${name} chain`;
+};
+
 /** Why a node does not run on an item: an attached document stands in for it. */
 export const coveredText = (kind: string): string => `covered by the attached ${kind}`;

@@ -6,7 +6,7 @@ import { elapsed, repoName, usd } from "../../../format";
 import { useStore } from "../../../store";
 import type { Analytics as Report } from "../../../types";
 import { boardHref, DEFAULT_RANGE, gateLabel, gateRows, HOW_COUNTED, measured, RANGES, EMPTY_RANGE, scopeLine, stopFilter, stopLabel, waitingKpi } from "../../analytics/shared";
-import { chainLabel, chainOf } from "../../board/model";
+import { chainKeys, chainLabel, chainOf } from "../../board/model";
 import { ChoiceSheet, useSheet } from "../nav/Sheet";
 import { RootHeader } from "../nav/ScreenHeader";
 import { Block } from "../ui/Rows";
@@ -34,7 +34,7 @@ export function Analytics() {
   const t = report?.totals;
   const delta = t?.completed_prev != null ? t.completed - t.completed_prev : null;
   const repos = [...new Set(items.map((i) => i.repo))].sort((a, b) => repoName(a).localeCompare(repoName(b)));
-  const chains = [...new Set(items.map(chainOf))].sort();
+  const chains = chainKeys(items);
   const gates = report ? gateRows(report) : [];
   const empty = !!report && t!.completed === 0 && report.by_node.length === 0;
   const rangeLabel = RANGES.find((r) => r.value === range)!.label;

@@ -15,7 +15,7 @@ import { Kbd } from "../ui/Kbd";
 import { Menu } from "../ui/Menu";
 import { tip } from "../ui/Tooltip";
 import { NoMatch } from "../ui/NoMatch";
-import { chainLabel, chainOf, groupsOf, type GroupBy, type SortBy } from "./model";
+import { chainKeys, chainLabel, chainOf, groupsOf, type GroupBy, type SortBy } from "./model";
 import { useBoardPrefs } from "./prefs";
 import { Row } from "./Row";
 import { showToast } from "../ui/Toast";
@@ -276,7 +276,7 @@ export function BoardPage() {
 
   const count = (f: (i: WorkItem) => boolean) => String(items.filter(f).length);
   const repos = [...new Set(items.map((i) => i.repo))].sort((a, b) => repoName(a).localeCompare(repoName(b)));
-  const chains = [...new Set(items.map(chainOf))].sort();
+  const chains = chainKeys(items);
   const { gates, stops } = stopFilterOptions(items);
   // A chosen gate or stop nothing waits at any more stays listed, so the menu says what is filtering.
   const gateLabel = (id: string) => gates.find((g) => g.value === id)?.label ?? nodeWords(id);

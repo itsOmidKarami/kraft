@@ -3,7 +3,7 @@ import * as api from "../../api";
 import { elapsed, repoName, tokens, usd } from "../../format";
 import { useStore } from "../../store";
 import type { Analytics } from "../../types";
-import { chainLabel, chainOf } from "../board/model";
+import { chainKeys, chainLabel, chainOf } from "../board/model";
 import { Link } from "react-router-dom";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { Menu } from "../ui/Menu";
@@ -64,7 +64,7 @@ export function AnalyticsPage() {
 
   const weeks = useMemo(() => weekBuckets(report?.weekly_merged ?? []), [report]);
   const repos = [...new Set(items.map((i) => i.repo))].sort();
-  const chains = [...new Set(items.map(chainOf))].sort();
+  const chains = chainKeys(items);
   const count = (f: (i: (typeof items)[number]) => boolean) => String(items.filter(f).length);
 
   const rangeLabel = RANGES.find((r) => r.value === range)!.label;

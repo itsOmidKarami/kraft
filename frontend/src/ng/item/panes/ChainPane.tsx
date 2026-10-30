@@ -10,7 +10,7 @@ import { useDraft } from "../draft/context";
 import { lines } from "../draft/view";
 import { age, recent as recentLines } from "../events";
 import type { ItemDetail } from "../useItem";
-import { chainName } from "../chainName";
+import { chainName, chainTitle } from "../chainName";
 import { DocViewer } from "../DocViewer";
 import { gateName, nameOf } from "../../board/rowText";
 import { budgetRaise, neverStarted, spentLine } from "../status";
@@ -288,7 +288,7 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget, ap
           </ol>
         </>
       )}
-      <p className="ip-foot is-mono">{chainName(item)} chain · {repoName(item.repo)} · frozen at intake</p>
+      <p className="ip-foot is-mono">{chainTitle(item)} · {repoName(item.repo)} · frozen at intake</p>
     </>
   );
 }
