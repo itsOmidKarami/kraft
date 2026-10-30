@@ -306,28 +306,42 @@ def _seed_silent_reviews(run_dir, bot: str, count: int) -> None:
     asyncio.run(seed())
 
 
+_BOT_REPO = {"path": "/r", "automated_review": {"bot": "ccr"}}
+
+
 @pytest.mark.parametrize(
-    "silences, triage, warned, says",
+    "silences, triage, repo, says, state",
     [
-        (3, True, True, "`ccr` on /r has never posted (items w3, w2, w1)"),
-        (2, True, False, "no review bot silent across 3 items"),
-        (0, False, True, "/r name a review bot, but the library has no triage step"),
+        (3, True, _BOT_REPO, "`ccr` on /r has never posted (items w3, w2, w1)", "warn"),
+        (2, True, _BOT_REPO, "no review bot silent across 3 items", "ok"),
+        (0, False, _BOT_REPO, "no triage step reads a bot's summary for /r", "warn"),
+        # Only a bot has a summary to read: a check reviewer is not named.
+        (0, False, {"path": "/r", "automated_review": {"check": "scan"}}, "no review bot", "ok"),
     ],
-    ids=["silent-three-times", "silent-twice", "no-triage-step"],
+    ids=["silent-on-three-items", "silent-on-two", "no-triage-step", "no-triage-step-no-bot"],
 )
 def test_doctor_names_a_review_bot_that_may_not_be_reviewing(
-    app, tmp_path, monkeypatch, silences, triage, warned, says
+    app, tmp_path, monkeypatch, silences, triage, repo, says, state
 ):
     _seed_silent_reviews(tmp_path / "run", "ccr", silences)
     monkeypatch.setattr(doctor.capabilities, "adopted", lambda c, live: triage)
-    monkeypatch.setattr(
-        client, "repos", _returning([{"path": "/r", "automated_review": {"bot": "ccr"}}])
-    )
+    monkeypatch.setattr(client, "repos", _returning([repo]))
 
     row = _by_name(asyncio.run(doctor.run_checks()), "review bots")
 
-    assert row["ok"] and row["warn"] == warned
+    assert row["ok"] and (row["warn"], row["skipped"]) == (state == "warn", state == "skipped")
     assert says in row["detail"]
+
+
+def test_doctor_skips_the_review_bots_row_on_a_server_without_its_route(app, monkeypatch):
+    async def older(*_, **__):
+        raise client.transport.status_error(404, "Not Found")
+
+    monkeypatch.setattr(client, "silent_reviewers", older)
+
+    row = _by_name(asyncio.run(doctor.run_checks()), "review bots")
+
+    assert row["ok"] and row["skipped"] and "the server cannot say" in row["detail"]
 
 
 def _returning(value):

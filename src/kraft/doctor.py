@@ -1468,8 +1468,8 @@ async def _review_bots_check() -> dict:
         ]
         if named:
             lines.append(
-                f"{', '.join(named)} name a review bot, but the library has no triage "
-                "step: a bot's summary is never read (the capabilities row has the edit)"
+                f"no triage step reads a bot's summary for {', '.join(named)}: the library "
+                "has none (the capabilities row has the edit)"
             )
     if not lines:
         return _check("review bots", True, f"no review bot silent across {found['run']} items")

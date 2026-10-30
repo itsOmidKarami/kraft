@@ -139,8 +139,9 @@ def test_a_dead_server_is_one_failure_and_the_rest_are_skipped(monkeypatch, tmp_
     # `claude` is installed is a fact about the machine, not about doctor.)
     assert "server" in failed
     assert {"config", "mcp token"} <= failed
-    assert all(_by_name(rows, name)["skipped"] for name in ("health", "repos", "worktrees"))
-    assert not failed & {"health", "repos", "worktrees"}
+    downstream = ("health", "repos", "worktrees", "review bots")
+    assert all(_by_name(rows, name)["skipped"] for name in downstream)
+    assert not failed & set(downstream)
 
 
 def test_an_orphaned_worktree_is_reported(app, tmp_path):
