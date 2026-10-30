@@ -308,6 +308,18 @@ def test_a_gates_auto_review_expands_its_extends(tmp_path):
     )
 
 
+def test_the_packaged_gate_reviewer_is_a_gates_auto_review(tmp_path):
+    """Mutate: drop `gate_reviewer` from `config/library.yaml`, or give it a
+    `fallback:`, and this fails."""
+    library = yaml.safe_load((DESIGN_TEMPLATES.parents[2] / "config" / "library.yaml").read_text())
+    reviewer = {"id": "reviewer", "extends": "gate_reviewer"}
+    gate = {"id": "g", "kind": "gate", "auto_review_mode": "checks_first", "auto_review": reviewer}
+    chain = {"id": "default", "nodes": [gate]}
+    review = write_library(tmp_path, library, chain).resolve_chain("default").nodes[0].auto_review
+    assert isinstance(review.task, AgentTask)
+    assert (review.task.skill, review.task.fallback) == ("kraft:gate-review", None)
+
+
 def test_extends_rejects_more_than_one_parent(tmp_path):
     library = {"tasks": {"a": agent_task(), "b": agent_task()}}
     chain = {

@@ -68,6 +68,12 @@ tasks:
     skill: kraft:code-review
     inputs: [review_package, carried_findings, previous_review]
 
+  gate_reviewer:
+    kind: agent
+    harness: claude
+    prompt: Check this gate before the person decides.
+    skill: kraft:gate-review
+
   repair_verification:
     kind: agent
     harness: claude

@@ -76,3 +76,14 @@ def test_gate_review_guidance_covers_a_chain_revision_gate():
     guidance = (SKILLS / "gate-review" / "SKILL.md").read_text()
 
     assert "**A gate about a chain revision**" in guidance
+
+
+def test_gate_review_guidance_has_a_checks_first_section_that_passes_and_never_edits():
+    """It must agree with `gate_review._CHECKS_FIRST_PROMPT`: reject or `pass`,
+    `pass` when unsure, and no edit. Mutate: drop the section, and this fails."""
+    guidance = (SKILLS / "gate-review" / "SKILL.md").read_text()
+    section = guidance.split("## When you check first", 1)[1].split("\n## ", 1)[0]
+
+    assert "`pass`" in section and "`reject`" in section
+    assert "Never edit" in section
+    assert "`fixed`" not in section
