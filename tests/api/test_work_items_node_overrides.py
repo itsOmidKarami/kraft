@@ -179,6 +179,7 @@ _CALLERS = {
         ("patch", "own-escalation", "Also delete the tests.", 403),
         ("patch", "person", "Mind the migration order.", 200),
         ("patch", "assistant", None, 200),
+        ("patch-unknown-node", "assistant", "Also delete the tests.", 422),
     ],
     ids=[
         "create-assistant",
@@ -189,6 +190,7 @@ _CALLERS = {
         "patch-own-escalation",
         "patch-person",
         "patch-assistant-drops-it",
+        "patch-assistant-unknown-node-is-still-the-422",
     ],
 )
 def test_a_node_extra_prompt_is_a_persons_to_set(client, repo, door, caller, extra_prompt, status):
@@ -220,8 +222,9 @@ def test_a_node_extra_prompt_is_a_persons_to_set(client, repo, door, caller, ext
                 )
             )
             headers = {"x-kraft-session-id": f"{wid}/s-esc"}
+        node = "nope" if door == "patch-unknown-node" else "spec"
         r = client.patch(
-            f"/api/work-items/{wid}", json={"node_overrides": {"spec": fields}}, headers=headers
+            f"/api/work-items/{wid}", json={"node_overrides": {node: fields}}, headers=headers
         )
 
     assert r.status_code == status, r.text
@@ -229,3 +232,5 @@ def test_a_node_extra_prompt_is_a_persons_to_set(client, repo, door, caller, ext
         assert "an extra_prompt is a person's to set" in r.json()["detail"]
         if door == "patch":
             assert client.get(f"/api/work-items/{wid}").json()["node_overrides"] in (None, {})
+        else:
+            assert client.get("/api/work-items").json()["items"] == []
