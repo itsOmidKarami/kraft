@@ -112,6 +112,47 @@ def checks_page(contexts: dict, *, oid: str = "abc123") -> str:
     return gql({"node": {"commits": {"nodes": [{"commit": commit}]}}})
 
 
+#: `Cli.stub` routes for the pull request reads (`github_queries`): the lookup by
+#: branch, by number, the paging re-read, and `find_mr`'s list.
+READ_BRANCH = "api*graphql*first: 30*"
+READ_NUMBER = "api*graphql*pullRequest(number: $n) { id*"
+READ_MORE = "api*graphql*node(id: $id)*"
+FIND = "api*graphql*states: [OPEN, CLOSED, MERGED]*"
+
+
+def find_result(*nodes: dict) -> str:
+    """What `find_mr`'s list query answers (`gh pr list --head B --state all`)."""
+    return gql({"repository": {"pullRequests": {"nodes": list(nodes)}}})
+
+
+def listed(state: str = "OPEN", **fields) -> dict:
+    return {"number": 7, "url": URL, "state": state, **fields}
+
+
+FIND_MERGED = find_result(listed("MERGED", mergeCommit={"oid": "c0ffee1"}, headRefOid="c0ffee0"))
+#: An open pull request with auto-merge enabled: GitHub merges it itself once
+#: its checks pass.
+FIND_AUTO_MERGE = find_result(
+    listed(
+        autoMergeRequest={"enabledAt": "2026-09-22T10:00:00Z", "mergeMethod": "SQUASH"},
+        headRefOid="f0reign1",
+    )
+)
+
+#: The pull requests `ci_status` reads the merge state of.
+CONFLICT_PR = pull_request(
+    contexts_page([check_run("build", "SUCCESS")]),
+    mergeable="CONFLICTING",
+    mergeStateStatus="DIRTY",
+)
+NEEDS_APPROVAL_PR = pull_request(
+    contexts_page([check_run("build", "SUCCESS")]),
+    mergeable="UNKNOWN",
+    mergeStateStatus="BLOCKED",
+    reviewDecision="REVIEW_REQUIRED",
+)
+
+
 def merge_state(
     state: str = "CLEAN", *, queue: bool = False, queued: bool = False, id: str = "PR_kwDO7"
 ) -> str:

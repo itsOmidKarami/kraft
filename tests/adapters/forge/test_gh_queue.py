@@ -12,6 +12,7 @@ import pytest
 
 from kraft.adapters import forge
 
+from . import api_outputs
 from .nodes import FAIL, Api, FailWith
 
 _PR_URL = "https://github.com/o/r/pull/7"
@@ -69,7 +70,7 @@ _BY_HAND_CHECKS = "Removed by omid from the merge queue: checks failed on a flak
 
 def _queue_routes(graphql: str, runs: list[dict] | None = None, **routes: str) -> dict:
     return {
-        "pr list": json.dumps([{"number": 7, "url": _PR_URL, "state": "OPEN"}]),
+        api_outputs.FIND: api_outputs.find_result(api_outputs.listed()),
         "api graphql": graphql,
         "run list": json.dumps(runs or []),
         _JOBS: json.dumps(
@@ -492,8 +493,8 @@ async def test_merge_queue_a_failed_run_whose_jobs_cannot_be_read_is_not_infra(c
         pytest.param("api graphql", Api(404, '{"message": "Not Found"}'), id="graphql-404"),
         pytest.param("api graphql", Api(502, '{"message": "Bad Gateway"}'), id="graphql-502"),
         pytest.param("api graphql", FAIL, id="graphql-exit-1"),
-        pytest.param("pr list", FailWith("gh: HTTP 502 Bad Gateway"), id="pr-list-502"),
-        pytest.param("pr list", FAIL, id="pr-list-exit-1"),
+        pytest.param(api_outputs.FIND, FailWith("gh: HTTP 502 Bad Gateway"), id="pr-list-502"),
+        pytest.param(api_outputs.FIND, FAIL, id="pr-list-exit-1"),
         # A payload without the queue is no answer, not an answer of "no queue".
         pytest.param("api graphql", '{"data":{"repository":null}}', id="graphql-no-repository"),
         pytest.param("api graphql", '{"data":null}', id="graphql-no-data"),
@@ -513,12 +514,12 @@ async def test_merge_queue_does_not_read_a_failed_call_as_no_queue_or_a_drop(
 
 
 async def test_merge_queue_with_no_pull_request_is_no_queue_read(cli, tmp_path):
-    cli.stub("gh", routes={"pr list": "[]"}, default=FAIL)
+    cli.stub("gh", routes={api_outputs.FIND: api_outputs.find_result()}, default=FAIL)
 
     got = await forge.GhCli().merge_queue(repo=tmp_path, branch="kraft/abc", base="main")
 
     assert got == forge.QueueRead()
-    assert [c.split()[:2] for c in cli.calls("gh")] == [["pr", "list"]]
+    assert cli.argv("gh").count("graphql") == 1, "only the lookup was asked"
 
 
 async def test_merge_queue_asks_for_the_base_branch_queue_of_this_pull_request(cli, tmp_path):

@@ -19,7 +19,7 @@ from kraft.adapters.forge.gh import _QUEUE_QUERY, _THREADS_QUERY
 from kraft.adapters.forge.mr import MRMeta
 from kraft.automated_review import AutomatedReview
 
-from . import outputs
+from . import api_outputs, outputs
 from .nodes import Api, FailWith
 
 #: The full sha a merge is asked to land.
@@ -42,6 +42,7 @@ GLAB = SimpleNamespace(
     merged_head="",
     merged_list=outputs.GLAB_MR_LIST_MERGED,
     queued_list=outputs.GLAB_MR_LIST_AUTO_MERGE,
+    find_route="mr list",
     find_args={"mr": "list", "--all": None, "--source-branch": "kraft/abc"},
     close_argv=["mr", "close", "54"],
     reopen_argv=["mr", "reopen", "54"],
@@ -60,14 +61,10 @@ GH = SimpleNamespace(
     head_flag="--match-head-commit",
     head_moved="GraphQL: Head branch was modified. Review and try the merge again.",
     merged_head="c0ffee0",
-    merged_list=outputs.GH_PR_LIST_MERGED,
-    queued_list=outputs.GH_PR_LIST_AUTO_MERGE,
-    find_args={
-        "pr": "list",
-        "--state": "all",
-        "--head": "kraft/abc",
-        "--json": "number,url,state,autoMergeRequest,mergeCommit,headRefOid",
-    },
+    merged_list=api_outputs.FIND_MERGED,
+    queued_list=api_outputs.FIND_AUTO_MERGE,
+    find_route=api_outputs.FIND,
+    find_args={"owner={owner}": None, "name={repo}": None, "b=kraft/abc": None},
     close_argv=["pr", "close", "7"],
     reopen_argv=["pr", "reopen", "7"],
 )
@@ -183,6 +180,7 @@ async def test_every_merge_request_call_names_the_branch(be, cli, tmp_path, op):
     cli.stub(
         be.name,
         routes={
+            api_outputs.READ_BRANCH: api_outputs.pr_by_branch(api_outputs.pull_request()),
             "pr view": json.dumps(pr),
             "mr view": json.dumps(pr),
             "ci list": outputs.GLAB_CI_SUCCESS,
@@ -195,9 +193,16 @@ async def test_every_merge_request_call_names_the_branch(be, cli, tmp_path, op):
     # A GraphQL query's own lines are calls of no words, so only the first line
     # of each call is read.
     calls = [c.split() for c in cli.calls(be.name) if c.split()[:1] in (["pr"], ["mr"])]
-    assert calls
+    argv = cli.argv(be.name)
+    assert calls or argv.count("graphql")
     for call in calls:
         assert "kraft/abc" in call, call
+    if be is GH:
+        # Each GraphQL call carries the branch (`b`) or the number it read from
+        # the branch (`n`) as a variable, and none asked git for the current one.
+        named = [x for x in argv if x in ("b=kraft/abc", "n=7")]
+        assert len(named) == argv.count("graphql"), argv
+        assert not [c for c in cli.calls("git") if "symbolic-ref" in c]
 
 
 async def test_mark_ready_unsets_draft(be, cli, tmp_path):
@@ -268,8 +273,7 @@ async def test_a_merge_the_forge_refuses_for_a_moved_head_raises_head_moved(be, 
         routes={
             be.merge_verb: FailWith(be.head_moved),
             "api projects/:id": '{"id":1}',
-            "pr list": be.queued_list,
-            "mr list": be.queued_list,
+            be.find_route: be.queued_list,
         },
     )
 
@@ -417,18 +421,19 @@ async def test_glab_cancel_merge_that_fails_raises_unless_nothing_was_queued(
     "backend, view, reason, mergeable",
     [
         (GLAB, outputs.GLAB_MR_VIEW_CONFLICT, "conflict", False),
-        (GH, outputs.GH_PR_VIEW_CONFLICT, "conflict", False),
+        (GH, api_outputs.pr_by_branch(api_outputs.CONFLICT_PR), "conflict", False),
         # A conflict is a code problem; a missing approval is a person's to
         # grant on the forge. `merge` has to tell them apart, and mr_checks
         # (pre-gate) must read the approval as undecided, not fail on it.
         (GLAB, outputs.GLAB_MR_VIEW_NOT_APPROVED, "not_approved", None),
-        (GH, outputs.GH_PR_VIEW_NEEDS_APPROVAL, "not_approved", None),
+        (GH, api_outputs.pr_by_branch(api_outputs.NEEDS_APPROVAL_PR), "not_approved", None),
     ],
     ids=["glab-conflict", "gh-conflict", "glab-missing-approval", "gh-missing-approval"],
 )
 async def test_ci_status_names_the_block_reason(cli, tmp_path, backend, view, reason, mergeable):
     cli.stub(
-        backend.name, routes={"mr view": view, "ci list": outputs.GLAB_CI_SUCCESS, "pr view": view}
+        backend.name,
+        routes={"mr view": view, "ci list": outputs.GLAB_CI_SUCCESS, api_outputs.READ_BRANCH: view},
     )
 
     status = await backend.cls().ci_status(repo=tmp_path, mr=forge.MR(0, ""), branch="kraft/abc")

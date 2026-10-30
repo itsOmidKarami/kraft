@@ -8,16 +8,21 @@ import pytest
 
 from kraft.adapters import forge
 
+from .api_outputs import (
+    CONFLICT_PR,
+    NEEDS_APPROVAL_PR,
+    READ_BRANCH,
+    READ_NUMBER,
+    check_run,
+    contexts_page,
+    pr_by_branch,
+    pr_by_number,
+    pull_request,
+    status_context,
+)
 from .nodes import FAIL
-from .outputs import GH_PR_VIEW, GH_PR_VIEW_CONFLICT, GH_PR_VIEW_NEEDS_APPROVAL
 
 PR = forge.MR(7, "http://x/7")
-
-GH_PR_VIEW_TIMED_OUT = (
-    '{"number":7,"url":"https://github.com/o/r/pull/7","headRefOid":"abc123",'
-    '"statusCheckRollup":[{"name":"build","conclusion":"TIMED_OUT",'
-    '"detailsUrl":"https://github.com/o/r/actions/runs/123456/job/9"}]}'
-)
 
 GH_RUN_LIST = (
     '[{"status":"completed","conclusion":"failure","headSha":"deadbeef",'
@@ -25,30 +30,34 @@ GH_RUN_LIST = (
 )
 
 
-def _gh(cli, view: str, routes: dict[str, str] | None = None) -> None:
-    """`gh` answering `gh pr view` with `view`, each of `routes` (keyed on the
-    subcommand, `{"run list": ...}`) with its own shape, and failing any
-    other call."""
-    cli.stub("gh", routes={"pr view": view, **(routes or {})}, default=FAIL)
+def _gh(cli, pr: dict, routes: dict[str, str] | None = None) -> None:
+    """`gh` answering the lookup of `pr` by number or by branch, each of
+    `routes` (`{"run list": ...}`) with its own shape, and failing any other call."""
+    answers = {READ_NUMBER: pr_by_number(pr), READ_BRANCH: pr_by_branch(pr), **(routes or {})}
+    cli.stub("gh", routes=answers, default=FAIL)
 
 
-def _rollup(*checks: str) -> str:
-    rollup = ",".join(checks)
-    return f'{{"number":7,"url":"https://github.com/o/r/pull/7","statusCheckRollup":[{rollup}]}}'
+def _view(*checks: dict, **fields) -> dict:
+    """A pull request whose head commit's rollup holds `checks`."""
+    return pull_request(contexts_page(list(checks)), **fields)
 
 
 @pytest.mark.parametrize(
     "view, state, jobs",
     [
         # One red check is a red rollup: green build, red lint.
-        (GH_PR_VIEW, "failed", ("build: SUCCESS", "lint: FAILURE")),
+        (
+            _view(check_run("build", "SUCCESS"), check_run("lint", "FAILURE")),
+            "failed",
+            ("build: SUCCESS", "lint: FAILURE"),
+        ),
         # Kraft-n70: `test.yml` re-triggers on `labeled`, so a label Kraft sets
         # mid-check starts a second run; the superseded run's CANCELLED job
         # must not outvote the new run's later SUCCESS of the same name.
         (
-            _rollup(
-                '{"name":"test","conclusion":"CANCELLED","startedAt":"2026-09-18T00:15:33Z"}',
-                '{"name":"test","conclusion":"SUCCESS","startedAt":"2026-09-18T00:17:03Z"}',
+            _view(
+                check_run("test", "CANCELLED", startedAt="2026-09-18T00:15:33Z"),
+                check_run("test", "SUCCESS", startedAt="2026-09-18T00:17:03Z"),
             ),
             "success",
             ("test: SUCCESS",),
@@ -57,9 +66,7 @@ def _rollup(*checks: str) -> str:
         # is settled -- without SKIPPED in the success set, one such job pinned
         # every PR carrying it to "pending" forever.
         (
-            _rollup(
-                '{"name":"test","conclusion":"SUCCESS"}', '{"name":"deploy","conclusion":"SKIPPED"}'
-            ),
+            _view(check_run("test", "SUCCESS"), check_run("deploy", "SKIPPED")),
             "success",
             ("test: SUCCESS", "deploy: SKIPPED"),
         ),
@@ -83,9 +90,9 @@ async def test_gh_ci_status_reads_the_check_rollup(cli, tmp_path, view, state, j
         # A cancelled run is never a verdict: that is a wait.
         (
             (
-                '{"name":"test","conclusion":"CANCELLED","completedAt":"2026-09-18T00:15:33Z"}',
-                '{"name":"lint","conclusion":"CANCELLED"}',
-                '{"name":"playwright","conclusion":""}',
+                check_run("test", "CANCELLED", completedAt="2026-09-18T00:15:33Z"),
+                check_run("lint", "CANCELLED"),
+                check_run("playwright", None),
             ),
             "pending",
             (),
@@ -96,9 +103,9 @@ async def test_gh_ci_status_reads_the_check_rollup(cli, tmp_path, view, state, j
         # (Kraft-kbqmk). The latest cancel is the one that counts.
         (
             (
-                '{"name":"test","conclusion":"CANCELLED","completedAt":"2026-09-18T00:15:33Z"}',
-                '{"name":"lint","conclusion":"CANCELLED","completedAt":"2026-09-18T00:16:00Z"}',
-                '{"name":"build","conclusion":"SUCCESS","completedAt":"2026-09-18T00:17:00Z"}',
+                check_run("test", "CANCELLED", completedAt="2026-09-18T00:15:33Z"),
+                check_run("lint", "CANCELLED", completedAt="2026-09-18T00:16:00Z"),
+                check_run("build", "SUCCESS", completedAt="2026-09-18T00:17:00Z"),
             ),
             "pending",
             (),
@@ -108,8 +115,8 @@ async def test_gh_ci_status_reads_the_check_rollup(cli, tmp_path, view, state, j
         # the failed jobs a fix loop is handed.
         (
             (
-                '{"name":"test","conclusion":"CANCELLED","completedAt":"2026-09-18T00:15:33Z"}',
-                '{"name":"lint","conclusion":"FAILURE"}',
+                check_run("test", "CANCELLED", completedAt="2026-09-18T00:15:33Z"),
+                check_run("lint", "FAILURE"),
             ),
             "failed",
             ("lint",),
@@ -121,7 +128,7 @@ async def test_gh_ci_status_reads_the_check_rollup(cli, tmp_path, view, state, j
 async def test_gh_ci_status_never_reads_a_cancelled_check_as_a_verdict(
     cli, tmp_path, checks, state, failed, cancelled_at
 ):
-    _gh(cli, _rollup(*checks))
+    _gh(cli, _view(*checks))
 
     status = await forge.GhCli().ci_status(repo=tmp_path, mr=PR)
 
@@ -130,27 +137,25 @@ async def test_gh_ci_status_never_reads_a_cancelled_check_as_a_verdict(
     assert status.cancelled_at == cancelled_at
 
 
-@pytest.mark.parametrize(
-    "view", [GH_PR_VIEW_CONFLICT, GH_PR_VIEW_NEEDS_APPROVAL], ids=["conflict", "approval"]
-)
+@pytest.mark.parametrize("view", [CONFLICT_PR, NEEDS_APPROVAL_PR], ids=["conflict", "approval"])
 async def test_gh_ci_status_reads_the_merge_state_from_the_same_pr_view(cli, tmp_path, view):
     """No extra process on GitHub: `mergeable`, `mergeStateStatus` and
     `reviewDecision` -- the field that tells a pending-approval BLOCKED from any
-    other -- ride on the `gh pr view` call the node already makes."""
+    other -- ride on the one GraphQL call the node already makes."""
     _gh(cli, view)
 
-    await forge.GhCli().ci_status(repo=tmp_path, mr=forge.MR(0, ""))
+    await forge.GhCli().ci_status(repo=tmp_path, mr=PR)
 
     argv = cli.argv("gh")
-    assert argv.count("--json") == 1, "a second round trip for a fact one call already carries"
-    fields = argv[argv.index("--json") + 1].split(",")
-    assert {"mergeable", "mergeStateStatus", "reviewDecision"} <= set(fields)
+    assert argv.count("graphql") == 1, "a second round trip for a fact one call already carries"
+    query = "\n".join(argv)
+    assert all(f in query for f in ("mergeable", "mergeStateStatus", "reviewDecision"))
 
 
 async def test_gh_ci_status_names_the_conflict_detail(cli, tmp_path):
-    _gh(cli, GH_PR_VIEW_CONFLICT)
+    _gh(cli, CONFLICT_PR)
 
-    status = await forge.GhCli().ci_status(repo=tmp_path, mr=forge.MR(0, ""))
+    status = await forge.GhCli().ci_status(repo=tmp_path, mr=PR)
 
     assert "CONFLICTING" in status.merge_detail
 
@@ -158,71 +163,55 @@ async def test_gh_ci_status_names_the_conflict_detail(cli, tmp_path):
 async def test_gh_ci_status_flags_a_conflicting_pr_with_no_checks(cli, tmp_path):
     """Kraft-09ze6: GitHub registers no checks on a pull request that conflicts
     with its base, and `render_ci` needs both facts to stop waiting for them."""
-    _gh(cli, _rollup().replace('"number":7', '"number":7,"mergeable":"CONFLICTING"'))
+    _gh(cli, _view(mergeable="CONFLICTING"))
 
-    status = await forge.GhCli().ci_status(repo=tmp_path, mr=forge.MR(0, ""))
+    status = await forge.GhCli().ci_status(repo=tmp_path, mr=PR)
 
     assert (status.state, status.no_checks, status.mergeable) == ("pending", True, False)
 
 
 async def test_gh_ci_status_maps_timed_out_to_the_infra_reason(cli, tmp_path):
-    _gh(cli, GH_PR_VIEW_TIMED_OUT)
+    _gh(cli, _view(check_run("build", "TIMED_OUT", run=123456)))
 
     status = await forge.GhCli().ci_status(repo=tmp_path, mr=PR)
 
     assert status.failed_jobs[0].failure_reason == "job_execution_timeout"
 
 
-#: Two checks, each from its own Actions run (111 and 222).
-_TWO_RUNS = _rollup(
-    '{"name":"build","conclusion":"SUCCESS",'
-    '"detailsUrl":"https://github.com/o/r/actions/runs/111/job/1"}',
-    '{"name":"lint","conclusion":"SUCCESS",'
-    '"detailsUrl":"https://github.com/o/r/actions/runs/222/job/2"}',
-)
-
-
 @pytest.mark.parametrize(
-    "view, run_list, sha",
+    "view, sha",
     [
         # `sha = headRefOid` made render_ci's freshness guard compare the branch
-        # head to itself, so it could never fire on GitHub.
-        (GH_PR_VIEW_TIMED_OUT, '[{"databaseId":123456,"headSha":"oldsha"}]', "oldsha"),
-        # `gh run list` lists every recent run of the repository; only the ones
-        # the rollup names say what the checks were built from.
+        # head to itself, so it could never fire on GitHub: it is the commit the
+        # rollup was read from.
         (
-            GH_PR_VIEW_TIMED_OUT,
-            '[{"databaseId":999,"headSha":"newer"},{"databaseId":123456,"headSha":"oldsha"}]',
+            _view(check_run("build", "TIMED_OUT", run=123456), oid="oldsha", headRefOid="newer"),
             "oldsha",
         ),
         (
-            _TWO_RUNS,
-            '[{"databaseId":111,"headSha":"s1"},{"databaseId":222,"headSha":"s1"}]',
-            "s1",
+            _view(check_run("build", "SUCCESS", run=111), check_run("lint", "SUCCESS", run=222)),
+            "abc123",
         ),
-        # A rollup mixing two heads has no one sha to hand the freshness guard.
-        (
-            _TWO_RUNS,
-            '[{"databaseId":111,"headSha":"s1"},{"databaseId":222,"headSha":"s2"}]',
-            "",
-        ),
-        # The guard stays inert rather than guess.
-        (GH_PR_VIEW_TIMED_OUT, "{}", ""),
+        # No Actions run behind the checks (another app's check run) names no sha.
+        (_view(check_run("build", "SUCCESS")), ""),
+        # Nor does a rollup of commit statuses alone, or one with nothing in it.
+        (_view(status_context("ci/x", "SUCCESS")), ""),
+        (_view(), ""),
     ],
     ids=[
         "the-checks-sha-not-the-pr-head",
-        "only-the-rollups-runs-count",
         "several-runs-of-one-sha",
-        "empty-when-the-checks-span-shas",
         "empty-when-it-cannot-be-told",
+        "empty-with-only-commit-statuses",
+        "empty-without-checks",
     ],
 )
-async def test_gh_ci_status_sha_is_the_checks_own(cli, tmp_path, view, run_list, sha):
-    _gh(cli, view, {"run list": run_list})
+async def test_gh_ci_status_sha_is_the_checks_own(cli, tmp_path, view, sha):
+    _gh(cli, view)
 
     status = await forge.GhCli().ci_status(repo=tmp_path, mr=PR)
 
-    assert status.sha == sha  # never the PR's headRefOid, "abc123"
+    assert status.sha == sha  # never the PR's headRefOid, "newer"
 
 
 async def test_gh_branch_ci_status_reads_runs_not_a_pull_request(cli, tmp_path):
@@ -287,7 +276,7 @@ async def test_gh_branch_ci_status_waits_for_a_run_matching_the_given_head(
 ):
     """A run list that has not caught up to `head_sha` yet is a wait, not a
     (wrong-commit) result -- same shape as glab's own sha guard."""
-    _gh(cli, FAIL, {"run list": GH_RUN_LIST, **api})
+    cli.stub("gh", routes={"run list": GH_RUN_LIST, **api}, default=FAIL)
 
     status = await forge.GhCli().branch_ci_status(
         repo=tmp_path, branch="main", head_sha="other-sha"
@@ -343,10 +332,14 @@ async def test_gh_branch_ci_status_judges_the_latest_run_never_a_cancelled_one(
     assert not status.no_checks, "a head with a run has checks, even a pending one"
 
 
+def _labelled(*names: str) -> str:
+    return pr_by_number(pull_request(labels={"nodes": [{"name": n} for n in names]}))
+
+
 async def test_gh_set_labels_edits_the_pull_request(cli, tmp_path):
     """GitHub re-evaluates `pull_request: types: [labeled]` itself, so there is
     no pipeline to re-create here -- only the label to add."""
-    cli.stub("gh", routes={"pr view": '{"labels":[]}', "pr edit": ""})
+    cli.stub("gh", routes={READ_NUMBER: _labelled(), "pr edit": ""})
 
     await forge.GhCli().set_labels(
         repo=tmp_path, branch="kraft/abc", mr=forge.MR(7, "u"), labels=("release::patch", "bug")
@@ -360,11 +353,11 @@ async def test_gh_set_labels_edits_the_pull_request(cli, tmp_path):
     "current, edit",
     [
         (
-            '[{"name":"release::patch"},{"name":"bug"},{"name":"area::ui"}]',
+            ("release::patch", "bug", "area::ui"),
             "pr edit 7 --add-label release::minor --remove-label release::patch",
         ),
         # Setting the label the PR already has removes nothing.
-        ('[{"name":"release::minor"}]', "pr edit 7 --add-label release::minor"),
+        (("release::minor",), "pr edit 7 --add-label release::minor"),
     ],
     ids=["other-scoped-label-dropped", "same-label-kept"],
 )
@@ -373,13 +366,16 @@ async def test_gh_set_labels_replaces_an_existing_same_scope_label(cli, tmp_path
     repair pass that moves release::patch to release::minor left both on the PR
     and `next_tag.py` raises on more than one. The label sharing a new label's
     `scope::` prefix is removed in the same edit; other labels stay."""
-    cli.stub("gh", routes={"pr view": f'{{"labels":{current}}}', "pr edit": ""})
+    cli.stub("gh", routes={READ_NUMBER: _labelled(*current), "pr edit": ""})
 
     await forge.GhCli().set_labels(
         repo=tmp_path, branch="kraft/abc", mr=forge.MR(7, "u"), labels=("release::minor",)
     )
 
-    assert cli.calls("gh") == ["pr view 7 --json labels", edit]
+    calls = cli.calls("gh")
+    assert calls[0].startswith("api graphql") and "n=7" in cli.argv("gh")
+    assert calls[-1] == edit
+    assert "statusCheckRollup" not in "\n".join(cli.argv("gh")), "labels need no checks"
 
 
 async def test_gh_retry_jobs_reruns_the_actions_run_behind_the_failed_check(cli, tmp_path):
@@ -413,7 +409,8 @@ async def test_gh_rerun_after_description_change_reruns_without_a_new_pipeline(c
 
 
 async def test_gh_mr_body_reads_the_live_description(cli, tmp_path):
-    cli.stub("gh", routes={"pr view": '{"body":"the live body"}'})
+    cli.stub("gh", routes={READ_BRANCH: pr_by_branch(pull_request(body="the live body"))})
 
     assert await forge.GhCli().mr_body(repo=tmp_path, branch="b") == "the live body"
-    assert cli.argv("gh") == ["pr", "view", "b", "--json", "body"]
+    argv = cli.argv("gh")
+    assert "b=b" in argv and "statusCheckRollup" not in "\n".join(argv)

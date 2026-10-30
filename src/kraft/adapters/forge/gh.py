@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from kraft.adapters.forge import git
+from kraft.adapters.forge import github_queries as gq
 from kraft.adapters.forge import mr as mr_ops
 from kraft.adapters.forge.models import (
     MR,
@@ -361,7 +362,7 @@ class GhCli(mr_ops.CliWaits):
         await git.run_git(repo, ["gh", "pr", "edit", branch, "--body", body])
 
     async def mr_body(self, *, repo: Path, branch: str) -> str:
-        data = await self._json(repo, ["pr", "view", branch, "--json", "body"], "gh pr view")
+        data = await self._pr(repo, mr_ops.target(0, branch), checks=False)
         return str(data.get("body") or "")
 
     async def ci_status(
@@ -373,18 +374,7 @@ class GhCli(mr_ops.CliWaits):
         # `mergeable,mergeStateStatus` ride along on the call the node already
         # makes: the check node has to know whether the PR can land, and one
         # round trip already carries it (Kraft-ejj9).
-        raw = await git.run_git(
-            repo,
-            [
-                "gh",
-                "pr",
-                "view",
-                *mr_ops.target(mr.number, branch),
-                "--json",
-                "number,url,statusCheckRollup,mergeable,mergeStateStatus,reviewDecision,headRefOid",
-            ],
-        )
-        data = mr_ops.parse_json(raw, "gh pr view")
+        data = await self._pr(repo, mr_ops.target(mr.number, branch))
         # Either field can carry the bad news: `mergeable` is
         # MERGEABLE/CONFLICTING/UNKNOWN, `mergeStateStatus` adds DIRTY.
         # `reviewDecision` rides along for the same reason `mergeable`/
@@ -401,15 +391,19 @@ class GhCli(mr_ops.CliWaits):
         detail = "/".join(s for s in states if s)
         # Not `headRefOid`: that is the PR's own head, the very value render_ci's
         # freshness guard compares against, so it could never disagree. The sha
-        # is the one the checks' runs belong to, or "" when that can't be told.
-        sha = await self._checks_sha(repo, data.get("statusCheckRollup") or [])
+        # is the head commit the rollup was read from, once an Actions run is in
+        # it, else "" (a rollup of commit statuses alone names no run).
+        rollup = data.get("statusCheckRollup") or []
+        sha = (
+            str(data.get("headCommitOid") or "")
+            if any(c.get("workflowRunId") for c in rollup)
+            else ""
+        )
         # gh's "no checks yet" (empty statusCheckRollup) stays "pending",
         # unchanged -- that is a precursor state (checks not yet registered),
         # not GitLab's *settled*-red-with-zero-jobs case Kraft-ddxn is about,
         # so it is not treated as infra here.
-        checks = _latest_by_name(
-            data.get("statusCheckRollup") or [], name="name", started="startedAt"
-        )
+        checks = _latest_by_name(rollup, name="name", started="startedAt")
         if not checks:
             return CIStatus(
                 state="pending",
@@ -442,6 +436,11 @@ class GhCli(mr_ops.CliWaits):
             cancelled_at=_cancelled_at(checks, at="completedAt"),
         )
 
+    async def _pr(self, repo: Path, target: list[str], *, checks: bool = True) -> dict:
+        """The pull request `target` names (`mr_ops.target`), read through the
+        transport; `checks=False` leaves the check rollup unread."""
+        return await gq.read_pr(self._transport(repo), repo, target, checks=checks)
+
     async def _json(self, repo: Path, args: list[str], what: str):
         return mr_ops.parse_json(await git.run_git(repo, ["gh", *args]), what)
 
@@ -449,9 +448,7 @@ class GhCli(mr_ops.CliWaits):
         """`bot`'s latest review of the PR's current head, dismissed ones
         skipped: pending until there is one. Changes requested, or any inline comment, is actionable
         -- one finding per comment; anything else is clean."""
-        pr = await self._json(
-            repo, ["pr", "view", branch, "--json", "number,headRefOid"], "gh pr view"
-        )
+        pr = await self._pr(repo, mr_ops.target(0, branch), checks=False)
         number, head = pr["number"], pr["headRefOid"]
         # ponytail: one page of 100 reviews -- paginate if a PR ever has more.
         reviews = await self._api(
@@ -490,9 +487,7 @@ class GhCli(mr_ops.CliWaits):
         """What each of `reviewers` has said on the pull request, in order. The
         pull request, and for the bots its comments, reviews and threads, are
         read once however many reviewers there are."""
-        pr = await self._json(
-            repo, ["pr", "view", branch, "--json", "number,headRefOid"], "gh pr view"
-        )
+        pr = await self._pr(repo, mr_ops.target(0, branch), checks=False)
         number, head = pr["number"], pr["headRefOid"]
         comments = reviews = threads = []
         if any(r.bot is not None for r in reviewers):
@@ -558,9 +553,7 @@ class GhCli(mr_ops.CliWaits):
         """The check run `check` on the PR's head, or else the commit status
         of that name: pending until it completes, clean on success, and
         actionable on anything else, its output the finding."""
-        pr = await self._json(
-            repo, ["pr", "view", branch, "--json", "number,headRefOid"], "gh pr view"
-        )
+        pr = await self._pr(repo, mr_ops.target(0, branch), checks=False)
         head = pr["headRefOid"]
         runs = (
             await self._api(
@@ -593,34 +586,6 @@ class GhCli(mr_ops.CliWaits):
             "actionable",
             findings=(f"{check} {status.get('state')}: {status.get('description') or ''}",),
         )
-
-    async def _checks_sha(self, repo: Path, rollup: list[dict]) -> str:
-        """The single head sha the rollup's Actions runs were built from.
-
-        `statusCheckRollup` entries carry no sha, only a `detailsUrl` naming the
-        run, so `gh run list` maps run id to `headSha`. `""` -- the guard stays
-        inert -- when the checks span shas, name no run, or the lookup fails.
-        """
-        ids = {
-            m.group(1) for c in rollup if (m := _RUN_ID_RE.search(str(c.get("detailsUrl") or "")))
-        }
-        if not ids:
-            return ""
-        try:
-            raw = await git.run_git(
-                repo, ["gh", "run", "list", "-L", "100", "--json", "databaseId,headSha"]
-            )
-            rows = mr_ops.parse_json(raw, "gh run list")
-        except ForgeError:
-            return ""
-        if not isinstance(rows, list):
-            return ""
-        shas = {
-            str(r.get("headSha") or "")
-            for r in rows
-            if isinstance(r, dict) and str(r.get("databaseId")) in ids
-        }
-        return shas.pop() if len(shas) == 1 else ""
 
     async def branch_ci_status(
         self, *, repo: Path, branch: str, head_sha: str, pipeline_id: str = ""
@@ -746,8 +711,10 @@ class GhCli(mr_ops.CliWaits):
         if not labels:
             return
         target = mr_ops.target(mr.number, branch)
-        data = await self._json(repo, ["pr", "view", *target, "--json", "labels"], "gh pr view")
-        current = [str(label.get("name", "")) for label in data.get("labels") or []]
+        data = await self._pr(repo, target, checks=False)
+        current = [
+            str(label.get("name", "")) for label in (data.get("labels") or {}).get("nodes") or []
+        ]
         args = ["gh", "pr", "edit", *target, "--add-label", ",".join(labels)]
         for label in mr_ops.same_scope_labels(current, labels):
             args += ["--remove-label", label]
@@ -976,23 +943,13 @@ class GhCli(mr_ops.CliWaits):
         return detail, failed_jobs
 
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None:
-        raw = await git.run_git(
-            repo,
-            [
-                "gh",
-                "pr",
-                "list",
-                "--head",
-                branch,
-                "--state",
-                "all",
-                "--json",
-                "number,url,state,autoMergeRequest,mergeCommit,headRefOid",
-                "-L",
-                "5",
-            ],
-        )
-        rows = mr_ops.parse_json(raw, "gh pr list")
+        data = await self._gql(repo, gq.FIND_QUERY, gq.owner_vars(b=branch))
+        try:
+            rows = data["repository"]["pullRequests"]["nodes"]
+        except (KeyError, TypeError) as exc:
+            raise ForgeError(
+                f"gh api graphql answered without the pull requests: {data!r:.200}"
+            ) from exc
         return mr_ops.pick_mr(
             [
                 MRRef(
@@ -1004,5 +961,6 @@ class GhCli(mr_ops.CliWaits):
                     head_sha=str(r.get("headRefOid") or ""),
                 )
                 for r in rows
+                if isinstance(r, dict)
             ]
         )

@@ -14,12 +14,13 @@ from kraft import config
 from kraft.adapters import forge
 from kraft.automated_review import AutomatedReview, as_reviewers
 
+from .api_outputs import READ_BRANCH, pr_by_branch, pull_request
 from .nodes import FAIL
 from .outputs import glab_merged_results
 
 HEAD = "abc123"
 
-GH_PR = json.dumps({"number": 7, "headRefOid": HEAD})
+GH_PR = pr_by_branch(pull_request(oid=HEAD))
 GH_REVIEWS = "api repos/{owner}/{repo}/pulls/7/reviews?per_page=100"
 GH_COMMENTS = "api repos/{owner}/{repo}/pulls/7/reviews/51/comments?per_page=100"
 GH_RUNS = f"api*commits/{HEAD}/check-runs*check_name=review-bot*"
@@ -81,9 +82,9 @@ CHECK = AutomatedReview(check="review-bot")
             GH,
             # A review on an older head does not count: the bot has not seen
             # this one yet.
-            {"pr view": GH_PR, GH_REVIEWS: json.dumps([_gh_review("COMMENTED", commit="old")])},
+            {READ_BRANCH: GH_PR, GH_REVIEWS: json.dumps([_gh_review("COMMENTED", commit="old")])},
             {
-                "pr view": GH_PR,
+                READ_BRANCH: GH_PR,
                 GH_REVIEWS: json.dumps([_gh_review("COMMENTED")]),
                 GH_COMMENTS: "[]",
             },
@@ -115,7 +116,7 @@ async def test_a_bot_review_is_pending_until_the_bot_reviews_the_head_then_clean
         (
             GH,
             {
-                "pr view": GH_PR,
+                READ_BRANCH: GH_PR,
                 GH_REVIEWS: json.dumps([_gh_review("CHANGES_REQUESTED")]),
                 GH_COMMENTS: json.dumps(
                     [{"path": "calc.py", "line": 3, "body": "rename `x` to `total`"}]
@@ -147,7 +148,7 @@ async def test_a_bot_s_unresolved_feedback_is_actionable(cli, tmp_path, backend,
         (
             GH,
             {
-                "pr view": GH_PR,
+                READ_BRANCH: GH_PR,
                 GH_REVIEWS: json.dumps([_gh_review("DISMISSED")]),
                 GH_COMMENTS: json.dumps([{"path": "calc.py", "line": 3, "body": "stale"}]),
             },
@@ -158,7 +159,7 @@ async def test_a_bot_s_unresolved_feedback_is_actionable(cli, tmp_path, backend,
         (
             GH,
             {
-                "pr view": GH_PR,
+                READ_BRANCH: GH_PR,
                 GH_REVIEWS: json.dumps(
                     [_gh_review("COMMENTED", id=50), _gh_review("DISMISSED", id=51)]
                 ),
@@ -196,7 +197,7 @@ async def test_a_withdrawn_bot_review_does_not_count(cli, tmp_path, backend, rou
         (
             GH,
             {
-                "pr view": GH_PR,
+                READ_BRANCH: GH_PR,
                 GH_RUNS: json.dumps(
                     {
                         "check_runs": [
@@ -266,7 +267,7 @@ async def test_a_failed_review_check_is_actionable_with_its_output(
         (
             GH,
             {
-                "pr view": GH_PR,
+                READ_BRANCH: GH_PR,
                 GH_RUNS: json.dumps(
                     {"check_runs": [{"status": "in_progress", "conclusion": None}]}
                 ),
@@ -286,7 +287,7 @@ async def test_a_failed_review_check_is_actionable_with_its_output(
         (
             GH,
             {
-                "pr view": GH_PR,
+                READ_BRANCH: GH_PR,
                 GH_RUNS: json.dumps(
                     {"check_runs": [{"status": "completed", "conclusion": "cancelled"}]}
                 ),
@@ -343,14 +344,14 @@ _CHECK_READ_FAILS = {GH_RUNS: FAIL}
     ],
 )
 async def test_several_reviewers_read_as_one_result(cli, tmp_path, bot, check, state, findings):
-    routes = {"pr view": GH_PR, **bot, **check}
+    routes = {READ_BRANCH: GH_PR, **bot, **check}
     review = await _review(GH, cli, tmp_path, routes, [BOT, CHECK])
 
     assert (review.state, review.findings) == (state, findings)
 
 
 async def test_a_failed_read_without_findings_fails_as_today(cli, tmp_path):
-    routes = {"pr view": GH_PR, **_BOT_CLEAN, **_CHECK_READ_FAILS}
+    routes = {READ_BRANCH: GH_PR, **_BOT_CLEAN, **_CHECK_READ_FAILS}
 
     with pytest.raises(forge.ForgeError):
         await _review(GH, cli, tmp_path, routes, [BOT, CHECK])
