@@ -1145,7 +1145,7 @@ class GlabCli(mr_ops.CliWaits):
         ref = await self.find_mr(repo=repo, branch=branch)
         if ref is None:
             return None
-        r = await self._api(repo, f"projects/:id/merge_requests/{ref.number}")
+        r = await self._api(repo, f"projects/:id/merge_requests/{ref.number}") or {}
         return MRDetails(
             number=ref.number,
             url=str(r.get("web_url") or ref.url),
@@ -1215,6 +1215,7 @@ class GlabCli(mr_ops.CliWaits):
             "target_branch": base,
             "order_by": "merged_at",
             "sort": "desc",
+            # One page: the route caps `limit` at 100, GitLab's page size.
             "per_page": min(limit, 100),
         }
         try:
@@ -1236,7 +1237,10 @@ class GlabCli(mr_ops.CliWaits):
                 url=str(r.get("web_url") or ""),
                 merged_at=str(r.get("merged_at") or ""),
             )
-            for r in (rows or ())[:limit]
+            # Newest merge first even when the old-server fallback ordered by update.
+            for r in sorted(rows or (), key=lambda r: str(r.get("merged_at") or ""), reverse=True)[
+                :limit
+            ]
         )
 
     async def labels(self, *, repo: Path) -> tuple[Label, ...]:

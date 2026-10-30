@@ -192,21 +192,18 @@ def _labels(n: int) -> str:
                 f"{MRS}*order_by=merged_at*": Api(
                     400, '{"message": "order_by does not have a valid value"}'
                 ),
-                f"{MRS}*order_by=updated_at*": GLAB_MERGED_LIST,
+                f"{MRS}*order_by=updated_at*": json.dumps(
+                    [
+                        {"iid": 52, "merged_at": "2026-10-28T12:00:00.000Z"},
+                        {"iid": 53, "merged_at": "2026-10-29T12:00:00.000Z", "title": "Fix it"},
+                    ]
+                ),
             },
             [
                 f"{_MERGED} -F per_page=1",
                 f"{_MERGED.replace('merged_at', 'updated_at')} -F per_page=1",
             ],
-            (
-                forge.MergedMR(
-                    53,
-                    "Fix it",
-                    ("release::patch",),
-                    "https://gitlab.com/g/p/-/merge_requests/53",
-                    "2026-10-29T12:00:00.000Z",
-                ),
-            ),
+            (forge.MergedMR(53, "Fix it", (), "", "2026-10-29T12:00:00.000Z"),),
             id="merged-on-an-old-server",
         ),
         pytest.param(
