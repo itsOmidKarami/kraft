@@ -29,9 +29,9 @@ rewrites the title or description after you: write it for the reviewer, not for 
   checker for the body, run it on your draft before you finish.
 - `CODEOWNERS` for who reviews the paths this diff touches.
 - What the project already does: `git log --oneline -30` for the title
-  pattern (Conventional Commits or not), `glab mr list --merged` / `gh
-  pr list --state merged` for how merged ones are titled and labelled, and the
-  project's existing label set (`glab label list` / `gh label list`).
+  pattern (Conventional Commits or not), `kraft view merged --limit 20` for how
+  merged ones are titled and labelled, and `kraft view labels` for the
+  project's existing label set.
 
 ## Then read the change, not the plan
 

@@ -70,6 +70,10 @@ ROUTES: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
         ("GET", rf"/api/work-items/{_P}/threads", "item"),
         ("GET", rf"/api/work-items/{_P}/events", "item"),
         ("POST", rf"/api/work-items/{_P}/progress", "item"),
+        # Item-scoped forge reads: the server derives project and MR from the item.
+        ("GET", rf"/api/work-items/{_P}/forge/(?:mr|pipelines|merged|labels)", "item"),
+        ("GET", rf"/api/work-items/{_P}/forge/pipelines/[^/]+/jobs", "item"),
+        ("GET", rf"/api/work-items/{_P}/forge/pipelines/[^/]+/jobs/[^/]+/log", "item"),
         # The escalation self-retry keeps its server-side carve-out.
         ("POST", rf"/api/work-items/{_P}/retry", "item"),
         ("POST", rf"/api/threads/{_P}/replies", "thread"),

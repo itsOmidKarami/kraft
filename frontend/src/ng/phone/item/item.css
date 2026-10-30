@@ -48,3 +48,9 @@
 /* The spec and plan attached at intake, each opening Kraft's copy of it. */
 .ph-attached { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 6px 0 0; }
 .ph-start-lines { margin: 0 0 10px; padding: 8px 10px; border-radius: 8px; background: var(--side); font: var(--fs-label)/1.6 ui-monospace, Menlo, monospace; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* The one-off review sheet: each custom part, its place, then its text in full. */
+.ph-oneoff { display: flex; flex-direction: column; gap: 10px; margin: 0 0 10px; }
+.ph-oneoff-part { display: flex; flex-direction: column; gap: 2px; }
+/* No box of its own: the sheet scrolls, so a long prompt reads by touch and by keyboard alike. */
+.ph-oneoff-part .ph-start-lines { margin: 4px 0 0; }

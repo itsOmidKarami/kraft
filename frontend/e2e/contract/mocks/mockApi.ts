@@ -436,6 +436,57 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       viewedMarks[method === "PUT" ? "add" : "delete"](`${m[1]}|${file}`);
       return json({ file, to: q.get("to") ?? "latest", viewed: method === "PUT" });
     }
+    /* one-off chains: the new-item page's editor. Stateless like the server: the nodes added come back in the text, one `# add:<id>:<prompt>` line each. */
+    if (p === "/one-off-chain/ops" && method === "POST") {
+      const b = req.json() ?? {};
+      let text: string = b.text ?? "";
+      const id = (b.ops ?? []).find((o: any) => o.op === "add_node")?.id;
+      const prompt = (b.ops ?? []).find((o: any) => o.op === "set_field" && o.field === "prompt")?.value ?? "";
+      if (id) text += `# add:${id}:${prompt}\n`;
+      const added = [...text.matchAll(/^# add:([a-z0-9_-]+):(.*)$/gm)].map((x) => ({ id: x[1], prompt: x[2] }));
+      const v = JSON.parse(JSON.stringify(DRAFTS.views.default).replaceAll("chains/default.yaml", "chains/one-off.yaml"));
+      const file = v.result.model["chains/one-off.yaml"];
+      file.id = "one-off";
+      file.nodes.push(...added.map((a) => ({ id: a.id, kind: "exec", steps: [{ id: "run", tasks: [{ id: "agent", kind: "agent", harness: "claude", prompt: a.prompt }] }] })));
+      file.extends = "default";
+      v.result.extending = { parent: "default", nodes: file.nodes, origins: Object.fromEntries(added.map((a) => [a.id, "added"])), removed: [] };
+      v.key = "one-off";
+      v.draft = true;
+      v.files = { "chains/one-off.yaml": text };
+      v.result.changes = [];
+      v.result.problems = [];
+      v.result.choices = DRAFTS.choices;
+      const nodes = file.nodes.map((n: any) => ({ id: n.id, kind: n.kind ?? "exec", tasks: [], steps: [], gate_after: null }));
+      return json({
+        ...v, ops: (b.ops ?? []).map((o: any) => ({ op: o.op })), text, digest: "a".repeat(64), nodes,
+        custom: added.map((a) => ({ path: `add[${a.id}].node`, what: `adds '${a.id}', a node with its own content rather than library parts`, value: a.prompt })),
+        custom_nodes: added.map((a) => a.id),
+        added: added.map((a) => ({ node: a.id, harnesses: ["claude"], estimate_usd: null, estimate_runs: null })),
+      });
+    }
+    /* one-off chains: what Start reviews before an item with custom content runs */
+    if ((m = p.match(/^\/work-items\/([^/]+)\/one-off$/)) && method === "GET") {
+      const node = { id: "k6", kind: "exec", tasks: [{ id: "run", kind: "agent", harness: "claude", prompt: "run k6" }] };
+      return json({
+        extends: "default",
+        authored: { id: "one-off", extends: "default", add: [{ after: "verification", node }] },
+        custom: [{ path: "add[0].node", what: "adds 'k6', a node with its own content rather than library parts", value: node }],
+        provenance: { parent: "default", nodes: { k6: "added" }, overrides: {}, removed: [] },
+        digest: "0".repeat(64),
+        approval: null,
+        needs_review: true,
+        added: [{ node: "k6", harnesses: ["claude"], estimate_usd: null, estimate_runs: null }],
+        redrafted: [],
+      });
+    }
+    if ((m = p.match(/^\/work-items\/([^/]+)\/one-off\/approve$/)) && method === "POST") {
+      const b = req.json() ?? {};
+      if (b.digest !== "0".repeat(64)) return json({ detail: "the one-off chain changed since it was reviewed; review it again" }, 409);
+      const it = S.bundles[m[1]].item;
+      const approval = { by: "human", door: b.door, at: "2026-09-13T10:09:00.000Z", digest: b.digest };
+      it.one_off = { ...it.one_off, needs_review: false, approval };
+      return json({ id: m[1], approval });
+    }
     /* ux2-W8: review threads and comments, kept for the test's life */
     if ((m = p.match(/^\/work-items\/([^/]+)\/threads$/))) {
       const list = threadsOf(m[1]);

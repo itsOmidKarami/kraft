@@ -5,6 +5,7 @@ import * as api from "../../../api";
 import type { ChainNode, TemplateSummary } from "../../../types";
 import { Shell } from "../../shell/Shell";
 import { useStore } from "../../../store";
+import { DEFAULT_VIEW } from "../../templates/draft/fixture.default";
 import { DRAFT_KEY, DraftItemPage } from "./DraftItemPage";
 
 const N = (id: string, more: Partial<ChainNode> = {}) => ({ id, kind: "exec", tasks: [], gate_after: null, ...more }) as ChainNode;
@@ -23,11 +24,25 @@ function stub(created = "new1") {
       const skipped = [...(covered ? [{ node: "spec", why: "covered_by", kind: "spec" }, { node: "spec_approval", why: "covered_by", kind: "spec" }] : []), ...body.skip_nodes.map((n: string) => ({ node: n, why: "skip" }))];
       return new Response(JSON.stringify({ nodes: NODES.filter((n) => !skipped.some((s) => s.node === n.id)), skipped, gates: [], caps: { budget_usd: 5, budget_source: "policy", nodes: { implementation: { attempts: 3, wall_clock_s: 1800 } } } }), { status: 200 });
     }
+    if (String(url).endsWith("/one-off-chain/ops")) return oneOff.fail ? new Response(JSON.stringify({ detail: "the server is away" }), { status: 503 }) : new Response(JSON.stringify(oneOffAnswer(body)), { status: 200 });
     if (method === "POST") return new Response(JSON.stringify({ id: created }), { status: 201 });
     return new Response("{}", { status: 200 });
   }));
   return calls;
 }
+/** The editor's answer for the default chain extended: `custom` is what the test sets, `problem` breaks the chain. */
+let oneOff: { parent?: boolean; fail?: boolean; added?: unknown[]; custom: { path: string; what: string; value: unknown }[]; customNodes: string[]; problem: boolean; nodes: ChainNode[] };
+const oneOffAnswer = (body: { text: string; ops: { op: string; id?: string }[] }) => {
+  const added = body.ops.some((o) => o.op === "add_node") ? [...oneOff.nodes, N("k6")] : oneOff.nodes;
+  const authored = added.map((n) => ({ id: n.id, kind: n.kind, steps: [{ id: "main", tasks: [] }] }));
+  return {
+    ...DEFAULT_VIEW, key: "one-off", draft: true, files: { "chains/one-off.yaml": body.text },
+    result: { ...DEFAULT_VIEW.result, model: { "chains/one-off.yaml": { id: "one-off", extends: "default" } }, resolved: null, changes: [], sources: {},
+      problems: oneOff.problem ? [{ path: "k6", field: "prompt", message: "needs a prompt", file: "chains/one-off.yaml", line: 1, col: 1 }] : [],
+      extending: oneOff.parent === false ? null : { parent: "default", nodes: authored, origins: {}, removed: [] } },
+    ops: body.ops.map((o) => ({ op: o.op })), text: body.ops.length ? `${body.text}# edited\n` : body.text, digest: oneOff.problem ? null : "d1gest", custom: oneOff.custom, custom_nodes: oneOff.customNodes, nodes: added, added: oneOff.added ?? [],
+  };
+};
 const creates = (calls: Call[]) => calls.filter((c) => c.method === "POST" && c.url.endsWith("/work-items"));
 
 const Where = () => {
@@ -48,6 +63,7 @@ const mount = (state?: unknown, path = "/work-items/new") =>
 const settle = async () => { for (let i = 0; i < 3; i++) await act(async () => { await vi.advanceTimersByTimeAsync(350); }); };
 
 beforeEach(() => {
+  oneOff = { custom: [], customNodes: [], problem: false, nodes: NODES };
   vi.useFakeTimers({ shouldAdvanceTime: true });
   sessionStorage.clear();
   vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [{ path: "/code/kraft-plugins", default_chain: "default", enabled: true }] as never });
@@ -254,5 +270,294 @@ describe("DraftItemPage", () => {
     await settle();
     expect(screen.getByLabelText("default chain YAML")).toHaveTextContent("nodes: - id: spec");
     expect(screen.getByText("4 fix attempts")).toBeInTheDocument();
+  });
+
+  describe("a one-off chain", () => {
+    const FILED = { title: "t", repo: "/code/kraft-plugins", chain: "default" };
+    const customize = async () => {
+      mount({ draft: FILED });
+      await settle();
+      fireEvent.click(screen.getByRole("button", { name: /^default/ }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Customize for this item" }));
+      await settle();
+    };
+
+    it("Customize for this item shows the one-off head, and Back restores the page", async () => {
+      stub();
+      await customize();
+      expect(screen.getByRole("button", { name: /^one-off · extends default/ })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /^one-off · extends default/ }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Back to default" }));
+      await settle();
+      expect(screen.getByRole("button", { name: /^default/ })).toBeInTheDocument();
+      expect(JSON.parse(sessionStorage.getItem(DRAFT_KEY)!).oneOff).toBeNull();
+    });
+
+    it("a problem in the chain disables both creates, with the reason as their description; none is claimed while the first read is out", async () => {
+      stub();
+      oneOff.problem = true;
+      mount({ draft: FILED });
+      await settle();
+      fireEvent.click(screen.getByRole("button", { name: /^default/ }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Customize for this item" }));
+      expect(screen.getByText("DRAFT · NOT CREATED")).toBeInTheDocument();
+      expect(screen.getByRole("status", { name: "" })).toHaveTextContent("Reading the chain…");
+      await settle();
+      for (const name of ["Create paused", "More ways to create"]) {
+        const b = screen.getByRole("button", { name });
+        expect(b).toBeDisabled();
+        expect(b).toHaveAccessibleDescription("FIX THE CHAIN TO CREATE");
+        expect(b).not.toHaveAttribute("title");
+      }
+    });
+
+    it("a chain that cannot be read says so on the canvas and the YAML tab, with Try again", async () => {
+      const calls = stub();
+      oneOff.fail = true;
+      await customize();
+      expect(screen.getByRole("alert", { name: "" })).toHaveTextContent("Couldn't read this item's chain. the server is away");
+      fireEvent.click(screen.getByRole("tab", { name: "YAML" }));
+      expect(screen.getAllByRole("button", { name: "Try again" })).toHaveLength(2);
+      oneOff.fail = false;
+      const before = calls.length;
+      fireEvent.click(screen.getAllByRole("button", { name: "Try again" })[0]);
+      await settle();
+      expect(calls.length).toBeGreaterThan(before);
+      expect(screen.getByRole("textbox", { name: "One-off chain, YAML" })).toBeInTheDocument();
+    });
+
+    it.each([
+      ["a line break", "default%0Aoverrides%3A%20%7Bspec%3A%20%7B%7D%7D"],
+      ["a chain this repo has not got", "nightly"],
+    ])("offers no Customize for a chain from the address with %s", async (_, chain) => {
+      stub();
+      mount(undefined, `/work-items/new?repo=/code/kraft-plugins&title=t&chain=${chain}`);
+      await settle();
+      fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${decodeURIComponent(chain).split("\n")[0]}`) }));
+      expect(screen.queryByRole("menuitem", { name: "Customize for this item" })).toBeNull();
+    });
+
+    it("counts as an edit: leaving with no title still asks, and says the chain goes too", async () => {
+      stub();
+      mount({ draft: { repo: "/code/kraft-plugins", chain: "default" } });
+      await settle();
+      fireEvent.click(screen.getByRole("button", { name: /^default/ }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Customize for this item" }));
+      await settle();
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(screen.getByRole("alertdialog", { name: "Discard this draft?" })).toHaveTextContent("The title, brief, one-off chain and settings you entered are lost.");
+    });
+
+    it("Back drops the chain with an Undo that puts it back", async () => {
+      stub();
+      const toasts: { message: string; action?: { label: string; run: () => void } }[] = [];
+      const on = (e: Event) => toasts.push((e as CustomEvent).detail);
+      window.addEventListener("kraft:toast", on);
+      await customize();
+      fireEvent.click(screen.getByRole("button", { name: /^one-off · extends default/ }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Back to default" }));
+      await settle();
+      window.removeEventListener("kraft:toast", on);
+      expect(toasts.at(-1)).toMatchObject({ message: "One-off chain dropped", action: { label: "Undo" } });
+      act(() => toasts.at(-1)!.action!.run());
+      await settle();
+      expect(screen.getByRole("button", { name: /^one-off · extends default/ })).toBeInTheDocument();
+    });
+
+    it.each([
+      { id: "nothing open: undoes", dialog: null, text: 'id: one-off\nextends: "default"\n' },
+      { id: "under the discard dialog: leaves the chain alone", dialog: "discard", text: "id: one-off\nextends: default\n# typed\n" },
+      { id: "under the create review: leaves the chain alone", dialog: "review", text: "id: one-off\nextends: default\n# typed\n" },
+    ])("⌘Z outside a text field undoes the chain's last edit ($id)", async ({ dialog, text }) => {
+      const calls = stub();
+      if (dialog === "review") oneOff.custom = [{ path: "add[0]", what: "adds k6", value: "x" }];
+      await customize();
+      fireEvent.click(screen.getByRole("tab", { name: "YAML" }));
+      const ta = screen.getByRole("textbox", { name: "One-off chain, YAML" });
+      fireEvent.change(ta, { target: { value: "id: one-off\nextends: default\n# typed\n" } });
+      fireEvent.blur(ta);
+      await settle();
+      if (dialog === "discard") fireEvent.keyDown(window, { key: "Escape" });
+      if (dialog === "review") fireEvent.click(screen.getByRole("button", { name: "Create paused" }));
+      if (dialog) await settle();
+      fireEvent.keyDown(document.body, { key: "z", metaKey: true });
+      await settle();
+      const ops = calls.filter((c) => c.url.endsWith("/one-off-chain/ops"));
+      expect(ops.at(-1)!.body.text).toBe(text);
+    });
+
+    it("reads like the item page on the canvas: names, skips and covered nodes; the Overview names the one-off chain", async () => {
+      stub();
+      mount({ draft: { ...FILED, spec: "docs/spec.md", skip: ["implementation"] } });
+      await settle();
+      fireEvent.click(screen.getByRole("button", { name: /^default/ }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Customize for this item" }));
+      await settle();
+      const gate = screen.getByRole("button", { name: /^approve spec, gate/ });
+      expect(gate.textContent).toContain("covered");
+      expect(screen.getByRole("button", { name: /^implementation, node/ }).textContent).toContain("skipped");
+      expect(screen.getByText(/^one-off · extends default · 4 nodes$/)).toBeInTheDocument();
+    });
+
+    it("the YAML tab names no file, says nothing of a published file, and reverts to the last valid chain", async () => {
+      stub();
+      await customize();
+      fireEvent.click(screen.getByRole("tab", { name: "YAML" }));
+      expect(screen.queryByText("chains/one-off.yaml")).toBeNull();
+      expect(screen.queryByText(/added/)).toBeNull();
+      expect(screen.getByRole("status", { name: "" })).toHaveTextContent(/^parsed$/);
+    });
+
+    it("a node added from the + menu is selected, its pane open", async () => {
+      stub();
+      await customize();
+      fireEvent.click(screen.getAllByRole("button", { name: /^Add a node/ })[1]);
+      fireEvent.click(screen.getByRole("menuitem", { name: /Custom agent node/ }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Node id" }), { target: { value: "k6" } });
+      fireEvent.change(screen.getByRole("textbox", { name: "Prompt" }), { target: { value: "run k6" } });
+      fireEvent.click(screen.getByRole("button", { name: "Create & open →" }));
+      await settle();
+      expect(screen.getByRole("button", { name: /^k6, node/ })).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("never takes a one-off chain from the address or the router state", async () => {
+      stub();
+      mount({ draft: { ...FILED, oneOff: "id: x\n" } }, "/work-items/new?chain_yaml=id%3A%20x");
+      await settle();
+      expect(JSON.parse(sessionStorage.getItem(DRAFT_KEY)!).oneOff).toBeNull();
+    });
+
+    it("with nothing custom, Create sends the chain's text and no digest, and opens no review", async () => {
+      const calls = stub();
+      await customize();
+      fireEvent.click(screen.getByRole("button", { name: "Create paused" }));
+      await settle();
+      const body = creates(calls).at(-1)!.body;
+      expect(body).toMatchObject({ one_off_chain: 'id: one-off\nextends: "default"\n' });
+      expect("chain_template" in body || "approve_one_off" in body).toBe(false);
+    });
+
+    it("with custom content, Create shows every part before any POST, and Approve and create sends the digest", async () => {
+      const calls = stub();
+      oneOff.custom = [{ path: "add[0]", what: "adds the node k6, running an agent", value: "run k6 against staging" }];
+      oneOff.customNodes = ["k6"];
+      oneOff.added = [{ node: "k6", harnesses: ["claude"], estimate_usd: null, estimate_runs: null }];
+      await customize();
+      fireEvent.click(screen.getByRole("button", { name: "Create paused" }));
+      await settle();
+      expect(creates(calls)).toEqual([]);
+      const dialog = screen.getByRole("dialog", { name: /Approve this chain/ });
+      expect(within(dialog).getByText("run k6 against staging")).toBeInTheDocument();
+      // The editor's checks on the added node reach the review.
+      expect(within(dialog).getByText("✓ k6: harness claude is allowed · no estimate yet")).toBeInTheDocument();
+      fireEvent.click(within(dialog).getByRole("button", { name: "Approve and create" }));
+      await settle();
+      expect(creates(calls).at(-1)!.body).toMatchObject({ approve_one_off: "d1gest" });
+    });
+
+    it("Cancel on the review creates nothing", async () => {
+      const calls = stub();
+      oneOff.custom = [{ path: "add[0]", what: "adds k6", value: "x" }];
+      await customize();
+      fireEvent.click(screen.getByRole("button", { name: "Create paused" }));
+      await settle();
+      fireEvent.click(within(screen.getByRole("dialog", { name: /Approve this chain/ })).getByRole("button", { name: "Cancel" }));
+      expect(creates(calls)).toEqual([]);
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("drops a skip for a node the chain no longer has", async () => {
+      stub();
+      mount({ draft: { ...FILED, skip: ["final_review"] } });
+      await settle();
+      oneOff.nodes = NODES.filter((n) => n.id !== "final_review");
+      fireEvent.click(screen.getByRole("button", { name: /^default/ }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Customize for this item" }));
+      await settle();
+      expect(JSON.parse(sessionStorage.getItem(DRAFT_KEY)!).skip).toEqual([]);
+    });
+
+    it("rings the custom nodes on the canvas", async () => {
+      stub();
+      oneOff.customNodes = ["implementation"];
+      await customize();
+      expect(screen.getByRole("button", { name: /^implementation, node/ })).toHaveClass("one-off-custom");
+    });
+
+    it("a YAML edit still waiting to be sent when Create is pressed is sent, and filed", async () => {
+      const calls = stub();
+      await customize();
+      fireEvent.click(screen.getByRole("tab", { name: "YAML" }));
+      await settle();
+      fireEvent.change(screen.getByRole("textbox", { name: "One-off chain, YAML" }), { target: { value: "id: one-off\nextends: default\n# typed\n" } });
+      fireEvent.click(screen.getByRole("button", { name: "Create paused" }));
+      await settle();
+      expect(creates(calls).at(-1)!.body.one_off_chain).toContain("# typed");
+    });
+
+    it("the review is of the answer it was opened on: an edit that lands after it is read again, never filed unread", async () => {
+      const calls = stub();
+      oneOff.custom = [{ path: "add[0]", what: "adds k6", value: "run k6" }];
+      await customize();
+      fireEvent.click(screen.getByRole("button", { name: "Create paused" }));
+      await settle();
+      fireEvent.click(screen.getByRole("tab", { name: "YAML" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "One-off chain, YAML" }), { target: { value: "id: one-off\nextends: default\n# later\n" } });
+      fireEvent.click(within(screen.getByRole("dialog", { name: /Approve this chain/ })).getByRole("button", { name: "Approve and create" }));
+      await settle();
+      expect(creates(calls)).toEqual([]);
+      expect(screen.getByRole("dialog", { name: /Approve this chain/ })).toBeInTheDocument();
+    });
+
+    it("the review is read again when what is custom changed under it, though the text did not", async () => {
+      const calls = stub();
+      oneOff.custom = [{ path: "add[0]", what: "adds k6", value: "run k6" }];
+      await customize();
+      fireEvent.click(screen.getByRole("button", { name: "Create paused" }));
+      await settle();
+      oneOff.custom = [{ path: "add[0]", what: "adds k6", value: "run k6 --everywhere" }];
+      fireEvent.click(within(screen.getByRole("dialog", { name: /Approve this chain/ })).getByRole("button", { name: "Approve and create" }));
+      await settle();
+      expect(creates(calls)).toEqual([]);
+      expect(screen.getByText(/--everywhere/)).toBeInTheDocument();
+    });
+
+    it.each([
+      ["cannot be read", () => { oneOff.fail = true; }, "the server is away"],
+      ["has a problem now", () => { oneOff.problem = true; }, "The chain has problems now. Fix them, then approve it again."],
+    ])("a chain that %s on Approve keeps the review open and says why, filing nothing", async (_, breakIt, why) => {
+      const calls = stub();
+      oneOff.custom = [{ path: "add[0]", what: "adds k6", value: "run k6" }];
+      await customize();
+      fireEvent.click(screen.getByRole("button", { name: "Create paused" }));
+      await settle();
+      breakIt();
+      const dialog = screen.getByRole("dialog", { name: /Approve this chain/ });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Approve and create" }));
+      await settle();
+      expect(creates(calls)).toEqual([]);
+      expect(within(screen.getByRole("dialog", { name: /Approve this chain/ })).getByRole("alert")).toHaveTextContent(why);
+    });
+
+    it("two quick presses of Approve and create file one item", async () => {
+      const calls = stub();
+      oneOff.custom = [{ path: "add[0]", what: "adds k6", value: "run k6" }];
+      await customize();
+      fireEvent.click(screen.getByRole("button", { name: "Create paused" }));
+      await settle();
+      const approve = within(screen.getByRole("dialog", { name: /Approve this chain/ })).getByRole("button", { name: "Approve and create" });
+      fireEvent.click(approve);
+      fireEvent.click(approve);
+      await settle();
+      expect(creates(calls)).toHaveLength(1);
+    });
+
+    it("says nothing is extended once extends is out of the YAML", async () => {
+      stub();
+      oneOff.parent = false;
+      await customize();
+      expect(screen.getByRole("button", { name: /^one-off ▾|^one-off$/ })).toBeInTheDocument();
+      expect(screen.queryByText(/extends/)).toBeNull();
+    });
   });
 });

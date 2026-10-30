@@ -43,6 +43,8 @@ export function RaiseLimit({ itemId, limit, override, onClose, onDone }: { itemI
   const [error, setError] = useState<string | null>(null);
   // Dollars are read one way everywhere (`dollars`): a number field turned "0,5" into 05 (R13b-01).
   const n = money ? dollars(text) : Number(text);
+  // Invalid only for what was typed: a server failure is about the save, not the field.
+  const unreadable = !!(money && text.trim() && Number.isNaN(n));
   const valid = (money ? Number.isFinite(n) : Number.isInteger(n)) && n > limit.value && (!money || limit.maximum == null || n <= limit.maximum);
   const save = async () => {
     setBusy(true);
@@ -69,9 +71,9 @@ export function RaiseLimit({ itemId, limit, override, onClose, onDone }: { itemI
         <Field
           label={`${label(limit.path)} (${unit})`}
           hint={`Now ${show(limit.value)}. ${limit.maximum == null ? "No maximum." : `Maximum ${show(limit.maximum)}.`}`}
-          error={error ?? (money && text.trim() && Number.isNaN(n) ? DOLLARS_HINT : null)}
+          error={error ?? (unreadable ? DOLLARS_HINT : null)}
         >
-          <input data-autofocus className="item-input" type={money ? "text" : "number"} inputMode={money ? "decimal" : "numeric"} {...(!money && { min: limit.value + 1, max: limit.maximum ?? undefined, step: 1 })} value={text} onChange={(e) => setText(e.target.value)} />
+          <input aria-invalid={unreadable} data-autofocus className="item-input" type={money ? "text" : "number"} inputMode={money ? "decimal" : "numeric"} {...(!money && { min: limit.value + 1, max: limit.maximum ?? undefined, step: 1 })} value={text} onChange={(e) => setText(e.target.value)} />
         </Field>
       </form>
     </Dialog>

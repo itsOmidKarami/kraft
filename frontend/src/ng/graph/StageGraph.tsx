@@ -216,7 +216,7 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams: chainSeams
               aria-label={nodeName}
               aria-describedby={metaId}
               aria-pressed={n.id === selected}
-              className={`graph-node${bold ? " is-bold" : ""}${clipped({ cx, w }) ? " is-clipped" : ""}${n.state === "todo" ? " is-todo" : ""}${n.state === "ghost" ? " is-ghost" : ""}${n.mark === "add" ? (n.prob ? " is-bad" : " is-add") : ""}${n.pending ? " is-pending" : ""}${n.faded ? " is-faded" : ""}${drag?.id === n.id ? " is-dragging" : ""}`}
+              className={`graph-node${bold ? " is-bold" : ""}${clipped({ cx, w }) ? " is-clipped" : ""}${n.state === "todo" ? " is-todo" : ""}${n.state === "ghost" ? " is-ghost" : ""}${n.mark === "add" ? (n.prob ? " is-bad" : " is-add") : ""}${n.pending ? " is-pending" : ""}${n.custom ? " one-off-custom" : ""}${n.faded ? " is-faded" : ""}${drag?.id === n.id ? " is-dragging" : ""}`}
               style={{ left: cx - w / 2, top: L.CY - L.BOX / 2, width: w }}
               onFocus={() => { roving.go(key); camera.reveal({ x0: cx - w / 2, x1: cx + w / 2, y0: L.CY - L.BOX / 2, y1: L.CY + L.BOX / 2 + 40 }); }}
               onClick={(e) => single(e, () => onSelect?.(n.id), !!onFocusNode)}

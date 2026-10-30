@@ -145,11 +145,16 @@ describe("SignIn", () => {
     expect(screen.getByRole("button", { name: "Sign in" })).not.toBeDisabled();
   });
 
-  it("says it could not reach the server and stays idle", async () => {
-    serve("network");
+  it.each([
+    { id: "unreachable", reply: "network" as const, says: "Could not reach the Kraft server." },
+    { id: "5xx", reply: { status: 503 }, says: "Sign-in failed (503)." },
+  ])("says a server failure ($id), stays idle, and does not mark the password invalid", async ({ reply, says }) => {
+    serve(reply);
     render(<SignIn onSignedIn={async () => {}} />);
     await userEvent.type(field(), "pw{Enter}");
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not reach the Kraft server.");
+    expect(await screen.findByRole("alert")).toHaveTextContent(says);
+    expect(field()).not.toHaveAttribute("aria-invalid", "true");
+    expect(field()).toHaveAccessibleDescription(says);
     expect(field()).not.toBeDisabled();
     expect(screen.getByRole("button", { name: "Sign in" })).not.toBeDisabled();
   });

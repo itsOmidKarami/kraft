@@ -11,6 +11,7 @@ export function item(over: Partial<WorkItem> = {}): WorkItem {
     display_status: "running",
     stop: null,
     chain_template: null,
+    one_off: null,
     chain_definition: { template_id: "t", nodes: [] },
     current_node_id: "implementation",
     bead_id: null,

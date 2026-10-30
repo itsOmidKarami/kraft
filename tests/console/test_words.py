@@ -29,6 +29,11 @@ def test_a_row_sits_and_reads_as_on_the_web(case):
         ]
 
 
+@pytest.mark.parametrize("case", CASES["chains"], ids=[case["name"] for case in CASES["chains"]])
+def test_a_chain_is_labelled_as_on_the_web(case):
+    assert words.chain_of(case["row"]) == case["label"]
+
+
 def test_the_board_sorts_as_the_web_does():
     order = CASES["order"]
     assert [row["id"] for row in words.sort_rows(order["rows"])] == order["sorted"]

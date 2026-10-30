@@ -290,8 +290,9 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
           </div>
           {step === 1 && (
             <>
+              {/* The path is invalid only when the probe failed on it; a failed add keeps its probe. */}
               <Field label="Path to a local git checkout" error={error}>
-                <input ref={pathField} value={path} spellCheck={false} placeholder={onMac() ? "/Users/you/code/project" : "/home/you/code/project"} disabled={!!added}
+                <input ref={pathField} aria-invalid={!!error && !probe} value={path} spellCheck={false} placeholder={onMac() ? "/Users/you/code/project" : "/home/you/code/project"} disabled={!!added}
                   onChange={(e) => { setPath(e.target.value); setProbe(null); setShown(0); setError(null); }}
                   onKeyDown={(e) => e.key === "Enter" && (probe && !noCommit ? probed && !added && doAdd() : doProbe())} />
               </Field>

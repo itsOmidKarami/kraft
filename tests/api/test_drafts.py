@@ -4,6 +4,8 @@ discarded for good."""
 
 from __future__ import annotations
 
+import json
+
 import pytest
 import yaml
 
@@ -329,6 +331,25 @@ def test_renaming_a_chain_never_published_says_publish_creates_it(client):
 def test_a_fragment_yaml_error_answers_its_line_and_column(client):
     r = post_ops(client, {"op": "set_fragment", "path": "spec", "yaml": "id: spec\nkind: [\n"})
     assert (r.status_code, r.json()["line"], r.json()["col"]) == (422, 3, 1)
+
+
+BOMB = "".join(
+    f"l{n}: &l{n} {{<<: [{','.join([f'*l{n - 1}'] * 10)}]}}\n" if n else "l0: &l0 {a: 1}\n"
+    for n in range(8)
+)
+#: About 30,000 nodes: past a one-off chain's bound, well inside a library save's.
+WIDE = "a: &a [" + ",".join(["1"] * 1000) + "]\nb: [" + ",".join(["*a"] * 30) + "]\n"
+
+
+@pytest.mark.parametrize(
+    ("fragment", "refused"),
+    [pytest.param(BOMB, True, id="bomb"), pytest.param(WIDE, False, id="wide")],
+)
+def test_a_fragment_yaml_bomb_is_refused_not_built(client, fragment, refused):
+    r = post_ops(client, {"op": "set_fragment", "path": "spec", "yaml": fragment + "id: spec\n"})
+    assert ("not usable YAML" in json.dumps(r.json())) is refused
+    if not refused:
+        assert r.status_code == 200, r.text
 
 
 def test_a_move_to_library_publishes_the_chain_and_the_library_together(client, templates_dir):

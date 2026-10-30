@@ -360,6 +360,8 @@ def test_run_rows_rename_keys_only():
             "url": "https://github.com/o/r/actions/runs/5",
             "createdAt": "2026-09-19T05:51:00Z",
             "updatedAt": "2026-09-19T05:51:09Z",
+            "repository": {"id": 1},
+            "head_repository": {"id": 1},
         }
     ]
     assert gq.run_rows({}) == gq.run_rows([]) == []
