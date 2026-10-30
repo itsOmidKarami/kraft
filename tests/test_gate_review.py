@@ -401,8 +401,13 @@ _COPY_EDITED = "The reviewer changed files in its copy of the branch ({})"
 _TIP_MOVED = "the item's branch moved during the review ({})"
 _IGNORED_IN_COPY = ", so the reviewer's verdict was ignored"
 _COPY_REMOVED = "; Kraft removed the copy and left your working files as they were."
-#: `edit` for a row whose branch tip Kraft cannot read after the review.
-_UNREAD_TIP = "unread-tip"
+#: `edit` for a row whose copy or branch tip Kraft cannot read after the review:
+#: what the real comparison is told instead, None for its own answer.
+_UNREAD = {
+    "unread-copy": (["(git could not read it)"], None),
+    "unread-tip": (None, ["(git could not read it)"]),
+    "unread-tip-beside-a-move": (None, ["(git could not read it)", "elsewhere.txt"]),
+}
 _PERSONS = "# the person's edit\n"
 #: A commit on the person's branch by a route around the copy, which it then undoes.
 _PUSH = (
@@ -452,13 +457,45 @@ _PUSH = (
         ),
         pytest.param(
             False,
-            _UNREAD_TIP,
+            "unread-tip",
             (
                 "undecided",
                 "Kraft could not compare the item's branch after the review "
                 "(git could not read it)" + _IGNORED_IN_COPY + ".",
             ),
             id="in-place-branch-tip-unread",
+        ),
+        pytest.param(
+            False,
+            "unread-copy",
+            (
+                "undecided",
+                "Kraft could not compare its copy of the branch after the review "
+                "(git could not read it)" + _IGNORED_IN_COPY + ".",
+            ),
+            id="in-place-copy-unread",
+        ),
+        pytest.param(
+            False,
+            "unread-tip-beside-a-move",
+            (
+                "undecided",
+                "The item's branch moved during the review (elsewhere.txt) and Kraft could not "
+                "compare the item's branch after the review (git could not read it)"
+                + _IGNORED_IN_COPY
+                + ".",
+            ),
+            id="in-place-branch-tip-part-unread",
+        ),
+        # Its document is outside the copy: kept, and never called a copy edit.
+        pytest.param(
+            False,
+            'echo x > "$KRAFT_DOCS_DIR/review.md"',
+            (
+                "undecided",
+                "The reviewer rewrote the gate's document ({doc})" + _IGNORED_IN_COPY + ".",
+            ),
+            id="in-place-rewrites-the-gate-document",
         ),
     ],
 )
@@ -469,20 +506,22 @@ async def test_an_in_place_checks_first_reviewer_reads_a_copy_of_the_branch(
     is not touched, and the copy is gone after. A write in the copy, or a
     commit on their branch, voids the verdict without stopping the item, and
     the note says which: a moved branch may be the person's own commit."""
-    if edit == _UNREAD_TIP:
-        watch = inplace.watch_copy
+    if edit in _UNREAD:
+        told, watch = _UNREAD[edit], inplace.watch_copy
 
-        def unread_tip(*a):
+        def unread(*a):
             since = watch(*a)
-            return lambda: (since()[0], ["(git could not read it)"])
+            return lambda: tuple(
+                t if t is not None else real for t, real in zip(told, since(), strict=True)
+            )
 
-        monkeypatch.setattr(inplace, "watch_copy", unread_tip)
+        monkeypatch.setattr(inplace, "watch_copy", unread)
     gate = await _at_gate(
         database,
         run_dirs,
         tmp_path,
         repo,
-        ":" if edit == _UNREAD_TIP else edit.replace("{repo}", str(repo)),
+        ":" if edit in _UNREAD else edit.replace("{repo}", str(repo)),
         _PASS,
         mode=CHECKS_FIRST,
         in_place=True,
@@ -495,6 +534,7 @@ async def test_an_in_place_checks_first_reviewer_reads_a_copy_of_the_branch(
     reads = []
     _spy_snapshots(monkeypatch, reads)
 
+    expected = (expected[0], expected[1].replace("{doc}", str(_doc(run_dirs))))
     assert await _run(database, run_dirs, gate) == expected
     assert reads == ["snapshot", "snapshot"]
     assert git(repo, "symbolic-ref", "HEAD") == "refs/heads/main"
