@@ -678,7 +678,16 @@ def pr_rules_note(worktree: Path, work_item_row) -> str:
         if _store.is_in_place(work_item_row)
         else "HEAD"
     )
-    listed = git_read(Path(worktree), "ls-tree", "-r", "--name-only", head, "--", *PR_RULES_PATHS)
+    listed = git_read(
+        Path(worktree),
+        "ls-tree",
+        "-r",
+        "--name-only",
+        head,
+        "--",
+        *PR_RULES_PATHS,
+        expected_failure=True,
+    )
     committed = set((listed or "").splitlines())
     path = next((p for p in PR_RULES_PATHS if p in committed), None)
     return _PR_RULES_NOTE.format(path=path) if path else ""

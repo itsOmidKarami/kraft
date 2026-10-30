@@ -5,8 +5,10 @@ and a reviewer's continuity: its last round's findings and its own last
 session."""
 
 import json
+from pathlib import Path
 
 import pytest
+import yaml
 from support.harness import commit_all, entry_of, v1_named_chain, v1_node, v1_task, write
 
 from kraft import events, executor
@@ -409,3 +411,20 @@ async def test_pr_rules_reach_only_a_task_that_declares_them(
     [prompt] = fake_agent.prompts()
     assert ("`.claude/skills/steward/SKILL.md`" in prompt) is declared
     assert "Never squash." not in prompt
+
+
+@pytest.mark.parametrize(
+    "task",
+    [
+        "repair_mr_feedback",
+        "triage_review_feedback",
+        "repair_mr_checks",
+        "repair_merge_queue_failure",
+        "describe_mr",
+    ],
+)
+def test_the_seeded_merge_request_tasks_declare_pr_rules(task):
+    """Every shipped task that works a merge request is pointed at the repo's
+    pull-request rules."""
+    library = Path(__file__).resolve().parents[2] / "config" / "library.yaml"
+    assert "pr_rules" in yaml.safe_load(library.read_text())["tasks"][task]["inputs"]

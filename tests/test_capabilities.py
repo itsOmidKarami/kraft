@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+import yaml
 
 from kraft import capabilities
 from kraft.capabilities import Capability
@@ -173,3 +174,19 @@ def test_a_live_dir_without_the_key_has_not_adopted_it(tmp_path):
     assert not capabilities.adopted(c, tmp_path)
     (tmp_path / "harnesses.yaml").write_text("harnesses: {}\nprofiles: {}\n")
     assert capabilities.adopted(c, tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("inputs", "adopted"),
+    [(["bot_feedback"], False), (["bot_feedback", "pr_rules"], True)],
+    ids=["without-pr-rules", "with-pr-rules"],
+)
+def test_pr_rules_is_adopted_once_the_task_lists_it(tmp_path, inputs, adopted):
+    """A key path steps into a list by member: `pr_rules` is an item of a
+    task's `inputs:`, not a key, and a task that lists something else has not
+    adopted it."""
+    [entry] = [c for c in capabilities.MANIFEST if c.name == "pr_rules"]
+    library = {"tasks": {"repair_mr_feedback": {"inputs": inputs}}}
+    (tmp_path / "library.yaml").write_text(yaml.safe_dump(library))
+
+    assert capabilities.adopted(entry, tmp_path) is adopted

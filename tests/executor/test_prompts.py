@@ -355,24 +355,30 @@ _RULES = (
 
 
 @pytest.mark.parametrize(
-    ("committed", "pointed"),
+    ("committed", "on_disk", "pointed"),
     [
-        pytest.param(list(_RULES), _RULES[0], id="claude-steward-first"),
-        pytest.param(_RULES[1:], _RULES[1], id="steward-before-babysit"),
-        pytest.param(_RULES[2:], _RULES[2], id="claude-before-agents"),
-        pytest.param(_RULES[3:], _RULES[3], id="agents-babysit-last"),
-        pytest.param([], None, id="none"),
+        pytest.param(list(_RULES), [], _RULES[0], id="claude-steward-first"),
+        pytest.param(_RULES[1:], [], _RULES[1], id="steward-before-babysit"),
+        pytest.param(_RULES[2:], [], _RULES[2], id="claude-before-agents"),
+        pytest.param(_RULES[3:], [], _RULES[3], id="agents-babysit-last"),
+        pytest.param([], [], None, id="none"),
+        # Setup copies skills into an ignored `.agents/skills/`: on disk but not
+        # committed is not the repository's rules.
+        pytest.param([_RULES[3]], [_RULES[1]], _RULES[3], id="uncommitted-ignored"),
     ],
 )
 async def test_the_first_committed_pr_rules_file_is_pointed_at(
-    item_on, run_dirs, repo, committed, pointed
+    item_on, run_dirs, repo, committed, on_disk, pointed
 ):
-    """Steward before babysit, `.claude` before `.agents`, and the file is named,
-    never read into the prompt (the context-injection boundary)."""
+    """Steward before babysit, `.claude` before `.agents`, only what is
+    committed, and the file is named, never read into the prompt (the
+    context-injection boundary)."""
     it = await item_on(v1_named_chain(run_dirs.base / "t"), "implementation")
     for path in committed:
         write(repo, path, f"Rule from {path}: never squash.\n")
     commit_all(repo, "pr rules")
+    for path in on_disk:
+        write(repo, path, "dropped by setup\n")
 
     note = prompts.pr_rules_note(repo, it.row())
 
@@ -380,11 +386,11 @@ async def test_the_first_committed_pr_rules_file_is_pointed_at(
     assert "never squash" not in note
 
 
-async def test_an_uncommitted_pr_rules_file_is_not_the_repositorys(item_on, run_dirs, repo):
-    """Setup copies skills into an ignored `.agents/skills/`: a file on disk but
-    not committed is not the repository's rules."""
+async def test_an_unreadable_tree_points_at_no_pr_rules(item_on, run_dirs, repo, monkeypatch):
+    """A git read that fails (an in-place branch gone, a worktree that is not a
+    checkout) names nothing rather than breaking the launch."""
     it = await item_on(v1_named_chain(run_dirs.base / "t"), "implementation")
-    write(repo, ".agents/skills/steward/SKILL.md", "dropped by setup\n")
+    monkeypatch.setattr(prompts, "git_read", lambda *a, **k: None)
 
     assert prompts.pr_rules_note(repo, it.row()) == ""
 
