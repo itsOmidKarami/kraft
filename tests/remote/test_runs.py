@@ -472,7 +472,7 @@ async def test_a_drop_and_a_reconnect_each_note_the_item_whose_step_runs_there(
 async def test_a_machine_adds_sandbox_events_to_its_items_history_and_nothing_else(
     rig, database, type_, kept
 ):
-    run = await rig.run(["sh", "-c", "sleep 30"])
+    run = await _running(rig)  # a KILL sent before the step has started is dropped
     await rig.runs.on_frame(
         "gpu", {"t": "event", "id": run.spec.key, "type": type_, "payload": {"host": "x.test"}}
     )

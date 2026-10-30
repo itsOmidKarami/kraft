@@ -114,6 +114,7 @@ async def test_a_step_waiting_for_a_full_machine_has_no_session_row_and_never_ru
     with contextlib.suppress(asyncio.CancelledError):
         await task
     assert _row(rig, "s2") is None and rig.hub.slots_used("gpu") == 2
+    await _settled(lambda: all(r.state == "running" for r in held))  # an earlier KILL is dropped
     for run in held:
         await rig.runs.signal(run, "KILL")
         await rig.done(run)
