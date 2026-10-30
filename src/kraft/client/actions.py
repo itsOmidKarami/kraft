@@ -894,6 +894,35 @@ async def remove_worker(name: str) -> dict:
     return await transport._delete(f"/workers/{quote(name, safe='')}")
 
 
+async def list_forges() -> dict:
+    """The accounts in forges.yaml, each with the API address it implies."""
+    return await transport._get("/forges")
+
+
+async def add_forge(
+    name: str,
+    forge: str,
+    web_url: str,
+    api_url: str | None = None,
+    default_for_host: bool = False,
+) -> dict:
+    """Name a forge account (`client: cli`): the host's forge and web address."""
+    body = {"name": name, "forge": forge, "web_url": web_url, "default_for_host": default_for_host}
+    if api_url is not None:
+        body["api_url"] = api_url
+    return await transport._act("/forges", body)
+
+
+async def remove_forge(name: str) -> None:
+    """Forget an account. Refused (the server names the repos) while a repo uses it."""
+    await transport._delete(f"/forges/{quote(name, safe='')}")
+
+
+async def test_forge(name: str) -> dict:
+    """Ask the server whether the account's forge CLI is signed in for its host."""
+    return await transport._act(f"/forges/{quote(name, safe='')}/test")
+
+
 async def reload_addons() -> dict:
     """Rebuild the running server's library from `addons.lock`, leaving any
     pending edit of the other config files pending."""

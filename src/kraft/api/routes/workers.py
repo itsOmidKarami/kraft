@@ -59,12 +59,12 @@ _LOCAL_CANNOT_BE_REMOVED = (
 _LISTED_TITLES = 3
 
 
-def _forbid_sessions(request: Request) -> None:
+def _forbid_sessions(request: Request, what: str = "workers") -> None:
     """A Kraft session never manages machines. This is consistency, not the
     security boundary: the sandbox's is the allowlist in `worker/callback.py`,
     which does not name these routes."""
     if deps.caller_ref(request) is not None:
-        raise HTTPException(403, "a Kraft session cannot manage workers")
+        raise HTTPException(403, f"a Kraft session cannot manage {what}")
 
 
 async def _edit(request: Request, change) -> registry.WorkersFile:
