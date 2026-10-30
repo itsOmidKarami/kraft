@@ -782,7 +782,9 @@ def context_sections(
 INSTRUCTION_MAX_BYTES = 24 * 1024
 
 
-def _writable_dirs(run_dirs, files: item_paths.SessionFiles, work_item_id: str, cwd) -> str:
+def _writable_dirs(
+    run_dirs, files: item_paths.SessionFiles, work_item_id: str, cwd, *, in_copy: bool = False
+) -> str:
     """The `writable_dirs` value: a JSON array (also a TOML inline array) of
     the directories outside the worktree a worker must write (Kraft-rs9pk).
 
@@ -793,10 +795,20 @@ def _writable_dirs(run_dirs, files: item_paths.SessionFiles, work_item_id: str, 
     (`harnesses/codex.yaml`), so a worker granted it could plant a link
     there. And the worktree's git common dir, where every commit writes --
     the main checkout's `.git`, outside a linked worktree -- asked of git
-    rather than guessed, and left out when git has none to give."""
+    rather than guessed, and left out when git has none to give. A copy's
+    is its own `.git`, never asked: the folder is empty at launch, and git
+    would walk up to whatever repository holds it."""
     dirs = [str(files.writable), str(item_paths.docs_dir(run_dirs, work_item_id))]
-    common = git_read(
-        Path(cwd), "rev-parse", "--path-format=absolute", "--git-common-dir", expected_failure=True
+    common = (
+        str(Path(cwd) / ".git")
+        if in_copy
+        else git_read(
+            Path(cwd),
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+            expected_failure=True,
+        )
     )
     if common:
         dirs.append(common)
@@ -1418,7 +1430,9 @@ async def _run_agent_task(
         rules_files = _permission_rules.files_in(rules_argv, rules_dir)
     # Kraft's own value, not a task's, so the check above never sees it.
     if h.supports("writable_dirs"):
-        options["writable_dirs"] = _writable_dirs(run_dirs, files, work_item_id, cwd)
+        options["writable_dirs"] = _writable_dirs(
+            run_dirs, files, work_item_id, cwd, in_copy=in_copy
+        )
     if channel and h.supports("mcp_config"):
         # Its only MCP server is the session's own, through the channel: the
         # host's registration is not in the sandbox (spike 5.5).
