@@ -146,3 +146,119 @@ def glab_pipeline(
     if jobs is FAIL:
         return routes
     return routes | {f"api projects/:id/jobs/{j['id']}/trace": trace for j in json.loads(jobs)}
+
+
+# GitLab REST shapes for the item-scoped reads, trimmed to the fields they read.
+# Source: GitLab REST docs (docs.gitlab.com/api/merge_requests/#get-single-mr,
+# /api/merge_requests/#list-mr-pipelines, /api/pipelines/#list-project-pipelines,
+# /api/jobs/#list-pipeline-jobs, /api/merge_requests/#list-merge-requests,
+# /api/labels/#list-labels), as of 2026-10-30. No live forge was available;
+# the train ref is the one `_dropped` already compares against.
+GLAB_MR_DETAILS = json.dumps(
+    {
+        "iid": 54,
+        "state": "opened",
+        "title": "Draft: Teach it",
+        "description": "Why and what.",
+        "draft": True,
+        "labels": ["release::minor", "bug"],
+        "source_branch": "kraft/abc",
+        "target_branch": "main",
+        "sha": "c0ffee9",
+        "web_url": "https://gitlab.com/itsOmidKarami/kraft/-/merge_requests/54",
+    }
+)
+
+#: `GET projects/:id/merge_requests/54/pipelines`: a train, a merged-results and a plain one.
+GLAB_MR_PIPELINES = json.dumps(
+    [
+        {
+            "id": 903,
+            "sha": "t1",
+            "ref": "refs/merge-requests/54/train",
+            "status": "running",
+            "web_url": "https://gitlab.com/g/p/-/pipelines/903",
+            "created_at": "2026-10-30T10:00:00.000Z",
+        },
+        {
+            "id": 902,
+            "sha": "m1",
+            "ref": "refs/merge-requests/54/merge",
+            "status": "success",
+            "web_url": "https://gitlab.com/g/p/-/pipelines/902",
+            "created_at": "2026-10-30T09:00:00.000Z",
+        },
+        {
+            "id": 901,
+            "sha": "h1",
+            "ref": "refs/merge-requests/54/head",
+            "status": "failed",
+            "web_url": "https://gitlab.com/g/p/-/pipelines/901",
+            "created_at": "2026-10-30T08:00:00.000Z",
+        },
+        {
+            "id": 900,
+            "sha": "b1",
+            "ref": "kraft/abc",
+            "status": "success",
+            "web_url": "https://gitlab.com/g/p/-/pipelines/900",
+            "created_at": "2026-10-30T07:00:00.000Z",
+        },
+    ]
+)
+
+#: `GET projects/:id/pipelines?ref=kraft/abc`, before any merge request.
+GLAB_BRANCH_PIPELINES = json.dumps(
+    [
+        {
+            "id": 900,
+            "sha": "b1",
+            "ref": "kraft/abc",
+            "status": "success",
+            "web_url": "https://gitlab.com/g/p/-/pipelines/900",
+            "created_at": "2026-10-30T07:00:00.000Z",
+        }
+    ]
+)
+
+#: `GET projects/:id/pipelines/901/jobs`.
+GLAB_PIPELINE_JOBS = json.dumps(
+    [
+        {
+            "id": 7001,
+            "name": "lint",
+            "stage": "test",
+            "status": "success",
+            "failure_reason": None,
+            "web_url": "https://gitlab.com/g/p/-/jobs/7001",
+        },
+        {
+            "id": 7002,
+            "name": "unit",
+            "stage": "test",
+            "status": "failed",
+            "failure_reason": "script_failure",
+            "web_url": "https://gitlab.com/g/p/-/jobs/7002",
+        },
+    ]
+)
+
+#: `GET projects/:id/merge_requests?state=merged`.
+GLAB_MERGED_LIST = json.dumps(
+    [
+        {
+            "iid": 53,
+            "title": "Fix it",
+            "labels": ["release::patch"],
+            "web_url": "https://gitlab.com/g/p/-/merge_requests/53",
+            "merged_at": "2026-10-29T12:00:00.000Z",
+        },
+        {
+            "iid": 52,
+            "title": "Add it",
+            "labels": [],
+            "web_url": "https://gitlab.com/g/p/-/merge_requests/52",
+            "merged_at": None,
+        },
+    ]
+)
