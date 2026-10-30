@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import sys
 import time
+from pathlib import Path
 
 import pytest
 from support.api import _hold_storage
@@ -183,6 +186,30 @@ def test_health_reports_how_long_the_process_has_been_up(client):
 def test_health_does_not_name_the_python(client):
     """/api/health needs no login: the interpreter is About's, read behind it from /api/update."""
     assert "python" not in client.get("/api/health").json()
+
+
+@pytest.mark.parametrize(
+    ("server", "expected"),
+    [
+        pytest.param(None, None, id="nothing-registered"),
+        pytest.param({"type": "http", "url": "http://127.0.0.1:8765/mcp"}, None, id="no-command"),
+        pytest.param({"command": sys.executable}, True, id="on-path"),
+        pytest.param({"command": "kraft"}, False, id="not-on-path"),
+    ],
+)
+def test_health_says_whether_the_registered_kraft_server_can_start(
+    client, monkeypatch, tmp_path, server, expected
+):
+    """Its workers get this process's PATH (`worker_env`), and Claude starts
+    the user-scope `kraft` server by its command on it. A yes or no only:
+    /api/health needs no login, so the command and the PATH stay out."""
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    registered = Path.home() / ".claude.json"
+    if server is None:
+        registered.unlink()
+    else:
+        registered.write_text(json.dumps({"mcpServers": {"kraft": server}}))
+    assert client.get("/api/health").json()["mcp_command_on_path"] is expected
 
 
 @pytest.mark.api_client(host="localhost", env={"KRAFT_PORT": "18772"})

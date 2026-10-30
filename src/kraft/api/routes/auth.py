@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import math
 import os
 import time
@@ -10,7 +11,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from kraft import auth as auth_mod
-from kraft import storage
+from kraft import registration, storage
 from kraft import update as update_mod
 from kraft.addons import update as addon_update
 from kraft.api import api_router, deps
@@ -104,6 +105,16 @@ async def revoke_session(session_id: str, request: Request):
         raise HTTPException(404, "unknown session")
 
 
+def _mcp_command_on_path() -> bool | None:
+    """Whether the `kraft` MCP server registered at user or plugin scope runs
+    on this process's PATH, which its workers get (`worker_env`); None when
+    nothing registered names a command."""
+    found = registration.permission_tool(None)
+    if found is None or found[2] is None:
+        return None
+    return registration.on_path(found[2], os.environ.get("PATH", os.defpath))
+
+
 @api_router.get("/health")
 async def health(request: Request):
     st = request.app.state
@@ -157,6 +168,9 @@ async def health(request: Request):
         "pid": os.getpid(),
         # public: how long this process has been up; the About page draws it next to the pid.
         "uptime_s": int(time.monotonic() - st.started_at),
+        # public: a yes or no, never the command or the PATH. False: every
+        # unsandboxed Claude worker is refused at launch (`adapters.agent`).
+        "mcp_command_on_path": await asyncio.to_thread(_mcp_command_on_path),
         # public: the login screen's "stay signed in · N days" needs this
         # before a session exists to ask `/access` for it.
         "session_expiry_days": st.access["session_expiry_days"],

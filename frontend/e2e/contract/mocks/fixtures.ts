@@ -760,7 +760,7 @@ function settingsFor(variant: Variant, theme: { mode?: string; density?: string;
     health: { status: long ? "degraded" : "ok", invalid_templates: long ? { "docs-only": "node 'implement' references unknown task on.docs.write" } : {}, invalid_policy: long ? ["loops.an_extremely_long_loop_name_that_nobody_should_have_typed.wall_clock_s exceeds 24h"] : [], bind: "127.0.0.1", port: 8765, session_expiry_days: 7, version: "0.9.3", installed: "0.9.3", run_dir: "/Users/you/.kraft", pid: 41822, uptime_s: 3 * 86_400 + 4 * 3600 + 240,
       index: { documents: 214, last_scan_at: null as string | null, errors: [] as string[], repos_scanned: repos.length, embeddings: { available: true, model: "BAAI/bge-small-en-v1.5", chunks: 1830, reason: null, state: "ready" } },
       // Nothing held, refused or left over from a restart: `storage` is null without a worktree limit in health's terms.
-      invalid_intake: null, intake_off: false, addon_updates: {}, storage: null, reattach_summary: { scanned: 0, adopted: [], resolved_from_file: [], resumed_work_items: [], unknown: [] } },
+      invalid_intake: null, intake_off: false, mcp_command_on_path: true, addon_updates: {}, storage: null, reattach_summary: { scanned: 0, adopted: [], resolved_from_file: [], resumed_work_items: [], unknown: [] } },
   };
 }
 
