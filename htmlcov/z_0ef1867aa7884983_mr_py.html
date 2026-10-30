@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>Coverage for src/kraft/adapters/forge/mr.py: 99%</title>
+    <title>Coverage for src/kraft/adapters/forge/mr.py: 93%</title>
     <link rel="icon" sizes="32x32" href="favicon_32_cb_c827f16f.png">
     <link rel="stylesheet" href="style_cb_4667309f.css" type="text/css">
     <script src="coverage_html_cb_54cfdca1.js" defer></script>
@@ -12,7 +12,7 @@
     <div class="content">
         <h1>
             <span class="text">Coverage for </span><b>src<span class="sep">/</span>kraft<span class="sep">/</span>adapters<span class="sep">/</span>forge<span class="sep">/</span>mr.py</b>:
-            <span class="pc_cov">99%</span>
+            <span class="pc_cov">93%</span>
         </h1>
         <aside id="help_panel_wrapper">
             <input id="help_panel_state" type="checkbox">
@@ -55,8 +55,8 @@
         </aside>
         <h2>
             <span class="text">145 statements &nbsp;</span>
-            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">143<span class="text"> run</span></button>
-            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">2<span class="text"> missing</span></button>
+            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">135<span class="text"> run</span></button>
+            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">10<span class="text"> missing</span></button>
             <button type="button" class="exc show_exc button_toggle_exc" value="exc" data-shortcut="x" title="Toggle lines excluded">0<span class="text"> excluded</span></button>
         </h2>
         <p class="text">
@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_0ef1867aa7884983_run_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.0">coverage.py v7.17.0</a>,
-            created at 2026-10-30 07:21 +0000
+            created at 2026-10-30 10:26 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -231,18 +231,18 @@
     <p class="pln"><span class="n"><a id="t149" href="#t149">149</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t150" href="#t150">150</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t151" href="#t151">151</a></span><span class="t"><span class="key">def</span> <span class="nam">meta_flags</span><span class="op">(</span><span class="nam">meta</span><span class="op">:</span> <span class="nam">MRMeta</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="nam">list</span><span class="op">[</span><span class="nam">str</span><span class="op">]</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t152" href="#t152">152</a></span><span class="t">    <span class="str">&quot;&quot;&quot;The `--label/--assignee/--reviewer` arguments both CLIs spell the same</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t153" href="#t153">153</a></span><span class="t"><span class="str">    way. Omitted entirely when empty: `--label &quot;&quot;` is a real, empty value to</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t154" href="#t154">154</a></span><span class="t"><span class="str">    both, not an absence.&quot;&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t155" href="#t155">155</a></span><span class="t">    <span class="nam">flags</span><span class="op">:</span> <span class="nam">list</span><span class="op">[</span><span class="nam">str</span><span class="op">]</span> <span class="op">=</span> <span class="op">[</span><span class="op">]</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t156" href="#t156">156</a></span><span class="t">    <span class="key">for</span> <span class="nam">flag</span><span class="op">,</span> <span class="nam">values</span> <span class="key">in</span> <span class="op">(</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t157" href="#t157">157</a></span><span class="t">        <span class="op">(</span><span class="str">&quot;--label&quot;</span><span class="op">,</span> <span class="nam">meta</span><span class="op">.</span><span class="nam">labels</span><span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t158" href="#t158">158</a></span><span class="t">        <span class="op">(</span><span class="str">&quot;--assignee&quot;</span><span class="op">,</span> <span class="nam">meta</span><span class="op">.</span><span class="nam">assignees</span><span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t159" href="#t159">159</a></span><span class="t">        <span class="op">(</span><span class="str">&quot;--reviewer&quot;</span><span class="op">,</span> <span class="nam">meta</span><span class="op">.</span><span class="nam">reviewers</span><span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t160" href="#t160">160</a></span><span class="t">    <span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t161" href="#t161">161</a></span><span class="t">        <span class="key">if</span> <span class="nam">values</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t162" href="#t162">162</a></span><span class="t">            <span class="nam">flags</span> <span class="op">+=</span> <span class="op">[</span><span class="nam">flag</span><span class="op">,</span> <span class="str">&quot;,&quot;</span><span class="op">.</span><span class="nam">join</span><span class="op">(</span><span class="nam">values</span><span class="op">)</span><span class="op">]</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t163" href="#t163">163</a></span><span class="t">    <span class="key">return</span> <span class="nam">flags</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t152" href="#t152">152</a></span><span class="t">    <span class="str">&quot;&quot;&quot;The `--label/--assignee/--reviewer` arguments of `gh pr create`.</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t153" href="#t153">153</a></span><span class="t"><span class="str">    Omitted entirely when empty: `--label &quot;&quot;` is a real, empty value to</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t154" href="#t154">154</a></span><span class="t"><span class="str">    it, not an absence.&quot;&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis show_mis"><span class="n"><a id="t155" href="#t155">155</a></span><span class="t">    <span class="nam">flags</span><span class="op">:</span> <span class="nam">list</span><span class="op">[</span><span class="nam">str</span><span class="op">]</span> <span class="op">=</span> <span class="op">[</span><span class="op">]</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis show_mis"><span class="n"><a id="t156" href="#t156">156</a></span><span class="t">    <span class="key">for</span> <span class="nam">flag</span><span class="op">,</span> <span class="nam">values</span> <span class="key">in</span> <span class="op">(</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis mis2 show_mis"><span class="n"><a id="t157" href="#t157">157</a></span><span class="t">        <span class="op">(</span><span class="str">&quot;--label&quot;</span><span class="op">,</span> <span class="nam">meta</span><span class="op">.</span><span class="nam">labels</span><span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis mis2 show_mis"><span class="n"><a id="t158" href="#t158">158</a></span><span class="t">        <span class="op">(</span><span class="str">&quot;--assignee&quot;</span><span class="op">,</span> <span class="nam">meta</span><span class="op">.</span><span class="nam">assignees</span><span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis mis2 show_mis"><span class="n"><a id="t159" href="#t159">159</a></span><span class="t">        <span class="op">(</span><span class="str">&quot;--reviewer&quot;</span><span class="op">,</span> <span class="nam">meta</span><span class="op">.</span><span class="nam">reviewers</span><span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis mis2 show_mis"><span class="n"><a id="t160" href="#t160">160</a></span><span class="t">    <span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis show_mis"><span class="n"><a id="t161" href="#t161">161</a></span><span class="t">        <span class="key">if</span> <span class="nam">values</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis show_mis"><span class="n"><a id="t162" href="#t162">162</a></span><span class="t">            <span class="nam">flags</span> <span class="op">+=</span> <span class="op">[</span><span class="nam">flag</span><span class="op">,</span> <span class="str">&quot;,&quot;</span><span class="op">.</span><span class="nam">join</span><span class="op">(</span><span class="nam">values</span><span class="op">)</span><span class="op">]</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis show_mis"><span class="n"><a id="t163" href="#t163">163</a></span><span class="t">    <span class="key">return</span> <span class="nam">flags</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t164" href="#t164">164</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t165" href="#t165">165</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t166" href="#t166">166</a></span><span class="t"><span class="key">def</span> <span class="nam">mr_body</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
@@ -343,7 +343,7 @@
     <p class="run"><span class="n"><a id="t261" href="#t261">261</a></span><span class="t">    <span class="key">if</span> <span class="nam">any</span><span class="op">(</span><span class="nam">s</span> <span class="key">in</span> <span class="nam">_UNMERGEABLE</span> <span class="key">for</span> <span class="nam">s</span> <span class="key">in</span> <span class="nam">states</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t262" href="#t262">262</a></span><span class="t">        <span class="key">return</span> <span class="key">False</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t263" href="#t263">263</a></span><span class="t">    <span class="key">if</span> <span class="nam">any</span><span class="op">(</span><span class="nam">s</span> <span class="key">in</span> <span class="nam">_MERGEABLE</span> <span class="key">for</span> <span class="nam">s</span> <span class="key">in</span> <span class="nam">states</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t264" href="#t264">264</a></span><span class="t">        <span class="key">return</span> <span class="key">True</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t264" href="#t264">264</a></span><span class="t">        <span class="key">return</span> <span class="key">True</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t265" href="#t265">265</a></span><span class="t">    <span class="key">return</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t266" href="#t266">266</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t267" href="#t267">267</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
@@ -407,10 +407,10 @@
     <p class="pln"><span class="n"><a id="t325" href="#t325">325</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t326" href="#t326">326</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t327" href="#t327">327</a></span><span class="t"><span class="key">def</span> <span class="nam">parse_json</span><span class="op">(</span><span class="nam">raw</span><span class="op">:</span> <span class="nam">str</span><span class="op">,</span> <span class="nam">what</span><span class="op">:</span> <span class="nam">str</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t328" href="#t328">328</a></span><span class="t">    <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t329" href="#t329">329</a></span><span class="t">        <span class="key">return</span> <span class="nam">json</span><span class="op">.</span><span class="nam">loads</span><span class="op">(</span><span class="nam">raw</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t330" href="#t330">330</a></span><span class="t">    <span class="key">except</span> <span class="nam">ValueError</span> <span class="key">as</span> <span class="nam">exc</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t331" href="#t331">331</a></span><span class="t">        <span class="key">raise</span> <span class="nam">ForgeError</span><span class="op">(</span><span class="fst">f&quot;</span><span class="op">{</span><span class="nam">what</span><span class="op">}</span><span class="fst"> did not return JSON: </span><span class="op">{</span><span class="nam">raw</span><span class="op">[</span><span class="op">:</span><span class="num">200</span><span class="op">]</span><span class="op">!</span><span class="nam">r</span><span class="op">}</span><span class="fst">&quot;</span><span class="op">)</span> <span class="key">from</span> <span class="nam">exc</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis show_mis"><span class="n"><a id="t328" href="#t328">328</a></span><span class="t">    <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis show_mis"><span class="n"><a id="t329" href="#t329">329</a></span><span class="t">        <span class="key">return</span> <span class="nam">json</span><span class="op">.</span><span class="nam">loads</span><span class="op">(</span><span class="nam">raw</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis show_mis"><span class="n"><a id="t330" href="#t330">330</a></span><span class="t">    <span class="key">except</span> <span class="nam">ValueError</span> <span class="key">as</span> <span class="nam">exc</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis show_mis"><span class="n"><a id="t331" href="#t331">331</a></span><span class="t">        <span class="key">raise</span> <span class="nam">ForgeError</span><span class="op">(</span><span class="fst">f&quot;</span><span class="op">{</span><span class="nam">what</span><span class="op">}</span><span class="fst"> did not return JSON: </span><span class="op">{</span><span class="nam">raw</span><span class="op">[</span><span class="op">:</span><span class="num">200</span><span class="op">]</span><span class="op">!</span><span class="nam">r</span><span class="op">}</span><span class="fst">&quot;</span><span class="op">)</span> <span class="key">from</span> <span class="nam">exc</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t332" href="#t332">332</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t333" href="#t333">333</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t334" href="#t334">334</a></span><span class="t"><span class="key">class</span> <span class="nam">CliWaits</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
@@ -490,7 +490,7 @@
             <a class="nav" href="z_0ef1867aa7884983_run_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.0">coverage.py v7.17.0</a>,
-            created at 2026-10-30 07:21 +0000
+            created at 2026-10-30 10:26 +0000
         </p>
     </div>
 </footer>
