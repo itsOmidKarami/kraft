@@ -468,6 +468,7 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
         {n.id: n for n in chain.nodes},
         deps.instance_policy(st).maxima,
     )
+    _refuse_agent_extra_prompt(request, body.node_overrides)
     if body.runner and (why := runner_problem(body.runner)):
         raise HTTPException(422, why)
     runners = {
@@ -1119,6 +1120,19 @@ def _check_node_overrides(
             )
 
 
+def _refuse_agent_extra_prompt(request: Request, overrides: dict[str, dict]) -> None:
+    """403 when an agent or an MCP session sets a node's `extra_prompt`: it
+    reaches every agent task of that node, so it is a person's text, as a
+    one-off chain's custom content is (#1188). Dropping one stays open."""
+    for node_id, fields in overrides.items():
+        if fields.get("extra_prompt") is not None and gates._decided_by(request) != "human":
+            raise HTTPException(
+                403,
+                f"node {node_id!r}: only a person sets an extra_prompt, in the web UI or "
+                "a terminal; an agent's text does not reach a task unreviewed",
+            )
+
+
 def _validate_node_overrides(st, row, patch: dict[str, dict]) -> None:
     """422 on an unknown node id or field, 409 on a node that has started
     (UI v2 · 04 point 1). `patch == {}` (reset to template) 409s if the item
@@ -1290,6 +1304,7 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
     _check_text("description", body.description)
 
     if body.node_overrides is not None:
+        _refuse_agent_extra_prompt(request, body.node_overrides)
         _validate_node_overrides(st, row, body.node_overrides)
 
     filed_kinds = frozenset(a["kind"] for a in entry.attachments_of(row))

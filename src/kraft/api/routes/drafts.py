@@ -20,7 +20,7 @@ from kraft import apply as apply_mod
 from kraft import config as config_mod
 from kraft import store as items
 from kraft.api import api_router, config_check, deps
-from kraft.api.routes import board
+from kraft.api.routes import board, gates
 from kraft.drafts import authored, item, ops, policy_caps, resolve, store
 from kraft.policy import PolicyError
 from kraft.templates import catalogue, revision
@@ -419,10 +419,20 @@ async def discard_draft(area: str, key: str, request: Request):
 
 
 def _item_row(st, request: Request, wid: str):
-    """A door onto the item's chain: never its own worker's (an escalation may,
-    as it may retry with an override), never an ended item's."""
+    """A door onto the item's chain: never its own worker's, never an ended
+    item's."""
     deps.forbid_self_action(st, request, wid)
     return deps._live_work_item_row(st, wid)
+
+
+def _person_only(request: Request) -> None:
+    """403 unless a person writes or applies the draft (#1190): its ops change
+    the chain an item runs, started or not, and its overrides can set a task's
+    prompt or command, so an agent's never reaches a task unreviewed."""
+    if (who := gates._decided_by(request)) != "human":
+        raise HTTPException(
+            403, f"an item's chain draft is a person's to write and apply, not an {who}'s"
+        )
 
 
 def _chain(row):
@@ -508,6 +518,7 @@ async def get_item_draft(wid: str, request: Request):
 async def put_item_draft(wid: str, body: Ops, request: Request):
     """Replace the whole op list (an empty one deletes the draft)."""
     st = request.app.state
+    _person_only(request)
     row = _item_row(st, request, wid)
     try:
         ops_ = item.OPS.dump_python(
@@ -535,6 +546,7 @@ async def apply_item_draft(wid: str, request: Request):
     Otherwise the revised chain replaces the item's (`chain_revised`, `source:
     "draft"`), each `skip` is recorded as `scope_skipped`, and the draft goes."""
     st = request.app.state
+    _person_only(request)
     _item_row(st, request, wid)
     library = st.library
 

@@ -51,3 +51,12 @@ again as a fresh filing and SHALL file the copy with no approval, so custom
 content goes through the review again.
 enforced-by: tests/api/test_one_off_replace.py::test_duplicate_one_off[custom], tests/api/test_one_off_replace.py::test_duplicate_one_off[base-gone]
 origin: src/kraft/api/routes/work_items.py §duplicate_work_item -- the copy is a new item and approval belongs to one item's chain. A base chain that has gone gives the resolver's 422 rather than a copy of a frozen snapshot.
+
+## REQ agent-text-reaches-no-task-unreviewed
+
+The system SHALL accept, only from a caller it reads as a person, a node
+override's `extra_prompt`, a retry's change to a task beyond its model and
+effort, and the writing or applying of an item's chain draft, and SHALL refuse
+each from a Kraft worker or an MCP session, whether or not the item has started.
+enforced-by: tests/api/test_work_items_node_overrides.py::test_a_node_extra_prompt_is_a_persons_to_set[create-assistant], tests/api/test_work_items_node_overrides.py::test_a_node_extra_prompt_is_a_persons_to_set[patch-worker], tests/api/test_retry_paths.py::test_a_retry_that_changes_more_than_a_tasks_model_is_a_persons[escalation-prompt], tests/api/test_retry_paths.py::test_a_retry_that_changes_more_than_a_tasks_model_is_a_persons[assistant-prompt], tests/api/test_item_drafts.py::test_an_items_chain_draft_is_a_persons_to_write_and_apply[assistant-writes-a-prompt], tests/api/test_item_drafts.py::test_an_items_chain_draft_is_a_persons_to_write_and_apply[worker-applies-a-persons-added-node-to-a-started-item]
+origin: src/kraft/api/routes/lifecycle.py §_retry -- each door reads `gates._decided_by`, as approving a one-off chain does. Refused rather than held for review: the one-off review covers only an item that has not started, and none of Kraft's own agent flows sends text through these doors. A local shell reads as a person, so this stops sessions and workers, not a determined agent in a shell.

@@ -7,6 +7,7 @@ import os
 import sqlite3
 from pathlib import Path
 
+import pytest
 from support.api import _set_status
 
 from kraft.templates.models import MaterializedChain
@@ -155,3 +156,71 @@ def test_a_node_whose_op_cannot_apply_has_no_added_check(client, repo):
     view = client.put(f"/api/work-items/{wid}/draft", json={"ops": [bad]}).json()
     assert [p["op"] for p in view["problems"]] == [0]
     assert view["checks"]["added"] == []
+
+
+PROMPT = {"op": "override", "path": "work_brief.main.author", "task_config": {"prompt": "x"}}
+_AGENTS = {"assistant": {"x-kraft-client": "mcp"}, "worker": {"x-kraft-session-id": "w-o/abc123"}}
+
+
+@pytest.mark.parametrize(
+    ("caller", "verb", "ops", "started"),
+    [
+        ("assistant", "put", [PROMPT], False),
+        ("assistant", "put", [ADD], True),
+        ("worker", "put", [OVERRIDE], False),
+        ("assistant", "apply", [PROMPT], False),
+        ("worker", "apply", [ADD], True),
+    ],
+    ids=[
+        "assistant-writes-a-prompt",
+        "assistant-adds-a-node-to-a-started-item",
+        "another-items-worker-writes-an-override",
+        "assistant-applies-a-persons-prompt",
+        "worker-applies-a-persons-added-node-to-a-started-item",
+    ],
+)
+def test_an_items_chain_draft_is_a_persons_to_write_and_apply(
+    client, repo, caller, verb, ops, started
+):
+    """#1190: a draft's ops change the chain the item runs, started or not, and
+    an override can set a task's prompt, so only a person writes or applies
+    one. An agent still reads it; the chain-revision gate is another door
+    (tests/api/test_gates.py)."""
+    wid = _filed(client, repo)
+    url = f"/api/work-items/{wid}/draft"
+    if verb == "apply":
+        assert client.put(url, json={"ops": ops}).status_code == 200
+    if started:
+        conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+        conn.execute("UPDATE work_items SET current_node_id = 'spec' WHERE id = ?", (wid,))
+        conn.commit()
+        conn.close()
+    headers = _AGENTS[caller]
+
+    if verb == "put":
+        r = client.put(url, json={"ops": ops}, headers=headers)
+    else:
+        r = client.post(f"{url}/apply", headers=headers)
+
+    assert r.status_code == 403, r.text
+    assert "a person's to write and apply" in r.json()["detail"]
+    assert client.get(url, headers=headers).json()["ops"] == (
+        [] if verb == "put" else [{**op, "passed": False} for op in ops]
+    )
+    events = client.get(f"/api/work-items/{wid}/events").json()
+    assert not [e for e in events if e["type"] == "chain_revised"]
+
+
+def test_a_persons_draft_with_a_prompt_applies(client, repo):
+    """#1190's other half: a person's own draft, prompt included, still applies."""
+    wid = _filed(client, repo)
+    client.put(f"/api/work-items/{wid}/draft", json={"ops": [PROMPT]})
+
+    r = client.post(f"/api/work-items/{wid}/draft/apply")
+
+    assert r.status_code == 200, r.text
+    chain = MaterializedChain.from_json(
+        client.get(f"/api/work-items/{wid}").json()["materialized_chain"]
+    )
+    [author] = [t for n in chain.chain.nodes for t in n.tasks() if t.path == PROMPT["path"]]
+    assert author.task.prompt == "x"
