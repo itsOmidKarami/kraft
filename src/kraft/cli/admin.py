@@ -974,6 +974,22 @@ class _SignalLoggingServer(uvicorn.Server):
         print(f"kraft: shutdown - signal {signal.Signals(sig).name}", file=sys.stderr, flush=True)
         super().handle_exit(sig, frame)
 
+    async def serve(self, sockets=None):
+        """Listen before the lifespan, not after it as uvicorn does: startup
+        reattaches, marking a live session `unknown` and stopping its item,
+        and a server that then lost its port to another process would exit
+        having done that. A failed bind exits 3, as uvicorn's own does.
+        Listening, not only bound: on Linux two `SO_REUSEADDR` sockets both
+        bind a port until one listens."""
+        if sockets is None:
+            sock = self.config.bind_socket()
+            # uvicorn marks it inheritable for its worker processes; Kraft has
+            # none, and an agent it starts must not hold the server's port.
+            sock.set_inheritable(False)
+            sock.listen(self.config.backlog)
+            sockets = [sock]
+        await super().serve(sockets=sockets)
+
 
 def prepare_home() -> Path:
     """The config directory this server runs against, after the one-time 2.0
