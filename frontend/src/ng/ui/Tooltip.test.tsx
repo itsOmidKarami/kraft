@@ -50,6 +50,22 @@ describe("Tooltip (TT-1)", () => {
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
+  // The collapsed sidebar's pin: a key that pins or unpins it changes its tip, so a shown or pending one goes.
+  it.each([["Enter"], ["\\"]])("hides a shown tip on %s, and drops a pending one whose button turns data-tip-off", (key) => {
+    const b = mount();
+    fireEvent.mouseOver(b);
+    wait(TIP_DELAY_MS + 10);
+    expect(screen.getByRole("tooltip")).toBeInTheDocument();
+    fireEvent.keyDown(b, { key });
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    fireEvent.mouseOver(screen.getByRole("button", { name: "other" }));
+    fireEvent.mouseOver(b);
+    wait(100);
+    b.setAttribute("data-tip-off", "");
+    wait(TIP_DELAY_MS);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
   it("sits under the button, clear of it", () => {
     const b = mount();
     vi.spyOn(b, "getBoundingClientRect").mockReturnValue({ top: 100, bottom: 128, left: 50, right: 78, width: 28, height: 28, x: 50, y: 100, toJSON: () => ({}) });

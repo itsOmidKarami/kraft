@@ -158,18 +158,19 @@ describe("ng Sidebar", () => {
 
   // Unpinned, only the pointer leaving (or focus leaving) hides it, in CSS. A
   // close in script would also move focus out of it, which is what these catch.
-  it.each<[string, () => Promise<void>, ("pinned" | "rail")?]>([
-    ["unpinning with the pin", async () => void (await userEvent.click(screen.getByRole("button", { name: "Pin sidebar" }))), "pinned"],
+  // The pin sits beside the panel, so only its own case may end with focus outside `.ng-sidebar`.
+  it.each<[string, () => Promise<void>, ("pinned" | "rail")?, string?]>([
+    ["unpinning with the pin", async () => void (await userEvent.click(screen.getByRole("button", { name: "Pin sidebar" }))), "pinned", ".ng-side"],
     ["unpinning with Ctrl+\\", async () => { screen.getByRole("link", { name: "Analytics" }).focus(); await userEvent.keyboard("{Control>}\\{/Control}"); }, "pinned"],
     ["the window losing focus", async () => { screen.getByRole("link", { name: "Analytics" }).focus(); act(() => void window.dispatchEvent(new Event("blur"))); }],
     ["choosing a row", async () => void (await userEvent.click(screen.getByRole("link", { name: "Analytics" })))],
-  ])("leaves an unpinned sidebar open after %s, keeping focus in it", async (_, act_, from = "rail") => {
+  ])("leaves an unpinned sidebar open after %s, keeping focus in it", async (_, act_, from = "rail", holder = ".ng-sidebar") => {
     localStorage.setItem(SIDEBAR_KEY, from);
     mount();
     await act_();
     expect(screen.getByRole("button", { name: "Pin sidebar" })).toHaveAttribute("aria-pressed", "false");
     expect(document.querySelector(".ng-side")!.attributes).toHaveLength(1);
-    expect(document.querySelector(".ng-side")).toContainElement(document.activeElement as HTMLElement);
+    expect(document.querySelector(holder)).toContainElement(document.activeElement as HTMLElement);
   });
 
   // #502 review (WCAG 1.4.13): shown by focus, an unpinned sidebar could not be dismissed from the
