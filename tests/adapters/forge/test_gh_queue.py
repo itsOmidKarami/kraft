@@ -677,6 +677,34 @@ async def test_merge_sends_what_gh_pr_merge_sends(cli, tmp_path, read, number, s
     assert ("b=kraft/abc" if number == 0 else "n=7") in argv
 
 
+async def test_merge_reads_again_without_the_queue_fields_an_older_server_lacks(cli, tmp_path):
+    """gh feature-detects `isMergeQueueEnabled` / `isInMergeQueue` (finder.go:212-226):
+    a server without them has no queue, so the merge goes ahead as a plain one."""
+    undefined = json.dumps(
+        {
+            "errors": [
+                {
+                    "type": "undefinedField",
+                    "message": "Field 'isMergeQueueEnabled' doesn't exist on type 'PullRequest'",
+                }
+            ]
+        }
+    )
+    cli.stub("git", "0")
+    routes = {
+        _MERGE_READ: undefined,
+        _MUTATION: api_outputs.MERGED,
+        "api*graphql*pullRequest*": api_outputs.merge_state(),
+    }
+    cli.stub("gh", routes=routes, default=FAIL)
+
+    await forge.GhCli().merge(
+        repo=tmp_path, branch="kraft/abc", mr=forge.MR(number=7, url=""), head=_HEAD
+    )
+
+    assert _mutations(cli.argv("gh")) == [("mergePullRequest", _MERGE_INPUT)]
+
+
 @pytest.mark.parametrize(
     "answer, moved, forge_head",
     [

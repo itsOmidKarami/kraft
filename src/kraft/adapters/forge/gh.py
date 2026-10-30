@@ -793,11 +793,15 @@ class GhCli(mr_ops.CliWaits):
             fields={"labels": list(labels)},
         )
         for label in mr_ops.same_scope_labels(current, labels):
-            await self._send(
-                repo,
-                f"repos/{{owner}}/{{repo}}/issues/{number}/labels/{urlquote(label, safe='')}",
-                method="DELETE",
-            )
+            try:
+                await self._send(
+                    repo,
+                    f"repos/{{owner}}/{{repo}}/issues/{number}/labels/{urlquote(label, safe='')}",
+                    method="DELETE",
+                )
+            except ForgeError as exc:
+                if exc.status != 404:  # taken off the pull request since it was read
+                    raise
 
     async def merge(self, *, repo: Path, branch: str, mr: MR, head: str) -> None:
         """Squash-merge at `head` only, as gh decides (merge.go:151-304): an
@@ -809,7 +813,15 @@ class GhCli(mr_ops.CliWaits):
         if not head:
             raise ForgeError("cannot merge without the head to merge")
         await git._assert_pushed(repo, branch)
-        pr = await self._pr(repo, mr_ops.target(mr.number, branch), fields=gq.MERGE_FIELDS)
+        target = mr_ops.target(mr.number, branch)
+        try:
+            pr = await self._pr(repo, target, fields=gq.MERGE_FIELDS)
+        except ForgeError as exc:
+            # gh feature-detects the queue fields (finder.go:212-226); an older
+            # GitHub Enterprise Server has none, and so no queue to enter.
+            if not any(f in str(exc) for f in ("isMergeQueueEnabled", "isInMergeQueue")):
+                raise
+            pr = await self._pr(repo, target, fields=gq.PR_CORE_FIELDS)
         # merge.go:590,257,282-284: a pull request that landed since it was read is done.
         if pr.get("isInMergeQueue") or pr.get("state") == "MERGED":
             return

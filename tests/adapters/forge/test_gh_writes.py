@@ -253,7 +253,7 @@ def _labelled(*names: str) -> dict:
     ],
 )
 async def test_gh_set_labels_adds_and_drops_over_rest(cli, tmp_path, current, labels, calls):
-    _stub(cli, _labelled(*current))
+    _stub(cli, _labelled(*current), **{"api*-X DELETE*": Api(404, '{"message": "Not Found"}')})
 
     await forge.GhCli().set_labels(
         repo=tmp_path, branch="kraft/abc", mr=forge.MR(7, "u"), labels=labels
