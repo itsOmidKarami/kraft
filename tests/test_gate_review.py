@@ -431,8 +431,8 @@ async def test_only_a_reviewer_that_may_edit_is_told_to_commit_and_test(
     database, run_dirs, tmp_path, repo, monkeypatch, mode, in_place, told
 ):
     """Its own instruction says do not edit; the session's context must not
-    then say commit, or run tests that can leave files behind. In a person's
-    own checkout it is still warned off the git commands that move their work."""
+    then say commit, or run tests that can leave files behind. In place it is
+    told it works in a throwaway copy of the branch, never the person's checkout."""
     argv = tmp_path / "argv.txt"
     gate = await _at_gate(
         database,
@@ -448,10 +448,12 @@ async def test_only_a_reviewer_that_may_edit_is_told_to_commit_and_test(
     context = argv.read_text()
     assert "You are working on a Kraft work item." in context
     assert [line in context for line in _TOLD_TO_EDIT] == [told, told]
-    assert ("`git stash`" in context) == in_place
+    assert ("throwaway copy of this work item's branch" in context) == in_place
+    assert "`git stash`" not in context
     # The read-only paragraph ends the contract: one blank line, not two, before the next.
     after = context.partition("Kraft compares it after you.")[2]
-    assert not after.partition("`git reset`.")[2 if in_place else 0].startswith("\n\n\n")
+    assert ("is kept." in after) == in_place
+    assert not after.partition("is kept.")[2 if in_place else 0].startswith("\n\n\n")
 
 
 @pytest.mark.parametrize(

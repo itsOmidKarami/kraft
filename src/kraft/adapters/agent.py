@@ -11,8 +11,8 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
+from kraft import caps, ids, inplace, item_paths, store, when_free
 from kraft import harness as _harness
-from kraft import ids, inplace, item_paths, store, when_free
 from kraft import permission_rules as _permission_rules
 from kraft import policy as _policy
 from kraft import registration as _registration
@@ -139,12 +139,11 @@ _READ_ONLY = (
     "You are reading this work item's checkout. Change, write and commit "
     "nothing in it, and leave no file behind: Kraft compares it after you."
 )
-#: Added to `_READ_ONLY` in place: only the branch tip is compared there, so the
-#: person's uncommitted work is protected by this sentence alone.
-_READ_ONLY_IN_PLACE = (
-    " It is a person's own checkout, on this work item's branch `{branch}`, and "
-    "may hold their uncommitted changes: never `git stash`, `git checkout`, "
-    "`git switch` or `git reset`."
+#: Added to `_READ_ONLY` in place: such an agent runs in a copy of the branch
+#: (`run_agent_task(in_copy=True)`), never the person's checkout.
+_READ_ONLY_COPY = (
+    " It is a throwaway copy of this work item's branch `{branch}`, made for"
+    " this session and deleted when it ends: nothing you change here is kept."
 )
 
 #: Intent-process design §4. Kraft-authored, and its only input is the repo's
@@ -665,7 +664,7 @@ def context_sections(
                 hook_point=hook_point,
                 session_id=session_id,
                 summary_path=summary_path or "<session summary path>",
-                edits=_READ_ONLY + (_READ_ONLY_IN_PLACE.format(branch=branch) if in_place else "")
+                edits=_READ_ONLY + (_READ_ONLY_COPY.format(branch=branch) if in_place else "")
                 if read_only
                 else _TESTS
                 + (_IN_PLACE.format(branch=branch) if in_place else _WORKTREE)
@@ -1121,7 +1120,8 @@ async def _run_agent_task(
     #: one `CheckoutBusy` refused (an escalation's message, a review's start).
     on_session: Callable[[], Awaitable[None]] | None = None,
     #: Awaited last before the agent starts, an in-place checkout taken and
-    #: marked by then. It must not raise: the session row already exists.
+    #: marked, or its copy made (`in_copy`), by then. It must not raise: the
+    #: session row already exists.
     after_checkout: Callable[[], Awaitable[None]] | None = None,
     #: The machine this launch runs on (`kraft.remote.placement`), or None for the server.
     runner: str | None = None,
@@ -1129,6 +1129,9 @@ async def _run_agent_task(
     placed_claim: Claim | None = None,
     #: `context_sections`' `read_only`: a gate reviewer that checks first.
     read_only: bool = False,
+    #: In place: `cwd` is this session's copy of the branch (`inplace.copy_path`), made once
+    #: the session holds the checkout's lease, instead of taking the checkout itself.
+    in_copy: bool = False,
 ) -> str:
     runner = None if runner == "local" else runner
     # An update holds the moment: no session starts until the server restarts.
@@ -1164,6 +1167,10 @@ async def _run_agent_task(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )
     in_place = item_row is not None and store.is_in_place(item_row)
+    in_copy = in_copy and in_place
+    if in_copy:
+        # Empty until `before_launch` fills it; everything before runs in it.
+        Path(cwd).mkdir(parents=True, exist_ok=True)
     reach = _harness_reach(item_row, h)
     ctx = build_context(
         usage_source=h.capabilities["usage"].source,
@@ -1442,8 +1449,11 @@ async def _run_agent_task(
     )
     # An agent outside the walk does, in place, what the walk does around a
     # task (`dispatch._dispatch_task`): take the checkout once the session
-    # holds its lease, mark it, and check it after.
-    borrows = takes_checkout and in_place
+    # holds its lease, mark it, and check it after. One in a copy only leases it.
+    borrows = takes_checkout and in_place and not in_copy
+    # Measured now: `run_task` moves `time_cap` on by its wait for a slot, which this
+    # closure's `time_cap` does not see.
+    copy_s = None if time_cap is None else max(time_cap.at - caps.monotonic(), 0.0)
     # Files a machine must be given because they live outside git: the cursor hook, and the
     # harness config the CLI reads (its chats stay where they were made).
     remote_ro: tuple[str, ...] = ()
@@ -1470,6 +1480,8 @@ async def _run_agent_task(
         if borrows:
             await inplace.take(db, run_dirs, item_row, attachments=inplace.attachments_of(item_row))
             await inplace.mark_task(db, run_dirs, item_row, Path(cwd), node_id, hook_point)
+        elif in_copy:
+            await inplace.make_copy(item_row, Path(cwd), timeout_s=copy_s)
         if after_checkout is not None:
             await after_checkout()
 
@@ -1523,7 +1535,7 @@ async def _run_agent_task(
         tips=tips,
         model=model,
         ro_paths=(*rules_files, *remote_ro),
-        before_launch=before_launch if borrows or on_session or after_checkout else None,
+        before_launch=before_launch if borrows or in_copy or on_session or after_checkout else None,
         runner=runner,
         codex_hook=codex_hook,
         placed_claim=placed_claim,
