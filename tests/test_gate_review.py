@@ -142,11 +142,13 @@ async def test_checks_first_instruction_offers_only_reject_and_pass(
 _COMMIT = "echo x > new.txt && git add new.txt && git commit -qm reviewer"
 _REJECT = {"verdict": "reject", "concerns": "redo it"}
 _PASS = {"verdict": "pass", "concerns": "read it all"}
+_DOC = "# the review\n"
 
 
-async def _at_gate(database, run_dirs, tmp_path, repo, edit, result, *, mode, in_place):
+async def _at_gate(database, run_dirs, tmp_path, repo, edit, result, *, mode, in_place, doc=_DOC):
     """An item at a reviewed gate whose reviewer runs `edit` in its checkout,
-    then reports `result`. The gate decides its `review` document. In place it
+    then reports `result`. The gate decides its `review` document, which reads
+    `doc` (None: not written yet). In place it
     is on its first take, with a spec to commit; otherwise in its own
     worktree. Returns the gate."""
     script = (
@@ -157,7 +159,8 @@ async def _at_gate(database, run_dirs, tmp_path, repo, edit, result, *, mode, in
     fake_harness_home(tmp_path, ["sh", "-c", script])
     keys = {"artifact": "review", **({"auto_review_mode": mode} if mode else {})}
     _doc(run_dirs).parent.mkdir(parents=True, exist_ok=True)
-    _doc(run_dirs).write_text("# the review\n")
+    if doc is not None:
+        _doc(run_dirs).write_text(doc)
     chain = _chain2(run_dirs, target=_IN_PLACE if in_place else None, harness="fake", **keys)
     await _seed_at_gate(database, run_dirs, "w1", chain, auto_gate=True, repo=repo)
     if in_place:
@@ -214,11 +217,12 @@ _25 = "for i in $(seq 25); do echo x > f$i.txt; done"
 
 
 @pytest.mark.parametrize(
-    "mode,in_place,edit,result,expected",
+    "mode,in_place,doc,edit,result,expected",
     [
         pytest.param(
             CHECKS_FIRST,
             False,
+            _DOC,
             _COMMIT,
             _REJECT,
             ("undecided", _IGNORED + "new.txt"),
@@ -227,6 +231,7 @@ _25 = "for i in $(seq 25); do echo x > f$i.txt; done"
         pytest.param(
             CHECKS_FIRST,
             False,
+            _DOC,
             _COMMIT,
             _PASS,
             ("undecided", _IGNORED + "new.txt"),
@@ -235,6 +240,7 @@ _25 = "for i in $(seq 25); do echo x > f$i.txt; done"
         pytest.param(
             CHECKS_FIRST,
             False,
+            _DOC,
             "echo x > new.txt",
             _REJECT,
             ("undecided", _IGNORED + "new.txt"),
@@ -243,6 +249,7 @@ _25 = "for i in $(seq 25); do echo x > f$i.txt; done"
         pytest.param(
             CHECKS_FIRST,
             False,
+            _DOC,
             "echo x > new.txt",
             _PASS,
             ("undecided", _IGNORED + "new.txt"),
@@ -252,6 +259,7 @@ _25 = "for i in $(seq 25); do echo x > f$i.txt; done"
         pytest.param(
             CHECKS_FIRST,
             False,
+            _DOC,
             _25,
             _PASS,
             (
@@ -262,11 +270,12 @@ _25 = "for i in $(seq 25); do echo x > f$i.txt; done"
             ),
             id="names-at-most-twenty",
         ),
-        pytest.param(CHECKS_FIRST, False, ":", _PASS, ("pass", "read it all"), id="no-edit"),
+        pytest.param(CHECKS_FIRST, False, _DOC, ":", _PASS, ("pass", "read it all"), id="no-edit"),
         # The first take commits the spec on the branch: Kraft's, not the reviewer's.
         pytest.param(
             CHECKS_FIRST,
             True,
+            _DOC,
             ":",
             _PASS,
             ("pass", "read it all"),
@@ -275,6 +284,7 @@ _25 = "for i in $(seq 25); do echo x > f$i.txt; done"
         pytest.param(
             CHECKS_FIRST,
             True,
+            _DOC,
             _COMMIT,
             _PASS,
             ("undecided", _IGNORED + "new.txt"),
@@ -284,15 +294,37 @@ _25 = "for i in $(seq 25); do echo x > f$i.txt; done"
         pytest.param(
             CHECKS_FIRST,
             False,
+            _DOC,
             'echo x > "$KRAFT_DOCS_DIR/review.md"',
             _PASS,
             ("undecided", _IGNORED + "{doc}"),
             id="rewrites-the-gate-document",
         ),
+        pytest.param(
+            CHECKS_FIRST,
+            False,
+            None,
+            'echo x > "$KRAFT_DOCS_DIR/review.md"',
+            _PASS,
+            ("undecided", _IGNORED + "{doc}"),
+            id="creates-the-gate-document",
+        ),
+        # Hashed whole, not as far as a person's read of it goes.
+        pytest.param(
+            CHECKS_FIRST,
+            False,
+            "x" * (item_paths.DOC_MAX_BYTES + 10),
+            f'printf y | dd of="$KRAFT_DOCS_DIR/review.md" bs=1 seek={item_paths.DOC_MAX_BYTES + 5}'
+            " conv=notrunc 2>/dev/null",
+            _PASS,
+            ("undecided", _IGNORED + "{doc}"),
+            id="edits-past-the-read-limit",
+        ),
         # A reviewer that decides may edit (`fixed`): no check, no "before" read.
         pytest.param(
             None,
             False,
+            _DOC,
             _COMMIT,
             {"verdict": "approve"},
             ("approve", ""),
@@ -301,10 +333,10 @@ _25 = "for i in $(seq 25); do echo x > f$i.txt; done"
     ],
 )
 async def test_checks_first_edits_void_the_verdict(
-    database, run_dirs, tmp_path, repo, monkeypatch, mode, in_place, edit, result, expected
+    database, run_dirs, tmp_path, repo, monkeypatch, mode, in_place, doc, edit, result, expected
 ):
     gate = await _at_gate(
-        database, run_dirs, tmp_path, repo, edit, result, mode=mode, in_place=in_place
+        database, run_dirs, tmp_path, repo, edit, result, mode=mode, in_place=in_place, doc=doc
     )
     reads = []
     _spy_snapshots(monkeypatch, reads)

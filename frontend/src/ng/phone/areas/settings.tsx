@@ -2,7 +2,7 @@ import { detailOf } from "../../http";
 import { useProviders } from "../../harnesses/useProviders";
 import type { ConfigDraft } from "../../templates/draft/useConfigDraft";
 import { rowChanged, sourceWord } from "../../templates/draft/view";
-import { choicesFor, modelsFor, noRestart, NOUN, optionsFor, unsetLabel } from "../../templates/fieldChoices";
+import { choicesFor, modelsFor, noRestart, NOUN, optionsFor, pickerOptions } from "../../templates/fieldChoices";
 import { editedValue, editOps, fieldMeta, parse, RECOVERY_NOTE, show } from "../../templates/fields";
 import { useHarnessOptions } from "../../templates/panes/useHarnessOptions";
 import { useLibrary } from "../../templates/useLibrary";
@@ -45,7 +45,7 @@ export function useSettingRows(draft: ConfigDraft, edit: (e: Edit) => void, read
       const current = editedValue(x.field, x.value);
       const list = optionsFor(meta, at, opts);
       if (list?.length)
-        return { ...base, onEdit: () => edit({ kind: "choice", title: label, options: [{ value: "", label: unsetLabel(x.field, x.value) }, ...list.map((value) => ({ value, label: meta.labels?.[value] ?? value }))], value: typeof current === "string" ? current : "", set: (v) => send(x.field, v || null, x.value) }) };
+        return { ...base, onEdit: () => edit({ kind: "choice", title: label, options: pickerOptions(meta, list, x.field, x.value), value: typeof current === "string" ? current : "", set: (v) => send(x.field, v || null, x.value) }) };
       const choices = choicesFor(meta, at, harnesses, library);
       const closed = !!choices?.length;
       const suggested = meta.suggest === "model" ? modelsFor(providers, harnesses, harness) : [];

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 from kraft import caps, events, executor, inplace, item_paths, store
@@ -29,6 +30,7 @@ from kraft.remote import placement as _placement
 from kraft.templates.models import CHECKS_FIRST, AgentTask, GateNode, ResolvedNode
 from kraft.vocab import ADVANCING, GateEvent
 from kraft.worker import steering as _steering
+from kraft.worker.worktree_read import open_no_symlinks
 
 #: The only strings a deciding reviewer's verdict may be (one that checks
 #: first has its own two, in `review`). Anything else -- a typo, a sentence, a
@@ -109,13 +111,24 @@ def _artifact_line(path: Path | None) -> str:
 
 
 def _document(run_dirs, work_item_id: str, rel: str | None) -> str | None:
-    """A hash of the gate's document as it stands, `"absent"` once it cannot be
-    read (gone, or no longer a regular file); None for a gate with none. Read
-    no-follow and bounded, as a person reads it: the reviewer may write here."""
+    """A hash of the whole of the gate's document as it stands, `"absent"` when
+    nothing is there and `"unreadable"` when it is no regular file reached
+    without a link; None for a gate with none. The reviewer may write here, so
+    it is opened as `read_document` opens it: no link followed, no FIFO waited on."""
     if rel is None:
         return None
-    text = item_paths.read_document(run_dirs, work_item_id, rel)
-    return "absent" if text is None else hashlib.sha256(text.encode()).hexdigest()
+    try:
+        fd = open_no_symlinks(*item_paths.locate(run_dirs, work_item_id, rel))
+    except FileNotFoundError:
+        return "absent"
+    except (OSError, ValueError, IndexError):
+        return "unreadable"
+    try:
+        # Whole, not `read_document`'s first 1 MB: an edit past it is still an edit.
+        with os.fdopen(fd, "rb") as fh:
+            return hashlib.file_digest(fh, "sha256").hexdigest()
+    except OSError:
+        return "unreadable"
 
 
 def _profile_fallback_refusal(
@@ -260,6 +273,13 @@ async def review(
     rel = executor.gate_artifact(run_dirs, row, gate)
     doc = item_paths.path_of(run_dirs, work_item_id, rel) if rel is not None else None
     cf = checks_first(node)
+    # What a checks-first review must leave as it was: the gate's document, or
+    # where it is written while there is none yet, since the reviewer may create it.
+    watched = rel or (
+        item_paths.document_name(work_item_id, node.node.artifact)
+        if cf and node.node.artifact
+        else None
+    )
     task_instruction = (_CHECKS_FIRST_PROMPT if cf else _PROMPT).format(
         gate=gate,
         node_id=node.id,
@@ -405,7 +425,7 @@ async def review(
         # Before the launch: once the reviewer's session row exists it counts
         # as live, and a sandboxed item's guard would refuse every read.
         before = read_only.snapshot(db, row, launch, worktree)
-        doc_was = _document(run_dirs, work_item_id, rel)
+        doc_was = _document(run_dirs, work_item_id, watched)
         if before is None:
             why = "Kraft could not read the checkout safely, so no reviewer ran: a person decides"
             await start()
@@ -430,7 +450,7 @@ async def review(
         # the live-session guard cannot refuse here; a None is judged below.
         nonlocal before, doc_was
         before = read_only.snapshot(db, row, launch, worktree)
-        doc_was = _document(run_dirs, work_item_id, rel)
+        doc_was = _document(run_dirs, work_item_id, watched)
 
     try:
         status = await _agent.run_agent_task(
@@ -503,7 +523,9 @@ async def review(
                     "so its verdict was ignored"
                 )
         elif files := read_only.changed(db, row, launch, worktree, before) + (
-            [str(doc)] if _document(run_dirs, work_item_id, rel) != doc_was else []
+            [str(item_paths.path_of(run_dirs, work_item_id, watched))]
+            if _document(run_dirs, work_item_id, watched) != doc_was
+            else []
         ):
             return "undecided", (
                 "The reviewer changed files, so its verdict was ignored; its changes are "

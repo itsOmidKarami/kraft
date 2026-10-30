@@ -82,9 +82,13 @@ describe("Library component (L.2)", () => {
     expect(within(used).getByRole("link", { name: /docs_only/ })).toHaveTextContent("via nodes.implementation");
   });
 
-  it("a gate's reviewer mode reads in the desktop's words", async () => {
-    open("nodes.spec_check");
-    expect(await screen.findByRole("button", { name: /^reviewer may/ })).toHaveTextContent("check first (reject, or hand it to you)");
+  it("a gate's reviewer mode reads and is picked in the desktop's words, and sends the value", async () => {
+    const { calls } = open("nodes.spec_check", { ...lib(), "POST /drafts/library/library/ops": [200, { ...view("library", "library", { draft: true }, { model: MODEL as never }), ops: [] }] });
+    const row = await screen.findByRole("button", { name: /^reviewer may/ });
+    expect(row).toHaveTextContent("check first (reject, or hand it to you)");
+    await userEvent.click(row);
+    await userEvent.click(await screen.findByRole("radio", { name: /^decide \(can approve\)/ }));
+    await waitFor(() => expect(posts(calls).map((c) => c.body)).toEqual([{ ops: [{ op: "set_field", path: "nodes.spec_check", field: "auto_review_mode", value: "decides" }] }]));
   });
 
   it("a missing component says so and does not claim to be unused", async () => {
