@@ -89,7 +89,9 @@ def _fails_at(monkeypatch, step: str, script: str) -> None:
     monkeypatch.setattr(builtins, "_git_group", _git_group)
 
 
-@pytest.mark.parametrize("how", ["missing-branch", "not-a-repo", "checkout-fails", "not-empty"])
+@pytest.mark.parametrize(
+    "how", ["missing-branch", "not-a-repo", "checkout-fails", "not-empty", "unexpected-error"]
+)
 async def test_a_copy_that_cannot_be_made_leaves_nothing(
     item_on, run_dirs, repo, tmp_path, monkeypatch, how
 ):
@@ -102,6 +104,16 @@ async def test_a_copy_that_cannot_be_made_leaves_nothing(
         (tmp_path / "plain").mkdir()
     elif how == "not-empty":
         write(dest, "theirs.txt", "not Kraft's\n")
+    elif how == "unexpected-error":
+        real = builtins._git_group
+
+        async def _git_group(args, **kw):
+            if "checkout" not in args:
+                return await real(args, **kw)
+            (dest / "half").touch()
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+        monkeypatch.setattr(builtins, "_git_group", _git_group)
     else:
         _fails_at(monkeypatch, "checkout", f"touch '{dest}/half'; exit 1")
 
