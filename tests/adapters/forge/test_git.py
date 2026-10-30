@@ -772,10 +772,19 @@ async def test_a_host_commit_never_lands_on_a_planted_head(tmp_path, database, s
     assert f"is not on {BRANCH}" in stopped
 
 
-def test_run_cli_returns_a_failed_exit(tmp_path):
-    """`run_cli` hands back what a failing CLI printed; `run_git` raises on it."""
-    args = ["sh", "-c", "echo out; echo err >&2; exit 3"]
+@pytest.mark.parametrize(
+    ("script", "out"),
+    [
+        pytest.param("echo out", "out\n", id="failed-exit"),
+        pytest.param("printf 'out \\377\\n'", "out \ufffd\n", id="undecodable-byte"),
+    ],
+)
+def test_run_cli_returns_a_failed_exit(tmp_path, script, out):
+    """`run_cli` hands back what a failing CLI printed, a byte that is not
+    UTF-8 (a GitLab job trace can carry one) as U+FFFD rather than a
+    UnicodeDecodeError past every ForgeError handler; `run_git` raises on it."""
+    args = ["sh", "-c", f"{script}; echo err >&2; exit 3"]
     done = asyncio.run(forge_git.run_cli(tmp_path, args))
-    assert (done.returncode, done.stdout, done.stderr) == (3, "out\n", "err\n")
+    assert (done.returncode, done.stdout, done.stderr) == (3, out, "err\n")
     with pytest.raises(forge.ForgeError, match="failed: err"):
         asyncio.run(forge_git.run_git(tmp_path, args))

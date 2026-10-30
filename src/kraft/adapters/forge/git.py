@@ -136,6 +136,9 @@ async def run_cli(
             input=stdin,
             capture_output=True,
             text=True,
+            # A job log can hold bytes that are not UTF-8 (a binary cat, a Latin-1
+            # compiler); strict decoding would raise past every ForgeError handler.
+            errors="replace",
             env=env,
             timeout=timeout,
         )

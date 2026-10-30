@@ -179,7 +179,8 @@ def test_a_member_is_read_with_its_own_forge_checkout_and_base(client, repo, mon
 def test_a_repo_that_is_not_a_member_is_404(client, repo, monkeypatch, mount):
     fake = _spy()
     wid = _item(client, repo, monkeypatch, fake)
-    got = client.get(f"/api/work-items/{wid}/forge/labels", params={"repo": mount})
+    # `pipelines`, which the spy records, so `calls == []` shows no forge read ran.
+    got = client.get(f"/api/work-items/{wid}/forge/pipelines", params={"repo": mount})
     assert got.status_code == 404
     assert "none" in got.json()["detail"]
     assert fake.calls == []
