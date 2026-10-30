@@ -59,7 +59,7 @@ _NOW = total(
         # Cancel and abandon both store `abandoned`: only the verb that ended it can tell.
         WorkItemStatus.ABANDONED: "ended",
         WorkItemStatus.WAITING: "waiting on something outside Kraft",
-        WorkItemStatus.RATE_LIMITED: "waiting for the agent's rate limit to reset",
+        WorkItemStatus.RATE_LIMITED: "waiting for the agent's or the forge's rate limit to reset",
         WorkItemStatus.QUEUED: "queued for a free slot",
         WorkItemStatus.BLOCKED: "blocked until the items it comes after complete",
         WorkItemStatus.NEEDS_HUMAN: None,  # item_now words it, with the id

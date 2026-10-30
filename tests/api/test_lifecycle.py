@@ -9,6 +9,7 @@ import os
 import sqlite3
 import subprocess
 import time
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,6 +27,8 @@ from support.api import (
     _spawn_never_returning,
     _status_of,
 )
+
+from kraft.adapters.forge import ForgeError
 
 
 def test_happy_path_via_api(client, repo, monkeypatch):
@@ -187,8 +190,7 @@ def _post_past_the_still_finishing_walk(client, path, timeout=10, json=None):
 
 
 def _rebase_fails(monkeypatch, error, message="rebase conflict: could not apply"):
-    """`refresh_worktree_base` raises `error`; escalation dispatches are
-    recorded, never run. Returns the recorded `(work_item_id, auto)` calls."""
+    """`refresh_worktree_base` raises `error`; escalations are recorded, not run."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     import kraft.builtins as builtins_mod
 
@@ -210,23 +212,23 @@ _STOP_STATUS = {"resume": "paused", "retry": "needs_human"}
 
 
 @pytest.mark.parametrize(
-    ("message", "cause"),
+    ("message", "cause", "error"),
     [
-        ("rebase conflict: could not apply", "git"),
-        ("fatal: Authentication failed for 'https://example.test/r.git'", "forge_auth"),
-        ("fatal: Could not resolve host: example.test", "forge_unreachable"),
+        ("rebase conflict: could not apply", "git", RuntimeError),
+        ("fatal: Authentication failed for 'https://x/r.git'", "forge_auth", RuntimeError),
+        ("fatal: Could not resolve host: x", "forge_unreachable", RuntimeError),
+        ("boom", "forge_auth", partial(ForgeError, reason="forbidden")),
+        ("401 Unauthorized", "git", partial(ForgeError, reason="not_found")),
     ],
-    ids=["git", "auth", "unreachable"],
+    ids=["git", "auth", "unreachable", "reason-forbidden", "reason-beats-text"],
 )
 @pytest.mark.parametrize("verb", ["resume", "retry"])
 def test_a_non_conflict_rebase_failure_goes_to_a_human_even_when_armed(
-    client, repo, monkeypatch, verb, message, cause
+    client, repo, monkeypatch, verb, message, cause, error
 ):
-    """A git failure that is NOT a conflict (`RebaseConflict` specifically)
-    stops for a human naming it; only a conflict gets the resolver path
-    (Kraft-s7c04.23). It is not in the stuck set, so no agent is dispatched
-    onto it even with `auto_escalate_stuck` armed (Ruling 176)."""
-    calls = _rebase_fails(monkeypatch, lambda b: RuntimeError, message)
+    """A failure that is not a `RebaseConflict` stops for a human naming it, and
+    no agent is dispatched even with `auto_escalate_stuck` armed (Ruling 176)."""
+    calls = _rebase_fails(monkeypatch, lambda b: error, message)
     wid = _completed_item(client, repo)
     _force_node(wid, "verify", _STOP_STATUS[verb])
 

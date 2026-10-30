@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     # the other way would be circular. `from __future__ import annotations`
     # already makes every annotation below lazy, so this is type-checking
     # only.
+    from collections.abc import Mapping
     from datetime import datetime
 
     from kraft.adapters.forge.mr import MRMeta
@@ -21,9 +22,65 @@ if TYPE_CHECKING:
 
 CIState = Literal["pending", "success", "failed"]
 
+#: Why a forge call failed, from the HTTP status (`reason_for`) or a GraphQL
+#: error's type. None on an error means no request was made or nothing is known.
+Reason = Literal[
+    "auth",
+    "forbidden",
+    "rate_limited",
+    "not_found",
+    "conflict",
+    "head_moved",
+    "unreachable",
+    "tls",
+]
+
 
 class ForgeError(RuntimeError):
-    """The forge could not be reached, or answered something unusable."""
+    """The forge could not be reached, or answered something unusable.
+
+    `status` and `reason` are set when a request was answered; `retry_after`
+    (seconds) and `sso_url` come from the response headers."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        reason: Reason | None = None,
+        retry_after: float | None = None,
+        sso_url: str = "",
+    ):
+        super().__init__(message)
+        self.status = status
+        self.reason = reason
+        self.retry_after = retry_after
+        self.sso_url = sso_url
+
+
+def reason_for(status: int, headers: Mapping[str, str], message: str = "") -> Reason | None:
+    """The `Reason` an HTTP status means; header names are lower-cased. A 403 is
+    a rate limit only when the forge says so, otherwise a refused permission:
+    by its headers, or by its message, as GitHub's secondary limit can send
+    neither `Retry-After` nor a spent quota."""
+    if status == 401:
+        return "auth"
+    if status == 429:
+        return "rate_limited"
+    if status == 403:
+        limited = (
+            headers.get("x-ratelimit-remaining") == "0"
+            or "retry-after" in headers
+            or "rate limit" in message.lower()
+        )
+        return "rate_limited" if limited else "forbidden"
+    if status == 404:
+        return "not_found"
+    if status == 409:
+        return "conflict"
+    if status >= 500:
+        return "unreachable"
+    return None
 
 
 class HeadMoved(ForgeError):
@@ -32,7 +89,7 @@ class HeadMoved(ForgeError):
     reviewed. `current` is the forge's head, "" when it could not be read."""
 
     def __init__(self, message: str, current: str = ""):
-        super().__init__(message)
+        super().__init__(message, reason="head_moved")
         self.current = current
 
 
@@ -85,12 +142,31 @@ _UNREACHABLE_MARKERS = (
 _LOCAL_GIT = ("git rebase ", "git worktree add timed out")
 
 
-def failure_cause(text: str) -> Literal["forge_auth", "forge_unreachable"] | None:
-    """Why a forge or git failure's message says it failed, when it says: a
-    credential the forge refused (`forge_auth`, fixed by signing the forge CLI in
-    on the server's machine, not in the repo's settings)
-    or a forge that could not be reached (`forge_unreachable`). None when the
-    text names neither."""
+#: What each `ForgeError.reason` means for a stop. A reason missing here (a rate
+#: limit, a missing project, a conflict, a moved head) is no auth or network
+#: cause.
+_CAUSE_OF_REASON: dict[str, Literal["forge_auth", "forge_unreachable"]] = {
+    "auth": "forge_auth",
+    "forbidden": "forge_auth",
+    "unreachable": "forge_unreachable",
+    "tls": "forge_unreachable",
+}
+
+
+def failure_cause(
+    text: str, record: Mapping[str, object] | None = None
+) -> Literal["forge_auth", "forge_unreachable"] | None:
+    """Why a forge or git failure says it failed, when it says: a credential the
+    forge refused (`forge_auth`, fixed by signing the forge CLI in on the
+    server's machine, not in the repo's settings) or a forge that could not be
+    reached (`forge_unreachable`). None when it names neither.
+
+    `record` is the failed task's forge-error record (`{"reason": ...}`); one
+    with a reason decides. Without one -- a row written before the record, or an
+    error from a call that made no request, like a CLI that is not signed in --
+    the text's markers decide."""
+    if record and record.get("reason"):
+        return _CAUSE_OF_REASON.get(str(record["reason"]))
     low = text.lower()
     if any(m in low for m in _LOCAL_GIT):
         return None

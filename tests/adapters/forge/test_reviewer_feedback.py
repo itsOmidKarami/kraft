@@ -13,6 +13,8 @@ import pytest
 from kraft.adapters import forge
 from kraft.automated_review import AutomatedReview
 
+from .api_outputs import READ_BRANCH
+from .outputs import glab_mr
 from .test_automated_review import (
     GH,
     GH_PR,
@@ -82,7 +84,7 @@ def _glab_discussion(id, *notes):
 
 
 _GH_BOT = {
-    "pr view": GH_PR,
+    READ_BRANCH: GH_PR,
     GH_ISSUE_COMMENTS: json.dumps(
         [
             _gh_comment("coderabbitai[bot]", "stale summary", "2026-01-01T11:00:00Z"),
@@ -103,9 +105,9 @@ _GH_BOT = {
         _gh_thread("T3", False, "a-person", "please rename", "2026-01-01T12:09:00Z"),
     ),
 }
-_GH_CHECK = {"pr view": GH_PR, GH_STATUS: json.dumps({"statuses": []})}
+_GH_CHECK = {READ_BRANCH: GH_PR, GH_STATUS: json.dumps({"statuses": []})}
 _GLAB_BOT = {
-    "mr view": GLAB_MR,
+    **glab_mr(GLAB_MR),
     GLAB_NOTES: json.dumps(
         [
             _glab_note(1, "coderabbitai", "stale summary", "2026-01-01T11:00:00Z", system=False),
@@ -262,7 +264,7 @@ def _comment(body, at):
         (
             GLAB,
             {
-                "mr view": GLAB_MR,
+                **glab_mr(GLAB_MR),
                 GLAB_STATUSES: json.dumps(
                     [{"id": 4, "name": "review-bot", "status": "failed", "description": "2 issues"}]
                 ),

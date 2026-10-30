@@ -12,6 +12,7 @@ import pytest
 from support.harness import (
     ALLOW_FILE,
     commit_all,
+    connect_repo,
     entry_of,
     git,
     isolated_bd,
@@ -20,7 +21,7 @@ from support.harness import (
     v1_resolved,
     write,
 )
-from support.workspace import workspace_target
+from support.workspace import workspace_item, workspace_target
 
 from kraft import builtins as _builtins
 from kraft import events, executor, policy, store
@@ -394,6 +395,86 @@ def _with_origin(tmp_path, it, worktree):
     git(tmp_path, "clone", "--bare", "-q", str(root), str(origin))
     git(root, "remote", "add", "origin", str(origin))
     git(worktree, "fetch", "-q", "origin")
+
+
+@pytest.mark.parametrize(
+    "member_forge, expected",
+    [("gitlab", {"glab": {"pkg"}, "gh": {"root"}}), (None, {"gh": {"pkg", "root"}})],
+    ids=["own-forge", "none-recorded-uses-the-roots"],
+)
+async def test_each_member_talks_to_its_own_forge(
+    item_on, database, run_dirs, tmp_path, monkeypatch, member_forge, expected
+):
+    it, worktree, branch = await _multi_repo_item(item_on, database, run_dirs, tmp_path, "ignore")
+    _with_origin(tmp_path, it, worktree)
+    config = tmp_path / "config"
+    config.mkdir()
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(config))
+    connect_repo(
+        tmp_path / "pkg-connected", id="pkg", **({"forge": member_forge} if member_forge else {})
+    )
+    for repo in (worktree / "repos" / "pkg", worktree):
+        write(repo, "new.txt", "x\n")
+        commit_all(repo)
+    backends: dict[str, _RecordingForge] = {}
+    monkeypatch.setattr(
+        forge.run, "resolve", lambda name: backends.setdefault(name, _RecordingForge())
+    )
+
+    await forge.run_task(
+        database,
+        run_dirs,
+        session_id="s1",
+        work_item_id=it.id,
+        node_id="open_mr",
+        hook_point="on.open_mr",
+        handler="open_mr",
+        backend="auto",
+        repo_forge="github",
+        repo=worktree,
+        branch=branch,
+        title="t",
+    )
+
+    reached = {
+        n: {"pkg" if c.name == "pkg" else "root" for c in b.cwds} for n, b in backends.items()
+    }
+    assert reached == expected
+
+
+async def test_an_item_filed_before_workspaces_reaches_its_forge(
+    database, run_dirs, tmp_path, monkeypatch
+):
+    """Its members come from the `submodules` column, named by the item's id,
+    which run_task's own read of the item has to carry."""
+    task = {"id": "t", "kind": "subprocess", "command": "true"}
+    row, _, worktree = await workspace_item(database, run_dirs, tmp_path, [task], legacy=True)
+    config = tmp_path / "config"
+    config.mkdir()
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(config))
+    write(worktree / "repos" / "pkg", "new.txt", "x\n")
+    commit_all(worktree / "repos" / "pkg")
+    backends: dict[str, _RecordingForge] = {}
+    monkeypatch.setattr(
+        forge.run, "resolve", lambda name: backends.setdefault(name, _RecordingForge())
+    )
+
+    await forge.run_task(
+        database,
+        run_dirs,
+        session_id="s1",
+        work_item_id=row["id"],
+        node_id="open_mr",
+        hook_point="on.open_mr",
+        handler="open_mr",
+        backend="auto",
+        repo_forge="github",
+        repo=worktree,
+        branch=store.branch_for(row),
+        title="t",
+    )
+
+    assert set(backends) == {"gh"}
 
 
 @pytest.mark.parametrize("policy_name", ["bump", "ignore"])

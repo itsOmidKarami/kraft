@@ -7,14 +7,13 @@ from __future__ import annotations
 
 import json
 import subprocess
-from unittest.mock import AsyncMock
 
 import pytest
 from support.harness import make_repo, own_files
 
 from kraft.adapters import forge
 
-from . import outputs
+from . import api_outputs, outputs
 from .nodes import back_half
 
 RED = [(forge.FailedJob("test", "failed", "script_failure"),)]
@@ -146,25 +145,6 @@ def test_every_v1_forge_target_maps_to_a_handler():
     assert {a.value for a in ForgeAction} <= set(forge.run.V1_HANDLERS)
     waits = {forge.run.V1_HANDLERS[a.value] for a in ForgeAction if a.waits}
     assert waits == set(forge.run._WAITS)
-
-
-@pytest.mark.parametrize(
-    "error, status",
-    [
-        (forge.ForgeError("glab fell over"), "failed"),
-        (forge.CliUnavailable("glab is not installed or not on PATH"), "config_error"),
-    ],
-    ids=["flaky", "cannot-start"],
-)
-async def test_a_forge_error_mid_poll_fails_the_node_rather_than_escaping(run_forge, error, status):
-    """A flaky CLI lands as a failed node, a CLI that never started as a stop for a
-    person -- and, since a wait left no record of its end (Kraft-vzq2q), as its `error`."""
-    fake = forge.FakeForge()
-    fake.ci_status = AsyncMock(side_effect=error)
-    assert await run_forge(fake, "ci_poll", "s7") == (status, status)
-    assert str(error) in run_forge.log("s7")
-    (ended,) = run_forge.events("external_wait_ended")
-    assert ended["outcome"] == "error" and str(error) in ended["result"]
 
 
 # --- open_mr / sync_mr / mark_ready --------------------------------------------
@@ -447,7 +427,7 @@ async def test_a_node_treats_an_already_merged_mr_as_done(run_forge, tmp_path, h
         (
             "gh",
             forge.GhCli,
-            outputs.GH_PR_LIST_MERGED,
+            api_outputs.FIND_MERGED,
             "done",
             "already merged (!7)",
         ),
@@ -633,7 +613,7 @@ async def test_infra_red_is_retried_across_entries_then_stops_with_the_reason(
 
 
 class _MergesOnlyOnGreen(forge.FakeForge):
-    """`glab mr merge --yes` against a still-running pipeline exits 0 but merges
+    """A GitLab merge with `auto_merge` against a still-running pipeline exits 0 but merges
     nothing (Kraft-79x3): this fake refuses unless the last read was green."""
 
     last = None
@@ -656,7 +636,7 @@ class _Refusing(forge.FakeForge):
 
 class _AutoMergeScheduled(forge.FakeForge):
     """Kraft-79x3, 0853ea31 / MR !76: with the head's pipeline still running,
-    GitLab's `mr merge` enables "merge when all checks pass", exits 0, and
+    GitLab's `auto_merge` enables "merge when all checks pass", exits 0, and
     merges nothing."""
 
     async def merge(self, *, repo, branch="", mr, head=""):

@@ -5,8 +5,11 @@ Shapes only one file uses live in that file."""
 
 import json
 
+from .nodes import FAIL
+
 GLAB_MR_VIEW = (
-    '{"iid":54,"target_branch":"main","source_branch":"kraft/abc","state":"opened",'
+    '{"iid":54,"title":"Draft: Teach it","target_branch":"main","source_branch":"kraft/abc",'
+    '"state":"opened",'
     '"web_url":"https://gitlab.com/itsOmidKarami/kraft/-/merge_requests/54"}'
 )
 
@@ -90,39 +93,18 @@ GH_PR_VIEW = (
     '{"name":"lint","conclusion":"FAILURE"}]}'
 )
 
-GH_PR_VIEW_CONFLICT = (
-    '{"number":7,"url":"https://github.com/o/r/pull/7","mergeable":"CONFLICTING",'
-    '"mergeStateStatus":"DIRTY","statusCheckRollup":[{"name":"build","conclusion":"SUCCESS"}]}'
+#: `GET projects/:id/pipelines/<id>` for the pipeline in GLAB_CI_FAILED, trimmed to
+#: the fields this code reads (GitLab REST, 2026-10-30; glab 1.117.0 printed
+#: this same object with its jobs inline).
+GLAB_PIPELINE_FAILED = '{"id":2826926700,"status":"failed"}'
+
+#: `GET projects/:id/pipelines/<id>/jobs` for it: an array, bridge jobs not in it.
+GLAB_JOBS_FAILED = (
+    '[{"id":16392037101,"name":"lint-and-test","status":"success"},'
+    '{"id":16392037104,"name":"release-impact","status":"failed"}]'
 )
 
-GH_PR_VIEW_NEEDS_APPROVAL = (
-    '{"number":7,"url":"https://github.com/o/r/pull/7","mergeable":"UNKNOWN",'
-    '"mergeStateStatus":"BLOCKED","reviewDecision":"REVIEW_REQUIRED",'
-    '"statusCheckRollup":[{"name":"build","conclusion":"SUCCESS"}]}'
-)
-
-GH_PR_LIST_MERGED = (
-    '[{"number":7,"url":"https://github.com/o/r/pull/7","state":"MERGED",'
-    '"mergeCommit":{"oid":"c0ffee1"},"headRefOid":"c0ffee0"}]'
-)
-#: An open pull request with auto-merge enabled: GitHub merges it itself once
-#: its checks pass (`gh pr list --json autoMergeRequest`).
-GH_PR_LIST_AUTO_MERGE = (
-    '[{"number":7,"url":"https://github.com/o/r/pull/7","state":"OPEN",'
-    '"autoMergeRequest":{"enabledAt":"2026-09-22T10:00:00Z","mergeMethod":"SQUASH"},'
-    '"headRefOid":"f0reign1"}]'
-)
-
-# `glab ci get -F json` for the pipeline in GLAB_CI_FAILED, trimmed to the
-# fields this code reads: the pipeline object carries its jobs inline, so one
-# call names every job (glab 1.117.0, 2026-09-09).
-GLAB_CI_GET_FAILED = (
-    '{"id":2826926700,"status":"failed","jobs":['
-    '{"id":16392037101,"name":"lint-and-test","status":"success"},'
-    '{"id":16392037104,"name":"release-impact","status":"failed"}]}'
-)
-
-# The tail of `glab ci trace release-impact`, the only place the reason for MR
+# The tail of `GET projects/:id/jobs/16392037104/trace`, the only place the reason for MR
 # !89's red pipeline was ever written down.
 GLAB_CI_TRACE = (
     '$ python3 dev/next_tag.py "" "$CI_MERGE_REQUEST_LABELS" > /dev/null\n'
@@ -130,3 +112,37 @@ GLAB_CI_TRACE = (
     "This MR needs one of: release::major, release::minor, release::patch, release::none\n"
     "ERROR: Job failed: exit code 1\n"
 )
+
+
+def glab_mr(view: str, iid: int | None = None, *, open: bool = True) -> dict:
+    """Stub routes for `GlabCli._mr`: the open-MR list for the branch, else (not
+    `open`) the empty one and then the all-states list, then the merge request
+    itself by its iid. `FAIL` makes the first list call fail."""
+    if view is FAIL:
+        return {"api*state=opened*": FAIL}
+    iid = iid or json.loads(view)["iid"]
+    listed = json.dumps([{"iid": iid}])
+    lists = (
+        {"api*state=opened*": listed}
+        if open
+        else {"api*state=opened*": "[]", "api*state=all -F per_page=1": listed}
+    )
+    return {**lists, f"api projects/:id/merge_requests/{iid}": view}
+
+
+PIPELINES = "api projects/:id/pipelines"
+
+
+def glab_pipeline(
+    pipeline: str = GLAB_PIPELINE_FAILED, jobs: str = GLAB_JOBS_FAILED, trace: str = GLAB_CI_TRACE
+) -> dict:
+    """Stub routes for reading one pipeline by id: the pipeline, its jobs, and
+    each job's trace. `FAIL` as the pipeline or the jobs fails that call."""
+    pid = json.loads(pipeline)["id"] if pipeline is not FAIL else 2826926700
+    routes = {f"{PIPELINES}/{pid}": pipeline}
+    if pipeline is FAIL:
+        return routes
+    routes[f"{PIPELINES}/{pid}/jobs"] = jobs
+    if jobs is FAIL:
+        return routes
+    return routes | {f"api projects/:id/jobs/{j['id']}/trace": trace for j in json.loads(jobs)}
