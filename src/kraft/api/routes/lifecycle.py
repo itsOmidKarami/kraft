@@ -39,7 +39,11 @@ from kraft.policy import NO_CAP, PolicyError
 from kraft.remote import runs as remote_runs
 from kraft.templates.forks import ChainPath, PathError, override_record
 from kraft.templates.models import AgentTask, GateNode
-from kraft.templates.retry import RetryOverrideError, validate_retry_override
+from kraft.templates.retry import (
+    AGENT_TASK_FIELDS,
+    RetryOverrideError,
+    validate_retry_override,
+)
 from kraft.vocab import (
     ENDED,
     HOLDS_SLOT,
@@ -1756,6 +1760,14 @@ async def _retry(wid: str, body: Retry, request: Request):
         body = body.model_copy(update={"path": _stopped_step(st, wid, chain, row)})
     target = _retry_target(chain, row, body)
     override = _retry_override(chain, target, body)
+    # After the bounds, so a structural field is still the 422 it is for anyone.
+    beyond = sorted(set(body.task_config or {}) - AGENT_TASK_FIELDS)
+    if beyond and (who := _decided_by(request)) != "human":
+        raise HTTPException(
+            403,
+            f"task_config: changing a task's {', '.join(beyond)} is a person's call, not an "
+            f"{who}'s; an {who}'s retry may change only the task's model and effort",
+        )
     # The node the rerun starts at: what a steer has to reach from, whose
     # findings seed one, and which counters the retry clears (Kraft-bzwi: a
     # node with no fix loop just has none to clear).

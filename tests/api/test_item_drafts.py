@@ -7,6 +7,7 @@ import os
 import sqlite3
 from pathlib import Path
 
+import pytest
 from support.api import _set_status
 
 from kraft.templates.models import MaterializedChain
@@ -155,3 +156,68 @@ def test_a_node_whose_op_cannot_apply_has_no_added_check(client, repo):
     view = client.put(f"/api/work-items/{wid}/draft", json={"ops": [bad]}).json()
     assert [p["op"] for p in view["problems"]] == [0]
     assert view["checks"]["added"] == []
+
+
+PROMPT = {"op": "override", "path": "work_brief.main.author", "task_config": {"prompt": "x"}}
+_CALLERS = {
+    "assistant": {"x-kraft-client": "mcp"},
+    "worker": {"x-kraft-session-id": "w-o/abc123"},
+    "person": {},
+}
+
+
+@pytest.mark.parametrize(
+    ("caller", "verb", "ops", "started", "status"),
+    [
+        ("assistant", "put", [PROMPT], False, 403),
+        ("assistant", "put", [ADD], True, 403),
+        ("worker", "put", [OVERRIDE], False, 403),
+        ("assistant", "apply", [PROMPT], False, 403),
+        ("worker", "apply", [ADD], True, 403),
+        ("person", "apply", [PROMPT], False, 200),
+        ("person", "apply", [ADD], True, 200),
+    ],
+    ids=[
+        "assistant-writes-a-prompt",
+        "assistant-adds-a-node-to-a-started-item",
+        "another-items-worker-writes-an-override",
+        "assistant-applies-a-persons-prompt",
+        "worker-applies-a-persons-added-node-to-a-started-item",
+        "person-applies-a-prompt",
+        "person-applies-an-added-node-to-a-started-item",
+    ],
+)
+def test_an_items_chain_draft_is_a_persons_to_write_and_apply(
+    client, repo, caller, verb, ops, started, status
+):
+    """#1190: a draft's ops change the chain the item runs, started or not, and
+    an override can set a task's prompt, so only a person writes or applies
+    one. An agent still reads it; the chain-revision gate is another door
+    (tests/api/test_chain_revision_gate.py)."""
+    wid = _filed(client, repo)
+    url = f"/api/work-items/{wid}/draft"
+    if verb == "apply":
+        assert client.put(url, json={"ops": ops}).status_code == 200
+    if started:
+        conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+        conn.execute("UPDATE work_items SET current_node_id = 'spec' WHERE id = ?", (wid,))
+        conn.commit()
+        conn.close()
+    headers = _CALLERS[caller]
+
+    if verb == "put":
+        r = client.put(url, json={"ops": ops}, headers=headers)
+    else:
+        r = client.post(f"{url}/apply", headers=headers)
+
+    assert r.status_code == status, r.text
+    events = client.get(f"/api/work-items/{wid}/events").json()
+    revised = [e for e in events if e["type"] == "chain_revised"]
+    if status == 200:
+        assert len(revised) == 1
+        return
+    assert "a person's to write and apply" in r.json()["detail"]
+    assert client.get(url, headers=headers).json()["ops"] == (
+        [] if verb == "put" else [{**op, "passed": False} for op in ops]
+    )
+    assert revised == []

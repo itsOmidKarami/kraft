@@ -38,6 +38,10 @@ from kraft.templates.models import (
 #: off a task, its fan-out, and its policy -- which has its own door, so it is
 #: bounded as policy rather than slipped in as configuration.
 _STRUCTURAL = frozenset({"id", "kind", "on_failure", "scope", "policy"})
+#: The task fields an agent's retry may change: which model runs it and how
+#: hard. Anything else (a prompt, a command, tools, a harness) is text or
+#: reach nobody reviewed, so only a person sets it (#1189).
+AGENT_TASK_FIELDS = frozenset({"model", "effort"})
 
 
 class RetryOverrideError(ValueError):

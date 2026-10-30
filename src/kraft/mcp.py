@@ -575,7 +575,8 @@ def build() -> MCPServer:
         """Set or clear one node's per-item override on a Kraft work item --
         its auto-escalate settings, the `model`/`effort` its agent tasks launch
         with (above the item-wide `set_agent_overrides`), an `extra_prompt`
-        appended to each of their instructions, and the `reviewers` its
+        appended to each of their instructions (a person's to set: refused
+        from an MCP session; `clear` drops it with the rest), and the `reviewers` its
         automated-review wait reads (each `{"bot": LOGIN}` or `{"check": NAME}`,
         over the repository's; `[]` expects none) -- without touching the Policy
         screen's system defaults or the chain everyone else uses. A
