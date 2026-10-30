@@ -1111,7 +1111,7 @@ class GhCli(mr_ops.CliWaits):
                 ("merge_group", r)
                 for r in group.get("workflow_runs") or []
                 if str(r.get("head_branch") or "").startswith(prefix)
-            ]
+            ][:20]
         rows = [
             Pipeline(
                 id=str(r.get("id")),

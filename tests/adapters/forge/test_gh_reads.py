@@ -41,7 +41,7 @@ _PAGE = [rest_label(f"l{i}") for i in range(100)]
     [
         pytest.param(
             lambda g, r: g.mr_details(repo=r, branch="kraft/abc"),
-            {FIND: _OPEN, f"api*{_PULLS}/7*": json.dumps(rest_pull(body=None))},
+            {FIND: _OPEN, f"api*{_PULLS}/7*": json.dumps(rest_pull(body=None, draft=False))},
             [f"api {_PULLS}/7 -X GET -i"],
             MRDetails(
                 number=7,
@@ -49,7 +49,7 @@ _PAGE = [rest_label(f"l{i}") for i in range(100)]
                 state="open",
                 title="Teach it",
                 body="",
-                draft=True,
+                draft=False,
                 labels=("bug",),
                 source_branch="kraft/abc",
                 target_branch="main",
@@ -113,7 +113,12 @@ _PAGE = [rest_label(f"l{i}") for i in range(100)]
             lambda g, r: g.jobs(repo=r, pipeline_id="555"),
             {
                 "api*actions/runs/555/jobs*": json.dumps(
-                    {"jobs": [job(20, "sad", "failure"), job(21, "ok", "success")]}
+                    {
+                        "jobs": [
+                            job(20, "sad", "failure"),
+                            {**job(21, "ok", None), "status": "in_progress"},
+                        ]
+                    }
                 )
             },
             [f"api {_RUNS}/555/jobs?per_page=100 -X GET -i"],
@@ -130,7 +135,7 @@ _PAGE = [rest_label(f"l{i}") for i in range(100)]
                     "21",
                     "ok",
                     "",
-                    "success",
+                    "in_progress",
                     None,
                     "https://github.com/o/r/actions/runs/555/job/21",
                 ),
@@ -219,3 +224,10 @@ async def test_gh_mr_details_is_none_without_an_mr(cli, tmp_path):
     cli.stub("gh", routes={FIND: find_result()})
     assert await forge.GhCli().mr_details(repo=tmp_path, branch="kraft/abc") is None
     assert _rest(cli) == []
+
+
+async def test_gh_mr_details_says_merged_when_the_pull_has_merged_at(cli, tmp_path):
+    pull = rest_pull(state="closed", merged_at="2026-09-01T00:00:00Z")
+    cli.stub("gh", routes={FIND: _OPEN, f"api*{_PULLS}/7*": json.dumps(pull)})
+    got = await forge.GhCli().mr_details(repo=tmp_path, branch="kraft/abc")
+    assert got is not None and got.state == "merged"
