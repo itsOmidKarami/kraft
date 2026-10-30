@@ -51,7 +51,7 @@ UP_TO_DATE = {"installed": "2.4.0", "latest": "v2.4.0", "behind": False}
 FEED_DOWN = client.ClientError("the release feed did not answer", kind=client.Failure.UNREACHABLE)
 OK_LINES = [
     "● ok · v2.4.0 (2.5.0 available) · up 3h 12m · pid 4120 · 127.0.0.1:8765",
-    "Config  templates ✓  policy ✓  intake ✓  ·  Index  ready",
+    "Config  templates ✓  policy ✓  intake ✓  forges ✓  ·  Index  ready",
     "Storage  3.1G of 20G  ·  Add-ons  1 update waiting",
 ]
 ACTIVE = [
@@ -99,7 +99,7 @@ def _reading_release(app) -> bool:
             [
                 "● degraded · v2.4.0 (2.5.0 installed, R finishes it) · up 59s"
                 " · pid 4120 · 127.0.0.1:8765",
-                "Config  templates ✗  policy ✗  intake ✓  ·  Index  not installed",
+                "Config  templates ✗  policy ✗  intake ✓  forges ✓  ·  Index  not installed",
                 "Storage  not limited  ·  Add-ons  none waiting",
                 "  invalid template: chain broken: no [/] such node",
                 "  invalid policy: bad key",
@@ -227,7 +227,8 @@ def test_the_servers_keys_run_their_verbs_after_the_consoles_confirm(
                 "refused_intake": None,
                 "refused_workers": None,
             },
-            "reloaded 2 template(s) and policy.yaml and intake.yaml and workers.yaml",
+            "reloaded 2 template(s) and policy.yaml and intake.yaml and workers.yaml"
+            " and forges.yaml",
             False,
         ),
         (
@@ -238,7 +239,7 @@ def test_the_servers_keys_run_their_verbs_after_the_consoles_confirm(
                 "refused_intake": None,
                 "refused_workers": None,
             },
-            "reloaded 1 template(s) and intake.yaml and workers.yaml\n"
+            "reloaded 1 template(s) and intake.yaml and workers.yaml and forges.yaml\n"
             "  invalid: chain x: no [/] node\n"
             "  refused: policy.yaml: bad (the running policy is kept)",
             True,

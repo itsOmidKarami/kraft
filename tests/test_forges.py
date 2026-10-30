@@ -21,6 +21,7 @@ def _load(tmp_path, text):
         ("github", "https://github.com", "https://api.github.com"),
         ("github", "https://acme.ghe.com", "https://api.acme.ghe.com"),
         ("github", "https://git.corp.example", "https://git.corp.example/api/v3"),
+        ("github", "https://ghe.corp:8443", "https://ghe.corp:8443/api/v3"),
         (
             "gitlab",
             "https://code.corp.example/gitlab",
@@ -32,7 +33,14 @@ def _load(tmp_path, text):
             "https://code.corp.example/gitlab/api/v4",
         ),
     ],
-    ids=["github-com", "ghe-data-residency", "ghes", "gitlab-prefix", "trailing-slash"],
+    ids=[
+        "github-com",
+        "ghe-data-residency",
+        "ghes",
+        "ghes-port",
+        "gitlab-prefix",
+        "trailing-slash",
+    ],
 )
 def test_an_account_loads_with_its_api_url_derived(tmp_path, forge, web_url, api):
     file = _load(
@@ -89,6 +97,10 @@ def test_remote_hosts_compare_without_case_port_or_dot(remote, host):
             "  b: {forge: gitlab, web_url: 'https://G.example/', default_for_host: true}\n",
             "both default_for_host",
         ),
+        ("accounts:\n  a: {forge: github, web_url: 'https://[::1'}\n", "plain https://"),
+        ("accounts:\n  a: {forge: gitlab, web_url: 'https://u:tok@g.example'}\n", "credentials"),
+        ("accounts:\n  a: {forge: gitlab, web_url: 'https://g.example?x'}\n", "query"),
+        ("accounts:\n  a: {forge: gitlab, web_url: 'https://g.example:99999'}\n", "plain https://"),
     ],
     ids=[
         "http-web-url",
@@ -97,6 +109,10 @@ def test_remote_hosts_compare_without_case_port_or_dot(remote, host):
         "client-api",
         "unknown-forge",
         "two-defaults-one-host",
+        "unclosed-bracket",
+        "userinfo",
+        "query",
+        "bad-port",
     ],
 )
 def test_a_bad_account_is_refused_naming_the_file_and_key(tmp_path, text, says):

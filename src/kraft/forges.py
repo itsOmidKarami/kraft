@@ -37,17 +37,20 @@ def default_api_url(forge: str, web_url: str) -> str:
         return "https://api.github.com"
     if host.endswith(".ghe.com"):
         return f"https://api.{host}"
-    return f"https://{host}/api/v3"
+    return f"https://{urlsplit(web_url).netloc}/api/v3"
 
 
 def _https(url: str, key: str) -> str:
     try:
         parts = urlsplit(url)
-        host = parts.hostname
+        ok = bool(parts.hostname) and parts.port != 0
     except ValueError:
-        host = None
-    if parts.scheme != "https" or not host:
-        raise ValueError(f"{key} {url!r} must be an https:// address with a host")
+        ok = False
+    # No userinfo, query or fragment: a token pasted into an address would be kept and shown.
+    if not ok or parts.scheme != "https" or parts.username or parts.password:
+        raise ValueError(f"{key} must be a plain https:// address with a host, no credentials")
+    if parts.query or parts.fragment:
+        raise ValueError(f"{key} must not carry a query or fragment")
     return url.rstrip("/")
 
 
