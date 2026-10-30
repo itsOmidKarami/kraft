@@ -43,9 +43,14 @@ def copy_path(run_dirs, wid: str, sid: str) -> Path:
     return item_paths.session_files(run_dirs, wid, sid).folder / "copy"
 
 
+#: Beside the copy, never in it: the servers a copy launch is handed, tokens included.
+MCP_SERVERS = "copy-mcp-servers.json"
+
+
 def remove_copy(path: Path) -> None:
     # A global `core.fsmonitor` may have started a daemon in it: best effort.
     shutil.rmtree(path, ignore_errors=True)
+    (path.parent / MCP_SERVERS).unlink(missing_ok=True)
 
 
 def watch_copy(
@@ -70,7 +75,7 @@ def watch_copy(
 
 
 def _empty(dest: Path) -> None:
-    remove_copy(dest)
+    shutil.rmtree(dest, ignore_errors=True)  # not remove_copy: the launch's servers file stays
     dest.mkdir(parents=True, exist_ok=True)
 
 

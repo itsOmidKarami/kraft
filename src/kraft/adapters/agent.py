@@ -50,7 +50,6 @@ logger = logging.getLogger(__name__)
 _NETWORK_DOCS = "https://kraft-sdlc.dev/reference/configuration/sandbox/network-policy"
 #: The MCP servers a launch in a copy is handed (`extra_mcp_config`), in its
 #: session's own folder: never in the copy, which stays a clean clone.
-_COPY_MCP_SERVERS = "copy-mcp-servers.json"
 
 _CTX = (
     "You are working on a Kraft work item.\n"
@@ -1477,7 +1476,7 @@ async def _run_agent_task(
         if servers and h.supports("extra_mcp_config"):
             # In a file only this user reads, never the argv: a person's servers carry
             # tokens, and the argv is in /proc, the session's row and the API.
-            handed = Path(cwd).parent / _COPY_MCP_SERVERS
+            handed = Path(cwd).parent / inplace.MCP_SERVERS
             text = json.dumps({"mcpServers": servers})
             await asyncio.to_thread(write_whole, handed, text.encode(), 0o600)
             options["extra_mcp_config"] = str(handed)
