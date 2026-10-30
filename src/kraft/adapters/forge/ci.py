@@ -169,7 +169,7 @@ async def retry_infra_once(
 
     `branch_only` picks which read the kick is followed by, and exists because
     `merge_watch` calls this after its own merge request is gone: the default
-    `ci_status` resolves an MR first (`gh pr view` / `glab mr view`), which on
+    `ci_status` resolves an MR first (a pull-request read), which on
     a just-merged branch has nothing left to resolve and raises `ForgeError`,
     failing the terminal node -- the same MR-vs-branch split the caller's
     first read already makes with `branch_ci_status`. Both real backends

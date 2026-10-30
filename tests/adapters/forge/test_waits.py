@@ -1,19 +1,22 @@
 """What one observation of each forge wait reads: automated review, external
 approval, and the merge node's own waits (its pre-merge pipeline, a missing
 approval, and the merge landing). Parking, backoff, timeout and the scheduler
-are tests/test_waits.py; `ci_poll` and `merge_watch` reads, and a forge error
-ending a wait, are test_run.py and test_merge_watch.py. A cancelled run nobody
-followed up is here, at every node that reads a pipeline."""
+are tests/test_waits.py; `ci_poll` and `merge_watch` reads are test_run.py and
+test_merge_watch.py. A forge error ending a wait, and a forge rate limit stopping
+the item, are here, as is a cancelled run nobody followed up, at every node that
+reads a pipeline."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
 
 import pytest
 from support.harness import git, own_files
 
-from kraft import events, inplace
+from kraft import events, inplace, waits
 from kraft.adapters import forge
 from kraft.templates.environment import WorkItemTarget
 
@@ -33,6 +36,79 @@ def _trail(run_forge, task="on.ci.poll") -> list[tuple[str, str | None, str | No
         for p in run_forge.events(t)
         if p["task"] == task
     ]
+
+
+@pytest.mark.parametrize(
+    "error, status",
+    [
+        (forge.ForgeError("glab fell over"), "failed"),
+        (forge.CliUnavailable("glab is not installed or not on PATH"), "config_error"),
+    ],
+    ids=["flaky", "cannot-start"],
+)
+async def test_a_forge_error_mid_poll_fails_the_node_rather_than_escaping(run_forge, error, status):
+    """A flaky CLI lands as a failed node, a CLI that never started as a stop for a
+    person -- and, since a wait left no record of its end (Kraft-vzq2q), as its `error`."""
+    fake = forge.FakeForge()
+    fake.ci_status = AsyncMock(side_effect=error)
+    assert await run_forge(fake, "ci_poll", "s7") == (status, status)
+    assert str(error) in run_forge.log("s7")
+    (ended,) = run_forge.events("external_wait_ended")
+    assert ended["outcome"] == "error" and str(error) in ended["result"]
+
+
+async def test_a_forge_rate_limit_stops_the_item_until_the_forge_allows_it(
+    run_forge, monkeypatch, run_dirs
+):
+    """A `Retry-After` the forge sent is when the walk comes back (`rate_limited`
+    stops through `stops.stop_for_rate_limit`), not a failed node or a login
+    failure; the record the task leaves beside its log says why."""
+    moment = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(waits, "now", lambda: moment)
+    fake = forge.FakeForge()
+    fake.ci_status = AsyncMock(
+        side_effect=forge.ForgeError(
+            "GET repos: API rate limit exceeded (HTTP 403)",
+            status=403,
+            reason="rate_limited",
+            retry_after=30,
+        )
+    )
+
+    assert await run_forge(fake, "ci_poll", "s8") == ("rate_limited", "rate_limited")
+
+    (hit,) = run_forge.events("rate_limit_hit")
+    assert hit["resets_at_iso"] == (moment + timedelta(seconds=30)).isoformat()
+    assert not run_forge.events("external_wait_ended"), "the wait and its deadline stay open"
+    record = json.loads(own_files(run_dirs, "s8").log.with_suffix(".forge.json").read_text())
+    assert (record["status"], record["reason"], record["retry_after"]) == (403, "rate_limited", 30)
+
+
+async def test_a_forge_rate_limit_without_a_time_waits_a_minute(run_forge, monkeypatch):
+    moment = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(waits, "now", lambda: moment)
+    fake = forge.FakeForge()
+    fake.ci_status = AsyncMock(
+        side_effect=forge.ForgeError("429", status=429, reason="rate_limited")
+    )
+
+    await run_forge(fake, "ci_poll", "s9")
+
+    (hit,) = run_forge.events("rate_limit_hit")
+    assert hit["resets_at_iso"] == (moment + timedelta(seconds=60)).isoformat()
+
+
+async def test_a_refused_permission_is_a_failed_node_not_a_rate_limit(run_forge, run_dirs):
+    fake = forge.FakeForge()
+    fake.ci_status = AsyncMock(
+        side_effect=forge.ForgeError("denied (HTTP 403)", status=403, reason="forbidden")
+    )
+
+    assert await run_forge(fake, "ci_poll", "s10") == ("failed", "failed")
+
+    assert not run_forge.events("rate_limit_hit")
+    record = json.loads(own_files(run_dirs, "s10").log.with_suffix(".forge.json").read_text())
+    assert record["reason"] == "forbidden"
 
 
 # --- automated review ----------------------------------------------------------
@@ -185,7 +261,7 @@ class _Counting(forge.FakeForge):
 async def test_a_merge_that_has_not_landed_is_observed_again_never_requested_again(
     run_forge, tmp_path, no_sleeping
 ):
-    """`glab mr merge` exits 0 for "merge when checks pass" and merges nothing
+    """GitLab's `auto_merge` answers 200 for "merge when checks pass" and merges nothing
     (Kraft-79x3): the landing is read off the forge. A second observation
     reads it again; it does not ask for a second merge."""
 

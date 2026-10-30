@@ -26,7 +26,7 @@ from kraft.adapters.forge import git as forge_git
 from kraft.worker import sandbox
 
 from . import outputs
-from .outputs import GLAB_MR_VIEW
+from .outputs import GLAB_MR_VIEW, glab_mr
 
 BRANCH = "kraft/abc"
 
@@ -80,11 +80,14 @@ def test_open_mr_refuses_a_dirty_worktree_against_real_git(tmp_path, glab):
 
 
 @pytest.mark.parametrize(
-    "name, cls, view",
-    [("glab", forge.GlabCli, outputs.GLAB_MR_VIEW), ("gh", forge.GhCli, outputs.GH_PR_VIEW)],
+    "name, cls, view, create",
+    [
+        ("glab", forge.GlabCli, outputs.GLAB_MR_VIEW, "projects/:id/merge_requests"),
+        ("gh", forge.GhCli, '{"number": 7, "html_url": "u"}', "repos/{owner}/{repo}/pulls"),
+    ],
     ids=["glab", "gh"],
 )
-def test_open_mr_in_place_ignores_a_dirty_checkout(tmp_path, cli, name, cls, view):
+def test_open_mr_in_place_ignores_a_dirty_checkout(tmp_path, cli, name, cls, view, create):
     """The in-place counterpart: the person's own uncommitted edits in their
     checkout are no reason to refuse; only the branch and its commits reach
     the merge request."""
@@ -96,7 +99,7 @@ def test_open_mr_in_place_ignores_a_dirty_checkout(tmp_path, cli, name, cls, vie
         cls().open_mr(repo=repo, branch=BRANCH, base="main", title="t", body="b", check_clean=False)
     )
 
-    assert cli.argv(name)[1] == "create"
+    assert cli.argv(name)[1] == create
 
 
 def test_open_mr_ignores_gitignored_paths_against_real_git(tmp_path, glab):
@@ -114,7 +117,7 @@ def test_open_mr_ignores_gitignored_paths_against_real_git(tmp_path, glab):
     )
 
     assert mr.number == 54
-    assert glab.argv("glab")[:2] == ["mr", "create"]
+    assert glab.argv("glab")[:4] == ["api", "projects/:id/merge_requests", "-X", "POST"]
 
 
 def test_open_mr_accepts_a_worktree_whose_attachment_was_copied_in(tmp_path, glab):
@@ -135,7 +138,7 @@ def test_open_mr_accepts_a_worktree_whose_attachment_was_copied_in(tmp_path, gla
     )
 
     assert mr.number == 54
-    assert glab.argv("glab")[:2] == ["mr", "create"]
+    assert glab.argv("glab")[:4] == ["api", "projects/:id/merge_requests", "-X", "POST"]
 
 
 def test_merge_refuses_an_unpushed_head_against_real_git(tmp_path, glab):
@@ -163,12 +166,14 @@ def test_merge_accepts_a_pushed_head_against_real_git(tmp_path, glab, elsewhere)
         git(repo, "checkout", "-q", "main")
         git(repo, "commit", "-q", "--allow-empty", "-m", "the person's own")
 
+    glab.stub("glab", routes=glab_mr(GLAB_MR_VIEW), default=GLAB_MR_VIEW)
+
     asyncio.run(forge.GlabCli().merge(repo=repo, branch=BRANCH, mr=forge.MR(0, ""), head="a" * 40))
 
     # glab first asks the project whether it merges through a train (it does
     # not: the stub's answer has no such field); the merge itself runs once.
-    assert [c for c in glab.calls("glab") if c.startswith("mr merge")] == [
-        f"mr merge {BRANCH} --yes --sha {'a' * 40}"
+    assert [c for c in glab.calls("glab") if c.endswith("/merge -X PUT -i -f sha=" + "a" * 40)] == [
+        "api projects/:id/merge_requests/54/merge -X PUT -i -f sha=" + "a" * 40
     ]
     assert not any("merge_trains" in c for c in glab.calls("glab"))
 
@@ -719,3 +724,12 @@ async def test_a_host_commit_never_lands_on_a_planted_head(tmp_path, database, s
 
     assert git(repo, "rev-parse", "main") == main
     assert f"is not on {BRANCH}" in stopped
+
+
+def test_run_cli_returns_a_failed_exit(tmp_path):
+    """`run_cli` hands back what a failing CLI printed; `run_git` raises on it."""
+    args = ["sh", "-c", "echo out; echo err >&2; exit 3"]
+    done = asyncio.run(forge_git.run_cli(tmp_path, args))
+    assert (done.returncode, done.stdout, done.stderr) == (3, "out\n", "err\n")
+    with pytest.raises(forge.ForgeError, match="failed: err"):
+        asyncio.run(forge_git.run_git(tmp_path, args))

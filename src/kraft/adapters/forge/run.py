@@ -32,9 +32,12 @@ from kraft.adapters.forge.models import (
     QueueRead,
 )
 from kraft.automated_review import Reviewers
+from kraft.config import ConfigError, load_repos
+from kraft.paths import config_dir
 from kraft.templates.environment import RootPointerPolicy
 from kraft.templates.models import DEFAULT_GRACE, DEFAULT_WAIT, WaitBounds
 from kraft.vocab import RUNNING, ForgeEvent
+from kraft.vocab.events.limit import LimitEvent
 from kraft.vocab.sql import in_list
 
 logger = logging.getLogger(__name__)
@@ -110,6 +113,9 @@ def resolve(name: str) -> Forge:
             raise ForgeError(f"unknown forge backend {name!r}; known: gh, glab, fake")
 
 
+#: How long a rate-limited forge call waits when the forge named no time.
+_RATE_LIMIT_WAIT_S = 60
+
 #: repos.yaml's `forge` (config._FORGES) -> the CLI that talks to it. Two
 #: vocabularies on purpose: `forge` is a fact about the remote, the backend is
 #: a fact about this machine, and a self-hosted GitLab is `gitlab` with `glab`.
@@ -144,6 +150,25 @@ def backend_for(backend: str, repo_forge: str | None) -> str:
             "that opens nothing"
         )
     return cli
+
+
+def _member_forges(item, backend: str, repo_forge: str | None) -> dict:
+    """A backend per workspace member whose repository records another forge
+    than the root's, by mount path: a GitLab member of a GitHub root is talked
+    to with `glab`. A member with no recorded forge (or an explicit `backend`)
+    uses the root's, as before."""
+    if backend != "auto" or item is None:
+        return {}
+    try:
+        by_id = {r.id: r for r in load_repos(config_dir() / "repos.yaml") if r.id}
+    except ConfigError:
+        return {}
+    found: dict = {}
+    for mount, rid in _builtins.item_members(item):
+        entry = by_id.get(rid) if rid is not None else None
+        if entry is not None and entry.forge and entry.forge != repo_forge:
+            found[mount] = resolve(backend_for(backend, entry.forge))
+    return found
 
 
 async def _record_push(
@@ -693,7 +718,8 @@ async def _collect_review(
         return "automated review: no reviewer configured; nothing to collect\n", "done", None
     log, status, note, collection = await _settle_review(
         forge, db, repo=repo, orig_repo=orig_repo, branch=branch, head=head,
-        work_item_id=work_item_id, hook_point=hook_point, reviewers=reviewers,
+        work_item_id=work_item_id, node_id=node_id, hook_point=hook_point,
+        reviewers=reviewers,
         bounds=bounds, grace=grace,
     )  # fmt: skip
     if collection is not None:
@@ -710,11 +736,13 @@ async def _settle_review(
     branch: str,
     head: str,
     work_item_id: str,
+    node_id: str,
     hook_point: str,
     reviewers: Reviewers,
     bounds: WaitBounds,
     grace: timedelta,
     scope: str | None = None,
+    mount: str | None = None,
 ) -> tuple[str, str, WaitNote, list[dict] | None]:
     """One check of whether every reviewer has finished with `head`
     (`settle.decide`): `waiting` with no collection yet, or `done` with what
@@ -749,8 +777,35 @@ async def _settle_review(
         note = WaitNote(decided.next_at, {"memory": decided.memory}, False, now)
         return log, "waiting", note, None
     log = f"automated review: {len(reviewers)} reviewer(s) finished with {head[:7]}\n"
+    heard, silent = settle.heard_and_silent(reviewers, decided.memory)
+    if silent:
+        log += f"never posted on {head[:7]}: {', '.join(silent)}\n"
+    if heard or silent:
+        payload = {"node_id": node_id, "task": hook_point, "repo": str(orig_repo)}
+        payload |= {"mount": mount, "head": head, "heard": heard, "silent": silent}
+        await db.write(lambda c: _record_settled(c, work_item_id, payload))
     note = WaitNote(None, {"memory": decided.memory}, timed_out, now)
     return log, "done", note, decided.collection
+
+
+def _record_settled(c, work_item_id: str, payload: dict) -> None:
+    """Record a settled review once per head: a multi-repo item re-reads a
+    repository that already settled on every check until the rest do, and a
+    count of silences must not grow with them."""
+    seen = c.execute(
+        "SELECT 1 FROM events WHERE work_item_id = ? AND type = ? "
+        "AND json_extract(payload, '$.task') = ? AND json_extract(payload, '$.head') = ? "
+        "AND json_extract(payload, '$.mount') IS ?",
+        (
+            work_item_id,
+            ForgeEvent.AUTOMATED_REVIEW_SETTLED,
+            payload["task"],
+            payload["head"],
+            payload["mount"],
+        ),
+    ).fetchone()
+    if seen is None:
+        events.append(c, work_item_id, ForgeEvent.AUTOMATED_REVIEW_SETTLED, payload)
 
 
 def _verdict(
@@ -1105,8 +1160,9 @@ async def _run_one(
             head = await git._head_sha(repo, branch)
             log, status, note, collection = await _settle_review(
                 forge, db, repo=repo, orig_repo=orig_repo, branch=branch, head=head,
-                work_item_id=work_item_id, hook_point=hook_point, reviewers=reviewers,
-                bounds=bounds, grace=grace, scope=scope,
+                work_item_id=work_item_id, node_id=node_id, hook_point=hook_point,
+                reviewers=reviewers,
+                bounds=bounds, grace=grace, scope=scope, mount=mount,
             )  # fmt: skip
             if collection is not None:
                 found, unread, unfinished = _verdict(collection, mount)
@@ -1483,8 +1539,8 @@ async def _run_one(
                         status = "unreviewed"
                     else:
                         # And a refusal the CLI reported as success does not get
-                        # through either: `glab mr merge` exits 0 for "merge when
-                        # checks pass" and merges nothing (Kraft-79x3). The landing
+                        # through either: a merge with `auto_merge` answers 200 for "merge
+                        # when checks pass" and merges nothing (Kraft-79x3). The landing
                         # is read off the forge, now and at every later
                         # observation.
                         landed = await forge.find_mr(repo=repo, branch=branch)
@@ -1918,7 +1974,7 @@ async def run_task(
     # (`work-item-target-selection-is-immutable`).
     item = db.read(
         lambda c: c.execute(
-            "SELECT materialized_chain, root_merge_policy, description "
+            "SELECT id, materialized_chain, root_merge_policy, description, submodules "
             "FROM work_items WHERE id = ?",
             (work_item_id,),
         ).fetchone()
@@ -2007,6 +2063,7 @@ async def run_task(
         )
     try:
         live_forge = resolve(backend_for(backend, repo_forge))
+        member_forges = _member_forges(item, backend, repo_forge)
     except ForgeError as exc:
         # No forge this repo can reach: nothing was launched, so this is a
         # configuration stop naming its cause, never a failed task a fix loop
@@ -2059,6 +2116,8 @@ async def run_task(
     #: The forge merged one.
     landed_unreviewed = False
     checkout_stopped = False
+    #: What the forge said when a call failed, for `failure_cause` to read later.
+    forge_error: dict | None = None
     # CI findings only ever reach `finish_session` for a single-target run: a
     # submodule's own CI is not this item's `mr_checks` node, and findings
     # from it would double-count against the wrong job (Kraft-cbr §3). A
@@ -2110,7 +2169,7 @@ async def run_task(
             member = role == "submodule" and handler != "merge_watch"
             if settled is None:
                 one_log, one_status, one_findings, one_note = await _run_one(
-                    live_forge,
+                    member_forges.get(mounts_by_row.get(row_id), live_forge),
                     db,
                     repo=target_repo,
                     # A member is its own source repository: its conflict
@@ -2220,6 +2279,25 @@ async def run_task(
             # Nothing a fix loop may touch: a person looks first (Kraft-xngty).
             status = "config_error"
         unobserved = str(exc)
+        forge_error = {
+            "status": exc.status,
+            "reason": exc.reason,
+            "retry_after": exc.retry_after,
+            "sso_url": exc.sso_url,
+        }
+        if exc.reason == "rate_limited":
+            # The forge says when to come back: stop the item until then, as a
+            # rate-limited agent does, instead of failing the node.
+            status = "rate_limited"
+            resets_at = waits.now() + timedelta(seconds=exc.retry_after or _RATE_LIMIT_WAIT_S)
+            await db.write(
+                lambda c: events.append(
+                    c,
+                    work_item_id,
+                    LimitEvent.RATE_LIMIT_HIT,
+                    {"resets_at_iso": resets_at.isoformat(), "node_id": node_id, "forge": True},
+                )
+            )
     except (inplace.AutostashClash, inplace.CheckoutRefused) as exc:
         # The person's checkout: stopped for them, as a refused take is.
         log, status, findings = f"{hook_point} failed: {exc}\n", "config_error", None
@@ -2227,7 +2305,8 @@ async def run_task(
         await inplace.stop_refused(db, work_item_id, node_id, exc)
         checkout_stopped = True
 
-    if handler in _WAITS:
+    # A rate-limited wait stays open as it was: ending it would restart its deadline.
+    if handler in _WAITS and status != "rate_limited":
         status, log = await _observed(
             db,
             work_item_id=work_item_id,
@@ -2251,6 +2330,7 @@ async def run_task(
         log=log,
         findings=findings,
         reused=reused,
+        forge_error=forge_error,
     )
     # A member's move is a base change `base_ref` cannot show: report it, as
     # `builtins.mr_rebase` does, so the node's declared span re-verifies it.

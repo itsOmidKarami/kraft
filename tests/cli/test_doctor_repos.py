@@ -273,3 +273,79 @@ def test_doctor_names_an_entry_from_before_the_probe_and_says_to_connect_again(a
     assert tests["warn"] and "stop at verify" in tests["detail"], tests
     assert "`make test`" in tests["detail"] and again in tests["detail"]
     assert again in _by_name(rows, "setup older")["detail"]
+
+
+def _seed_silent_reviews(run_dir, bot: str, count: int) -> None:
+    """`count` items in one repo, each whose review wait settled with `bot`
+    never posting: written before the server boots on `run_dir`."""
+    from support.harness import v1_chain, v1_item
+
+    from kraft import db as kdb
+    from kraft import events
+    from kraft.paths import RunDirs
+    from kraft.vocab import ForgeEvent
+
+    nodes = [
+        {"id": "n", "kind": "exec", "tasks": [{"id": "t", "kind": "subprocess", "command": "true"}]}
+    ]
+
+    async def seed():
+        database = await kdb.Database.open(RunDirs(run_dir).ensure().db)
+        try:
+            for n in range(1, count + 1):
+                await v1_item(database, v1_chain(nodes, repo="/r"), repo="/r", wid=f"w{n}")
+                payload = {"repo": "/r", "mount": None, "heard": [], "silent": [bot]}
+                await database.write(
+                    lambda c, w=f"w{n}", p=payload: events.append(
+                        c, w, ForgeEvent.AUTOMATED_REVIEW_SETTLED, p
+                    )
+                )
+        finally:
+            await database.close()
+
+    asyncio.run(seed())
+
+
+_BOT_REPO = {"path": "/r", "automated_review": {"bot": "ccr"}}
+
+
+@pytest.mark.parametrize(
+    "silences, triage, repo, says, state",
+    [
+        (3, True, _BOT_REPO, "`ccr` on /r has never posted (items w3, w2, w1)", "warn"),
+        (2, True, _BOT_REPO, "no review bot silent across 3 items", "ok"),
+        (0, False, _BOT_REPO, "no triage step reads a bot's summary for /r", "warn"),
+        # Only a bot has a summary to read: a check reviewer is not named.
+        (0, False, {"path": "/r", "automated_review": {"check": "scan"}}, "no review bot", "ok"),
+    ],
+    ids=["silent-on-three-items", "silent-on-two", "no-triage-step", "no-triage-step-no-bot"],
+)
+def test_doctor_names_a_review_bot_that_may_not_be_reviewing(
+    app, tmp_path, monkeypatch, silences, triage, repo, says, state
+):
+    _seed_silent_reviews(tmp_path / "run", "ccr", silences)
+    monkeypatch.setattr(doctor.capabilities, "adopted", lambda c, live: triage)
+    monkeypatch.setattr(client, "repos", _returning([repo]))
+
+    row = _by_name(asyncio.run(doctor.run_checks()), "review bots")
+
+    assert row["ok"] and (row["warn"], row["skipped"]) == (state == "warn", state == "skipped")
+    assert says in row["detail"]
+
+
+def test_doctor_skips_the_review_bots_row_on_a_server_without_its_route(app, monkeypatch):
+    async def older(*_, **__):
+        raise client.transport.status_error(404, "Not Found")
+
+    monkeypatch.setattr(client, "silent_reviewers", older)
+
+    row = _by_name(asyncio.run(doctor.run_checks()), "review bots")
+
+    assert row["ok"] and row["skipped"] and "the server cannot say" in row["detail"]
+
+
+def _returning(value):
+    async def answer(*_, **__):
+        return value
+
+    return answer

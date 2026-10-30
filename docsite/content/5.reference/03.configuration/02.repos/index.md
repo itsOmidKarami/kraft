@@ -201,7 +201,24 @@ It binds every work item filed in this repo, whatever its chain. A value `policy
 - A name the library does not define is refused when the repository is saved (Settings › Repos) and when an item is filed. A library save that removes a steering profile a repository still names is refused too.
 - You write steering profiles in Templates › Library, which edits `library.yaml`.
 
-This is not a place for target-repo files: Kraft never reads `CLAUDE.md`, `AGENTS.md`, or anything else from inside the repo being worked on as a source of process context.
+This is not a place for target-repo files. Kraft never copies `CLAUDE.md`, `AGENTS.md`, or anything else from inside the repo being worked on into what it tells an agent as a source of process context. The agent reads those files itself, the way it would for a person.
+
+### Pull-request rules
+
+_Added in next_
+
+A repo can keep its own rules for driving a pull request in a skill: the checks to run before a change, how to regenerate generated files, what its reviews and CI expect. Claude Code reads the same file before it works a pull request in the cloud.
+
+A task that declares the `pr_rules` input is told where that file is, by path, and to follow it. Kraft never copies the file into the prompt. It points at the first of these committed on the item's branch:
+
+1. `.claude/skills/steward/SKILL.md`
+2. `.agents/skills/steward/SKILL.md`
+3. `.claude/skills/babysit/SKILL.md`
+4. `.agents/skills/babysit/SKILL.md`
+
+A file on disk that is not committed does not count, so a skill a setup step copies into the worktree is never taken for the repo's rules. With none of the four, the task is told nothing.
+
+The shipped library declares `pr_rules` on the tasks that work a merge request: `repair_mr_feedback`, `triage_review_feedback`, `repair_mr_checks`, `repair_merge_queue_failure` and `describe_mr`. Where the rules say to push, merge or post to the pull request, the agent leaves that to Kraft.
 
 ### `sandbox`
 
@@ -251,6 +268,8 @@ What the wait does with them depends on the chain.
 A bot is finished with a push when it has been active since Kraft pushed that head and then quiet for the grace period, `wait.grace_period` on the task (60 seconds by default). Its activity is a new or edited comment, a review, an inline comment, a thread it resolved, or, on GitLab, an approval it gave or withdrew. Threads already open on the first check set a baseline and are not activity. A check is finished when it completes.
 
 On the collect path, and for a bot that nothing reads, the timeout settles the wait: a bot that never posted had nothing to say, and the item goes on with what was collected. The timeout is recorded in the wait's events as `timed_out`.
+
+Every settled review records which bots posted and which never did (`automated_review_settled`). A bot that has never posted in a repo, across three items or more, is likely misconfigured, and `kraft admin doctor`'s `review bots` row names it.
 
 Forge clocks are compared with Kraft's push time as they are, with no allowance for skew. A bot that posts a placeholder and edits it long after the grace period is read early; a longer `grace_period` on that chain is the fix.
 

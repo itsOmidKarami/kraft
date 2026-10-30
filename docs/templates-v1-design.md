@@ -299,6 +299,7 @@ tasks:
     harness: claude
     profile: strong
     prompt: Resolve the current CI failures and actionable merge-request feedback.
+    inputs: [pr_rules]
 
   triage_review_feedback:
     kind: agent
@@ -306,7 +307,7 @@ tasks:
     profile: fast
     prompt: Decide which of the review bots' feedback on this merge request needs a change.
     skill: kraft:review-feedback
-    inputs: [bot_feedback, previous_review]
+    inputs: [bot_feedback, previous_review, pr_rules]
 
   repair_mr_checks:
     kind: agent
@@ -317,6 +318,7 @@ tasks:
       as a missing or wrong label. A code failure is the fix loop's, which runs
       after you.
     skill: kraft:mr-metadata-repair
+    inputs: [pr_rules]
 
   # The `on_merge_rejected` repair of the default chain's `merge`: the merge
   # train or merge queue ran its own pipeline on the merge request merged
@@ -327,6 +329,7 @@ tasks:
     profile: strong
     prompt: Fix what made the merge train or merge queue reject this merge request.
     skill: kraft:merge-queue-repair
+    inputs: [pr_rules]
 
   strict_judge:
     kind: agent
@@ -387,6 +390,7 @@ tasks:
       following this repository's own rules for them.
     produces: mr_meta
     skill: kraft:mr-metadata
+    inputs: [pr_rules]
 
   write_work_brief:
     kind: agent

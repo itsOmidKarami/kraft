@@ -309,6 +309,25 @@ async def test_the_collect_path_settles_then_hands_on_the_collection(
     assert rig.triaged == (["feedback.review_feedback.triage"] if quiet else [])
 
 
+@pytest.mark.parametrize(
+    "said, advance, heard, silent",
+    [([_feedback(_A, 1)], 61, ["a"], []), ([_feedback(_A)], 1801, [], ["a"])],
+    ids=["heard", "never-posted"],
+)
+async def test_a_settled_review_records_which_bots_were_heard(rig, said, advance, heard, silent):
+    await rig(_review_node(30, reviewers=(_A,)), forge.FakeForge(feedback_script=[said]))
+
+    rig.clock(0)
+    assert await rig.walk() == "waiting"
+    rig.clock(advance)
+    await rig.walk()
+
+    [settled] = rig.item.events("automated_review_settled")
+    assert (settled["payload"]["heard"], settled["payload"]["silent"]) == (heard, silent)
+    log = Path(rig.wait_session()["log_path"]).read_text()
+    assert ("never posted on" in log) == bool(silent)
+
+
 async def test_the_next_check_comes_when_a_bots_grace_period_ends_not_at_the_backoff(rig):
     await rig(
         _review_node(30), forge.FakeForge(feedback_script=[[_feedback(_A, 1), _feedback(_B, 2)]])
@@ -515,6 +534,10 @@ async def test_a_multi_repo_item_settles_each_repository_s_bot_on_its_own_memory
 
     assert got == ["waiting"] * 4 + [ended]
     assert reads == {"pkg": 5, "root": 2 if again else 3}, "every check reads the bots' feedback"
+    settled = [e["payload"]["mount"] for e in it.events("automated_review_settled")]
+    assert settled == (["repos/pkg"] if again else ["repos/pkg", None]), (
+        "a repository read again after it settled is not recorded again"
+    )
     assert not list(run_dirs.base.rglob("bot_feedback.json")), "one triage per item is follow-up"
     if again:
         wait = database.read(lambda c: waits.open_wait(c, it.id, "on.automated_review"))

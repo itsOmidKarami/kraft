@@ -1933,6 +1933,10 @@ async def _dispatch_task_in(
             instruction += prompts.triage_verdict_note(
                 db, work_item_row["id"], work_item_row, run_dirs=run_dirs
             )
+    # On every pass, a fix loop's override included: a repair is exactly the
+    # job the repo's pull-request rules are written for.
+    if AgentInput.PR_RULES in t.inputs:
+        instruction += prompts.pr_rules_note(worktree, work_item_row)
     item_override = (
         json.loads(work_item_row["agent_overrides"]) if work_item_row["agent_overrides"] else {}
     )

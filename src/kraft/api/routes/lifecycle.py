@@ -1424,7 +1424,13 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             # The claim already flipped this item to 'active'; a failed rebase
             # must not leave it stranded there with no walk behind it.
             reason = str(exc)
-            cause = forge_mod.failure_cause(reason) or "git"
+            cause = (
+                forge_mod.failure_cause(
+                    reason,
+                    {"reason": exc.reason} if isinstance(exc, forge_mod.ForgeError) else None,
+                )
+                or "git"
+            )
             await st.db.write(
                 lambda c: store.mark_needs_human(
                     c,
@@ -1943,7 +1949,13 @@ async def _retry(wid: str, body: Retry, request: Request):
             return deps.work_item_answer(st, wid)
         except RuntimeError as exc:
             reason = str(exc)
-            cause = forge_mod.failure_cause(reason) or "git"
+            cause = (
+                forge_mod.failure_cause(
+                    reason,
+                    {"reason": exc.reason} if isinstance(exc, forge_mod.ForgeError) else None,
+                )
+                or "git"
+            )
             await st.db.write(
                 lambda c: store.mark_needs_human(
                     c, wid, node_id, reason, kind=StopKind.INFRA, facts={"cause": cause}
