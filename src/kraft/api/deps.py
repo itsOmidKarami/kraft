@@ -842,6 +842,37 @@ class OneOff:
     record: dict
 
 
+def plain_one_off_or_422(data: object) -> None:
+    """422 unless `data` can be a one-off chain's authored mapping: plain values,
+    answerable as JSON, at most 256 KiB. Create and the editor share it, so
+    they compute one digest."""
+    plain = "a one-off chain holds only plain YAML values: strings, numbers, lists and mappings"
+    if not _is_plain(data):
+        raise HTTPException(422, plain)
+    try:
+        size = len(json.dumps(data, allow_nan=False))  # .inf and .nan cannot be answered as JSON
+    except ValueError as exc:
+        raise HTTPException(422, plain) from exc
+    if size > one_off.MAX_TEXT:
+        raise HTTPException(422, "a one-off chain is at most 256 KiB")
+
+
+def own_id_or_422(library, id: str) -> None:
+    """422 unless `id` can be a one-off chain's: shaped like a chain id, and not
+    a library chain's. The designer loads the chain by this id."""
+    from kraft.drafts import store as draft_store
+
+    if not (isinstance(id, str) and draft_store.AREAS["chains"].valid(id)):
+        raise HTTPException(
+            422,
+            "a one-off chain's id is a lowercase letter, then lowercase letters, digits, - or _",
+        )
+    if id in library.chain_ids:
+        raise HTTPException(
+            422, f"one-off chain id {id!r} names a library chain; give it its own id"
+        )
+
+
 def one_off_chain_or_422(
     st, repo: str, source: str | dict, *, skips: list[str] | None = None
 ) -> OneOff:
@@ -858,25 +889,14 @@ def one_off_chain_or_422(
         data = authored_mapping(source, "chain")
     else:
         data = source
-    plain = "a one-off chain holds only plain YAML values: strings, numbers, lists and mappings"
-    if not _is_plain(data):
-        raise HTTPException(422, plain)
-    try:
-        size = len(json.dumps(data, allow_nan=False))  # .inf and .nan cannot be answered as JSON
-    except ValueError as exc:
-        raise HTTPException(422, plain) from exc
-    if size > one_off.MAX_TEXT:
-        raise HTTPException(422, "a one-off chain is at most 256 KiB")
+    plain_one_off_or_422(data)
     if isinstance(source, dict) and (why := config_check.retired_message(data)):
         raise HTTPException(422, why)
     authored, digest = one_off.prepare(data)
     id = authored["id"]
     if not isinstance(id, str):
         raise HTTPException(422, "a one-off chain's id is a string")
-    if id in library.chain_ids:
-        raise HTTPException(
-            422, f"one-off chain id {id!r} names a library chain; give it its own id"
-        )
+    own_id_or_422(library, id)
     try:
         candidate, id = library.with_chain(Path("<unsaved>") / "chains" / f"{id}.yaml", authored)
         resolved = candidate.resolve_chain(id)

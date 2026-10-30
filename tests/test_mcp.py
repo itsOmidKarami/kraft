@@ -182,6 +182,38 @@ def test_create_work_item_offers_a_description_and_says_what_it_is_for():
     assert "brief" in create.description.lower()
 
 
+def test_create_work_item_says_a_person_reviews_custom_chains():
+    """An agent that files a chain with its own prompts must know it cannot start."""
+    create = next(t for t in _tools() if t.name == "create_work_item")
+    assert "chain_yaml" in create.input_schema["properties"]
+    assert "a person must review it in the web UI" in create.description
+    set_chain = next(t for t in _tools() if t.name == "set_chain")
+    assert "a person must review it in the web UI" in set_chain.description
+    assert "chain" not in set_chain.input_schema.get("required", [])
+
+
+def test_chain_yaml_is_sent_as_the_one_off_chain(monkeypatch):
+    seen = {}
+
+    async def create(*args, **kwargs):
+        seen["create"] = kwargs
+        return {"id": "w1", "status": "paused", "title": "t"}
+
+    async def set_chain(*args, **kwargs):
+        seen["set"] = (args, kwargs)
+        return {"id": "w1"}
+
+    monkeypatch.setattr(mcp.client, "create_work_item", create)
+    monkeypatch.setattr(mcp.client, "set_chain", set_chain)
+    server = mcp.build()
+    asyncio.run(
+        server.call_tool("create_work_item", {"title": "t", "repo": "/r", "chain_yaml": "a: 1"})
+    )
+    asyncio.run(server.call_tool("set_chain", {"chain_yaml": "a: 1", "work_item_id": "w1"}))
+    assert seen["create"]["one_off_chain"] == "a: 1"
+    assert seen["set"] == ((None, "w1"), {"one_off_chain": "a: 1"})
+
+
 def test_create_work_item_offers_attachments_and_says_what_they_are_for():
     """An agent that cannot see the parameter hands over a title and lets Kraft
     re-run a spec node over a spec that is already written (Kraft-82gz)."""

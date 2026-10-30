@@ -331,6 +331,16 @@ def test_a_fragment_yaml_error_answers_its_line_and_column(client):
     assert (r.status_code, r.json()["line"], r.json()["col"]) == (422, 3, 1)
 
 
+def test_a_fragment_yaml_bomb_is_refused_not_built(client):
+    bomb = "".join(
+        f"l{n}: &l{n} {{<<: [{','.join([f'*l{n - 1}'] * 10)}]}}\n" if n else "l0: &l0 {a: 1}\n"
+        for n in range(8)
+    )
+    r = post_ops(client, {"op": "set_fragment", "path": "spec", "yaml": bomb + "id: spec\n"})
+    assert r.status_code == 422
+    assert "not usable YAML" in r.json()["detail"]
+
+
 def test_a_move_to_library_publishes_the_chain_and_the_library_together(client, templates_dir):
     move = {"op": "move_to_library", "path": "spec", "name": "spec_node"}
     r = post_ops(client, move)

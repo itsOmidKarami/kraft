@@ -18,11 +18,13 @@ import yaml
 from pydantic import TypeAdapter, ValidationError
 from yaml import YAMLError
 
+from kraft import config as config_mod
 from kraft.addons import load as addons_load
 from kraft.drafts import authored, resolve, store
 from kraft.templates import catalogue, positions
 from kraft.templates.environment import Identifier
 from kraft.templates.library import (
+    ADDON_YAML_NODES,
     LIBRARY_FILE,
     Namespace,
     TemplateLibrary,
@@ -1071,11 +1073,15 @@ def set_fragment(d: Draft, path: str, yaml: str) -> None:
     """The per-component YAML tab: the fragment replaces the authored
     component at `path`."""
     try:
-        fragment = authored.parse(yaml)
+        # Bounded like any YAML a person hands in: a merge-key bomb never builds.
+        fragment = config_mod.bounded_yaml(yaml, [ADDON_YAML_NODES])
+        fragment = {} if fragment is None else fragment
     except YAMLError as exc:
         line, col = positions.yaml_mark(exc) or (1, 1)
         message = getattr(exc, "problem", None) or str(exc)
         raise OpError(f"line {line}, column {col}: {message}", line=line, col=col) from None
+    except (config_mod.YamlTooLarge, ValueError) as exc:
+        raise OpError(f"the fragment is not usable YAML: {exc}") from None
     if not isinstance(fragment, dict):
         raise OpError("the fragment is not a mapping")
     target = d.at(path)

@@ -197,6 +197,20 @@ def one_off_unapproved(row) -> bool:
     return row["one_off_pending"] == 1
 
 
+def one_off_view(row) -> dict | None:
+    """What the board and the detail say of `row`'s one-off chain, None for a library chain."""
+    record = one_off_of(row)
+    if record is None:
+        return None
+    provenance = record["provenance"]
+    return {
+        "extends": provenance["parent"] if provenance else None,
+        "custom": len(record["custom"]),
+        "needs_review": one_off_unapproved(row),
+        "approval": json.loads(row["one_off_approval"]) if row["one_off_approval"] else None,
+    }
+
+
 def review_digest(row) -> str:
     """What a reviewer approves: the authored chain and the chains that will run,
     so a draft or a re-trim applied after the review changes it."""

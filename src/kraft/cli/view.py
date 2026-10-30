@@ -121,6 +121,11 @@ def _render_show(item: dict, full: dict | None = None) -> str:
         if full.get("in_place"):
             at = next((i + 1 for i, (key, _) in enumerate(pairs) if key == "repo"), len(pairs))
             pairs.insert(at, ("in_place", "yes"))
+        if full.get("one_off"):
+            after_status = next(
+                (i + 1 for i, (key, _) in enumerate(pairs) if key == "status"), len(pairs)
+            )
+            pairs.insert(after_status, ("chain", _one_off_line(full["one_off"])))
         at = next((i + 1 for i, (key, _) in enumerate(pairs) if key == "stop_reason"), len(pairs))
         if kind := (full.get("stop") or {}).get("kind"):
             pairs.insert(at, ("stop_kind", kind))
@@ -128,6 +133,19 @@ def _render_show(item: dict, full: dict | None = None) -> str:
         if (hint := _raise_hint(full)) and not item.get("suggested_action"):
             pairs.insert(at, ("next", hint))
     return render.kv(pairs)
+
+
+def _one_off_line(one_off: dict) -> str:
+    """Where a one-off chain stands: awaiting a person's review, approved, or library-only."""
+    approval = one_off.get("approval")
+    if approval:
+        state = f"approved by {approval['by']} ({approval['door']}) {approval['at']}"
+    elif one_off["needs_review"]:
+        state = "awaiting review"
+    else:
+        state = "library-only"
+    base = f"extends {one_off['extends']}" if one_off.get("extends") else None
+    return " · ".join(p for p in ("one-off", base, state) if p)
 
 
 def _raise_hint(item: dict) -> str | None:
