@@ -129,5 +129,25 @@ def test_test_runs_the_cli_auth_status_for_the_host(
     client.post("/api/forges", json={**GL, "forge": forge})
     body = client.post("/api/forges/corp/test").json()
     assert body["ok"] is ok and text in body["output"]
-    assert calls == ([argv] if argv else [calls[0]])
+    assert calls == ([argv] if argv else calls) and len(calls) == 1
     assert client.post("/api/forges/nope/test").status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("break_file", "status"),
+    [("repos", 409), ("forges", 200)],
+    ids=["broken-repos", "broken-forges"],
+)
+def test_an_unreadable_file_never_lets_remove_through_and_never_hides_the_running_accounts(
+    client, break_file, status
+):
+    client.post("/api/forges", json=GL)
+    templates = client.app.state.templates_dir
+    if break_file == "repos":
+        (templates / "repos.yaml").write_text("repos: [not: closed")
+        assert client.delete("/api/forges/corp").status_code == status
+        assert "corp" in read_yaml(_file(client))["accounts"]
+    else:
+        _file(client).write_text("accounts: [not: closed")
+        reply = client.get("/api/forges")
+        assert reply.status_code == status and list(reply.json()["accounts"]) == ["corp"]

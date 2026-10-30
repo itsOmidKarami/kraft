@@ -52,8 +52,9 @@ async def _naming(st, name: str) -> list[str]:
     """The connected repos whose `forge_account` is `name`."""
     try:
         entries = await asyncio.to_thread(config_mod.load_repos, st.templates_dir / "repos.yaml")
-    except config_mod.ConfigError:
-        return []
+    except config_mod.ConfigError as exc:
+        # An unreadable repos.yaml may name the account: never remove past it.
+        raise HTTPException(409, f"{exc}; fix repos.yaml first") from exc
     return [str(e.path) for e in entries if e.forge_account == name]
 
 
@@ -66,10 +67,18 @@ def _save(st, updated: forges.ForgesFile) -> None:
     st.invalid_forges = None
 
 
+async def _read(st) -> forges.ForgesFile:
+    """The file; when it does not load, the accounts running, which a read may still show."""
+    try:
+        return await asyncio.to_thread(forges.ForgesFile.load, _file_path(st))
+    except config_mod.ConfigError:
+        return st.forges
+
+
 @api_router.get("/forges")
 async def list_forges(request: Request):
     _forbid_sessions(request)
-    current = await _load(request.app.state)
+    current = await _read(request.app.state)
     return {"accounts": {name: _row(a) for name, a in current.accounts.items()}}
 
 
@@ -123,7 +132,7 @@ async def remove_forge(name: str, request: Request):
 async def test_forge(name: str, request: Request):
     _forbid_sessions(request)
     st = request.app.state
-    account = (await _load(st)).accounts.get(name)
+    account = (await _read(st)).accounts.get(name)
     if account is None:
         raise HTTPException(404, f"no forge account named {name!r}")
     host = forges.web_host(account.web_url)
