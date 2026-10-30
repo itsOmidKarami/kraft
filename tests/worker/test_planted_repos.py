@@ -143,10 +143,11 @@ def test_the_hardened_environment_pins_every_recursion_setting_and_the_hooks():
     assert _pins(env) == {**_RECURSION, "core.hooksPath": os.devnull, "core.fsmonitor": ""}
 
 
-def test_push_lifts_only_the_hooks_path_and_keeps_every_recursion_pin(monkeypatch):
+def test_push_keeps_every_pin_the_hooks_path_included(monkeypatch):
     for k in [k for k in os.environ if k.startswith("GIT_CONFIG_")]:
         monkeypatch.delenv(k)
-    assert _pins(sandbox.unhardened_git_env()) == {**_RECURSION, "core.fsmonitor": ""}
+    pinned = {**_RECURSION, "core.hooksPath": os.devnull, "core.fsmonitor": ""}
+    assert _pins(sandbox.hardened_git_env()) == pinned
 
 
 def test_the_hardened_environment_really_keeps_status_out_of_a_gitlink(repo):

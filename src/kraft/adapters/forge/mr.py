@@ -149,9 +149,9 @@ def mr_title_for(work_item_title: str, meta: MRMeta) -> str:
 
 
 def meta_flags(meta: MRMeta) -> list[str]:
-    """The `--label/--assignee/--reviewer` arguments both CLIs spell the same
-    way. Omitted entirely when empty: `--label ""` is a real, empty value to
-    both, not an absence."""
+    """The `--label/--assignee/--reviewer` arguments of `gh pr create`.
+    Omitted entirely when empty: `--label ""` is a real, empty value to
+    it, not an absence."""
     flags: list[str] = []
     for flag, values in (
         ("--label", meta.labels),

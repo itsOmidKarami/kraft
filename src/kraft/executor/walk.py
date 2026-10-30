@@ -354,11 +354,10 @@ def _node_handler_applies(node: ResolvedNode, failed: list[ResolvedTask]) -> boo
 _STOP_CAUSE_MAX = 300
 
 
-def _task_log(
-    db, work_item_id: str, node: ResolvedNode, task: ResolvedTask, status: str = CONFIG_ERROR
-) -> str:
-    """The newest `status` session log for `task`, or "" when there is none or
-    it cannot be read. Never raises."""
+def _task_log_path(
+    db, work_item_id: str, node: ResolvedNode, task: ResolvedTask, status: str
+) -> Path | None:
+    """The newest `status` session's log path for `task`, or None."""
     row = db.read(
         lambda c: c.execute(
             "SELECT log_path FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
@@ -367,10 +366,32 @@ def _task_log(
             (work_item_id, node.id, task.path, status),
         ).fetchone()
     )
+    return Path(row["log_path"]) if row else None
+
+
+def _task_log(
+    db, work_item_id: str, node: ResolvedNode, task: ResolvedTask, status: str = CONFIG_ERROR
+) -> str:
+    """The newest `status` session log for `task`, or "" when there is none or
+    it cannot be read. Never raises."""
+    path = _task_log_path(db, work_item_id, node, task, status)
     try:
-        return Path(row["log_path"]).read_text() if row else ""
+        return path.read_text() if path else ""
     except (OSError, ValueError):  # ValueError: UnicodeDecodeError
         return ""
+
+
+def _task_forge_error(
+    db, work_item_id: str, node: ResolvedNode, task: ResolvedTask, status: str
+) -> dict | None:
+    """The forge-error record `run_task` left beside the newest `status` log for
+    `task`, or None when there is none or it cannot be read. Never raises."""
+    path = _task_log_path(db, work_item_id, node, task, status)
+    try:
+        record = json.loads(path.with_suffix(".forge.json").read_text()) if path else None
+    except (OSError, ValueError):
+        return None
+    return record if isinstance(record, dict) else None
 
 
 def _task_cause(
@@ -411,7 +432,10 @@ def _forge_cause(db, work_item_id: str, node: ResolvedNode, failed: list) -> dic
     card reads the cause from the stop's facts."""
     for t in failed:
         if _in_process(t) and (
-            c := forge_mod.failure_cause(_task_log(db, work_item_id, node, t, "failed"))
+            c := forge_mod.failure_cause(
+                _task_log(db, work_item_id, node, t, "failed"),
+                _task_forge_error(db, work_item_id, node, t, "failed"),
+            )
         ):
             return {"cause": c}
     return None

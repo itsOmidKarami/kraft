@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import errno
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -23,10 +24,9 @@ from support.harness import commit_all, git, make_repo, make_repo_with_submodule
 from kraft import builtins as kraft_builtins
 from kraft.adapters import forge
 from kraft.adapters.forge import git as forge_git
-from kraft.worker import sandbox
 
 from . import outputs
-from .outputs import GLAB_MR_VIEW
+from .outputs import GLAB_MR_VIEW, glab_mr
 
 BRANCH = "kraft/abc"
 
@@ -80,11 +80,14 @@ def test_open_mr_refuses_a_dirty_worktree_against_real_git(tmp_path, glab):
 
 
 @pytest.mark.parametrize(
-    "name, cls, view",
-    [("glab", forge.GlabCli, outputs.GLAB_MR_VIEW), ("gh", forge.GhCli, outputs.GH_PR_VIEW)],
+    "name, cls, view, create",
+    [
+        ("glab", forge.GlabCli, outputs.GLAB_MR_VIEW, "projects/:id/merge_requests"),
+        ("gh", forge.GhCli, '{"number": 7, "html_url": "u"}', "repos/{owner}/{repo}/pulls"),
+    ],
     ids=["glab", "gh"],
 )
-def test_open_mr_in_place_ignores_a_dirty_checkout(tmp_path, cli, name, cls, view):
+def test_open_mr_in_place_ignores_a_dirty_checkout(tmp_path, cli, name, cls, view, create):
     """The in-place counterpart: the person's own uncommitted edits in their
     checkout are no reason to refuse; only the branch and its commits reach
     the merge request."""
@@ -96,7 +99,7 @@ def test_open_mr_in_place_ignores_a_dirty_checkout(tmp_path, cli, name, cls, vie
         cls().open_mr(repo=repo, branch=BRANCH, base="main", title="t", body="b", check_clean=False)
     )
 
-    assert cli.argv(name)[1] == "create"
+    assert cli.argv(name)[1] == create
 
 
 def test_open_mr_ignores_gitignored_paths_against_real_git(tmp_path, glab):
@@ -114,7 +117,7 @@ def test_open_mr_ignores_gitignored_paths_against_real_git(tmp_path, glab):
     )
 
     assert mr.number == 54
-    assert glab.argv("glab")[:2] == ["mr", "create"]
+    assert glab.argv("glab")[:4] == ["api", "projects/:id/merge_requests", "-X", "POST"]
 
 
 def test_open_mr_accepts_a_worktree_whose_attachment_was_copied_in(tmp_path, glab):
@@ -135,7 +138,7 @@ def test_open_mr_accepts_a_worktree_whose_attachment_was_copied_in(tmp_path, gla
     )
 
     assert mr.number == 54
-    assert glab.argv("glab")[:2] == ["mr", "create"]
+    assert glab.argv("glab")[:4] == ["api", "projects/:id/merge_requests", "-X", "POST"]
 
 
 def test_merge_refuses_an_unpushed_head_against_real_git(tmp_path, glab):
@@ -163,12 +166,14 @@ def test_merge_accepts_a_pushed_head_against_real_git(tmp_path, glab, elsewhere)
         git(repo, "checkout", "-q", "main")
         git(repo, "commit", "-q", "--allow-empty", "-m", "the person's own")
 
+    glab.stub("glab", routes=glab_mr(GLAB_MR_VIEW), default=GLAB_MR_VIEW)
+
     asyncio.run(forge.GlabCli().merge(repo=repo, branch=BRANCH, mr=forge.MR(0, ""), head="a" * 40))
 
     # glab first asks the project whether it merges through a train (it does
     # not: the stub's answer has no such field); the merge itself runs once.
-    assert [c for c in glab.calls("glab") if c.startswith("mr merge")] == [
-        f"mr merge {BRANCH} --yes --sha {'a' * 40}"
+    assert [c for c in glab.calls("glab") if c.endswith("/merge -X PUT -i -f sha=" + "a" * 40)] == [
+        "api projects/:id/merge_requests/54/merge -X PUT -i -f sha=" + "a" * 40
     ]
     assert not any("merge_trains" in c for c in glab.calls("glab"))
 
@@ -210,69 +215,115 @@ def test_push_publishes_a_rebased_branch_against_real_git(tmp_path, pushed):
     assert remote_head == git(repo, "rev-parse", "HEAD")
 
 
-@pytest.mark.parametrize(
-    ("hooks", "linked", "runs"),
-    [
-        pytest.param("gitdir", False, True, id="installed-in-the-gitdir-runs"),
-        pytest.param("in-tree", False, False, id="in-the-working-tree-does-not"),
-        pytest.param(
-            "in-tree-symlink", False, False, id="symlinked-from-the-working-tree-does-not"
-        ),
-        pytest.param("dotdot", False, False, id="dotdot-through-a-symlink-does-not"),
-        pytest.param("gitdir", True, True, id="linked-worktree-gitdir-runs"),
-        pytest.param("in-tree", True, False, id="linked-worktree-in-tree-does-not"),
-    ],
-)
-def test_push_runs_an_installed_pre_push_under_harden_host_git_env(tmp_path, hooks, linked, runs):
-    """Kraft-rki. `harden_host_git_env` pins `core.hooksPath=/dev/null` on
-    the process env so a worker's own commits can't fire a planted hook --
-    but by push time the commit is already made, and a real pre-push hook
-    (git-lfs's) uploading the objects a push's pointers reference must still
-    run. A pinned `core.hooksPath` that survives into `forge.push` would
-    silently drop those uploads.
-
-    A `core.hooksPath` in the working tree is the worker's to edit, so that
-    one stays pinned: a push that ran it would run the worker's code as the
-    person, outside any sandbox. A symlink there pointing out of the tree is
-    still the worker's file, and so is one under `a/../../x`, which reads as
-    outside the tree but lands inside it once the worker makes `a` a symlink
-    two levels down. A linked worktree, the layout Kraft pushes from, reads
-    the shared config and prints its gitdir paths absolute."""
+@pytest.mark.parametrize("linked", [False, True], ids=["checkout", "linked-worktree"])
+def test_push_runs_no_hook_even_one_the_person_installed(tmp_path, monkeypatch, linked):
+    """A hook in the git directory is the person's, but it can run what the
+    working tree says, and the worker writes the working tree: pre-commit's
+    pre-push runs whatever `.pre-commit-config.yaml` names. Kraft pushes from
+    the host, outside any sandbox, so its push runs no hook, even under a
+    process env nobody hardened. A linked worktree is the layout Kraft
+    pushes from; a plain `git push` after it shows the hooks are live."""
+    for k in [k for k in os.environ if k.startswith("GIT_CONFIG_")]:
+        monkeypatch.delenv(k)
     repo = _repo_with_origin(tmp_path)
     if linked:
         git(repo, "checkout", "-q", "main")
         git(repo, "worktree", "add", "-q", str(tmp_path / "wt"), BRANCH)
-        # `git config` from the worktree writes the shared config, as an operator's would.
         repo = tmp_path / "wt"
-    if hooks in ("in-tree", "in-tree-symlink"):
-        target = tmp_path / "outside-hooks" if hooks == "in-tree-symlink" else repo / ".hooks"
-        target.mkdir()
-        if hooks == "in-tree-symlink":
-            (repo / ".hooks").symlink_to(target)
-        git(repo, "config", "core.hooksPath", ".hooks")
-    if hooks == "dotdot":
-        (repo / "b" / "c").mkdir(parents=True)
-        (repo / "x").mkdir()
-        (repo / "a").symlink_to(repo / "b" / "c")
-        git(repo, "config", "core.hooksPath", "a/../../x")
-    # Unhardened: a suite run from inside a Kraft worker inherits the pinned
-    # `core.hooksPath=/dev/null`, and `--git-path hooks` would answer that.
-    hooks_dir = git(repo, "rev-parse", "--git-path", "hooks", env=sandbox.unhardened_git_env())
-    marker = tmp_path / "pre-push-ran"
-    pre_push = Path(repo) / hooks_dir / "pre-push"
-    pre_push.write_text(f"#!/bin/sh\ntouch {marker}\n")
-    pre_push.chmod(0o755)
-    # A push with nothing new to send never invokes pre-push at all.
-    (repo / "more-work.txt").write_text("more work\n")
-    commit_all(repo, "more work")
+    marker = tmp_path / "hook-ran"
+    (repo / "from-the-branch.sh").write_text(f"touch {marker}\n")
+    commit_all(repo, "the worker's script")
+    common = git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    for name in ("pre-push", "reference-transaction"):
+        hook = Path(common) / "hooks" / name
+        hook.write_text("#!/bin/sh\nexec sh ./from-the-branch.sh\n")
+        hook.chmod(0o755)
 
-    sandbox.harden_host_git_env(os.environ)
-    try:
+    asyncio.run(forge.push(repo, BRANCH))
+
+    assert git(tmp_path / "origin.git", "rev-parse", BRANCH) == git(repo, "rev-parse", "HEAD")
+    assert not marker.exists()
+    git(repo, "push", "-q", "origin", f"{BRANCH}:control")
+    assert marker.exists()
+
+
+_POINTER = "version https://git-lfs.github.com/spec/v1\noid sha256:" + "a" * 64 + "\nsize 12\n"
+
+
+@pytest.mark.parametrize(
+    ("content", "refused"),
+    [
+        pytest.param("plain text\n", False, id="no-lfs-pointer-needs-no-git-lfs"),
+        pytest.param(_POINTER, True, id="an-lfs-pointer-needs-git-lfs"),
+    ],
+)
+def test_push_needs_git_lfs_only_for_commits_that_add_lfs_pointers(
+    tmp_path, monkeypatch, content, refused
+):
+    """The push uploads LFS objects itself, so a branch that adds a pointer,
+    on a machine with no git-lfs, refuses before any of it is pushed, as
+    git-lfs's own pre-push did, rather than publish pointers to objects the
+    forge never got. Commits with no pointer never ask for git-lfs, whatever
+    `.gitattributes` says."""
+    which = shutil.which
+    monkeypatch.setattr(
+        shutil, "which", lambda name, **kw: None if name == "git-lfs" else which(name, **kw)
+    )
+    repo = _repo_with_origin(tmp_path)
+    # LFS for another pattern: the filter never runs on f.txt, wherever git-lfs is set up.
+    (repo / ".gitattributes").write_text("*.psd filter=lfs diff=lfs merge=lfs -text\n")
+    (repo / "f.txt").write_text(content)
+    commit_all(repo, "a file")
+    before = git(tmp_path / "origin.git", "rev-parse", BRANCH)
+
+    if refused:
+        with pytest.raises(forge.ForgeError, match="no git-lfs"):
+            asyncio.run(forge.push(repo, BRANCH))
+        assert git(tmp_path / "origin.git", "rev-parse", BRANCH) == before
+    else:
         asyncio.run(forge.push(repo, BRANCH))
-    finally:
-        os.environ.pop("GIT_CONFIG_COUNT", None)
 
-    assert marker.exists() == runs
+
+@pytest.mark.e2e("git-lfs")
+@pytest.mark.parametrize("brought_in", [False, True], ids=["own-commit", "after-a-persons"])
+def test_push_uploads_the_lfs_objects_the_branch_points_at(tmp_path, brought_in):
+    """git-lfs's pre-push no longer runs on Kraft's push, so the push sends
+    the objects the new commits' pointers name to the remote's LFS store
+    itself. A person's commit brought in without its object (fetched with
+    `--refmap=`, as `bring_home` does, and never smudged) is already on
+    origin, so its missing object is not asked for."""
+    repo = _repo_with_origin(tmp_path)
+    git(repo, "lfs", "install", "--local", "--skip-repo")
+    git(repo, "lfs", "track", "*.bin")
+    commit_all(repo, "lfs tracking")
+    git(repo, "push", "-q", "--no-verify", "origin", BRANCH)
+    if brought_in:
+        person = tmp_path / "person"
+        git(tmp_path, "clone", "-q", "-b", BRANCH, str(tmp_path / "origin.git"), str(person))
+        git(person, "lfs", "install", "--local", "--skip-repo")
+        (person / "theirs.bin").write_bytes(os.urandom(64))
+        commit_all(person, "a person's lfs file")
+        git(person, "lfs", "push", "origin", BRANCH)
+        git(person, "push", "-q", "--no-verify", "origin", BRANCH)
+        git(repo, "fetch", "-q", "--refmap=", "origin", BRANCH)
+        git(
+            repo,
+            "merge",
+            "-q",
+            "--ff-only",
+            "FETCH_HEAD",
+            env={**os.environ, "GIT_LFS_SKIP_SMUDGE": "1"},
+        )
+        theirs = git(repo, "show", "HEAD:theirs.bin").split("oid sha256:")[1].split()[0]
+        assert not (repo / ".git" / "lfs" / "objects" / theirs[:2] / theirs[2:4] / theirs).exists()
+    (repo / "big.bin").write_bytes(os.urandom(64))
+    commit_all(repo, "an lfs file")
+    oid = git(repo, "show", "HEAD:big.bin").split("oid sha256:")[1].split()[0]
+
+    asyncio.run(forge.push(repo, BRANCH))
+
+    assert (tmp_path / "origin.git" / "lfs" / "objects" / oid[:2] / oid[2:4] / oid).is_file()
+    assert git(tmp_path / "origin.git", "rev-parse", BRANCH) == git(repo, "rev-parse", "HEAD")
 
 
 @pytest.mark.parametrize(
@@ -719,3 +770,12 @@ async def test_a_host_commit_never_lands_on_a_planted_head(tmp_path, database, s
 
     assert git(repo, "rev-parse", "main") == main
     assert f"is not on {BRANCH}" in stopped
+
+
+def test_run_cli_returns_a_failed_exit(tmp_path):
+    """`run_cli` hands back what a failing CLI printed; `run_git` raises on it."""
+    args = ["sh", "-c", "echo out; echo err >&2; exit 3"]
+    done = asyncio.run(forge_git.run_cli(tmp_path, args))
+    assert (done.returncode, done.stdout, done.stderr) == (3, "out\n", "err\n")
+    with pytest.raises(forge.ForgeError, match="failed: err"):
+        asyncio.run(forge_git.run_git(tmp_path, args))

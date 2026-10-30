@@ -71,8 +71,8 @@ def git(cwd: Path, *args: str, env: Mapping[str, str] | None = None) -> str:
     `_FIXED_DATE`, so it needs no identity configured anywhere and the same
     tree built twice has the same SHAs. `env` is the environment those two
     are laid over, `os.environ` unless given (a test that must run git
-    outside `sandbox.harden_host_git_env`'s pins passes
-    `sandbox.unhardened_git_env()`).
+    outside `sandbox.harden_host_git_env`'s pins passes an env without
+    them).
 
         head = git(repo, "rev-parse", "HEAD")
     """
