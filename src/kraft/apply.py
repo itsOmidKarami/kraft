@@ -22,6 +22,7 @@ from kraft import config as config_mod
 from kraft import forges as forges_mod
 from kraft import intake as intake_mod
 from kraft import storage
+from kraft.adapters.forge import credentials
 from kraft.api import config_check, deps
 from kraft.remote import registry as workers_registry
 
@@ -249,6 +250,9 @@ def _reload_forges(st) -> None:
         return
     st.forges = file
     st.invalid_forges = "; ".join(new) or None
+    # A variable named now, set in the server's environment since it started.
+    credentials.take_env(a.token.env for a in file.accounts.values() if a.token and a.token.env)
+    credentials.set_secret_files(file)
     set_loaded(st, forges_mod.ForgesFile.FILE, digest)
 
 
@@ -301,4 +305,6 @@ def spawn_restart(st, *, confirm: bool = False) -> None:
             stdout=log,
             stderr=log,
             start_new_session=True,
+            # The restarted server strips them again; the env, not argv, carries them.
+            env={**os.environ, **credentials.taken_env()},
         )

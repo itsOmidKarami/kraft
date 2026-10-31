@@ -213,6 +213,23 @@ def _cmd_install_service(ns: argparse.Namespace) -> None:
     else:
         raise SystemExit(f"kraft admin install-service: unsupported platform {sys.platform}")
     print(f"kraft: wrote {path}, loaded with {manager}")
+    _say_env_tokens()
+
+
+def _say_env_tokens() -> None:
+    """The unit never carries a token. Names only, never a value."""
+    from kraft import forges as forges_mod
+    from kraft.paths import config_dir
+
+    try:
+        file = forges_mod.ForgesFile.load(config_dir() / forges_mod.ForgesFile.FILE)
+    except Exception:  # noqa: BLE001 - a broken file is doctor's to name
+        return
+    for name in sorted({a.token.env for a in file.accounts.values() if a.token and a.token.env}):
+        print(
+            f"kraft: the service has no {name}: install-service never writes a token. "
+            "Give it to the service yourself: see 'Forge tokens for a service' in the service guide"
+        )
 
 
 def _cmd_uninstall_service(ns: argparse.Namespace) -> None:

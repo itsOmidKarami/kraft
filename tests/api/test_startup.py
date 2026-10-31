@@ -510,3 +510,36 @@ def test_an_edit_during_startup_is_not_taken_as_applied(boot_edit, pending, clie
         "/api/forges", json={"name": "b", "forge": "github", "web_url": "https://github.com"}
     )
     assert added.status_code == (409 if pending else 201)
+
+
+def _forges_with_env_source(templates_dir):
+    (templates_dir / "forges.yaml").write_text(
+        "accounts:\n  gl:\n    forge: gitlab\n    client: api\n"
+        "    web_url: https://gl.example\n    token: {from: env, env: CORP_GL}\n"
+    )
+
+
+@pytest.fixture
+def link_sees(no_link_installed, monkeypatch):
+    """What `CORP_GL` was in the environment when the server built its local link."""
+    from kraft.adapters.forge import credentials
+    from kraft.remote import local_link
+
+    monkeypatch.setattr(credentials, "_TAKEN", {})
+    seen = []
+
+    class Recording(local_link.LocalLink):
+        def __init__(self, *a, **kw):
+            seen.append(os.environ.get("CORP_GL"))
+            super().__init__(*a, **kw)
+
+    monkeypatch.setattr(local_link, "LocalLink", Recording)
+    return seen
+
+
+@pytest.mark.api_client(edit_templates=_forges_with_env_source, env={"CORP_GL": "tok-0123456789"})
+def test_the_server_drops_an_env_token_before_it_builds_the_local_link(link_sees, client):
+    from kraft.adapters.forge import credentials
+
+    assert link_sees == [None]
+    assert credentials.env_token("CORP_GL") == "tok-0123456789"

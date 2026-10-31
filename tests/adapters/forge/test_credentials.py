@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-import subprocess
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -56,7 +56,17 @@ async def test_git_credential_fill_runs_without_a_prompt_from_a_neutral_director
 ):
     for var in ("GIT_ASKPASS", "SSH_ASKPASS", "GIT_TERMINAL_PROMPT", "GCM_INTERACTIVE"):
         monkeypatch.setenv(var, "inherited")
+    real_git = shutil.which("git")  # before the stub shadows it
     cli.stub("git", f"username=u\npassword={TOK}", record=True)
+    # The real git, run where the stub runs: it must find no repository there.
+    stub = cli.bindir / "git"
+    stub.write_text(
+        stub.read_text().replace(
+            "pwd >",
+            f"{real_git} rev-parse --git-dir >/dev/null 2>&1; echo $? > {stub}.rev; pwd >",
+            1,
+        )
+    )
     await read(tmp_path, repo, **{"from": "git-credential"})
     assert cli.argv("git") == ["credential", "fill"]
     rec = cli.recorded("git")
@@ -69,16 +79,7 @@ async def test_git_credential_fill_runs_without_a_prompt_from_a_neutral_director
     ):
         assert rec["env"][key] == want
     assert not Path(rec["pwd"]).is_relative_to(repo)
-    # The ceiling keeps git from finding a repo above the directory.
-    probe = subprocess.run(
-        ["git", "rev-parse"],
-        cwd=rec["pwd"] if Path(rec["pwd"]).exists() else tmp_path,
-        env={**os.environ, "GIT_CEILING_DIRECTORIES": rec["env"]["GIT_CEILING_DIRECTORIES"]},
-        capture_output=True,
-        text=True,
-        executable="/usr/bin/git",
-    )
-    assert probe.returncode != 0
+    assert int((cli.bindir / "git.rev").read_text()) != 0
     assert rec["sid"] == rec["pid"]
 
 
@@ -290,3 +291,66 @@ def test_the_kinds_table(kind, scopes):
 )
 def test_a_prefix_that_contradicts_the_kind_is_a_warning(token, kind, warning):
     assert prefix_warning(token, kind) == warning
+
+
+_ENV_FILE = (
+    "accounts:\n  gl:\n    forge: gitlab\n    client: api\n    web_url: {url}\n    token: {tok}\n"
+)
+_SRC = "{from: env, env: CORP_GL}"
+_DEFAULTS = (
+    _ENV_FILE.format(url=URL, tok=_SRC).replace(
+        "client: api", "client: api\n    default_for_host: true"
+    )
+    + "  gl2:\n    forge: gitlab\n    client: api\n    default_for_host: true\n    web_url: "
+    + URL
+    + "\n    token: {from: command, command: x}\n"
+)
+
+
+@pytest.mark.parametrize(
+    "text, passthrough",
+    [
+        pytest.param(_ENV_FILE.format(url=URL, tok=_SRC), False, id="loaded-file"),
+        pytest.param(_ENV_FILE.format(url=URL, tok=_SRC) + "bad: [\n", False, id="unreadable-file"),
+        pytest.param(_DEFAULTS, False, id="invalid-file"),
+        pytest.param(
+            _ENV_FILE.format(url=URL, tok='{from: env, env: "CORP_GL"}') + "bad: [\n",
+            False,
+            id="quoted-name",
+        ),
+        pytest.param(_ENV_FILE.format(url=URL, tok=_SRC), True, id="passthrough-names-it"),
+    ],
+)
+async def test_an_env_source_leaves_the_server_environment(
+    tmp_path, monkeypatch, text, passthrough
+):
+    from kraft.adapters.forge import git
+    from kraft.worker.env import worker_env
+
+    monkeypatch.setenv("CORP_GL", TOK)
+    path = tmp_path / "forges.yaml"
+    path.write_text(text)
+    assert credentials.strip_env_sources(path) == ["CORP_GL"]
+    assert "CORP_GL" not in os.environ
+    assert credentials.env_token("CORP_GL") == TOK
+    entry = RepoEntry(path=str(tmp_path), env_passthrough=["CORP_GL"]) if passthrough else None
+    env = worker_env(entry)
+    assert "CORP_GL" not in env
+    # `env` stands for any child: git, a hook, the local worker.
+    seen = await git.run_cli(tmp_path, ["env"], env=env if passthrough else None)
+    assert TOK not in seen.stdout
+
+
+def test_a_refused_name_in_an_unreadable_file_is_left_alone(tmp_path, monkeypatch):
+    from unittest import mock
+
+    from kraft.worker import sandbox
+
+    path = tmp_path / "forges.yaml"
+    path.write_text("accounts: [\n  env: GIT_CONFIG_COUNT\n  env: PATH\n")
+    with mock.patch.dict(os.environ):
+        sandbox.harden_host_git_env()
+        before = dict(os.environ)
+        assert credentials.strip_env_sources(path) == []
+        assert dict(os.environ) == before
+    assert credentials._TAKEN == {}

@@ -160,6 +160,10 @@ _NAMES_A = "repos:\n  - {path: /r, forge: github, forge_account: a}\n"
 _NO_ACCOUNTS = "accounts: {}\n"
 _HAS_A = "accounts:\n  a: {forge: github, web_url: 'https://github.com'}\n"
 _HAS_B = "accounts:\n  b: {forge: github, web_url: 'https://github.com'}\n"
+_TOKEN_SOURCE = (
+    "accounts:\n  t: {forge: github, web_url: 'https://github.com', client: api, "
+    "token: {from: env, env: CORP_GL}}\n"
+)
 
 
 @pytest.mark.parametrize(
@@ -170,6 +174,13 @@ _HAS_B = "accounts:\n  b: {forge: github, web_url: 'https://github.com'}\n"
         (_NAMES_A, _NO_ACCOUNTS, "repos.yaml", _NAMES_A + "  - {path: /s}\n", None),
         (_NAMES_A, _HAS_A, "forges.yaml", _HAS_B, "names no account"),
         (_NAMES_A, _NO_ACCOUNTS, "forges.yaml", _HAS_B, None),
+        (
+            "repos: []\n",
+            _TOKEN_SOURCE,
+            "repos.yaml",
+            "repos:\n  - {path: /r, forge: github, env_passthrough: [CORP_GL]}\n",
+            "env_passthrough names CORP_GL",
+        ),
     ],
     ids=[
         "repos-account-exists",
@@ -177,6 +188,7 @@ _HAS_B = "accounts:\n  b: {forge: github, web_url: 'https://github.com'}\n"
         "repos-old-mismatch-does-not-block",
         "forges-new-mismatch-refused",
         "forges-old-mismatch-does-not-block",
+        "repos-new-passthrough-of-a-token-source-refused",
     ],
 )
 def test_a_save_is_refused_only_for_a_forge_account_problem_it_adds(

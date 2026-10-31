@@ -4,6 +4,7 @@ restart. A split-off sibling of `test_admin.py`, kept under the line budget."""
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -234,6 +235,27 @@ def test_spawn_restart(tmp_path, monkeypatch, platform, kind, starts):
     else:
         assert not any(a.startswith("--setenv") for a in argv)
         assert argv[0] == sys.executable
+
+
+def test_a_restart_the_server_spawns_keeps_its_env_tokens(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from kraft import apply
+    from kraft.adapters.forge import credentials
+
+    run_dirs = RunDirs(tmp_path / "run").ensure()
+    run_dirs.logs.mkdir(parents=True, exist_ok=True)
+    seen = []
+    monkeypatch.setattr(credentials, "_TAKEN", {})
+    monkeypatch.setenv("CORP_GL", "tok-0123456789")
+    credentials.take_env(["CORP_GL"])
+    monkeypatch.setattr(cli.admin, "_kraft_executable", lambda: "/bin/kraft")
+    monkeypatch.setattr(apply.subprocess, "Popen", lambda argv, **kw: seen.append((argv, kw)))
+    apply.spawn_restart(SimpleNamespace(run_dirs=run_dirs))
+    [(argv, kw)] = seen
+    assert kw["env"]["CORP_GL"] == "tok-0123456789"
+    assert "CORP_GL" not in os.environ
+    assert not any("tok-0123456789" in a for a in argv)
 
 
 def test_spawn_restart_without_confirm_is_as_it_was(tmp_path, monkeypatch):

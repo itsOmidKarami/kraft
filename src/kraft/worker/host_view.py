@@ -117,6 +117,8 @@ def _is_system(path: Path) -> bool:
 
 
 def _protected(home: Path, kraft_home: Path) -> list[Path]:
+    # Inside: credentials imports host_view.
+    from kraft.adapters.forge import credentials
     from kraft.paths import config_dir, default_run_dir
 
     # The run and config directories as well: `KRAFT_RUN_DIR` and
@@ -127,6 +129,7 @@ def _protected(home: Path, kraft_home: Path) -> list[Path]:
         run_dir.resolve(),
         config_dir().resolve(),
         *((home / p).resolve() for p in _PROTECTED_IN_HOME),
+        *credentials.secret_files(),
     ]
 
 

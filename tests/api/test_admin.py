@@ -350,9 +350,28 @@ _B = "b: {forge: github, web_url: 'https://github.com'}"
 
 
 @pytest.mark.parametrize(
-    "running, accounts, applied, says, refused_it",
+    "running, accounts, applied, says, refused_it, passthrough",
     [
-        pytest.param(["a"], _B, ["a"], "'a' names no account", True, id="new-mismatch-is-refused"),
+        pytest.param(
+            ["a"],
+            _B,
+            ["a"],
+            "'a' names no account",
+            True,
+            [],
+            id="new-mismatch-is-refused",
+        ),
+        pytest.param(
+            ["a"],
+            "a: {forge: github, web_url: 'https://github.com'}\n  "
+            "b: {forge: github, web_url: 'https://github.com', client: api, "
+            "token: {from: env, env: CORP_GL}}",
+            ["a"],
+            "env_passthrough names CORP_GL",
+            True,
+            ["CORP_GL"],
+            id="new-env-source-a-repo-passes-through-is-refused",
+        ),
         # applied: the old mismatch is named on /health, and the reload is no refusal
         pytest.param(
             [],
@@ -360,6 +379,7 @@ _B = "b: {forge: github, web_url: 'https://github.com'}"
             ["b"],
             "'a' names no account",
             False,
+            [],
             id="old-mismatch-does-not-block-an-unrelated-edit",
         ),
         # nothing runs while forges.yaml has never loaded: any file that loads is taken
@@ -369,12 +389,13 @@ _B = "b: {forge: github, web_url: 'https://github.com'}"
             ["a"],
             "'a' says forge: gitlab",
             False,
+            [],
             id="unreadable-since-startup-takes-a-file-that-loads",
         ),
     ],
 )
 def test_a_forges_yaml_that_leaves_a_repo_without_its_account_is_refused_on_reload(
-    client, running, accounts, applied, says, refused_it
+    client, running, accounts, applied, says, refused_it, passthrough
 ):
     st = client.app.state
     st.forges = (
@@ -389,6 +410,7 @@ def test_a_forges_yaml_that_leaves_a_repo_without_its_account_is_refused_on_relo
     )
     (st.templates_dir / "repos.yaml").write_text(
         "repos:\n  - path: /r\n    forge: github\n    forge_account: a\n"
+        f"    env_passthrough: {passthrough}\n"
     )
     (st.templates_dir / "forges.yaml").write_text(f"accounts:\n  {accounts}\n")
     refused = client.post("/api/templates/reload").json()["refused_forges"]

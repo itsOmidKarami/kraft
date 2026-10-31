@@ -35,6 +35,7 @@ from kraft import triggers as triggers_mod
 from kraft import update as update_mod
 from kraft.adapters import hook_install
 from kraft.adapters import subprocess as _subprocess
+from kraft.adapters.forge import credentials
 from kraft.adapters.forge import git as forge_git
 from kraft.adapters.forge import mr as forge_mr
 from kraft.addons import load as addons_load
@@ -171,6 +172,7 @@ def load_forges(app: FastAPI) -> None:
     else:
         problems = forges_mod.repo_problems(app.state.forges, app.state.templates_dir)
         app.state.invalid_forges = "; ".join(problems) or None
+        credentials.set_secret_files(app.state.forges)
 
 
 async def _probation_timer(app: FastAPI) -> None:
@@ -249,6 +251,8 @@ async def _lifespan(app: FastAPI):
     # it must be able to write cannot execute as the invoking host user
     # (Kraft-rki).
     sandbox.harden_host_git_env()
+    # Before any child (the local worker, git, a hook) can inherit an env token.
+    credentials.strip_env_sources(config_dir() / forges_mod.ForgesFile.FILE)
     app.state.tasks = {}
     # deps.skip_lock() lazily stashes a per-work-item Lock here; reset it with
     # everything else per-lifespan so it neither grows forever in a live

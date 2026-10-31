@@ -7,19 +7,20 @@ from __future__ import annotations
 import asyncio
 import base64
 import os
+import re
 import signal
 import stat
 import subprocess
 import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from kraft import redact
-from kraft.config import RepoEntry
-from kraft.forges import ForgeAccount
+from kraft.config import ConfigError, RepoEntry
+from kraft.forges import ForgeAccount, ForgesFile, env_name_problem
 
 CREDENTIAL_TIMEOUT_S = 10.0
 
@@ -42,6 +43,11 @@ PREFIXES = {"ghp_": "pat", "github_pat_": "pat", "gho_": "oauth", "ghu_": "oauth
 
 # Taken from the server's environment at startup, so a worker's env cannot supply it.
 _TAKEN: dict[str, str] = {}
+
+
+# Token files, kept from every sandbox's view (set at load and on reload).
+_SECRET_FILES: tuple[Path, ...] = ()
+_ENV_NAME = re.compile(r"\benv:\s*[\"']?([A-Za-z_]\w*)")
 
 
 class NoToken(Exception):
@@ -94,7 +100,13 @@ def neutral_run(
                 os.killpg(proc.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            proc.communicate()
+            # A descendant that left the session may still hold the pipes.
+            try:
+                proc.communicate(timeout=1)
+            except subprocess.TimeoutExpired:
+                for pipe in (proc.stdin, proc.stdout, proc.stderr):
+                    if pipe:
+                        pipe.close()
             raise
         return subprocess.CompletedProcess(argv, proc.returncode, out, err)
 
@@ -152,7 +164,7 @@ async def run_command(command: str) -> str:
 def read_file(
     spec: str, *, repos: Sequence[RepoEntry], worktrees: Path, expose: Sequence[Path]
 ) -> str:
-    # Inside: host_view imports credentials (Task 4).
+    # Inside: host_view imports credentials.
     from kraft.worker.host_view import system_dirs
 
     expanded = os.path.expandvars(os.path.expanduser(spec))
@@ -226,3 +238,45 @@ async def read_token(
     redact.register(token)
     redact.register(basic_form(token, source.kind))
     return token
+
+
+def take_env(names: Iterable[str]) -> list[str]:
+    """Move each variable out of the process environment, so no child inherits it."""
+    taken = []
+    for name in names:
+        if name in os.environ:
+            _TAKEN[name] = os.environ.pop(name)
+            taken.append(name)
+    return taken
+
+
+def strip_env_sources(forges_yaml: Path) -> list[str]:
+    """Take every `env` source's variable before anything can start a child. A file that
+    does not load is scanned as text: a token must leave even when the file is broken."""
+    try:
+        file = ForgesFile.load(forges_yaml)
+        names = [a.token.env for a in file.accounts.values() if a.token and a.token.env]
+    except ConfigError:
+        try:
+            names = _ENV_NAME.findall(forges_yaml.read_text())
+        except (OSError, UnicodeDecodeError):
+            names = []
+    return take_env(n for n in dict.fromkeys(names) if env_name_problem(n) is None)
+
+
+def taken_env() -> dict[str, str]:
+    """For `spawn_restart` only: the restarted server must find them again."""
+    return dict(_TAKEN)
+
+
+def set_secret_files(forges: ForgesFile) -> None:
+    global _SECRET_FILES
+    _SECRET_FILES = tuple(
+        Path(os.path.realpath(os.path.expandvars(os.path.expanduser(a.token.file))))
+        for a in forges.accounts.values()
+        if a.token and a.token.file
+    )
+
+
+def secret_files() -> tuple[Path, ...]:
+    return _SECRET_FILES

@@ -77,6 +77,31 @@ def test_protected_refusal(host, tmp_path, rel, refused, monkeypatch):
     assert (got is not None) is refused
 
 
+@pytest.mark.parametrize(
+    "where", ["secrets-dir", "file-source-elsewhere"], ids=["secrets-dir", "file-source-elsewhere"]
+)
+def test_a_token_file_is_never_shown_to_a_sandbox(host, tmp_path, monkeypatch, where):
+    from kraft.adapters.forge import credentials
+    from kraft.forges import ForgeAccount, ForgesFile, TokenSource
+
+    home, kraft, _ = host
+    monkeypatch.setattr(credentials, "_SECRET_FILES", ())
+    token = _file(
+        kraft / "secrets" / "x" if where == "secrets-dir" else home / "tokens" / "gl", "tok", 0o600
+    )
+    if where == "file-source-elsewhere":
+        account = ForgeAccount(
+            forge="gitlab",
+            client="api",
+            web_url="https://gl.example",
+            token=TokenSource(**{"from": "file", "file": str(token)}),
+        )
+        credentials.set_secret_files(ForgesFile(accounts={"gl": account}))
+    assert host_view.protected_refusal(token, home, kraft) is not None
+    with pytest.raises(Refused):
+        host_view.expose_roots([str(token.parent)], home, kraft)
+
+
 def _at(base: dict[str, Path], text: str) -> Path:
     """`~/x` in the fake home, `./x` in the checkout."""
     return base[text[0]] / text[2:]
