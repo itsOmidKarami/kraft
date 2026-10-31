@@ -175,13 +175,29 @@ async def test_the_probe_names_why_a_token_does_not_work(mock_http, run, answer,
 
 @pytest.mark.real_probe
 @pytest.mark.parametrize(
-    "status, visible", [(200, True), (404, False)], ids=["visible", "not-found"]
+    "status, visible, pushurl",
+    [
+        (200, True, None),
+        (404, False, None),
+        (200, True, "https://code.corp.example/gitlab/team/app.git"),
+    ],
+    ids=["visible", "not-found", "pushurl-names-the-project"],
 )
 async def test_the_probe_says_whether_each_repo_is_visible(
-    mock_http, run, tmp_path, status, visible
+    mock_http, run, tmp_path, status, visible, pushurl
 ):
     dest = make_repo(tmp_path)
-    git(dest, "remote", "add", "origin", "https://code.corp.example/gitlab/team/app.git")
+    git(
+        dest,
+        "remote",
+        "add",
+        "origin",
+        "https://code.corp.example/gitlab/other/app.git"
+        if pushurl
+        else "https://code.corp.example/gitlab/team/app.git",
+    )
+    if pushurl:
+        git(dest, "config", "remote.origin.pushurl", pushurl)
     entry = config.RepoEntry(path=str(dest), forge="gitlab", forge_account="corp")
     m = mock_http(
         {

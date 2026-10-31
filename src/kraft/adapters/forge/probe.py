@@ -20,7 +20,7 @@ from kraft import config, redact
 from kraft.adapters.forge import credentials
 from kraft.adapters.forge.http import HttpTransport
 from kraft.adapters.forge.models import ForgeError
-from kraft.forges import ForgeAccount, ForgesFile, account_for, project_path, remote_host
+from kraft.forges import ForgeAccount, ForgesFile, account_for, remote_host, repo_project
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +184,10 @@ async def _probe_account(
         )
         if not account_for(repo, mine, remote_host(remote) if remote else None):
             return None
-        path = project_path(remote or "", account)
+        try:
+            path = await asyncio.to_thread(repo_project, Path(repo.path), account)
+        except ValueError as exc:
+            return str(repo.path), {"project": "", "visible": False, "detail": str(exc)}
         if path is None:
             return None
         try:
