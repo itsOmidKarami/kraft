@@ -75,3 +75,20 @@ def test_the_warning_reaches_the_client_and_so_the_cli_and_mcp(app, repo):
     again = asyncio.run(kraft_client.create_work_item("Container isolation", str(repo)))
 
     assert first["id"] in again["duplicate_warning"]
+
+
+def test_an_alias_of_the_repo_still_finds_the_open_duplicate(client, repo, tmp_path, monkeypatch):
+    from support.harness import entry_of
+
+    from kraft.api import deps
+
+    original = _create(client, repo)["id"]
+    alias = tmp_path / "alias"
+    alias.symlink_to(repo)
+    monkeypatch.setattr(
+        deps, "_connected", lambda repos, path: entry_of({"path": str(repo), "setup_command": ""})
+    )
+
+    again = _create(client, alias)
+
+    assert original in again["duplicate_warning"]
