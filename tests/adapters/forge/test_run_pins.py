@@ -306,12 +306,22 @@ class _NeverRun:
         pytest.param(
             {"corp-gl": _GL_API},
             None,
-            True,
+            "gitlab",
             {
                 "": {"account": None, "backend": "gh"},
                 "libs/core": {"account": "corp-gl", "backend": "gitlab-api"},
             },
             id="member-on-an-api-account",
+        ),
+        pytest.param(
+            {"corp-gl": _GL_API},
+            None,
+            "",
+            {
+                "": {"account": "corp-gl", "backend": "gitlab-api"},
+                "libs/core": {"account": "corp-gl", "backend": "gitlab-api"},
+            },
+            id="member-with-no-forge-takes-the-roots-api-pin",
         ),
     ],
 )
@@ -320,8 +330,9 @@ async def test_an_api_account_stops_at_the_first_forge_node_and_never_runs_the_c
 ):
     path = make_repo(tmp_path)
     git(path, "remote", "add", "origin", "https://gitlab.example/o/r.git")
+    # `member`: the member's own forge ("" none, so it uses the root's), or None for no member.
     forge_name = "github" if member else "gitlab"
-    if member:
+    if member is not None:
         monkeypatch.setattr(forge.run._builtins, "item_members", lambda row: [("libs/core", "lib")])
     result = await run_forge(
         _NeverRun(),
@@ -332,8 +343,14 @@ async def test_an_api_account_stops_at_the_first_forge_node_and_never_runs_the_c
         repo_forge=forge_name,
         repo_entry=RepoEntry(path=str(path), forge=forge_name, forge_account=named),
         repositories=(
-            {"lib": RepoEntry(path=str(path), forge="gitlab", forge_account="corp-gl")}
-            if member
+            {
+                "lib": RepoEntry(
+                    path=str(path),
+                    forge=member or None,
+                    forge_account="corp-gl" if member else None,
+                )
+            }
+            if member is not None
             else {}
         ),
         forges=ForgesFile(accounts=accounts),

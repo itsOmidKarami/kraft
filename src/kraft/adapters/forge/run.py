@@ -225,9 +225,16 @@ async def _pin_forge_accounts(
     for mount, entry in mounts:
         pin = pins.get(mount)
         if entry is None or (mount and not entry.forge):
-            # An unknown member, or one with no forge, uses the root's (as _member_forges does).
+            # An unknown member, or one with no forge, uses the root's (as _member_forges
+            # does), so it pins the root's account and backend too: an API root's member
+            # must never be pinned to the CLI.
             if pin is None and not unreadable:
-                new[mount] = (None, backend_for(backend, repo_forge))
+                root = pins.get("")
+                new[mount] = new.get("") or (
+                    (root["account"], root["backend"])
+                    if root
+                    else (None, backend_for(backend, repo_forge))
+                )
             continue
         if unreadable:
             if pin is not None:
@@ -314,7 +321,7 @@ async def refuse_api_account(db, work_item_id, mount, entry, forges) -> None:
         if pin["backend"] in API_BACKENDS.values():
             _refuse_text(pin["account"], pin["backend"])
         return
-    if entry is None or forges is None:
+    if entry is None or forges is None or not (entry.forge_account or forges.accounts):
         return
     origin = await asyncio.to_thread(
         config.git_read, Path(entry.path), "remote", "get-url", "origin", expected_failure=True
@@ -337,18 +344,21 @@ async def item_forge(db, row, entry, forges, mount: str | None = None) -> Forge:
     """The CLI forge for an item's root (or workspace member `mount`) outside
     the walk, after `refuse_api_account`. PR 5 turns this into `resolve(entry)`."""
     repo_forge = entry.forge if entry else None
-    member_entry = entry
-    if mount:
-        try:
-            by_id = {r.id: r for r in load_repos(config_dir() / "repos.yaml") if r.id}
-        except ConfigError:
-            by_id = {}
-        rid = dict(_builtins.item_members(row)).get(mount)
-        member_entry = by_id.get(rid) or entry if rid else entry
-    await refuse_api_account(db, row["id"], mount or "", member_entry, forges)
-    if mount:
-        return member_forge(row, repo_forge, mount)
-    return resolve(backend_for("auto", repo_forge))
+    if not mount:
+        await refuse_api_account(db, row["id"], "", entry, forges)
+        return resolve(backend_for("auto", repo_forge))
+    try:
+        by_id = {r.id: r for r in load_repos(config_dir() / "repos.yaml") if r.id}
+    except ConfigError:
+        by_id = {}
+    rid = dict(_builtins.item_members(row)).get(mount)
+    own = by_id.get(rid) if rid else None
+    if own is not None and own.forge:
+        await refuse_api_account(db, row["id"], mount, own, forges)
+    else:  # no forge of its own: it uses the root's, so the root's account decides too
+        await refuse_api_account(db, row["id"], mount, None, None)
+        await refuse_api_account(db, row["id"], "", entry, forges)
+    return member_forge(row, repo_forge, mount)
 
 
 def member_forge(item, repo_forge: str | None, mount: str) -> Forge:
@@ -2274,9 +2284,9 @@ async def run_task(
                         c, work_item_id, "", None, backend_for(backend, repo_forge)
                     )
                 )
-        pins = db.read(lambda c: store.forge_pins(c, work_item_id))
-        for mount in pins:
-            await refuse_api_account(db, work_item_id, mount, None, None)
+        for pin in db.read(lambda c: store.forge_pins(c, work_item_id)).values():
+            if pin["backend"] in API_BACKENDS.values():
+                _refuse_text(pin["account"], pin["backend"])
         live_forge = resolve(backend_for(backend, repo_forge))
         member_forges = _member_forges(item, backend, repo_forge)
     except ForgeError as exc:
