@@ -3,6 +3,7 @@
 driver that claims `sys.platform == "darwin"` and stubs what needs a real Mac."""
 
 import base64
+import contextlib
 import json
 import os
 import re
@@ -16,7 +17,9 @@ import threading
 import time
 from pathlib import Path
 
+import psutil
 import pytest
+from support.server import on_a_free_port
 
 from kraft.worker import os_init
 from kraft.worker.mounts import RELAY_PROXY_ENV
@@ -494,18 +497,35 @@ def _ask(port):
         time.sleep(0.05)
 
 
+def _init_relay(sock, **popen):
+    """`os_init init` relaying a free port to `sock`, once it listens there itself."""
+
+    def start(port):
+        argv = init_argv(*py("import time; time.sleep(30)"), sock=sock, port=port)
+        return subprocess.Popen(argv, env={}, start_new_session=True, **popen)
+
+    def owns(p, port):
+        if p.poll() is not None:
+            return None  # lost the number to whatever bound it first
+        try:
+            conns = psutil.Process(p.pid).net_connections("tcp")
+        except psutil.Error:  # exited since the poll: the next one says so
+            return False
+        return any(c.status == psutil.CONN_LISTEN and c.laddr.port == port for c in conns)
+
+    def stop(p):
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(p.pid, signal.SIGKILL)
+        p.wait()
+
+    return on_a_free_port(start, owns, stop)
+
+
 @linux_only  # on macOS the launcher is the relay
 def test_relay_reconnects_per_connection(short_run):
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]
     sock = short_run.base / "s.sock"
     _unix_server(sock)
-    p = subprocess.Popen(
-        init_argv(*py("import time; time.sleep(30)"), sock=sock, port=port),
-        env={},
-        start_new_session=True,
-    )
+    p, port = _init_relay(sock)
     try:
         assert _ask(port) == b"pong:ping"
         sock.unlink()  # the daemon restarted and re-created its socket
@@ -518,21 +538,13 @@ def test_relay_reconnects_per_connection(short_run):
 
 @linux_only
 def test_relay_survives_descriptor_exhaustion(short_run):
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]
     sock = short_run.base / "s.sock"
     _unix_server(sock, conns=100)
 
     def small_limit():
         resource.setrlimit(resource.RLIMIT_NOFILE, (40, 40))
 
-    p = subprocess.Popen(
-        init_argv(*py("import time; time.sleep(30)"), sock=sock, port=port),
-        env={},
-        start_new_session=True,
-        preexec_fn=small_limit,
-    )
+    p, port = _init_relay(sock, preexec_fn=small_limit)
     try:
         assert _ask(port) == b"pong:ping"
         held = [socket.create_connection(("127.0.0.1", port)) for _ in range(30)]  # 60 > 40

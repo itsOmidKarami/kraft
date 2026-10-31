@@ -28,6 +28,34 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+def health_pid(port: int) -> int | None:
+    """The pid in whatever answers `/api/health` on `port`, or None for no answer."""
+    with contextlib.suppress(httpx.HTTPError, ValueError, AttributeError):
+        return httpx.get(f"http://127.0.0.1:{port}/api/health", timeout=2.0).json().get("pid")
+    return None
+
+
+def on_a_free_port(start, owns, stop, *, attempts: int = 3, timeout: float = 30.0):
+    """`start(port)` on a free number, until `owns(handle, port)` says what it
+    started is listening there itself. Returns `(handle, port)`.
+
+    `_free_port` closes its socket before the thing started binds the number,
+    so another xdist worker can take it in between: `owns` answers None when
+    the start lost it (exited, or someone else answers), False for not yet.
+    Lost, or not up by `timeout`, it is `stop(handle)`ed and tried again on a
+    fresh number."""
+    for _ in range(attempts):
+        port = _free_port()
+        handle = start(port)
+        deadline = time.monotonic() + timeout
+        while (state := owns(handle, port)) is False and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if state:
+            return handle, port
+        stop(handle)
+    raise RuntimeError(f"never came up on its own port in {attempts} attempts")
+
+
 @dataclass
 class Server:
     proc: subprocess.Popen

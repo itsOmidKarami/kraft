@@ -6,7 +6,6 @@ import argparse
 import pathlib
 import plistlib
 import shutil
-import socket
 import subprocess
 import sys
 import time
@@ -15,6 +14,7 @@ import uuid
 import pytest
 from support.harness import fake_templates_dir
 from support.pidfile import hold_pidfile
+from support.server import health_pid, on_a_free_port
 
 from kraft import cli
 from kraft.paths import RunDirs
@@ -202,6 +202,26 @@ def test_install_service_enables_systemd_unit_by_absolute_path(tmp_path, monkeyp
     assert enable_calls == [["systemctl", "--user", "enable", "--now", str(unit_path)]]
 
 
+def _install_on_a_free_port(monkeypatch, run_dir: pathlib.Path) -> None:
+    """`install-service` on a free KRAFT_PORT, baked into the unit at write time,
+    once the daemon it supervises answers health there with its own pid."""
+
+    def start(port):
+        monkeypatch.setenv("KRAFT_PORT", str(port))
+        cli.main(["admin", "install-service"])
+
+    def owns(_, port):
+        if (answer := health_pid(port)) is None:
+            return False  # not serving yet: the pidfile comes before the listen
+        return True if answer == cli.admin._read_pid(RunDirs(run_dir).pid) else None
+
+    def stop(_):
+        cli.main(["admin", "uninstall-service"])
+        assert _wait_for(lambda: cli.admin._read_pid(RunDirs(run_dir).pid) is None)
+
+    on_a_free_port(start, owns, stop)
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="launchd is macOS-only")
 @pytest.mark.skipif(not shutil.which("kraft"), reason="no installed `kraft` on PATH to supervise")
 @pytest.mark.skipif(
@@ -221,19 +241,8 @@ def test_install_and_uninstall_service_use_the_real_launchd(tmp_path, monkeypatc
     run_dir = tmp_path / "kraft-home" / "run"
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
     monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
-    monkeypatch.setenv("KRAFT_PORT", "0")  # replaced below with a real free one
-    probe = socket.socket()
-    probe.bind(("127.0.0.1", 0))
-    port = probe.getsockname()[1]
-    probe.close()
-    monkeypatch.setenv("KRAFT_PORT", str(port))
-
     try:
-        cli.main(["admin", "install-service"])
-        pid_path = RunDirs(run_dir).pid
-        assert _wait_for(lambda: cli.admin._read_pid(pid_path) is not None), (
-            "launchd never brought the daemon up"
-        )
+        _install_on_a_free_port(monkeypatch, run_dir)
     finally:
         cli.main(["admin", "uninstall-service"])
         assert not cli.admin._launchd_plist_path().exists()
@@ -263,18 +272,8 @@ def test_install_and_uninstall_service_use_real_systemd_user(tmp_path, monkeypat
     run_dir = tmp_path / "kraft-home" / "run"
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
     monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
-    probe = socket.socket()
-    probe.bind(("127.0.0.1", 0))
-    port = probe.getsockname()[1]
-    probe.close()
-    monkeypatch.setenv("KRAFT_PORT", str(port))
-
     try:
-        cli.main(["admin", "install-service"])
-        pid_path = RunDirs(run_dir).pid
-        assert _wait_for(lambda: cli.admin._read_pid(pid_path) is not None), (
-            "systemd never brought the daemon up"
-        )
+        _install_on_a_free_port(monkeypatch, run_dir)
     finally:
         cli.main(["admin", "uninstall-service"])
         assert not cli.admin._systemd_unit_path().exists()
@@ -314,12 +313,7 @@ def test_install_service_enable_works_inside_the_managers_own_search_path(tmp_pa
         monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
         monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))
         monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
-        probe = socket.socket()
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
-        probe.close()
-        monkeypatch.setenv("KRAFT_PORT", str(port))
-        cli.main(["admin", "install-service"])
+        _install_on_a_free_port(monkeypatch, run_dir)
 
     try:
         run_dir_1 = tmp_path / "kraft-home-1" / "run"
