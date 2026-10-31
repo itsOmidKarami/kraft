@@ -167,3 +167,86 @@ async def test_a_base_lfsconfig_endpoint_is_refused_unless_it_is_origins_own(
     else:
         await forge_git.push(remote.repo, "kraft/abc", account=remote.pinned)
         assert fake_lfs.exists(), "git-lfs never ran: nothing was checked"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param(
+            "fatal: unable to access 'https://h/o/r.git/': server certificate verification failed. CAfile: /x/cacert.pem CRLfile: none",  # noqa: E501 (a captured message)
+            id="tls-gnutls-server-certificate-verification-failed",
+        ),
+        pytest.param(
+            "fatal: unable to access 'https://h/o/r.git/': SSL certificate verification failed: certificate signer not trusted. (CAfile: /x/cacert.pem CRLfile: none)",  # noqa: E501 (a captured message)
+            id="tls-newer-ssl-certificate-verification-failed",
+        ),
+        pytest.param(
+            "fatal: unable to access 'https://h/o/r.git/': SSL certificate problem: certificate has expired",  # noqa: E501 (a captured message)
+            id="tls-openssl-ssl-certificate-problem",
+        ),
+        pytest.param(
+            "fatal: unable to access 'https://h/o/r.git/': SSL certificate OpenSSL verify result: certificate has expired (10)",  # noqa: E501 (a captured message)
+            id="tls-openssl-verify-result",
+        ),
+        pytest.param(
+            "fatal: unable to access 'https://h/o/r.git/': self signed certificate in certificate chain",  # noqa: E501 (a captured message)
+            id="tls-self-signed",
+        ),
+        pytest.param(
+            "fatal: unable to access 'https://h/o/r.git/': Problem with the SSL CA cert (path? access rights?)",  # noqa: E501 (a captured message)
+            id="tls-unreadable-ca-bundle",
+        ),
+        pytest.param(
+            "error:0A000086:SSL routines::certificate verify failed",
+            id="tls-go-x509-via-lfs",
+        ),
+        pytest.param(
+            "fatal: unable to access 'https://h/o/r.git/': SSL: certificate subject name 'a' does not match target host name 'h'",  # noqa: E501 (a captured message)
+            id="tls-name-mismatch",
+        ),
+        pytest.param(
+            "fatal: unable to access 'https://h/o/r.git/': Peer certificate cannot be authenticated with given CA certificates",  # noqa: E501 (a captured message)
+            id="tls-nss-peer-certificate",
+        ),
+        pytest.param(
+            "fatal: unable to access 'https://h/o/r.git/': SSL certificate verification failed (CAfile: /x/cacert.pem)",  # noqa: E501 (a captured message)
+            id="tls-newer-wording-alone",
+        ),
+        pytest.param(
+            "fatal: unable to access 'https://h/o/r.git/': certificate signer not trusted",
+            id="tls-signer-not-trusted-alone",
+        ),
+        pytest.param(
+            "fatal: unable to access 'https://h/o/r.git/': unable to get local issuer certificate",
+            id="tls-issuer-alone",
+        ),
+        pytest.param(
+            "fatal: unable to access 'https://h/o/r.git/': SSL peer certificate or SSH remote key was not OK",  # noqa: E501 (a captured message)
+            id="tls-ssh-remote-key-not-ok",
+        ),
+        pytest.param(
+            "fatal: unable to access 'https://h/o/r.git/': no alternative certificate subject name matches target host name 'h'",  # noqa: E501 (a captured message)
+            id="tls-no-alternative-subject-name",
+        ),
+    ],
+)
+async def test_a_git_tls_failure_is_a_stop_whatever_the_curl_behind_it_says(
+    tmp_path, monkeypatch, text
+):
+    """Each wording stamps as a certificate stop (so a fetch stops instead of using a stale
+    base), and a push, whose error passes through the same stamp, names ca_file."""
+    from .test_git_auth import HTTPS, acct, auth, rig
+
+    assert auth().stops(text) and auth().untrusted(text)
+    exc = auth().stamp(ForgeError(text))
+    assert (exc.reason, exc.account) == ("tls", "corp-gl")
+    assert "verify origin's certificate" in str(exc) and "ca_file" in str(exc)
+
+    async def run_git(repo, args, **_):
+        raise ForgeError(f"git {args[1]} failed: {text}")
+
+    repo, _ = rig(tmp_path, monkeypatch, remote=HTTPS)
+    monkeypatch.setattr(forge_git, "run_git", run_git)
+    with pytest.raises(ForgeError, match="ca_file") as caught:
+        await forge_git.push(repo, "main", account=("corp-gl", acct()))
+    assert caught.value.reason == "tls"

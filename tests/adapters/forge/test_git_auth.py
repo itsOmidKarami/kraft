@@ -502,6 +502,12 @@ async def test_an_unreadable_token_is_an_auth_error(tmp_path, monkeypatch):
             "fatal: unable to access: Connection refused", None, "gitlab", id="connection-refused"
         ),
         pytest.param(
+            "fatal: unable to access 'https://h/': Could not resolve host: h",
+            None,
+            "gitlab",
+            id="unresolvable-host-is-no-tls-stop",
+        ),
+        pytest.param(
             "fatal: repository 'https://github.com/o/r/' not found",
             "auth",
             "github",
@@ -567,6 +573,12 @@ def test_an_ipv6_origin_is_bracketed(web, key):
     [
         pytest.param("fatal: ... The requested URL returned error: 403", "forbidden", id="403"),
         pytest.param("fatal: ... The requested URL returned error: 401", "auth", id="401"),
+        pytest.param(
+            "fatal: unable to access 'https://h/o/r.git/': SSL certificate verification failed: "
+            "certificate signer not trusted. (CAfile: /x/cacert.pem CRLfile: none)",
+            "tls",
+            id="untrusted-certificate-as-newer-git-words-it",
+        ),
     ],
 )
 async def test_a_refused_base_fetch_names_its_reason(tmp_path, monkeypatch, text, reason):

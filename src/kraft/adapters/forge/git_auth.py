@@ -34,8 +34,13 @@ AUTH_FAILED = re.compile(
 _NOT_FOUND = re.compile(r"repository '.*' not found", re.IGNORECASE)
 _REDIRECTED = re.compile(r"returned error: 30[1278]", re.IGNORECASE)
 _TLS = re.compile(
-    r"SSL certificate problem|Problem with the SSL CA cert|server certificate verification"
-    r" failed|certificate verify failed",
+    r"SSL certificate (problem|verification failed|OpenSSL verify result)"  # curl, by backend
+    r"|Problem with the SSL CA cert"  # an unreadable or empty CA bundle
+    r"|server certificate verification failed"  # GnuTLS
+    r"|certificate verify failed|certificate signer not trusted"
+    r"|unable to get (local )?issuer certificate|self[- ]signed certificate"
+    r"|SSL: certificate subject name|no alternative certificate subject name"
+    r"|peer certificate cannot be authenticated|SSL peer certificate or SSH remote key was not OK",
     re.IGNORECASE,
 )
 
