@@ -221,6 +221,13 @@ async def test_the_probe_never_puts_a_token_in_its_result(mock_http, run):
     assert got.state == "refused" and TOK not in json.dumps(got.to_json())
 
 
+@pytest.mark.real_probe
+async def test_a_login_that_echoes_the_token_is_redacted(mock_http, run):
+    m = mock_http({("GET", f"{GH}/user"): (200, {"login": f"ada {TOK}"})})
+    got = await run(m, acct())
+    assert got.state == "ok" and TOK not in json.dumps(got.to_json())
+
+
 async def _hangs(*a, **kw):
     await asyncio.sleep(10)
 

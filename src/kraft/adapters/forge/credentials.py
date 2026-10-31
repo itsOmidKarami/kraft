@@ -381,7 +381,8 @@ def set_secret_files(forges_yaml: Path, running: ForgesFile | None = None) -> No
     if running:
         specs += [a.token.file for a in running.accounts.values() if a.token and a.token.file]
     # A directory is never a token (read_file refuses it); protecting one would hide all of it.
-    _SECRET_FILES = tuple(p for p in dict.fromkeys(map(_expand, specs)) if not p.is_dir())
+    # os.path.isdir, not Path.is_dir: a directory the server cannot enter must not stop boot.
+    _SECRET_FILES = tuple(p for p in dict.fromkeys(map(_expand, specs)) if not os.path.isdir(p))
 
 
 def secret_files() -> tuple[Path, ...]:

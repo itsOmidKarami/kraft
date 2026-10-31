@@ -508,3 +508,16 @@ def test_a_directory_named_as_a_token_file_is_not_protected(tmp_path, monkeypatc
     )
     credentials.set_secret_files(path)
     assert credentials.secret_files() == (tmp_path.resolve() / "tok",)
+
+
+def test_a_token_file_under_a_closed_directory_never_stops_boot(tmp_path, monkeypatch):
+    # Python 3.12's Path.is_dir raises on EACCES; boot and reload call this unguarded.
+    def denied(self, *a, **kw):
+        raise PermissionError(13, "denied", str(self))
+
+    monkeypatch.setattr(credentials, "_SECRET_FILES", ())
+    monkeypatch.setattr(Path, "is_dir", denied)
+    path = tmp_path / "forges.yaml"
+    path.write_text("accounts:\n  gh: {token: {from: file, file: /closed/tok}}\nbad: [\n")
+    credentials.set_secret_files(path)
+    assert credentials.secret_files() == (Path("/closed/tok"),)
