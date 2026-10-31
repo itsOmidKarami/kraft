@@ -401,3 +401,40 @@ def test_a_connect_awaits_nothing_between_reading_repos_yaml_and_saving_it(
     last_read = len(order) - 1 - order[::-1].index("read")
     between = order[last_read : order.index("save")]
     assert not [o for o in between if o.startswith("thread:")], order
+
+
+@pytest.mark.parametrize(
+    "remote, account, needs",
+    [
+        pytest.param("https://github.com/acme/app.git", False, False, id="github-com-false"),
+        pytest.param(
+            "git@code.corp.example:team/app.git", False, True, id="self-hosted-no-account-true"
+        ),
+        pytest.param(
+            "git@code.corp.example:team/app.git", True, False, id="self-hosted-with-account-false"
+        ),
+        pytest.param("git@code.corp.example:team/app.git", None, False, id="forge-given-false"),
+    ],
+)
+def test_the_probe_says_when_connect_must_ask_for_the_forge(
+    tmp_path, client, remote, account, needs
+):
+    repo = make_repo(tmp_path)
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", remote], check=True)
+    if account:
+        body = {"name": "corp", "forge": "gitlab", "web_url": "https://code.corp.example"}
+        assert (
+            client.post("/api/forges", json={**body, "default_for_host": True}).status_code == 201
+        )
+    got = client.post(
+        "/api/repos/probe",
+        json={
+            "path": str(repo),
+            "detect": False,
+            **({"forge": "gitlab"} if account is None else {}),
+        },
+    ).json()
+    assert got["needs_forge"] is needs
+    assert got["forge"] == (
+        "github" if "github" in remote else None if account is False else "gitlab"
+    )

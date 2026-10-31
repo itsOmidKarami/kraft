@@ -23,10 +23,20 @@ def web_host(url: str) -> str:
     return host.removesuffix(".")
 
 
+def _remote(remote: str):
+    return next((m for rx in config._REMOTE if (m := rx.match(remote.strip()))), None)
+
+
 def remote_host(remote: str) -> str | None:
     """The host of an origin URL (URL-style or scp-style), in `web_host`'s form."""
-    match = next((m for rx in config._REMOTE if (m := rx.match(remote.strip()))), None)
+    match = _remote(remote)
     return match["host"].lower().removesuffix(".") if match else None
+
+
+def remote_path(remote: str) -> str | None:
+    """The path of an origin URL without its slashes or `.git`."""
+    match = _remote(remote)
+    return (match["path"].strip("/").removesuffix(".git") or None) if match else None
 
 
 def default_account(forges: ForgesFile, host: str | None) -> tuple[str, ForgeAccount] | None:

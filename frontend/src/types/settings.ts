@@ -79,6 +79,11 @@ export interface RepoProbe {
   setup_command: string | null;
   forge: string | null;
   project: string | null;
+  /** The host names no forge and no account matches: `repo connect` asks. */
+  needs_forge?: boolean;
+  remote_host?: string | null;
+  remote_path?: string | null;
+  remote_port?: number | null;
   /** Every command the evidence supports, chosen or not. Told, never stored. */
   candidates?: ProbeCandidate[];
   /** The commit the proposal was read from (`refs/remotes/origin/main`). */
