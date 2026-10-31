@@ -1,16 +1,24 @@
-"""`forges.yaml`: named forge accounts. Only `client: cli` exists until the API backends
-land: an account records a host's forge and web address, so connect does not ask about
-a self-hosted host whose name does not say which forge it is. It carries no
-token; `gh`/`glab` keep their own sign-in."""
+"""`forges.yaml`: named forge accounts. An account records a host's forge and web address,
+so connect does not ask about a self-hosted host whose name does not say which forge it
+is. A `client: cli` account carries no token (`gh`/`glab` keep their own sign-in); a
+`client: api` account names where Kraft reads its token from, and never holds the token."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
 import yaml
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from kraft import config
 
@@ -38,6 +46,84 @@ def remote_path(remote: str) -> str | None:
     """The path of an origin URL without its slashes or `.git`."""
     match = _remote(remote)
     return (match["path"].strip("/").removesuffix(".git") or None) if match else None
+
+
+def origin(url: str) -> tuple[str, str, int]:
+    """(scheme, host, port) of an address: the host in `web_host`'s form, the port 443 when none."""
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return ("", "", 443)
+    return (parts.scheme, web_host(url), port or 443)
+
+
+def project_path(remote: str, account: ForgeAccount) -> str | None:
+    """The remote's project path: without `.git`, and without the account's web_url path
+    prefix (`/gitlab`) when the remote is on the account's host."""
+    path = remote_path(remote)
+    if path is None:
+        return None
+    if remote_host(remote) == web_host(account.web_url):
+        prefix = urlsplit(account.web_url).path.strip("/")
+        if prefix and path.startswith(prefix + "/"):
+            path = path[len(prefix) + 1 :]
+    return path or None
+
+
+def env_name_problem(name: str) -> str | None:
+    """Why an `env` token source may not name `name`, else None. Worded to follow `token.env`."""
+    # Inside: worker.env imports a lot, and forges is imported early.
+    from kraft.worker.env import BASELINE
+    from kraft.worker.sandbox import FORWARDED_ENV
+
+    # Never quote an arbitrary name: a token pasted here would reach the open /health.
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        return "must name an environment variable: letters, digits and _"
+    if name.startswith("KRAFT_"):
+        return "names a KRAFT_ variable, which Kraft sets for itself"
+    if name.startswith("GIT_"):
+        return "names a GIT_ variable, which git reads"
+    if name in FORWARDED_ENV:
+        return f"names {name}, which Kraft passes to agents"
+    if name in BASELINE:
+        return f"names {name}, which every Kraft child needs"
+    return None
+
+
+class TokenSource(BaseModel):
+    """Where an API account's token comes from. Holds a name or a path, never the token."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+    from_: Literal["git-credential", "command", "env", "file"] = Field(
+        "git-credential", alias="from"
+    )
+    kind: Literal["pat", "oauth", "unknown"] = "unknown"
+    command: str | None = None
+    env: str | None = None
+    file: str | None = None
+
+    @model_validator(mode="after")
+    def _one_key(self) -> TokenSource:
+        given = {k for k in ("command", "env", "file") if getattr(self, k) is not None}
+        want = set() if self.from_ == "git-credential" else {self.from_}
+        if given != want:
+            need = f"only `{self.from_}`" if want else "no other key"
+            raise ValueError(f"token from: {self.from_} takes {need}")
+        if self.env is not None and (why := env_name_problem(self.env)):
+            raise ValueError(f"token.env {why}")
+        if self.file is not None and not self.file.startswith(("/", "~/", "$")):
+            raise ValueError("token.file must be an absolute path, or start with ~/ or $")
+        return self
+
+    def label(self) -> str:
+        """What names the source in an answer: never the command text, never a token."""
+        if self.from_ == "env":
+            return f"env {self.env}"
+        if self.from_ == "file":
+            return f"file {self.file}"
+        return self.from_
 
 
 def default_account(forges: ForgesFile, host: str | None) -> tuple[str, ForgeAccount] | None:
@@ -126,17 +212,12 @@ class ForgeAccount(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     forge: Literal["github", "gitlab"]
-    client: Literal["cli"] = "cli"
+    client: Literal["cli", "api"] = "cli"
     web_url: str
     api_url: str | None = None
     default_for_host: bool = False
-
-    @field_validator("client", mode="before")
-    @classmethod
-    def _cli_only(cls, value):
-        if value == "api":
-            raise ValueError("`client: api` arrives with the API backends; use `client: cli`")
-        return value
+    ca_file: str | None = None
+    token: TokenSource | None = None
 
     @field_validator("web_url")
     @classmethod
@@ -149,18 +230,31 @@ class ForgeAccount(BaseModel):
         return None if value is None else _https(value, "api_url")
 
     @model_validator(mode="after")
-    def _same_host(self) -> ForgeAccount:
+    def _same_origin(self) -> ForgeAccount:
+        if self.client == "cli" and (self.token is not None or self.ca_file is not None):
+            raise ValueError(
+                "a client: cli account carries no token: gh/glab keep their own sign-in"
+            )
         if self.api_url is None:
             return self
-        web, api = web_host(self.web_url), web_host(self.api_url)
-        allowed = {web}
-        if web == "github.com":
-            allowed.add("api.github.com")
-        if web.endswith(".ghe.com"):
-            allowed.add(f"api.{web}")
-        if api not in allowed:
-            raise ValueError(f"api_url host {api!r} must be web_url's host {web!r}")
+        web, api = origin(self.web_url), origin(self.api_url)
+        host = web[1]
+        official = (host == "github.com" and api[1] == "api.github.com") or (
+            host.endswith(".ghe.com") and api[1] == f"api.{host}"
+        )
+        if official:
+            same = api[2] == 443 and web[2] == 443
+        else:
+            same = api[1:] == web[1:]
+        if not same:
+            raise ValueError(
+                f"api_url {api[0]}://{api[1]}:{api[2]} must be web_url's origin "
+                f"{web[0]}://{web[1]}:{web[2]}"
+            )
         return self
+
+    def source(self) -> TokenSource:
+        return self.token or TokenSource()
 
     def api(self) -> str:
         return self.api_url or default_api_url(self.forge, self.web_url)
@@ -200,12 +294,27 @@ class ForgesFile(config._Model):
             return super().load(path)
         except config.ConfigError as exc:
             cause = exc.__cause__
+            if (
+                isinstance(cause, ValidationError)
+                and cause.errors()[0]["type"] == "extra_forbidden"
+            ):
+                # The unknown key is not named: a token pasted as a key would be quoted.
+                parent = ".".join(str(p) for p in cause.errors()[0]["loc"][:-1]) or "the top level"
+                raise config.ConfigError(
+                    f"{cls.FILE}: {parent} has a key forges.yaml does not know"
+                ) from None
             if not isinstance(cause, yaml.MarkedYAMLError):
-                raise
+                # Not `raise`: the chained ValidationError carries `input_value='glpat-...'`.
+                raise config.ConfigError(str(exc)) from None
             mark = cause.problem_mark
             where = f" at line {mark.line + 1}, column {mark.column + 1}" if mark else ""
             raise config.ConfigError(f"{cls.FILE}: not valid YAML{where}") from None
 
     def save(self, path) -> None:
         """Written over the file's own text: hand comments stay, defaults are not spelled out."""
-        config.write_preserving(path, self.model_dump(exclude_defaults=True))
+        data = self.model_dump(exclude_defaults=True, by_alias=True)
+        for name, acct in self.accounts.items():
+            if acct.token is not None:  # `from` is always written, even the default
+                written = data["accounts"][name]
+                written["token"] = {"from": acct.token.from_, **written.get("token", {})}
+        config.write_preserving(path, data)
