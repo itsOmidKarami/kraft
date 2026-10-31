@@ -34,13 +34,12 @@ def _connect(repo, *flags):
     cli.main(["repo", "connect", str(repo), *flags])
 
 
-def _never_leaked(calls, capsys, token=_TOKEN):
+def _never_leaked(calls, output, token=_TOKEN):
     """The token reached `set_forge_token` and nowhere else: no payload, no output."""
-    out, err = capsys.readouterr()
     for name, a, kw in calls:
         if name != "set_forge_token":
             assert token not in repr((a, kw)), name
-    assert token not in out + err
+    assert token not in output
 
 
 @pytest.mark.parametrize(
@@ -91,6 +90,13 @@ def test_an_api_account_asks_where_the_token_comes_from_only_when_git_has_none(
     _probes(monkeypatch, probes)
     seen = _prompts(monkeypatch, answers)
     monkeypatch.setattr("getpass.getpass", lambda prompt="": seen.append(prompt) or _TOKEN)
+    real_edit = client.edit_forge
+
+    async def guarded(name, fields):
+        assert "ghp_" not in repr(fields), "a token-shaped variable name reached the server"
+        return await real_edit(name, fields)
+
+    monkeypatch.setattr(client, "edit_forge", guarded)
     calls = _spy(monkeypatch, *_WRITES)
     if expect.get("fails"):
         with pytest.raises(SystemExit):
@@ -117,7 +123,7 @@ def test_an_api_account_asks_where_the_token_comes_from_only_when_git_has_none(
         assert edit[1] == ("github.com", {"token": {"from": "env", "env": env, "kind": "unknown"}})
     if command := expect.get("command"):
         assert _accounts()["github.com"]["token"]["command"] == command
-    _never_leaked(calls, capsys)
+    _never_leaked(calls, out + capsys.readouterr().err)
     assert "ghp_" not in yaml.safe_dump(_accounts())
 
 
@@ -260,5 +266,5 @@ def test_a_token_on_stdin_reaches_only_set_forge_token(app, capsys, repo, monkey
     calls = _spy(monkeypatch, *_WRITES)
     _connect(repo, "-y", "--forge", "github", "--token-stdin")
     assert [c[1] for c in calls if c[0] == "set_forge_token"] == [("github.com", _TOKEN, "unknown")]
-    _never_leaked(calls, capsys)
+    _never_leaked(calls, "".join(capsys.readouterr()))
     assert _TOKEN not in _forges_yaml().read_text()

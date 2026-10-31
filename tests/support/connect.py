@@ -35,7 +35,14 @@ def _prompts(monkeypatch, answers):
     seen, left = [], iter(answers)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt="": seen.append(prompt) or next(left))
+
+    def ask(prompt=""):
+        seen.append(prompt)
+        answer = next(left, None)
+        assert answer is not None, f"a prompt nobody answered: {prompt!r}"
+        return answer
+
+    monkeypatch.setattr("builtins.input", ask)
     return seen
 
 
