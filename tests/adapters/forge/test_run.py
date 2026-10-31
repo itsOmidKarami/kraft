@@ -44,16 +44,26 @@ def test_resolve_returns_each_named_backend(name, cls):
     "name, says",
     [
         ("bitbucket", "bitbucket"),
-        ("gitlab-api", "built from its account"),
-        ("github-api", "not in this release"),
+        ("gitlab-api", "the gitlab-api backend is built from its account"),
+        ("github-api", "the github-api backend is built from its account"),
     ],
-    ids=["unknown", "gitlab-api-is-built-from-its-account", "github-api-not-in-this-release"],
+    ids=["unknown", "gitlab-api-is-built-from-its-account", "github-api-is-built-from-its-account"],
 )
 def test_resolve_rejects_what_a_name_cannot_build(name, says):
     """Named, never probed: an unusable backend must fail loudly rather than
     silently taking a different path than the one configured."""
     with pytest.raises(forge.ForgeError, match=says):
         forge.resolve(name)
+
+
+@pytest.mark.parametrize(
+    "account_forge, cls", [("github", forge.GitHubApi), ("gitlab", forge.GitLabApi)]
+)
+def test_api_forge_builds_the_backend_of_the_accounts_forge(account_forge, cls):
+    from kraft.forges import ForgeAccount
+
+    acct = ForgeAccount(forge=account_forge, web_url="https://h.example", client="api")
+    assert type(forge.api_forge("a", acct)) is cls
 
 
 @pytest.mark.parametrize(

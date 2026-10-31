@@ -233,6 +233,7 @@ def test_the_forge_row_names_the_account_or_why_the_default_was_skipped(
 
 _SEES = {"project": "group/repo", "visible": True}
 _BLIND = {"project": "group/repo", "visible": False, "detail": "group/repo: HTTP 404"}
+_SSO = {**_BLIND, "sso_url": "https://sso.example/x"}
 _NO_PROJECT = {"project": "", "visible": False, "detail": "origin names no project"}
 
 
@@ -249,6 +250,13 @@ _NO_PROJECT = {"project": "", "visible": False, "detail": "origin names no proje
         ),
         (
             "gitlab",
+            {"state": "ok", "seen": _SSO},
+            False,
+            False,
+            " · cannot see group/repo (group/repo: HTTP 404) · authorize it: https://sso.example/x",
+        ),
+        (
+            "gitlab",
             {"state": "ok", "seen": _NO_PROJECT},
             False,
             False,
@@ -258,25 +266,34 @@ _NO_PROJECT = {"project": "", "visible": False, "detail": "origin names no proje
         ("gitlab", None, True, True, " · not probed yet"),
         ("gitlab", {"state": "ok"}, True, True, " · project not probed yet"),
         ("gitlab", {"state": "refused"}, False, False, " · token refused"),
-        ("github", {"state": "ok", "seen": _SEES}, False, False, " · sees group/repo"),
+        ("github", {"state": "ok", "seen": _SEES}, True, False, " · sees group/repo"),
+        (
+            "github",
+            {"state": "ok", "seen": _SSO},
+            False,
+            False,
+            " · cannot see group/repo (group/repo: HTTP 404) · authorize it: https://sso.example/x",
+        ),
         (
             "github",
             "unreadable",
-            False,
-            False,
+            True,
+            True,
             " · not probed: the forge accounts could not be read",
         ),
     ],
     ids=[
         "gitlab-api-sees-the-project",
         "gitlab-api-cannot-see-it",
+        "sso-link-reaches-the-row",
         "gitlab-api-no-project-names-the-reason",
         "gitlab-api-accounts-unreadable",
         "gitlab-api-not-probed",
         "gitlab-api-project-not-probed",
         "gitlab-api-token-refused",
-        "github-api-still-fails",
-        "github-api-unreadable-still-fails",
+        "github-api-sees-the-project",
+        "github-api-sso-link-reaches-the-row",
+        "github-api-accounts-unreadable-warns",
     ],
 )
 def test_the_forge_row_says_whether_an_api_token_sees_the_project(
@@ -302,7 +319,7 @@ def test_the_forge_row_says_whether_an_api_token_sees_the_project(
     row = doctor._forge_check(entry, forges, accounts)
     assert (row["ok"], bool(row.get("warn"))) == (ok, warn), row
     assert row["detail"].endswith(says), row
-    assert ("not in this release" in row["detail"]) == (forge == "github")
+    assert f"{forge}-api · account a" in row["detail"]
 
 
 def test_doctor_warns_on_a_repo_on_the_dev_only_fake_forge(app, tmp_path):

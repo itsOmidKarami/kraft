@@ -354,6 +354,13 @@ jobs:
     # runner has too little free disk for the podman image builds and fails
     # the bwrap launcher test. Unpin once those pass there.
     runs-on: ubuntu-24.04
+    # Read-only, for the GitHub API e2e that reads this repo with github.token:
+    # pull requests, Actions runs and job logs, and labels. Writes stay off.
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+      issues: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -381,6 +388,8 @@ jobs:
       - run: uv run pytest -m e2e -n logical --durations=25 -rs --junitxml=e2e-junit.xml
         env:
           KRAFT_E2E_REQUIRE: bd,docker,podman,bwrap
+          E2E_GITHUB_TOKEN: ${{ github.token }}
+          E2E_GITHUB_REPO: ${{ github.repository }}
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

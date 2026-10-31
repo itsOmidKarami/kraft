@@ -635,7 +635,7 @@ def _on_api_account(
     """Put `wid` on a `client: api` account (`corp-gh` on GitHub, `corp-gl` on GitLab):
     pinned to its API backend, or only configured (its repo's origin on the account's
     host, the account that host's default). Any CLI forge resolution after this fails the
-    test. GitHub's API backend is not in this release, so it stops; GitLab's is built."""
+    test."""
     from kraft.forges import ForgeAccount, ForgesFile
 
     name, web = (

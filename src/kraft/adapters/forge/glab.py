@@ -211,33 +211,6 @@ class GlabCli(mr_ops.CliWaits):
         resp = await self._transport(repo).rest(method, path, fields=fields)
         return resp.json() if resp.text.strip() else None
 
-    async def _paged(
-        self,
-        repo: Path,
-        path: str,
-        fields: Mapping[str, str | int | bool] | None = None,
-        *,
-        pages: int = 10,
-        strict: bool = False,
-    ) -> list:
-        """Up to `pages` pages of 100, until a short page, as glab follows X-Next-Page
-        (get.go:117-124). A non-list answer is a `ForgeError`; `strict` also raises when
-        the cap is hit without a short page, so a caller never reads a truncated list as whole."""
-        out: list = []
-        for page in range(1, pages + 1):
-            query = {"per_page": 100, **(fields or {}), "page": page}
-            got = await self._api(repo, path, fields=query)
-            if got is None:
-                got = []
-            if not isinstance(got, list):
-                raise ForgeError(f"GET {path}: answered without a list")
-            out += got
-            if len(got) < 100:
-                return out
-        if strict:
-            raise ForgeError(f"GET {path}: more than {pages * 100} rows")
-        return out
-
     async def open_mr(
         self,
         *,

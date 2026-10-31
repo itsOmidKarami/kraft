@@ -5,13 +5,12 @@ from __future__ import annotations
 import os
 import re
 import secrets
-import shutil
-import stat
 from types import SimpleNamespace
 
 import httpx
 import pytest
-from support.harness import git, make_repo
+from support.api_accounts import LEAK_PLACES, answers, checkout, logged_push_repo
+from support.api_accounts import account as accounts
 
 from kraft.adapters.forge import credentials
 from kraft.adapters.forge.credentials import ReadContext, set_token_context
@@ -25,31 +24,7 @@ WEB = "https://code.corp.example"
 
 
 def account(web=WEB, **token) -> ForgeAccount:
-    return ForgeAccount(
-        forge="gitlab",
-        client="api",
-        web_url=web,
-        token=TokenSource(**(token or {"from": "env", "env": "CORP_GL"})),
-    )
-
-
-def checkout(tmp_path, remote=None):
-    path = make_repo(tmp_path)
-    if remote:
-        git(path, "remote", "add", "origin", remote)
-    return path
-
-
-def answers(*bodies):
-    """A handler answering each request with the next status or (status, body)."""
-    queue = list(bodies)
-
-    def handler(request):
-        got = queue.pop(0) if len(queue) > 1 else queue[0]
-        status, body = got if isinstance(got, tuple) else (got, {"message": "no"})
-        return httpx.Response(status, json=body)
-
-    return handler
+    return accounts("gitlab", web, **token)
 
 
 @pytest.fixture
@@ -222,28 +197,12 @@ async def test_every_error_names_its_account_and_source(
 @pytest.fixture
 def pushed(tmp_path, monkeypatch, mock_http):
     """`GitLabApi` opening and labelling a merge request, then reading labels, with a real
-    `git push` to a local bare repo (`insteadOf` the GitLab URL) through a `git` that logs
-    its argv and environment. The token enters as in production: set, then `take_env`."""
+    `git push` (`logged_push_repo`)."""
     tok = "glpat-" + secrets.token_hex(16)
-    monkeypatch.setattr(credentials, "_TAKEN", {})
-    monkeypatch.setenv("CORP_GL", tok)
-    credentials.take_env(["CORP_GL"])
-    log = tmp_path / "git.log"
-    wrapper = tmp_path / "wrap" / "git"
-    wrapper.parent.mkdir()
-    wrapper.write_text(
-        f'#!/bin/sh\n{{ printf "ARGV %s\\n" "$*"; env; }} >> {log}\n'
-        f'exec {shutil.which("git")} "$@"\n'
+    got = logged_push_repo(
+        tmp_path, monkeypatch, env="CORP_GL", tok=tok, remote=f"{WEB}/team/app.git"
     )
-    wrapper.chmod(wrapper.stat().st_mode | stat.S_IEXEC)
-    monkeypatch.setenv("PATH", f"{wrapper.parent}:{os.environ['PATH']}")
-
-    remote = f"{WEB}/team/app.git"
-    repo = checkout(tmp_path, remote)
-    bare = tmp_path / "origin.git"
-    git(tmp_path, "init", "-q", "--bare", str(bare))
-    git(repo, "config", f"url.{bare}.insteadOf", remote)
-    git(repo, "checkout", "-q", "-b", "kraft/abc")
+    repo = got.repo
 
     def handler(request):
         if request.url.path.endswith("/labels"):  # a 401 that quotes the token it was sent
@@ -261,7 +220,7 @@ def pushed(tmp_path, monkeypatch, mock_http):
             await api.labels(repo=repo)
         return SimpleNamespace(
             tok=tok,
-            git=log.read_text(),
+            git=got.log.read_text(),
             config=(repo / ".git" / "config").read_text(),
             err=f"{err.value} {err.value!r} {err.value.args}",
             requests=m.requests,
@@ -270,17 +229,7 @@ def pushed(tmp_path, monkeypatch, mock_http):
     return run
 
 
-@pytest.mark.parametrize(
-    "place",
-    [
-        pytest.param(
-            lambda r: "\n".join(x for x in r.git.splitlines() if x.startswith("ARGV")), id="argv"
-        ),
-        pytest.param(lambda r: r.git, id="git-env"),  # every line a hook would inherit, argv too
-        pytest.param(lambda r: r.config, id="git-config"),
-        pytest.param(lambda r: r.err, id="401-text"),
-    ],
-)
+@pytest.mark.parametrize("place", LEAK_PLACES)
 async def test_a_gitlab_api_token_reaches_only_its_origin(pushed, place):
     got = await pushed()
     assert all(r.url.host == "code.corp.example" for r in got.requests)

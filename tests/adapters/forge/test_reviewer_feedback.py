@@ -30,8 +30,8 @@ SINCE = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 BOT = AutomatedReview(bot="coderabbitai")
 CHECK = AutomatedReview(check="review-bot")
 
-GH_ISSUE_COMMENTS = "api repos/{owner}/{repo}/issues/7/comments?per_page=100"
-GH_REVIEWS = "api repos/{owner}/{repo}/pulls/7/reviews?per_page=100"
+GH_ISSUE_COMMENTS = "api repos/{owner}/{repo}/issues/7/comments"
+GH_REVIEWS = "api repos/{owner}/{repo}/pulls/7/reviews"
 GLAB_NOTES = "api projects/:id/merge_requests/9/notes"
 GLAB_DISCUSSIONS = "api projects/:id/merge_requests/9/discussions"
 

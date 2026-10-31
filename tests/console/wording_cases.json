@@ -484,7 +484,12 @@
     {
       "name": "forge-token-with-sso",
       "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "draft_merge_request", "reason": "forge account corp-gl: token refused", "facts": { "cause": "forge_auth", "account": "corp-gl", "source": "env CORP_GL", "sso_url": "https://gitlab.corp/sso" } } },
-      "banner": { "kind": "failed", "node": "draft_merge_request", "name": "draft merge request", "text": "Forge account corp-gl: token refused.", "way": "Open this address to authorize the forge CLI's token for single sign-on, then Retry: https://gitlab.corp/sso" }
+      "banner": { "kind": "failed", "node": "draft_merge_request", "name": "draft merge request", "text": "Forge account corp-gl: token refused.", "way": "Open this address to authorize forge account corp-gl's token for single sign-on, then Retry: https://gitlab.corp/sso" }
+    },
+    {
+      "name": "forge-sso-account-with-backtick-falls-back",
+      "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "draft_merge_request", "reason": "forge account corp`gl: token refused", "facts": { "cause": "forge_auth", "account": "corp`gl", "source": "env CORP_GL", "sso_url": "https://gitlab.corp/sso" } } },
+      "banner": { "kind": "failed", "node": "draft_merge_request", "name": "draft merge request", "text": "Forge account corp`gl: token refused.", "way": "Open this address to authorize the forge CLI's token for single sign-on, then Retry: https://gitlab.corp/sso" }
     },
     {
       "name": "forge-auth-without-account",

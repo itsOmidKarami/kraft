@@ -226,36 +226,103 @@ def mock_http() -> type[MockHttp]:
     return MockHttp
 
 
-class GlabOverHttp:
-    """An `httpx.MockTransport` that answers a `GitLabApi` request from the `glab` stub.
+class CliOverHttp:
+    """An `httpx.MockTransport` that answers an API backend's request from a `gh`/`glab` stub.
 
     The request is rendered as the argv `CliTransport` would have sent
     (`api PATH -X METHOD -i FLAGS`) and run through the stub on PATH, so the stub's
     call log holds the same line for both backends and one route table serves both.
     Test-only and lossy in one place: a GET query value that is all digits or
-    true/false is a typed `-F`, so a string of digits would read as an integer."""
+    true/false is a typed `-F`, so a string of digits would read as an integer.
+    `prefix` is the API's root path, taken off before the path is rendered."""
 
-    def __init__(self, project: str = "itsOmidKarami/kraft"):
-        self.project = project
+    def __init__(self, cli: str, prefix: str):
+        self.cli, self.prefix = cli, prefix
         self.transport = httpx.MockTransport(self._answer)
 
-    def _answer(self, request: httpx.Request) -> httpx.Response:
-        path = request.url.raw_path.decode().split("?")[0].removeprefix("/api/v4/")
-        mine = f"projects/{quote(self.project, safe='')}"
-        # The project must reach the wire encoded: never decoded, never double-encoded.
-        assert path.startswith(mine) or not re.match(r"projects/\D", path), path
-        path = path.replace(mine, "projects/:id", 1)
-        if request.method == "GET":
-            flags = [
-                x
-                for k, v in request.url.params.multi_items()
-                for x in ("-F" if re.fullmatch(r"\d+|true|false", v) else "-f", f"{k}={v}")
-            ]
-        else:
-            flags = transport._flags(json.loads(request.content or b"{}"))
-        argv = ["glab", "api", path, "-X", request.method, "-i", *flags]
+    def _path(self, path: str) -> str:
+        """`path` (the prefix off) as the CLI was given it, placeholders back."""
+        return path
+
+    def _flags(self, request: httpx.Request) -> list[str]:
+        if request.method != "GET":
+            return transport._flags(json.loads(request.content or b"{}"))
+        return [
+            x
+            for k, v in request.url.params.multi_items()
+            for x in ("-F" if re.fullmatch(r"\d+|true|false", v) else "-f", f"{k}={v}")
+        ]
+
+    def _run(self, argv: list[str]) -> httpx.Response:
         done = subprocess.run(argv, capture_output=True, text=True, errors="replace")
         resp = transport.parse_included(done.stdout)
         if resp is None:
             raise httpx.ConnectError("stub: failed")
         return httpx.Response(resp.status, headers=dict(resp.headers), content=resp.text.encode())
+
+    def _answer(self, request: httpx.Request) -> httpx.Response:
+        raw = request.url.raw_path.decode().split("?")[0].removeprefix(self.prefix)
+        path = self._path(raw)
+        return self._run([self.cli, "api", path, "-X", request.method, "-i", *self._flags(request)])
+
+
+class GlabOverHttp(CliOverHttp):
+    """`CliOverHttp` for a `GitLabApi`: the project is `:id`."""
+
+    def __init__(self, project: str = "itsOmidKarami/kraft"):
+        super().__init__("glab", "/api/v4/")
+        self.project = project
+
+    def _path(self, path: str) -> str:
+        mine = f"projects/{quote(self.project, safe='')}"
+        # The project must reach the wire encoded: never decoded, never double-encoded.
+        assert path.startswith(mine) or not re.match(r"projects/\D", path), path
+        return path.replace(mine, "projects/:id", 1)
+
+
+_PLACEHOLDER_WIRE = re.compile(r"\{(owner|repo|branch)\}|%7B(owner|repo|branch)%7D", re.I)
+_PLACEHOLDER_VALUE = frozenset({"{owner}", "{repo}", "{branch}"})
+
+
+class GhOverHttp(CliOverHttp):
+    """`CliOverHttp` for a `GitHubApi` on github.com or a GHES (`/api/v3`): `repos/OWNER/REPO`
+    is `repos/{owner}/{repo}`, and a GraphQL call is `gh api graphql -f query=...` with the
+    owner and name variables as `-F owner={owner}`. Asserts that no placeholder reaches the
+    wire, as a path or as a whole field value (braces inside a query or a body are fine).
+    A job log answers 302 to `https://blob.example/logs/ID?sig=s`, and the follow-up, which
+    must carry no `authorization`, is answered with what the stub says for the log."""
+
+    def __init__(self, owner: str = "o", repo: str = "r"):
+        super().__init__("gh", "/")
+        self.owner, self.repo = owner, repo
+        self._logs: dict[str, list[str]] = {}
+
+    def _path(self, path: str) -> str:
+        path = re.sub("^(api/v3/)?", "", path)
+        return re.sub(f"^repos/{self.owner}/{self.repo}(?=/|$)", "repos/{owner}/{repo}", path)
+
+    def _answer(self, request: httpx.Request) -> httpx.Response:
+        raw = request.url.raw_path.decode().split("?")[0]
+        assert not _PLACEHOLDER_WIRE.search(raw), raw
+        if request.url.host == "blob.example":
+            assert "authorization" not in request.headers, "the token went to blob storage"
+            return self._run(self._logs[raw.rsplit("/", 1)[1]])
+        body = json.loads(request.content) if request.content else {}
+        sent = {**dict(request.url.params.multi_items()), **body.get("variables", body)}
+        assert not _PLACEHOLDER_VALUE & {v for v in sent.values() if isinstance(v, str)}, sent
+        if raw in ("/graphql", "/api/graphql"):
+            variables = dict(body["variables"])
+            if variables.get("owner") == self.owner:
+                variables["owner"] = "{owner}"
+            if variables.get("name") == self.repo:
+                variables["name"] = "{repo}"
+            argv = ["gh", "api", "graphql", "-i", "-f", f"query={body['query']}"]
+            return self._run([*argv, *transport._flags(variables)])
+        path = self._path(raw.removeprefix("/"))
+        argv = ["gh", "api", path, "-X", request.method, "-i", *self._flags(request)]
+        if request.method == "GET" and (m := re.fullmatch(r".*/actions/jobs/(\d+)/logs", path)):
+            self._logs[m[1]] = argv
+            return httpx.Response(
+                302, headers={"location": f"https://blob.example/logs/{m[1]}?sig=s"}
+            )
+        return self._run(argv)

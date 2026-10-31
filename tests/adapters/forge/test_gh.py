@@ -243,7 +243,7 @@ async def test_gh_branch_ci_status_finds_a_commits_runs_on_a_busy_branch(cli, tm
     assert (status.state, status.sha, status.no_checks) == ("success", "deadbeef", False)
 
 
-_CHECK_RUNS = "api repos/{owner}/{repo}/commits/other-sha/check-runs?per_page=1"
+_CHECK_RUNS = "api repos/{owner}/{repo}/commits/other-sha/check-runs"
 _STATUS = "api repos/{owner}/{repo}/commits/other-sha/status"
 
 
