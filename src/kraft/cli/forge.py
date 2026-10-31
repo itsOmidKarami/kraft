@@ -13,7 +13,6 @@ import sys
 from pydantic import ValidationError
 
 from kraft import client, config, forges
-from kraft.adapters.forge import credentials
 from kraft.cli import common
 from kraft.client import transport
 from kraft.paths import config_dir, kraft_home
@@ -197,6 +196,9 @@ def set_command_source(name: str, fields: dict, *, paste: str | None = None) -> 
         }
 
     def stage():
+        # Lazy: the package pulls in the server, and the permission hook imports this module.
+        from kraft.adapters.forge import credentials
+
         target = kraft_home() / "secrets" / name
         previous = target.read_bytes() if target.is_file() else None
         credentials.write_pasted(name, paste)
@@ -264,6 +266,8 @@ def _cmd_edit(ns: argparse.Namespace) -> None:
     before = asyncio.run(client.list_forges())["accounts"].get(ns.name) or {}
     if _is_command(before):
         # The API will not replace a command (the browser must not); the server's machine can.
+        from kraft.adapters.forge import credentials  # lazy, as in stage()
+
         paste = None
         if token is not None:
             try:
