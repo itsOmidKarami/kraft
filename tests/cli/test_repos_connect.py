@@ -4,11 +4,14 @@ repo with no commit, and how connect names what it found."""
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
+from pathlib import Path
 
 import pytest
+import yaml
 from support.addons import a_terminal, library_outcome, repo_with_library
-from support.harness import commit_all
+from support.harness import commit_all, git
 
 from kraft import cli, client
 
@@ -310,3 +313,115 @@ def test_a_library_that_cannot_be_checked_does_not_fail_the_connect(
     out = capsys.readouterr().out
     assert "connected:" in out
     assert "repo library not checked: kraft 502: origin did not answer" in out
+
+
+def _origin(repo, url):
+    """An origin, and a test command found, so the only questions are the forge's."""
+    (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n[tool.pytest.ini_options]\n")
+    (repo / "uv.lock").write_text("version = 1\n")
+    commit_all(repo)
+    git(repo, "remote", "add", "origin", url)
+
+
+def _forges_yaml():
+    return Path(os.environ["KRAFT_CONFIG_DIR"]) / "forges.yaml"
+
+
+def _prompts(monkeypatch, answers):
+    """A terminal; every prompt recorded, answered from `answers`."""
+    seen, left = [], iter(answers)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt="": seen.append(prompt) or next(left))
+    return seen
+
+
+def test_an_existing_user_sees_no_change(app, capsys, repo, monkeypatch):
+    """The spec's anti-goal: a github.com remote, no forges.yaml, and connect asks
+    what it asked before the forge questions existed -- nothing here -- and
+    writes no forges.yaml."""
+    _origin(repo, "https://github.com/acme/app.git")
+    seen = _prompts(monkeypatch, [])
+    cli.main(["repo", "connect", str(repo)])
+    [entry] = asyncio.run(client.repos())
+    assert (seen, entry["forge"], entry["project"], entry.get("forge_account")) == (
+        [],
+        "github",
+        "acme/app",
+        None,
+    )
+    assert not _forges_yaml().exists()
+
+
+_SELF_HOSTED = "git@code.corp.example:gitlab/team/app.git"
+
+
+def test_a_self_hosted_host_asks_forge_then_web_address(app, capsys, repo, monkeypatch):
+    _origin(repo, _SELF_HOSTED)
+    seen = _prompts(monkeypatch, ["gitlab", "2"])
+    cli.main(["repo", "connect", str(repo)])
+    assert len(seen) == 2
+    assert yaml.safe_load(_forges_yaml().read_text()) == {
+        "accounts": {
+            "code.corp.example": {
+                "forge": "gitlab",
+                "web_url": "https://code.corp.example/gitlab",
+                "default_for_host": True,
+            }
+        }
+    }
+    [entry] = asyncio.run(client.repos())
+    assert (entry["forge"], entry["project"]) == ("gitlab", "team/app")
+
+
+@pytest.mark.parametrize(
+    "extra, account",
+    [
+        pytest.param([], "code.corp.example", id="named-for-the-host"),
+        pytest.param(["--forge-account", "corp"], "corp", id="named-by-flag"),
+    ],
+)
+def test_flags_answer_the_questions(app, capsys, repo, monkeypatch, extra, account):
+    _origin(repo, _SELF_HOSTED)
+    seen = _prompts(monkeypatch, [])
+    cli.main(
+        ["repo", "connect", str(repo), "--forge", "gitlab", "-y"]
+        + ["--web-url", "https://code.corp.example/gitlab", *extra]
+    )
+    assert seen == []
+    accounts = yaml.safe_load(_forges_yaml().read_text())["accounts"]
+    assert list(accounts) == [account] and accounts[account]["forge"] == "gitlab"
+    assert asyncio.run(client.repos())[0]["forge"] == "gitlab"
+
+
+def test_a_host_with_an_account_asks_nothing(app, capsys, repo, monkeypatch):
+    _origin(repo, _SELF_HOSTED)
+    asyncio.run(client.add_forge("corp", "gitlab", "https://code.corp.example", None, True))
+    seen = _prompts(monkeypatch, [])
+    cli.main(["repo", "connect", str(repo)])
+    assert seen == [] and asyncio.run(client.repos())[0]["forge"] == "gitlab"
+
+
+def test_an_account_name_already_taken_asks_for_forge_account(app, capsys, repo):
+    _origin(repo, _SELF_HOSTED)
+    asyncio.run(client.add_forge("code.corp.example", "gitlab", "https://other.example"))
+    with pytest.raises(SystemExit) as caught:
+        cli.main(
+            [
+                "repo",
+                "connect",
+                str(repo),
+                "--forge",
+                "gitlab",
+                "--web-url",
+                "https://code.corp.example",
+            ]
+        )
+    assert "--forge-account" in str(caught.value)
+    assert asyncio.run(client.repos()) == []
+
+
+def test_yes_without_forge_asks_nothing_and_writes_no_account(app, capsys, repo):
+    _origin(repo, _SELF_HOSTED)
+    cli.main(["repo", "connect", str(repo), "-y"])
+    assert asyncio.run(client.repos())[0]["forge"] is None and not _forges_yaml().exists()

@@ -149,16 +149,23 @@ CONNECT_TIMEOUT_S = 300.0
 
 
 async def probe_repo(
-    path: str | None = None, *, detect: bool = True, test_command: str | None = None
+    path: str | None = None,
+    *,
+    detect: bool = True,
+    test_command: str | None = None,
+    forge: str | None = None,
 ) -> dict:
     """What connecting `path` would propose, changing nothing: its setup and
     test commands, and every candidate the evidence supports. `detect=False`:
     only the resolved path and the facts that need no detector table.
-    `test_command`: the root's, as connecting with it would save it."""
+    `test_command`: the root's, as connecting with it would save it. `forge`: the
+    one the caller knows, so the answer's `needs_forge` is false."""
     path = context.absolute_path(path or os.getcwd())
     payload = {"path": path, "detect": detect}
     if test_command is not None:
         payload["test_command"] = test_command
+    if forge is not None:
+        payload["forge"] = forge
     status, body = await transport._post("/repos/probe", payload, timeout=CONNECT_TIMEOUT_S)
     if status >= 400:
         raise transport.status_error(status, transport.detail_of(body))
@@ -172,6 +179,8 @@ async def ensure_repo(
     setup_command: str | None = None,
     enabled: bool | None = None,
     worktrees: bool | None = None,
+    forge: str | None = None,
+    forge_account: str | None = None,
 ) -> dict:
     """Register a repo with Kraft if it is not already connected.
 
@@ -187,6 +196,8 @@ async def ensure_repo(
         "setup_command": setup_command,
         "enabled": enabled,
         "worktrees": worktrees,
+        "forge": forge,
+        "forge_account": forge_account,
     }
     payload = {"path": path, **{k: v for k, v in fields.items() if v is not None}}
     try:

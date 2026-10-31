@@ -501,18 +501,96 @@ def _cmd_library(ns: argparse.Namespace) -> None:
     _take_library(ns.path, ask=interactive, yes=ns.yes)
 
 
+def _web_choices(host: str, path: str | None) -> list[str]:
+    """`https://HOST` and `https://HOST/<prefix>` for each leading directory of the
+    remote's path above `group/project`: `team/app` has none."""
+    parts = (path or "").split("/")
+    return [
+        f"https://{host}",
+        *(f"https://{host}/{'/'.join(parts[:i])}" for i in range(1, len(parts) - 1)),
+    ]
+
+
+def _ask_forge() -> str:
+    while (answer := input("  which forge is it? [github/gitlab] ").strip().lower()) not in (
+        "github",
+        "gitlab",
+    ):
+        _print("  github or gitlab")
+    return answer
+
+
+def _ask_web_url(host: str, path: str | None) -> str:
+    options = _web_choices(host, path)
+    _print("  web address of the forge:")
+    for i, option in enumerate(options, 1):
+        _print(f"    {i}. {option}")
+    answer = input("  number, or type an address [1] ").strip()
+    if not answer:
+        return options[0]
+    return (
+        options[int(answer) - 1] if answer.isdigit() and 0 < int(answer) <= len(options) else answer
+    )
+
+
+def _settle_forge(ns: argparse.Namespace, *, interactive: bool) -> tuple[str | None, bool]:
+    """The forge to connect with, naming an account for the host when it needs one:
+    only when the host names no forge and no account matches, and a person (or
+    `--forge` with `--web-url`) answers. `-y` and `--json` without `--forge` ask
+    nothing and write nothing; the repo is then connected as it always was.
+    Returns the forge and whether an account was written."""
+    if ns.web_url and not ns.forge:
+        raise SystemExit("error: --web-url needs --forge")
+    if not (interactive or ns.forge):
+        return None, False
+    resolved = asyncio.run(client.probe_repo(ns.path, detect=False))
+    if resolved["path"] in {r["path"] for r in asyncio.run(client.repos())}:
+        return None, False  # connect says so; the account is for a repo not yet connected
+    if not resolved["needs_forge"]:
+        return ns.forge, False
+    host = resolved["remote_host"]
+    forge = ns.forge or (_ask_forge() if interactive else None)
+    web_url = ns.web_url or (_ask_web_url(host, resolved["remote_path"]) if interactive else None)
+    if forge is None or web_url is None:
+        return forge, False  # a script with --forge alone: the repo names the forge, no account
+    name = ns.forge_account or host
+    try:
+        asyncio.run(client.add_forge(name, forge, web_url, ns.api_url, default_for_host=True))
+    except ValueError as exc:
+        if "already exists" in str(exc):
+            raise SystemExit(
+                f"error: a forge account named {name!r} already exists; "
+                "name this one with --forge-account"
+            ) from exc
+        raise
+    if not ns.json:
+        _print(f"added forge account {name} ({forge}, {web_url})")
+    return forge, True
+
+
 def _cmd_connect(ns: argparse.Namespace) -> None:
     test_command = "" if ns.no_tests else ns.test_command
     setup_command = ns.setup_command
     interactive = not (ns.json or ns.yes) and sys.stdin.isatty() and sys.stdout.isatty()
+    forge, added = _settle_forge(ns, interactive=interactive)
     if interactive and test_command is None and setup_command is None:
         test_command, setup_command = _choose_interactively(ns.path)
     worktrees = False if ns.in_place else None
-    result = asyncio.run(
-        client.ensure_repo(
-            ns.path, test_command=test_command, setup_command=setup_command, worktrees=worktrees
+    try:
+        result = asyncio.run(
+            client.ensure_repo(
+                ns.path,
+                test_command=test_command,
+                setup_command=setup_command,
+                worktrees=worktrees,
+                forge=forge,
+                forge_account=ns.forge_account,
+            )
         )
-    )
+    except ValueError:
+        if added:
+            _print("the forge account stays in forges.yaml; connecting again finds it")
+        raise
     if result.get("already_connected"):
         result = _connect_again(
             result, test_command, setup_command, ask=interactive, say=not ns.json
@@ -596,6 +674,22 @@ def _add_repo(subs, common: argparse.ArgumentParser) -> None:
         "--no-tests",
         action="store_true",
         help='the repo has no tests to run (saves test_command: "", and the repo enabled)',
+    )
+    connect.add_argument(
+        "--forge",
+        choices=("github", "gitlab"),
+        help="which forge the host is, when its name does not say",
+    )
+    connect.add_argument(
+        "--web-url",
+        metavar="URL",
+        help="with --forge: the forge's web address, saved as an account",
+    )
+    connect.add_argument(
+        "--api-url", metavar="URL", help="with --web-url: the forge's API address, if not derived"
+    )
+    connect.add_argument(
+        "--forge-account", metavar="NAME", help="the forge account to name (default: the host)"
     )
     connect.add_argument(
         "--in-place",

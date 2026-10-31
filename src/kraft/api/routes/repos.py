@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from itertools import count
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlsplit
 
 import yaml
 from fastapi import HTTPException, Request
@@ -73,6 +74,8 @@ class ProbeBody(BaseModel):
     #: The root's test command, as `POST /repos` takes it: the proposal is
     #: what connecting with it would save.
     test_command: str | None = None
+    #: The forge the caller already knows (connect's `--forge`): nothing to ask.
+    forge: str | None = None
 
 
 #: How long probing all of a connect's submodules may take, together.
@@ -108,6 +111,30 @@ def _probe_children(
             out[rel] = config_mod.probe_repo(where, templates_dir=templates_dir, timeout=left)
         except config_mod.ConfigError:
             continue
+    return out
+
+
+def _told_forge(
+    forges_file: forges_mod.ForgesFile | None, probed: dict, forge: str | None = None
+) -> dict:
+    """The probe with its forge settled. A host that names no forge takes the one
+    of its `default_for_host` account; with no such account, `needs_forge` says
+    connect must ask. A host that names its forge is left as it is."""
+    remote = config_mod.git_read(
+        Path(probed["path"]), "remote", "get-url", "origin", expected_failure=True
+    )
+    host = forges_mod.remote_host(remote or "")
+    path = forges_mod.remote_path(remote or "")
+    out = {**probed, "remote_host": host, "remote_path": path, "needs_forge": False}
+    if probed["forge"] is not None or not host:
+        return out
+    found = forges_mod.default_account(forges_file or forges_mod.ForgesFile(), host)
+    if forge is None and found is None:
+        out["needs_forge"] = True
+        return out
+    prefix = urlsplit(found[1].web_url).path.strip("/") if found else ""
+    out["forge"] = forge or found[1].forge
+    out["project"] = path.removeprefix(prefix + "/") if prefix and path else path
     return out
 
 
@@ -488,7 +515,8 @@ async def probe_repo(body: ProbeBody, request: Request):
     st = request.app.state
     if not body.detect:  # what needs no detector table is quick, and never queued
         try:
-            return await asyncio.to_thread(config_mod.probe_repo, body.path, detect=False)
+            facts = await asyncio.to_thread(config_mod.probe_repo, body.path, detect=False)
+            return await asyncio.to_thread(_told_forge, st.forges, facts, body.forge)
         except config_mod.ConfigError as exc:
             raise HTTPException(400, str(exc)) from exc
     # Each probe is a process of up to 2 GB for up to two minutes: a few at
@@ -499,12 +527,13 @@ async def probe_repo(body: ProbeBody, request: Request):
         raise HTTPException(429, "Kraft is already probing other repositories; try again shortly")
     async with st.probing:
         try:
-            return await asyncio.to_thread(
+            probed = await asyncio.to_thread(
                 config_mod.probe_repo,
                 body.path,
                 templates_dir=st.templates_dir,
                 test_command=body.test_command,
             )
+            return await asyncio.to_thread(_told_forge, st.forges, probed, body.forge)
         except config_mod.ConfigError as exc:
             raise HTTPException(400, str(exc)) from exc
 
@@ -566,6 +595,12 @@ async def _add_repo(body: RepoBody, st) -> dict:
         child_probes = await asyncio.to_thread(
             _probe_children, probed["path"], probed["submodules"], templates_dir
         )
+        # A host that names no forge takes its default account's: never asked here.
+        probed = await asyncio.to_thread(_told_forge, st.forges, probed, body.forge)
+        child_probes = {
+            rel: await asyncio.to_thread(_told_forge, st.forges, child)
+            for rel, child in child_probes.items()
+        }
     except config_mod.ConfigError as exc:
         raise HTTPException(400, str(exc)) from exc
     # From here to the save, nothing awaits: PATCH and DELETE save without the
