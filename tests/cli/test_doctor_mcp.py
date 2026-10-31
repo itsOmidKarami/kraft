@@ -122,27 +122,45 @@ def test_mcp_check_only_warns_when_every_connected_repo_is_sandboxed(app, tmp_pa
 
 
 @pytest.mark.parametrize(
-    ("server_up", "present", "ok", "warn"),
+    ("server_up", "present", "repo", "ok", "warn"),
     [
         # Its workers get the server's PATH: the server's own answer decides.
-        pytest.param(True, False, False, False, id="server-says-not-on-its-path"),
+        pytest.param(True, False, None, False, False, id="server-says-not-on-its-path"),
         # As with nothing registered: no launch here needs it until a chain does.
-        pytest.param(True, None, True, True, id="server-says-not-on-its-path-none-needs-it"),
+        pytest.param(True, None, None, True, True, id="server-says-not-on-its-path-none-needs-it"),
+        # A repo's own PATH or own entry may still start it for that repo's workers.
+        pytest.param(True, False, "env-path", True, True, id="a-repo-sets-its-own-path"),
+        pytest.param(True, False, "own-entry", True, True, id="a-repo-registers-its-own"),
         # Present with the server up is `test_mcp_check_passes_on_a_user_scope_registration`.
         # This shell's PATH may not be the server's, a service's above all: only a warning.
-        pytest.param(False, False, True, True, id="no-server-not-on-this-path"),
-        pytest.param(False, True, True, False, id="no-server-on-this-path"),
+        pytest.param(False, False, None, True, True, id="no-server-not-on-this-path"),
+        pytest.param(False, True, None, True, False, id="no-server-on-this-path"),
     ],
 )
 def test_mcp_check_says_when_claude_cannot_start_the_registered_server(
-    request, tmp_path, server_up, present, ok, warn
+    request, tmp_path, server_up, present, repo, ok, warn
 ):
     """Registered, but by a command Claude cannot find: the server never
-    starts, and every unsandboxed Claude worker is refused at launch."""
+    starts, and an unsandboxed Claude worker is refused at launch -- unless
+    its repo's own PATH or own `kraft` entry starts it."""
     if server_up:
         request.getfixturevalue("app")
     if present is None:
         _codex_only()
+    if repo is not None:
+        checkout = make_repo(tmp_path)
+        asyncio.run(client.ensure_repo(str(checkout)))
+    if repo == "env-path":
+        repos = _templates() / "repos.yaml"
+        data = yaml.safe_load(repos.read_text())
+        for entry in data["repos"] if isinstance(data, dict) else data:
+            entry["env"] = {"PATH": str(tmp_path / "bin")}
+        repos.write_text(yaml.safe_dump(data))
+    elif repo == "own-entry":
+        own = {"mcpServers": {"kraft": {"command": sys.executable}}}
+        write(checkout, ".mcp.json", json.dumps(own))
+        git(checkout, "add", ".mcp.json")
+        git(checkout, "commit", "-qm", "mcp")
     command = sys.executable if present else str(tmp_path / "nowhere" / "kraft")
     registered = Path.home() / ".claude.json"
     registered.write_text(json.dumps({"mcpServers": {"kraft": {"command": command}}}))
@@ -152,4 +170,5 @@ def test_mcp_check_says_when_claude_cannot_start_the_registered_server(
         assert repr(command) in check["detail"] and str(registered) in check["detail"]
         assert "absolute path" in check["detail"]
         assert ("the server's may differ" in check["detail"]) is (not server_up)
+        assert ("its own PATH" in check["detail"]) is (repo is not None)
         assert ("before one does" in check["detail"]) is (present is None)

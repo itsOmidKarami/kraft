@@ -168,8 +168,9 @@ async def health(request: Request):
         "pid": os.getpid(),
         # public: how long this process has been up; the About page draws it next to the pid.
         "uptime_s": int(time.monotonic() - st.started_at),
-        # public: a yes or no, never the command or the PATH. False: every
-        # unsandboxed Claude worker is refused at launch (`adapters.agent`).
+        # public: a yes or no, never the command or the PATH. False: an unsandboxed
+        # Claude worker is refused at launch (`adapters.agent`) unless its repo's own
+        # PATH or `kraft` entry starts the server.
         "mcp_command_on_path": await asyncio.to_thread(_mcp_command_on_path),
         # public: the login screen's "stay signed in · N days" needs this
         # before a session exists to ask `/access` for it.

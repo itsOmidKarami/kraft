@@ -1021,7 +1021,14 @@ async def _mcp_check(health: dict | None) -> dict:
         needed = _launches_direct_asker(entries)
         # None from a server older than the field.
         if health.get("mcp_command_on_path") is False and found is not None:
-            return _cannot_start(found, asking, server_up=True, needed=needed)
+            # The server answers for user and plugin scope: a repo's own PATH, or its
+            # own entry, may still start it for that repo's workers.
+            ours = {where for where, _ in found[2]}
+            elsewhere = any("PATH" in e.env for e in entries) or any(
+                tool is not None and {where for where, _ in tool[2]} - ours
+                for tool in per_repo.values()
+            )
+            return _cannot_start(found, asking, server_up=True, needed=needed, elsewhere=elsewhere)
         # Every repo refused and nothing at user scope is no registration at
         # all: it falls through to the same failure as no repo connected,
         # since the first such worker anywhere is refused -- when the chains
@@ -1065,10 +1072,13 @@ async def _mcp_check(health: dict | None) -> dict:
     )
 
 
-def _cannot_start(found: tuple, asking: list[str], *, server_up: bool, needed: bool) -> dict:
+def _cannot_start(
+    found: tuple, asking: list[str], *, server_up: bool, needed: bool, elsewhere: bool = False
+) -> dict:
     """The `mcp server` row for a registration whose command is not on the
-    PATH workers get: a failure when the server says so and a launch needs
-    it, else a warning -- this shell's PATH may not be the server's."""
+    PATH workers get: a failure when the server says so, a launch needs it
+    and no repo may start it its own way (`elsewhere`), else a warning --
+    this shell's PATH may not be the server's."""
     path = "the server's PATH" if server_up else "this shell's PATH (the server's may differ)"
     detail = (
         f"the kraft MCP server runs {registration.named(found[2])}, which is not on "
@@ -1079,9 +1089,14 @@ def _cannot_start(found: tuple, asking: list[str], *, server_up: bool, needed: b
             f": no chain launches an unsandboxed task on harness {' or '.join(asking)} here, "
             f"which is the launch that needs it; {registration.PATH_FIX} before one does"
         )
+    elif elsewhere:
+        detail += (
+            " and unsandboxed Claude workers are refused, unless their repo sets its own PATH "
+            f"in `env:` or registers its own `kraft` entry that runs; {registration.PATH_FIX}"
+        )
     else:
         detail += f" and unsandboxed Claude workers are refused; {registration.PATH_FIX}"
-    fails = server_up and needed
+    fails = server_up and needed and not elsewhere
     return _check("mcp server", not fails, f"{detail} ({_MCP_SCOPE})", warn=not fails)
 
 
