@@ -1,7 +1,8 @@
 """`GitHubApi` and `GhCli` run one operation against the same `gh` stub routes and must return
 the same result and send the same requests (`GhOverHttp` renders the HTTP the API backend sent
 as the argv gh would have had). The body is `parity.assert_alike`, shared with test_forge_parity.py,
-which also enforces that every `Forge` method but `push` has a row in one of the two tables."""
+which also enforces that each of the two tables, on its own, has a row for every `Forge`
+method but `push`."""
 
 from __future__ import annotations
 

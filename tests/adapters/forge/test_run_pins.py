@@ -162,7 +162,7 @@ async def test_the_first_forge_node_pins_and_a_broken_pin_stops_the_item(
         assert result == ("config_error", "config_error")
         assert stop in run_forge.log(sid)
         if "forge_account" not in stop:
-            assert "a person's" in run_forge.log(sid) and "kraft item retry" in run_forge.log(sid)
+            assert "a person's" in run_forge.log(sid) and "`kraft item retry`" in run_forge.log(sid)
     assert database.read(lambda c: store.forge_pins(c, "w1")) == pins_after
 
 
@@ -186,7 +186,7 @@ async def test_the_first_forge_node_pins_and_a_broken_pin_stops_the_item(
         pytest.param(
             (None, None, "bad yaml"),
             None,
-            "forges.yaml does not load (bad yaml); fix it, then a person's kraft item retry",
+            "forges.yaml does not load (bad yaml); fix it, then a person's `kraft item retry`",
             {},
             id="unreadable-file-stops-unpinned-host-default",
         ),

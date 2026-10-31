@@ -234,9 +234,10 @@ class CliOverHttp:
     call log holds the same line for both backends and one route table serves both.
     Test-only and lossy in one place: a GET query value that is all digits or
     true/false is a typed `-F`, so a string of digits would read as an integer.
-    `prefix` is the API's root path, taken off before the path is rendered."""
+    `prefix` is the API's root path, taken off before the path is rendered (a subclass
+    that answers on its own needs none)."""
 
-    def __init__(self, cli: str, prefix: str):
+    def __init__(self, cli: str, prefix: str = ""):
         self.cli, self.prefix = cli, prefix
         self.transport = httpx.MockTransport(self._answer)
 
@@ -293,7 +294,7 @@ class GhOverHttp(CliOverHttp):
     must carry no `authorization`, is answered with what the stub says for the log."""
 
     def __init__(self, owner: str = "o", repo: str = "r"):
-        super().__init__("gh", "/")
+        super().__init__("gh")  # its own `_answer` and `_path` take the API root off
         self.owner, self.repo = owner, repo
         self._logs: dict[str, list[str]] = {}
 

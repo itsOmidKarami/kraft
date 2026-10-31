@@ -12,6 +12,7 @@ import httpx
 import pytest
 from support.api_accounts import LEAK_PLACES, answers, checkout, logged_push_repo
 from support.api_accounts import account as accounts
+from support.harness import git
 
 from kraft.adapters.forge import credentials
 from kraft.adapters.forge.github_api import GitHubApi
@@ -115,24 +116,27 @@ def rest(path, method="GET", **fields):
             {"labels": ["{owner}"]},
             id="list-item-not-filled",
         ),
+        pytest.param(  # no remote at all: a call with no placeholder reads no project
+            "https://github.com",
+            rest("rate_limit"),
+            "GET",
+            "api.github.com",
+            "/rate_limit",
+            None,
+            id="no-placeholder-reads-no-project",
+        ),
     ],
 )
 async def test_the_repository_fills_owner_and_repo_and_nothing_else(
     tmp_path, seen, web, call, method, host, raw, sent
 ):
-    repo = checkout(tmp_path, f"{web}/o/r.git")
+    repo = checkout(tmp_path, None if raw == "/rate_limit" else f"{web}/o/r.git")
     await call(GitHubApi("corp-gh", account(web), http=seen.transport)._transport(repo))
     (req,) = seen.requests
     assert (req.method, req.url.host) == (method, host)
     assert req.url.raw_path.decode().split("?")[0] == raw
     body = json.loads(req.content) if req.content else {}
     assert not sent or all(body.get(k) == v for k, v in sent.items())
-
-
-async def test_a_call_with_no_placeholder_reads_no_project(tmp_path, seen):
-    api = GitHubApi("corp-gh", account(), http=seen.transport)
-    await api._transport(checkout(tmp_path)).rest("GET", "rate_limit")
-    assert len(seen.requests) == 1
 
 
 @pytest.mark.parametrize(
@@ -147,6 +151,12 @@ async def test_a_call_with_no_placeholder_reads_no_project(tmp_path, seen):
         ),
         pytest.param(
             "https://github.com/o/...git", "can read a GitHub repository from", id="dot-name"
+        ),
+        pytest.param(
+            "https://github.com/./r.git", "can read a GitHub repository from", id="single-dot-owner"
+        ),
+        pytest.param(
+            "https://github.com/o/..git", "can read a GitHub repository from", id="single-dot-name"
         ),
         pytest.param(
             "https://oauth2:ghp_SECRET0000@evil.example/o/r.git",
@@ -180,8 +190,6 @@ async def test_a_repository_it_cannot_name_stops_without_quoting_the_remote(
     ],
 )
 async def test_the_repository_comes_from_the_push_url(tmp_path, seen, remote, pushurl, raw):
-    from support.harness import git
-
     repo = checkout(tmp_path, remote)
     if pushurl:
         git(repo, "config", "remote.origin.pushurl", pushurl)
@@ -213,12 +221,12 @@ async def test_a_401_re_reads_the_token_once(tmp_path, mock_http, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "call, replies, status, reason, sso",
+    "call, reply, status, reason, sso",
     [
-        pytest.param(rest("repos/{owner}/{repo}"), [404], 404, None, "", id="http-404"),
+        pytest.param(rest("repos/{owner}/{repo}"), 404, 404, None, "", id="http-404"),
         pytest.param(
             lambda t: t.graphql("query", owner_vars()),
-            [(200, {"errors": [{"type": "NOT_FOUND", "message": "gone"}]})],
+            (200, {"errors": [{"type": "NOT_FOUND", "message": "gone"}]}),
             200,
             "not_found",
             "",
@@ -226,7 +234,7 @@ async def test_a_401_re_reads_the_token_once(tmp_path, mock_http, monkeypatch):
         ),
         pytest.param(
             rest("repos/{owner}/{repo}"),
-            [(403, {"message": "Resource protected by organization SAML enforcement."})],
+            (403, {"message": "Resource protected by organization SAML enforcement."}),
             403,
             "forbidden",
             SSO,
@@ -235,7 +243,7 @@ async def test_a_401_re_reads_the_token_once(tmp_path, mock_http, monkeypatch):
         # Most pull request reads are GraphQL, which answers SSO with HTTP 200.
         pytest.param(
             lambda t: t.graphql("query", owner_vars()),
-            [(200, {"errors": [{"type": "FORBIDDEN", "message": "SAML enforcement"}]})],
+            (200, {"errors": [{"type": "FORBIDDEN", "message": "SAML enforcement"}]}),
             200,
             "forbidden",
             SSO,
@@ -244,11 +252,11 @@ async def test_a_401_re_reads_the_token_once(tmp_path, mock_http, monkeypatch):
     ],
 )
 async def test_every_error_names_its_account_and_source(
-    tmp_path, mock_http, monkeypatch, call, replies, status, reason, sso
+    tmp_path, mock_http, monkeypatch, call, reply, status, reason, sso
 ):
     monkeypatch.setattr(credentials, "_TAKEN", {"CORP_GH": TOK})
     headers = {"x-github-sso": f"required; url={SSO}"} if sso else None
-    status_, body = replies[0] if isinstance(replies[0], tuple) else (replies[0], {"message": "no"})
+    status_, body = reply if isinstance(reply, tuple) else (reply, {"message": "no"})
     m = mock_http(handler=lambda r: httpx.Response(status_, json=body, headers=headers))
     api = GitHubApi("corp-gh", account(), http=m.transport)
     with pytest.raises(ForgeError) as err:
@@ -340,6 +348,12 @@ async def test_github_api_reads_this_repo(tmp_path, monkeypatch):
     api = GitHubApi("e2e-gh", acct)
 
     assert "release::minor" in [label.name for label in await api.labels(repo=repo)]
+    named = await api._gql(
+        repo,
+        "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){nameWithOwner}}",
+        owner_vars(),
+    )
+    assert named["repository"]["nameWithOwner"].lower() == slug.lower()
     merged = await api.merged_mrs(repo=repo, base="main", limit=5)
     assert merged
     # By number: a later pull request can reuse the head branch, so no `find_mr` on it.

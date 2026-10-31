@@ -294,11 +294,13 @@ def test_an_api_account_item_reads_through_its_account(
         ("gitlab", {"forge": "github"}, "now says forge: github, was gitlab"),
         ("github", {"client": "cli"}, "now says client: cli, was client: api"),
         ("gitlab", {"client": "cli"}, "now says client: cli, was client: api"),
+        ("github", {"forge": "gitlab"}, "now says forge: gitlab, was github"),
     ],
     ids=[
         "gitlab-pin-account-now-github",
         "github-pin-account-now-cli",
         "gitlab-pin-account-now-cli",
+        "github-pin-account-now-gitlab",
     ],
 )
 def test_a_pin_is_not_read_through_an_account_edited_under_it(

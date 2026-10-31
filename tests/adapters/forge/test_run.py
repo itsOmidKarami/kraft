@@ -12,6 +12,7 @@ import pytest
 from support.harness import make_repo, own_files
 
 from kraft.adapters import forge
+from kraft.forges import ForgeAccount
 
 from . import api_outputs, outputs
 from .nodes import back_half
@@ -57,12 +58,10 @@ def test_resolve_rejects_what_a_name_cannot_build(name, says):
 
 
 @pytest.mark.parametrize(
-    "account_forge, cls", [("github", forge.GitHubApi), ("gitlab", forge.GitLabApi)]
+    "kind, cls", [("github", forge.GitHubApi), ("gitlab", forge.GitLabApi)], ids=["gh", "gl"]
 )
-def test_api_forge_builds_the_backend_of_the_accounts_forge(account_forge, cls):
-    from kraft.forges import ForgeAccount
-
-    acct = ForgeAccount(forge=account_forge, web_url="https://h.example", client="api")
+def test_api_forge_builds_the_backend_of_the_accounts_forge(kind, cls):
+    acct = ForgeAccount(forge=kind, web_url="https://h.example", client="api")
     assert type(forge.api_forge("a", acct)) is cls
 
 

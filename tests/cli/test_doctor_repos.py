@@ -285,7 +285,7 @@ _NO_PROJECT = {"project": "", "visible": False, "detail": "origin names no proje
     ids=[
         "gitlab-api-sees-the-project",
         "gitlab-api-cannot-see-it",
-        "sso-link-reaches-the-row",
+        "gitlab-sso-link-reaches-the-row",
         "gitlab-api-no-project-names-the-reason",
         "gitlab-api-accounts-unreadable",
         "gitlab-api-not-probed",

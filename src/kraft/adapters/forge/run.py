@@ -279,7 +279,7 @@ async def _pin_forge_accounts(
                 )
             raise ForgeError(
                 f"forges.yaml does not load ({forges_error}); "
-                "fix it, then a person's kraft item retry"
+                "fix it, then a person's `kraft item retry`"
             )
         named = entry.forge_account
         if pin is not None and pin["account"] is not None:
@@ -295,7 +295,7 @@ async def _pin_forge_accounts(
                     now, then = ("api", "cli") if acct.client == "api" else ("cli", "api")
                     raise ForgeError(
                         f"forge account {pin['account']} now says client: {now}, was "
-                        f"client: {then}; a person's kraft item retry re-pins to what "
+                        f"client: {then}; a person's `kraft item retry` re-pins to what "
                         "is configured now"
                     )
                 raise ForgeError(
@@ -351,11 +351,11 @@ def _pinned_api(pin, forges, forges_error=None) -> tuple[str, forges_mod.ForgeAc
     if forges is None:
         raise ForgeError(
             f"forges.yaml does not load ({forges_error or 'unreadable'}); "
-            "fix it, then a person's kraft item retry"
+            "fix it, then a person's `kraft item retry`"
         )
     if name not in forges.accounts:
         raise ForgeError(
-            f"forge account {name} was removed; a person's kraft item retry "
+            f"forge account {name} was removed; a person's `kraft item retry` "
             "re-pins to what is configured now"
         )
     acct = forges.accounts[name]
@@ -364,12 +364,12 @@ def _pinned_api(pin, forges, forges_error=None) -> tuple[str, forges_mod.ForgeAc
     if acct.forge != was:
         raise ForgeError(
             f"forge account {name} now says forge: {acct.forge}, was {was}; "
-            "a person's kraft item retry re-pins to what is configured now"
+            "a person's `kraft item retry` re-pins to what is configured now"
         )
     if acct.client != "api":
         raise ForgeError(
             f"forge account {name} now says client: cli, was client: api; "
-            "a person's kraft item retry re-pins to what is configured now"
+            "a person's `kraft item retry` re-pins to what is configured now"
         )
     return name, acct
 
@@ -388,7 +388,8 @@ async def api_account_for(
         return _pinned_api(pin, forges, forges_error)
     if entry is not None and forges is None and forges_error:
         raise ForgeError(
-            f"forges.yaml does not load ({forges_error}); fix it, then a person's kraft item retry"
+            f"forges.yaml does not load ({forges_error}); "
+            "fix it, then a person's `kraft item retry`"
         )
     if entry is None or forges is None:
         return None

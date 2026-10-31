@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import ssl
 import subprocess
 
 import certifi
 import httpx
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import NameOID
 
 from kraft import redact
 from kraft.adapters.forge import credentials, http
@@ -132,16 +137,20 @@ async def test_a_redirect_is_followed_only_within_the_origin(mock_http, method, 
 
 
 _LOGS = "repos/o/r/actions/jobs/1/logs"
-_BLOB = "https://blob.example/l/1?sig=SECRETSIG"
+_BLOB = "https://blob.corp.example/l/1?sig=SECRETSIG"
+# A GHES account: its API host and the blob host share `corp.example`, which a cookie can span.
+_COOKIE_SCOPE = "corp.example; Path=/"
+_GHES = acct(web="https://ghe.corp.example")
 
 
 def _log_handler(blob, location=_BLOB):
     """The API answers a redirect to `location`; the blob host answers `blob`."""
 
     def handler(req):
-        if req.url.host == "api.github.com":
+        if req.url.host == "ghe.corp.example":
             return httpx.Response(
-                302, headers={"Location": location, "Set-Cookie": "sess=abc; Domain=example"}
+                302,
+                headers={"Location": location, "Set-Cookie": f"sess=abc; Domain={_COOKIE_SCOPE}"},
             )
         if isinstance(blob, BaseException):
             raise blob
@@ -155,10 +164,10 @@ def _log_handler(blob, location=_BLOB):
     [
         pytest.param(_BLOB, 200, 2, None, None, None, id="followed-without-auth"),
         pytest.param(
-            "http://blob.example/l/1?sig=SECRETSIG",
+            "http://blob.corp.example/l/1?sig=SECRETSIG",
             200,
             1,
-            "http://blob.example:443, not followed",
+            "http://blob.corp.example:443, not followed",
             "unreachable",
             None,
             id="http-refused",
@@ -176,7 +185,7 @@ def _log_handler(blob, location=_BLOB):
             _BLOB,
             403,
             2,
-            "https://blob.example:443 answered HTTP 403",
+            "https://blob.corp.example:443 answered HTTP 403",
             "unreachable",
             403,
             id="blob-403-is-not-a-token-stop",
@@ -185,10 +194,19 @@ def _log_handler(blob, location=_BLOB):
             _BLOB,
             httpx.ConnectError("[SSL: CERTIFICATE_VERIFY_FAILED] self-signed"),
             2,
-            "https://blob.example:443 failed TLS verification",
+            "https://blob.corp.example:443 failed TLS verification",
             "unreachable",
             None,
             id="blob-tls-names-the-blob-origin",
+        ),
+        pytest.param(
+            _BLOB,
+            TimeoutError(),
+            2,
+            "from https://blob.corp.example:443 did not answer within the time left",
+            "unreachable",
+            None,
+            id="blob-timeout-says-the-budget-is-shared",
         ),
     ],
 )
@@ -197,21 +215,22 @@ async def test_a_log_download_follows_one_redirect_without_the_token(
 ):
     m = mock_http(handler=_log_handler(blob, location))
     if says is None:
-        got = await tr(m).rest("GET", _LOGS, download=True)
+        got = await tr(m, _GHES).rest("GET", _LOGS, download=True)
         assert got.text == "the log"
         hop = m.requests[1]
-        assert hop.url.host == "blob.example"
+        assert hop.url.host == "blob.corp.example"
         assert "authorization" not in hop.headers and "x-github-api-version" not in hop.headers
         assert not any(TOK in v for v in hop.headers.values())
         assert "cookie" not in hop.headers
     else:
         with pytest.raises(ForgeError) as err:
-            await tr(m).rest("GET", _LOGS, download=True)
+            await tr(m, _GHES).rest("GET", _LOGS, download=True)
         assert says in str(err.value)
         assert (err.value.reason, err.value.status) == (reason, status)
         assert "SECRETSIG" not in str(err.value) and "S2" not in str(err.value)
     assert len(m.requests) == sent
     assert m.requests[0].headers["authorization"] == f"Bearer {TOK}"
+    assert m.requests[0].url.host == "ghe.corp.example"
 
 
 @pytest.mark.parametrize(
@@ -261,7 +280,7 @@ async def test_the_download_hop_trusts_the_system_and_the_accounts_ca(mock_http,
     monkeypatch.setattr(
         http, "ssl_context", lambda account, **kw: asked.append(kw) or real(account, **kw)
     )
-    await tr(mock_http(handler=_log_handler(200))).rest("GET", _LOGS, download=True)
+    await tr(mock_http(handler=_log_handler(200)), _GHES).rest("GET", _LOGS, download=True)
     assert asked == [{}, {"plus_system": True}]
 
 
@@ -271,12 +290,30 @@ async def test_the_download_hop_trusts_the_system_and_the_accounts_ca(mock_http,
     ids=["ca-file-alone", "download-hop-adds-the-system-store"],
 )
 def test_the_download_hops_trust_holds_the_ca_and_more(tmp_path, plus_system, more_than_ca_file):
-    pem = certifi.contents().split("-----END CERTIFICATE-----")[0] + "-----END CERTIFICATE-----\n"
-    ca = tmp_path / "one.pem"
-    ca.write_text(pem)
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "kraft test ca")])
+    now = datetime.datetime.now(datetime.UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(minutes=5))
+        .not_valid_after(now + datetime.timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    ca = tmp_path / "ca.pem"
+    ca.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
     ctx = http.ssl_context(acct(ca_file=str(ca)), plus_system=plus_system)
-    assert (ctx.cert_store_stats()["x509_ca"] > 1) is more_than_ca_file
-    assert ctx.cert_store_stats()["x509_ca"] >= 1
+    assert ((("commonName", "kraft test ca"),),) in [c["subject"] for c in ctx.get_ca_certs()]
+    base = ssl.create_default_context()
+    if base.cert_store_stats()["x509_ca"] == 0:  # the fallback ssl_context makes
+        base.load_verify_locations(certifi.where())
+    assert ctx.cert_store_stats()["x509_ca"] == (
+        base.cert_store_stats()["x509_ca"] + 1 if more_than_ca_file else 1
+    )
 
 
 async def _never(req):

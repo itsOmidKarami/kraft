@@ -262,7 +262,7 @@ class HttpTransport:
                     await resp.aclose()
         except TimeoutError:
             raise ForgeError(
-                f"{label}: the log download from {shown} did not answer in {self.timeout:g}s",
+                f"{label}: the log download from {shown} did not answer within the time left",
                 reason="unreachable",
             ) from None
         except httpx.HTTPError as exc:

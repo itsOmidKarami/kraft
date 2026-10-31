@@ -23,7 +23,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Least-privilege default for every job below that doesn't declare its own
-# block (only `test` does, for its PR-comment and coverage-push steps).
+# block (`test-report`, `e2e-cli` and `removals-declared` do, each for what it needs).
 permissions:
   contents: read
 
