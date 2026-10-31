@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_e76ffebab55e5b0a_workers_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.0">coverage.py v7.17.0</a>,
-            created at 2026-10-31 19:08 +0000
+            created at 2026-10-31 20:03 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -624,7 +624,7 @@
     <p class="run"><span class="n"><a id="t542" href="#t542">542</a></span><span class="t">    <span class="nam">waits</span> <span class="op">=</span> <span class="nam">st</span><span class="op">.</span><span class="nam">db</span><span class="op">.</span><span class="nam">read</span><span class="op">(</span><span class="key">lambda</span> <span class="nam">c</span><span class="op">:</span> <span class="nam">store</span><span class="op">.</span><span class="nam">any_unfinished</span><span class="op">(</span><span class="nam">c</span><span class="op">,</span> <span class="nam">depends_on</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t543" href="#t543">543</a></span><span class="t">    <span class="nam">start_now</span> <span class="op">=</span> <span class="nam">autostart</span> <span class="key">and</span> <span class="key">not</span> <span class="nam">waits</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t544" href="#t544">544</a></span><span class="t">    <span class="nam">duplicates</span> <span class="op">=</span> <span class="nam">st</span><span class="op">.</span><span class="nam">db</span><span class="op">.</span><span class="nam">read</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t545" href="#t545">545</a></span><span class="t">        <span class="key">lambda</span> <span class="nam">c</span><span class="op">:</span> <span class="nam">store</span><span class="op">.</span><span class="nam">open_duplicates</span><span class="op">(</span><span class="nam">c</span><span class="op">,</span> <span class="nam">body</span><span class="op">.</span><span class="nam">repo</span><span class="op">,</span> <span class="nam">body</span><span class="op">.</span><span class="nam">title</span><span class="op">,</span> <span class="nam">body</span><span class="op">.</span><span class="nam">implements_beads</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t545" href="#t545">545</a></span><span class="t">        <span class="key">lambda</span> <span class="nam">c</span><span class="op">:</span> <span class="nam">store</span><span class="op">.</span><span class="nam">open_duplicates</span><span class="op">(</span><span class="nam">c</span><span class="op">,</span> <span class="nam">repo_entry</span><span class="op">.</span><span class="nam">path</span><span class="op">,</span> <span class="nam">body</span><span class="op">.</span><span class="nam">title</span><span class="op">,</span> <span class="nam">body</span><span class="op">.</span><span class="nam">implements_beads</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t546" href="#t546">546</a></span><span class="t">    <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t547" href="#t547">547</a></span><span class="t">    <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t548" href="#t548">548</a></span><span class="t">        <span class="nam">wid</span> <span class="op">=</span> <span class="key">await</span> <span class="nam">executor</span><span class="op">.</span><span class="nam">intake</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
@@ -632,7 +632,7 @@
     <p class="run run2"><span class="n"><a id="t550" href="#t550">550</a></span><span class="t">            <span class="nam">st</span><span class="op">.</span><span class="nam">run_dirs</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t551" href="#t551">551</a></span><span class="t">            <span class="nam">title</span><span class="op">=</span><span class="nam">body</span><span class="op">.</span><span class="nam">title</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t552" href="#t552">552</a></span><span class="t">            <span class="nam">description</span><span class="op">=</span><span class="nam">body</span><span class="op">.</span><span class="nam">description</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t553" href="#t553">553</a></span><span class="t">            <span class="nam">repo</span><span class="op">=</span><span class="nam">body</span><span class="op">.</span><span class="nam">repo</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t553" href="#t553">553</a></span><span class="t">            <span class="nam">repo</span><span class="op">=</span><span class="nam">repo_entry</span><span class="op">.</span><span class="nam">path</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t554" href="#t554">554</a></span><span class="t">            <span class="nam">chain</span><span class="op">=</span><span class="nam">chain</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t555" href="#t555">555</a></span><span class="t">            <span class="nam">effective_policy</span><span class="op">=</span><span class="nam">policy</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t556" href="#t556">556</a></span><span class="t">            <span class="com"># `chain_template_for`&#x27;s value, not the resolved template&#x27;s id</span>&nbsp;</span><span class="r"></span></p>
@@ -1606,7 +1606,7 @@
             <a class="nav" href="z_e76ffebab55e5b0a_workers_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.0">coverage.py v7.17.0</a>,
-            created at 2026-10-31 19:08 +0000
+            created at 2026-10-31 20:03 +0000
         </p>
     </div>
 </footer>
