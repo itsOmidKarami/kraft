@@ -101,10 +101,13 @@ class _AccountTransport:
         *,
         fields: Mapping[str, Field] | None = None,
         tail: bool = False,
+        download: bool = False,
     ) -> ApiResponse:
         if _ID.search(path):
             path = _ID.sub(quote(await self.api._project(self.repo), safe=""), path)
-        return await self._send(lambda http: http.rest(method, path, fields=fields, tail=tail))
+        return await self._send(
+            lambda http: http.rest(method, path, fields=fields, tail=tail, download=download)
+        )
 
     async def graphql(self, query: str, variables: Mapping[str, Field] | None = None) -> dict:
         return await self._send(lambda http: http.graphql(query, variables))

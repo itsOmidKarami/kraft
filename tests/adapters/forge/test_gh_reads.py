@@ -121,7 +121,7 @@ _PAGE = [rest_label(f"l{i}") for i in range(100)]
                     }
                 )
             },
-            [f"api {_RUNS}/555/jobs?per_page=100 -X GET -i"],
+            [f"api {_RUNS}/555/jobs -X GET -i -F per_page=100 -F page=1"],
             (
                 Job(
                     "20",
@@ -174,6 +174,33 @@ _PAGE = [rest_label(f"l{i}") for i in range(100)]
                 ),
             ),
             id="merged",
+        ),
+        pytest.param(
+            lambda g, r: g.jobs(repo=r, pipeline_id="555"),
+            {
+                "api*actions/runs/555/jobs*-F page=1": json.dumps(
+                    {"jobs": [job(n, f"j{n}", "success") for n in range(100)]}
+                ),
+                "api*actions/runs/555/jobs*-F page=2": json.dumps(
+                    {"jobs": [job(n, f"j{n}", "success") for n in range(100, 103)]}
+                ),
+            },
+            [
+                f"api {_RUNS}/555/jobs -X GET -i -F per_page=100 -F page=1",
+                f"api {_RUNS}/555/jobs -X GET -i -F per_page=100 -F page=2",
+            ],
+            tuple(
+                Job(
+                    str(n),
+                    f"j{n}",
+                    "",
+                    "success",
+                    None,
+                    f"https://github.com/o/r/actions/runs/555/job/{n}",
+                )
+                for n in range(103)
+            ),
+            id="jobs-two-pages",
         ),
         pytest.param(
             lambda g, r: g.labels(repo=r),

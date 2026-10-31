@@ -56,6 +56,7 @@ class Transport(Protocol):
         *,
         fields: Mapping[str, Field] | None = None,
         tail: bool = False,
+        download: bool = False,
     ) -> ApiResponse: ...
 
     async def graphql(self, query: str, variables: Mapping[str, Field] | None = None) -> dict: ...
@@ -231,6 +232,7 @@ class CliTransport:
         *,
         fields: Mapping[str, Field] | None = None,
         tail: bool = False,  # the CLI hands over the whole body; only HTTP windows it
+        download: bool = False,  # gh follows a log's redirect itself and drops the token
     ) -> ApiResponse:
         args = [path, "-X", method, "-i", *_flags(fields), *await self._host()]
         return (await self._call(f"{method} {path}", args))[0]

@@ -5,7 +5,7 @@ land -- vocabulary both CLI backends share.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -371,6 +371,38 @@ class CliWaits:
         if failed and not any(r.state == "actionable" for r in results):
             raise failed
         return combine_reviews(results)
+
+    async def _paged(
+        self,
+        repo: Path,
+        path: str,
+        fields: Mapping[str, str | int | bool] | None = None,
+        *,
+        key: str | None = None,
+        pages: int = 10,
+        strict: bool = False,
+    ) -> list:
+        """Up to `pages` pages of 100, until a short page (never the `Link` header: the
+        token goes to no address the forge chose). `key` names the list inside an object
+        answer. A non-list answer, or a missing `key`, is a `ForgeError`; `strict` also
+        raises when the cap is hit without a short page, so a caller never reads a
+        truncated list as whole."""
+        out: list = []
+        for page in range(1, pages + 1):
+            query = {"per_page": 100, **(fields or {}), "page": page}
+            got = await self._api(repo, path, fields=query)
+            if key is not None:
+                got = got.get(key) if isinstance(got, dict) else None
+            elif got is None:
+                got = []
+            if not isinstance(got, list):
+                raise ForgeError(f"GET {path}: answered without a list")
+            out += got
+            if len(got) < 100:
+                return out
+        if strict:
+            raise ForgeError(f"GET {path}: more than {pages * 100} rows")
+        return out
 
 
 def combine_reviews(results: list[ReviewResult]) -> ReviewResult:
