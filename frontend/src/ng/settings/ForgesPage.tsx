@@ -136,7 +136,7 @@ export function ForgesPage() {
           </Block>
         )}
         {accounts && (
-          <p className="set-hint set-wk-note">
+          <p className="set-hint set-wk-note set-fg-note">
             {TERMINAL_SAME} <code className="set-mono">kraft admin forge</code>{TERMINAL_WRITES} <code className="set-mono">forges.yaml</code>.
           </p>
         )}

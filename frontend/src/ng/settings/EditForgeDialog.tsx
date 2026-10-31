@@ -40,6 +40,9 @@ export function EditForgeDialog({ account: a, repos, onClose, onSaved, onRemove 
   // effect runs after the dialog's own). A command account's Client is disabled, so focus stays where the dialog put it.
   const clientRef = useRef<HTMLDivElement>(null);
   useEffect(() => clientRef.current?.querySelector<HTMLElement>('[aria-checked="true"]:not(:disabled)')?.focus(), []);
+  // The output lands below a long form, inside the scrolling body: bring it into view.
+  const outRef = useRef<HTMLPreElement>(null);
+  useEffect(() => outRef.current?.scrollIntoView?.({ block: "nearest" }), [output]);
   const path = `/forges/${encodeURIComponent(a.name)}`;
 
   const api = client === "api";
@@ -161,7 +164,7 @@ export function EditForgeDialog({ account: a, repos, onClose, onSaved, onRemove 
         )}
         <div role="status" aria-label="Test status" className="set-fg-live">
           {testing && <p className="set-hint">Testing {a.name}…</p>}
-          {output !== null && <pre className="set-wk-cmd" aria-label="Test output">{output}</pre>}
+          {output !== null && <pre ref={outRef} className="set-wk-cmd" aria-label="Test output">{output}</pre>}
         </div>
       </div>
     </Dialog>

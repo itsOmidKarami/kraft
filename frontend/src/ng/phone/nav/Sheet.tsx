@@ -140,7 +140,7 @@ export function EditSheet({ title, text, initial = "", placeholder, secret, mult
   const [skip, setSkip] = useState(!!none?.on);
   return (
     <Frame title={title} text={text} onClose={onClose}>
-      <form className="ph-sheet-edit" onSubmit={(e) => { e.preventDefault(); onSubmit(value, skip); }}>
+      <form className={secret ? "ph-sheet-edit ph-is-secret" : "ph-sheet-edit"} onSubmit={(e) => { e.preventDefault(); onSubmit(value, skip); }}>
         {none && (
           <label className="ph-sheet-none">
             <input type="checkbox" checked={skip} onChange={(e) => setSkip(e.target.checked)} /> {none.label}
