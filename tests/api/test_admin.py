@@ -7,6 +7,7 @@ import os
 import plistlib
 import sys
 import threading
+from pathlib import Path
 
 import pytest
 import yaml
@@ -97,7 +98,12 @@ def test_a_file_that_would_not_load_carries_its_problem(
     if running:
         client.app.state.forges = forges_mod.ForgesFile(
             accounts={
-                n: forges_mod.ForgeAccount(forge="github", web_url="https://github.com")
+                n: forges_mod.ForgeAccount(
+                    forge="github",
+                    web_url="https://github.com",
+                    client="api",
+                    token=forges_mod.TokenSource(**{"from": "file", "file": "/s/tok"}),
+                )
                 for n in running
             }
         )
@@ -350,9 +356,28 @@ _B = "b: {forge: github, web_url: 'https://github.com'}"
 
 
 @pytest.mark.parametrize(
-    "running, accounts, applied, says, refused_it",
+    "running, accounts, applied, says, refused_it, passthrough",
     [
-        pytest.param(["a"], _B, ["a"], "'a' names no account", True, id="new-mismatch-is-refused"),
+        pytest.param(
+            ["a"],
+            _B,
+            ["a"],
+            "'a' names no account",
+            True,
+            [],
+            id="new-mismatch-is-refused",
+        ),
+        pytest.param(
+            ["a"],
+            "a: {forge: github, web_url: 'https://github.com'}\n  "
+            "b: {forge: github, web_url: 'https://github.com', client: api, "
+            "token: {from: env, env: CORP_GL}}",
+            ["a"],
+            "env_passthrough names CORP_GL",
+            True,
+            ["CORP_GL"],
+            id="new-env-source-a-repo-passes-through-is-refused",
+        ),
         # applied: the old mismatch is named on /health, and the reload is no refusal
         pytest.param(
             [],
@@ -360,6 +385,7 @@ _B = "b: {forge: github, web_url: 'https://github.com'}"
             ["b"],
             "'a' names no account",
             False,
+            [],
             id="old-mismatch-does-not-block-an-unrelated-edit",
         ),
         # nothing runs while forges.yaml has never loaded: any file that loads is taken
@@ -369,29 +395,65 @@ _B = "b: {forge: github, web_url: 'https://github.com'}"
             ["a"],
             "'a' says forge: gitlab",
             False,
+            [],
             id="unreadable-since-startup-takes-a-file-that-loads",
         ),
     ],
 )
 def test_a_forges_yaml_that_leaves_a_repo_without_its_account_is_refused_on_reload(
-    client, running, accounts, applied, says, refused_it
+    client, monkeypatch, running, accounts, applied, says, refused_it, passthrough
 ):
+    from kraft.adapters.forge import credentials
+
+    monkeypatch.setattr(credentials, "_TAKEN", {})
+    monkeypatch.setattr(credentials, "_SECRET_FILES", ())
+    monkeypatch.setenv("CORP_GL", "tok-0123456789")
     st = client.app.state
     st.forges = (
         None
         if running is None
         else forges_mod.ForgesFile(
             accounts={
-                n: forges_mod.ForgeAccount(forge="github", web_url="https://github.com")
+                n: forges_mod.ForgeAccount(
+                    forge="github",
+                    web_url="https://github.com",
+                    client="api",
+                    token=forges_mod.TokenSource(**{"from": "file", "file": "/s/tok"}),
+                )
                 for n in running
             }
         )
     )
     (st.templates_dir / "repos.yaml").write_text(
         "repos:\n  - path: /r\n    forge: github\n    forge_account: a\n"
+        f"    env_passthrough: {passthrough}\n"
     )
     (st.templates_dir / "forges.yaml").write_text(f"accounts:\n  {accounts}\n")
     refused = client.post("/api/templates/reload").json()["refused_forges"]
     assert (refused is not None) is refused_it
     assert says in st.invalid_forges
     assert st.forges is not None and list(st.forges.accounts) == applied
+    # A refused edit that drops a running account keeps its token file protected.
+    if refused_it:
+        assert credentials.secret_files() == (Path("/s/tok"),)
+    # Taken even when the edit is refused: no child may inherit a token the file names.
+    assert ("CORP_GL" not in os.environ) is ("CORP_GL" in accounts)
+
+
+@pytest.mark.parametrize(
+    ("state", "expires_on", "status"),
+    [("ok", None, "ok"), ("refused", "2099-01-01", "degraded")],
+    ids=["ok", "refused"],
+)
+def test_health_reports_a_tokens_state_and_never_who_it_is(client, state, expires_on, status):
+    from kraft.adapters.forge import probe
+
+    client.app.state.forge_probes["a"] = probe.Probe(
+        "a", "2026-01-01T00:00:00+00:00", state, "bad tok-0123456789",
+        login="octocat", scopes=("repo",), expires_on=expires_on,
+    )  # fmt: skip
+    body = client.get("/api/health").json()
+    assert body["status"] == status
+    assert body["forge_tokens"] == {"a": {"state": state, "expires_on": expires_on}}
+    for secret in ("octocat", "repo", "tok-0123456789"):
+        assert secret not in str(body["forge_tokens"])

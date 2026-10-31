@@ -22,7 +22,9 @@ from kraft import config as config_mod
 from kraft import forges as forges_mod
 from kraft import intake as intake_mod
 from kraft import storage
+from kraft.adapters.forge import credentials, probe
 from kraft.api import config_check, deps
+from kraft.paths import config_dir
 from kraft.remote import registry as workers_registry
 
 logger = logging.getLogger(__name__)
@@ -230,9 +232,14 @@ def _reload_forges(st) -> None:
     an edit that adds a repo/account problem; old problems are named by
     `invalid_forges` but block nothing. With nothing running (unreadable since
     startup), any file that loads is taken."""
-    digest = _digest(st.templates_dir / forges_mod.ForgesFile.FILE)
+    path = st.templates_dir / forges_mod.ForgesFile.FILE
+    digest = _digest(path)
+    # Before any refusal, as at boot: a variable named now, set since the server started,
+    # must not reach a child even when this edit is refused.
+    credentials.strip_env_sources(path)
+    credentials.set_secret_files(path, running=st.forges)
     try:
-        file = forges_mod.ForgesFile.load(st.templates_dir / forges_mod.ForgesFile.FILE)
+        file = forges_mod.ForgesFile.load(path)
     except config_mod.ConfigError as exc:
         st.invalid_forges = str(exc)
         return
@@ -247,8 +254,14 @@ def _reload_forges(st) -> None:
     if st.forges is not None and (added := [p for p in new if p not in old]):
         st.invalid_forges = "; ".join(added)
         return
+    api = {n for n, a in file.accounts.items() if a.client == "api"}
+    for gone in set(st.forge_probes) - api:
+        del st.forge_probes[gone]
+    # Every API account, changed or not: a reload is how a person says "I fixed the token".
+    probe.kick(st, api)
     st.forges = file
     st.invalid_forges = "; ".join(new) or None
+    credentials.set_secret_files(path)  # accepted: the new set alone
     set_loaded(st, forges_mod.ForgesFile.FILE, digest)
 
 
@@ -294,6 +307,7 @@ def spawn_restart(st, *, confirm: bool = False) -> None:
         if sys.platform.startswith("linux") and admin.restart_kind(st.run_dirs.base) == "service":
             env = [f"--setenv={k}={v}" for k, v in admin._instance_env().items()]
             argv = ["systemd-run", "--user", "--collect", "--quiet", *env, *argv]
+    names = credentials.env_source_names(config_dir() / forges_mod.ForgesFile.FILE)
     with (st.run_dirs.logs / "server.log").open("ab") as log:
         subprocess.Popen(
             argv,
@@ -301,4 +315,6 @@ def spawn_restart(st, *, confirm: bool = False) -> None:
             stdout=log,
             stderr=log,
             start_new_session=True,
+            # The restarted server strips them again; the env, not argv, carries them.
+            env={**os.environ, **credentials.taken_env(names)},
         )

@@ -245,6 +245,24 @@ def test_refusals_raise_sandbox_refused(scene, kw):
         scene.build(**kw(scene))
 
 
+def test_an_expose_holding_a_token_file_is_refused_naming_it(scene, tmp_path, monkeypatch):
+    from kraft.adapters.forge import credentials
+
+    token = tmp_path / "tokens" / "gl"
+    token.parent.mkdir()
+    token.write_text("tok")
+    forges = tmp_path / "forges.yaml"
+    forges.write_text(
+        "accounts:\n  gl:\n    forge: gitlab\n    client: api\n"
+        f"    web_url: https://gl.example\n    token: {{from: file, file: {token}}}\n"
+    )
+    monkeypatch.setattr(credentials, "_SECRET_FILES", ())
+    credentials.set_secret_files(forges)
+    with pytest.raises(SandboxRefused) as err:
+        scene.build(sandbox={**SANDBOX, "expose": [str(token.parent)]})
+    assert str(token) in str(err.value) and "which the sandbox never shows" in str(err.value)
+
+
 def test_unknown_architecture_is_refused(run_dirs, monkeypatch):
     monkeypatch.setattr(bwrap.os_seccomp, "machine", lambda: "riscv64")
     with pytest.raises(SandboxRefused, match="riscv64"):

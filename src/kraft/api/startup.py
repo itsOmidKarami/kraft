@@ -35,8 +35,10 @@ from kraft import triggers as triggers_mod
 from kraft import update as update_mod
 from kraft.adapters import hook_install
 from kraft.adapters import subprocess as _subprocess
+from kraft.adapters.forge import credentials
 from kraft.adapters.forge import git as forge_git
 from kraft.adapters.forge import mr as forge_mr
+from kraft.adapters.forge import probe as forge_probe
 from kraft.addons import load as addons_load
 from kraft.api import deps
 from kraft.db import Database
@@ -77,6 +79,7 @@ BACKGROUND_TASKS = (
     "apply_task",
     "addon_update_task",
     "when_free_task",
+    "forge_probe_task",
 )
 
 
@@ -137,6 +140,8 @@ def start_background(app: FastAPI) -> None:
     # Off by default costs a look a minute at a file and the database: it
     # installs and restarts only what a person marked, or `update.yaml` allows.
     app.state.when_free_task = asyncio.ensure_future(when_free.loop(app))
+    # Always on: a token expires or is revoked while nobody runs a forge node.
+    app.state.forge_probe_task = asyncio.ensure_future(forge_probe.loop(app))
     load_workers(app)
 
 
@@ -162,6 +167,7 @@ def load_forges(app: FastAPI) -> None:
     # The bytes these accounts come from: an edit landing before startup records
     # every file's hash must still read as pending (not applied).
     app.state.forges_loaded_digest = apply_mod.file_digest(path)
+    credentials.set_secret_files(path)  # also from a file that does not load
     try:
         app.state.forges = forges_mod.ForgesFile.load(path)
     except config_mod.ConfigError as exc:
@@ -249,6 +255,8 @@ async def _lifespan(app: FastAPI):
     # it must be able to write cannot execute as the invoking host user
     # (Kraft-rki).
     sandbox.harden_host_git_env()
+    # Before any child (the local worker, git, a hook) can inherit an env token.
+    credentials.strip_env_sources(config_dir() / forges_mod.ForgesFile.FILE)
     app.state.tasks = {}
     # deps.skip_lock() lazily stashes a per-work-item Lock here; reset it with
     # everything else per-lifespan so it neither grows forever in a live
@@ -402,6 +410,9 @@ async def _lifespan(app: FastAPI):
     # Before reattach and resumed walks, whose forge nodes read the accounts;
     # nothing else runs yet, so the load needs no lock.
     app.state.forges_lock = asyncio.Lock()
+    app.state.forge_probes = {}
+    app.state.forge_probe_wake = asyncio.Event()
+    app.state.forge_probe_due = set()
     load_forges(app)
 
     booted_at = time.time()
@@ -605,6 +616,7 @@ async def _lifespan(app: FastAPI):
             app.state.addon_update_task,
             app.state.apply_task,
             app.state.when_free_task,
+            app.state.forge_probe_task,
         ):
             await _cancel(task)
         await _cancel(app.state.workers_watch_task)

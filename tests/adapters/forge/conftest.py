@@ -4,8 +4,10 @@ node run against a fake through `forge.run_task`."""
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
+import httpx
 import pytest
 from support.harness import own_files
 
@@ -28,7 +30,9 @@ class Cli:
         bindir.mkdir(exist_ok=True)
         monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
 
-    def stub(self, name: str, stdout: str = "", *, rc: int = 0, routes=None, default="{}"):
+    def stub(
+        self, name: str, stdout: str = "", *, rc: int = 0, routes=None, default="{}", record=False
+    ):
         """Install `name`. Without `routes` every call prints `stdout` and exits
         `rc`. With `routes` (`{"mr view": stdout, "ci get": FAIL}`) the answer
         depends on the call, and an unrouted call prints `default` (`FAIL`: exit
@@ -36,7 +40,8 @@ class Cli:
         `<cli> api`). A key without `*` matches the first two arguments; a key
         with `*` globs the whole argv (`"api*pulls/7*"`). Routes are tried in
         order. Asked `api ... -i`, a plain string answer comes back as a 200
-        envelope, unless it already is one."""
+        envelope, unless it already is one. `record=True` also keeps the last
+        call's stdin, cwd, environment, pid and session id (`recorded`)."""
 
         def quote(text):
             return "'" + text.replace("'", "'\\''") + "'"
@@ -75,10 +80,19 @@ class Cli:
                 )
             )
             cases += f"case {subject} in\n  {pat}) {answer(out)} ;;\nesac\n"
+        base = self.bindir / name
+        rec = (
+            f"cat > {base}.stdin; pwd > {base}.pwd; env > {base}.env; "
+            f"echo $$ > {base}.pid; "
+            f"{sys.executable} -c 'import os; print(os.getsid(0))' > {base}.sid\n"
+            if record
+            else ""
+        )
         p = self.bindir / name
         p.write_text(
             f'#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a" >> {self.bindir / name}.argv; done\n'
             f'echo "$@" >> {self.bindir / name}.calls\n'
+            f"{rec}"
             f'INC=; for a in "$@"; do [ "$a" = -i ] && INC=1; done\n'
             f"{cases}{answer(default)}\n"
         )
@@ -88,6 +102,18 @@ class Cli:
         """Every argument of every call to `name`, one per item."""
         path = self.bindir / f"{name}.argv"
         return path.read_text().splitlines() if path.exists() else []
+
+    def recorded(self, name: str) -> dict:
+        """The last recorded call: `stdin`, `pwd`, `env` (a dict), `pid`, `sid`."""
+        read = lambda ext: (self.bindir / f"{name}.{ext}").read_text()  # noqa: E731
+        env = dict(line.split("=", 1) for line in read("env").splitlines() if "=" in line)
+        return {
+            "stdin": read("stdin"),
+            "pwd": read("pwd").strip(),
+            "env": env,
+            "pid": int(read("pid")),
+            "sid": int(read("sid")),
+        }
 
     def calls(self, name: str) -> list[str]:
         """One space-joined argv string per call to `name`."""
@@ -157,3 +183,39 @@ class ForgeRun:
 @pytest.fixture
 def run_forge(database, run_dirs, item_on, tmp_path, monkeypatch) -> ForgeRun:
     return ForgeRun(database, run_dirs, item_on, tmp_path, monkeypatch)
+
+
+class MockHttp:
+    """`httpx.MockTransport` over a route table or a handler, listing each request.
+
+    `routes` maps `(method, url without query)` to an answer or a list of answers used in
+    turn. An answer is a status, `(status, json[, headers])`, an `httpx.Response`, or an
+    exception to raise. `handler(request)` replaces the table. An unrouted request fails the
+    test."""
+
+    def __init__(self, routes=None, handler=None):
+        self.requests: list[httpx.Request] = []
+        self._routes, self._handler = {k: v for k, v in (routes or {}).items()}, handler
+        self.transport = httpx.MockTransport(self._answer)
+
+    def _answer(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if self._handler:
+            return self._handler(request)
+        key = (request.method, str(request.url.copy_with(query=None)))
+        assert key in self._routes, f"unrouted {key}"
+        out = self._routes[key]
+        if isinstance(out, list):
+            out = out.pop(0) if len(out) > 1 else out[0]
+        if isinstance(out, BaseException):
+            raise out
+        if isinstance(out, httpx.Response):
+            return out
+        status, *rest = (out,) if isinstance(out, int) else out
+        body, headers = (rest + [None, None])[:2]
+        return httpx.Response(status, json=body, headers=headers)
+
+
+@pytest.fixture
+def mock_http() -> type[MockHttp]:
+    return MockHttp

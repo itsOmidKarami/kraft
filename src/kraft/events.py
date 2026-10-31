@@ -4,6 +4,7 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 
+from kraft import redact
 from kraft.vocab import BY_VALUE, EventType
 
 
@@ -34,7 +35,7 @@ def append(
     cur = conn.execute(
         "INSERT INTO events (work_item_id, type, payload, node_id, created_at) "
         "VALUES (?, ?, ?, ?, ?)",
-        (work_item_id, type, json.dumps(payload), node_id, _now()),
+        (work_item_id, type, redact.redact(json.dumps(payload)), node_id, _now()),
     )
     return cur.lastrowid
 

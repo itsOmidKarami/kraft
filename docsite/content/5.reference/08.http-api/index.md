@@ -33,6 +33,7 @@ The answer carries:
 |---|---|
 | `status` | `ok` or `degraded`. |
 | `invalid_templates`, `invalid_policy`, `invalid_intake`, `invalid_forges` | The reasons it is degraded. `invalid_intake` is why `intake.yaml` does not load, else `null`; `invalid_forges` is the same for `forges.yaml`. |
+| `forge_tokens` | Each `client: api` account's last token check, by name: `{state, expires_on}`, never who it signs in as. A `state` of `no_token`, `refused`, `forbidden` or `tls`, or an `expires_on` within 7 days, makes `status` `degraded`. _Added in next_ |
 | `storage` | `null` without `storage.worktrees.limit`, else `{state, used_bytes, quota_bytes, limit_bytes, measured_at, too_recent}`. `state` is `ok`, `over_quota` or `held`, and `held` makes `status` `degraded`. `too_recent` counts finished items the last automatic clean-up left because they ended less than `min_age` ago. |
 | `intake_off` | Whether [auto-intake](/concepts/vocabulary#auto-intake) and `intake.yaml`'s schedules are off for it. |
 | `mcp_command_on_path` | Whether Claude can start its user- or plugin-scope `kraft` MCP server on the server's `PATH`, which workers get. It leaves out a repo's own entries, which a launch also counts. `null`: nothing to check. _Added in next_ |

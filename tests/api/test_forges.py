@@ -8,6 +8,7 @@ import pytest
 from support.harness import connect_repo
 
 from kraft.adapters.forge import git as forge_git
+from kraft.adapters.forge import probe
 from kraft.adapters.forge.git import CliUnavailable
 from kraft.adapters.forge.models import ForgeError
 from kraft.config import read_yaml
@@ -215,3 +216,50 @@ def test_a_refused_add_names_the_field(client):
 def test_the_403_names_forge_accounts(client):
     reply = client.get("/api/forges", headers={"X-Kraft-Session-Id": "w1/s1"})
     assert "forge accounts" in reply.text
+
+
+_API = (
+    "accounts:\n  corp:\n    forge: gitlab\n    client: api\n"
+    "    web_url: https://code.corp.example\n    api_url: {api}\n"
+    "    token: {{from: env, env: CORP_GL, kind: pat}}\n"
+)
+
+
+def _api_account(client, api="https://code.corp.example/api/v4"):
+    _file(client).write_text(_API.format(api=api))
+    assert client.post("/api/apply/reload").status_code == 200
+
+
+def test_an_api_account_lists_its_source_and_probe(client):
+    _api_account(client)
+    row = client.get("/api/forges").json()["accounts"]["corp"]
+    assert row["token"] == {"from": "env", "env": "CORP_GL", "kind": "pat"}
+    assert row["probe"] is None or row["probe"]["state"] == "ok"
+    assert "probe" in row
+
+
+def test_test_probes_an_api_account_and_never_runs_the_cli(client, monkeypatch):
+    async def no_cli(*a, **kw):
+        raise AssertionError("an API account's test ran the forge CLI")
+
+    monkeypatch.setattr(forge_git, "run_cli", no_cli)
+    _api_account(client)
+    body = client.post("/api/forges/corp/test").json()
+    assert body["ok"] is True and "signed in as canned" in body["output"]
+    assert body["probe"]["state"] == "ok"
+    assert client.get("/api/forges").json()["accounts"]["corp"]["probe"]["state"] == "ok"
+
+
+def test_test_probes_the_file_as_written(client, monkeypatch):
+    _api_account(client)
+    seen = []
+
+    async def probe_account(name, account, **kw):
+        seen.append(account.api())
+        return await real(name, account, **kw)
+
+    real = probe.probe_account
+    monkeypatch.setattr(probe, "probe_account", probe_account)
+    _file(client).write_text(_API.format(api="https://code.corp.example/api/v5"))  # not reloaded
+    client.post("/api/forges/corp/test")
+    assert "https://code.corp.example/api/v5" in seen  # the reload's own pass may add v4

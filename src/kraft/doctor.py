@@ -15,6 +15,7 @@ import shutil
 import stat
 import sys
 from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 
 import yaml
@@ -24,6 +25,8 @@ from kraft import forges as forges_mod
 from kraft import policy as policy_mod
 from kraft import skill as skill_mod
 from kraft.adapters import forge
+from kraft.adapters.forge.probe import EXPIRY_WARN_DAYS
+from kraft.adapters.forge.run import API_BACKENDS
 from kraft.addons import load as addons_load
 from kraft.api import config_check
 from kraft.automated_review import as_reviewers
@@ -106,6 +109,14 @@ async def run_checks() -> list[dict]:
         except ValueError:
             listed = None  # a server older than the route
     checks.extend(_worker_checks(listed))
+    accounts = None
+    if health is not None:
+        try:
+            accounts = (await client.list_forges())["accounts"]
+        except ValueError:
+            accounts = None  # inside a Kraft session, or a server older than the route
+    if accounts is not None or _has_api_account():
+        checks.extend(_forge_account_checks(accounts, "no server" if health is None else None))
     checks.append(_pidfile_check())
     checks.extend(_agent_checks())
     checks.append(await _mcp_check(health))
@@ -119,7 +130,7 @@ async def run_checks() -> list[dict]:
         checks.append(_check("worktrees", True, "skipped: no server", skipped=True))
         checks.append(_check("review bots", True, "skipped: no server", skipped=True))
     else:
-        checks.extend(await _repo_checks())
+        checks.extend(await _repo_checks(accounts))
         checks.append(await _orphan_check())
         checks.append(await _review_bots_check())
     checks.append(_old_documents_check())
@@ -185,6 +196,7 @@ def _health_checks(payload: dict) -> list[dict]:
             f"not load or adds a conflict is not applied); fix it and reload: "
             f"{payload['invalid_forges']}"
         )
+    reasons.extend(f"forge account {line}" for line in render.token_problems(payload))
     reasons.extend(f"index: {error}" for error in index.get("errors") or [])
     orphaned = (payload.get("reattach_summary") or {}).get("unknown") or []
     if orphaned:
@@ -1438,7 +1450,58 @@ def _credential_check(repo: config.RepoEntry, policy) -> dict | None:
     return _check(f"credentials {_label(repo)}", not missing, detail, warn=bool(orphans))
 
 
-def _forge_check(repo: config.RepoEntry, forges: forges_mod.ForgesFile | None = None) -> dict:
+def _has_api_account() -> bool:
+    """Whether forges.yaml names a `client: api` account: a skipped row for none would be a
+    change a user who never touched the feature sees."""
+    try:
+        file = forges_mod.ForgesFile.load(config_dir() / forges_mod.ForgesFile.FILE)
+    except config.ConfigError:
+        return False  # the forges.yaml row says why
+    return any(a.client == "api" for a in file.accounts.values())
+
+
+def _forge_account_checks(accounts: dict[str, dict] | None, why: str | None = None) -> list[dict]:
+    """One row per `client: api` account, from the probe the server holds. `accounts` is
+    `GET /forges`'s, or None when it could not be read (`why`, when there is no server)."""
+    if accounts is None:
+        why = why or "the server's forge accounts could not be read"
+        return [_check("forge accounts", True, f"skipped: {why}", skipped=True)]
+    checks = []
+    for name, row in accounts.items():
+        if row["client"] != "api":
+            continue
+        label = f"forge account {name}"
+        if (p := row.get("probe")) is None:
+            checks.append(
+                _check(label, True, f"not probed yet; kraft admin forge test {name}", warn=True)
+            )
+        elif p["state"] != "ok":
+            sso = f" · authorize it: {p['sso_url']}" if p["sso_url"] else ""
+            # As on /health: a network blip warns, it does not fail the server.
+            bad = p["state"] != "unreachable"
+            checks.append(_check(label, not bad, f"{p['state']}: {p['detail']}{sso}", warn=not bad))
+        else:
+            parts = [f"signs in as {p['login']}"]
+            if p["scopes"] is not None:
+                parts.append(f"scopes {', '.join(p['scopes']) or 'none'}")
+            if p["expires_on"]:
+                parts.append(f"expires on {p['expires_on']}")
+            left = (
+                (date.fromisoformat(p["expires_on"]) - date.today()).days
+                if p["expires_on"]
+                else None
+            )
+            soon = left is not None and left <= EXPIRY_WARN_DAYS
+            parts.extend(["renew it soon"] * soon + [f"warning: {w}" for w in p["warnings"]])
+            checks.append(_check(label, True, " · ".join(parts), warn=soon or bool(p["warnings"])))
+    return checks
+
+
+def _forge_check(
+    repo: config.RepoEntry,
+    forges: forges_mod.ForgesFile | None = None,
+    accounts: dict[str, dict] | None = None,
+) -> dict:
     """Can this repo's `backend: auto` forge nodes actually run?
 
     Fails rather than reporting with detail: a chain that runs a forge task
@@ -1454,25 +1517,45 @@ def _forge_check(repo: config.RepoEntry, forges: forges_mod.ForgesFile | None = 
         return _check(name, False, str(exc))
     if cli == "fake":
         return _check(name, True, "fake · dev only: opens, merges and pushes nothing", warn=True)
-    if not shutil.which(cli):
-        return _check(name, False, f"`{cli}` is not on PATH — the forge nodes cannot run")
-    if forges is not None and (problems := forges_mod.account_problems(forges, [repo])):
-        return _check(name, False, problems[0])
-    detail = f"{repo.forge} · {cli}"
+    host = found = None
     if forges is not None and forges.accounts:
         origin = config.git_read(
             Path(repo.path), "remote", "get-url", "origin", expected_failure=True
         )
         host = forges_mod.remote_host(origin) if origin else None
-        if (found := forges_mod.account_for(repo, forges, host)) is not None:
-            detail += f" · account {found[0]}"
+        found = forges_mod.account_for(repo, forges, host)
+    if found is not None and found[1].client == "api":
+        backend = API_BACKENDS[found[1].forge]
+        detail = (
+            f"{repo.forge} · {backend} · account {found[0]}: client: api, and the {backend} "
+            "backend is not in this release; forge nodes stop on this repo"
+        )
+        if accounts is None:
+            detail += " · not probed: the forge accounts could not be read"
         elif (
-            skipped := forges_mod.default_account(forges, host)
-        ) is not None and not repo.forge_account:
-            detail += (
-                f" · default account {skipped[0]} skipped: it says forge: {skipped[1].forge}, "
-                f"the repo says forge: {repo.forge}"
-            )
+            seen := ((accounts.get(found[0]) or {}).get("probe") or {})
+            .get("projects", {})
+            .get(str(repo.path))
+        ):
+            verb = "sees" if seen["visible"] else "cannot see"
+            detail += f" · {verb} {seen['project']}"
+        return _check(name, False, detail)
+    if not shutil.which(cli):
+        return _check(name, False, f"`{cli}` is not on PATH — the forge nodes cannot run")
+    if forges is not None and (problems := forges_mod.account_problems(forges, [repo])):
+        return _check(name, False, problems[0])
+    detail = f"{repo.forge} · {cli}"
+    if found is not None:
+        detail += f" · account {found[0]}"
+    elif (
+        forges is not None
+        and (skipped := forges_mod.default_account(forges, host)) is not None
+        and not repo.forge_account
+    ):
+        detail += (
+            f" · default account {skipped[0]} skipped: it says forge: {skipped[1].forge}, "
+            f"the repo says forge: {repo.forge}"
+        )
     return _check(name, True, detail)
 
 
@@ -1562,7 +1645,7 @@ def _label(repo: config.RepoEntry) -> str:
     return repo.name or repo.path
 
 
-async def _repo_checks() -> list[dict]:
+async def _repo_checks(accounts: dict[str, dict] | None) -> list[dict]:
     """Through `GET /repos`, not `repos.yaml`: spec D §4 keeps one reader of the
     repo list on this side of the wire, and doctor is not an exception to it."""
     checks = []
@@ -1655,7 +1738,7 @@ async def _repo_checks() -> list[dict]:
                 if extra is not None:
                     checks.append(extra)
         if auto:
-            checks.append(_forge_check(repo, forges))
+            checks.append(_forge_check(repo, forges, accounts))
         if repo.steering and profiles is not None:
             checks.append(_steering_check(repo, profiles))
     checks.extend(_duplicate_repo_checks(repos))

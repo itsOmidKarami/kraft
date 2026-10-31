@@ -4,6 +4,7 @@ restart. A split-off sibling of `test_admin.py`, kept under the line budget."""
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -74,7 +75,7 @@ def update_attempt(tmp_path, monkeypatch):
         c.execute("UPDATE t SET v = 'migrated'")
     Path(f"{run_dirs.db}-wal").write_text("stale")
 
-    calls = []
+    calls, envs = [], []
     health = {"payloads": []}
 
     async def fake_health():
@@ -99,7 +100,9 @@ def update_attempt(tmp_path, monkeypatch):
     monkeypatch.setattr(
         cli.admin.subprocess,
         "run",
-        lambda argv, **_k: calls.append(argv) or subprocess.CompletedProcess(argv, 0),
+        lambda argv, **k: (
+            (calls.append(argv), envs.append(k.get("env"))) and subprocess.CompletedProcess(argv, 0)
+        ),
     )
     monkeypatch.setattr(
         cli.admin,
@@ -112,6 +115,7 @@ def update_attempt(tmp_path, monkeypatch):
         state=SimpleNamespace(run_dirs=run_dirs),
         config_dir=config_dir,
         calls=calls,
+        envs=envs,
         health=health,
     )
 
@@ -202,6 +206,33 @@ def test_restart_confirm_rolls_back(update_attempt, kind, payload, installs, dat
 
 
 @pytest.mark.parametrize(
+    "named",
+    [
+        pytest.param(True, id="env-token-named-by-forges-yaml"),
+        pytest.param(False, id="other-variable-is-kept"),
+    ],
+)
+def test_a_rollback_install_runs_without_the_env_tokens(update_attempt, monkeypatch, named):
+    from kraft import when_free
+
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(update_attempt.config_dir))
+    (update_attempt.config_dir / "forges.yaml").write_text(
+        "accounts:\n  gl:\n    forge: gitlab\n    client: api\n"
+        "    web_url: https://gl.example\n    token: {from: env, env: CORP_GL}\n"
+    )
+    monkeypatch.setenv("CORP_GL" if named else "OTHER_VAR", "tok-0123456789")
+    when_free.write_rollback(update_attempt.run_dirs, kind="release")
+    update_attempt.health["payloads"] = [{"pid": 1, "version": "2.2.0"}]
+
+    with pytest.raises(SystemExit):
+        _restart_confirm()
+
+    [env] = update_attempt.envs
+    assert ("CORP_GL" in env) is False
+    assert ("OTHER_VAR" in env) is (not named)
+
+
+@pytest.mark.parametrize(
     ("platform", "kind", "starts"),
     [
         pytest.param("linux", "service", "systemd-run", id="linux-service-escapes-the-unit"),
@@ -234,6 +265,44 @@ def test_spawn_restart(tmp_path, monkeypatch, platform, kind, starts):
     else:
         assert not any(a.startswith("--setenv") for a in argv)
         assert argv[0] == sys.executable
+
+
+@pytest.mark.parametrize(
+    "forges_yaml, passed",
+    [
+        pytest.param("{from: env, env: CORP_GL}", True, id="named-account-keeps-its-token"),
+        pytest.param("{from: command, command: x}", False, id="removed-account-token-not-passed"),
+        pytest.param("{from: file, file: /x/t}", False, id="switched-to-file-token-not-passed"),
+    ],
+)
+def test_a_restart_the_server_spawns_keeps_its_env_tokens(
+    tmp_path, monkeypatch, forges_yaml, passed
+):
+    from types import SimpleNamespace
+
+    from kraft import apply
+    from kraft.adapters.forge import credentials
+
+    run_dirs = RunDirs(tmp_path / "run").ensure()
+    run_dirs.logs.mkdir(parents=True, exist_ok=True)
+    config = tmp_path / "config"
+    config.mkdir()
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(config))
+    (config / "forges.yaml").write_text(
+        "accounts:\n  gl:\n    forge: gitlab\n    client: api\n"
+        f"    web_url: https://gl.example\n    token: {forges_yaml}\n"
+    )
+    seen = []
+    monkeypatch.setattr(credentials, "_TAKEN", {})
+    monkeypatch.setenv("CORP_GL", "tok-0123456789")
+    credentials.take_env(["CORP_GL"])
+    monkeypatch.setattr(cli.admin, "_kraft_executable", lambda: "/bin/kraft")
+    monkeypatch.setattr(apply.subprocess, "Popen", lambda argv, **kw: seen.append((argv, kw)))
+    apply.spawn_restart(SimpleNamespace(run_dirs=run_dirs))
+    [(argv, kw)] = seen
+    assert kw["env"].get("CORP_GL") == ("tok-0123456789" if passed else None)
+    assert "CORP_GL" not in os.environ
+    assert not any("tok-0123456789" in a for a in argv)
 
 
 def test_spawn_restart_without_confirm_is_as_it_was(tmp_path, monkeypatch):

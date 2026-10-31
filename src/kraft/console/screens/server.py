@@ -128,7 +128,7 @@ def summary(health: dict, release: dict | None, *, answered: bool = True) -> Con
         "  intake ",
         _mark(health.get("invalid_intake")),
         "  forges ",
-        _mark(health.get("invalid_forges")),
+        _mark(health.get("invalid_forges") or render.token_problems(health)),
         ("  ·  Index  ", "$kraft-muted"),
         f"{(index.get('embeddings') or {}).get('state') or '-'}\n",
         ("Storage  ", "$kraft-muted"),

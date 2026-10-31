@@ -1,8 +1,8 @@
 """`/api/forges`: the accounts in `forges.yaml`.
 
-The server owns the file; `kraft admin forge` only calls these. Until the API backends
-land every account is `client: cli`, so `test` asks the forge's own CLI whether it is
-signed in for the host."""
+The server owns the file; `kraft admin forge` only calls these. `test` asks a CLI
+account's forge CLI whether it is signed in for the host, and probes an API account's
+token."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from kraft import apply as apply_mod
 from kraft import config as config_mod
 from kraft import forges
-from kraft.adapters.forge import git
+from kraft.adapters.forge import git, probe
 from kraft.adapters.forge.models import ForgeError
 from kraft.api import api_router
 from kraft.api.routes.workers import _forbid_sessions
@@ -34,8 +34,16 @@ class AddForge(BaseModel):
     default_for_host: bool = False
 
 
-def _row(account: forges.ForgeAccount) -> dict:
-    return {**account.model_dump(), "api_url": account.api()}
+def _row(st, name: str, account: forges.ForgeAccount) -> dict:
+    found = st.forge_probes.get(name)
+    return {
+        **account.model_dump(by_alias=True),
+        "api_url": account.api(),
+        "token": account.token.model_dump(by_alias=True, exclude_none=True)
+        if account.token
+        else None,
+        "probe": found.to_json() if found else None,
+    }
 
 
 def _file_path(st):
@@ -74,6 +82,8 @@ def _save(st, updated: forges.ForgesFile) -> None:
     updated.save(_file_path(st))
     apply_mod.record(st, forges.ForgesFile.FILE)
     st.forges = updated
+    for gone in set(st.forge_probes) - set(probe.api_accounts(st)):
+        del st.forge_probes[gone]  # a removed account must not keep /health degraded
     st.invalid_forges = "; ".join(forges.repo_problems(updated, st.templates_dir)) or None
 
 
@@ -92,7 +102,9 @@ async def _read(st) -> forges.ForgesFile:
 async def list_forges(request: Request):
     _forbid_sessions(request, "forge accounts")
     current = await _read(request.app.state)
-    return {"accounts": {name: _row(a) for name, a in current.accounts.items()}}
+    return {
+        "accounts": {name: _row(request.app.state, name, a) for name, a in current.accounts.items()}
+    }
 
 
 @api_router.post("/forges", status_code=201)
@@ -121,7 +133,7 @@ async def add_forge(body: AddForge, request: Request):
             ) from exc
         _save(st, updated)
     apply_mod.notify(request.app)
-    return _row(updated.accounts[body.name])
+    return _row(st, body.name, updated.accounts[body.name])
 
 
 @api_router.delete("/forges/{name}", status_code=204)
@@ -153,6 +165,9 @@ async def test_forge(name: str, request: Request):
     account = (await _read(st)).accounts.get(name)
     if account is None:
         raise HTTPException(404, f"no forge account named {name!r}")
+    if account.client == "api":  # never the CLI: it would prove another credential
+        found = (await probe.refresh(st, {name: account}))[name]
+        return {"ok": found.state == "ok", "output": found.text(), "probe": found.to_json()}
     host = forges.web_host(account.web_url)
     argv = (
         ["gh", "auth", "status", "-h", host]

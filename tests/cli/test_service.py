@@ -170,6 +170,30 @@ def test_service_files_survive_a_special_character_in_the_environment(tmp_path, 
     assert f'Environment="KRAFT_HOME={str(home).replace(chr(34), chr(92) + chr(34))}"' in unit
 
 
+@pytest.mark.parametrize("platform", ["linux", "darwin"], ids=["systemd", "launchd"])
+def test_service_files_never_carry_an_env_token(tmp_path, monkeypatch, capsys, platform):
+    monkeypatch.setattr(cli.admin, "_read_pid", lambda *_: None)
+    monkeypatch.setattr(cli.admin, "_kraft_executable", lambda: "/usr/local/bin/kraft")
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("CORP_GL", "tok-0123456789")
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "forges.yaml").write_text(
+        "accounts:\n  gl:\n    forge: gitlab\n    client: api\n"
+        "    web_url: https://gl.example\n    token: {from: env, env: CORP_GL}\n"
+    )
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0))
+    cli.admin._cmd_install_service(argparse.Namespace())
+    written = (
+        cli.admin._launchd_plist_path() if platform == "darwin" else cli.admin._systemd_unit_path()
+    )
+    assert "tok-0123456789" not in written.read_text()
+    out = capsys.readouterr().out
+    assert "CORP_GL" in out and "Forge tokens for a service" in out and "tok-0123456789" not in out
+
+
 def test_install_service_enables_systemd_unit_by_absolute_path(tmp_path, monkeypatch):
     """`enable` must be given the unit's absolute path, not its bare name.
 
