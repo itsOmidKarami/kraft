@@ -402,6 +402,7 @@ _ACCT = {"forge": "gitlab", "web_url": "https://code.corp.example", "client": "a
         ("corp", TOK, 422, None),
         ("corp", {"api_url": "https://code.corp.example:8443/api/v4"}, 422, None),
         ("nope", {"api_url": "https://code.corp.example/api/v5"}, 404, None),
+        ("corp", {"api_url": "https://code.corp.example/" + "a" * 70000}, 422, None),
     ],
     ids=[
         "api-url",
@@ -415,6 +416,7 @@ _ACCT = {"forge": "gitlab", "web_url": "https://code.corp.example", "client": "a
         "body-is-a-string",
         "api-url-other-port-422",
         "unknown-404",
+        "body-over-64-kib",
     ],
 )
 def test_edit_changes_only_the_fields_given(client, name, patch, status, changes):
@@ -465,6 +467,8 @@ def test_an_edit_that_moves_off_the_pasted_file_deletes_it(client, patch, surviv
         ({"value": TOK + " x", "kind": "pat"}, {}, API, 422, 1),
         ({"value": TOK, "kind": "pat"}, {"X-Kraft-Session-Id": "w1/s1"}, API, 403, 1),
         ({"value": TOK, "kind": "pat"}, {}, GL, 409, 1),
+        ({"value": "a" * 70000, "kind": "pat"}, {}, API, 422, 1),
+        ("[" * 50000, {}, API, 422, 1),
     ],
     ids=[
         "pasted",
@@ -477,6 +481,8 @@ def test_an_edit_that_moves_off_the_pasted_file_deletes_it(client, patch, surviv
         "has-whitespace",
         "session-403",
         "cli-account-409",
+        "body-over-64-kib",
+        "deeply-nested",
     ],
 )
 def test_a_pasted_token_is_written_private_and_never_echoed(
@@ -564,10 +570,18 @@ def _hand_accounts(client, **files):
 
 @pytest.mark.parametrize(
     "how",
-    ["symlinked-home", "dotdot", "env-var", "link-to-elsewhere", "another-account-reads-it"],
+    [
+        "symlinked-home",
+        "dotdot",
+        "env-var",
+        "link-to-elsewhere",
+        "another-account-reads-it",
+        "name-outside-the-pattern",
+    ],
 )
 def test_remove_deletes_the_pasted_file_by_its_real_path(client, tmp_path, monkeypatch, how):
-    mine = _pasted()
+    name = "Corp" if how == "name-outside-the-pattern" else "corp"
+    mine = _pasted(name)
     mine.parent.mkdir(parents=True)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.write_text(TOK)
@@ -583,10 +597,11 @@ def test_remove_deletes_the_pasted_file_by_its_real_path(client, tmp_path, monke
         "env-var": "$KH/secrets/corp",
         "link-to-elsewhere": str(elsewhere),
         "another-account-reads-it": str(mine),
+        "name-outside-the-pattern": str(mine),
     }[how]
-    _hand_accounts(client, corp=spec, **({"other": str(mine)} if "another" in how else {}))
-    assert client.delete("/api/forges/corp").status_code == 204
-    kept = how == "another-account-reads-it"
+    _hand_accounts(client, **{name: spec}, **({"other": str(mine)} if "another" in how else {}))
+    assert client.delete(f"/api/forges/{name}").status_code == 204
+    kept = how in ("another-account-reads-it", "name-outside-the-pattern")
     assert (mine.exists() or mine.is_symlink()) is kept
     assert elsewhere.exists()
 
@@ -612,3 +627,51 @@ def test_a_failed_paste_leaves_the_old_token_and_no_orphan(client, monkeypatch, 
         assert fail == "save"
     assert (_pasted().read_text() if _pasted().exists() else None) == before
     assert [p.name for p in _pasted().parent.glob("*")] == (["corp"] if before else [])
+
+
+@pytest.mark.parametrize("method", ["post", "patch"])
+@pytest.mark.parametrize(
+    "source",
+    [
+        {"from": "env", "env": "CORP_GL"},
+        {"from": "file", "file": "{shared}"},
+        {"from": "file", "file": "{link}"},
+        {"from": "file", "file": "{secrets}/someone"},
+    ],
+    ids=["env-another-reads", "file-another-reads", "link-to-a-file-another-reads", "another-name"],
+)
+def test_an_http_write_never_points_an_account_at_a_secret_it_does_not_own(
+    client, tmp_path, method, source
+):
+    shared = tmp_path / "shared"
+    shared.write_text(TOK)
+    (tmp_path / "link").symlink_to(shared)
+    secrets = kraft_home() / "secrets"
+    secrets.mkdir(parents=True)
+    (secrets / "someone").write_text(TOK)
+    held = {"forge": "gitlab", "client": "api", "web_url": "https://other.example"}
+    _file(client).write_text(
+        yaml.safe_dump(
+            {
+                "accounts": {
+                    "env-reader": {**held, "token": {"from": "env", "env": "CORP_GL"}},
+                    "file-reader": {**held, "token": {"from": "file", "file": str(shared)}},
+                }
+            }
+        )
+    )
+    assert client.post("/api/apply/reload").status_code == 200
+    if method == "patch":
+        assert client.post("/api/forges", json=API).status_code == 201
+    before = _file(client).read_text()
+    fill = {"shared": str(shared), "link": str(tmp_path / "link"), "secrets": str(secrets)}
+    token = {k: v.format(**fill) for k, v in source.items()}
+    reply = (
+        client.post("/api/forges", json={**API, "token": token})
+        if method == "post"
+        else client.patch("/api/forges/corp", json={"token": token})
+    )
+    assert reply.status_code == 403
+    assert "another account" in reply.text
+    assert "CORP_GL" not in reply.text and "someone" not in reply.text and "shared" not in reply.text
+    assert _file(client).read_text() == before

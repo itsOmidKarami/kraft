@@ -7,6 +7,7 @@ token."""
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 from pathlib import Path
@@ -30,6 +31,11 @@ _COMMAND_403 = (
     "a command source runs code on the server's machine, so it is set there: "
     "kraft admin forge add … --token-from 'command:…', or by hand in forges.yaml"
 )
+_SHARED_403 = (
+    "that token source is already read by another account, or is another account's pasted "
+    "file: a token is sent only to the host it was set for. Use a source of its own"
+)
+_BODY_MAX = 64 * 1024
 _TOKEN_BODY = 'the body must be {"value": …, "kind": "pat" | "oauth" | "unknown"}'
 
 
@@ -122,11 +128,14 @@ def _own_file(name: str, account: forges.ForgeAccount | None) -> Path | None:
     """The file Kraft wrote for `name`'s pasted token, when the account reads it: its own
     path, returned only when the account's path leads to the same real file."""
     token = account.token if account else None
-    if token is None or token.file is None:
+    if token is None or token.file is None or not _NAME.fullmatch(name):
         return None
-    mine = kraft_home() / "secrets" / name
-    theirs = os.path.realpath(os.path.expandvars(os.path.expanduser(token.file)))
-    return mine if os.path.realpath(mine) == theirs else None
+    mine = kraft_home().resolve() / "secrets" / name
+    return mine if os.path.realpath(mine) == _real(token.file) else None
+
+
+def _real(spec: str) -> str:
+    return os.path.realpath(os.path.expandvars(os.path.expanduser(spec)))
 
 
 def _drop_own_file(name: str, before: forges.ForgeAccount | None, after: forges.ForgesFile) -> None:
@@ -156,13 +165,45 @@ def _no_command(sent, updated: forges.ForgeAccount) -> None:
         raise HTTPException(403, _COMMAND_403)
 
 
+def _no_shared(updated: forges.ForgesFile, name: str, sent) -> None:
+    """A write over HTTP never points an account at a secret another account already reads,
+    nor at another name's pasted file: the probe would send it to this account's host.
+    Fixed words, never the name or path. Hand edits on disk are not checked here."""
+    token = updated.accounts[name].token
+    if sent is None or token is None:
+        return
+    others = [a.token for n, a in updated.accounts.items() if n != name and a.token]
+    if token.env and any(o.env == token.env for o in others):
+        raise HTTPException(403, _SHARED_403)
+    if token.file:
+        real = _real(token.file)
+        secrets = os.path.realpath(kraft_home().resolve() / "secrets")
+        own = os.path.join(secrets, name)
+        if any(o.file and _real(o.file) == real for o in others) or (
+            real.startswith(secrets + os.sep) and real != own
+        ):
+            raise HTTPException(403, _SHARED_403)
+
+
+async def _json(request: Request):
+    """The body parsed, or None when it is not JSON. Capped: nothing here is larger than a
+    token, and a deep or huge body must not cost the server more than a refusal."""
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > _BODY_MAX:
+        raise HTTPException(422, "the body is larger than 64 KiB")
+    raw = await request.body()
+    if len(raw) > _BODY_MAX:
+        raise HTTPException(422, "the body is larger than 64 KiB")
+    try:
+        return json.loads(raw)
+    except (ValueError, RecursionError):
+        return None
+
+
 async def _body(request: Request, model: type[BaseModel]):
     """The JSON body as `model`. Not a handler parameter: FastAPI's 422 quotes the `input`
     of each error (an unknown key's value, a bare string), and a body here may be a token."""
-    try:
-        raw = await request.json()
-    except ValueError:
-        raw = None
+    raw = await _json(request)
     if not isinstance(raw, dict):
         raise HTTPException(422, "the body must be a JSON object")
     try:
@@ -212,6 +253,7 @@ async def add_forge(request: Request):
             {**current.accounts, body.name: body.model_dump(exclude={"name"}, exclude_none=True)}
         )
         _no_command(body.token, updated.accounts[body.name])
+        _no_shared(updated, body.name, body.token)
         _refuse_added(st, current, updated)
         _save(st, updated, (body.name,))
     apply_mod.notify(request.app)
@@ -238,6 +280,7 @@ async def edit_forge(name: str, request: Request):
         fields = {k: v for k, v in fields.items() if v is not None}
         updated = _validated({**current.accounts, name: fields})
         _no_command(sent.get("token"), updated.accounts[name])
+        _no_shared(updated, name, sent.get("token"))
         _refuse_added(st, current, updated)
         _save(st, updated, (name,))
         _drop_own_file(name, old, updated)
@@ -251,10 +294,7 @@ async def set_token(name: str, request: Request):
     its input, and this is the one body that is a token."""
     _forbid_sessions(request, "forge accounts")
     st = request.app.state
-    try:
-        body = await request.json()
-    except ValueError:
-        body = None
+    body = await _json(request)
     value, kind = (body.get("value"), body.get("kind")) if isinstance(body, dict) else (None, None)
     if not isinstance(value, str) or not isinstance(kind, str) or kind not in credentials.KINDS:
         raise HTTPException(422, _TOKEN_BODY)
@@ -277,7 +317,7 @@ async def set_token(name: str, request: Request):
         # Before the file exists: no log line can carry it unredacted.
         redact.register(value)
         redact.register(credentials.basic_form(value, kind))
-        target = kraft_home() / "secrets" / name
+        target = kraft_home().resolve() / "secrets" / name
         source = {"from": "file", "file": str(target), "kind": kind}
         fields = {**old.model_dump(by_alias=True, exclude_none=True), "token": source}
         updated = _validated({**current.accounts, name: fields})  # before any file is touched
