@@ -469,6 +469,15 @@ _CORP = {"forge": "gitlab", "web_url": "https://code.corp.example/gitlab"}
             "github-work",
             id="existing-github.com-default-untouched",
         ),
+        # The alias's account from an earlier connect: reused, not a 409.
+        pytest.param(
+            "git@github-work:acme/app.git",
+            ["--forge", "github"],
+            {"github-work": {"forge": "github", "web_url": "https://github.com"}},
+            {"github-work": {"forge": "github", "web_url": "https://github.com"}},
+            "github-work",
+            id="alias-account-reused",
+        ),
         # An account that exists: its forge, and nothing asked or written.
         pytest.param(
             _SELF_HOSTED,
@@ -496,12 +505,27 @@ def test_flags_answer_the_questions(
     )
 
 
-def test_an_existing_account_named_in_a_terminal_asks_nothing(app, capsys, repo, monkeypatch):
+@pytest.mark.parametrize(
+    "worker",
+    [
+        pytest.param(False, id="terminal"),
+        # A worker may not read forge accounts: the server takes the account's forge.
+        pytest.param(True, id="worker"),
+    ],
+)
+def test_an_existing_account_named_asks_nothing(app, capsys, repo, monkeypatch, worker):
     """...and the project loses the account's web prefix, as for a host's default."""
     _origin(repo, "https://code.corp.example/gitlab/team/app.git")
     asyncio.run(client.add_forge("corp", **_CORP))
     seen = _prompts(monkeypatch, [])
-    cli.main(["repo", "connect", str(repo), "--forge-account", "corp"])
+    if worker:
+        monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "wi-1")
+
+        async def refused():
+            raise client.status_error(403, "a Kraft session cannot manage forge accounts")
+
+        monkeypatch.setattr(client, "list_forges", refused)
+    cli.main(["repo", "connect", str(repo), "--forge-account", "corp", *(["-y"] if worker else [])])
     [entry] = asyncio.run(client.repos())
     assert (seen, entry["forge"], entry["forge_account"], entry["project"]) == (
         [],
@@ -525,7 +549,7 @@ def test_a_host_with_an_account_asks_nothing(app, capsys, repo, monkeypatch):
         pytest.param(
             ["--forge", "gitlab", "--web-url", "https://code.corp.example"],
             {"code.corp.example": {"forge": "gitlab", "web_url": "https://other.example"}},
-            "name this one with --forge-account",
+            "already exists (gitlab, https://other.example); name this one with --forge-account",
             id="name-taken",
         ),
         pytest.param(
@@ -588,19 +612,34 @@ def test_a_failed_connect_keeps_the_account_it_wrote(app, capsys, repo, monkeypa
 
 
 @pytest.mark.parametrize(
-    "remote, again, said",
+    "remote, again, flags, said",
     [
-        pytest.param(_SELF_HOSTED, True, "is connected already", id="connected"),
-        pytest.param("git@github.com:acme/app.git", False, "github.com is github", id="host-says"),
+        pytest.param(
+            _SELF_HOSTED, True, ["--forge", "gitlab"], "--forge ignored: ", id="connected"
+        ),
+        pytest.param(
+            "git@github.com:acme/app.git",
+            False,
+            ["--forge", "gitlab"],
+            "--forge ignored: github.com is github",
+            id="host-says",
+        ),
+        pytest.param(
+            "git@github.com:acme/app.git",
+            False,
+            ["--forge", "github", "--web-url", "https://github.com"],
+            "--web-url ignored: github.com has its forge already",
+            id="web-url-on-a-host-that-says",
+        ),
     ],
 )
-def test_an_ignored_forge_says_so(app, capsys, repo, remote, again, said):
+def test_an_ignored_forge_says_so(app, capsys, repo, remote, again, flags, said):
     _origin(repo, remote)
     if again:
         cli.main(["repo", "connect", str(repo), "-y", "--forge", "github"])
         capsys.readouterr()
-    cli.main(["repo", "connect", str(repo), "-y", "--forge", "gitlab"])
-    assert "--forge ignored: " in (out := capsys.readouterr().out) and said in out
+    cli.main(["repo", "connect", str(repo), "-y", *flags])
+    assert said in capsys.readouterr().out and not _forges_yaml().exists()
     assert asyncio.run(client.repos())[0]["forge"] == "github"
 
 

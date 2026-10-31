@@ -546,6 +546,14 @@ def _ask_web_url(host: str, path: str | None, port: int | None) -> str:
     )
 
 
+def _forge_accounts() -> dict:
+    """forges.yaml's accounts; none in a worker, which may not read them (the
+    server still checks an account the repo names)."""
+    if os.environ.get("KRAFT_WORK_ITEM_ID"):
+        return {}
+    return asyncio.run(client.list_forges())["accounts"]
+
+
 def _settle_forge(ns: argparse.Namespace, *, interactive: bool) -> tuple[dict, bool, bool | None]:
     """The `forge` and `forge_account` to connect with, naming an account for the
     host when it needs one: only when the host names no forge and no account
@@ -561,8 +569,7 @@ def _settle_forge(ns: argparse.Namespace, *, interactive: bool) -> tuple[dict, b
         raise SystemExit("error: a worker does not change the instance's forge accounts")
     say = _print if not ns.json else (lambda _: None)
     if ns.forge_account and not ns.web_url:
-        accounts = asyncio.run(client.list_forges())["accounts"]
-        if (named := accounts.get(ns.forge_account)) is not None:
+        if (named := _forge_accounts().get(ns.forge_account)) is not None:
             if ns.forge and ns.forge != named["forge"]:
                 raise SystemExit(
                     f"error: forge account {ns.forge_account!r} is {named['forge']}, not {ns.forge}"
@@ -573,16 +580,29 @@ def _settle_forge(ns: argparse.Namespace, *, interactive: bool) -> tuple[dict, b
         return asked, False, None
     resolved, connected = _resolve(ns.path)
     if connected:
-        if ns.forge:
+        if ns.forge or ns.web_url:
             say(f"--forge ignored: {resolved['path']} is connected already")
         return asked, False, True  # connect says so; the account is for a repo not yet connected
     if not resolved["needs_forge"]:
         if ns.forge and resolved["forge"] and ns.forge != resolved["forge"]:
             say(f"--forge ignored: {resolved['remote_host']} is {resolved['forge']}")
             return asked, False, False
+        if ns.web_url:
+            say(f"--web-url ignored: {resolved['remote_host']} has its forge already")
         return {**asked, "forge": ns.forge}, False, False
-    asyncio.run(client.list_forges())  # a forges.yaml that does not load: say so before asking
+    accounts = _forge_accounts()  # a forges.yaml that does not load: said before asking
     host = resolved["remote_host"]
+    name = ns.forge_account or host
+    # An account named for the host but no host's default (an SSH alias's): reuse it.
+    if (same := accounts.get(name)) is not None:
+        same_url = (ns.web_url or same["web_url"]).rstrip("/") == same["web_url"].rstrip("/")
+        if ns.forge in (None, same["forge"]) and same_url:
+            say(f"using forge account {name} ({same['forge']}, {same['web_url']})")
+            return {"forge": same["forge"], "forge_account": name}, False, False
+        raise SystemExit(
+            f"error: a forge account named {name!r} already exists "
+            f"({same['forge']}, {same['web_url']}); name this one with --forge-account"
+        )
     forge = ns.forge or (_ask_forge() if interactive else None)
     web_url = ns.web_url or (
         _ask_web_url(host, resolved["remote_path"], resolved["remote_port"])
@@ -591,7 +611,6 @@ def _settle_forge(ns: argparse.Namespace, *, interactive: bool) -> tuple[dict, b
     )
     if web_url is None:
         return {**asked, "forge": forge}, False, False  # --forge alone: no account
-    name = ns.forge_account or host
     # The host's default only when the address is on the remote's host: an SSH
     # alias, or an address elsewhere, would make it another host's default.
     default = forges_mod.web_host(web_url) == host
