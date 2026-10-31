@@ -438,9 +438,12 @@ def _in_process_fix(cause: dict | None, forbidden: bool = False) -> str:
         )
     if cause and cause.get("sso_url"):
         # The address is `facts.sso_url`, which every screen shows once, as the hint.
-        return (
-            "Authorize the forge CLI's token for single sign-on (the address is below), then retry."
-        )
+        account = cause.get("account")
+        if isinstance(account, str) and account and "`" not in account:
+            return f"Forge account {account}'s token needs single sign-on authorization."
+        if isinstance(account, str) and account:
+            return "The forge account's token needs single sign-on authorization."
+        return "The forge CLI's token needs single sign-on authorization."
     return _IN_PROCESS_FIX.get(cause["cause"] if cause else "", _IN_PROCESS_FIX_DEFAULT)
 
 

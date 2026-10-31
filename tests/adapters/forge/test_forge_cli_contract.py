@@ -1,9 +1,9 @@
-"""What the three backends (`GlabCli`, `GitLabApi` and `GhCli`)
+"""What the four backends (`GlabCli`, `GitLabApi`, `GhCli` and `GitHubApi`)
 promise alike, against a stubbed `glab`/`gh` (and `git`) on PATH: the argv each
-operation builds and what it parses back. `GitLabApi` runs over `GlabOverHttp`, which
-answers its HTTP from the same `glab` stub. Behaviour only one backend has stays in
-test_glab.py / test_gh.py / test_gitlab_api.py. The all-methods twin test is in
-test_forge_parity.py."""
+operation builds and what it parses back. An API backend runs over `GlabOverHttp` or
+`GhOverHttp`, which answer its HTTP from the same stub. Behaviour only one backend has stays
+in test_glab.py / test_gh.py / test_gitlab_api.py / test_github_api.py. The all-methods twin
+tests are in test_forge_parity.py and test_github_parity.py."""
 
 from __future__ import annotations
 
@@ -20,12 +20,13 @@ from kraft.adapters import forge
 from kraft.adapters.forge import credentials, transport
 from kraft.adapters.forge import gh as gh_adapter
 from kraft.adapters.forge.gh import _QUEUE_QUERY, _THREADS_QUERY
+from kraft.adapters.forge.github_api import GitHubApi
 from kraft.adapters.forge.gitlab_api import GitLabApi
 from kraft.automated_review import AutomatedReview
 from kraft.forges import ForgeAccount, TokenSource
 
 from . import api_outputs, outputs
-from .conftest import GlabOverHttp
+from .conftest import GhOverHttp, GlabOverHttp
 from .nodes import FAIL, Api
 
 #: The full sha a merge is asked to land.
@@ -93,13 +94,36 @@ GH = SimpleNamespace(
 )
 
 
+#: What the `git` stub answers a `GitHubApi` asking for its repository: no push URL, an origin.
+GH_GIT_ROUTES = {
+    "*config*pushurl*": FAIL,
+    "*config*remote.origin.url*": "https://github.com/o/r.git",
+}
+_GH_ACCOUNT = ForgeAccount(
+    forge="github",
+    client="api",
+    web_url="https://github.com",
+    token=TokenSource(**{"from": "env", "env": "CONTRACT_GH"}),
+)
+GH_API = SimpleNamespace(
+    **{
+        **vars(GH),
+        "id": "github-api",
+        "twin": GH,
+        "git_routes": GH_GIT_ROUTES,
+        "cls": lambda: GitHubApi("contract-gh", _GH_ACCOUNT, http=GhOverHttp().transport),
+    }
+)
+
+
 @pytest.fixture(autouse=True)
 def _contract_token(monkeypatch):
-    """`GitLabApi`'s token as production gets it: taken from the server's environment."""
+    """The API backends' tokens as production gets them: taken from the server's environment."""
     monkeypatch.setitem(credentials._TAKEN, "CONTRACT_GL", "glpat-contract-fake")
+    monkeypatch.setitem(credentials._TAKEN, "CONTRACT_GH", "ghp_contract_fake")
 
 
-@pytest.fixture(params=[GLAB, GLAB_API, GH], ids=["glab", "gitlab-api", "gh"])
+@pytest.fixture(params=[GLAB, GLAB_API, GH, GH_API], ids=["glab", "gitlab-api", "gh", "github-api"])
 def be(request, cli):
     """One backend, with its CLI stubbed to answer a merge request view and
     `git` stubbed clean."""
@@ -118,8 +142,9 @@ def be(request, cli):
         # Untracked files are not excused: a new file the agent never `git
         # add`ed is exactly what went missing on 5163dd1b.
         (GH, "?? tests/test_new_thing.py", "test_new_thing.py"),
+        (GH_API, "?? tests/test_new_thing.py", "test_new_thing.py"),
     ],
-    ids=["glab-modified", "gh-untracked-only"],
+    ids=["glab-modified", "gh-untracked-only", "github-api-untracked-only"],
 )
 async def test_open_mr_refuses_a_dirty_worktree(cli, tmp_path, backend, porcelain, named):
     cli.stub(backend.name, backend.view)
@@ -193,7 +218,7 @@ async def test_every_merge_request_call_names_the_branch(be, cli, tmp_path, op):
     assert calls or argv.count("graphql") or "head=kraft/abc" in argv
     for call in calls:
         assert any("kraft/abc" in word for word in call), call
-    if be is GH:
+    if be.name == "gh":
         # Each GraphQL call carries the branch (`b`) or the number it read from
         # the branch (`n`) as a variable, and none asked git for the current one.
         named = [x for x in argv if x in ("b=kraft/abc", "n=7", "id=PR_kwDO7")]
@@ -379,27 +404,31 @@ async def test_glab_cancel_merge_that_fails_raises_unless_nothing_was_queued(
         (GLAB, outputs.GLAB_MR_VIEW_CONFLICT, "conflict", False),
         (GLAB_API, outputs.GLAB_MR_VIEW_CONFLICT, "conflict", False),
         (GH, api_outputs.pr_by_branch(api_outputs.CONFLICT_PR), "conflict", False),
+        (GH_API, api_outputs.pr_by_branch(api_outputs.CONFLICT_PR), "conflict", False),
         # A conflict is a code problem; a missing approval is a person's to
         # grant on the forge. `merge` has to tell them apart, and mr_checks
         # (pre-gate) must read the approval as undecided, not fail on it.
         (GLAB, outputs.GLAB_MR_VIEW_NOT_APPROVED, "not_approved", None),
         (GLAB_API, outputs.GLAB_MR_VIEW_NOT_APPROVED, "not_approved", None),
         (GH, api_outputs.pr_by_branch(api_outputs.NEEDS_APPROVAL_PR), "not_approved", None),
+        (GH_API, api_outputs.pr_by_branch(api_outputs.NEEDS_APPROVAL_PR), "not_approved", None),
     ],
     ids=[
         "glab-conflict",
         "gitlab-api-conflict",
         "gh-conflict",
+        "github-api-conflict",
         "glab-missing-approval",
         "gitlab-api-missing-approval",
         "gh-missing-approval",
+        "github-api-missing-approval",
     ],
 )
 async def test_ci_status_names_the_block_reason(cli, tmp_path, backend, view, reason, mergeable):
-    routes = outputs.glab_mr(view) if backend is not GH else {api_outputs.READ_BRANCH: view}
+    routes = outputs.glab_mr(view) if backend.name == "glab" else {api_outputs.READ_BRANCH: view}
     cli.stub(backend.name, routes={**routes, outputs.PIPELINES: outputs.GLAB_CI_SUCCESS})
-    if backend is GLAB_API:
-        cli.stub("git", routes=GIT_ROUTES, default="")
+    if hasattr(backend, "git_routes"):
+        cli.stub("git", routes=backend.git_routes, default="")
 
     status = await backend.cls().ci_status(repo=tmp_path, mr=forge.MR(0, ""), branch="kraft/abc")
 

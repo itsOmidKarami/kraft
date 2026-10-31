@@ -104,16 +104,19 @@ async def test_a_forge_task_failure_names_its_cause_in_the_stops_facts(
 
 
 _SSO = "https://github.com/orgs/acme/sso?authorization_request=abc"
-_SSO_FIX = "Authorize the forge CLI's token for single sign-on (the address is below), then retry."
+_SSO_FIX = "The forge CLI's token needs single sign-on authorization."
 _TODAYS_FIX = (
     "The forge refused the credentials on the Kraft server's machine. Fix them, then retry."
 )
 
 
 _WHO = {"account": "corp-gl", "source": "env CORP_GL"}
+_TICK = {"account": "corp`gl", "source": "env CORP_GL"}
 _TOKEN_FIX = (
     "Forge account corp-gl could not sign in with its token, or its token could not be read."
 )
+_ACCOUNT_SSO_FIX = "Forge account corp-gl's token needs single sign-on authorization."
+_UNNAMED_SSO_FIX = "The forge account's token needs single sign-on authorization."
 _DENIED_FIX = "Forge account corp-gl: its token lacks the rights this needs."
 
 
@@ -128,7 +131,8 @@ _DENIED_FIX = "Forge account corp-gl: its token lacks the rights this needs."
         ("https://github.com/sso`id`", {}, {"cause": "forge_auth"}, _TODAYS_FIX),
         ("", _WHO, {"cause": "forge_auth", **_WHO}, _DENIED_FIX),
         ("", {**_WHO, "reason": "auth"}, {"cause": "forge_auth", **_WHO}, _TOKEN_FIX),
-        (_SSO, _WHO, {"cause": "forge_auth", "sso_url": _SSO, **_WHO}, _SSO_FIX),
+        (_SSO, _WHO, {"cause": "forge_auth", "sso_url": _SSO, **_WHO}, _ACCOUNT_SSO_FIX),
+        (_SSO, _TICK, {"cause": "forge_auth", "sso_url": _SSO, **_TICK}, _UNNAMED_SSO_FIX),
     ],
     ids=[
         "sso-on-a-cli-account",
@@ -140,6 +144,7 @@ _DENIED_FIX = "Forge account corp-gl: its token lacks the rights this needs."
         "api-account-forbidden",
         "api-account-refused",
         "api-account-with-sso",
+        "api-account-with-sso-unprintable-name",
     ],
 )
 @pytest.mark.parametrize(
@@ -165,6 +170,8 @@ async def test_a_refused_token_stop_carries_the_sso_address_only_when_it_is_safe
         assert "`" not in stop["reason"]
         # Shown once, as the hint under the reason, from the facts.
         assert "https://" not in stop["reason"]
+        # The cause alone: the banner joins it to the hint, so "below" would point at nothing.
+        assert "below" not in stop["reason"]
 
 
 async def test_a_forge_rate_limit_parks_the_item_until_the_forge_allows_it(
