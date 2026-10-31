@@ -3048,9 +3048,16 @@ async def run_once(
         failing_node = nodes[start_index].id
         reason = str(exc)
         kind = StopKind.CONFIG if isinstance(exc, _config.ConfigError) else StopKind.INFRA
+        # A token stop (a base fetch the account's token could not authenticate) names it.
+        cause = getattr(exc, "account", "") and forge_mod.failure_cause(
+            reason, {"reason": getattr(exc, "reason", None)}
+        )
+        facts = {"cause": cause, "account": exc.account, "source": exc.source} if cause else None
         await node_runs.entered(db, inplace.item_folder(run_dirs, row), work_item_id, failing_node)
         await db.write(
-            lambda c: store.mark_needs_human(c, work_item_id, failing_node, reason, kind=kind)
+            lambda c: store.mark_needs_human(
+                c, work_item_id, failing_node, reason, kind=kind, facts=facts
+            )
         )
         return "needs_human"
     if report is not None:

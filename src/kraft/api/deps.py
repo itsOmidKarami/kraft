@@ -30,7 +30,9 @@ from kraft import config as config_mod
 from kraft import forges as forges_mod
 from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.forge import git as forge_git
+from kraft.adapters.forge import git_auth
 from kraft.adapters.forge import mr as forge_mr
+from kraft.adapters.forge.models import ForgeError
 from kraft.addons import load as addons_load
 from kraft.config import RepoEntry
 from kraft.policy import (
@@ -1013,6 +1015,10 @@ async def base_branch_or_422(repo: str, branch: str | None) -> str | None:
         raise HTTPException(
             422, f"base branch {branch!r} cannot be checked: {repo} has no origin remote"
         )
+    try:  # an account whose token cannot be read refuses the check, as a 422
+        env = await git_auth.remote_env(path, builtins_mod.promptless_git_env(path))
+    except ForgeError as exc:
+        raise HTTPException(422, f"base branch {branch!r} cannot be checked: {exc}") from None
     try:
         done = await asyncio.to_thread(
             subprocess.run,
@@ -1022,7 +1028,7 @@ async def base_branch_or_422(repo: str, branch: str | None) -> str | None:
             capture_output=True,
             text=True,
             timeout=30,
-            env=builtins_mod.promptless_git_env(path),
+            env=env,
         )
     except subprocess.TimeoutExpired:
         raise HTTPException(

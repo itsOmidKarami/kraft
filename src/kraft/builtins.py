@@ -22,7 +22,7 @@ from kraft import carried as _carried
 from kraft import events, inplace, item_paths, logs, redact, reviewed_head, store
 from kraft import harness as _harness
 from kraft.adapters import subprocess as _subprocess
-from kraft.adapters.forge import git
+from kraft.adapters.forge import git, git_auth
 from kraft.config import ConfigError, RepoEntry, base_ignore_args, git_read
 from kraft.paths import RunDirs, default_run_dir
 from kraft.vocab import LimitEvent
@@ -67,6 +67,19 @@ class BaseBranchMissing(git.ForgeError):
     person naming the branch, never a silent fork from whatever the connected
     checkout has on it. A `ForgeError` (so a `RuntimeError`): every door that
     already stops on a failed refresh or a failed forge call stops on this."""
+
+
+class BaseFetchRefused(BaseBranchMissing):
+    """origin refused the account's token (or sent the fetch elsewhere) when the base was
+    fetched: a stop naming the account, never a start from a stale base. `reason`, `account`
+    and `source` are a token stop's, as the forge nodes' errors carry them."""
+
+
+def _restated(exc: RuntimeError, text: str) -> RuntimeError:
+    """A wrapper's `text` for `exc`, a token stop keeping its account and source."""
+    if isinstance(exc, git.ForgeError) and exc.account:
+        return git.ForgeError(text, reason=exc.reason, account=exc.account, source=exc.source)
+    return RuntimeError(text)
 
 
 def _commit_paths(worktree: Path, paths: list[str], message: str, base: str) -> None:
@@ -403,8 +416,10 @@ def _pin_identity(repo: Path, worktree: Path, work_item_id: str) -> None:
         )
 
 
-def _git_ok(cwd: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+def _git_ok(
+    cwd: Path, *args: str, env: Mapping[str, str] | None = None
+) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, env=env)
 
 
 def _submodule_name(worktree: Path, base: str | None, rel: str) -> str | None:
@@ -430,7 +445,14 @@ def _submodule_name(worktree: Path, base: str | None, rel: str) -> str | None:
 
 
 def _add_member(
-    worktree: Path, rel: str, member_repo: Path, branch: str, base: str | None = None
+    worktree: Path,
+    rel: str,
+    member_repo: Path,
+    branch: str,
+    base: str | None = None,
+    *,
+    env: Mapping[str, str] | None = None,
+    auth: git_auth.GitAuth | None = None,
 ) -> None:
     """Check member `rel` out as a linked worktree of its connected
     repository `member_repo` (Kraft-ju36l, spec 3.1), on `branch` at the
@@ -464,7 +486,16 @@ def _add_member(
     have = ("cat-file", "-e", f"{sha}^{{commit}}")
     for fetch in ((), ("fetch", "-q", "origin"), ("fetch", "-q", "origin", sha)):
         if fetch:
-            _git_ok(member_repo, *fetch)
+            fetched = _git_ok(member_repo, *fetch, env=env)
+            if fetched.returncode and auth and auth.stops(fetched.stderr):
+                raise auth.stamp(
+                    git.ForgeError(
+                        f"forge account {auth.name} could not fetch {rel}'s commit from "
+                        f"origin with its token ({auth.account.source().label()}). "
+                        "Replace the token there, then retry"
+                    ),
+                    fetched.stderr,
+                )
         if _git_ok(member_repo, *have).returncode == 0:
             break
     else:
@@ -574,9 +605,19 @@ async def _setup_submodules(
         else:
             member_repo = Path(repositories[ids[rel]].path)
             try:
-                await asyncio.to_thread(_add_member, worktree, rel, member_repo, branch, base)
+                auth = await git_auth.auth_for(member_repo)
+                await asyncio.to_thread(
+                    _add_member,
+                    worktree,
+                    rel,
+                    member_repo,
+                    branch,
+                    base,
+                    env=git_auth.git_env(os.environ, auth),
+                    auth=auth,
+                )
             except RuntimeError as exc:
-                raise RuntimeError(f"member {rel} of {work_item_id}: {exc}") from exc
+                raise _restated(exc, f"member {rel} of {work_item_id}: {exc}") from exc
 
     # Only once every member is checked out: a failure above discards the
     # worktree, and its retry must not record an earlier member twice.
@@ -862,7 +903,7 @@ async def ensure_worktree(
             connected = [m for m in member_repositories(row, repositories or {}).values() if m]
             left = await _discard_worktree(Path(repo), worktree, connected)
             suffix = f" (and its worktree could not be removed: {left})" if left else ""
-            raise RuntimeError(f"{exc}{suffix}") from exc
+            raise _restated(exc, f"{exc}{suffix}") from exc
     return worktree
 
 
@@ -1203,6 +1244,16 @@ async def upstream_head(repo: Path, branch: str) -> str | None:
         ref = f"refs/remotes/origin/{branch}"
         env = promptless_git_env(repo)
         try:
+            auth = await git_auth.auth_for(repo)
+        except git.ForgeError as exc:  # the account's token cannot be read
+            raise BaseFetchRefused(
+                f"{exc}; Kraft will not start {branch} from a stale base. Fix it, then retry",
+                reason=exc.reason,
+                account=exc.account,
+                source=exc.source,
+            ) from None
+        env = git_auth.git_env(env, auth)
+        try:
             done = await asyncio.to_thread(
                 subprocess.run,
                 ["git", "fetch", "-q", "origin", f"+refs/heads/{branch}:{ref}"],
@@ -1218,6 +1269,25 @@ async def upstream_head(repo: Path, branch: str) -> str | None:
             detail = "timed out"
         if detail is not None:
             logger.warning("could not fetch origin/%s in %s: %s", branch, repo, detail)
+        if detail is not None and auth and auth.stops(detail):
+            fixed = auth.stop_words(detail)
+            raise BaseFetchRefused(
+                fixed
+                or (
+                    f"forge account {auth.name} could not fetch {branch} from origin with its "
+                    f"token ({auth.account.source().label()}), so Kraft will not start from a "
+                    "stale base. Replace the token there, then retry"
+                ),
+                reason=(
+                    "tls"
+                    if auth.untrusted(detail)
+                    else "forbidden"
+                    if not auth.redirected(detail) and "returned error: 403" in detail.lower()
+                    else "auth"
+                ),
+                account=auth.name,
+                source=auth.account.source().label(),
+            )
         # git's own words for a branch origin does not have. A last-fetched
         # copy of a branch that is gone is no base to build on either.
         gone = detail is not None and "couldn't find remote ref" in detail

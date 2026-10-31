@@ -559,3 +559,11 @@ def test_the_server_keeps_a_token_file_from_every_sandbox_from_boot(client):
     from kraft.adapters.forge import credentials
 
     assert Path("/secrets/kraft-tok") in credentials.secret_files()
+
+
+def test_the_server_installs_its_git_auth_reader_and_clears_it_at_shutdown(client_factory):
+    from kraft.adapters.forge import git_auth
+
+    with client_factory():
+        assert git_auth._READER is not None
+    assert git_auth._READER is None
