@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const SRC = new URL("../../", import.meta.url).pathname;
-const OWNERS = ["ng/settings/ForgesPage.tsx", "ng/settings/AddForgeDialog.tsx", "ng/settings/EditForgeDialog.tsx", "ng/phone/areas/Forges.tsx"];
+const OWNERS = ["ng/settings/ForgesPage.tsx", "ng/settings/AddForgeDialog.tsx", "ng/settings/EditForgeDialog.tsx", "ng/settings/forgeForm.tsx", "ng/phone/areas/Forges.tsx"];
 const walk = (dir: string): string[] =>
   readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
 

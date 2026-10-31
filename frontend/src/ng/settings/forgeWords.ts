@@ -66,3 +66,5 @@ export function probeWords(a: ForgeAccount, today: Date): { word: string | null;
 
 export const namedBy = (repos: Pick<Repo, "name" | "forge_account">[], name: string): string[] =>
   repos.filter((r) => r.forge_account === name).map((r) => r.name);
+
+export const SWITCH_DELETES_PASTED = "If this file is a pasted token, switching to another source deletes it.";

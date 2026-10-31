@@ -9,6 +9,8 @@ import { Empty } from "../ui/Empty";
 import { LinkButton } from "../ui/LinkButton";
 import { showToast } from "../ui/Toast";
 import { type ForgeAccount, accountsOf, EMPTY_FORGES, EMPTY_FORGES_WHY, FORGES_LEDE, namedBy, probeWords, sourceWords } from "./forgeWords";
+import { AddForgeDialog } from "./AddForgeDialog";
+import { EditForgeDialog } from "./EditForgeDialog";
 import { Block } from "./parts";
 import "./settings.css";
 
@@ -53,11 +55,14 @@ export function useForges() {
 
 /** Settings › Forge accounts: the accounts `kraft admin forge list` prints and the last check of each token. */
 export function ForgesPage() {
-  const { accounts, repos, error } = useForges();
+  const { accounts, repos, error, load, remove } = useForges();
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const editingAccount = accounts?.find((a) => a.name === editing);
   const today = new Date();
   // A pin to an account that is not in forges.yaml: the repo falls back to gh/glab, so say which.
   const missing = accounts ? repos.filter((r) => r.forge_account && !accounts.some((a) => a.name === r.forge_account)) : [];
-  const add = <Button>Add account</Button>; // Task 3 opens the dialogs.
+  const add = <Button onClick={() => setAdding(true)}>Add account</Button>;
   return (
     <div className="ng-settings">
       <div className="set-page is-cards">
@@ -110,7 +115,7 @@ export function ForgesPage() {
                           </td>
                           <td className="is-dim">{a.probe ? ago(a.probe.checked_at) : <Dash />}</td>
                           <td className="is-dim">{users.length ? users.join(", ") : <Dash />}</td>
-                          <td className="is-act"><Button aria-label={`Edit ${a.name}`}>Edit</Button></td>
+                          <td className="is-act"><Button aria-label={`Edit ${a.name}`} onClick={() => setEditing(a.name)}>Edit</Button></td>
                         </tr>
                       );
                     })}
@@ -131,6 +136,8 @@ export function ForgesPage() {
           </p>
         )}
       </div>
+      {editingAccount && <EditForgeDialog account={editingAccount} repos={repos} onClose={() => setEditing(null)} onSaved={() => void load()} onRemove={remove} />}
+      {adding && <AddForgeDialog onClose={() => setAdding(false)} onAdded={() => void load()} />}
     </div>
   );
 }
