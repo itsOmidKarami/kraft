@@ -629,11 +629,23 @@ def _seed_session(client, wid, *, session_id, hook_point, node_id="verify", runn
         conn.close()
 
 
-def _on_api_account(client, repo, monkeypatch, wid: str, *, pinned: bool = True) -> None:
-    """Put `wid` on a `client: api` GitLab account: pinned to `gitlab-api`, or
-    only configured (its repo's origin on the account's host, the account that
-    host's default). Any CLI forge resolution after this fails the test."""
+def _on_api_account(
+    client, repo, monkeypatch, wid: str, *, pinned: bool = True, forge: str = "github"
+) -> None:
+    """Put `wid` on a `client: api` account (`corp-gh` on GitHub, `corp-gl` on GitLab):
+    pinned to its API backend, or only configured (its repo's origin on the account's
+    host, the account that host's default). Any CLI forge resolution after this fails the
+    test. GitHub's API backend is not in this release, so it stops; GitLab's is built."""
     from kraft.forges import ForgeAccount, ForgesFile
+
+    name, web = (
+        ("corp-gh", "https://github.com")
+        if forge == "github"
+        else (
+            "corp-gl",
+            "https://gitlab.example",
+        )
+    )
 
     def never(name):
         raise AssertionError(f"the CLI forge {name} was resolved")
@@ -642,17 +654,19 @@ def _on_api_account(client, repo, monkeypatch, wid: str, *, pinned: bool = True)
     if pinned:
         client.portal.call(
             client.app.state.db.write,
-            lambda c: store.set_forge_pin(c, wid, "", "corp-gl", "gitlab-api"),
+            lambda c: store.set_forge_pin(c, wid, "", name, f"{forge}-api"),
         )
-        return
-    harness.git(repo, "remote", "add", "origin", "https://gitlab.example/o/r.git")
-    assert client.post("/api/repos", json={"path": str(repo), "enabled": False}).status_code == 201
-    assert client.patch(f"/api/repos?path={repo}", json={"forge": "gitlab"}).status_code == 200
+    else:
+        harness.git(repo, "remote", "add", "origin", f"{web}/o/r.git")
+        assert (
+            client.post("/api/repos", json={"path": str(repo), "enabled": False}).status_code == 201
+        )
+        assert client.patch(f"/api/repos?path={repo}", json={"forge": forge}).status_code == 200
     client.app.state.forges = ForgesFile(
         accounts={
-            "corp-gl": ForgeAccount(
-                forge="gitlab",
-                web_url="https://gitlab.example",
+            name: ForgeAccount(
+                forge=forge,
+                web_url=web,
                 client="api",
                 default_for_host=True,
                 token={"from": "git-credential"},

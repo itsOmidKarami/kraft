@@ -12,7 +12,7 @@ import pytest
 
 from kraft import redact
 from kraft.adapters.forge import credentials
-from kraft.adapters.forge.http import HttpTransport, graphql_url
+from kraft.adapters.forge.http import TRACE_MAX, HttpTransport, graphql_url
 from kraft.adapters.forge.models import ForgeError
 from kraft.forges import ForgeAccount
 
@@ -169,6 +169,31 @@ async def test_an_absolute_or_protocol_relative_path_is_refused(mock_http, path)
     with pytest.raises(ForgeError):
         await tr(m).rest("GET", path)
     assert m.requests == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["projects/1/notes?per_page=100", "projects/1/commits/a#b"],
+    ids=["query", "fragment"],
+)
+async def test_a_path_with_a_query_or_fragment_is_refused(mock_http, path):
+    """httpx drops a query written in the URL when `params` is given, so it would be lost."""
+    m = mock_http()
+    with pytest.raises(ForgeError, match="fields, not in the path") as err:
+        await tr(m).rest("GET", path)
+    assert "per_page" not in str(err.value) and m.requests == []
+
+
+def test_a_trace_keeps_the_last_8_mib():
+    assert TRACE_MAX == 8 << 20
+
+
+async def test_a_trace_read_keeps_its_tail(mock_http, monkeypatch):
+    monkeypatch.setattr("kraft.adapters.forge.http.TRACE_MAX", 1024)
+    body = b"a" * 4000 + b"the end"
+    m = mock_http(handler=lambda req: httpx.Response(200, content=body))
+    got = await tr(m).rest("GET", "x", tail=True)
+    assert got.text == (b"a" * 1017 + b"the end").decode() and len(got.text) == 1024
 
 
 @pytest.mark.parametrize("method", ["GET", "POST"])

@@ -60,15 +60,35 @@ def origin(url: str) -> tuple[str, str, int]:
 
 def project_path(remote: str, account: ForgeAccount) -> str | None:
     """The remote's project path: without `.git`, and without the account's web_url path
-    prefix (`/gitlab`) when the remote is on the account's host."""
+    prefix (`/gitlab`) when the remote is an http(s) URL on the account's host. An SSH path
+    never carries GitLab's relative URL root."""
     path = remote_path(remote)
     if path is None:
         return None
-    if remote_host(remote) == web_host(account.web_url):
+    if remote.strip().lower().startswith(("http://", "https://")) and remote_host(
+        remote
+    ) == web_host(account.web_url):
         prefix = urlsplit(account.web_url).path.strip("/")
         if prefix and path.startswith(prefix + "/"):
             path = path[len(prefix) + 1 :]
     return path or None
+
+
+def repo_project(repo: Path, account: ForgeAccount) -> str | None:
+    """The repo's project on `account`: its push URL as configured (`pushurl`, else `url`;
+    not `insteadOf`-expanded, since the branch Kraft pushes lives there). None when there
+    is no origin. Raises ValueError for an http(s) push URL on another host than the
+    account's, without quoting it (a remote can carry `oauth2:<token>@`). Synchronous."""
+    remote = config.git_read(
+        repo, "config", "--get", "remote.origin.pushurl", expected_failure=True
+    ) or config.git_read(repo, "config", "--get", "remote.origin.url", expected_failure=True)
+    if (
+        remote
+        and remote.lower().startswith(("http://", "https://"))
+        and remote_host(remote) != web_host(account.web_url)
+    ):
+        raise ValueError(f"{repo.name}'s push URL is on a different host than the forge account's")
+    return project_path(remote or "", account)
 
 
 def env_name_problem(name: str) -> str | None:

@@ -28,14 +28,14 @@ GH_STATUS = f"api repos/{{owner}}/{{repo}}/commits/{HEAD}/status"
 
 GLAB_MR = json.dumps({"iid": 9, "sha": HEAD})
 GLAB_APPROVALS = "api projects/:id/merge_requests/9/approvals"
-GLAB_DISCUSSIONS = "api projects/:id/merge_requests/9/discussions?per_page=100"
-GLAB_STATUSES = f"api projects/:id/repository/commits/{HEAD}/statuses?per_page=100"
+GLAB_DISCUSSIONS = "api projects/:id/merge_requests/9/discussions"
+GLAB_STATUSES = f"api projects/:id/repository/commits/{HEAD}/statuses"
 
 #: A merged results head pipeline built from HEAD: its jobs report on its merge
 #: commit, not on HEAD.
 MERGED, READ_MERGE_COMMIT, MERGE_COMMIT = glab_merged_results(HEAD)
 GLAB_MERGED_STATUSES = (
-    f"api projects/{MERGED['project_id']}/repository/commits/{MERGED['sha']}/statuses?per_page=100"
+    f"api projects/{MERGED['project_id']}/repository/commits/{MERGED['sha']}/statuses"
 )
 
 

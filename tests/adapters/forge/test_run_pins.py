@@ -3,16 +3,19 @@ forge node, and stops the item when a pin no longer holds."""
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
 import yaml
-from support.harness import git, make_repo
+from support.harness import git, make_repo, own_files
 
 from kraft import apply, store
 from kraft.adapters import forge
 from kraft.config import RepoEntry
 from kraft.forges import ForgeAccount, ForgesFile
+
+from .nodes import back_half
 
 _GH = ForgeAccount(forge="github", web_url="https://github.com")
 _GL = ForgeAccount(forge="gitlab", web_url="https://gitlab.example")
@@ -20,6 +23,7 @@ _GH_DEFAULT = ForgeAccount(forge="github", web_url="https://github.com", default
 _GH_API = ForgeAccount(
     forge="github", web_url="https://github.com", client="api", token={"from": "git-credential"}
 )
+_GH_API_DEFAULT = ForgeAccount(**{**_GH_API.model_dump(), "default_for_host": True})
 _GL_API = ForgeAccount(
     forge="gitlab",
     web_url="https://gitlab.example",
@@ -286,40 +290,52 @@ class _NeverRun:
         raise AssertionError(f"the CLI forge ran: {name}")
 
 
+class _Tagged(forge.FakeForge):
+    """A `FakeForge` that says which backend ran the node."""
+
+    def __init__(self, tag, ran):
+        super().__init__()
+        self.tag, self.ran = tag, ran
+
+    async def open_mr(self, **kwargs):
+        self.ran.append(self.tag)
+        return await super().open_mr(**kwargs)
+
+
 @pytest.mark.parametrize(
     "accounts, named, member, pins",
     [
         pytest.param(
-            {"corp-gl": _GL_API},
-            "corp-gl",
+            {"corp-gh": _GH_API},
+            "corp-gh",
             None,
-            {"": {"account": "corp-gl", "backend": "gitlab-api"}},
+            {"": {"account": "corp-gh", "backend": "github-api"}},
             id="named-account",
         ),
         pytest.param(
-            {"corp-gl": _GL_API},
+            {"corp-gh": _GH_API_DEFAULT},
             None,
             None,
-            {"": {"account": "corp-gl", "backend": "gitlab-api"}},
+            {"": {"account": "corp-gh", "backend": "github-api"}},
             id="host-default",
         ),
         pytest.param(
-            {"corp-gl": _GL_API},
+            {"corp-gh": _GH_API},
             None,
-            "gitlab",
+            "github",
             {
-                "": {"account": None, "backend": "gh"},
-                "libs/core": {"account": "corp-gl", "backend": "gitlab-api"},
+                "": {"account": None, "backend": "glab"},
+                "libs/core": {"account": "corp-gh", "backend": "github-api"},
             },
             id="member-on-an-api-account",
         ),
         pytest.param(
-            {"corp-gl": _GL_API},
-            None,
+            {"corp-gh": _GH_API},
+            "corp-gh",
             "",
             {
-                "": {"account": "corp-gl", "backend": "gitlab-api"},
-                "libs/core": {"account": "corp-gl", "backend": "gitlab-api"},
+                "": {"account": "corp-gh", "backend": "github-api"},
+                "libs/core": {"account": "corp-gh", "backend": "github-api"},
             },
             id="member-with-no-forge-takes-the-roots-api-pin",
         ),
@@ -328,10 +344,11 @@ class _NeverRun:
 async def test_an_api_account_stops_at_the_first_forge_node_and_never_runs_the_cli(
     run_forge, database, tmp_path, monkeypatch, accounts, named, member, pins
 ):
+    """GitHub's API backend is not in this release: the stop names it, and no CLI runs."""
     path = make_repo(tmp_path)
-    git(path, "remote", "add", "origin", "https://gitlab.example/o/r.git")
+    git(path, "remote", "add", "origin", "https://github.com/o/r.git")
     # `member`: the member's own forge ("" none, so it uses the root's), or None for no member.
-    forge_name = "github" if member else "gitlab"
+    forge_name = "gitlab" if member else "github"
     if member is not None:
         monkeypatch.setattr(forge.run._builtins, "item_members", lambda row: [("libs/core", "lib")])
     result = await run_forge(
@@ -347,7 +364,7 @@ async def test_an_api_account_stops_at_the_first_forge_node_and_never_runs_the_c
                 "lib": RepoEntry(
                     path=str(path),
                     forge=member or None,
-                    forge_account="corp-gl" if member else None,
+                    forge_account="corp-gh" if member else None,
                 )
             }
             if member is not None
@@ -358,7 +375,293 @@ async def test_an_api_account_stops_at_the_first_forge_node_and_never_runs_the_c
 
     assert result == ("config_error", "config_error")
     assert (
-        "forge account corp-gl says client: api, and the gitlab-api backend is not in this release"
+        "forge account corp-gh says client: api, and the github-api backend is not in this release"
         in run_forge.log("a1")
     )
     assert database.read(lambda c: store.forge_pins(c, "w1")) == pins
+
+
+@pytest.fixture
+def backends(monkeypatch):
+    """`api_forge` and `resolve` as recorders: what each was asked for, and which one ran."""
+    seen = SimpleNamespace(api=[], resolved=[], ran=[])
+
+    def api(name, account, **kw):
+        seen.api.append((name, account))
+        return _Tagged("api", seen.ran)
+
+    monkeypatch.setattr(forge.run, "api_forge", api)
+    return seen
+
+
+@pytest.mark.parametrize(
+    "accounts, named, member, member_account, pins, ran",
+    [
+        pytest.param(
+            {"corp-gl": _GL_API},
+            "corp-gl",
+            None,
+            None,
+            {"": {"account": "corp-gl", "backend": "gitlab-api"}},
+            ["api"],
+            id="named-account",
+        ),
+        pytest.param(
+            {"corp-gl": _GL_API},
+            None,
+            None,
+            None,
+            {"": {"account": "corp-gl", "backend": "gitlab-api"}},
+            ["api"],
+            id="host-default",
+        ),
+        pytest.param(
+            {"corp-gl": _GL_API},
+            None,
+            "gitlab",
+            "corp-gl",
+            {
+                "": {"account": None, "backend": "gh"},
+                "libs/core": {"account": "corp-gl", "backend": "gitlab-api"},
+            },
+            ["cli"],
+            id="member-on-an-api-account",
+        ),
+        pytest.param(
+            {"corp-gl": _GL_API},
+            None,
+            "",
+            None,
+            {
+                "": {"account": "corp-gl", "backend": "gitlab-api"},
+                "libs/core": {"account": "corp-gl", "backend": "gitlab-api"},
+            },
+            ["api"],
+            id="member-with-no-forge-takes-the-roots-api-pin",
+        ),
+    ],
+)
+async def test_a_gitlab_api_account_runs_through_the_api_and_never_the_cli(
+    run_forge,
+    database,
+    tmp_path,
+    monkeypatch,
+    backends,
+    accounts,
+    named,
+    member,
+    member_account,
+    pins,
+    ran,
+):
+    path = make_repo(tmp_path)
+    git(path, "remote", "add", "origin", "https://gitlab.example/o/r.git")
+    forge_name = "github" if member else "gitlab"
+    if member is not None:
+        monkeypatch.setattr(forge.run._builtins, "item_members", lambda row: [("libs/core", "lib")])
+    cli = _Tagged("cli", backends.ran)
+    result = await run_forge(
+        cli,
+        "open_mr",
+        "a1",
+        repo=path,
+        backend="auto",
+        repo_forge=forge_name,
+        repo_entry=RepoEntry(path=str(path), forge=forge_name, forge_account=named),
+        repositories=(
+            {"lib": RepoEntry(path=str(path), forge=member or None, forge_account=member_account)}
+            if member is not None
+            else {}
+        ),
+        forges=ForgesFile(accounts=accounts),
+    )
+
+    assert result == ("done", "done"), run_forge.log("a1")
+    assert database.read(lambda c: store.forge_pins(c, "w1")) == pins
+    assert backends.ran == ran
+    # Each API account is built once, whoever it serves.
+    assert backends.api == [("corp-gl", _GL_API)]
+
+
+_API = ("api", "corp-gl")
+
+
+@pytest.mark.parametrize(
+    "pins, live, members",
+    [
+        pytest.param(
+            {
+                "": {"account": "corp-gl", "backend": "gitlab-api"},
+                "libs/core": {"account": "gl-cli", "backend": "glab"},
+            },
+            _API,
+            {"libs/core": ("cli", "glab")},
+            id="cli-member-under-api-root-keeps-glab",
+        ),
+        pytest.param(
+            {
+                "": {"account": "corp-gl", "backend": "gitlab-api"},
+                "libs/core": {"account": "corp-gl", "backend": "gitlab-api"},
+            },
+            _API,
+            {"libs/core": _API},
+            id="members-on-the-roots-account-share-its-instance",
+        ),
+        pytest.param(
+            {
+                "": {"account": None, "backend": "gh"},
+                "libs/core": {"account": "corp-gl", "backend": "gitlab-api"},
+            },
+            ("cli", "gh"),
+            {"libs/core": _API},
+            id="api-member-under-a-cli-root",
+        ),
+    ],
+)
+def test_every_mount_is_run_from_its_own_pin(monkeypatch, pins, live, members):
+    built = []
+    monkeypatch.setattr(forge.run, "api_forge", lambda n, a, **kw: built.append(n) or ("api", n))
+    monkeypatch.setattr(forge.run, "resolve", lambda name: ("cli", name))
+    monkeypatch.setattr(forge.run, "_member_forges", lambda *a: {})
+    forges = ForgesFile(accounts={"corp-gl": _GL_API, "gl-cli": _GL})
+
+    got = forge.run._mount_forges(pins, None, "auto", "github", forges, None)
+
+    assert got == (live, members)
+    assert built == ["corp-gl"]  # one instance per account
+
+
+@pytest.mark.parametrize(
+    "pins, forges, error, mount, built, stop",
+    [
+        pytest.param(
+            {"": ("corp-gl", "gitlab-api")},
+            {"corp-gl": _GL_API},
+            None,
+            None,
+            ["corp-gl"],
+            None,
+            id="root-pinned",
+        ),
+        pytest.param(
+            {}, {"corp-gl": _GL_API}, None, None, ["corp-gl"], None, id="root-live-before-any-pin"
+        ),
+        pytest.param(
+            {"": (None, "gh"), "libs/core": ("corp-gl", "gitlab-api")},
+            {"corp-gl": _GL_API},
+            None,
+            "libs/core",
+            ["corp-gl"],
+            None,
+            id="member-pinned-to-its-own-account",
+        ),
+        pytest.param(
+            {"": ("corp-gl", "gitlab-api")},
+            {"corp-gl": _GL_API},
+            None,
+            "libs/core",
+            ["corp-gl"],
+            None,
+            id="member-without-forge-takes-the-roots",
+        ),
+        pytest.param(
+            {"": ("corp-gl", "gitlab-api")},
+            {},
+            None,
+            None,
+            [],
+            "forge account corp-gl was removed",
+            id="pinned-account-removed-stops",
+        ),
+        pytest.param(
+            {"": ("corp-gl", "gitlab-api")},
+            None,
+            "bad yaml",
+            None,
+            [],
+            "forges.yaml does not load (bad yaml)",
+            id="pinned-while-forges-yaml-does-not-load-stops",
+        ),
+        pytest.param(
+            {"": ("corp-gh", "github-api")},
+            {"corp-gh": _GH_API},
+            None,
+            None,
+            [],
+            "the github-api backend is not in this release",
+            id="github-api-still-refused",
+        ),
+        pytest.param(
+            {"": (None, "glab")},
+            {"corp-gl": _GL_API},
+            None,
+            None,
+            [],
+            None,
+            id="cli-pin-stays-cli",
+        ),
+    ],
+)
+async def test_item_forge_builds_the_api_backend_from_the_pin(
+    item_on, database, tmp_path, monkeypatch, pins, forges, error, mount, built, stop
+):
+    path = make_repo(tmp_path)
+    git(path, "remote", "add", "origin", "https://gitlab.example/o/r.git")
+    await item_on(back_half(), repo=path)
+    for at, (account, backend) in pins.items():
+        await database.write(
+            lambda c, a=at, x=account, b=backend: store.set_forge_pin(c, "w1", a, x, b)
+        )
+    calls = []
+    monkeypatch.setattr(forge.run, "api_forge", lambda n, a, **kw: calls.append(n) or ("api", n))
+    monkeypatch.setattr(forge.run, "resolve", lambda name: ("cli", name))
+    monkeypatch.setattr(forge.run._builtins, "item_members", lambda row: [("libs/core", "lib")])
+    monkeypatch.setattr(
+        forge.run,
+        "load_repos",
+        lambda p: [
+            RepoEntry(
+                id="lib", path=str(path), forge="gitlab" if mount and pins.get(mount) else None
+            )
+        ],
+    )
+    entry = RepoEntry(path=str(path), forge="gitlab")
+    row = {"id": "w1"}
+    args = (ForgesFile(accounts=forges) if forges is not None else None, error)
+
+    async def build():
+        return await forge.run.item_forge(database, row, entry, *args, mount=mount)
+
+    if stop:
+        with pytest.raises(forge.ForgeError, match=stop.replace("(", r"\(").replace(")", r"\)")):
+            await build()
+    else:
+        got = await build()
+        assert got == (("api", "corp-gl") if built else ("cli", "glab"))
+    assert calls == built
+
+
+@pytest.mark.parametrize(
+    "error, record",
+    [
+        pytest.param(
+            {"reason": "auth", "account": "corp-gl", "source": "env CORP_GL"},
+            {"account": "corp-gl", "source": "env CORP_GL"},
+            id="api-account-named",
+        ),
+        pytest.param({"reason": "auth"}, {}, id="cli-error-names-no-account"),
+    ],
+)
+async def test_a_forge_error_record_carries_the_account_and_source_it_names(
+    run_forge, run_dirs, repo, error, record
+):
+    class Refused(forge.FakeForge):
+        async def open_mr(self, **kwargs):
+            raise forge.ForgeError("HTTP 401", status=401, **error)
+
+    await _run(run_forge, repo, "r1", {}, None)  # the item and its pin
+    await run_forge(Refused(), "open_mr", "r2", repo=repo, backend="gh")
+
+    saved = json.loads(own_files(run_dirs, "r2").log.with_suffix(".forge.json").read_text())
+    assert {k: v for k, v in saved.items() if k in ("account", "source")} == record
+    assert saved["reason"] == "auth"

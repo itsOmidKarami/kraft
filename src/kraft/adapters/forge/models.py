@@ -62,12 +62,16 @@ class ForgeError(RuntimeError):
         reason: Reason | None = None,
         retry_after: float | None = None,
         sso_url: str = "",
+        account: str = "",
+        source: str = "",
     ):
         super().__init__(redact.redact(message))
         self.status = status
         self.reason = reason
         self.retry_after = retry_after
         self.sso_url = sso_url
+        self.account = account
+        self.source = source
 
 
 def reason_for(status: int, headers: Mapping[str, str], message: str = "") -> Reason | None:

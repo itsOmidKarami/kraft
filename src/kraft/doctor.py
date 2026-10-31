@@ -26,7 +26,7 @@ from kraft import policy as policy_mod
 from kraft import skill as skill_mod
 from kraft.adapters import forge
 from kraft.adapters.forge.probe import EXPIRY_WARN_DAYS
-from kraft.adapters.forge.run import API_BACKENDS
+from kraft.adapters.forge.run import API_BACKENDS, SHIPPED_API
 from kraft.addons import load as addons_load
 from kraft.api import config_check
 from kraft.automated_review import as_reviewers
@@ -1526,17 +1526,36 @@ def _forge_check(
         found = forges_mod.account_for(repo, forges, host)
     if found is not None and found[1].client == "api":
         backend = API_BACKENDS[found[1].forge]
+        probe = (accounts.get(found[0]) or {}).get("probe") if accounts is not None else None
+        seen = ((probe or {}).get("projects") or {}).get(str(repo.path))
+        if backend in SHIPPED_API:
+            detail = f"{repo.forge} · {backend} · account {found[0]}"
+            if accounts is None:
+                return _check(
+                    name,
+                    True,
+                    f"{detail} · not probed: the forge accounts could not be read",
+                    warn=True,
+                )
+            if not probe:
+                return _check(name, True, f"{detail} · not probed yet", warn=True)
+            if probe["state"] != "ok":
+                return _check(name, False, f"{detail} · token {probe['state']}")
+            if not seen:
+                return _check(name, True, f"{detail} · project not probed yet", warn=True)
+            if seen["visible"]:
+                return _check(name, True, f"{detail} · sees {seen['project']}")
+            why = f" ({seen['detail']})" if seen.get("detail") else ""
+            # No project when the repo's remote names none: the reason is all there is.
+            what = seen["project"] or "its project"
+            return _check(name, False, f"{detail} · cannot see {what}{why}")
         detail = (
             f"{repo.forge} · {backend} · account {found[0]}: client: api, and the {backend} "
             "backend is not in this release; forge nodes stop on this repo"
         )
         if accounts is None:
             detail += " · not probed: the forge accounts could not be read"
-        elif (
-            seen := ((accounts.get(found[0]) or {}).get("probe") or {})
-            .get("projects", {})
-            .get(str(repo.path))
-        ):
+        elif seen:
             verb = "sees" if seen["visible"] else "cannot see"
             detail += f" · {verb} {seen['project']}"
         return _check(name, False, detail)

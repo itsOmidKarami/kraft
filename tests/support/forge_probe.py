@@ -15,6 +15,9 @@ def _canned_probe(request, monkeypatch):
     CALLS.clear()
     monkeypatch.setattr(credentials, "_TAKEN", {})
     monkeypatch.setattr(credentials, "_SECRET_FILES", ())
+    monkeypatch.setattr(credentials, "_TOKENS", {})
+    monkeypatch.setattr(credentials, "_LOCKS", {})
+    monkeypatch.setattr(credentials, "_CONTEXT", None)
     if request.node.get_closest_marker("real_probe"):
         return
 

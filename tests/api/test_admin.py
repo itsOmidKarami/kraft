@@ -457,3 +457,14 @@ def test_health_reports_a_tokens_state_and_never_who_it_is(client, state, expire
     assert body["forge_tokens"] == {"a": {"state": state, "expires_on": expires_on}}
     for secret in ("octocat", "repo", "tok-0123456789"):
         assert secret not in str(body["forge_tokens"])
+
+
+def test_reload_forgets_cached_tokens(client, monkeypatch):
+    from kraft.adapters.forge import credentials
+
+    seeded = {("corp", "{}"): "tok-0123456789"}
+    monkeypatch.setattr(credentials, "_TOKENS", seeded)
+    st = client.app.state
+    (st.templates_dir / "forges.yaml").write_text("accounts: {}\n")
+    client.post("/api/templates/reload")
+    assert seeded == {}

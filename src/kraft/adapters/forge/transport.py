@@ -50,7 +50,12 @@ class ApiResponse:
 
 class Transport(Protocol):
     async def rest(
-        self, method: str, path: str, *, fields: Mapping[str, Field] | None = None
+        self,
+        method: str,
+        path: str,
+        *,
+        fields: Mapping[str, Field] | None = None,
+        tail: bool = False,
     ) -> ApiResponse: ...
 
     async def graphql(self, query: str, variables: Mapping[str, Field] | None = None) -> dict: ...
@@ -220,7 +225,12 @@ class CliTransport:
         return ["--hostname", host] if host and host != "github.com" else []
 
     async def rest(
-        self, method: str, path: str, *, fields: Mapping[str, Field] | None = None
+        self,
+        method: str,
+        path: str,
+        *,
+        fields: Mapping[str, Field] | None = None,
+        tail: bool = False,  # the CLI hands over the whole body; only HTTP windows it
     ) -> ApiResponse:
         args = [path, "-X", method, "-i", *_flags(fields), *await self._host()]
         return (await self._call(f"{method} {path}", args))[0]

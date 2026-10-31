@@ -338,6 +338,23 @@ FORGE_LOGIN_HINT = (
 FORGE_SSO_HINT = (
     "Open this address to authorize the forge CLI's token for single sign-on, then Retry: {sso_url}"
 )
+#: `cause.tsx`: a forge token (an API account's) that could not sign in, by the kind of source
+#: (`TokenSource.label()`'s first word); {value} is the variable or path, {account} its name.
+FORGE_TOKEN_HINTS = {
+    "env": "Set `{value}` to a new token where Kraft starts, then restart Kraft. Then Retry.",
+    "file": (
+        "Put a new token in the file, then check it with `kraft admin forge test {account}`. "
+        "Then Retry: `{value}`"
+    ),
+    "command": (
+        "Fix the token command for {account} in forges.yaml, then check it with "
+        "`kraft admin forge test {account}`. Then Retry."
+    ),
+    "git-credential": (
+        "Save a new token in git's credential helper for this host, then check it with "
+        "`kraft admin forge test {account}`. Then Retry."
+    ),
+}
 #: `bannerWords.ts`: a failure the repo's settings can answer.
 REPO_FIX = "Check the repo settings."
 
@@ -372,12 +389,27 @@ def _sso_url(facts: dict) -> str:
     return url if isinstance(url, str) and re.fullmatch(r"https://[!-_a-~]+", url) else ""
 
 
+def _token_hint(facts: dict) -> str:
+    """`forgeHint`: the token hint for the source's kind, or "" unless `account` and `source`
+    are plain text and the source is one the hints know (a variable or path has a value)."""
+    account, source = facts.get("account"), facts.get("source")
+    if not all(isinstance(v, str) and v and "`" not in v for v in (account, source)):
+        return ""
+    kind, _, value = source.partition(" ")
+    hint = FORGE_TOKEN_HINTS.get(kind)
+    if hint is None or (kind in ("env", "file")) != bool(value):
+        return ""
+    return hint.format(account=account, value=value)
+
+
 def _failed_fix(stop: dict) -> str:
-    """`failedFix`: `forge_sso`, `forge_login`, `retry` or `repo`."""
+    """`failedFix`: `forge_sso`, `forge_token`, `forge_login`, `retry` or `repo`."""
     facts = stop.get("facts") or {}
     cause = facts.get("cause")
     if cause == "forge_auth":
-        return "forge_sso" if _sso_url(facts) else "forge_login"
+        if _sso_url(facts):
+            return "forge_sso"
+        return "forge_token" if _token_hint(facts) else "forge_login"
     if stop.get("kind") != "infra" or cause == "stranded":
         return "retry"
     return "repo"
@@ -426,7 +458,9 @@ def _banner_words(item: dict) -> dict | None:
     if item["display_status"] == "failed":
         fix = _failed_fix(stop)
         sso = FORGE_SSO_HINT.format(sso_url=_sso_url(stop.get("facts") or {}))
-        way = {"forge_login": FORGE_LOGIN_HINT, "forge_sso": sso, "repo": REPO_FIX}.get(fix, "")
+        token = _token_hint(stop.get("facts") or {})
+        ways = {"forge_login": FORGE_LOGIN_HINT, "forge_sso": sso, "forge_token": token}
+        way = {**ways, "repo": REPO_FIX}.get(fix, "")
         text = sentence(reason) if (reason := _or(stop.get("reason"), "")) else ""
         return {"kind": "failed", "node": node, "text": text, "way": way}
     kind = stop.get("kind")

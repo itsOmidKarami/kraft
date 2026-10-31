@@ -17,7 +17,7 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -49,6 +49,12 @@ PREFIXES = {"ghp_": "pat", "github_pat_": "pat", "gho_": "oauth", "ghu_": "oauth
 # Taken from the server's environment at startup, so a worker's env cannot supply it.
 _TAKEN: dict[str, str] = {}
 
+
+# Read once per (name, account as running): an edited source, web_url or api_url misses.
+_TOKENS: dict[tuple[str, str], str] = {}
+_LOCKS: dict[tuple[str, str], asyncio.Lock] = {}
+_CONTEXT: Callable[[], Awaitable[ReadContext]] | None = None
+REPOS_UNREAD = "repos.yaml does not load, so a file token cannot be checked; fix repos.yaml"
 
 # Token files, kept from every sandbox's view (set at load and on reload).
 _SECRET_FILES: tuple[Path, ...] = ()
@@ -322,6 +328,48 @@ async def read_token(
     redact.register(token)
     redact.register(basic_form(token, source.kind))
     return token
+
+
+@dataclass(frozen=True)
+class ReadContext:
+    """What a `file` source is checked against."""
+
+    repos: Sequence[RepoEntry]
+    worktrees: Path
+    expose: Sequence[Path]
+    repos_unread: bool = False
+
+
+def set_token_context(fn: Callable[[], Awaitable[ReadContext]] | None) -> None:
+    """The server installs its reader of the repos and roots a file token is checked against."""
+    global _CONTEXT
+    _CONTEXT = fn
+
+
+async def token_for(name: str, account: ForgeAccount, *, fresh: bool = False) -> str:
+    """The account's token: cached, or read from its source (always, when `fresh`)."""
+    key = (name, account.model_dump_json())  # pydantic models do not hash
+    async with _LOCKS.setdefault(key, asyncio.Lock()):  # concurrent cold reads do one lookup
+        if not fresh and key in _TOKENS:
+            return _TOKENS[key]
+        repos, worktrees, expose = (), Path(), ()
+        if account.source().from_ == "file":
+            if _CONTEXT is None:
+                raise NoToken("the server's token reader is not running")
+            ctx = await _CONTEXT()
+            if ctx.repos_unread:
+                raise NoToken(REPOS_UNREAD)
+            repos, worktrees, expose = ctx.repos, ctx.worktrees, ctx.expose
+        _TOKENS[key] = await read_token(account, repos=repos, worktrees=worktrees, expose=expose)
+        return _TOKENS[key]
+
+
+def forget_tokens() -> None:
+    """Drop every cached token, and the read locks nobody holds, so an account edited over
+    and over does not leave one lock per edit."""
+    _TOKENS.clear()
+    for key in [k for k, lock in _LOCKS.items() if not lock.locked()]:
+        del _LOCKS[key]
 
 
 def write_pasted(name: str, value: str) -> Path:

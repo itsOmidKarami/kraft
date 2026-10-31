@@ -110,15 +110,25 @@ _TODAYS_FIX = (
 )
 
 
+_WHO = {"account": "corp-gl", "source": "env CORP_GL"}
+_TOKEN_FIX = (
+    "Forge account corp-gl could not sign in with its token, or its token could not be read."
+)
+_DENIED_FIX = "Forge account corp-gl: its token lacks the rights this needs."
+
+
 @pytest.mark.parametrize(
-    ("sso_url", "facts", "fix"),
+    ("sso_url", "who", "facts", "fix"),
     [
-        (_SSO, {"cause": "forge_auth", "sso_url": _SSO}, _SSO_FIX),
-        ("", {"cause": "forge_auth"}, _TODAYS_FIX),
-        ("http://github.com/sso", {"cause": "forge_auth"}, _TODAYS_FIX),
-        ("javascript:alert(1)", {"cause": "forge_auth"}, _TODAYS_FIX),
-        ("https://github.com/sso then run it", {"cause": "forge_auth"}, _TODAYS_FIX),
-        ("https://github.com/sso`id`", {"cause": "forge_auth"}, _TODAYS_FIX),
+        (_SSO, {}, {"cause": "forge_auth", "sso_url": _SSO}, _SSO_FIX),
+        ("", {}, {"cause": "forge_auth"}, _TODAYS_FIX),
+        ("http://github.com/sso", {}, {"cause": "forge_auth"}, _TODAYS_FIX),
+        ("javascript:alert(1)", {}, {"cause": "forge_auth"}, _TODAYS_FIX),
+        ("https://github.com/sso then run it", {}, {"cause": "forge_auth"}, _TODAYS_FIX),
+        ("https://github.com/sso`id`", {}, {"cause": "forge_auth"}, _TODAYS_FIX),
+        ("", _WHO, {"cause": "forge_auth", **_WHO}, _DENIED_FIX),
+        ("", {**_WHO, "reason": "auth"}, {"cause": "forge_auth", **_WHO}, _TOKEN_FIX),
+        (_SSO, _WHO, {"cause": "forge_auth", "sso_url": _SSO, **_WHO}, _SSO_FIX),
     ],
     ids=[
         "sso-on-a-cli-account",
@@ -127,18 +137,21 @@ _TODAYS_FIX = (
         "other-scheme-dropped",
         "whitespace-dropped",
         "backtick-dropped",
+        "api-account-forbidden",
+        "api-account-refused",
+        "api-account-with-sso",
     ],
 )
 @pytest.mark.parametrize(
     ("fix_loop", "stop_kind"), [(True, "infra"), (False, "failed")], ids=["fix-loop", "no-loop"]
 )
 async def test_a_refused_token_stop_carries_the_sso_address_only_when_it_is_safe(
-    item_on, tmp_path, fake_agent, monkeypatch, sso_url, facts, fix, fix_loop, stop_kind
+    item_on, tmp_path, fake_agent, monkeypatch, sso_url, who, facts, fix, fix_loop, stop_kind
 ):
     """The forge's SSO address reaches the stop's facts, never the reason (the
     screens show it once, as the hint): only as a plain `https://` address.
     Anything else is dropped and the stop reads as it always did."""
-    error = {"reason": "forbidden", "sso_url": sso_url}
+    error = {"reason": "forbidden", "sso_url": sso_url, **who}
     monkeypatch.setattr(_forge.run, "resolve", lambda name: _RaisingWith("HTTP 403", **error))
     extra = {"fix_loop": {"tasks": [_agent("repair")]}} if fix_loop else {}
     it = await item_on([_exec("checks", _forge_task("open", "mr.open_draft"), **extra)])

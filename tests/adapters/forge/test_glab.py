@@ -690,3 +690,22 @@ async def test_glab_ci_status_pages_through_the_jobs_to_a_failure_on_page_two(cl
         f"{jobs} -X GET -i -F per_page=100 -F page=2",
         "api projects/:id/jobs/101/trace -X GET -i",
     ]
+
+
+async def test_glab_ci_status_with_jobs_past_the_page_cap_is_unreadable_not_infra(cli, tmp_path):
+    """Ten full pages and no short one: the failure may be on a page never read, so the
+    detail is "(unreadable)", never the empty tuple `is_infra_red` takes for infra."""
+    full = json.dumps([{"id": n, "name": f"j{n}", "status": "success"} for n in range(1, 101)])
+    cli.stub(
+        "glab",
+        routes={
+            **glab_mr(GLAB_MR_VIEW),
+            PIPELINES: GLAB_CI_FAILED,
+            **glab_pipeline(jobs=full),
+        },
+    )
+    cli.stub("git", routes={"symbolic-ref --short": "kraft/abc"}, default="")
+
+    status = await forge.GlabCli().ci_status(repo=tmp_path, mr=forge.MR(54, "u"), branch="")
+
+    assert status.failed_jobs == (forge.FailedJob("(unreadable)", "failed", None),)

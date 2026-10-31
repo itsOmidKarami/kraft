@@ -117,6 +117,7 @@ def _save(st, updated: forges.ForgesFile, probe_names: tuple[str, ...] = ()) -> 
     apply_mod.record(st, forges.ForgesFile.FILE)
     credentials.strip_env_sources(path)
     credentials.set_secret_files(path, running=updated)
+    credentials.forget_tokens()
     st.forges = updated
     for gone in set(st.forge_probes) - set(probe.api_accounts(st)):
         del st.forge_probes[gone]  # a removed account must not keep /health degraded

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 import yaml
+from support.harness import git, make_repo
 
 from kraft import forges
 from kraft.config import ConfigError, RepoEntry
@@ -279,17 +280,96 @@ def test_an_env_name_kraft_needs_is_never_a_source(name, refused):
             "git@code.corp.example:gitlab/team/app.git",
             "https://code.corp.example/gitlab",
             "gitlab",
-            "team/app",
+            "gitlab/team/app",
         ),
         ("git@github-work:acme/app.git", "https://github.com", "github", "acme/app"),
         ("https://github.com/acme/app", "https://github.com", "github", "acme/app"),
         ("", "https://github.com", "github", None),
+        (
+            "https://code.corp.example/gitlab/team/sub/app.git",
+            "https://code.corp.example/gitlab",
+            "gitlab",
+            "team/sub/app",
+        ),
+        (
+            "ssh://git@code.corp.example:2222/team/app.git",
+            "https://code.corp.example",
+            "gitlab",
+            "team/app",
+        ),
+        (
+            "ssh://git@code.corp.example/gitlab/team/app.git",
+            "https://code.corp.example/gitlab",
+            "gitlab",
+            "gitlab/team/app",
+        ),
+        ("https://gitlab.com/team/app.git/", "https://gitlab.com", "gitlab", "team/app"),
+        (
+            "https://code.corp.example/gitlab/team/app",
+            "https://code.corp.example/git",
+            "gitlab",
+            "gitlab/team/app",
+        ),
+        (
+            "https://oauth2:glpat-SECRET0000@gitlab.com/team/app.git",
+            "https://gitlab.com",
+            "gitlab",
+            "team/app",
+        ),
     ],
-    ids=["https-with-prefix", "scp-with-prefix", "ssh-alias-host", "github", "empty"],
+    ids=[
+        "https-with-prefix",
+        "scp-under-prefix-not-stripped",
+        "ssh-alias-host",
+        "github",
+        "empty",
+        "subgroups",
+        "ssh-url-with-port",
+        "ssh-under-prefix-not-stripped",
+        "trailing-slash",
+        "prefix-is-a-whole-segment",
+        "userinfo-in-url",
+    ],
 )
 def test_the_project_is_the_remotes_path_less_the_web_prefix(remote, web_url, forge, path):
     account = forges.ForgeAccount(forge=forge, web_url=web_url)
     assert forges.project_path(remote, account) == path
+
+
+@pytest.mark.parametrize(
+    ("config_", "want"),
+    [
+        ({"remote.origin.url": "https://gitlab.com/team/app.git"}, "team/app"),
+        (
+            {
+                "remote.origin.url": "https://gitlab.com/team/app.git",
+                "remote.origin.pushurl": "https://gitlab.com/team/fork.git",
+            },
+            "team/fork",
+        ),
+        (
+            {
+                "remote.origin.url": "https://gitlab.com/team/app.git",
+                "url.{bare}.insteadOf": "https://gitlab.com/team/app.git",
+            },
+            "team/app",
+        ),
+        ({}, None),
+        ({"remote.origin.url": "https://oauth2:glpat-SECRET0000@evil.example/team/app.git"}, "!"),
+    ],
+    ids=["url-only", "pushurl-wins", "insteadof-not-expanded", "no-origin", "other-host-refused"],
+)
+def test_a_repos_project_is_its_push_url_as_configured(tmp_path, config_, want):
+    dest = make_repo(tmp_path)
+    for key, value in config_.items():
+        git(dest, "config", key.format(bare=tmp_path / "bare"), value)
+    account = forges.ForgeAccount(forge="gitlab", web_url="https://gitlab.com")
+    if want == "!":
+        with pytest.raises(ValueError) as err:
+            forges.repo_project(dest, account)
+        assert "SECRET" not in str(err.value) and "evil" not in str(err.value)
+    else:
+        assert forges.repo_project(dest, account) == want
 
 
 _GH = forges.ForgeAccount(forge="github", web_url="https://git.corp.example", default_for_host=True)

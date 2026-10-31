@@ -3,9 +3,13 @@ node run against a fake through `forge.run_task`."""
 
 from __future__ import annotations
 
+import json
 import os
+import re
+import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 import pytest
@@ -13,6 +17,7 @@ from support.harness import own_files
 
 from kraft import events
 from kraft.adapters import forge
+from kraft.adapters.forge import transport
 
 from .nodes import FAIL, Api, FailWith, back_half
 
@@ -219,3 +224,38 @@ class MockHttp:
 @pytest.fixture
 def mock_http() -> type[MockHttp]:
     return MockHttp
+
+
+class GlabOverHttp:
+    """An `httpx.MockTransport` that answers a `GitLabApi` request from the `glab` stub.
+
+    The request is rendered as the argv `CliTransport` would have sent
+    (`api PATH -X METHOD -i FLAGS`) and run through the stub on PATH, so the stub's
+    call log holds the same line for both backends and one route table serves both.
+    Test-only and lossy in one place: a GET query value that is all digits or
+    true/false is a typed `-F`, so a string of digits would read as an integer."""
+
+    def __init__(self, project: str = "itsOmidKarami/kraft"):
+        self.project = project
+        self.transport = httpx.MockTransport(self._answer)
+
+    def _answer(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.raw_path.decode().split("?")[0].removeprefix("/api/v4/")
+        mine = f"projects/{quote(self.project, safe='')}"
+        # The project must reach the wire encoded: never decoded, never double-encoded.
+        assert path.startswith(mine) or not re.match(r"projects/\D", path), path
+        path = path.replace(mine, "projects/:id", 1)
+        if request.method == "GET":
+            flags = [
+                x
+                for k, v in request.url.params.multi_items()
+                for x in ("-F" if re.fullmatch(r"\d+|true|false", v) else "-f", f"{k}={v}")
+            ]
+        else:
+            flags = transport._flags(json.loads(request.content or b"{}"))
+        argv = ["glab", "api", path, "-X", request.method, "-i", *flags]
+        done = subprocess.run(argv, capture_output=True, text=True, errors="replace")
+        resp = transport.parse_included(done.stdout)
+        if resp is None:
+            raise httpx.ConnectError("stub: failed")
+        return httpx.Response(resp.status, headers=dict(resp.headers), content=resp.text.encode())

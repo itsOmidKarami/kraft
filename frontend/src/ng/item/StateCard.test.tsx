@@ -204,6 +204,21 @@ describe("StateCard", () => {
     expect(within(screen.getByRole("region", { name: "Failed" })).queryByRole("button", { name: /Check the repo settings/ })).toBeNull();
   });
 
+  it.each([
+    ["env", "env CORP_GL", "Set CORP_GL to a new token where Kraft starts, then restart Kraft. Then Retry."],
+    ["file, its path last", "file /etc/kraft/gl.token", "Put a new token in the file, then check it with kraft admin forge test corp-gl. Then Retry: /etc/kraft/gl.token"],
+    ["command", "command", "Fix the token command for corp-gl in forges.yaml, then check it with kraft admin forge test corp-gl. Then Retry."],
+    ["git-credential", "git-credential", "Save a new token in git's credential helper for this host, then check it with kraft admin forge test corp-gl. Then Retry."],
+    ["a path holding replacement patterns, taken literally", "file /srv/$&/$'/$$.token", "Put a new token in the file, then check it with kraft admin forge test corp-gl. Then Retry: /srv/$&/$'/$$.token"],
+  ])("a forge_auth stop naming an account and a %s source: that source's token hint, with neither a fact row", (_name, source, hint) => {
+    stubFetch();
+    show({ display_status: "failed", stop: stop("failed", { facts: { cause: "forge_auth", account: "corp-gl", source } }) });
+    const card = screen.getByRole("region", { name: "Failed" });
+    expect(card.querySelector(".item-card-fix")!.textContent).toBe(hint);
+    expect(within(card).queryByText("account")).toBeNull();
+    expect(within(card).queryByText("source")).toBeNull();
+  });
+
   // The forge's authorize address is the hint's last words and a link, only when it is a plain https address.
   it.each([
     ["https", "https://github.com/orgs/acme/sso?authorization_request=abc", true],

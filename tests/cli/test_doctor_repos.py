@@ -195,20 +195,6 @@ def test_doctor_reports_the_resolved_forge_cli(app, tmp_path, monkeypatch):
             False,
             "repo ${path}: forge_account 'a' says forge: github, the repo says forge: gitlab",
         ),
-        (
-            {
-                "a": {
-                    "forge": "gitlab",
-                    "web_url": "https://gitlab.com",
-                    "client": "api",
-                    "token": {"from": "env", "env": "CORP_GL"},
-                }
-            },
-            "a",
-            False,
-            "gitlab · gitlab-api · account a: client: api, and the gitlab-api backend is not in "
-            "this release; forge nodes stop on this repo",
-        ),
     ],
     ids=[
         "names-the-account",
@@ -217,7 +203,6 @@ def test_doctor_reports_the_resolved_forge_cli(app, tmp_path, monkeypatch):
         "named-account",
         "unknown-forge-account-fails",
         "named-account-on-the-wrong-forge-fails",
-        "api-account-not-in-this-release",
     ],
 )
 def test_the_forge_row_names_the_account_or_why_the_default_was_skipped(
@@ -246,28 +231,78 @@ def test_the_forge_row_names_the_account_or_why_the_default_was_skipped(
     assert row["ok"] is ok and row["detail"] == detail.replace("${path}", str(repo))
 
 
+_SEES = {"project": "group/repo", "visible": True}
+_BLIND = {"project": "group/repo", "visible": False, "detail": "group/repo: HTTP 404"}
+_NO_PROJECT = {"project": "", "visible": False, "detail": "origin names no project"}
+
+
 @pytest.mark.parametrize(
-    ("seen", "says"),
+    ("forge", "probe", "ok", "warn", "says"),
     [
-        ({"project": "group/repo", "visible": True}, " · sees group/repo"),
-        ({"project": "group/repo", "visible": False}, " · cannot see group/repo"),
-        (None, " · not probed: the forge accounts could not be read"),
+        ("gitlab", {"state": "ok", "seen": _SEES}, True, False, " · sees group/repo"),
+        (
+            "gitlab",
+            {"state": "ok", "seen": _BLIND},
+            False,
+            False,
+            " · cannot see group/repo (group/repo: HTTP 404)",
+        ),
+        (
+            "gitlab",
+            {"state": "ok", "seen": _NO_PROJECT},
+            False,
+            False,
+            " · cannot see its project (origin names no project)",
+        ),
+        ("gitlab", "unreadable", True, True, " · not probed: the forge accounts could not be read"),
+        ("gitlab", None, True, True, " · not probed yet"),
+        ("gitlab", {"state": "ok"}, True, True, " · project not probed yet"),
+        ("gitlab", {"state": "refused"}, False, False, " · token refused"),
+        ("github", {"state": "ok", "seen": _SEES}, False, False, " · sees group/repo"),
+        (
+            "github",
+            "unreadable",
+            False,
+            False,
+            " · not probed: the forge accounts could not be read",
+        ),
     ],
-    ids=["sees-the-project", "cannot-see-the-project", "accounts-unreadable"],
+    ids=[
+        "gitlab-api-sees-the-project",
+        "gitlab-api-cannot-see-it",
+        "gitlab-api-no-project-names-the-reason",
+        "gitlab-api-accounts-unreadable",
+        "gitlab-api-not-probed",
+        "gitlab-api-project-not-probed",
+        "gitlab-api-token-refused",
+        "github-api-still-fails",
+        "github-api-unreadable-still-fails",
+    ],
 )
-def test_the_forge_row_says_whether_an_api_token_sees_the_project(tmp_path, seen, says):
+def test_the_forge_row_says_whether_an_api_token_sees_the_project(
+    tmp_path, forge, probe, ok, warn, says
+):
     repo = make_repo(tmp_path, name="onforge")
+    web = f"https://{forge}.com"
     subprocess.run(
-        ["git", "remote", "add", "origin", "git@gitlab.com:group/repo.git"], cwd=repo, check=True
+        ["git", "remote", "add", "origin", f"{web}/group/repo.git"], cwd=repo, check=True
     )
     forges = forges_mod.ForgesFile.model_validate(
-        {"accounts": {"a": {"forge": "gitlab", "web_url": "https://gitlab.com", "client": "api"}}}
+        {"accounts": {"a": {"forge": forge, "web_url": web, "client": "api"}}}
     )
-    entry = config.RepoEntry(path=str(repo), forge="gitlab", forge_account="a")
-    probe = {"projects": {str(repo): seen}} if seen else None
-    accounts = {"a": {"client": "api", "probe": probe}} if seen else None
+    entry = config.RepoEntry(path=str(repo), forge=forge, forge_account="a")
+    if probe == "unreadable":
+        accounts = None
+    else:
+        seen = (probe or {}).get("seen")
+        body = None if probe is None else {"state": probe["state"]}
+        if body and seen:
+            body["projects"] = {str(repo): seen}
+        accounts = {"a": {"client": "api", "probe": body}}
     row = doctor._forge_check(entry, forges, accounts)
-    assert row["ok"] is False and row["detail"].endswith(says), row
+    assert (row["ok"], bool(row.get("warn"))) == (ok, warn), row
+    assert row["detail"].endswith(says), row
+    assert ("not in this release" in row["detail"]) == (forge == "github")
 
 
 def test_doctor_warns_on_a_repo_on_the_dev_only_fake_forge(app, tmp_path):

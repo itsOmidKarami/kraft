@@ -74,8 +74,8 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
   switch (item.display_status) {
     case "failed": {
       if (!stop) return null;
-      // The desktop's card, fact for fact: what the run kept, then the stop's own facts, and never `cause`, which picks the hint, or `sso_url`, which the hint shows.
-      const fs = Object.entries(facts).flatMap(([k, v]) => (k !== "cause" && k !== "sso_url" && str(v) ? [[k, str(v)!] as [string, string]] : []));
+      // The desktop's card, fact for fact: what the run kept, then the stop's own facts, and never `cause`, which picks the hint, or `sso_url`, `account`, `source`, which the hint shows.
+      const fs = Object.entries(facts).flatMap(([k, v]) => (k !== "cause" && k !== "sso_url" && k !== "account" && k !== "source" && str(v) ? [[k, str(v)!] as [string, string]] : []));
       const kept = keptLine(item, fileCount);
       const keptFact: [string, string][] = kept ? [["work kept", kept]] : [];
       return {

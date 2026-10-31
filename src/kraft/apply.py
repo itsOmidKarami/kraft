@@ -258,6 +258,7 @@ def _reload_forges(st) -> None:
     for gone in set(st.forge_probes) - api:
         del st.forge_probes[gone]
     # Every API account, changed or not: a reload is how a person says "I fixed the token".
+    credentials.forget_tokens()
     probe.kick(st, api)
     st.forges = file
     st.invalid_forges = "; ".join(new) or None
