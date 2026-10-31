@@ -462,6 +462,26 @@
       "banner": { "kind": "failed", "node": "draft_merge_request", "name": "draft merge request", "text": "Gh: authentication failed.", "way": "Sign the forge CLI in on the server's machine: `gh auth login`, or `glab auth login` for GitLab. If git itself can't authenticate, check its credentials there too (`gh auth setup-git`, your SSH key or credential helper). Then Retry." }
     },
     {
+      "name": "failed-on-forge-token-env",
+      "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "draft_merge_request", "reason": "forge account corp-gl: token refused", "facts": { "cause": "forge_auth", "account": "corp-gl", "source": "env CORP_GL" } } },
+      "banner": { "kind": "failed", "node": "draft_merge_request", "name": "draft merge request", "text": "Forge account corp-gl: token refused.", "way": "Forge account corp-gl could not sign in with its token (env CORP_GL). Replace it there, then Retry." }
+    },
+    {
+      "name": "failed-on-forge-token-file",
+      "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "draft_merge_request", "reason": "forge account corp-gl: token refused", "facts": { "cause": "forge_auth", "account": "corp-gl", "source": "file /etc/kraft/gl.token" } } },
+      "banner": { "kind": "failed", "node": "draft_merge_request", "name": "draft merge request", "text": "Forge account corp-gl: token refused.", "way": "Forge account corp-gl could not sign in with its token (file /etc/kraft/gl.token). Replace it there, then Retry." }
+    },
+    {
+      "name": "forge-token-with-sso",
+      "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "draft_merge_request", "reason": "forge account corp-gl: token refused", "facts": { "cause": "forge_auth", "account": "corp-gl", "source": "env CORP_GL", "sso_url": "https://gitlab.corp/sso" } } },
+      "banner": { "kind": "failed", "node": "draft_merge_request", "name": "draft merge request", "text": "Forge account corp-gl: token refused.", "way": "Open this address to authorize the forge CLI's token for single sign-on, then Retry: https://gitlab.corp/sso" }
+    },
+    {
+      "name": "forge-auth-without-account",
+      "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "draft_merge_request", "reason": "forge account corp-gl: token refused", "facts": { "cause": "forge_auth", "source": "env CORP_GL" } } },
+      "banner": { "kind": "failed", "node": "draft_merge_request", "name": "draft merge request", "text": "Forge account corp-gl: token refused.", "way": "Sign the forge CLI in on the server's machine: `gh auth login`, or `glab auth login` for GitLab. If git itself can't authenticate, check its credentials there too (`gh auth setup-git`, your SSH key or credential helper). Then Retry." }
+    },
+    {
       "name": "failed-on-forge-sso",
       "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "draft_merge_request", "reason": "gh: HTTP 403", "facts": { "cause": "forge_auth", "sso_url": "https://github.com/orgs/acme/sso?authorization_request=abc" } } },
       "banner": { "kind": "failed", "node": "draft_merge_request", "name": "draft merge request", "text": "Gh: HTTP 403.", "way": "Open this address to authorize the forge CLI's token for single sign-on, then Retry: https://github.com/orgs/acme/sso?authorization_request=abc" }

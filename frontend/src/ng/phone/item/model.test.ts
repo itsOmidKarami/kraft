@@ -3,7 +3,7 @@ import type { DisplayStatus, WorkItemStop } from "../../../types";
 import type { EventType } from "../../../types/vocab.generated";
 import { chainGraph } from "../../item/graph";
 import { detail } from "../../item/testkit";
-import { BROKEN_BASE_TEXT, FORGE_LOGIN_HINT, FORGE_SSO_HINT } from "../../item/cause";
+import { BROKEN_BASE_TEXT, FORGE_LOGIN_HINT, FORGE_SSO_HINT, FORGE_TOKEN_HINT } from "../../item/cause";
 import { cardOf, kebabOf, nodeSub, pairOf } from "./model";
 
 const stop = (kind: WorkItemStop["kind"], over: Partial<WorkItemStop> = {}): WorkItemStop => ({ kind, node: "verification", resume_at: null, reason: null, ...over });
@@ -186,6 +186,15 @@ describe("the failed card's cause (R15b-01)", () => {
     ["forge_auth with a control character in the sso_url hints the login", "https://github.com/sso\u0007bell", FORGE_LOGIN_HINT],
   ] as const)("%s, and the address is never a fact of its own", (_name, sso_url, hint) => {
     const card = cardOf(mk("failed", stop("failed", { facts: { cause: "forge_auth", sso_url } })));
+    expect(card?.hint).toBe(hint);
+    expect(card?.facts).toEqual([]);
+  });
+
+  it.each([
+    ["account and source: the token hint, neither a fact row", { account: "corp-gl", source: "env CORP_GL" }, FORGE_TOKEN_HINT.replace("{account}", "corp-gl").replace("{source}", "env CORP_GL")],
+    ["no account: the login hint", { source: "env CORP_GL" }, FORGE_LOGIN_HINT],
+  ] as const)("forge_auth with %s", (_name, extra, hint) => {
+    const card = cardOf(mk("failed", stop("failed", { facts: { cause: "forge_auth", ...extra } })));
     expect(card?.hint).toBe(hint);
     expect(card?.facts).toEqual([]);
   });

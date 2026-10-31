@@ -204,6 +204,15 @@ describe("StateCard", () => {
     expect(within(screen.getByRole("region", { name: "Failed" })).queryByRole("button", { name: /Check the repo settings/ })).toBeNull();
   });
 
+  it("a forge_auth stop naming an account and source: the token hint, with neither as a fact row", () => {
+    stubFetch();
+    show({ display_status: "failed", stop: stop("failed", { facts: { cause: "forge_auth", account: "corp-gl", source: "env CORP_GL" } }) });
+    const card = screen.getByRole("region", { name: "Failed" });
+    expect(card.querySelector(".item-card-fix")!.textContent).toBe("Forge account corp-gl could not sign in with its token (env CORP_GL). Replace it there, then Retry.");
+    expect(within(card).queryByText("account")).toBeNull();
+    expect(within(card).queryByText("source")).toBeNull();
+  });
+
   // The forge's authorize address is the hint's last words and a link, only when it is a plain https address.
   it.each([
     ["https", "https://github.com/orgs/acme/sso?authorization_request=abc", true],
