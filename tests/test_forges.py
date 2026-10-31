@@ -92,8 +92,14 @@ def test_remote_hosts_compare_without_case_port_or_dot(remote, host):
         ("github", "https://github.com", "https://api.github.com"),
         ("github", "https://acme.ghe.com", "https://api.acme.ghe.com"),
         ("gitlab", "https://g.example:8443", "https://g.example:8443/api/v4"),
+        ("github", "https://github.com:443", "https://api.github.com:443"),
     ],
-    ids=["github-com-api-host", "ghe-data-residency-api-host", "same-host-with-port"],
+    ids=[
+        "github-com-api-host",
+        "ghe-data-residency-api-host",
+        "same-host-with-port",
+        "explicit-443",
+    ],
 )
 def test_an_explicit_api_url_on_an_allowed_host_loads(tmp_path, forge, web_url, api_url):
     acct = {"forge": forge, "web_url": web_url, "api_url": api_url}
@@ -124,8 +130,16 @@ _API = "accounts:\n  a: {forge: gitlab, web_url: 'https://g.example', client: ap
         (_CLI + "ca_file: /etc/ca.pem}\n", "carries no token"),
         (_API + "token: {from: env}}\n", "token from: env takes only `env`"),
         (_API + "token: {from: env, env: ANTHROPIC_API_KEY}}\n", "which Kraft passes to agents"),
-        (_API + "token: {from: env, env: KRAFT_HOME}}\n", "token.env names KRAFT_HOME"),
-        (_API + "token: {from: env, env: GIT_CONFIG_COUNT}}\n", "token.env names GIT_CONFIG_COUNT"),
+        (_API + "token: {from: env, env: KRAFT_HOME}}\n", "token.env names a KRAFT_ variable"),
+        (_API + "token: {from: env, env: GIT_CONFIG_COUNT}}\n", "token.env names a GIT_ variable"),
+        (_API + "token: {from: env, env: glpat-SECRETSECRET}}\n", "must name an environment"),
+        (_API + "token: {glpat-SECRETSECRET}}\n", "accounts.a.token has a key forges.yaml"),
+        (_CLI + "glpat-SECRETSECRET: x}\n", "accounts.a has a key forges.yaml does not know"),
+        (
+            "accounts:\n  a: {forge: github, web_url: 'https://github.com:8443', "
+            "api_url: 'https://api.github.com'}\n",
+            "must be web_url's origin",
+        ),
         (_API + "token: {from: file, file: secrets/gl}}\n", "must be an absolute path"),
         (_API + "token: {from: env, env: A_B, file: /x}}\n", "token from: env takes only"),
         (_API + "token: glpat-SECRETSECRET}\n", "'accounts'.a.token"),
@@ -154,6 +168,10 @@ _API = "accounts:\n  a: {forge: gitlab, web_url: 'https://g.example', client: ap
         "env-names-anthropic-key",
         "env-names-kraft-var",
         "env-names-git-var",
+        "env-holds-a-token",
+        "token-flow-key",
+        "account-unknown-key-holds-a-token",
+        "github-api-host-other-port",
         "file-relative",
         "two-source-keys",
         "token-as-a-string",
@@ -200,8 +218,15 @@ def test_a_missing_file_is_no_accounts(tmp_path):
             ["from: env", "env: CORP_GL"],
             ["from_", "kind: unknown"],
         ),
+        (
+            forges.ForgeAccount(
+                forge="gitlab", web_url="https://g.example", client="api", token={}
+            ),
+            ["from: git-credential"],
+            ["token: {}", "kind: unknown"],
+        ),
     ],
-    ids=["cli", "api-env-source"],
+    ids=["cli", "api-env-source", "api-default-source-keeps-from"],
 )
 def test_a_save_round_trips_at_0600_without_defaults(tmp_path, account, present, absent):
     path = tmp_path / "forges.yaml"

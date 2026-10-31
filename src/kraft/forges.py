@@ -11,7 +11,14 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from kraft import config
 
@@ -70,12 +77,13 @@ def env_name_problem(name: str) -> str | None:
     from kraft.worker.env import BASELINE
     from kraft.worker.sandbox import FORWARDED_ENV
 
+    # Never quote an arbitrary name: a token pasted here would reach the open /health.
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
-        return f"names {name!r}, which is not an environment variable name"
+        return "must name an environment variable: letters, digits and _"
     if name.startswith("KRAFT_"):
-        return f"names {name}, which Kraft sets for itself"
+        return "names a KRAFT_ variable, which Kraft sets for itself"
     if name.startswith("GIT_"):
-        return f"names {name}, which git reads"
+        return "names a GIT_ variable, which git reads"
     if name in FORWARDED_ENV:
         return f"names {name}, which Kraft passes to agents"
     if name in BASELINE:
@@ -286,6 +294,15 @@ class ForgesFile(config._Model):
             return super().load(path)
         except config.ConfigError as exc:
             cause = exc.__cause__
+            if (
+                isinstance(cause, ValidationError)
+                and cause.errors()[0]["type"] == "extra_forbidden"
+            ):
+                # The unknown key is not named: a token pasted as a key would be quoted.
+                parent = ".".join(str(p) for p in cause.errors()[0]["loc"][:-1]) or "the top level"
+                raise config.ConfigError(
+                    f"{cls.FILE}: {parent} has a key forges.yaml does not know"
+                ) from None
             if not isinstance(cause, yaml.MarkedYAMLError):
                 # Not `raise`: the chained ValidationError carries `input_value='glpat-...'`.
                 raise config.ConfigError(str(exc)) from None
@@ -295,4 +312,9 @@ class ForgesFile(config._Model):
 
     def save(self, path) -> None:
         """Written over the file's own text: hand comments stay, defaults are not spelled out."""
-        config.write_preserving(path, self.model_dump(exclude_defaults=True, by_alias=True))
+        data = self.model_dump(exclude_defaults=True, by_alias=True)
+        for name, acct in self.accounts.items():
+            if acct.token is not None:  # `from` is always written, even the default
+                written = data["accounts"][name]
+                written["token"] = {"from": acct.token.from_, **written.get("token", {})}
+        config.write_preserving(path, data)
