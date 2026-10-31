@@ -1,7 +1,9 @@
+import importlib
 import io
 import json
 import logging
 import secrets
+from pathlib import Path
 
 import pytest
 from rich.console import Console
@@ -13,11 +15,6 @@ from kraft import builtins, events, redact
 from kraft.adapters.forge.git import run_git
 from kraft.adapters.forge.models import ForgeError
 from kraft.api import deps
-
-
-@pytest.fixture(autouse=True)
-def _no_secrets(monkeypatch):
-    monkeypatch.setattr(redact, "_secrets", ())
 
 
 async def _forge_error(tok, **_):
@@ -62,6 +59,20 @@ async def _event_payload(tok, database, **_):
     )
 
 
+async def _kraft_log_dict_args(tok, caplog, **_):
+    logging.getLogger("kraft.test").warning("could not push: %(why)s", {"why": tok})
+    return caplog.text
+
+
+async def _kraft_log_stack_info(tok, caplog, **_):
+    def frame_holding_the_token():
+        logging.getLogger("kraft.test").warning("here", stack_info=True)
+
+    frame_holding_the_token.__code__ = frame_holding_the_token.__code__.replace(co_name=f"t_{tok}")
+    frame_holding_the_token()
+    return caplog.text
+
+
 async def _crash_stop_reason(tok, database, **_):
     # A direct git run's RuntimeError carries raw stderr into guard's stop reason.
     async def crash():
@@ -102,6 +113,8 @@ async def _kraft_log(tok, caplog, **_):
         pytest.param(_event_payload, id="event-payload"),
         pytest.param(_crash_stop_reason, id="crash-stop-reason"),
         pytest.param(_kraft_log, id="kraft-log"),
+        pytest.param(_kraft_log_dict_args, id="kraft-log-dict-args"),
+        pytest.param(_kraft_log_stack_info, id="kraft-log-stack-info"),
     ],
 )
 @pytest.mark.parametrize(
@@ -133,6 +146,14 @@ def test_a_secret_inside_another_never_leaves_the_longer_ones_tail():
     assert redact.redact("x abcdefgh-12345678 y") == "x <redacted> y"
 
 
+def test_a_second_install_never_wraps_itself(caplog):
+    importlib.reload(redact)
+    importlib.reload(redact)
+    redact.register(tok := secrets.token_hex(16))
+    logging.getLogger("kraft.test").warning("once: %s", tok)
+    assert caplog.text.count("once: <redacted>") == 1
+
+
 def test_nothing_registered_leaves_text_untouched():
     text = "a token-like abcdefgh12345678"
     assert redact.redact(text) is text
@@ -144,6 +165,9 @@ def test_a_log_record_keeps_the_args_a_formatter_unpacks(caplog):
     caplog.set_level(logging.INFO, logger="uvicorn.access")
     logger.info('%s - "%s %s HTTP/%s" %d', "127.0.0.1:1", "GET", "/health", "1.1", 200)
     record = caplog.records[-1]
+    path = Path("/no/secret/here")
+    logging.getLogger("kraft.test").warning("at %s", path)
+    assert caplog.records[-1].args[0] is path
     assert AccessFormatter("%(request_line)s %(status_code)s").format(record) == (
         "GET /health HTTP/1.1 200 OK"
     )

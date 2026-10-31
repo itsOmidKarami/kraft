@@ -31,7 +31,9 @@ def redact(text: str) -> str:
     return text
 
 
-_make_record = logging.getLogRecordFactory()
+# The factory Kraft's wraps: the original even when this module runs twice (a
+# reload, a second import path), so the wrapper never ends up calling itself.
+_make_record = getattr(logging.getLogRecordFactory(), "_kraft_wraps", logging.getLogRecordFactory())
 
 
 def _arg(value):
@@ -50,7 +52,12 @@ def _arg(value):
 
 def _redacted_record(*args, **kwargs) -> logging.LogRecord:
     """Every log record Kraft or a library makes, whatever handler writes it
-    (Rich, uvicorn's, lastResort): its message and traceback, redacted."""
+    (Rich, uvicorn's, lastResort): its message and traceback, redacted.
+
+    shortcut: misses fields passed by `extra=` (set after the factory runs), a
+    `%r` arg whose repr holds a secret its str does not, and records built by
+    `logging.makeLogRecord`; upgrade to a handler-side filter if a token ever
+    reaches one of those."""
     record = _make_record(*args, **kwargs)
     if _secrets:
         # Args keep their shape: uvicorn's access formatter unpacks them.
@@ -68,4 +75,5 @@ def _redacted_record(*args, **kwargs) -> logging.LogRecord:
     return record
 
 
+_redacted_record._kraft_wraps = _make_record  # type: ignore[attr-defined]
 logging.setLogRecordFactory(_redacted_record)
