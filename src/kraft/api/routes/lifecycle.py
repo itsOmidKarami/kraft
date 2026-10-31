@@ -2623,7 +2623,7 @@ async def _close_cancelled_mr(st, wid: str, row) -> dict:
     mr_ref = forge_mod.MRRef(number=ref["number"], url=ref["url"], state="open")
     repo_entry = deps.launch(st, row["repo"]).repo_entry
     try:
-        forge = await forge_mod.item_forge(st.db, row, repo_entry, getattr(st, "forges", None))
+        forge = await forge_mod.item_forge(st.db, row, repo_entry, *deps.forges_now(st))
         await forge.close_mr(repo=worktree, mr=mr_ref)
     except forge_mod.ForgeError as exc:
         return {"ok": False, "error": str(exc)}
@@ -2669,7 +2669,7 @@ async def reopen_mr(wid: str, request: Request):
     repo_entry = deps.launch(st, row["repo"]).repo_entry
     try:
         # A repo with no forge recorded fails here, a forge failure too.
-        forge = await forge_mod.item_forge(st.db, row, repo_entry, getattr(st, "forges", None))
+        forge = await forge_mod.item_forge(st.db, row, repo_entry, *deps.forges_now(st))
         await forge.reopen_mr(repo=worktree, mr=mr_ref)
     except forge_mod.ForgeError as exc:
         raise HTTPException(502, str(exc)) from None
@@ -2875,7 +2875,7 @@ async def set_mr_labels(wid: str, body: MrLabels, request: Request):
         raise HTTPException(422, "no labels given")
     repo_entry = deps.launch(st, row["repo"]).repo_entry
     try:
-        forge = await forge_mod.item_forge(st.db, row, repo_entry, getattr(st, "forges", None))
+        forge = await forge_mod.item_forge(st.db, row, repo_entry, *deps.forges_now(st))
         await forge.set_labels(
             repo=worktree,
             branch=store.branch_for(row),

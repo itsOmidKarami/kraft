@@ -351,6 +351,10 @@ def test_cancel_closes_nothing_through_the_cli_on_an_api_account(client, repo, m
     wid = _stopped_item_with_mr(client, repo, _fake_forge_cancel(monkeypatch))
     _on_api_account(client, repo, monkeypatch, wid)
 
+    async def still_open(st, row):  # past the preview's own refusal, to the close itself
+        return "open"
+
+    monkeypatch.setattr("kraft.api.routes.board._mr_state", still_open)
     r = client.post(f"/api/work-items/{wid}/cancel", json={"reason": "no", "close_mr": True})
 
     assert r.status_code == 200, r.text

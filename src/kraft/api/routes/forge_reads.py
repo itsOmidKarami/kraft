@@ -39,7 +39,7 @@ async def _item_forge(st, wid: str, repo: str | None) -> tuple[Forge, Path, str,
     branch = store.branch_for(row)
     try:
         if repo is None:
-            forge = await forge_mod.item_forge(st.db, row, entry, getattr(st, "forges", None))
+            forge = await forge_mod.item_forge(st.db, row, entry, *deps.forges_now(st))
             root = Path(row["repo"])
             return (
                 forge,
@@ -63,7 +63,7 @@ async def _item_forge(st, wid: str, repo: str | None) -> tuple[Forge, Path, str,
             )
         path = Path(found["repo_path"])
         return (
-            await forge_mod.item_forge(st.db, row, entry, getattr(st, "forges", None), repo),
+            await forge_mod.item_forge(st.db, row, entry, *deps.forges_now(st), mount=repo),
             path,
             branch,
             await builtins_mod.base_branch(st.db, wid, path, member=True),

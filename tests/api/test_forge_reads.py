@@ -226,15 +226,29 @@ def test_the_job_log_keeps_what_a_carriage_return_left(
 
 
 @pytest.mark.parametrize(
-    "pinned, mount",
-    [(False, None), (True, None), (False, "libs/core")],
-    ids=["before-any-pin", "pinned", "member-with-no-forge-of-its-own"],
+    "pinned, mount, unreadable, want",
+    [
+        (False, None, False, "forge account corp-gl says client: api"),
+        (True, None, False, "forge account corp-gl says client: api"),
+        (False, "libs/core", False, "forge account corp-gl says client: api"),
+        # the broken file may hold the API host default: reading it as no accounts is the switch
+        (False, None, True, "forges.yaml does not load (bad yaml)"),
+    ],
+    ids=[
+        "before-any-pin",
+        "pinned",
+        "member-with-no-forge-of-its-own",
+        "unreadable-file-before-any-pin",
+    ],
 )
 def test_an_api_account_item_reads_nothing_through_the_cli(
-    client, repo, monkeypatch, pinned, mount
+    client, repo, monkeypatch, pinned, mount, unreadable, want
 ):
     wid = _item(client, repo, monkeypatch, _spy())
     _on_api_account(client, repo, monkeypatch, wid, pinned=pinned)
+    if unreadable:
+        monkeypatch.setattr(client.app.state, "forges", None)
+        monkeypatch.setattr(client.app.state, "invalid_forges", "bad yaml", raising=False)
     if mount:
         client.portal.call(
             client.app.state.db.write,
@@ -251,4 +265,4 @@ def test_an_api_account_item_reads_nothing_through_the_cli(
         f"/api/work-items/{wid}/forge/pipelines", params={"repo": mount} if mount else None
     )
     assert got.status_code == 502
-    assert "forge account corp-gl says client: api" in got.json()["detail"]
+    assert want in got.json()["detail"]
