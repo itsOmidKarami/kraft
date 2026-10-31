@@ -320,6 +320,20 @@ def _dry_run_response(
     }
 
 
+def refuse_agent_on_disabled_repo(st, request: Request, repo: str) -> None:
+    """403 when an agent or an MCP session files work on a disabled repo
+    (#1198): a repo an agent connected with its own commands is saved
+    disabled, and those commands run for every item on it, so a person
+    enables it first. A person may still file on one by hand."""
+    who = gates._decided_by(request)
+    if who != "human" and not deps.connected_or_422(st, repo).enabled:
+        raise HTTPException(
+            403,
+            f"{repo} is disabled: a person enables it in Settings › Repos before an "
+            f"{who} files work on it, since its commands run for every item",
+        )
+
+
 def repo_warning(entry) -> str | None:
     """What will stop an item filed on `entry`, said when it is filed rather
     than found once it has run: no setup command declared stops it before
@@ -485,6 +499,7 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
             in_place=in_place_by is not None,
             members=[m.path for m in materialized.target.mounts.values()],
         )
+    refuse_agent_on_disabled_repo(st, request, body.repo)
     if dry_run:
         # B33: every check up to and including `_check_node_overrides` has run;
         # nothing is written -- no row, no bead, no attachment copy, no spawn.
@@ -758,6 +773,7 @@ async def duplicate_work_item(wid: str, request: Request):
         detail = "; ".join(st.invalid_policy)
         raise HTTPException(503, f"policy config invalid, refusing work: {detail}")
     row = deps._work_item_row(st, wid)
+    refuse_agent_on_disabled_repo(st, request, row["repo"])
     one = None
     if row["chain_template"] == one_off.ONE_OFF_TEMPLATE:
         # Resolved again from what was authored, as a fresh filing, and unapproved.
@@ -927,6 +943,7 @@ async def fire_trigger(body: TriggerBody, request: Request):
     _check_text("description", body.description)
     if not Path(body.repo).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
+    refuse_agent_on_disabled_repo(st, request, body.repo)
     policy = deps.item_policy_or_422(st, body.repo)
     repo_steering = deps.repository_steering_or_422(st, body.repo)
     in_place_by = deps.in_place_or_422(st, body.repo, None, workspace=None)

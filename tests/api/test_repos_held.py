@@ -82,3 +82,49 @@ def test_turning_a_repo_on_is_a_persons_call(client, tmp_path, caller, patch, st
     assert stored["enabled"] is (status == 200 and patch["enabled"])
     if status == 403:
         assert "enabling a repo is a person's call" in r.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("door", "caller", "enabled", "status"),
+    [
+        ("create", "assistant", False, 403),
+        ("create", "worker", False, 403),
+        ("dry-run", "assistant", False, 403),
+        ("trigger", "assistant", False, 403),
+        ("duplicate", "assistant", False, 403),
+        ("create", "person", False, 201),
+        ("create", "assistant", True, 201),
+    ],
+    ids=[
+        "assistant-files",
+        "worker-files",
+        "assistant-previews",
+        "assistant-triggers",
+        "assistant-duplicates",
+        "person-files",
+        "assistant-files-on-an-enabled-repo",
+    ],
+)
+def test_an_agent_files_no_work_on_a_disabled_repo(client, tmp_path, door, caller, enabled, status):
+    """A disabled repo's commands have not been turned on by a person, so an
+    agent cannot file work that would run them; a person may still file by
+    hand. Without this the hold above stops nothing: `enabled` gates only
+    auto-intake."""
+    repo = make_repo(tmp_path)
+    path = client.post(
+        "/api/repos", json={"path": str(repo), "test_command": "true", "enabled": enabled}
+    ).json()["path"]
+    item = {"title": "t", "repo": path, "autostart": False}
+    headers = _CALLERS[caller]
+    if door == "duplicate":
+        wid = client.post("/api/work-items", json=item).json()["id"]
+        r = client.post(f"/api/work-items/{wid}/duplicate", headers=headers)
+    elif door == "trigger":
+        r = client.post("/api/triggers", json={"title": "t", "repo": path}, headers=headers)
+    else:
+        url = "/api/work-items" + ("?dry_run=true" if door == "dry-run" else "")
+        r = client.post(url, json=item, headers=headers)
+
+    assert r.status_code == status, r.text
+    if status == 403:
+        assert "is disabled: a person enables it in Settings › Repos" in r.json()["detail"]

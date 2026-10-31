@@ -479,8 +479,8 @@ _PROBES_AT_ONCE = 2
 
 #: Why a repo an agent connected with its own commands is saved disabled.
 HELD = (
-    "saved disabled: an agent chose its commands, and they run for every work item on it; "
-    "a person enables it in Settings › Repos once they have read them"
+    "saved disabled: an agent chose its commands, which run for every work item on it, so no "
+    "agent files work on it until a person has read them and enabled it in Settings › Repos"
 )
 
 

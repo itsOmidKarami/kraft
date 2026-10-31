@@ -40,8 +40,8 @@ it did was right. Then hand off to `kraft:check`.
    `ensure_repo` saves as soon as it is called. With Kraft's own proposal the
    repo is saved enabled, so the person sees the commands only through you.
    Commands you pass save it disabled (the answer's `held` says so): they run
-   for every work item, so the person reads them in Settings › Repos and
-   enables it there. Either way, show them what was saved, each command with
+   for every work item, so you cannot file work on it until the person has
+   read them in Settings › Repos and enabled it there. Either way, show them what was saved, each command with
    its source, and the candidates it passed over, then ask them to confirm
    or correct it before the first work item. Say which you chose and why.
 

@@ -324,7 +324,8 @@ def _gains(stored: dict, probed: dict, test_command: str | None, setup: str | No
     leaves undecided -- a test command where it has neither one nor test
     scopes, a setup command where none is declared -- from the commands
     given, else from the probe. A repo saved disabled for want of a test
-    command is enabled once it has one. Anything decided stays as it is."""
+    command is enabled once it has one, unless a worker connects it: turning
+    a repo on is a person's call (#1198). Anything decided stays as it is."""
     patch: dict = {}
     if stored.get("test_command") is None and not stored.get("test_scopes"):
         test = test_command if test_command is not None else probed.get("test_command")
@@ -337,7 +338,11 @@ def _gains(stored: dict, probed: dict, test_command: str | None, setup: str | No
         found = setup if setup is not None else probed.get("setup_command")
         if found is not None:
             patch["setup_command"] = found
-    if "test_command" in patch and stored.get("enabled") is False:
+    if (
+        "test_command" in patch
+        and stored.get("enabled") is False
+        and not os.environ.get("KRAFT_WORK_ITEM_ID")
+    ):
         patch["enabled"] = True
     return patch
 
@@ -402,6 +407,8 @@ def _connect_again(
             return stored
     saved = asyncio.run(client.update_repo(path, patch))
     out(f"saved {', '.join(_FIELDS[k] for k in patch)}")
+    if saved.get("enabled") is False:
+        out("  it stays disabled: a person enables it in Settings › Repos")
     return {**saved, "already_connected": True, "updated": sorted(patch)}
 
 
