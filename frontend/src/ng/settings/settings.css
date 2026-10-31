@@ -238,13 +238,16 @@
 @media (max-width: 767px) { .set-wk-pair { grid-template-columns: minmax(0, 1fr); } }
 /* Fixed layout: a cell never grows to its longest unbroken string, so the table fits its card at 1280. */
 .set-fg-table { table-layout: fixed; }
-.set-fg-table th:nth-child(1) { width: 16%; }
-.set-fg-table th:nth-child(2) { width: 19%; }
-.set-fg-table th:nth-child(3) { width: 18%; }
-.set-fg-table th:nth-child(4) { width: 17%; }
-.set-fg-table th:nth-child(5) { width: 9%; }
-.set-fg-table th:nth-child(7) { width: 64px; }
-.set-fg-table td { overflow-wrap: anywhere; }
+.set-fg-table th:nth-child(1) { width: 15%; }
+.set-fg-table th:nth-child(2) { width: 17%; }
+.set-fg-table th:nth-child(3) { width: 16%; }
+.set-fg-table th:nth-child(4) { width: 13%; }
+.set-fg-table th:nth-child(5) { width: 8%; }
+.set-fg-table th:nth-child(6) { width: 20%; min-width: 150px; }
+.set-fg-table th:nth-child(7) { width: 72px; }
+/* Words break only between words; a long unbroken string (a path, a URL, a name) ellipsises in .set-fg-clip. Only the
+   free-text .set-fg-why may break inside a word, and it has a column wide enough for several letters per line. */
+.set-fg-table td { overflow-wrap: normal; word-break: normal; }
 .set-fg-table .set-fg-clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .set-fg-url { display: block; }
 .set-fg-fixed { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; font-size: var(--fs-meta); }

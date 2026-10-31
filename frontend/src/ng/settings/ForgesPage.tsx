@@ -121,10 +121,10 @@ export function ForgesPage() {
                               )}
                             </div>
                           </td>
-                          <td className="is-dim">{a.forge} <span className="set-fg-url">{a.web_url}</span></td>
+                          <td className="is-dim">{a.forge} <span className="set-fg-url set-fg-clip" title={a.web_url}>{a.web_url}</span></td>
                           <td className="is-dim set-fg-clip" title={sourceWords(a)}>{sourceWords(a)}</td>
                           <td className="is-dim">{a.probe ? ago(a.probe.checked_at) : <Dash />}</td>
-                          <td className="is-dim">{users.length ? users.join(", ") : <Dash />}</td>
+                          <td className="is-dim">{users.length ? users.map((u) => <div key={u} className="set-fg-clip" title={u}>{u}</div>) : <Dash />}</td>
                           <td className="is-act"><Button aria-label={`Edit ${a.name}`} onClick={() => setEditing(a.name)}>Edit</Button></td>
                         </tr>
                       );
