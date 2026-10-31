@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import date
 
@@ -185,9 +186,7 @@ async def test_the_probe_says_whether_each_repo_is_visible(
 @pytest.mark.parametrize(
     "account, token, want",
     [
-        pytest.param(
-            acct(kind="oauth"), "ghp_1234567890", "starts with ghp_", id="glpat-says-oauth"
-        ),
+        pytest.param(acct(kind="oauth"), "ghp_1234567890", "starts with ghp_", id="ghp-says-oauth"),
         pytest.param(
             acct(env="GITLAB_TOKEN"), TOK, "GITLAB_TOKEN is read by glab/gh", id="env-gitlab-token"
         ),
@@ -205,6 +204,30 @@ async def test_the_probe_never_puts_a_token_in_its_result(mock_http, run):
     m = mock_http({("GET", f"{GH}/user"): (401, {"message": f"bad token {TOK}"})})
     got = await run(m, acct())
     assert got.state == "refused" and TOK not in json.dumps(got.to_json())
+
+
+async def _hangs(*a, **kw):
+    await asyncio.sleep(10)
+
+
+@pytest.mark.parametrize(
+    "token, slow, says",
+    [
+        pytest.param(
+            "tök-1234567890", False, "probe failed (UnicodeEncodeError)", id="non-ascii-token"
+        ),
+        pytest.param(TOK, True, "did not finish in 0.05s", id="too-slow"),
+    ],
+)
+async def test_a_probe_that_raises_or_hangs_is_its_own_unreachable_result(
+    mock_http, run, monkeypatch, token, slow, says
+):
+    m = mock_http({("GET", f"{GH}/user"): (200, {"login": "ada"})})
+    if slow:
+        monkeypatch.setattr(probe, "PROBE_TIMEOUT_S", 0.05)
+        monkeypatch.setattr(probe, "_probe_account", _hangs)
+    got = await run(m, acct(), token=token)
+    assert got.state == "unreachable" and says in got.detail, got
 
 
 @pytest.mark.parametrize(

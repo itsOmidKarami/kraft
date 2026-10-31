@@ -29,6 +29,7 @@ State = Literal["ok", "no_token", "refused", "forbidden", "tls", "unreachable"]
 PROBE_INTERVAL_S = 6 * 3600
 EXPIRY_WARN_DAYS = 7
 PROBE_CALL_TIMEOUT_S = 15  # below CLI_TIMEOUT_S: `forge test` answers inside the client's 120s
+PROBE_TIMEOUT_S = 90  # a whole account's probe, repos included
 _STATE = {"auth": "refused", "forbidden": "forbidden", "tls": "tls"}
 _BAD = frozenset({"no_token", "refused", "forbidden", "tls"})
 _WELL_KNOWN_ENV = frozenset({"GITLAB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"})
@@ -103,7 +104,20 @@ async def _info(account, http, web) -> tuple[tuple[str, ...] | None, str | None]
     return None, None
 
 
-async def probe_account(
+async def probe_account(name: str, account: ForgeAccount, **kw) -> Probe:
+    """`_probe_account`, bounded so `forge test` answers inside the client's 120s, and never
+    raising: one account's surprise must not cost every other account its result."""
+    try:
+        async with asyncio.timeout(PROBE_TIMEOUT_S):
+            return await _probe_account(name, account, **kw)
+    except TimeoutError:
+        detail = f"the probe did not finish in {PROBE_TIMEOUT_S}s"
+    except Exception as exc:  # noqa: BLE001 -- its text could hold what the forge sent
+        detail = f"the probe failed ({type(exc).__name__})"
+    return Probe(name, datetime.now(UTC).isoformat(timespec="seconds"), "unreachable", detail)
+
+
+async def _probe_account(
     name: str,
     account: ForgeAccount,
     *,
@@ -197,10 +211,12 @@ def _expose(st, repos: Sequence[config.RepoEntry]) -> list[Path]:
     return [Path(e).expanduser() for box in boxes if box for e in box.expose or ()]
 
 
-async def refresh(st, accounts: Mapping[str, ForgeAccount] | None = None) -> None:
+async def refresh(st, accounts: Mapping[str, ForgeAccount] | None = None) -> dict[str, Probe]:
+    """Probe `accounts` (every API account by default). Kept only for an account the server
+    still runs: one removed meanwhile, or not reloaded yet, must not reach `/health`."""
     accounts = _api_accounts(st) if accounts is None else accounts
     if not accounts:
-        return
+        return {}
     try:
         repos = await asyncio.to_thread(config.load_repos, st.templates_dir / "repos.yaml")
     except config.ConfigError:
@@ -219,8 +235,11 @@ async def refresh(st, accounts: Mapping[str, ForgeAccount] | None = None) -> Non
             for n, a in accounts.items()
         )
     )
+    running = _api_accounts(st)
     for p in probes:
-        st.forge_probes[p.account] = p
+        if p.account in running:
+            st.forge_probes[p.account] = p
+    return {p.account: p for p in probes}
 
 
 def kick(st, names: Iterable[str] | None = None) -> None:

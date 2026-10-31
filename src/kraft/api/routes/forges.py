@@ -164,8 +164,7 @@ async def test_forge(name: str, request: Request):
     if account is None:
         raise HTTPException(404, f"no forge account named {name!r}")
     if account.client == "api":  # never the CLI: it would prove another credential
-        await probe.refresh(st, {name: account})
-        found = st.forge_probes[name]
+        found = (await probe.refresh(st, {name: account}))[name]
         return {"ok": found.state == "ok", "output": found.text(), "probe": found.to_json()}
     host = forges.web_host(account.web_url)
     argv = (

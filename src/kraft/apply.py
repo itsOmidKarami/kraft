@@ -254,11 +254,11 @@ def _reload_forges(st) -> None:
     if st.forges is not None and (added := [p for p in new if p not in old]):
         st.invalid_forges = "; ".join(added)
         return
-    api = {n: a for n, a in file.accounts.items() if a.client == "api"}
-    was = st.forges.accounts if st.forges else {}
-    for gone in set(st.forge_probes) - set(api):
+    api = {n for n, a in file.accounts.items() if a.client == "api"}
+    for gone in set(st.forge_probes) - api:
         del st.forge_probes[gone]
-    probe.kick(st, [n for n, a in api.items() if was.get(n) != a])
+    # Every API account, changed or not: a reload is how a person says "I fixed the token".
+    probe.kick(st, api)
     st.forges = file
     st.invalid_forges = "; ".join(new) or None
     credentials.set_secret_files(path)  # accepted: the new set alone
