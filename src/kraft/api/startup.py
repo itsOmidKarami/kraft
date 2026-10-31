@@ -484,8 +484,7 @@ async def _lifespan(app: FastAPI):
     app.state.loaded_hashes = {}
     app.state.apply_signature = ()
     apply_mod.record(app.state)
-    if hasattr(app.state, "forges_loaded_digest"):
-        apply_mod.set_loaded(app.state, forges_mod.ForgesFile.FILE, app.state.forges_loaded_digest)
+    apply_mod.set_loaded(app.state, forges_mod.ForgesFile.FILE, app.state.forges_loaded_digest)
     if policy_obj:
         forge_git.CLI_TIMEOUT_S = policy_obj.forge_cli_timeout_s
         _subprocess.IDLE_MINUTES = policy_obj.agent_idle_minutes

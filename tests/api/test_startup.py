@@ -11,6 +11,7 @@ import psutil
 import pytest
 from support.harness import IN_PLACE, git, make_item, make_repo, v1_named_chain, write
 
+from kraft import apply as apply_mod
 from kraft import db, inplace, store
 from kraft.adapters import hook_install
 from kraft.forges import ForgesFile
@@ -474,3 +475,38 @@ def test_launch_reads_the_running_forges_and_the_error_only_while_unloaded(
     if later is not None:
         st.forges = later
     assert launch.forges() == (later or forges, error)
+
+
+_GH = "accounts:\n  a: {forge: github, web_url: 'https://github.com'}\n"
+
+
+@pytest.fixture
+def boot_edit(request, templates_dir, monkeypatch):
+    """forges.yaml as the server starts, and an edit (or none) landing after the
+    accounts load, while reattach runs, before startup records every file's hash."""
+    before, during = request.param
+    if before is not None:
+        (templates_dir / "forges.yaml").write_text(before)
+    real = reattach.reattach
+
+    async def editing(*args, **kwargs):
+        if during is not None:
+            (templates_dir / "forges.yaml").write_text(during)
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(reattach, "reattach", editing)
+
+
+@pytest.mark.parametrize(
+    ("boot_edit", "pending"),
+    [((_GH, "accounts: {}\n"), True), ((_GH, None), False), ((None, None), False)],
+    indirect=["boot_edit"],
+    ids=["edited-during-startup", "unchanged", "no-file"],
+)
+def test_an_edit_during_startup_is_not_taken_as_applied(boot_edit, pending, client):
+    st = client.app.state
+    assert apply_mod.pending_file(st, "forges.yaml") is pending
+    added = client.post(
+        "/api/forges", json={"name": "b", "forge": "github", "web_url": "https://github.com"}
+    )
+    assert added.status_code == (409 if pending else 201)
