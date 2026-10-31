@@ -74,7 +74,7 @@ export function repo(path: string, i: number, long = false) {
     test_command: i % 4 === 3 ? null : long ? "uv run pytest -q tests/ --maxfail=1 --disable-warnings -p no:cacheprovider" : "uv run pytest -q",
     test_scopes: long && i % 2 === 0 ? [{ paths: ["frontend/**"], command: "cd frontend && npm test -- --run" }] : null,
     forge: i % 2 === 0 ? "gitlab" : "github",
-    forge_account: null,
+    forge_account: i === 0 ? "shared-gl" : null,
     project: long ? `acme-corporation/platform-engineering/${name}` : `acme/${name}`,
     enabled: i % 5 !== 4,
     models: i === 1 ? { claude: "claude-opus-4-1" } : {},

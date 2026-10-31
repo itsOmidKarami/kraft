@@ -4,6 +4,7 @@ import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchF
 import { makeAreas } from "./areasMock";
 import { ngThreads } from "./ngItems";
 import { harnessesServer, PROVIDER_STATUS } from "./ngHarnesses";
+import { forgesServer } from "./ngForges";
 import { motion, type Motion, type MotionOptions } from "./motion";
 import { listRow, transitions, type Ev } from "./transitions";
 import draftViews from "./draftViews.json" with { type: "json" };
@@ -37,6 +38,8 @@ export interface MockOptions {
   areas?: "default";
   /** ux2-W14: the Harnesses page's draft (ngHarnesses.ts): `floor`, a clean install. Unset: the routes answer as before. */
   harnesses?: "floor";
+  /** Settings > Forge accounts (ngForges.ts): `empty`, no forges.yaml accounts; `unloadable`, a forges.yaml that never loaded (409). Unset: the fixture accounts. */
+  forges?: "empty" | "unloadable";
   /** ux2-W11: the running item's chain draft. Unset or `none`: no draft (the + seam's menu reads the real library). */
   itemDraft?: "none" | "changes" | "problems";
   /** ux2-W12: the Library's draft. `draft`: three changes, one a new component. */
@@ -291,6 +294,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
   const updateSettings = { auto_update: false, restart_when_free: false, channel: null as string | null, allowed_hours: [] as string[] };
   let updateMark: { tag: string; by: "you" | "auto"; at: string } | null = null;
   const hs = opts.harnesses ? harnessesServer() : null;
+  const forges = forgesServer(new Date(opts.now?.() ?? Date.now()), opts.forges);
   let listReads = 0;
   const itemDrafts = new Map<string, any[]>();
   // Always answering: a shell cell may open Policy (a built page), and the shipped UI never asks for /drafts/(repos|policy|intake).
@@ -873,6 +877,8 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     if (p === "/sessions") return json(st.sessions);
     if ((m = p.match(/^\/sessions\/[^/]+$/))) return { status: 204 };
     if (p === "/analytics") return json(S.analytics);
+    const fg = forges(method, p, req.json());
+    if (fg) return fg[0] === 204 ? { status: 204 } : json(fg[1], fg[0]);
     if (p === "/workers" && method === "GET") return json({ workers: WORKERS_FIXTURE });
     // The Add, Edit, Remove and rotate-token answers, plausible and not kept: the list reads the fixture again.
     if (p === "/workers" && method === "POST") {

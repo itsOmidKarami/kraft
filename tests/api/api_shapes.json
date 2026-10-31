@@ -243,6 +243,12 @@
     "system": "_"
    }
   },
+  "GET /api/forges": {
+   "params": {},
+   "shape": {
+    "accounts": "_"
+   }
+  },
   "GET /api/harnesses": {
    "params": {},
    "shape": [

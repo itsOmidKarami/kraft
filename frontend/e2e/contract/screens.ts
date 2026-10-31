@@ -71,6 +71,24 @@ const appReview = (data: Variant = "default", tail = "") => (p: Page) =>
   app(p, item("needs-gate", `/review${tail}`), { data, ready: (pg) => pg.locator(".review-page").waitFor({ timeout: 8000 }) });
 const appSettings = (url: string): Pick<State, "app"> => ({ app: (p) => app(p, url) });
 
+/** Settings > Forge accounts: the page, then the Edit dialog of `name`. */
+const FORGES = "/settings/forge-accounts";
+const forgeEdit = (name: string, then?: (p: Page) => Promise<unknown>) => async (p: Page) => {
+  await app(p, FORGES, { ready: (pg) => pg.getByRole("button", { name: `Edit ${name}`, exact: true }).waitFor() });
+  await p.getByRole("button", { name: `Edit ${name}`, exact: true }).click();
+  await p.getByRole("dialog").waitFor();
+  if (then) await then(p);
+  await p.waitForTimeout(500);
+};
+/** The phone's Forge accounts: the row of `name` tapped open to its menu. */
+const forgeRow = (name: string, then?: (p: Page) => Promise<unknown>) => async (p: Page) => {
+  await appPhone(FORGES, { ready: (pg) => pg.getByRole("button", { name: new RegExp(`^${name}`) }).waitFor() })(p);
+  await p.getByRole("button", { name: new RegExp(`^${name}`) }).click();
+  await p.waitForTimeout(500);
+  if (then) await then(p);
+  await p.waitForTimeout(500);
+};
+
 const FILE = '[data-file="kraft/progress.py"]';
 const num = (p: Page, side: string, n: number) => p.locator(FILE).getByRole("button", { name: `Pick ${side} line ${n}`, exact: true }).first();
 /** Pick a range on the review page's one file and open the composer on it (the + shows on the end row). */
@@ -155,6 +173,16 @@ export const STATES: State[] = [
   { area: "settings", state: "notifications", ...appSettings("/settings/notifications") },
   { area: "settings", state: "access", ...appSettings("/settings/access") },
   { area: "settings", state: "appearance", ...appSettings("/settings/appearance") },
+  { area: "settings", state: "forge-accounts", ...appArea(FORGES) },
+  { area: "settings", state: "forge-accounts-empty", app: (p) => app(p, FORGES, { mock: { forges: "empty" }, ready: (pg) => pg.getByText(/No forge accounts/).waitFor() }) },
+  { area: "settings", state: "forge-accounts-unloadable", app: (p) => app(p, FORGES, { mock: { forges: "unloadable" }, ready: (pg) => pg.getByRole("alert").waitFor() }) },
+  { area: "settings", state: "forge-accounts-add-paste", app: async (p) => { await app(p, FORGES, { ready: (pg) => pg.getByRole("button", { name: "Add account" }).first().waitFor() }); await p.getByRole("button", { name: "Add account" }).first().click(); await p.getByRole("radio", { name: "api" }).click(); await p.getByRole("radio", { name: "paste" }).click(); await p.waitForTimeout(500); } },
+  { area: "settings", state: "forge-accounts-edit-cli", app: forgeEdit("github-cli") },
+  { area: "settings", state: "forge-accounts-edit-file", app: forgeEdit("corp-gl") },
+  { area: "settings", state: "forge-accounts-edit-env", app: forgeEdit("old-gl") },
+  { area: "settings", state: "forge-accounts-edit-command", app: forgeEdit("vault-gl") },
+  { area: "settings", state: "forge-accounts-edit-named", app: forgeEdit("shared-gl") },
+  { area: "settings", state: "forge-accounts-test-result", app: forgeEdit("corp-gl", async (p) => { await p.getByRole("button", { name: "Test", exact: true }).click(); await p.getByLabel("Test output").waitFor(); }) },
   { area: "settings", state: "board-and-code", ...appSettings("/settings/board-and-code") },
   { area: "settings", state: "about", ...appSettings("/settings/about") },
   // Item header (H1–H6): the main button's menu, ⋮, the four anchored cards, the diff line
@@ -243,6 +271,12 @@ export const STATES: State[] = [
   { area: "phone", state: "chains", viewport: "phone", app: appPhone("/templates/chains") },
   { area: "phone", state: "policy", viewport: "phone", app: appPhone("/settings/policy") },
   { area: "phone", state: "policy-offline", viewport: "phone", app: appPhone("/settings/policy", { mock: { boardState: "offline" }, ready: (pg) => pg.getByRole("button", { name: "Retry now" }).waitFor() }) },
+  { area: "phone", state: "forge-accounts", viewport: "phone", app: appPhone(FORGES, { ready: (pg) => pg.getByRole("button", { name: /^corp-gl/ }).waitFor() }) },
+  { area: "phone", state: "forge-accounts-empty", viewport: "phone", app: appPhone(FORGES, { mock: { forges: "empty" }, ready: (pg) => pg.getByText(/No forge accounts/).waitFor() }) },
+  { area: "phone", state: "forge-accounts-unloadable", viewport: "phone", app: appPhone(FORGES, { mock: { forges: "unloadable" }, ready: (pg) => pg.getByRole("alert").waitFor() }) },
+  { area: "phone", state: "forge-account-menu-sso", viewport: "phone", app: forgeRow("acme-gh") },
+  { area: "phone", state: "forge-account-paste", viewport: "phone", app: forgeRow("corp-gl", async (p) => { await p.getByRole("button", { name: "Paste a new token" }).click(); }) },
+  { area: "phone", state: "forge-account-named", viewport: "phone", app: forgeRow("shared-gl") },
   { area: "phone", state: "sign-in", viewport: "phone", app: (p) => app(p, "/", { mock: { locked: true }, noShell: true, ready: (pg) => pg.getByLabel(/^Password/).waitFor() }) },
 
   // Follow-ups: what a seed adds, review ranges, the revealed sidebar, the phone
