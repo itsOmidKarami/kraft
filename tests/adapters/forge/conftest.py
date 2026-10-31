@@ -28,7 +28,9 @@ class Cli:
         bindir.mkdir(exist_ok=True)
         monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
 
-    def stub(self, name: str, stdout: str = "", *, rc: int = 0, routes=None, default="{}"):
+    def stub(
+        self, name: str, stdout: str = "", *, rc: int = 0, routes=None, default="{}", record=False
+    ):
         """Install `name`. Without `routes` every call prints `stdout` and exits
         `rc`. With `routes` (`{"mr view": stdout, "ci get": FAIL}`) the answer
         depends on the call, and an unrouted call prints `default` (`FAIL`: exit
@@ -36,7 +38,8 @@ class Cli:
         `<cli> api`). A key without `*` matches the first two arguments; a key
         with `*` globs the whole argv (`"api*pulls/7*"`). Routes are tried in
         order. Asked `api ... -i`, a plain string answer comes back as a 200
-        envelope, unless it already is one."""
+        envelope, unless it already is one. `record=True` also keeps the last
+        call's stdin, cwd, environment, pid and session id (`recorded`)."""
 
         def quote(text):
             return "'" + text.replace("'", "'\\''") + "'"
@@ -75,10 +78,18 @@ class Cli:
                 )
             )
             cases += f"case {subject} in\n  {pat}) {answer(out)} ;;\nesac\n"
+        base = self.bindir / name
+        rec = (
+            f"cat > {base}.stdin; pwd > {base}.pwd; env > {base}.env; "
+            f"echo $$ > {base}.pid; ps -o sid= -p $$ > {base}.sid\n"
+            if record
+            else ""
+        )
         p = self.bindir / name
         p.write_text(
             f'#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a" >> {self.bindir / name}.argv; done\n'
             f'echo "$@" >> {self.bindir / name}.calls\n'
+            f"{rec}"
             f'INC=; for a in "$@"; do [ "$a" = -i ] && INC=1; done\n'
             f"{cases}{answer(default)}\n"
         )
@@ -88,6 +99,18 @@ class Cli:
         """Every argument of every call to `name`, one per item."""
         path = self.bindir / f"{name}.argv"
         return path.read_text().splitlines() if path.exists() else []
+
+    def recorded(self, name: str) -> dict:
+        """The last recorded call: `stdin`, `pwd`, `env` (a dict), `pid`, `sid`."""
+        read = lambda ext: (self.bindir / f"{name}.{ext}").read_text()  # noqa: E731
+        env = dict(line.split("=", 1) for line in read("env").splitlines() if "=" in line)
+        return {
+            "stdin": read("stdin"),
+            "pwd": read("pwd").strip(),
+            "env": env,
+            "pid": int(read("pid")),
+            "sid": int(read("sid")),
+        }
 
     def calls(self, name: str) -> list[str]:
         """One space-joined argv string per call to `name`."""
