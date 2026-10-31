@@ -245,6 +245,16 @@ describe("StateCard", () => {
     expect(within(card).queryByText("single sign-on")).toBeNull();
   });
 
+  it("a forge_auth stop with an sso_url and an API account: the account's SSO hint, the address still its link last", () => {
+    stubFetch();
+    const sso = "https://github.com/orgs/acme/sso?authorization_request=abc";
+    show({ display_status: "failed", stop: stop("failed", { facts: { cause: "forge_auth", account: "corp-gh", source: "env CORP_GH", sso_url: sso } }) });
+    const card = screen.getByRole("region", { name: "Failed" });
+    expect(card.querySelector(".item-card-fix")!.textContent).toBe(`Open this address to authorize forge account corp-gh's token for single sign-on, then Retry: ${sso}`);
+    expect(within(card).getByRole("link", { name: sso })).toHaveAttribute("href", sso);
+    expect(within(card).queryByText("account")).toBeNull();
+  });
+
   it("failed with failing test scopes: each as a row, the paragraph stops at the node, no log tail", () => {
     const calls = stubFetch();
     const scopes = [{ command: "npm test", scope: "web/**", exit_code: 1 }, { command: "just test-c", setup: true, area: "c", exit_code: 2 }];

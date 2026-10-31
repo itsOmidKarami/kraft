@@ -114,6 +114,9 @@ _WHO = {"account": "corp-gl", "source": "env CORP_GL"}
 _TOKEN_FIX = (
     "Forge account corp-gl could not sign in with its token, or its token could not be read."
 )
+_ACCOUNT_SSO_FIX = (
+    "Authorize forge account corp-gl's token for single sign-on (the address is below), then retry."
+)
 _DENIED_FIX = "Forge account corp-gl: its token lacks the rights this needs."
 
 
@@ -128,7 +131,7 @@ _DENIED_FIX = "Forge account corp-gl: its token lacks the rights this needs."
         ("https://github.com/sso`id`", {}, {"cause": "forge_auth"}, _TODAYS_FIX),
         ("", _WHO, {"cause": "forge_auth", **_WHO}, _DENIED_FIX),
         ("", {**_WHO, "reason": "auth"}, {"cause": "forge_auth", **_WHO}, _TOKEN_FIX),
-        (_SSO, _WHO, {"cause": "forge_auth", "sso_url": _SSO, **_WHO}, _SSO_FIX),
+        (_SSO, _WHO, {"cause": "forge_auth", "sso_url": _SSO, **_WHO}, _ACCOUNT_SSO_FIX),
     ],
     ids=[
         "sso-on-a-cli-account",
