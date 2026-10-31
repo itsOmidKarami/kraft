@@ -1270,16 +1270,18 @@ async def upstream_head(repo: Path, branch: str) -> str | None:
         if detail is not None:
             logger.warning("could not fetch origin/%s in %s: %s", branch, repo, detail)
         if detail is not None and auth and auth.stops(detail):
+            fixed = auth.stop_words(detail)
             raise BaseFetchRefused(
-                auth.redirect_words()
-                if auth.redirected(detail)
-                else (
+                fixed
+                or (
                     f"forge account {auth.name} could not fetch {branch} from origin with its "
                     f"token ({auth.account.source().label()}), so Kraft will not start from a "
                     "stale base. Replace the token there, then retry"
                 ),
                 reason=(
-                    "forbidden"
+                    "tls"
+                    if auth.untrusted(detail)
+                    else "forbidden"
                     if not auth.redirected(detail) and "returned error: 403" in detail.lower()
                     else "auth"
                 ),

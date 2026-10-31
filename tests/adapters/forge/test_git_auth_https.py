@@ -303,7 +303,8 @@ async def test_a_path_scoped_follow_redirects_and_ssl_verify_never_beat_our_pins
         plain = await _ls_remote(remote.repo)
         assert "certificate" not in plain.lower() and "Username" in plain
         remote.web.authorizations.clear()
-        await builtins.upstream_head(remote.repo, "main")  # a certificate error is a stale base
+        with pytest.raises(builtins.BaseFetchRefused, match="verify origin's certificate"):
+            await builtins.upstream_head(remote.repo, "main")
         assert remote.web.authorizations == []
 
 
@@ -686,7 +687,9 @@ def planted(remote, tmp_path, monkeypatch):
             plant_keys(remote.repo, ["sslCAPath"], str(tmp_path / "evil"), ranks)
         plant_keys(remote.repo, ["followRedirects"], "true", ranks)
 
-    yield SimpleNamespace(plant=plant, proxy_hits=seen, listener=listener, remote=remote)
+    yield SimpleNamespace(
+        plant=plant, proxy_hits=seen, proxy=proxy, listener=listener, remote=remote
+    )
     proxy_cm.__exit__(None, None, None)
     listener_cm.__exit__(None, None, None)
 

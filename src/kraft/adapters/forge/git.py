@@ -789,7 +789,7 @@ async def _push(repo: Path, branch: str, auth: git_auth.GitAuth | None) -> None:
             f"{pushed_ref}` and `git update-ref -d refs/remotes/origin/{branch}` in "
             "the item's worktree, then retry"
         )
-    await _push_lfs_objects(repo, branch, head, remote, target, env)
+    await _push_lfs_objects(repo, branch, head, remote, target, env, auth)
     args = ["git", "push", "--no-verify"]
     if remote:
         args.append(f"--force-with-lease={branch}:{remote}")
@@ -798,8 +798,17 @@ async def _push(repo: Path, branch: str, auth: git_auth.GitAuth | None) -> None:
     await run_git(repo, ["git", "update-ref", pushed_ref, head], env=plain)
 
 
+_LFS_ENDPOINT_KEYS = ("lfs.url", "remote.origin.lfsurl", "remote.origin.lfspushurl")
+
+
 async def _push_lfs_objects(
-    repo: Path, branch: str, head: str, remote: str, target: str, env: dict[str, str]
+    repo: Path,
+    branch: str,
+    head: str,
+    remote: str,
+    target: str,
+    env: dict[str, str],
+    auth: git_auth.GitAuth | None = None,
 ) -> None:
     """What git-lfs's pre-push did, run as git would run it: `git lfs
     pre-push` told this push's one ref, so it uploads the objects the new
@@ -830,6 +839,14 @@ async def _push_lfs_objects(
         raise ForgeError(
             "the branch adds Git LFS files and this machine has no git-lfs, so Kraft "
             "cannot upload them or push the branch: install git-lfs, then retry"
+        )
+    if auth and any(
+        git_read(repo, "config", "--get", key, expected_failure=True) for key in _LFS_ENDPOINT_KEYS
+    ):
+        raise ForgeError(
+            f"forge account {auth.name}: git-lfs is pointed elsewhere by lfs.url or "
+            "remote.origin.lfsurl; Kraft sends its token only to origin's own LFS endpoint, "
+            "so unset it and retry"
         )
     ref = f"refs/heads/{branch}"
     await run_git(

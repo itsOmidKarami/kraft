@@ -7,11 +7,12 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-import ssl
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
+
+import certifi
 
 from kraft import config, forges
 from kraft.adapters.forge import credentials
@@ -32,6 +33,11 @@ AUTH_FAILED = re.compile(
 # GitHub answers a private repo it will not show a bad token with "not found".
 _NOT_FOUND = re.compile(r"repository '.*' not found", re.IGNORECASE)
 _REDIRECTED = re.compile(r"returned error: 30[1278]", re.IGNORECASE)
+_TLS = re.compile(
+    r"SSL certificate problem|Problem with the SSL CA cert|server certificate verification"
+    r" failed|certificate verify failed",
+    re.IGNORECASE,
+)
 
 _STRIPPED = ("GIT_CURL_VERBOSE", "GIT_TRANSFER_TRACE", "GIT_SSL_NO_VERIFY")
 _TRACE2 = ("GIT_TRACE2", "GIT_TRACE2_EVENT", "GIT_TRACE2_PERF")
@@ -51,7 +57,7 @@ class GitAuth:
     urls: tuple[str, ...] = ()
     #: The CA bundle and directory git is pinned to (never a repo-local one): the account's
     #: `ca_file`, else the environment's or the global gitconfig's, else the system's.
-    ca_info: str | None = None
+    ca_info: str = ""
     ca_path: str = ""
 
     def refused(self, text: str) -> bool:
@@ -66,23 +72,39 @@ class GitAuth:
             "point origin at the new address, then retry"
         )
 
+    def tls_words(self) -> str:
+        return (
+            f"forge account {self.name}: git could not verify origin's certificate; set "
+            "ca_file on the account, or http.sslCAInfo in your global gitconfig, then retry"
+        )
+
     @staticmethod
     def redirected(text: str) -> bool:
         return bool(_REDIRECTED.search(text))
 
+    @staticmethod
+    def untrusted(text: str) -> bool:
+        return bool(_TLS.search(text))
+
     def stops(self, text: str) -> bool:
-        """Whether git's words are a token stop: the token was refused, or the call was sent
-        elsewhere."""
-        return self.refused(text) or self.redirected(text)
+        """Whether git's words are a stop of the account's: the token was refused, the call was
+        sent elsewhere, or the origin's certificate is not trusted (Kraft pins the CA)."""
+        return self.refused(text) or self.redirected(text) or self.untrusted(text)
+
+    def stop_words(self, text: str) -> str | None:
+        """The fixed words for a redirect or an untrusted certificate, else None."""
+        if self.redirected(text):
+            return self.redirect_words()
+        return self.tls_words() if self.untrusted(text) else None
 
     def stamp(self, exc: ForgeError, words: str | None = None) -> ForgeError:
         """Mark `exc` a token stop, in place, when git's words (`exc`'s own text unless `words`
         is given) say the forge refused the token or sent the call elsewhere (the redirect is
         not followed, so the token stays home)."""
         text = str(exc) if words is None else words
-        if self.redirected(text):
-            exc.args = (self.redirect_words(),)
-            exc.reason = "auth"
+        if (fixed := self.stop_words(text)) is not None:
+            exc.args = (fixed,)
+            exc.reason = "auth" if self.redirected(text) else "tls"
         elif self.refused(text):
             exc.reason = "forbidden" if "returned error: 403" in text.lower() else "auth"
         else:
@@ -133,24 +155,23 @@ def _injected(account: ForgeAccount) -> bool:
     return account.client == "api" and account.source().from_ in INJECTED
 
 
-def _trust(account: ForgeAccount) -> tuple[str | None, str]:
+def _trust(account: ForgeAccount) -> tuple[str, str]:
     """(sslCAInfo, sslCAPath) from sources a repo cannot write: the account's `ca_file`, the
     environment, the system and global gitconfig (read from a neutral directory, so no repo's
-    own config answers), then the system's default store. An empty `sslCAInfo` is no pin: git
-    reads it as 'no CA at all'."""
+    own config answers), then certifi's bundle. Always a bundle: an empty `sslCAInfo` is read
+    as 'no CA at all', and an unpinned one lets a repo name its own."""
     asked = credentials.neutral_run(
         ["git", "config", "--get-urlmatch", "http", account.web_url], timeout=10
     )
     conf = dict(line.partition(" ")[::2] for line in asked.stdout.splitlines())
-    paths = ssl.get_default_verify_paths()
-    info = account.ca_file or os.environ.get("GIT_SSL_CAINFO") or conf.get("http.sslcainfo")
+    info = (
+        account.ca_file
+        or os.environ.get("GIT_SSL_CAINFO")
+        or conf.get("http.sslcainfo")
+        or certifi.where()
+    )
     path = os.environ.get("GIT_SSL_CAPATH") or conf.get("http.sslcapath") or ""
-    if not info and not path:
-        if paths.cafile and os.path.exists(paths.cafile):
-            info = paths.cafile
-        elif paths.capath and os.path.isdir(paths.capath):
-            path = paths.capath
-    return (os.path.expanduser(info) if info else None), (os.path.expanduser(path) if path else "")
+    return os.path.expanduser(info), os.path.expanduser(path)
 
 
 async def _git(repo: Path, *args: str) -> list[str]:
@@ -286,8 +307,7 @@ def git_env(base: Mapping[str, str], auth: GitAuth | None) -> dict[str, str]:
             (f"http.{target}sslCAPath", auth.ca_path),
             (f"http.{target}curloptResolve", ""),  # resets a pinned host -> address list
         ]
-        if auth.ca_info is not None:  # trust is pinned to a CA a repo cannot name
-            pins.append((f"http.{target}sslCAInfo", auth.ca_info))
+        pins.append((f"http.{target}sslCAInfo", auth.ca_info))  # a CA a repo cannot name
     start = int(env["GIT_CONFIG_COUNT"])
     env["GIT_CONFIG_COUNT"] = str(start + len(pins))
     for i, (k, v) in enumerate(pins, start):

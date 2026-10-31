@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
+import certifi
 import pytest
 from support.harness import git, make_repo
 
@@ -83,7 +84,10 @@ def rig(
     return repo, calls
 
 
-def auth(origin=WEB, header=None, urls=(), ca_info=None, ca_path="") -> GitAuth:
+CA = "/ca/default.pem"
+
+
+def auth(origin=WEB, header=None, urls=(), ca_info=CA, ca_path="") -> GitAuth:
     return GitAuth(
         "corp-gl",
         acct(),
@@ -109,9 +113,8 @@ PROXY = next((HARD[k] for k in git_auth._PROXY_VARS if HARD.get(k)), "")
 URL = f"{WEB}/team/app.git"
 
 
-def expected(*targets: str, ca: str | None = None) -> list[tuple[str, str]]:
-    """The pins after the hardening ones: the helper reset, then seven per origin or exact URL
-    (eight with a pinned `sslCAInfo`)."""
+def expected(*targets: str, ca: str = CA) -> list[tuple[str, str]]:
+    """The pins after the hardening ones: the helper reset, then eight per origin or exact URL."""
     out = [("credential.helper", ""), ("remote.origin.proxy", PROXY)]
     for t in targets:
         out += [
@@ -123,8 +126,7 @@ def expected(*targets: str, ca: str | None = None) -> list[tuple[str, str]]:
             (f"http.{t}sslCAPath", ""),
             (f"http.{t}curloptResolve", ""),
         ]
-        if ca is not None:
-            out.append((f"http.{t}sslCAInfo", ca))
+        out.append((f"http.{t}sslCAInfo", ca))
     return out
 
 
@@ -675,12 +677,14 @@ def neutral_home(tmp_path, monkeypatch):
         pytest.param("/acct.pem", "/env.pem", "/global.pem", ("/acct.pem", ""), id="account-first"),
         pytest.param(None, "/env.pem", "/global.pem", ("/env.pem", ""), id="environment-next"),
         pytest.param(None, None, "/global.pem", ("/global.pem", ""), id="global-gitconfig-last"),
+        pytest.param(None, None, None, (certifi.where(), ""), id="certifi-when-nothing-else"),
     ],
 )
 def test_trust_comes_from_sources_a_repo_cannot_write(
     neutral_home, monkeypatch, ca_file, env, gitconfig, want
 ):
-    (neutral_home / ".gitconfig").write_text(f'[http "{WEB}/"]\n\tsslCAInfo = {gitconfig}\n')
+    if gitconfig:
+        (neutral_home / ".gitconfig").write_text(f'[http "{WEB}/"]\n\tsslCAInfo = {gitconfig}\n')
     if env:
         monkeypatch.setenv("GIT_SSL_CAINFO", env)
     assert git_auth._trust(acct(ca_file=ca_file)) == want
