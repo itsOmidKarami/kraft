@@ -151,9 +151,10 @@ def test_a_repository_policy_the_instance_refuses_is_a_422_at_intake(client, rep
     assert r.status_code == 422, r.text
     assert "allowed_tools" in r.json()["detail"]
 
+
 @pytest.mark.parametrize("door", ["/api/work-items", "/api/triggers"])
 def test_a_chain_breaking_an_administrator_maximum_is_a_422_at_intake(client, repo, door):
-    """A chain exceeding an administrator maximum (max_attempts) returns 422 at intake 
+    """A chain exceeding an administrator maximum (max_attempts) returns 422 at intake
     for both work-items and triggers."""
     client.app.state.instance_policy = _instance(max_attempts=1)
     _connect(client.app.state.templates_dir, repo, policy={})
