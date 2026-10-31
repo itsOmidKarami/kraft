@@ -631,6 +631,13 @@ def test_a_failed_connect_keeps_the_account_it_wrote(app, capsys, repo, monkeypa
             "--web-url ignored: github.com has its forge already",
             id="web-url-on-a-host-that-says",
         ),
+        pytest.param(
+            None,
+            False,
+            ["--forge", "github", "--web-url", "https://github.com"],
+            "--web-url ignored: the repo has no origin",
+            id="web-url-with-no-origin",
+        ),
     ],
 )
 def test_an_ignored_forge_says_so(app, capsys, repo, remote, again, flags, said):
@@ -641,6 +648,17 @@ def test_an_ignored_forge_says_so(app, capsys, repo, remote, again, flags, said)
     cli.main(["repo", "connect", str(repo), "-y", *flags])
     assert said in capsys.readouterr().out and not _forges_yaml().exists()
     assert asyncio.run(client.repos())[0]["forge"] == "github"
+
+
+def test_forge_alone_beside_a_disagreeing_account_connects(app, capsys, repo):
+    """--forge alone writes no account, so an account of the host's name is no conflict."""
+    _origin(repo, "git@github-work:acme/app.git")
+    theirs = {"forge": "github", "web_url": "https://github.com"}
+    asyncio.run(client.add_forge("github-work", **theirs))
+    cli.main(["repo", "connect", str(repo), "-y", "--forge", "gitlab"])
+    [entry] = asyncio.run(client.repos())
+    assert (entry["forge"], entry.get("forge_account")) == ("gitlab", None)
+    assert _accounts() == {"github-work": theirs}
 
 
 def test_yes_without_forge_asks_nothing_and_writes_no_account(app, capsys, repo):

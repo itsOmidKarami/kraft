@@ -588,7 +588,12 @@ def _settle_forge(ns: argparse.Namespace, *, interactive: bool) -> tuple[dict, b
             say(f"--forge ignored: {resolved['remote_host']} is {resolved['forge']}")
             return asked, False, False
         if ns.web_url:
-            say(f"--web-url ignored: {resolved['remote_host']} has its forge already")
+            why = (
+                f"{resolved['remote_host']} has its forge already"
+                if resolved["remote_host"]
+                else "the repo has no origin"
+            )
+            say(f"--web-url ignored: {why}")
         return {**asked, "forge": ns.forge}, False, False
     accounts = _forge_accounts()  # a forges.yaml that does not load: said before asking
     host = resolved["remote_host"]
@@ -599,6 +604,7 @@ def _settle_forge(ns: argparse.Namespace, *, interactive: bool) -> tuple[dict, b
         if ns.forge in (None, same["forge"]) and same_url:
             say(f"using forge account {name} ({same['forge']}, {same['web_url']})")
             return {"forge": same["forge"], "forge_account": name}, False, False
+    if same is not None and (ns.web_url or interactive):  # --forge alone writes no account
         raise SystemExit(
             f"error: a forge account named {name!r} already exists "
             f"({same['forge']}, {same['web_url']}); name this one with --forge-account"
