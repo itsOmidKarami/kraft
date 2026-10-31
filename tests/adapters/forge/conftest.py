@@ -7,6 +7,7 @@ import os
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
 from support.harness import own_files
 
@@ -182,3 +183,39 @@ class ForgeRun:
 @pytest.fixture
 def run_forge(database, run_dirs, item_on, tmp_path, monkeypatch) -> ForgeRun:
     return ForgeRun(database, run_dirs, item_on, tmp_path, monkeypatch)
+
+
+class MockHttp:
+    """`httpx.MockTransport` over a route table or a handler, listing each request.
+
+    `routes` maps `(method, url without query)` to an answer or a list of answers used in
+    turn. An answer is a status, `(status, json[, headers])`, an `httpx.Response`, or an
+    exception to raise. `handler(request)` replaces the table. An unrouted request fails the
+    test."""
+
+    def __init__(self, routes=None, handler=None):
+        self.requests: list[httpx.Request] = []
+        self._routes, self._handler = {k: v for k, v in (routes or {}).items()}, handler
+        self.transport = httpx.MockTransport(self._answer)
+
+    def _answer(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if self._handler:
+            return self._handler(request)
+        key = (request.method, str(request.url.copy_with(query=None)))
+        assert key in self._routes, f"unrouted {key}"
+        out = self._routes[key]
+        if isinstance(out, list):
+            out = out.pop(0) if len(out) > 1 else out[0]
+        if isinstance(out, BaseException):
+            raise out
+        if isinstance(out, httpx.Response):
+            return out
+        status, *rest = (out,) if isinstance(out, int) else out
+        body, headers = (rest + [None, None])[:2]
+        return httpx.Response(status, json=body, headers=headers)
+
+
+@pytest.fixture
+def mock_http() -> type[MockHttp]:
+    return MockHttp
