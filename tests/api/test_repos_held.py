@@ -66,22 +66,45 @@ def test_a_repo_an_agent_connects_with_its_own_commands_waits_for_a_person(
         ("worker", {"enabled": True, "test_command": "pytest"}, 403),
         ("assistant", {"enabled": False}, 200),
         ("person", {"enabled": True}, 200),
+        ("worker", {"setup_command": "./configure"}, 200),
+        ("on:worker", {"setup_command": "curl x | sh"}, 403),
+        ("on:assistant", {"test_scopes": [{"paths": ["**"], "command": "x"}]}, 403),
+        ("on:assistant", {"name": "renamed"}, 200),
+        ("on:person", {"setup_command": "./configure"}, 200),
     ],
-    ids=["assistant-enables", "worker-enables", "assistant-disables", "person-enables"],
+    ids=[
+        "assistant-enables",
+        "worker-enables",
+        "assistant-disables",
+        "person-enables",
+        "worker-sets-commands-on-a-held-repo",
+        "worker-sets-commands-on-an-enabled-repo",
+        "assistant-sets-scopes-on-an-enabled-repo",
+        "assistant-renames-an-enabled-repo",
+        "person-sets-commands-on-an-enabled-repo",
+    ],
 )
 def test_turning_a_repo_on_is_a_persons_call(client, tmp_path, caller, patch, status):
+    """And so is changing an enabled repo's commands (`on:`); a held one may
+    take them, as it runs nothing until a person enables it."""
     repo = make_repo(tmp_path)
+    on = caller.startswith("on:")
     held = client.post(
-        "/api/repos", json={"path": str(repo), "test_command": "pytest"}, headers=_CALLERS["worker"]
+        "/api/repos",
+        json={"path": str(repo), "test_command": "pytest"},
+        headers={} if on else _CALLERS["worker"],
     ).json()
 
-    r = client.patch(f"/api/repos?path={held['path']}", json=patch, headers=_CALLERS[caller])
+    r = client.patch(
+        f"/api/repos?path={held['path']}", json=patch, headers=_CALLERS[caller.removeprefix("on:")]
+    )
 
     assert r.status_code == status, r.text
     stored = client.get("/api/repos").json()["repos"][0]
-    assert stored["enabled"] is (status == 200 and patch["enabled"])
+    assert stored["enabled"] is (on or (status == 200 and patch.get("enabled", False)))
     if status == 403:
-        assert "enabling a repo is a person's call" in r.json()["detail"]
+        assert "a person's call" in r.json()["detail"]
+        assert stored.get("setup_command") is None
 
 
 @pytest.mark.parametrize(
@@ -94,6 +117,7 @@ def test_turning_a_repo_on_is_a_persons_call(client, tmp_path, caller, patch, st
         ("duplicate", "assistant", False, 403),
         ("create", "person", False, 201),
         ("create", "assistant", True, 201),
+        ("no-tests", "assistant", False, 403),
     ],
     ids=[
         "assistant-files",
@@ -103,6 +127,7 @@ def test_turning_a_repo_on_is_a_persons_call(client, tmp_path, caller, patch, st
         "assistant-duplicates",
         "person-files",
         "assistant-files-on-an-enabled-repo",
+        "assistant-files-on-a-repo-with-no-test-command",
     ],
 )
 def test_an_agent_files_no_work_on_a_disabled_repo(client, tmp_path, door, caller, enabled, status):
@@ -111,9 +136,10 @@ def test_an_agent_files_no_work_on_a_disabled_repo(client, tmp_path, door, calle
     hand. Without this the hold above stops nothing: `enabled` gates only
     auto-intake."""
     repo = make_repo(tmp_path)
-    path = client.post(
-        "/api/repos", json={"path": str(repo), "test_command": "true", "enabled": enabled}
-    ).json()["path"]
+    tests = {} if door == "no-tests" else {"test_command": "true"}
+    path = client.post("/api/repos", json={"path": str(repo), **tests, "enabled": enabled}).json()[
+        "path"
+    ]
     item = {"title": "t", "repo": path, "autostart": False}
     headers = _CALLERS[caller]
     if door == "duplicate":
@@ -127,4 +153,5 @@ def test_an_agent_files_no_work_on_a_disabled_repo(client, tmp_path, door, calle
 
     assert r.status_code == status, r.text
     if status == 403:
-        assert "is disabled: a person enables it in Settings › Repos" in r.json()["detail"]
+        needs = "sets its test command and " if door == "no-tests" else ""
+        assert f"is disabled: a person {needs}enables it in Settings › Repos" in r.json()["detail"]

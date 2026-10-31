@@ -326,12 +326,16 @@ def refuse_agent_on_disabled_repo(st, request: Request, repo: str) -> None:
     disabled, and those commands run for every item on it, so a person
     enables it first. A person may still file on one by hand."""
     who = gates._decided_by(request)
-    if who != "human" and not deps.connected_or_422(st, repo).enabled:
-        raise HTTPException(
-            403,
-            f"{repo} is disabled: a person enables it in Settings › Repos before an "
-            f"{who} files work on it, since its commands run for every item",
-        )
+    if who == "human" or (entry := deps.connected_or_422(st, repo)).enabled:
+        return
+    needs = (
+        "" if entry.test_command is not None or entry.test_scopes else "sets its test command and "
+    )
+    raise HTTPException(
+        403,
+        f"{repo} is disabled: a person {needs}enables it in Settings › Repos before an "
+        f"{who} files work on it, since its commands run for every item",
+    )
 
 
 def repo_warning(entry) -> str | None:

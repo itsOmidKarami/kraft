@@ -38,7 +38,8 @@ it did was right. Then hand off to `kraft:check`.
      `kraft repo connect --test-command ... --setup-command ...`.
 
    `ensure_repo` saves as soon as it is called. With Kraft's own proposal the
-   repo is saved enabled, so the person sees the commands only through you.
+   repo is saved enabled when it found a test command (disabled when it found
+   none), so the person sees those commands only through you.
    Commands you pass save it disabled (the answer's `held` says so): they run
    for every work item, so you cannot file work on it until the person has
    read them in Settings › Repos and enabled it there. Either way, show them what was saved, each command with
@@ -59,9 +60,9 @@ it did was right. Then hand off to `kraft:check`.
    test scope per project, with its commands run from that directory
    (`sh -c 'cd web && npm test'`). Read those back too.
 
-   Once a repo is connected, `ensure_repo` leaves it alone. To correct its
-   commands, tell the person what to change and why: they change it in
-   Settings › Repos. Do not edit `~/.kraft/config/repos.yaml` yourself; a
+   Once a repo is connected, `ensure_repo` leaves it alone, and an enabled
+   repo's commands are a person's to change. To correct them, tell the person
+   what to change and why: they change it in Settings › Repos. Do not edit `~/.kraft/config/repos.yaml` yourself; a
    command there runs for every work item, so a person sets it. A convention Kraft keeps getting wrong
    across repos belongs in `~/.kraft/config/detectors.yaml` instead: see
    https://kraft-sdlc.dev/reference/configuration/repos/detectors

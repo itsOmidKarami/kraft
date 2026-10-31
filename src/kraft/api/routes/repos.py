@@ -685,10 +685,19 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
     repos, entry = _editable_repos(st, path)
     if entry is None:
         raise HTTPException(404, f"{path} is not connected")
-    if body.enabled is True and (who := gates._decided_by(request)) != "human":
-        raise HTTPException(
-            403, f"enabling a repo is a person's call, not an {who}'s: its commands run unread"
-        )
+    if (who := gates._decided_by(request)) != "human":
+        if body.enabled is True:
+            raise HTTPException(
+                403, f"enabling a repo is a person's call, not an {who}'s: its commands run unread"
+            )
+        # A disabled repo may take them: it runs nothing until a person enables it.
+        sets = body.test_command is not None or body.setup_command or body.test_scopes
+        if sets and entry.get("enabled", True):
+            raise HTTPException(
+                403,
+                f"changing an enabled repo's commands is a person's call, not an {who}'s: "
+                "they run for every work item on it",
+            )
     # exclude_unset, not `v is not None`: a field the caller left out of the
     # JSON body must not clobber the saved value, but one sent as an explicit
     # `null` (clearing forge, test_command, project — the

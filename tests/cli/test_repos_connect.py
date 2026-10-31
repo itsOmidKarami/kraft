@@ -25,9 +25,13 @@ def test_no_tests_leaves_a_setup_found_undecided(app, capsys, repo):
     assert asyncio.run(client.repos())[0]["setup_command"] is None
 
 
-@pytest.mark.parametrize("worker", [False, True], ids=["person", "worker"])
+@pytest.mark.parametrize(
+    "session",
+    [None, ("KRAFT_WORK_ITEM_ID", "w1"), ("KRAFT_SESSION_ID", "w1/abc123")],
+    ids=["person", "worker", "escalation-turn"],
+)
 def test_connecting_again_saves_what_a_lockfile_committed_since_proposes(
-    app, capsys, repo, monkeypatch, worker
+    app, capsys, repo, monkeypatch, session
 ):
     """ "Commit one (uv lock) and connect again" led nowhere: connecting
     again said "already connected" and saved nothing, so the repo stayed
@@ -40,8 +44,9 @@ def test_connecting_again_saves_what_a_lockfile_committed_since_proposes(
     assert "commit a uv.lock (uv lock) and connect again" in capsys.readouterr().out
     (repo / "uv.lock").write_text("version = 1\n")
     commit_all(repo)
+    worker = session is not None
     if worker:
-        monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "w1")
+        monkeypatch.setenv(*session)
     cli.main(["repo", "connect", str(repo)])
     out = capsys.readouterr().out
     assert "already connected" in out
