@@ -231,8 +231,8 @@ The release is done when the stamp PR has merged.
    to the PR (`RELEASING.md`, "Docs Added in notes").
 2. **What's new.** Open a `release::none` pull request that adds the release's
    section to `docsite/content/6.project/3.whats-new.md`, newest first: its
-   headline change (the `notes::highlight` entry) and at most two more of its
-   most notable changes, a bullet each with a link to the page that describes
+   `notes::highlight` entries (one with sub-bullets counts as one) and at most
+   two more of its most notable changes, a bullet each with a link to the page that describes
    it, under `<!-- not new: shipped in X.Y -->`.
    A patch release adds nothing.
 3. **Report**, outcome first: the version, where it is published, what the rc
