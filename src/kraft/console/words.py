@@ -343,6 +343,11 @@ FORGE_ACCOUNT_SSO_HINT = (
     "Open this address to authorize forge account {account}'s token for single sign-on, "
     "then Retry: {sso_url}"
 )
+#: `cause.tsx`: the same when the account's name cannot be printed (it holds a backtick).
+FORGE_ACCOUNT_SSO_UNNAMED_HINT = (
+    "Open this address to authorize the forge account's token for single sign-on, "
+    "then Retry: {sso_url}"
+)
 #: `cause.tsx`: a forge token (an API account's) that could not sign in, by the kind of source
 #: (`TokenSource.label()`'s first word); {value} is the variable or path, {account} its name.
 FORGE_TOKEN_HINTS = {
@@ -397,8 +402,9 @@ def _sso_url(facts: dict) -> str:
 def _sso_hint(facts: dict) -> str:
     """`forgeHint` for `forge_sso`: names the API account when `account` is plain text."""
     account, url = facts.get("account"), _sso_url(facts)
-    if isinstance(account, str) and account and "`" not in account:
-        return FORGE_ACCOUNT_SSO_HINT.format(account=account, sso_url=url)
+    if isinstance(account, str) and account:
+        hint = FORGE_ACCOUNT_SSO_HINT if "`" not in account else FORGE_ACCOUNT_SSO_UNNAMED_HINT
+        return hint.format(account=account, sso_url=url)
     return FORGE_SSO_HINT.format(sso_url=url)
 
 
