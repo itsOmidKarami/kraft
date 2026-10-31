@@ -36,11 +36,10 @@ async def _item_forge(st, wid: str, repo: str | None) -> tuple[Forge, Path, str,
     workspace member mounted at `repo`, exactly as the forge nodes run them."""
     row = deps._work_item_row(st, wid)
     entry = deps.launch(st, row["repo"]).repo_entry
-    repo_forge = entry.forge if entry else None
     branch = store.branch_for(row)
     try:
         if repo is None:
-            forge = forge_mod.resolve(forge_mod.backend_for("auto", repo_forge))
+            forge = await forge_mod.item_forge(st.db, row, entry, getattr(st, "forges", None))
             root = Path(row["repo"])
             return (
                 forge,
@@ -64,7 +63,7 @@ async def _item_forge(st, wid: str, repo: str | None) -> tuple[Forge, Path, str,
             )
         path = Path(found["repo_path"])
         return (
-            forge_mod.member_forge(row, repo_forge, repo),
+            await forge_mod.item_forge(st.db, row, entry, getattr(st, "forges", None), repo),
             path,
             branch,
             await builtins_mod.base_branch(st.db, wid, path, member=True),

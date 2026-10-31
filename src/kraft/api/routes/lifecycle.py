@@ -2622,9 +2622,8 @@ async def _close_cancelled_mr(st, wid: str, row) -> dict:
     worktree = inplace.item_folder(st.run_dirs, row)
     mr_ref = forge_mod.MRRef(number=ref["number"], url=ref["url"], state="open")
     repo_entry = deps.launch(st, row["repo"]).repo_entry
-    backend = forge_mod.backend_for("auto", repo_entry.forge if repo_entry else None)
-    forge = forge_mod.resolve(backend)
     try:
+        forge = await forge_mod.item_forge(st.db, row, repo_entry, getattr(st, "forges", None))
         await forge.close_mr(repo=worktree, mr=mr_ref)
     except forge_mod.ForgeError as exc:
         return {"ok": False, "error": str(exc)}
@@ -2670,8 +2669,7 @@ async def reopen_mr(wid: str, request: Request):
     repo_entry = deps.launch(st, row["repo"]).repo_entry
     try:
         # A repo with no forge recorded fails here, a forge failure too.
-        backend = forge_mod.backend_for("auto", repo_entry.forge if repo_entry else None)
-        forge = forge_mod.resolve(backend)
+        forge = await forge_mod.item_forge(st.db, row, repo_entry, getattr(st, "forges", None))
         await forge.reopen_mr(repo=worktree, mr=mr_ref)
     except forge_mod.ForgeError as exc:
         raise HTTPException(502, str(exc)) from None
@@ -2877,8 +2875,7 @@ async def set_mr_labels(wid: str, body: MrLabels, request: Request):
         raise HTTPException(422, "no labels given")
     repo_entry = deps.launch(st, row["repo"]).repo_entry
     try:
-        backend = forge_mod.backend_for("auto", repo_entry.forge if repo_entry else None)
-        forge = forge_mod.resolve(backend)
+        forge = await forge_mod.item_forge(st.db, row, repo_entry, getattr(st, "forges", None))
         await forge.set_labels(
             repo=worktree,
             branch=store.branch_for(row),

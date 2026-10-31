@@ -9,7 +9,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from support.api import _force_node, _set_status
+from support.api import _force_node, _on_api_account, _set_status
 from support.harness import commit_all, git, write
 
 # --- D: cancel preview and close the MR on cancel (B4) ----------------------
@@ -19,8 +19,8 @@ def _fake_forge_cancel(monkeypatch):
     from kraft.adapters import forge as forge_mod
 
     fake = forge_mod.FakeForge()
-    monkeypatch.setattr("kraft.adapters.forge.backend_for", lambda *a, **k: "fake")
-    monkeypatch.setattr("kraft.adapters.forge.resolve", lambda name: fake)
+    monkeypatch.setattr("kraft.adapters.forge.run.backend_for", lambda *a, **k: "fake")
+    monkeypatch.setattr("kraft.adapters.forge.run.resolve", lambda name: fake)
     return fake
 
 
@@ -336,7 +336,7 @@ def test_reopen_mr_with_a_forge_failure_answers_502_and_the_item_stays_stopped(
         monkeypatch.setattr(fake, "reopen_mr", _boom)
     else:
         # The repo records no `forge:`, so `auto` names no backend.
-        monkeypatch.setattr("kraft.adapters.forge.backend_for", real_backend_for)
+        monkeypatch.setattr("kraft.adapters.forge.run.backend_for", real_backend_for)
 
     r = client.post(f"/api/work-items/{wid}/reopen-mr")
 
@@ -345,3 +345,26 @@ def test_reopen_mr_with_a_forge_failure_answers_502_and_the_item_stays_stopped(
     detail = client.get(f"/api/work-items/{wid}").json()
     assert detail["status"] == "needs_human"
     assert detail["stop"]["kind"] == "mr_closed"
+
+
+def test_cancel_closes_nothing_through_the_cli_on_an_api_account(client, repo, monkeypatch):
+    wid = _stopped_item_with_mr(client, repo, _fake_forge_cancel(monkeypatch))
+    _on_api_account(client, repo, monkeypatch, wid)
+
+    r = client.post(f"/api/work-items/{wid}/cancel", json={"reason": "no", "close_mr": True})
+
+    assert r.status_code == 200, r.text
+    close = r.json()["close_mr"]
+    assert close["ok"] is False
+    assert "forge account corp-gl says client: api" in close["error"]
+
+
+def test_reopen_runs_nothing_through_the_cli_on_an_api_account(client, repo, monkeypatch):
+    wid = _stopped_item_with_closed_mr(client, repo, _fake_forge_cancel(monkeypatch))
+    _on_api_account(client, repo, monkeypatch, wid)
+
+    r = client.post(f"/api/work-items/{wid}/reopen-mr")
+
+    assert r.status_code == 502, r.text
+    assert "forge account corp-gl says client: api" in r.json()["detail"]
+    assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"

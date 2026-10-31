@@ -4,7 +4,7 @@ repair task calls once it has decided which labels a red pipeline wants
 
 from __future__ import annotations
 
-from support.api import _completed_item
+from support.api import _completed_item, _on_api_account
 
 from kraft.adapters import forge as forge_mod
 
@@ -13,8 +13,8 @@ def _fake_forge(monkeypatch):
     """Every backend resolves to one shared FakeForge, so the test can read
     back what `set_labels` was called with."""
     fake = forge_mod.FakeForge()
-    monkeypatch.setattr("kraft.adapters.forge.backend_for", lambda *a, **k: "fake")
-    monkeypatch.setattr("kraft.adapters.forge.resolve", lambda name: fake)
+    monkeypatch.setattr("kraft.adapters.forge.run.backend_for", lambda *a, **k: "fake")
+    monkeypatch.setattr("kraft.adapters.forge.run.resolve", lambda name: fake)
     return fake
 
 
@@ -126,3 +126,11 @@ def test_set_mr_labels_on_a_malformed_repos_yaml_is_a_clean_error(client, repo, 
 
     assert r.status_code == 422, r.text
     assert "repos.yaml" in r.json()["detail"]
+
+
+def test_an_api_account_item_labels_nothing_through_the_cli(client, repo, monkeypatch):
+    wid = _completed_item(client, repo)
+    _on_api_account(client, repo, monkeypatch, wid)
+    r = client.post(f"/api/work-items/{wid}/mr-labels", json={"labels": ["x"]})
+    assert r.status_code == 502, r.text
+    assert "forge account corp-gl says client: api" in r.json()["detail"]

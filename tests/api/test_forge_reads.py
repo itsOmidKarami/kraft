@@ -7,6 +7,7 @@ import json
 from dataclasses import asdict, dataclass, field
 
 import pytest
+from support.api import _on_api_account
 from support.harness import make_repo
 
 from kraft import store
@@ -52,8 +53,8 @@ def _spy(**kwargs) -> Spy:
 
 
 def _item(client, repo, monkeypatch, fake) -> str:
-    monkeypatch.setattr("kraft.adapters.forge.backend_for", lambda *a, **k: "fake")
-    monkeypatch.setattr("kraft.adapters.forge.resolve", lambda name: fake)
+    monkeypatch.setattr("kraft.adapters.forge.run.backend_for", lambda *a, **k: "fake")
+    monkeypatch.setattr("kraft.adapters.forge.run.resolve", lambda name: fake)
     return client.post(
         "/api/work-items",
         json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
@@ -222,3 +223,12 @@ def test_the_job_log_keeps_what_a_carriage_return_left(
     wid = _item(client, repo, monkeypatch, fake)
     url = f"/api/work-items/{wid}/forge/pipelines/p1/jobs/j1/log"
     assert client.get(url, params={"lines": lines}).json() == expected
+
+
+@pytest.mark.parametrize("pinned", [False, True], ids=["before-any-pin", "pinned"])
+def test_an_api_account_item_reads_nothing_through_the_cli(client, repo, monkeypatch, pinned):
+    wid = _item(client, repo, monkeypatch, _spy())
+    _on_api_account(client, repo, monkeypatch, wid, pinned=pinned)
+    got = client.get(f"/api/work-items/{wid}/forge/pipelines")
+    assert got.status_code == 502
+    assert "forge account corp-gl says client: api" in got.json()["detail"]
