@@ -55,7 +55,7 @@ describe("Forge accounts (phone)", () => {
 
   it.each([
     ["api-file", "corp-gl", ["Test", "Paste a new token", "Remove"], null],
-    // PUT /token would erase a command and the server does not stop it: no paste for a command account.
+    // PUT /token would erase a command (the server refuses it too): the menu offers no paste for a command account.
     ["command", "vault-gl", ["Test", "Remove"], null],
     ["cli", "github-cli", ["Test", "Remove"], null],
     ["named", "shared-gl", ["Test"], NAMED_BY(["repo-zero"])],
@@ -130,6 +130,21 @@ describe("Forge accounts (phone)", () => {
     done(new Response(JSON.stringify(TESTED[1]), { status: 200 }));
     expect(await screen.findByText("signed in as alice")).toBeInTheDocument();
     await waitFor(() => expect(calls.filter((c) => c.method === "GET" && c.path === "/forges")).toHaveLength(2));
+  });
+
+  it("after a paste, the account's menu reopened during the check reads Testing… and is disabled", async () => {
+    let done: (r: Response) => void = () => {};
+    open({ "PUT /forges/corp-gl/token": [200, {}] });
+    const real = globalThis.fetch;
+    vi.stubGlobal("fetch", (u: string, init?: RequestInit) => (init?.method === "POST" ? new Promise<Response>((r) => { done = r; }) : real(u, init)));
+    await tap("corp-gl");
+    await userEvent.click(screen.getByRole("button", { name: "Paste a new token" }));
+    await userEvent.type(screen.getByLabelText(/Paste a new token for corp-gl/, { selector: "input" }), `${TOKEN}{Enter}`);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await tap("corp-gl");
+    expect(await screen.findByRole("button", { name: "Testing…" })).toBeDisabled();
+    done(new Response(JSON.stringify(TESTED[1]), { status: 200 }));
+    expect(await screen.findByText(/signed in as alice/)).toBeInTheDocument();
   });
 
   it("a test running for one account does not busy or close another's sheet", async () => {

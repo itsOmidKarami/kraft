@@ -15,9 +15,9 @@ const SOURCES: { value: SourceChoice; label: string }[] = [
   { value: "file", label: "file" },
   { value: "paste", label: "paste" },
 ];
-// Never `command`: it is code run on the server's machine, set only there. The server's PUT /token and a PATCH that
-// sends `client: "cli"` or `token: null` do not stop a browser from replacing or erasing one, so leaving it out of
-// the UI (here, and the paste and client controls on a command account) is the only guard.
+// Never `command`: it is code run on the server's machine, set only there. The server refuses a browser that tries to
+// replace or erase one (403: PUT /token, and a PATCH with `token` or `client: "cli"`), and the UI leaves the paste and
+// client controls off a command account so a person never meets that refusal.
 
 /** The token as the API takes it; null for a paste, which goes in its own PUT. */
 export function sourceBody(choice: SourceChoice, env: string, file: string, kind: Kind): ForgeTokenSource | null {

@@ -46,8 +46,8 @@ describe("EditForgeDialog", () => {
     expect(of("PATCH")[0].body).toEqual({ api_url: null });
   });
 
-  // The server does not stop a browser replacing or erasing a command (PUT /token never calls _no_command, and a PATCH
-  // with client cli or token null would): leaving paste and the client switch out here is the guard. Do not simplify.
+  // The server refuses a browser that replaces or erases a command (403); the UI leaves paste and the client switch off
+  // a command account so a person never meets that. Do not simplify.
   it("a command source shows its command read-only and no Save ever sends token or client", async () => {
     const { of, onClose } = mount("vault-gl", { "PATCH /forges/vault-gl": [200, {}] });
     // A command can embed a token: its text is never in the page, only that there is one.
@@ -168,6 +168,20 @@ describe("EditForgeDialog", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  // The Save has answered, so nothing is left to lose: Esc closes like Cancel instead of waiting out a 90 s check.
+  it.each([
+    ["after-save", () => { pick("variable"); fireEvent.change(screen.getByRole("textbox", { name: /Variable name/ }), { target: { value: "CORP_GL" } }); save(); }, {}],
+    ["after-replace", () => { fireEvent.change(pw()!, { target: { value: TOKEN } }); fireEvent.click(screen.getByRole("button", { name: "Replace token" })); }, { "PUT /forges/corp-gl/token": [200, {}] }],
+  ] as const)("Esc closes the dialog during the check that follows a new token: %s", async (_id, start, more) => {
+    const { onClose } = mount("corp-gl", more as Record<string, [number, unknown]>);
+    const real = fetch;
+    vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => (init?.method === "POST" ? new Promise<Response>(() => {}) : real(url, init))));
+    start();
+    await screen.findByRole("button", { name: "Testing…" });
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it.each([

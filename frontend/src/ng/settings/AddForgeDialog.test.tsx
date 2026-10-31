@@ -77,9 +77,9 @@ describe("AddForgeDialog", () => {
   });
 
   it.each([
-    ["removed", [204, undefined], /^the token is shorter than 8 characters$/, 1],
-    ["delete-refused-409", [409, { detail: "forge account 'corp-gl' is named by: /r" }], /shorter than 8 characters.*could not be removed again.*named by: \/r/, 1],
-  ] as const)("a refused paste takes the account it just added back out: %s", async (_id, del, shown, reread) => {
+    ["removed", [204, undefined], /^the token is shorter than 8 characters$/],
+    ["delete-refused-409", [409, { detail: "forge account 'corp-gl' is named by: /r" }], /shorter than 8 characters.*could not be removed again.*named by: \/r/],
+  ] as const)("a refused paste takes the account it just added back out: %s", async (_id, del, shown) => {
     const { of, onAdded } = mount({
       "POST /forges": [201, ROW], "PUT /forges/corp-gl/token": [422, { detail: "the token is shorter than 8 characters" }], "DELETE /forges/corp-gl": del as [number, unknown],
     });
@@ -87,7 +87,7 @@ describe("AddForgeDialog", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(shown);
     expect(of("DELETE")).toHaveLength(1);
     // A 409 rollback leaves the account, so the list is read again to show it as it is.
-    expect(onAdded).toHaveBeenCalledTimes(del[0] === 409 ? reread : 0);
+    expect(onAdded).toHaveBeenCalledTimes(del[0] === 409 ? 1 : 0);
     expect(bodyHasToken()).toBe(false);
   });
 
@@ -117,7 +117,7 @@ describe("AddForgeDialog", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  // A command source is code run on the server's machine. The UI is its only guard on this path too: never offer one here.
+  // A command source is code run on the server's machine. POST refuses one too: the form never offers it.
   it("never offers a command source, and says where one is set", () => {
     mount();
     pick("api");

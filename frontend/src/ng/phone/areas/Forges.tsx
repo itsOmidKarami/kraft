@@ -86,8 +86,8 @@ export function ForgesScreen() {
     void load();
   };
 
-  // Paste is offered only on an api account whose token is not a command: PUT /token would erase a command, the server
-  // does not stop it, and leaving it out here is the only guard. Do not "simplify" it away.
+  // Paste is offered only on an api account whose token is not a command: PUT /token would erase a command. The server
+  // refuses it too (403); the sheet leaves it out so a person never meets that. Do not "simplify" it away.
   const pasteable = a?.client === "api" && a.token?.from !== "command";
   const s = a ? probeWords(a, today) : null;
 

@@ -31,6 +31,11 @@ export function EditForgeDialog({ account: a, repos, onClose, onSaved, onRemove 
   const [testing, setTesting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set once the Save or Replace has answered: nothing is left to lose, so Esc and the backdrop close like Cancel.
+  const [answered, setAnswered] = useState(false);
+  // A person who closed the dialog during a check must not have the late answer close whatever they opened next.
+  const closed = useRef(false);
+  const close = () => { closed.current = true; onClose(); };
   // The dialog focuses its first control, which would be the unchosen "cli": open on the chosen Client instead (this
   // effect runs after the dialog's own). A command account's Client is disabled, so focus stays where the dialog put it.
   const clientRef = useRef<HTMLDivElement>(null);
@@ -39,7 +44,7 @@ export function EditForgeDialog({ account: a, repos, onClose, onSaved, onRemove 
 
   const api = client === "api";
   const tokenChanged = !command && api && (client !== a.client || choice !== first || env !== (t?.env ?? "") || file !== (t?.file ?? "") || kind !== (t?.kind ?? "unknown"));
-  // A command account sends neither `token` nor `client`: see forgeForm's note, the UI is the only guard.
+  // A command account sends neither `token` nor `client`: the server also refuses them (403), and the UI hides the controls so a person never meets that.
   const changes: Record<string, unknown> = {
     ...(!command && client !== a.client && { client }),
     ...(apiUrl !== a.api_url && { api_url: apiUrl.trim() || null }),
@@ -57,7 +62,7 @@ export function EditForgeDialog({ account: a, repos, onClose, onSaved, onRemove 
     setTesting(true);
     await checkAndToast(a.name, lead);
     setTesting(false);
-    onClose();
+    if (!closed.current) onClose();
   };
   const save = async () => {
     setBusy(true);
@@ -66,8 +71,9 @@ export function EditForgeDialog({ account: a, repos, onClose, onSaved, onRemove 
     setBusy(false);
     if (r.status !== 200) return setError(detailOf(r.body));
     onSaved();
+    setAnswered(true);
     if (!tokenChanged) {
-      onClose();
+      close();
       return showToast(`Saved ${a.name}.`);
     }
     await checked(`Saved ${a.name}.`);
@@ -82,6 +88,7 @@ export function EditForgeDialog({ account: a, repos, onClose, onSaved, onRemove 
     setBusy(false);
     if (r.status !== 200) return setError(detailOf(r.body));
     onSaved();
+    setAnswered(true);
     await checked(`Pasted a new token for ${a.name}.`);
   };
   const test = async () => {
@@ -98,15 +105,15 @@ export function EditForgeDialog({ account: a, repos, onClose, onSaved, onRemove 
   return (
     <Dialog
       title={`Edit ${a.name}`}
-      onClose={onClose}
-      dirty={busy || changed || paste !== ""}
+      onClose={close}
+      dirty={busy || (!answered && (changed || paste !== ""))}
       className="set-wk-dlg"
       footer={
         <div className="set-wk-foot">
           <div className="set-wk-foot-row">
-            <Button variant="danger" className="set-wk-remove" disabled={locked || named.length > 0} aria-describedby="set-fg-remove" onClick={() => { onClose(); onRemove(a.name); }}>Remove account</Button>
+            <Button variant="danger" className="set-wk-remove" disabled={locked || named.length > 0} aria-describedby="set-fg-remove" onClick={() => { close(); onRemove(a.name); }}>Remove account</Button>
             <Button className="set-fg-test" aria-disabled={locked || undefined} onClick={test}>{testing ? "Testing…" : "Test"}</Button>
-            <Button onClick={onClose} disabled={busy}>Cancel</Button>
+            <Button onClick={close} disabled={busy}>Cancel</Button>
             <Button variant="primary" disabled={!changed || locked} onClick={save}>Save</Button>
           </div>
           <p id="set-fg-remove" className="set-hint">{named.length ? NAMED_BY(named) : a.default_for_host ? DEFAULT_REMOVABLE : ""}</p>
@@ -142,7 +149,7 @@ export function EditForgeDialog({ account: a, repos, onClose, onSaved, onRemove 
             </>
           )}
         </form>
-        {/* A command account gets no Replace token, and a PUT would erase its command: the UI is the only guard.
+        {/* A command account gets no Replace token: a PUT would erase its command (the server refuses it too, 403).
             Its own form, so Enter in the new token replaces it and never saves the other edits. */}
         {a.client === "api" && !command && (
           <form className="set-wk-token set-fg-replace" onSubmit={(e) => { e.preventDefault(); void replace(); }}>

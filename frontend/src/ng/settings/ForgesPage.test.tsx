@@ -101,8 +101,37 @@ describe("Settings › Forge accounts", () => {
   });
 });
 
+describe("a check that outlives its dialog", () => {
+  const TOKEN = "glpat-" + "x1y2z3w4v5u6t7s8r9q0";
+  it.each([
+    ["after-save", () => {
+      fireEvent.click(screen.getByRole("radio", { name: "variable" }));
+      fireEvent.change(screen.getByRole("textbox", { name: /Variable name/ }), { target: { value: "CORP_GL" } });
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    }],
+    ["after-replace", () => {
+      fireEvent.change(document.querySelector<HTMLInputElement>('input[type="password"]')!, { target: { value: TOKEN } });
+      fireEvent.click(screen.getByRole("button", { name: "Replace token" }));
+    }],
+  ])("a late answer never closes the dialog a person opened since: %s", async (_id, start) => {
+    let answer!: (r: Response) => void;
+    stubFetch({ ...answers, "PATCH /forges/corp-gl": [200, {}], "PUT /forges/corp-gl/token": [200, {}] });
+    const real = fetch;
+    vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => (init?.method === "POST" && String(url).endsWith("/test") ? new Promise<Response>((r) => (answer = r)) : real(url, init))));
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit corp-gl" }));
+    start();
+    await screen.findByRole("button", { name: "Testing…" });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit old-gl" }));
+    await screen.findByRole("dialog", { name: "Edit old-gl" });
+    await act(async () => answer(new Response(JSON.stringify({ ok: true, output: "signed in" }), { status: 200 })));
+    expect(screen.getByRole("dialog", { name: "Edit old-gl" })).toBeInTheDocument();
+  });
+});
+
 describe("removing an account", () => {
-  /** A harness over the page's own hook: Edit's Remove button comes with the dialog in Task 3. */
+  /** A harness over the page's own hook: Remove is the Edit dialog's button; this drives the hook directly. */
   function Harness() {
     const { accounts, remove } = useForges();
     return <>{accounts?.map((a) => <button key={a.name} onClick={() => remove(a.name)}>Remove {a.name}</button>)}</>;
