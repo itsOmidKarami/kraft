@@ -178,7 +178,7 @@ async def ensure_repo(
     Idempotent by construction: `POST /repos` 409s on a path it already holds,
     and "already connected" is the goal state, not a failure. `test_command`
     and `setup_command` replace what the probe would propose (`""` for none);
-    an already-connected repo keeps what it has -- edit repos.yaml to change it.
+    an already-connected repo keeps what it has -- a person changes it in Settings › Repos.
     `enabled` None lets the server decide (enabled when it has a test).
     """
     path = context.absolute_path(path or os.getcwd())

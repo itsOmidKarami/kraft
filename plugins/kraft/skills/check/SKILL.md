@@ -37,8 +37,9 @@ server, the MCP token) are `kraft:doctor`'s; say so rather than diagnosing them.
   `repos.yaml`. There is no default, so this repo's next work item stops when
   its worktree is built. The row carries the setup command `kraft repo connect`
   would propose today (from the repo's task runner, CI and lockfiles); check it
-  against what the repo's own docs say before writing it in, the same way step
-  1 of `kraft:onboard` checks a proposed `test_command`.
+  against what the repo's own docs say, the same way step 1 of `kraft:onboard`
+  checks a proposed `test_command`, then give it to the person to set in
+  Settings › Repos.
 
 Translate each row's compact detail (`c1, c2 missing` style) into one line per
 chain or node, grouped under its own heading, so a human reads "these three

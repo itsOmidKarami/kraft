@@ -1286,6 +1286,12 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
     row = deps._live_work_item_row(st, wid)
+    if row["current_node_id"] is None:
+        # #1198: an agent does not start a person's item on a disabled repo.
+        from kraft.api.routes.work_items import refuse_agent_on_disabled_repo  # imports this
+
+        filed = store.materialized_chain_of(row)
+        refuse_agent_on_disabled_repo(st, request, row["repo"], filed.target if filed else None)
     from_statuses = [
         s
         for s in admitting(Verb.RESUME)

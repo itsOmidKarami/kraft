@@ -25,22 +25,37 @@ def test_no_tests_leaves_a_setup_found_undecided(app, capsys, repo):
     assert asyncio.run(client.repos())[0]["setup_command"] is None
 
 
-def test_connecting_again_saves_what_a_lockfile_committed_since_proposes(app, capsys, repo):
+@pytest.mark.parametrize(
+    "session",
+    [None, ("KRAFT_WORK_ITEM_ID", "w1"), ("KRAFT_SESSION_ID", "w1/abc123")],
+    ids=["person", "worker", "escalation-turn"],
+)
+def test_connecting_again_saves_what_a_lockfile_committed_since_proposes(
+    app, capsys, repo, monkeypatch, session
+):
     """ "Commit one (uv lock) and connect again" led nowhere: connecting
     again said "already connected" and saved nothing, so the repo stayed
-    disabled with no commands until it was disconnected first."""
+    disabled with no commands until it was disconnected first. A Kraft
+    session saves nothing: a connected repo's commands are a person's to set
+    (#1198)."""
     (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n[tool.pytest.ini_options]\n")
     commit_all(repo)
     cli.main(["repo", "connect", str(repo)])
     assert "commit a uv.lock (uv lock) and connect again" in capsys.readouterr().out
     (repo / "uv.lock").write_text("version = 1\n")
     commit_all(repo)
+    if session:
+        monkeypatch.setenv(*session)
     cli.main(["repo", "connect", str(repo)])
     out = capsys.readouterr().out
     assert "already connected" in out
-    assert "test command: uv run pytest (from uv.lock)" in out
-    assert "saved the test command, the setup command, enabled" in out
     [entry] = asyncio.run(client.repos())
+    if session:
+        assert "its commands are a person's to set, in Settings › Repos" in out
+        assert (entry["test_command"], entry["enabled"]) == (None, False)
+        return
+    assert "test command: uv run pytest (from uv.lock)" in out
+    assert "saved the test command, the setup command, enabled\n" in out
     assert (entry["test_command"], entry["setup_command"], entry["enabled"]) == (
         "uv run pytest",
         "uv sync",

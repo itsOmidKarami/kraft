@@ -320,13 +320,44 @@ def _dry_run_response(
     }
 
 
+def refuse_agent_on_disabled_repo(st, request: Request, repo: str, target=None) -> None:
+    """403 when an agent or an MCP session files or starts work on a disabled
+    repo, or a workspace that selects a disabled member (#1198): a repo an
+    agent connected with its own commands is saved disabled, and its commands
+    run for every item on it, so a person enables it first. Members are found
+    by id, as verification runs them. A person may still file by hand."""
+    who = gates._decided_by(request)
+    if who == "human":
+        return
+    deps.connected_or_422(st, repo)
+    try:
+        entries = [e for _rid, e in deps._repository_layers(st, repo, target)]
+    except PolicyError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    for found in entries:
+        if found.enabled:
+            continue
+        has_tests = found.test_command is not None or found.test_scopes
+        needs = "" if has_tests else "sets its test command and "
+        raise HTTPException(
+            403,
+            f"{found.path} is disabled: a person {needs}enables it in Settings › Repos before "
+            f"an {who} files or starts work on it, since its commands run for every item",
+        )
+
+
 def repo_warning(entry) -> str | None:
     """What will stop an item filed on `entry`, said when it is filed rather
     than found once it has run: no setup command declared stops it before
     its first task, and no test command (nor test scopes) stops it at
     verification, after its agent tasks have run. Warned, not refused: a
-    disabled repo still takes items filed by hand."""
+    disabled repo still takes items filed by hand, and is warned of too, as
+    its commands may be an agent's that no one has read (#1198)."""
     stops = []
+    if not entry.enabled:
+        stops.append(
+            "is disabled: check its commands in Settings › Repos before starting this item"
+        )
     if entry.setup_command is None:
         stops.append(
             "declares no setup command, so this item stops before its first task, when "
@@ -485,6 +516,7 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
             in_place=in_place_by is not None,
             members=[m.path for m in materialized.target.mounts.values()],
         )
+    refuse_agent_on_disabled_repo(st, request, body.repo, materialized.target)
     if dry_run:
         # B33: every check up to and including `_check_node_overrides` has run;
         # nothing is written -- no row, no bead, no attachment copy, no spawn.
@@ -786,6 +818,7 @@ async def duplicate_work_item(wid: str, request: Request):
     target = _duplicate_target(st, row) or entry.single_repo_target(
         row["repo"], in_place=in_place_by is not None
     )
+    refuse_agent_on_disabled_repo(st, request, row["repo"], target)
     policy = deps.item_policy_or_422(st, row["repo"], target)
     per_repository = deps.repository_policies_or_422(st, target)
     repo_steering = deps.repository_steering_or_422(st, row["repo"], target)
@@ -927,6 +960,7 @@ async def fire_trigger(body: TriggerBody, request: Request):
     _check_text("description", body.description)
     if not Path(body.repo).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
+    refuse_agent_on_disabled_repo(st, request, body.repo)
     policy = deps.item_policy_or_422(st, body.repo)
     repo_steering = deps.repository_steering_or_422(st, body.repo)
     in_place_by = deps.in_place_or_422(st, body.repo, None, workspace=None)

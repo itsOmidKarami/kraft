@@ -23,6 +23,7 @@ from kraft.addons import review as addon_review
 from kraft.addons import update as addon_update
 from kraft.addons.config import RepoLibrariesLock
 from kraft.api import api_router, deps
+from kraft.api.routes import gates
 from kraft.store import open_counts_by_repo
 
 logger = logging.getLogger(__name__)
@@ -476,9 +477,19 @@ async def probe_repo(body: ProbeBody, request: Request):
 _PROBES_AT_ONCE = 2
 
 
+#: Why a repo an agent connected with its own commands is saved disabled.
+HELD = (
+    "saved disabled: an agent chose its commands, which run for every work item on it, so no "
+    "agent files work on it until a person has read them and enabled it in Settings › Repos"
+)
+
+
 @api_router.post("/repos", status_code=201)
 async def add_repo(body: RepoBody, request: Request):
     st = request.app.state
+    # #1198: commands an agent chose run in every worktree, so a person turns them on.
+    chose = body.test_command is not None or body.setup_command or body.test_scopes
+    hold = bool(chose) and gates._decided_by(request) != "human"
     # One connect at a time between reading repos.yaml and saving it: the
     # probe runs in a thread, and two connects interleaving at that await
     # would each save the list without the other's entry. Per app, so the
@@ -486,10 +497,10 @@ async def add_repo(body: RepoBody, request: Request):
     if getattr(st, "connecting", None) is None:
         st.connecting = asyncio.Lock()
     async with st.connecting:
-        return await _add_repo(body, st)
+        return await _add_repo(body, st, hold=hold)
 
 
-async def _add_repo(body: RepoBody, st) -> dict:
+async def _add_repo(body: RepoBody, st, *, hold: bool = False) -> dict:
     templates_dir = st.templates_dir
     try:
         # "Already connected" first, from what needs no detector table: a
@@ -562,7 +573,9 @@ async def _add_repo(body: RepoBody, st) -> dict:
         "setup_command": setup_command,
         "forge": body.forge or probed["forge"],
         "project": body.project or probed["project"],
-        "enabled": body.enabled
+        "enabled": False
+        if hold
+        else body.enabled
         if body.enabled is not None
         else _has_tests({"test_command": test_command, "test_scopes": test_scopes}),
         "models": body.models or {},
@@ -607,7 +620,12 @@ async def _add_repo(body: RepoBody, st) -> dict:
         "stopped",
         "missing_tools",
     )
-    return {**entry, **{k: probed[k] for k in told}, **_failed(probed)}
+    return {
+        **entry,
+        **{k: probed[k] for k in told},
+        **_failed(probed),
+        **({"held": HELD} if hold else {}),
+    }
 
 
 def _failed(probed: dict) -> dict:
@@ -667,6 +685,18 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
     repos, entry = _editable_repos(st, path)
     if entry is None:
         raise HTTPException(404, f"{path} is not connected")
+    if (who := gates._decided_by(request)) != "human":
+        if body.enabled is True:
+            raise HTTPException(
+                403, f"enabling a repo is a person's call, not an {who}'s: its commands run unread"
+            )
+        # Even a disabled repo's: its open items, filed by hand, would run them.
+        if body.test_command is not None or body.setup_command or body.test_scopes:
+            raise HTTPException(
+                403,
+                f"a connected repo's commands are a person's to set, not an {who}'s: "
+                "they run for every work item on it",
+            )
     # exclude_unset, not `v is not None`: a field the caller left out of the
     # JSON body must not clobber the saved value, but one sent as an explicit
     # `null` (clearing forge, test_command, project — the
