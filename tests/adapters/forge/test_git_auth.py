@@ -144,8 +144,9 @@ NOISE = {
         pytest.param(
             {**HARD, "https_proxy": "http://proxy.example:3128"},
             auth(),
-            lambda e: ("http.https://code.corp.example/.proxy", "http://proxy.example:3128")
-            in pins(e),
+            lambda e: (
+                ("http.https://code.corp.example/.proxy", "http://proxy.example:3128") in pins(e)
+            ),
             id="proxy-is-pinned-to-the-environments-own",
         ),
         pytest.param(

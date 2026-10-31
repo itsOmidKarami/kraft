@@ -20,6 +20,7 @@ from kraft import forges as forges_mod
 from kraft.adapters import beads
 from kraft.adapters.forge import ci, git, git_auth, settle
 from kraft.adapters.forge import mr as mr_ops
+from kraft.adapters.forge.api_account import ApiAccount
 from kraft.adapters.forge.gh import GhCli
 from kraft.adapters.forge.github_api import GitHubApi
 from kraft.adapters.forge.gitlab_api import GitLabApi
@@ -2749,8 +2750,15 @@ async def _point_at_merged_members(
                 "its pointer is left where it was"
             )
         default = await _builtins.base_branch(db, work_item_id, sub_path, member=True)
-        env = await git_auth.remote_env(sub_path, os.environ)
-        await git.run_git(sub_path, ["git", "fetch", "origin", default], env=env)
+        auth = await git_auth.auth_for(sub_path)
+        try:
+            await git.run_git(
+                sub_path,
+                ["git", "fetch", "origin", default],
+                env=git_auth.git_env(os.environ, auth),
+            )
+        except ForgeError as exc:
+            raise (auth.stamp(exc) if auth else exc) from None
         git.assert_no_operation(sub_path)  # a checkout stores a planted autostash
         git.assert_lfsconfig_unmoved(sub_path, f"check {sub_path.name}'s merge out")
         await git.run_git(sub_path, ["git", "checkout", landed.merged_sha])
@@ -2874,8 +2882,16 @@ async def _bump_pointer_only_root(
     bumped = await _point_at_merged_members(forge, db, root_repo, branch, work_item_id)
     if not bumped:
         return "every member pointer already names its merged revision\n", False
+    # The item's pinned account, as every other push: never the live one, and a refusal here
+    # (an unreadable token, a push URL off its origin) is a stop, not a reason to try a merge
+    # request.
+    auth = (
+        await git_auth.auth_for_account(root_repo, forge.name, forge.account, push=True)
+        if isinstance(forge, ApiAccount)
+        else None
+    )
     try:
-        env = await git_auth.remote_env(root_repo, os.environ, push=True)
+        env = git_auth.git_env(os.environ, auth)
         # --no-verify: hooks are pinned off, and a credentialed push runs none.
         await git.run_git(
             root_repo, ["git", "push", "--no-verify", "origin", f"HEAD:{base}"], env=env
