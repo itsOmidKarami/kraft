@@ -7,6 +7,7 @@ import os
 import plistlib
 import sys
 import threading
+from pathlib import Path
 
 import pytest
 import yaml
@@ -97,7 +98,12 @@ def test_a_file_that_would_not_load_carries_its_problem(
     if running:
         client.app.state.forges = forges_mod.ForgesFile(
             accounts={
-                n: forges_mod.ForgeAccount(forge="github", web_url="https://github.com")
+                n: forges_mod.ForgeAccount(
+                    forge="github",
+                    web_url="https://github.com",
+                    client="api",
+                    token=forges_mod.TokenSource(**{"from": "file", "file": "/s/tok"}),
+                )
                 for n in running
             }
         )
@@ -400,6 +406,7 @@ def test_a_forges_yaml_that_leaves_a_repo_without_its_account_is_refused_on_relo
     from kraft.adapters.forge import credentials
 
     monkeypatch.setattr(credentials, "_TAKEN", {})
+    monkeypatch.setattr(credentials, "_SECRET_FILES", ())
     monkeypatch.setenv("CORP_GL", "tok-0123456789")
     st = client.app.state
     st.forges = (
@@ -407,7 +414,12 @@ def test_a_forges_yaml_that_leaves_a_repo_without_its_account_is_refused_on_relo
         if running is None
         else forges_mod.ForgesFile(
             accounts={
-                n: forges_mod.ForgeAccount(forge="github", web_url="https://github.com")
+                n: forges_mod.ForgeAccount(
+                    forge="github",
+                    web_url="https://github.com",
+                    client="api",
+                    token=forges_mod.TokenSource(**{"from": "file", "file": "/s/tok"}),
+                )
                 for n in running
             }
         )
@@ -421,5 +433,8 @@ def test_a_forges_yaml_that_leaves_a_repo_without_its_account_is_refused_on_relo
     assert (refused is not None) is refused_it
     assert says in st.invalid_forges
     assert st.forges is not None and list(st.forges.accounts) == applied
+    # A refused edit that drops a running account keeps its token file protected.
+    if refused_it:
+        assert credentials.secret_files() == (Path("/s/tok"),)
     # Taken even when the edit is refused: no child may inherit a token the file names.
     assert ("CORP_GL" not in os.environ) is ("CORP_GL" in accounts)

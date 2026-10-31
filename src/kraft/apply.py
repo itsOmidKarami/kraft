@@ -237,7 +237,7 @@ def _reload_forges(st) -> None:
     # Before any refusal, as at boot: a variable named now, set since the server started,
     # must not reach a child even when this edit is refused.
     credentials.strip_env_sources(path)
-    credentials.set_secret_files(path)
+    credentials.set_secret_files(path, running=st.forges)
     try:
         file = forges_mod.ForgesFile.load(path)
     except config_mod.ConfigError as exc:
@@ -256,6 +256,7 @@ def _reload_forges(st) -> None:
         return
     st.forges = file
     st.invalid_forges = "; ".join(new) or None
+    credentials.set_secret_files(path)  # accepted: the new set alone
     set_loaded(st, forges_mod.ForgesFile.FILE, digest)
 
 

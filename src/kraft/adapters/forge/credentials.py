@@ -309,16 +309,19 @@ def _expand(spec: str) -> Path:
     return Path(os.path.realpath(os.path.expandvars(os.path.expanduser(spec))))
 
 
-def set_secret_files(forges_yaml: Path) -> None:
+def set_secret_files(forges_yaml: Path, running: ForgesFile | None = None) -> None:
     """Token files stay out of every sandbox. As with env sources, a file that does not
-    load is scanned as text."""
+    load is scanned as text. `running` are the accounts still in use: a refused reload
+    must not unprotect their files."""
     global _SECRET_FILES
     try:
         file = ForgesFile.load(forges_yaml)
         specs = [a.token.file for a in file.accounts.values() if a.token and a.token.file]
     except ConfigError:
         specs = _scan(forges_yaml, _FILE_PATH)
-    _SECRET_FILES = tuple(_expand(s) for s in specs)
+    if running:
+        specs += [a.token.file for a in running.accounts.values() if a.token and a.token.file]
+    _SECRET_FILES = tuple(_expand(s) for s in dict.fromkeys(specs))
 
 
 def secret_files() -> tuple[Path, ...]:
