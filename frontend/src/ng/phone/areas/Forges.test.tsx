@@ -30,11 +30,14 @@ describe("Forge accounts (phone)", () => {
     } else {
       expect(await screen.findByRole("heading", { name: title })).toBeInTheDocument();
       const row = (n: string) => screen.getByRole("button", { name: new RegExp(`^${n}`) });
-      // The state word is shown once: a chip, or the value for a muted state, never both.
+      // The state is one chip (toneless when muted); the value is only the client.
       expect(within(row("soon-gl")).getAllByText("expires in 3 days")).toHaveLength(1);
       expect(within(row("old-gl")).getAllByText("refused")).toHaveLength(1);
       expect(within(row("fresh-gl")).getAllByText("not checked yet")).toHaveLength(1);
-      expect(within(row("down-gl")).queryByText("unreachable", { selector: ".badge" })).toBeNull();
+      expect(within(row("down-gl")).getByText("unreachable", { selector: ".ph-badge-tag" })).toHaveAttribute("class", "ph-badge-tag");
+      expect(within(row("fresh-gl")).getByText("not checked yet", { selector: ".ph-badge-tag" })).toBeInTheDocument();
+      expect(within(row("corp-gl")).getByText("api")).toBeInTheDocument();
+      expect(within(row("fresh-gl")).getByText("api")).toBeInTheDocument();
       expect(within(row("blind-gl")).getByText("cannot see 1 repo")).toHaveClass("ph-tone-warn");
       expect(within(row("github-cli")).getByText("cli")).toBeInTheDocument();
       expect(within(row("shared-gl")).getByText(/used by repo-zero/)).toBeInTheDocument();
@@ -68,7 +71,13 @@ describe("Forge accounts (phone)", () => {
     const { calls } = open({ "PUT /forges/corp-gl/token": [200, {}], "POST /forges/corp-gl/test": TESTED });
     await tap("corp-gl");
     await userEvent.click(screen.getByRole("button", { name: "Paste a new token" }));
-    await userEvent.type(screen.getByLabelText(/Paste a new token for corp-gl/, { selector: "input" }), `${TOKEN}{Enter}`);
+    const field = screen.getByLabelText(/Paste a new token for corp-gl/, { selector: "input" });
+    // Chrome ignores autocomplete="off" on a password field and offers to save the token when the sheet closes.
+    expect(field).toHaveAttribute("autocomplete", "new-password");
+    expect(field).toHaveAttribute("data-1p-ignore");
+    expect(field).toHaveAttribute("data-lpignore", "true");
+    expect(field).toHaveAttribute("spellcheck", "false");
+    await userEvent.type(field, `${TOKEN}{Enter}`);
     expect(await screen.findByText("Pasted a new token for corp-gl. signed in as alice")).toBeInTheDocument();
     expect(posts(calls).map((c) => `${c.method} ${c.path}`)).toEqual(["PUT /forges/corp-gl/token", "POST /forges/corp-gl/test"]);
     expect(posts(calls)[0].body).toEqual({ value: TOKEN, kind: "pat" });
@@ -121,5 +130,24 @@ describe("Forge accounts (phone)", () => {
     done(new Response(JSON.stringify(TESTED[1]), { status: 200 }));
     expect(await screen.findByText("signed in as alice")).toBeInTheDocument();
     await waitFor(() => expect(calls.filter((c) => c.method === "GET" && c.path === "/forges")).toHaveLength(2));
+  });
+
+  it("a test running for one account does not busy or close another's sheet", async () => {
+    let done: (r: Response) => void = () => {};
+    const { calls } = open({ "POST /forges/corp-gl/test": TESTED });
+    const real = globalThis.fetch;
+    vi.stubGlobal("fetch", (u: string, init?: RequestInit) => (init?.method === "POST" && String(u).includes("corp-gl") ? new Promise<Response>((r) => { done = r; }) : real(u, init)));
+    await tap("corp-gl");
+    await userEvent.click(screen.getByRole("button", { name: "Test" }));
+    await screen.findByRole("button", { name: "Testing…" });
+    await userEvent.keyboard("{Escape}");
+    await tap("acme-gh");
+    expect(screen.getByRole("button", { name: "Test" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "Paste a new token" }));
+    done(new Response(JSON.stringify(TESTED[1]), { status: 200 }));
+    expect(await screen.findByText("signed in as alice")).toBeInTheDocument();
+    // test() re-reads the list right after it would have closed the sheet.
+    await waitFor(() => expect(calls.filter((c) => c.method === "GET" && c.path === "/forges")).toHaveLength(2));
+    expect(screen.getByLabelText(/Paste a new token for acme-gh/, { selector: "input" })).toBeInTheDocument();
   });
 });

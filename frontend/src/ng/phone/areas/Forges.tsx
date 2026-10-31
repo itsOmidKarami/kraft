@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ago, plural } from "../../../format";
 import type { ForgeAccountRow, ForgeTestAnswer, Repo } from "../../../types";
 import { detailOf, request } from "../../http";
@@ -23,7 +23,8 @@ export function ForgesScreen() {
   const [repos, setRepos] = useState<Pick<Repo, "name" | "forge_account">[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState<string | null>(null);
-  const [testing, setTesting] = useState(false);
+  const [testing, setTesting] = useState<ReadonlySet<string>>(new Set());
+  const shown = useRef<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const sheet = useSheet();
@@ -36,6 +37,7 @@ export function ForgesScreen() {
   }, []);
   useEffect(() => void load(), [load]);
 
+  shown.current = name;
   const today = new Date();
   const a = accounts?.find((x) => x.name === name);
   const named = a ? namedBy(repos, a.name) : [];
@@ -44,17 +46,22 @@ export function ForgesScreen() {
   const rows = (accounts ?? []).map((x): RowSpec => {
     const s = probeWords(x, today);
     const users = namedBy(repos, x.name);
-    // A muted state has no chip (its word is the value); a chip's word is never also the value.
-    const chip = s.word && s.tone !== "muted" ? [{ label: s.word, tone: s.tone as "ok" | "warn" | "bad" }] : undefined;
+    // The state is always a chip (toneless when muted, as About's "unknown"); the value is only ever the client.
+    const chip = s.word ? [{ label: s.word, tone: s.tone === "muted" ? undefined : (s.tone as "ok" | "warn" | "bad") }] : undefined;
     const sub = [...new Set([x.forge, x.web_url, sourceWords(x), s.line, x.probe && `checked ${ago(x.probe.checked_at)}`, users.length && `used by ${users.join(", ")}`].filter(Boolean))].join(" · ");
-    return { key: x.name, label: x.name, mono: true, value: chip ? x.client : (s.word ?? x.client), chips: chip, sub, onClick: () => { setName(x.name); sheet.open("menu"); } };
+    return { key: x.name, label: x.name, mono: true, value: x.client, chips: chip, sub, onClick: () => { setName(x.name); sheet.open("menu"); } };
   });
 
+  /** One account's check, flagged on that account alone. */
+  const probe = async (n: string, lead?: string) => {
+    setTesting((t) => new Set(t).add(n));
+    await check(n, lead);
+    setTesting((t) => { const u = new Set(t); u.delete(n); return u; });
+  };
   const test = async (n: string) => {
-    setTesting(true);
-    await check(n);
-    setTesting(false);
-    sheet.close();
+    await probe(n);
+    // Only this account's own sheet: another one opened meanwhile is not ours to close.
+    if (shown.current === n) sheet.close();
     void load();
   };
   const paste = async (n: string, kind: string, value: string) => {
@@ -65,7 +72,7 @@ export function ForgesScreen() {
     // Any answer closes the sheet, so the token never stays in a field a refusal could leave on screen.
     sheet.close();
     if (r.status !== 200) return void showToast(detailOf(r.body), { tone: "error" });
-    await check(n, `Pasted a new token for ${n}. `);
+    await probe(n, `Pasted a new token for ${n}. `);
     void load();
   };
   const remove = async (n: string) => {
@@ -94,7 +101,7 @@ export function ForgesScreen() {
           text={named.length ? NAMED_BY(named) : a.default_for_host ? DEFAULT_REMOVABLE : undefined}
           options={[
             ...(s.ssoUrl ? [{ value: "sso", label: "Authorize for single sign-on" }] : []),
-            { value: "test", label: testing ? "Testing…" : "Test", disabled: testing },
+            { value: "test", label: testing.has(a.name) ? "Testing…" : "Test", disabled: testing.has(a.name) },
             ...(pasteable ? [{ value: "paste", label: "Paste a new token" }] : []),
             ...(named.length ? [] : [{ value: "remove", label: "Remove", danger: true }]),
           ]}
