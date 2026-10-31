@@ -12,7 +12,7 @@ import pytest
 
 from kraft import redact
 from kraft.adapters.forge import credentials
-from kraft.adapters.forge.http import HttpTransport, graphql_url
+from kraft.adapters.forge.http import TRACE_MAX, HttpTransport, graphql_url
 from kraft.adapters.forge.models import ForgeError
 from kraft.forges import ForgeAccount
 
@@ -184,8 +184,12 @@ async def test_a_path_with_a_query_or_fragment_is_refused(mock_http, path):
     assert "per_page" not in str(err.value) and m.requests == []
 
 
+def test_a_trace_keeps_the_last_8_mib():
+    assert TRACE_MAX == 8 << 20
+
+
 async def test_a_trace_read_keeps_its_tail(mock_http, monkeypatch):
-    monkeypatch.setattr("kraft.adapters.forge.http.MAX_BODY", 1024)
+    monkeypatch.setattr("kraft.adapters.forge.http.TRACE_MAX", 1024)
     body = b"a" * 4000 + b"the end"
     m = mock_http(handler=lambda req: httpx.Response(200, content=body))
     got = await tr(m).rest("GET", "x", tail=True)

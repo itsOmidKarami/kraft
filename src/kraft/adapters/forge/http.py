@@ -33,6 +33,7 @@ from kraft.forges import ForgeAccount, origin
 
 MAX_REDIRECTS = 5
 MAX_BODY = 32 << 20  # a forge answer bigger than this is not one Kraft can use
+TRACE_MAX = 8 << 20  # a job log keeps its last this much
 _REDIRECTS = frozenset({301, 302, 303, 307, 308})
 _NOT_A_PATH = re.compile(r"^(//|[A-Za-z][A-Za-z0-9+.-]*:)")
 
@@ -95,11 +96,11 @@ async def _read(label: str, resp: httpx.Response, tail: bool = False) -> ApiResp
     data = bytearray()
     async for chunk in resp.aiter_bytes():
         data += chunk
-        if tail and len(data) > 2 * MAX_BODY:  # amortised: trim at twice the cap, not per chunk
-            del data[:-MAX_BODY]
+        if tail and len(data) > 2 * TRACE_MAX:  # amortised: trim at twice the cap, not per chunk
+            del data[:-TRACE_MAX]
         elif not tail and len(data) > MAX_BODY:
             raise ForgeError(f"{label}: answered more than {MAX_BODY} bytes", reason="unreachable")
-    text = data[-MAX_BODY:].decode(resp.charset_encoding or "utf-8", "replace")
+    text = (data[-TRACE_MAX:] if tail else data).decode(resp.charset_encoding or "utf-8", "replace")
     return ApiResponse(resp.status_code, {k.lower(): v for k, v in resp.headers.items()}, text)
 
 

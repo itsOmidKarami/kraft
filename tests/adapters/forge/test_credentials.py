@@ -563,9 +563,11 @@ async def test_a_token_is_read_once_per_account_until_it_changes(monkeypatch, st
             else acct
         )
         if step == "forget":
-            credentials.forget_tokens(["a"])
+            credentials.forget_tokens()
         assert await credentials.token_for("a", who, fresh=step == "fresh") == TOK
     assert len(seen) == reads
+    credentials.forget_tokens()
+    assert not credentials._LOCKS  # one lock per edit would grow without end
 
 
 async def test_concurrent_cold_reads_do_one_lookup(monkeypatch):

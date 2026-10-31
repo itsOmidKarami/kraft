@@ -233,6 +233,7 @@ def test_the_forge_row_names_the_account_or_why_the_default_was_skipped(
 
 _SEES = {"project": "group/repo", "visible": True}
 _BLIND = {"project": "group/repo", "visible": False, "detail": "group/repo: HTTP 404"}
+_NO_PROJECT = {"project": "", "visible": False, "detail": "origin names no project"}
 
 
 @pytest.mark.parametrize(
@@ -245,6 +246,13 @@ _BLIND = {"project": "group/repo", "visible": False, "detail": "group/repo: HTTP
             False,
             False,
             " · cannot see group/repo (group/repo: HTTP 404)",
+        ),
+        (
+            "gitlab",
+            {"state": "ok", "seen": _NO_PROJECT},
+            False,
+            False,
+            " · cannot see its project (origin names no project)",
         ),
         ("gitlab", "unreadable", True, True, " · not probed: the forge accounts could not be read"),
         ("gitlab", None, True, True, " · not probed yet"),
@@ -262,6 +270,7 @@ _BLIND = {"project": "group/repo", "visible": False, "detail": "group/repo: HTTP
     ids=[
         "gitlab-api-sees-the-project",
         "gitlab-api-cannot-see-it",
+        "gitlab-api-no-project-names-the-reason",
         "gitlab-api-accounts-unreadable",
         "gitlab-api-not-probed",
         "gitlab-api-project-not-probed",
@@ -293,8 +302,7 @@ def test_the_forge_row_says_whether_an_api_token_sees_the_project(
     row = doctor._forge_check(entry, forges, accounts)
     assert (row["ok"], bool(row.get("warn"))) == (ok, warn), row
     assert row["detail"].endswith(says), row
-    if forge == "gitlab":
-        assert "not in this release" not in row["detail"]
+    assert ("not in this release" in row["detail"]) == (forge == "github")
 
 
 def test_doctor_warns_on_a_repo_on_the_dev_only_fake_forge(app, tmp_path):

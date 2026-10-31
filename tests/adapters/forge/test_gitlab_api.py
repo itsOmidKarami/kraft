@@ -290,14 +290,31 @@ async def test_a_gitlab_api_token_reaches_only_its_origin(pushed, place):
 
 
 @pytest.mark.e2e("git")
+@pytest.mark.real_probe
 @pytest.mark.skipif(
     not (os.environ.get("E2E_GITLAB_TOKEN") and os.environ.get("E2E_GITLAB_PROJECT")),
     reason="e2e: needs E2E_GITLAB_TOKEN (a read_api token secret) and E2E_GITLAB_PROJECT "
-    "(namespace/project on gitlab.com); see the PR 5 plan's 'What the user creates later'",
+    "(namespace/project on gitlab.com); the setup is in this test's docstring",
 )
-async def test_gitlab_api_reads_a_real_gitlab_com_project(tmp_path):
+async def test_gitlab_api_reads_a_real_gitlab_com_project(tmp_path, monkeypatch):
     """Read-only, against a project holding an open draft merge request on `kraft-e2e/fixture`,
-    a label `kraft-e2e`, and a pipeline whose `e2e` job prints `kraft-e2e`."""
+    a label `kraft-e2e`, and a pipeline whose `e2e` job prints `kraft-e2e`.
+
+    To turn it on, create:
+    1. A gitlab.com project, e.g. `<namespace>/kraft-e2e` (private is fine), with a
+       `.gitlab-ci.yml` whose one job `e2e` runs `echo kraft-e2e` (shared runners need a
+       verified account); a branch `kraft-e2e/fixture` with an open draft merge request into
+       `main` whose pipeline has run once; one merged merge request into `main`; and a project
+       label `kraft-e2e`.
+    2. A token with scope `read_api` only: a project access token (Reporter) where the tier
+       offers one, else a personal token from a dedicated account that is a Reporter on that
+       project alone. Set the longest expiry allowed.
+    3. In the GitHub repo, the secret `E2E_GITLAB_TOKEN` (the token) and the variable
+       `E2E_GITLAB_PROJECT` (`<namespace>/kraft-e2e`).
+    4. In the e2e job's `env:` of `.github/workflows/test.yml`, `E2E_GITLAB_TOKEN: ${{
+       secrets.E2E_GITLAB_TOKEN }}` and `E2E_GITLAB_PROJECT: ${{ vars.E2E_GITLAB_PROJECT }}`.
+       Pull requests from forks get no secrets, so the test skips there.
+    """
     from kraft.adapters.forge.probe import probe_account
     from kraft.config import RepoEntry
 
@@ -330,7 +347,7 @@ async def test_gitlab_api_reads_a_real_gitlab_com_project(tmp_path):
     assert await api.merged_mrs(repo=repo, base="main", limit=5)
 
     junk = "glpat-" + secrets.token_hex(16)
-    os.environ["E2E_GITLAB_JUNK"] = junk
+    monkeypatch.setenv("E2E_GITLAB_JUNK", junk)
     credentials.take_env(["E2E_GITLAB_JUNK"])
     bad = ForgeAccount(
         forge="gitlab",

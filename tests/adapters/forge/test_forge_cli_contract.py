@@ -1,5 +1,5 @@
-"""What the four backends (`GlabCli`, `GitLabApi`, `GhCli` and, in PR 6, `GitHubApi`)
-both promise, against a stubbed `glab`/`gh` (and `git`) on PATH: the argv each
+"""What the three backends (`GlabCli`, `GitLabApi` and `GhCli`)
+promise alike, against a stubbed `glab`/`gh` (and `git`) on PATH: the argv each
 operation builds and what it parses back. `GitLabApi` runs over `GlabOverHttp`, which
 answers its HTTP from the same `glab` stub. Behaviour only one backend has stays in
 test_glab.py / test_gh.py / test_gitlab_api.py. The all-methods twin test is in

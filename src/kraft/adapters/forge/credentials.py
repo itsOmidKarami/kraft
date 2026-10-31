@@ -364,11 +364,12 @@ async def token_for(name: str, account: ForgeAccount, *, fresh: bool = False) ->
         return _TOKENS[key]
 
 
-def forget_tokens(names: Iterable[str] | None = None) -> None:
-    """Drop cached tokens (every account's when None)."""
-    drop = None if names is None else set(names)
-    for key in [k for k in _TOKENS if drop is None or k[0] in drop]:
-        del _TOKENS[key]
+def forget_tokens() -> None:
+    """Drop every cached token, and the read locks nobody holds, so an account edited over
+    and over does not leave one lock per edit."""
+    _TOKENS.clear()
+    for key in [k for k, lock in _LOCKS.items() if not lock.locked()]:
+        del _LOCKS[key]
 
 
 def write_pasted(name: str, value: str) -> Path:
