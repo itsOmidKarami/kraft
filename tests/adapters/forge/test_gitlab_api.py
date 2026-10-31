@@ -11,7 +11,9 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from support.harness import git, make_repo
+from support.api_accounts import account as accounts
+from support.api_accounts import answers, checkout
+from support.harness import git
 
 from kraft.adapters.forge import credentials
 from kraft.adapters.forge.credentials import ReadContext, set_token_context
@@ -25,31 +27,7 @@ WEB = "https://code.corp.example"
 
 
 def account(web=WEB, **token) -> ForgeAccount:
-    return ForgeAccount(
-        forge="gitlab",
-        client="api",
-        web_url=web,
-        token=TokenSource(**(token or {"from": "env", "env": "CORP_GL"})),
-    )
-
-
-def checkout(tmp_path, remote=None):
-    path = make_repo(tmp_path)
-    if remote:
-        git(path, "remote", "add", "origin", remote)
-    return path
-
-
-def answers(*bodies):
-    """A handler answering each request with the next status or (status, body)."""
-    queue = list(bodies)
-
-    def handler(request):
-        got = queue.pop(0) if len(queue) > 1 else queue[0]
-        status, body = got if isinstance(got, tuple) else (got, {"message": "no"})
-        return httpx.Response(status, json=body)
-
-    return handler
+    return accounts("gitlab", web, **token)
 
 
 @pytest.fixture

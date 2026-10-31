@@ -20,7 +20,14 @@ from kraft import config, redact
 from kraft.adapters.forge import credentials
 from kraft.adapters.forge.http import HttpTransport
 from kraft.adapters.forge.models import ForgeError
-from kraft.forges import ForgeAccount, ForgesFile, account_for, remote_host, repo_project
+from kraft.forges import (
+    ForgeAccount,
+    ForgesFile,
+    account_for,
+    github_owner_name,
+    remote_host,
+    repo_project,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -186,16 +193,28 @@ async def _probe_account(
             return None
         try:
             path = await asyncio.to_thread(repo_project, Path(repo.path), account)
+            if path and github:  # the run's own check, so doctor never says "HTTP 404" for it
+                github_owner_name(path, Path(repo.path).name)
         except ValueError as exc:
-            return str(repo.path), {"project": "", "visible": False, "detail": str(exc)}
+            return str(repo.path), {
+                "project": "",
+                "visible": False,
+                "detail": str(exc),
+                "sso_url": "",
+            }
         if path is None:
             return None
         try:
             await api.rest("GET", f"repos/{path}" if github else f"projects/{quote(path, safe='')}")
-            return str(repo.path), {"project": path, "visible": True, "detail": ""}
+            return str(repo.path), {"project": path, "visible": True, "detail": "", "sso_url": ""}
         except ForgeError as exc:
             why = f"{path}: HTTP {exc.status}" if exc.status else str(exc)
-            return str(repo.path), {"project": path, "visible": False, "detail": redact.redact(why)}
+            return str(repo.path), {
+                "project": path,
+                "visible": False,
+                "detail": redact.redact(why),
+                "sso_url": exc.sso_url,
+            }
 
     # At once, not one after another: `forge test` waits on the slowest, not on the sum.
     projects = dict(filter(None, await asyncio.gather(*(sees(r) for r in repos))))

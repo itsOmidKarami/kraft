@@ -1548,7 +1548,8 @@ def _forge_check(
             why = f" ({seen['detail']})" if seen.get("detail") else ""
             # No project when the repo's remote names none: the reason is all there is.
             what = seen["project"] or "its project"
-            return _check(name, False, f"{detail} · cannot see {what}{why}")
+            sso = f" · authorize it: {seen['sso_url']}" if seen.get("sso_url") else ""
+            return _check(name, False, f"{detail} · cannot see {what}{why}{sso}")
         detail = (
             f"{repo.forge} · {backend} · account {found[0]}: client: api, and the {backend} "
             "backend is not in this release; forge nodes stop on this repo"

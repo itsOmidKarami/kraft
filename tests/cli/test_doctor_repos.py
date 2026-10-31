@@ -233,6 +233,7 @@ def test_the_forge_row_names_the_account_or_why_the_default_was_skipped(
 
 _SEES = {"project": "group/repo", "visible": True}
 _BLIND = {"project": "group/repo", "visible": False, "detail": "group/repo: HTTP 404"}
+_SSO = {**_BLIND, "sso_url": "https://sso.example/x"}
 _NO_PROJECT = {"project": "", "visible": False, "detail": "origin names no project"}
 
 
@@ -246,6 +247,13 @@ _NO_PROJECT = {"project": "", "visible": False, "detail": "origin names no proje
             False,
             False,
             " · cannot see group/repo (group/repo: HTTP 404)",
+        ),
+        (
+            "gitlab",
+            {"state": "ok", "seen": _SSO},
+            False,
+            False,
+            " · cannot see group/repo (group/repo: HTTP 404) · authorize it: https://sso.example/x",
         ),
         (
             "gitlab",
@@ -270,6 +278,7 @@ _NO_PROJECT = {"project": "", "visible": False, "detail": "origin names no proje
     ids=[
         "gitlab-api-sees-the-project",
         "gitlab-api-cannot-see-it",
+        "sso-link-reaches-the-row",
         "gitlab-api-no-project-names-the-reason",
         "gitlab-api-accounts-unreadable",
         "gitlab-api-not-probed",
