@@ -35,6 +35,7 @@ from .test_git_auth import TOK, acct, form, rig
 
 OURS = f"Basic {form()}"
 SOURCE = "env CORP_GL"
+REDIRECT_WORDS = "origin redirects elsewhere; point origin at the new address"
 _ONE_NODE = [
     {"id": "n", "kind": "exec", "tasks": [{"id": "t", "kind": "subprocess", "command": "true"}]}
 ]
@@ -85,6 +86,13 @@ def remote(request, tmp_path, monkeypatch):
             tmp=tmp_path,
             pinned=("corp-gl", account),
         )
+
+
+def _clean(*parts):
+    """No raw token, Basic form or `Authorization: Basic` in any of `parts`."""
+    text = " ".join(str(p) for p in parts)
+    for secret in (TOK, form(), "Authorization: Basic"):
+        assert secret not in text
 
 
 def _ours_only(web):
@@ -189,8 +197,9 @@ async def test_a_redirect_to_another_host_sees_no_header(remote, tmp_path, monke
         monkeypatch.setenv("GIT_SSL_CAINFO", str(bundle))
         git(remote.repo, "push", "-q", str(_bare(second.root)), "main")
         remote.web.redirect = second.url
-        with pytest.raises(builtins.BaseFetchRefused, match="origin redirects elsewhere"):
+        with pytest.raises(builtins.BaseFetchRefused, match=REDIRECT_WORDS) as caught:
             await builtins.upstream_head(remote.repo, "main")
+        _clean(caught.value, caught.value.reason, caught.value.args)
         assert remote.web.authorizations == [OURS], "the redirecting origin was asked"
         assert second.authorizations == [], "git followed the redirect"
 
@@ -255,7 +264,7 @@ async def test_a_gitconfig_that_traces_never_logs_the_header(remote, tmp_path, m
     trace.unlink()
     await _base_fetch(remote, None, None)
     logged = trace.read_text() if trace.exists() else ""
-    assert OURS.split()[1] not in logged and TOK not in logged
+    _clean(logged)
 
 
 @pytest.mark.parametrize(
@@ -349,22 +358,29 @@ async def test_a_base_fetch_the_token_cannot_authenticate_stops(remote, database
     exc = caught.value
     assert (exc.reason, exc.account, exc.source) == ("auth", "corp-gl", SOURCE)
     assert "`" not in str(exc)
+    _clean(exc, exc.reason, exc.args)
 
 
 @pytest.mark.parametrize(
-    "remote",
+    ("remote", "words"),
     [
-        pytest.param({"server": "another-token"}, id="wrong-token"),
-        pytest.param({"redirect": True}, id="redirect"),
+        pytest.param(
+            {"server": "another-token"},
+            "could not read Username.*terminal prompts disabled",
+            id="wrong-token",
+        ),
+        pytest.param({"redirect": True}, REDIRECT_WORDS, id="redirect"),
+        pytest.param({"token": False}, "set it there and restart", id="unreadable-token"),
     ],
-    indirect=True,
+    indirect=["remote"],
 )
-async def test_a_push_the_token_cannot_authenticate_is_a_token_stop(remote):
-    with pytest.raises(ForgeError) as caught:
+async def test_a_push_the_token_cannot_authenticate_is_a_token_stop(remote, words):
+    with pytest.raises(ForgeError, match=words) as caught:
         await forge_git.push(remote.repo, "kraft/abc", account=remote.pinned)
     exc = caught.value
     assert (exc.reason, exc.account, exc.source) == ("auth", "corp-gl", SOURCE)
     assert git(remote.bare, "branch", "--list", "kraft/abc") == ""
+    _clean(exc, exc.reason, exc.args)
 
 
 @pytest.mark.parametrize(

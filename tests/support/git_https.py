@@ -4,10 +4,9 @@ wire. Seed and inspect the bare repos through their paths, never over HTTPS."""
 
 from __future__ import annotations
 
-import datetime
 import http.server
-import ipaddress
 import os
+import re
 import shutil
 import ssl
 import subprocess
@@ -17,55 +16,11 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from kraft.adapters.forge import credentials
-
-
-def cert(subject: str, key, issuer=None, issuer_key=None, *, ca: bool):
-    now = datetime.datetime.now(datetime.UTC)
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject)])
-    builder = (
-        x509.CertificateBuilder()
-        .subject_name(name)
-        .issuer_name(issuer.subject if issuer else name)
-        .public_key(key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(now - datetime.timedelta(minutes=5))
-        .not_valid_after(now + datetime.timedelta(hours=1))
-        .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True)
-        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
-    )
-    if issuer_key is not None:
-        # Python's default context verifies strictly (VERIFY_X509_STRICT).
-        builder = builder.add_extension(
-            x509.AuthorityKeyIdentifier.from_issuer_public_key(issuer_key.public_key()),
-            critical=False,
-        )
-    if ca:
-        builder = builder.add_extension(
-            x509.KeyUsage(
-                digital_signature=True,
-                key_cert_sign=True,
-                crl_sign=True,
-                content_commitment=False,
-                key_encipherment=False,
-                data_encipherment=False,
-                key_agreement=False,
-                encipher_only=False,
-                decipher_only=False,
-            ),
-            critical=True,
-        )
-    else:
-        builder = builder.add_extension(
-            x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]),
-            critical=False,
-        ).add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
-    return builder.sign(issuer_key or key, hashes.SHA256())
+from support.certs import cert
 
 
 @dataclass
@@ -135,7 +90,9 @@ def git_https(root: Path, *, token: str | None = None, forge: str = "gitlab") ->
             path, _, query = self.path.partition("?")
             if remote.redirect and path.endswith("/info/refs"):
                 self.send_response(302)
-                self.send_header("Location", remote.redirect + self.path)
+                # A path with CR, LF or anything outside URL characters never reaches a header.
+                safe = re.sub(r"[^A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]", "", self.path)
+                self.send_header("Location", remote.redirect + safe)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return

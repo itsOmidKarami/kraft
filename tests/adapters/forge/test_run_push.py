@@ -142,3 +142,40 @@ async def test_the_pointer_bump_uses_the_accounts_git_env(tmp_path, monkeypatch,
     )
     assert ran[0] == (["git", "fetch", "origin", "main"], sentinel)
     assert asked == [(sub, False)]
+
+
+async def test_a_pointer_bump_push_whose_token_cannot_be_read_falls_to_the_merge_request_path(
+    tmp_path, monkeypatch
+):
+    """`remote_env` raising skips the direct push (no git ran), and the forge's own push then
+    makes the stop: the error is not swallowed."""
+    ran = []
+
+    async def remote_env(*_, **__):
+        raise forge.git.ForgeError("forge account corp-gl: set it there and restart")
+
+    async def run_git(*args, **kw):
+        ran.append(args)
+        return ""
+
+    async def moved(*_):
+        return ["m"]
+
+    async def push(**_):
+        raise forge.git.ForgeError("forge account corp-gl: set it there and restart")
+
+    monkeypatch.setattr(git_auth, "remote_env", remote_env)
+    monkeypatch.setattr(forge.git, "run_git", run_git)
+    monkeypatch.setattr(forge.run, "_point_at_merged_members", moved)
+    rows = [{"role": "root", "repo_path": str(tmp_path)}]
+    with pytest.raises(forge.git.ForgeError, match="corp-gl"):
+        await forge.run._bump_pointer_only_root(
+            SimpleNamespace(push=push),
+            None,
+            rows,
+            branch="kraft/w1",
+            base="main",
+            title="t",
+            work_item_id="w1",
+        )
+    assert ran == []

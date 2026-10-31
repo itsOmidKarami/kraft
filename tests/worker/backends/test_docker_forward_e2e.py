@@ -12,7 +12,7 @@ import threading
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from support.git_https import cert
+from support.certs import cert
 
 from kraft.worker.backends import docker, docker_forward
 

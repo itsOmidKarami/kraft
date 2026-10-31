@@ -416,3 +416,15 @@ async def test_the_server_reads_repos_yaml_only_for_an_account_that_could_carry_
     st = SimpleNamespace(forges=forges, templates_dir=tmp_path)
     assert await git_auth.server_context(st) == ([], forges)
     assert len(seen) == loads
+
+
+@pytest.mark.parametrize(
+    ("forge", "refused"),
+    [
+        pytest.param("github", True, id="github-not-found-is-a-refusal"),
+        pytest.param("gitlab", False, id="gitlab-not-found-is-not"),
+    ],
+)
+def test_a_githubs_not_found_is_a_refusal_only_for_github(forge, refused):
+    text = "fatal: repository 'https://github.com/o/r/' not found"
+    assert GitAuth("corp-gl", acct(forge=forge), WEB, "h").refused(text) is refused
