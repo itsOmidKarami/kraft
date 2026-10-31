@@ -45,6 +45,9 @@ export function forgesFixture(now: Date): Record<string, ForgeAccountRow> {
 
 /** `routes/forges.py`'s answers over an in-memory copy of the fixture: `[status, body]`, or null for a path that is not
  *  `/forges…`. `unloadable` is a forges.yaml that never loaded (`_read` and `_load` both answer 409). */
+/** The removable account whose DELETE the mock refuses (409), for the contract's refused-removal state. */
+export const NAMED_MEANWHILE = "down-gl";
+
 export function forgesServer(now: Date, mode?: "empty" | "unloadable") {
   const rows = mode === "empty" ? {} : forgesFixture(now);
   const MIN_LEN = 8; // redact.MIN_LEN
@@ -87,6 +90,8 @@ export function forgesServer(now: Date, mode?: "empty" | "unloadable") {
       return [200, (rows[name] = merged)];
     }
     if (method === "DELETE") {
+      // A repo names this one in the meantime (the removal waited out the page's undo window): the listing above did not say so.
+      if (name === NAMED_MEANWHILE) return [409, { detail: `forge account '${name}' is named by: ${NG_REPOS[1].path}`, repos: [NG_REPOS[1].path] }];
       const repos = namedBy(name);
       if (repos.length) return [409, { detail: `forge account '${name}' is named by: ${repos.join(", ")}`, repos }];
       delete rows[name];
