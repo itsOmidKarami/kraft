@@ -574,7 +574,8 @@ def _settle_forge(ns: argparse.Namespace, *, interactive: bool) -> tuple[dict, b
                 raise SystemExit(
                     f"error: forge account {ns.forge_account!r} is {named['forge']}, not {ns.forge}"
                 )
-            return {"forge": named["forge"], "forge_account": ns.forge_account}, False, None
+            # The server takes its forge where the host names none, and refuses a clash.
+            return {"forge_account": ns.forge_account}, False, None
     asked = {"forge_account": ns.forge_account}
     if not (interactive or ns.forge):
         return asked, False, None

@@ -544,44 +544,56 @@ def test_a_host_with_an_account_asks_nothing(app, capsys, repo, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "flags, before, refusal",
+    "flags, before, refusal, remote",
     [
         pytest.param(
             ["--forge", "gitlab", "--web-url", "https://code.corp.example"],
             {"code.corp.example": {"forge": "gitlab", "web_url": "https://other.example"}},
             "already exists (gitlab, https://other.example); name this one with --forge-account",
+            _SELF_HOSTED,
             id="name-taken",
         ),
         pytest.param(
             ["--web-url", "https://code.corp.example"],
             {},
             "--web-url needs --forge",
+            _SELF_HOSTED,
             id="web-url-alone",
         ),
         pytest.param(
             ["--forge", "gitlab", "--api-url", "https://code.corp.example/api/v4"],
             {},
             "--api-url needs --web-url",
+            _SELF_HOSTED,
             id="api-url-without-web-url",
         ),
         pytest.param(
             ["--forge", "github", "--forge-account", "corp"],
             {"corp": _CORP},
             "forge account 'corp' is gitlab, not github",
+            _SELF_HOSTED,
             id="forge-differs-from-named-account",
+        ),
+        # A host that names its forge keeps it: an account on another forge is a clash.
+        pytest.param(
+            ["-y", "--forge-account", "corp"],
+            {"corp": _CORP},
+            "forge_account 'corp' says forge: gitlab, the repo says forge: github",
+            "https://github.com/acme/app.git",
+            id="named-account-on-a-host-that-says-otherwise",
         ),
     ],
 )
 def test_flags_that_cannot_hold_are_refused_before_connecting(
-    app, capsys, repo, monkeypatch, flags, before, refusal
+    app, capsys, repo, monkeypatch, flags, before, refusal, remote
 ):
-    _origin(repo, _SELF_HOSTED)
+    _origin(repo, remote)
     for name, acct in before.items():
         asyncio.run(client.add_forge(name, **acct))
     seen = _prompts(monkeypatch, [])
     with pytest.raises(SystemExit) as caught:
         cli.main(["repo", "connect", str(repo), *flags])
-    assert refusal in str(caught.value) and seen == []
+    assert refusal in str(caught.value) + capsys.readouterr().err and seen == []
     assert asyncio.run(client.repos()) == []
     assert (_accounts() if _forges_yaml().exists() else {}) == before
 
