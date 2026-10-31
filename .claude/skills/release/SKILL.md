@@ -229,9 +229,14 @@ The release is done when the stamp PR has merged.
    fails, read that check's log and report it. A patch release that ships an
    `_Added in next_` note does not fail it: the stamp step warns and adds a line
    to the PR (`RELEASING.md`, "Docs Added in notes").
-2. **Report**, outcome first: the version, where it is published, what the rc
+2. **What's new.** Open a `release::none` pull request that adds the release's
+   section to `docsite/content/6.project/3.whats-new.md`, newest first: its
+   headline change (the `notes::highlight` entry) in a few bullets, each with a
+   link to the page that describes it, under `<!-- not new: shipped in X.Y -->`.
+   A patch release adds nothing.
+3. **Report**, outcome first: the version, where it is published, what the rc
    and stable smoke runs checked, anything that warned, and the release link.
-3. **Offer an announcement.** Build it from `CHANGELOG.md` on main, grouped by
+4. **Offer an announcement.** Build it from `CHANGELOG.md` on main, grouped by
    theme rather than by version, with the install lines
    (`uv tool install kraft-sdlc`, `brew tap itsOmidKarami/kraft && brew install kraft`,
    `kraft admin update`) and the live demo, https://kraft-sdlc.dev/demo/. Keep

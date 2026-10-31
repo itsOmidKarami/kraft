@@ -65,6 +65,10 @@ bump. Before you add it, make sure the `## Changelog` section reads as a
 headline, since it now opens the release notes. You can add the label after
 merge, then dry-run again to check.
 
+After a minor or major release, add its section to the docs' [What's new](docsite/content/6.project/3.whats-new.md)
+page from that highlight, in a `release::none` pull request; nothing writes it
+for you.
+
 A highlight can carry a picture under its bullet, indented after a blank line
 (CONTRIBUTING.md has the form). A Markdown image, or an image dropped into the
 description on GitHub, may also sit right under the bullet; a dropped video
