@@ -464,12 +464,22 @@
     {
       "name": "failed-on-forge-token-env",
       "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "draft_merge_request", "reason": "forge account corp-gl: token refused", "facts": { "cause": "forge_auth", "account": "corp-gl", "source": "env CORP_GL" } } },
-      "banner": { "kind": "failed", "node": "draft_merge_request", "name": "draft merge request", "text": "Forge account corp-gl: token refused.", "way": "Forge account corp-gl could not sign in with its token (env CORP_GL). Replace it there, then Retry." }
+      "banner": { "kind": "failed", "node": "draft_merge_request", "name": "draft merge request", "text": "Forge account corp-gl: token refused.", "way": "Set `CORP_GL` to a new token where Kraft starts, then restart Kraft. Then Retry." }
     },
     {
       "name": "failed-on-forge-token-file",
       "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "draft_merge_request", "reason": "forge account corp-gl: token refused", "facts": { "cause": "forge_auth", "account": "corp-gl", "source": "file /etc/kraft/gl.token" } } },
-      "banner": { "kind": "failed", "node": "draft_merge_request", "name": "draft merge request", "text": "Forge account corp-gl: token refused.", "way": "Forge account corp-gl could not sign in with its token (file /etc/kraft/gl.token). Replace it there, then Retry." }
+      "banner": { "kind": "failed", "node": "draft_merge_request", "name": "draft merge request", "text": "Forge account corp-gl: token refused.", "way": "Put a new token in the file, then check it with `kraft admin forge test corp-gl`. Then Retry: `/etc/kraft/gl.token`" }
+    },
+    {
+      "name": "failed-on-forge-token-command",
+      "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "draft_merge_request", "reason": "forge account corp-gl: token refused", "facts": { "cause": "forge_auth", "account": "corp-gl", "source": "command" } } },
+      "banner": { "kind": "failed", "node": "draft_merge_request", "name": "draft merge request", "text": "Forge account corp-gl: token refused.", "way": "Fix the token command for corp-gl in forges.yaml, then check it with `kraft admin forge test corp-gl`. Then Retry." }
+    },
+    {
+      "name": "failed-on-forge-token-git-credential",
+      "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "draft_merge_request", "reason": "forge account corp-gl: token refused", "facts": { "cause": "forge_auth", "account": "corp-gl", "source": "git-credential" } } },
+      "banner": { "kind": "failed", "node": "draft_merge_request", "name": "draft merge request", "text": "Forge account corp-gl: token refused.", "way": "Save a new token in git's credential helper for this host, then check it with `kraft admin forge test corp-gl`. Then Retry." }
     },
     {
       "name": "forge-token-with-sso",

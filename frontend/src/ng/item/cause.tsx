@@ -6,7 +6,8 @@ import { targetedWords } from "./TestsLine";
 import type { ItemDetail } from "./useItem";
 
 /** What a stop's `facts.cause` says to do about it, in one place for the desktop's state card and the phone's: a
- *  refused forge credential is fixed on the server's machine (Kraft holds no token), one that only needs single
+ *  refused forge credential is fixed on the server's machine (the CLI signed in, or for an API account its token
+ *  replaced where its source reads it: `forge_token`), one that only needs single
  *  sign-on is authorized on the forge's website, a stranded claim just needs a
  *  retry, and any other infrastructure stop, or one naming no cause, says where to look. */
 export type FailedFix = "forge_login" | "forge_sso" | "forge_token" | "retry" | "repo";
@@ -21,11 +22,18 @@ const ssoUrl = (item: Pick<ItemDetail, "stop">): string | null => {
   return typeof url === "string" && SSO_URL.test(url) ? url : null;
 };
 
-/** `facts.account`/`source` when both are non-empty text with no backtick (the console's `_token_hint` agrees). */
+/** `facts.account`/`source` when both are non-empty text with no backtick and the source is a kind the hints know
+ *  (the console's `_token_hint` agrees). */
 const tokenHint = (item: Pick<ItemDetail, "stop">): string | null => {
   const f = (item.stop?.facts ?? {}) as Record<string, unknown>;
-  const ok = [f.account, f.source].every((v) => typeof v === "string" && v !== "" && !v.includes("`"));
-  return ok ? FORGE_TOKEN_HINT.replace("{account}", f.account as string).replace("{source}", f.source as string) : null;
+  const { account, source } = f;
+  if (![account, source].every((v) => typeof v === "string" && v !== "" && !v.includes("`"))) return null;
+  const [kind, ...rest] = (source as string).split(" ");
+  const value = rest.join(" ");
+  const hint = Object.hasOwn(FORGE_TOKEN_HINTS, kind) ? FORGE_TOKEN_HINTS[kind] : undefined;
+  if (hint === undefined || (kind === "env" || kind === "file") !== (value !== "")) return null;
+  // A replacer function: a `$&` or `$'` in a path is not a pattern.
+  return hint.replace(/\{(account|value)\}/g, (_m, k: string) => (k === "account" ? (account as string) : value));
 };
 
 /** What the failed card offers besides Retry and Escalate (a forge task's failure carries its cause on a `failed` stop too). */
@@ -45,10 +53,16 @@ export const FORGE_LOGIN_HINT =
  *  comes last, so a long one wraps with nothing after it. */
 export const FORGE_SSO_HINT = "Open this address to authorize the forge CLI's token for single sign-on, then Retry: {sso_url}";
 
-/** The fix for `forge_token`: an API account's token could not sign in, and it is replaced where the account reads it. */
-export const FORGE_TOKEN_HINT = "Forge account {account} could not sign in with its token ({source}). Replace it there, then Retry.";
+/** The fix for `forge_token`, by the kind of source (`TokenSource.label()`'s first word): an API account's token could
+ *  not sign in. A variable is read only at server start; a long path comes last. */
+export const FORGE_TOKEN_HINTS: Record<string, string> = {
+  env: "Set `{value}` to a new token where Kraft starts, then restart Kraft. Then Retry.",
+  file: "Put a new token in the file, then check it with `kraft admin forge test {account}`. Then Retry: `{value}`",
+  command: "Fix the token command for {account} in forges.yaml, then check it with `kraft admin forge test {account}`. Then Retry.",
+  "git-credential": "Save a new token in git's credential helper for this host, then check it with `kraft admin forge test {account}`. Then Retry.",
+};
 
-/** The hint under a failed forge stop (`FORGE_LOGIN_HINT`, `FORGE_TOKEN_HINT` filled or `FORGE_SSO_HINT` with its address), or null for any other. */
+/** The hint under a failed forge stop (`FORGE_LOGIN_HINT`, `FORGE_TOKEN_HINTS` filled or `FORGE_SSO_HINT` with its address), or null for any other. */
 export function forgeHint(item: Pick<ItemDetail, "stop">): string | null {
   const fix = failedFix(item);
   if (fix === "forge_token") return tokenHint(item);

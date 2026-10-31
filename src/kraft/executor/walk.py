@@ -425,14 +425,16 @@ _IN_PROCESS_FIX = {
 }
 
 
-def _in_process_fix(cause: dict | None) -> str:
+def _in_process_fix(cause: dict | None, forbidden: bool = False) -> str:
     """The end of the reason for `cause` (`_forge_cause`'s facts), or the default."""
     if cause and cause.get("account") and not cause.get("sso_url"):
-        # Neutral: a missing token also stops here, so it does not claim a refusal. The
-        # source is a label (a file path, a variable name), never a command's text.
+        # Neutral: a missing token also stops here, so it does not claim a refusal. Where to
+        # fix it is the card's hint, by the source (`facts.source`), not repeated here.
+        if forbidden:
+            return f"Forge account {cause['account']}: its token lacks the rights this needs."
         return (
-            f"Forge account {cause['account']} could not sign in with its token "
-            f"({cause['source']}). Replace it there, then retry."
+            f"Forge account {cause['account']} could not sign in with its token, "
+            "or its token could not be read."
         )
     if cause and cause.get("sso_url"):
         # The address is `facts.sso_url`, which every screen shows once, as the hint.
@@ -442,8 +444,10 @@ def _in_process_fix(cause: dict | None) -> str:
     return _IN_PROCESS_FIX.get(cause["cause"] if cause else "", _IN_PROCESS_FIX_DEFAULT)
 
 
-def _forge_cause(db, work_item_id: str, node: ResolvedNode, failed: list) -> dict | None:
-    """`{"cause": ...}` when a failed forge task's log says the forge refused
+def _forge_cause(
+    db, work_item_id: str, node: ResolvedNode, failed: list
+) -> tuple[dict | None, bool]:
+    """`({"cause": ...}, forbidden)` when a failed forge task's log says the forge refused
     the credential or could not be reached (`forge.failure_cause`): a forge
     CLI's failure is a failed task (an infra stop only in a fix-loop node), so the
     card reads the cause from the stop's facts."""
@@ -458,12 +462,13 @@ def _forge_cause(db, work_item_id: str, node: ResolvedNode, failed: list) -> dic
             auth = c == "forge_auth"
             sso = auth and forge_mod.safe_sso_url(record.get("sso_url"))
             who = auth and record.get("account") and record.get("source")
-            return {
+            facts = {
                 "cause": c,
                 **({"sso_url": sso} if sso else {}),
                 **({"account": record["account"], "source": record["source"]} if who else {}),
             }
-    return None
+            return facts, record.get("reason") == "forbidden"
+    return None, False
 
 
 def _in_process_causes(db, work_item_id: str, node: ResolvedNode, failed: list) -> str:
@@ -1931,7 +1936,7 @@ async def _walk_node_once(
                     reason += " (after on_failure)"
                 facts = {
                     **(_scope_facts(scopes) or {}),
-                    **(_forge_cause(db, work_item_id, node, failed) or {}),
+                    **(_forge_cause(db, work_item_id, node, failed)[0] or {}),
                 }
                 return _Stuck(reason, kind=StopKind.FAILED, facts=facts or None)
         await node_runs.completed(
@@ -2303,10 +2308,10 @@ async def _walk_node_once(
             named = ", ".join(
                 sorted(prompts.named_with_kind(t) for t in blind_failures if _in_process(t))
             )
-            cause = _forge_cause(db, work_item_id, node, blind_failures)
+            cause, forbidden = _forge_cause(db, work_item_id, node, blind_failures)
             # What to do depends on why it failed: a refused credential or an
             # unreachable forge is the machine's to fix, not a reinstall.
-            fix = _in_process_fix(cause)
+            fix = _in_process_fix(cause, forbidden)
             reason = (
                 f"{named} failed in node {node.id}"
                 f"{_in_process_causes(db, work_item_id, node, blind_failures)}, and those "

@@ -338,11 +338,23 @@ FORGE_LOGIN_HINT = (
 FORGE_SSO_HINT = (
     "Open this address to authorize the forge CLI's token for single sign-on, then Retry: {sso_url}"
 )
-#: `cause.tsx`: a forge token (an API account's) that could not sign in; says where to replace it.
-FORGE_TOKEN_HINT = (
-    "Forge account {account} could not sign in with its token ({source}). "
-    "Replace it there, then Retry."
-)
+#: `cause.tsx`: a forge token (an API account's) that could not sign in, by the kind of source
+#: (`TokenSource.label()`'s first word); {value} is the variable or path, {account} its name.
+FORGE_TOKEN_HINTS = {
+    "env": "Set `{value}` to a new token where Kraft starts, then restart Kraft. Then Retry.",
+    "file": (
+        "Put a new token in the file, then check it with `kraft admin forge test {account}`. "
+        "Then Retry: `{value}`"
+    ),
+    "command": (
+        "Fix the token command for {account} in forges.yaml, then check it with "
+        "`kraft admin forge test {account}`. Then Retry."
+    ),
+    "git-credential": (
+        "Save a new token in git's credential helper for this host, then check it with "
+        "`kraft admin forge test {account}`. Then Retry."
+    ),
+}
 #: `bannerWords.ts`: a failure the repo's settings can answer.
 REPO_FIX = "Check the repo settings."
 
@@ -378,10 +390,16 @@ def _sso_url(facts: dict) -> str:
 
 
 def _token_hint(facts: dict) -> str:
-    """`forgeHint`: the token hint filled, or "" unless `account` and `source` are plain text."""
+    """`forgeHint`: the token hint for the source's kind, or "" unless `account` and `source`
+    are plain text and the source is one the hints know (a variable or path has a value)."""
     account, source = facts.get("account"), facts.get("source")
-    ok = all(isinstance(v, str) and v and "`" not in v for v in (account, source))
-    return FORGE_TOKEN_HINT.format(account=account, source=source) if ok else ""
+    if not all(isinstance(v, str) and v and "`" not in v for v in (account, source)):
+        return ""
+    kind, _, value = source.partition(" ")
+    hint = FORGE_TOKEN_HINTS.get(kind)
+    if hint is None or (kind in ("env", "file")) != bool(value):
+        return ""
+    return hint.format(account=account, value=value)
 
 
 def _failed_fix(stop: dict) -> str:

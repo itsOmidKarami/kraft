@@ -112,9 +112,9 @@ _TODAYS_FIX = (
 
 _WHO = {"account": "corp-gl", "source": "env CORP_GL"}
 _TOKEN_FIX = (
-    "Forge account corp-gl could not sign in with its token (env CORP_GL). "
-    "Replace it there, then retry."
+    "Forge account corp-gl could not sign in with its token, or its token could not be read."
 )
+_DENIED_FIX = "Forge account corp-gl: its token lacks the rights this needs."
 
 
 @pytest.mark.parametrize(
@@ -126,7 +126,8 @@ _TOKEN_FIX = (
         ("javascript:alert(1)", {}, {"cause": "forge_auth"}, _TODAYS_FIX),
         ("https://github.com/sso then run it", {}, {"cause": "forge_auth"}, _TODAYS_FIX),
         ("https://github.com/sso`id`", {}, {"cause": "forge_auth"}, _TODAYS_FIX),
-        ("", _WHO, {"cause": "forge_auth", **_WHO}, _TOKEN_FIX),
+        ("", _WHO, {"cause": "forge_auth", **_WHO}, _DENIED_FIX),
+        ("", {**_WHO, "reason": "auth"}, {"cause": "forge_auth", **_WHO}, _TOKEN_FIX),
         (_SSO, _WHO, {"cause": "forge_auth", "sso_url": _SSO, **_WHO}, _SSO_FIX),
     ],
     ids=[
@@ -136,7 +137,8 @@ _TOKEN_FIX = (
         "other-scheme-dropped",
         "whitespace-dropped",
         "backtick-dropped",
-        "api-account-env",
+        "api-account-forbidden",
+        "api-account-refused",
         "api-account-with-sso",
     ],
 )

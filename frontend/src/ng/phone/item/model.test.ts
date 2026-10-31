@@ -3,7 +3,7 @@ import type { DisplayStatus, WorkItemStop } from "../../../types";
 import type { EventType } from "../../../types/vocab.generated";
 import { chainGraph } from "../../item/graph";
 import { detail } from "../../item/testkit";
-import { BROKEN_BASE_TEXT, FORGE_LOGIN_HINT, FORGE_SSO_HINT, FORGE_TOKEN_HINT } from "../../item/cause";
+import { BROKEN_BASE_TEXT, FORGE_LOGIN_HINT, FORGE_SSO_HINT, FORGE_TOKEN_HINTS } from "../../item/cause";
 import { cardOf, kebabOf, nodeSub, pairOf } from "./model";
 
 const stop = (kind: WorkItemStop["kind"], over: Partial<WorkItemStop> = {}): WorkItemStop => ({ kind, node: "verification", resume_at: null, reason: null, ...over });
@@ -191,8 +191,9 @@ describe("the failed card's cause (R15b-01)", () => {
   });
 
   it.each([
-    ["account and source: the token hint, neither a fact row", { account: "corp-gl", source: "env CORP_GL" }, FORGE_TOKEN_HINT.replace("{account}", "corp-gl").replace("{source}", "env CORP_GL")],
+    ["account and source: the token hint, neither a fact row", { account: "corp-gl", source: "env CORP_GL" }, FORGE_TOKEN_HINTS.env.replace("{value}", "CORP_GL")],
     ["no account: the login hint", { source: "env CORP_GL" }, FORGE_LOGIN_HINT],
+    ["a source kind the hints do not know: the login hint", { account: "corp-gl", source: "vault x" }, FORGE_LOGIN_HINT],
   ] as const)("forge_auth with %s", (_name, extra, hint) => {
     const card = cardOf(mk("failed", stop("failed", { facts: { cause: "forge_auth", ...extra } })));
     expect(card?.hint).toBe(hint);
