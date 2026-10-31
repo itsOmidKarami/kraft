@@ -315,7 +315,11 @@ def test_the_timer_probes_again_with_nothing_asking(fast_timer, client):
 
 @pytest.mark.parametrize("how", ["reload", "delete"])
 def test_a_removed_account_leaves_health(client, templates_dir, how):
-    assert until(1) == 1
+    # The first pass stored its result, so it cannot overwrite the one planted below.
+    for _ in range(100):
+        if "corp" in client.app.state.forge_probes:
+            break
+        time.sleep(0.05)
     client.app.state.forge_probes["corp"] = probe.Probe("corp", "t", "refused", "HTTP 401")
     assert client.get("/api/health").json()["status"] == "degraded"
     if how == "delete":
