@@ -167,6 +167,12 @@ async def auth_for_account(
             "next to one that is, so Kraft will not send its token through it; point every "
             "push URL at the account's address, then retry"
         )
+    if await _git(repo, "config", "--get", "remote.origin.vcs"):
+        # git would run `git-remote-<vcs>` with the header in its environment.
+        raise ForgeError(
+            f"forge account {name}: origin uses a remote helper (remote.origin.vcs); Kraft "
+            "sends its token only to git's own https transport, so unset it and retry"
+        )
     source = account.source().label()
     try:
         token = await credentials.token_for(name, account)

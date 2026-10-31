@@ -339,6 +339,20 @@ async def test_an_existing_user_gets_the_same_git_env(tmp_path, monkeypatch, set
             id="push-https-next-to-a-remote-helper-refused",
         ),
         pytest.param(
+            "foo::https://code.corp.example/team/app.git",
+            (),
+            False,
+            "none",
+            id="helper-url-fetch-no-header",
+        ),
+        pytest.param(
+            "foo::https://code.corp.example/team/app.git",
+            (),
+            True,
+            "none",
+            id="helper-url-push-no-header",
+        ),
+        pytest.param(
             HTTPS,
             (("remote.origin.pushurl", SSH),),
             True,
@@ -580,3 +594,33 @@ async def test_an_unreadable_repos_yaml_stops_only_a_remote_that_would_carry_a_h
         assert "`" not in text
     else:
         assert await remote_env(repo, base) == base
+
+
+@pytest.mark.parametrize("push", [pytest.param(False, id="fetch"), pytest.param(True, id="push")])
+async def test_a_remote_helper_on_origin_is_refused_before_any_git_carries_the_header(
+    tmp_path, monkeypatch, push
+):
+    """`remote.origin.vcs` would start `git-remote-<vcs>` with the header env: a fake one on
+    PATH records its env and must never run."""
+    ran = tmp_path / "helper-ran"
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    helper = bindir / "git-remote-evil"
+    helper.write_text(f"#!/bin/sh\nenv >> {ran}\nexit 1\n")
+    helper.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    repo, _ = rig(tmp_path, monkeypatch, remote=HTTPS, config_lines=[("remote.origin.vcs", "evil")])
+    with pytest.raises(ForgeError) as caught:
+        await git_auth.auth_for_account(repo, "corp-gl", acct(), push=push)
+    text = str(caught.value)
+    assert "corp-gl" in text and "remote helper" in text and "evil" not in text
+    assert "`" not in text and not ran.exists()
+    git_auth.set_reader(lambda: _reader_of(repo))
+    with pytest.raises(ForgeError, match="remote helper"):
+        await git_auth.auth_for(repo)
+
+
+async def _reader_of(repo):
+    return [RepoEntry(path=str(repo), forge="gitlab", forge_account="corp-gl")], ForgesFile(
+        accounts={"corp-gl": acct()}
+    )
