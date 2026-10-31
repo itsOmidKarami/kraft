@@ -90,7 +90,7 @@ def pins(env) -> list[tuple[str, str]]:
 
 KEY = f"http.{WEB}/."
 HEADER = "Authorization: Basic " + form()
-FOUR = [
+PINS = [
     (f"{KEY}extraHeader", ""),
     (f"{KEY}extraHeader", HEADER),
     ("credential.helper", ""),
@@ -115,7 +115,7 @@ NOISE = {
 @pytest.mark.parametrize(
     ("base", "built", "check"),
     [
-        pytest.param(HARD, auth(), lambda e: pins(e) == pins(HARD) + FOUR, id="appended"),
+        pytest.param(HARD, auth(), lambda e: pins(e) == pins(HARD) + PINS, id="appended"),
         pytest.param(
             HARD,
             auth(),
@@ -128,7 +128,7 @@ NOISE = {
         pytest.param(
             {"PATH": "/bin"},
             auth(),
-            lambda e: pins(e) == pins(HARD) + FOUR,
+            lambda e: pins(e) == pins(HARD) + PINS,
             id="unhardened-base-is-hardened-first",
         ),
         pytest.param(
@@ -156,16 +156,40 @@ NOISE = {
             ),
             id="askpass-emptied",
         ),
-        pytest.param(
-            HARD,
-            auth("https://code.corp.example:8443"),
-            lambda e: pins(e)[8][0] == "http.https://code.corp.example:8443/.extraHeader",
-            id="key-is-the-origin-only",
-        ),
     ],
 )
 def test_the_header_is_appended_after_the_hardening_pins(base, built, check):
     assert check(git_env(base, built))
+
+
+def test_no_auth_is_a_copy_of_the_base():
+    assert git_env(HARD, None) == HARD and git_env(HARD, None) is not HARD
+
+
+@pytest.mark.parametrize(
+    ("web", "forge", "origin", "header"),
+    [
+        pytest.param(
+            "https://CODE.corp.example:8443/gitlab",
+            "gitlab",
+            "https://code.corp.example:8443",
+            None,
+            id="key-is-the-origin-only",
+        ),
+        pytest.param(
+            "https://github.example", "github", "https://github.example", "github", id="github-form"
+        ),
+    ],
+)
+async def test_an_account_keys_its_header_on_its_origin(
+    tmp_path, monkeypatch, web, forge, origin, header
+):
+    host = web.split("/")[2].lower()
+    repo, _ = rig(tmp_path, monkeypatch, remote=f"https://{host}/team/app.git")
+    account = acct(web, forge=forge)
+    got = await git_auth.auth_for_account(repo, "corp-gl", account, push=True)
+    assert got is not None and got.origin == origin
+    assert got.header == f"Authorization: Basic {form(forge=header or 'gitlab')}"
 
 
 def test_the_builder_leaves_its_base_and_os_environ_alone():
@@ -351,6 +375,7 @@ async def test_an_unreadable_token_is_an_auth_error(tmp_path, monkeypatch):
         await git_auth.auth_for(repo)
     exc = caught.value
     assert (exc.reason, exc.account, exc.source) == ("auth", "corp-gl", "env CORP_GL")
+    assert "set it there and restart" in str(exc)
 
 
 @pytest.mark.parametrize(
@@ -370,3 +395,24 @@ def test_a_git_auth_stamps_only_an_auth_failure(text, stamped):
     assert exc.reason == stamped
     assert exc.account == ("corp-gl" if stamped else "")
     assert exc.source == ("env CORP_GL" if stamped else "")
+
+
+@pytest.mark.parametrize(
+    ("accounts", "loads"),
+    [
+        pytest.param({"c": acct(client="cli")}, 0, id="no-api-account-reads-no-repos"),
+        pytest.param(None, 0, id="no-forges-reads-no-repos"),
+        pytest.param({"c": acct()}, 1, id="env-account-reads-repos"),
+    ],
+)
+async def test_the_server_reads_repos_yaml_only_for_an_account_that_could_carry_a_header(
+    tmp_path, monkeypatch, accounts, loads
+):
+    from types import SimpleNamespace
+
+    seen = []
+    monkeypatch.setattr(config, "load_repos", lambda p: seen.append(p) or [])
+    forges = None if accounts is None else ForgesFile(accounts=accounts)
+    st = SimpleNamespace(forges=forges, templates_dir=tmp_path)
+    assert await git_auth.server_context(st) == ([], forges)
+    assert len(seen) == loads

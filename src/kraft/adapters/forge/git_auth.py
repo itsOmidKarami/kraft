@@ -43,7 +43,7 @@ class GitAuth:
     def stamp(self, exc: ForgeError) -> ForgeError:
         """Mark `exc` a token failure, in place, when git's words say the forge refused it."""
         if AUTH_FAILED.search(str(exc)):
-            exc.reason = "forbidden" if "returned error: 403" in str(exc) else "auth"
+            exc.reason = "forbidden" if "returned error: 403" in str(exc).lower() else "auth"
             exc.account = self.name
             exc.source = self.account.source().label()
         return exc
@@ -56,6 +56,8 @@ def set_reader(fn: Reader | None) -> None:
 
 
 async def server_context(st) -> tuple[list[RepoEntry], ForgesFile | None]:
+    if st.forges is None or not any(_injected(a) for a in st.forges.accounts.values()):
+        return [], st.forges  # no account could carry a header: read no repos.yaml
     try:
         repos = await asyncio.to_thread(config.load_repos, st.templates_dir / "repos.yaml")
     except ConfigError:
