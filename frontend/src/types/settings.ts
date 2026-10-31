@@ -21,6 +21,8 @@ export interface Repo {
   /** How a fresh worktree is prepared; `""` for nothing to run, null for none declared. */
   setup_command?: string | null;
   forge: string | null;
+  /** The forges.yaml account the repo names, if any. */
+  forge_account?: string | null;
   project: string | null;
   enabled: boolean;
   /** Model per harness profile id (Ruling 165), e.g. `{claude: "opus"}`. */

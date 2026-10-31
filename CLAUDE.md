@@ -97,7 +97,7 @@ kraft view diff [ID] [--stat|--name-only] [-w]   # truncation and untracked alwa
 kraft view docs [ID] [--attachment spec|plan] / kraft view doc DOC_ID [--open [EDITOR]]  # --attachment: what it was filed with
 kraft view artifact [ID]                    # the doc the pending gate is about
 kraft repo list                             # `*` marks the repo you are in
-kraft repo connect [PATH] [--test-command C] [--setup-command C] [--no-tests] [--in-place] [-y] [--verify [--timeout MIN] [--on-host]]
+kraft repo connect [PATH] [--test-command C] [--setup-command C] [--no-tests] [--in-place] [-y] [--verify [--timeout MIN] [--on-host]] [--forge github|gitlab] [--web-url URL] [--api-url URL] [--forge-account NAME]  # asks the forge only for a host that names none
 kraft repo disconnect [PATH]
 kraft repo library [PATH] [-y | --check]     # review the repo's .kraft/ library and take it; --check exits 0 current, 1 waiting, 2 refused, 3 could not check
 kraft repo path [ID] (alias cd) / kraft repo open [ID]

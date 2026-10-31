@@ -1,5 +1,5 @@
-"""`forges.yaml`: named forge accounts. PR 3 knows `client: cli` only: an
-account records a host's forge and web address, so connect does not ask about
+"""`forges.yaml`: named forge accounts. Only `client: cli` exists until the API backends
+land: an account records a host's forge and web address, so connect does not ask about
 a self-hosted host whose name does not say which forge it is. It carries no
 token; `gh`/`glab` keep their own sign-in."""
 
