@@ -7,8 +7,9 @@ from __future__ import annotations
 import asyncio
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from kraft import config, forges
 from kraft.adapters.forge import credentials
@@ -42,7 +43,9 @@ class GitAuth:
     name: str
     account: ForgeAccount
     origin: str  # https://host[:port], no trailing slash
-    header: str  # Authorization: Basic <basic_form>
+    header: str = field(repr=False)  # Authorization: Basic <basic_form>
+    #: The exact URLs git will dial on this origin (no userinfo, no query), each pinned too.
+    urls: tuple[str, ...] = ()
 
     def refused(self, text: str) -> bool:
         """Whether git's words say the forge refused the header's token."""
@@ -87,13 +90,28 @@ async def server_context(st) -> tuple[list[RepoEntry], ForgesFile | None]:
     try:
         repos = await asyncio.to_thread(config.load_repos, st.templates_dir / "repos.yaml")
     except ConfigError:
-        repos = []
+        # Falling back to git's own credential would hide that the token was never sent.
+        name, account = next((n, a) for n, a in st.forges.accounts.items() if _injected(a))
+        raise ForgeError(
+            f"forge account {name}: repos.yaml does not load, so Kraft cannot tell which "
+            "repo uses it; fix repos.yaml",
+            reason="auth",
+            account=name,
+            source=account.source().label(),
+        ) from None
     return repos, st.forges
 
 
 def _origin(account: ForgeAccount) -> str:
     _, host, port = forges.origin(account.web_url)
+    host = f"[{host}]" if ":" in host else host  # an IPv6 literal
     return f"https://{host}" + (f":{port}" if port != 443 else "")
+
+
+def _exact(origin: str, url: str) -> str | None:
+    """`url` as git's `http.<url>.*` key wants it: the origin and the path, no trailing slash."""
+    path = urlsplit(url).path.rstrip("/")
+    return origin + path if path else None
 
 
 def _injected(account: ForgeAccount) -> bool:
@@ -115,13 +133,16 @@ async def auth_for_account(
         return None
     origin = _origin(account)
     urls = await _git(repo, "remote", "get-url", *(("--push", "--all") if push else ()), "origin")
-    carry = False
+    carry, exact, other = False, [], False
     for url in urls:
         scheme, host, port = forges.origin(url)
         if scheme not in ("http", "https"):
+            other = True
             continue
         if scheme == "https" and (host, port) == forges.origin(account.web_url)[1:]:
             carry = True
+            if (one := _exact(origin, url)) and one not in exact:
+                exact.append(one)
         elif push:
             raise ForgeError(
                 f"forge account {name}: {repo.name}'s push URL is not on {origin}, the "
@@ -130,6 +151,13 @@ async def auth_for_account(
             )
     if not carry:
         return None
+    if other:
+        # ssh, a `foo::` helper or a local path would run with the header env.
+        raise ForgeError(
+            f"forge account {name}: {repo.name} has a push URL that is not https on {origin} "
+            "next to one that is, so Kraft will not send its token through it; point every "
+            "push URL at the account's address, then retry"
+        )
     source = account.source().label()
     try:
         token = await credentials.token_for(name, account)
@@ -138,7 +166,7 @@ async def auth_for_account(
             f"forge account {name}: {exc}", reason="auth", account=name, source=source
         ) from None
     form = credentials.basic_form(token, account.source().kind, forge=account.forge)
-    return GitAuth(name, account, origin, f"Authorization: Basic {form}")
+    return GitAuth(name, account, origin, f"Authorization: Basic {form}", tuple(exact))
 
 
 async def auth_for(repo: Path, *, push: bool = False) -> GitAuth | None:
@@ -160,8 +188,10 @@ async def auth_for(repo: Path, *, push: bool = False) -> GitAuth | None:
         return None
     host = forges.remote_host(fetch[0])
     found = forges.account_for(entry, file, host)
-    if found is None and not entry.forge_account and entry.forge is None:
-        found = forges.default_account(file, host)  # a member with no recorded forge
+    if found is None and not entry.forge_account and entry.forge is None and entry.id:
+        # Only a workspace root or member carries an id; one with no recorded forge uses the
+        # root's account (`run._member_forges`). A legacy entry with none stays on git's own.
+        found = forges.default_account(file, host)
     if found is None:
         return None
     return await auth_for_account(repo, *found, push=push)
@@ -174,18 +204,27 @@ def git_env(base: Mapping[str, str], auth: GitAuth | None) -> dict[str, str]:
     if auth is None:
         return env
     sandbox.harden_host_git_env(env)
+    # GIT_CONFIG_PARAMETERS (`-c`) beats GIT_CONFIG_COUNT, so one a caller set could undo a pin.
+    env.pop("GIT_CONFIG_PARAMETERS", None)
     for key in [k for k in env if k.startswith("GIT_TRACE") or k in _STRIPPED]:
         del env[key]
     # A gitconfig's trace2 target would log the header with no variable set: switch it off.
     env.update(dict.fromkeys(_TRACE2, "0"))
-    key = f"http.{auth.origin}/."
-    pins = (
-        (f"{key}extraHeader", ""),  # resets a persisted header: never two Authorizations
-        (f"{key}extraHeader", auth.header),
-        ("credential.helper", ""),  # resets the helper list: no prompt, no `reject`
-        (f"{key}sslVerify", "true"),
-        (f"{key}followRedirects", "false"),  # git re-sends extraHeader after a redirect
-    )
+    # git takes the most specific `http.<url>.*` first, so a path-scoped key in a repo's own
+    # config beats an origin-keyed pin: every URL git dials is pinned as well, and a tie goes
+    # to this env entry. `http.sslCAInfo` is left alone: it can only name a CA that verifies
+    # the origin's own certificate, never turn verification off.
+    proxy = env.get("https_proxy") or env.get("HTTPS_PROXY") or ""  # as set, never a repo's
+    pins = [("credential.helper", "")]  # resets the helper list: no prompt, no `reject`
+    for target in (f"{auth.origin}/.", *(f"{u}." for u in auth.urls)):
+        pins += [
+            (f"http.{target}extraHeader", ""),  # resets a persisted header: no two Authorizations
+            (f"http.{target}extraHeader", auth.header),
+            (f"http.{target}sslVerify", "true"),
+            (f"http.{target}followRedirects", "false"),  # git re-sends extraHeader on a redirect
+            (f"http.{target}proxy", proxy),
+            (f"http.{target}curloptResolve", ""),  # resets a pinned host -> address list
+        ]
     start = int(env["GIT_CONFIG_COUNT"])
     env["GIT_CONFIG_COUNT"] = str(start + len(pins))
     for i, (k, v) in enumerate(pins, start):

@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import stat
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -239,16 +240,52 @@ async def test_a_persons_credential_helper_is_never_asked(remote, tmp_path, scop
     assert not marker.exists()
 
 
-@pytest.mark.parametrize("remote", [{"server": "another-token"}], indirect=True)
-async def test_a_path_scoped_saved_header_overrides_ours_so_the_stop_blames_the_account(remote):
-    """The known limit: git takes the more specific key, so the saved header goes out and ours
-    never does. The token does not leak; the stop names the account all the same."""
+async def test_a_path_scoped_saved_header_never_beats_ours(remote):
+    """git takes the more specific key; ours names the exact URL, and a tie goes to the env."""
     old = "AUTHORIZATION: basic b2xkOm9sZA=="
     git(remote.repo, "config", f"http.{remote.web.url}/team/app.git.extraheader", old)
-    with pytest.raises(builtins.BaseFetchRefused) as caught:
-        await builtins.upstream_head(remote.repo, "main")
-    assert caught.value.account == "corp-gl"
-    assert remote.web.authorizations and OURS not in remote.web.authorizations
+    await _base_fetch(remote, None, None)
+    _ours_only(remote.web)
+
+
+async def test_a_path_scoped_follow_redirects_and_ssl_verify_never_beat_our_pins(
+    remote, tmp_path, monkeypatch
+):
+    """The repo's own config scopes `followRedirects=true` and `sslVerify=false` to the URL:
+    the control (no exact-URL pins) follows the redirect with the header; with them it does not."""
+    scoped = f"http.{remote.web.url}/team/app.git"
+    git(remote.repo, "config", f"{scoped}.followRedirects", "true")
+    git(remote.repo, "config", f"{scoped}.sslVerify", "false")
+    with git_https(tmp_path / "srv2") as second:
+        bundle = tmp_path / "ca-both.pem"
+        bundle.write_text(remote.web.ca.read_text() + second.ca.read_text())
+        monkeypatch.setenv("GIT_SSL_CAINFO", str(bundle))
+        git(remote.repo, "push", "-q", str(_bare(second.root)), "main")
+        remote.web.redirect = second.url
+        with monkeypatch.context() as bare:
+            bare.setattr(git_auth, "_exact", lambda origin, url: None)
+            await builtins.upstream_head(remote.repo, "main")
+        assert OURS in second.authorizations, "the header was not followed: no proof"
+        second.authorizations.clear()
+        with pytest.raises(builtins.BaseFetchRefused, match=REDIRECT_WORDS):
+            await builtins.upstream_head(remote.repo, "main")
+        assert second.authorizations == []
+        # TLS still verifies: with the CA gone the pinned run fails on the certificate, and
+        # the control (a plain git, same config) gets past it to the 401.
+        monkeypatch.delenv("GIT_SSL_CAINFO")
+        remote.web.redirect = None
+        plain = await _ls_remote(remote.repo)
+        assert "certificate" not in plain.lower() and "Username" in plain
+        remote.web.authorizations.clear()
+        await builtins.upstream_head(remote.repo, "main")  # a certificate error is a stale base
+        assert remote.web.authorizations == []
+
+
+async def _ls_remote(repo) -> str:
+    done = subprocess.run(
+        ["git", "ls-remote", "origin"], cwd=repo, capture_output=True, text=True, env=os.environ
+    )
+    return done.stderr
 
 
 async def test_a_gitconfig_that_traces_never_logs_the_header(remote, tmp_path, monkeypatch):

@@ -77,8 +77,8 @@ def rig(
     return repo, calls
 
 
-def auth(origin=WEB, header=None) -> GitAuth:
-    return GitAuth("corp-gl", acct(), origin, header or f"Authorization: Basic {form()}")
+def auth(origin=WEB, header=None, urls=()) -> GitAuth:
+    return GitAuth("corp-gl", acct(), origin, header or f"Authorization: Basic {form()}", urls)
 
 
 def pins(env) -> list[tuple[str, str]]:
@@ -90,14 +90,27 @@ def pins(env) -> list[tuple[str, str]]:
 
 KEY = f"http.{WEB}/."
 HEADER = "Authorization: Basic " + form()
-PINS = [
-    (f"{KEY}extraHeader", ""),
-    (f"{KEY}extraHeader", HEADER),
-    ("credential.helper", ""),
-    (f"{KEY}sslVerify", "true"),
-    (f"{KEY}followRedirects", "false"),
-]
 HARD = sandbox.hardened_git_env()
+PROXY = HARD.get("https_proxy") or HARD.get("HTTPS_PROXY") or ""
+URL = f"{WEB}/team/app.git"
+
+
+def expected(*targets: str) -> list[tuple[str, str]]:
+    """The pins after the hardening ones: the helper reset, then six per origin or exact URL."""
+    out = [("credential.helper", "")]
+    for t in targets:
+        out += [
+            (f"http.{t}extraHeader", ""),
+            (f"http.{t}extraHeader", HEADER),
+            (f"http.{t}sslVerify", "true"),
+            (f"http.{t}followRedirects", "false"),
+            (f"http.{t}proxy", PROXY),
+            (f"http.{t}curloptResolve", ""),
+        ]
+    return out
+
+
+PINS = expected(f"{WEB}/.")
 NOISE = {
     k: "1"
     for k in (
@@ -118,15 +131,34 @@ NOISE = {
         pytest.param(HARD, auth(), lambda e: pins(e) == pins(HARD) + PINS, id="appended"),
         pytest.param(
             HARD,
+            auth(urls=(URL,)),
+            lambda e: pins(e) == pins(HARD) + expected(f"{WEB}/.", f"{URL}."),
+            id="every-dialed-url-is-pinned-too",
+        ),
+        pytest.param(
+            {**HARD, "GIT_CONFIG_PARAMETERS": "'http.x.sslverify=false'"},
+            auth(),
+            lambda e: "GIT_CONFIG_PARAMETERS" not in e,
+            id="config-parameters-stripped",
+        ),
+        pytest.param(
+            {**HARD, "https_proxy": "http://proxy.example:3128"},
+            auth(),
+            lambda e: ("http.https://code.corp.example/.proxy", "http://proxy.example:3128")
+            in pins(e),
+            id="proxy-is-pinned-to-the-environments-own",
+        ),
+        pytest.param(
+            HARD,
             auth(),
             lambda e: (
                 (e["GIT_CONFIG_COUNT"], e["GIT_CONFIG_KEY_0"], e["GIT_CONFIG_VALUE_0"])
-                == ("13", "core.hooksPath", os.devnull)
+                == (str(len(pins(HARD)) + len(PINS)), "core.hooksPath", os.devnull)
             ),
             id="hooks-pin-stays-first",
         ),
         pytest.param(
-            {"PATH": "/bin"},
+            {"PATH": "/bin", "https_proxy": PROXY},
             auth(),
             lambda e: pins(e) == pins(HARD) + PINS,
             id="unhardened-base-is-hardened-first",
@@ -351,22 +383,29 @@ async def test_a_member_linked_worktree_uses_its_own_account(tmp_path, monkeypat
     assert got is not None and (got.name, got.origin) == ("other-gl", "https://other.example")
 
 
-async def test_a_member_without_a_forge_takes_its_hosts_default(tmp_path, monkeypatch):
-    repo, _ = rig(
-        tmp_path,
-        monkeypatch,
-        remote=HTTPS,
-        accounts={"corp-gl": acct(default=True)},
-        entry=None,
-    )
-    entry = RepoEntry(path=str(repo))
+@pytest.mark.parametrize(
+    ("entry_id", "named"),
+    [
+        pytest.param("member", "corp-gl", id="member-without-forge-takes-its-hosts-default"),
+        pytest.param(None, None, id="legacy-entry-without-forge-gets-no-header"),
+    ],
+)
+async def test_an_entry_without_a_forge_takes_a_default_only_as_a_workspace_member(
+    tmp_path, monkeypatch, entry_id, named
+):
+    repo, calls = rig(tmp_path, monkeypatch, remote=HTTPS)
+    entry = RepoEntry(path=str(repo), id=entry_id)
+    accounts = {"corp-gl": acct(default=True)}
 
     async def read():
-        return [entry], ForgesFile(accounts={"corp-gl": acct(default=True)})
+        return [entry], ForgesFile(accounts=accounts)
 
     git_auth.set_reader(read)
+    base = {**os.environ, "X": "1"}
     got = await git_auth.auth_for(repo)
-    assert got is not None and got.name == "corp-gl"
+    assert (got.name if got else None) == named
+    if named is None:
+        assert await remote_env(repo, base) == base
 
 
 async def test_an_unreadable_token_is_an_auth_error(tmp_path, monkeypatch):
