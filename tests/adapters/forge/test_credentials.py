@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import shutil
 import sys
@@ -310,9 +311,25 @@ async def test_a_hung_lookup_times_out_naming_what_may_wait(
         os.kill(pid, 0)
 
 
-async def test_a_read_token_and_its_basic_form_are_registered(tmp_path):
-    tok = await read(tmp_path, **{"from": "command", "command": f"echo {TOK}"})
-    assert redact.redact(f"{tok} {basic_form(tok, 'pat')}") == "<redacted> <redacted>"
+@pytest.mark.parametrize(
+    ("forge", "user"),
+    [
+        pytest.param("gitlab", "oauth2", id="gitlab-oauth2"),
+        pytest.param("github", "x-access-token", id="github-x-access-token"),
+        pytest.param(None, "oauth2", id="no-forge-keeps-the-kinds-user"),
+    ],
+)
+async def test_a_read_token_and_its_basic_form_are_registered(tmp_path, forge, user):
+    acc = ForgeAccount(
+        forge=forge or "gitlab",
+        client="api",
+        web_url=URL,
+        token=TokenSource(**{"from": "command", "command": f"echo {TOK}"}),
+    )
+    tok = await read_token(acc, repos=[], worktrees=tmp_path / "wt", expose=[])
+    sent = basic_form(tok, "unknown", forge=forge)
+    assert base64.b64decode(sent).decode() == f"{user}:{tok}"
+    assert redact.redact(f"{tok} {sent}") == "<redacted> <redacted>"
 
 
 @pytest.mark.parametrize(

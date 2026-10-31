@@ -36,7 +36,7 @@ from kraft import triggers as triggers_mod
 from kraft import update as update_mod
 from kraft.adapters import hook_install
 from kraft.adapters import subprocess as _subprocess
-from kraft.adapters.forge import credentials
+from kraft.adapters.forge import credentials, git_auth
 from kraft.adapters.forge import git as forge_git
 from kraft.adapters.forge import mr as forge_mr
 from kraft.adapters.forge import probe as forge_probe
@@ -144,6 +144,7 @@ def start_background(app: FastAPI) -> None:
     # Always on: a token expires or is revoked while nobody runs a forge node.
     app.state.forge_probe_task = asyncio.ensure_future(forge_probe.loop(app))
     credentials.set_token_context(partial(forge_probe.read_context, app.state))
+    git_auth.set_reader(partial(git_auth.server_context, app.state))
     load_workers(app)
 
 
@@ -622,6 +623,7 @@ async def _lifespan(app: FastAPI):
         ):
             await _cancel(task)
         credentials.set_token_context(None)
+        git_auth.set_reader(None)
         await _cancel(app.state.workers_watch_task)
         await app.state.workers_listener.close()
         workers_runs.install(None)
