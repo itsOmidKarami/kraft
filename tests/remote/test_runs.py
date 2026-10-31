@@ -207,7 +207,7 @@ async def test_a_document_a_person_edited_while_the_step_ran_keeps_the_servers_v
         "time.sleep(0.4); open(p,'w').write('the step')"
     )
     run = await rig.run([sys.executable, "-c", script])
-    await asyncio.sleep(0.2)
+    await until(lambda: run.pushed)  # the server has taken the snapshot the step starts from
     (docs / "spec.md").write_text("a person")
     await rig.done(run)
     assert (docs / "spec.md").read_text() == "a person"
@@ -266,10 +266,10 @@ async def test_co_tasks_of_one_step_share_the_machines_copy_without_tripping_ove
 
 
 async def test_int_pauses_and_kill_ends_the_step_through_the_machine(rig):
-    run = await rig.run(["sh", "-c", "trap 'echo got-int; exit 130' INT; sleep 30 & wait"])
-    while run.state != "running":
-        await asyncio.sleep(0.02)
-    await asyncio.sleep(0.2)
+    run = await rig.run(
+        ["sh", "-c", "trap 'echo got-int; exit 130' INT; echo armed; sleep 30 & wait"]
+    )
+    await until(lambda: "armed" in run.spool.read_text())  # the trap is in place
     await rig.runs.signal(run, "INT")
     await rig.done(run)
     assert run.exit_code == 130 and "got-int" in run.spool.read_text()
@@ -295,7 +295,9 @@ async def test_cancelling_while_the_machine_is_offline_ends_the_run_and_discards
     assert run.exit_code == 143 and "offline" in run.spool.read_text()
     before = rig.tip()
     await rig.reconnect()  # the server tells it to stop; it hands in what it has
-    await until(lambda: rig.runs.find(rig.wid, "s1") is None)  # its hand-in is in and thrown away
+    await until(lambda: rig.machine._jobs[run.spec.key].final is not None)
+    await asyncio.sleep(0.3)  # time for the server to take the hand-in, which it must not
+    assert rig.runs.find(rig.wid, "s1") is None
     assert (
         rig.tip() == before
         and not rig.files("s1").result.exists()
