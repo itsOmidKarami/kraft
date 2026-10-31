@@ -320,22 +320,28 @@ def _dry_run_response(
     }
 
 
-def refuse_agent_on_disabled_repo(st, request: Request, repo: str) -> None:
-    """403 when an agent or an MCP session files work on a disabled repo
-    (#1198): a repo an agent connected with its own commands is saved
-    disabled, and those commands run for every item on it, so a person
-    enables it first. A person may still file on one by hand."""
+def refuse_agent_on_disabled_repo(st, request: Request, repo: str, members: list[str] = ()) -> None:
+    """403 when an agent or an MCP session files work on a disabled repo, or
+    a workspace whose member is one (#1198): a repo an agent connected with
+    its own commands is saved disabled, and its commands run for every item
+    on it, so a person enables it first. A person may still file by hand."""
     who = gates._decided_by(request)
-    if who == "human" or (entry := deps.connected_or_422(st, repo)).enabled:
+    if who == "human":
         return
-    needs = (
-        "" if entry.test_command is not None or entry.test_scopes else "sets its test command and "
-    )
-    raise HTTPException(
-        403,
-        f"{repo} is disabled: a person {needs}enables it in Settings › Repos before an "
-        f"{who} files work on it, since its commands run for every item",
-    )
+    repos = config_mod.load_repos(deps.repos_path(st))
+    entries = [deps.connected_or_422(st, repo)]
+    mounted = (str(Path(repo) / m) for m in members)  # a mount's path is the root's
+    entries += [e for m in mounted if (e := deps._connected(repos, m)) is not None]
+    for found in entries:
+        if found.enabled:
+            continue
+        has_tests = found.test_command is not None or found.test_scopes
+        needs = "" if has_tests else "sets its test command and "
+        raise HTTPException(
+            403,
+            f"{found.path} is disabled: a person {needs}enables it in Settings › Repos before "
+            f"an {who} files work on it, since its commands run for every item",
+        )
 
 
 def repo_warning(entry) -> str | None:
@@ -343,8 +349,14 @@ def repo_warning(entry) -> str | None:
     than found once it has run: no setup command declared stops it before
     its first task, and no test command (nor test scopes) stops it at
     verification, after its agent tasks have run. Warned, not refused: a
-    disabled repo still takes items filed by hand."""
+    disabled repo still takes items filed by hand, and is warned of too, as
+    its commands may be an agent's that no one has read (#1198)."""
     stops = []
+    if not entry.enabled:
+        stops.append(
+            "is disabled: check its commands in Settings › Repos before starting this item, "
+            "as they may be an agent's that no one has read"
+        )
     if entry.setup_command is None:
         stops.append(
             "declares no setup command, so this item stops before its first task, when "
@@ -503,7 +515,8 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
             in_place=in_place_by is not None,
             members=[m.path for m in materialized.target.mounts.values()],
         )
-    refuse_agent_on_disabled_repo(st, request, body.repo)
+    members = [m.path for m in materialized.target.mounts.values()]
+    refuse_agent_on_disabled_repo(st, request, body.repo, members)
     if dry_run:
         # B33: every check up to and including `_check_node_overrides` has run;
         # nothing is written -- no row, no bead, no attachment copy, no spawn.

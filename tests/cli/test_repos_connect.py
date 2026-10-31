@@ -35,30 +35,31 @@ def test_connecting_again_saves_what_a_lockfile_committed_since_proposes(
 ):
     """ "Commit one (uv lock) and connect again" led nowhere: connecting
     again said "already connected" and saved nothing, so the repo stayed
-    disabled with no commands until it was disconnected first. From a worker
-    it saves the commands and leaves the repo off: turning a repo on is a
-    person's call (#1198)."""
+    disabled with no commands until it was disconnected first. A Kraft
+    session saves nothing: a connected repo's commands are a person's to set
+    (#1198)."""
     (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n[tool.pytest.ini_options]\n")
     commit_all(repo)
     cli.main(["repo", "connect", str(repo)])
     assert "commit a uv.lock (uv lock) and connect again" in capsys.readouterr().out
     (repo / "uv.lock").write_text("version = 1\n")
     commit_all(repo)
-    worker = session is not None
-    if worker:
+    if session:
         monkeypatch.setenv(*session)
     cli.main(["repo", "connect", str(repo)])
     out = capsys.readouterr().out
     assert "already connected" in out
-    assert "test command: uv run pytest (from uv.lock)" in out
-    saved = "saved the test command, the setup command" + ("" if worker else ", enabled")
-    assert saved + "\n" in out
-    assert ("it stays disabled: a person enables it" in out) is worker
     [entry] = asyncio.run(client.repos())
+    if session:
+        assert "its commands are a person's to set, in Settings › Repos" in out
+        assert (entry["test_command"], entry["enabled"]) == (None, False)
+        return
+    assert "test command: uv run pytest (from uv.lock)" in out
+    assert "saved the test command, the setup command, enabled\n" in out
     assert (entry["test_command"], entry["setup_command"], entry["enabled"]) == (
         "uv run pytest",
         "uv sync",
-        not worker,
+        True,
     )
 
 

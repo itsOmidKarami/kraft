@@ -11,12 +11,13 @@ from support.harness import connect_repo, make_repo
 @pytest.mark.parametrize(
     ("fields", "said"),
     [
-        ({"test_command": "make test"}, None),
+        ({"test_command": "make test", "enabled": True}, None),
+        ({"test_command": "make test"}, ["is disabled: check its commands in Settings › Repos"]),
         ({"test_command": None}, ["has no test command", "stops at verification"]),
         ({"test_command": "make test", "setup_command": None}, ["declares no setup command"]),
         ({"test_command": None, "setup_command": None}, ["no setup command", "no test command"]),
     ],
-    ids=["ready", "no-test-command", "no-setup-command", "neither"],
+    ids=["ready", "disabled", "no-test-command", "no-setup-command", "neither"],
 )
 def test_filing_on_a_repo_that_cannot_run_an_item_warns(client, tmp_path, fields, said):
     """An item on a repo with no test command ran its agent tasks, spending

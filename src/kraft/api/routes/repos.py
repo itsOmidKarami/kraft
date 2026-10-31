@@ -690,12 +690,11 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
             raise HTTPException(
                 403, f"enabling a repo is a person's call, not an {who}'s: its commands run unread"
             )
-        # A disabled repo may take them: it runs nothing until a person enables it.
-        sets = body.test_command is not None or body.setup_command or body.test_scopes
-        if sets and entry.get("enabled", True):
+        # Even a disabled repo's: its open items, filed by hand, would run them.
+        if body.test_command is not None or body.setup_command or body.test_scopes:
             raise HTTPException(
                 403,
-                f"changing an enabled repo's commands is a person's call, not an {who}'s: "
+                f"a connected repo's commands are a person's to set, not an {who}'s: "
                 "they run for every work item on it",
             )
     # exclude_unset, not `v is not None`: a field the caller left out of the

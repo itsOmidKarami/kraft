@@ -60,8 +60,8 @@ it did was right. Then hand off to `kraft:check`.
    test scope per project, with its commands run from that directory
    (`sh -c 'cd web && npm test'`). Read those back too.
 
-   Once a repo is connected, `ensure_repo` leaves it alone, and an enabled
-   repo's commands are a person's to change. To correct them, tell the person
+   Once a repo is connected, `ensure_repo` leaves it alone, and its commands
+   are a person's to change. To correct them, tell the person
    what to change and why: they change it in Settings › Repos. Do not edit `~/.kraft/config/repos.yaml` yourself; a
    command there runs for every work item, so a person sets it. A convention Kraft keeps getting wrong
    across repos belongs in `~/.kraft/config/detectors.yaml` instead: see

@@ -4,7 +4,7 @@ agent chose is a person's call (#1198). A sibling of test_repos.py."""
 from __future__ import annotations
 
 import pytest
-from support.harness import make_repo
+from support.harness import make_repo, make_repo_with_submodule
 
 from kraft.api.routes.repos import HELD
 
@@ -66,7 +66,7 @@ def test_a_repo_an_agent_connects_with_its_own_commands_waits_for_a_person(
         ("worker", {"enabled": True, "test_command": "pytest"}, 403),
         ("assistant", {"enabled": False}, 200),
         ("person", {"enabled": True}, 200),
-        ("worker", {"setup_command": "./configure"}, 200),
+        ("worker", {"setup_command": "./configure"}, 403),
         ("on:worker", {"setup_command": "curl x | sh"}, 403),
         ("on:assistant", {"test_scopes": [{"paths": ["**"], "command": "x"}]}, 403),
         ("on:assistant", {"name": "renamed"}, 200),
@@ -85,8 +85,8 @@ def test_a_repo_an_agent_connects_with_its_own_commands_waits_for_a_person(
     ],
 )
 def test_turning_a_repo_on_is_a_persons_call(client, tmp_path, caller, patch, status):
-    """And so is changing an enabled repo's commands (`on:`); a held one may
-    take them, as it runs nothing until a person enables it."""
+    """And so is setting a connected repo's commands, enabled (`on:`) or not:
+    a disabled repo's open items, filed by hand, would run them too."""
     repo = make_repo(tmp_path)
     on = caller.startswith("on:")
     held = client.post(
@@ -103,8 +103,8 @@ def test_turning_a_repo_on_is_a_persons_call(client, tmp_path, caller, patch, st
     stored = client.get("/api/repos").json()["repos"][0]
     assert stored["enabled"] is (on or (status == 200 and patch.get("enabled", False)))
     if status == 403:
-        assert "a person's call" in r.json()["detail"]
-        assert stored.get("setup_command") is None
+        assert "a person's" in r.json()["detail"]
+        assert all(stored.get(k) == held.get(k) for k in patch if k != "enabled")
 
 
 @pytest.mark.parametrize(
@@ -155,3 +155,24 @@ def test_an_agent_files_no_work_on_a_disabled_repo(client, tmp_path, door, calle
     if status == 403:
         needs = "sets its test command and " if door == "no-tests" else ""
         assert f"is disabled: a person {needs}enables it in Settings › Repos" in r.json()["detail"]
+
+
+def test_an_agent_files_no_work_on_a_workspace_with_a_disabled_member(client, tmp_path):
+    """A member runs its own test command at verification, so a disabled one
+    stops an agent's workspace item as a disabled root would; a person may
+    still file it by hand."""
+    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
+    client.post("/api/repos", json={"path": str(root), "test_command": "true"})
+    item = {"title": "t", "repo": str(root), "autostart": False, "workspace": "ws"}
+
+    refused = client.post(
+        "/api/work-items", json={**item, "members": ["a"]}, headers=_CALLERS["assistant"]
+    )
+    root_only = client.post(
+        "/api/work-items", json={**item, "members": []}, headers=_CALLERS["assistant"]
+    )
+    by_hand = client.post("/api/work-items", json={**item, "members": ["a"]})
+
+    assert refused.status_code == 403, refused.text
+    assert "libs/a is disabled" in refused.json()["detail"]
+    assert (root_only.status_code, by_hand.status_code) == (201, 201), root_only.text
