@@ -90,6 +90,13 @@ def _run(run_forge, repo, sid, accounts, named, forge_name="github", error=None)
             id="null-pin-never-stops",
         ),
         pytest.param(
+            ({}, None),
+            ({}, "ghost"),
+            None,
+            {"": {"account": None, "backend": "gh"}},
+            id="null-pin-ignores-a-later-unknown-account",
+        ),
+        pytest.param(
             ({"a": _GL}, "a"),
             None,
             "forge_account a says forge: gitlab, the repo says forge: github",

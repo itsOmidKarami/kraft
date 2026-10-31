@@ -181,8 +181,9 @@ def _health_checks(payload: dict) -> list[dict]:
         )
     if payload.get("invalid_forges"):
         reasons.append(
-            f"invalid forges.yaml, not applied: the running accounts are kept; "
-            f"fix the file and reload: {payload['invalid_forges']}"
+            f"forges.yaml, or a repo's forge_account, needs fixing (an edit that does "
+            f"not load or adds a conflict is not applied); fix it and reload: "
+            f"{payload['invalid_forges']}"
         )
     reasons.extend(f"index: {error}" for error in index.get("errors") or [])
     orphaned = (payload.get("reattach_summary") or {}).get("unknown") or []

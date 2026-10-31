@@ -1799,6 +1799,7 @@ async def _dispatch_task_in(
         )
 
     if isinstance(t, ForgeTask):
+        forges, forges_error = launch.forges() if launch and launch.forges else (None, None)
         return await _forge.run_task(
             db,
             run_dirs,
@@ -1810,8 +1811,8 @@ async def _dispatch_task_in(
             repo_forge=launch.repo_entry.forge if launch and launch.repo_entry else None,
             repo_entry=launch.repo_entry if launch else None,
             repositories=launch.repositories if launch else None,
-            forges=launch.forges if launch else None,
-            forges_error=launch.forges_error if launch else None,
+            forges=forges,
+            forges_error=forges_error,
             reviewers=_reviewers(t, node.id, work_item_row, launch),
             ci_checks=launch.repo_entry.ci_checks if launch and launch.repo_entry else True,
             # The item's folder: for a worktree item, not the repo, whose

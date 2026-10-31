@@ -957,7 +957,7 @@ def _check_repos(path, data, ctx):
         candidate = Path(tmp) / "repos.yaml"
         candidate.write_text(yaml.safe_dump(data))
         try:
-            config_mod.load_repos(candidate, steering=profiles)
+            loaded = config_mod.load_repos(candidate, steering=profiles)
         except config_mod.ConfigError as exc:
             entries = data.get("repos")
             loc = None
@@ -977,7 +977,7 @@ def _check_repos(path, data, ctx):
         old = set(forges_mod.account_problems(forges, current))
         issues = [
             TemplateIssue(path, None, why)
-            for why in forges_mod.account_problems(forges, config_mod.load_repos(candidate))
+            for why in forges_mod.account_problems(forges, loaded)
             if why not in old
         ]
     return (

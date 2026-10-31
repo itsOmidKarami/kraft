@@ -138,7 +138,6 @@ def start_background(app: FastAPI) -> None:
     # installs and restarts only what a person marked, or `update.yaml` allows.
     app.state.when_free_task = asyncio.ensure_future(when_free.loop(app))
     load_workers(app)
-    load_forges(app)
 
 
 def load_workers(app: FastAPI) -> None:
@@ -397,6 +396,10 @@ async def _lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001 -- never a refused boot
         logger.exception("could not stop the process groups stopped sessions left")
 
+    # Before reattach and resumed walks, whose forge nodes read the accounts.
+    app.state.forges_lock = asyncio.Lock()
+    load_forges(app)
+
     booted_at = time.time()
     summary, adopted = await reattach.reattach(
         database,
@@ -504,9 +507,6 @@ async def _lifespan(app: FastAPI):
     app.state.workers_watch_task = asyncio.create_task(hub.runs.watch())
     app.state.workers_lock = asyncio.Lock()
     app.state.invalid_workers = None
-    app.state.forges = forges_mod.ForgesFile()
-    app.state.invalid_forges = None
-    app.state.forges_lock = asyncio.Lock()
 
     dist = Path(os.environ.get("KRAFT_FRONTEND_DIST") or DEFAULT_FRONTEND_DIST)
     app.state.frontend_dist = dist if dist.is_dir() else None

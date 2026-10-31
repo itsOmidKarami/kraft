@@ -230,7 +230,8 @@ def _reload_forges(st) -> None:
     old = forges_mod.account_problems(st.forges or forges_mod.ForgesFile(), repos)
     new = forges_mod.account_problems(file, repos)
     # Only a problem this edit adds keeps it pending; an old hand edit is doctor's.
-    if added := [p for p in new if p not in old]:
+    # With nothing running (unreadable since startup) there is nothing to keep.
+    if st.forges is not None and (added := [p for p in new if p not in old]):
         st.invalid_forges = "; ".join(added)
         return
     st.forges = file

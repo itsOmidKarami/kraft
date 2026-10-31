@@ -4,6 +4,7 @@ repos.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -224,14 +225,19 @@ async def _pin_forge_accounts(
                 f"forge account {pin['account']} {why}; "
                 "kraft item retry re-pins to what is configured now"
             )
-        if named and named not in forges.accounts:
-            raise ForgeError(f"forge_account {named} names no account in forges.yaml")
         if pin is not None:  # a null pin never stops: it resolves live, as before accounts
             continue
+        if named and named not in forges.accounts:
+            raise ForgeError(f"forge_account {named} names no account in forges.yaml")
         found = None
         if named or forges.accounts:
-            origin = config.git_read(
-                Path(entry.path), "remote", "get-url", "origin", expected_failure=True
+            origin = await asyncio.to_thread(
+                config.git_read,
+                Path(entry.path),
+                "remote",
+                "get-url",
+                "origin",
+                expected_failure=True,
             )
             found = forges_mod.account_for(
                 entry, forges, forges_mod.remote_host(origin) if origin else None

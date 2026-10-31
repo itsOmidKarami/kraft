@@ -199,10 +199,10 @@ class LaunchContext:
     #: fanned out to a workspace member reads instead of `repo_entry` (its
     #: setup, test scopes, sandbox). Empty when nothing has an id.
     repositories: Mapping[str, RepoEntry] = field(default_factory=dict)
-    #: The accounts `forges.yaml` names (`st.forges`); None where nothing loaded it.
-    forges: ForgesFile | None = None
-    #: The reason forges.yaml did not load at startup, set only while `forges` is None.
-    forges_error: str | None = None
+    #: Reads `forges.yaml`'s accounts as running now (`st.forges`, None when it
+    #: never loaded) and, only while None, why. Read at each forge node, not
+    #: copied: a walk outlives a reload, a forge removal and the boot order.
+    forges: Callable[[], tuple[ForgesFile | None, str | None]] | None = None
     #: The live library's steering profiles, name to instructions: read only
     #: by an item whose snapshot predates frozen repository steering
     #: (`steering.for_repository`). Everything else runs on its snapshot's.
