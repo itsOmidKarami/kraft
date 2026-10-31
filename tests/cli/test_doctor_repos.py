@@ -11,7 +11,8 @@ import pytest
 import yaml
 from support.harness import make_repo
 
-from kraft import client, doctor
+from kraft import client, config, doctor
+from kraft import forges as forges_mod
 
 # `app` fixture: tests/conftest.py. It wires client.transport.http() to the ASGI app.
 
@@ -194,6 +195,20 @@ def test_doctor_reports_the_resolved_forge_cli(app, tmp_path, monkeypatch):
             False,
             "repo ${path}: forge_account 'a' says forge: github, the repo says forge: gitlab",
         ),
+        (
+            {
+                "a": {
+                    "forge": "gitlab",
+                    "web_url": "https://gitlab.com",
+                    "client": "api",
+                    "token": {"from": "env", "env": "CORP_GL"},
+                }
+            },
+            "a",
+            False,
+            "gitlab · gitlab-api · account a: client: api, and the gitlab-api backend is not in "
+            "this release; forge nodes stop on this repo",
+        ),
     ],
     ids=[
         "names-the-account",
@@ -202,6 +217,7 @@ def test_doctor_reports_the_resolved_forge_cli(app, tmp_path, monkeypatch):
         "named-account",
         "unknown-forge-account-fails",
         "named-account-on-the-wrong-forge-fails",
+        "api-account-not-in-this-release",
     ],
 )
 def test_the_forge_row_names_the_account_or_why_the_default_was_skipped(
@@ -228,6 +244,30 @@ def test_the_forge_row_names_the_account_or_why_the_default_was_skipped(
     row = _by_name(asyncio.run(doctor.run_checks()), "forge onforge")
 
     assert row["ok"] is ok and row["detail"] == detail.replace("${path}", str(repo))
+
+
+@pytest.mark.parametrize(
+    ("seen", "says"),
+    [
+        ({"project": "group/repo", "visible": True}, " · sees group/repo"),
+        ({"project": "group/repo", "visible": False}, " · cannot see group/repo"),
+        (None, " · not probed: the forge accounts could not be read"),
+    ],
+    ids=["sees-the-project", "cannot-see-the-project", "accounts-unreadable"],
+)
+def test_the_forge_row_says_whether_an_api_token_sees_the_project(tmp_path, seen, says):
+    repo = make_repo(tmp_path, name="onforge")
+    subprocess.run(
+        ["git", "remote", "add", "origin", "git@gitlab.com:group/repo.git"], cwd=repo, check=True
+    )
+    forges = forges_mod.ForgesFile.model_validate(
+        {"accounts": {"a": {"forge": "gitlab", "web_url": "https://gitlab.com", "client": "api"}}}
+    )
+    entry = config.RepoEntry(path=str(repo), forge="gitlab", forge_account="a")
+    probe = {"projects": {str(repo): seen}} if seen else None
+    accounts = {"a": {"client": "api", "probe": probe}} if seen else None
+    row = doctor._forge_check(entry, forges, accounts)
+    assert row["ok"] is False and row["detail"].endswith(says), row
 
 
 def test_doctor_warns_on_a_repo_on_the_dev_only_fake_forge(app, tmp_path):

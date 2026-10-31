@@ -311,6 +311,7 @@
    "shape": {
     "addon_updates": {},
     "bind": "_",
+    "forge_tokens": {},
     "index": {
      "documents": "_",
      "embeddings": "_",

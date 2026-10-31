@@ -546,6 +546,28 @@ def page(text: str, *, force_plain: bool = False) -> None:
         print(text)
 
 
+def token_problems(payload: dict) -> list[str]:
+    """`/health`'s API-account tokens that degrade it, as `NAME: state` or `NAME: expires on D`."""
+    from datetime import date
+
+    from kraft.adapters.forge import probe
+
+    rows = payload.get("forge_tokens") or {}
+    bad = probe.health_rows(
+        {
+            n: probe.Probe(n, "", r["state"], "", expires_on=r["expires_on"])
+            for n, r in rows.items()
+        },
+        date.today(),
+    )[1]
+    return [
+        f"{n}: expires on {rows[n]['expires_on']}"
+        if rows[n]["state"] == "ok"
+        else f"{n}: {rows[n]['state']}"
+        for n in bad
+    ]
+
+
 def health_block(payload: dict) -> str:
     """`/health`, readable. Every degraded reason is spelled out: a status that
     says "degraded" and nothing else sends you to the browser anyway."""
@@ -585,6 +607,7 @@ def health_block(payload: dict) -> str:
         pairs.append(("invalid intake", str(payload["invalid_intake"])))
     if payload.get("invalid_forges"):
         pairs.append(("invalid forges", str(payload["invalid_forges"])))
+    pairs.extend(("forge token", line) for line in token_problems(payload))
     stored = payload.get("storage")
     if stored:
         pairs.append(
