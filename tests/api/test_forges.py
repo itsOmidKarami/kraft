@@ -673,5 +673,5 @@ def test_an_http_write_never_points_an_account_at_a_secret_it_does_not_own(
     )
     assert reply.status_code == 403
     assert "another account" in reply.text
-    assert "CORP_GL" not in reply.text and "someone" not in reply.text and "shared" not in reply.text
+    assert not any(word in reply.text for word in ("CORP_GL", "someone", "shared"))
     assert _file(client).read_text() == before

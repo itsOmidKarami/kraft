@@ -8,9 +8,8 @@ import contextlib
 import getpass
 import os
 import sys
-from pathlib import Path
 
-from kraft import client, config, detect, render
+from kraft import client, detect, render
 from kraft import forges as forges_mod
 from kraft.cli import common
 from kraft.cli import forge as forge_cli
@@ -646,11 +645,6 @@ def _settle_api(
     if connected:
         say(f"{resolved['path']} is connected already: the forge flags change nothing")
         return {"forge_account": ns.forge_account}, False, True
-    if not (interactive or ns.forge):
-        raise SystemExit(
-            "error: no terminal to ask: pass --forge, --web-url (a self-hosted forge) and "
-            "--token-from or --token-stdin"
-        )
     host = resolved["remote_host"]
     if not host:
         raise SystemExit("error: the repo has no origin to name a forge host")
@@ -682,6 +676,11 @@ def _settle_api(
         say(f"using forge account {name} ({same['forge']}, {same['web_url']})")
         named = ns.forge_account or (None if same["default_for_host"] else name)
         return {"forge": same["forge"], "forge_account": named}, False, False
+    if not (interactive or ns.forge):  # only a new account needs asking
+        raise SystemExit(
+            "error: no terminal to ask: pass --forge, --web-url (a self-hosted forge) and "
+            "--token-from or --token-stdin"
+        )
     if ns.forge and resolved["forge"] and ns.forge != resolved["forge"]:
         say(f"--forge ignored: {host} is {resolved['forge']}")
     forge = resolved["forge"] or ns.forge or _ask_forge()
@@ -717,27 +716,14 @@ def _settle_api(
 
 
 def _show_api_account(result: dict) -> None:
-    """A repo just connected on a host whose account is `client: api`: that account's test,
-    shown. Never fails the connect."""
-    try:
-        accounts = _forge_accounts()
-        remote = config.git_read(
-            Path(result["path"]), "remote", "get-url", "origin", expected_failure=True
-        )
-        host = forges_mod.remote_host(remote or "")
-        name = result.get("forge_account") or next(
-            (
-                n
-                for n, a in accounts.items()
-                if a["default_for_host"] and forges_mod.web_host(a["web_url"]) == host
-            ),
-            None,
-        )
-        if name in accounts and accounts[name]["client"] == "api":
+    """A repo just connected on a host whose account is `client: api`, which the server
+    names in its answer: that account's test, shown. Never fails the connect."""
+    if name := result.get("api_account"):
+        try:
             _print(f"forge account {name}:")
             _test_account(name, _print)
-    except ValueError:
-        pass
+        except ValueError:
+            pass
 
 
 def _settle_forge(ns: argparse.Namespace, *, interactive: bool) -> tuple[dict, bool, bool | None]:

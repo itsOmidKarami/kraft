@@ -186,9 +186,10 @@ def test_a_failed_token_test_keeps_the_account_only_on_a_yes(
     assert seen == ([] if flags else ["  keep forge account code.corp.example anyway? [y/N] "])
 
 
+@pytest.mark.parametrize("flags", [[], ["--client", "api", "-y"]], ids=["plain", "client-api-y"])
 @pytest.mark.parametrize("state", ["ok", "refused"])
 def test_a_host_with_an_api_account_shows_its_test_and_asks_nothing(
-    app, capsys, repo, monkeypatch, state
+    app, capsys, repo, monkeypatch, state, flags
 ):
     """Connect never fails on an account that is already there."""
     _origin(repo, _SELF_HOSTED)
@@ -198,7 +199,7 @@ def test_a_host_with_an_api_account_shows_its_test_and_asks_nothing(
     _probes(monkeypatch, lambda a: state)
     seen = _prompts(monkeypatch, [])
     calls = _spy(monkeypatch, "test_forge", *_WRITES)
-    _connect(repo)
+    _connect(repo, *flags)  # -y with the API flag: the account is there, nothing to ask
     out = capsys.readouterr().out
     assert seen == [] and [c[0] for c in calls] == ["test_forge"]
     assert ("signed in as canned" in out) == (state == "ok") and f"{state} detail" in out

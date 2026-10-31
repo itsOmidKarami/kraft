@@ -6,12 +6,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import getpass
 import os
 import sys
 
 from pydantic import ValidationError
 
-from kraft import answers, client, config, forges
+from kraft import client, config, forges
 from kraft.cli import common
 from kraft.client import transport
 from kraft.paths import config_dir
@@ -53,15 +54,17 @@ def _token_flags(ns: argparse.Namespace) -> tuple[dict | None, bool]:
     if given and ns.client == "cli":
         raise _die("--client cli keeps no token: gh and glab keep their own sign-in")
     try:
-        source = parse_source(ns.token_from, ns.kind) if ns.token_from else None
+        source = parse_source(ns.token_from, ns.kind or "unknown") if ns.token_from else None
     except ValueError as exc:
         raise _die(str(exc)) from None
     return source, bool(ns.token_stdin)
 
 
 def _read_stdin_token() -> str:
-    # Whole stdin, never argv: a process listing shows argv.
-    value = sys.stdin.read().strip()
+    # Whole stdin, never argv: a process listing shows argv. A terminal is not echoed.
+    value = (
+        getpass.getpass("token (not shown): ") if sys.stdin.isatty() else sys.stdin.read()
+    ).strip()
     if not value:
         raise _die("--token-stdin: nothing on stdin")
     return value
@@ -94,14 +97,33 @@ def _write_command(name: str, change) -> dict:
         raise _die(f"{exc}; fix the file first") from None
     except ValidationError as exc:
         raise _die(forges.validation_text(exc)) from None
-    result = asyncio.run(client.reload_templates())
-    if answers.reload_refused(result):
+
+    def restore() -> None:
         if old is None:
             path.unlink(missing_ok=True)
         else:
             config.write_text(path, old)
-        asyncio.run(client.reload_templates())  # the refusal's mark is not the file's
-        raise _die(f"the server refused forges.yaml: {result.get('refused_forges')}")
+        with contextlib.suppress(Exception):
+            asyncio.run(client.reload_templates())  # the refusal's mark is not the file's
+
+    try:
+        result = asyncio.run(client.reload_templates())
+        # Only a refused forges.yaml undoes this write: another file's refusal is not ours.
+        refused = result.get("refused_forges")
+        accounts = {} if refused else asyncio.run(client.list_forges())["accounts"]
+    except BaseException:
+        restore()
+        raise
+    if refused:
+        restore()
+        raise _die(f"the server refused forges.yaml: {refused}")
+    row = accounts.get(name)
+    if not (row and (row.get("token") or {}).get("from") == "command"):
+        restore()
+        raise _die(
+            f"the server does not read the forges.yaml written here ({config_dir()}); "
+            "its config directory is another one. Nothing was changed"
+        )
     return result
 
 
@@ -186,6 +208,8 @@ def _cmd_add(ns: argparse.Namespace) -> None:
 
 def _cmd_edit(ns: argparse.Namespace) -> None:
     source, stdin = _token_flags(ns)
+    if ns.kind and not (source or stdin):
+        raise _die("--kind says what a token is: give --token-from or --token-stdin with it")
     fields = {
         k: v
         for k, v in {
@@ -203,9 +227,18 @@ def _cmd_edit(ns: argparse.Namespace) -> None:
         common.emit({"name": ns.name}, lambda r: f"edited {r['name']}", ns.json)
         return
     token = _read_stdin_token() if stdin else None
+    before = None
+    if token is not None:
+        before = asyncio.run(client.list_forges())["accounts"].get(ns.name) or {}
     result = asyncio.run(client.edit_forge(ns.name, fields))
     if token is not None:
-        result = asyncio.run(client.set_forge_token(ns.name, token, ns.kind))
+        try:
+            result = asyncio.run(client.set_forge_token(ns.name, token, ns.kind or "unknown"))
+        except Exception:
+            # Not left as api with no token; the paste's own error is the one to show.
+            with contextlib.suppress(Exception):
+                asyncio.run(client.edit_forge(ns.name, {k: before.get(k) for k in fields}))
+            raise
     common.emit(result, lambda r: f"edited {ns.name}", ns.json)
 
 
@@ -277,7 +310,7 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
     edit_p.add_argument("name")
     edit_p.add_argument("--api-url", metavar="URL", help="same origin as the web address")
     _token_args(edit_p)
-    edit_p.set_defaults(func=_cmd_edit)
+    edit_p.set_defaults(func=_cmd_edit, kind=None)  # None: a --kind with no token is refused
 
     list_p = verbs.add_parser("list", parents=[common_parser], help="the accounts")
     list_p.set_defaults(func=_cmd_list)

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import sys
 
 import pytest
 from support.addons import a_terminal, library_outcome, repo_with_library
@@ -12,6 +13,7 @@ from support.connect import _accounts, _forges_yaml, _origin, _posted, _prompts,
 from support.harness import commit_all
 
 from kraft import cli, client
+from kraft import config as config_mod
 
 # `app` and `repo` fixtures: tests/conftest.py.
 
@@ -352,13 +354,21 @@ def test_an_existing_user_sees_no_change(
         monkeypatch,
         *("ensure_repo", "list_forges", "add_forge", "test_forge", "edit_forge", "set_forge_token"),
     )
+    git_reads = []  # the CLI's own `git remote get-url`: connect never needs a second look
+    real = config_mod.git_read
+
+    def spy(*a, **kw):
+        if sys._getframe(1).f_globals["__name__"].startswith("kraft.cli"):  # not the server's
+            git_reads.append(a)
+        return real(*a, **kw)
+
+    monkeypatch.setattr(config_mod, "git_read", spy)
     cli.main(["repo", "connect", str(repo)])
     [entry] = asyncio.run(client.repos())
     assert (seen, posted) == ([], [{"path": str(repo)}])
     assert (entry["forge"], entry["project"], entry.get("forge_account")) == (forge, project, None)
     assert not _forges_yaml().exists()
-    # The connect comes first; only a look afterwards at an account the host may have follows.
-    assert calls[0][0] == "ensure_repo" and {c[0] for c in calls} <= {"ensure_repo", "list_forges"}
+    assert [c[0] for c in calls] == ["ensure_repo"] and git_reads == []
 
 
 _SELF_HOSTED = "git@code.corp.example:gitlab/team/app.git"

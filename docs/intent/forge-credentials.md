@@ -107,7 +107,7 @@ origin: src/kraft/forges.py §ForgesFile.load
 
 ## REQ pasted-token-is-never-echoed
 WHEN a person pastes a token, the system SHALL write it to a 0600 file in a 0700 directory and SHALL NOT return it in any answer, a refusal included.
-enforced-by: tests/api/test_forges.py::test_a_pasted_token_is_written_private_and_never_echoed[missing-kind], tests/api/test_forges.py::test_a_pasted_token_is_written_private_and_never_echoed[not-json], tests/api/test_forges.py::test_a_pasted_token_is_written_private_and_never_echoed[value-not-a-string], tests/api/test_forges.py::test_a_pasted_token_is_written_private_and_never_echoed[kind-is-the-value], tests/cli/test_repos_connect_api.py::test_a_token_on_stdin_reaches_only_set_forge_token
+enforced-by: tests/api/test_forges.py::test_a_pasted_token_is_written_private_and_never_echoed[pasted], tests/api/test_forges.py::test_a_pasted_token_is_written_private_and_never_echoed[pasted-twice], tests/api/test_forges.py::test_a_pasted_token_is_written_private_and_never_echoed[missing-kind], tests/api/test_forges.py::test_a_pasted_token_is_written_private_and_never_echoed[not-json], tests/api/test_forges.py::test_a_pasted_token_is_written_private_and_never_echoed[value-not-a-string], tests/api/test_forges.py::test_a_pasted_token_is_written_private_and_never_echoed[kind-is-the-value], tests/cli/test_repos_connect_api.py::test_a_token_on_stdin_reaches_only_set_forge_token, tests/cli/test_forge.py::test_a_token_is_read_from_stdin_never_argv[add-pasted], tests/cli/test_forge.py::test_a_token_is_read_from_stdin_never_argv[edit-pasted]
 origin: src/kraft/api/routes/forges.py
 
 ## REQ command-source-is-set-on-the-servers-machine
@@ -127,7 +127,7 @@ origin: src/kraft/cli/repo.py
 
 ## REQ a-token-is-never-a-variable-name
 IF a name given for an `env` source starts with a known token prefix, THEN the system SHALL refuse it in fixed words that do not repeat the name.
-enforced-by: tests/test_forges.py::test_a_bad_account_is_refused_naming_the_file_and_key[env-holds-a-token], tests/cli/test_repos_connect_api.py::test_an_api_account_asks_where_the_token_comes_from_only_when_git_has_none[env-refuses-a-pasted-token]
+enforced-by: tests/test_forges.py::test_an_env_name_kraft_needs_is_never_a_source[ghp_FAKEFAKEFAKE0123-True], tests/test_forges.py::test_an_env_name_kraft_needs_is_never_a_source[github_pat_FAKEFAKE0123-True], tests/test_forges.py::test_an_env_name_kraft_needs_is_never_a_source[gho_FAKEFAKEFAKE0123-True], tests/cli/test_repos_connect_api.py::test_an_api_account_asks_where_the_token_comes_from_only_when_git_has_none[env-refuses-a-pasted-token]
 origin: src/kraft/forges.py
 
 ## REQ sso-stop-names-the-authorize-link
