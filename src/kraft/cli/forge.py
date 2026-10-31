@@ -105,9 +105,64 @@ def _write_command(name: str, change) -> dict:
     return result
 
 
+def create_account(
+    name: str, account: dict, *, source: dict | None, token: str | None, kind: str, as_api: bool
+) -> dict:
+    """The account added: `account` is the forge, web_url, api_url, default_for_host and
+    ca_file to send. A `command` source is written on disk; a pasted `token` goes to
+    `set_forge_token` alone, and a failed paste leaves no half-made account behind."""
+    if source and source["from"] == "command":
+
+        def put(accounts: dict) -> None:
+            if name in accounts:
+                raise _die(f"forge account {name!r} already exists")
+            accounts[name] = {
+                **{k: v for k, v in account.items() if v},
+                "client": "api",
+                "token": source,
+            }
+
+        _write_command(name, put)
+        return {"name": name, **account}
+    result = asyncio.run(
+        client.add_forge(
+            name,
+            account["forge"],
+            account["web_url"],
+            api_url=account["api_url"],
+            default_for_host=account["default_for_host"],
+            client="api" if as_api else "cli",
+            ca_file=account["ca_file"],
+            token=source,
+        )
+    )
+    if token is not None:
+        try:
+            result = asyncio.run(client.set_forge_token(name, token, kind))
+        except Exception:
+            # No half-made account: an API account with no token would only fail later.
+            with contextlib.suppress(Exception):  # the paste's error is the one to show
+                asyncio.run(client.remove_forge(name))
+            raise
+    return result
+
+
+def set_command_source(name: str, fields: dict) -> dict:
+    """`fields` applied to the account in forges.yaml on disk (a command source's way in)."""
+
+    def change(accounts: dict) -> None:
+        if name not in accounts:
+            raise _die(f"no forge account named {name!r}")
+        accounts[name] = {
+            **accounts[name].model_dump(by_alias=True, exclude_none=True),
+            **fields,
+        }
+
+    return _write_command(name, change)
+
+
 def _cmd_add(ns: argparse.Namespace) -> None:
     source, stdin = _token_flags(ns)
-    as_api = bool(source or stdin) or ns.client == "api"
     account = {
         "forge": ns.forge,
         "web_url": ns.web_url,
@@ -115,41 +170,17 @@ def _cmd_add(ns: argparse.Namespace) -> None:
         "default_for_host": ns.default_for_host,
         "ca_file": ns.ca_file,
     }
+    result = create_account(
+        ns.name,
+        account,
+        source=source,
+        token=_read_stdin_token() if stdin else None,
+        kind=ns.kind,
+        as_api=bool(source or stdin) or ns.client == "api",
+    )
     if source and source["from"] == "command":
-
-        def put(accounts: dict) -> None:
-            if ns.name in accounts:
-                raise _die(f"forge account {ns.name!r} already exists")
-            accounts[ns.name] = {
-                **{k: v for k, v in account.items() if v},
-                "client": "api",
-                "token": source,
-            }
-
-        _write_command(ns.name, put)
         common.emit({"name": ns.name}, lambda r: f"added {r['name']} (client: api)", ns.json)
         return
-    token = _read_stdin_token() if stdin else None
-    result = asyncio.run(
-        client.add_forge(
-            ns.name,
-            ns.forge,
-            ns.web_url,
-            api_url=ns.api_url,
-            default_for_host=ns.default_for_host,
-            client="api" if as_api else "cli",
-            ca_file=ns.ca_file,
-            token=source,
-        )
-    )
-    if token is not None:
-        try:
-            result = asyncio.run(client.set_forge_token(ns.name, token, ns.kind))
-        except Exception:
-            # No half-made account: an API account with no token would only fail later.
-            with contextlib.suppress(Exception):  # the paste's error is the one to show
-                asyncio.run(client.remove_forge(ns.name))
-            raise
     common.emit(result, lambda r: f"added {ns.name} ({r['forge']}, {r['web_url']})", ns.json)
 
 
@@ -168,16 +199,7 @@ def _cmd_edit(ns: argparse.Namespace) -> None:
     if not fields:
         raise _die("nothing to change: give a flag")
     if source and source["from"] == "command":
-
-        def change(accounts: dict) -> None:
-            if ns.name not in accounts:
-                raise _die(f"no forge account named {ns.name!r}")
-            accounts[ns.name] = {
-                **accounts[ns.name].model_dump(by_alias=True, exclude_none=True),
-                **fields,
-            }
-
-        _write_command(ns.name, change)
+        set_command_source(ns.name, fields)
         common.emit({"name": ns.name}, lambda r: f"edited {r['name']}", ns.json)
         return
     token = _read_stdin_token() if stdin else None
