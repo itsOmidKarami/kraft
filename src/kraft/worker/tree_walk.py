@@ -40,7 +40,7 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 #: How a folder is opened: never through a link, never inherited by a child.
-DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)  # noqa: E501
 #: How many folder descriptors a walk keeps open, besides the top's (the
 #: caller's). Briefly a few more: the one it is opening before it lets the
 #: shallowest go, the parent it reopens by `..` before it closes the child,
