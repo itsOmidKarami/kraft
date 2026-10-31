@@ -428,9 +428,9 @@ _IN_PROCESS_FIX = {
 def _in_process_fix(cause: dict | None) -> str:
     """The end of the reason for `cause` (`_forge_cause`'s facts), or the default."""
     if cause and cause.get("sso_url"):
+        # The address is `facts.sso_url`, which every screen shows once, as the hint.
         return (
-            "The forge needs the token authorized for single sign-on: "
-            f"{cause['sso_url']}. Authorize it, then retry."
+            "Authorize the forge CLI's token for single sign-on (the address is below), then retry."
         )
     return _IN_PROCESS_FIX.get(cause["cause"] if cause else "", _IN_PROCESS_FIX_DEFAULT)
 

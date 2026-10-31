@@ -104,9 +104,7 @@ async def test_a_forge_task_failure_names_its_cause_in_the_stops_facts(
 
 
 _SSO = "https://github.com/orgs/acme/sso?authorization_request=abc"
-_SSO_FIX = (
-    f"The forge needs the token authorized for single sign-on: {_SSO}. Authorize it, then retry."
-)
+_SSO_FIX = "Authorize the forge CLI's token for single sign-on (the address is below), then retry."
 _TODAYS_FIX = (
     "The forge refused the credentials on the Kraft server's machine. Fix them, then retry."
 )
@@ -137,10 +135,9 @@ _TODAYS_FIX = (
 async def test_a_refused_token_stop_carries_the_sso_address_only_when_it_is_safe(
     item_on, tmp_path, fake_agent, monkeypatch, sso_url, facts, fix, fix_loop, stop_kind
 ):
-    """The forge's SSO address reaches the stop's facts and, in a fix-loop node,
-    the reason: only as an `https://` address with no whitespace or backtick
-    (the reason is plain text). Anything else is dropped and the stop reads as
-    it always did."""
+    """The forge's SSO address reaches the stop's facts, never the reason (the
+    screens show it once, as the hint): only as a plain `https://` address.
+    Anything else is dropped and the stop reads as it always did."""
     error = {"reason": "forbidden", "sso_url": sso_url}
     monkeypatch.setattr(_forge.run, "resolve", lambda name: _RaisingWith("HTTP 403", **error))
     extra = {"fix_loop": {"tasks": [_agent("repair")]}} if fix_loop else {}
@@ -153,6 +150,8 @@ async def test_a_refused_token_stop_carries_the_sso_address_only_when_it_is_safe
     if stop_kind == "infra":
         assert stop["reason"].endswith(fix)
         assert "`" not in stop["reason"]
+        # Shown once, as the hint under the reason, from the facts.
+        assert "https://" not in stop["reason"]
 
 
 async def test_a_forge_rate_limit_parks_the_item_until_the_forge_allows_it(

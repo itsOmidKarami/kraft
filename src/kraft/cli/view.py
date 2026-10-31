@@ -8,6 +8,7 @@ import json
 import sys
 
 from kraft import answers, client, logs, render, usage
+from kraft.adapters.forge.models import safe_sso_url
 from kraft.cli import common
 from kraft.vocab import StopKind, WorkItemEvent, WorkItemStatus
 
@@ -129,6 +130,10 @@ def _render_show(item: dict, full: dict | None = None) -> str:
         at = next((i + 1 for i, (key, _) in enumerate(pairs) if key == "stop_reason"), len(pairs))
         if kind := (full.get("stop") or {}).get("kind"):
             pairs.insert(at, ("stop_kind", kind))
+            at += 1
+        # The reason no longer carries the address; this row does (plain text, the safe form).
+        if sso := safe_sso_url(((full.get("stop") or {}).get("facts") or {}).get("sso_url")):
+            pairs.insert(at, ("sso_url", sso))
             at += 1
         if (hint := _raise_hint(full)) and not item.get("suggested_action"):
             pairs.insert(at, ("next", hint))
