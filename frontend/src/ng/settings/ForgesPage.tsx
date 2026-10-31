@@ -8,7 +8,7 @@ import { Button } from "../ui/Button";
 import { Empty } from "../ui/Empty";
 import { LinkButton } from "../ui/LinkButton";
 import { showToast } from "../ui/Toast";
-import { type ForgeAccount, accountsOf, EMPTY_FORGES, EMPTY_FORGES_WHY, FORGES_LEDE, namedBy, probeWords, sourceWords } from "./forgeWords";
+import { type ForgeAccount, accountsOf, EMPTY_FORGES, EMPTY_FORGES_WHY, FORGES_LEDE, namedBy, probeWords, SSO_LINK, sourceWords, TEST_TO_CHECK } from "./forgeWords";
 import { AddForgeDialog } from "./AddForgeDialog";
 import { EditForgeDialog } from "./EditForgeDialog";
 import { Block } from "./parts";
@@ -37,17 +37,24 @@ export function useForges() {
   const remove = (name: string) => {
     setRemoving((r) => [...r, name]);
     const done = () => setRemoving((r) => r.filter((n) => n !== name));
-    let refused = false;
+    // Where the DELETE is: Undo says one thing for each, and nothing once the server has refused (its toast is up).
+    let phase: "waiting" | "sent" | "gone" | "refused" = "waiting";
     const { undo } = sendLater(async ({ keepalive }) => {
+      phase = "sent";
       const r = await request(`/forges/${encodeURIComponent(name)}`, { method: "DELETE", ...(keepalive && { keepalive }) });
-      refused = r.status !== 204;
+      phase = r.status === 204 ? "gone" : "refused";
       done();
-      if (refused) showToast(detailOf(r.body), { tone: "error" });
+      if (phase === "refused") showToast(detailOf(r.body), { tone: "error" });
       void load();
     }, UNDO_WINDOW_MS);
     showToast(`Removed ${name}`, {
       ms: UNDO_WINDOW_MS,
-      action: { label: "Undo", run: () => { if (undo()) done(); else if (!refused) showToast(`Too late to undo: ${name} was removed.`); } },
+      action: { label: "Undo", run: () => {
+        if (undo()) done();
+        else if (phase === "sent") showToast(`${name} is being removed.`);
+        else if (phase === "gone") showToast(`Too late to undo: ${name} was removed.`);
+      },
+    },
     });
   };
   return { accounts: accounts?.filter((a) => !removing.includes(a.name)), repos, error, load, remove };
@@ -71,6 +78,9 @@ export function ForgesPage() {
           <p className="lede">{FORGES_LEDE}</p>
         </div>
         {error && <p className="set-error" role="alert">{error}</p>}
+        {missing.map((r) => (
+          <p key={r.name} className="set-hint is-warn">{r.name} names {r.forge_account}, which is not in forges.yaml: it uses gh or glab.</p>
+        ))}
         {accounts && accounts.length === 0 && (
           <Empty variant="block" action={add}>
             {EMPTY_FORGES} {EMPTY_FORGES_WHY}
@@ -84,10 +94,9 @@ export function ForgesPage() {
                   <thead>
                     <tr>
                       <th scope="col">Name</th>
-                      <th scope="col">Forge</th>
-                      <th scope="col">Client</th>
-                      <th scope="col">Token</th>
                       <th scope="col">State</th>
+                      <th scope="col">Forge</th>
+                      <th scope="col">Token</th>
                       <th scope="col">Checked</th>
                       <th scope="col">Used by</th>
                       <th scope="col"><span className="adr-sr">Actions</span></th>
@@ -99,20 +108,21 @@ export function ForgesPage() {
                       const users = namedBy(repos, a.name);
                       return (
                         <tr key={a.name}>
-                          <td className="set-mono is-dim">{a.name}</td>
-                          <td className="is-dim">{a.forge} <span className="set-fg-url">{a.web_url}</span></td>
-                          <td className="is-dim">{a.client}</td>
-                          <td className="is-dim">{sourceWords(a)}</td>
+                          <td className="set-mono is-dim set-fg-clip" title={a.name}>{a.name}</td>
                           <td>
                             <div className="set-fg-state">
                               {s.word && <Badge tone={s.tone}>{s.word}</Badge>}
-                              {s.ssoUrl ? (
-                                <LinkButton inline href={s.ssoUrl} target="_blank" rel="noopener noreferrer">{s.ssoUrl}</LinkButton>
+                              {a.client === "cli" ? (
+                                <span className="set-fg-why">{TEST_TO_CHECK}</span>
+                              ) : s.ssoUrl ? (
+                                <LinkButton inline href={s.ssoUrl} target="_blank" rel="noopener noreferrer">{SSO_LINK}</LinkButton>
                               ) : (
-                                s.line && s.line !== sourceWords(a) ? <span className="set-fg-why">{s.line}</span> : !s.word && <Dash />
+                                s.line && <span className="set-fg-why">{s.line}</span>
                               )}
                             </div>
                           </td>
+                          <td className="is-dim">{a.forge} <span className="set-fg-url">{a.web_url}</span></td>
+                          <td className="is-dim set-fg-clip" title={sourceWords(a)}>{sourceWords(a)}</td>
                           <td className="is-dim">{a.probe ? ago(a.probe.checked_at) : <Dash />}</td>
                           <td className="is-dim">{users.length ? users.join(", ") : <Dash />}</td>
                           <td className="is-act"><Button aria-label={`Edit ${a.name}`} onClick={() => setEditing(a.name)}>Edit</Button></td>
@@ -124,11 +134,6 @@ export function ForgesPage() {
               </div>
             </div>
           </Block>
-        )}
-        {missing.length > 0 && (
-          <p className="set-hint is-warn">
-            {missing.map((r) => `${r.name} names ${r.forge_account}`).join("; ")}, which is not in forges.yaml: {missing.length === 1 ? "it uses" : "they use"} gh or glab.
-          </p>
         )}
         {accounts && (
           <p className="set-hint set-fg-note">

@@ -205,18 +205,18 @@
 /* Settings › Workers: the machines table (styled like analytics' .an-table, which settings/ may not style), and the Add and Edit dialogs. */
 .set-block-head .set-block-aside { margin-left: auto; }
 .set-block-action { display: inline-flex; align-items: center; gap: 8px; }
-.set-wk-body { display: flex; flex-direction: column; gap: 8px; padding: 0 8px 4px; }
-.set-wk-scroll { overflow-x: auto; }
-.set-wk-table { width: 100%; border-collapse: collapse; font-size: var(--fs-label); }
-.set-wk-table th { padding: 4px 8px; font-size: var(--fs-label); font-weight: 400; text-align: left; color: var(--text-muted); border-bottom: 1px solid var(--line); white-space: nowrap; }
-.set-wk-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); color: var(--text); vertical-align: middle; }
+.set-wk-body, .set-fg-body { display: flex; flex-direction: column; gap: 8px; padding: 0 8px 4px; }
+.set-wk-scroll, .set-fg-scroll { overflow-x: auto; }
+.set-wk-table, .set-fg-table { width: 100%; border-collapse: collapse; font-size: var(--fs-label); }
+.set-wk-table th, .set-fg-table th { padding: 4px 8px; font-size: var(--fs-label); font-weight: 400; text-align: left; color: var(--text-muted); border-bottom: 1px solid var(--line); white-space: nowrap; }
+.set-wk-table td, .set-fg-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); color: var(--text); vertical-align: middle; }
 .set-wk-table .is-num { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
 .set-wk-table tr.is-off td.is-dim { color: var(--text-muted); }
-.set-wk-dash { color: var(--text-muted); }
-.set-wk-note { padding: 0 4px; }
-.set-wk-table .is-act { text-align: right; white-space: nowrap; }
-.set-wk-state { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
-.set-wk-why { font-size: var(--fs-meta); color: var(--text-muted); overflow-wrap: anywhere; }
+.set-wk-dash, .set-fg-dash, .set-fg-url { color: var(--text-muted); }
+.set-wk-note, .set-fg-note { padding: 0 4px; }
+.set-wk-table .is-act, .set-fg-table .is-act { text-align: right; white-space: nowrap; }
+.set-wk-state, .set-fg-state { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.set-wk-why, .set-fg-why { font-size: var(--fs-meta); color: var(--text-muted); overflow-wrap: anywhere; }
 .set-wk-dlg.dialog { box-sizing: border-box; width: min(560px, 100%); }
 .set-wk-form, .set-wk-token { display: flex; flex-direction: column; gap: 14px; }
 .set-wk-field { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-meta); }
@@ -236,16 +236,21 @@
 .set-wk-rotate { display: flex; gap: 8px; }
 .set-wk-remove { margin-right: auto; }
 @media (max-width: 767px) { .set-wk-pair { grid-template-columns: minmax(0, 1fr); } }
-.set-fg-body { display: flex; flex-direction: column; gap: 8px; padding: 0 8px 4px; }
-.set-fg-scroll { overflow-x: auto; }
-.set-fg-table { width: 100%; border-collapse: collapse; font-size: var(--fs-label); }
-.set-fg-table th { padding: 4px 8px; font-size: var(--fs-label); font-weight: 400; text-align: left; color: var(--text-muted); border-bottom: 1px solid var(--line); white-space: nowrap; }
-.set-fg-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); color: var(--text); vertical-align: middle; }
-.set-fg-table .is-act { text-align: right; white-space: nowrap; }
-.set-fg-dash, .set-fg-url { color: var(--text-muted); }
-.set-fg-table td:first-child { white-space: nowrap; }
-.set-fg-url { display: block; overflow-wrap: break-word; }
-.set-fg-replace { margin-top: 10px; }
-.set-fg-state { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
-.set-fg-why { font-size: var(--fs-meta); color: var(--text-muted); overflow-wrap: anywhere; }
-.set-fg-note { padding: 0 4px; }
+/* Fixed layout: a cell never grows to its longest unbroken string, so the table fits its card at 1280. */
+.set-fg-table { table-layout: fixed; }
+.set-fg-table th:nth-child(1) { width: 16%; }
+.set-fg-table th:nth-child(2) { width: 19%; }
+.set-fg-table th:nth-child(3) { width: 18%; }
+.set-fg-table th:nth-child(4) { width: 17%; }
+.set-fg-table th:nth-child(5) { width: 9%; }
+.set-fg-table th:nth-child(7) { width: 64px; }
+.set-fg-table td { overflow-wrap: anywhere; }
+.set-fg-table .set-fg-clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.set-fg-url { display: block; }
+.set-fg-fixed { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; font-size: var(--fs-meta); }
+.set-fg-fixed dt { color: var(--text-muted); }
+.set-fg-fixed dd { margin: 0; overflow-wrap: anywhere; }
+.set-fg-replace { padding-top: 14px; border-top: 1px solid var(--line); }
+.set-fg-sub { margin: 0; font-size: var(--fs-body); font-weight: 600; }
+.set-fg-live:empty { position: absolute; }
+.set-fg-test[aria-disabled="true"] { opacity: .5; cursor: default; }

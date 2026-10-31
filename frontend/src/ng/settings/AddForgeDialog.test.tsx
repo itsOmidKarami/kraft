@@ -91,7 +91,10 @@ describe("AddForgeDialog", () => {
     expect(bodyHasToken()).toBe(false);
   });
 
-  it("clears the pasted value when the choice moves off paste, and says what paste does", () => {
+  it.each([
+    ["source", () => pick("file")],
+    ["client", () => pick("cli")],
+  ])("clears the pasted value when the %s moves off paste, and says what paste does", (_id, leave) => {
     mount();
     fill();
     pick("api");
@@ -100,8 +103,9 @@ describe("AddForgeDialog", () => {
     expect(pw()).toHaveAttribute("autocomplete", "new-password");
     expect(pw()).toHaveAttribute("data-1p-ignore");
     fireEvent.change(pw(), { target: { value: TOKEN } });
-    pick("file");
-    pick("paste");
+    leave();
+    pick(_id === "client" ? "api" : "paste");
+    if (_id === "client") pick("paste");
     expect(pw()).toHaveValue("");
   });
 

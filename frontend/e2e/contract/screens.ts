@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { Scenario, Variant } from "./mocks/fixtures";
 import { withCapLimit, withFixRoundOutcome, withOneOffPending, withProducer, withReviewer, withScopes, withStop, withTestResult } from "./mocks/fixtures";
 import { app, editorsRoute, item, type AppOpts } from "./kit";
@@ -173,7 +173,14 @@ export const STATES: State[] = [
   { area: "settings", state: "notifications", ...appSettings("/settings/notifications") },
   { area: "settings", state: "access", ...appSettings("/settings/access") },
   { area: "settings", state: "appearance", ...appSettings("/settings/appearance") },
-  { area: "settings", state: "forge-accounts", ...appArea(FORGES) },
+  // The fixture's account with a very long name, address and file path is in this table: at 1280 it must fit its card
+  // whole (every column visible, nothing scrolled), so a cell that grows to its longest string fails this state.
+  { area: "settings", state: "forge-accounts", app: async (p) => {
+    await app(p, FORGES, { ready: (pg) => pg.getByRole("table", { name: "Forge accounts" }).waitFor() });
+    const fits = await p.locator(".set-fg-scroll").evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
+    expect(fits, "the Forge accounts table fits its card at 1280").toBe(true);
+    await expect(p.getByRole("columnheader", { name: "Used by" })).toBeInViewport();
+  } },
   { area: "settings", state: "forge-accounts-empty", app: (p) => app(p, FORGES, { mock: { forges: "empty" }, ready: (pg) => pg.getByText(/No forge accounts/).waitFor() }) },
   { area: "settings", state: "forge-accounts-unloadable", app: (p) => app(p, FORGES, { mock: { forges: "unloadable" }, ready: (pg) => pg.getByRole("alert").waitFor() }) },
   { area: "settings", state: "forge-accounts-add-paste", app: async (p) => { await app(p, FORGES, { ready: (pg) => pg.getByRole("button", { name: "Add account" }).first().waitFor() }); await p.getByRole("button", { name: "Add account" }).first().click(); await p.getByRole("radio", { name: "api" }).click(); await p.getByRole("radio", { name: "paste" }).click(); await p.waitForTimeout(500); } },

@@ -4,7 +4,7 @@ import { forgesFixture } from "../../../e2e/contract/mocks/ngForges";
 import { stubFetch } from "../item/testkit";
 import { Toaster } from "../ui/Toast";
 import { EditForgeDialog } from "./EditForgeDialog";
-import { COMMAND_READ_ONLY, DEFAULT_REMOVABLE, ENV_RESTART, NAMED_BY, SWITCH_DELETES_PASTED, TO_CLI_DROPS } from "./forgeWords";
+import { COMMAND_READ_ONLY, COMMAND_SET_WITH, DEFAULT_REMOVABLE, ENV_RESTART, NAMED_BY, SWITCH_DELETES_PASTED, TO_CLI_DROPS } from "./forgeWords";
 
 const TOKEN = "glpat-" + "x1y2z3w4v5u6t7s8r9q0";
 const FIXTURE = forgesFixture(new Date());
@@ -23,9 +23,11 @@ const pw = () => document.querySelector<HTMLInputElement>('input[type="password"
 afterEach(() => vi.unstubAllGlobals());
 
 describe("EditForgeDialog", () => {
-  it("name, forge and web address are read-only, and a Save sends only what changed", async () => {
+  it("name, forge and web address are text, focus opens on Client, and a Save sends only what changed", async () => {
     const { of, onSaved, onClose } = mount("corp-gl");
-    expect(screen.getByRole("textbox", { name: /^Name/ })).toHaveAttribute("readonly");
+    expect(screen.queryByRole("textbox", { name: /^(Name|Forge|Web address)/ })).toBeNull();
+    expect(screen.getByText("Web address").nextElementSibling).toHaveTextContent("https://gitlab.corp.example");
+    expect(screen.getByRole("radio", { name: "api" })).toHaveFocus();
     expect(screen.getByText(/To change these, remove the account and add it again\./)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     fireEvent.change(screen.getByRole("textbox", { name: /^API address/ }), { target: { value: "https://gl.example/api/v4" } });
@@ -48,8 +50,10 @@ describe("EditForgeDialog", () => {
   // with client cli or token null would): leaving paste and the client switch out here is the guard. Do not simplify.
   it("a command source shows its command read-only and no Save ever sends token or client", async () => {
     const { of, onClose } = mount("vault-gl", { "PATCH /forges/vault-gl": [200, {}] });
-    expect(screen.getByLabelText("Token command")).toHaveTextContent("op read op://dev/gl/token");
-    expect(screen.getByText(COMMAND_READ_ONLY("vault-gl"))).toBeInTheDocument();
+    // A command can embed a token: its text is never in the page, only that there is one.
+    expect(screen.getByText(COMMAND_SET_WITH)).toBeInTheDocument();
+    expect(screen.getByText(COMMAND_READ_ONLY)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("op read");
     expect(screen.queryByRole("radio", { name: "paste" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Replace token" })).toBeNull();
     expect(pw()).toBeNull();
@@ -123,22 +127,64 @@ describe("EditForgeDialog", () => {
     expect(of("POST")).toEqual([]);
   });
 
-  it("Test is disabled and reads Testing… while the check runs, then shows the output and re-reads the list", async () => {
+  // A check can take 90 s. Test stays focused and announced (aria-disabled, never disabled), Cancel stays usable, and the
+  // check that follows a new token holds the same flag so a second Test cannot run beside it.
+  it.each([
+    ["test", () => fireEvent.click(screen.getByRole("button", { name: "Test" })), {}],
+    ["after-replace", () => { fireEvent.change(pw()!, { target: { value: TOKEN } }); fireEvent.click(screen.getByRole("button", { name: "Replace token" })); }, { "PUT /forges/corp-gl/token": [200, {}] }],
+    ["after-save", () => { pick("variable"); fireEvent.change(screen.getByRole("textbox", { name: /Variable name/ }), { target: { value: "CORP_GL" } }); save(); }, {}],
+  ] as const)("a running check is announced, keeps Test focused and Cancel usable: %s", async (id, start, more) => {
     let answer!: (r: Response) => void;
-    const { onSaved } = mount("corp-gl");
+    const { onSaved, onClose } = mount("corp-gl", more as Record<string, [number, unknown]>);
     const real = fetch;
-    vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => (init?.method === "POST" ? new Promise<Response>((r) => (answer = r)) : real(url, init))));
-    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+    const posts: string[] = [];
+    vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => (init?.method === "POST" ? (posts.push(url), new Promise<Response>((r) => (answer = r))) : real(url, init))));
+    if (id === "test") screen.getByRole("button", { name: "Test" }).focus();
+    start();
     const busy = await screen.findByRole("button", { name: "Testing…" });
-    expect(busy).toBeDisabled();
+    expect(busy).toHaveAttribute("aria-disabled", "true");
+    expect(busy).not.toBeDisabled();
+    if (id === "test") expect(busy).toHaveFocus();
+    expect(screen.getByRole("status", { name: "Test status" })).toHaveTextContent("Testing corp-gl…");
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+    fireEvent.click(busy); // ignored: one check at a time
+    expect(posts).toHaveLength(1);
+    if (id !== "test") expect(onClose).not.toHaveBeenCalled(); // the dialog waits for the check
     answer(new Response(JSON.stringify(TESTED), { status: 200 }));
-    expect(await screen.findByLabelText("Test output")).toHaveTextContent("sees 2 repos");
-    expect(screen.getByRole("button", { name: "Test" })).toBeEnabled();
+    if (id === "test") {
+      expect(await screen.findByLabelText("Test output")).toHaveTextContent("sees 2 repos");
+      expect(screen.getByRole("status", { name: "Test status" })).toContainElement(screen.getByLabelText("Test output"));
+      expect(screen.getByRole("button", { name: "Test" })).not.toHaveAttribute("aria-disabled");
+    } else await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(onSaved).toHaveBeenCalled();
   });
 
+  it("Cancel and Esc close the dialog while a check runs", async () => {
+    const { onClose } = mount("corp-gl");
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+    await screen.findByRole("button", { name: "Testing…" });
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
-    ["named", "shared-gl", [{ name: "repo-zero", forge_account: "shared-gl" }], false, NAMED_BY(["repo-zero"])],
+    ["with-other-edits", true],
+    ["alone", false],
+  ])("Enter in the new token replaces it and never saves other edits: %s", async (_id, edited) => {
+    const { of, onClose } = mount("corp-gl", { "PUT /forges/corp-gl/token": [200, {}] });
+    if (edited) fireEvent.change(screen.getByRole("textbox", { name: /^API address/ }), { target: { value: "https://gl.example/api/v4" } });
+    fireEvent.change(pw()!, { target: { value: TOKEN } });
+    fireEvent.submit(pw()!.closest("form")!); // what Enter in the field does
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(of("PUT")).toHaveLength(1);
+    expect(of("PATCH")).toEqual([]);
+  });
+
+  it.each([
+    ["named", "shared-gl", [{ name: "repo-zero", forge_account: "shared-gl" }], false, "Can't remove: repo-zero uses it. Point it at another account first."],
     ["unnamed-default", "shared-gl", [], true, DEFAULT_REMOVABLE],
   ])("Remove: %s", (_id, name, repos, enabled, hint) => {
     const { onRemove } = mount(name, {}, repos);

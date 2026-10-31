@@ -86,9 +86,9 @@ export function AddForgeDialog({ onClose, onAdded }: { onClose: () => void; onAd
         <Field label="Web address" hint="The host's address, e.g. https://gitlab.corp.example."><input value={webUrl} onChange={(e) => setWebUrl(e.target.value)} /></Field>
         <div className="set-wk-field">
           <span className="field-label">Client</span>
-          <Segmented label="Client" value={client} onChange={setClient} options={[{ value: "cli", label: "cli" }, { value: "api", label: "api" }]} />
+          <Segmented label="Client" value={client} onChange={(c) => { setPaste(""); setClient(c); }} options={[{ value: "cli", label: "cli" }, { value: "api", label: "api" }]} />
         </div>
-        <Field label="API address" hint="Blank: derived from the web address."><input placeholder="derived from the web address" value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} /></Field>
+        <Field label="API address" hint="Blank: derived from the web address."><input value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} /></Field>
         <div className="set-wk-switch">
           <Switch label="Default for its host" checked={isDefault} onChange={setDefault} />
           <span className="field-label">Default for its host</span>

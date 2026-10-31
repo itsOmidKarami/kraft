@@ -16,12 +16,16 @@ export const FORGES_LEDE = "Which forge each host runs and, for an API account, 
 export const EMPTY_FORGES = "No forge accounts. Kraft uses gh and glab as they are signed in, as it always has.";
 export const EMPTY_FORGES_WHY = "Add one for a self-hosted host whose name does not say its forge, or to sign in with a token instead of gh or glab.";
 export const CLI_SIGN_IN = (forge: string) => (forge === "github" ? "gh's own sign-in" : "glab's own sign-in");
-export const COMMAND_READ_ONLY = (name: string) => `A command runs on the server's machine, so it is set there: kraft admin forge edit ${name} --token-from 'command:…'`;
+export const COMMAND_READ_ONLY = "A command runs on the server's machine, so it is set there. Its text is not shown here: it can hold a token.";
+export const COMMAND_SET_WITH = "command (set with kraft admin forge edit)";
+export const SSO_LINK = "Authorize for single sign-on";
+export const TEST_TO_CHECK = "Test to check";
 export const COMMAND_ADD_HINT = "A token command is set on the server's machine: kraft admin forge add NAME --token-from 'command:…'";
 export const ENV_RESTART = "Kraft takes the variable from its own environment when it starts, so a new value needs a restart.";
 export const PASTE_ONCE = "Kraft keeps it in a file under its home that only the server's user can read, and never shows it again.";
 export const TO_CLI_DROPS = "With client cli, gh or glab keep their own sign-in: the token source and CA file are dropped, and a pasted token's file is deleted.";
-export const NAMED_BY = (repos: string[]) => `Named by ${repos.join(", ")}: give them another forge account first.`;
+export const NAMED_BY = (repos: string[]) =>
+  repos.length === 1 ? `Can't remove: ${repos[0]} uses it. Point it at another account first.` : `Can't remove: ${repos.join(", ")} use it. Point them at another account first.`;
 export const DEFAULT_REMOVABLE = "Repos that use it as their host's default go back to gh or glab.";
 export const FIXED_FIELDS = "To change these, remove the account and add it again.";
 export const PHONE_READ_ONLY = "Add accounts and change their addresses in Settings on a wider screen, or with kraft admin forge in a terminal.";
@@ -59,9 +63,12 @@ export function probeWords(a: ForgeAccount, today: Date): { word: string | null;
   const hidden = Object.values(p.projects).filter((x) => !x.visible);
   if (hidden.length) {
     const link = hidden.map((x) => safeSso(x.sso_url)).find(Boolean) ?? null;
-    return out(`cannot see ${plural(hidden.length, "repo")}`, "warn", `cannot see ${hidden.map((x) => x.project).join(", ")}`, link);
+    // A project the probe did not name falls back to its own detail, then the probe's.
+    const names = hidden.map((x) => x.project).filter(Boolean);
+    const why = names.length ? `cannot see ${names.join(", ")}` : hidden.map((x) => x.detail).find(Boolean) ?? p.detail;
+    return out(`cannot see ${plural(hidden.length, "repo")}`, "warn", why, link);
   }
-  return out("signed in", "ok", `as ${p.login}`);
+  return out("signed in", "ok", p.login ? `as ${p.login}` : p.detail);
 }
 
 export const namedBy = (repos: Pick<Repo, "name" | "forge_account">[], name: string): string[] =>

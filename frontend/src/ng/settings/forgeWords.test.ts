@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { forgesFixture } from "../../../e2e/contract/mocks/ngForges";
 import type { ForgeProbe } from "../../types";
-import { CLI_SIGN_IN, EXPIRY_WARN_DAYS, accountsOf, namedBy, probeWords, sourceWords, type ForgeAccount } from "./forgeWords";
+import { CLI_SIGN_IN, EXPIRY_WARN_DAYS, NAMED_BY, accountsOf, namedBy, probeWords, sourceWords, type ForgeAccount } from "./forgeWords";
 
 const NOW = new Date(2026, 9, 31, 12, 0);
 const ymd = (today: Date, days: number) => {
@@ -55,6 +55,8 @@ describe("probeWords puts the state a person must act on first", () => {
     ["sso-url-unsafe", { probe: probe({ state: "forbidden", sso_url: "javascript:alert(1)" }) }, NOW, { word: "needs SSO", ssoUrl: null }],
     ["project-sso", { probe: probe({ projects: { a: { project: "t/a", visible: false, detail: "", sso_url: SSO } } }) }, NOW, { ssoUrl: SSO }],
     ["unreachable", { probe: probe({ state: "unreachable", detail: "timed out" }) }, NOW, { word: "unreachable", tone: "muted", line: "timed out" }],
+    ["ok-no-login", { probe: probe({ login: null, detail: "token has no user" }) }, NOW, { word: "signed in", tone: "ok", line: "token has no user" }],
+    ["cannot-see-unnamed-project", { probe: probe({ detail: "scope", projects: { a: { project: "", visible: false, detail: "" } } }) }, NOW, { word: "cannot see 1 repo", line: "scope" }],
     ["cannot-see-a-project", { probe: probe({ projects: { a: { project: "team/app", visible: false, detail: "" } } }) }, NOW, { word: "cannot see 1 repo", tone: "warn", line: "cannot see team/app" }],
   ];
   it.each(cases)("%s", (_id, over, today, want) => {
@@ -65,6 +67,13 @@ describe("probeWords puts the state a person must act on first", () => {
 it("EXPIRY_WARN_DAYS is probe.py's", () => {
   const py = readFileSync(new URL("../../../../src/kraft/adapters/forge/probe.py", import.meta.url), "utf-8");
   expect(Number(/EXPIRY_WARN_DAYS = (\d+)/.exec(py)?.[1])).toBe(EXPIRY_WARN_DAYS);
+});
+
+it.each([
+  ["one", ["kraft-plugins"], "Can't remove: kraft-plugins uses it. Point it at another account first."],
+  ["many", ["a", "b"], "Can't remove: a, b use it. Point them at another account first."],
+])("the remove refusal says it is one: %s", (_id, repos, want) => {
+  expect(NAMED_BY(repos)).toBe(want);
 });
 
 it("namedBy is the repos whose forge_account is the account", () => {

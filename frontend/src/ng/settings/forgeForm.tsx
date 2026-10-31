@@ -4,7 +4,7 @@ import { Field } from "../ui/Field";
 import { Segmented } from "../ui/Segmented";
 import { Select } from "../ui/Select";
 import { showToast } from "../ui/Toast";
-import { COMMAND_READ_ONLY, ENV_RESTART, PASTE_ONCE } from "./forgeWords";
+import { COMMAND_READ_ONLY, COMMAND_SET_WITH, ENV_RESTART, PASTE_ONCE } from "./forgeWords";
 
 export type SourceChoice = "git-credential" | "env" | "file" | "paste";
 export type Kind = ForgeTokenSource["kind"];
@@ -63,11 +63,12 @@ export function TokenSourceField({ allowPaste, choice, onChoice, env, onEnv, fil
   );
 }
 
-export const CommandSource = ({ name, command }: { name: string; command: string }) => (
+/** The command is code that may embed a token, so Edit never shows its text, only that there is one. */
+export const CommandSource = () => (
   <div className="set-wk-field">
     <span className="field-label">Token command</span>
-    <pre className="set-wk-cmd" aria-label="Token command">{command}</pre>
-    <span className="field-hint">{COMMAND_READ_ONLY(name)}</span>
+    <code className="set-mono">{COMMAND_SET_WITH}</code>
+    <span className="field-hint">{COMMAND_READ_ONLY}</span>
   </div>
 );
 

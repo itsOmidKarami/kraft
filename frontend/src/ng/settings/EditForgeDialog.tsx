@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Repo } from "../../types";
 import { detailOf, jsonBody, request } from "../http";
 import { Button } from "../ui/Button";
@@ -31,6 +31,10 @@ export function EditForgeDialog({ account: a, repos, onClose, onSaved, onRemove 
   const [testing, setTesting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The dialog focuses its first control, which would be the unchosen "cli": open on the chosen Client instead (this
+  // effect runs after the dialog's own). A command account's Client is disabled, so focus stays where the dialog put it.
+  const clientRef = useRef<HTMLDivElement>(null);
+  useEffect(() => clientRef.current?.querySelector<HTMLElement>('[aria-checked="true"]:not(:disabled)')?.focus(), []);
   const path = `/forges/${encodeURIComponent(a.name)}`;
 
   const api = client === "api";
@@ -48,6 +52,13 @@ export function EditForgeDialog({ account: a, repos, onClose, onSaved, onRemove 
   const leavesFile = t?.from === "file" && (client === "cli" || choice !== "file" || file !== t.file);
   const locked = busy || testing;
 
+  /** The check a new token gets runs with `testing` set, so a second Test cannot start beside it; the dialog closes after. */
+  const checked = async (lead: string) => {
+    setTesting(true);
+    await checkAndToast(a.name, lead);
+    setTesting(false);
+    onClose();
+  };
   const save = async () => {
     setBusy(true);
     setError(null);
@@ -55,12 +66,15 @@ export function EditForgeDialog({ account: a, repos, onClose, onSaved, onRemove 
     setBusy(false);
     if (r.status !== 200) return setError(detailOf(r.body));
     onSaved();
-    onClose();
-    if (tokenChanged) await checkAndToast(a.name, `Saved ${a.name}.`);
-    else showToast(`Saved ${a.name}.`);
+    if (!tokenChanged) {
+      onClose();
+      return showToast(`Saved ${a.name}.`);
+    }
+    await checked(`Saved ${a.name}.`);
   };
   const replace = async () => {
     const value = paste;
+    if (value === "" || locked) return;
     setPaste(""); // every answer, a refusal included, leaves the field empty
     setBusy(true);
     setError(null);
@@ -68,10 +82,10 @@ export function EditForgeDialog({ account: a, repos, onClose, onSaved, onRemove 
     setBusy(false);
     if (r.status !== 200) return setError(detailOf(r.body));
     onSaved();
-    onClose();
-    await checkAndToast(a.name, `Pasted a new token for ${a.name}.`);
+    await checked(`Pasted a new token for ${a.name}.`);
   };
   const test = async () => {
+    if (locked) return; // aria-disabled, not disabled: a disabled button that has focus sends it to <body>
     setTesting(true);
     setError(null);
     const r = await request<{ output: string }>(`${path}/test`, { method: "POST" });
@@ -85,57 +99,64 @@ export function EditForgeDialog({ account: a, repos, onClose, onSaved, onRemove 
     <Dialog
       title={`Edit ${a.name}`}
       onClose={onClose}
-      dirty={locked || changed || paste !== ""}
+      dirty={busy || changed || paste !== ""}
       className="set-wk-dlg"
       footer={
         <div className="set-wk-foot">
           <div className="set-wk-foot-row">
             <Button variant="danger" className="set-wk-remove" disabled={locked || named.length > 0} aria-describedby="set-fg-remove" onClick={() => { onClose(); onRemove(a.name); }}>Remove account</Button>
-            <Button onClick={test} disabled={locked}>{testing ? "Testing…" : "Test"}</Button>
-            <Button onClick={onClose} disabled={locked}>Cancel</Button>
+            <Button className="set-fg-test" aria-disabled={locked || undefined} onClick={test}>{testing ? "Testing…" : "Test"}</Button>
+            <Button onClick={onClose} disabled={busy}>Cancel</Button>
             <Button variant="primary" disabled={!changed || locked} onClick={save}>Save</Button>
           </div>
           <p id="set-fg-remove" className="set-hint">{named.length ? NAMED_BY(named) : a.default_for_host ? DEFAULT_REMOVABLE : ""}</p>
         </div>
       }
     >
-      <form className="set-wk-form" onSubmit={(e) => { e.preventDefault(); if (changed && !locked) void save(); }}>
+      <div className="set-wk-form">
         {error && <p className="set-error" role="alert">{error}</p>}
-        <Field label="Name"><input readOnly value={a.name} /></Field>
-        <div className="set-wk-pair">
-          <Field label="Forge"><input readOnly value={a.forge} /></Field>
-          <Field label="Web address"><input readOnly value={a.web_url} /></Field>
-        </div>
+        <dl className="set-fg-fixed">
+          <dt>Name</dt><dd className="set-mono">{a.name}</dd>
+          <dt>Forge</dt><dd>{a.forge}</dd>
+          <dt>Web address</dt><dd className="set-mono">{a.web_url}</dd>
+        </dl>
         <p className="set-hint">{FIXED_FIELDS}</p>
-        <div className="set-wk-field">
-          <span className="field-label">Client</span>
-          <Segmented label="Client" disabled={command} value={client} onChange={setClient} options={[{ value: "cli", label: "cli" }, { value: "api", label: "api" }]} />
-        </div>
-        {client === "cli" && a.client === "api" && <p className="set-hint">{TO_CLI_DROPS}</p>}
-        <Field label="API address"><input value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} /></Field>
-        <div className="set-wk-switch">
-          <Switch label="Default for its host" checked={isDefault} onChange={setDefault} />
-          <span className="field-label">Default for its host</span>
-        </div>
-        {api && <Field label="CA file"><input value={caFile} onChange={(e) => setCaFile(e.target.value)} /></Field>}
-        {api && command && <CommandSource name={a.name} command={t?.command ?? ""} />}
-        {api && !command && (
-          <>
-            {/* No paste choice here: cli to api is a Save first, then Replace token (a PUT alone, nothing to roll back). */}
-            <TokenSourceField allowPaste={false} choice={choice} onChoice={setChoice} env={env} onEnv={setEnv} file={file} onFile={setFile} kind={kind} onKind={setKind} paste="" onPaste={() => {}} />
-            {leavesFile && <p className="set-hint">{SWITCH_DELETES_PASTED}</p>}
-          </>
-        )}
-        {/* A command account gets no Replace token, and a PUT would erase its command: the UI is the only guard. */}
+        <form className="set-wk-form" onSubmit={(e) => { e.preventDefault(); if (changed && !locked) void save(); }}>
+          <div className="set-wk-field" ref={clientRef}>
+            <span className="field-label">Client</span>
+            <Segmented label="Client" disabled={command} value={client} onChange={setClient} options={[{ value: "cli", label: "cli" }, { value: "api", label: "api" }]} />
+          </div>
+          {client === "cli" && a.client === "api" && <p className="set-hint">{TO_CLI_DROPS}</p>}
+          <Field label="API address"><input value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} /></Field>
+          <div className="set-wk-switch">
+            <Switch label="Default for its host" checked={isDefault} onChange={setDefault} />
+            <span className="field-label">Default for its host</span>
+          </div>
+          {api && <Field label="CA file"><input value={caFile} onChange={(e) => setCaFile(e.target.value)} /></Field>}
+          {api && command && <CommandSource />}
+          {api && !command && (
+            <>
+              {/* No paste choice here: cli to api is a Save first, then Replace token (a PUT alone, nothing to roll back). */}
+              <TokenSourceField allowPaste={false} choice={choice} onChoice={setChoice} env={env} onEnv={setEnv} file={file} onFile={setFile} kind={kind} onKind={setKind} paste="" onPaste={() => {}} />
+              {leavesFile && <p className="set-hint">{SWITCH_DELETES_PASTED}</p>}
+            </>
+          )}
+        </form>
+        {/* A command account gets no Replace token, and a PUT would erase its command: the UI is the only guard.
+            Its own form, so Enter in the new token replaces it and never saves the other edits. */}
         {a.client === "api" && !command && (
-          <div className="set-wk-token set-fg-replace">
+          <form className="set-wk-token set-fg-replace" onSubmit={(e) => { e.preventDefault(); void replace(); }}>
+            <h3 className="set-fg-sub">Replace token</h3>
             <PasteInput label="New token" value={paste} onChange={setPaste} />
             <KindSelect label="New token kind" kind={pasteKind} onKind={setPasteKind} />
-            <div><Button disabled={locked || paste === ""} onClick={replace}>Replace token</Button></div>
-          </div>
+            <div><Button type="submit" aria-disabled={locked || paste === "" || undefined}>Replace token</Button></div>
+          </form>
         )}
-        {output !== null && <pre className="set-wk-cmd" aria-label="Test output">{output}</pre>}
-      </form>
+        <div role="status" aria-label="Test status" className="set-fg-live">
+          {testing && <p className="set-hint">Testing {a.name}…</p>}
+          {output !== null && <pre className="set-wk-cmd" aria-label="Test output">{output}</pre>}
+        </div>
+      </div>
     </Dialog>
   );
 }

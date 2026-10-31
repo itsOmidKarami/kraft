@@ -9,7 +9,7 @@ import { ForgesPage, useForges } from "./ForgesPage";
 import { WithHeader } from "./testkit";
 
 const ACCOUNTS = forgesFixture(new Date());
-const REPOS = [{ name: "repo-zero", forge_account: "shared-gl" }, { name: "stray", forge_account: "gone-gl" }, { name: "plain", forge_account: null }];
+const REPOS = [{ name: "repo-zero", forge_account: "shared-gl" }, { name: "stray", forge_account: "gone-gl" }, { name: "stray2", forge_account: "gone-gl" }, { name: "plain", forge_account: null }];
 const answers = { "GET /forges": [200, { accounts: ACCOUNTS }], "GET /repos": [200, { repos: REPOS }] } as Record<string, [number, unknown]>;
 
 const mount = (ui = <ForgesPage />) =>
@@ -37,16 +37,16 @@ describe("Settings › Forge accounts", () => {
     expect(screen.queryByRole("table")).toBeNull();
   });
 
-  it("is one table: each account's name, forge and address, client, token source, state, last check and the repos that name it", async () => {
+  it("is one table: each account's name, state, forge and address, token source (the client is in it), last check and the repos that name it", async () => {
     stubFetch(answers);
     mount();
     const table = await screen.findByRole("table", { name: "Forge accounts" });
-    expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Name", "Forge", "Client", "Token", "State", "Checked", "Used by", "Actions"]);
+    expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Name", "State", "Forge", "Token", "Checked", "Used by", "Actions"]);
     expect(within(table).getAllByRole("row")).toHaveLength(Object.keys(ACCOUNTS).length + 1);
     const shared = await rowOf("shared-gl");
-    expect(shared).toHaveTextContent(/^shared-glgitlab https:\/\/code\.corp\.example\/gitlabcliglab's own sign-in——repo-zeroEdit$/);
+    expect(shared).toHaveTextContent(/^shared-glTest to checkgitlab https:\/\/code\.corp\.example\/gitlabglab's own sign-in—repo-zeroEdit$/);
     const corp = await rowOf("corp-gl");
-    expect(corp).toHaveTextContent(/gitlab https:\/\/gitlab\.corp\.exampleapifile \/home\/kraft\/\.kraft\/secrets\/corp-glsigned inas alice5m ago—Edit/);
+    expect(corp).toHaveTextContent(/signed inas alicegitlab https:\/\/gitlab\.corp\.examplefile \/home\/kraft\/\.kraft\/secrets\/corp-gl5m ago—Edit/);
     expect(within(await rowOf("vault-gl")).getAllByRole("cell")[3]).toHaveTextContent(/^command$/);
     expect(document.body.textContent).not.toContain("op read");
     for (const name of Object.keys(ACCOUNTS)) expect(screen.getByRole("button", { name: `Edit ${name}` })).toBeInTheDocument();
@@ -58,7 +58,7 @@ describe("Settings › Forge accounts", () => {
     ["old-gl", "refused", "401 Unauthorized"],
     ["fresh-gl", "not checked yet", "is-muted"],
     ["blind-gl", "cannot see 1 repo", "cannot see team/app"],
-    ["github-cli", null, "gh's own sign-in"],
+    ["github-cli", null, "Test to check"],
   ])("the state carries its word: %s", async (name, word, extra) => {
     stubFetch(answers);
     mount();
@@ -74,16 +74,19 @@ describe("Settings › Forge accounts", () => {
     stubFetch(answers);
     mount();
     const link = within(await rowOf("acme-gh")).getByRole("link");
+    expect(link).toHaveTextContent("Authorize for single sign-on");
     expect(link).toHaveAttribute("href", ACCOUNTS["acme-gh"].probe!.sso_url);
     expect(link).toHaveAttribute("target", "_blank");
     expect(link.getAttribute("rel")).toContain("noopener");
   });
 
-  it("lists repos whose forge_account is not in forges.yaml, from the repos it already loads", async () => {
+  it("lists repos whose forge_account is not in forges.yaml, one line each above the table, from the repos it already loads", async () => {
     stubFetch(answers);
     mount();
     await rowOf("old-gl");
-    expect(screen.getByText(/stray names gone-gl, which is not in forges\.yaml: it uses gh or glab\./)).toBeInTheDocument();
+    const line = screen.getByText("stray names gone-gl, which is not in forges.yaml: it uses gh or glab.");
+    expect(screen.getByText(/^stray2 names gone-gl/)).not.toBe(line);
+    expect(line.compareDocumentPosition(screen.getByRole("table"))).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(screen.queryByText(/repo-zero names/)).toBeNull();
   });
 
@@ -132,5 +135,25 @@ describe("removing an account", () => {
     await act(async () => vi.advanceTimersByTime(UNDO_WINDOW_MS));
     expect(screen.getByRole("button", { name: "Remove shared-gl" })).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent(body.detail);
+  });
+
+  it("Undo while the DELETE is in flight says one thing, not Too late and then an error", async () => {
+    let answer!: (r: Response) => void;
+    stubFetch(answers);
+    const real = fetch;
+    vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => (init?.method === "DELETE" ? new Promise<Response>((r) => (answer = r)) : real(url, init))));
+    mount(<Harness />);
+    await screen.findByRole("button", { name: "Remove shared-gl" });
+    vi.useFakeTimers();
+    // A hovered toast outlives the window, so its Undo can be pressed with the DELETE out: take its action as the toast got it.
+    let undo: (() => void) | undefined;
+    window.addEventListener("kraft:toast", (e) => void (undo = (e as CustomEvent).detail.action?.run), { once: true });
+    fireEvent.click(screen.getByRole("button", { name: "Remove shared-gl" }));
+    await act(async () => vi.advanceTimersByTime(UNDO_WINDOW_MS));
+    act(() => undo!()); // the window is over and the DELETE is out
+    expect(screen.queryByText(/Too late to undo/)).toBeNull();
+    expect(screen.getByText("shared-gl is being removed.")).toBeInTheDocument();
+    await act(async () => answer(new Response(JSON.stringify({ detail: "named" }), { status: 409 })));
+    expect(screen.getByRole("alert")).toHaveTextContent("named");
   });
 });
