@@ -87,6 +87,12 @@ def _is_command(row: dict | None) -> bool:
     return bool(row and (row.get("token") or {}).get("from") == "command")
 
 
+_SHARED = (
+    "that token source is already read by another account, or is another account's pasted "
+    "file: a token is sent only to the host it was set for. Use a source of its own"
+)
+
+
 def _write_command(name: str, change, *, expect=_is_command, stage=None) -> dict:
     """forges.yaml on disk with `change(accounts)` applied, then the server asked to reload.
     A reload that refuses it puts the old text back. `stage()` runs once the new file is
@@ -194,12 +200,18 @@ def set_command_source(name: str, fields: dict, *, paste: str | None = None) -> 
             **accounts[name].model_dump(by_alias=True, exclude_none=True),
             **fields,
         }
+        if fields.get("token"):  # as the route does for a token it is sent
+            from kraft.adapters.forge import credentials  # lazy, as in stage()
+
+            checked = forges.ForgesFile.model_validate({"accounts": accounts})
+            if credentials.shares_secret(checked, name):
+                raise _die(_SHARED)
 
     def stage():
         # Lazy: the package pulls in the server, and the permission hook imports this module.
         from kraft.adapters.forge import credentials
 
-        target = kraft_home() / "secrets" / name
+        target = kraft_home().resolve() / "secrets" / name
         previous = target.read_bytes() if target.is_file() else None
         credentials.write_pasted(name, paste)
 
@@ -264,7 +276,7 @@ def _cmd_edit(ns: argparse.Namespace) -> None:
         return
     token = _read_stdin_token() if stdin else None
     before = asyncio.run(client.list_forges())["accounts"].get(ns.name) or {}
-    if _is_command(before):
+    if _is_command(before) and (source or stdin or fields.get("client") == "cli"):
         # The API will not replace a command (the browser must not); the server's machine can.
         from kraft.adapters.forge import credentials  # lazy, as in stage()
 
@@ -278,7 +290,7 @@ def _cmd_edit(ns: argparse.Namespace) -> None:
                 raise _die("--token-stdin: the account's name cannot name a secret file")
             fields["token"] = {
                 "from": "file",
-                "file": str(kraft_home() / "secrets" / ns.name),
+                "file": str(kraft_home().resolve() / "secrets" / ns.name),
                 "kind": ns.kind or "unknown",
             }
         if fields.get("client") == "cli":  # gh/glab keep their own sign-in

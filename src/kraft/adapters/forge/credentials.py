@@ -385,6 +385,38 @@ def clean_paste(value: str) -> str:
     return value
 
 
+def real_path(spec: str) -> str:
+    return os.path.realpath(os.path.expandvars(os.path.expanduser(spec)))
+
+
+def _same(a, b) -> bool:
+    """The same file, even where the disk ignores case (realpath keeps the case typed);
+    paths that do not exist yet compare as text."""
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return str(a) == str(b)
+
+
+def shares_secret(updated: ForgesFile, name: str) -> bool:
+    """Whether `name` reads a secret another account already reads, or another name's
+    pasted file."""
+    token = updated.accounts[name].token
+    if token is None:
+        return False
+    others = [a.token for n, a in updated.accounts.items() if n != name and a.token]
+    if token.env and any(o.env == token.env for o in others):
+        return True
+    if token.file:
+        real = real_path(token.file)
+        secrets = kraft_home().resolve() / "secrets"
+        under = any(_same(str(p), secrets) for p in (Path(real), *Path(real).parents))
+        return any(o.file and _same(real_path(o.file), real) for o in others) or (
+            under and not _same(real, secrets / name)
+        )
+    return False
+
+
 def write_pasted(name: str, value: str) -> Path:
     """A pasted token, in a file only the server's user can open: its directory 0700
     (an existing one too), the file 0600 from its first byte, replaced whole."""

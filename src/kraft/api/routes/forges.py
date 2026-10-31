@@ -138,17 +138,7 @@ def _own_file(name: str, account: forges.ForgeAccount | None) -> Path | None:
     return mine if os.path.realpath(mine) == _real(token.file) else None
 
 
-def _real(spec: str) -> str:
-    return os.path.realpath(os.path.expandvars(os.path.expanduser(spec)))
-
-
-def _same(a, b) -> bool:
-    """The same file, even where the disk ignores case (realpath keeps the case typed);
-    paths that do not exist yet compare as text."""
-    try:
-        return os.path.samefile(a, b)
-    except OSError:
-        return str(a) == str(b)
+_real = credentials.real_path
 
 
 def _drop_own_file(name: str, before: forges.ForgeAccount | None, after: forges.ForgesFile) -> None:
@@ -189,21 +179,8 @@ def _no_shared(updated: forges.ForgesFile, name: str, sent) -> None:
     """A write over HTTP never points an account at a secret another account already reads,
     nor at another name's pasted file: the probe would send it to this account's host.
     Fixed words, never the name or path. Hand edits on disk are not checked here."""
-    token = updated.accounts[name].token
-    if sent is None or token is None:
-        return
-    others = [a.token for n, a in updated.accounts.items() if n != name and a.token]
-    if token.env and any(o.env == token.env for o in others):
+    if sent is not None and credentials.shares_secret(updated, name):
         raise HTTPException(403, _SHARED_403)
-    if token.file:
-        real = _real(token.file)
-        secrets = kraft_home().resolve() / "secrets"
-        own = secrets / name
-        under = any(_same(str(p), secrets) for p in (Path(real), *Path(real).parents))
-        if any(o.file and _same(_real(o.file), real) for o in others) or (
-            under and not _same(real, own)
-        ):
-            raise HTTPException(403, _SHARED_403)
 
 
 async def _json(request: Request):
