@@ -541,6 +541,12 @@ def _settle_forge(ns: argparse.Namespace, *, interactive: bool) -> tuple[str | N
     Returns the forge and whether an account was written."""
     if ns.web_url and not ns.forge:
         raise SystemExit("error: --web-url needs --forge")
+    if ns.api_url and not ns.web_url:
+        raise SystemExit("error: --api-url needs --web-url")
+    if ns.web_url and os.environ.get("KRAFT_WORK_ITEM_ID"):
+        raise SystemExit("error: a worker does not change the instance's forge accounts")
+    if ns.forge_account and not (ns.forge or ns.web_url):
+        return None, False  # an account that exists: the repo names it, nothing to ask
     if not (interactive or ns.forge):
         return None, False
     resolved = asyncio.run(client.probe_repo(ns.path, detect=False))
@@ -588,7 +594,7 @@ def _cmd_connect(ns: argparse.Namespace) -> None:
             )
         )
     except ValueError:
-        if added:
+        if added and not ns.json:
             _print("the forge account stays in forges.yaml; connecting again finds it")
         raise
     if result.get("already_connected"):
