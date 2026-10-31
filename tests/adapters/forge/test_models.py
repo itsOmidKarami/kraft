@@ -102,3 +102,13 @@ def test_reason_for_maps_status_and_headers(status, headers, reason, message):
 
 def test_head_moved_carries_its_reason():
     assert forge.HeadMoved("x", "abc").reason == "head_moved"
+
+
+@pytest.mark.parametrize(
+    ("kw", "want"),
+    [({}, ("", "")), ({"account": "corp", "source": "env X"}, ("corp", "env X"))],
+    ids=["default-empty", "carries-account-and-source"],
+)
+def test_forge_error_carries_its_account_and_source(kw, want):
+    err = forge.ForgeError("x", **kw)
+    assert (err.account, err.source) == want

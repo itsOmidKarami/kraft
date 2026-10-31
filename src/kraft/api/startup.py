@@ -6,6 +6,7 @@ import os
 import threading
 import time
 from contextlib import asynccontextmanager
+from functools import partial
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -142,6 +143,7 @@ def start_background(app: FastAPI) -> None:
     app.state.when_free_task = asyncio.ensure_future(when_free.loop(app))
     # Always on: a token expires or is revoked while nobody runs a forge node.
     app.state.forge_probe_task = asyncio.ensure_future(forge_probe.loop(app))
+    credentials.set_token_context(partial(forge_probe.read_context, app.state))
     load_workers(app)
 
 
@@ -619,6 +621,7 @@ async def _lifespan(app: FastAPI):
             app.state.forge_probe_task,
         ):
             await _cancel(task)
+        credentials.set_token_context(None)
         await _cancel(app.state.workers_watch_task)
         await app.state.workers_listener.close()
         workers_runs.install(None)

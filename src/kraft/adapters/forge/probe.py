@@ -221,34 +221,40 @@ def _expose(st, repos: Sequence[config.RepoEntry]) -> list[Path]:
     return [Path(e).expanduser() for box in boxes if box for e in box.expose or ()]
 
 
+async def read_context(st) -> credentials.ReadContext:
+    try:
+        repos = await asyncio.to_thread(config.load_repos, st.templates_dir / "repos.yaml")
+        unread = False
+    except config.ConfigError:
+        repos, unread = [], True  # repos.yaml's own check says why
+    return credentials.ReadContext(
+        repos, st.run_dirs.worktrees, _expose(st, repos), repos_unread=unread
+    )
+
+
 async def refresh(st, accounts: Mapping[str, ForgeAccount] | None = None) -> dict[str, Probe]:
     """Probe `accounts` (every API account by default). Kept only for an account the server
     still runs: one removed meanwhile, or not reloaded yet, must not reach `/health`."""
     accounts = api_accounts(st) if accounts is None else accounts
     if not accounts:
         return {}
-    try:
-        repos = await asyncio.to_thread(config.load_repos, st.templates_dir / "repos.yaml")
-        unread = False
-    except config.ConfigError:
-        repos, unread = [], True  # repos.yaml's own check says why
-    expose = _expose(st, repos)
+    ctx = await read_context(st)
 
     async def one(n: str, a: ForgeAccount) -> Probe:
-        if unread and a.source().from_ == "file":
+        if ctx.repos_unread and a.source().from_ == "file":
             # Without the repos, the file's place cannot be checked against them: refuse.
             return Probe(
                 n,
                 datetime.now(UTC).isoformat(timespec="seconds"),
                 "no_token",
-                "repos.yaml does not load, so a file token cannot be checked; fix repos.yaml",
+                credentials.REPOS_UNREAD,
             )
         return await probe_account(
             n,
             a,
-            repos=repos,
-            worktrees=st.run_dirs.worktrees,
-            expose=expose,
+            repos=ctx.repos,
+            worktrees=ctx.worktrees,
+            expose=ctx.expose,
             transport=getattr(st, "forge_http_transport", None),
         )
 

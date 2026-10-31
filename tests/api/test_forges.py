@@ -707,3 +707,10 @@ def test_an_account_may_keep_the_source_it_already_has(client, own):
     reply = client.patch("/api/forges/corp", json={"token": own})
     assert reply.status_code == 200, reply.text
     assert client.app.state.forges.accounts["corp"].token.from_ == own["from"]
+
+
+def test_save_forgets_cached_tokens(client, monkeypatch):
+    seeded = {("corp", "{}"): TOK}
+    monkeypatch.setattr(credentials, "_TOKENS", seeded)
+    assert client.post("/api/forges", json={**API, "token": None}).status_code in (200, 201)
+    assert seeded == {}
