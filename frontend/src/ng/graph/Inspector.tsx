@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { Maximize2, NodeIcon, PanelRightClose, PanelRightOpen, type TaskKind } from "../icons";
 import { Tabs } from "../ui/Tabs";
@@ -50,6 +50,12 @@ type Props = {
  *  tabs, a body that alone scrolls, a footer; collapses to a 40px rail. */
 export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title, prose, sub, prob, tabs, tab, onTab, onCollapse, onExpand, rail, onFocus, focusAs, onTitle, titleLocked, titleEdit, onIcon, footer, children }: Props) {
   const railBtn = useRef<HTMLButtonElement>(null);
+  // The pane unfolds out of its rail and folds back into it, but only once it has
+  // changed: a page that opens with it open or collapsed shows it still.
+  const [first] = useState(open);
+  const [moved, setMoved] = useState(false);
+  if (!moved && open !== first) setMoved(true);
+  const motion = moved ? " is-moving" : "";
   const fromKeys = useRef(false);
   // Escape, or the collapse button, lands focus on the rail that replaces the pane.
   useEffect(() => {
@@ -70,7 +76,7 @@ export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title,
 
   if (!open)
     return (
-      <aside className="pane-rail" aria-label={`${title} pane, collapsed`}>
+      <aside className={`pane-rail${motion}`} aria-label={`${title} pane, collapsed`} style={{ "--pane-w": `${size.width}px` } as CSSProperties}>
         <button ref={railBtn} type="button" className="rail-btn" {...tip("Expand pane")} onClick={onExpand}><PanelRightOpen size={14} /></button>
         <button type="button" className="rail-name" aria-label={`Expand ${rail ?? title}`} onClick={onExpand}>
           <span className="rail-icon">{glyph}{prob && <span className="rail-prob" aria-label="has a problem" />}</span>
@@ -91,7 +97,7 @@ export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title,
     onCollapse();
   };
   return (
-    <aside className={`pane${size.overlay ? " is-overlay" : ""}`} aria-label={`${title} pane`} style={{ width: size.width }} onKeyDown={onKeyDown} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+    <aside className={`pane${size.overlay ? " is-overlay" : ""}${motion}`} aria-label={`${title} pane`} style={{ width: size.width }} onKeyDown={onKeyDown} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
       {size.handle && <div className="pane-handle" {...size.handle} />}
       <div className="pane-crumb">
         <nav aria-label="Pane path" className="pane-crumbs">

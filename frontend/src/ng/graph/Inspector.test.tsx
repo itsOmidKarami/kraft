@@ -61,14 +61,17 @@ describe("Inspector", () => {
     if (!collapses) expect(screen.getByLabelText("field")).toHaveFocus();
   });
 
-  it("collapses to the rail and expands from it", async () => {
+  it("collapses to the rail and expands from it, moving only once it has changed", async () => {
     const user = userEvent.setup();
     render(<Pane />);
+    expect(screen.getByRole("complementary", { name: "verification pane" })).not.toHaveClass("is-moving");
     await user.click(screen.getByRole("button", { name: "Collapse pane" }));
     expect(screen.queryByRole("tablist")).toBeNull();
     expect(screen.getByLabelText("has a problem")).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "verification pane, collapsed" })).toHaveClass("is-moving");
     await user.click(screen.getByRole("button", { name: "Expand verification" }));
     expect(screen.getByRole("tablist")).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "verification pane" })).toHaveClass("is-moving");
   });
 
   it("puts focus on the rail when the collapse button is pressed by keyboard (ux2-W5)", async () => {
