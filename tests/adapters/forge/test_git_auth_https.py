@@ -289,7 +289,7 @@ async def test_a_path_scoped_follow_redirects_and_ssl_verify_never_beat_our_pins
         git(remote.repo, "push", "-q", str(_bare(second.root)), "main")
         remote.web.redirect = second.url
         with monkeypatch.context() as bare:
-            bare.setattr(git_auth, "_exact", lambda origin, url: None)
+            bare.setattr(git_auth, "git_env", bare_header_env)
             await builtins.upstream_head(remote.repo, "main")
         assert OURS in second.authorizations, "the header was not followed: no proof"
         second.authorizations.clear()

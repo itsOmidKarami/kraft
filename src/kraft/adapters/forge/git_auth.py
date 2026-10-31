@@ -150,10 +150,14 @@ def _origin(account: ForgeAccount) -> str:
     return f"https://{host}" + (f":{port}" if port != 443 else "")
 
 
-def _exact(origin: str, url: str) -> str | None:
-    """`url` as git's `http.<url>.*` key wants it: the origin and the path, no trailing slash."""
+def _exact(origin: str, url: str) -> list[str]:
+    """`url` as git's `http.<url>.*` key wants it (the origin and the path, no trailing slash),
+    in its `.git` and its no-`.git` spelling: a bare `<url>` key does not match `<url>.git`."""
     path = urlsplit(url).path.rstrip("/")
-    return origin + path if path else None
+    if not path:
+        return []
+    other = path.removesuffix(".git") if path.endswith(".git") else path + ".git"
+    return [origin + path, origin + other]
 
 
 def _injected(account: ForgeAccount) -> bool:
@@ -208,8 +212,7 @@ async def auth_for_account(
                     "can send its token, then retry"
                 )
             carry = True
-            if (one := _exact(origin, url)) and one not in exact:
-                exact.append(one)
+            exact += [one for one in _exact(origin, url) if one not in exact]
         elif push:
             raise ForgeError(
                 f"forge account {name}: {repo.name}'s push URL is not on {origin}, the "
@@ -293,32 +296,38 @@ def git_env(base: Mapping[str, str], auth: GitAuth | None) -> dict[str, str]:
     env.update(dict.fromkeys(_TRACE2, "0"))
     # git takes the most specific `http.<url>.*` first, so a path-scoped key in a repo's own
     # config beats an origin-keyed pin: every URL git dials is pinned as well, and a tie goes
-    # to this env entry. `remote.origin.proxy` beats every `http.<url>.proxy`, so it is pinned
-    # as well. `http.sslCAInfo` stays unpinned (a corporate CA needs it): a CA a repo plants
-    # there verifies whatever a man in the middle signs, which is why the proxy and the
-    # resolve list, the ways to put one in the path, are pinned to the environment's own.
+    # to this env entry. The header itself is pinned at those exact URLs only, never at the
+    # origin: a key at the origin would attach it to any other URL there (a `fetch.bundleURI`).
+    # `remote.origin.proxy` beats every `http.<url>.proxy`, so it is pinned as well. The CA is
+    # pinned to one a repo cannot name, and the proxy and resolve list to the environment's own.
     proxy = next((env[k] for k in _PROXY_VARS if env.get(k)), "")  # as set, never a repo's
     pins = [
         ("credential.helper", ""),  # resets the helper list: no prompt, no `reject`
         ("remote.origin.proxy", proxy),
+        ("push.gpgSign", "false"),  # the signer would run with the header env
+        ("core.alternateRefsCommand", ""),  # a program git runs during fetch and push
+        ("fetch.bundleURI", ""),  # a bundle is fetched from a URL git picks, not Kraft
+        ("transfer.bundleURI", "false"),
     ]
     for target in (f"{auth.origin}/.", *(f"{u}." for u in auth.urls)):
+        pins.append((f"http.{target}extraHeader", ""))  # resets a persisted header
+        if target != f"{auth.origin}/.":
+            pins.append((f"http.{target}extraHeader", auth.header))
         pins += [
-            (f"http.{target}extraHeader", ""),  # resets a persisted header: no two Authorizations
-            (f"http.{target}extraHeader", auth.header),
             (f"http.{target}sslVerify", "true"),
             (f"http.{target}followRedirects", "false"),  # git re-sends extraHeader on a redirect
             (f"http.{target}proxy", proxy),
             (f"http.{target}sslCAPath", auth.ca_path),
             (f"http.{target}curloptResolve", ""),  # resets a pinned host -> address list
+            (f"http.{target}sslCAInfo", auth.ca_info),  # a CA a repo cannot name
         ]
-        pins.append((f"http.{target}sslCAInfo", auth.ca_info))  # a CA a repo cannot name
     start = int(env["GIT_CONFIG_COUNT"])
     env["GIT_CONFIG_COUNT"] = str(start + len(pins))
     for i, (k, v) in enumerate(pins, start):
         env[f"GIT_CONFIG_KEY_{i}"] = k
         env[f"GIT_CONFIG_VALUE_{i}"] = v
-    env.update(GIT_ASKPASS="", SSH_ASKPASS="", GIT_TERMINAL_PROMPT="0")
+    # git-lfs prefers GIT_SSH_COMMAND to `core.sshCommand`: no ssh runs with the header env.
+    env.update(GIT_ASKPASS="", SSH_ASKPASS="", GIT_TERMINAL_PROMPT="0", GIT_SSH_COMMAND="false")
     return env
 
 

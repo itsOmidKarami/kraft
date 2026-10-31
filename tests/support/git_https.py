@@ -33,6 +33,8 @@ class GitHttps:
     authorizations: list[str | None] = field(default_factory=list)
     #: Every request's whole `Authorization` list (`headers.get_all`).
     all_authorizations: list[list[str]] = field(default_factory=list)
+    #: Every request's (path, `Authorization`), in order.
+    requests: list[tuple[str, str | None]] = field(default_factory=list)
     #: When set, a GET of `info/refs` answers 302 to this base plus the same path.
     redirect: str | None = None
     _server: http.server.ThreadingHTTPServer | None = None
@@ -93,6 +95,7 @@ def git_https(
 
         def _serve(self):
             remote.authorizations.append(self.headers.get("Authorization"))
+            remote.requests.append((self.path.partition("?")[0], self.headers.get("Authorization")))
             remote.all_authorizations.append(self.headers.get_all("Authorization") or [])
             length = int(self.headers.get("Content-Length") or 0)
             body = self.rfile.read(length) if length else b""

@@ -803,13 +803,31 @@ async def _push(repo: Path, branch: str, auth: git_auth.GitAuth | None) -> None:
 _LFS_ENDPOINT_KEYS = ("lfs.url", "remote.origin.lfsurl", "remote.origin.lfspushurl")
 
 
-def _lfs_endpoint_elsewhere(repo: Path) -> bool:
-    """Whether git-lfs would be told another endpoint: any `lfs.url`, `remote.origin.lfsurl` or
-    `remote.origin.lfspushurl` in the repo's own config, or one in the `.lfsconfig` on disk (the
-    branch cannot have moved it, `assert_lfsconfig_unmoved`) that is not origin's own endpoint,
-    the fetch URL with or without `.git`, plus `/info/lfs`."""
+def _lfs_refusal(repo: Path, name: str) -> str | None:
+    """Why a header-carrying `git lfs pre-push` must not run, in words that quote no value, or
+    None: another endpoint named by `lfs.url`, `remote.origin.lfsurl` or `remote.origin.lfspushurl`
+    in the repo's own config, or in the `.lfsconfig` on disk (the branch cannot have moved it,
+    `assert_lfsconfig_unmoved`) unless that is origin's own endpoint, the fetch URL with or
+    without `.git` plus `/info/lfs`; or a custom transfer agent, which runs with the header env."""
+    if git_read(
+        repo,
+        "config",
+        "--name-only",
+        "--get-regexp",
+        r"^lfs\..*(customtransfer\.|standalonetransferagent$)",
+        expected_failure=True,
+    ):
+        return (
+            f"forge account {name}: git-lfs runs a custom transfer agent here "
+            "(lfs.customtransfer or lfs.standalonetransferagent); Kraft sends its token only "
+            "to git-lfs's own transfer, so unset it and retry"
+        )
     if any(git_read(repo, "config", "--get", k, expected_failure=True) for k in _LFS_ENDPOINT_KEYS):
-        return True
+        return (
+            f"forge account {name}: git-lfs is pointed elsewhere by lfs.url or "
+            "remote.origin.lfsurl; Kraft sends its token only to origin's own LFS endpoint, "
+            "so unset it and retry"
+        )
     origin = urlsplit(git_read(repo, "remote", "get-url", "origin", expected_failure=True) or "")
     stem = origin.path.rstrip("/").removesuffix(".git")
     own = {f"{stem}/info/lfs", f"{stem}.git/info/lfs"}
@@ -828,8 +846,11 @@ def _lfs_endpoint_elsewhere(repo: Path) -> bool:
             and not named.query
         )
         if not same:
-            return True
-    return False
+            return (
+                f"forge account {name}: the base branch's .lfsconfig sends LFS to another "
+                "endpoint; push this branch yourself, or move LFS to origin, then retry"
+            )
+    return None
 
 
 async def _push_lfs_objects(
@@ -871,12 +892,8 @@ async def _push_lfs_objects(
             "the branch adds Git LFS files and this machine has no git-lfs, so Kraft "
             "cannot upload them or push the branch: install git-lfs, then retry"
         )
-    if auth and _lfs_endpoint_elsewhere(repo):
-        raise ForgeError(
-            f"forge account {auth.name}: git-lfs is pointed elsewhere by lfs.url or "
-            "remote.origin.lfsurl; Kraft sends its token only to origin's own LFS endpoint, "
-            "so unset it and retry"
-        )
+    if auth and (why := _lfs_refusal(repo, auth.name)):
+        raise ForgeError(why)
     ref = f"refs/heads/{branch}"
     await run_git(
         repo,

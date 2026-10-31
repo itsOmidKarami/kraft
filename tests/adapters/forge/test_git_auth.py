@@ -87,13 +87,13 @@ def rig(
 CA = "/ca/default.pem"
 
 
-def auth(origin=WEB, header=None, urls=(), ca_info=CA, ca_path="") -> GitAuth:
+def auth(origin=WEB, header=None, urls=None, ca_info=CA, ca_path="") -> GitAuth:
     return GitAuth(
         "corp-gl",
         acct(),
         origin,
         header or f"Authorization: Basic {form()}",
-        urls,
+        (URL,) if urls is None else urls,
         ca_info,
         ca_path,
     )
@@ -113,24 +113,35 @@ PROXY = next((HARD[k] for k in git_auth._PROXY_VARS if HARD.get(k)), "")
 URL = f"{WEB}/team/app.git"
 
 
+PROGRAMS = [
+    ("push.gpgSign", "false"),
+    ("core.alternateRefsCommand", ""),
+    ("fetch.bundleURI", ""),
+    ("transfer.bundleURI", "false"),
+]
+
+
 def expected(*targets: str, ca: str = CA) -> list[tuple[str, str]]:
-    """The pins after the hardening ones: the helper reset, then eight per origin or exact URL."""
-    out = [("credential.helper", ""), ("remote.origin.proxy", PROXY)]
+    """The pins after the hardening ones: the helper and proxy resets and the program-launching
+    keys, then eight per exact URL and seven per origin (`.../.`: it gets no header)."""
+    out = [("credential.helper", ""), ("remote.origin.proxy", PROXY), *PROGRAMS]
     for t in targets:
+        out.append((f"http.{t}extraHeader", ""))
+        if not t.endswith("/."):
+            out.append((f"http.{t}extraHeader", HEADER))
         out += [
-            (f"http.{t}extraHeader", ""),
-            (f"http.{t}extraHeader", HEADER),
             (f"http.{t}sslVerify", "true"),
             (f"http.{t}followRedirects", "false"),
             (f"http.{t}proxy", PROXY),
             (f"http.{t}sslCAPath", ""),
             (f"http.{t}curloptResolve", ""),
+            (f"http.{t}sslCAInfo", ca),
         ]
-        out.append((f"http.{t}sslCAInfo", ca))
     return out
 
 
-PINS = expected(f"{WEB}/.")
+URL_NOGIT = URL.removesuffix(".git")
+PINS = expected(f"{WEB}/.", f"{URL}.")
 NOISE = {
     k: "1"
     for k in (
@@ -151,9 +162,30 @@ NOISE = {
         pytest.param(HARD, auth(), lambda e: pins(e) == pins(HARD) + PINS, id="appended"),
         pytest.param(
             HARD,
-            auth(urls=(URL,)),
-            lambda e: pins(e) == pins(HARD) + expected(f"{WEB}/.", f"{URL}."),
-            id="every-dialed-url-is-pinned-too",
+            auth(urls=(URL, URL_NOGIT)),
+            lambda e: pins(e) == pins(HARD) + expected(f"{WEB}/.", f"{URL}.", f"{URL_NOGIT}."),
+            id="every-dialed-url-is-pinned-in-both-spellings",
+        ),
+        pytest.param(
+            HARD,
+            auth(),
+            lambda e: (
+                (f"http.{WEB}/.extraHeader", HEADER) not in pins(e)
+                and pins(e).count((f"http.{URL}.extraHeader", HEADER)) == 1
+            ),
+            id="the-header-is-pinned-at-the-exact-url-never-the-origin",
+        ),
+        pytest.param(
+            HARD,
+            auth(),
+            lambda e: all(pin in pins(e) for pin in PROGRAMS),
+            id="program-launching-keys-are-pinned",
+        ),
+        pytest.param(
+            {**HARD, "GIT_SSH_COMMAND": "ssh -o x"},
+            auth(),
+            lambda e: e["GIT_SSH_COMMAND"] == "false",
+            id="ssh-fails-at-once",
         ),
         pytest.param(
             HARD,
