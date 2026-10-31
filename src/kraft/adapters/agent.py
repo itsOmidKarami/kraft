@@ -1452,13 +1452,20 @@ async def _run_agent_task(
         # empty until `before_launch`: ask of the person's checkout instead.
         checkout_dir = Path(item_row["repo"]) if in_copy else Path(cwd)
         found = await asyncio.to_thread(_registration.permission_tool, checkout_dir)
+        # Claude also starts a `.mcp.json` on disk where it runs, and above: more
+        # entries that may run, by the direct name (a copy's checkout too).
+        disk = await asyncio.to_thread(
+            _registration.on_disk, Path(cwd), *([checkout_dir] if in_copy else [])
+        )
+        if found is None and disk:
+            found = (_registration.DIRECT, disk[0][0], [])
         if found is None:
             raise LaunchRefused(
                 f"harness {harness!r} asks Kraft's permission gate through the `kraft` MCP "
                 f"server, and nothing registers it for Claude Code: {_registration.FIX}"
             )
         options["approval_channel"] = found[0]
-        registered = found
+        registered = (*found[:2], found[2] + disk) if found[0] == _registration.DIRECT else found
         # Claude keys a checkout's own servers by its folder, never the copy's:
         # handed beside whatever else loads there, not instead of it.
         servers = (

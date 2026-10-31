@@ -164,6 +164,10 @@ HTTP = {"type": "http", "url": "http://127.0.0.1:8765/mcp"}
         pytest.param(KRAFT, False, {"entry_path": True}, False, id="the-entrys-own-path"),
         # Resolved from Claude's own folder, which Kraft cannot judge from here.
         pytest.param({"command": "bin/kraft"}, False, {}, False, id="relative-to-claudes-folder"),
+        # Claude loads a `.mcp.json` on disk where it runs, committed or not, and in each parent.
+        pytest.param(KRAFT, False, {"disk": "cwd"}, False, id="gitignored-mcp-json-in-cwd"),
+        pytest.param(KRAFT, False, {"disk": "parent"}, False, id="mcp-json-in-a-parent"),
+        pytest.param(None, False, {"disk": "cwd"}, False, id="only-a-mcp-json-on-disk"),
     ],
 )
 def test_a_launch_whose_kraft_server_cannot_start_on_the_workers_path_is_refused(
@@ -174,7 +178,7 @@ def test_a_launch_whose_kraft_server_cannot_start_on_the_workers_path_is_refused
     so the launch is refused before it starts, naming the command and where it
     is registered. A repo's `env:` PATH is the one the worker gets. Refused
     only when Kraft is sure: every entry Claude could start it from is missing."""
-    config: dict = {"mcpServers": {"kraft": server}}
+    config: dict = {"mcpServers": {"kraft": server}} if server else {}
     kw: dict = {"runner": launch.get("runner")}
     if env := launch.get("env"):
         kw = {"repo_entry": entry_of({"env": env})}
@@ -182,6 +186,11 @@ def test_a_launch_whose_kraft_server_cannot_start_on_the_workers_path_is_refused
         repo = make_repo(tmp_path)
         config["projects"] = {str(repo.resolve()): {"mcpServers": {"kraft": launch["local"]}}}
         kw["cwd"] = str(repo)
+    if disk := launch.get("disk"):
+        repo = make_repo(tmp_path / "parent")
+        kw["cwd"] = str(repo)
+        on_disk = {"mcpServers": {"kraft": LOCAL}}
+        write(repo if disk == "cwd" else repo.parent, ".mcp.json", json.dumps(on_disk))
     if launch.get("entry_path"):
         config["mcpServers"]["kraft"] = {**server, "env": {"PATH": str(kraft_on_path.parent)}}
     if not on_path:

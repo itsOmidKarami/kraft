@@ -53,8 +53,9 @@ FIX = "install the Kraft plugin (then `/kraft:onboard`), or run `kraft admin ini
 #: worker gets: Claude then cannot start the server, and the first ask fails.
 PATH_FIX = (
     "put `kraft` on that PATH (install it as the install docs say, or `just install` in a "
-    "checkout), register the server by its absolute path (`claude mcp remove --scope user "
-    "kraft`, then `claude mcp add --scope user kraft -- /path/to/kraft admin mcp`), or give "
+    "checkout), register the server by its absolute path (`claude mcp add --scope user kraft "
+    "-- /path/to/kraft admin mcp`, after `claude mcp remove --scope user kraft` if `kraft "
+    "admin init` registered it there already), or give "
     "the service a PATH that has it (`kraft admin uninstall-service`, then `kraft admin "
     "install-service` from a shell where `kraft` runs)"
 )
@@ -131,8 +132,9 @@ def _kraft(config: dict) -> dict:
 def _plugin_entry(installs, repo: Path | None, scope: str) -> dict:
     """The `kraft` entry of the installed plugin's own `.mcp.json`, from an
     install that applies to a worker in `repo` -- user scope, or a project's
-    for that repo -- the one in `scope` first. An install without one runs
-    the bare `kraft` the plugin ships; none that applies, nothing to check."""
+    for that repo -- the one in `scope` first. Nothing to check when no
+    install applies, or its `.mcp.json` names no `kraft`: the plugin may
+    declare its servers elsewhere (`plugin.json`), and a guess may refuse."""
     key = _checkout(repo) if repo is not None else None
     installs = installs if isinstance(installs, list) else [installs]
     usable = [
@@ -154,8 +156,8 @@ def _plugin_entry(installs, repo: Path | None, scope: str) -> dict:
         path = install.get("installPath")
         if isinstance(path, str):
             config = _read(Path(path) / ".mcp.json")
-            return _kraft(config) if _names_kraft(config) else {"command": "kraft"}
-    return {"command": "kraft"} if usable else {}
+            return _kraft(config) if _names_kraft(config) else {}
+    return {}
 
 
 def permission_tool(repo: Path | None) -> tuple[str, str, list[tuple[str, dict]]] | None:
@@ -195,6 +197,23 @@ def permission_tool(repo: Path | None) -> tuple[str, str, list[tuple[str, dict]]
         where = str(user_settings)
         return PLUGIN, where, [(where, _plugin_entry(installed[key], repo, "user"))]
     return None
+
+
+def on_disk(*folders: Path) -> list[tuple[str, dict]]:
+    """`(where, entry)` for each `.mcp.json` naming `kraft` in `folders` or any
+    folder above them: Claude loads the one where it runs whether committed or
+    not, and each parent's (measured, 2.1.314). None under a managed config,
+    which shuts every other out."""
+    if MANAGED_MCP.exists():
+        return []
+    found: list[tuple[str, dict]] = []
+    for folder in folders:
+        for here in (folder, *folder.parents):
+            config = _read(here / ".mcp.json")
+            where = str(here / ".mcp.json")
+            if _names_kraft(config) and where not in (w for w, _ in found):
+                found.append((where, _kraft(config)))
+    return found
 
 
 def _starts(entry: dict, path: str | None) -> bool | None:

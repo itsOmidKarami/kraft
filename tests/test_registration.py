@@ -179,7 +179,8 @@ SSE = {"type": "sse", "url": "http://127.0.0.1:8765/mcp"}
         pytest.param(
             "user", {"user": {"command": "/venv/bin/kraft"}}, "/venv/bin/kraft", id="user-install"
         ),
-        pytest.param("user", {"user": None}, "kraft", id="install-without-mcp-json"),
+        # Its servers may be declared elsewhere (`plugin.json`): not a guess at `kraft`.
+        pytest.param("user", {"user": None}, None, id="install-without-mcp-json"),
         pytest.param("user", {"user": SSE}, None, id="install-sse"),
         # Another project's copy may run something else, and never loads here.
         pytest.param(
