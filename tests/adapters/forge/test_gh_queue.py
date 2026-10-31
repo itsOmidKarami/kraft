@@ -18,7 +18,7 @@ from .nodes import FAIL, Api, FailWith
 _PR_URL = "https://github.com/o/r/pull/7"
 _RUN_URL = "https://github.com/o/r/actions/runs/555"
 _QUEUE_BRANCH = "gh-readonly-queue/main/pr-7-" + "a" * 40
-_JOBS = "api repos/{owner}/{repo}/actions/runs/555/jobs?per_page=100"
+_JOBS = "api repos/{owner}/{repo}/actions/runs/555/jobs"
 _RUNS = "api*repos/{owner}/{repo}/actions/runs -X GET*"
 _LOGS = "api*repos/{owner}/{repo}/actions/jobs/*/logs*"
 _RUNS_CALL = "api repos/{owner}/{repo}/actions/runs -X GET -i -f event=merge_group -F per_page=100"
@@ -489,14 +489,26 @@ async def test_merge_queue_cuts_a_job_log_to_its_failed_step_as_gh_does(cli, tmp
     )
 
 
-async def test_merge_queue_a_failed_run_whose_jobs_cannot_be_read_is_not_infra(cli, tmp_path):
+@pytest.mark.parametrize(
+    "answer",
+    [
+        pytest.param(Api(502, '{"message": "502"}'), id="502"),
+        pytest.param(
+            json.dumps({"jobs": [{"id": n} for n in range(100)]}), id="jobs-cap-is-unreadable"
+        ),
+        pytest.param(json.dumps({"total_count": 0}), id="jobs-without-a-list-is-unreadable"),
+    ],
+)
+async def test_merge_queue_a_failed_run_whose_jobs_cannot_be_read_is_not_infra(
+    cli, tmp_path, answer
+):
     """No failed job to name must mean GitHub said there is none, never that the
     read failed: `ci.is_infra_red` takes an empty list for a runner problem and
     would retry a code failure instead of repairing it."""
     routes = _queue_routes(
         _graphql(removal="Required status checks failed"),
         [_merge_group_run()],
-        **{_JOBS: Api(502, '{"message": "502"}')},
+        **{_JOBS: answer},
     )
     cli.stub("gh", routes=routes, default=FAIL)
 

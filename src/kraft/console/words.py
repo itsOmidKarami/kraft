@@ -338,6 +338,16 @@ FORGE_LOGIN_HINT = (
 FORGE_SSO_HINT = (
     "Open this address to authorize the forge CLI's token for single sign-on, then Retry: {sso_url}"
 )
+#: `cause.tsx`: the same for an API account's token; {account} is its name.
+FORGE_ACCOUNT_SSO_HINT = (
+    "Open this address to authorize forge account {account}'s token for single sign-on, "
+    "then Retry: {sso_url}"
+)
+#: `cause.tsx`: the same when the account's name cannot be printed (it holds a backtick).
+FORGE_ACCOUNT_SSO_UNNAMED_HINT = (
+    "Open this address to authorize the forge account's token for single sign-on, "
+    "then Retry: {sso_url}"
+)
 #: `cause.tsx`: a forge token (an API account's) that could not sign in, by the kind of source
 #: (`TokenSource.label()`'s first word); {value} is the variable or path, {account} its name.
 FORGE_TOKEN_HINTS = {
@@ -387,6 +397,15 @@ def _sso_url(facts: dict) -> str:
     """`ssoUrl`: `facts.sso_url` when it is `https://` printable ASCII, no backtick."""
     url = facts.get("sso_url")
     return url if isinstance(url, str) and re.fullmatch(r"https://[!-_a-~]+", url) else ""
+
+
+def _sso_hint(facts: dict) -> str:
+    """`forgeHint` for `forge_sso`: names the API account when `account` is plain text."""
+    account, url = facts.get("account"), _sso_url(facts)
+    if isinstance(account, str) and account:
+        hint = FORGE_ACCOUNT_SSO_HINT if "`" not in account else FORGE_ACCOUNT_SSO_UNNAMED_HINT
+        return hint.format(account=account, sso_url=url)
+    return FORGE_SSO_HINT.format(sso_url=url)
 
 
 def _token_hint(facts: dict) -> str:
@@ -457,7 +476,7 @@ def _banner_words(item: dict) -> dict | None:
     node = _or(stop.get("node"), "")
     if item["display_status"] == "failed":
         fix = _failed_fix(stop)
-        sso = FORGE_SSO_HINT.format(sso_url=_sso_url(stop.get("facts") or {}))
+        sso = _sso_hint(stop.get("facts") or {})
         token = _token_hint(stop.get("facts") or {})
         ways = {"forge_login": FORGE_LOGIN_HINT, "forge_sso": sso, "forge_token": token}
         way = {**ways, "repo": REPO_FIX}.get(fix, "")

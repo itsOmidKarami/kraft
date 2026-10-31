@@ -4,7 +4,7 @@ import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DiffFile, ItemAction, WorkerSession } from "../../types";
-import { BROKEN_BASE_TEXT } from "./cause";
+import { BROKEN_BASE_TEXT, FORGE_ACCOUNT_SSO_HINT, FORGE_ACCOUNT_SSO_UNNAMED_HINT, FORGE_SSO_HINT, hintText } from "./cause";
 import { ComesAfterCard, PausedCard, StateCard, useFolded } from "./StateCard";
 import { acceptWrites, detail, stubFetch, type Call } from "./testkit";
 
@@ -243,6 +243,37 @@ describe("StateCard", () => {
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
     expect(within(card).queryByText("single sign-on")).toBeNull();
+  });
+
+  it("a forge_auth stop with an sso_url and an API account: the account's SSO hint, the address still its link last", () => {
+    stubFetch();
+    const sso = "https://github.com/orgs/acme/sso?authorization_request=abc";
+    show({ display_status: "failed", stop: stop("failed", { facts: { cause: "forge_auth", account: "corp-gh", source: "env CORP_GH", sso_url: sso } }) });
+    const card = screen.getByRole("region", { name: "Failed" });
+    expect(card.querySelector(".item-card-fix")!.textContent).toBe(`Open this address to authorize forge account corp-gh's token for single sign-on, then Retry: ${sso}`);
+    expect(within(card).getByRole("link", { name: sso })).toHaveAttribute("href", sso);
+    expect(within(card).queryByText("account")).toBeNull();
+    // On a phone "corp-gh's" must not break after the hyphen: the name is one non-breaking element.
+    expect(within(card).getByText("corp-gh")).toHaveStyle({ whiteSpace: "nowrap" });
+  });
+
+  it.each([
+    ["the CLI's", FORGE_SSO_HINT],
+    ["an account's", FORGE_ACCOUNT_SSO_HINT.replace("{account}", "corp-gh")],
+    ["an unprintable account's", FORGE_ACCOUNT_SSO_UNNAMED_HINT],
+  ])("%s SSO hint, built from the constants: the address is its link whatever the copy says", (_name, hint) => {
+    const sso = "https://github.com/orgs/acme/sso?x=1";
+    const { container } = render(<p>{hintText(hint.replace("{sso_url}", sso))}</p>);
+    expect(within(container).getByRole("link", { name: sso })).toHaveAttribute("href", sso);
+  });
+
+  it("a forge_auth stop with an sso_url and an account name that cannot be printed: the neutral hint, address still its link", () => {
+    stubFetch();
+    const sso = "https://github.com/orgs/acme/sso?authorization_request=abc";
+    show({ display_status: "failed", stop: stop("failed", { facts: { cause: "forge_auth", account: "corp`gh", source: "env CORP_GH", sso_url: sso } }) });
+    const card = screen.getByRole("region", { name: "Failed" });
+    expect(card.querySelector(".item-card-fix")!.textContent).toBe(`Open this address to authorize the forge account's token for single sign-on, then Retry: ${sso}`);
+    expect(within(card).getByRole("link", { name: sso })).toHaveAttribute("href", sso);
   });
 
   it("failed with failing test scopes: each as a row, the paragraph stops at the node, no log tail", () => {
