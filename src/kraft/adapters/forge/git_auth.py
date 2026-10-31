@@ -5,7 +5,9 @@ argv or `.git/config`, and is keyed on the account's own origin."""
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import ssl
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,6 +49,10 @@ class GitAuth:
     header: str = field(repr=False)  # Authorization: Basic <basic_form>
     #: The exact URLs git will dial on this origin (no userinfo, no query), each pinned too.
     urls: tuple[str, ...] = ()
+    #: The CA bundle and directory git is pinned to (never a repo-local one): the account's
+    #: `ca_file`, else the environment's or the global gitconfig's, else the system's.
+    ca_info: str | None = None
+    ca_path: str = ""
 
     def refused(self, text: str) -> bool:
         """Whether git's words say the forge refused the header's token."""
@@ -127,6 +133,26 @@ def _injected(account: ForgeAccount) -> bool:
     return account.client == "api" and account.source().from_ in INJECTED
 
 
+def _trust(account: ForgeAccount) -> tuple[str | None, str]:
+    """(sslCAInfo, sslCAPath) from sources a repo cannot write: the account's `ca_file`, the
+    environment, the system and global gitconfig (read from a neutral directory, so no repo's
+    own config answers), then the system's default store. An empty `sslCAInfo` is no pin: git
+    reads it as 'no CA at all'."""
+    asked = credentials.neutral_run(
+        ["git", "config", "--get-urlmatch", "http", account.web_url], timeout=10
+    )
+    conf = dict(line.partition(" ")[::2] for line in asked.stdout.splitlines())
+    paths = ssl.get_default_verify_paths()
+    info = account.ca_file or os.environ.get("GIT_SSL_CAINFO") or conf.get("http.sslcainfo")
+    path = os.environ.get("GIT_SSL_CAPATH") or conf.get("http.sslcapath") or ""
+    if not info and not path:
+        if paths.cafile and os.path.exists(paths.cafile):
+            info = paths.cafile
+        elif paths.capath and os.path.isdir(paths.capath):
+            path = paths.capath
+    return (os.path.expanduser(info) if info else None), (os.path.expanduser(path) if path else "")
+
+
 async def _git(repo: Path, *args: str) -> list[str]:
     out = await asyncio.to_thread(config.git_read, repo, *args, expected_failure=True)
     return out.splitlines() if out else []
@@ -149,6 +175,12 @@ async def auth_for_account(
             other = True
             continue
         if scheme == "https" and (host, port) == forges.origin(account.web_url)[1:]:
+            if "@" in urlsplit(url).netloc:
+                # git ranks a key naming the user above any pin that does not.
+                raise ForgeError(
+                    f"forge account {name}: origin's URL names a user; remove it so Kraft "
+                    "can send its token, then retry"
+                )
             carry = True
             if (one := _exact(origin, url)) and one not in exact:
                 exact.append(one)
@@ -181,7 +213,9 @@ async def auth_for_account(
             f"forge account {name}: {exc}", reason="auth", account=name, source=source
         ) from None
     form = credentials.basic_form(token, account.source().kind, forge=account.forge)
-    return GitAuth(name, account, origin, f"Authorization: Basic {form}", tuple(exact))
+    info, path = await asyncio.to_thread(_trust, account)
+    header = f"Authorization: Basic {form}"
+    return GitAuth(name, account, origin, header, tuple(exact), info, path)
 
 
 async def auth_for(repo: Path, *, push: bool = False) -> GitAuth | None:
@@ -197,12 +231,8 @@ async def auth_for(repo: Path, *, push: bool = False) -> GitAuth | None:
         # Without repos.yaml the repo's account is unknown: refuse only an https remote on a
         # host some injected-token account names; an SSH or local remote keeps running.
         fetch = await _git(repo, "remote", "get-url", "origin")
-        hosts = {forges.web_host(a.web_url) for a in file.accounts.values() if _injected(a)}
-        if (
-            fetch
-            and fetch[0].lower().startswith("https://")
-            and forges.remote_host(fetch[0]) in hosts
-        ):
+        hosts = {forges.origin(a.web_url) for a in file.accounts.values() if _injected(a)}
+        if fetch and forges.origin(fetch[0]) in hosts:
             raise ForgeError(f"repos.yaml does not load ({entries.why}); fix it, then retry")
         return None
     common = await _git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
@@ -253,8 +283,11 @@ def git_env(base: Mapping[str, str], auth: GitAuth | None) -> dict[str, str]:
             (f"http.{target}sslVerify", "true"),
             (f"http.{target}followRedirects", "false"),  # git re-sends extraHeader on a redirect
             (f"http.{target}proxy", proxy),
+            (f"http.{target}sslCAPath", auth.ca_path),
             (f"http.{target}curloptResolve", ""),  # resets a pinned host -> address list
         ]
+        if auth.ca_info is not None:  # trust is pinned to a CA a repo cannot name
+            pins.append((f"http.{target}sslCAInfo", auth.ca_info))
     start = int(env["GIT_CONFIG_COUNT"])
     env["GIT_CONFIG_COUNT"] = str(start + len(pins))
     for i, (k, v) in enumerate(pins, start):

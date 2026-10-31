@@ -741,6 +741,16 @@ async def _push(repo: Path, branch: str, auth: git_auth.GitAuth | None) -> None:
     # Where the push goes, which a `pushurl` or `pushInsteadOf` can make
     # somewhere other than where `origin` fetches from.
     target = git_read(repo, "remote", "get-url", "--push", "origin") or "origin"
+    if auth:
+        # Never dial by URL with the header: git applies a `[remote "<url>"]` section of the
+        # repo's config to such a call, and none of it is pinned. `origin` reads the fetch URL.
+        if target != git_read(repo, "remote", "get-url", "origin"):
+            raise ForgeError(
+                f"forge account {auth.name}: origin's push URL differs from its fetch URL; "
+                "Kraft sends its token only through the remote's own name, so make them "
+                "the same, then retry"
+            )
+        target = "origin"
     listed = await run_git(repo, ["git", "ls-remote", target, f"refs/heads/{branch}"], env=env)
     remote = listed.split()[0] if listed.split() else ""
     ours = next(

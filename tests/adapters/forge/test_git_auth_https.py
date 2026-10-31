@@ -4,6 +4,7 @@ the wire sees (`support.git_https`) and what each site does when the token fails
 from __future__ import annotations
 
 import base64
+import contextlib
 import os
 import re
 import shutil
@@ -15,7 +16,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 from support import worktree as wtree
-from support.git_https import git_https, recording_proxy
+from support.git_https import bare_header_env, git_https, plant_keys, recording_proxy
 from support.harness import (
     commit_all,
     entry_of,
@@ -652,3 +653,131 @@ async def test_no_verify_alone_stops_the_pre_push_hook(hooks, monkeypatch):
         git(hooks.remote.repo, "push", "-q", str(hooks.remote.bare), "kraft/abc:refs/heads/ctl")
         assert "pre-push" in hooks.seen.read_text(), "pre-push is not live: no proof"
         assert "pre-push" not in await hooks.fire()
+
+
+@pytest.fixture
+def planted(remote, tmp_path, monkeypatch):
+    """What a repo's own config can plant for the dialed URL, at the origin, path and user
+    ranks: a recording proxy, a resolve to 127.0.0.2 where a TLS listener (a CA of its own) waits,
+    that CA, `sslVerify=false` and `followRedirects=true`. Nothing may reach any of them."""
+    for k in ("no_proxy", "NO_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"):
+        monkeypatch.delenv(k, raising=False)
+    port = int(remote.web.url.rsplit(":", 1)[1])
+    url = f"{remote.web.url}/team/app.git"
+    user_url = url.replace("https://", "https://git@")
+    ranks = [f"http.{remote.web.url}/", f"http.{url}", f"http.{user_url}"]
+    try:
+        listener_cm = git_https(tmp_path / "evil", bind=("127.0.0.2", port))
+        listener = listener_cm.__enter__()
+    except OSError:
+        pytest.skip("cannot bind 127.0.0.2 on this machine")
+    proxy_cm = recording_proxy()
+    seen, proxy = proxy_cm.__enter__()
+
+    def plant(*what):
+        if "proxy" in what:
+            plant_keys(remote.repo, ["proxy"], proxy, ranks)
+            git(remote.repo, "config", "remote.origin.proxy", proxy)
+            git(remote.repo, "config", f"remote.{url}.proxy", proxy)
+        if "resolve" in what:
+            plant_keys(remote.repo, ["curloptResolve"], f"127.0.0.1:{port}:127.0.0.2", ranks)
+            plant_keys(remote.repo, ["sslCAInfo"], str(listener.ca), ranks)
+            plant_keys(remote.repo, ["sslVerify"], "false", ranks)
+            plant_keys(remote.repo, ["sslCAPath"], str(tmp_path / "evil"), ranks)
+        plant_keys(remote.repo, ["followRedirects"], "true", ranks)
+
+    yield SimpleNamespace(plant=plant, proxy_hits=seen, listener=listener, remote=remote)
+    proxy_cm.__exit__(None, None, None)
+    listener_cm.__exit__(None, None, None)
+
+
+async def _fetch_and_push(r):
+    """Both calls, whatever they answer: what matters is who they reached."""
+    for call in (
+        lambda: builtins.upstream_head(r.repo, "main"),
+        lambda: forge_git.push(r.repo, "kraft/abc", account=r.pinned),
+    ):
+        with contextlib.suppress(Exception):
+            await call()
+
+
+@pytest.mark.parametrize(
+    ("what", "leaks_to"),
+    [
+        pytest.param(("proxy",), "proxy", id="proxy-keys"),
+        pytest.param(("resolve",), "listener", id="resolve-ca-and-verify-keys"),
+        pytest.param(("proxy", "resolve"), "proxy", id="every-key"),
+    ],
+)
+async def test_no_repo_config_key_routes_the_header_anywhere_but_the_origin(
+    planted, monkeypatch, what, leaks_to
+):
+    r = planted.remote
+    planted.plant(*what)
+    with monkeypatch.context() as bare:
+        bare.setattr(git_auth, "git_env", bare_header_env)
+        await _fetch_and_push(r)
+    reached = {
+        "proxy": bool(planted.proxy_hits),
+        "listener": OURS in planted.listener.authorizations,
+    }
+    assert reached[leaks_to], "the control leaked nowhere: the row proves nothing"
+    planted.proxy_hits.clear()
+    planted.listener.authorizations.clear()
+    r.web.authorizations.clear()
+    await _fetch_and_push(r)
+    assert planted.proxy_hits == []
+    assert planted.listener.authorizations == []
+    _ours_only(r.web)
+
+
+@pytest.mark.parametrize("user", ["git@", "git:pw@"])
+@pytest.mark.parametrize("remote", [pytest.param({}, id="origin-names-a-user")], indirect=True)
+async def test_an_origin_url_that_names_a_user_never_receives_the_header(remote, user):
+    port = remote.web.url.rsplit(":", 1)[1]
+    git(remote.repo, "remote", "set-url", "origin", f"https://{user}127.0.0.1:{port}/team/app.git")
+    with pytest.raises(ForgeError, match="names a user") as caught:
+        await forge_git.push(remote.repo, "kraft/abc", account=remote.pinned)
+    assert "git@" not in str(caught.value) and "pw" not in str(caught.value)
+    with pytest.raises(builtins.BaseFetchRefused, match="names a user"):
+        await builtins.upstream_head(remote.repo, "main")
+    assert remote.web.authorizations == []
+
+
+async def test_a_repo_section_named_by_the_url_never_receives_a_connect(remote, monkeypatch):
+    """git applies `[remote "<url>"]` to a call that dials that URL; Kraft dials `origin`."""
+    for k in ("no_proxy", "NO_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"):
+        monkeypatch.delenv(k, raising=False)
+    url = f"{remote.web.url}/team/app.git"
+    with recording_proxy() as (seen, proxy):
+        git(remote.repo, "config", f"remote.{url}.proxy", proxy)
+        subprocess.run(["git", "ls-remote", url], cwd=remote.repo, capture_output=True)
+        assert seen, "git ignored the section: no proof"
+        seen.clear()
+        await forge_git.push(remote.repo, "kraft/abc", account=remote.pinned)
+        assert seen == []
+    _ours_only(remote.web)
+
+
+async def test_a_push_url_that_differs_from_the_fetch_url_is_refused(remote):
+    git(remote.repo, "config", "remote.origin.pushurl", f"{remote.web.url}/team/other.git")
+    with pytest.raises(ForgeError, match="push URL differs from its fetch URL"):
+        await forge_git.push(remote.repo, "kraft/abc", account=remote.pinned)
+    assert remote.web.authorizations == []
+
+
+@pytest.mark.skipif(shutil.which("git-lfs") is None, reason="git-lfs is not installed")
+async def test_git_lfs_never_reaches_a_planted_proxy(planted, monkeypatch):
+    r = planted.remote
+    git(r.repo, "lfs", "install", "--local")
+    git(r.repo, "lfs", "track", "*.bin")
+    write(r.repo, "a.bin", "hello lfs\n")
+    commit_all(r.repo, "lfs")
+    planted.plant("proxy")
+    with monkeypatch.context() as bare:
+        bare.setattr(git_auth, "git_env", bare_header_env)
+        await _fetch_and_push(r)
+    assert planted.proxy_hits, "the control never reached the proxy: no proof"
+    planted.proxy_hits.clear()
+    await _fetch_and_push(r)
+    assert planted.proxy_hits == []

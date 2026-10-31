@@ -55,7 +55,13 @@ def _backend() -> str:
 
 
 @contextmanager
-def git_https(root: Path, *, token: str | None = None, forge: str = "gitlab") -> Iterator[GitHttps]:
+def git_https(
+    root: Path,
+    *,
+    token: str | None = None,
+    forge: str = "gitlab",
+    bind: tuple[str, int] = ("127.0.0.1", 0),
+) -> Iterator[GitHttps]:
     """Serve every bare repo under `root`. With `token`, a request whose `Authorization` is not
     that token's Basic form gets 401."""
     backend = _backend()
@@ -148,13 +154,13 @@ def git_https(root: Path, *, token: str | None = None, forge: str = "gitlab") ->
         def log_message(self, *args):
             pass
 
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = http.server.ThreadingHTTPServer(bind, Handler)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(leaf_pem, key_pem)
     server.socket = context.wrap_socket(server.socket, server_side=True)
     remote._server = server
-    remote.url = f"https://127.0.0.1:{server.server_address[1]}"
+    remote.url = f"https://{bind[0]}:{server.server_address[1]}"
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         yield remote
@@ -192,3 +198,30 @@ def recording_proxy() -> Iterator[tuple[list[bytes], str]]:
         yield seen, f"http://127.0.0.1:{srv.getsockname()[1]}"
     finally:
         srv.close()
+
+
+def plant_keys(repo, keys, value, targets):
+    """`git config <target>.<key> <value>` for each key and target (a repo-local plant)."""
+    from support.harness import git
+
+    for t in targets:
+        for key in keys:
+            git(repo, "config", f"{t}.{key}", value)
+
+
+def bare_header_env(base, auth):
+    """The control: the header and nothing else pinned, so a repo's own keys all apply."""
+    env = dict(base)
+    from kraft.worker import sandbox
+
+    sandbox.harden_host_git_env(env)
+    n = int(env["GIT_CONFIG_COUNT"])
+    env.update(
+        GIT_CONFIG_COUNT=str(n + 1),
+        **{
+            f"GIT_CONFIG_KEY_{n}": f"http.{auth.origin}/.extraHeader",
+            f"GIT_CONFIG_VALUE_{n}": auth.header,
+        },
+    )
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env

@@ -24,13 +24,16 @@ SSH = "git@code.corp.example:team/app.git"
 HTTPS = "https://code.corp.example/team/app.git"
 
 
-def acct(web=WEB, *, client="api", forge="gitlab", default=False, **token) -> ForgeAccount:
+def acct(
+    web=WEB, *, client="api", forge="gitlab", default=False, ca_file=None, **token
+) -> ForgeAccount:
     token = token or {"from": "env", "env": "CORP_GL", "kind": "pat"}
     return ForgeAccount(
         forge=forge,
         client=client,
         web_url=web,
         default_for_host=default,
+        ca_file=ca_file,
         token=TokenSource(**token) if client == "api" else None,
     )
 
@@ -80,8 +83,16 @@ def rig(
     return repo, calls
 
 
-def auth(origin=WEB, header=None, urls=()) -> GitAuth:
-    return GitAuth("corp-gl", acct(), origin, header or f"Authorization: Basic {form()}", urls)
+def auth(origin=WEB, header=None, urls=(), ca_info=None, ca_path="") -> GitAuth:
+    return GitAuth(
+        "corp-gl",
+        acct(),
+        origin,
+        header or f"Authorization: Basic {form()}",
+        urls,
+        ca_info,
+        ca_path,
+    )
 
 
 def pins(env) -> list[tuple[str, str]]:
@@ -98,8 +109,9 @@ PROXY = next((HARD[k] for k in git_auth._PROXY_VARS if HARD.get(k)), "")
 URL = f"{WEB}/team/app.git"
 
 
-def expected(*targets: str) -> list[tuple[str, str]]:
-    """The pins after the hardening ones: the helper reset, then six per origin or exact URL."""
+def expected(*targets: str, ca: str | None = None) -> list[tuple[str, str]]:
+    """The pins after the hardening ones: the helper reset, then seven per origin or exact URL
+    (eight with a pinned `sslCAInfo`)."""
     out = [("credential.helper", ""), ("remote.origin.proxy", PROXY)]
     for t in targets:
         out += [
@@ -108,8 +120,11 @@ def expected(*targets: str) -> list[tuple[str, str]]:
             (f"http.{t}sslVerify", "true"),
             (f"http.{t}followRedirects", "false"),
             (f"http.{t}proxy", PROXY),
+            (f"http.{t}sslCAPath", ""),
             (f"http.{t}curloptResolve", ""),
         ]
+        if ca is not None:
+            out.append((f"http.{t}sslCAInfo", ca))
     return out
 
 
@@ -137,6 +152,21 @@ NOISE = {
             auth(urls=(URL,)),
             lambda e: pins(e) == pins(HARD) + expected(f"{WEB}/.", f"{URL}."),
             id="every-dialed-url-is-pinned-too",
+        ),
+        pytest.param(
+            HARD,
+            auth(ca_info="/ca/corp.pem", ca_path="/ca/dir"),
+            lambda e: (
+                ("http.https://code.corp.example/.sslCAInfo", "/ca/corp.pem") in pins(e)
+                and ("http.https://code.corp.example/.sslCAPath", "/ca/dir") in pins(e)
+            ),
+            id="trust-is-pinned-at-the-origin",
+        ),
+        pytest.param(
+            HARD,
+            auth(urls=(URL,), ca_info="/ca/corp.pem"),
+            lambda e: pins(e) == pins(HARD) + expected(f"{WEB}/.", f"{URL}.", ca="/ca/corp.pem"),
+            id="trust-is-pinned-at-every-dialed-url",
         ),
         pytest.param(
             {**HARD, "GIT_CONFIG_PARAMETERS": "'http.x.sslverify=false'"},
@@ -569,6 +599,9 @@ async def test_an_unreadable_repos_yaml_is_read_as_a_config_problem_by_the_serve
         pytest.param(
             "https://other.example/t/a.git", False, id="https-on-another-host-keeps-running"
         ),
+        pytest.param(
+            "https://code.corp.example:8443/t/a.git", False, id="same-host-other-port-keeps-running"
+        ),
     ],
 )
 async def test_an_unreadable_repos_yaml_stops_only_a_remote_that_would_carry_a_header(
@@ -624,3 +657,53 @@ async def _reader_of(repo):
     return [RepoEntry(path=str(repo), forge="gitlab", forge_account="corp-gl")], ForgesFile(
         accounts={"corp-gl": acct()}
     )
+
+
+@pytest.fixture
+def neutral_home(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    for k in ("XDG_CONFIG_HOME", "GIT_SSL_CAINFO", "GIT_SSL_CAPATH", "GIT_CONFIG_GLOBAL"):
+        monkeypatch.delenv(k, raising=False)
+    return home
+
+
+@pytest.mark.parametrize(
+    ("ca_file", "env", "gitconfig", "want"),
+    [
+        pytest.param("/acct.pem", "/env.pem", "/global.pem", ("/acct.pem", ""), id="account-first"),
+        pytest.param(None, "/env.pem", "/global.pem", ("/env.pem", ""), id="environment-next"),
+        pytest.param(None, None, "/global.pem", ("/global.pem", ""), id="global-gitconfig-last"),
+    ],
+)
+def test_trust_comes_from_sources_a_repo_cannot_write(
+    neutral_home, monkeypatch, ca_file, env, gitconfig, want
+):
+    (neutral_home / ".gitconfig").write_text(f'[http "{WEB}/"]\n\tsslCAInfo = {gitconfig}\n')
+    if env:
+        monkeypatch.setenv("GIT_SSL_CAINFO", env)
+    assert git_auth._trust(acct(ca_file=ca_file)) == want
+
+
+async def test_a_repos_own_ca_setting_is_never_the_trust_pin(tmp_path, monkeypatch, neutral_home):
+    repo, _ = rig(
+        tmp_path,
+        monkeypatch,
+        remote=HTTPS,
+        config_lines=[("http.sslCAInfo", "/planted.pem"), (f"http.{WEB}/.sslCAPath", "/planted")],
+    )
+    got = await git_auth.auth_for_account(repo, "corp-gl", acct(), push=False)
+    assert got is not None and "planted" not in f"{got.ca_info} {got.ca_path}"
+
+
+@pytest.mark.parametrize("user", ["git@", "git:pw@"])
+@pytest.mark.parametrize("push", [False, True], ids=["fetch", "push"])
+async def test_a_url_that_names_a_user_is_refused_without_quoting_it(
+    tmp_path, monkeypatch, user, push
+):
+    repo, _ = rig(tmp_path, monkeypatch, remote=f"https://{user}code.corp.example/team/app.git")
+    with pytest.raises(ForgeError, match="names a user; remove it") as caught:
+        await git_auth.auth_for_account(repo, "corp-gl", acct(), push=push)
+    assert "git@" not in str(caught.value) and "pw" not in str(caught.value)
+    assert "`" not in str(caught.value)
