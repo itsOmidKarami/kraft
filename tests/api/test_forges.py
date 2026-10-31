@@ -637,11 +637,20 @@ def test_a_failed_paste_leaves_the_old_token_and_no_orphan(client, monkeypatch, 
         {"from": "file", "file": "{shared}"},
         {"from": "file", "file": "{link}"},
         {"from": "file", "file": "{secrets}/someone"},
+        {"from": "file", "file": "{cased}/someone"},
+        {"from": "file", "file": "{shared_cased}"},
     ],
-    ids=["env-another-reads", "file-another-reads", "link-to-a-file-another-reads", "another-name"],
+    ids=[
+        "env-another-reads",
+        "file-another-reads",
+        "link-to-a-file-another-reads",
+        "another-name",
+        "another-name-in-another-case",
+        "file-another-reads-in-another-case",
+    ],
 )
 def test_an_http_write_never_points_an_account_at_a_secret_it_does_not_own(
-    client, tmp_path, method, source
+    client, tmp_path, monkeypatch, method, source
 ):
     shared = tmp_path / "shared"
     shared.write_text(TOK)
@@ -664,7 +673,15 @@ def test_an_http_write_never_points_an_account_at_a_secret_it_does_not_own(
     if method == "patch":
         assert client.post("/api/forges", json=API).status_code == 201
     before = _file(client).read_text()
-    fill = {"shared": str(shared), "link": str(tmp_path / "link"), "secrets": str(secrets)}
+    fill = {
+        "shared": str(shared),
+        "link": str(tmp_path / "link"),
+        "secrets": str(secrets),
+        "cased": str(secrets.parent / "SECRETS"),
+        "shared_cased": str(shared).upper(),
+    }
+    if "cased" in source.get("file", ""):  # a disk that ignores case (macOS): not this one
+        monkeypatch.setattr(os.path, "samefile", lambda a, b: str(a).lower() == str(b).lower())
     token = {k: v.format(**fill) for k, v in source.items()}
     reply = (
         client.post("/api/forges", json={**API, "token": token})
@@ -675,3 +692,18 @@ def test_an_http_write_never_points_an_account_at_a_secret_it_does_not_own(
     assert "another account" in reply.text
     assert not any(word in reply.text for word in ("CORP_GL", "someone", "shared"))
     assert _file(client).read_text() == before
+
+
+@pytest.mark.parametrize(
+    "own",
+    [{"from": "file", "file": "{secrets}/corp"}, {"from": "env", "env": "CORP_GL"}],
+    ids=["its-own-pasted-file", "its-own-env"],
+)
+def test_an_account_may_keep_the_source_it_already_has(client, own):
+    own = {k: v.format(secrets=kraft_home() / "secrets") for k, v in own.items()}
+    other = {**API, "name": "other", "web_url": "https://other.example"}
+    assert client.post("/api/forges", json=other).status_code == 201
+    assert client.post("/api/forges", json={**API, "token": own}).status_code == 201
+    reply = client.patch("/api/forges/corp", json={"token": own})
+    assert reply.status_code == 200, reply.text
+    assert client.app.state.forges.accounts["corp"].token.from_ == own["from"]

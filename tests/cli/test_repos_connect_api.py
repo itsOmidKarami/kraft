@@ -206,6 +206,15 @@ def test_a_host_with_an_api_account_shows_its_test_and_asks_nothing(
     assert asyncio.run(client.repos())[0]["forge"] == "gitlab"
 
 
+def test_a_cli_account_for_the_host_is_never_tested_at_connect(app, capsys, repo, monkeypatch):
+    _origin(repo, _SELF_HOSTED)
+    asyncio.run(client.add_forge("corp", "gitlab", "https://code.corp.example", None, True))
+    calls = _spy(monkeypatch, "test_forge", *_WRITES)
+    _connect(repo, "--json")
+    assert calls == [] and "api_account" not in capsys.readouterr().out
+    assert asyncio.run(client.repos())[0]["forge"] == "gitlab"
+
+
 @pytest.mark.parametrize(
     "remote, before, flags, interactive, said",
     [

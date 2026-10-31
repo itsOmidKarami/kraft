@@ -138,6 +138,15 @@ def _real(spec: str) -> str:
     return os.path.realpath(os.path.expandvars(os.path.expanduser(spec)))
 
 
+def _same(a, b) -> bool:
+    """The same file, even where the disk ignores case (realpath keeps the case typed);
+    paths that do not exist yet compare as text."""
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return str(a) == str(b)
+
+
 def _drop_own_file(name: str, before: forges.ForgeAccount | None, after: forges.ForgesFile) -> None:
     """Delete the pasted token file once no account reads it: the account is gone, or reads
     another source now. Only the file Kraft wrote for this name, never one it was pointed at."""
@@ -177,10 +186,11 @@ def _no_shared(updated: forges.ForgesFile, name: str, sent) -> None:
         raise HTTPException(403, _SHARED_403)
     if token.file:
         real = _real(token.file)
-        secrets = os.path.realpath(kraft_home().resolve() / "secrets")
-        own = os.path.join(secrets, name)
-        if any(o.file and _real(o.file) == real for o in others) or (
-            real.startswith(secrets + os.sep) and real != own
+        secrets = kraft_home().resolve() / "secrets"
+        own = secrets / name
+        under = any(_same(str(p), secrets) for p in (Path(real), *Path(real).parents))
+        if any(o.file and _same(_real(o.file), real) for o in others) or (
+            under and not _same(real, own)
         ):
             raise HTTPException(403, _SHARED_403)
 
