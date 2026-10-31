@@ -21,12 +21,13 @@ from support.harness import entry_of, fake_templates_dir, isolated_bd, make_repo
 from support.real_binaries import GUARDED_BINARIES as _GUARDED_BINARIES
 
 from kraft import client as kraft_client
-from kraft import db, redact
+from kraft import db
 from kraft.paths import RunDirs
 
 #: `rig` and `rig_offline`: a server and a machine in one process (`support.remote`).
 #: `support.local_worker`: the in-process local worker every test starts its sessions through.
-pytest_plugins = ["support.rig_fixtures", "support.local_worker"]
+#: `support.redaction`: every test starts with no secret registered with `kraft.redact`.
+pytest_plugins = ["support.rig_fixtures", "support.local_worker", "support.redaction"]
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -37,14 +38,6 @@ _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 #: empty test fields are the same statement about verification, and they are
 #: here rather than inline so the three call sites below cannot drift apart.
 _INERT_REPO_ENTRY = {"setup_command": "", "test_command": None, "test_scopes": None}
-
-
-@pytest.fixture(autouse=True)
-def _no_registered_secrets(monkeypatch):
-    """Each test starts with no secret registered: one a test (or code it ran)
-    registered would make every later log record in the worker drop its
-    `exc_info`, which tests read."""
-    monkeypatch.setattr(redact, "_secrets", ())
 
 
 @pytest.fixture(autouse=True)
