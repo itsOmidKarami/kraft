@@ -116,7 +116,7 @@ def _is_system(path: Path) -> bool:
     )
 
 
-def _protected(home: Path, kraft_home: Path) -> list[Path]:
+def _protected(home: Path, kraft_home: Path, secrets: bool = True) -> list[Path]:
     # Inside: credentials imports host_view.
     from kraft.adapters.forge import credentials
     from kraft.paths import config_dir, default_run_dir
@@ -129,20 +129,24 @@ def _protected(home: Path, kraft_home: Path) -> list[Path]:
         run_dir.resolve(),
         config_dir().resolve(),
         *((home / p).resolve() for p in _PROTECTED_IN_HOME),
-        *credentials.secret_files(),
+        *(credentials.secret_files() if secrets else ()),
     ]
 
 
-def protected_refusal(path: Path, home: Path, kraft_home: Path) -> str | None:
+def protected_refusal(
+    path: Path, home: Path, kraft_home: Path, *, secrets: bool = True
+) -> str | None:
     """Why `path`, resolved, may not be shown, or None. It is refused when it
     is or holds `home`, or is, holds or is inside Kraft's home or a secrets
-    directory. Inside `home` alone is fine: home-installed CLIs live there."""
+    directory. Inside `home` alone is fine: home-installed CLIs live there.
+    `secrets=False` leaves forge token files out: repos.yaml's own validator,
+    so one token file never stops every repo from loading (launch still refuses)."""
     p, h = path.resolve(), home.resolve()
     if p.name in CREDENTIAL_FILES:
         return f"{p} is a credential file"
     if _within(h, p):
         return f"{p} is or holds your home directory"
-    for q in _protected(home, kraft_home):
+    for q in _protected(home, kraft_home, secrets):
         if _within(p, q) or _within(q, p):
             return f"{p} is or holds {q}, which the sandbox never shows"
     return None

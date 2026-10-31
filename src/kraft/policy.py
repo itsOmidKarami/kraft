@@ -1241,7 +1241,7 @@ class SandboxPolicy(BaseModel):
             home = Path(os.environ.get("HOME") or Path.home())
             for path in value:
                 p = home / path[2:] if path.startswith("~/") else Path(path)
-                if why := host_view.protected_refusal(p, home, kraft_home()):
+                if why := host_view.protected_refusal(p, home, kraft_home(), secrets=False):
                     raise ValueError(f"expose {path!r} is protected: {why}")
         return value or None
 

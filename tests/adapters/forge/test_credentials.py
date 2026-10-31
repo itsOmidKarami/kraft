@@ -496,3 +496,15 @@ def test_a_broken_file_still_names_its_token_files(tmp_path, monkeypatch, text):
     path.write_bytes(text.encode("latin-1"))
     credentials.set_secret_files(path)
     assert credentials.secret_files() == (Path("/s/tok"),)
+
+
+def test_a_directory_named_as_a_token_file_is_not_protected(tmp_path, monkeypatch):
+    # `file: ~/` would otherwise hide all of home from every sandbox (and every CLI under it).
+    monkeypatch.setattr(credentials, "_SECRET_FILES", ())
+    path = tmp_path / "forges.yaml"
+    path.write_text(
+        f"accounts:\n  gl: {{token: {{from: file, file: {tmp_path}}}}}\n"
+        f"  gh: {{token: {{from: file, file: {tmp_path}/tok}}}}\nbad: [\n"
+    )
+    credentials.set_secret_files(path)
+    assert credentials.secret_files() == (tmp_path.resolve() / "tok",)

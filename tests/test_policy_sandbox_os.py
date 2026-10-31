@@ -1,6 +1,8 @@
 """`sandbox: {kind: os}`: the host's own agent CLI under the operating
 system's process sandbox, reaching Kraft only through its session's channel."""
 
+from pathlib import Path
+
 import pytest
 import yaml
 from pydantic import ValidationError
@@ -50,13 +52,21 @@ def test_os_round_trips():
         (["x"], "'x' is not an absolute or ~/ path"),
         (["~/.ssh"], "protected"),
         ([], None),
+        # A forge token file under an expose is refused at launch, never here: one token
+        # file must not stop repos.yaml loading for every repo.
+        (["/srv/shared"], None),
     ],
-    ids=["relative", "protected", "empty"],
+    ids=["relative", "protected", "empty", "holds-a-forge-token-file-loads"],
 )
-def test_expose_paths(expose, error):
+def test_expose_paths(expose, error, monkeypatch):
+    from kraft.adapters.forge import credentials
+
+    monkeypatch.setattr(credentials, "_SECRET_FILES", (Path("/srv/shared/tok"),))
     data = {**OS, "expose": expose}
     if error:
         with pytest.raises(ValidationError, match=error):
             policy.SandboxPolicy.model_validate(data)
     else:
-        assert "expose" not in policy.SandboxPolicy.model_validate(data).model_dump()
+        assert policy.SandboxPolicy.model_validate(data).model_dump().get("expose") == (
+            expose or None
+        )

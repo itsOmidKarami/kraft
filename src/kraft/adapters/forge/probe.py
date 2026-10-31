@@ -133,6 +133,9 @@ async def _probe_account(
     checked = datetime.now(UTC).isoformat(timespec="seconds")
 
     def done(state: State, detail: str, **kw) -> Probe:
+        for k in ("login", "sso_url"):
+            if isinstance(kw.get(k), str):
+                kw[k] = redact.redact(kw[k])
         return Probe(name, checked, state, redact.redact(detail), **kw)
 
     source = account.source()
@@ -223,25 +226,35 @@ async def refresh(st, accounts: Mapping[str, ForgeAccount] | None = None) -> dic
         return {}
     try:
         repos = await asyncio.to_thread(config.load_repos, st.templates_dir / "repos.yaml")
+        unread = False
     except config.ConfigError:
-        repos = []  # repos.yaml's own check says why
+        repos, unread = [], True  # repos.yaml's own check says why
     expose = _expose(st, repos)
-    probes = await asyncio.gather(
-        *(
-            probe_account(
+
+    async def one(n: str, a: ForgeAccount) -> Probe:
+        if unread and a.source().from_ == "file":
+            # Without the repos, the file's place cannot be checked against them: refuse.
+            return Probe(
                 n,
-                a,
-                repos=repos,
-                worktrees=st.run_dirs.worktrees,
-                expose=expose,
-                transport=getattr(st, "forge_http_transport", None),
+                datetime.now(UTC).isoformat(timespec="seconds"),
+                "no_token",
+                "repos.yaml does not load, so a file token cannot be checked; fix repos.yaml",
             )
-            for n, a in accounts.items()
+        return await probe_account(
+            n,
+            a,
+            repos=repos,
+            worktrees=st.run_dirs.worktrees,
+            expose=expose,
+            transport=getattr(st, "forge_http_transport", None),
         )
-    )
+
+    probes = await asyncio.gather(*(one(n, a) for n, a in accounts.items()))
     running = api_accounts(st)
     for p in probes:
-        if p.account in running:
+        # Only for the account as the server runs it: a test of an unreloaded edit, or a
+        # reload that landed mid-probe, must not show under the running account's name.
+        if running.get(p.account) == accounts[p.account]:
             st.forge_probes[p.account] = p
     return {p.account: p for p in probes}
 

@@ -380,7 +380,8 @@ def set_secret_files(forges_yaml: Path, running: ForgesFile | None = None) -> No
         specs = _scan(forges_yaml, _FILE_PATH)
     if running:
         specs += [a.token.file for a in running.accounts.values() if a.token and a.token.file]
-    _SECRET_FILES = tuple(_expand(s) for s in dict.fromkeys(specs))
+    # A directory is never a token (read_file refuses it); protecting one would hide all of it.
+    _SECRET_FILES = tuple(p for p in dict.fromkeys(map(_expand, specs)) if not p.is_dir())
 
 
 def secret_files() -> tuple[Path, ...]:

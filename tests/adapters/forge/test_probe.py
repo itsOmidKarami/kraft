@@ -329,3 +329,39 @@ def test_a_removed_account_leaves_health(client, templates_dir, how):
         client.post("/api/apply/reload")
     health = client.get("/api/health").json()
     assert health["forge_tokens"] == {} and health["status"] == "ok", health
+
+
+def test_a_test_of_an_unreloaded_edit_never_reaches_health(client, templates_dir):
+    for _ in range(100):
+        if "corp" in client.app.state.forge_probes:
+            break
+        time.sleep(0.05)
+    client.app.state.forge_probes["corp"] = probe.Probe("corp", "t", "refused", "HTTP 401")
+    forges = templates_dir / "forges.yaml"
+    forges.write_text(forges.read_text().replace("pat}", "oauth}"))  # on disk, not reloaded
+    assert client.post("/api/forges/corp/test").json()["ok"] is True
+    assert client.app.state.forge_probes["corp"].state == "refused"
+
+
+async def test_a_file_token_is_not_read_while_repos_yaml_does_not_load(tmp_path):
+    from types import SimpleNamespace
+
+    from kraft.forges import ForgesFile
+
+    (tmp_path / "repos.yaml").write_text("repos: [\n")
+    account = ForgeAccount(
+        forge="gitlab",
+        client="api",
+        web_url=GL,
+        token=TokenSource(**{"from": "file", "file": "/s/tok"}),
+    )
+    st = SimpleNamespace(
+        forges=ForgesFile(accounts={"corp": account}),
+        templates_dir=tmp_path,
+        instance_policy=SimpleNamespace(sandbox=None),
+        run_dirs=SimpleNamespace(worktrees=tmp_path / "wt"),
+        forge_probes={},
+    )
+    got = await probe.refresh(st)
+    assert got["corp"].state == "no_token" and "repos.yaml" in got["corp"].detail
+    assert canned.CALLS == []
