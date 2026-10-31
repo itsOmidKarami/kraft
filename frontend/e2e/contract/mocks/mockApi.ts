@@ -684,7 +684,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       if (method === "DELETE") return { status: 204 };
       return json({ ...(st.repos[0] ?? {}), ...(req.json() ?? {}) });
     }
-    if (p === "/repos/probe") return json({ path: req.json()?.path ?? "/tmp/x", name: "x", branch: "main", submodules: ["vendor/kraft-lite"], has_beads: true, beads_export_auto: false, beads_export_git_add: true, has_engineering: true, test_command: "uv run pytest -q", test_scopes: null, forge: "gitlab", project: "acme/x" });
+    if (p === "/repos/probe") return json({ path: req.json()?.path ?? "/tmp/x", name: "x", branch: "main", submodules: ["vendor/kraft-lite"], has_beads: true, beads_export_auto: false, beads_export_git_add: true, has_engineering: true, test_command: "uv run pytest -q", test_scopes: null, forge: "gitlab", project: "acme/x", needs_forge: false, remote_host: "gitlab.com", remote_path: "acme/x" });
     if (hs) {
       if (p === "/harnesses") return json(PROVIDER_STATUS);
       if (p === "/policy") return json({ ...policy(), maxima: { allowed_tools: ["git", "shell"] }, defaults: { escalation_grants: ["git-commit"] } });
