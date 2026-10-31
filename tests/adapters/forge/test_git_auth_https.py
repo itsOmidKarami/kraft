@@ -3,7 +3,11 @@ the wire sees (`support.git_https`) and what each site does when the token fails
 
 from __future__ import annotations
 
+import os
+import re
+import shutil
 import stat
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -404,3 +408,115 @@ async def test_a_push_follows_its_backend(remote, backend):
         with pytest.raises(ForgeError, match="not on https://moved.example"):
             await GitLabApi("corp-gl", moved).push(repo=remote.repo, branch="kraft/abc")
         assert remote.web.authorizations == []
+
+
+_LFS_POINTER = "version https://git-lfs.github.com/spec/v1\noid sha256:" + "a" * 64 + "\nsize 12\n"
+_SRC = Path(__file__).resolve().parents[3] / "src" / "kraft"
+
+
+def _script(path, body):
+    path.write_text(f"#!/bin/sh\n{body}\n")
+    path.chmod(0o755)
+
+
+@pytest.fixture
+async def leaked(remote, tmp_path, monkeypatch):
+    """One credentialed push (with an LFS pointer) and one base fetch, with every place a token
+    could land watched: a git wrapper's argv log, a fake git-lfs's argv and env, hooks that dump
+    their env, git's own traces (redaction off), `.git/config` and `os.environ`."""
+    for k in [k for k in os.environ if k.startswith("GIT_CONFIG_")]:
+        monkeypatch.delenv(k)
+    write(remote.repo, "big.bin", _LFS_POINTER)
+    commit_all(remote.repo, "an lfs pointer")
+    bin_, logs = tmp_path / "bin", tmp_path / "logs"
+    bin_.mkdir()
+    logs.mkdir()
+    real = shutil.which("git")
+    _script(bin_ / "git", f'printf \'%s\\n\' "$@" >> {logs}/argv\nexec {real} "$@"')
+    _script(
+        bin_ / "git-lfs", f"printf '%s\\n' \"$@\" >> {logs}/lfs-argv\nenv >> {logs}/lfs-env\nexit 0"
+    )
+    common = Path(git(remote.repo, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    for name in ("pre-push", "reference-transaction"):
+        _script(common / "hooks" / name, f"env >> {logs}/hook-env")
+    monkeypatch.setenv("PATH", f"{bin_}{os.pathsep}{os.environ['PATH']}")
+    traces = {k: logs / k.lower() for k in ("GIT_TRACE", "GIT_TRACE_CURL", "GIT_TRACE_PACKET")}
+    for k, path in traces.items():
+        monkeypatch.setenv(k, str(path))
+    monkeypatch.setenv("GIT_TRACE_REDACT", "0")
+
+    def read(name):
+        path = logs / name
+        text = path.read_text() if path.exists() else None
+        path.unlink(missing_ok=True)
+        return text
+
+    await forge_git.push(remote.repo, "kraft/abc", account=remote.pinned)
+    on_push = read("hook-env")
+    await builtins.upstream_head(remote.repo, "main")
+    return SimpleNamespace(
+        web=remote.web,
+        argv=read("argv"),
+        hook_env_on_push=on_push,
+        hook_env_on_fetch=read("hook-env"),
+        lfs_argv=read("lfs-argv"),
+        lfs_env=read("lfs-env"),
+        trace=" ".join(p.read_text() for p in traces.values() if p.exists()),
+        config=(common / "config").read_text(),
+        environ=" ".join(os.environ.values()),
+    )
+
+
+@pytest.mark.parametrize(
+    "place",
+    [
+        "argv",
+        "hook_env_on_push",
+        "hook_env_on_fetch",
+        "config",
+        "environ",
+        "trace",
+        "lfs_argv",
+    ],
+)
+async def test_a_git_token_reaches_only_its_origin(leaked, place):
+    _ours_only(leaked.web)
+    assert len(leaked.web.authorizations) >= 2  # the push's calls and the fetch
+    assert leaked.argv and leaked.lfs_argv, "the wrappers never ran: the row proves nothing"
+    held = getattr(leaked, place)
+    _clean(held or "")
+    if place.startswith("hook_env"):
+        assert held is None  # a hook that never ran wrote nothing
+
+
+async def test_git_lfs_gets_the_header_in_its_config_not_its_argv(leaked):
+    values = [
+        v
+        for k, v in (ln.split("=", 1) for ln in leaked.lfs_env.splitlines() if "=" in ln)
+        if k.startswith("GIT_CONFIG_VALUE_")
+    ]
+    assert f"Authorization: Basic {form()}" in values
+    _clean(leaked.lfs_argv)
+
+
+def test_no_remote_or_worker_module_builds_a_credentialed_git_env():
+    imports = re.compile(r"^\s*(from|import)\s.*\bgit_auth\b", re.MULTILINE)
+    for pkg in ("remote", "worker"):
+        for path in (_SRC / pkg).rglob("*.py"):
+            assert not imports.search(path.read_text()), path
+    callers = {
+        p.relative_to(_SRC).as_posix()
+        for p in _SRC.rglob("*.py")
+        if "set_reader(" in p.read_text() and p.name != "git_auth.py"
+    }
+    assert callers == {"api/startup.py"}
+
+
+@pytest.mark.parametrize("remote", [{"server": "another-token"}], indirect=True)
+async def test_a_verbose_curl_never_prints_the_header_into_a_stop(remote, monkeypatch):
+    monkeypatch.setenv("GIT_CURL_VERBOSE", "1")  # beats GIT_TRACE_CURL, and prints to stderr
+    monkeypatch.setenv("GIT_TRACE_REDACT", "0")
+    with pytest.raises(ForgeError) as caught:
+        await forge_git.push(remote.repo, "kraft/abc", account=remote.pinned)
+    _ours_only(remote.web)
+    _clean(caught.value, caught.value.args)
