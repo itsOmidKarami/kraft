@@ -111,6 +111,12 @@ def resolve(name: str) -> Forge:
             return GhCli()
         case "fake":
             return _DEV_FAKE
+        case "github-api" | "gitlab-api":
+            # Backstop: run_task and item_forge refuse an API account first.
+            raise ForgeError(
+                f"the {name} backend is not in this release; set client: cli on its "
+                "forge account in forges.yaml, then a person's kraft item retry"
+            )
         case _:
             raise ForgeError(f"unknown forge backend {name!r}; known: gh, glab, fake")
 
@@ -124,6 +130,27 @@ _RATE_LIMIT_WAIT_S = 60
 #: `fake` is dev-only (Ruling 147): the in-process `FakeForge`, so `just dev`
 #: reaches the merge-request half of a chain. It opens nothing anywhere.
 _FORGE_CLI = {"gitlab": "glab", "github": "gh", "fake": "fake"}
+
+#: `client: api` accounts pin these; no release ships them yet (see `refuse_api_account`).
+API_BACKENDS = {"github": "github-api", "gitlab": "gitlab-api"}
+
+#: A pinned backend -> the forge it talks to.
+_BACKEND_FORGE = {
+    "gh": "github",
+    "glab": "gitlab",
+    "github-api": "github",
+    "gitlab-api": "gitlab",
+    "fake": "fake",
+}
+
+
+def backend_name(repo_forge: str | None, account, backend: str = "auto") -> str:
+    """The backend an item pins: the API one for a `client: api` account, else
+    the CLI `backend_for` names."""
+    if account is not None and account.client == "api":
+        return API_BACKENDS[account.forge]
+    return backend_for(backend, repo_forge)
+
 
 #: The one `FakeForge` a `fake` repo gets, for the life of the process: every
 #: forge node resolves afresh, and a per-call instance forgot the draft MR
@@ -183,7 +210,8 @@ async def _pin_forge_accounts(
     or not, until a person's retry: an item that started on the CLI keeps it
     (doctor and the save check name the bad account).
     `forges` None with a `forges_error` is a forges.yaml that never loaded: pins
-    are kept unchecked, and only a repo naming an account stops."""
+    are kept unchecked, and every mount not yet pinned stops: the broken file
+    may hold an API host default, so running the CLI would be a silent switch."""
     pins = db.read(lambda c: store.forge_pins(c, work_item_id))
     unreadable = forges is None and bool(forges_error)
     forges = forges or forges_mod.ForgesFile()
@@ -197,26 +225,46 @@ async def _pin_forge_accounts(
     for mount, entry in mounts:
         pin = pins.get(mount)
         if entry is None or (mount and not entry.forge):
-            # An unknown member, or one with no forge, uses the root's (as _member_forges does).
+            # An unknown member, or one with no forge, uses the root's (as _member_forges
+            # does), so it pins the root's account and backend too: an API root's member
+            # must never be pinned to the CLI.
             if pin is None and not unreadable:
-                new[mount] = (None, backend_for(backend, repo_forge))
+                root = pins.get("")
+                new[mount] = new.get("") or (
+                    (root["account"], root["backend"])
+                    if root
+                    else (None, backend_for(backend, repo_forge))
+                )
             continue
         if unreadable:
-            if pin is None and entry.forge_account:
+            if pin is not None:
+                continue
+            if entry.forge_account:
                 raise ForgeError(
                     f"forge_account {entry.forge_account}: forges.yaml does not load "
                     f"({forges_error}); fix it, then a person's `kraft item retry`"
                 )
-            continue
+            raise ForgeError(
+                f"forges.yaml does not load ({forges_error}); "
+                "fix it, then a person's kraft item retry"
+            )
         named = entry.forge_account
         if pin is not None and pin["account"] is not None:
             acct = forges.accounts.get(pin["account"])
-            was = next((f for f, cli in _FORGE_CLI.items() if cli == pin["backend"]), "?")
+            was = _BACKEND_FORGE.get(pin["backend"], "?")
             if acct is None:
                 why = "was removed"
             elif acct.forge != was:
                 why = f"now says forge: {acct.forge}, was {was}"
-            elif backend_for(backend, entry.forge) != pin["backend"]:
+            elif backend_name(entry.forge, acct, backend) != pin["backend"]:
+                was_api = pin["backend"] in API_BACKENDS.values()
+                if was_api != (acct.client == "api"):
+                    now, then = ("api", "cli") if acct.client == "api" else ("cli", "api")
+                    raise ForgeError(
+                        f"forge account {pin['account']} now says client: {now}, was "
+                        f"client: {then}; a person's kraft item retry re-pins to what "
+                        "is configured now"
+                    )
                 raise ForgeError(
                     f"forge account {pin['account']} is pinned to {pin['backend']}, the repo "
                     f"now says forge: {entry.forge}; a person's `kraft item retry` "
@@ -250,7 +298,10 @@ async def _pin_forge_accounts(
                 f"forge_account {found[0]} says forge: {found[1].forge}, "
                 f"the repo says forge: {entry.forge}"
             )
-        new[mount] = (found[0] if found else None, backend_for(backend, entry.forge))
+        new[mount] = (
+            found[0] if found else None,
+            backend_name(entry.forge, found[1] if found else None, backend),
+        )
 
     def write(conn):
         for mount, (account, pinned) in new.items():
@@ -258,6 +309,65 @@ async def _pin_forge_accounts(
 
     if new:
         await db.write(write)
+
+
+async def refuse_api_account(db, work_item_id, mount, entry, forges, forges_error=None) -> None:
+    """Stop (ForgeError) before any CLI runs for a mount on a `client: api`
+    account: no API backend ships yet, and falling back to gh/glab would be a
+    silent switch. A pin decides (a null-account CLI pin never stops); with no
+    pin, the live account for the mount's origin does, and a forges.yaml that
+    did not load (`forges` None, `forges_error` set) stops it as the walk does."""
+    pin = db.read(lambda c: store.forge_pins(c, work_item_id)).get(mount)
+    if pin is not None:
+        if pin["backend"] in API_BACKENDS.values():
+            _refuse_text(pin["account"], pin["backend"])
+        return
+    if entry is not None and forges is None and forges_error:
+        raise ForgeError(
+            f"forges.yaml does not load ({forges_error}); fix it, then a person's kraft item retry"
+        )
+    if entry is None or forges is None:
+        return
+    if not any(a.client == "api" for a in forges.accounts.values()):
+        return  # no account could refuse: spare the git call
+    origin = await asyncio.to_thread(
+        config.git_read, Path(entry.path), "remote", "get-url", "origin", expected_failure=True
+    )
+    found = forges_mod.account_for(
+        entry, forges, forges_mod.remote_host(origin) if origin else None
+    )
+    if found and found[1].client == "api":
+        _refuse_text(found[0], API_BACKENDS[found[1].forge])
+
+
+def _refuse_text(account, backend) -> None:
+    raise ForgeError(
+        f"forge account {account} says client: api, and the {backend} backend is not in "
+        "this release; set client: cli on it in forges.yaml, then a person's kraft item retry"
+    )
+
+
+async def item_forge(
+    db, row, entry, forges, forges_error: str | None = None, mount: str | None = None
+) -> Forge:
+    """The CLI forge for an item's root (or workspace member `mount`) outside
+    the walk, after `refuse_api_account`. PR 5 turns this into `resolve(entry)`."""
+    repo_forge = entry.forge if entry else None
+    if not mount:
+        await refuse_api_account(db, row["id"], "", entry, forges, forges_error)
+        return resolve(backend_for("auto", repo_forge))
+    try:
+        by_id = {r.id: r for r in load_repos(config_dir() / "repos.yaml") if r.id}
+    except ConfigError:
+        by_id = {}
+    rid = dict(_builtins.item_members(row)).get(mount)
+    own = by_id.get(rid) if rid else None
+    if own is not None and own.forge:
+        await refuse_api_account(db, row["id"], mount, own, forges, forges_error)
+    else:  # no forge of its own: it uses the root's, so the root's account decides too
+        await refuse_api_account(db, row["id"], mount, None, None)
+        await refuse_api_account(db, row["id"], "", entry, forges, forges_error)
+    return member_forge(row, repo_forge, mount)
 
 
 def member_forge(item, repo_forge: str | None, mount: str) -> Forge:
@@ -2183,6 +2293,9 @@ async def run_task(
                         c, work_item_id, "", None, backend_for(backend, repo_forge)
                     )
                 )
+        for pin in db.read(lambda c: store.forge_pins(c, work_item_id)).values():
+            if pin["backend"] in API_BACKENDS.values():
+                _refuse_text(pin["account"], pin["backend"])
         live_forge = resolve(backend_for(backend, repo_forge))
         member_forges = _member_forges(item, backend, repo_forge)
     except ForgeError as exc:

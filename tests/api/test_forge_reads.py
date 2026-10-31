@@ -7,6 +7,7 @@ import json
 from dataclasses import asdict, dataclass, field
 
 import pytest
+from support.api import _on_api_account
 from support.harness import make_repo
 
 from kraft import store
@@ -52,8 +53,8 @@ def _spy(**kwargs) -> Spy:
 
 
 def _item(client, repo, monkeypatch, fake) -> str:
-    monkeypatch.setattr("kraft.adapters.forge.backend_for", lambda *a, **k: "fake")
-    monkeypatch.setattr("kraft.adapters.forge.resolve", lambda name: fake)
+    monkeypatch.setattr("kraft.adapters.forge.run.backend_for", lambda *a, **k: "fake")
+    monkeypatch.setattr("kraft.adapters.forge.run.resolve", lambda name: fake)
     return client.post(
         "/api/work-items",
         json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
@@ -222,3 +223,46 @@ def test_the_job_log_keeps_what_a_carriage_return_left(
     wid = _item(client, repo, monkeypatch, fake)
     url = f"/api/work-items/{wid}/forge/pipelines/p1/jobs/j1/log"
     assert client.get(url, params={"lines": lines}).json() == expected
+
+
+@pytest.mark.parametrize(
+    "pinned, mount, unreadable, want",
+    [
+        (False, None, False, "forge account corp-gl says client: api"),
+        (True, None, False, "forge account corp-gl says client: api"),
+        (False, "libs/core", False, "forge account corp-gl says client: api"),
+        # the broken file may hold the API host default: reading it as no accounts is the switch
+        (False, None, True, "forges.yaml does not load (bad yaml)"),
+    ],
+    ids=[
+        "before-any-pin",
+        "pinned",
+        "member-with-no-forge-of-its-own",
+        "unreadable-file-before-any-pin",
+    ],
+)
+def test_an_api_account_item_reads_nothing_through_the_cli(
+    client, repo, monkeypatch, pinned, mount, unreadable, want
+):
+    wid = _item(client, repo, monkeypatch, _spy())
+    _on_api_account(client, repo, monkeypatch, wid, pinned=pinned)
+    if unreadable:
+        monkeypatch.setattr(client.app.state, "forges", None)
+        monkeypatch.setattr(client.app.state, "invalid_forges", "bad yaml", raising=False)
+    if mount:
+        client.portal.call(
+            client.app.state.db.write,
+            lambda c: store.repos.add_repo(
+                c,
+                work_item_id=wid,
+                repo_path=str(repo),
+                role="submodule",
+                merge_rank=0,
+                submodule_path=mount,
+            ),
+        )
+    got = client.get(
+        f"/api/work-items/{wid}/forge/pipelines", params={"repo": mount} if mount else None
+    )
+    assert got.status_code == 502
+    assert want in got.json()["detail"]

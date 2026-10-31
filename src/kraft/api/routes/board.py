@@ -807,8 +807,8 @@ async def _mr_state(st, row) -> str | None:
     `ForgeError`; the preview catches it, the close reports it."""
     worktree = inplace.item_folder(st.run_dirs, row)
     repo_entry = deps.launch(st, row["repo"]).repo_entry
-    backend = forge_mod.backend_for("auto", repo_entry.forge if repo_entry else None)
-    found = await forge_mod.resolve(backend).find_mr(repo=worktree, branch=store.branch_for(row))
+    forge = await forge_mod.item_forge(st.db, row, repo_entry, *deps.forges_now(st))
+    found = await forge.find_mr(repo=worktree, branch=store.branch_for(row))
     return found.state if found else None
 
 

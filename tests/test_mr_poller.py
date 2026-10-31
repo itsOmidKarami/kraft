@@ -18,8 +18,8 @@ def _chain(repo, *, mr_node_id: str = "merge"):
 
 
 def _patch_forge(monkeypatch, fake):
-    monkeypatch.setattr("kraft.adapters.forge.backend_for", lambda *a, **k: "fake")
-    monkeypatch.setattr("kraft.adapters.forge.resolve", lambda name: fake)
+    monkeypatch.setattr("kraft.adapters.forge.run.backend_for", lambda *a, **k: "fake")
+    monkeypatch.setattr("kraft.adapters.forge.run.resolve", lambda name: fake)
 
 
 async def _opened_mr(it, fake):

@@ -201,8 +201,8 @@ def test_a_legacy_rows_walking_doors_refuse(client, repo, monkeypatch, state, me
     from kraft.adapters import forge as forge_mod
 
     # A forge that would reopen: only the refusal keeps `mr_reopened` off.
-    monkeypatch.setattr("kraft.adapters.forge.backend_for", lambda *a, **k: "fake")
-    monkeypatch.setattr("kraft.adapters.forge.resolve", lambda name: forge_mod.FakeForge())
+    monkeypatch.setattr("kraft.adapters.forge.run.backend_for", lambda *a, **k: "fake")
+    monkeypatch.setattr("kraft.adapters.forge.run.resolve", lambda name: forge_mod.FakeForge())
     wid = _legacy(client, repo, state)
     kw = {"json": body} if body is not None else {}
     before = client.get(f"/api/work-items/{wid}/events").json()

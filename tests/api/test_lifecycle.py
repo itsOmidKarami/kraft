@@ -366,9 +366,9 @@ def test_a_door_takes_only_the_states_this_table_lists(client, repo, monkeypatch
     async def reopened(**_):
         return None
 
-    monkeypatch.setattr(lifecycle.forge_mod, "backend_for", lambda *_: "fake")
+    monkeypatch.setattr(lifecycle.forge_mod.run, "backend_for", lambda *_: "fake")
     monkeypatch.setattr(
-        lifecycle.forge_mod, "resolve", lambda _b: SimpleNamespace(reopen_mr=reopened)
+        lifecycle.forge_mod.run, "resolve", lambda _b: SimpleNamespace(reopen_mr=reopened)
     )
     monkeypatch.setattr(lifecycle, "_terminate", lambda pid, **_: None)
     row, spec = DOORS["states"][state], DOORS["doors"][door]

@@ -570,12 +570,21 @@ HELD = (
 )
 
 
+_FORGE_ACCOUNT_REFUSED = (
+    "a repo's forge account is a person's to choose, not an {who}'s: "
+    "it decides whose token the forge calls use"
+)
+
+
 @api_router.post("/repos", status_code=201)
 async def add_repo(body: RepoBody, request: Request):
     st = request.app.state
     # #1198: commands an agent chose run in every worktree, so a person turns them on.
     chose = body.test_command is not None or body.setup_command or body.test_scopes
-    hold = bool(chose) and gates._decided_by(request) != "human"
+    who = gates._decided_by(request)
+    hold = bool(chose) and who != "human"
+    if body.forge_account is not None and who != "human":
+        raise HTTPException(403, _FORGE_ACCOUNT_REFUSED.format(who=who))
     # One connect at a time between reading repos.yaml and saving it: the
     # probe runs in a thread, and two connects interleaving at that await
     # would each save the list without the other's entry. Per app, so the
@@ -795,6 +804,9 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
                 f"a connected repo's commands are a person's to set, not an {who}'s: "
                 "they run for every work item on it",
             )
+        # Even null: clearing it hands the repo to the host default's token.
+        if "forge_account" in body.model_fields_set:
+            raise HTTPException(403, _FORGE_ACCOUNT_REFUSED.format(who=who))
     # exclude_unset, not `v is not None`: a field the caller left out of the
     # JSON body must not clobber the saved value, but one sent as an explicit
     # `null` (clearing forge, test_command, project — the

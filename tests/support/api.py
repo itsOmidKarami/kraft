@@ -18,6 +18,7 @@ from urllib.parse import urljoin
 from fastapi.testclient import TestClient
 
 from kraft import storage, store
+from support import harness
 from support.harness import entry_of, fake_templates_dir, isolated_bd
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -626,3 +627,35 @@ def _seed_session(client, wid, *, session_id, hook_point, node_id="verify", runn
         conn.commit()
     finally:
         conn.close()
+
+
+def _on_api_account(client, repo, monkeypatch, wid: str, *, pinned: bool = True) -> None:
+    """Put `wid` on a `client: api` GitLab account: pinned to `gitlab-api`, or
+    only configured (its repo's origin on the account's host, the account that
+    host's default). Any CLI forge resolution after this fails the test."""
+    from kraft.forges import ForgeAccount, ForgesFile
+
+    def never(name):
+        raise AssertionError(f"the CLI forge {name} was resolved")
+
+    monkeypatch.setattr("kraft.adapters.forge.run.resolve", never)
+    if pinned:
+        client.portal.call(
+            client.app.state.db.write,
+            lambda c: store.set_forge_pin(c, wid, "", "corp-gl", "gitlab-api"),
+        )
+        return
+    harness.git(repo, "remote", "add", "origin", "https://gitlab.example/o/r.git")
+    assert client.post("/api/repos", json={"path": str(repo), "enabled": False}).status_code == 201
+    assert client.patch(f"/api/repos?path={repo}", json={"forge": "gitlab"}).status_code == 200
+    client.app.state.forges = ForgesFile(
+        accounts={
+            "corp-gl": ForgeAccount(
+                forge="gitlab",
+                web_url="https://gitlab.example",
+                client="api",
+                default_for_host=True,
+                token={"from": "git-credential"},
+            )
+        }
+    )

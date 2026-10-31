@@ -17,6 +17,16 @@ from kraft.forges import ForgeAccount, ForgesFile
 _GH = ForgeAccount(forge="github", web_url="https://github.com")
 _GL = ForgeAccount(forge="gitlab", web_url="https://gitlab.example")
 _GH_DEFAULT = ForgeAccount(forge="github", web_url="https://github.com", default_for_host=True)
+_GH_API = ForgeAccount(
+    forge="github", web_url="https://github.com", client="api", token={"from": "git-credential"}
+)
+_GL_API = ForgeAccount(
+    forge="gitlab",
+    web_url="https://gitlab.example",
+    client="api",
+    default_for_host=True,
+    token={"from": "git-credential"},
+)
 
 
 @pytest.fixture
@@ -105,6 +115,28 @@ def _run(run_forge, repo, sid, accounts, named, forge_name="github", error=None)
         ),
         pytest.param(
             ({"a": _GH}, "a"),
+            ({"a": _GH_API}, "a"),
+            "forge account a now says client: api, was client: cli",
+            {"": {"account": "a", "backend": "gh"}},
+            id="client-changed-to-api-stops",
+        ),
+        pytest.param(
+            ({"a": _GH_API}, "a"),
+            ({"a": _GH}, "a"),
+            "forge account a now says client: cli, was client: api",
+            {"": {"account": "a", "backend": "github-api"}},
+            id="client-changed-to-cli-stops",
+        ),
+        pytest.param(
+            ({}, None),
+            # a null pin is a CLI pin: the account that now applies never re-pins it
+            ({"a": ForgeAccount(**{**_GH_API.model_dump(), "default_for_host": True})}, None),
+            None,
+            {"": {"account": None, "backend": "gh"}},
+            id="null-pin-keeps-the-cli",
+        ),
+        pytest.param(
+            ({"a": _GH}, "a"),
             ({"a": _GH}, "a", "gitlab"),
             "forge account a is pinned to gh, the repo now says forge: gitlab",
             {"": {"account": "a", "backend": "gh"}},
@@ -126,7 +158,7 @@ async def test_the_first_forge_node_pins_and_a_broken_pin_stops_the_item(
         assert result == ("config_error", "config_error")
         assert stop in run_forge.log(sid)
         if "forge_account" not in stop:
-            assert "a person's `kraft item retry`" in run_forge.log(sid)
+            assert "a person's" in run_forge.log(sid) and "kraft item retry" in run_forge.log(sid)
     assert database.read(lambda c: store.forge_pins(c, "w1")) == pins_after
 
 
@@ -150,9 +182,9 @@ async def test_the_first_forge_node_pins_and_a_broken_pin_stops_the_item(
         pytest.param(
             (None, None, "bad yaml"),
             None,
-            None,
+            "forges.yaml does not load (bad yaml); fix it, then a person's kraft item retry",
             {},
-            id="restart-unreadable-unpinned-stays-unpinned",
+            id="unreadable-file-stops-unpinned-host-default",
         ),
         pytest.param(
             (None, "a", "bad yaml"),
@@ -247,3 +279,86 @@ async def test_a_member_is_pinned_by_its_mount(run_forge, database, tmp_path, mo
     assert [w for w in writes if w.startswith("_pin_forge_accounts")] == [
         "_pin_forge_accounts.<locals>.write"
     ]
+
+
+class _NeverRun:
+    def __getattr__(self, name):
+        raise AssertionError(f"the CLI forge ran: {name}")
+
+
+@pytest.mark.parametrize(
+    "accounts, named, member, pins",
+    [
+        pytest.param(
+            {"corp-gl": _GL_API},
+            "corp-gl",
+            None,
+            {"": {"account": "corp-gl", "backend": "gitlab-api"}},
+            id="named-account",
+        ),
+        pytest.param(
+            {"corp-gl": _GL_API},
+            None,
+            None,
+            {"": {"account": "corp-gl", "backend": "gitlab-api"}},
+            id="host-default",
+        ),
+        pytest.param(
+            {"corp-gl": _GL_API},
+            None,
+            "gitlab",
+            {
+                "": {"account": None, "backend": "gh"},
+                "libs/core": {"account": "corp-gl", "backend": "gitlab-api"},
+            },
+            id="member-on-an-api-account",
+        ),
+        pytest.param(
+            {"corp-gl": _GL_API},
+            None,
+            "",
+            {
+                "": {"account": "corp-gl", "backend": "gitlab-api"},
+                "libs/core": {"account": "corp-gl", "backend": "gitlab-api"},
+            },
+            id="member-with-no-forge-takes-the-roots-api-pin",
+        ),
+    ],
+)
+async def test_an_api_account_stops_at_the_first_forge_node_and_never_runs_the_cli(
+    run_forge, database, tmp_path, monkeypatch, accounts, named, member, pins
+):
+    path = make_repo(tmp_path)
+    git(path, "remote", "add", "origin", "https://gitlab.example/o/r.git")
+    # `member`: the member's own forge ("" none, so it uses the root's), or None for no member.
+    forge_name = "github" if member else "gitlab"
+    if member is not None:
+        monkeypatch.setattr(forge.run._builtins, "item_members", lambda row: [("libs/core", "lib")])
+    result = await run_forge(
+        _NeverRun(),
+        "open_mr",
+        "a1",
+        repo=path,
+        backend="auto",
+        repo_forge=forge_name,
+        repo_entry=RepoEntry(path=str(path), forge=forge_name, forge_account=named),
+        repositories=(
+            {
+                "lib": RepoEntry(
+                    path=str(path),
+                    forge=member or None,
+                    forge_account="corp-gl" if member else None,
+                )
+            }
+            if member is not None
+            else {}
+        ),
+        forges=ForgesFile(accounts=accounts),
+    )
+
+    assert result == ("config_error", "config_error")
+    assert (
+        "forge account corp-gl says client: api, and the gitlab-api backend is not in this release"
+        in run_forge.log("a1")
+    )
+    assert database.read(lambda c: store.forge_pins(c, "w1")) == pins
