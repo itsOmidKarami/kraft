@@ -82,10 +82,31 @@ def test_a_changed_file_is_pending_by_its_bytes_not_its_mtime(client, templates_
     assert "problem" not in got[0]
 
 
-def test_a_file_that_would_not_load_carries_its_problem(client, templates_dir):
-    put_file(templates_dir, "policy.yaml", "defaults: [not, a, mapping]\n")
+@pytest.mark.parametrize(
+    ("file", "text", "running", "problem"),
+    [
+        ("policy.yaml", "defaults: [not, a, mapping]\n", None, ""),
+        # the running accounts are the baseline, not forges.yaml as it is on disk
+        ("forges.yaml", "accounts: {}\n", ["a"], "'a' names no account"),
+    ],
+    ids=["policy-not-a-mapping", "forges-drops-an-account-a-repo-names"],
+)
+def test_a_file_that_would_not_load_carries_its_problem(
+    client, templates_dir, file, text, running, problem
+):
+    if running:
+        client.app.state.forges = forges_mod.ForgesFile(
+            accounts={
+                n: forges_mod.ForgeAccount(forge="github", web_url="https://github.com")
+                for n in running
+            }
+        )
+        (templates_dir / "repos.yaml").write_text(
+            "repos:\n  - path: /r\n    forge: github\n    forge_account: a\n"
+        )
+    put_file(templates_dir, file, text)
     (item,) = pending(client)["reload"]
-    assert item["id"] == "disk:policy.yaml" and item["problem"]
+    assert item["id"] == f"disk:{file}" and item["problem"] and problem in item["problem"]
 
 
 def test_a_hand_edited_workers_file_is_pending_and_a_broken_one_carries_its_problem(

@@ -3,6 +3,7 @@ it would be, with nothing written."""
 
 from __future__ import annotations
 
+import dataclasses
 import shutil
 from pathlib import Path
 
@@ -12,6 +13,7 @@ import yaml
 from kraft.addons import update as addon_update
 from kraft.api import config_check, deps
 from kraft.config import write_yaml
+from kraft.forges import ForgesFile
 
 pytestmark = pytest.mark.api_client(default_setup=False)
 
@@ -182,6 +184,7 @@ def test_a_save_is_refused_only_for_a_forge_account_problem_it_adds(
 ):
     (templates_dir / "repos.yaml").write_text(on_disk_repos)
     (templates_dir / "forges.yaml").write_text(on_disk_forges)
+    ctx = dataclasses.replace(ctx, forges=ForgesFile.model_validate(yaml.safe_load(on_disk_forges)))
     issues = config_check.check(name, text, ctx)
     assert (problem is None) == (issues == [])
     if problem:

@@ -263,6 +263,16 @@ def _workspaces(st) -> dict:
     return dict(config_mod.read_yaml(deps.repos_path(st), {}).get("workspaces") or {})
 
 
+def _save_repos(st, repos: list[dict], workspaces: dict | None = None) -> None:
+    """Write repos.yaml, then recompute the repo/account mismatches `invalid_forges`
+    names. Not while forges.yaml is pending reload: its refused reason stays."""
+    config_mod.save_repos(deps.repos_path(st), repos, workspaces)
+    forges = getattr(st, "forges", None)
+    if forges is not None and not apply_mod.pending_file(st, forges_mod.ForgesFile.FILE):
+        problems = forges_mod.repo_problems(forges, st.templates_dir)
+        st.invalid_forges = "; ".join(problems) or None
+
+
 def _validate_repos(
     st, repos: list[dict], workspaces: dict | None = None, *, steering: bool = True
 ) -> None:
@@ -287,11 +297,22 @@ def _validate_repos(
             raise HTTPException(422, str(exc)) from exc
     if entries is not None:
         # Only a problem this save adds is refused; an old hand edit is doctor's.
-        forges = getattr(st, "forges", None) or forges_mod.ForgesFile()
+        forges = getattr(st, "forges", None)
         try:
             current = config_mod.load_repos(deps.repos_path(st))
         except config_mod.ConfigError:
             current = []
+        if forges is None:
+            # Unreadable since startup: no account can be checked, so none may be added.
+            had = {str(e.path): e.forge_account for e in current}
+            for e in entries:
+                if e.forge_account and had.get(str(e.path)) != e.forge_account:
+                    raise HTTPException(
+                        422,
+                        f"forge_account {e.forge_account}: forges.yaml does not load "
+                        f"({st.invalid_forges}); fix it first",
+                    )
+            forges = forges_mod.ForgesFile()
         old = set(forges_mod.account_problems(forges, current))
         if added := [p for p in forges_mod.account_problems(forges, entries) if p not in old]:
             raise HTTPException(422, added[0])
@@ -386,7 +407,7 @@ async def repo_library_accept(body: LibraryAccept, request: Request, path: str):
         # A forge removal must not check repos.yaml between this save's check and write.
         async with st.forges_lock:
             _validate_repos(st, repos)
-            config_mod.save_repos(deps.repos_path(st), repos)
+            _save_repos(st, repos)
         try:
             await deps._in_thread(
                 st, repo_library.accept, found, st.templates_dir, st.run_dirs.addons
@@ -605,7 +626,7 @@ async def _add_repo(body: RepoBody, st) -> dict:
     # A forge removal must not check repos.yaml between this save's check and write.
     async with st.forges_lock:
         _validate_repos(st, repos, workspaces)
-        config_mod.save_repos(deps.repos_path(st), repos, workspaces)
+        _save_repos(st, repos, workspaces)
     # Index it now: a repo connected mid-session would otherwise stay invisible
     # to search (and to the intake picker) until the next restart. The scan is
     # `git ls-files .engineering/` — cheap enough to await. A scan failure must
@@ -713,7 +734,7 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
     # A forge removal must not check repos.yaml between this save's check and write.
     async with st.forges_lock:
         _validate_repos(st, repos)
-        config_mod.save_repos(deps.repos_path(st), repos)
+        _save_repos(st, repos)
     # The whole entry, defaults included, as the answer always was:
     # `kraft repo connect` reads the saved entry back from it, and a client
     # of the API may read any field. Only the file keeps to what was set.
@@ -768,7 +789,7 @@ async def remove_repo(request: Request, path: str):
             )
         except addon_update.Busy as exc:
             raise HTTPException(409, str(exc)) from exc
-    config_mod.save_repos(deps.repos_path(st), kept)
+    _save_repos(st, kept)
     if held:
         await deps.reload_templates(st)
         apply_mod.notify(request.app)

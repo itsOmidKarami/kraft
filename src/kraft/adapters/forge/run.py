@@ -178,7 +178,10 @@ async def _pin_forge_accounts(
 ) -> None:
     """Pin each repo's account and backend at the item's first forge node; once
     pinned, stop (ForgeError) when the pinned account is gone or changed forge.
-    A repo that names an account forges.yaml lacks stops too, never a silent CLI.
+    A mount not yet pinned that names an account forges.yaml lacks stops too,
+    never falling back silently to the CLI. A pinned mount keeps its pin, null
+    or not, until a person's retry: an item that started on the CLI keeps it
+    (doctor and the save check name the bad account).
     `forges` None with a `forges_error` is a forges.yaml that never loaded: pins
     are kept unchecked, and only a repo naming an account stops."""
     pins = db.read(lambda c: store.forge_pins(c, work_item_id))
@@ -202,7 +205,7 @@ async def _pin_forge_accounts(
             if pin is None and entry.forge_account:
                 raise ForgeError(
                     f"forge_account {entry.forge_account}: forges.yaml does not load "
-                    f"({forges_error}); fix it and kraft item retry"
+                    f"({forges_error}); fix it, then a person's `kraft item retry`"
                 )
             continue
         named = entry.forge_account
@@ -216,14 +219,14 @@ async def _pin_forge_accounts(
             elif backend_for(backend, entry.forge) != pin["backend"]:
                 raise ForgeError(
                     f"forge account {pin['account']} is pinned to {pin['backend']}, the repo "
-                    f"now says forge: {entry.forge}; kraft item retry re-pins to what is "
-                    "configured now"
+                    f"now says forge: {entry.forge}; a person's `kraft item retry` "
+                    "re-pins to what is configured now"
                 )
             else:
                 continue
             raise ForgeError(
                 f"forge account {pin['account']} {why}; "
-                "kraft item retry re-pins to what is configured now"
+                "a person's `kraft item retry` re-pins to what is configured now"
             )
         if pin is not None:  # a null pin never stops: it resolves live, as before accounts
             continue

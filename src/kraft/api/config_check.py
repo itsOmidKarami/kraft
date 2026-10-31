@@ -84,6 +84,8 @@ class CheckContext:
     addons: tuple[addons_load.InstalledAddon, ...] = ()
     #: `run/addons`, where their stores are. None: this process's own.
     addons_dir: Path | None = None
+    #: The running accounts (`st.forges`); None when forges.yaml never loaded or is unknown.
+    forges: forges_mod.ForgesFile | None = None
 
 
 def context(st) -> CheckContext:
@@ -95,6 +97,7 @@ def context(st) -> CheckContext:
         providers=harness_mod.load(None).valid,
         addons=getattr(getattr(st, "library", None), "addons", ()),
         addons_dir=st.run_dirs.addons if getattr(st, "run_dirs", None) else None,
+        forges=getattr(st, "forges", None),
     )
 
 
@@ -449,12 +452,10 @@ def _check_forges(path, data, ctx):
         repos = config_mod.load_repos(ctx.templates_dir / "repos.yaml")
     except config_mod.ConfigError:
         return []  # repos.yaml's own check says why
-    try:
-        current = forges_mod.ForgesFile.load(ctx.templates_dir / forges_mod.ForgesFile.FILE)
-    except config_mod.ConfigError:
-        current = forges_mod.ForgesFile()
-    # Only a problem this candidate adds is refused; an old hand edit is doctor's.
-    old = set(forges_mod.account_problems(current, repos))
+    if ctx.forges is None:
+        return []  # nothing running (unreadable since startup): the reload takes any file
+    # Only a problem this candidate adds is refused; old ones are doctor's.
+    old = set(forges_mod.account_problems(ctx.forges, repos))
     return [
         TemplateIssue(path, None, why)
         for why in forges_mod.account_problems(file, repos)
@@ -965,10 +966,12 @@ def _check_repos(path, data, ctx):
                 loc = loc or _first_loc(config_mod.RepoEntry, entry, ("repos", index))
             message = str(exc).replace(str(candidate), str(path))
             return [TemplateIssue(path, None, message, loc=loc)]
-        try:
-            forges = forges_mod.ForgesFile.load(ctx.templates_dir / forges_mod.ForgesFile.FILE)
-        except config_mod.ConfigError:
-            forges = forges_mod.ForgesFile()  # the forges.yaml check says why
+        forges = ctx.forges
+        if forges is None:  # unreadable since startup: what is on disk
+            try:
+                forges = forges_mod.ForgesFile.load(ctx.templates_dir / forges_mod.ForgesFile.FILE)
+            except config_mod.ConfigError:
+                forges = forges_mod.ForgesFile()  # the forges.yaml check says why
         try:
             current = config_mod.load_repos(ctx.templates_dir / "repos.yaml")
         except config_mod.ConfigError:

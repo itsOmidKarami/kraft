@@ -126,7 +126,7 @@ async def test_the_first_forge_node_pins_and_a_broken_pin_stops_the_item(
         assert result == ("config_error", "config_error")
         assert stop in run_forge.log(sid)
         if "forge_account" not in stop:
-            assert "kraft item retry" in run_forge.log(sid)
+            assert "a person's `kraft item retry`" in run_forge.log(sid)
     assert database.read(lambda c: store.forge_pins(c, "w1")) == pins_after
 
 
@@ -202,10 +202,31 @@ async def test_a_forges_yaml_that_does_not_load_never_unpins_or_stops_a_pinned_i
     assert database.read(lambda c: store.forge_pins(c, "w1")) == pins_after
 
 
+async def test_a_repo_with_no_accounts_and_none_named_never_reads_its_origin(
+    run_forge, database, repo, monkeypatch
+):
+    def refuse(*args, **kwargs):
+        raise AssertionError("the origin was read with nothing to match it against")
+
+    monkeypatch.setattr(forge.run.config, "git_read", refuse)
+    assert await _run(run_forge, repo, "p1", {}, None) == ("done", "done")
+    assert database.read(lambda c: store.forge_pins(c, "w1")) == {
+        "": {"account": None, "backend": "gh"}
+    }
+
+
 async def test_a_member_is_pinned_by_its_mount(run_forge, database, tmp_path, monkeypatch):
     monkeypatch.setattr(forge.run._builtins, "item_members", lambda row: [("libs/core", "lib")])
     root = RepoEntry(path=str(tmp_path), forge="github")
     member = RepoEntry(path=str(tmp_path), forge="gitlab", forge_account="gl")
+    writes = []
+    write = database.write
+
+    async def spy(fn):
+        writes.append(fn.__qualname__)
+        return await write(fn)
+
+    monkeypatch.setattr(database, "write", spy)
 
     await run_forge(
         forge.FakeForge(),
@@ -222,3 +243,7 @@ async def test_a_member_is_pinned_by_its_mount(run_forge, database, tmp_path, mo
         "": {"account": None, "backend": "gh"},
         "libs/core": {"account": "gl", "backend": "glab"},
     }
+    # root and member are pinned by one write, not one per mount
+    assert [w for w in writes if w.startswith("_pin_forge_accounts")] == [
+        "_pin_forge_accounts.<locals>.write"
+    ]

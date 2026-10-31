@@ -56,6 +56,11 @@ def _names(st) -> list[str]:
     return [*CONFIG_FILES, *sorted(chains)]
 
 
+def pending_file(st, name: str) -> bool:
+    """`name` differs on disk from what was loaded."""
+    return _digest(st.templates_dir / name) != getattr(st, "loaded_hashes", {}).get(name)
+
+
 def set_loaded(st, name: str, digest: str | None) -> None:
     if not hasattr(st, "loaded_hashes"):
         st.loaded_hashes = {}
@@ -215,8 +220,11 @@ def _reload_workers(st) -> None:
 
 
 def _reload_forges(st) -> None:
-    """`forges.yaml` reread. One that does not load keeps the running accounts,
-    its reason kept as `st.invalid_forges`, and stays pending."""
+    """`forges.yaml` reread. A file that does not load keeps the running
+    accounts, its reason kept as `st.invalid_forges`, and stays pending. So does
+    an edit that adds a repo/account problem; old problems are named by
+    `invalid_forges` but block nothing. With nothing running (unreadable since
+    startup), any file that loads is taken."""
     digest = _digest(st.templates_dir / forges_mod.ForgesFile.FILE)
     try:
         file = forges_mod.ForgesFile.load(st.templates_dir / forges_mod.ForgesFile.FILE)

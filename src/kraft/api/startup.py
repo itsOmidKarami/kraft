@@ -396,7 +396,8 @@ async def _lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001 -- never a refused boot
         logger.exception("could not stop the process groups stopped sessions left")
 
-    # Before reattach and resumed walks, whose forge nodes read the accounts.
+    # Before reattach and resumed walks, whose forge nodes read the accounts;
+    # nothing else runs yet, so the load needs no lock.
     app.state.forges_lock = asyncio.Lock()
     load_forges(app)
 
