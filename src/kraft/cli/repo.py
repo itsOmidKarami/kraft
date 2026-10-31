@@ -197,7 +197,9 @@ def _say_connected(result: dict) -> None:
     _say_tests(result)
     _say_setup(result)
     _say_rest(result)
-    if result.get("enabled") is False:
+    if result.get("held"):
+        _print(result["held"])
+    elif result.get("enabled") is False:
         _print(
             "saved disabled: no test command found in its task runners, toolchain files or CI; "
             "pass --test-command (--no-tests for a repo with none) or set "

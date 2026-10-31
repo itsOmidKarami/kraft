@@ -236,9 +236,9 @@ def build() -> MCPServer:
         lockfiles) and returns every candidate it saw; pass `test_command` or
         `setup_command` to use the repo's own documented commands instead
         (`""` declares none). Show the person what it proposes before relying
-        on it. `test_command=""` (no tests) saves the repo disabled: work items
-        on it would pass verification without running a test, which is the
-        person's to decide, by enabling it. A repository with no commit yet is
+        on it. Commands you pass save the repo disabled (the answer's `held`
+        says so): they run for every work item on it, so the person enables it
+        in Settings › Repos once they have read them. A repository with no commit yet is
         refused: a work item's branch starts from one. An already-connected
         repo is left as it is."""
         return await client.ensure_repo(
