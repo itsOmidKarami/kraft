@@ -706,6 +706,21 @@ def test_no_chain_template_takes_the_repo_default_and_files_paused(
     assert (unset["status"], named["status"]) == ("paused", "paused")
 
 
+def test_trigger_files_the_connected_path_not_an_alias(client, repo, tmp_path, monkeypatch):
+    from support.harness import entry_of
+
+    from kraft.api import deps
+
+    alias = tmp_path / "alias"
+    alias.symlink_to(repo)
+    monkeypatch.setattr(
+        deps, "_connected", lambda repos, path: entry_of({"path": str(repo), "setup_command": ""})
+    )
+    r = client.post("/api/triggers", json={"repo": str(alias), "title": "t"})
+    assert r.status_code == 201, r.text
+    assert r.json()["repo"] == str(repo)
+
+
 def test_trigger_refuses_with_503_when_policy_is_invalid(client, repo):
     """Same posture as create_work_item (spec §9): a re-run we cannot bound is
     not started. Set app.state.invalid_policy directly rather than writing a
