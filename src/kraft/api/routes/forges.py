@@ -43,6 +43,14 @@ def _file_path(st):
 
 
 async def _load(st) -> forges.ForgesFile:
+    """The file a write starts from. An edit on disk that is not applied (one a reload
+    refused, or not reloaded yet) is refused: saving over it would apply it unchecked."""
+    if st.forges is not None and apply_mod.pending_file(st, forges.ForgesFile.FILE):
+        raise HTTPException(
+            409,
+            "forges.yaml has an edit that is not applied; `kraft admin reload` applies it "
+            "or says why not. Apply or undo it first",
+        )
     try:
         return await asyncio.to_thread(forges.ForgesFile.load, _file_path(st))
     except config_mod.ConfigError as exc:

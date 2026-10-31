@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
+import yaml
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from kraft import config
@@ -188,6 +189,22 @@ class ForgesFile(config._Model):
                 )
             seen[host] = name
         return self
+
+    @classmethod
+    def load(cls, path) -> ForgesFile:
+        """As `_Model.load`, but a file that does not parse is named by its line and
+        column only. YAML's own message quotes the line, and this one is shown on
+        the open `/health` and is where a token will be pasted."""
+        try:
+            return super().load(path)
+        except config.ConfigError as exc:
+            cause = exc.__cause__
+            if not isinstance(cause, yaml.MarkedYAMLError):
+                raise
+            mark = cause.problem_mark
+            where = f" at line {mark.line + 1}, column {mark.column + 1}" if mark else ""
+            what = cause.problem or cause.context or "invalid YAML"
+            raise config.ConfigError(f"{cls.FILE}: cannot parse: {what}{where}") from None
 
     def save(self, path) -> None:
         """Written over the file's own text: hand comments stay, defaults are not spelled out."""

@@ -544,10 +544,12 @@ def test_a_harnesses_draft_reloads_the_policy_only_when_it_wrote_policy_yaml(
 
 
 def test_a_repos_draft_publishes_without_reloading_anything(client, templates_dir, applied):
+    client.app.state.invalid_forges = "repo /gone: forge_account 'x' names no account"
     put_file(client, "repos", "repos.yaml", "repos: []\n")
     assert client.post("/api/drafts/repos/repos/publish").status_code == 200
     assert (templates_dir / "repos.yaml").read_text() == "repos: []\n"
     assert applied == []
+    assert client.app.state.invalid_forges is None  # the publish recomputes the mismatches
 
 
 def test_a_repos_draft_over_a_repos_yaml_saved_since_answers_409(client, templates_dir):

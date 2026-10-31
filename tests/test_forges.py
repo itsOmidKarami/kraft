@@ -116,6 +116,7 @@ def test_an_explicit_api_url_on_an_allowed_host_loads(tmp_path, forge, web_url, 
         ("accounts:\n  a: {forge: gitlab, web_url: 'https://u:tok@g.example'}\n", "credentials"),
         ("accounts:\n  a: {forge: gitlab, web_url: 'https://g.example?x'}\n", "query"),
         ("accounts:\n  a: {forge: gitlab, web_url: 'https://g.example:99999'}\n", "plain https://"),
+        ("accounts:\n  a:\n    token: ghp_SECRET: x\n", "at line 3, column"),
     ],
     ids=[
         "http-web-url",
@@ -128,6 +129,7 @@ def test_an_explicit_api_url_on_an_allowed_host_loads(tmp_path, forge, web_url, 
         "userinfo",
         "query",
         "bad-port",
+        "unparseable-names-the-line-not-its-text",
     ],
 )
 def test_a_bad_account_is_refused_naming_the_file_and_key(tmp_path, text, says):
@@ -135,6 +137,7 @@ def test_a_bad_account_is_refused_naming_the_file_and_key(tmp_path, text, says):
         _load(tmp_path, text)
     assert "forges.yaml" in str(err.value)
     assert says in str(err.value)
+    assert "ghp_SECRET" not in str(err.value)  # shown on the open /health
 
 
 def test_a_missing_file_is_no_accounts(tmp_path):

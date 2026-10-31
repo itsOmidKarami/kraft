@@ -59,6 +59,20 @@ def test_a_refused_add_writes_nothing(client, second, status, text):
     assert _file(client).read_text() == before
 
 
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [("post", "/api/forges", {**GL, "name": "other"}), ("delete", "/api/forges/corp", None)],
+    ids=["add", "remove"],
+)
+def test_an_edit_not_applied_is_never_saved_over(client, method, path, body):
+    client.post("/api/forges", json=GL)
+    _file(client).write_text("accounts: {}\n")  # a hand edit no reload has taken
+    reply = client.request(method.upper(), path, json=body)
+    assert reply.status_code == 409 and "not applied" in reply.text
+    assert _file(client).read_text() == "accounts: {}\n"
+    assert "corp" in client.app.state.forges.accounts
+
+
 def test_remove_of_an_account_a_repo_names_is_409_listing_it(client, repo):
     client.post("/api/forges", json=GL)
     connect_repo(repo, forge_account="corp")

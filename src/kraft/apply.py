@@ -247,6 +247,15 @@ def _reload_forges(st) -> None:
     set_loaded(st, forges_mod.ForgesFile.FILE, digest)
 
 
+def refresh_forge_problems(st) -> None:
+    """After a repos.yaml write: recompute the repo/account mismatches
+    `invalid_forges` names. Not while forges.yaml is pending reload, whose
+    refused reason stays, nor while it never loaded."""
+    forges = getattr(st, "forges", None)
+    if forges is not None and not pending_file(st, forges_mod.ForgesFile.FILE):
+        st.invalid_forges = "; ".join(forges_mod.repo_problems(forges, st.templates_dir)) or None
+
+
 def managed() -> bool:
     """Started by the service manager `kraft admin install-service` set up, whose
     names are the ones it writes."""

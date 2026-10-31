@@ -317,13 +317,9 @@ def _workspaces(st) -> dict:
 
 
 def _save_repos(st, repos: list[dict], workspaces: dict | None = None) -> None:
-    """Write repos.yaml, then recompute the repo/account mismatches `invalid_forges`
-    names. Not while forges.yaml is pending reload: its refused reason stays."""
+    """Write repos.yaml, then recompute the repo/account mismatches `invalid_forges` names."""
     config_mod.save_repos(deps.repos_path(st), repos, workspaces)
-    forges = getattr(st, "forges", None)
-    if forges is not None and not apply_mod.pending_file(st, forges_mod.ForgesFile.FILE):
-        problems = forges_mod.repo_problems(forges, st.templates_dir)
-        st.invalid_forges = "; ".join(problems) or None
+    apply_mod.refresh_forge_problems(st)
 
 
 def _validate_repos(
