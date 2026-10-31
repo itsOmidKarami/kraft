@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import os
 import sys
 
@@ -146,7 +147,8 @@ def _cmd_add(ns: argparse.Namespace) -> None:
             result = asyncio.run(client.set_forge_token(ns.name, token, ns.kind))
         except Exception:
             # No half-made account: an API account with no token would only fail later.
-            asyncio.run(client.remove_forge(ns.name))
+            with contextlib.suppress(Exception):  # the paste's error is the one to show
+                asyncio.run(client.remove_forge(ns.name))
             raise
     common.emit(result, lambda r: f"added {ns.name} ({r['forge']}, {r['web_url']})", ns.json)
 

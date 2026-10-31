@@ -119,19 +119,21 @@ def _save(st, updated: forges.ForgesFile, probe_names: tuple[str, ...] = ()) -> 
 
 
 def _own_file(name: str, account: forges.ForgeAccount | None) -> Path | None:
-    """The file Kraft wrote for `name`'s pasted token, when the account still reads it."""
+    """The file Kraft wrote for `name`'s pasted token, when the account reads it: its own
+    path, returned only when the account's path leads to the same real file."""
     token = account.token if account else None
     if token is None or token.file is None:
         return None
-    mine = Path(os.path.realpath(kraft_home() / "secrets" / name))
-    theirs = Path(os.path.realpath(os.path.expandvars(os.path.expanduser(token.file))))
-    return mine if mine == theirs else None
+    mine = kraft_home() / "secrets" / name
+    theirs = os.path.realpath(os.path.expandvars(os.path.expanduser(token.file)))
+    return mine if os.path.realpath(mine) == theirs else None
 
 
-def _drop_own_file(name: str, before: forges.ForgeAccount | None, after) -> None:
-    """Delete the pasted token file once nothing reads it: the account is gone, or reads
+def _drop_own_file(name: str, before: forges.ForgeAccount | None, after: forges.ForgesFile) -> None:
+    """Delete the pasted token file once no account reads it: the account is gone, or reads
     another source now. Only the file Kraft wrote for this name, never one it was pointed at."""
-    if (gone := _own_file(name, before)) is not None and _own_file(name, after) is None:
+    gone = _own_file(name, before)
+    if gone is not None and not any(_own_file(name, a) for a in after.accounts.values()):
         gone.unlink(missing_ok=True)
 
 
@@ -152,6 +154,21 @@ def _validated(accounts: dict) -> forges.ForgesFile:
 def _no_command(sent, updated: forges.ForgeAccount) -> None:
     if sent is not None and updated.token is not None and updated.token.from_ == "command":
         raise HTTPException(403, _COMMAND_403)
+
+
+async def _body(request: Request, model: type[BaseModel]):
+    """The JSON body as `model`. Not a handler parameter: FastAPI's 422 quotes the `input`
+    of each error (an unknown key's value, a bare string), and a body here may be a token."""
+    try:
+        raw = await request.json()
+    except ValueError:
+        raw = None
+    if not isinstance(raw, dict):
+        raise HTTPException(422, "the body must be a JSON object")
+    try:
+        return model.model_validate(raw)
+    except ValidationError as exc:
+        raise HTTPException(422, forges.validation_text(exc)) from exc
 
 
 def _token_dict(token) -> None:
@@ -180,9 +197,10 @@ async def list_forges(request: Request):
 
 
 @api_router.post("/forges", status_code=201)
-async def add_forge(body: AddForge, request: Request):
+async def add_forge(request: Request):
     _forbid_sessions(request, "forge accounts")
     st = request.app.state
+    body = await _body(request, AddForge)
     if not _NAME.fullmatch(body.name):
         raise HTTPException(422, "name: lowercase letters, digits, . - and _, starting with one")
     _token_dict(body.token)
@@ -201,9 +219,10 @@ async def add_forge(body: AddForge, request: Request):
 
 
 @api_router.patch("/forges/{name}")
-async def edit_forge(name: str, body: EditForge, request: Request):
+async def edit_forge(name: str, request: Request):
     _forbid_sessions(request, "forge accounts")
     st = request.app.state
+    body = await _body(request, EditForge)
     _token_dict(body.token)
     async with st.forges_lock:
         current = await _load(st)
@@ -221,7 +240,7 @@ async def edit_forge(name: str, body: EditForge, request: Request):
         _no_command(sent.get("token"), updated.accounts[name])
         _refuse_added(st, current, updated)
         _save(st, updated, (name,))
-        _drop_own_file(name, old, updated.accounts[name])
+        _drop_own_file(name, old, updated)
     apply_mod.notify(request.app)
     return _row(st, name, updated.accounts[name])
 
@@ -258,12 +277,22 @@ async def set_token(name: str, request: Request):
         # Before the file exists: no log line can carry it unredacted.
         redact.register(value)
         redact.register(credentials.basic_form(value, kind))
-        path = credentials.write_pasted(name, value)
-        source = {"from": "file", "file": str(path), "kind": kind}
+        target = kraft_home() / "secrets" / name
+        source = {"from": "file", "file": str(target), "kind": kind}
         fields = {**old.model_dump(by_alias=True, exclude_none=True), "token": source}
-        updated = _validated({**current.accounts, name: fields})
-        _save(st, updated, (name,))
-        _drop_own_file(name, old, updated.accounts[name])
+        updated = _validated({**current.accounts, name: fields})  # before any file is touched
+        previous = target.read_bytes() if target.is_file() else None
+        credentials.write_pasted(name, value)
+        try:
+            _save(st, updated, (name,))
+        except BaseException:
+            # The old token stays the old token, and a first paste leaves no orphan.
+            if previous is None:
+                target.unlink(missing_ok=True)
+            else:
+                credentials.write_pasted(name, previous.decode().strip())
+            raise
+        _drop_own_file(name, old, updated)
     apply_mod.notify(request.app)
     return _row(st, name, updated.accounts[name])
 
@@ -286,7 +315,7 @@ async def remove_forge(name: str, request: Request):
             )
         rest = {n: a for n, a in current.accounts.items() if n != name}
         _save(st, forges.ForgesFile(accounts=rest))
-        _drop_own_file(name, current.accounts[name], None)
+        _drop_own_file(name, current.accounts[name], forges.ForgesFile(accounts=rest))
     apply_mod.notify(request.app)
     return Response(status_code=204)
 

@@ -162,10 +162,24 @@ def test_add_and_edit_send_the_source(capsys, monkeypatch, flags, source):
             assert sent[verb] == [(("corp", {"client": "api", "token": token}), {})]
 
 
-@pytest.mark.parametrize("put_fails", [False, True], ids=["pasted", "put-fails-removes-account"])
-def test_a_token_is_read_from_stdin_never_argv(capsys, monkeypatch, put_fails):
+@pytest.mark.parametrize(
+    ("verb", "put_fails", "remove_fails"),
+    [
+        ("add", False, False),
+        ("add", True, False),
+        ("add", True, True),
+        ("edit", False, False),
+    ],
+    ids=[
+        "add-pasted",
+        "add-put-fails-removes-account",
+        "add-put-and-remove-fail-keeps-the-first-error",
+        "edit-pasted",
+    ],
+)
+def test_a_token_is_read_from_stdin_never_argv(capsys, monkeypatch, verb, put_fails, remove_fails):
     monkeypatch.setattr(sys, "stdin", io.StringIO(TOK + "\n"))
-    added = _stub(monkeypatch, "add_forge", ACCT)
+    sent = _stub(monkeypatch, "add_forge" if verb == "add" else "edit_forge", ACCT)
     removed = _stub(monkeypatch, "remove_forge", None)
     pasted = []
 
@@ -175,13 +189,22 @@ def test_a_token_is_read_from_stdin_never_argv(capsys, monkeypatch, put_fails):
             raise transport.ClientError("kraft: too short", kind=transport.Failure.SERVER_ERROR)
         return ACCT
 
+    async def cannot_remove(*args):
+        raise transport.ClientError("kraft: gone", kind=transport.Failure.UNREACHABLE)
+
     monkeypatch.setattr(client, "set_forge_token", paste)
-    argv = [*ADD, "--token-stdin", "--kind", "pat"]
+    if remove_fails:
+        monkeypatch.setattr(client, "remove_forge", cannot_remove)
+    argv = [*(ADD if verb == "add" else ["edit", "corp"]), "--token-stdin", "--kind", "pat"]
     code, out = _run(capsys, *argv)
-    assert TOK not in " ".join(argv) and TOK not in out and TOK not in repr(added)
+    # The token reaches `set_forge_token` and nothing else: not argv, the payload, or stdout.
+    assert TOK not in " ".join(argv) and TOK not in out and TOK not in repr(sent)
     assert pasted == [("corp", TOK, "pat")]
-    assert added[0][1]["client"] == "api" and added[0][1]["token"] is None
-    assert (code, removed) == ((1, [(("corp",), {})]) if put_fails else (0, []))
+    assert sent[0][1].get("token") is None
+    assert code == (1 if put_fails else 0) and ("too short" in out) is put_fails
+    assert removed == (
+        [(("corp",), {})] if verb == "add" and put_fails and not remove_fails else []
+    )
 
 
 @pytest.fixture

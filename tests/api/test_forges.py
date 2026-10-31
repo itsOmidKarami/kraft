@@ -9,6 +9,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
+from fastapi import HTTPException
 from support.harness import connect_repo
 
 from kraft import redact
@@ -16,7 +18,9 @@ from kraft.adapters.forge import credentials, probe
 from kraft.adapters.forge import git as forge_git
 from kraft.adapters.forge.git import CliUnavailable
 from kraft.adapters.forge.models import ForgeError
+from kraft.api.routes import forges as routes
 from kraft.config import read_yaml
+from kraft.forges import ForgesFile
 from kraft.paths import kraft_home
 
 GL = {"name": "corp", "forge": "gitlab", "web_url": "https://code.corp.example/"}
@@ -101,6 +105,9 @@ def test_add_list_remove_round_trip(client, tmp_path, token):
             "env_passthrough names CORP_GL",
         ),
         ({**API, "name": "str", "token": TOK}, 422, "token: must be an object"),
+        ({**API, "name": "top", TOK: "x"}, 422, "the body has a key forges.yaml"),
+        ({**API, "name": "top", "value": TOK, "kind": "pat"}, 422, "the body has a key"),
+        (TOK, 422, "the body must be a JSON object"),
         ({**API, "name": "key", "token": {TOK: "x"}}, 422, "token has a key forges.yaml"),
         (
             {**API, "name": "name", "token": {"from": "env", "env": TOK}},
@@ -118,6 +125,9 @@ def test_add_list_remove_round_trip(client, tmp_path, token):
         "api-url-other-port-422",
         "env-source-a-repo-passes-through-422",
         "token-as-a-string-never-echoed",
+        "extra-top-level-key-is-the-name",
+        "extra-top-level-key-is-the-value",
+        "body-is-a-string",
         "token-key-is-the-value",
         "token-pasted-as-a-variable-name",
     ],
@@ -387,6 +397,9 @@ _ACCT = {"forge": "gitlab", "web_url": "https://code.corp.example", "client": "a
         ("corp", {"token": COMMAND}, 403, None),
         ("corp", {"token": TOK}, 422, None),
         ("corp", {"token": {TOK: "x"}}, 422, None),
+        ("corp", {"value": TOK, "kind": "pat"}, 422, None),
+        ("corp", {TOK: "x"}, 422, None),
+        ("corp", TOK, 422, None),
         ("corp", {"api_url": "https://code.corp.example:8443/api/v4"}, 422, None),
         ("nope", {"api_url": "https://code.corp.example/api/v5"}, 404, None),
     ],
@@ -397,6 +410,9 @@ _ACCT = {"forge": "gitlab", "web_url": "https://code.corp.example", "client": "a
         "command-403",
         "token-as-a-string-never-echoed",
         "token-key-is-the-value",
+        "extra-top-level-key-is-the-value",
+        "extra-top-level-key-is-the-name",
+        "body-is-a-string",
         "api-url-other-port-422",
         "unknown-404",
     ],
@@ -437,20 +453,22 @@ def test_an_edit_that_moves_off_the_pasted_file_deletes_it(client, patch, surviv
 
 
 @pytest.mark.parametrize(
-    ("raw", "headers", "account", "status"),
+    ("raw", "headers", "account", "status", "pastes"),
     [
-        ({"value": TOK, "kind": "pat"}, {}, API, 200),
-        ({"value": TOK}, {}, API, 422),
-        ('{"value": "' + TOK, {}, API, 422),
-        ({"value": [TOK], "kind": "pat"}, {}, API, 422),
-        ({"value": TOK, "kind": TOK}, {}, API, 422),
-        ({"value": "short", "kind": "pat"}, {}, API, 422),
-        ({"value": TOK + " x", "kind": "pat"}, {}, API, 422),
-        ({"value": TOK, "kind": "pat"}, {"X-Kraft-Session-Id": "w1/s1"}, API, 403),
-        ({"value": TOK, "kind": "pat"}, {}, GL, 409),
+        ({"value": TOK, "kind": "pat"}, {}, API, 200, 1),
+        ({"value": TOK, "kind": "pat"}, {}, API, 200, 2),
+        ({"value": TOK}, {}, API, 422, 1),
+        ('{"value": "' + TOK, {}, API, 422, 1),
+        ({"value": [TOK], "kind": "pat"}, {}, API, 422, 1),
+        ({"value": TOK, "kind": TOK}, {}, API, 422, 1),
+        ({"value": "short", "kind": "pat"}, {}, API, 422, 1),
+        ({"value": TOK + " x", "kind": "pat"}, {}, API, 422, 1),
+        ({"value": TOK, "kind": "pat"}, {"X-Kraft-Session-Id": "w1/s1"}, API, 403, 1),
+        ({"value": TOK, "kind": "pat"}, {}, GL, 409, 1),
     ],
     ids=[
         "pasted",
+        "pasted-twice",
         "missing-kind",
         "not-json",
         "value-not-a-string",
@@ -462,7 +480,7 @@ def test_an_edit_that_moves_off_the_pasted_file_deletes_it(client, patch, surviv
     ],
 )
 def test_a_pasted_token_is_written_private_and_never_echoed(
-    client, monkeypatch, raw, headers, account, status
+    client, monkeypatch, raw, headers, account, status, pastes
 ):
     monkeypatch.setattr(redact, "_secrets", ())
     kicked = []
@@ -471,11 +489,12 @@ def test_a_pasted_token_is_written_private_and_never_echoed(
     kicked.clear()
     before = _file(client).read_text()
     content = raw if isinstance(raw, str) else json.dumps(raw)
-    reply = client.put(
-        "/api/forges/corp/token",
-        content=content,
-        headers={"content-type": "application/json", **headers},
-    )
+    for _ in range(pastes):  # the second leaves the account equal: it is probed again anyway
+        reply = client.put(
+            "/api/forges/corp/token",
+            content=content,
+            headers={"content-type": "application/json", **headers},
+        )
     assert reply.status_code == status, reply.text
     if status != 200:
         assert TOK not in reply.text
@@ -493,7 +512,7 @@ def test_a_pasted_token_is_written_private_and_never_echoed(
         "kind": "pat",
     }
     assert path in credentials.secret_files()  # in force now, not at the next reload
-    assert kicked == [["corp"]]  # probed again, even a second paste
+    assert kicked == [["corp"]] * pastes
     assert (
         redact.redact(TOK) == "<redacted>"
         and redact.redact(credentials.basic_form(TOK, "pat")) == "<redacted>"
@@ -513,13 +532,83 @@ def test_a_pasted_token_is_written_private_and_never_echoed(
 def test_a_new_source_is_protected_at_once(client, monkeypatch, tmp_path, method, body, protected):
     monkeypatch.setenv("CORP_GL", TOK)
     file = tmp_path / "tok"
+    kicked = []
+    monkeypatch.setattr(probe, "kick", lambda st, names=None: kicked.append(list(names)))
     if method == "patch":
         client.post("/api/forges", json={**API, "token": None})
+    kicked.clear()
     body = {**body, "token": {**body["token"], "file": str(file)}} if protected == "file" else body
     url = "/api/forges" + ("/corp" if method == "patch" else "")
     reply = client.request(method.upper(), url, json=body)
     assert reply.status_code in (200, 201), reply.text
+    assert kicked == [["corp"]]  # named, not guessed from what changed
     if protected == "env":
         assert "CORP_GL" not in os.environ and credentials.env_token("CORP_GL") == TOK
     else:
         assert Path(os.path.realpath(file)) in credentials.secret_files()
+
+
+def _hand_accounts(client, **files):
+    accounts = {
+        name: {
+            "forge": "gitlab",
+            "client": "api",
+            "web_url": "https://code.corp.example",
+            "token": {"from": "file", "file": spec, "kind": "pat"},
+        }
+        for name, spec in files.items()
+    }
+    _file(client).write_text(yaml.safe_dump({"accounts": accounts}))
+    assert client.post("/api/apply/reload").status_code == 200
+
+
+@pytest.mark.parametrize(
+    "how",
+    ["symlinked-home", "dotdot", "env-var", "link-to-elsewhere", "another-account-reads-it"],
+)
+def test_remove_deletes_the_pasted_file_by_its_real_path(client, tmp_path, monkeypatch, how):
+    mine = _pasted()
+    mine.parent.mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.write_text(TOK)
+    if how == "link-to-elsewhere":
+        mine.symlink_to(elsewhere)  # Kraft's name is a link: the link goes, not the target
+    else:
+        mine.write_text(TOK)
+    (tmp_path / "homelink").symlink_to(kraft_home())
+    monkeypatch.setenv("KH", str(kraft_home()))
+    spec = {
+        "symlinked-home": str(tmp_path / "homelink" / "secrets" / "corp"),
+        "dotdot": f"{mine.parent}/../secrets/corp",
+        "env-var": "$KH/secrets/corp",
+        "link-to-elsewhere": str(elsewhere),
+        "another-account-reads-it": str(mine),
+    }[how]
+    _hand_accounts(client, corp=spec, **({"other": str(mine)} if "another" in how else {}))
+    assert client.delete("/api/forges/corp").status_code == 204
+    kept = how == "another-account-reads-it"
+    assert (mine.exists() or mine.is_symlink()) is kept
+    assert elsewhere.exists()
+
+
+@pytest.mark.parametrize("fail", ["validate", "save"])
+@pytest.mark.parametrize("first", [False, True], ids=["replacing", "first-paste"])
+def test_a_failed_paste_leaves_the_old_token_and_no_orphan(client, monkeypatch, fail, first):
+    client.post("/api/forges", json=API)
+    if not first:
+        assert _put(client, TOK).status_code == 200
+    before = _pasted().read_text() if _pasted().exists() else None
+
+    def boom(*a, **kw):
+        raise HTTPException(422, "no") if fail == "validate" else OSError("disk")
+
+    if fail == "validate":
+        monkeypatch.setattr(routes, "_validated", boom)
+    else:
+        monkeypatch.setattr(ForgesFile, "save", boom)
+    try:
+        _put(client, "ghp_FAKESECOND0123456789")
+    except OSError:
+        assert fail == "save"
+    assert (_pasted().read_text() if _pasted().exists() else None) == before
+    assert [p.name for p in _pasted().parent.glob("*")] == (["corp"] if before else [])
