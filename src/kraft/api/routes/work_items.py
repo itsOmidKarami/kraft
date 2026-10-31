@@ -958,7 +958,10 @@ async def fire_trigger(body: TriggerBody, request: Request):
     chain_template, chain = deps.intake_chain_or_422(st, body.repo, body.chain)
     _check_title(body.title)
     _check_text("description", body.description)
-    if not Path(body.repo).is_dir():
+    # The configured path, not the request's string: a connected repo's own path is the only one
+    # this door ever touches on disk.
+    entry_ = deps.connected_or_422(st, body.repo)
+    if not Path(entry_.path).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
     refuse_agent_on_disabled_repo(st, request, body.repo)
     policy = deps.item_policy_or_422(st, body.repo)
@@ -976,7 +979,6 @@ async def fire_trigger(body: TriggerBody, request: Request):
             raise HTTPException(422, problem)
     if runners := placement.library_runners(chain):
         # A library that places steps on a machine is refused here as at the other doors.
-        entry_ = deps.connected_or_422(st, body.repo)
         try:
             materialized = chain.materialize(
                 target=entry.single_repo_target(body.repo, in_place=in_place_by is not None),
