@@ -268,19 +268,14 @@ def test_add_repo_stores_probed_forge(client, tmp_path):
 
 def test_patch_repo_overrides_forge(client, tmp_path):
     repo = make_repo(tmp_path, name="patchrepo")
-    # A save naming an account forges.yaml lacks is refused, so the account comes first.
-    web = {"forge": "gitlab", "web_url": "https://gitlab.example"}
-    assert client.post("/api/forges", json={"name": "corp", **web}).status_code == 201
+    client.post("/api/forges", json={"name": "corp", "forge": "gitlab", "web_url": "https://gl.x"})
     client.post("/api/repos", json={"path": str(repo), "forge": "github", "enabled": False})
-    r = client.patch(f"/api/repos?path={repo}", json={"forge": "gitlab", "forge_account": "corp"})
-    assert r.status_code == 200, r.text
-    r = client.patch(f"/api/repos?path={repo}", json={"project": "t/r"})
-    assert r.status_code == 200, r.text
+    for body in ({"forge": "gitlab", "forge_account": "corp"}, {"project": "t/r"}):
+        assert client.patch(f"/api/repos?path={repo}", json=body).status_code == 200
     (entry,) = [
         x for x in client.get("/api/repos").json()["repos"] if x["path"] == str(repo.resolve())
     ]
-    assert entry["forge"] == "gitlab"
-    assert entry["project"] == "t/r"
+    assert (entry["forge"], entry["project"]) == ("gitlab", "t/r")
     assert entry["forge_account"] == "corp"  # set by one patch, kept by the next
 
 
