@@ -133,4 +133,4 @@ def test_an_api_account_item_labels_nothing_through_the_cli(client, repo, monkey
     _on_api_account(client, repo, monkeypatch, wid)
     r = client.post(f"/api/work-items/{wid}/mr-labels", json={"labels": ["x"]})
     assert r.status_code == 502, r.text
-    assert "forge account corp-gl says client: api" in r.json()["detail"]
+    assert "forge account corp-gh says client: api" in r.json()["detail"]

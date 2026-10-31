@@ -360,7 +360,7 @@ def test_cancel_closes_nothing_through_the_cli_on_an_api_account(client, repo, m
     assert r.status_code == 200, r.text
     close = r.json()["close_mr"]
     assert close["ok"] is False
-    assert "forge account corp-gl says client: api" in close["error"]
+    assert "forge account corp-gh says client: api" in close["error"]
 
 
 def test_reopen_runs_nothing_through_the_cli_on_an_api_account(client, repo, monkeypatch):
@@ -370,5 +370,5 @@ def test_reopen_runs_nothing_through_the_cli_on_an_api_account(client, repo, mon
     r = client.post(f"/api/work-items/{wid}/reopen-mr")
 
     assert r.status_code == 502, r.text
-    assert "forge account corp-gl says client: api" in r.json()["detail"]
+    assert "forge account corp-gh says client: api" in r.json()["detail"]
     assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"

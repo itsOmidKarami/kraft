@@ -427,6 +427,13 @@ _IN_PROCESS_FIX = {
 
 def _in_process_fix(cause: dict | None) -> str:
     """The end of the reason for `cause` (`_forge_cause`'s facts), or the default."""
+    if cause and cause.get("account") and not cause.get("sso_url"):
+        # Neutral: a missing token also stops here, so it does not claim a refusal. The
+        # source is a label (a file path, a variable name), never a command's text.
+        return (
+            f"Forge account {cause['account']} could not sign in with its token "
+            f"({cause['source']}). Replace it there, then retry."
+        )
     if cause and cause.get("sso_url"):
         # The address is `facts.sso_url`, which every screen shows once, as the hint.
         return (
@@ -447,10 +454,15 @@ def _forge_cause(db, work_item_id: str, node: ResolvedNode, failed: list) -> dic
                 _task_forge_error(db, work_item_id, node, t, "failed"),
             )
         ):
-            sso = c == "forge_auth" and forge_mod.safe_sso_url(
-                (_task_forge_error(db, work_item_id, node, t, "failed") or {}).get("sso_url")
-            )
-            return {"cause": c, **({"sso_url": sso} if sso else {})}
+            record = _task_forge_error(db, work_item_id, node, t, "failed") or {}
+            auth = c == "forge_auth"
+            sso = auth and forge_mod.safe_sso_url(record.get("sso_url"))
+            who = auth and record.get("account") and record.get("source")
+            return {
+                "cause": c,
+                **({"sso_url": sso} if sso else {}),
+                **({"account": record["account"], "source": record["source"]} if who else {}),
+            }
     return None
 
 

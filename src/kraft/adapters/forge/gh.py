@@ -1,4 +1,9 @@
-"""GitHub through `gh`."""
+"""GitHub through `gh`.
+
+For the `github-api` backend (forge roadmap PR 6): several reads below put a query in the
+path (`...?per_page=100`). `HttpTransport.rest` refuses a path holding `?` (httpx drops a
+URL's query when it is given params), so each moves into `fields=` first, as `glab.py`'s
+did, or the API backend cannot run it."""
 
 from __future__ import annotations
 

@@ -40,11 +40,20 @@ def test_resolve_returns_each_named_backend(name, cls):
     assert isinstance(forge.resolve(name), cls)
 
 
-def test_resolve_rejects_an_unknown_backend():
+@pytest.mark.parametrize(
+    "name, says",
+    [
+        ("bitbucket", "bitbucket"),
+        ("gitlab-api", "built from its account"),
+        ("github-api", "not in this release"),
+    ],
+    ids=["unknown", "gitlab-api-is-built-from-its-account", "github-api-not-in-this-release"],
+)
+def test_resolve_rejects_what_a_name_cannot_build(name, says):
     """Named, never probed: an unusable backend must fail loudly rather than
     silently taking a different path than the one configured."""
-    with pytest.raises(forge.ForgeError, match="bitbucket"):
-        forge.resolve("bitbucket")
+    with pytest.raises(forge.ForgeError, match=says):
+        forge.resolve(name)
 
 
 @pytest.mark.parametrize(
