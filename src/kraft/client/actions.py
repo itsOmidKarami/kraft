@@ -930,8 +930,9 @@ async def remove_forge(name: str) -> None:
 
 
 async def test_forge(name: str) -> dict:
-    """Ask the server whether the account's forge CLI is signed in for its host."""
-    return await transport._act(f"/forges/{quote(name, safe='')}/test")
+    """Ask the server whether the account's forge CLI is signed in for its host, or its
+    API token works. A probe may take longer than the client's default wait."""
+    return await transport._act(f"/forges/{quote(name, safe='')}/test", timeout=120)
 
 
 async def reload_addons() -> dict:

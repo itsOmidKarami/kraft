@@ -265,8 +265,8 @@ async def _post(path: str, payload: dict | None = None, **kwargs) -> tuple[int, 
     return response.status_code, body
 
 
-async def _act(path: str, payload: dict | None = None) -> dict:
-    status, body = await _post(path, payload)
+async def _act(path: str, payload: dict | None = None, **kwargs) -> dict:
+    status, body = await _post(path, payload, **kwargs)
     if status >= 400:
         raise status_error(status, detail_of(body))
     return body

@@ -38,6 +38,7 @@ from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.forge import credentials
 from kraft.adapters.forge import git as forge_git
 from kraft.adapters.forge import mr as forge_mr
+from kraft.adapters.forge import probe as forge_probe
 from kraft.addons import load as addons_load
 from kraft.api import deps
 from kraft.db import Database
@@ -78,6 +79,7 @@ BACKGROUND_TASKS = (
     "apply_task",
     "addon_update_task",
     "when_free_task",
+    "forge_probe_task",
 )
 
 
@@ -138,6 +140,8 @@ def start_background(app: FastAPI) -> None:
     # Off by default costs a look a minute at a file and the database: it
     # installs and restarts only what a person marked, or `update.yaml` allows.
     app.state.when_free_task = asyncio.ensure_future(when_free.loop(app))
+    # Always on: a token expires or is revoked while nobody runs a forge node.
+    app.state.forge_probe_task = asyncio.ensure_future(forge_probe.loop(app))
     load_workers(app)
 
 
@@ -406,6 +410,9 @@ async def _lifespan(app: FastAPI):
     # Before reattach and resumed walks, whose forge nodes read the accounts;
     # nothing else runs yet, so the load needs no lock.
     app.state.forges_lock = asyncio.Lock()
+    app.state.forge_probes = {}
+    app.state.forge_probe_wake = asyncio.Event()
+    app.state.forge_probe_due = set()
     load_forges(app)
 
     booted_at = time.time()
@@ -609,6 +616,7 @@ async def _lifespan(app: FastAPI):
             app.state.addon_update_task,
             app.state.apply_task,
             app.state.when_free_task,
+            app.state.forge_probe_task,
         ):
             await _cancel(task)
         await _cancel(app.state.workers_watch_task)

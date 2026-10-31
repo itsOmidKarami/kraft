@@ -5,6 +5,7 @@ import math
 import os
 import time
 from dataclasses import asdict
+from datetime import date
 
 from fastapi import HTTPException, Request, Response
 from fastapi.responses import JSONResponse
@@ -13,6 +14,7 @@ from pydantic import BaseModel
 from kraft import auth as auth_mod
 from kraft import registration, storage
 from kraft import update as update_mod
+from kraft.adapters.forge import probe
 from kraft.addons import update as addon_update
 from kraft.api import api_router, deps
 from kraft.worker import reattach as reattach_mod
@@ -131,16 +133,20 @@ async def health(request: Request):
     # schedules unfired, which nothing else would say (R12E-03).
     invalid_intake = getattr(st, "invalid_intake", None)
     invalid_forges = getattr(st, "invalid_forges", None)
+    tokens, bad_tokens = probe.health_rows(st.forge_probes, date.today())
     storage_health = storage.health(st)
     held = (storage_health or {}).get("state") == "held"
     return {
         "status": "degraded"
-        if (invalid or invalid_policy or invalid_intake or invalid_forges or held)
+        if (invalid or invalid_policy or invalid_intake or invalid_forges or bad_tokens or held)
         else "ok",
         "invalid_templates": invalid,
         "invalid_policy": invalid_policy,
         "invalid_intake": invalid_intake,
         "invalid_forges": invalid_forges,
+        # public: an API account's token state and date, never who it is. Degraded
+        # when a token is refused or about to expire; the admin route has the rest.
+        "forge_tokens": tokens,
         # public: each auto-updating add-on's last outcome and kind, not its
         # message (refusal and git error text). `doctor` reads the message from
         # status.json. A held or failed one is not degraded: the locked

@@ -438,3 +438,22 @@ def test_a_forges_yaml_that_leaves_a_repo_without_its_account_is_refused_on_relo
         assert credentials.secret_files() == (Path("/s/tok"),)
     # Taken even when the edit is refused: no child may inherit a token the file names.
     assert ("CORP_GL" not in os.environ) is ("CORP_GL" in accounts)
+
+
+@pytest.mark.parametrize(
+    ("state", "expires_on", "status"),
+    [("ok", None, "ok"), ("refused", "2099-01-01", "degraded")],
+    ids=["ok", "refused"],
+)
+def test_health_reports_a_tokens_state_and_never_who_it_is(client, state, expires_on, status):
+    from kraft.adapters.forge import probe
+
+    client.app.state.forge_probes["a"] = probe.Probe(
+        "a", "2026-01-01T00:00:00+00:00", state, "bad tok-0123456789",
+        login="octocat", scopes=("repo",), expires_on=expires_on,
+    )  # fmt: skip
+    body = client.get("/api/health").json()
+    assert body["status"] == status
+    assert body["forge_tokens"] == {"a": {"state": state, "expires_on": expires_on}}
+    for secret in ("octocat", "repo", "tok-0123456789"):
+        assert secret not in str(body["forge_tokens"])

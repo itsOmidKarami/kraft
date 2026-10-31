@@ -22,7 +22,7 @@ from kraft import config as config_mod
 from kraft import forges as forges_mod
 from kraft import intake as intake_mod
 from kraft import storage
-from kraft.adapters.forge import credentials
+from kraft.adapters.forge import credentials, probe
 from kraft.api import config_check, deps
 from kraft.paths import config_dir
 from kraft.remote import registry as workers_registry
@@ -254,6 +254,11 @@ def _reload_forges(st) -> None:
     if st.forges is not None and (added := [p for p in new if p not in old]):
         st.invalid_forges = "; ".join(added)
         return
+    api = {n for n, a in file.accounts.items() if a.client == "api"}
+    for gone in set(st.forge_probes) - api:
+        del st.forge_probes[gone]
+    # Every API account, changed or not: a reload is how a person says "I fixed the token".
+    probe.kick(st, api)
     st.forges = file
     st.invalid_forges = "; ".join(new) or None
     credentials.set_secret_files(path)  # accepted: the new set alone
