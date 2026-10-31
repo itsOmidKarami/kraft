@@ -53,9 +53,10 @@ FIX = "install the Kraft plugin (then `/kraft:onboard`), or run `kraft admin ini
 #: worker gets: Claude then cannot start the server, and the first ask fails.
 PATH_FIX = (
     "put `kraft` on that PATH (install it as the install docs say, or `just install` in a "
-    "checkout), register the server by its absolute path (`claude mcp add --scope user kraft "
-    "-- /path/to/kraft admin mcp`), or give the service a PATH that has it (`kraft admin "
-    "uninstall-service`, then `kraft admin install-service` from a shell where `kraft` runs)"
+    "checkout), register the server by its absolute path (`claude mcp remove --scope user "
+    "kraft`, then `claude mcp add --scope user kraft -- /path/to/kraft admin mcp`), or give "
+    "the service a PATH that has it (`kraft admin uninstall-service`, then `kraft admin "
+    "install-service` from a shell where `kraft` runs)"
 )
 
 
