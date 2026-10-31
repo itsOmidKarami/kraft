@@ -33,6 +33,7 @@ _REDIRECTED = re.compile(r"returned error: 30[1278]", re.IGNORECASE)
 
 _STRIPPED = ("GIT_CURL_VERBOSE", "GIT_TRANSFER_TRACE", "GIT_SSL_NO_VERIFY")
 _TRACE2 = ("GIT_TRACE2", "GIT_TRACE2_EVENT", "GIT_TRACE2_PERF")
+_PROXY_VARS = ("https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY")
 
 Reader = Callable[[], Awaitable[tuple[Sequence[RepoEntry], ForgesFile | None]]]
 _READER: Reader | None = None
@@ -91,21 +92,22 @@ def set_reader(fn: Reader | None) -> None:
     _READER = fn
 
 
-async def server_context(st) -> tuple[list[RepoEntry], ForgesFile | None]:
+class Unread(list):
+    """What `server_context` returns for the repos when repos.yaml does not load: no entries,
+    and why. Falling back to git's own credential would hide that a token was never sent."""
+
+    def __init__(self, why: str):
+        super().__init__()
+        self.why = why
+
+
+async def server_context(st) -> tuple[Sequence[RepoEntry], ForgesFile | None]:
     if st.forges is None or not any(_injected(a) for a in st.forges.accounts.values()):
         return [], st.forges  # no account could carry a header: read no repos.yaml
     try:
         repos = await asyncio.to_thread(config.load_repos, st.templates_dir / "repos.yaml")
-    except ConfigError:
-        # Falling back to git's own credential would hide that the token was never sent.
-        name, account = next((n, a) for n, a in st.forges.accounts.items() if _injected(a))
-        raise ForgeError(
-            f"forge account {name}: repos.yaml does not load, so Kraft cannot tell which "
-            "repo uses it; fix repos.yaml",
-            reason="auth",
-            account=name,
-            source=account.source().label(),
-        ) from None
+    except ConfigError as exc:
+        return Unread((str(exc).splitlines() or ["unreadable"])[0][:200]), st.forges
     return repos, st.forges
 
 
@@ -185,6 +187,18 @@ async def auth_for(repo: Path, *, push: bool = False) -> GitAuth | None:
     entries, file = await _READER()
     if file is None or not any(_injected(a) for a in file.accounts.values()):
         return None  # no account could carry a header: spare the git calls
+    if isinstance(entries, Unread):
+        # Without repos.yaml the repo's account is unknown: refuse only an https remote on a
+        # host some injected-token account names; an SSH or local remote keeps running.
+        fetch = await _git(repo, "remote", "get-url", "origin")
+        hosts = {forges.web_host(a.web_url) for a in file.accounts.values() if _injected(a)}
+        if (
+            fetch
+            and fetch[0].lower().startswith("https://")
+            and forges.remote_host(fetch[0]) in hosts
+        ):
+            raise ForgeError(f"repos.yaml does not load ({entries.why}); fix it, then retry")
+        return None
     common = await _git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if not common:
         return None
@@ -194,11 +208,9 @@ async def auth_for(repo: Path, *, push: bool = False) -> GitAuth | None:
     if entry is None or not fetch:
         return None
     host = forges.remote_host(fetch[0])
+    # As `run.api_account_for` does: an entry with no recorded forge never takes a host default,
+    # so its backend stays the CLI and git keeps its own credential.
     found = forges.account_for(entry, file, host)
-    if found is None and not entry.forge_account and entry.forge is None and entry.id:
-        # Only a workspace root or member carries an id; one with no recorded forge uses the
-        # root's account (`run._member_forges`). A legacy entry with none stays on git's own.
-        found = forges.default_account(file, host)
     if found is None:
         return None
     return await auth_for_account(repo, *found, push=push)
@@ -219,10 +231,15 @@ def git_env(base: Mapping[str, str], auth: GitAuth | None) -> dict[str, str]:
     env.update(dict.fromkeys(_TRACE2, "0"))
     # git takes the most specific `http.<url>.*` first, so a path-scoped key in a repo's own
     # config beats an origin-keyed pin: every URL git dials is pinned as well, and a tie goes
-    # to this env entry. `http.sslCAInfo` is left alone: it can only name a CA that verifies
-    # the origin's own certificate, never turn verification off.
-    proxy = env.get("https_proxy") or env.get("HTTPS_PROXY") or ""  # as set, never a repo's
-    pins = [("credential.helper", "")]  # resets the helper list: no prompt, no `reject`
+    # to this env entry. `remote.origin.proxy` beats every `http.<url>.proxy`, so it is pinned
+    # as well. `http.sslCAInfo` stays unpinned (a corporate CA needs it): a CA a repo plants
+    # there verifies whatever a man in the middle signs, which is why the proxy and the
+    # resolve list, the ways to put one in the path, are pinned to the environment's own.
+    proxy = next((env[k] for k in _PROXY_VARS if env.get(k)), "")  # as set, never a repo's
+    pins = [
+        ("credential.helper", ""),  # resets the helper list: no prompt, no `reject`
+        ("remote.origin.proxy", proxy),
+    ]
     for target in (f"{auth.origin}/.", *(f"{u}." for u in auth.urls)):
         pins += [
             (f"http.{target}extraHeader", ""),  # resets a persisted header: no two Authorizations

@@ -94,13 +94,13 @@ def pins(env) -> list[tuple[str, str]]:
 KEY = f"http.{WEB}/."
 HEADER = "Authorization: Basic " + form()
 HARD = sandbox.hardened_git_env()
-PROXY = HARD.get("https_proxy") or HARD.get("HTTPS_PROXY") or ""
+PROXY = next((HARD[k] for k in git_auth._PROXY_VARS if HARD.get(k)), "")
 URL = f"{WEB}/team/app.git"
 
 
 def expected(*targets: str) -> list[tuple[str, str]]:
     """The pins after the hardening ones: the helper reset, then six per origin or exact URL."""
-    out = [("credential.helper", "")]
+    out = [("credential.helper", ""), ("remote.origin.proxy", PROXY)]
     for t in targets:
         out += [
             (f"http.{t}extraHeader", ""),
@@ -151,6 +151,21 @@ NOISE = {
                 ("http.https://code.corp.example/.proxy", "http://proxy.example:3128") in pins(e)
             ),
             id="proxy-is-pinned-to-the-environments-own",
+        ),
+        pytest.param(
+            {**HARD, "https_proxy": "", "HTTPS_PROXY": "", "ALL_PROXY": "socks5://p.example:1080"},
+            auth(),
+            lambda e: (
+                ("remote.origin.proxy", "socks5://p.example:1080") in pins(e)
+                and ("http.https://code.corp.example/.proxy", "socks5://p.example:1080") in pins(e)
+            ),
+            id="all-proxy-is-the-fallback",
+        ),
+        pytest.param(
+            {**HARD, "https_proxy": "http://proxy.example:3128"},
+            auth(),
+            lambda e: ("remote.origin.proxy", "http://proxy.example:3128") in pins(e),
+            id="remote-origin-proxy-is-pinned",
         ),
         pytest.param(
             HARD,
@@ -393,16 +408,17 @@ async def test_a_member_linked_worktree_uses_its_own_account(tmp_path, monkeypat
 
 
 @pytest.mark.parametrize(
-    ("entry_id", "named"),
+    "entry_id",
     [
-        pytest.param("member", "corp-gl", id="member-without-forge-takes-its-hosts-default"),
-        pytest.param(None, None, id="legacy-entry-without-forge-gets-no-header"),
+        pytest.param("root", id="root-with-an-id-and-no-forge"),
+        pytest.param("member", id="member-with-no-forge"),
+        pytest.param(None, id="legacy-entry-without-forge"),
     ],
 )
-async def test_an_entry_without_a_forge_takes_a_default_only_as_a_workspace_member(
-    tmp_path, monkeypatch, entry_id, named
-):
-    repo, calls = rig(
+async def test_an_entry_without_a_forge_never_takes_a_host_default(tmp_path, monkeypatch, entry_id):
+    """As `run.api_account_for`: its backend stays the CLI, so git keeps its own credential
+    (no header, no helper reset) even with a `default_for_host` API account on its host."""
+    repo, _ = rig(
         tmp_path,
         monkeypatch,
         remote=HTTPS,
@@ -410,10 +426,8 @@ async def test_an_entry_without_a_forge_takes_a_default_only_as_a_workspace_memb
         entry_fields={"id": entry_id},
     )
     base = {**os.environ, "X": "1"}
-    got = await git_auth.auth_for(repo)
-    assert (got.name if got else None) == named
-    if named is None:
-        assert await remote_env(repo, base) == base
+    assert await git_auth.auth_for(repo) is None
+    assert await remote_env(repo, base) == base
 
 
 async def test_an_unreadable_token_is_an_auth_error(tmp_path, monkeypatch):
@@ -526,12 +540,43 @@ async def test_a_refused_base_fetch_names_its_reason(tmp_path, monkeypatch, text
     assert (caught.value.reason, caught.value.account) == (reason, "corp-gl")
 
 
-async def test_an_unreadable_repos_yaml_stops_an_injected_account_not_falls_back(
-    tmp_path, monkeypatch
-):
+async def test_an_unreadable_repos_yaml_is_read_as_a_config_problem_by_the_server(tmp_path):
     (tmp_path / "repos.yaml").write_text("repos: [not: a list")
     st = SimpleNamespace(forges=ForgesFile(accounts={"corp-gl": acct()}), templates_dir=tmp_path)
-    with pytest.raises(ForgeError) as caught:
-        await git_auth.server_context(st)
-    exc = caught.value
-    assert (exc.reason, exc.account, exc.source) == ("auth", "corp-gl", "env CORP_GL")
+    entries, _ = await git_auth.server_context(st)
+    assert isinstance(entries, git_auth.Unread) and entries.why
+
+
+@pytest.mark.parametrize(
+    ("remote", "stops"),
+    [
+        pytest.param(HTTPS, True, id="https-on-an-accounts-host-stops"),
+        pytest.param(SSH, False, id="ssh-remote-keeps-running"),
+        pytest.param(
+            "https://other.example/t/a.git", False, id="https-on-another-host-keeps-running"
+        ),
+    ],
+)
+async def test_an_unreadable_repos_yaml_stops_only_a_remote_that_would_carry_a_header(
+    tmp_path, monkeypatch, remote, stops
+):
+    from functools import partial
+
+    repo, _ = rig(tmp_path, monkeypatch, remote=remote, reader=False)
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    (cfg / "repos.yaml").write_text("repos: [not: a list")
+    st = SimpleNamespace(forges=ForgesFile(accounts={"corp-gl": acct()}), templates_dir=cfg)
+    git_auth.set_reader(partial(git_auth.server_context, st))
+    base = {**os.environ, "X": "1"}
+    if stops:
+        with pytest.raises(ForgeError) as caught:
+            await remote_env(repo, base)
+        text = str(caught.value)
+        assert text.startswith("repos.yaml does not load (") and text.endswith(
+            "; fix it, then retry"
+        )
+        assert (caught.value.reason, caught.value.account) == (None, "")
+        assert "`" not in text
+    else:
+        assert await remote_env(repo, base) == base

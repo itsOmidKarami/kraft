@@ -1248,7 +1248,7 @@ async def upstream_head(repo: Path, branch: str) -> str | None:
         except git.ForgeError as exc:  # the account's token cannot be read
             raise BaseFetchRefused(
                 f"{exc}; Kraft will not start {branch} from a stale base. Fix it, then retry",
-                reason="auth",
+                reason=exc.reason,
                 account=exc.account,
                 source=exc.source,
             ) from None

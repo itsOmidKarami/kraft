@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 from support import worktree as wtree
-from support.git_https import git_https
+from support.git_https import git_https, recording_proxy
 from support.harness import (
     commit_all,
     entry_of,
@@ -201,6 +201,21 @@ async def test_another_origin_sees_no_header(remote, tmp_path, monkeypatch):
         assert done.returncode == 0, done.stderr
         assert second.authorizations and set(second.authorizations) == {None}
         assert remote.web.authorizations == []
+
+
+async def test_a_remote_proxy_in_the_repos_config_never_sees_the_header(remote, monkeypatch):
+    """`remote.origin.proxy` beats every `http.<url>.proxy`: the control (plain git, same config)
+    reaches the proxy; the pinned fetch does not, and the remote sees our header."""
+    for k in ("no_proxy", "NO_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"):
+        monkeypatch.delenv(k, raising=False)
+    with recording_proxy() as (seen, proxy):
+        git(remote.repo, "config", "remote.origin.proxy", proxy)
+        subprocess.run(["git", "fetch", "-q", "origin", "main"], cwd=remote.repo, env=os.environ)
+        assert seen, "the config's proxy was not used: no proof"
+        seen.clear()
+        await _base_fetch(remote, None, None)
+        assert seen == []
+    _ours_only(remote.web)
 
 
 async def test_a_redirect_to_another_host_sees_no_header(remote, tmp_path, monkeypatch):

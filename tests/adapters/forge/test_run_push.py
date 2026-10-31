@@ -91,9 +91,11 @@ async def test_a_head_kraft_never_pushed_is_dated_by_its_commit(on_branch):
     assert when == datetime.fromisoformat(git(on_branch, "log", "-1", "--format=%cI", head))
 
 
-async def _bump(forge_obj, root, monkeypatch, ran, *, push=None):
+async def _bump(forge_obj, root, monkeypatch, ran, *, push=None, fail=None):
     async def run_git(repo, args, *, env=None, **_):
         ran.append((args, env))
+        if fail:
+            raise forge.git.ForgeError(fail)
         return ""
 
     async def moved(*_):
@@ -199,8 +201,8 @@ async def test_a_cli_backends_pointer_bump_push_carries_no_header(tmp_path, monk
 async def test_a_pointer_bump_pushes_with_the_pinned_account_not_the_live_one(
     tmp_path, monkeypatch
 ):
-    """The repo was re-pointed at another account after the pin: the live reader names
-    `other-gl`, yet the push carries `corp-gl`'s header, and with no reader at all."""
+    """With no live reader at all the push still carries `corp-gl`'s header, from the pin; and
+    once a reader that would name another account is installed, it is never asked."""
     from kraft.adapters.forge.gitlab_api import GitLabApi
 
     from .test_git_auth import HTTPS, acct, form, rig
@@ -254,3 +256,31 @@ async def test_a_pointer_bump_push_the_pin_refuses_stops_and_never_opens_a_merge
     with pytest.raises(forge.git.ForgeError, match=words):
         await _bump(Pinned("corp-gl", acct()), repo, monkeypatch, ran)
     assert ran == [] and opened == []
+
+
+@pytest.mark.parametrize(
+    ("text", "reason"),
+    [
+        pytest.param("... The requested URL returned error: 401", "auth", id="401"),
+        pytest.param("... The requested URL returned error: 403", "forbidden", id="403"),
+    ],
+)
+async def test_a_refused_token_on_the_direct_pointer_push_stops_with_one_attempt(
+    tmp_path, monkeypatch, text, reason
+):
+    from kraft.adapters.forge.gitlab_api import GitLabApi
+
+    from .test_git_auth import HTTPS, acct, rig
+
+    repo, _ = rig(tmp_path, monkeypatch, remote=HTTPS, reader=False)
+    pushed = []
+
+    class Pinned(GitLabApi):
+        async def push(self, **_):
+            pushed.append("second push")
+
+    ran = []
+    with pytest.raises(forge.git.ForgeError) as caught:
+        await _bump(Pinned("corp-gl", acct()), repo, monkeypatch, ran, fail=text)
+    assert (caught.value.reason, caught.value.account) == (reason, "corp-gl")
+    assert len(ran) == 1 and pushed == []

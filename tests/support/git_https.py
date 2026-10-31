@@ -161,3 +161,34 @@ def git_https(root: Path, *, token: str | None = None, forge: str = "gitlab") ->
     finally:
         remote.stop()
         shutil.rmtree(pems, ignore_errors=True)
+
+
+@contextmanager
+def recording_proxy() -> Iterator[tuple[list[bytes], str]]:
+    """A TCP listener that records what each client sends first (a proxy's CONNECT line and any
+    header) and hangs up: a stand-in for a proxy a repo's config names."""
+    import socket
+
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(5)
+    seen: list[bytes] = []
+
+    def serve():
+        while True:
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                return
+            conn.settimeout(1)
+            try:
+                seen.append(conn.recv(65536))
+            except OSError:
+                pass
+            conn.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    try:
+        yield seen, f"http://127.0.0.1:{srv.getsockname()[1]}"
+    finally:
+        srv.close()

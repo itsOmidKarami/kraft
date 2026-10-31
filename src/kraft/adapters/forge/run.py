@@ -2901,6 +2901,8 @@ async def _bump_pointer_only_root(
             False,
         )
     except ForgeError as exc:
+        if auth and auth.stops(str(exc)):
+            raise auth.stamp(exc) from None  # a refused token is not sent a second time
         refused = str(exc).strip().splitlines()[-1] if str(exc).strip() else "refused"
     await forge.push(repo=root_repo, branch=branch)
     mr = await forge.open_mr(
