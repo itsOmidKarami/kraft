@@ -455,6 +455,7 @@ def test_a_command_token_is_not_replaced_from_the_browser(client, method, path, 
     reply = getattr(client, method)(f"/api/forges/corp{path}", json=body)
     assert reply.status_code == status and TOK not in reply.text
     assert status == 200 or "echo x" not in reply.text  # a row shows its own source
+    assert status == 200 or "kraft admin forge edit NAME --token-from" in reply.text
     kept = read_yaml(_file(client))["accounts"]["corp"]["token"]
     assert kept == COMMAND
 

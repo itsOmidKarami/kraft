@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import re
 from pathlib import Path
 from typing import Any
 
@@ -26,10 +25,14 @@ from kraft.api import api_router
 from kraft.api.routes.workers import _forbid_sessions
 from kraft.paths import kraft_home
 
-_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
+_NAME = credentials.ACCOUNT_NAME
 _COMMAND_403 = (
     "a command source runs code on the server's machine, so it is set there: "
     "kraft admin forge add … --token-from 'command:…', or by hand in forges.yaml"
+)
+_KEEPS_403 = (
+    "this account's token comes from a command; change it with "
+    "`kraft admin forge edit NAME --token-from …` on the server's machine"
 )
 _SHARED_403 = (
     "that token source is already read by another account, or is another account's pasted "
@@ -179,7 +182,7 @@ def _keeps_command(old: forges.ForgeAccount | None, replaces_token: bool) -> Non
     """The file can gain a command source while a browser dialog is open, so the guard reads
     the account as it is now: no write over HTTP replaces or erases a command."""
     if replaces_token and old is not None and old.token and old.token.from_ == "command":
-        raise HTTPException(403, _COMMAND_403)
+        raise HTTPException(403, _KEEPS_403)
 
 
 def _no_shared(updated: forges.ForgesFile, name: str, sent) -> None:
@@ -317,11 +320,10 @@ async def set_token(name: str, request: Request):
     value, kind = (body.get("value"), body.get("kind")) if isinstance(body, dict) else (None, None)
     if not isinstance(value, str) or not isinstance(kind, str) or kind not in credentials.KINDS:
         raise HTTPException(422, _TOKEN_BODY)
-    value = value.strip()
-    if any(c.isspace() or not c.isprintable() for c in value):
-        raise HTTPException(422, "the token holds whitespace or a control character")
-    if len(value) < redact.MIN_LEN:
-        raise HTTPException(422, f"the token is shorter than {redact.MIN_LEN} characters")
+    try:
+        value = credentials.clean_paste(value)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     if not _NAME.fullmatch(name):
         raise HTTPException(422, "name: lowercase letters, digits, . - and _, starting with one")
     async with st.forges_lock:

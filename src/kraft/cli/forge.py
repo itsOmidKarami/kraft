@@ -13,9 +13,10 @@ import sys
 from pydantic import ValidationError
 
 from kraft import client, config, forges
+from kraft.adapters.forge import credentials
 from kraft.cli import common
 from kraft.client import transport
-from kraft.paths import config_dir
+from kraft.paths import config_dir, kraft_home
 
 _SOURCES = "git-credential, env:NAME, file:PATH or command:CMD"
 
@@ -83,22 +84,31 @@ def _on_this_machine() -> None:
         raise _die("a command source is written on the server's machine; run this there") from None
 
 
-def _write_command(name: str, change) -> dict:
+def _is_command(row: dict | None) -> bool:
+    return bool(row and (row.get("token") or {}).get("from") == "command")
+
+
+def _write_command(name: str, change, *, expect=_is_command, stage=None) -> dict:
     """forges.yaml on disk with `change(accounts)` applied, then the server asked to reload.
-    A reload that refuses it puts the old text back."""
+    A reload that refuses it puts the old text back. `stage()` runs once the new file is
+    known valid, before it is saved, and returns the undo for what it wrote; `expect` says
+    what the account must look like in the server's listing afterwards."""
     _on_this_machine()
     path = config_dir() / forges.ForgesFile.FILE
     old = path.read_text() if path.exists() else None
     try:
         accounts = dict(forges.ForgesFile.load(path).accounts)
         change(accounts)
-        forges.ForgesFile.model_validate({"accounts": accounts}).save(path)
+        valid = forges.ForgesFile.model_validate({"accounts": accounts})
     except config.ConfigError as exc:
         raise _die(f"{exc}; fix the file first") from None
     except ValidationError as exc:
         raise _die(forges.validation_text(exc)) from None
+    undo = stage() if stage else None
 
     def restore() -> None:
+        if undo:
+            undo()
         if old is None:
             path.unlink(missing_ok=True)
         else:
@@ -107,18 +117,21 @@ def _write_command(name: str, change) -> dict:
             asyncio.run(client.reload_templates())  # the refusal's mark is not the file's
 
     try:
+        valid.save(path)
         result = asyncio.run(client.reload_templates())
         # Only a refused forges.yaml undoes this write: another file's refusal is not ours.
         refused = result.get("refused_forges")
         accounts = {} if refused else asyncio.run(client.list_forges())["accounts"]
+    except config.ConfigError as exc:
+        restore()
+        raise _die(f"{exc}; fix the file first") from None
     except BaseException:
         restore()
         raise
     if refused:
         restore()
         raise _die(f"the server refused forges.yaml: {refused}")
-    row = accounts.get(name)
-    if not (row and (row.get("token") or {}).get("from") == "command"):
+    if not expect(accounts.get(name)):
         restore()
         raise _die(
             f"the server does not read the forges.yaml written here ({config_dir()}); "
@@ -169,8 +182,11 @@ def create_account(
     return result
 
 
-def set_command_source(name: str, fields: dict) -> dict:
-    """`fields` applied to the account in forges.yaml on disk (a command source's way in)."""
+def set_command_source(name: str, fields: dict, *, paste: str | None = None) -> dict:
+    """`fields` applied to the account in forges.yaml on disk: how a command source gets in,
+    and how an account that reads one is changed (the API refuses both). A `paste` is the
+    pasted token: written to the account's private file, which `fields["token"]` names."""
+    moves_off = (fields.get("token") or {}).get("from") != "command"
 
     def change(accounts: dict) -> None:
         if name not in accounts:
@@ -180,7 +196,25 @@ def set_command_source(name: str, fields: dict) -> dict:
             **fields,
         }
 
-    return _write_command(name, change)
+    def stage():
+        target = kraft_home() / "secrets" / name
+        previous = target.read_bytes() if target.is_file() else None
+        credentials.write_pasted(name, paste)
+
+        def undo() -> None:
+            if previous is None:
+                target.unlink(missing_ok=True)
+            else:
+                credentials.write_pasted(name, previous.decode().strip())
+
+        return undo
+
+    return _write_command(
+        name,
+        change,
+        expect=(lambda row: row is not None and not _is_command(row)) if moves_off else _is_command,
+        stage=stage if paste is not None else None,
+    )
 
 
 def _cmd_add(ns: argparse.Namespace) -> None:
@@ -227,9 +261,27 @@ def _cmd_edit(ns: argparse.Namespace) -> None:
         common.emit({"name": ns.name}, lambda r: f"edited {r['name']}", ns.json)
         return
     token = _read_stdin_token() if stdin else None
-    before = None
-    if token is not None:
-        before = asyncio.run(client.list_forges())["accounts"].get(ns.name) or {}
+    before = asyncio.run(client.list_forges())["accounts"].get(ns.name) or {}
+    if _is_command(before):
+        # The API will not replace a command (the browser must not); the server's machine can.
+        paste = None
+        if token is not None:
+            try:
+                paste = credentials.clean_paste(token)
+            except ValueError as exc:
+                raise _die(f"--token-stdin: {exc}") from None
+            if not credentials.ACCOUNT_NAME.fullmatch(ns.name):
+                raise _die("--token-stdin: the account's name cannot name a secret file")
+            fields["token"] = {
+                "from": "file",
+                "file": str(kraft_home() / "secrets" / ns.name),
+                "kind": ns.kind or "unknown",
+            }
+        if fields.get("client") == "cli":  # gh/glab keep their own sign-in
+            fields = {**fields, "token": None, "ca_file": None}
+        set_command_source(ns.name, fields, paste=paste)
+        common.emit({"name": ns.name}, lambda r: f"edited {r['name']}", ns.json)
+        return
     result = asyncio.run(client.edit_forge(ns.name, fields))
     if token is not None:
         try:

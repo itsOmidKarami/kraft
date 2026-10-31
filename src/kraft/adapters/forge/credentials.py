@@ -372,6 +372,19 @@ def forget_tokens() -> None:
         del _LOCKS[key]
 
 
+ACCOUNT_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
+
+
+def clean_paste(value: str) -> str:
+    """A pasted token as it is kept, or a ValueError saying why not (never quoting it)."""
+    value = value.strip()
+    if any(c.isspace() or not c.isprintable() for c in value):
+        raise ValueError("the token holds whitespace or a control character")
+    if len(value) < redact.MIN_LEN:
+        raise ValueError(f"the token is shorter than {redact.MIN_LEN} characters")
+    return value
+
+
 def write_pasted(name: str, value: str) -> Path:
     """A pasted token, in a file only the server's user can open: its directory 0700
     (an existing one too), the file 0600 from its first byte, replaced whole."""
