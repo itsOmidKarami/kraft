@@ -315,11 +315,24 @@ def test_account_for_picks_named_then_host_default_then_none(accounts, entry, ho
 
 
 @pytest.mark.parametrize(
-    ("forge_account", "says"),
-    [("ghost", "names no account"), ("gl", "says forge: gitlab")],
-    ids=["unknown-account", "forge-mismatch"],
+    ("forge_account", "says", "passthrough"),
+    [
+        ("ghost", "names no account", []),
+        ("gl", "says forge: gitlab", []),
+        ("", "env_passthrough names CORP_GL", ["CORP_GL"]),
+    ],
+    ids=["unknown-account", "forge-mismatch", "env-passthrough-names-a-token-source"],
 )
-def test_account_problems_names_each(forge_account, says):
-    repo = RepoEntry(path="/r", forge="github", forge_account=forge_account)
-    problems = forges.account_problems(forges.ForgesFile(accounts={"gl": _GL}), [repo])
+def test_account_problems_names_each(forge_account, says, passthrough):
+    repo = RepoEntry(
+        path="/r", forge="github", forge_account=forge_account, env_passthrough=passthrough
+    )
+    # Another account's token source counts too: the variable is gone for every repo.
+    api = forges.ForgeAccount(
+        forge="gitlab",
+        client="api",
+        web_url="https://gl.example",
+        token=forges.TokenSource(**{"from": "env", "env": "CORP_GL"}),
+    )
+    problems = forges.account_problems(forges.ForgesFile(accounts={"gl": _GL, "api": api}), [repo])
     assert len(problems) == 1 and forge_account in problems[0] and says in problems[0]

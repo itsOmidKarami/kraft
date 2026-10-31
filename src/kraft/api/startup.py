@@ -35,6 +35,7 @@ from kraft import triggers as triggers_mod
 from kraft import update as update_mod
 from kraft.adapters import hook_install
 from kraft.adapters import subprocess as _subprocess
+from kraft.adapters.forge import credentials
 from kraft.adapters.forge import git as forge_git
 from kraft.adapters.forge import mr as forge_mr
 from kraft.addons import load as addons_load
@@ -162,6 +163,7 @@ def load_forges(app: FastAPI) -> None:
     # The bytes these accounts come from: an edit landing before startup records
     # every file's hash must still read as pending (not applied).
     app.state.forges_loaded_digest = apply_mod.file_digest(path)
+    credentials.set_secret_files(path)  # also from a file that does not load
     try:
         app.state.forges = forges_mod.ForgesFile.load(path)
     except config_mod.ConfigError as exc:
@@ -249,6 +251,8 @@ async def _lifespan(app: FastAPI):
     # it must be able to write cannot execute as the invoking host user
     # (Kraft-rki).
     sandbox.harden_host_git_env()
+    # Before any child (the local worker, git, a hook) can inherit an env token.
+    credentials.strip_env_sources(config_dir() / forges_mod.ForgesFile.FILE)
     app.state.tasks = {}
     # deps.skip_lock() lazily stashes a per-work-item Lock here; reset it with
     # everything else per-lifespan so it neither grows forever in a live

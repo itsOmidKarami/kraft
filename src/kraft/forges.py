@@ -156,7 +156,15 @@ def account_for(
 def account_problems(forges: ForgesFile, repos: list[config.RepoEntry]) -> list[str]:
     """What forges.yaml and repos.yaml say that cannot both hold."""
     out = []
+    # Gone from the server's environment for every repo, not only the account's own.
+    taken = {a.token.env: n for n, a in forges.accounts.items() if a.token and a.token.env}
     for r in repos:
+        out.extend(
+            f"repo {r.path}: env_passthrough names {v}, "
+            f"which forge account {taken[v]} reads its token from"
+            for v in r.env_passthrough
+            if v in taken
+        )
         if not r.forge_account:
             continue
         acct = forges.accounts.get(r.forge_account)
