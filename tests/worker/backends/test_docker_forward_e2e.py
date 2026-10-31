@@ -3,19 +3,16 @@ proof that a client inside the container trusts a CA only the host knows,
 through the bundle `docker_forward.prepare` built from the image's own roots,
 and still trusts those roots."""
 
-import datetime
 import http.server
-import ipaddress
 import os
 import ssl
 import subprocess
 import threading
 
 import pytest
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.x509.oid import NameOID
+from support.git_https import cert
 
 from kraft.worker.backends import docker, docker_forward
 
@@ -34,57 +31,14 @@ print(len(ssl.create_default_context().get_ca_certs()))
 """
 
 
-def _cert(subject: str, key, issuer=None, issuer_key=None, *, ca: bool):
-    now = datetime.datetime.now(datetime.UTC)
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject)])
-    builder = (
-        x509.CertificateBuilder()
-        .subject_name(name)
-        .issuer_name(issuer.subject if issuer else name)
-        .public_key(key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(now - datetime.timedelta(minutes=5))
-        .not_valid_after(now + datetime.timedelta(hours=1))
-        .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True)
-        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
-    )
-    if issuer_key is not None:
-        # Python's default context verifies strictly (VERIFY_X509_STRICT).
-        builder = builder.add_extension(
-            x509.AuthorityKeyIdentifier.from_issuer_public_key(issuer_key.public_key()),
-            critical=False,
-        )
-    if ca:
-        builder = builder.add_extension(
-            x509.KeyUsage(
-                digital_signature=True,
-                key_cert_sign=True,
-                crl_sign=True,
-                content_commitment=False,
-                key_encipherment=False,
-                data_encipherment=False,
-                key_agreement=False,
-                encipher_only=False,
-                decipher_only=False,
-            ),
-            critical=True,
-        )
-    else:
-        builder = builder.add_extension(
-            x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]),
-            critical=False,
-        )
-    return builder.sign(issuer_key or key, hashes.SHA256())
-
-
 @pytest.fixture
 def tls_server(tmp_path):
     """An HTTPS server on the host's 127.0.0.1, its certificate signed by a
     throwaway CA: `(url, ca.pem)`."""
     ca_key = ec.generate_private_key(ec.SECP256R1())
-    ca = _cert("Kraft test CA", ca_key, ca=True)
+    ca = cert("Kraft test CA", ca_key, ca=True)
     leaf_key = ec.generate_private_key(ec.SECP256R1())
-    leaf = _cert("127.0.0.1", leaf_key, ca, ca_key, ca=False)
+    leaf = cert("127.0.0.1", leaf_key, ca, ca_key, ca=False)
     ca_pem, leaf_pem, key_pem = tmp_path / "ca.pem", tmp_path / "leaf.pem", tmp_path / "leaf.key"
     ca_pem.write_bytes(ca.public_bytes(serialization.Encoding.PEM))
     leaf_pem.write_bytes(leaf.public_bytes(serialization.Encoding.PEM))

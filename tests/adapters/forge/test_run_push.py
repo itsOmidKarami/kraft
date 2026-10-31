@@ -5,12 +5,15 @@ Walked through `forge.run_task` against a `FakeForge`; git is real."""
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from support.harness import commit_all, git, write
 
 from kraft import waits
 from kraft.adapters import forge
+from kraft.adapters.forge import git_auth
 
 
 @pytest.fixture
@@ -87,3 +90,55 @@ async def test_a_head_kraft_never_pushed_is_dated_by_its_commit(on_branch):
     when = await forge.git.committed_at(on_branch, head)
 
     assert when == datetime.fromisoformat(git(on_branch, "log", "-1", "--format=%cI", head))
+
+
+@pytest.mark.parametrize("site", ["member-fetch", "direct-push"])
+async def test_the_pointer_bump_uses_the_accounts_git_env(tmp_path, monkeypatch, site):
+    """The two git calls to origin `run.py` makes itself take `git_auth.remote_env`'s answer."""
+    sentinel = {"SENTINEL": "1"}
+    asked: list[tuple[Path, bool]] = []
+    ran: list[tuple[list[str], dict | None]] = []
+
+    async def remote_env(repo, base, *, push=False):
+        asked.append((repo, push))
+        return sentinel
+
+    async def run_git(repo, args, *, env=None, **_):
+        ran.append((args, env))
+        return ""
+
+    monkeypatch.setattr(git_auth, "remote_env", remote_env)
+    monkeypatch.setattr(forge.git, "run_git", run_git)
+    root = tmp_path / "root"
+    if site == "direct-push":
+
+        async def moved(*_):
+            return ["m"]
+
+        monkeypatch.setattr(forge.run, "_point_at_merged_members", moved)
+        rows = [{"role": "root", "repo_path": str(root)}]
+        await forge.run._bump_pointer_only_root(
+            None, None, rows, branch="kraft/w1", base="main", title="t", work_item_id="w1"
+        )
+        assert ran == [(["git", "push", "--no-verify", "origin", "HEAD:main"], sentinel)]
+        assert asked == [(root, True)]
+        return
+
+    sub = root / "m"
+
+    async def default(*_, **__):
+        return "main"
+
+    async def find_mr(**_):
+        return SimpleNamespace(state="merged", merged_sha="a" * 40)
+
+    monkeypatch.setattr(forge.git, "assert_on_branch", lambda *_: None)
+    monkeypatch.setattr(forge.git, "assert_no_operation", lambda *_: None)
+    monkeypatch.setattr(forge.git, "assert_lfsconfig_unmoved", lambda *_: None)
+    monkeypatch.setattr(forge.run._builtins, "base_branch", default)
+    db = SimpleNamespace(read=lambda fn: [{"repo_path": str(sub)}])
+    await forge.run._point_at_merged_members(
+        SimpleNamespace(find_mr=find_mr), db, root, "kraft/w1", "w1"
+    )
+    assert ran[0] == (["git", "fetch", "origin", "main"], sentinel)
+    assert asked == [(sub, False)]

@@ -26,6 +26,10 @@ AUTH_FAILED = re.compile(
     re.IGNORECASE,
 )
 
+# GitHub answers a private repo it will not show a bad token with "not found".
+_NOT_FOUND = re.compile(r"repository '.*' not found", re.IGNORECASE)
+_REDIRECTED = re.compile(r"returned error: 30[1278]", re.IGNORECASE)
+
 _STRIPPED = ("GIT_CURL_VERBOSE", "GIT_TRANSFER_TRACE", "GIT_SSL_NO_VERIFY")
 _TRACE2 = ("GIT_TRACE2", "GIT_TRACE2_EVENT", "GIT_TRACE2_PERF")
 
@@ -40,12 +44,34 @@ class GitAuth:
     origin: str  # https://host[:port], no trailing slash
     header: str  # Authorization: Basic <basic_form>
 
+    def refused(self, text: str) -> bool:
+        """Whether git's words say the forge refused the header's token."""
+        return bool(
+            AUTH_FAILED.search(text) or (self.account.forge == "github" and _NOT_FOUND.search(text))
+        )
+
+    def redirect_words(self) -> str:
+        return (
+            f"forge account {self.name}: origin redirects elsewhere; "
+            "point origin at the new address"
+        )
+
+    def redirected(self, text: str) -> bool:
+        return bool(_REDIRECTED.search(text))
+
     def stamp(self, exc: ForgeError) -> ForgeError:
-        """Mark `exc` a token failure, in place, when git's words say the forge refused it."""
-        if AUTH_FAILED.search(str(exc)):
-            exc.reason = "forbidden" if "returned error: 403" in str(exc).lower() else "auth"
-            exc.account = self.name
-            exc.source = self.account.source().label()
+        """Mark `exc` a token stop, in place, when git's words say the forge refused the token
+        or sent the call elsewhere (the redirect is not followed, so the token stays home)."""
+        text = str(exc)
+        if self.redirected(text):
+            exc.args = (self.redirect_words(),)
+            exc.reason = "auth"
+        elif self.refused(text):
+            exc.reason = "forbidden" if "returned error: 403" in text.lower() else "auth"
+        else:
+            return exc
+        exc.account = self.name
+        exc.source = self.account.source().label()
         return exc
 
 

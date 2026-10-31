@@ -15,8 +15,10 @@ from collections.abc import Collection, Mapping
 from datetime import datetime
 from pathlib import Path
 
+from kraft.adapters.forge import git_auth
 from kraft.adapters.forge.models import ForeignCommits, ForgeError
 from kraft.config import KRAFT_ROOTS, base_ignore_args, git_read
+from kraft.forges import ForgeAccount
 from kraft.remote import lfs
 from kraft.worker import sandbox
 
@@ -673,7 +675,7 @@ def assert_lfsconfig_unmoved(
         )
 
 
-async def push(repo: Path, branch: str) -> None:
+async def push(repo: Path, branch: str, *, account: tuple[str, ForgeAccount] | None = None) -> None:
     """`git push origin <branch>`, safe to call after a rebase. Never `-u`:
     the push names its branch, so an upstream buys nothing, and it would be
     written into the repository's config, in place the person's own.
@@ -713,12 +715,27 @@ async def push(repo: Path, branch: str) -> None:
     and the push runs on the host, outside any sandbox. pre-commit's pre-push
     runs whatever `.pre-commit-config.yaml` names. git-lfs's pre-push was the
     one Kraft needed, so the push uploads the LFS objects itself first.
+
+    `account` is the API account the item pinned, as `(name, account)`: its token
+    authenticates every remote call here (`git_auth`), and a push URL off its
+    origin is refused. A CLI backend passes none, so git uses its own credential.
     """
     # git-lfs reads its server from `.lfsconfig`, which the worker writes: a
     # changed one would send this push's LFS traffic from the host, outside
     # any sandbox, to a URL the branch chose.
     assert_lfsconfig_unmoved(repo, "push it")
-    env = sandbox.hardened_git_env()
+    auth = await git_auth.auth_for_account(repo, *account, push=True) if account else None
+    try:
+        await _push(repo, branch, auth)
+    except ForgeError as exc:
+        if auth:
+            auth.stamp(exc)
+        raise
+
+
+async def _push(repo: Path, branch: str, auth: git_auth.GitAuth | None) -> None:
+    plain = sandbox.hardened_git_env()
+    env = git_auth.git_env(plain, auth)
     pushed_ref = f"{PUSHED_REFS}/{branch}"
     head = git_read(repo, "rev-parse", "--verify", f"refs/heads/{branch}")
     # Where the push goes, which a `pushurl` or `pushInsteadOf` can make
@@ -768,7 +785,7 @@ async def push(repo: Path, branch: str) -> None:
         args.append(f"--force-with-lease={branch}:{remote}")
     args += ["origin", branch]
     await run_git(repo, args, env=env)
-    await run_git(repo, ["git", "update-ref", pushed_ref, head], env=env)
+    await run_git(repo, ["git", "update-ref", pushed_ref, head], env=plain)
 
 
 async def _push_lfs_objects(

@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
@@ -17,7 +18,7 @@ from kraft import builtins as _builtins
 from kraft import config, events, inplace, item_paths, reviewed_head, store, waits
 from kraft import forges as forges_mod
 from kraft.adapters import beads
-from kraft.adapters.forge import ci, git, settle
+from kraft.adapters.forge import ci, git, git_auth, settle
 from kraft.adapters.forge import mr as mr_ops
 from kraft.adapters.forge.gh import GhCli
 from kraft.adapters.forge.gitlab_api import GitLabApi
@@ -2755,7 +2756,8 @@ async def _point_at_merged_members(
                 "its pointer is left where it was"
             )
         default = await _builtins.base_branch(db, work_item_id, sub_path, member=True)
-        await git.run_git(sub_path, ["git", "fetch", "origin", default])
+        env = await git_auth.remote_env(sub_path, os.environ)
+        await git.run_git(sub_path, ["git", "fetch", "origin", default], env=env)
         git.assert_no_operation(sub_path)  # a checkout stores a planted autostash
         git.assert_lfsconfig_unmoved(sub_path, f"check {sub_path.name}'s merge out")
         await git.run_git(sub_path, ["git", "checkout", landed.merged_sha])
@@ -2880,7 +2882,11 @@ async def _bump_pointer_only_root(
     if not bumped:
         return "every member pointer already names its merged revision\n", False
     try:
-        await git.run_git(root_repo, ["git", "push", "origin", f"HEAD:{base}"])
+        env = await git_auth.remote_env(root_repo, os.environ, push=True)
+        # --no-verify: hooks are pinned off, and a credentialed push runs none.
+        await git.run_git(
+            root_repo, ["git", "push", "--no-verify", "origin", f"HEAD:{base}"], env=env
+        )
         return (
             f"bumped {', '.join(bumped)} directly on {base}, no root merge request\n",
             False,
