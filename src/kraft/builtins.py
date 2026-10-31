@@ -1281,7 +1281,11 @@ async def upstream_head(repo: Path, branch: str) -> str | None:
                     f"token ({auth.account.source().label()}), so Kraft will not start from a "
                     "stale base. Replace the token there, then retry"
                 ),
-                reason="auth",
+                reason=(
+                    "forbidden"
+                    if not auth.redirected(detail) and "returned error: 403" in detail.lower()
+                    else "auth"
+                ),
                 account=auth.name,
                 source=auth.account.source().label(),
             )

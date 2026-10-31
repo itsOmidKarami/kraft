@@ -3,6 +3,7 @@ the wire sees (`support.git_https`) and what each site does when the token fails
 
 from __future__ import annotations
 
+import base64
 import os
 import re
 import shutil
@@ -28,6 +29,7 @@ from support.workspace import workspace_target
 from kraft import builtins, reviewed_head
 from kraft.adapters.forge import git as forge_git
 from kraft.adapters.forge import git_auth
+from kraft.adapters.forge.github_api import GitHubApi
 from kraft.adapters.forge.gitlab_api import GitLabApi
 from kraft.adapters.forge.glab import GlabCli
 from kraft.adapters.forge.models import ForgeError
@@ -67,10 +69,10 @@ def remote(request, tmp_path, monkeypatch):
     variable is never set) and `redirect` (an origin that never answers: `info/refs` goes there)."""
     opts = getattr(request, "param", {})
     srv = tmp_path / "srv"
-    with git_https(srv, token=opts.get("server", TOK)) as web:
+    with git_https(srv, token=opts.get("server", TOK), forge=opts.get("forge", "gitlab")) as web:
         monkeypatch.setenv("GIT_SSL_CAINFO", str(web.ca))
         web.redirect = "https://127.0.0.1:9" if opts.get("redirect") else None
-        account = acct(web.url, **opts.get("source", {}))
+        account = acct(web.url, forge=opts.get("forge", "gitlab"), **opts.get("source", {}))
         repo, _ = rig(
             tmp_path,
             monkeypatch,
@@ -557,3 +559,66 @@ async def test_a_verbose_curl_never_prints_the_header_into_a_stop(remote, monkey
         await forge_git.push(remote.repo, "kraft/abc", account=remote.pinned)
     _ours_only(remote.web)
     _clean(caught.value, caught.value.args)
+
+
+@pytest.mark.parametrize("remote", [{"forge": "github"}], indirect=True)
+async def test_a_github_api_push_sends_the_x_access_token_form(remote):
+    await GitHubApi("corp-gl", remote.account).push(repo=remote.repo, branch="kraft/abc")
+    assert git(remote.bare, "rev-parse", "kraft/abc") == git(remote.repo, "rev-parse", "kraft/abc")
+    assert set(remote.web.authorizations) == {
+        "Basic " + base64.b64encode(f"x-access-token:{TOK}".encode()).decode()
+    }
+
+
+@pytest.fixture
+def hooks(remote, tmp_path, monkeypatch):
+    """Real hooks in the git directory that record their env and that they ran, with no
+    GIT_CONFIG_* in the process env; `fire` pushes a new commit and returns what they saw."""
+    for k in [k for k in os.environ if k.startswith("GIT_CONFIG_")]:
+        monkeypatch.delenv(k)
+    seen = tmp_path / "hook-ran"
+    common = Path(git(remote.repo, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    for name in ("pre-push", "reference-transaction"):
+        _script(common / "hooks" / name, f"echo {name} >> {seen}; env >> {seen}")
+
+    async def fire(**kw):
+        write(remote.repo, "n.txt", os.urandom(4).hex())
+        commit_all(remote.repo, "more")  # the person's own commit runs the hooks too
+        seen.unlink(missing_ok=True)
+        await forge_git.push(remote.repo, "kraft/abc", account=remote.pinned, **kw)
+        return seen.read_text() if seen.exists() else ""
+
+    return SimpleNamespace(fire=fire, seen=seen, remote=remote)
+
+
+def _unhardened(monkeypatch):
+    """No core.hooksPath pin: git's own hooks stay live (the controls)."""
+    from kraft.worker import sandbox
+
+    def none(env=None):
+        (os.environ if env is None else env)["GIT_CONFIG_COUNT"] = "0"
+
+    monkeypatch.setattr(sandbox, "harden_host_git_env", none)
+    monkeypatch.setattr(
+        sandbox, "hardened_git_env", lambda: {**os.environ, "GIT_CONFIG_COUNT": "0"}
+    )
+
+
+async def test_a_hook_sees_the_header_without_the_pins_and_nothing_with_them(hooks, monkeypatch):
+    with monkeypatch.context() as bare:
+        _unhardened(bare)
+        control = await hooks.fire()
+    assert "reference-transaction" in control and OURS.split()[1] in control, "no proof"
+    assert await hooks.fire() == ""
+
+
+async def test_no_verify_alone_stops_the_pre_push_hook(hooks, monkeypatch):
+    """With hooksPath unpinned only `--no-verify` keeps pre-push from running: the control
+    (a plain `git push`) runs it."""
+    with monkeypatch.context() as bare:
+        _unhardened(bare)
+        await hooks.fire()
+        hooks.seen.unlink()
+        git(hooks.remote.repo, "push", "-q", str(hooks.remote.bare), "kraft/abc:refs/heads/ctl")
+        assert "pre-push" in hooks.seen.read_text(), "pre-push is not live: no proof"
+        assert "pre-push" not in await hooks.fire()

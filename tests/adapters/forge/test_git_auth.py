@@ -308,6 +308,20 @@ async def test_an_existing_user_gets_the_same_git_env(tmp_path, monkeypatch, set
         ),
         pytest.param(
             HTTPS,
+            (("remote.origin.pushurl", HTTPS), ("--add", "remote.origin.pushurl", SSH)),
+            True,
+            "refused",
+            id="push-https-next-to-ssh-refused",
+        ),
+        pytest.param(
+            HTTPS,
+            (("remote.origin.pushurl", HTTPS), ("--add", "remote.origin.pushurl", "foo::bar")),
+            True,
+            "refused",
+            id="push-https-next-to-a-remote-helper-refused",
+        ),
+        pytest.param(
+            HTTPS,
             (("remote.origin.pushurl", SSH),),
             True,
             "none",
@@ -468,3 +482,56 @@ async def test_the_server_reads_repos_yaml_only_for_an_account_that_could_carry_
 def test_a_githubs_not_found_is_a_refusal_only_for_github(forge, refused):
     text = "fatal: repository 'https://github.com/o/r/' not found"
     assert GitAuth("corp-gl", acct(forge=forge), WEB, "h").refused(text) is refused
+
+
+def test_a_git_auth_repr_shows_neither_the_token_nor_its_basic_form():
+    text = repr(auth())
+    assert TOK not in text and form() not in text and "Basic" not in text
+
+
+@pytest.mark.parametrize(
+    ("web", "key"),
+    [
+        pytest.param("https://[::1]:8443", "https://[::1]:8443", id="ipv6-is-bracketed"),
+        pytest.param("https://[::1]", "https://[::1]", id="ipv6-on-443"),
+    ],
+)
+def test_an_ipv6_origin_is_bracketed(web, key):
+    assert git_auth._origin(acct(web)) == key
+
+
+@pytest.mark.parametrize(
+    ("text", "reason"),
+    [
+        pytest.param("fatal: ... The requested URL returned error: 403", "forbidden", id="403"),
+        pytest.param("fatal: ... The requested URL returned error: 401", "auth", id="401"),
+    ],
+)
+async def test_a_refused_base_fetch_names_its_reason(tmp_path, monkeypatch, text, reason):
+    from kraft import builtins
+
+    repo, _ = rig(tmp_path, monkeypatch, remote=HTTPS)
+    real = subprocess.run
+
+    def fake(args, *a, **k):
+        if "fetch" in args:
+            return subprocess.CompletedProcess(args, 128, "", text)
+        return real(args, *a, **k)
+
+    monkeypatch.setattr(subprocess, "run", fake)
+    with pytest.raises(builtins.BaseFetchRefused) as caught:
+        await builtins.upstream_head(repo, "main")
+    assert (caught.value.reason, caught.value.account) == (reason, "corp-gl")
+
+
+async def test_an_unreadable_repos_yaml_stops_an_injected_account_not_falls_back(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+
+    (tmp_path / "repos.yaml").write_text("repos: [not: a list")
+    st = SimpleNamespace(forges=ForgesFile(accounts={"corp-gl": acct()}), templates_dir=tmp_path)
+    with pytest.raises(ForgeError) as caught:
+        await git_auth.server_context(st)
+    exc = caught.value
+    assert (exc.reason, exc.account, exc.source) == ("auth", "corp-gl", "env CORP_GL")
