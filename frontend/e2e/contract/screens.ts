@@ -180,6 +180,11 @@ export const STATES: State[] = [
     const fits = await p.locator(".set-fg-scroll").evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
     expect(fits, "the Forge accounts table fits its card at 1280").toBe(true);
     await expect(p.getByRole("columnheader", { name: "Used by" })).toBeInViewport();
+    // A fixed layout can fit the card and still squeeze one cell into a column of letters (a td ~250px tall):
+    // no cell may be taller than 4x the shortest row (a one-line row is ~34px; the State cell's badge and two wrapped lines stay under 4x).
+    const rows = await p.getByRole("table", { name: "Forge accounts" }).locator("tbody tr").evaluateAll((trs) => trs.map((tr) => ({ row: tr.getBoundingClientRect().height, cells: [...tr.children].map((td) => td.getBoundingClientRect().height) })));
+    const shortest = Math.min(...rows.map((r) => r.row));
+    expect(Math.max(...rows.flatMap((r) => r.cells)), `no Forge accounts cell taller than 4x the shortest row (${shortest}px)`).toBeLessThanOrEqual(4 * shortest);
   } },
   { area: "settings", state: "forge-accounts-empty", app: (p) => app(p, FORGES, { mock: { forges: "empty" }, ready: (pg) => pg.getByText(/No forge accounts/).waitFor() }) },
   { area: "settings", state: "forge-accounts-unloadable", app: (p) => app(p, FORGES, { mock: { forges: "unloadable" }, ready: (pg) => pg.getByRole("alert").waitFor() }) },
