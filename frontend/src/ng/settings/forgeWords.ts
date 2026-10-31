@@ -6,7 +6,7 @@ import type { Tone } from "../ui/tone";
 export type ForgeAccount = ForgeAccountRow & { name: string };
 
 export const accountsOf = (body: { accounts: Record<string, ForgeAccountRow> }): ForgeAccount[] =>
-  Object.entries(body.accounts).map(([name, row]) => ({ name, ...row }));
+  Object.entries(body.accounts ?? {}).map(([name, row]) => ({ name, ...row }));
 
 /** Days before `expires_on` at which a token reads as a warning: `probe.py`'s `EXPIRY_WARN_DAYS`, where `/health` turns
  *  degraded at the same bound (a test keeps the two equal). */

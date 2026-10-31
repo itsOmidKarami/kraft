@@ -97,6 +97,7 @@ export interface Option<T extends string = string> {
   label: string;
   hint?: string;
   danger?: boolean;
+  disabled?: boolean;
 }
 
 export function ChoiceSheet<T extends string>({ title, text, options, value, onPick, onClose, children }: { title: string; text?: string; options: Option<T>[]; value?: T | null; onPick: (v: T) => void; onClose: () => void; children?: ReactNode }) {
@@ -113,6 +114,7 @@ export function ChoiceSheet<T extends string>({ title, text, options, value, onP
               role={single ? "radio" : undefined}
               aria-checked={single ? value === o.value : undefined}
               className={`ph-sheet-option${o.danger ? " ph-is-danger" : ""}`}
+              disabled={o.disabled}
               onClick={() => onPick(o.value)}
             >
               <span className="ph-sheet-check" aria-hidden="true">{value === o.value ? "✓" : ""}</span>

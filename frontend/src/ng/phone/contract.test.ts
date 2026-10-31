@@ -70,6 +70,7 @@ const ALLOWED = [
   "settings/notifyWords", // the channels, their state words and the permission lines, on both layouts
   "settings/storageWords", // the categories and the state note
   "settings/workersWords", // the machines' state, slots and give-up words
+  "settings/forgeWords", // the forge accounts' source and state words, on both layouts
   "settings/policy/ctx", // the policy sections' shared context type and problemAt
   "settings/policy/keys", // the set_value keys the Policy page sends
   "settings/policy/sections", // which section a key or a problem belongs to
