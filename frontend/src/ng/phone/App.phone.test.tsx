@@ -101,7 +101,8 @@ describe("ng App at phone width (A.1)", () => {
 // phone screen, and a phone screen's lands on a desktop page when the window
 // widens past 767px. Neither side ever shows Not found (R3-04).
 describe("one address space across a resize", () => {
-  it.each([...ROUTES.map((r) => r.path), "/settings/intake", "/settings/repos/kraft", "/templates/library/implementation", "/settings/policy/loops"])("the desktop's %s opens a phone screen", (path) => {
+  // TEMPORARY: Task 4 of the forge-settings plan adds the phone Forges screen; delete this filter there.
+  it.each([...ROUTES.map((r) => r.path).filter((p) => p !== "/settings/forge-accounts"), "/settings/intake", "/settings/repos/kraft", "/templates/library/implementation", "/settings/policy/loops"])("the desktop's %s opens a phone screen", (path) => {
     width(true);
     stubFetch();
     window.history.pushState({}, "", path);

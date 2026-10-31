@@ -236,3 +236,13 @@
 .set-wk-rotate { display: flex; gap: 8px; }
 .set-wk-remove { margin-right: auto; }
 @media (max-width: 767px) { .set-wk-pair { grid-template-columns: minmax(0, 1fr); } }
+.set-fg-body { display: flex; flex-direction: column; gap: 8px; padding: 0 8px 4px; }
+.set-fg-scroll { overflow-x: auto; }
+.set-fg-table { width: 100%; border-collapse: collapse; font-size: var(--fs-label); }
+.set-fg-table th { padding: 4px 8px; font-size: var(--fs-label); font-weight: 400; text-align: left; color: var(--text-muted); border-bottom: 1px solid var(--line); white-space: nowrap; }
+.set-fg-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); color: var(--text); vertical-align: middle; overflow-wrap: anywhere; }
+.set-fg-table .is-act { text-align: right; white-space: nowrap; }
+.set-fg-dash, .set-fg-url { color: var(--text-muted); }
+.set-fg-state { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.set-fg-why { font-size: var(--fs-meta); color: var(--text-muted); overflow-wrap: anywhere; }
+.set-fg-note { padding: 0 4px; }
