@@ -8,9 +8,7 @@ import { Segmented } from "../ui/Segmented";
 import { Switch } from "../ui/Switch";
 import { showToast } from "../ui/Toast";
 import { checkAndToast, type Kind, putToken, sourceBody, type SourceChoice, TokenSourceField } from "./forgeForm";
-import { COMMAND_ADD_HINT } from "./forgeWords";
-
-const NAME_RULE = "Lowercase letters, digits, . - and _, starting with one.";
+import { API_ADDRESS_HINT, CA_FILE_HINT, COMMAND_ADD_HINT, NAME_RULE, WEB_ADDRESS_HINT } from "./forgeWords";
 
 /** Add an account. A pasted token is a POST and then a PUT; a refused PUT removes the account again. */
 export function AddForgeDialog({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
@@ -83,19 +81,19 @@ export function AddForgeDialog({ onClose, onAdded }: { onClose: () => void; onAd
           <span className="field-label">Forge</span>
           <Segmented label="Forge" value={forge} onChange={setForge} options={[{ value: "github", label: "github" }, { value: "gitlab", label: "gitlab" }]} />
         </div>
-        <Field label="Web address" hint="The host's address, e.g. https://gitlab.corp.example."><input value={webUrl} onChange={(e) => setWebUrl(e.target.value)} /></Field>
+        <Field label="Web address" hint={WEB_ADDRESS_HINT}><input value={webUrl} onChange={(e) => setWebUrl(e.target.value)} /></Field>
         <div className="set-wk-field">
           <span className="field-label">Client</span>
           <Segmented label="Client" value={client} onChange={(c) => { setPaste(""); setClient(c); }} options={[{ value: "cli", label: "cli" }, { value: "api", label: "api" }]} />
         </div>
-        <Field label="API address" hint="Blank: derived from the web address."><input value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} /></Field>
+        <Field label="API address" hint={API_ADDRESS_HINT}><input value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} /></Field>
         <div className="set-wk-switch">
           <Switch label="Default for its host" checked={isDefault} onChange={setDefault} />
           <span className="field-label">Default for its host</span>
         </div>
         {api && (
           <>
-            <Field label="CA file" hint="For a host whose certificate a public authority did not sign."><input value={caFile} onChange={(e) => setCaFile(e.target.value)} /></Field>
+            <Field label="CA file" hint={CA_FILE_HINT}><input value={caFile} onChange={(e) => setCaFile(e.target.value)} /></Field>
             <TokenSourceField allowPaste choice={choice} onChoice={setChoice} env={env} onEnv={setEnv} file={file} onFile={setFile} kind={kind} onKind={setKind} paste={paste} onPaste={setPaste} />
             <p className="set-hint">{COMMAND_ADD_HINT}</p>
           </>

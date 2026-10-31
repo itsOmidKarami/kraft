@@ -29,6 +29,14 @@ export const NAMED_BY = (repos: string[]) =>
 export const DEFAULT_REMOVABLE = "Repos that use it as their host's default go back to gh or glab.";
 export const FIXED_FIELDS = "To change these, remove the account and add it again.";
 export const PHONE_READ_ONLY = "Add accounts and change their addresses in Settings on a wider screen, or with kraft admin forge in a terminal.";
+export const SWITCH_DELETES_PASTED = "If this file is a pasted token, switching to another source deletes it.";
+export const MISSING_ACCOUNT = (repo: string, account: string) => `${repo} names ${account}, which is not in forges.yaml: it uses gh or glab.`;
+export const TERMINAL_SAME = "The terminal does the same with";
+export const TERMINAL_WRITES = ", and both write";
+export const NAME_RULE = "Lowercase letters, digits, . - and _, starting with one.";
+export const WEB_ADDRESS_HINT = "The host's address, e.g. https://gitlab.corp.example.";
+export const API_ADDRESS_HINT = "Blank: derived from the web address.";
+export const CA_FILE_HINT = "For a host whose certificate a public authority did not sign.";
 export const PHONE_REMOVE = "It goes at once, and a pasted token's file is deleted with it.";
 
 export function sourceWords(a: ForgeAccount): string {
@@ -73,5 +81,3 @@ export function probeWords(a: ForgeAccount, today: Date): { word: string | null;
 
 export const namedBy = (repos: Pick<Repo, "name" | "forge_account">[], name: string): string[] =>
   repos.filter((r) => r.forge_account === name).map((r) => r.name);
-
-export const SWITCH_DELETES_PASTED = "If this file is a pasted token, switching to another source deletes it.";

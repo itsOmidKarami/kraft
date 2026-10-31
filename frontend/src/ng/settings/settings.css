@@ -205,18 +205,18 @@
 /* Settings › Workers: the machines table (styled like analytics' .an-table, which settings/ may not style), and the Add and Edit dialogs. */
 .set-block-head .set-block-aside { margin-left: auto; }
 .set-block-action { display: inline-flex; align-items: center; gap: 8px; }
-.set-wk-body, .set-fg-body { display: flex; flex-direction: column; gap: 8px; padding: 0 8px 4px; }
-.set-wk-scroll, .set-fg-scroll { overflow-x: auto; }
-.set-wk-table, .set-fg-table { width: 100%; border-collapse: collapse; font-size: var(--fs-label); }
-.set-wk-table th, .set-fg-table th { padding: 4px 8px; font-size: var(--fs-label); font-weight: 400; text-align: left; color: var(--text-muted); border-bottom: 1px solid var(--line); white-space: nowrap; }
-.set-wk-table td, .set-fg-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); color: var(--text); vertical-align: middle; }
+.set-wk-body { display: flex; flex-direction: column; gap: 8px; padding: 0 8px 4px; }
+.set-wk-scroll { overflow-x: auto; }
+.set-wk-table { width: 100%; border-collapse: collapse; font-size: var(--fs-label); }
+.set-wk-table th { padding: 4px 8px; font-size: var(--fs-label); font-weight: 400; text-align: left; color: var(--text-muted); border-bottom: 1px solid var(--line); white-space: nowrap; }
+.set-wk-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); color: var(--text); vertical-align: middle; }
 .set-wk-table .is-num { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
 .set-wk-table tr.is-off td.is-dim { color: var(--text-muted); }
-.set-wk-dash, .set-fg-dash, .set-fg-url { color: var(--text-muted); }
-.set-wk-note, .set-fg-note { padding: 0 4px; }
-.set-wk-table .is-act, .set-fg-table .is-act { text-align: right; white-space: nowrap; }
-.set-wk-state, .set-fg-state { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
-.set-wk-why, .set-fg-why { font-size: var(--fs-meta); color: var(--text-muted); overflow-wrap: anywhere; }
+.set-wk-dash, .set-fg-url { color: var(--text-muted); }
+.set-wk-note { padding: 0 4px; }
+.set-wk-table .is-act { text-align: right; white-space: nowrap; }
+.set-wk-state { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.set-wk-why { font-size: var(--fs-meta); color: var(--text-muted); overflow-wrap: anywhere; }
 .set-wk-dlg.dialog { box-sizing: border-box; width: min(560px, 100%); }
 .set-wk-form, .set-wk-token { display: flex; flex-direction: column; gap: 14px; }
 .set-wk-field { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-meta); }
@@ -246,7 +246,7 @@
 .set-fg-table th:nth-child(6) { width: 20%; min-width: 150px; }
 .set-fg-table th:nth-child(7) { width: 72px; }
 /* Words break only between words; a long unbroken string (a path, a URL, a name) ellipsises in .set-fg-clip. Only the
-   free-text .set-fg-why may break inside a word, and it has a column wide enough for several letters per line. */
+   free-text .set-wk-why may break inside a word, and it has a column wide enough for several letters per line. */
 .set-fg-table td { overflow-wrap: normal; word-break: normal; }
 .set-fg-table .set-fg-clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .set-fg-url { display: block; }
@@ -256,4 +256,4 @@
 .set-fg-replace { padding-top: 14px; border-top: 1px solid var(--line); }
 .set-fg-sub { margin: 0; font-size: var(--fs-body); font-weight: 600; }
 .set-fg-live:empty { position: absolute; }
-.set-fg-test[aria-disabled="true"] { opacity: .5; cursor: default; }
+.set-fg-test[aria-disabled="true"], .set-fg-replace button[aria-disabled="true"] { opacity: .5; cursor: default; }

@@ -8,13 +8,13 @@ import { Button } from "../ui/Button";
 import { Empty } from "../ui/Empty";
 import { LinkButton } from "../ui/LinkButton";
 import { showToast } from "../ui/Toast";
-import { type ForgeAccount, accountsOf, EMPTY_FORGES, EMPTY_FORGES_WHY, FORGES_LEDE, namedBy, probeWords, SSO_LINK, sourceWords, TEST_TO_CHECK } from "./forgeWords";
+import { type ForgeAccount, accountsOf, EMPTY_FORGES, EMPTY_FORGES_WHY, FORGES_LEDE, MISSING_ACCOUNT, namedBy, probeWords, SSO_LINK, sourceWords, TERMINAL_SAME, TERMINAL_WRITES, TEST_TO_CHECK } from "./forgeWords";
 import { AddForgeDialog } from "./AddForgeDialog";
 import { EditForgeDialog } from "./EditForgeDialog";
 import { Block } from "./parts";
 import "./settings.css";
 
-const Dash = () => <span className="set-fg-dash">—</span>;
+const Dash = () => <span className="set-wk-dash">—</span>;
 
 /** The accounts, the repos that name them, and `remove` with its 5 s undo window (Workers' pattern; the DELETE answers 204). */
 export function useForges() {
@@ -79,7 +79,7 @@ export function ForgesPage() {
         </div>
         {error && <p className="set-error" role="alert">{error}</p>}
         {missing.map((r) => (
-          <p key={r.name} className="set-hint is-warn">{r.name} names {r.forge_account}, which is not in forges.yaml: it uses gh or glab.</p>
+          <p key={r.name} className="set-hint is-warn">{MISSING_ACCOUNT(r.name, r.forge_account!)}</p>
         ))}
         {accounts && accounts.length === 0 && (
           <Empty variant="block" action={add}>
@@ -88,9 +88,9 @@ export function ForgesPage() {
         )}
         {accounts && accounts.length > 0 && (
           <Block id="set-fg-accounts" title="Accounts" card aside={plural(accounts.length, "account")} action={add}>
-            <div className="set-fg-body">
-              <div className="set-fg-scroll">
-                <table className="set-fg-table" aria-label="Forge accounts">
+            <div className="set-wk-body">
+              <div className="set-wk-scroll">
+                <table className="set-wk-table set-fg-table" aria-label="Forge accounts">
                   <thead>
                     <tr>
                       <th scope="col">Name</th>
@@ -110,14 +110,14 @@ export function ForgesPage() {
                         <tr key={a.name}>
                           <td className="set-mono is-dim set-fg-clip" title={a.name}>{a.name}</td>
                           <td>
-                            <div className="set-fg-state">
+                            <div className="set-wk-state">
                               {s.word && <Badge tone={s.tone}>{s.word}</Badge>}
                               {a.client === "cli" ? (
-                                <span className="set-fg-why">{TEST_TO_CHECK}</span>
+                                <span className="set-wk-why">{TEST_TO_CHECK}</span>
                               ) : s.ssoUrl ? (
                                 <LinkButton inline href={s.ssoUrl} target="_blank" rel="noopener noreferrer">{SSO_LINK}</LinkButton>
                               ) : (
-                                s.line && <span className="set-fg-why">{s.line}</span>
+                                s.line && <span className="set-wk-why">{s.line}</span>
                               )}
                             </div>
                           </td>
@@ -136,8 +136,8 @@ export function ForgesPage() {
           </Block>
         )}
         {accounts && (
-          <p className="set-hint set-fg-note">
-            The terminal does the same with <code className="set-mono">kraft admin forge</code>, and both write <code className="set-mono">forges.yaml</code>.
+          <p className="set-hint set-wk-note">
+            {TERMINAL_SAME} <code className="set-mono">kraft admin forge</code>{TERMINAL_WRITES} <code className="set-mono">forges.yaml</code>.
           </p>
         )}
       </div>

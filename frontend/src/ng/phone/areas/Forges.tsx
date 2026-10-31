@@ -2,14 +2,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ago, plural } from "../../../format";
 import type { ForgeAccountRow, ForgeTestAnswer, Repo } from "../../../types";
 import { detailOf, request } from "../../http";
-import { DEFAULT_REMOVABLE, EMPTY_FORGES, FORGES_LEDE, NAMED_BY, PASTE_ONCE, PHONE_READ_ONLY, PHONE_REMOVE, type ForgeAccount, accountsOf, namedBy, probeWords, sourceWords } from "../../settings/forgeWords";
+import { DEFAULT_REMOVABLE, EMPTY_FORGES, FORGES_LEDE, NAMED_BY, PASTE_ONCE, PHONE_READ_ONLY, PHONE_REMOVE, SSO_LINK, type ForgeAccount, accountsOf, namedBy, probeWords, sourceWords } from "../../settings/forgeWords";
 import { showToast } from "../../ui/Toast";
 import { ChoiceSheet, ConfirmSheet, EditSheet, useSheet } from "../nav/Sheet";
 import { AreaScreen } from "./AreaScreen";
 import { Group, type RowSpec } from "./kit";
 
 /** POST /test, then a toast with its first line. The server's probe runs in the background after a token changes, so a
- *  re-read would still show the old state; the test itself answers with the new one. Up to 90 s. */
+ *  re-read would still show the old state; the test itself answers with the new one. Up to 90 s.
+ *  A copy of forgeForm's checkAndToast (the PUT below, of putToken): phone/ may not import settings/forgeForm (the contract test's ALLOWED). */
 async function check(name: string, lead = ""): Promise<void> {
   const r = await request<ForgeTestAnswer>(`/forges/${encodeURIComponent(name)}/test`, { method: "POST" });
   if (r.status !== 200) return void showToast(`${lead}${detailOf(r.body)}`.trim(), { tone: "error" });
@@ -100,7 +101,7 @@ export function ForgesScreen() {
           title={a.name}
           text={named.length ? NAMED_BY(named) : a.default_for_host ? DEFAULT_REMOVABLE : undefined}
           options={[
-            ...(s.ssoUrl ? [{ value: "sso", label: "Authorize for single sign-on" }] : []),
+            ...(s.ssoUrl ? [{ value: "sso", label: SSO_LINK }] : []),
             { value: "test", label: testing.has(a.name) ? "Testing…" : "Test", disabled: testing.has(a.name) },
             ...(pasteable ? [{ value: "paste", label: "Paste a new token" }] : []),
             ...(named.length ? [] : [{ value: "remove", label: "Remove", danger: true }]),

@@ -2,6 +2,7 @@ import { expect, type Page } from "@playwright/test";
 import type { Scenario, Variant } from "./mocks/fixtures";
 import { withCapLimit, withFixRoundOutcome, withOneOffPending, withProducer, withReviewer, withScopes, withStop, withTestResult } from "./mocks/fixtures";
 import { app, editorsRoute, item, type AppOpts } from "./kit";
+import { NAMED_MEANWHILE } from "./mocks/ngForges";
 
 /**
  * Every screen the icon audit visits: an area × state, with the steps that reach it on the app's mocked API.
@@ -177,7 +178,7 @@ export const STATES: State[] = [
   // whole (every column visible, nothing scrolled), so a cell that grows to its longest string fails this state.
   { area: "settings", state: "forge-accounts", app: async (p) => {
     await app(p, FORGES, { ready: (pg) => pg.getByRole("table", { name: "Forge accounts" }).waitFor() });
-    const fits = await p.locator(".set-fg-scroll").evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
+    const fits = await p.locator(".set-wk-scroll").evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
     expect(fits, "the Forge accounts table fits its card at 1280").toBe(true);
     await expect(p.getByRole("columnheader", { name: "Used by" })).toBeInViewport();
     // A fixed layout can fit the card and still squeeze one cell into a column of letters (a td ~250px tall):
@@ -194,6 +195,13 @@ export const STATES: State[] = [
   { area: "settings", state: "forge-accounts-edit-env", app: forgeEdit("old-gl") },
   { area: "settings", state: "forge-accounts-edit-command", app: forgeEdit("vault-gl") },
   { area: "settings", state: "forge-accounts-edit-named", app: forgeEdit("shared-gl") },
+  // Remove is not a dialog action but a toast: the row goes, Undo is offered for 5 s, then the DELETE the mock refuses (409) brings the row back with the server's words.
+  { area: "settings", state: "forge-accounts-remove-refused", app: forgeEdit(NAMED_MEANWHILE, async (p) => {
+    await p.getByRole("button", { name: "Remove account" }).click();
+    await p.getByRole("button", { name: `Edit ${NAMED_MEANWHILE}`, exact: true }).waitFor({ state: "detached" });
+    await p.getByRole("alert").filter({ hasText: "is named by" }).waitFor({ timeout: 10_000 }); // the undo window is real time: the clock is only fixed
+    await p.getByRole("button", { name: `Edit ${NAMED_MEANWHILE}`, exact: true }).waitFor();
+  }) },
   { area: "settings", state: "forge-accounts-test-result", app: forgeEdit("corp-gl", async (p) => { await p.getByRole("button", { name: "Test", exact: true }).click(); await p.getByLabel("Test output").waitFor(); }) },
   { area: "settings", state: "board-and-code", ...appSettings("/settings/board-and-code") },
   { area: "settings", state: "about", ...appSettings("/settings/about") },
@@ -288,6 +296,8 @@ export const STATES: State[] = [
   { area: "phone", state: "forge-accounts-unloadable", viewport: "phone", app: appPhone(FORGES, { mock: { forges: "unloadable" }, ready: (pg) => pg.getByRole("alert").waitFor() }) },
   { area: "phone", state: "forge-account-menu-sso", viewport: "phone", app: forgeRow("acme-gh") },
   { area: "phone", state: "forge-account-paste", viewport: "phone", app: forgeRow("corp-gl", async (p) => { await p.getByRole("button", { name: "Paste a new token" }).click(); }) },
+  { area: "phone", state: "forge-account-menu-command", viewport: "phone", app: forgeRow("vault-gl") },
+  { area: "phone", state: "forge-account-remove-confirm", viewport: "phone", app: forgeRow("corp-gl", async (p) => { await p.getByRole("button", { name: "Remove" }).click(); await p.getByText("Remove corp-gl?").waitFor(); }) },
   { area: "phone", state: "forge-account-named", viewport: "phone", app: forgeRow("shared-gl") },
   { area: "phone", state: "sign-in", viewport: "phone", app: (p) => app(p, "/", { mock: { locked: true }, noShell: true, ready: (pg) => pg.getByLabel(/^Password/).waitFor() }) },
 
