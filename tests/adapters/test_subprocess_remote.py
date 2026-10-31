@@ -10,7 +10,7 @@ import pytest
 from support.chain_builders import v1_node
 from support.fake_backend import Remote
 from support.harness import entry_of, v1_chain
-from support.remote import attach, make_rig, workers_file
+from support.remote import attach, make_rig, until, workers_file
 
 from kraft import caps
 from kraft.adapters import hook_install
@@ -114,7 +114,7 @@ async def test_a_step_waiting_for_a_full_machine_has_no_session_row_and_never_ru
     with contextlib.suppress(asyncio.CancelledError):
         await task
     assert _row(rig, "s2") is None and rig.hub.slots_used("gpu") == 2
-    await _settled(lambda: all(r.state == "running" for r in held))  # an earlier KILL is dropped
+    await until(lambda: all(r.state == "running" for r in held))  # an earlier KILL is dropped
     for run in held:
         await rig.runs.signal(run, "KILL")
         await rig.done(run)
@@ -321,17 +321,11 @@ async def pair(tmp_path, database, run_dirs, item_on):
     await rig.hub.close()
 
 
-async def _settled(cond, timeout=5.0):
-    async with asyncio.timeout(timeout):
-        while not cond():
-            await asyncio.sleep(0.02)
-
-
 async def _hold_gpu_then_lower_its_limit(rig, limit):
     """One step running on `gpu`, then `gpu` sets a limit of one: the server still thinks it has
     a second slot."""
     held = await rig.run(["sh", "-c", "sleep 30"], sid="h1")
-    await _settled(lambda: held.state == "running")
+    await until(lambda: held.state == "running")
     limit[0] = 1
     return held
 
@@ -355,7 +349,7 @@ async def test_a_step_named_for_a_machine_at_its_limit_waits_and_runs_there_once
     rig, limit, spare = pair
     held = await _hold_gpu_then_lower_its_limit(rig, limit)
     task = asyncio.create_task(_run(rig, "s2", [sys.executable, "-c", "print('ok')"], runner="gpu"))
-    await _settled(lambda: rig.hub.limit("gpu") == 1)  # turned away once
+    await until(lambda: rig.hub.limit("gpu") == 1)  # turned away once
     await asyncio.sleep(0.6)
     assert _row(rig, "s2") is None and not task.done()  # no session row while it waits
     await _kill(rig, held)
@@ -397,11 +391,11 @@ async def test_a_launch_that_ends_before_the_run_starts_gives_back_the_slot_and_
         monkeypatch.setattr(sp.store, "replay_claimed", cancelled)
     task = asyncio.create_task(_run(rig, "s1", ["true"], runner="gpu"))
     if how == "cancelled-at-reserve":
-        await _settled(lambda: rig.runs._reserved.get("gpu"))
+        await until(lambda: rig.runs._reserved.get("gpu"))
         task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await asyncio.wait_for(task, 20)
-    await _settled(lambda: not rig.machine._reserved and not rig.runs._reserved.get("gpu"))
+    await until(lambda: not rig.machine._reserved and not rig.runs._reserved.get("gpu"))
     assert rig.hub.slots_used("gpu") == 0
 
 
@@ -431,7 +425,7 @@ async def test_a_reconnect_keeps_the_holds_the_server_still_has_and_drops_the_re
     assert (await rig.runs.reserve("gpu", f"{rig.wid}/forgotten")).ok
     rig.runs._reserved["gpu"].discard(f"{rig.wid}/forgotten")  # the server no longer holds it
     await rig.reconnect()
-    await _settled(lambda: set(rig.machine._reserved) == {f"{rig.wid}/kept"})
+    await until(lambda: set(rig.machine._reserved) == {f"{rig.wid}/kept"})
 
 
 async def test_a_refusal_marks_the_machine_full_and_takes_its_limit_whatever_else_it_said(

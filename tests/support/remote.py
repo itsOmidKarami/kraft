@@ -279,6 +279,13 @@ async def send_job(
     return spec
 
 
+async def until(cond, timeout: float = 5.0) -> None:
+    """Wait for `cond()`, which another task makes true; `TimeoutError` after `timeout` seconds."""
+    async with asyncio.timeout(timeout):
+        while not cond():
+            await asyncio.sleep(0.02)
+
+
 def lfs_pointer(body: bytes) -> tuple[str, str]:
     """`(oid, pointer text)` of an LFS object holding `body`."""
     oid = hashlib.sha256(body).hexdigest()
