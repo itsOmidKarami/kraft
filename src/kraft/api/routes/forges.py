@@ -1,8 +1,8 @@
 """`/api/forges`: the accounts in `forges.yaml`.
 
 The server owns the file; `kraft admin forge` only calls these. Until the API backends
-land every account is `client: cli`, so `test` asks the forge's own CLI whether it is
-signed in for the host."""
+land, `test` asks the forge's own CLI whether it is signed in for the host; a
+`client: api` account is written and shown but has no backend yet."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ class AddForge(BaseModel):
 
 
 def _row(account: forges.ForgeAccount) -> dict:
-    return {**account.model_dump(), "api_url": account.api()}
+    return {**account.model_dump(by_alias=True), "api_url": account.api()}
 
 
 def _file_path(st):

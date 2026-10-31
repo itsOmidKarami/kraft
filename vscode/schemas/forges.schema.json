@@ -15,9 +15,24 @@
           "default": null,
           "title": "Api Url"
         },
+        "ca_file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ca File"
+        },
         "client": {
-          "const": "cli",
           "default": "cli",
+          "enum": [
+            "cli",
+            "api"
+          ],
           "title": "Client",
           "type": "string"
         },
@@ -34,6 +49,17 @@
           "title": "Forge",
           "type": "string"
         },
+        "token": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "web_url": {
           "title": "Web Url",
           "type": "string"
@@ -44,6 +70,71 @@
         "web_url"
       ],
       "title": "ForgeAccount",
+      "type": "object"
+    },
+    "TokenSource": {
+      "additionalProperties": false,
+      "description": "Where an API account's token comes from. Holds a name or a path, never the token.",
+      "properties": {
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command"
+        },
+        "env": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Env"
+        },
+        "file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "File"
+        },
+        "from": {
+          "default": "git-credential",
+          "enum": [
+            "git-credential",
+            "command",
+            "env",
+            "file"
+          ],
+          "title": "From",
+          "type": "string"
+        },
+        "kind": {
+          "default": "unknown",
+          "enum": [
+            "pat",
+            "oauth",
+            "unknown"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "TokenSource",
       "type": "object"
     }
   },
