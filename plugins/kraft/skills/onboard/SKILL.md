@@ -37,8 +37,12 @@ it did was right. Then hand off to `kraft:check`.
      `ensure_repo(test_command=..., setup_command=...)`, or
      `kraft repo connect --test-command ... --setup-command ...`.
 
-   `ensure_repo` saves as soon as it is called, so the person sees the
-   commands only through you. Show them what was saved, each command with
+   `ensure_repo` saves as soon as it is called. With Kraft's own proposal the
+   repo is saved enabled when it found a test command (disabled when it found
+   none), so the person sees those commands only through you.
+   Commands you pass save it disabled (the answer's `held` says so): they run
+   for every work item, so you cannot file work on it until the person has
+   read them in Settings › Repos and enabled it there. Either way, show them what was saved, each command with
    its source, and the candidates it passed over, then ask them to confirm
    or correct it before the first work item. Say which you chose and why.
 
@@ -56,10 +60,10 @@ it did was right. Then hand off to `kraft:check`.
    test scope per project, with its commands run from that directory
    (`sh -c 'cd web && npm test'`). Read those back too.
 
-   Once a repo is connected, `ensure_repo` leaves it alone. Correct it by
-   editing this repo's entry in `~/.kraft/config/repos.yaml` directly, and
-   say what you changed. The running server reads that file fresh on each
-   request, so no restart is needed. A convention Kraft keeps getting wrong
+   Once a repo is connected, `ensure_repo` leaves it alone, and its commands
+   are a person's to change. To correct them, tell the person
+   what to change and why: they change it in Settings › Repos. Do not edit `~/.kraft/config/repos.yaml` yourself; a
+   command there runs for every work item, so a person sets it. A convention Kraft keeps getting wrong
    across repos belongs in `~/.kraft/config/detectors.yaml` instead: see
    https://kraft-sdlc.dev/reference/configuration/repos/detectors
 
@@ -68,8 +72,8 @@ it did was right. Then hand off to `kraft:check`.
    (they're `managed: false` until touched, so plain `kraft repo list` won't
    show them) and say how many landed. Each is a real, disabled repo of its
    own: it needs its own probed `test_command` checked the same way as the
-   parent's, and its own `enabled: true` in its `repos.yaml` entry before any
-   item can be scoped to it — connecting the parent does not turn any of them on.
+   parent's, and a person enables it in Settings › Repos before any item can
+   be scoped to it — connecting the parent does not turn any of them on.
 
 2. **Register.** Nothing to run when this skill came with the Kraft plugin:
    the plugin registers Kraft's MCP server itself, and workers find it there
@@ -103,7 +107,8 @@ it did was right. Then hand off to `kraft:check`.
    likeliest to fail silently: `requires-python = "~=3.11"` is satisfied by
    3.14 too, so the wrong interpreter can pass every test without saying so.
 
-   Anything the repo genuinely needs goes in its `repos.yaml` entry:
+   Anything the repo genuinely needs goes in its `repos.yaml` entry. Unlike a
+   command, `local_files` is yours to add there:
 
    ```yaml
    local_files:

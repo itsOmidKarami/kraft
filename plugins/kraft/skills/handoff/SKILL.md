@@ -21,7 +21,9 @@ rather than doing it inline when it is large enough to want that structure.
 2. `create_work_item(title, description=...)` - files the work. The title is a
    label; the description is the brief, and it is what the spec node writes its
    design from. Put the intent in the description rather than packing it into
-   the title.
+   the title. On a disabled repo it is refused (`403`, "… is disabled"): tell
+   the person what the answer says the repo needs, and do not retry until they
+   have enabled it in Settings › Repos.
 
 **`create_work_item` does not start anything.** The item lands paused and a
 person starts it from the board. When you report back, say the work is *filed*,

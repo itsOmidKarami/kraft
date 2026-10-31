@@ -102,11 +102,49 @@ _VOIDED = (
     "The reviewer changed files, so its verdict was ignored; its changes are "
     "still in the worktree: "
 )
-_VOIDED_IN_COPY = (
-    "The reviewer changed files in its copy of the branch, or on the branch itself, so "
-    "its verdict was ignored; Kraft removed the copy and left your working files as "
-    "they were: "
-)
+#: `read_only.changed`'s answers for what it could not compare, not files.
+_UNREAD = ("(not compared", "(git could not read it)")
+
+
+def _voided_in_copy(edited: list[str], written: list[str], moved: list[str]) -> str | None:
+    """Why a review in a copy is ignored, in one sentence: what the reviewer
+    changed in its copy, the gate's document it rewrote (`written`, outside the
+    copy), and the item's branch, moved by whoever moved it (a push from the
+    copy, or the person); a copy or tip Kraft could not compare is said as
+    that. None when nothing changed."""
+
+    def split(files: list[str]) -> tuple[list[str], str]:
+        unread = "; ".join(f.strip("()") for f in files if f.startswith(_UNREAD))
+        return [f for f in files if not f.startswith(_UNREAD)], unread
+
+    (edited, copy_unread), (moved, tip_unread) = split(edited), split(moved)
+    parts = [
+        text
+        for text, said in (
+            (
+                f"the reviewer changed files in its copy of the branch ({read_only.named(edited)})",
+                edited,
+            ),
+            (
+                f"Kraft could not compare its copy of the branch after the review ({copy_unread})",
+                copy_unread,
+            ),
+            (f"the reviewer rewrote the gate's document ({read_only.named(written)})", written),
+            (f"the item's branch moved during the review ({read_only.named(moved)})", moved),
+            (
+                f"Kraft could not compare the item's branch after the review ({tip_unread})",
+                tip_unread,
+            ),
+        )
+        if said
+    ]
+    if not parts:
+        return None
+    note = " and ".join([", ".join(parts[:-1]), parts[-1]] if len(parts) > 1 else parts)
+    note = note[0].upper() + note[1:] + ", so the reviewer's verdict was ignored"
+    if edited:
+        return note + "; Kraft removed the copy and left your working files as they were."
+    return note + "."
 
 
 def checks_first(node: ResolvedNode) -> bool:
@@ -552,15 +590,15 @@ async def review(
                         "so its verdict was ignored"
                     )
             else:
+                written = [str(item_paths.path_of(run_dirs, work_item_id, d)) for d in sorted(docs)]
                 if copy:
-                    files = before()  # the whole copy, and the person's branch tip
-                    voided = _VOIDED_IN_COPY
+                    edited, moved = before()  # the whole copy, and the person's branch tip
+                    voided = _voided_in_copy(edited, written, moved)
                 else:
-                    files = read_only.changed(db, row, launch, worktree, before)
-                    voided = _VOIDED
-                files += [str(item_paths.path_of(run_dirs, work_item_id, d)) for d in sorted(docs)]
-                if files:
-                    return "undecided", voided + read_only.named(files)
+                    files = read_only.changed(db, row, launch, worktree, before) + written
+                    voided = _VOIDED + read_only.named(files) if files else None
+                if voided:
+                    return "undecided", voided
     finally:
         if copy is not None:
             await _subprocess.uncancellable(asyncio.to_thread(inplace.remove_copy, copy))

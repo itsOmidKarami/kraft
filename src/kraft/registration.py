@@ -25,6 +25,8 @@ operator's agent config (`doctor._mcp_check`).
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -46,6 +48,17 @@ MANAGED_MCP = (
 
 #: What an operator is told when nothing registers the server.
 FIX = "install the Kraft plugin (then `/kraft:onboard`), or run `kraft admin init`"
+
+#: What an operator is told when the registered command is not on the PATH a
+#: worker gets: Claude then cannot start the server, and the first ask fails.
+PATH_FIX = (
+    "put `kraft` on that PATH (install it as the install docs say, or `just install` in a "
+    "checkout), register the server by its absolute path (`claude mcp add --scope user kraft "
+    "-- /path/to/kraft admin mcp`, after `claude mcp remove --scope user kraft` if `kraft "
+    "admin init` registered it there already), or give "
+    "the service a PATH that has it (`kraft admin uninstall-service`, then `kraft admin "
+    "install-service` from a shell where `kraft` runs)"
+)
 
 
 def _json(text: str | None) -> dict:
@@ -74,15 +87,20 @@ def _names_kraft(config: dict) -> bool:
     return isinstance(servers, dict) and "kraft" in servers
 
 
-def _local_scope(user: dict, repo: Path) -> dict:
-    """`projects.<repo>` in `~/.claude.json`. Claude Code keys it by the main
-    checkout's real path, and resolves a git worktree to that same key, so a
-    worker in an item's worktree gets the repo's entry (measured, 2.1.281)."""
+def _checkout(repo: Path) -> str | None:
+    """The main checkout's real path, which Claude Code keys a project by: a
+    git worktree of it resolves to the same key (measured, 2.1.281)."""
     common = git_read(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    projects = user.get("projects")
-    if common is None or not isinstance(projects, dict):
+    return None if common is None else str(Path(common).parent.resolve())
+
+
+def _local_scope(user: dict, repo: Path) -> dict:
+    """`projects.<repo>` in `~/.claude.json`, which a worker in an item's
+    worktree gets too (`_checkout`)."""
+    key, projects = _checkout(repo), user.get("projects")
+    if key is None or not isinstance(projects, dict):
         return {}
-    entry = projects.get(str(Path(common).parent.resolve()))
+    entry = projects.get(key)
     return entry if isinstance(entry, dict) else {}
 
 
@@ -91,31 +109,78 @@ def _plugins(settings: dict) -> dict:
     return plugins if isinstance(plugins, dict) else {}
 
 
-def _kraft_on(plugins: dict, installed: dict) -> bool:
-    """A `kraft@<marketplace>` key switched on and installed. Both formats of
-    `installed_plugins.json` (v1 and v2) key `plugins` by `plugin@marketplace`."""
-    return any(
-        key.split("@")[0] == "kraft" and on is True and bool(installed.get(key))
-        for key, on in plugins.items()
+def _kraft_on(plugins: dict, installed: dict) -> str | None:
+    """The `kraft@<marketplace>` key switched on and installed, if any. Both
+    formats of `installed_plugins.json` (v1 and v2) key `plugins` by
+    `plugin@marketplace`."""
+    return next(
+        (
+            key
+            for key, on in plugins.items()
+            if key.split("@")[0] == "kraft" and on is True and bool(installed.get(key))
+        ),
+        None,
     )
 
 
-def permission_tool(repo: Path | None) -> tuple[str, str] | None:
-    """`(tool name, where it is registered)` for a worker in `repo`, or None
-    when nothing registers the `kraft` server. `repo` None asks about the
-    machine- and user-scope files only."""
+def _kraft(config: dict) -> dict:
+    """`config`'s `kraft` server entry, as Claude Code would start it."""
+    entry = config["mcpServers"]["kraft"]
+    return entry if isinstance(entry, dict) else {}
+
+
+def _plugin_entry(installs, repo: Path | None, scope: str) -> dict:
+    """The `kraft` entry of the installed plugin's own `.mcp.json`, from an
+    install that applies to a worker in `repo` -- user scope, or a project's
+    for that repo -- the one in `scope` first. Nothing to check when no
+    install applies, or its `.mcp.json` names no `kraft`: the plugin may
+    declare its servers elsewhere (`plugin.json`), and a guess may refuse."""
+    key = _checkout(repo) if repo is not None else None
+    installs = installs if isinstance(installs, list) else [installs]
+    usable = [
+        i
+        for i in installs
+        if isinstance(i, dict)
+        and (
+            i.get("scope", "user") == "user"
+            or (
+                key is not None
+                and isinstance(i.get("projectPath"), str)
+                and str(Path(i["projectPath"]).resolve()) == key
+            )
+        )
+    ]
+    for install in sorted(
+        usable, key=lambda i: (i.get("scope", "user") == "user") != (scope == "user")
+    ):
+        path = install.get("installPath")
+        if isinstance(path, str):
+            config = _read(Path(path) / ".mcp.json")
+            return _kraft(config) if _names_kraft(config) else {}
+    return {}
+
+
+def permission_tool(repo: Path | None) -> tuple[str, str, list[tuple[str, dict]]] | None:
+    """`(tool name, where it is registered, the entries Claude could start the
+    server from)` for a worker in `repo`, or None when nothing registers the
+    `kraft` server. Each entry is `(where, its mcpServers.kraft)`: every
+    direct one that applies, since Claude takes local scope before the
+    project's and the user's and the name is the same, or the plugin's own.
+    `repo` None asks about the machine- and user-scope files only."""
     if MANAGED_MCP.exists():
         # Exclusive while it exists, even unreadable: nothing else loads.
-        return (DIRECT, str(MANAGED_MCP)) if _names_kraft(_read(MANAGED_MCP)) else None
+        managed, where = _read(MANAGED_MCP), str(MANAGED_MCP)
+        return (DIRECT, where, [(where, _kraft(managed))]) if _names_kraft(managed) else None
     home = Path.home()
     user = home / ".claude.json"
     user_config = _read(user)
-    if _names_kraft(user_config):
-        return DIRECT, str(user)
-    if repo is not None and _names_kraft(_local_scope(user_config, repo)):
-        return DIRECT, f"{user} (local scope)"
-    if repo is not None and _names_kraft(_committed(repo, ".mcp.json")):
-        return DIRECT, str(repo / ".mcp.json")
+    scopes = [(str(user), user_config)]
+    if repo is not None:
+        scopes.append((f"{user} (local scope)", _local_scope(user_config, repo)))
+        scopes.append((str(repo / ".mcp.json"), _committed(repo, ".mcp.json")))
+    direct = [(where, _kraft(config)) for where, config in scopes if _names_kraft(config)]
+    if direct:
+        return DIRECT, direct[0][0], direct
     # Claude Code merges `enabledPlugins` key by key (`plugin@marketplace`),
     # a project's value overriding the user's: a repo that turns
     # `kraft@kraft` off wins over a user who turned it on, while a repo that
@@ -125,23 +190,77 @@ def permission_tool(repo: Path | None) -> tuple[str, str] | None:
     project_plugins = _plugins(_committed(repo, ".claude/settings.json")) if repo else {}
     installed = _read(home / ".claude" / "plugins" / "installed_plugins.json").get("plugins")
     installed = installed if isinstance(installed, dict) else {}
-    if not _kraft_on(user_plugins | project_plugins, installed):
-        return None
-    if _kraft_on(project_plugins, installed):
-        return PLUGIN, str(repo / ".claude" / "settings.json")
-    return PLUGIN, str(user_settings)
+    if key := _kraft_on(project_plugins, installed):
+        where = str(repo / ".claude" / "settings.json")
+        return PLUGIN, where, [(where, _plugin_entry(installed[key], repo, "project"))]
+    if key := _kraft_on(user_plugins | project_plugins, installed):
+        where = str(user_settings)
+        return PLUGIN, where, [(where, _plugin_entry(installed[key], repo, "user"))]
+    return None
 
 
-def checkout_entry(repo: Path, where: str) -> dict | None:
-    """The `kraft` server's entry as registered for `repo`'s own folder, given
-    `where` `permission_tool(repo)` found it: its local scope or its committed
-    `.mcp.json`. Claude Code approves a project's servers per folder path, so a
-    launch in a copy of `repo` loads neither and is handed this entry instead.
-    None for a managed, user or plugin registration, which loads anywhere."""
-    if where == f"{Path.home() / '.claude.json'} (local scope)":
-        config = _local_scope(_read(Path.home() / ".claude.json"), repo)
-    elif where == str(repo / ".mcp.json"):
-        config = _committed(repo, ".mcp.json")
-    else:
-        return None
-    return config["mcpServers"]["kraft"]
+def on_disk(*folders: Path) -> list[tuple[str, dict]]:
+    """`(where, entry)` for each `.mcp.json` naming `kraft` in `folders` or any
+    folder above them: Claude loads the one where it runs whether committed or
+    not, and each parent's (measured, 2.1.314). None under a managed config,
+    which shuts every other out."""
+    if MANAGED_MCP.exists():
+        return []
+    found: list[tuple[str, dict]] = []
+    for folder in folders:
+        for here in (folder, *folder.parents):
+            config = _read(here / ".mcp.json")
+            where = str(here / ".mcp.json")
+            if _names_kraft(config) and where not in (w for w, _ in found):
+                found.append((where, _kraft(config)))
+    return found
+
+
+def _starts(entry: dict, path: str | None) -> bool | None:
+    """Whether Claude can start `entry` on `path`; None when Kraft cannot tell."""
+    command, env = entry.get("command"), entry.get("env")
+    if not isinstance(command, str) or not command or "$" in command:
+        return None  # reached by `url`, or a variable Claude expands
+    if os.sep in command and not os.path.isabs(command) and not command.startswith("~"):
+        return None  # found from Claude's own working folder, which Kraft does not know
+    if isinstance(env, dict) and "PATH" in env:
+        # Claude looks the command up on the entry's own PATH.
+        path = env["PATH"]
+        if not isinstance(path, str) or "$" in path:
+            return None
+    return shutil.which(command, path=path) is not None
+
+
+def starts(entries: list[tuple[str, dict]], path: str | None) -> bool | None:
+    """Whether Claude can start the server from one of `entries` (from
+    `permission_tool`) on `path`, the PATH it runs with: False only when Kraft
+    is sure none can, since False refuses a launch; None when it cannot tell."""
+    verdicts = [_starts(entry, path) for _, entry in entries]
+    if True in verdicts:
+        return True
+    return False if verdicts and None not in verdicts else None
+
+
+def named(entries: list[tuple[str, dict]]) -> str:
+    """The commands `entries` run, and where each is registered."""
+    return " or ".join(f"{e.get('command')!r} (registered in {where})" for where, e in entries)
+
+
+def copy_servers(repo: Path, where: str) -> dict:
+    """The MCP servers a launch in a copy of `repo` is handed, given `where`
+    `permission_tool(repo)` found the `kraft` server. Claude Code keys a
+    project's servers by its folder path, so the copy loads none of `repo`'s:
+    it is handed the person's local-scope servers for `repo`, and `kraft`
+    from the committed `.mcp.json` when that is where it is registered. The
+    `.mcp.json`'s other servers are not: Claude asks to approve those per
+    folder. Nothing under a `managed-mcp.json`, which only its own servers
+    pass; user and plugin servers load anywhere already."""
+    if where == str(MANAGED_MCP):
+        return {}
+    local = _local_scope(_read(Path.home() / ".claude.json"), repo).get("mcpServers")
+    servers = dict(local) if isinstance(local, dict) else {}
+    committed = _committed(repo, ".mcp.json").get("mcpServers")
+    # Read again: a commit since `permission_tool` may have dropped it.
+    if where == str(repo / ".mcp.json") and isinstance(committed, dict) and "kraft" in committed:
+        servers["kraft"] = committed["kraft"]
+    return servers

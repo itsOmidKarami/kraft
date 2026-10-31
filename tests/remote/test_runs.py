@@ -12,6 +12,7 @@ from support.remote import (
     lfs_pointer,
     lfs_script,
     make_rig,
+    until,
     workers_file,
 )
 
@@ -206,7 +207,7 @@ async def test_a_document_a_person_edited_while_the_step_ran_keeps_the_servers_v
         "time.sleep(0.4); open(p,'w').write('the step')"
     )
     run = await rig.run([sys.executable, "-c", script])
-    await asyncio.sleep(0.2)
+    await until(lambda: run.pushed)  # the server has taken the snapshot the step starts from
     (docs / "spec.md").write_text("a person")
     await rig.done(run)
     assert (docs / "spec.md").read_text() == "a person"
@@ -265,10 +266,10 @@ async def test_co_tasks_of_one_step_share_the_machines_copy_without_tripping_ove
 
 
 async def test_int_pauses_and_kill_ends_the_step_through_the_machine(rig):
-    run = await rig.run(["sh", "-c", "trap 'echo got-int; exit 130' INT; sleep 30 & wait"])
-    while run.state != "running":
-        await asyncio.sleep(0.02)
-    await asyncio.sleep(0.2)
+    run = await rig.run(
+        ["sh", "-c", "trap 'echo got-int; exit 130' INT; echo armed; sleep 30 & wait"]
+    )
+    await until(lambda: "armed" in run.spool.read_text())  # the trap is in place
     await rig.runs.signal(run, "INT")
     await rig.done(run)
     assert run.exit_code == 130 and "got-int" in run.spool.read_text()
@@ -294,7 +295,8 @@ async def test_cancelling_while_the_machine_is_offline_ends_the_run_and_discards
     assert run.exit_code == 143 and "offline" in run.spool.read_text()
     before = rig.tip()
     await rig.reconnect()  # the server tells it to stop; it hands in what it has
-    await asyncio.sleep(1.0)
+    await until(lambda: rig.machine._jobs[run.spec.key].final is not None)
+    await asyncio.sleep(0.3)  # time for the server to take the hand-in, which it must not
     assert rig.runs.find(rig.wid, "s1") is None
     assert (
         rig.tip() == before
@@ -375,12 +377,11 @@ async def test_a_run_whose_machine_is_gone_give_up_after_ends_unknown_and_kills_
     assert rig.hub.slots_used("gpu") == 0
     killed = rig.machine._jobs[run.spec.key].runner
     await rig.connect()  # the server tells it to stop; what it hands in is thrown away
-    while killed._proc.poll() is None:
-        await asyncio.sleep(0.02)
-    await asyncio.sleep(0.3)
+    await until(  # told `delivered`, so the machine dropped it too
+        lambda: rig.runs.find(rig.wid, "s1") is None and run.spec.key not in rig.machine._jobs
+    )
+    assert killed._proc.poll() is not None
     assert run.exit_code == REMOTE_GAVE_UP and not rig.files("s1").result.exists()
-    assert rig.runs.find(rig.wid, "s1") is None  # told `delivered`, so the machine dropped it too
-    assert run.spec.key not in rig.machine._jobs
 
 
 async def test_a_given_up_run_outlives_the_exit_timer_until_the_machine_hands_in(clocked):
@@ -429,7 +430,7 @@ async def test_a_reconnect_tells_the_machine_which_items_to_keep(rig, database, 
 
     rig.machine._on_frame = spy
     await rig.reconnect()
-    await asyncio.sleep(0.3)
+    await until(lambda: any(f["t"] == "keep" for f in seen))
     assert [f["items"] for f in seen if f["t"] == "keep"] == [[rig.wid]]
 
 
@@ -440,16 +441,20 @@ async def test_a_drop_and_a_reconnect_each_note_the_item_whose_step_runs_there(
     from support.harness import v1_chain
 
     await item_on(v1_chain([v1_node("build")], repo=rig.repo), "build", repo=rig.repo, wid="idle1")
+
+    def noted():
+        return database.read(
+            lambda c: c.execute(
+                "SELECT work_item_id, type, payload FROM events WHERE type LIKE 'remote_machine_%'"
+            ).fetchall()
+        )
+
     run = await _running(rig)
     await rig.disconnect()
-    await asyncio.sleep(0.2)
+    await until(lambda: len(noted()) == 1)
     await rig.connect()
-    await asyncio.sleep(0.3)
-    got = database.read(
-        lambda c: c.execute(
-            "SELECT work_item_id, type, payload FROM events WHERE type LIKE 'remote_machine_%'"
-        ).fetchall()
-    )
+    await until(lambda: len(noted()) == 2)
+    got = noted()
     assert [(e["work_item_id"], e["type"]) for e in got] == [
         (rig.wid, "remote_machine_disconnected"),
         (rig.wid, "remote_machine_reconnected"),
@@ -472,11 +477,11 @@ async def test_a_drop_and_a_reconnect_each_note_the_item_whose_step_runs_there(
 async def test_a_machine_adds_sandbox_events_to_its_items_history_and_nothing_else(
     rig, database, type_, kept
 ):
-    run = await rig.run(["sh", "-c", "sleep 30"])
+    run = await _running(rig)  # a KILL sent before the step has started is dropped
     await rig.runs.on_frame(
         "gpu", {"t": "event", "id": run.spec.key, "type": type_, "payload": {"host": "x.test"}}
     )
-    await asyncio.sleep(0.2)
+    await until(lambda: not rig.runs._tasks)  # the frame is handled in a task of its own
     assert (type_ in _event_types(database)) is kept
     await rig.runs.signal(run, "KILL")
     await rig.done(run)

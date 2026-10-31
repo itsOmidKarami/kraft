@@ -236,11 +236,11 @@ def build() -> MCPServer:
         lockfiles) and returns every candidate it saw; pass `test_command` or
         `setup_command` to use the repo's own documented commands instead
         (`""` declares none). Show the person what it proposes before relying
-        on it. `test_command=""` (no tests) saves the repo disabled: work items
-        on it would pass verification without running a test, which is the
-        person's to decide, by enabling it. A repository with no commit yet is
-        refused: a work item's branch starts from one. An already-connected
-        repo is left as it is."""
+        on it. Commands you pass save the repo disabled (the answer's `held`
+        says so): they run for every work item on it, so you cannot file work
+        on it until the person has read them and enabled it in Settings › Repos.
+        A repository with no commit yet is refused: a work item's branch starts
+        from one. An already-connected repo is left as it is."""
         return await client.ensure_repo(
             path,
             test_command=test_command,
@@ -575,7 +575,8 @@ def build() -> MCPServer:
         """Set or clear one node's per-item override on a Kraft work item --
         its auto-escalate settings, the `model`/`effort` its agent tasks launch
         with (above the item-wide `set_agent_overrides`), an `extra_prompt`
-        appended to each of their instructions, and the `reviewers` its
+        appended to each of their instructions (a person's to set: refused
+        from an MCP session; `clear` drops it with the rest), and the `reviewers` its
         automated-review wait reads (each `{"bot": LOGIN}` or `{"check": NAME}`,
         over the repository's; `[]` expects none) -- without touching the Policy
         screen's system defaults or the chain everyone else uses. A

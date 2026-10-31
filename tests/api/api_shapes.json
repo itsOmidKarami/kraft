@@ -324,6 +324,7 @@
     "invalid_intake": "_",
     "invalid_policy": [],
     "invalid_templates": {},
+    "mcp_command_on_path": "_",
     "pid": "_",
     "port": "_",
     "reattach_summary": {

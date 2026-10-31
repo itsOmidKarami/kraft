@@ -55,6 +55,11 @@ capabilities:
   # server, and no other (spike 5.5, claude 2.1.281: without one the CLI
   # exits 1 naming the missing tool; its HTTP MCP client honours the proxy).
   mcp_config:       { cli: ["--strict-mcp-config", "--mcp-config", "{value}"] }
+  # Kraft sets it for an in-place launch in a copy of the checkout: the
+  # checkout's local-scope servers and a `kraft` registered for it, which
+  # Claude keys by the checkout's folder. Added to the servers that load
+  # anywhere, not in place of them.
+  extra_mcp_config: { cli: ["--mcp-config", "{value}"] }
   resume:           { cli: ["--resume", "{value}"] }
   autocompact:      { cli: ["--autocompact", "{value}"] }
   usage:            { source: envelope, reader: claude-stream-json }

@@ -396,11 +396,18 @@ async def test_checks_first_gate_with_no_document_checks_the_checkout(
     assert await _run(database, run_dirs, gate) == ("undecided", _IGNORED + "new.txt")
 
 
-_IN_PLACE_IGNORED = (
-    "The reviewer changed files in its copy of the branch, or on the branch itself, so "
-    "its verdict was ignored; Kraft removed the copy and left your working files as "
-    "they were: "
-)
+#: What a reviewer in a copy is told its verdict was ignored for.
+_COPY_EDITED = "The reviewer changed files in its copy of the branch ({})"
+_TIP_MOVED = "the item's branch moved during the review ({})"
+_IGNORED_IN_COPY = ", so the reviewer's verdict was ignored"
+_COPY_REMOVED = "; Kraft removed the copy and left your working files as they were."
+#: `edit` for a row whose copy or branch tip Kraft cannot read after the review:
+#: what the real comparison is told instead, None for its own answer.
+_UNREAD = {
+    "unread-copy": (["(git could not read it)"], None),
+    "unread-tip": (None, ["(git could not read it)"]),
+    "unread-tip-beside-a-move": (None, ["(git could not read it)", "elsewhere.txt"]),
+}
 _PERSONS = "# the person's edit\n"
 #: A commit on the person's branch by a route around the copy, which it then undoes.
 _PUSH = (
@@ -416,21 +423,79 @@ _PUSH = (
         pytest.param(
             False,
             _COMMIT,
-            ("undecided", _IN_PLACE_IGNORED + "new.txt"),
+            ("undecided", _COPY_EDITED.format("new.txt") + _IGNORED_IN_COPY + _COPY_REMOVED),
             id="in-place-commits-in-the-copy",
         ),
         pytest.param(
             True,
             "echo agent >> calc.py",
-            ("undecided", _IN_PLACE_IGNORED + "calc.py"),
+            ("undecided", _COPY_EDITED.format("calc.py") + _IGNORED_IN_COPY + _COPY_REMOVED),
             id="in-place-edits-a-file-the-person-had-dirty",
         ),
         pytest.param(True, ":", ("pass", "read it all"), id="in-place-person-mid-work"),
         pytest.param(
             False,
             _PUSH,
-            ("undecided", _IN_PLACE_IGNORED + "tip.txt"),
+            (
+                "undecided",
+                "The item's branch moved during the review (tip.txt)" + _IGNORED_IN_COPY + ".",
+            ),
             id="in-place-moves-the-branch-tip",
+        ),
+        pytest.param(
+            False,
+            _PUSH + " && echo agent >> calc.py",
+            (
+                "undecided",
+                _COPY_EDITED.format("calc.py")
+                + " and "
+                + _TIP_MOVED.format("tip.txt")
+                + _IGNORED_IN_COPY
+                + _COPY_REMOVED,
+            ),
+            id="in-place-edits-the-copy-and-moves-the-branch-tip",
+        ),
+        pytest.param(
+            False,
+            "unread-tip",
+            (
+                "undecided",
+                "Kraft could not compare the item's branch after the review "
+                "(git could not read it)" + _IGNORED_IN_COPY + ".",
+            ),
+            id="in-place-branch-tip-unread",
+        ),
+        pytest.param(
+            False,
+            "unread-copy",
+            (
+                "undecided",
+                "Kraft could not compare its copy of the branch after the review "
+                "(git could not read it)" + _IGNORED_IN_COPY + ".",
+            ),
+            id="in-place-copy-unread",
+        ),
+        pytest.param(
+            False,
+            "unread-tip-beside-a-move",
+            (
+                "undecided",
+                "The item's branch moved during the review (elsewhere.txt) and Kraft could not "
+                "compare the item's branch after the review (git could not read it)"
+                + _IGNORED_IN_COPY
+                + ".",
+            ),
+            id="in-place-branch-tip-part-unread",
+        ),
+        # Its document is outside the copy: kept, and never called a copy edit.
+        pytest.param(
+            False,
+            'echo x > "$KRAFT_DOCS_DIR/review.md"',
+            (
+                "undecided",
+                "The reviewer rewrote the gate's document ({doc})" + _IGNORED_IN_COPY + ".",
+            ),
+            id="in-place-rewrites-the-gate-document",
         ),
     ],
 )
@@ -439,13 +504,24 @@ async def test_an_in_place_checks_first_reviewer_reads_a_copy_of_the_branch(
 ):
     """Never the person's checkout: it is not switched, their uncommitted work
     is not touched, and the copy is gone after. A write in the copy, or a
-    commit on their branch, voids the verdict without stopping the item."""
+    commit on their branch, voids the verdict without stopping the item, and
+    the note says which: a moved branch may be the person's own commit."""
+    if edit in _UNREAD:
+        told, watch = _UNREAD[edit], inplace.watch_copy
+
+        def unread(*a):
+            since = watch(*a)
+            return lambda: tuple(
+                t if t is not None else real for t, real in zip(told, since(), strict=True)
+            )
+
+        monkeypatch.setattr(inplace, "watch_copy", unread)
     gate = await _at_gate(
         database,
         run_dirs,
         tmp_path,
         repo,
-        edit.replace("{repo}", str(repo)),
+        ":" if edit in _UNREAD else edit.replace("{repo}", str(repo)),
         _PASS,
         mode=CHECKS_FIRST,
         in_place=True,
@@ -458,6 +534,7 @@ async def test_an_in_place_checks_first_reviewer_reads_a_copy_of_the_branch(
     reads = []
     _spy_snapshots(monkeypatch, reads)
 
+    expected = (expected[0], expected[1].replace("{doc}", str(_doc(run_dirs))))
     assert await _run(database, run_dirs, gate) == expected
     assert reads == ["snapshot", "snapshot"]
     assert git(repo, "symbolic-ref", "HEAD") == "refs/heads/main"

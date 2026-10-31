@@ -380,6 +380,62 @@ def test_a_deferred_self_retry_refuses_an_override_out_of_bounds(client, repo, w
     assert _self_retry_requests(client, wid) == []
 
 
+_MCP = {"x-kraft-client": "mcp"}
+
+
+@pytest.mark.parametrize(
+    ("caller", "task_config", "status"),
+    [
+        ("escalation", {"prompt": "do this instead"}, 403),
+        ("mcp", {"prompt": "do this instead"}, 403),
+        ("other-worker", {"prompt": "do this instead"}, 403),
+        ("mcp", {"effort": "low", "prompt": "and this"}, 403),
+        ("mcp", {"effort": "low", "model": "claude-opus-4-1"}, 200),
+        ("mcp", {"kind": "subprocess", "prompt": "x"}, 422),
+        ("person", {"prompt": "do this instead"}, 200),
+    ],
+    ids=[
+        "escalation-prompt",
+        "assistant-prompt",
+        "another-items-worker-prompt",
+        "assistant-effort-and-prompt",
+        "assistant-model-and-effort",
+        "assistant-structural-field-is-still-the-bounds-422",
+        "person-prompt",
+    ],
+)
+def test_a_retry_that_changes_more_than_a_tasks_model_is_a_persons(
+    client, repo, retried, caller, task_config, status
+):
+    """#1189: a retry's `task_config` reaches the rerun task, so a prompt or
+    command in it is a person's to set. An agent's retry may still change the
+    task's model and effort; a refusal forks nothing."""
+    wid = _stopped_at(client, repo, "verification")
+    headers = {
+        "escalation": lambda: _escalation_running(wid),
+        "mcp": lambda: _MCP,
+        "other-worker": lambda: {"x-kraft-session-id": "w-other/abc123"},
+        "person": dict,
+    }[caller]()
+
+    r = client.post(
+        f"/api/work-items/{wid}/retry",
+        json={"path": "verification.review.code_review", "task_config": task_config},
+        headers=headers,
+    )
+
+    assert r.status_code == status, r.text
+    if status == 403:
+        assert "changing a task's prompt is a person's call" in r.json()["detail"]
+        assert _forks(client, wid)[0] == []
+        assert _self_retry_requests(client, wid) == []
+        assert retried == {}
+    elif status == 422:
+        assert r.json()["detail"].startswith("task_config.kind: ")
+    else:
+        _wait_for(lambda: "target" in retried)
+
+
 def _at_a_gate(client, repo, status: str) -> str:
     wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")

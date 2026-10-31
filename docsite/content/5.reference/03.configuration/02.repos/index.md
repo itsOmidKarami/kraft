@@ -99,8 +99,10 @@ No key on an entry passes silently. A key within two edits of a field below (`au
 
 ### `enabled`
 
-- It governs auto-intake only: you can still file and run items on a disabled repo (from the CLI or an agent; the web composer lists only enabled repos), and running items keep going.
+- It governs auto-intake, and what an agent may file (below): you can still file and run items on a disabled repo from your own terminal (the web composer lists only enabled repos), and running items keep going.
 - `kraft repo connect` saves a repo it found no test command for with `enabled: false`; an item on it runs its agent tasks, then stops at `verification` until it has a `test_command` or `test_scopes`.
+- A connect from a worker session, an escalation turn or the MCP server that gives its own test or setup command is saved with `enabled: false` too. Only a person turns it on: the API refuses `enabled: true` from an agent, and an agent's change to any connected repo's commands.
+- While a repo is disabled, an agent cannot file work on it: `POST /api/work-items`, its duplicate route and `POST /api/triggers` answer `403` to a worker session, an escalation turn or the MCP server, as does a workspace item with a disabled member. A person can still file on it by hand, and is warned (`repo_warning`) to check its commands first.
 - An absent key counts as enabled.
 - Kraft refuses an edit that would leave an enabled repo with neither a `test_command` (`""` counts) nor `test_scopes`.
 

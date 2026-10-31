@@ -208,7 +208,9 @@ def _say_connected(result: dict) -> None:
     _say_tests(result)
     _say_setup(result)
     _say_rest(result)
-    if result.get("enabled") is False:
+    if result.get("held"):
+        _print(result["held"])
+    elif result.get("enabled") is False:
         _print(
             "saved disabled: no test command found in its task runners, toolchain files or CI; "
             "pass --test-command (--no-tests for a repo with none) or set "
@@ -363,6 +365,10 @@ def _connect_again(
     needs_tests = stored.get("test_command") is None and not stored.get("test_scopes")
     needs_setup = stored.get("setup_command") is None
     out(f"already connected: {path}")
+    if os.environ.get("KRAFT_SESSION_ID") or os.environ.get("KRAFT_WORK_ITEM_ID"):
+        # #1198: the API refuses a session's change to a connected repo's commands.
+        out("  its commands are a person's to set, in Settings › Repos: say what it needs")
+        return stored
     if (test_command is not None and not needs_tests) or (
         setup_command is not None and not needs_setup
     ):

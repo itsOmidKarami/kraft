@@ -501,7 +501,7 @@ async def _sweep_after(db, run_dirs, row, launch_factory) -> None:
         return
     task = next((t for n in snapshot.chain.nodes for t in n.tasks() if t.path == hook), None)
     if task is None and store.is_in_place(item):
-        # An agent outside the walk (an escalation, a reply): the after-check
+        # An agent outside the walk (an escalation, a deciding gate reviewer): the after-check
         # its own launch runs, from the mark it left under its hook point.
         try:
             await inplace.check_task(
