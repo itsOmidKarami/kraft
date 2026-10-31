@@ -487,17 +487,14 @@ def _add_member(
     for fetch in ((), ("fetch", "-q", "origin"), ("fetch", "-q", "origin", sha)):
         if fetch:
             fetched = _git_ok(member_repo, *fetch, env=env)
-            if (
-                fetched.returncode
-                and auth
-                and (auth.refused(fetched.stderr) or auth.redirected(fetched.stderr))
-            ):
+            if fetched.returncode and auth and auth.stops(fetched.stderr):
                 raise auth.stamp(
                     git.ForgeError(
                         f"forge account {auth.name} could not fetch {rel}'s commit from "
-                        f"origin with its token ({auth.account.source().label()}): "
-                        f"{fetched.stderr.strip()}"
-                    )
+                        f"origin with its token ({auth.account.source().label()}). "
+                        "Replace the token there, then retry"
+                    ),
+                    fetched.stderr,
                 )
         if _git_ok(member_repo, *have).returncode == 0:
             break
@@ -1250,7 +1247,7 @@ async def upstream_head(repo: Path, branch: str) -> str | None:
             auth = await git_auth.auth_for(repo)
         except git.ForgeError as exc:  # the account's token cannot be read
             raise BaseFetchRefused(
-                f"{exc}; Kraft will not start {branch} from a stale base",
+                f"{exc}; Kraft will not start {branch} from a stale base. Fix it, then retry",
                 reason="auth",
                 account=exc.account,
                 source=exc.source,
@@ -1272,7 +1269,7 @@ async def upstream_head(repo: Path, branch: str) -> str | None:
             detail = "timed out"
         if detail is not None:
             logger.warning("could not fetch origin/%s in %s: %s", branch, repo, detail)
-        if detail is not None and auth and (auth.refused(detail) or auth.redirected(detail)):
+        if detail is not None and auth and auth.stops(detail):
             raise BaseFetchRefused(
                 auth.redirect_words()
                 if auth.redirected(detail)

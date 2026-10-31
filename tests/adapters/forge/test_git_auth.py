@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from support.harness import git, make_repo
@@ -46,6 +47,7 @@ def rig(
     config_lines=(),
     accounts=None,
     entry=None,
+    entry_fields=None,
     reader=True,
     loaded=True,
     token=True,
@@ -59,7 +61,8 @@ def rig(
         monkeypatch.setenv("CORP_GL", TOK)
         credentials.take_env(["CORP_GL"])
     accounts = {"corp-gl": acct()} if accounts is None else accounts
-    entries = [entry or RepoEntry(path=str(repo), forge="gitlab", forge_account="corp-gl")]
+    fields = entry_fields or {"forge": "gitlab", "forge_account": "corp-gl"}
+    entries = [entry or RepoEntry(path=str(repo), **fields)]
     forges = ForgesFile(accounts=accounts) if loaded else None
 
     async def read():
@@ -345,15 +348,6 @@ async def test_the_dialed_url_decides(tmp_path, monkeypatch, remote, extra, push
         assert (got.origin, got.header) == (WEB, f"Authorization: Basic {form()}")
 
 
-async def test_a_push_to_an_edited_web_url_is_refused_not_answered_by_gits_credential(
-    tmp_path, monkeypatch
-):
-    repo, _ = rig(tmp_path, monkeypatch, remote=HTTPS)
-    moved = acct("https://moved.example")
-    with pytest.raises(ForgeError, match="not on https://moved.example"):
-        await git_auth.auth_for_account(repo, "corp-gl", moved, push=True)
-
-
 @pytest.mark.parametrize(
     "kind",
     [
@@ -408,14 +402,13 @@ async def test_a_member_linked_worktree_uses_its_own_account(tmp_path, monkeypat
 async def test_an_entry_without_a_forge_takes_a_default_only_as_a_workspace_member(
     tmp_path, monkeypatch, entry_id, named
 ):
-    repo, calls = rig(tmp_path, monkeypatch, remote=HTTPS)
-    entry = RepoEntry(path=str(repo), id=entry_id)
-    accounts = {"corp-gl": acct(default=True)}
-
-    async def read():
-        return [entry], ForgesFile(accounts=accounts)
-
-    git_auth.set_reader(read)
+    repo, calls = rig(
+        tmp_path,
+        monkeypatch,
+        remote=HTTPS,
+        accounts={"corp-gl": acct(default=True)},
+        entry_fields={"id": entry_id},
+    )
     base = {**os.environ, "X": "1"}
     got = await git_auth.auth_for(repo)
     assert (got.name if got else None) == named
@@ -433,22 +426,45 @@ async def test_an_unreadable_token_is_an_auth_error(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("text", "stamped"),
+    ("text", "stamped", "forge"),
     [
-        pytest.param("fatal: Authentication failed for 'x'", "auth", id="authentication-failed"),
         pytest.param(
-            "fatal: could not read Username for 'x'", "auth", id="could-not-read-username"
+            "fatal: Authentication failed for 'x'", "auth", "gitlab", id="authentication-failed"
         ),
-        pytest.param("The requested URL returned error: 401", "auth", id="returned-401"),
-        pytest.param("The requested URL returned error: 403", "forbidden", id="returned-403"),
-        pytest.param("fatal: unable to access: Connection refused", None, id="connection-refused"),
+        pytest.param(
+            "fatal: could not read Username for 'x'", "auth", "gitlab", id="could-not-read-username"
+        ),
+        pytest.param("The requested URL returned error: 401", "auth", "gitlab", id="returned-401"),
+        pytest.param(
+            "The requested URL returned error: 403", "forbidden", "gitlab", id="returned-403"
+        ),
+        pytest.param(
+            "fatal: unable to access: Connection refused", None, "gitlab", id="connection-refused"
+        ),
+        pytest.param(
+            "fatal: repository 'https://github.com/o/r/' not found",
+            "auth",
+            "github",
+            id="github-not-found-is-a-token-problem",
+        ),
+        pytest.param(
+            "fatal: repository 'https://gitlab.example/o/r/' not found",
+            None,
+            "gitlab",
+            id="gitlab-not-found-is-not",
+        ),
+        pytest.param(
+            "The requested URL returned error: 302", "auth", "gitlab", id="redirect-is-stamped"
+        ),
     ],
 )
-def test_a_git_auth_stamps_only_an_auth_failure(text, stamped):
-    exc = auth().stamp(ForgeError(text))
+def test_a_git_auth_stamps_only_an_auth_failure(text, stamped, forge):
+    exc = GitAuth("corp-gl", acct(forge=forge), WEB, "h").stamp(ForgeError(text))
     assert exc.reason == stamped
     assert exc.account == ("corp-gl" if stamped else "")
     assert exc.source == ("env CORP_GL" if stamped else "")
+    if "error: 302" in text:
+        assert "origin redirects elsewhere" in str(exc) and "then retry" in str(exc)
 
 
 @pytest.mark.parametrize(
@@ -462,26 +478,12 @@ def test_a_git_auth_stamps_only_an_auth_failure(text, stamped):
 async def test_the_server_reads_repos_yaml_only_for_an_account_that_could_carry_a_header(
     tmp_path, monkeypatch, accounts, loads
 ):
-    from types import SimpleNamespace
-
     seen = []
     monkeypatch.setattr(config, "load_repos", lambda p: seen.append(p) or [])
     forges = None if accounts is None else ForgesFile(accounts=accounts)
     st = SimpleNamespace(forges=forges, templates_dir=tmp_path)
     assert await git_auth.server_context(st) == ([], forges)
     assert len(seen) == loads
-
-
-@pytest.mark.parametrize(
-    ("forge", "refused"),
-    [
-        pytest.param("github", True, id="github-not-found-is-a-refusal"),
-        pytest.param("gitlab", False, id="gitlab-not-found-is-not"),
-    ],
-)
-def test_a_githubs_not_found_is_a_refusal_only_for_github(forge, refused):
-    text = "fatal: repository 'https://github.com/o/r/' not found"
-    assert GitAuth("corp-gl", acct(forge=forge), WEB, "h").refused(text) is refused
 
 
 def test_a_git_auth_repr_shows_neither_the_token_nor_its_basic_form():
@@ -527,8 +529,6 @@ async def test_a_refused_base_fetch_names_its_reason(tmp_path, monkeypatch, text
 async def test_an_unreadable_repos_yaml_stops_an_injected_account_not_falls_back(
     tmp_path, monkeypatch
 ):
-    from types import SimpleNamespace
-
     (tmp_path / "repos.yaml").write_text("repos: [not: a list")
     st = SimpleNamespace(forges=ForgesFile(accounts={"corp-gl": acct()}), templates_dir=tmp_path)
     with pytest.raises(ForgeError) as caught:

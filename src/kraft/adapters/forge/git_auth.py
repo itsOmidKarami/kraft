@@ -56,16 +56,23 @@ class GitAuth:
     def redirect_words(self) -> str:
         return (
             f"forge account {self.name}: origin redirects elsewhere; "
-            "point origin at the new address"
+            "point origin at the new address, then retry"
         )
 
-    def redirected(self, text: str) -> bool:
+    @staticmethod
+    def redirected(text: str) -> bool:
         return bool(_REDIRECTED.search(text))
 
-    def stamp(self, exc: ForgeError) -> ForgeError:
-        """Mark `exc` a token stop, in place, when git's words say the forge refused the token
-        or sent the call elsewhere (the redirect is not followed, so the token stays home)."""
-        text = str(exc)
+    def stops(self, text: str) -> bool:
+        """Whether git's words are a token stop: the token was refused, or the call was sent
+        elsewhere."""
+        return self.refused(text) or self.redirected(text)
+
+    def stamp(self, exc: ForgeError, words: str | None = None) -> ForgeError:
+        """Mark `exc` a token stop, in place, when git's words (`exc`'s own text unless `words`
+        is given) say the forge refused the token or sent the call elsewhere (the redirect is
+        not followed, so the token stays home)."""
+        text = str(exc) if words is None else words
         if self.redirected(text):
             exc.args = (self.redirect_words(),)
             exc.reason = "auth"

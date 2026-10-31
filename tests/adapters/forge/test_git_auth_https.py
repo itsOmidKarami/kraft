@@ -42,7 +42,7 @@ from .test_git_auth import TOK, acct, form, rig
 
 OURS = f"Basic {form()}"
 SOURCE = "env CORP_GL"
-REDIRECT_WORDS = "origin redirects elsewhere; point origin at the new address"
+REDIRECT_WORDS = "origin redirects elsewhere; point origin at the new address, then retry"
 _ONE_NODE = [
     {"id": "n", "kind": "exec", "tasks": [{"id": "t", "kind": "subprocess", "command": "true"}]}
 ]
@@ -181,18 +181,24 @@ async def test_every_remote_git_call_carries_the_accounts_header(remote, databas
 
 
 async def test_another_origin_sees_no_header(remote, tmp_path, monkeypatch):
+    """`origin` stays on A, so `auth_for_account` builds A's header; git then dials B (as an
+    `ls-remote <url>` would, or a second host a fetch reaches) and B must not see it."""
     with git_https(tmp_path / "srv2") as second:
         bundle = tmp_path / "ca-both.pem"
         bundle.write_text(remote.web.ca.read_text() + second.ca.read_text())
         monkeypatch.setenv("GIT_SSL_CAINFO", str(bundle))
-        git(remote.repo, "push", "-q", str(_bare(second.root)), "main")
-        git(
-            remote.repo,
-            "config",
-            f"url.{second.url}/team/app.git.insteadOf",
-            f"{remote.web.url}/team/app.git",
+        _bare(second.root)
+        built = await git_auth.auth_for_account(remote.repo, *remote.pinned, push=False)
+        assert built is not None and built.origin == remote.web.url
+        env = git_auth.git_env(builtins.promptless_git_env(remote.repo), built)
+        done = subprocess.run(
+            ["git", "ls-remote", f"{second.url}/team/app.git"],
+            cwd=remote.repo,
+            env=env,
+            capture_output=True,
+            text=True,
         )
-        assert await builtins.upstream_head(remote.repo, "main")
+        assert done.returncode == 0, done.stderr
         assert second.authorizations and set(second.authorizations) == {None}
         assert remote.web.authorizations == []
 
@@ -225,7 +231,9 @@ async def test_a_persisted_header_never_makes_two_authorizations(remote):
         pytest.param(True, id="url-scoped-helper-as-gh-setup-git-writes-it"),
     ],
 )
-@pytest.mark.parametrize("remote", [{"server": "another-token"}], indirect=True)
+@pytest.mark.parametrize(
+    "remote", [pytest.param({"server": "another-token"}, id="wrong-token")], indirect=True
+)
 async def test_a_persons_credential_helper_is_never_asked(remote, tmp_path, scoped):
     marker = tmp_path / "asked"
     script = tmp_path / "helper.sh"
@@ -310,22 +318,15 @@ async def test_a_gitconfig_that_traces_never_logs_the_header(remote, tmp_path, m
     _clean(logged)
 
 
-@pytest.mark.parametrize(
-    ("remote", "site", "raises"),
-    [
-        pytest.param({"token": False}, _base_check, HTTPException, id="base-check-is-a-422"),
-        pytest.param({"token": False}, _bring_home, None, id="bring-home-is-false"),
-    ],
-    indirect=["remote"],
-)
-async def test_an_unreadable_token_is_each_sites_own_refusal(
-    remote, database, run_dirs, site, raises
-):
-    if raises is not None:
-        with pytest.raises(raises) as caught:
-            await site(remote, database, run_dirs)
-        assert caught.value.status_code == 422 and "corp-gl" in str(caught.value.detail)
-        return
+@pytest.mark.parametrize("remote", [pytest.param({"token": False}, id="no-token")], indirect=True)
+async def test_an_unreadable_token_is_a_422_at_the_base_branch_check(remote):
+    with pytest.raises(HTTPException) as caught:
+        await _base_check(remote, None, None)
+    assert caught.value.status_code == 422 and "corp-gl" in str(caught.value.detail)
+
+
+@pytest.mark.parametrize("remote", [pytest.param({"token": False}, id="no-token")], indirect=True)
+async def test_an_unreadable_token_makes_bring_home_false(remote):
     _land(remote)
     before = git(remote.repo, "rev-parse", "kraft/abc")
     assert await reviewed_head.bring_home(remote.repo, "kraft/abc", in_place=False) is False
@@ -369,39 +370,53 @@ def _fetched(r):
 
 
 @pytest.mark.parametrize(
-    ("remote", "stops"),
+    ("remote", "sent"),
     [
-        pytest.param({"server": "another-token"}, "stops", id="wrong-token-stops"),
-        pytest.param({"token": False}, "stops", id="unreadable-token-stops"),
-        pytest.param({"server": "another-token"}, "worktree", id="ensure-worktree-cuts-nothing"),
-        pytest.param({}, "offline", id="offline-keeps-the-stale-base"),
-        pytest.param(
-            {"source": {"from": "git-credential"}},
-            "stale",
-            id="git-credential-keeps-the-stale-base",
-        ),
+        pytest.param({"server": "another-token"}, True, id="wrong-token-stops"),
+        pytest.param({"token": False}, False, id="unreadable-token-stops"),
     ],
     indirect=["remote"],
 )
-async def test_a_base_fetch_the_token_cannot_authenticate_stops(remote, database, run_dirs, stops):
-    stale = _fetched(remote)
-    if stops in ("offline", "stale"):
-        if stops == "offline":
-            remote.web.stop()
-        assert await builtins.upstream_head(remote.repo, "main") == stale
-        return
-    if stops == "worktree":
-        await _item_on(database, remote.repo)
-        with pytest.raises(builtins.BaseFetchRefused):
-            await wtree.ensure(database, run_dirs, remote.repo)
-        assert not (run_dirs.worktrees / "w1").exists(), "nothing was cut from a stale base"
-        return
+async def test_a_base_fetch_the_token_cannot_authenticate_stops(remote, sent):
+    _fetched(remote)
     with pytest.raises(builtins.BaseFetchRefused) as caught:
         await builtins.upstream_head(remote.repo, "main")
     exc = caught.value
     assert (exc.reason, exc.account, exc.source) == ("auth", "corp-gl", SOURCE)
-    assert "`" not in str(exc)
+    assert "`" not in str(exc) and "then retry" in str(exc)
+    if sent:
+        assert remote.web.authorizations and set(remote.web.authorizations) == {OURS}
+    else:
+        assert remote.web.authorizations == [], "an unreadable token sends nothing"
     _clean(exc, exc.reason, exc.args)
+
+
+@pytest.mark.parametrize(
+    "remote", [pytest.param({"server": "another-token"}, id="wrong-token")], indirect=True
+)
+async def test_a_refused_base_fetch_cuts_no_worktree(remote, database, run_dirs):
+    _fetched(remote)
+    await _item_on(database, remote.repo)
+    with pytest.raises(builtins.BaseFetchRefused):
+        await wtree.ensure(database, run_dirs, remote.repo)
+    assert not (run_dirs.worktrees / "w1").exists(), "nothing was cut from a stale base"
+
+
+@pytest.mark.parametrize(
+    ("remote", "offline"),
+    [
+        pytest.param({}, True, id="offline-keeps-the-stale-base"),
+        pytest.param(
+            {"source": {"from": "git-credential"}}, False, id="git-credential-keeps-the-stale-base"
+        ),
+    ],
+    indirect=["remote"],
+)
+async def test_a_base_fetch_that_is_no_token_failure_keeps_the_stale_base(remote, offline):
+    stale = _fetched(remote)
+    if offline:
+        remote.web.stop()
+    assert await builtins.upstream_head(remote.repo, "main") == stale
 
 
 @pytest.mark.parametrize(
@@ -423,30 +438,28 @@ async def test_a_push_the_token_cannot_authenticate_is_a_token_stop(remote, word
     exc = caught.value
     assert (exc.reason, exc.account, exc.source) == ("auth", "corp-gl", SOURCE)
     assert git(remote.bare, "branch", "--list", "kraft/abc") == ""
+    if "terminal prompts" in words:
+        _ours_only(remote.web)  # the token was sent first, and the remote refused it
     _clean(exc, exc.reason, exc.args)
 
 
-@pytest.mark.parametrize(
-    "backend",
-    [
-        pytest.param("api", id="api-backend-pushes-with-its-pinned-account"),
-        pytest.param("cli", id="cli-backend-pushes-with-no-header"),
-        pytest.param("edited", id="an-edited-web-url-is-refused"),
-    ],
-)
-async def test_a_push_follows_its_backend(remote, backend):
-    if backend == "api":
-        await GitLabApi("corp-gl", remote.account).push(repo=remote.repo, branch="kraft/abc")
-        _ours_only(remote.web)
-    elif backend == "cli":
-        with pytest.raises(ForgeError):  # git's own credential: the remote wants a token
-            await GlabCli().push(repo=remote.repo, branch="kraft/abc")
-        assert remote.web.authorizations and set(remote.web.authorizations) == {None}
-    else:
-        moved = acct("https://moved.example")
-        with pytest.raises(ForgeError, match="not on https://moved.example"):
-            await GitLabApi("corp-gl", moved).push(repo=remote.repo, branch="kraft/abc")
-        assert remote.web.authorizations == []
+async def test_an_api_backend_pushes_with_its_pinned_account(remote):
+    await GitLabApi("corp-gl", remote.account).push(repo=remote.repo, branch="kraft/abc")
+    _ours_only(remote.web)
+
+
+async def test_a_cli_backend_pushes_with_no_header(remote, monkeypatch):
+    monkeypatch.setenv("GIT_TERMINAL_PROMPT", "0")  # git's own credential must not ask a TTY
+    with pytest.raises(ForgeError):  # git's own credential: the remote wants a token
+        await GlabCli().push(repo=remote.repo, branch="kraft/abc")
+    assert remote.web.authorizations and set(remote.web.authorizations) == {None}
+
+
+async def test_an_edited_web_url_refuses_the_push(remote):
+    moved = acct("https://moved.example")
+    with pytest.raises(ForgeError, match="not on https://moved.example"):
+        await GitLabApi("corp-gl", moved).push(repo=remote.repo, branch="kraft/abc")
+    assert remote.web.authorizations == []
 
 
 _LFS_POINTER = "version https://git-lfs.github.com/spec/v1\noid sha256:" + "a" * 64 + "\nsize 12\n"
@@ -551,7 +564,9 @@ def test_no_remote_or_worker_module_builds_a_credentialed_git_env():
     assert callers == {"api/startup.py"}
 
 
-@pytest.mark.parametrize("remote", [{"server": "another-token"}], indirect=True)
+@pytest.mark.parametrize(
+    "remote", [pytest.param({"server": "another-token"}, id="wrong-token")], indirect=True
+)
 async def test_a_verbose_curl_never_prints_the_header_into_a_stop(remote, monkeypatch):
     monkeypatch.setenv("GIT_CURL_VERBOSE", "1")  # beats GIT_TRACE_CURL, and prints to stderr
     monkeypatch.setenv("GIT_TRACE_REDACT", "0")
