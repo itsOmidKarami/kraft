@@ -85,7 +85,8 @@
 @media (max-width: 767px) {
   .hn-page { flex-direction: column; overflow: auto; }
   .hn-list { width: auto; border-right: 0; border-bottom: 1px solid var(--line); max-height: 220px; }
-  .hn-stage { min-height: 520px; }
+  /* The side pane slides past the stage's edge as it opens or shuts: no scrollbar for it. */
+  .hn-stage { min-height: 520px; overflow-x: clip; }
 }
 /* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
 .hn-row { padding-block: calc(3px + var(--row-pad-add)); }

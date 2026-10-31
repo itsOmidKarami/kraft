@@ -28,6 +28,41 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+def health_pid(port: int) -> int | None:
+    """The pid in whatever answers `/api/health` on `port`, or None for no answer."""
+    with contextlib.suppress(httpx.HTTPError, ValueError, AttributeError):
+        return httpx.get(f"http://127.0.0.1:{port}/api/health", timeout=2.0).json().get("pid")
+    return None
+
+
+def on_a_free_port(start, owns, stop, *, attempts: int = 3, timeout: float = 15.0):
+    """`start(port)` on a free number, until `owns(handle, port)` says what it
+    started is listening there itself. Returns `(handle, port)`.
+
+    `_free_port` closes its socket before the thing started binds the number,
+    so another xdist worker can take it in between. `owns` answers None when
+    the start lost it that way, False for not yet: a lost start is
+    `stop(handle)`ped and tried again on a fresh number. Not up by `timeout`
+    is no race but a failure, stopped and raised at once, so a test's own
+    cleanup still runs inside pytest's 120s timeout."""
+    for _ in range(attempts):
+        port = _free_port()
+        handle = start(port)
+        try:
+            deadline = time.monotonic() + timeout
+            while (state := owns(handle, port)) is False:
+                if time.monotonic() > deadline:
+                    raise TimeoutError(f"not up on port {port} after {timeout:.0f}s")
+                time.sleep(0.05)
+        except BaseException:
+            stop(handle)
+            raise
+        if state:
+            return handle, port
+        stop(handle)
+    raise RuntimeError(f"another listener took its port on all {attempts} attempts")
+
+
 @dataclass
 class Server:
     proc: subprocess.Popen
