@@ -490,6 +490,14 @@
 /project/contributing#cut-a-release-maintainers: /project/contributing#contribute-a-change
 /project/contributing#related: /project/contributing#next-steps
 /project/whats-new#looking-ahead: /project/whats-new
+/project/whats-new#what-needs-action-when-you-upgrade-from-14: /guides/run/upgrade-from-1-4
+/project/whats-new#a-new-interface-built-around-what-needs-you: /project/whats-new#kraft-20-a-place-to-work-not-just-an-engine
+/project/whats-new#review-the-way-you-would-on-a-code-host: /project/whats-new#kraft-20-a-place-to-work-not-just-an-engine
+/project/whats-new#shape-the-work-from-its-page: /project/whats-new#kraft-20-a-place-to-work-not-just-an-engine
+/project/whats-new#one-config-directory-named-for-what-it-holds: /reference/changes-from-1-4#config-directory-and-files
+/project/whats-new#repo-connect-reads-more-of-the-repo: /project/whats-new#kraft-20-a-place-to-work-not-just-an-engine
+/project/whats-new#safer-to-share: /project/whats-new#kraft-20-a-place-to-work-not-just-an-engine
+/project/whats-new#why-20-so-soon-after-10: /project/whats-new#kraft-20-a-place-to-work-not-just-an-engine
 /reference/cli/item#target-a-repo: /reference/cli/item#filing-a-work-item
 /reference/cli/repo#repo-settings: /reference/cli/repo#related
 /reference/web-ui/board#keyboard: /reference/web-ui/sidebar-search-and-keyboard#keyboard-shortcuts

@@ -37,7 +37,7 @@ their agent steps on Claude Code, and any step can
 [switch to another agent](https://kraft-sdlc.dev/guides/harnesses/switch-harness).
 
 The [releases](https://github.com/itsOmidKarami/kraft/releases) page says what
-each version adds. Coming from 1.4? [What's new in 2.0](https://kraft-sdlc.dev/project/whats-new)
+each version adds. Coming from 1.4? [Upgrade from 1.4](https://kraft-sdlc.dev/guides/run/upgrade-from-1-4)
 says what to check before you upgrade.
 
 [![The Kraft board in the dark Ink look with a violet accent: filters for chain, gate and stop reason above work items grouped by status, Needs you first with each item's one button (Review at a gate, Retry, Raise cap, Answer, Resume and Raise budget on the stopped ones), and Running below it, with a Select all link on every group and a ? shortcuts button in the toolbar](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)](https://kraft-sdlc.dev/demo/)
