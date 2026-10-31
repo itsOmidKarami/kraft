@@ -726,9 +726,19 @@ async def _add_repo(body: RepoBody, st, *, hold: bool = False) -> dict:
         "stopped",
         "missing_tools",
     )
+    # Told so connect need not ask for the forge accounts to show a test of an API one.
+    named = body.forge_account
+    known = st.forges.accounts if st.forges else {}
+    found = (
+        (named, known[named])
+        if named in known
+        else forges_mod.default_account(st.forges or forges_mod.ForgesFile(), probed["remote_host"])
+    )
+    api = found[0] if found and found[1].client == "api" else None
     return {
         **entry,
         **{k: probed[k] for k in told},
+        **({"api_account": api} if api else {}),
         **_failed(probed),
         **({"held": HELD} if hold else {}),
     }

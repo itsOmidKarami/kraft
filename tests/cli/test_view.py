@@ -165,8 +165,18 @@ def test_show_says_a_queued_item_is_queued_since_when_for_which_verb_and_why(
             {"status": "needs_human", "stop": {"kind": "checkout"}, "stop_reason": "in use"},
             ["stop_reason in use", "stop_kind checkout"],
         ),
+        (
+            {
+                "stop": {
+                    "kind": "infra",
+                    "facts": {"cause": "forge_auth", "sso_url": "https://github.com/sso?x=1"},
+                }
+            },
+            ["sso_url https://github.com/sso?x=1"],
+        ),
+        ({"stop": {"kind": "infra", "facts": {"sso_url": "https://github.com/sso\x1b[2J"}}}, []),
     ],
-    ids=["in-place", "worktree", "checkout-stop"],
+    ids=["in-place", "worktree", "checkout-stop", "sso-stop", "unsafe-sso-address-not-printed"],
 )
 def test_show_marks_an_in_place_item_and_names_the_kind_of_its_stop(
     monkeypatch, capsys, detail, printed
@@ -182,6 +192,7 @@ def test_show_marks_an_in_place_item_and_names_the_kind_of_its_stop(
     rows = [" ".join(r.split()) for r in out.splitlines()]
     assert all(line in rows for line in printed)
     assert ("in_place" in out) is bool(detail.get("in_place"))
+    assert ("\x1b" in out) is False
 
 
 def test_show_lists_what_a_blocked_item_comes_after(monkeypatch, capsys):

@@ -4,7 +4,7 @@ import type { ItemAction, KraftEvent, StopLimit } from "../../../types";
 import { admits, budgetRaise, headerState, archivable, NOT_RAISABLE, offersRaise, RAISE_REFUSED, RELEASED, strandedOneOff } from "../../item/status";
 import { doneText, gateMessage, materialized } from "../../item/chainValues";
 import { taskName } from "../../item/paths";
-import { BROKEN_BASE_TEXT, brokenBase, FORGE_LOGIN_HINT, failedFix, keptLine } from "../../item/cause";
+import { BROKEN_BASE_TEXT, brokenBase, failedFix, forgeHint, keptLine } from "../../item/cause";
 import { escalationsOf, ESCALATION } from "../../item/nodeGraph";
 import { limitPolicy } from "../../item/limitPolicy";
 import type { ItemDetail } from "../../item/useItem";
@@ -26,7 +26,7 @@ export interface Card {
   title: string;
   where?: string;
   text?: string;
-  /** What to do about it, when it is not a button: the forge CLI to sign in (`FORGE_LOGIN_HINT`; `backticks` mark commands). */
+  /** What to do about it, when it is not a button: the forge CLI to sign in (`forgeHint`; `backticks` mark commands). */
   hint?: string;
   /** Label, value, and for a fact that is another work item, its id: the value opens it. */
   facts: [string, string, string?][];
@@ -74,13 +74,13 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
   switch (item.display_status) {
     case "failed": {
       if (!stop) return null;
-      // The desktop's card, fact for fact: what the run kept, then the stop's own facts, and never `cause`, which picks the hint.
-      const fs = Object.entries(facts).flatMap(([k, v]) => (k !== "cause" && str(v) ? [[k, str(v)!] as [string, string]] : []));
+      // The desktop's card, fact for fact: what the run kept, then the stop's own facts, and never `cause`, which picks the hint, or `sso_url`, which the hint shows.
+      const fs = Object.entries(facts).flatMap(([k, v]) => (k !== "cause" && k !== "sso_url" && str(v) ? [[k, str(v)!] as [string, string]] : []));
       const kept = keptLine(item, fileCount);
       const keptFact: [string, string][] = kept ? [["work kept", kept]] : [];
       return {
         tone: "bad", title: "Failed", where, text: stop.reason ?? undefined,
-        ...(failedFix(item) === "forge_login" && { hint: FORGE_LOGIN_HINT }),
+        ...(forgeHint(item) && { hint: forgeHint(item)! }),
         facts: [...keptFact, ...fs.slice(0, 3 - keptFact.length), ...spent(item)],
       };
     }

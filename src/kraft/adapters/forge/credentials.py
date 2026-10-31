@@ -25,6 +25,7 @@ from urllib.parse import urlsplit
 from kraft import redact
 from kraft.config import ConfigError, RepoEntry
 from kraft.forges import ForgeAccount, ForgesFile, env_name_problem
+from kraft.paths import kraft_home
 
 CREDENTIAL_TIMEOUT_S = 10.0
 
@@ -321,6 +322,23 @@ async def read_token(
     redact.register(token)
     redact.register(basic_form(token, source.kind))
     return token
+
+
+def write_pasted(name: str, value: str) -> Path:
+    """A pasted token, in a file only the server's user can open: its directory 0700
+    (an existing one too), the file 0600 from its first byte, replaced whole."""
+    folder = kraft_home() / "secrets"
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    folder.chmod(0o700)
+    fd, temp = tempfile.mkstemp(dir=folder, prefix=".pasted-")  # mkstemp opens 0600
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(value + "\n")
+        os.replace(temp, folder / name)
+    except BaseException:
+        Path(temp).unlink(missing_ok=True)
+        raise
+    return folder / name
 
 
 def take_env(names: Iterable[str]) -> list[str]:

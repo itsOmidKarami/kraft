@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from kraft.adapters.forge import git
-from kraft.adapters.forge.models import ForgeError, Reason, reason_for
+from kraft.adapters.forge.models import ForgeError, Reason, reason_for, safe_sso_url
 from kraft.config import _REMOTE, git_read
 
 #: Values `gh api` expands itself, so they go as `-F` and nothing else does.
@@ -178,7 +178,7 @@ def _flags(fields: Mapping[str, Field] | None) -> list[str]:
 
 def _sso_url(header: str) -> str:
     match = re.search(r"url=(\S+)", header)
-    return match[1] if match else ""
+    return safe_sso_url(match[1]) if match else ""
 
 
 class CliTransport:

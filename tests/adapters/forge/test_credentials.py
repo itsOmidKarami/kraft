@@ -521,3 +521,17 @@ def test_a_token_file_under_a_closed_directory_never_stops_boot(tmp_path, monkey
     path.write_text("accounts:\n  gh: {token: {from: file, file: /closed/tok}}\nbad: [\n")
     credentials.set_secret_files(path)
     assert credentials.secret_files() == (Path("/closed/tok"),)
+
+
+def test_a_pasted_token_is_0600_in_a_0700_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "home"))
+    secrets = tmp_path / "home" / "secrets"
+    secrets.mkdir(parents=True)
+    secrets.chmod(0o755)
+    path = credentials.write_pasted("corp", TOK)
+    assert path == secrets / "corp" and path.read_text().strip() == TOK
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert secrets.stat().st_mode & 0o777 == 0o700
+    credentials.write_pasted("corp", TOK + "2")
+    assert path.read_text().strip() == TOK + "2"
+    assert [p.name for p in secrets.iterdir()] == ["corp"]  # no temp file left

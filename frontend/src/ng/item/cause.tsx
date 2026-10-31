@@ -1,20 +1,30 @@
 import { Fragment, type ReactNode } from "react";
 import { plural } from "../../format";
 import type { KraftEvent } from "../../types";
+import { LinkButton } from "../ui/LinkButton";
 import { targetedWords } from "./TestsLine";
 import type { ItemDetail } from "./useItem";
 
 /** What a stop's `facts.cause` says to do about it, in one place for the desktop's state card and the phone's: a
- *  refused forge credential is fixed on the server's machine (Kraft holds no token), a stranded claim just needs a
+ *  refused forge credential is fixed on the server's machine (Kraft holds no token), one that only needs single
+ *  sign-on is authorized on the forge's website, a stranded claim just needs a
  *  retry, and any other infrastructure stop, or one naming no cause, says where to look. */
-export type FailedFix = "forge_login" | "retry" | "repo";
+export type FailedFix = "forge_login" | "forge_sso" | "retry" | "repo";
 
 export const causeOf = (item: Pick<ItemDetail, "stop">): unknown => (item.stop?.facts as Record<string, unknown> | undefined)?.cause;
+
+/** `facts.sso_url` when it is an `https://` address of printable ASCII and no backtick (the server's `safe_sso_url` and
+ *  the console's `_sso_url` agree; it becomes a link, so nothing else gets through). */
+const SSO_URL = /^https:\/\/[!-_a-~]+$/;
+const ssoUrl = (item: Pick<ItemDetail, "stop">): string | null => {
+  const url = (item.stop?.facts as Record<string, unknown> | undefined)?.sso_url;
+  return typeof url === "string" && SSO_URL.test(url) ? url : null;
+};
 
 /** What the failed card offers besides Retry and Escalate (a forge task's failure carries its cause on a `failed` stop too). */
 export function failedFix(item: Pick<ItemDetail, "stop">): FailedFix {
   const cause = causeOf(item);
-  if (cause === "forge_auth") return "forge_login";
+  if (cause === "forge_auth") return ssoUrl(item) ? "forge_sso" : "forge_login";
   if (item.stop?.kind !== "infra" || cause === "stranded") return "retry";
   return "repo";
 }
@@ -23,6 +33,24 @@ export function failedFix(item: Pick<ItemDetail, "stop">): FailedFix {
  *  GitHub's, `glab` GitLab's (`kraft.adapters.forge`); the repo's settings hold no token. Backticks mark the commands. */
 export const FORGE_LOGIN_HINT =
   "Sign the forge CLI in on the server's machine: `gh auth login`, or `glab auth login` for GitLab. If git itself can't authenticate, check its credentials there too (`gh auth setup-git`, your SSH key or credential helper). Then Retry.";
+
+/** The fix for `forge_sso`: the forge accepted the token but wants it authorized for the organization. The address
+ *  comes last, so a long one wraps with nothing after it. */
+export const FORGE_SSO_HINT = "Open this address to authorize the forge CLI's token for single sign-on, then Retry: {sso_url}";
+
+/** The hint under a failed forge stop (`FORGE_LOGIN_HINT` or `FORGE_SSO_HINT` with its address), or null for any other. */
+export function forgeHint(item: Pick<ItemDetail, "stop">): string | null {
+  const fix = failedFix(item);
+  return fix === "forge_sso" ? FORGE_SSO_HINT.replace("{sso_url}", ssoUrl(item) ?? "") : fix === "forge_login" ? FORGE_LOGIN_HINT : null;
+}
+
+/** A forge hint as the cards show it: the SSO hint's address is a link, any other hint is `withCode`. */
+export function hintText(hint: string): ReactNode {
+  const [head] = FORGE_SSO_HINT.split("{sso_url}");
+  const url = hint.slice(head.length);
+  if (!hint.startsWith(head) || !SSO_URL.test(url)) return withCode(hint);
+  return <>{head}<LinkButton inline href={url} target="_blank" rel="noopener noreferrer">{url}</LinkButton></>;
+}
 
 /** The words of `text` with each `backticked` run as <code>. */
 export function withCode(text: string): ReactNode {
@@ -67,8 +95,8 @@ export function failureFacts(item: ItemDetail): { rows: [string, ReactNode][]; s
   if (scopes.length) rows.push(["tests failed", <ul key="scopes" className="item-card-list">{scopes.map((s, i) => <li key={i}>{scopeLine(s)}</li>)}</ul>]);
   const why = CAUSE_WORDS[text(facts.cause) ?? ""];
   if (why) rows.push(["why", why]);
-  // The scope's own keys (and the list) are the "tests failed" row above, not facts of their own.
-  const shown = new Set(["cause", "failed_scopes", ...(scopes.length ? ["command", "scope", "exit_code", "area", "setup", "session_id"] : [])]);
+  // `sso_url` is in the hint, as a link. The scope's own keys (and the list) are the "tests failed" row above, not facts of their own.
+  const shown = new Set(["cause", "sso_url", "failed_scopes", ...(scopes.length ? ["command", "scope", "exit_code", "area", "setup", "session_id"] : [])]);
   for (const [k, v] of Object.entries(facts)) if (!shown.has(k) && text(v)) rows.push([k, text(v)!]);
   return { rows, structured: scopes.length > 0 };
 }

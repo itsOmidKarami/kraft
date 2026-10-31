@@ -104,3 +104,38 @@ origin: src/kraft/api/routes/repos.py
 IF forges.yaml does not load, THEN the system SHALL name the key and SHALL NOT quote its value or chain the validation error.
 enforced-by: tests/test_forges.py::test_a_bad_account_is_refused_naming_the_file_and_key[token-as-a-string]
 origin: src/kraft/forges.py §ForgesFile.load
+
+## REQ pasted-token-is-never-echoed
+WHEN a person pastes a token, the system SHALL write it to a 0600 file in a 0700 directory and SHALL NOT return it in any answer, a refusal included.
+enforced-by: tests/api/test_forges.py::test_a_pasted_token_is_written_private_and_never_echoed[pasted], tests/api/test_forges.py::test_a_pasted_token_is_written_private_and_never_echoed[pasted-twice], tests/api/test_forges.py::test_a_pasted_token_is_written_private_and_never_echoed[missing-kind], tests/api/test_forges.py::test_a_pasted_token_is_written_private_and_never_echoed[not-json], tests/api/test_forges.py::test_a_pasted_token_is_written_private_and_never_echoed[value-not-a-string], tests/api/test_forges.py::test_a_pasted_token_is_written_private_and_never_echoed[kind-is-the-value], tests/cli/test_repos_connect_api.py::test_a_token_on_stdin_reaches_only_set_forge_token, tests/cli/test_forge.py::test_a_token_is_read_from_stdin_never_argv[add-pasted], tests/cli/test_forge.py::test_a_token_is_read_from_stdin_never_argv[edit-pasted]
+origin: src/kraft/api/routes/forges.py
+
+## REQ command-source-is-set-on-the-servers-machine
+IF an HTTP request sets a `command` source, THEN the system SHALL refuse it.
+enforced-by: tests/api/test_forges.py::test_a_refused_add_writes_nothing[command-source-403], tests/api/test_forges.py::test_edit_changes_only_the_fields_given[command-403]
+origin: src/kraft/api/routes/forges.py
+
+## REQ routes-protect-a-new-source-at-once
+WHEN a route saves a new `env` or `file` token source, the system SHALL remove the variable from its environment or refuse the file to a sandbox before the answer returns.
+enforced-by: tests/api/test_forges.py::test_a_new_source_is_protected_at_once[add-env], tests/api/test_forges.py::test_a_new_source_is_protected_at_once[add-file], tests/api/test_forges.py::test_a_new_source_is_protected_at_once[edit-file], tests/api/test_forges.py::test_a_new_source_is_protected_at_once[edit-env]
+origin: src/kraft/api/routes/forges.py
+
+## REQ connect-without-api-flags-is-unchanged
+WHILE a person passes no API flag and no matching API account exists, the system SHALL connect a repo with no new prompt and no forge account call before the repo is connected.
+enforced-by: tests/cli/test_repos_connect.py::test_an_existing_user_sees_no_change[github-https-terminal], tests/cli/test_repos_connect.py::test_an_existing_user_sees_no_change[github-https-no-terminal], tests/cli/test_repos_connect.py::test_an_existing_user_sees_no_change[github-ssh-terminal], tests/cli/test_repos_connect.py::test_an_existing_user_sees_no_change[github-ssh-no-terminal], tests/cli/test_repos_connect.py::test_an_existing_user_sees_no_change[no-origin-terminal], tests/cli/test_repos_connect.py::test_an_existing_user_sees_no_change[no-origin-no-terminal]
+origin: src/kraft/cli/repo.py
+
+## REQ a-token-is-never-a-variable-name
+IF a name given for an `env` source starts with a known token prefix, THEN the system SHALL refuse it in fixed words that do not repeat the name.
+enforced-by: tests/test_forges.py::test_an_env_name_kraft_needs_is_never_a_source[ghp_FAKEFAKEFAKE0123-True], tests/test_forges.py::test_an_env_name_kraft_needs_is_never_a_source[github_pat_FAKEFAKE0123-True], tests/test_forges.py::test_an_env_name_kraft_needs_is_never_a_source[gho_FAKEFAKEFAKE0123-True], tests/cli/test_repos_connect_api.py::test_an_api_account_asks_where_the_token_comes_from_only_when_git_has_none[env-refuses-a-pasted-token]
+origin: src/kraft/forges.py
+
+## REQ sso-stop-names-the-authorize-link
+WHEN a forge refuses a token and names an `https://` single sign-on address with no whitespace or backtick, the system SHALL put that address in the stop's facts and reason, and SHALL drop any other address.
+enforced-by: tests/executor/test_walk_forge_cause.py::test_a_refused_token_stop_carries_the_sso_address_only_when_it_is_safe[fix-loop-sso-on-a-cli-account], tests/executor/test_walk_forge_cause.py::test_a_refused_token_stop_carries_the_sso_address_only_when_it_is_safe[no-loop-sso-on-a-cli-account], tests/executor/test_walk_forge_cause.py::test_a_refused_token_stop_carries_the_sso_address_only_when_it_is_safe[fix-loop-backtick-dropped], tests/executor/test_walk_forge_cause.py::test_a_refused_token_stop_carries_the_sso_address_only_when_it_is_safe[no-loop-non-https-dropped]
+origin: src/kraft/executor/walk.py
+
+## REQ http-write-never-borrows-another-accounts-secret
+WHEN a POST or PATCH on /api/forges names an env variable or a file (by real path) another account reads, or a file under Kraft's secrets/ other than secrets/<name>, the system SHALL refuse with 403 in fixed words naming neither the variable nor the path, and SHALL leave forges.yaml unchanged.
+enforced-by: tests/api/test_forges.py::test_an_http_write_never_points_an_account_at_a_secret_it_does_not_own[env-another-reads-post], tests/api/test_forges.py::test_an_http_write_never_points_an_account_at_a_secret_it_does_not_own[env-another-reads-patch], tests/api/test_forges.py::test_an_http_write_never_points_an_account_at_a_secret_it_does_not_own[file-another-reads-post], tests/api/test_forges.py::test_an_http_write_never_points_an_account_at_a_secret_it_does_not_own[file-another-reads-patch], tests/api/test_forges.py::test_an_http_write_never_points_an_account_at_a_secret_it_does_not_own[link-to-a-file-another-reads-post], tests/api/test_forges.py::test_an_http_write_never_points_an_account_at_a_secret_it_does_not_own[link-to-a-file-another-reads-patch], tests/api/test_forges.py::test_an_http_write_never_points_an_account_at_a_secret_it_does_not_own[another-name-post], tests/api/test_forges.py::test_an_http_write_never_points_an_account_at_a_secret_it_does_not_own[another-name-patch], tests/api/test_forges.py::test_an_http_write_never_points_an_account_at_a_secret_it_does_not_own[another-name-in-another-case-post], tests/api/test_forges.py::test_an_http_write_never_points_an_account_at_a_secret_it_does_not_own[another-name-in-another-case-patch], tests/api/test_forges.py::test_an_http_write_never_points_an_account_at_a_secret_it_does_not_own[file-another-reads-in-another-case-post], tests/api/test_forges.py::test_an_http_write_never_points_an_account_at_a_secret_it_does_not_own[file-another-reads-in-another-case-patch]
+origin: src/kraft/api/routes/forges.py §_no_shared

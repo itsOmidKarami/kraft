@@ -3,7 +3,7 @@ import type { DisplayStatus, WorkItemStop } from "../../../types";
 import type { EventType } from "../../../types/vocab.generated";
 import { chainGraph } from "../../item/graph";
 import { detail } from "../../item/testkit";
-import { BROKEN_BASE_TEXT, FORGE_LOGIN_HINT } from "../../item/cause";
+import { BROKEN_BASE_TEXT, FORGE_LOGIN_HINT, FORGE_SSO_HINT } from "../../item/cause";
 import { cardOf, kebabOf, nodeSub, pairOf } from "./model";
 
 const stop = (kind: WorkItemStop["kind"], over: Partial<WorkItemStop> = {}): WorkItemStop => ({ kind, node: "verification", resume_at: null, reason: null, ...over });
@@ -177,6 +177,17 @@ describe("the failed card's cause (R15b-01)", () => {
     const card = cardOf(item);
     expect(card?.facts).toEqual([["command", "gh pr create"]]);
     expect(card?.hint).toBe(hint ? FORGE_LOGIN_HINT : undefined);
+  });
+
+  it.each([
+    ["forge_auth with an sso_url hints sso", "https://github.com/orgs/a/sso?x=1", FORGE_SSO_HINT.replace("{sso_url}", "https://github.com/orgs/a/sso?x=1")],
+    ["forge_auth with a non-https sso_url hints the login", "http://github.com/sso", FORGE_LOGIN_HINT],
+    ["forge_auth with a backticked sso_url hints the login", "https://github.com/sso`id`", FORGE_LOGIN_HINT],
+    ["forge_auth with a control character in the sso_url hints the login", "https://github.com/sso\u0007bell", FORGE_LOGIN_HINT],
+  ] as const)("%s, and the address is never a fact of its own", (_name, sso_url, hint) => {
+    const card = cardOf(mk("failed", stop("failed", { facts: { cause: "forge_auth", sso_url } })));
+    expect(card?.hint).toBe(hint);
+    expect(card?.facts).toEqual([]);
   });
 
   it("says what the run kept, as the desktop's card does: branch, files, passing tests", () => {

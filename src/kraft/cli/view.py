@@ -130,6 +130,13 @@ def _render_show(item: dict, full: dict | None = None) -> str:
         if kind := (full.get("stop") or {}).get("kind"):
             pairs.insert(at, ("stop_kind", kind))
             at += 1
+        # The reason no longer carries the address; this row does (plain text, the safe form).
+        # Imported here: a module-level import drags the server onto the permission hook's path.
+        from kraft.adapters.forge.models import safe_sso_url
+
+        if sso := safe_sso_url(((full.get("stop") or {}).get("facts") or {}).get("sso_url")):
+            pairs.insert(at, ("sso_url", sso))
+            at += 1
         if (hint := _raise_hint(full)) and not item.get("suggested_action"):
             pairs.insert(at, ("next", hint))
     return render.kv(pairs)

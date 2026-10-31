@@ -4,16 +4,16 @@ repo with no commit, and how connect names what it found."""
 from __future__ import annotations
 
 import asyncio
-import os
 import subprocess
-from pathlib import Path
+import sys
 
 import pytest
-import yaml
 from support.addons import a_terminal, library_outcome, repo_with_library
-from support.harness import commit_all, git
+from support.connect import _accounts, _forges_yaml, _origin, _posted, _prompts, _spy
+from support.harness import commit_all
 
 from kraft import cli, client
+from kraft import config as config_mod
 
 # `app` and `repo` fixtures: tests/conftest.py.
 
@@ -330,46 +330,7 @@ def test_a_library_that_cannot_be_checked_does_not_fail_the_connect(
     assert "repo library not checked: kraft 502: origin did not answer" in out
 
 
-def _origin(repo, url):
-    """An origin (none for None), and a test command found, so the only
-    questions are the forge's."""
-    (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n[tool.pytest.ini_options]\n")
-    (repo / "uv.lock").write_text("version = 1\n")
-    commit_all(repo)
-    if url:
-        git(repo, "remote", "add", "origin", url)
-
-
-def _forges_yaml():
-    return Path(os.environ["KRAFT_CONFIG_DIR"]) / "forges.yaml"
-
-
-def _accounts():
-    return yaml.safe_load(_forges_yaml().read_text())["accounts"]
-
-
-def _prompts(monkeypatch, answers):
-    """A terminal; every prompt recorded, answered from `answers`."""
-    seen, left = [], iter(answers)
-    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda prompt="": seen.append(prompt) or next(left))
-    return seen
-
-
-def _posted(monkeypatch):
-    """Every body `POST /repos` was sent."""
-    posted, post = [], client.transport._post
-
-    async def spy(path, payload, **kw):
-        if path == "/repos":
-            posted.append(payload)
-        return await post(path, payload, **kw)
-
-    monkeypatch.setattr(client.transport, "_post", spy)
-    return posted
-
-
+@pytest.mark.parametrize("terminal", [True, False], ids=["terminal", "no-terminal"])
 @pytest.mark.parametrize(
     "remote, forge, project",
     [
@@ -378,17 +339,36 @@ def _posted(monkeypatch):
         pytest.param(None, None, None, id="no-origin"),
     ],
 )
-def test_an_existing_user_sees_no_change(app, capsys, repo, monkeypatch, remote, forge, project):
+def test_an_existing_user_sees_no_change(
+    app, capsys, repo, monkeypatch, remote, forge, project, terminal
+):
     """The spec's anti-goal: no forges.yaml, and connect asks what it asked
     before the forge questions existed -- nothing here -- posts the body it
-    posted, and writes no forges.yaml."""
+    posted, and writes no forges.yaml. The forge's CLI missing from PATH changes
+    nothing either: an account is only made on a request for the API."""
     _origin(repo, remote)
-    seen, posted = _prompts(monkeypatch, []), _posted(monkeypatch)
+    monkeypatch.setattr("shutil.which", lambda *a, **kw: None)
+    seen = _prompts(monkeypatch, []) if terminal else []
+    posted = _posted(monkeypatch)
+    calls = _spy(
+        monkeypatch,
+        *("ensure_repo", "list_forges", "add_forge", "test_forge", "edit_forge", "set_forge_token"),
+    )
+    git_reads = []  # the CLI's own `git remote get-url`: connect never needs a second look
+    real = config_mod.git_read
+
+    def spy(*a, **kw):
+        if sys._getframe(1).f_globals["__name__"].startswith("kraft.cli"):  # not the server's
+            git_reads.append(a)
+        return real(*a, **kw)
+
+    monkeypatch.setattr(config_mod, "git_read", spy)
     cli.main(["repo", "connect", str(repo)])
     [entry] = asyncio.run(client.repos())
     assert (seen, posted) == ([], [{"path": str(repo)}])
     assert (entry["forge"], entry["project"], entry.get("forge_account")) == (forge, project, None)
     assert not _forges_yaml().exists()
+    assert [c[0] for c in calls] == ["ensure_repo"] and git_reads == []
 
 
 _SELF_HOSTED = "git@code.corp.example:gitlab/team/app.git"
