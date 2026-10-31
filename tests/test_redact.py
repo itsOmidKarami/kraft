@@ -9,13 +9,19 @@ from kraft.adapters.forge.git import run_git
 from kraft.adapters.forge.models import ForgeError
 
 
+@pytest.fixture(autouse=True)
+def _no_secrets(monkeypatch):
+    monkeypatch.setattr(redact, "_secrets", ())
+
+
 async def _forge_error(tok, **_):
     return str(ForgeError(f"x {tok}"))
 
 
 async def _git_stderr(tok, tmp_path, **_):
     with pytest.raises(ForgeError) as caught:
-        await run_git(tmp_path, ["sh", "-c", f"echo {tok} >&2; exit 1"])
+        # Through env, so the token reaches the message only by git's stderr.
+        await run_git(tmp_path, ["sh", "-c", 'echo "$T" >&2; exit 1'], env={"T": tok})
     return str(caught.value)
 
 
