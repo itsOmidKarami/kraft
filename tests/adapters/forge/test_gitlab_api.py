@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+import os
+import re
+import secrets
+import shutil
+import stat
+from types import SimpleNamespace
+
 import httpx
 import pytest
 from support.harness import git, make_repo
@@ -9,7 +16,7 @@ from support.harness import git, make_repo
 from kraft.adapters.forge import credentials
 from kraft.adapters.forge.credentials import ReadContext, set_token_context
 from kraft.adapters.forge.gitlab_api import GitLabApi
-from kraft.adapters.forge.models import ForgeError
+from kraft.adapters.forge.models import MR, ForgeError
 from kraft.forges import ForgeAccount, TokenSource
 
 TOK = "tok-0123456789"
@@ -210,3 +217,128 @@ async def test_every_error_names_its_account_and_source(
     if reason:
         assert exc.reason == reason
     assert "LEAKMARK" not in exc.source
+
+
+@pytest.fixture
+def pushed(tmp_path, monkeypatch, mock_http):
+    """`GitLabApi` opening and labelling a merge request, then reading labels, with a real
+    `git push` to a local bare repo (`insteadOf` the GitLab URL) through a `git` that logs
+    its argv and environment. The token enters as in production: set, then `take_env`."""
+    tok = "glpat-" + secrets.token_hex(16)
+    monkeypatch.setattr(credentials, "_TAKEN", {})
+    monkeypatch.setenv("CORP_GL", tok)
+    credentials.take_env(["CORP_GL"])
+    log = tmp_path / "git.log"
+    wrapper = tmp_path / "wrap" / "git"
+    wrapper.parent.mkdir()
+    wrapper.write_text(
+        f'#!/bin/sh\n{{ printf "ARGV %s\\n" "$*"; env; }} >> {log}\n'
+        f'exec {shutil.which("git")} "$@"\n'
+    )
+    wrapper.chmod(wrapper.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{wrapper.parent}:{os.environ['PATH']}")
+
+    remote = f"{WEB}/team/app.git"
+    repo = checkout(tmp_path, remote)
+    bare = tmp_path / "origin.git"
+    git(tmp_path, "init", "-q", "--bare", str(bare))
+    git(repo, "config", f"url.{bare}.insteadOf", remote)
+    git(repo, "checkout", "-q", "-b", "kraft/abc")
+
+    def handler(request):
+        if request.url.path.endswith("/labels"):  # a 401 that quotes the token it was sent
+            sent = request.headers["authorization"]
+            return httpx.Response(401, json={"message": f"bad {sent}"})
+        return httpx.Response(200, json={"iid": 7, "web_url": "w", "labels": []})
+
+    m = mock_http(handler=handler)
+    api = GitLabApi("corp-gl", account(), http=m.transport)
+
+    async def run() -> SimpleNamespace:
+        await api.open_mr(repo=repo, branch="kraft/abc", base="main", title="t", body="b")
+        await api.set_labels(repo=repo, branch="kraft/abc", mr=MR(7, "w"), labels=("x",))
+        with pytest.raises(ForgeError) as err:
+            await api.labels(repo=repo)
+        return SimpleNamespace(
+            tok=tok,
+            git=log.read_text(),
+            config=(repo / ".git" / "config").read_text(),
+            err=f"{err.value} {err.value!r} {err.value.args}",
+            requests=m.requests,
+        )
+
+    return run
+
+
+@pytest.mark.parametrize(
+    "place",
+    [
+        pytest.param(
+            lambda r: "\n".join(x for x in r.git.splitlines() if x.startswith("ARGV")), id="argv"
+        ),
+        pytest.param(lambda r: r.git, id="git-env"),  # every line a hook would inherit, argv too
+        pytest.param(lambda r: r.config, id="git-config"),
+        pytest.param(lambda r: r.err, id="401-text"),
+    ],
+)
+async def test_a_gitlab_api_token_reaches_only_its_origin(pushed, place):
+    got = await pushed()
+    assert all(r.url.host == "code.corp.example" for r in got.requests)
+    assert any(r.headers["authorization"] == f"Bearer {got.tok}" for r in got.requests)
+    assert re.search(r"^ARGV .*\bpush\b", got.git, re.M), "git never pushed"
+    assert got.tok not in place(got)
+
+
+@pytest.mark.e2e("git")
+@pytest.mark.skipif(
+    not (os.environ.get("E2E_GITLAB_TOKEN") and os.environ.get("E2E_GITLAB_PROJECT")),
+    reason="e2e: needs E2E_GITLAB_TOKEN (a read_api token secret) and E2E_GITLAB_PROJECT "
+    "(namespace/project on gitlab.com); see the PR 5 plan's 'What the user creates later'",
+)
+async def test_gitlab_api_reads_a_real_gitlab_com_project(tmp_path):
+    """Read-only, against a project holding an open draft merge request on `kraft-e2e/fixture`,
+    a label `kraft-e2e`, and a pipeline whose `e2e` job prints `kraft-e2e`."""
+    from kraft.adapters.forge.probe import probe_account
+    from kraft.config import RepoEntry
+
+    project = os.environ["E2E_GITLAB_PROJECT"]
+    acct = ForgeAccount(
+        forge="gitlab",
+        client="api",
+        web_url="https://gitlab.com",
+        token=TokenSource(**{"from": "env", "env": "E2E_GITLAB_TOKEN", "kind": "pat"}),
+    )
+    credentials.take_env(["E2E_GITLAB_TOKEN"])
+    repo = checkout(tmp_path, f"https://gitlab.com/{project}.git")
+    api = GitLabApi("e2e-gl", acct)
+
+    probe = await probe_account(
+        "e2e-gl", acct, repos=[RepoEntry(path=str(repo))], worktrees=tmp_path / "wt"
+    )
+    assert probe.state == "ok"
+    assert probe.projects[str(repo)]["visible"] is True
+    assert await api._version(repo) is not None
+    assert "kraft-e2e" in [label.name for label in await api.labels(repo=repo)]
+    found = await api.find_mr(repo=repo, branch="kraft-e2e/fixture")
+    assert found and found.state == "open"
+    details = await api.mr_details(repo=repo, branch="kraft-e2e/fixture")
+    assert details and details.draft
+    listed = await api.pipelines(repo=repo, branch="kraft-e2e/fixture", base="main")
+    assert listed
+    jobs = {j.name: j for j in await api.jobs(repo=repo, pipeline_id=listed[0].id)}
+    assert "kraft-e2e" in await api.job_log(repo=repo, job_id=jobs["e2e"].id)
+    assert await api.merged_mrs(repo=repo, base="main", limit=5)
+
+    junk = "glpat-" + secrets.token_hex(16)
+    os.environ["E2E_GITLAB_JUNK"] = junk
+    credentials.take_env(["E2E_GITLAB_JUNK"])
+    bad = ForgeAccount(
+        forge="gitlab",
+        client="api",
+        web_url="https://gitlab.com",
+        token=TokenSource(**{"from": "env", "env": "E2E_GITLAB_JUNK", "kind": "pat"}),
+    )
+    with pytest.raises(ForgeError) as err:
+        await GitLabApi("e2e-junk", bad).labels(repo=repo)
+    assert err.value.reason == "auth" and err.value.account == "e2e-junk"
+    assert junk not in str(err.value)
