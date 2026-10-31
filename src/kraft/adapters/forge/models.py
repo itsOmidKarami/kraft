@@ -39,12 +39,12 @@ Reason = Literal[
 ]
 
 
-_SSO_URL = re.compile(r"https://[^\s`]+")
+_SSO_URL = re.compile(r"https://[!-_a-~]+")
 
 
 def safe_sso_url(url: object) -> str:
-    """`url` when it is an `https://` address with no whitespace or backtick (it is
-    shown as plain text and followed by a person), else ""."""
+    """`url` when it is an `https://` address of printable ASCII and no backtick (a person
+    follows it as a link; `ssoUrl` in the web and `_sso_url` in the console agree), else ""."""
     return url if isinstance(url, str) and _SSO_URL.fullmatch(url) else ""
 
 
