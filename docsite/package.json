@@ -9,7 +9,7 @@
   "dependencies": {
     "docus": "5.13.0",
     "better-sqlite3": "^12.11.1",
-    "nuxt": "^4.6.2"
+    "nuxt": "^4.6.3"
   },
   "overrides": {
     "fontless": {
