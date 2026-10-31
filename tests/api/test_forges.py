@@ -439,6 +439,27 @@ def test_edit_changes_only_the_fields_given(client, name, patch, status, changes
 
 
 @pytest.mark.parametrize(
+    ("method", "path", "body", "status"),
+    [
+        ("put", "/token", {"value": TOK, "kind": "pat"}, 403),
+        ("patch", "", {"token": {"from": "env", "env": "OTHER_GL", "kind": "pat"}}, 403),
+        ("patch", "", {"token": None}, 403),
+        ("patch", "", {"client": "cli"}, 403),
+        ("patch", "", {"default_for_host": True}, 200),
+    ],
+    ids=["put-token", "patch-token", "patch-token-null", "patch-client-cli", "patch-other-field"],
+)
+def test_a_command_token_is_not_replaced_from_the_browser(client, method, path, body, status):
+    _file(client).write_text(yaml.safe_dump({"accounts": {"corp": {**_ACCT, "token": COMMAND}}}))
+    assert client.post("/api/apply/reload").status_code == 200
+    reply = getattr(client, method)(f"/api/forges/corp{path}", json=body)
+    assert reply.status_code == status and TOK not in reply.text
+    assert status == 200 or "echo x" not in reply.text  # a row shows its own source
+    kept = read_yaml(_file(client))["accounts"]["corp"]["token"]
+    assert kept == COMMAND
+
+
+@pytest.mark.parametrize(
     ("patch", "survives"),
     [
         ({"api_url": "https://code.corp.example/api/v5"}, True),

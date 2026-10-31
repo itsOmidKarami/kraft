@@ -175,6 +175,13 @@ def _no_command(sent, updated: forges.ForgeAccount) -> None:
         raise HTTPException(403, _COMMAND_403)
 
 
+def _keeps_command(old: forges.ForgeAccount | None, replaces_token: bool) -> None:
+    """The file can gain a command source while a browser dialog is open, so the guard reads
+    the account as it is now: no write over HTTP replaces or erases a command."""
+    if replaces_token and old is not None and old.token and old.token.from_ == "command":
+        raise HTTPException(403, _COMMAND_403)
+
+
 def _no_shared(updated: forges.ForgesFile, name: str, sent) -> None:
     """A write over HTTP never points an account at a secret another account already reads,
     nor at another name's pasted file: the probe would send it to this account's host.
@@ -283,6 +290,7 @@ async def edit_forge(name: str, request: Request):
         if old is None:
             raise HTTPException(404, f"no forge account named {name!r}")
         sent = body.model_dump(exclude_unset=True)
+        _keeps_command(old, "token" in sent or sent.get("client") == "cli")
         fields = {**old.model_dump(by_alias=True, exclude_none=True), **sent}
         if fields.get("client") == "cli":  # gh/glab keep their own sign-in
             fields.pop("token", None)
@@ -321,6 +329,7 @@ async def set_token(name: str, request: Request):
         old = current.accounts.get(name)
         if old is None:
             raise HTTPException(404, f"no forge account named {name!r}")
+        _keeps_command(old, True)
         if old.client == "cli":
             raise HTTPException(
                 409, f"forge account {name!r} is client: cli, which keeps no token; edit it first"
