@@ -461,8 +461,8 @@ itself:
   390px wide, in light and dark. Take them from a seeded `just dev` instance
   (`just dev-seed` fills it), the "before" from `main` and the "after" from your
   branch.
-- Push the pictures to a separate `kraft/<branch>-screenshots` branch, not to the
-  pull request's own branch, and link them in the pull request body.
+- Attach the pictures to the pull request with `gh pr edit --attach`, not to a
+  branch, in a Before and After table in its body.
 
 A starter issue (`good first issue` or `help wanted`) says which screenshots it
 needs instead: none, or one before and after at 1280px in light. The
@@ -472,16 +472,26 @@ A screen that also appears in a README or docs screenshot (`.github/assets/`)
 is retaken with `just docs-screenshots` too; see the screen row under
 [User-facing docs](#user-facing-docs).
 
-In a cloud session, pushing that branch needs the user's approval in the session
-that does the pushing. Ask for it; do not assume it.
+Name each file for the state, the screen, the width and the theme
+(`before-board-1280-light.png`), write the table with those names as the image
+paths, and attach them:
 
-`kraft/pr-686-screenshots` is the example. It holds two files at its root, no
-folders and no code: `before-skipped-task.png` and `after-skipped-task.png`,
-named for the state and the screen. Pull request 686's body links them in a
-Before and After table, by their full `raw.githubusercontent.com` URLs pinned to
-the branch's commit. That pull request shows one screen at one width and one
-theme; with the four combinations, put the width and the theme in each file name
-as well.
+```bash
+gh pr edit N --body-file body.md \
+  --attach before-board-1280-light.png --attach after-board-1280-light.png
+```
+
+gh uploads each file the way dragging it into the description does and rewrites
+its path in the body into the file's `github.com/user-attachments` URL. Nothing
+is pushed, so there is no branch to clean up afterwards.
+
+`--attach` needs gh 2.99.0 or newer and a token with write access to the
+repository. Your own `gh auth login` has one. Actions' `GITHUB_TOKEN` does not
+count: the upload endpoint refuses it. A cloud session uses the token its
+environment stores as `SCREENSHOTS_GH_TOKEN`
+(`GH_TOKEN="$SCREENSHOTS_GH_TOKEN" gh pr edit ...`); a session without one says so
+and leaves the pictures to the user. A pull request from a fork has no write
+access, so drag the pictures into its description instead.
 
 ## Branch hygiene
 
