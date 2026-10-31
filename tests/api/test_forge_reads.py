@@ -286,3 +286,29 @@ def test_an_api_account_item_reads_through_its_account(
     assert got.status_code == 200, got.text
     assert built == [{"github": "corp-gh", "gitlab": "corp-gl"}[forge]]
     assert fake.calls[0][0] == "pipelines"
+
+
+@pytest.mark.parametrize(
+    "pin_forge, edit, want",
+    [
+        ("gitlab", {"forge": "github"}, "now says forge: github, was gitlab"),
+        ("github", {"client": "cli"}, "now says client: cli, was client: api"),
+        ("gitlab", {"client": "cli"}, "now says client: cli, was client: api"),
+    ],
+    ids=[
+        "gitlab-pin-account-now-github",
+        "github-pin-account-now-cli",
+        "gitlab-pin-account-now-cli",
+    ],
+)
+def test_a_pin_is_not_read_through_an_account_edited_under_it(
+    client, repo, monkeypatch, pin_forge, edit, want
+):
+    wid = _item(client, repo, monkeypatch, _spy())
+    _on_api_account(client, repo, monkeypatch, wid, forge=pin_forge)
+    accounts = client.app.state.forges.accounts
+    name = next(iter(accounts))
+    accounts[name] = accounts[name].model_copy(update=edit)
+    got = client.get(f"/api/work-items/{wid}/forge/pipelines")
+    assert got.status_code == 502
+    assert want in got.json()["detail"]

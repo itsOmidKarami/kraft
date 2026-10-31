@@ -140,7 +140,9 @@ def _log_handler(blob, location=_BLOB):
 
     def handler(req):
         if req.url.host == "api.github.com":
-            return httpx.Response(302, headers={"Location": location})
+            return httpx.Response(
+                302, headers={"Location": location, "Set-Cookie": "sess=abc; Domain=example"}
+            )
         if isinstance(blob, BaseException):
             raise blob
         return blob if isinstance(blob, httpx.Response) else httpx.Response(blob, text="the log")
@@ -261,6 +263,20 @@ async def test_the_download_hop_trusts_the_system_and_the_accounts_ca(mock_http,
     )
     await tr(mock_http(handler=_log_handler(200))).rest("GET", _LOGS, download=True)
     assert asked == [{}, {"plus_system": True}]
+
+
+@pytest.mark.parametrize(
+    ("plus_system", "more_than_ca_file"),
+    [(False, False), (True, True)],
+    ids=["ca-file-alone", "download-hop-adds-the-system-store"],
+)
+def test_the_download_hops_trust_holds_the_ca_and_more(tmp_path, plus_system, more_than_ca_file):
+    pem = certifi.contents().split("-----END CERTIFICATE-----")[0] + "-----END CERTIFICATE-----\n"
+    ca = tmp_path / "one.pem"
+    ca.write_text(pem)
+    ctx = http.ssl_context(acct(ca_file=str(ca)), plus_system=plus_system)
+    assert (ctx.cert_store_stats()["x509_ca"] > 1) is more_than_ca_file
+    assert ctx.cert_store_stats()["x509_ca"] >= 1
 
 
 async def _never(req):

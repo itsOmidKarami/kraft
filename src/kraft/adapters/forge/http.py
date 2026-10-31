@@ -159,10 +159,11 @@ class HttpTransport:
         if self._ctx is None:
             self._ctx = await asyncio.to_thread(ssl_context, self.account)
         blob = None
+        # The whole exchange, redirects and a log download included: httpx's own is per phase.
+        deadline = asyncio.get_running_loop().time() + self.timeout
         try:
-            # The whole exchange, redirects included: httpx's own timeout is per phase.
             async with (
-                asyncio.timeout(self.timeout),
+                asyncio.timeout_at(deadline),
                 httpx.AsyncClient(
                     follow_redirects=False,
                     verify=self._ctx,
@@ -218,9 +219,9 @@ class HttpTransport:
             ) from None
         if blob is None:
             raise AssertionError("unreachable")  # pragma: no cover
-        return await self._download(label, blob, tail)
+        return await self._download(label, blob, tail, deadline)
 
-    async def _download(self, label: str, url: str, tail: bool) -> ApiResponse:
+    async def _download(self, label: str, url: str, tail: bool, deadline: float) -> ApiResponse:
         """GitHub's pre-signed log URL, in a client of its own: no token, no GitHub headers,
         no cookies, no redirect. Every failure names the blob origin and never the URL (its
         query is the signature), and is `unreachable`: an expired signature is not a token stop."""
@@ -230,7 +231,7 @@ class HttpTransport:
             self._blob_ctx = await asyncio.to_thread(ssl_context, self.account, plus_system=True)
         try:
             async with (
-                asyncio.timeout(self.timeout),
+                asyncio.timeout_at(deadline),
                 httpx.AsyncClient(
                     follow_redirects=False,
                     verify=self._blob_ctx,

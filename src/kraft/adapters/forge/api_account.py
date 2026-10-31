@@ -88,13 +88,18 @@ class AccountTransport:
 
     async def _send(self, call) -> object:
         """`call(http)` with the account's token; a 401 re-reads the token once and retries
-        when it changed. An `env` source changes only with a restart, so it never re-reads."""
+        when it changed. An `env` source changes only with a restart, so it never re-reads.
+        A blob host's 401 (`unreachable`) says nothing of the token, so it never re-reads."""
         try:
             token = await self._token()
             try:
                 return await call(self.api._http_for(token))
             except ForgeError as exc:
-                if exc.status != 401 or self.api.account.source().from_ == "env":
+                if (
+                    exc.status != 401
+                    or exc.reason == "unreachable"
+                    or self.api.account.source().from_ == "env"
+                ):
                     raise
                 fresh = await self._token(fresh=True)
                 if fresh == token:
@@ -108,6 +113,7 @@ class AccountTransport:
         self, path: str | None, fields: Mapping[str, Field] | None
     ) -> tuple[str | None, Mapping[str, Field] | None]:
         """Fill the placeholders, reading the project only when there is one to fill."""
+        # A value of exactly `{branch}` is filled by `gh api -F`, not over HTTP; nothing sends one.
         api, want = self.api, self.api._VALUE_PLACEHOLDER
         valued = [
             k

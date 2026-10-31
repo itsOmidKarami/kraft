@@ -44,8 +44,8 @@ def test_resolve_returns_each_named_backend(name, cls):
     "name, says",
     [
         ("bitbucket", "bitbucket"),
-        ("gitlab-api", "built from its account"),
-        ("github-api", "built from its account"),
+        ("gitlab-api", "the gitlab-api backend is built from its account"),
+        ("github-api", "the github-api backend is built from its account"),
     ],
     ids=["unknown", "gitlab-api-is-built-from-its-account", "github-api-is-built-from-its-account"],
 )

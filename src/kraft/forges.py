@@ -96,7 +96,7 @@ def github_owner_name(project: str, repo_name: str) -> tuple[str, str]:
     without the remote. The run (`GitHubApi`) and doctor's probe both ask this, so they
     refuse a repository in the same words."""
     owner, _, name = project.partition("/")
-    if not owner or not name or "/" in name:
+    if not owner or not name or "/" in name or {owner, name} & {".", ".."}:
         raise ValueError(f"{repo_name} has no origin URL Kraft can read a GitHub repository from")
     return owner, name
 

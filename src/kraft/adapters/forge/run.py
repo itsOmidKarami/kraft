@@ -115,7 +115,7 @@ def resolve(name: str) -> Forge:
             return _DEV_FAKE
         case "github-api" | "gitlab-api":
             raise ForgeError(
-                "the gitlab-api backend is built from its account (run.api_forge), never by name"
+                f"the {name} backend is built from its account (run.api_forge), never by name"
             )
         case _:
             raise ForgeError(f"unknown forge backend {name!r}; known: gh, glab, fake")
@@ -358,7 +358,20 @@ def _pinned_api(pin, forges, forges_error=None) -> tuple[str, forges_mod.ForgeAc
             f"forge account {name} was removed; a person's kraft item retry "
             "re-pins to what is configured now"
         )
-    return name, forges.accounts[name]
+    acct = forges.accounts[name]
+    # api_forge picks its class from the account, so a changed account must stop here.
+    was = _BACKEND_FORGE[pin["backend"]]
+    if acct.forge != was:
+        raise ForgeError(
+            f"forge account {name} now says forge: {acct.forge}, was {was}; "
+            "a person's kraft item retry re-pins to what is configured now"
+        )
+    if acct.client != "api":
+        raise ForgeError(
+            f"forge account {name} now says client: cli, was client: api; "
+            "a person's kraft item retry re-pins to what is configured now"
+        )
+    return name, acct
 
 
 async def api_account_for(

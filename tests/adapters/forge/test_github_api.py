@@ -143,6 +143,12 @@ async def test_a_call_with_no_placeholder_reads_no_project(tmp_path, seen):
             "https://github.com/a/b/c.git", "can read a GitHub repository from", id="3-segments"
         ),
         pytest.param(
+            "https://github.com/../x.git", "can read a GitHub repository from", id="dotdot-owner"
+        ),
+        pytest.param(
+            "https://github.com/o/...git", "can read a GitHub repository from", id="dot-name"
+        ),
+        pytest.param(
             "https://oauth2:ghp_SECRET0000@evil.example/o/r.git",
             "different host",
             id="other-host-never-quotes-the-url",
@@ -366,3 +372,41 @@ async def test_github_api_reads_this_repo(tmp_path, monkeypatch):
         await GitHubApi("e2e-junk", bad).labels(repo=repo)
     assert err.value.reason == "auth" and err.value.account == "e2e-junk"
     assert junk not in str(err.value)
+
+
+async def test_a_blob_401_neither_re_reads_the_token_nor_repeats_the_call(
+    tmp_path, mock_http, monkeypatch
+):
+    path = tmp_path / "outside" / "token"
+    path.parent.mkdir()
+    path.write_text(TOK + "\n")
+    path.chmod(0o600)
+
+    async def context():
+        return credentials.ReadContext(repos=[], worktrees=tmp_path / "wt", expose=[])
+
+    credentials.set_token_context(context)
+    acct = account(from_="file", file=str(path))
+
+    def handler(req):
+        if req.url.host == "api.github.com":
+            return httpx.Response(302, headers={"Location": "https://blob.example/l?sig=S"})
+        return httpx.Response(401)
+
+    m = mock_http(handler=handler)
+    api = GitHubApi("corp-gh", acct, http=m.transport)
+    await credentials.token_for("corp-gh", acct)
+    path.write_text(NEW + "\n")  # a re-read would find a changed token, and retry
+    reads = []
+    real = credentials.read_token
+
+    async def spy(*a, **kw):
+        reads.append(1)
+        return await real(*a, **kw)
+
+    monkeypatch.setattr(credentials, "read_token", spy)
+    repo = checkout(tmp_path, "https://github.com/o/r.git")
+    with pytest.raises(ForgeError) as err:
+        await api._transport(repo).rest("GET", "repos/o/r/actions/jobs/1/logs", download=True)
+    assert err.value.reason == "unreachable" and reads == []
+    assert len(m.requests) == 2

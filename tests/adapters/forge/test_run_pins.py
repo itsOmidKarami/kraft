@@ -491,6 +491,15 @@ _API = ("api", "corp-gl")
             {"libs/core": _API},
             id="api-member-under-a-cli-root",
         ),
+        pytest.param(
+            {
+                "": {"account": "corp-gh", "backend": "github-api"},
+                "libs/core": {"account": None, "backend": "gh"},
+            },
+            ("api", "corp-gh"),
+            {"libs/core": ("cli", "gh")},
+            id="gh-member-under-a-github-api-root",
+        ),
     ],
 )
 def test_every_mount_is_run_from_its_own_pin(monkeypatch, pins, live, members):
@@ -498,12 +507,15 @@ def test_every_mount_is_run_from_its_own_pin(monkeypatch, pins, live, members):
     monkeypatch.setattr(forge.run, "api_forge", lambda n, a, **kw: built.append(n) or ("api", n))
     monkeypatch.setattr(forge.run, "resolve", lambda name: ("cli", name))
     monkeypatch.setattr(forge.run, "_member_forges", lambda *a: {})
-    forges = ForgesFile(accounts={"corp-gl": _GL_API, "gl-cli": _GL})
+    forges = ForgesFile(accounts={"corp-gl": _GL_API, "gl-cli": _GL, "corp-gh": _GH_API})
 
     got = forge.run._mount_forges(pins, None, "auto", "github", forges, None)
 
     assert got == (live, members)
-    assert built == ["corp-gl"]  # one instance per account
+    # one instance per account
+    assert sorted(built) == sorted(
+        {p["account"] for p in pins.values() if p["backend"][-3:] == "api"}
+    )
 
 
 @pytest.mark.parametrize(
