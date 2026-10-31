@@ -19,7 +19,7 @@ from typing import NoReturn
 
 from kraft import caps as _caps
 from kraft import carried as _carried
-from kraft import events, inplace, item_paths, logs, reviewed_head, store
+from kraft import events, inplace, item_paths, logs, redact, reviewed_head, store
 from kraft import harness as _harness
 from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.forge import git
@@ -2305,6 +2305,7 @@ async def finish_session(
     is extended the same way: only the newly-added lines get a fresh
     timestamp; ones already on disk keep theirs.
     """
+    log = redact.redact(log)
     previous = log_path.read_text() if reused and log_path.exists() else ""
     log_path.write_text(previous + log if previous else log)
     if findings is not None:

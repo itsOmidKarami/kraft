@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol
 
+from kraft import redact
+
 if TYPE_CHECKING:
     # `mr.py` imports `ForgeError`/`MRRef` from here -- a real-time import
     # the other way would be circular. `from __future__ import annotations`
@@ -51,7 +53,7 @@ class ForgeError(RuntimeError):
         retry_after: float | None = None,
         sso_url: str = "",
     ):
-        super().__init__(message)
+        super().__init__(redact.redact(message))
         self.status = status
         self.reason = reason
         self.retry_after = retry_after
