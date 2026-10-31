@@ -227,11 +227,14 @@ def _reload_forges(st) -> None:
         repos = config_mod.load_repos(st.templates_dir / "repos.yaml")
     except config_mod.ConfigError:
         repos = []  # repos.yaml's own reload says why
-    if problems := forges_mod.account_problems(file, repos):
-        st.invalid_forges = "; ".join(problems)
+    old = forges_mod.account_problems(st.forges or forges_mod.ForgesFile(), repos)
+    new = forges_mod.account_problems(file, repos)
+    # Only a problem this edit adds keeps it pending; an old hand edit is doctor's.
+    if added := [p for p in new if p not in old]:
+        st.invalid_forges = "; ".join(added)
         return
     st.forges = file
-    st.invalid_forges = None
+    st.invalid_forges = "; ".join(new) or None
     set_loaded(st, forges_mod.ForgesFile.FILE, digest)
 
 

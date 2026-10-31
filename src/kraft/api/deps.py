@@ -1273,6 +1273,10 @@ def repository_steering(
     }
 
 
+def _forges_error(st) -> str | None:
+    return getattr(st, "invalid_forges", None) if getattr(st, "forges", None) is None else None
+
+
 def launch(st, repo: str) -> executor.LaunchContext:
     """The repo config for one agent dispatch.
 
@@ -1310,6 +1314,7 @@ def launch(st, repo: str) -> executor.LaunchContext:
             library_steering=steering,
             chain_revision_digest=digest,
             forges=getattr(st, "forges", None),
+            forges_error=_forges_error(st),
         )
     entry = _connected(repos, repo)
     repo_id = entry.id if entry is not None else None
@@ -1321,4 +1326,5 @@ def launch(st, repo: str) -> executor.LaunchContext:
         chain_revision_digest=functools.partial(digest, repo_id=repo_id),
         item_repo_id=repo_id,
         forges=getattr(st, "forges", None),
+        forges_error=_forges_error(st),
     )

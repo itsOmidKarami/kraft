@@ -1409,6 +1409,8 @@ def _forge_check(repo: config.RepoEntry, forges: forges_mod.ForgesFile | None = 
         return _check(name, True, "fake · dev only: opens, merges and pushes nothing", warn=True)
     if not shutil.which(cli):
         return _check(name, False, f"`{cli}` is not on PATH — the forge nodes cannot run")
+    if forges is not None and (problems := forges_mod.account_problems(forges, [repo])):
+        return _check(name, False, problems[0])
     detail = f"{repo.forge} · {cli}"
     if forges is not None and forges.accounts:
         origin = config.git_read(
@@ -1536,7 +1538,7 @@ async def _repo_checks() -> list[dict]:
     try:
         forges = forges_mod.ForgesFile.load(live / forges_mod.ForgesFile.FILE)
     except config.ConfigError:
-        forges = forges_mod.ForgesFile()  # `_forges_check` names the fault
+        forges = None  # no account checks; `_forges_check` names the fault
     networked = False
     asked: set[str] = set()
     for repo in repos:

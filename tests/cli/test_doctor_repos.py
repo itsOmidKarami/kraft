@@ -160,25 +160,52 @@ def test_doctor_reports_the_resolved_forge_cli(app, tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("accounts", "named", "detail"),
+    ("accounts", "named", "ok", "detail"),
     [
         (
             {"a": {"forge": "gitlab", "web_url": "https://gitlab.com", "default_for_host": True}},
             None,
+            True,
             "gitlab · glab · account a",
         ),
         (
             {"a": {"forge": "github", "web_url": "https://gitlab.com", "default_for_host": True}},
             None,
+            True,
             "gitlab · glab · default account a skipped: it says forge: github, "
             "the repo says forge: gitlab",
         ),
-        ({}, None, "gitlab · glab"),
+        ({}, None, True, "gitlab · glab"),
+        (
+            {"a": {"forge": "gitlab", "web_url": "https://gitlab.example"}},
+            "a",
+            True,
+            "gitlab · glab · account a",
+        ),
+        (
+            {},
+            "ghost",
+            False,
+            "repo ${path}: forge_account 'ghost' names no account in forges.yaml",
+        ),
+        (
+            {"a": {"forge": "github", "web_url": "https://github.com"}},
+            "a",
+            False,
+            "repo ${path}: forge_account 'a' says forge: github, the repo says forge: gitlab",
+        ),
     ],
-    ids=["names-the-account", "default-other-forge-skipped", "no-account-as-today"],
+    ids=[
+        "names-the-account",
+        "default-other-forge-skipped",
+        "no-account-as-today",
+        "named-account",
+        "unknown-forge-account-fails",
+        "named-account-on-the-wrong-forge-fails",
+    ],
 )
 def test_the_forge_row_names_the_account_or_why_the_default_was_skipped(
-    app, tmp_path, monkeypatch, accounts, named, detail
+    app, tmp_path, monkeypatch, accounts, named, ok, detail
 ):
     repo = make_repo(tmp_path, name="onforge")
     subprocess.run(
@@ -186,6 +213,11 @@ def test_the_forge_row_names_the_account_or_why_the_default_was_skipped(
     )
     asyncio.run(client.ensure_repo(str(repo)))
     (tmp_path / "templates" / "forges.yaml").write_text(yaml.safe_dump({"accounts": accounts}))
+    if named:
+        path = tmp_path / "templates" / "repos.yaml"
+        data = yaml.safe_load(path.read_text())
+        next(r for r in data["repos"] if r["name"] == "onforge")["forge_account"] = named
+        path.write_text(yaml.safe_dump(data))
     stub_dir = tmp_path / "bin"
     stub_dir.mkdir()
     glab = stub_dir / "glab"
@@ -195,7 +227,7 @@ def test_the_forge_row_names_the_account_or_why_the_default_was_skipped(
 
     row = _by_name(asyncio.run(doctor.run_checks()), "forge onforge")
 
-    assert row["ok"] and row["detail"] == detail
+    assert row["ok"] is ok and row["detail"] == detail.replace("${path}", str(repo))
 
 
 def test_doctor_warns_on_a_repo_on_the_dev_only_fake_forge(app, tmp_path):

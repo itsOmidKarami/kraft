@@ -3,15 +3,44 @@ forge node, and stops the item when a pin no longer holds."""
 
 from __future__ import annotations
 
-import pytest
+from types import SimpleNamespace
 
-from kraft import store
+import pytest
+import yaml
+from support.harness import git, make_repo
+
+from kraft import apply, store
 from kraft.adapters import forge
 from kraft.config import RepoEntry
 from kraft.forges import ForgeAccount, ForgesFile
 
 _GH = ForgeAccount(forge="github", web_url="https://github.com")
 _GL = ForgeAccount(forge="gitlab", web_url="https://gitlab.example")
+_GH_DEFAULT = ForgeAccount(forge="github", web_url="https://github.com", default_for_host=True)
+
+
+@pytest.fixture
+def repo(tmp_path):
+    """A real checkout whose origin is on github.com, so the origin host is known."""
+    path = make_repo(tmp_path)
+    git(path, "remote", "add", "origin", "https://github.com/o/r.git")
+    return path
+
+
+def _run(run_forge, repo, sid, accounts, named, forge_name="github", error=None):
+    """One `open_mr` node; `accounts` None is a forges.yaml that never loaded."""
+    return run_forge(
+        forge.FakeForge(),
+        "open_mr",
+        sid,
+        repo=repo,
+        backend="auto",
+        repo_forge=forge_name,
+        repo_entry=RepoEntry(path=str(repo), forge=forge_name, forge_account=named),
+        repositories={},
+        forges=None if accounts is None else ForgesFile(accounts=accounts),
+        forges_error=error,
+    )
 
 
 @pytest.mark.parametrize(
@@ -54,40 +83,34 @@ _GL = ForgeAccount(forge="gitlab", web_url="https://gitlab.example")
         ),
         pytest.param(
             ({}, None),
-            ({"a": _GH}, None),
+            # the origin's default account would now apply, but a null pin never re-pins
+            ({"a": _GH_DEFAULT}, None),
             None,
             {"": {"account": None, "backend": "gh"}},
             id="null-pin-never-stops",
         ),
         pytest.param(
-            ({"a": _GH}, "a"),
-            # an invalid forges.yaml keeps the running config, so the same accounts arrive
-            ({"a": _GH}, "a"),
+            ({"a": _GL}, "a"),
             None,
+            "forge_account a says forge: gitlab, the repo says forge: github",
+            {},
+            id="named-account-on-wrong-forge-stops",
+        ),
+        pytest.param(
+            ({"a": _GH}, "a"),
+            ({"a": _GH}, "a", "gitlab"),
+            "forge account a is pinned to gh, the repo now says forge: gitlab",
             {"": {"account": "a", "backend": "gh"}},
-            id="invalid-file-keeps-pin",
+            id="repo-forge-changed-stops",
         ),
     ],
 )
 async def test_the_first_forge_node_pins_and_a_broken_pin_stops_the_item(
-    run_forge, database, tmp_path, first, second, stop, pins_after
+    run_forge, database, repo, first, second, stop, pins_after
 ):
-    def run(accounts, named, sid):
-        entry = RepoEntry(path=str(tmp_path), forge="github", forge_account=named)
-        return run_forge(
-            forge.FakeForge(),
-            "open_mr",
-            sid,
-            backend="auto",
-            repo_forge="github",
-            repo_entry=entry,
-            repositories={},
-            forges=ForgesFile(accounts=accounts),
-        )
-
-    result = await run(*first, "p1")
+    result = await _run(run_forge, repo, "p1", *first)
     if second is not None:
-        result = await run(*second, "p2")
+        result = await _run(run_forge, repo, "p2", *second)
     sid = "p2" if second is not None else "p1"
 
     if stop is None:
@@ -97,6 +120,78 @@ async def test_the_first_forge_node_pins_and_a_broken_pin_stops_the_item(
         assert stop in run_forge.log(sid)
         if "forge_account" not in stop:
             assert "kraft item retry" in run_forge.log(sid)
+    assert database.read(lambda c: store.forge_pins(c, "w1")) == pins_after
+
+
+@pytest.mark.parametrize(
+    "first, second, stop, pins_after",
+    [
+        pytest.param(
+            ({"a": _GH}, "a", None),
+            "refused reload",
+            None,
+            {"": {"account": "a", "backend": "gh"}},
+            id="refused-reload-keeps-pin",
+        ),
+        pytest.param(
+            ({"a": _GH}, "a", None),
+            (None, "a", "bad yaml"),
+            None,
+            {"": {"account": "a", "backend": "gh"}},
+            id="restart-unreadable-keeps-pin",
+        ),
+        pytest.param(
+            (None, None, "bad yaml"),
+            None,
+            None,
+            {},
+            id="restart-unreadable-unpinned-stays-unpinned",
+        ),
+        pytest.param(
+            (None, "a", "bad yaml"),
+            None,
+            "forge_account a: forges.yaml does not load (bad yaml)",
+            {},
+            id="restart-unreadable-named-stops",
+        ),
+    ],
+)
+async def test_a_forges_yaml_that_does_not_load_never_unpins_or_stops_a_pinned_item(
+    run_forge, database, repo, tmp_path, first, second, stop, pins_after
+):
+    accounts, named, error = first
+    result = await _run(run_forge, repo, "p1", accounts, named, error=error)
+    sid = "p1"
+    if second == "refused reload":
+        # The running config is kept, so the next run receives the same accounts.
+        config = tmp_path / "config"
+        config.mkdir()
+        two_defaults = {
+            "forge": "github",
+            "web_url": "https://github.com",
+            "default_for_host": True,
+        }
+        (config / "forges.yaml").write_text(
+            yaml.safe_dump({"accounts": {"a": two_defaults, "b": two_defaults}})
+        )
+        st = SimpleNamespace(
+            templates_dir=config, forges=ForgesFile(accounts=first[0]), invalid_forges=None
+        )
+        before = st.forges
+        apply._reload_forges(st)
+        assert st.invalid_forges and st.forges is before
+        sid = "p2"
+        result = await _run(run_forge, repo, sid, st.forges.accounts, "a")
+    elif second is not None:
+        accounts, named, error = second
+        sid = "p2"
+        result = await _run(run_forge, repo, sid, accounts, named, error=error)
+
+    if stop is None:
+        assert result == ("done", "done")
+    else:
+        assert result == ("config_error", "config_error")
+        assert stop in run_forge.log(sid)
     assert database.read(lambda c: store.forge_pins(c, "w1")) == pins_after
 
 

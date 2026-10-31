@@ -12,6 +12,7 @@ import pytest
 import yaml
 
 from kraft import apply as apply_mod
+from kraft import forges as forges_mod
 from kraft import storage
 from kraft.cli import admin
 
@@ -324,8 +325,23 @@ def test_a_hand_edited_forges_yaml_is_reloaded_and_a_broken_one_degrades_health(
     assert client.get("/api/health").json()["invalid_forges"] is None
 
 
-def test_a_forges_yaml_that_leaves_a_repo_without_its_account_is_refused_on_reload(client):
+@pytest.mark.parametrize(
+    "running, applied",
+    [
+        pytest.param(["a"], [], id="new-mismatch-is-refused"),
+        pytest.param([], ["b"], id="old-mismatch-does-not-block-an-unrelated-edit"),
+    ],
+)
+def test_a_forges_yaml_that_leaves_a_repo_without_its_account_is_refused_on_reload(
+    client, running, applied
+):
     st = client.app.state
+    st.forges = forges_mod.ForgesFile(
+        accounts={
+            n: forges_mod.ForgeAccount(forge="github", web_url="https://github.com")
+            for n in running
+        }
+    )
     (st.templates_dir / "repos.yaml").write_text(
         "repos:\n  - path: /r\n    forge: github\n    forge_account: a\n"
     )
@@ -334,4 +350,4 @@ def test_a_forges_yaml_that_leaves_a_repo_without_its_account_is_refused_on_relo
     )
     refused = client.post("/api/templates/reload").json()["refused_forges"]
     assert refused and "'a' names no account" in refused
-    assert list(st.forges.accounts) == []
+    assert list(st.forges.accounts) == (applied or running)

@@ -449,7 +449,17 @@ def _check_forges(path, data, ctx):
         repos = config_mod.load_repos(ctx.templates_dir / "repos.yaml")
     except config_mod.ConfigError:
         return []  # repos.yaml's own check says why
-    return [TemplateIssue(path, None, why) for why in forges_mod.account_problems(file, repos)]
+    try:
+        current = forges_mod.ForgesFile.load(ctx.templates_dir / forges_mod.ForgesFile.FILE)
+    except config_mod.ConfigError:
+        current = forges_mod.ForgesFile()
+    # Only a problem this candidate adds is refused; an old hand edit is doctor's.
+    old = set(forges_mod.account_problems(current, repos))
+    return [
+        TemplateIssue(path, None, why)
+        for why in forges_mod.account_problems(file, repos)
+        if why not in old
+    ]
 
 
 def _check_workers(path, data, ctx):
@@ -959,9 +969,16 @@ def _check_repos(path, data, ctx):
             forges = forges_mod.ForgesFile.load(ctx.templates_dir / forges_mod.ForgesFile.FILE)
         except config_mod.ConfigError:
             forges = forges_mod.ForgesFile()  # the forges.yaml check says why
+        try:
+            current = config_mod.load_repos(ctx.templates_dir / "repos.yaml")
+        except config_mod.ConfigError:
+            current = []
+        # Only a problem this candidate adds is refused; an old hand edit is doctor's.
+        old = set(forges_mod.account_problems(forges, current))
         issues = [
             TemplateIssue(path, None, why)
             for why in forges_mod.account_problems(forges, config_mod.load_repos(candidate))
+            if why not in old
         ]
     return (
         issues

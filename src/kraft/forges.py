@@ -5,6 +5,7 @@ token; `gh`/`glab` keep their own sign-in."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -72,6 +73,16 @@ def account_problems(forges: ForgesFile, repos: list[config.RepoEntry]) -> list[
                 f"the repo says forge: {r.forge}"
             )
     return out
+
+
+def repo_problems(forges: ForgesFile, templates_dir: Path) -> list[str]:
+    """`account_problems` against the repos.yaml in `templates_dir`; none when
+    that file does not load (its own check names that)."""
+    try:
+        repos = config.load_repos(templates_dir / "repos.yaml")
+    except config.ConfigError:
+        return []
+    return account_problems(forges, repos)
 
 
 def default_api_url(forge: str, web_url: str) -> str:

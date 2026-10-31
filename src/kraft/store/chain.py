@@ -784,7 +784,8 @@ def work_item_payload(row) -> dict:
     `agent_overrides` and `policy_override` (`None` when unset) and
     `node_overrides` (`{}` when unset). The one-off columns are summed up as
     `one_off` (`one_off_view`)."""
-    payload = {k: row[k] for k in row.keys() if k not in _ONE_OFF_COLUMNS}
+    # forge_pins is the executor's bookkeeping, not part of the item's API.
+    payload = {k: row[k] for k in row.keys() if k not in _ONE_OFF_COLUMNS and k != "forge_pins"}
     payload["agent_overrides"] = json.loads(row["agent_overrides"] or "null")
     payload["policy_override"] = json.loads(row["policy_override"] or "null")
     payload["node_overrides"] = node_overrides_of(row)

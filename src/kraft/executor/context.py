@@ -201,6 +201,8 @@ class LaunchContext:
     repositories: Mapping[str, RepoEntry] = field(default_factory=dict)
     #: The accounts `forges.yaml` names (`st.forges`); None where nothing loaded it.
     forges: ForgesFile | None = None
+    #: The reason forges.yaml did not load at startup, set only while `forges` is None.
+    forges_error: str | None = None
     #: The live library's steering profiles, name to instructions: read only
     #: by an item whose snapshot predates frozen repository steering
     #: (`steering.for_repository`). Everything else runs on its snapshot's.

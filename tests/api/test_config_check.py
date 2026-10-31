@@ -154,6 +154,40 @@ def test_workers_yaml_is_checked_and_its_repos_must_resolve(
         assert problem in issues[0].message
 
 
+_NAMES_A = "repos:\n  - {path: /r, forge: github, forge_account: a}\n"
+_NO_ACCOUNTS = "accounts: {}\n"
+_HAS_A = "accounts:\n  a: {forge: github, web_url: 'https://github.com'}\n"
+_HAS_B = "accounts:\n  b: {forge: github, web_url: 'https://github.com'}\n"
+
+
+@pytest.mark.parametrize(
+    ("on_disk_repos", "on_disk_forges", "name", "text", "problem"),
+    [
+        ("repos: []\n", _HAS_A, "repos.yaml", _NAMES_A, None),
+        ("repos: []\n", _NO_ACCOUNTS, "repos.yaml", _NAMES_A, "names no account"),
+        (_NAMES_A, _NO_ACCOUNTS, "repos.yaml", _NAMES_A + "  - {path: /s}\n", None),
+        (_NAMES_A, _HAS_A, "forges.yaml", _HAS_B, "names no account"),
+        (_NAMES_A, _NO_ACCOUNTS, "forges.yaml", _HAS_B, None),
+    ],
+    ids=[
+        "repos-account-exists",
+        "repos-new-unknown-account-refused",
+        "repos-old-mismatch-does-not-block",
+        "forges-new-mismatch-refused",
+        "forges-old-mismatch-does-not-block",
+    ],
+)
+def test_a_save_is_refused_only_for_a_forge_account_problem_it_adds(
+    ctx, templates_dir, on_disk_repos, on_disk_forges, name, text, problem
+):
+    (templates_dir / "repos.yaml").write_text(on_disk_repos)
+    (templates_dir / "forges.yaml").write_text(on_disk_forges)
+    issues = config_check.check(name, text, ctx)
+    assert (problem is None) == (issues == [])
+    if problem:
+        assert problem in issues[0].message
+
+
 @pytest.mark.parametrize(
     "relative", ["../access.yaml", "chains/../../x.yaml", "chains/Bad Name.yaml", "notes.txt"]
 )

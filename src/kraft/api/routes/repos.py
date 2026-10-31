@@ -383,8 +383,10 @@ async def repo_library_accept(body: LibraryAccept, request: Request, path: str):
             )
         # The id first: a crash before the lock leaves an entry with an id and
         # nothing accepted, which the next check reads as a first load.
-        _validate_repos(st, repos)
-        config_mod.save_repos(deps.repos_path(st), repos)
+        # A forge removal must not check repos.yaml between this save's check and write.
+        async with st.forges_lock:
+            _validate_repos(st, repos)
+            config_mod.save_repos(deps.repos_path(st), repos)
         try:
             await deps._in_thread(
                 st, repo_library.accept, found, st.templates_dir, st.run_dirs.addons
@@ -600,8 +602,10 @@ async def _add_repo(body: RepoBody, st) -> dict:
     # back the same, and `forge: null`, `models: {}` and the rest are noise in
     # a file people edit by hand. The answer below keeps the whole entry.
     repos = [r if id(r) in had else _without_defaults(r) for r in repos]
-    _validate_repos(st, repos, workspaces)
-    config_mod.save_repos(deps.repos_path(st), repos, workspaces)
+    # A forge removal must not check repos.yaml between this save's check and write.
+    async with st.forges_lock:
+        _validate_repos(st, repos, workspaces)
+        config_mod.save_repos(deps.repos_path(st), repos, workspaces)
     # Index it now: a repo connected mid-session would otherwise stay invisible
     # to search (and to the intake picker) until the next restart. The scan is
     # `git ls-files .engineering/` — cheap enough to await. A scan failure must
@@ -706,8 +710,10 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
                 "cannot clear the test command of an enabled repo — "
                 "disable it, or set test scopes, in the same change",
             )
-    _validate_repos(st, repos)
-    config_mod.save_repos(deps.repos_path(st), repos)
+    # A forge removal must not check repos.yaml between this save's check and write.
+    async with st.forges_lock:
+        _validate_repos(st, repos)
+        config_mod.save_repos(deps.repos_path(st), repos)
     # The whole entry, defaults included, as the answer always was:
     # `kraft repo connect` reads the saved entry back from it, and a client
     # of the API may read any field. Only the file keeps to what was set.

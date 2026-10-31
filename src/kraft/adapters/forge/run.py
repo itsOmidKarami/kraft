@@ -173,12 +173,15 @@ def _member_forges(item, backend: str, repo_forge: str | None) -> dict:
 
 
 async def _pin_forge_accounts(
-    db, work_item_id, item, backend, repo_forge, repo_entry, repositories, forges
+    db, work_item_id, item, backend, repo_forge, repo_entry, repositories, forges, forges_error
 ) -> None:
     """Pin each repo's account and backend at the item's first forge node; once
     pinned, stop (ForgeError) when the pinned account is gone or changed forge.
-    A repo that names an account forges.yaml lacks stops too, never a silent CLI."""
+    A repo that names an account forges.yaml lacks stops too, never a silent CLI.
+    `forges` None with a `forges_error` is a forges.yaml that never loaded: pins
+    are kept unchecked, and only a repo naming an account stops."""
     pins = db.read(lambda c: store.forge_pins(c, work_item_id))
+    unreadable = forges is None and bool(forges_error)
     forges = forges or forges_mod.ForgesFile()
     mounts: list[tuple[str, config.RepoEntry | None]] = [("", repo_entry)]
     if repo_entry is not None:
@@ -186,51 +189,66 @@ async def _pin_forge_accounts(
             (m, (repositories or {}).get(rid) if rid else None)
             for m, rid in _builtins.item_members(item)
         ]
+    new: dict[str, tuple[str | None, str]] = {}
     for mount, entry in mounts:
         pin = pins.get(mount)
         if entry is None or (mount and not entry.forge):
             # An unknown member, or one with no forge, uses the root's (as _member_forges does).
-            if pin is None:
-                await db.write(
-                    lambda c, m=mount: store.set_forge_pin(
-                        c, work_item_id, m, None, backend_for(backend, repo_forge)
-                    )
+            if pin is None and not unreadable:
+                new[mount] = (None, backend_for(backend, repo_forge))
+            continue
+        if unreadable:
+            if pin is None and entry.forge_account:
+                raise ForgeError(
+                    f"forge_account {entry.forge_account}: forges.yaml does not load "
+                    f"({forges_error}); fix it and kraft item retry"
                 )
             continue
         named = entry.forge_account
-        if named and named not in forges.accounts:
-            raise ForgeError(f"forge_account {named} names no account in forges.yaml")
-        if pin is not None and pin["account"] is None:
-            continue
-        if pin is not None:
+        if pin is not None and pin["account"] is not None:
             acct = forges.accounts.get(pin["account"])
             was = next((f for f, cli in _FORGE_CLI.items() if cli == pin["backend"]), "?")
             if acct is None:
                 why = "was removed"
             elif acct.forge != was:
                 why = f"now says forge: {acct.forge}, was {was}"
+            elif backend_for(backend, entry.forge) != pin["backend"]:
+                raise ForgeError(
+                    f"forge account {pin['account']} is pinned to {pin['backend']}, the repo "
+                    f"now says forge: {entry.forge}; kraft item retry re-pins to what is "
+                    "configured now"
+                )
             else:
                 continue
             raise ForgeError(
                 f"forge account {pin['account']} {why}; "
                 "kraft item retry re-pins to what is configured now"
             )
-        origin = config.git_read(
-            Path(entry.path), "remote", "get-url", "origin", expected_failure=True
-        )
-        found = forges_mod.account_for(
-            entry, forges, forges_mod.remote_host(origin) if origin else None
-        )
+        if named and named not in forges.accounts:
+            raise ForgeError(f"forge_account {named} names no account in forges.yaml")
+        if pin is not None:  # a null pin never stops: it resolves live, as before accounts
+            continue
+        found = None
+        if named or forges.accounts:
+            origin = config.git_read(
+                Path(entry.path), "remote", "get-url", "origin", expected_failure=True
+            )
+            found = forges_mod.account_for(
+                entry, forges, forges_mod.remote_host(origin) if origin else None
+            )
         if found and found[1].forge != entry.forge:
             raise ForgeError(
                 f"forge_account {found[0]} says forge: {found[1].forge}, "
                 f"the repo says forge: {entry.forge}"
             )
-        await db.write(
-            lambda c, m=mount, f=found, e=entry: store.set_forge_pin(
-                c, work_item_id, m, f[0] if f else None, backend_for(backend, e.forge)
-            )
-        )
+        new[mount] = (found[0] if found else None, backend_for(backend, entry.forge))
+
+    def write(conn):
+        for mount, (account, pinned) in new.items():
+            store.set_forge_pin(conn, work_item_id, mount, account, pinned)
+
+    if new:
+        await db.write(write)
 
 
 def member_forge(item, repo_forge: str | None, mount: str) -> Forge:
@@ -1963,6 +1981,7 @@ async def run_task(
     repo_entry: config.RepoEntry | None = None,
     repositories: dict[str, config.RepoEntry] | None = None,
     forges: forges_mod.ForgesFile | None = None,
+    forges_error: str | None = None,
     repo: Path,
     #: The original repo, not the worktree -- `ci_poll`'s confirmed-conflict
     #: rebase (Kraft-9h7v) needs origin's current base branch tip, which
@@ -2137,7 +2156,15 @@ async def run_task(
     try:
         if repo_entry is not None:
             await _pin_forge_accounts(
-                db, work_item_id, item, backend, repo_forge, repo_entry, repositories, forges
+                db,
+                work_item_id,
+                item,
+                backend,
+                repo_forge,
+                repo_entry,
+                repositories,
+                forges,
+                forges_error,
             )
         else:
             pinned = db.read(lambda c: store.forge_pins(c, work_item_id))

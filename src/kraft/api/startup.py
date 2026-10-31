@@ -157,17 +157,18 @@ def load_workers(app: FastAPI) -> None:
 
 
 def load_forges(app: FastAPI) -> None:
-    """The accounts `forges.yaml` names; a file that does not load means none,
-    named by `invalid_forges`."""
+    """The accounts `forges.yaml` names; a file that does not load leaves
+    `forges` None (no last-good copy), named by `invalid_forges`."""
     path = app.state.templates_dir / forges_mod.ForgesFile.FILE
     try:
         app.state.forges = forges_mod.ForgesFile.load(path)
     except config_mod.ConfigError as exc:
         logger.warning("forges.yaml is unreadable, no accounts are used: %s", exc)
-        app.state.forges = forges_mod.ForgesFile()
+        app.state.forges = None  # unreadable, which is not the same as empty
         app.state.invalid_forges = str(exc)
     else:
-        app.state.invalid_forges = None
+        problems = forges_mod.repo_problems(app.state.forges, app.state.templates_dir)
+        app.state.invalid_forges = "; ".join(problems) or None
 
 
 async def _probation_timer(app: FastAPI) -> None:
