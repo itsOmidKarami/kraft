@@ -540,7 +540,7 @@ class GhCli(mr_ops.CliWaits):
         number, head = pr["number"], pr["headRefOid"]
         # ponytail: one page of 100 reviews -- paginate if a PR ever has more.
         reviews = await self._api(
-            repo, f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews?per_page=100"
+            repo, f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews", fields={"per_page": 100}
         )
         mine = [
             r
@@ -557,7 +557,8 @@ class GhCli(mr_ops.CliWaits):
         last = mine[-1]
         comments = await self._api(
             repo,
-            f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews/{last['id']}/comments?per_page=100",
+            f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews/{last['id']}/comments",
+            fields={"per_page": 100},
         )
         findings = tuple(
             f"{c.get('path')}:{c.get('line') or c.get('original_line')}: {c.get('body', '')}"
@@ -581,10 +582,10 @@ class GhCli(mr_ops.CliWaits):
         if any(r.bot is not None for r in reviewers):
             # ponytail: one page of 100 of each -- paginate if a PR ever has more.
             comments = await self._api(
-                repo, f"repos/{{owner}}/{{repo}}/issues/{number}/comments?per_page=100"
+                repo, f"repos/{{owner}}/{{repo}}/issues/{number}/comments", fields={"per_page": 100}
             )
             reviews = await self._api(
-                repo, f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews?per_page=100"
+                repo, f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews", fields={"per_page": 100}
             )
             data = await self._gql(
                 repo, _THREADS_QUERY, {"owner": "{owner}", "name": "{repo}", "n": number}
@@ -746,7 +747,7 @@ class GhCli(mr_ops.CliWaits):
         read fails: an unreadable answer is a reason to wait, never to pass."""
         try:
             runs = await self._api(
-                repo, f"repos/{{owner}}/{{repo}}/commits/{sha}/check-runs?per_page=1"
+                repo, f"repos/{{owner}}/{{repo}}/commits/{sha}/check-runs", fields={"per_page": 1}
             )
             if runs.get("check_runs"):
                 return True
@@ -1034,16 +1035,16 @@ class GhCli(mr_ops.CliWaits):
         if not run_id:
             return (), _UNREADABLE_JOBS
         try:
-            data = await self._api(
-                repo, f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/jobs?per_page=100"
+            # strict: a capped list is not the whole run, and a missing "jobs" raises
+            data = await self._paged(
+                repo,
+                f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/jobs",
+                key="jobs",
+                strict=True,
             )
         except ForgeError:
             return (), _UNREADABLE_JOBS
-        rows = (
-            [j for j in data.get("jobs") or [] if isinstance(j, dict)]
-            if isinstance(data, dict)
-            else []
-        )
+        rows = [j for j in data if isinstance(j, dict)]
         failed_jobs = _red_jobs(rows, url="html_url")
         red = [j for j in rows if str(j.get("conclusion") or "").upper() in _GH_RED]
         detail: tuple[str, ...] = ()
@@ -1053,7 +1054,10 @@ class GhCli(mr_ops.CliWaits):
             detail += (f"job {job.name}: failed" + (f" ({reason})" if reason else ""),)
             try:
                 whole = await self._transport(repo).rest(
-                    "GET", f"repos/{{owner}}/{{repo}}/actions/jobs/{row.get('id')}/logs"
+                    "GET",
+                    f"repos/{{owner}}/{{repo}}/actions/jobs/{row.get('id')}/logs",
+                    tail=True,
+                    download=True,
                 )
             except ForgeError:
                 continue
@@ -1138,8 +1142,8 @@ class GhCli(mr_ops.CliWaits):
         return tuple(sorted(rows, key=lambda p: p.created_at, reverse=True))
 
     async def jobs(self, *, repo: Path, pipeline_id: str) -> tuple[Job, ...]:
-        data = await self._api(
-            repo, f"repos/{{owner}}/{{repo}}/actions/runs/{pipeline_id}/jobs?per_page=100"
+        rows = await self._paged(
+            repo, f"repos/{{owner}}/{{repo}}/actions/runs/{pipeline_id}/jobs", key="jobs"
         )
         return tuple(
             Job(
@@ -1156,12 +1160,12 @@ class GhCli(mr_ops.CliWaits):
                 ),
                 url=str(j.get("html_url") or ""),
             )
-            for j in data.get("jobs") or []
+            for j in rows
         )
 
     async def job_log(self, *, repo: Path, job_id: str) -> str:
         resp = await self._transport(repo).rest(
-            "GET", f"repos/{{owner}}/{{repo}}/actions/jobs/{job_id}/logs"
+            "GET", f"repos/{{owner}}/{{repo}}/actions/jobs/{job_id}/logs", tail=True, download=True
         )
         return resp.text
 
@@ -1192,14 +1196,7 @@ class GhCli(mr_ops.CliWaits):
         )
 
     async def labels(self, *, repo: Path) -> tuple[Label, ...]:
-        rows: list[dict] = []
-        for page in range(1, 11):
-            got = await self._api(
-                repo, "repos/{owner}/{repo}/labels", fields={"per_page": 100, "page": page}
-            )
-            rows += got
-            if len(got) < 100:
-                break
+        rows = await self._paged(repo, "repos/{owner}/{repo}/labels")
         return tuple(
             Label(str(r.get("name")), str(r.get("description") or ""), str(r.get("color") or ""))
             for r in rows

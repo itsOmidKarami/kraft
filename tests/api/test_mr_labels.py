@@ -131,6 +131,8 @@ def test_set_mr_labels_on_a_malformed_repos_yaml_is_a_clean_error(client, repo, 
 def test_an_api_account_item_labels_nothing_through_the_cli(client, repo, monkeypatch):
     wid = _completed_item(client, repo)
     _on_api_account(client, repo, monkeypatch, wid)
+    fake = forge_mod.FakeForge()
+    monkeypatch.setattr("kraft.adapters.forge.run.api_forge", lambda name, account: fake)
     r = client.post(f"/api/work-items/{wid}/mr-labels", json={"labels": ["x"]})
-    assert r.status_code == 502, r.text
-    assert "forge account corp-gh says client: api" in r.json()["detail"]
+    assert r.status_code == 200, r.text
+    assert fake.labeled == ["x"]

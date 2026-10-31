@@ -91,6 +91,16 @@ def repo_project(repo: Path, account: ForgeAccount) -> str | None:
     return project_path(remote or "", account)
 
 
+def github_owner_name(project: str, repo_name: str) -> tuple[str, str]:
+    """`project` as GitHub's (owner, name): exactly two segments, else ValueError worded
+    without the remote. The run (`GitHubApi`) and doctor's probe both ask this, so they
+    refuse a repository in the same words."""
+    owner, _, name = project.partition("/")
+    if not owner or not name or "/" in name or {owner, name} & {".", ".."}:
+        raise ValueError(f"{repo_name} has no origin URL Kraft can read a GitHub repository from")
+    return owner, name
+
+
 def env_name_problem(name: str) -> str | None:
     """Why an `env` token source may not name `name`, else None. Worded to follow `token.env`."""
     # Inside: worker.env imports a lot, and forges is imported early.

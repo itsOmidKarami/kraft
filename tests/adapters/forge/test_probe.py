@@ -214,6 +214,44 @@ async def test_the_probe_says_whether_each_repo_is_visible(
 
 @pytest.mark.real_probe
 @pytest.mark.parametrize(
+    "remote, repo_reply, visible, detail, sso",
+    [
+        pytest.param(
+            "https://github.com/o/r.git",
+            (403, {"message": "SAML"}, {"x-github-sso": "required; url=https://sso.example/x"}),
+            False,
+            "o/r: HTTP 403",
+            "https://sso.example/x",
+            id="sso-link-stays-in-the-project",
+        ),
+        pytest.param(
+            "https://github.com/a/b/c.git",
+            None,
+            False,
+            "has no origin URL Kraft can read a GitHub repository from",
+            "",
+            id="three-segments-refused-as-the-run-does",
+        ),
+        pytest.param("https://github.com/o/r.git", (200, {}), True, "", "", id="visible"),
+    ],
+)
+async def test_the_probe_reads_a_github_repository_as_the_run_does(
+    mock_http, run, tmp_path, remote, repo_reply, visible, detail, sso
+):
+    dest = make_repo(tmp_path)
+    git(dest, "remote", "add", "origin", remote)
+    routes = {("GET", f"{GH}/user"): (200, {"login": "ada"})}
+    if repo_reply:
+        routes[("GET", f"{GH}/repos/o/r")] = repo_reply
+    entry = config.RepoEntry(path=str(dest), forge="github", forge_account="corp")
+    got = await run(mock_http(routes), acct(), repos=[entry])
+    seen = got.projects[str(dest)]
+    assert seen["visible"] is visible and detail in seen["detail"] and seen["sso_url"] == sso
+    assert visible or "HTTP 404" not in seen["detail"]
+
+
+@pytest.mark.real_probe
+@pytest.mark.parametrize(
     "account, token, want",
     [
         pytest.param(acct(kind="oauth"), "ghp_1234567890", "starts with ghp_", id="ghp-says-oauth"),

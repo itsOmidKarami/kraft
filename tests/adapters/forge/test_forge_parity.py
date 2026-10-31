@@ -6,25 +6,19 @@ but `push` has one, which `test_every_forge_method_has_a_parity_row` enforces.""
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from typing import Any
 
 import pytest
 
 from kraft.adapters import forge
-from kraft.adapters.forge.glab import GlabCli
-from kraft.adapters.forge.models import Forge
-from kraft.automated_review import AutomatedReview
 
 from . import outputs
 from .nodes import Api
-from .test_forge_cli_contract import GIT_ROUTES, GLAB_API, HEAD, _contract_token  # noqa: F401
+from .parity import BR, Row, assert_alike, feedback, methods_without_a_row, review
+from .test_forge_cli_contract import GLAB_API, HEAD, _contract_token  # noqa: F401
+from .test_github_parity import ROWS as GITHUB_ROWS
 
-BR = "kraft/abc"
 MR54 = forge.MR(54, "u")
 QUEUED = forge.MRRef(54, "u", state="open", merge_queued=True)
-SINCE = datetime(2026, 1, 1, tzinfo=UTC)
 VIEW = outputs.glab_mr(outputs.GLAB_MR_VIEW)
 RUNNING = json.dumps({"iid": 54, "head_pipeline": {"status": "running"}})
 TRAIN_PROJECT = json.dumps({"merge_trains_enabled": True, "merge_pipelines_enabled": True})
@@ -47,14 +41,6 @@ def _version(v: str) -> dict:
     return {"api version": outputs.GITLAB_VERSIONS[v]}
 
 
-@dataclass
-class Row:
-    method: str
-    call: Any  # (forge, repo) -> awaitable
-    routes: dict = field(default_factory=dict)
-    git: dict = field(default_factory=dict)
-
-
 def _merge(f, r):
     return f.merge(repo=r, branch=BR, mr=MR54, head=HEAD)
 
@@ -65,16 +51,6 @@ def _cancel(f, r):
 
 def _ci(f, r):
     return f.ci_status(repo=r, mr=forge.MR(0, ""), branch=BR)
-
-
-def _review(**kw):
-    return lambda f, r: f.automated_review(repo=r, branch=BR, reviewers=(AutomatedReview(**kw),))
-
-
-def _feedback(**kw):
-    return lambda f, r: f.reviewer_feedback(
-        repo=r, branch=BR, reviewers=(AutomatedReview(**kw),), since=SINCE
-    )
 
 
 _merged_pipeline, _merge_commit_route, _merge_commit = outputs.glab_merged_results(HEAD)
@@ -250,7 +226,7 @@ ROWS: dict[str, Row] = {
     ),
     "bot-review": Row(
         "automated_review",
-        _review(bot="bot"),
+        review(bot="bot"),
         {
             **VIEW,
             "api projects/:id/merge_requests/54/discussions": json.dumps([THREAD]),
@@ -258,7 +234,7 @@ ROWS: dict[str, Row] = {
     ),
     "check-review": Row(
         "automated_review",
-        _review(check="c"),
+        review(check="c"),
         {
             "api projects/:id/merge_requests/54": REVIEWED,
             **{"api*state=opened*": '[{"iid":54}]'},
@@ -267,7 +243,7 @@ ROWS: dict[str, Row] = {
     ),
     "bot-feedback": Row(
         "reviewer_feedback",
-        _feedback(bot="bot"),
+        feedback(bot="bot"),
         {
             **VIEW,
             "api projects/:id/merge_requests/54/notes": json.dumps([NOTE]),
@@ -276,7 +252,7 @@ ROWS: dict[str, Row] = {
     ),
     "check-feedback": Row(
         "reviewer_feedback",
-        _feedback(check="c"),
+        feedback(check="c"),
         {
             "api projects/:id/merge_requests/54": REVIEWED,
             "api*state=opened*": '[{"iid":54}]',
@@ -286,33 +262,12 @@ ROWS: dict[str, Row] = {
 }
 
 
-async def _outcome(call, f, repo):
-    """The result, or what an error says about itself (not its text: the CLI and HTTP word it
-    alike only where both read the same body)."""
-    try:
-        return await call(f, repo)
-    except forge.ForgeError as exc:
-        return (type(exc), exc.status, exc.reason)
-
-
 @pytest.mark.parametrize("name", list(ROWS))
 async def test_every_forge_method_answers_alike(cli, tmp_path, name):
-    row = ROWS[name]
-    cli.stub("glab", routes=row.routes, default="{}")
-    cli.stub("git", routes={**row.git, **GIT_ROUTES}, default="")
-
-    twin = await _outcome(row.call, GlabCli(), tmp_path)
-    twin_calls = cli.calls("glab")
-    for ext in ("calls", "argv"):
-        (cli.bindir / f"glab.{ext}").unlink(missing_ok=True)
-    api = await _outcome(row.call, GLAB_API.cls(), tmp_path)
-
-    assert twin_calls, "the twin never reached glab"
-    assert api == twin
-    assert cli.calls("glab") == twin_calls
+    await assert_alike(cli, tmp_path, ROWS[name], GLAB_API)
 
 
-def test_every_forge_method_has_a_parity_row():
+@pytest.mark.parametrize("rows", [ROWS, GITHUB_ROWS], ids=["glab", "gh"])
+def test_every_forge_method_has_a_parity_row(rows):
     """A method added to `Forge` without a row fails: the twin proof must not go stale."""
-    methods = {m for m in vars(Forge) if not m.startswith("_")} - {"push"}
-    assert methods - {row.method for row in ROWS.values()} == set()
+    assert methods_without_a_row(rows) == set()

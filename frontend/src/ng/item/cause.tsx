@@ -53,6 +53,19 @@ export const FORGE_LOGIN_HINT =
  *  comes last, so a long one wraps with nothing after it. */
 export const FORGE_SSO_HINT = "Open this address to authorize the forge CLI's token for single sign-on, then Retry: {sso_url}";
 
+/** `FORGE_SSO_HINT` for an API account's token: the console's `FORGE_ACCOUNT_SSO_HINT`, byte for byte. */
+export const FORGE_ACCOUNT_SSO_HINT = "Open this address to authorize forge account {account}'s token for single sign-on, then Retry: {sso_url}";
+
+/** `FORGE_ACCOUNT_SSO_HINT` for an account whose name holds a backtick and so cannot be printed: neutral, not the CLI's. */
+export const FORGE_ACCOUNT_SSO_UNNAMED_HINT = "Open this address to authorize the forge account's token for single sign-on, then Retry: {sso_url}";
+
+/** The SSO hint for the stop's facts, with `{sso_url}` still in it: the account's when `facts.account` is plain text. */
+const ssoHint = (item: Pick<ItemDetail, "stop">): string => {
+  const account = (item.stop?.facts as Record<string, unknown> | undefined)?.account;
+  if (typeof account !== "string" || account === "") return FORGE_SSO_HINT;
+  return account.includes("`") ? FORGE_ACCOUNT_SSO_UNNAMED_HINT : FORGE_ACCOUNT_SSO_HINT.replace("{account}", () => account);
+};
+
 /** The fix for `forge_token`, by the kind of source (`TokenSource.label()`'s first word): an API account's token could
  *  not sign in. A variable is read only at server start; a long path comes last. */
 export const FORGE_TOKEN_HINTS: Record<string, string> = {
@@ -66,15 +79,21 @@ export const FORGE_TOKEN_HINTS: Record<string, string> = {
 export function forgeHint(item: Pick<ItemDetail, "stop">): string | null {
   const fix = failedFix(item);
   if (fix === "forge_token") return tokenHint(item);
-  return fix === "forge_sso" ? FORGE_SSO_HINT.replace("{sso_url}", ssoUrl(item) ?? "") : fix === "forge_login" ? FORGE_LOGIN_HINT : null;
+  return fix === "forge_sso" ? ssoHint(item).replace("{sso_url}", ssoUrl(item) ?? "") : fix === "forge_login" ? FORGE_LOGIN_HINT : null;
 }
 
-/** A forge hint as the cards show it: the SSO hint's address is a link, any other hint is `withCode`. */
+/** A forge hint as the cards show it: the SSO hint's address is a link (and an account's name stays on one line), any
+ *  other hint is `withCode`. The shapes to match come from the hint constants, so a copy change cannot stop the link. */
 export function hintText(hint: string): ReactNode {
-  const [head] = FORGE_SSO_HINT.split("{sso_url}");
-  const url = hint.slice(head.length);
-  if (!hint.startsWith(head) || !SSO_URL.test(url)) return withCode(hint);
-  return <>{head}<LinkButton inline href={url} target="_blank" rel="noopener noreferrer">{url}</LinkButton></>;
+  const at = hint.lastIndexOf(" https://") + 1; // the address has no space, so it starts after the last one
+  const head = hint.slice(0, at);
+  const url = hint.slice(at);
+  if (!at || !SSO_URL.test(url)) return withCode(hint);
+  const [before, after] = FORGE_ACCOUNT_SSO_HINT.replace("{sso_url}", "").split("{account}");
+  const account = head.startsWith(before) && head.endsWith(after) ? head.slice(before.length, head.length - after.length) : "";
+  const link = <LinkButton inline href={url} target="_blank" rel="noopener noreferrer">{url}</LinkButton>;
+  if (account && !account.includes("`")) return <>{before}<span style={{ whiteSpace: "nowrap" }}>{account}</span>{after}{link}</>;
+  return [FORGE_SSO_HINT, FORGE_ACCOUNT_SSO_UNNAMED_HINT].some((t) => head === t.replace("{sso_url}", "")) ? <>{head}{link}</> : withCode(hint);
 }
 
 /** The words of `text` with each `backticked` run as <code>. */

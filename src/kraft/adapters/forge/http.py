@@ -35,6 +35,7 @@ MAX_REDIRECTS = 5
 MAX_BODY = 32 << 20  # a forge answer bigger than this is not one Kraft can use
 TRACE_MAX = 8 << 20  # a job log keeps its last this much
 _REDIRECTS = frozenset({301, 302, 303, 307, 308})
+_LOG_PATH = re.compile(r"repos/[^/]+/[^/]+/actions/jobs/\d+/logs")
 _NOT_A_PATH = re.compile(r"^(//|[A-Za-z][A-Za-z0-9+.-]*:)")
 
 
@@ -62,23 +63,31 @@ def _load_ca(path: str, named: str) -> ssl.SSLContext:
         raise ForgeError(f"{named} {path} cannot be read as a CA bundle", reason="tls") from exc
 
 
-def ssl_context(account: ForgeAccount) -> ssl.SSLContext:
+def ssl_context(account: ForgeAccount, *, plus_system: bool = False) -> ssl.SSLContext:
     """ca_file, else git's `http.sslCAInfo` for the API address, else the system's store
-    (plus certifi's when that holds no CA). Always verifying, never a way to turn it off."""
+    (plus certifi's when that holds no CA). Always verifying, never a way to turn it off.
+    `plus_system` trusts the system's store as well as that CA (the log download's blob host)."""
+    found = None
     if account.ca_file:
-        return _load_ca(account.ca_file, "ca_file")
-    try:
-        done = credentials.neutral_run(
-            ["git", "config", "--get-urlmatch", "http.sslCAInfo", account.api()],
-            timeout=credentials.CREDENTIAL_TIMEOUT_S,
-        )
-    except Exception:  # noqa: BLE001 - a git that cannot answer means the system store
-        done = None
-    if done is not None and done.returncode == 0 and (path := done.stdout.strip()):
-        return _load_ca(path, "git's http.sslCAInfo")
+        found = (account.ca_file, "ca_file")
+    else:
+        try:
+            done = credentials.neutral_run(
+                ["git", "config", "--get-urlmatch", "http.sslCAInfo", account.api()],
+                timeout=credentials.CREDENTIAL_TIMEOUT_S,
+            )
+        except Exception:  # noqa: BLE001 - a git that cannot answer means the system store
+            done = None
+        if done is not None and done.returncode == 0 and (path := done.stdout.strip()):
+            found = (path, "git's http.sslCAInfo")
+    if found and not plus_system:
+        return _load_ca(*found)
     ctx = ssl.create_default_context()
     if ctx.cert_store_stats()["x509_ca"] == 0:
         ctx.load_verify_locations(certifi.where())  # the same context: a capath keeps its CAs
+    if found:
+        _load_ca(*found)  # a CA that cannot be read is refused, not skipped
+        ctx.load_verify_locations(found[0])
     return ctx
 
 
@@ -125,6 +134,7 @@ class HttpTransport:
         self.timeout = git.CLI_TIMEOUT_S if timeout is None else timeout
         self._transport = transport
         self._ctx: ssl.SSLContext | None = None
+        self._blob_ctx: ssl.SSLContext | None = None
 
     def _headers(self) -> dict[str, str]:
         headers = {"Authorization": f"Bearer {self._token}", "User-Agent": _user_agent()}
@@ -134,16 +144,26 @@ class HttpTransport:
         return headers
 
     async def _send(
-        self, label: str, method: str, url: str, *, params=None, body=None, tail: bool = False
+        self,
+        label: str,
+        method: str,
+        url: str,
+        *,
+        params=None,
+        body=None,
+        tail: bool = False,
+        download: bool = False,
     ) -> ApiResponse:
         here = origin(url)
         shown = f"{here[0]}://{here[1]}:{here[2]}"
         if self._ctx is None:
             self._ctx = await asyncio.to_thread(ssl_context, self.account)
+        blob = None
+        # The whole exchange, redirects and a log download included: httpx's own is per phase.
+        deadline = asyncio.get_running_loop().time() + self.timeout
         try:
-            # The whole exchange, redirects included: httpx's own timeout is per phase.
             async with (
-                asyncio.timeout(self.timeout),
+                asyncio.timeout_at(deadline),
                 httpx.AsyncClient(
                     follow_redirects=False,
                     verify=self._ctx,
@@ -164,6 +184,9 @@ class HttpTransport:
                     finally:
                         await resp.aclose()
                     to = origin(url)
+                    if download and to != here and to[0] == "https":
+                        blob = url  # the one hop that leaves the origin, and carries no token
+                        break
                     why = (
                         "it is not a GET"
                         if method != "GET"
@@ -194,7 +217,63 @@ class HttpTransport:
             raise ForgeError(
                 f"{label}: cannot reach {shown} ({type(exc).__name__})", reason="unreachable"
             ) from None
-        raise AssertionError("unreachable")  # pragma: no cover
+        if blob is None:
+            raise AssertionError("unreachable")  # pragma: no cover
+        return await self._download(label, blob, tail, deadline)
+
+    async def _download(self, label: str, url: str, tail: bool, deadline: float) -> ApiResponse:
+        """GitHub's pre-signed log URL, in a client of its own: no token, no GitHub headers,
+        no cookies, no redirect. Every failure names the blob origin and never the URL (its
+        query is the signature), and is `unreachable`: an expired signature is not a token stop."""
+        kind, host, port = origin(url)
+        shown = f"{kind}://{host}:{port}"
+        if self._blob_ctx is None:
+            self._blob_ctx = await asyncio.to_thread(ssl_context, self.account, plus_system=True)
+        try:
+            async with (
+                asyncio.timeout_at(deadline),
+                httpx.AsyncClient(
+                    follow_redirects=False,
+                    verify=self._blob_ctx,
+                    timeout=self.timeout,
+                    trust_env=True,
+                    auth=httpx.Auth(),  # a netrc entry must not put an Authorization here
+                    transport=self._transport,
+                ) as client,
+            ):
+                request = client.build_request("GET", url, headers={"User-Agent": _user_agent()})
+                resp = await client.send(request, stream=True)
+                try:
+                    if resp.status_code in _REDIRECTS:
+                        raise ForgeError(
+                            f"{label}: the log download from {shown} redirected, "
+                            "not followed (a download redirects once)",
+                            reason="unreachable",
+                        )
+                    if resp.status_code >= 400:
+                        raise ForgeError(
+                            f"{label}: the log download from {shown} answered "
+                            f"HTTP {resp.status_code}",
+                            status=resp.status_code,
+                            reason="unreachable",
+                        )
+                    return await _read(label, resp, tail)
+                finally:
+                    await resp.aclose()
+        except TimeoutError:
+            raise ForgeError(
+                f"{label}: the log download from {shown} did not answer within the time left",
+                reason="unreachable",
+            ) from None
+        except httpx.HTTPError as exc:
+            why = (
+                "failed TLS verification"
+                if _is_tls(exc)
+                else f"cannot be reached ({type(exc).__name__})"
+            )
+            raise ForgeError(
+                f"{label}: the log download from {shown} {why}", reason="unreachable"
+            ) from None
 
     async def _call(self, label: str, method: str, url: str, **kw) -> ApiResponse:
         for attempt in (0, 1):
@@ -231,6 +310,7 @@ class HttpTransport:
         *,
         fields: Mapping[str, Field] | None = None,
         tail: bool = False,
+        download: bool = False,
     ) -> ApiResponse:
         label = f"{method} {path}"
         if "?" in path or "#" in path:  # httpx drops a URL's query when params are given
@@ -238,6 +318,10 @@ class HttpTransport:
             raise ForgeError(f"{method} {bare}: a query goes in fields, not in the path")
         if _NOT_A_PATH.match(path):
             raise ForgeError(f"{label}: a path, not an address, goes under the account's API")
+        if download and method != "GET":
+            raise ForgeError(f"{label}: only a GET downloads")
+        if download and not (self.account.forge == "github" and _LOG_PATH.fullmatch(path)):
+            raise ForgeError(f"{label}: only a GitHub job log downloads from another origin")
         url = f"{self.base.rstrip('/')}/{path.lstrip('/')}"
         if method != "GET":
             return await self._call(label, method, url, body=dict(fields or {}))
@@ -246,7 +330,7 @@ class HttpTransport:
             for k, v in (fields or {}).items()
             for x in (v if isinstance(v, list) else [v])
         ]
-        return await self._call(label, method, url, params=params, tail=tail)
+        return await self._call(label, method, url, params=params, tail=tail, download=download)
 
     async def graphql(self, query: str, variables: Mapping[str, Field] | None = None) -> dict:
         resp = await self._call(
