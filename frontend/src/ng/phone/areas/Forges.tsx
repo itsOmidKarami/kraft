@@ -49,7 +49,7 @@ export function ForgesScreen() {
     const users = namedBy(repos, x.name);
     // The state is always a chip (toneless when muted, as About's "unknown"); the value is only ever the client.
     const chip = s.word ? [{ label: s.word, tone: s.tone === "muted" ? undefined : (s.tone as "ok" | "warn" | "bad") }] : undefined;
-    const sub = [...new Set([x.forge, x.web_url, sourceWords(x), s.line, x.probe && `checked ${ago(x.probe.checked_at)}`, users.length && `used by ${users.join(", ")}`].filter(Boolean))].join(" · ");
+    const sub = [...new Set([x.forge, x.web_url, sourceWords(x), s.ssoUrl ? null : s.line, x.probe && `checked ${ago(x.probe.checked_at)}`, users.length && `used by ${users.join(", ")}`].filter(Boolean))].join(" · ");
     return { key: x.name, label: x.name, mono: true, value: x.client, chips: chip, sub, onClick: () => { setName(x.name); sheet.open("menu"); } };
   });
 

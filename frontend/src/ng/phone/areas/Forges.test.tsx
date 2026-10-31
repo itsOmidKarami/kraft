@@ -41,6 +41,8 @@ describe("Forge accounts (phone)", () => {
       expect(within(row("blind-gl")).getByText("cannot see 1 repo")).toHaveClass("ph-tone-warn");
       expect(within(row("github-cli")).getByText("cli")).toBeInTheDocument();
       expect(within(row("shared-gl")).getByText(/used by repo-zero/)).toBeInTheDocument();
+      expect(within(row("acme-gh")).getAllByText("needs SSO")).toHaveLength(1);
+      expect(row("acme-gh").textContent).not.toContain("authorization_request"); // the SSO address lives in the menu, not the row
       expect(document.body.textContent).not.toContain("op read");
     }
     expect(screen.getByText(PHONE_READ_ONLY)).toBeInTheDocument();
