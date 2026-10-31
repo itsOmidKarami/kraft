@@ -14,7 +14,9 @@ import subprocess
 from collections.abc import Collection, Mapping
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
+from kraft import forges
 from kraft.adapters.forge import git_auth
 from kraft.adapters.forge.models import ForeignCommits, ForgeError
 from kraft.config import KRAFT_ROOTS, base_ignore_args, git_read
@@ -801,6 +803,35 @@ async def _push(repo: Path, branch: str, auth: git_auth.GitAuth | None) -> None:
 _LFS_ENDPOINT_KEYS = ("lfs.url", "remote.origin.lfsurl", "remote.origin.lfspushurl")
 
 
+def _lfs_endpoint_elsewhere(repo: Path) -> bool:
+    """Whether git-lfs would be told another endpoint: any `lfs.url`, `remote.origin.lfsurl` or
+    `remote.origin.lfspushurl` in the repo's own config, or one in the `.lfsconfig` on disk (the
+    branch cannot have moved it, `assert_lfsconfig_unmoved`) that is not origin's own endpoint,
+    the fetch URL with or without `.git`, plus `/info/lfs`."""
+    if any(git_read(repo, "config", "--get", k, expected_failure=True) for k in _LFS_ENDPOINT_KEYS):
+        return True
+    origin = urlsplit(git_read(repo, "remote", "get-url", "origin", expected_failure=True) or "")
+    stem = origin.path.rstrip("/").removesuffix(".git")
+    own = {f"{stem}/info/lfs", f"{stem}.git/info/lfs"}
+    for key in _LFS_ENDPOINT_KEYS:
+        value = git_read(
+            repo, "config", "--file", str(repo / ".lfsconfig"), "--get", key, expected_failure=True
+        )
+        if not value:
+            continue
+        named = urlsplit(value)
+        same = (
+            named.scheme == "https"
+            and "@" not in named.netloc
+            and forges.origin(value) == forges.origin(origin.geturl())
+            and named.path.rstrip("/") in own
+            and not named.query
+        )
+        if not same:
+            return True
+    return False
+
+
 async def _push_lfs_objects(
     repo: Path,
     branch: str,
@@ -840,9 +871,7 @@ async def _push_lfs_objects(
             "the branch adds Git LFS files and this machine has no git-lfs, so Kraft "
             "cannot upload them or push the branch: install git-lfs, then retry"
         )
-    if auth and any(
-        git_read(repo, "config", "--get", key, expected_failure=True) for key in _LFS_ENDPOINT_KEYS
-    ):
+    if auth and _lfs_endpoint_elsewhere(repo):
         raise ForgeError(
             f"forge account {auth.name}: git-lfs is pointed elsewhere by lfs.url or "
             "remote.origin.lfsurl; Kraft sends its token only to origin's own LFS endpoint, "

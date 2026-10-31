@@ -126,3 +126,44 @@ async def test_a_key_at_an_lfs_path_never_routes_the_header(planted, monkeypatch
     planted.proxy_hits.clear()
     await both()
     assert planted.proxy_hits == []
+
+
+def _base_lfsconfig(r, text):
+    """`.lfsconfig` already on the base branch (so the branch's own work did not move it)."""
+    git(r.repo, "checkout", "-q", "main")
+    write(r.repo, ".lfsconfig", text)
+    commit_all(r.repo, "base lfsconfig")
+    git(r.repo, "push", "-q", str(r.bare), "main")
+    git(r.repo, "fetch", "-q", str(r.bare), "+refs/heads/main:refs/remotes/origin/main")
+    git(r.repo, "checkout", "-q", "kraft/abc")
+    git(r.repo, "rebase", "-q", "main")
+
+
+@pytest.mark.parametrize(
+    ("value", "refused"),
+    [
+        pytest.param("{url}/info/lfs", False, id="own-endpoint-is-fine"),
+        pytest.param("{stem}/info/lfs", False, id="own-endpoint-without-dot-git-is-fine"),
+        pytest.param("{url}/info/lfs/", False, id="own-endpoint-with-a-slash-is-fine"),
+        pytest.param("https://other.example/x/info/lfs", True, id="other-host"),
+        pytest.param("{origin}/team/other.git/info/lfs", True, id="other-path"),
+        pytest.param("http://127.0.0.1:1/team/app.git/info/lfs", True, id="other-scheme-and-port"),
+    ],
+)
+@pytest.mark.parametrize("key", ["lfs.url", "remote.origin.lfsurl", "remote.origin.lfspushurl"])
+async def test_a_base_lfsconfig_endpoint_is_refused_unless_it_is_origins_own(
+    remote, fake_lfs, key, value, refused
+):
+    url = f"{remote.web.url}/team/app.git"
+    value = value.format(url=url, stem=url.removesuffix(".git"), origin=remote.web.url)
+    section, _, name = key.rpartition(".")
+    head = "[lfs]" if section == "lfs" else '[remote "origin"]'
+    _base_lfsconfig(remote, f"{head}\n\t{name} = {value}\n")
+    if refused:
+        with pytest.raises(ForgeError, match="git-lfs is pointed elsewhere") as caught:
+            await forge_git.push(remote.repo, "kraft/abc", account=remote.pinned)
+        assert "other.example" not in str(caught.value) and value not in str(caught.value)
+        assert not fake_lfs.exists()
+    else:
+        await forge_git.push(remote.repo, "kraft/abc", account=remote.pinned)
+        assert fake_lfs.exists(), "git-lfs never ran: nothing was checked"
