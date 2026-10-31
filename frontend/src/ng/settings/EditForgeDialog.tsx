@@ -128,7 +128,7 @@ export function EditForgeDialog({ account: a, repos, onClose, onSaved, onRemove 
         )}
         {/* A command account gets no Replace token, and a PUT would erase its command: the UI is the only guard. */}
         {a.client === "api" && !command && (
-          <div className="set-wk-field">
+          <div className="set-wk-token set-fg-replace">
             <PasteInput label="New token" value={paste} onChange={setPaste} />
             <KindSelect label="New token kind" kind={pasteKind} onKind={setPasteKind} />
             <div><Button disabled={locked || paste === ""} onClick={replace}>Replace token</Button></div>

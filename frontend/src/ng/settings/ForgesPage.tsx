@@ -109,7 +109,7 @@ export function ForgesPage() {
                               {s.ssoUrl ? (
                                 <LinkButton inline href={s.ssoUrl} target="_blank" rel="noopener noreferrer">{s.ssoUrl}</LinkButton>
                               ) : (
-                                s.line && <span className="set-fg-why">{s.line}</span>
+                                s.line && s.line !== sourceWords(a) ? <span className="set-fg-why">{s.line}</span> : !s.word && <Dash />
                               )}
                             </div>
                           </td>

@@ -44,7 +44,7 @@ describe("Settings › Forge accounts", () => {
     expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Name", "Forge", "Client", "Token", "State", "Checked", "Used by", "Actions"]);
     expect(within(table).getAllByRole("row")).toHaveLength(Object.keys(ACCOUNTS).length + 1);
     const shared = await rowOf("shared-gl");
-    expect(shared).toHaveTextContent(/^shared-glgitlab https:\/\/code\.corp\.example\/gitlabcliglab's own sign-inglab's own sign-in—repo-zeroEdit$/);
+    expect(shared).toHaveTextContent(/^shared-glgitlab https:\/\/code\.corp\.example\/gitlabcliglab's own sign-in——repo-zeroEdit$/);
     const corp = await rowOf("corp-gl");
     expect(corp).toHaveTextContent(/gitlab https:\/\/gitlab\.corp\.exampleapifile \/home\/kraft\/\.kraft\/secrets\/corp-glsigned inas alice5m ago—Edit/);
     expect(within(await rowOf("vault-gl")).getAllByRole("cell")[3]).toHaveTextContent(/^command$/);
