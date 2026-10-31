@@ -131,25 +131,47 @@ LEAK = "echo LEAKMARK; echo LEAKMARK >&2"
             id="git-exits-128",
         ),
         pytest.param(
-            {"from": "command", "command": f"{LEAK}; exit 1"},
+            {"from": "command", "command": f"sh -c '{LEAK}; exit 1'"},
             None,
             False,
             "command exited 1; its output is not shown",
             id="command-exits-1",
         ),
         pytest.param(
-            {"from": "command", "command": "true; echo LEAKMARK >&2"},
+            {"from": "command", "command": "sh -c 'true; echo LEAKMARK >&2'"},
             None,
             False,
             "the command printed nothing",
             id="command-empty",
         ),
         pytest.param(
-            {"from": "command", "command": "echo LEAKMARK; echo LEAKMARK"},
+            {"from": "command", "command": "sh -c 'echo LEAKMARK; echo LEAKMARK'"},
             None,
             False,
             "the command printed more than one line; its output is not shown",
             id="command-two-lines",
+        ),
+        pytest.param(
+            {"from": "git-credential"},
+            "echo LEAKMARK; echo \"fatal: could not read Username for 'https://x': "
+            'terminal prompts disabled" >&2; exit 128',
+            False,
+            "git has no saved credential for code.corp.example:8443",
+            id="git-no-credential-real-git",
+        ),
+        pytest.param(
+            {"from": "command", "command": f"A=1 echo {TOK}"},
+            None,
+            False,
+            "the token command could not run (FileNotFoundError)",
+            id="command-has-no-shell",
+        ),
+        pytest.param(
+            {"from": "command", "command": "echo 'unterminated"},
+            None,
+            False,
+            "the token command is not valid shell-style quoting",
+            id="command-bad-quoting",
         ),
         pytest.param(
             {"from": "env", "env": "NOT_TAKEN"},
@@ -188,7 +210,9 @@ async def test_a_source_that_finds_nothing_says_why_without_its_output(
             "group", "readable by group or others; chmod 600 it", id="file-group-readable"
         ),
         pytest.param("other-owner", "owned by another user", id="file-other-owner"),
-        pytest.param("unset-var", "variable that is not set", id="file-unset-var"),
+        pytest.param(
+            "unset-var", "names $KRAFT_NO_SUCH_DIR, a variable that is not set", id="file-unset-var"
+        ),
         pytest.param("in-repo", "inside", id="file-inside-repo"),
         pytest.param("in-worktrees", "inside", id="file-inside-worktrees"),
         pytest.param("in-expose", "inside", id="file-inside-expose"),
@@ -222,20 +246,32 @@ async def test_a_file_that_is_not_safe_to_read_is_refused(
         expose = [path.parent]
     else:
         path = Path("/etc/kraft-token" if case == "etc" else f"{system_dirs()[0]}/kraft-token")
-        real = os.lstat(secret_file(tmp_path))
-        monkeypatch.setattr(os, "lstat", lambda p: real)
     with pytest.raises(NoToken) as exc:
         await read(tmp_path, repo, expose=expose, **{"from": "file", "file": str(path)})
     assert message in str(exc.value)
     assert TOK not in str(exc.value)
 
 
-@pytest.mark.parametrize("platform", ["darwin", "linux"])
-async def test_a_hung_lookup_times_out_naming_what_may_wait(cli, tmp_path, monkeypatch, platform):
+@pytest.mark.parametrize(
+    "platform, escaped",
+    [("darwin", False), ("linux", False), ("linux", True)],
+    ids=["darwin", "linux", "descendant-left-the-session"],
+)
+async def test_a_hung_lookup_times_out_naming_what_may_wait(
+    cli, tmp_path, monkeypatch, platform, escaped
+):
     pidfile = tmp_path / "child.pid"
-    git_script(cli, f"sleep 30 &\necho $! > {pidfile}\nwait")
+    sleeper = "python3 -c 'import os,time; os.setsid(); time.sleep(30)'" if escaped else "sleep 30"
+    git_script(cli, f"{sleeper} &\necho $! > {pidfile}\nwait")
     monkeypatch.setattr(credentials, "CREDENTIAL_TIMEOUT_S", 0.5)
     monkeypatch.setattr(sys, "platform", platform)
+    procs = []
+    real_popen = credentials.subprocess.Popen
+    monkeypatch.setattr(
+        credentials.subprocess,
+        "Popen",
+        lambda *a, **k: procs.append(real_popen(*a, **k)) or procs[-1],
+    )
     start = time.monotonic()
     with pytest.raises(NoToken) as exc:
         await read(tmp_path, **{"from": "git-credential"})
@@ -247,7 +283,11 @@ async def test_a_hung_lookup_times_out_naming_what_may_wait(cli, tmp_path, monke
         assert "allow Keychain access for git" in text
     else:
         assert "may be waiting for input" in text and "Keychain" not in text
+    assert procs[0].returncode is not None  # reaped, not a zombie
     pid = int(pidfile.read_text())
+    if escaped:  # killpg cannot reach it; the lookup still returns and reaps its child
+        os.kill(pid, 9)
+        return
     for _ in range(50):  # the kill is a signal; the process goes a moment later
         try:
             os.kill(pid, 0)
@@ -354,3 +394,11 @@ def test_a_refused_name_in_an_unreadable_file_is_left_alone(tmp_path, monkeypatc
         assert credentials.strip_env_sources(path) == []
         assert dict(os.environ) == before
     assert credentials._TAKEN == {}
+
+
+def test_a_broken_file_still_names_its_token_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(credentials, "_SECRET_FILES", ())
+    path = tmp_path / "forges.yaml"
+    path.write_text("accounts:\n  gl: {token: {from: file, file: '/s/tok'}}\nbad: [\n")
+    credentials.set_secret_files(path)
+    assert credentials.secret_files() == (Path("/s/tok"),)

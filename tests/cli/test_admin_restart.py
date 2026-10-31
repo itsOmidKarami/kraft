@@ -237,7 +237,17 @@ def test_spawn_restart(tmp_path, monkeypatch, platform, kind, starts):
         assert argv[0] == sys.executable
 
 
-def test_a_restart_the_server_spawns_keeps_its_env_tokens(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "forges_yaml, passed",
+    [
+        pytest.param("{from: env, env: CORP_GL}", True, id="named-account-keeps-its-token"),
+        pytest.param("{from: command, command: x}", False, id="removed-account-token-not-passed"),
+        pytest.param("{from: file, file: /x/t}", False, id="switched-to-file-token-not-passed"),
+    ],
+)
+def test_a_restart_the_server_spawns_keeps_its_env_tokens(
+    tmp_path, monkeypatch, forges_yaml, passed
+):
     from types import SimpleNamespace
 
     from kraft import apply
@@ -245,6 +255,13 @@ def test_a_restart_the_server_spawns_keeps_its_env_tokens(tmp_path, monkeypatch)
 
     run_dirs = RunDirs(tmp_path / "run").ensure()
     run_dirs.logs.mkdir(parents=True, exist_ok=True)
+    config = tmp_path / "config"
+    config.mkdir()
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(config))
+    (config / "forges.yaml").write_text(
+        "accounts:\n  gl:\n    forge: gitlab\n    client: api\n"
+        f"    web_url: https://gl.example\n    token: {forges_yaml}\n"
+    )
     seen = []
     monkeypatch.setattr(credentials, "_TAKEN", {})
     monkeypatch.setenv("CORP_GL", "tok-0123456789")
@@ -253,7 +270,7 @@ def test_a_restart_the_server_spawns_keeps_its_env_tokens(tmp_path, monkeypatch)
     monkeypatch.setattr(apply.subprocess, "Popen", lambda argv, **kw: seen.append((argv, kw)))
     apply.spawn_restart(SimpleNamespace(run_dirs=run_dirs))
     [(argv, kw)] = seen
-    assert kw["env"]["CORP_GL"] == "tok-0123456789"
+    assert kw["env"].get("CORP_GL") == ("tok-0123456789" if passed else None)
     assert "CORP_GL" not in os.environ
     assert not any("tok-0123456789" in a for a in argv)
 

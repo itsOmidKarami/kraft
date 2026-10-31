@@ -247,19 +247,17 @@ def test_refusals_raise_sandbox_refused(scene, kw):
 
 def test_an_expose_holding_a_token_file_is_refused_naming_it(scene, tmp_path, monkeypatch):
     from kraft.adapters.forge import credentials
-    from kraft.forges import ForgeAccount, ForgesFile, TokenSource
 
     token = tmp_path / "tokens" / "gl"
     token.parent.mkdir()
     token.write_text("tok")
-    account = ForgeAccount(
-        forge="gitlab",
-        client="api",
-        web_url="https://gl.example",
-        token=TokenSource(**{"from": "file", "file": str(token)}),
+    forges = tmp_path / "forges.yaml"
+    forges.write_text(
+        "accounts:\n  gl:\n    forge: gitlab\n    client: api\n"
+        f"    web_url: https://gl.example\n    token: {{from: file, file: {token}}}\n"
     )
     monkeypatch.setattr(credentials, "_SECRET_FILES", ())
-    credentials.set_secret_files(ForgesFile(accounts={"gl": account}))
+    credentials.set_secret_files(forges)
     with pytest.raises(SandboxRefused) as err:
         scene.build(sandbox={**SANDBOX, "expose": [str(token.parent)]})
     assert str(token) in str(err.value) and "which the sandbox never shows" in str(err.value)

@@ -6,8 +6,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import errno
 import os
 import re
+import shlex
 import signal
 import stat
 import subprocess
@@ -48,6 +50,7 @@ _TAKEN: dict[str, str] = {}
 # Token files, kept from every sandbox's view (set at load and on reload).
 _SECRET_FILES: tuple[Path, ...] = ()
 _ENV_NAME = re.compile(r"\benv:\s*[\"']?([A-Za-z_]\w*)")
+_FILE_PATH = re.compile(r"\bfile:\s*[\"']?([^\"'\s,}]+)")
 
 
 class NoToken(Exception):
@@ -107,6 +110,10 @@ def neutral_run(
                 for pipe in (proc.stdin, proc.stdout, proc.stderr):
                     if pipe:
                         pipe.close()
+            try:
+                proc.wait(timeout=1)  # reap it
+            except subprocess.TimeoutExpired:
+                pass
             raise
         return subprocess.CompletedProcess(argv, proc.returncode, out, err)
 
@@ -137,6 +144,10 @@ async def git_credential(web_url: str) -> str | None:
         ["git", "credential", "fill"],
         f"protocol=https\nhost={netloc}\n\n",
     )
+    # With prompts off, real git says "terminal prompts disabled" and exits 128
+    # when it has nothing saved; only that fixed phrase is read from stderr.
+    if done.returncode == 128 and "terminal prompts disabled" in done.stderr:
+        return None
     if done.returncode != 0:
         raise NoToken(f"git credential fill exited {done.returncode}; its output is not shown")
     return next(
@@ -150,7 +161,13 @@ async def git_credential(web_url: str) -> str | None:
 
 
 async def run_command(command: str) -> str:
-    done = await _run("the token command", ["/bin/sh", "-c", command])
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        raise NoToken("the token command is not valid shell-style quoting") from None
+    if not argv:
+        raise NoToken("the token command is empty")
+    done = await _run("the token command", argv)
     if done.returncode != 0:
         raise NoToken(f"command exited {done.returncode}; its output is not shown")
     lines = done.stdout.strip().splitlines()
@@ -168,21 +185,11 @@ def read_file(
     from kraft.worker.host_view import system_dirs
 
     expanded = os.path.expandvars(os.path.expanduser(spec))
+    if unset := re.findall(r"\$\{?(\w+)", expanded):
+        raise NoToken(f"the token file path names ${unset[0]}, a variable that is not set")
     if "$" in expanded:
         raise NoToken("the token file path names a variable that is not set")
     path = Path(expanded)
-    try:
-        st = os.lstat(path)
-    except OSError:
-        raise NoToken("the token file does not exist or cannot be read") from None
-    if stat.S_ISLNK(st.st_mode):
-        raise NoToken("the token file is a symlink; name the file itself")
-    if not stat.S_ISREG(st.st_mode):
-        raise NoToken("the token file is not a regular file")
-    if st.st_uid != os.getuid():
-        raise NoToken("the token file is owned by another user")
-    if st.st_mode & 0o077:
-        raise NoToken("the token file is readable by group or others; chmod 600 it")
     # Where a worker, a sandbox or the system could read it.
     real = Path(os.path.realpath(path))
     roots = [
@@ -196,10 +203,29 @@ def read_file(
         for form in (root, Path(os.path.realpath(root))):
             if path == form or path.is_relative_to(form) or real.is_relative_to(form):
                 raise NoToken(f"the token file is inside {form}, which a worker can read")
+    # One descriptor for the checks and the read: no swap in between.
     try:
-        return path.read_text().strip()
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise NoToken("the token file is a symlink; name the file itself") from None
+        raise NoToken("the token file does not exist or cannot be read") from None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise NoToken("the token file is not a regular file")
+        if st.st_uid != os.getuid():
+            raise NoToken("the token file is owned by another user")
+        if st.st_mode & 0o077:
+            raise NoToken("the token file is readable by group or others; chmod 600 it")
+        with os.fdopen(fd, encoding="utf-8") as f:
+            fd = -1
+            return f.read().strip()
     except (OSError, UnicodeDecodeError):
         raise NoToken("the token file cannot be read") from None
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 def env_token(name: str) -> str:
@@ -250,32 +276,49 @@ def take_env(names: Iterable[str]) -> list[str]:
     return taken
 
 
-def strip_env_sources(forges_yaml: Path) -> list[str]:
-    """Take every `env` source's variable before anything can start a child. A file that
-    does not load is scanned as text: a token must leave even when the file is broken."""
+def _scan(path: Path, pattern: re.Pattern[str]) -> list[str]:
+    try:
+        return pattern.findall(path.read_text())
+    except (OSError, UnicodeDecodeError):
+        return []
+
+
+def env_source_names(forges_yaml: Path) -> list[str]:
+    """Every `env` source's variable. A file that does not load is scanned as text: a
+    token must leave even when the file is broken."""
     try:
         file = ForgesFile.load(forges_yaml)
         names = [a.token.env for a in file.accounts.values() if a.token and a.token.env]
     except ConfigError:
-        try:
-            names = _ENV_NAME.findall(forges_yaml.read_text())
-        except (OSError, UnicodeDecodeError):
-            names = []
-    return take_env(n for n in dict.fromkeys(names) if env_name_problem(n) is None)
+        names = _scan(forges_yaml, _ENV_NAME)
+    return [n for n in dict.fromkeys(names) if env_name_problem(n) is None]
 
 
-def taken_env() -> dict[str, str]:
-    """For `spawn_restart` only: the restarted server must find them again."""
-    return dict(_TAKEN)
+def strip_env_sources(forges_yaml: Path) -> list[str]:
+    """Take them before anything can start a child."""
+    return take_env(env_source_names(forges_yaml))
 
 
-def set_secret_files(forges: ForgesFile) -> None:
+def taken_env(names: Iterable[str]) -> dict[str, str]:
+    """For `spawn_restart` only: the restarted server must find them again. Only those
+    the config still names, or the new server (which strips only those) would leak one."""
+    return {n: _TAKEN[n] for n in names if n in _TAKEN}
+
+
+def _expand(spec: str) -> Path:
+    return Path(os.path.realpath(os.path.expandvars(os.path.expanduser(spec))))
+
+
+def set_secret_files(forges_yaml: Path) -> None:
+    """Token files stay out of every sandbox. As with env sources, a file that does not
+    load is scanned as text."""
     global _SECRET_FILES
-    _SECRET_FILES = tuple(
-        Path(os.path.realpath(os.path.expandvars(os.path.expanduser(a.token.file))))
-        for a in forges.accounts.values()
-        if a.token and a.token.file
-    )
+    try:
+        file = ForgesFile.load(forges_yaml)
+        specs = [a.token.file for a in file.accounts.values() if a.token and a.token.file]
+    except ConfigError:
+        specs = _scan(forges_yaml, _FILE_PATH)
+    _SECRET_FILES = tuple(_expand(s) for s in specs)
 
 
 def secret_files() -> tuple[Path, ...]:

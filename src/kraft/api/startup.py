@@ -163,6 +163,7 @@ def load_forges(app: FastAPI) -> None:
     # The bytes these accounts come from: an edit landing before startup records
     # every file's hash must still read as pending (not applied).
     app.state.forges_loaded_digest = apply_mod.file_digest(path)
+    credentials.set_secret_files(path)  # also from a file that does not load
     try:
         app.state.forges = forges_mod.ForgesFile.load(path)
     except config_mod.ConfigError as exc:
@@ -172,7 +173,6 @@ def load_forges(app: FastAPI) -> None:
     else:
         problems = forges_mod.repo_problems(app.state.forges, app.state.templates_dir)
         app.state.invalid_forges = "; ".join(problems) or None
-        credentials.set_secret_files(app.state.forges)
 
 
 async def _probation_timer(app: FastAPI) -> None:

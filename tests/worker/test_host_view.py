@@ -78,25 +78,26 @@ def test_protected_refusal(host, tmp_path, rel, refused, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "where", ["secrets-dir", "file-source-elsewhere"], ids=["secrets-dir", "file-source-elsewhere"]
+    "where",
+    ["secrets-dir", "file-source-elsewhere", "file-source-in-a-broken-forges-yaml"],
+    ids=["secrets-dir", "file-source-elsewhere", "file-source-in-a-broken-forges-yaml"],
 )
 def test_a_token_file_is_never_shown_to_a_sandbox(host, tmp_path, monkeypatch, where):
     from kraft.adapters.forge import credentials
-    from kraft.forges import ForgeAccount, ForgesFile, TokenSource
 
     home, kraft, _ = host
     monkeypatch.setattr(credentials, "_SECRET_FILES", ())
     token = _file(
         kraft / "secrets" / "x" if where == "secrets-dir" else home / "tokens" / "gl", "tok", 0o600
     )
-    if where == "file-source-elsewhere":
-        account = ForgeAccount(
-            forge="gitlab",
-            client="api",
-            web_url="https://gl.example",
-            token=TokenSource(**{"from": "file", "file": str(token)}),
+    if where != "secrets-dir":
+        forges = tmp_path / "forges.yaml"
+        forges.write_text(
+            "accounts:\n  gl:\n    forge: gitlab\n    client: api\n"
+            f"    web_url: https://gl.example\n    token: {{from: file, file: {token}}}\n"
+            + ("bad: [\n" if "broken" in where else "")
         )
-        credentials.set_secret_files(ForgesFile(accounts={"gl": account}))
+        credentials.set_secret_files(forges)
     assert host_view.protected_refusal(token, home, kraft) is not None
     with pytest.raises(Refused):
         host_view.expose_roots([str(token.parent)], home, kraft)

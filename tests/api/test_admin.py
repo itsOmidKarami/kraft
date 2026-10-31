@@ -395,8 +395,12 @@ _B = "b: {forge: github, web_url: 'https://github.com'}"
     ],
 )
 def test_a_forges_yaml_that_leaves_a_repo_without_its_account_is_refused_on_reload(
-    client, running, accounts, applied, says, refused_it, passthrough
+    client, monkeypatch, running, accounts, applied, says, refused_it, passthrough
 ):
+    from kraft.adapters.forge import credentials
+
+    monkeypatch.setattr(credentials, "_TAKEN", {})
+    monkeypatch.setenv("CORP_GL", "tok-0123456789")
     st = client.app.state
     st.forges = (
         None
@@ -417,3 +421,5 @@ def test_a_forges_yaml_that_leaves_a_repo_without_its_account_is_refused_on_relo
     assert (refused is not None) is refused_it
     assert says in st.invalid_forges
     assert st.forges is not None and list(st.forges.accounts) == applied
+    # Taken even when the edit is refused: no child may inherit a token the file names.
+    assert ("CORP_GL" not in os.environ) is ("CORP_GL" in accounts)
