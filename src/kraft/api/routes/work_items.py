@@ -342,7 +342,7 @@ def refuse_agent_on_disabled_repo(st, request: Request, repo: str, target=None) 
         raise HTTPException(
             403,
             f"{found.path} is disabled: a person {needs}enables it in Settings › Repos before "
-            f"an {who} files work on it, since its commands run for every item",
+            f"an {who} files or starts work on it, since its commands run for every item",
         )
 
 
@@ -356,8 +356,7 @@ def repo_warning(entry) -> str | None:
     stops = []
     if not entry.enabled:
         stops.append(
-            "is disabled: check its commands in Settings › Repos before starting this item, "
-            "as they may be an agent's that no one has read"
+            "is disabled: check its commands in Settings › Repos before starting this item"
         )
     if entry.setup_command is None:
         stops.append(

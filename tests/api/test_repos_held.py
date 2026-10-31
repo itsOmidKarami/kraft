@@ -183,17 +183,33 @@ def test_an_agent_files_no_work_on_a_workspace_with_a_disabled_member(client, tm
     assert (root_only.status_code, by_hand.status_code) == (201, 201), root_only.text
 
 
-def test_an_agent_does_not_start_a_persons_item_on_a_disabled_repo(client, tmp_path):
+@pytest.mark.parametrize(
+    ("caller", "started", "status"),
+    [("assistant", False, 403), ("person", False, 200), ("assistant", True, 200)],
+    ids=["agent-never-started", "person-never-started", "agent-mid-run"],
+)
+def test_an_agent_does_not_start_a_persons_item_on_a_disabled_repo(
+    client, tmp_path, monkeypatch, caller, started, status
+):
     """The person filing by hand is told to read the repo's commands before
-    starting it; an agent's resume would start it before they had."""
+    starting it; an agent's resume would start it before they had. An item
+    already run has run them; the person starts theirs."""
+    from support.api import _force_node
+
+    from kraft.api import deps
+
+    monkeypatch.setattr(deps, "spawn", lambda app, w, coro: deps.discard(coro))
     repo = make_repo(tmp_path)
     path = client.post(
         "/api/repos", json={"path": str(repo), "test_command": "evil"}, headers=_CALLERS["worker"]
     ).json()["path"]
     wid = client.post("/api/work-items", json={"title": "t", "repo": path}).json()["id"]
+    if started:
+        _force_node(wid, "implementation", "paused")
 
-    r = client.post(f"/api/work-items/{wid}/resume", json={}, headers=_CALLERS["assistant"])
+    r = client.post(f"/api/work-items/{wid}/resume", json={}, headers=_CALLERS[caller])
 
-    assert r.status_code == 403, r.text
-    assert "is disabled: a person enables it" in r.json()["detail"]
-    assert client.get(f"/api/work-items/{wid}").json()["status"] == "paused"
+    assert r.status_code == status, r.text
+    if status == 403:
+        assert "is disabled: a person enables it" in r.json()["detail"]
+        assert client.get(f"/api/work-items/{wid}").json()["status"] == "paused"

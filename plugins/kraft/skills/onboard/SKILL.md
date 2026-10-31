@@ -107,7 +107,8 @@ it did was right. Then hand off to `kraft:check`.
    likeliest to fail silently: `requires-python = "~=3.11"` is satisfied by
    3.14 too, so the wrong interpreter can pass every test without saying so.
 
-   Anything the repo genuinely needs goes in its `repos.yaml` entry:
+   Anything the repo genuinely needs goes in its `repos.yaml` entry. Unlike a
+   command, `local_files` is yours to add there:
 
    ```yaml
    local_files:
