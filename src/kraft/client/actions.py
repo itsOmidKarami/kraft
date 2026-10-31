@@ -916,12 +916,39 @@ async def add_forge(
     web_url: str,
     api_url: str | None = None,
     default_for_host: bool = False,
+    *,
+    client: str = "cli",
+    ca_file: str | None = None,
+    token: dict | None = None,
 ) -> dict:
-    """Name a forge account (`client: cli`): the host's forge and web address."""
+    """Name a forge account. `token` is a source (`{"from": "env", "env": NAME}`), never a
+    token; a `command` source is refused here, it is set on the server's machine."""
     body = {"name": name, "forge": forge, "web_url": web_url, "default_for_host": default_for_host}
-    if api_url is not None:
-        body["api_url"] = api_url
+    for key, value in {
+        "api_url": api_url,
+        "ca_file": ca_file,
+        "token": token,
+        **({"client": client} if client != "cli" else {}),
+    }.items():
+        if value is not None:
+            body[key] = value
     return await transport._act("/forges", body)
+
+
+async def edit_forge(name: str, fields: dict) -> dict:
+    """Change the fields given: `api_url`, `ca_file`, `client`, `default_for_host`, `token`
+    (a source, never a token)."""
+    return await transport._patch(f"/forges/{transport.segment(name)}", fields)
+
+
+async def set_forge_token(name: str, value: str, kind: str) -> dict:
+    """Paste a token: the server writes it to a private file and names that as the source."""
+    response = await transport._send(
+        "PUT", f"/forges/{transport.segment(name)}/token", json={"value": value, "kind": kind}
+    )
+    if response.status_code >= 400:
+        raise transport.status_error(response.status_code, transport._detail(response))
+    return transport._json(response)
 
 
 async def remove_forge(name: str) -> None:

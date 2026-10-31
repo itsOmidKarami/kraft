@@ -7,7 +7,10 @@ token."""
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+from pathlib import Path
+from typing import Any
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, Response
@@ -15,13 +18,19 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from kraft import apply as apply_mod
 from kraft import config as config_mod
-from kraft import forges
-from kraft.adapters.forge import git, probe
+from kraft import forges, redact
+from kraft.adapters.forge import credentials, git, probe
 from kraft.adapters.forge.models import ForgeError
 from kraft.api import api_router
 from kraft.api.routes.workers import _forbid_sessions
+from kraft.paths import kraft_home
 
 _NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
+_COMMAND_403 = (
+    "a command source runs code on the server's machine, so it is set there: "
+    "kraft admin forge add … --token-from 'command:…', or by hand in forges.yaml"
+)
+_TOKEN_BODY = 'the body must be {"value": …, "kind": "pat" | "oauth" | "unknown"}'
 
 
 class AddForge(BaseModel):
@@ -32,6 +41,22 @@ class AddForge(BaseModel):
     web_url: str
     api_url: str | None = None
     default_for_host: bool = False
+    client: str = "cli"
+    ca_file: str | None = None
+    # Untyped: FastAPI's own 422 quotes the input it refused, and this may hold a token.
+    token: Any = None
+
+
+class EditForge(BaseModel):
+    """What an edit may change; only the keys sent are applied."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    api_url: str | None = None
+    ca_file: str | None = None
+    client: str | None = None
+    default_for_host: bool | None = None
+    token: Any = None
 
 
 def _row(st, name: str, account: forges.ForgeAccount) -> dict:
@@ -76,15 +101,62 @@ def _naming(st, name: str) -> list[str]:
     return [str(e.path) for e in entries if e.forge_account == name]
 
 
-def _save(st, updated: forges.ForgesFile) -> None:
+def _save(st, updated: forges.ForgesFile, probe_names: tuple[str, ...] = ()) -> None:
     """Written, recorded as loaded and running. The callers hold `forges_lock` and await
-    nothing between their last check and here, so the file reflects the check."""
-    updated.save(_file_path(st))
+    nothing between their last check and here, so the file reflects the check. A new
+    `env` or `file` source is protected now, not at the next reload. `probe_names` are
+    probed again even when the account is unchanged: a second paste leaves it equal."""
+    path = _file_path(st)
+    updated.save(path)
     apply_mod.record(st, forges.ForgesFile.FILE)
+    credentials.strip_env_sources(path)
+    credentials.set_secret_files(path, running=updated)
     st.forges = updated
     for gone in set(st.forge_probes) - set(probe.api_accounts(st)):
         del st.forge_probes[gone]  # a removed account must not keep /health degraded
     st.invalid_forges = "; ".join(forges.repo_problems(updated, st.templates_dir)) or None
+    probe.kick(st, [n for n in probe_names if n in probe.api_accounts(st)])
+
+
+def _own_file(name: str, account: forges.ForgeAccount | None) -> Path | None:
+    """The file Kraft wrote for `name`'s pasted token, when the account still reads it."""
+    token = account.token if account else None
+    if token is None or token.file is None:
+        return None
+    mine = Path(os.path.realpath(kraft_home() / "secrets" / name))
+    theirs = Path(os.path.realpath(os.path.expandvars(os.path.expanduser(token.file))))
+    return mine if mine == theirs else None
+
+
+def _drop_own_file(name: str, before: forges.ForgeAccount | None, after) -> None:
+    """Delete the pasted token file once nothing reads it: the account is gone, or reads
+    another source now. Only the file Kraft wrote for this name, never one it was pointed at."""
+    if (gone := _own_file(name, before)) is not None and _own_file(name, after) is None:
+        gone.unlink(missing_ok=True)
+
+
+def _refuse_added(st, current: forges.ForgesFile, updated: forges.ForgesFile) -> None:
+    """A write that adds a repo/account problem is refused, as `_validate_repos` does."""
+    before = forges.repo_problems(current, st.templates_dir)
+    if added := [p for p in forges.repo_problems(updated, st.templates_dir) if p not in before]:
+        raise HTTPException(422, "; ".join(added))
+
+
+def _validated(accounts: dict) -> forges.ForgesFile:
+    try:
+        return forges.ForgesFile.model_validate({"accounts": accounts})
+    except ValidationError as exc:
+        raise HTTPException(422, forges.validation_text(exc)) from exc
+
+
+def _no_command(sent, updated: forges.ForgeAccount) -> None:
+    if sent is not None and updated.token is not None and updated.token.from_ == "command":
+        raise HTTPException(403, _COMMAND_403)
+
+
+def _token_dict(token) -> None:
+    if token is not None and not isinstance(token, dict):
+        raise HTTPException(422, "token: must be an object")  # never what was sent
 
 
 async def _read(st) -> forges.ForgesFile:
@@ -113,27 +185,87 @@ async def add_forge(body: AddForge, request: Request):
     st = request.app.state
     if not _NAME.fullmatch(body.name):
         raise HTTPException(422, "name: lowercase letters, digits, . - and _, starting with one")
+    _token_dict(body.token)
     async with st.forges_lock:
         current = await _load(st)
         if body.name in current.accounts:
             raise HTTPException(409, f"forge account {body.name!r} already exists")
-        fields = body.model_dump(exclude={"name"})
-        try:
-            updated = forges.ForgesFile.model_validate(
-                {"accounts": {**current.accounts, body.name: fields}}
-            )
-        except ValidationError as exc:
-            raise HTTPException(
-                422,
-                "; ".join(
-                    (f"{e['loc'][-1]}: " if e["loc"] else "")
-                    + e["msg"].removeprefix("Value error, ")
-                    for e in exc.errors()
-                ),
-            ) from exc
-        _save(st, updated)
+        updated = _validated(
+            {**current.accounts, body.name: body.model_dump(exclude={"name"}, exclude_none=True)}
+        )
+        _no_command(body.token, updated.accounts[body.name])
+        _refuse_added(st, current, updated)
+        _save(st, updated, (body.name,))
     apply_mod.notify(request.app)
     return _row(st, body.name, updated.accounts[body.name])
+
+
+@api_router.patch("/forges/{name}")
+async def edit_forge(name: str, body: EditForge, request: Request):
+    _forbid_sessions(request, "forge accounts")
+    st = request.app.state
+    _token_dict(body.token)
+    async with st.forges_lock:
+        current = await _load(st)
+        old = current.accounts.get(name)
+        if old is None:
+            raise HTTPException(404, f"no forge account named {name!r}")
+        sent = body.model_dump(exclude_unset=True)
+        fields = {**old.model_dump(by_alias=True, exclude_none=True), **sent}
+        if fields.get("client") == "cli":  # gh/glab keep their own sign-in
+            fields.pop("token", None)
+            fields.pop("ca_file", None)
+        # None clears a key, as it does in the file.
+        fields = {k: v for k, v in fields.items() if v is not None}
+        updated = _validated({**current.accounts, name: fields})
+        _no_command(sent.get("token"), updated.accounts[name])
+        _refuse_added(st, current, updated)
+        _save(st, updated, (name,))
+        _drop_own_file(name, old, updated.accounts[name])
+    apply_mod.notify(request.app)
+    return _row(st, name, updated.accounts[name])
+
+
+@api_router.put("/forges/{name}/token")
+async def set_token(name: str, request: Request):
+    """A pasted token. The body is read raw, never through a model: FastAPI's 422 quotes
+    its input, and this is the one body that is a token."""
+    _forbid_sessions(request, "forge accounts")
+    st = request.app.state
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    value, kind = (body.get("value"), body.get("kind")) if isinstance(body, dict) else (None, None)
+    if not isinstance(value, str) or not isinstance(kind, str) or kind not in credentials.KINDS:
+        raise HTTPException(422, _TOKEN_BODY)
+    value = value.strip()
+    if any(c.isspace() or not c.isprintable() for c in value):
+        raise HTTPException(422, "the token holds whitespace or a control character")
+    if len(value) < redact.MIN_LEN:
+        raise HTTPException(422, f"the token is shorter than {redact.MIN_LEN} characters")
+    if not _NAME.fullmatch(name):
+        raise HTTPException(422, "name: lowercase letters, digits, . - and _, starting with one")
+    async with st.forges_lock:
+        current = await _load(st)
+        old = current.accounts.get(name)
+        if old is None:
+            raise HTTPException(404, f"no forge account named {name!r}")
+        if old.client == "cli":
+            raise HTTPException(
+                409, f"forge account {name!r} is client: cli, which keeps no token; edit it first"
+            )
+        # Before the file exists: no log line can carry it unredacted.
+        redact.register(value)
+        redact.register(credentials.basic_form(value, kind))
+        path = credentials.write_pasted(name, value)
+        source = {"from": "file", "file": str(path), "kind": kind}
+        fields = {**old.model_dump(by_alias=True, exclude_none=True), "token": source}
+        updated = _validated({**current.accounts, name: fields})
+        _save(st, updated, (name,))
+        _drop_own_file(name, old, updated.accounts[name])
+    apply_mod.notify(request.app)
+    return _row(st, name, updated.accounts[name])
 
 
 @api_router.delete("/forges/{name}", status_code=204)
@@ -154,6 +286,7 @@ async def remove_forge(name: str, request: Request):
             )
         rest = {n: a for n, a in current.accounts.items() if n != name}
         _save(st, forges.ForgesFile(accounts=rest))
+        _drop_own_file(name, current.accounts[name], None)
     apply_mod.notify(request.app)
     return Response(status_code=204)
 

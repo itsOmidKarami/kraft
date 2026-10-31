@@ -250,12 +250,20 @@ def test_a_save_round_trips_at_0600_without_defaults(tmp_path, account, present,
         ("CLAUDE_CODE_OAUTH_TOKEN", True),
         ("KRAFT_PORT", True),
         ("1BAD", True),
+        ("ghp_FAKEFAKEFAKE0123", True),
+        ("github_pat_FAKEFAKE0123", True),
+        ("gho_FAKEFAKEFAKE0123", True),
+        ("glpat-FAKEFAKEFAKE0123", True),
+        ("GHP_TOKEN", False),
         ("CORP_GL", False),
     ],
     ids=lambda v: v if isinstance(v, str) else None,
 )
 def test_an_env_name_kraft_needs_is_never_a_source(name, refused):
-    assert (forges.env_name_problem(name) is not None) is refused
+    why = forges.env_name_problem(name)
+    assert (why is not None) is refused
+    if "FAKE" in name:
+        assert name not in why  # a token pasted as a name is never quoted
 
 
 @pytest.mark.parametrize(

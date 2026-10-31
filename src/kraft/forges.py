@@ -74,12 +74,15 @@ def project_path(remote: str, account: ForgeAccount) -> str | None:
 def env_name_problem(name: str) -> str | None:
     """Why an `env` token source may not name `name`, else None. Worded to follow `token.env`."""
     # Inside: worker.env imports a lot, and forges is imported early.
+    from kraft.adapters.forge.credentials import PREFIXES
     from kraft.worker.env import BASELINE
     from kraft.worker.sandbox import FORWARDED_ENV
 
     # Never quote an arbitrary name: a token pasted here would reach the open /health.
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
         return "must name an environment variable: letters, digits and _"
+    if name.startswith(tuple(PREFIXES)):
+        return "looks like a token, not a variable name"
     if name.startswith("KRAFT_"):
         return "names a KRAFT_ variable, which Kraft sets for itself"
     if name.startswith("GIT_"):
@@ -266,6 +269,21 @@ class ForgeAccount(BaseModel):
 
     def api(self) -> str:
         return self.api_url or default_api_url(self.forge, self.web_url)
+
+
+def validation_text(exc: ValidationError) -> str:
+    """What an account refused for, in words that quote nothing the person sent: an
+    unknown key is named by its parent only (`ForgesFile.load` does the same), since a
+    token pasted as a key would otherwise come back."""
+    out = []
+    for e in exc.errors():
+        loc = e["loc"]
+        if e["type"] == "extra_forbidden":
+            parent = str(loc[-2]) if len(loc) > 1 else "the body"
+            out.append(f"{parent} has a key forges.yaml does not know")
+        else:
+            out.append((f"{loc[-1]}: " if loc else "") + e["msg"].removeprefix("Value error, "))
+    return "; ".join(out)
 
 
 class ForgesFile(config._Model):
