@@ -70,7 +70,7 @@
 /* Banner (Decisions §4) and the cards under the brief (§14). */
 .item-banner { flex: none; display: flex; align-items: center; gap: 10px; box-sizing: border-box; padding: 8px 8px 8px 14px; border: 1px solid var(--warn-edge); border-radius: 8px; background: var(--warn-wash); font-size: var(--fs-meta); color: var(--text); }
 .item-banner-glyph { color: var(--warn); }
-.item-banner-text { flex: 1 1 auto; min-width: 0; }
+.item-banner-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .item-banner-note { display: block; margin-top: 2px; font-size: var(--fs-label); color: var(--text-sub); }
 .item-banner .btn { flex: none; white-space: nowrap; }
 .item-banner code, .item-card code { font: var(--fs-meta) ui-monospace, Menlo, monospace; }
@@ -99,6 +99,7 @@
 .item-card .item-facts dt { color: var(--text-sub); }
 .item-card .item-input { max-width: 860px; }
 .item-card-text { margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text); }
+.item-card-fix { overflow-wrap: anywhere; }
 .item-card-fix code { font: var(--fs-label) ui-monospace, Menlo, monospace; }
 .item-card-open { margin-left: auto; }
 .item-card-note { overflow-wrap: anywhere; }

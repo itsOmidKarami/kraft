@@ -334,6 +334,8 @@ FORGE_LOGIN_HINT = (
     "for GitLab. If git itself can't authenticate, check its credentials there too "
     "(`gh auth setup-git`, your SSH key or credential helper). Then Retry."
 )
+#: `cause.tsx`: a forge token that needs single sign-on, fixed on the forge's website.
+FORGE_SSO_HINT = "Authorize the token for single sign-on: {sso_url}. Then Retry."
 #: `bannerWords.ts`: a failure the repo's settings can answer.
 REPO_FIX = "Check the repo settings."
 
@@ -362,11 +364,18 @@ def _offers_raise(item: dict) -> bool:
     return _admits(item, "retry", True) if how == "limit" else False
 
 
+def _sso_url(facts: dict) -> str:
+    """`ssoUrl`: `facts.sso_url` when it is an `https://` address with no whitespace or backtick."""
+    url = facts.get("sso_url")
+    return url if isinstance(url, str) and re.fullmatch(r"https://[^\s`]+", url) else ""
+
+
 def _failed_fix(stop: dict) -> str:
-    """`failedFix`: `forge_login`, `retry` or `repo`."""
-    cause = (stop.get("facts") or {}).get("cause")
+    """`failedFix`: `forge_sso`, `forge_login`, `retry` or `repo`."""
+    facts = stop.get("facts") or {}
+    cause = facts.get("cause")
     if cause == "forge_auth":
-        return "forge_login"
+        return "forge_sso" if _sso_url(facts) else "forge_login"
     if stop.get("kind") != "infra" or cause == "stranded":
         return "retry"
     return "repo"
@@ -414,7 +423,8 @@ def _banner_words(item: dict) -> dict | None:
     node = _or(stop.get("node"), "")
     if item["display_status"] == "failed":
         fix = _failed_fix(stop)
-        way = {"forge_login": FORGE_LOGIN_HINT, "repo": REPO_FIX}.get(fix, "")
+        sso = FORGE_SSO_HINT.format(sso_url=_sso_url(stop.get("facts") or {}))
+        way = {"forge_login": FORGE_LOGIN_HINT, "forge_sso": sso, "repo": REPO_FIX}.get(fix, "")
         text = sentence(reason) if (reason := _or(stop.get("reason"), "")) else ""
         return {"kind": "failed", "node": node, "text": text, "way": way}
     kind = stop.get("kind")

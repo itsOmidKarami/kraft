@@ -1,6 +1,6 @@
 import type { WorkItem } from "../../types";
 import { gateName, nameOf } from "../board/rowText";
-import { FORGE_LOGIN_HINT, failedFix } from "./cause";
+import { forgeHint, failedFix } from "./cause";
 import { BUDGET_RAN_OUT, LIMIT_REACHED } from "./sharedWords";
 import { budgetRaise, NOT_RAISABLE, offersRaise, RAISE_REFUSED } from "./status";
 
@@ -40,7 +40,7 @@ function bannerWords(item: BannerItem): Omit<BannerWords, "name"> | null {
   const node = stop.node ?? "";
   if (item.display_status === "failed") {
     const fix = failedFix(item);
-    return { kind: "failed", node, text: stop.reason ? sentence(stop.reason) : "", way: fix === "forge_login" ? FORGE_LOGIN_HINT : fix === "repo" ? REPO_FIX : "" };
+    return { kind: "failed", node, text: stop.reason ? sentence(stop.reason) : "", way: forgeHint(item) ?? (fix === "repo" ? REPO_FIX : "") };
   }
   switch (stop.kind) {
     case "gate":
