@@ -1611,7 +1611,9 @@ def _restart_confirm(ns: argparse.Namespace) -> None:
 def _roll_back(ns: argparse.Namespace, run_dirs: RunDirs, record: dict, kind: str) -> str:
     """Stop whatever started, put back what the update changed, and start
     again. Returns what became of it, in a sentence."""
+    from kraft import forges as forges_mod
     from kraft import update, when_free
+    from kraft.adapters.forge import credentials
 
     try:
         if kind == "service":
@@ -1627,7 +1629,10 @@ def _roll_back(ns: argparse.Namespace, run_dirs: RunDirs, record: dict, kind: st
             "uv", "tool", "install", "--force", "--python", update._python(),
             update.install_argument(requirement),
         ]  # fmt: skip
-        if subprocess.run(command, check=False).returncode != 0:
+        # uv may run a package's build backend; the tokens this helper carries are not its.
+        names = credentials.env_source_names(config_dir() / forges_mod.ForgesFile.FILE)
+        env = {k: v for k, v in os.environ.items() if k not in names}
+        if subprocess.run(command, check=False, env=env).returncode != 0:
             return "the previous version could not be reinstalled; Kraft is down"
     # A settings restart changed no database; a release and a dev install may
     # have had one migrated by the new server.

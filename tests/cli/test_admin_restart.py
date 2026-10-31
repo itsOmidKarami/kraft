@@ -75,7 +75,7 @@ def update_attempt(tmp_path, monkeypatch):
         c.execute("UPDATE t SET v = 'migrated'")
     Path(f"{run_dirs.db}-wal").write_text("stale")
 
-    calls = []
+    calls, envs = [], []
     health = {"payloads": []}
 
     async def fake_health():
@@ -100,7 +100,9 @@ def update_attempt(tmp_path, monkeypatch):
     monkeypatch.setattr(
         cli.admin.subprocess,
         "run",
-        lambda argv, **_k: calls.append(argv) or subprocess.CompletedProcess(argv, 0),
+        lambda argv, **k: (
+            (calls.append(argv), envs.append(k.get("env"))) and subprocess.CompletedProcess(argv, 0)
+        ),
     )
     monkeypatch.setattr(
         cli.admin,
@@ -113,6 +115,7 @@ def update_attempt(tmp_path, monkeypatch):
         state=SimpleNamespace(run_dirs=run_dirs),
         config_dir=config_dir,
         calls=calls,
+        envs=envs,
         health=health,
     )
 
@@ -200,6 +203,33 @@ def test_restart_confirm_rolls_back(update_attempt, kind, payload, installs, dat
     assert when_free.read_rollback(update_attempt.run_dirs) is None
     assert when_free.outcome(update_attempt.state)["status"] == "failed"
     assert when_free.failed_key(update_attempt.state) == "v2.3.0"
+
+
+@pytest.mark.parametrize(
+    "named",
+    [
+        pytest.param(True, id="env-token-named-by-forges-yaml"),
+        pytest.param(False, id="other-variable-is-kept"),
+    ],
+)
+def test_a_rollback_install_runs_without_the_env_tokens(update_attempt, monkeypatch, named):
+    from kraft import when_free
+
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(update_attempt.config_dir))
+    (update_attempt.config_dir / "forges.yaml").write_text(
+        "accounts:\n  gl:\n    forge: gitlab\n    client: api\n"
+        "    web_url: https://gl.example\n    token: {from: env, env: CORP_GL}\n"
+    )
+    monkeypatch.setenv("CORP_GL" if named else "OTHER_VAR", "tok-0123456789")
+    when_free.write_rollback(update_attempt.run_dirs, kind="release")
+    update_attempt.health["payloads"] = [{"pid": 1, "version": "2.2.0"}]
+
+    with pytest.raises(SystemExit):
+        _restart_confirm()
+
+    [env] = update_attempt.envs
+    assert ("CORP_GL" in env) is False
+    assert ("OTHER_VAR" in env) is (not named)
 
 
 @pytest.mark.parametrize(

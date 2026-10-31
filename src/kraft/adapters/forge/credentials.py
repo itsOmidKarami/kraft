@@ -15,6 +15,8 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,12 +51,17 @@ _TAKEN: dict[str, str] = {}
 
 # Token files, kept from every sandbox's view (set at load and on reload).
 _SECRET_FILES: tuple[Path, ...] = ()
-_ENV_NAME = re.compile(r"\benv:\s*[\"']?([A-Za-z_]\w*)")
-_FILE_PATH = re.compile(r"\bfile:\s*[\"']?([^\"'\s,}]+)")
+_ENV_NAME = re.compile(r"""\benv["']?\s*:\s*["']?([A-Za-z_]\w*)""")
+_FILE_PATH = re.compile(r"""\bfile["']?\s*:\s*["']?([^"'\s,}]+)""")
+MAX_OUTPUT = 64 * 1024
 
 
 class NoToken(Exception):
     """Fixed operator text; never a source's output."""
+
+
+class OutputTooLarge(Exception):
+    """A source printed more than MAX_OUTPUT."""
 
 
 def prefix_warning(token: str, kind: str) -> str | None:
@@ -72,49 +79,95 @@ def basic_form(token: str, kind: str) -> str:
     return base64.b64encode(f"{KINDS[kind].git_username}:{token}".encode()).decode()
 
 
+def _kill(proc: subprocess.Popen) -> None:
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def _neutral_env(cwd: str) -> dict[str, str]:
+    # An inherited GIT_DIR or GIT_WORK_TREE would undo the neutral cwd; keep only the
+    # hardening pins (sandbox.harden_host_git_env).
+    keep = ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_") or k.startswith(keep)}
+    return {
+        **env,
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": "",
+        "SSH_ASKPASS": "",
+        "GCM_INTERACTIVE": "never",
+        "GIT_CEILING_DIRECTORIES": str(Path(cwd).parent),
+    }
+
+
 def neutral_run(
     argv: list[str], *, input: str | None = None, timeout: float
 ) -> subprocess.CompletedProcess[str]:
     """Run `argv` in an empty directory, outside the repo, with every prompt turned off, in
-    its own session so a timeout kills what a credential helper started too."""
+    its own session so a timeout kills what a credential helper started too. Output past
+    MAX_OUTPUT kills it (OutputTooLarge)."""
     with tempfile.TemporaryDirectory(prefix="kraft-cred-") as cwd:
-        env = {
-            **os.environ,
-            "GIT_TERMINAL_PROMPT": "0",
-            "GIT_ASKPASS": "",
-            "SSH_ASKPASS": "",
-            "GCM_INTERACTIVE": "never",
-            "GIT_CEILING_DIRECTORIES": str(Path(cwd).parent),
-        }
         proc = subprocess.Popen(
             argv,
             cwd=cwd,
-            env=env,
+            env=_neutral_env(cwd),
             stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
             start_new_session=True,
         )
-        try:
-            out, err = proc.communicate(input, timeout=timeout)
-        except subprocess.TimeoutExpired:
+        over = threading.Event()
+        bufs = (bytearray(), bytearray())
+
+        def drain(pipe, buf: bytearray) -> None:
             try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
+                while chunk := os.read(pipe.fileno(), 65536):
+                    buf += chunk
+                    if len(buf) > MAX_OUTPUT:
+                        over.set()
+                        _kill(proc)
+                        return
+            except (OSError, ValueError):
                 pass
-            # A descendant that left the session may still hold the pipes.
+
+        readers = [
+            threading.Thread(target=drain, args=(p, b), daemon=True)
+            for p, b in zip((proc.stdout, proc.stderr), bufs, strict=True)
+        ]
+        for t in readers:
+            t.start()
+        if input is not None:
             try:
-                proc.communicate(timeout=1)
-            except subprocess.TimeoutExpired:
-                for pipe in (proc.stdin, proc.stdout, proc.stderr):
-                    if pipe:
-                        pipe.close()
+                proc.stdin.write(input.encode())
+                proc.stdin.close()
+            except OSError:
+                pass
+        deadline = time.monotonic() + timeout
+        try:
+            for t in readers:
+                t.join(max(0.0, deadline - time.monotonic()))
+                if t.is_alive():
+                    raise subprocess.TimeoutExpired(argv, timeout)
+            proc.wait(max(0.0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            _kill(proc)
+            for t in readers:
+                t.join(1)  # a descendant that left the session may still hold a pipe
+            for pipe in (proc.stdin, proc.stdout, proc.stderr):
+                if pipe:
+                    pipe.close()
             try:
                 proc.wait(timeout=1)  # reap it
             except subprocess.TimeoutExpired:
                 pass
+            if over.is_set():
+                raise OutputTooLarge from None
             raise
+        if over.is_set():
+            proc.wait()
+            raise OutputTooLarge
+        out, err = (bytes(b).decode("utf-8", "replace") for b in bufs)
         return subprocess.CompletedProcess(argv, proc.returncode, out, err)
 
 
@@ -132,6 +185,8 @@ async def _run(what: str, argv: list[str], input: str | None = None):
         return await asyncio.to_thread(neutral_run, argv, input=input, timeout=CREDENTIAL_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         raise _timed_out(what) from None
+    except OutputTooLarge:
+        raise NoToken(f"{what} printed too much; its output is not shown") from None
     except OSError as exc:
         raise NoToken(f"{what} could not run ({type(exc).__name__})") from None
 
@@ -243,7 +298,7 @@ async def read_token(
     *,
     repos: Sequence[RepoEntry],
     worktrees: Path,
-    expose: Sequence[Path] = (),
+    expose: Sequence[Path],
     ssh_hint: bool = False,
 ) -> str:
     source = account.source()
@@ -259,6 +314,8 @@ async def read_token(
         token = env_token(source.env or "")
     else:
         token = read_file(source.file or "", repos=repos, worktrees=worktrees, expose=expose)
+    if any(c.isspace() or not c.isprintable() for c in token):
+        raise NoToken("the token contains whitespace or a control character; it is not shown")
     if len(token) < redact.MIN_LEN:
         raise NoToken(f"the token is shorter than {redact.MIN_LEN} characters")
     redact.register(token)
@@ -272,14 +329,16 @@ def take_env(names: Iterable[str]) -> list[str]:
     for name in names:
         if name in os.environ:
             _TAKEN[name] = os.environ.pop(name)
+            if len(_TAKEN[name]) >= redact.MIN_LEN:
+                redact.register(_TAKEN[name])
             taken.append(name)
     return taken
 
 
 def _scan(path: Path, pattern: re.Pattern[str]) -> list[str]:
     try:
-        return pattern.findall(path.read_text())
-    except (OSError, UnicodeDecodeError):
+        return pattern.findall(path.read_bytes().decode("utf-8", "replace"))
+    except OSError:
         return []
 
 

@@ -56,6 +56,12 @@ async def test_git_credential_fill_runs_without_a_prompt_from_a_neutral_director
 ):
     for var in ("GIT_ASKPASS", "SSH_ASKPASS", "GIT_TERMINAL_PROMPT", "GCM_INTERACTIVE"):
         monkeypatch.setenv(var, "inherited")
+    # These would point git back at a repository; the hardening pins must survive.
+    for var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_CONFIG_PARAMETERS"):
+        monkeypatch.setenv(var, str(repo))
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "/dev/null")
     real_git = shutil.which("git")  # before the stub shadows it
     cli.stub("git", f"username=u\npassword={TOK}", record=True)
     # The real git, run where the stub runs: it must find no repository there.
@@ -78,6 +84,10 @@ async def test_git_credential_fill_runs_without_a_prompt_from_a_neutral_director
         ("GCM_INTERACTIVE", "never"),
     ):
         assert rec["env"][key] == want
+    for gone in ("GIT_DIR", "GIT_WORK_TREE", "GIT_CONFIG_PARAMETERS"):
+        assert gone not in rec["env"]
+    assert rec["env"]["GIT_CONFIG_COUNT"] == "1"
+    assert rec["env"]["GIT_CONFIG_KEY_0"] == "core.hooksPath"
     assert not Path(rec["pwd"]).is_relative_to(repo)
     assert int((cli.bindir / "git.rev").read_text()) != 0
     assert rec["sid"] == rec["pid"]
@@ -196,7 +206,9 @@ async def test_a_source_that_finds_nothing_says_why_without_its_output(
     if git_body:
         git_script(cli, git_body)
     with pytest.raises(NoToken) as exc:
-        await read_token(account(**token), repos=[], worktrees=tmp_path / "wt", ssh_hint=ssh)
+        await read_token(
+            account(**token), repos=[], worktrees=tmp_path / "wt", expose=(), ssh_hint=ssh
+        )
     assert str(exc.value) == message
     assert "LEAKMARK" not in str(exc.value)
 
@@ -337,6 +349,51 @@ _ENV_FILE = (
     "accounts:\n  gl:\n    forge: gitlab\n    client: api\n    web_url: {url}\n    token: {tok}\n"
 )
 _SRC = "{from: env, env: CORP_GL}"
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        pytest.param({"from": "git-credential"}, id="git-credential"),
+        pytest.param({"from": "command", "command": "echo 'two words here'"}, id="command"),
+        pytest.param({"from": "env", "env": "MY_FORGE_TOKEN"}, id="env"),
+        pytest.param({"from": "file", "file": "FILE"}, id="file"),
+    ],
+)
+async def test_a_token_with_whitespace_inside_is_refused_without_quoting_it(
+    cli, tmp_path, monkeypatch, token
+):
+    blob = f"# comment\n{TOK}"
+    if token["from"] == "git-credential":
+        cli.stub("git", f"username=u\npassword=two words here {TOK}")
+    elif token["from"] == "env":
+        monkeypatch.setitem(credentials._TAKEN, "MY_FORGE_TOKEN", blob)
+    elif token["from"] == "file":
+        path = secret_file(tmp_path)
+        path.write_text(blob)
+        token = {**token, "file": str(path)}
+    with pytest.raises(NoToken) as exc:
+        await read(tmp_path, **token)
+    assert str(exc.value) == "the token contains whitespace or a control character; it is not shown"
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        pytest.param({"from": "command", "command": "yes"}, id="command-stdout-endless"),
+        pytest.param(
+            {"from": "command", "command": "sh -c 'yes >&2'"}, id="command-stderr-endless"
+        ),
+    ],
+)
+async def test_a_command_that_prints_endlessly_is_refused_fast(tmp_path, token):
+    start = time.monotonic()
+    with pytest.raises(NoToken) as exc:
+        await read(tmp_path, **token)
+    assert time.monotonic() - start < 5
+    assert str(exc.value) == "the token command printed too much; its output is not shown"
+
+
 _DEFAULTS = (
     _ENV_FILE.format(url=URL, tok=_SRC).replace(
         "client: api", "client: api\n    default_for_host: true"
@@ -359,6 +416,21 @@ _DEFAULTS = (
             id="quoted-name",
         ),
         pytest.param(_ENV_FILE.format(url=URL, tok=_SRC), True, id="passthrough-names-it"),
+        pytest.param(
+            "# caf\xe9\n" + _ENV_FILE.format(url=URL, tok=_SRC) + "bad: [\n",
+            False,
+            id="non-utf8-file",
+        ),
+        pytest.param(
+            _ENV_FILE.format(url=URL, tok='{"from": "env", "env": "CORP_GL"}') + "bad: [\n",
+            False,
+            id="quoted-key",
+        ),
+        pytest.param(
+            _ENV_FILE.format(url=URL, tok="{from: env, env : CORP_GL}") + "bad: [\n",
+            False,
+            id="space-before-colon",
+        ),
     ],
 )
 async def test_an_env_source_leaves_the_server_environment(
@@ -367,10 +439,12 @@ async def test_an_env_source_leaves_the_server_environment(
     from kraft.adapters.forge import git
     from kraft.worker.env import worker_env
 
+    monkeypatch.setattr(redact, "_secrets", ())
     monkeypatch.setenv("CORP_GL", TOK)
     path = tmp_path / "forges.yaml"
-    path.write_text(text)
+    path.write_bytes(text.encode("latin-1"))
     assert credentials.strip_env_sources(path) == ["CORP_GL"]
+    assert redact.redact(TOK) == "<redacted>"  # registered at take time, before any probe
     assert "CORP_GL" not in os.environ
     assert credentials.env_token("CORP_GL") == TOK
     entry = RepoEntry(path=str(tmp_path), env_passthrough=["CORP_GL"]) if passthrough else None
@@ -396,9 +470,29 @@ def test_a_refused_name_in_an_unreadable_file_is_left_alone(tmp_path, monkeypatc
     assert credentials._TAKEN == {}
 
 
-def test_a_broken_file_still_names_its_token_files(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param(
+            "accounts:\n  gl: {token: {from: file, file: '/s/tok'}}\nbad: [\n", id="plain"
+        ),
+        pytest.param(
+            "# caf\xe9\naccounts:\n  gl: {token: {from: file, file: /s/tok}}\nbad: [\n",
+            id="non-utf8-file",
+        ),
+        pytest.param(
+            'accounts:\n  gl: {token: {"from": "file", "file": "/s/tok"}}\nbad: [\n',
+            id="quoted-key",
+        ),
+        pytest.param(
+            "accounts:\n  gl: {token: {from: file, file : /s/tok}}\nbad: [\n",
+            id="space-before-colon",
+        ),
+    ],
+)
+def test_a_broken_file_still_names_its_token_files(tmp_path, monkeypatch, text):
     monkeypatch.setattr(credentials, "_SECRET_FILES", ())
     path = tmp_path / "forges.yaml"
-    path.write_text("accounts:\n  gl: {token: {from: file, file: '/s/tok'}}\nbad: [\n")
+    path.write_bytes(text.encode("latin-1"))
     credentials.set_secret_files(path)
     assert credentials.secret_files() == (Path("/s/tok"),)

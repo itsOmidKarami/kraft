@@ -543,3 +543,19 @@ def test_the_server_drops_an_env_token_before_it_builds_the_local_link(link_sees
 
     assert link_sees == [None]
     assert credentials.env_token("CORP_GL") == "tok-0123456789"
+
+
+def _forges_with_file_source(templates_dir):
+    (templates_dir / "forges.yaml").write_text(
+        "accounts:\n  gl:\n    forge: gitlab\n    client: api\n"
+        "    web_url: https://gl.example\n    token: {from: file, file: /secrets/kraft-tok}\n"
+    )
+
+
+@pytest.mark.api_client(edit_templates=_forges_with_file_source)
+def test_the_server_keeps_a_token_file_from_every_sandbox_from_boot(client):
+    from pathlib import Path
+
+    from kraft.adapters.forge import credentials
+
+    assert Path("/secrets/kraft-tok") in credentials.secret_files()

@@ -4,6 +4,7 @@ node run against a fake through `forge.run_task`."""
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -81,7 +82,8 @@ class Cli:
         base = self.bindir / name
         rec = (
             f"cat > {base}.stdin; pwd > {base}.pwd; env > {base}.env; "
-            f"echo $$ > {base}.pid; ps -o sid= -p $$ > {base}.sid\n"
+            f"echo $$ > {base}.pid; "
+            f"{sys.executable} -c 'import os; print(os.getsid(0))' > {base}.sid\n"
             if record
             else ""
         )
