@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_0ef1867aa7884983_github_queries_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.0">coverage.py v7.17.0</a>,
-            created at 2026-10-31 01:14 +0000
+            created at 2026-10-31 01:49 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -409,7 +409,7 @@
     <p class="run"><span class="n"><a id="t327" href="#t327">327</a></span><span class="t">        <span class="nam">raw</span> <span class="op">=</span> <span class="nam">path</span><span class="op">.</span><span class="nam">read_bytes</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t328" href="#t328">328</a></span><span class="t">    <span class="key">except</span> <span class="nam">FileNotFoundError</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t329" href="#t329">329</a></span><span class="t">        <span class="key">return</span> <span class="op">{</span><span class="op">}</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t330" href="#t330">330</a></span><span class="t">    <span class="key">except</span> <span class="op">(</span><span class="nam">OSError</span><span class="op">,</span> <span class="nam">ForgeError</span><span class="op">)</span> <span class="key">as</span> <span class="nam">exc</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis show_mis"><span class="n"><a id="t330" href="#t330">330</a></span><span class="t">    <span class="key">except</span> <span class="op">(</span><span class="nam">OSError</span><span class="op">,</span> <span class="nam">ForgeError</span><span class="op">)</span> <span class="key">as</span> <span class="nam">exc</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t331" href="#t331">331</a></span><span class="t">        <span class="nam">logger</span><span class="op">.</span><span class="nam">warning</span><span class="op">(</span><span class="str">&quot;ignoring the setup record of %s: %s&quot;</span><span class="op">,</span> <span class="nam">repo</span><span class="op">,</span> <span class="nam">exc</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t332" href="#t332">332</a></span><span class="t">        <span class="key">return</span> <span class="op">{</span><span class="op">}</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t333" href="#t333">333</a></span><span class="t">    <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
@@ -672,7 +672,7 @@
     <p class="run"><span class="n"><a id="t590" href="#t590">590</a></span><span class="t">        <span class="key">await</span> <span class="nam">run_git</span><span class="op">(</span><span class="nam">repo</span><span class="op">,</span> <span class="op">[</span><span class="str">&quot;git&quot;</span><span class="op">,</span> <span class="op">*</span><span class="nam">ignore_args</span><span class="op">,</span> <span class="str">&quot;add&quot;</span><span class="op">,</span> <span class="str">&quot;-A&quot;</span><span class="op">,</span> <span class="str">&quot;--&quot;</span><span class="op">,</span> <span class="op">*</span><span class="nam">pathspec</span><span class="op">]</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t591" href="#t591">591</a></span><span class="t">        <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t592" href="#t592">592</a></span><span class="t">            <span class="key">await</span> <span class="nam">run_git</span><span class="op">(</span><span class="nam">repo</span><span class="op">,</span> <span class="op">[</span><span class="str">&quot;git&quot;</span><span class="op">,</span> <span class="str">&quot;commit&quot;</span><span class="op">,</span> <span class="str">&quot;-m&quot;</span><span class="op">,</span> <span class="nam">message</span><span class="op">]</span><span class="op">,</span> <span class="nam">env</span><span class="op">=</span><span class="nam">env</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t593" href="#t593">593</a></span><span class="t">        <span class="key">except</span> <span class="nam">ForgeError</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t593" href="#t593">593</a></span><span class="t">        <span class="key">except</span> <span class="nam">ForgeError</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t594" href="#t594">594</a></span><span class="t">            <span class="com"># A commit hook that reformats what it is given exits non-zero with the</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t595" href="#t595">595</a></span><span class="t">            <span class="com"># files rewritten under it. Re-adding takes its edits; --no-verify then</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t596" href="#t596">596</a></span><span class="t">            <span class="com"># refuses to let a second opinion cost us the work, which is the whole</span>&nbsp;</span><span class="r"></span></p>
@@ -1016,7 +1016,7 @@
             <a class="nav" href="z_0ef1867aa7884983_github_queries_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.0">coverage.py v7.17.0</a>,
-            created at 2026-10-31 01:14 +0000
+            created at 2026-10-31 01:49 +0000
         </p>
     </div>
 </footer>

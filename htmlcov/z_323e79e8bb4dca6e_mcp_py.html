@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_323e79e8bb4dca6e_mr_poller_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.0">coverage.py v7.17.0</a>,
-            created at 2026-10-31 01:14 +0000
+            created at 2026-10-31 01:49 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -318,11 +318,11 @@
     <p class="pln"><span class="n"><a id="t236" href="#t236">236</a></span><span class="t"><span class="str">        lockfiles) and returns every candidate it saw; pass `test_command` or</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t237" href="#t237">237</a></span><span class="t"><span class="str">        `setup_command` to use the repo&#x27;s own documented commands instead</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t238" href="#t238">238</a></span><span class="t"><span class="str">        (`&quot;&quot;` declares none). Show the person what it proposes before relying</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t239" href="#t239">239</a></span><span class="t"><span class="str">        on it. `test_command=&quot;&quot;` (no tests) saves the repo disabled: work items</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t240" href="#t240">240</a></span><span class="t"><span class="str">        on it would pass verification without running a test, which is the</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t241" href="#t241">241</a></span><span class="t"><span class="str">        person&#x27;s to decide, by enabling it. A repository with no commit yet is</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t242" href="#t242">242</a></span><span class="t"><span class="str">        refused: a work item&#x27;s branch starts from one. An already-connected</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t243" href="#t243">243</a></span><span class="t"><span class="str">        repo is left as it is.&quot;&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t239" href="#t239">239</a></span><span class="t"><span class="str">        on it. Commands you pass save the repo disabled (the answer&#x27;s `held`</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t240" href="#t240">240</a></span><span class="t"><span class="str">        says so): they run for every work item on it, so you cannot file work</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t241" href="#t241">241</a></span><span class="t"><span class="str">        on it until the person has read them and enabled it in Settings &#8250; Repos.</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t242" href="#t242">242</a></span><span class="t"><span class="str">        A repository with no commit yet is refused: a work item&#x27;s branch starts</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t243" href="#t243">243</a></span><span class="t"><span class="str">        from one. An already-connected repo is left as it is.&quot;&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t244" href="#t244">244</a></span><span class="t">        <span class="key">return</span> <span class="key">await</span> <span class="nam">client</span><span class="op">.</span><span class="nam">ensure_repo</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t245" href="#t245">245</a></span><span class="t">            <span class="nam">path</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t246" href="#t246">246</a></span><span class="t">            <span class="nam">test_command</span><span class="op">=</span><span class="nam">test_command</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
@@ -878,7 +878,7 @@
             <a class="nav" href="z_323e79e8bb4dca6e_mr_poller_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.0">coverage.py v7.17.0</a>,
-            created at 2026-10-31 01:14 +0000
+            created at 2026-10-31 01:49 +0000
         </p>
     </div>
 </footer>
