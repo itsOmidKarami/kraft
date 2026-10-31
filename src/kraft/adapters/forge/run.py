@@ -20,6 +20,7 @@ from kraft.adapters import beads
 from kraft.adapters.forge import ci, git, settle
 from kraft.adapters.forge import mr as mr_ops
 from kraft.adapters.forge.gh import GhCli
+from kraft.adapters.forge.github_api import GitHubApi
 from kraft.adapters.forge.gitlab_api import GitLabApi
 from kraft.adapters.forge.glab import GlabCli
 from kraft.adapters.forge.models import (
@@ -112,13 +113,7 @@ def resolve(name: str) -> Forge:
             return GhCli()
         case "fake":
             return _DEV_FAKE
-        case "github-api":
-            # Backstop: run_task and item_forge refuse an API account first.
-            raise ForgeError(
-                f"the {name} backend is not in this release; set client: cli on its "
-                "forge account in forges.yaml, then a person's kraft item retry"
-            )
-        case "gitlab-api":
+        case "github-api" | "gitlab-api":
             raise ForgeError(
                 "the gitlab-api backend is built from its account (run.api_forge), never by name"
             )
@@ -136,17 +131,15 @@ _RATE_LIMIT_WAIT_S = 60
 #: reaches the merge-request half of a chain. It opens nothing anywhere.
 _FORGE_CLI = {"gitlab": "glab", "github": "gh", "fake": "fake"}
 
-#: `client: api` accounts pin these; only `SHIPPED_API` runs (see `api_account_for`).
+#: `client: api` accounts pin these (see `api_account_for`).
 API_BACKENDS = {"github": "github-api", "gitlab": "gitlab-api"}
-SHIPPED_API = frozenset({"gitlab-api"})
 
 
 def api_forge(name: str, account, *, http=None) -> Forge:
     """The backend for forge account `name` on `client: api`, built from the account and
-    never by name (`http` is the tests' transport). GitHub's lands with its backend."""
-    if account.forge != "gitlab":
-        _refuse_text(name, API_BACKENDS[account.forge])
-    return GitLabApi(name, account, http=http)
+    never by name (`http` is the tests' transport)."""
+    cls = GitHubApi if account.forge == "github" else GitLabApi
+    return cls(name, account, http=http)
 
 
 #: A pinned backend -> the forge it talks to.
@@ -227,16 +220,13 @@ def _mount_forges(pins, item, backend, repo_forge, forges, forges_error) -> tupl
             apis[name] = api_forge(name, account)
         return apis[name]
 
-    for pin in pins.values():
-        if pin["backend"] in API_BACKENDS.values() and pin["backend"] not in SHIPPED_API:
-            _refuse_text(pin["account"], pin["backend"])
-    root_api = (pins.get("") or {}).get("backend") in SHIPPED_API
+    root_api = (pins.get("") or {}).get("backend") in API_BACKENDS.values()
     live = pinned_api(pins[""]) if root_api else resolve(backend_for(backend, repo_forge))
     members = _member_forges(item, backend, repo_forge)
     for mount, pin in pins.items():
         if not mount:
             continue
-        if pin["backend"] in SHIPPED_API:
+        if pin["backend"] in API_BACKENDS.values():
             members[mount] = pinned_api(pin)
         elif root_api and mount not in members:
             members[mount] = resolve(pin["backend"])
@@ -377,13 +367,11 @@ async def api_account_for(
     """The `(name, account)` a mount talks to over an API, else None for the CLI. A pin
     decides (a null-account CLI pin is the CLI); with no pin, the live account for the
     mount's origin does, and a forges.yaml that did not load (`forges` None, `forges_error`
-    set) stops it as the walk does. An API backend not yet shipped is refused."""
+    set) stops it as the walk does."""
     pin = db.read(lambda c: store.forge_pins(c, work_item_id)).get(mount)
     if pin is not None:
         if pin["backend"] not in API_BACKENDS.values():
             return None
-        if pin["backend"] not in SHIPPED_API:
-            _refuse_text(pin["account"], pin["backend"])
         return _pinned_api(pin, forges, forges_error)
     if entry is not None and forges is None and forges_error:
         raise ForgeError(
@@ -401,16 +389,7 @@ async def api_account_for(
     )
     if not found or found[1].client != "api":
         return None
-    if API_BACKENDS[found[1].forge] not in SHIPPED_API:
-        _refuse_text(found[0], API_BACKENDS[found[1].forge])
     return found
-
-
-def _refuse_text(account, backend) -> None:
-    raise ForgeError(
-        f"forge account {account} says client: api, and the {backend} backend is not in "
-        "this release; set client: cli on it in forges.yaml, then a person's kraft item retry"
-    )
 
 
 async def item_forge(
