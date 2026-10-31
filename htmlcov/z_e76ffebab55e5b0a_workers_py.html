@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_17f1e2281569e48d_startup_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.0">coverage.py v7.17.0</a>,
-            created at 2026-10-31 01:49 +0000
+            created at 2026-10-31 05:32 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -141,12 +141,12 @@
     <p class="run"><span class="n"><a id="t59" href="#t59">59</a></span><span class="t"><span class="nam">_LISTED_TITLES</span> <span class="op">=</span> <span class="num">3</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t60" href="#t60">60</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t61" href="#t61">61</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t62" href="#t62">62</a></span><span class="t"><span class="key">def</span> <span class="nam">_forbid_sessions</span><span class="op">(</span><span class="nam">request</span><span class="op">:</span> <span class="nam">Request</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="key">None</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t62" href="#t62">62</a></span><span class="t"><span class="key">def</span> <span class="nam">_forbid_sessions</span><span class="op">(</span><span class="nam">request</span><span class="op">:</span> <span class="nam">Request</span><span class="op">,</span> <span class="nam">what</span><span class="op">:</span> <span class="nam">str</span> <span class="op">=</span> <span class="str">&quot;workers&quot;</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="key">None</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t63" href="#t63">63</a></span><span class="t">    <span class="str">&quot;&quot;&quot;A Kraft session never manages machines. This is consistency, not the</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t64" href="#t64">64</a></span><span class="t"><span class="str">    security boundary: the sandbox&#x27;s is the allowlist in `worker/callback.py`,</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t65" href="#t65">65</a></span><span class="t"><span class="str">    which does not name these routes.&quot;&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t66" href="#t66">66</a></span><span class="t">    <span class="key">if</span> <span class="nam">deps</span><span class="op">.</span><span class="nam">caller_ref</span><span class="op">(</span><span class="nam">request</span><span class="op">)</span> <span class="key">is</span> <span class="key">not</span> <span class="key">None</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t67" href="#t67">67</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">403</span><span class="op">,</span> <span class="str">&quot;a Kraft session cannot manage workers&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t67" href="#t67">67</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">403</span><span class="op">,</span> <span class="fst">f&quot;</span><span class="fst">a Kraft session cannot manage </span><span class="op">{</span><span class="nam">what</span><span class="op">}</span><span class="fst">&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t68" href="#t68">68</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t69" href="#t69">69</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t70" href="#t70">70</a></span><span class="t"><span class="key">async</span> <span class="key">def</span> <span class="nam">_edit</span><span class="op">(</span><span class="nam">request</span><span class="op">:</span> <span class="nam">Request</span><span class="op">,</span> <span class="nam">change</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="nam">registry</span><span class="op">.</span><span class="nam">WorkersFile</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
@@ -476,7 +476,7 @@
             <a class="nav" href="z_17f1e2281569e48d_startup_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.0">coverage.py v7.17.0</a>,
-            created at 2026-10-31 01:49 +0000
+            created at 2026-10-31 05:32 +0000
         </p>
     </div>
 </footer>
