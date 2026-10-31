@@ -8,6 +8,7 @@ import dataclasses
 import json
 import os
 import shlex
+import shutil
 import stat
 import sys
 from pathlib import Path
@@ -155,6 +156,14 @@ HTTP = {"type": "http", "url": "http://127.0.0.1:8765/mcp"}
         pytest.param(KRAFT, True, {"env": {"PATH": "/nowhere"}}, True, id="the-repos-env-path"),
         # The machine's own PATH starts it there, not the server's.
         pytest.param(KRAFT, False, {"runner": "gpu"}, False, id="on-a-machine"),
+        # Claude takes local scope before user scope: any direct entry that runs may be the one.
+        pytest.param(KRAFT, False, {"local": LOCAL}, False, id="local-beats-user"),
+        pytest.param(LOCAL, False, {"local": KRAFT}, False, id="local-missing-user-runs"),
+        pytest.param(KRAFT, False, {"local": {"command": "/nowhere/kraft"}}, True, id="none-runs"),
+        # Claude looks the command up on the entry's own `env.PATH` when it sets one.
+        pytest.param(KRAFT, False, {"entry_path": True}, False, id="the-entrys-own-path"),
+        # Resolved from Claude's own folder, which Kraft cannot judge from here.
+        pytest.param({"command": "bin/kraft"}, False, {}, False, id="relative-to-claudes-folder"),
     ],
 )
 def test_a_launch_whose_kraft_server_cannot_start_on_the_workers_path_is_refused(
@@ -163,12 +172,25 @@ def test_a_launch_whose_kraft_server_cannot_start_on_the_workers_path_is_refused
     """Claude starts the registered server by its command, on the PATH the
     worker gets: one missing there fails the session's first permission ask,
     so the launch is refused before it starts, naming the command and where it
-    is registered. A repo's `env:` PATH is the one the worker gets."""
+    is registered. A repo's `env:` PATH is the one the worker gets. Refused
+    only when Kraft is sure: every entry Claude could start it from is missing."""
+    config: dict = {"mcpServers": {"kraft": server}}
+    kw: dict = {"runner": launch.get("runner")}
+    if env := launch.get("env"):
+        kw = {"repo_entry": entry_of({"env": env})}
+    if "local" in launch:
+        repo = make_repo(tmp_path)
+        config["projects"] = {str(repo.resolve()): {"mcpServers": {"kraft": launch["local"]}}}
+        kw["cwd"] = str(repo)
+    if launch.get("entry_path"):
+        config["mcpServers"]["kraft"] = {**server, "env": {"PATH": str(kraft_on_path.parent)}}
     if not on_path:
-        monkeypatch.setenv("PATH", str(tmp_path / "empty"))
-    (Path.home() / ".claude.json").write_text(json.dumps({"mcpServers": {"kraft": server}}))
-    env = launch.get("env")
-    kw = {"repo_entry": entry_of({"env": env})} if env else {"runner": launch.get("runner")}
+        # Git stays: the local scope is found through it.
+        only_git = tmp_path / "only-git"
+        only_git.mkdir()
+        (only_git / "git").symlink_to(shutil.which("git"))
+        monkeypatch.setenv("PATH", str(only_git))
+    (Path.home() / ".claude.json").write_text(json.dumps(config))
     if refused:
         with pytest.raises(agent.LaunchRefused) as raised:
             run(**kw)

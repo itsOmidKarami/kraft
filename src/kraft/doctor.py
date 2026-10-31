@@ -1044,7 +1044,7 @@ async def _mcp_check(health: dict | None) -> dict:
         # The repo-scope half needs `GET /repos`, like every other
         # server-dependent check here.
         return _check("mcp server", True, "skipped: no server", skipped=True)
-    elif found[2] is not None and not registration.on_path(found[2], None):
+    elif registration.starts(found[2], None) is False:
         return _cannot_start(found, asking, server_up=False, needed=True)
     if found:
         return _check("mcp server", True, f"{found[0]}, registered in {found[1]} ({_MCP_SCOPE})")
@@ -1071,7 +1071,7 @@ def _cannot_start(found: tuple, asking: list[str], *, server_up: bool, needed: b
     it, else a warning -- this shell's PATH may not be the server's."""
     path = "the server's PATH" if server_up else "this shell's PATH (the server's may differ)"
     detail = (
-        f"the kraft MCP server registered in {found[1]} runs {found[2]!r}, which is not on "
+        f"the kraft MCP server runs {registration.named(found[2])}, which is not on "
         f"{path}, so Claude cannot start it"
     )
     if not needed:

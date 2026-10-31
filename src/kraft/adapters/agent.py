@@ -1439,7 +1439,7 @@ async def _run_agent_task(
         options["writable_dirs"] = _writable_dirs(
             run_dirs, files, work_item_id, cwd, in_copy=in_copy
         )
-    registered: tuple[str, str, str | None] | None = None
+    registered: tuple | None = None
     if channel and h.supports("mcp_config"):
         # Its only MCP server is the session's own, through the channel: the
         # host's registration is not in the sandbox (spike 5.5).
@@ -1502,16 +1502,16 @@ async def _run_agent_task(
         if sandbox and h.config_env is not None
         else None,
     )
-    if registered is not None and registered[2] is not None and not runner:
-        # Claude starts the server by that command, on the PATH the worker gets: the
+    if registered is not None and not runner:
+        # Claude starts the server by its command, on the PATH the worker gets: the
         # daemon's unless the repo's `env:` or the harness's own names say otherwise.
         # A machine starts it on its own PATH, which only it can check.
         path = worker_env(repo_entry, {**config_env, **rules_env}).get("PATH", os.defpath)
-        if not _registration.on_path(registered[2], path):
+        if _registration.starts(registered[2], path) is False:
             raise LaunchRefused(
                 f"harness {harness!r} asks Kraft's permission gate through the `kraft` MCP "
-                f"server registered in {registered[1]}, which runs {registered[2]!r}, and that "
-                f"is not on the PATH the worker gets, so Claude cannot start it: "
+                f"server, which runs {_registration.named(registered[2])}, and Claude cannot "
+                f"find that on the PATH the worker gets, so it cannot start it: "
                 f"{_registration.PATH_FIX}"
             )
     # An agent outside the walk does, in place, what the walk does around a

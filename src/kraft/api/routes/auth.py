@@ -108,11 +108,11 @@ async def revoke_session(session_id: str, request: Request):
 def _mcp_command_on_path() -> bool | None:
     """Whether the `kraft` MCP server registered at user or plugin scope runs
     on this process's PATH, which its workers get (`worker_env`); None when
-    nothing registered names a command."""
+    nothing is registered there or Kraft cannot tell (`registration.starts`)."""
     found = registration.permission_tool(None)
-    if found is None or found[2] is None:
-        return None
-    return registration.on_path(found[2], os.environ.get("PATH", os.defpath))
+    return (
+        None if found is None else registration.starts(found[2], os.environ.get("PATH", os.defpath))
+    )
 
 
 @api_router.get("/health")

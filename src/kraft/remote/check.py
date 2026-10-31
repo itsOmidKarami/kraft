@@ -86,15 +86,17 @@ def _kraft_mcp() -> list[dict]:
     starts the `kraft` MCP server by its registered command, on this PATH: one missing fails the
     step at its first ask. Only a warning: a machine may take sandboxed steps only."""
     found = registration.permission_tool(None)
-    command = "kraft" if found is None else found[2]
-    if command is None:
-        return []  # reached by `url`: nothing to start here
-    path = shutil.which(command)
-    if path is not None:
-        return [_row("kraft MCP server", True, path)]
+    if found is None:
+        detail = f"nothing registers it for Claude Code here; {registration.FIX}"
+        return [_row("kraft MCP server", True, detail, warn=True)]
+    starts = registration.starts(found[2], None)
+    if starts is None:
+        return []  # reached by `url`, or nothing Kraft can judge from here
+    if starts:
+        return [_row("kraft MCP server", True, registration.named(found[2]))]
     detail = (
-        f"{command!r} is not on PATH, so an unsandboxed Claude step here fails at its first "
-        f"permission ask; {registration.PATH_FIX}"
+        f"{registration.named(found[2])} is not on PATH, so an unsandboxed Claude step here "
+        f"fails at its first permission ask; {registration.PATH_FIX}"
     )
     return [_row("kraft MCP server", True, detail, warn=True)]
 

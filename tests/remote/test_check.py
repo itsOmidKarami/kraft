@@ -36,7 +36,9 @@ def _no_sandbox_runtime(monkeypatch):
 
 async def test_git_and_one_agent_cli_pass_and_a_missing_credential_only_warns(monkeypatch):
     monkeypatch.setattr(
-        check.shutil, "which", lambda exe: f"/bin/{exe}" if exe in ("git", "claude") else None
+        check.shutil,
+        "which",
+        lambda exe, path=None: f"/bin/{exe}" if exe in ("git", "claude") else None,
     )
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
@@ -54,7 +56,7 @@ async def test_git_and_one_agent_cli_pass_and_a_missing_credential_only_warns(mo
 )
 async def test_what_must_be_present_fails_when_it_is_not(monkeypatch, present, failing):
     monkeypatch.setattr(
-        check.shutil, "which", lambda exe: f"/bin/{exe}" if exe in present else None
+        check.shutil, "which", lambda exe, path=None: f"/bin/{exe}" if exe in present else None
     )
     rows = await check.run(kraft_version="2.3.0")
     assert {r["name"] for r in rows if not r["ok"]} == failing
@@ -97,7 +99,7 @@ async def test_git_lfs_is_a_row_that_never_fails(monkeypatch, present):
     monkeypatch.setattr(
         check.shutil,
         "which",
-        lambda exe: (
+        lambda exe, path=None: (
             f"/bin/{exe}" if exe in ("git", "claude") or (present and exe == "git-lfs") else None
         ),
     )
@@ -114,8 +116,10 @@ async def test_git_lfs_is_a_row_that_never_fails(monkeypatch, present):
         # Only a warning: a machine may take sandboxed steps only.
         (("claude",), {"ok": True, "warn": True}),
         ((), None),
+        # Not a pass on a guess that `kraft` is what would run.
+        (("claude", "kraft", "unregistered"), {"ok": True, "warn": True}),
     ],
-    ids=["on-path", "not-on-path", "no-claude"],
+    ids=["on-path", "not-on-path", "no-claude", "nothing-registered"],
 )
 async def test_a_machine_with_claude_says_whether_its_kraft_mcp_server_can_start(
     monkeypatch, present, row
@@ -124,11 +128,14 @@ async def test_a_machine_with_claude_says_whether_its_kraft_mcp_server_can_start
     machine's Claude starts the `kraft` server by its registered command, on
     this machine's PATH: one missing fails the step at its first ask."""
     registered = {"mcpServers": {"kraft": {"command": "kraft", "args": ["admin", "mcp"]}}}
+    if "unregistered" in present:
+        registered = {}
     (Path.home() / ".claude.json").write_text(json.dumps(registered))
     monkeypatch.setattr(
-        check.shutil, "which", lambda exe: f"/bin/{exe}" if exe in present else None
+        check.shutil, "which", lambda exe, path=None: f"/bin/{exe}" if exe in present else None
     )
     got = _by_name(await check.run(kraft_version="2.3.0")).get("kraft MCP server")
     assert (got and {k: got[k] for k in ("ok", "warn")}) == row
     if row and row["warn"]:
-        assert "'kraft' is not on PATH" in got["detail"]
+        said = "nothing registers" if "unregistered" in present else "'kraft' (registered in"
+        assert said in got["detail"]

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -44,7 +45,11 @@ def test_a_managed_mcp_json_naming_kraft_is_the_direct_name(home, tmp_path, monk
     managed = tmp_path / "managed-mcp.json"
     monkeypatch.setattr(registration, "MANAGED_MCP", managed)
     _json(managed, KRAFT_SERVER)
-    assert registration.permission_tool(None) == (DIRECT, str(managed), "kraft")
+    assert registration.permission_tool(None) == (
+        DIRECT,
+        str(managed),
+        [(str(managed), KRAFT_SERVER["mcpServers"]["kraft"])],
+    )
 
 
 def test_a_managed_mcp_json_without_kraft_shuts_out_every_other_registration(tmp_path, monkeypatch):
@@ -105,7 +110,7 @@ def test_a_committed_mcp_json_is_direct_and_beats_the_plugin(home, installed, tm
     repo = make_repo(tmp_path)
     _json(repo / ".mcp.json", KRAFT_SERVER)
     commit_all(repo)
-    assert registration.permission_tool(repo) == (DIRECT, str(repo / ".mcp.json"), "kraft")
+    assert registration.permission_tool(repo)[:2] == (DIRECT, str(repo / ".mcp.json"))
 
 
 def test_an_uncommitted_mcp_json_never_reaches_a_worktree(home, tmp_path):
@@ -141,52 +146,137 @@ def test_a_repo_that_disables_another_marketplaces_copy_leaves_the_users_on(
     repo = make_repo(tmp_path)
     _json(repo / ".claude/settings.json", {"enabledPlugins": {"kraft@old-mkt": False}})
     commit_all(repo)
-    assert registration.permission_tool(repo) == (
+    assert registration.permission_tool(repo)[:2] == (
         PLUGIN,
         str(home / ".claude" / "settings.json"),
-        "kraft",
     )
 
 
-PLUGIN_ROOT = {"mcpServers": {"kraft": {"command": "/venv/bin/kraft"}}}
-SSE = {"mcpServers": {"kraft": {"type": "sse", "url": "http://127.0.0.1:8765/mcp"}}}
+def test_every_direct_entry_claude_could_start_the_server_from_is_a_candidate(home, tmp_path):
+    """Claude starts the local entry before the project's and the user's
+    (`claude mcp get`): which one it takes is its call, so each is one to
+    check. The name and where it is registered stay the user scope's."""
+    repo = make_repo(tmp_path)
+    _json(repo / ".mcp.json", {"mcpServers": {"kraft": {"command": "/project/kraft"}}})
+    commit_all(repo)
+    local = {"mcpServers": {"kraft": {"command": "/local/kraft"}}}
+    _json(home / ".claude.json", {**KRAFT_SERVER, "projects": {str(repo.resolve()): local}})
+    name, where, entries = registration.permission_tool(repo)
+    assert (name, where) == (DIRECT, str(home / ".claude.json"))
+    assert sorted(entry["command"] for _, entry in entries) == [
+        "/local/kraft",
+        "/project/kraft",
+        "kraft",
+    ]
+
+
+SSE = {"type": "sse", "url": "http://127.0.0.1:8765/mcp"}
 
 
 @pytest.mark.parametrize(
-    ("server", "plugin_mcp", "command"),
+    ("decided_by", "installs", "command"),
     [
         pytest.param(
-            {"command": "/opt/kraft/bin/kraft"}, None, "/opt/kraft/bin/kraft", id="direct"
+            "user", {"user": {"command": "/venv/bin/kraft"}}, "/venv/bin/kraft", id="user-install"
         ),
-        pytest.param({"type": "http", "url": "http://127.0.0.1:8765/mcp"}, None, None, id="http"),
-        pytest.param({"command": "${KRAFT_BIN}/kraft"}, None, None, id="a-variable-claude-expands"),
-        pytest.param(None, PLUGIN_ROOT, "/venv/bin/kraft", id="plugin-install-path"),
-        pytest.param(None, None, "kraft", id="plugin-without-mcp-json"),
-        pytest.param(None, SSE, None, id="plugin-sse"),
+        pytest.param("user", {"user": None}, "kraft", id="install-without-mcp-json"),
+        pytest.param("user", {"user": SSE}, None, id="install-sse"),
+        # Another project's copy may run something else, and never loads here.
+        pytest.param(
+            "user", {"other": {"command": "/elsewhere/kraft"}}, None, id="only-another-repos"
+        ),
+        pytest.param(
+            "project", {"mine": {"command": "/mine/kraft"}}, "/mine/kraft", id="this-repos"
+        ),
+        pytest.param(
+            "project", {"other": {"command": "/x/kraft"}}, None, id="project-only-another-repos"
+        ),
     ],
 )
-def test_the_command_the_registered_server_runs(home, tmp_path, server, plugin_mcp, command):
-    """What a worker's Claude must find to start the server: the entry's own
-    `command`, the installed plugin's `.mcp.json` for the plugin (of the
-    install in the scope that turned it on; another scope's copy may differ),
-    and nothing to check for a server reached by `url`."""
-    if server is not None:
-        _json(home / ".claude.json", {"mcpServers": {"kraft": server}})
-    else:
+def test_the_plugin_entry_is_the_install_that_applies_here(
+    home, tmp_path, decided_by, installs, command
+):
+    """The installed plugin's own `.mcp.json`, of an install that applies to
+    the worker's repo: user scope, or a project install for that repo. One
+    with no `.mcp.json` runs the bare `kraft` the plugin ships; none that
+    applies leaves nothing to check."""
+    repo = make_repo(tmp_path)
+    if decided_by == "user":
         _json(home / ".claude" / "settings.json", {"enabledPlugins": {"kraft@kraft": True}})
-        mine, other = tmp_path / "user-install", tmp_path / "project-install"
-        _json(other / ".mcp.json", {"mcpServers": {"kraft": {"command": "/elsewhere/kraft"}}})
-        if plugin_mcp is not None:
-            _json(mine / ".mcp.json", plugin_mcp)
-        installs = [
-            {"scope": "project", "installPath": str(other), "projectPath": str(tmp_path)},
-            {"scope": "user", "installPath": str(mine)},
-        ]
-        _json(
-            home / ".claude" / "plugins" / "installed_plugins.json",
-            {"version": 2, "plugins": {"kraft@kraft": installs}},
-        )
-    assert registration.permission_tool(None)[2] == command
+    else:
+        _json(repo / ".claude" / "settings.json", {"enabledPlugins": {"kraft@kraft": True}})
+        commit_all(repo)
+    # Listed first, so a pick that ignores `projectPath` takes it.
+    records = [
+        {"scope": "project", "installPath": str(tmp_path / "decoy"), "projectPath": str(tmp_path)}
+    ]
+    _json(tmp_path / "decoy" / ".mcp.json", {"mcpServers": {"kraft": {"command": "/decoy/kraft"}}})
+    for which, entry in installs.items():
+        install = tmp_path / which
+        install.mkdir()
+        if entry is not None:
+            _json(install / ".mcp.json", {"mcpServers": {"kraft": entry}})
+        scope = {"user": "user", "other": "project", "mine": "project"}[which]
+        owner = {"mine": str(repo)}.get(which, str(tmp_path / "another-repo"))
+        records.append({"scope": scope, "installPath": str(install), "projectPath": owner})
+    _json(
+        home / ".claude" / "plugins" / "installed_plugins.json",
+        {"version": 2, "plugins": {"kraft@kraft": records}},
+    )
+    entries = registration.permission_tool(repo)[2]
+    assert [entry.get("command") for _, entry in entries] == [command]
+
+
+@pytest.mark.parametrize(
+    ("entries", "path", "verdict"),
+    [
+        pytest.param([{"command": "kraft"}], "bin", True, id="bare-on-path"),
+        pytest.param([{"command": "kraft"}], "empty", False, id="bare-missing"),
+        pytest.param([{"command": sys.executable}], "empty", True, id="absolute-present"),
+        pytest.param([{"command": "/nowhere/kraft"}], "bin", False, id="absolute-missing"),
+        pytest.param([{"type": "http", "url": "http://x/mcp"}], "bin", None, id="http"),
+        pytest.param(
+            [{"command": "${KRAFT_BIN}/kraft"}], "bin", None, id="a-variable-claude-expands"
+        ),
+        # Found from Claude's own working folder, which Kraft does not know.
+        pytest.param([{"command": "bin/kraft"}], "empty", None, id="relative-with-a-slash"),
+        # Claude fails these too: refused, and never a crash.
+        pytest.param([{"command": "~/nowhere/kraft"}], "bin", False, id="tilde"),
+        pytest.param([{"command": "kraft admin mcp"}], "bin", False, id="args-in-the-command"),
+        # The entry's own `env.PATH` is the one Claude looks the command up on.
+        pytest.param([{"command": "kraft", "env": {"PATH": "bin"}}], "empty", True, id="own-path"),
+        pytest.param(
+            [{"command": "kraft", "env": {"PATH": "empty"}}], "bin", False, id="own-path-without-it"
+        ),
+        pytest.param(
+            [{"command": "kraft", "env": {"PATH": "${PATH}"}}], "bin", None, id="own-path-variable"
+        ),
+        pytest.param(
+            [{"command": "kraft"}, {"command": sys.executable}], "empty", True, id="one-of-two-runs"
+        ),
+        pytest.param(
+            [{"command": "kraft"}, {"type": "sse", "url": "u"}], "empty", None, id="one-unjudged"
+        ),
+        pytest.param([], "bin", None, id="none"),
+    ],
+)
+def test_claude_is_judged_unable_to_start_the_server_only_when_kraft_is_sure(
+    tmp_path, entries, path, verdict
+):
+    """False refuses a launch, so only when every entry is checkable and none
+    runs; True when one runs; None, nothing to check, whenever Kraft cannot tell."""
+    stub = write(tmp_path / "bin", "kraft", "#!/bin/sh\n")
+    stub.chmod(0o755)
+    (tmp_path / "empty").mkdir()
+
+    def placed(entry: dict) -> dict:
+        env = entry.get("env")
+        if env and "$" not in env["PATH"]:
+            return {**entry, "env": {"PATH": str(tmp_path / env["PATH"])}}
+        return entry
+
+    found = [("where", placed(entry)) for entry in entries]
+    assert registration.starts(found, str(tmp_path / path)) is verdict
 
 
 @pytest.mark.e2e("claude")
