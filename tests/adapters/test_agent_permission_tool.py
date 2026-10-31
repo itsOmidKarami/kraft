@@ -168,10 +168,12 @@ HTTP = {"type": "http", "url": "http://127.0.0.1:8765/mcp"}
         pytest.param(KRAFT, False, {"disk": "cwd"}, False, id="gitignored-mcp-json-in-cwd"),
         pytest.param(KRAFT, False, {"disk": "parent"}, False, id="mcp-json-in-a-parent"),
         pytest.param(None, False, {"disk": "cwd"}, False, id="only-a-mcp-json-on-disk"),
+        # A copy runs in the session's folder; Claude is handed the checkout's servers.
+        pytest.param(KRAFT, False, {"disk": "checkout"}, False, id="copy-checkouts-mcp-json"),
     ],
 )
 def test_a_launch_whose_kraft_server_cannot_start_on_the_workers_path_is_refused(
-    run, kraft_on_path, monkeypatch, tmp_path, server, on_path, launch, refused
+    run, kraft_on_path, monkeypatch, request, tmp_path, server, on_path, launch, refused
 ):
     """Claude starts the registered server by its command, on the PATH the
     worker gets: one missing there fails the session's first permission ask,
@@ -190,7 +192,11 @@ def test_a_launch_whose_kraft_server_cannot_start_on_the_workers_path_is_refused
         repo = make_repo(tmp_path / "parent")
         kw["cwd"] = str(repo)
         on_disk = {"mcpServers": {"kraft": LOCAL}}
-        write(repo if disk == "cwd" else repo.parent, ".mcp.json", json.dumps(on_disk))
+        write(repo.parent if disk == "parent" else repo, ".mcp.json", json.dumps(on_disk))
+    if disk == "checkout":
+        request.getfixturevalue("in_place")
+        row = {"id": "w1", "branch": None, "repo": str(repo)}
+        kw.update(db=SimpleNamespace(read=lambda fn: row), cwd=str(tmp_path / "copy"), in_copy=True)
     if launch.get("entry_path"):
         config["mcpServers"]["kraft"] = {**server, "env": {"PATH": str(kraft_on_path.parent)}}
     if not on_path:
