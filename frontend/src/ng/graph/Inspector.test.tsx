@@ -7,8 +7,8 @@ import { Inspector } from "./Inspector";
 
 const docked = { width: 380, overlay: false, handle: { role: "separator", "aria-label": "Resize pane", tabIndex: 0 } } as never;
 
-function Pane({ size = docked, onFocus }: { size?: never; onFocus?: () => void }) {
-  const [open, setOpen] = useState(true);
+function Pane({ size = docked, onFocus, start = true }: { size?: never; onFocus?: () => void; start?: boolean }) {
+  const [open, setOpen] = useState(start);
   const [tab, setTab] = useState("overview");
   return (
     <Inspector id="p" open={open} size={size} title="verification" crumbs={[{ label: "default", onClick: vi.fn() }, { label: "kraft-cb59" }]} prob={{ msg: "Stopped here." }}
@@ -72,6 +72,15 @@ describe("Inspector", () => {
     await user.click(screen.getByRole("button", { name: "Expand verification" }));
     expect(screen.getByRole("tablist")).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "verification pane" })).toHaveClass("is-moving");
+  });
+
+  it("opens still when it starts collapsed, and moves once expanded", async () => {
+    const user = userEvent.setup();
+    render(<Pane start={false} />);
+    expect(screen.getByRole("complementary", { name: "verification pane, collapsed" })).not.toHaveClass("is-moving");
+    await user.click(screen.getByRole("button", { name: "Expand verification" }));
+    await user.click(screen.getByRole("button", { name: "Collapse pane" }));
+    expect(screen.getByRole("complementary", { name: "verification pane, collapsed" })).toHaveClass("is-moving");
   });
 
   it("puts focus on the rail when the collapse button is pressed by keyboard (ux2-W5)", async () => {
