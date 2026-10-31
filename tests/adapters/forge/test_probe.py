@@ -1,0 +1,226 @@
+"""The server-side token probe, against `httpx.MockTransport` only."""
+
+from __future__ import annotations
+
+import json
+from datetime import date
+
+import httpx
+import pytest
+from support.harness import git, make_repo
+
+from kraft import config, redact
+from kraft.adapters.forge import credentials, probe
+from kraft.forges import ForgeAccount, TokenSource
+
+pytestmark = pytest.mark.real_probe
+
+TOK = "tok-1234567890"
+GH, GL = "https://api.github.com", "https://code.corp.example/gitlab"
+GL_USER = {"username": "ada"}
+
+
+def acct(forge="github", web="https://github.com", **token) -> ForgeAccount:
+    return ForgeAccount(
+        forge=forge,
+        client="api",
+        web_url=web,
+        token=TokenSource(**{"from": "env", "env": "CORP_TOKEN", **token}),
+    )
+
+
+def gitlab(**token) -> ForgeAccount:
+    return acct("gitlab", GL, **token)
+
+
+@pytest.fixture
+def run(monkeypatch, tmp_path):
+    async def go(m, account, *, repos=(), token=TOK, no_token=None):
+        async def read_token(*a, **kw):
+            if no_token:
+                raise credentials.NoToken(no_token)
+            redact.register(token)  # as the real read_token does
+            return token
+
+        monkeypatch.setattr(credentials, "read_token", read_token)
+        return await probe.probe_account(
+            "corp", account, repos=repos, worktrees=tmp_path, transport=m.transport
+        )
+
+    return go
+
+
+@pytest.mark.parametrize(
+    "account, routes, want",
+    [
+        pytest.param(
+            acct(),
+            {
+                ("GET", f"{GH}/user"): (
+                    200,
+                    {"login": "ada"},
+                    {
+                        "x-oauth-scopes": "repo, read:org",
+                        "github-authentication-token-expiration": "2027-01-15 00:00:00 UTC",
+                    },
+                )
+            },
+            ("ada", ("repo", "read:org"), "2027-01-15"),
+            id="github-classic",
+        ),
+        pytest.param(
+            acct(),
+            {("GET", f"{GH}/user"): (200, {"login": "ada"})},
+            ("ada", None, None),
+            id="github-fine-grained",
+        ),
+        pytest.param(
+            gitlab(kind="pat"),
+            {
+                ("GET", f"{GL}/api/v4/user"): (200, GL_USER),
+                ("GET", f"{GL}/api/v4/personal_access_tokens/self"): (
+                    200,
+                    {"scopes": ["api", "read_user"], "expires_at": "2027-02-01"},
+                ),
+            },
+            ("ada", ("api", "read_user"), "2027-02-01"),
+            id="gitlab-pat",
+        ),
+        pytest.param(
+            gitlab(kind="oauth"),
+            {
+                ("GET", f"{GL}/api/v4/user"): (200, GL_USER),
+                ("GET", f"{GL}/oauth/token/info"): (200, {"scope": ["api"], "expires_in": None}),
+            },
+            ("ada", ("api",), None),
+            id="gitlab-oauth",
+        ),
+        pytest.param(
+            gitlab(),
+            {
+                ("GET", f"{GL}/api/v4/user"): (200, GL_USER),
+                ("GET", f"{GL}/api/v4/personal_access_tokens/self"): 401,
+                ("GET", f"{GL}/oauth/token/info"): (200, {"scope": ["read_api"]}),
+            },
+            ("ada", ("read_api",), None),
+            id="gitlab-unknown-falls-back-to-oauth",
+        ),
+        pytest.param(
+            acct(),
+            {
+                ("GET", f"{GH}/user"): (
+                    200,
+                    {"login": "ada"},
+                    {"github-authentication-token-expiration": "soon"},
+                )
+            },
+            ("ada", None, None),
+            id="expiry-not-a-date-is-unknown",
+        ),
+    ],
+)
+async def test_the_probe_reports_who_the_token_signs_in_as(mock_http, run, account, routes, want):
+    m = mock_http(routes)
+    got = await run(m, account)
+    assert (got.state, got.login, got.scopes, got.expires_on) == ("ok", *want)
+
+
+@pytest.mark.parametrize(
+    "answer, state, text",
+    [
+        pytest.param(None, "no_token", "nothing saved", id="no-token"),
+        pytest.param(
+            (401, {"message": "Bad credentials"}), "refused", "HTTP 401", id="refused-401"
+        ),
+        pytest.param(
+            (403, {"message": "SSO"}, {"x-github-sso": "required; url=https://sso.example/x"}),
+            "forbidden",
+            "HTTP 403",
+            id="forbidden-sso",
+        ),
+        pytest.param(
+            httpx.ConnectError("[SSL: CERTIFICATE_VERIFY_FAILED] self-signed"),
+            "tls",
+            "ca_file",
+            id="tls",
+        ),
+        pytest.param(httpx.ConnectError("down"), "unreachable", "cannot reach", id="unreachable"),
+        pytest.param(
+            (200, ["not", "an", "object"]),
+            "unreachable",
+            "without an object",
+            id="user-not-an-object",
+        ),
+    ],
+)
+async def test_the_probe_names_why_a_token_does_not_work(mock_http, run, answer, state, text):
+    m = mock_http({("GET", f"{GH}/user"): answer or 200})
+    got = await run(m, acct(), no_token="nothing saved" if answer is None else None)
+    assert got.state == state and text in got.detail
+    assert bool(got.sso_url) is (state == "forbidden")
+
+
+@pytest.mark.parametrize(
+    "status, visible", [(200, True), (404, False)], ids=["visible", "not-found"]
+)
+async def test_the_probe_says_whether_each_repo_is_visible(
+    mock_http, run, tmp_path, status, visible
+):
+    dest = make_repo(tmp_path)
+    git(dest, "remote", "add", "origin", "https://code.corp.example/gitlab/team/app.git")
+    entry = config.RepoEntry(path=str(dest), forge="gitlab", forge_account="corp")
+    m = mock_http(
+        {
+            ("GET", f"{GL}/api/v4/user"): (200, GL_USER),
+            ("GET", f"{GL}/api/v4/personal_access_tokens/self"): (200, {"scopes": []}),
+            ("GET", f"{GL}/api/v4/projects/team%2Fapp"): (status, {"message": "404 Not found"}),
+        }
+    )
+    got = await run(m, gitlab(kind="pat"), repos=[entry])
+    seen = got.projects[str(dest)]
+    assert seen["visible"] is visible and seen["project"] == "team/app"
+    assert visible or ("HTTP 404" in seen["detail"] and "team/app" in seen["detail"])
+
+
+@pytest.mark.parametrize(
+    "account, token, want",
+    [
+        pytest.param(
+            acct(kind="oauth"), "ghp_1234567890", "starts with ghp_", id="glpat-says-oauth"
+        ),
+        pytest.param(
+            acct(env="GITLAB_TOKEN"), TOK, "GITLAB_TOKEN is read by glab/gh", id="env-gitlab-token"
+        ),
+    ],
+)
+async def test_the_probe_warns_on_a_prefix_or_a_well_known_env_name(
+    mock_http, run, account, token, want
+):
+    m = mock_http({("GET", f"{GH}/user"): (200, {"login": "ada"})})
+    got = await run(m, account, token=token)
+    assert any(want in w for w in got.warnings)
+
+
+async def test_the_probe_never_puts_a_token_in_its_result(mock_http, run):
+    m = mock_http({("GET", f"{GH}/user"): (401, {"message": f"bad token {TOK}"})})
+    got = await run(m, acct())
+    assert got.state == "refused" and TOK not in json.dumps(got.to_json())
+
+
+@pytest.mark.parametrize(
+    "state, days, degraded",
+    [
+        pytest.param("ok", 400, False, id="ok-far"),
+        pytest.param("ok", 7, True, id="expires-in-7-days"),
+        pytest.param("ok", 8, False, id="expires-in-8-days"),
+        pytest.param("refused", None, True, id="refused"),
+        pytest.param("unreachable", None, False, id="unreachable-not-degraded"),
+    ],
+)
+def test_health_rows_degrade_on_a_bad_state_or_a_near_expiry(state, days, degraded):
+    today = date(2026, 10, 31)
+    expires = date.fromordinal(today.toordinal() + days).isoformat() if days else None
+    found = probe.Probe("corp", "t", state, "d", expires_on=expires)
+    rows, bad = probe.health_rows({"corp": found}, today)
+    assert rows == {"corp": {"state": state, "expires_on": expires}}
+    assert bad == (["corp"] if degraded else [])
