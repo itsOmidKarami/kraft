@@ -82,8 +82,14 @@ def prefix_warning(token: str, kind: str) -> str | None:
     return None
 
 
-def basic_form(token: str, kind: str) -> str:
-    return base64.b64encode(f"{KINDS[kind].git_username}:{token}".encode()).decode()
+#: A forge whose git login is not the kind's `git_username`: GitHub documents this one for
+#: installation tokens and GITHUB_TOKEN, and ignores the name for a PAT.
+GIT_USERNAME = {"github": "x-access-token"}
+
+
+def basic_form(token: str, kind: str, *, forge: str | None = None) -> str:
+    user = GIT_USERNAME.get(forge or "", KINDS[kind].git_username)
+    return base64.b64encode(f"{user}:{token}".encode()).decode()
 
 
 def _kill(proc: subprocess.Popen) -> None:
@@ -326,7 +332,7 @@ async def read_token(
     if len(token) < redact.MIN_LEN:
         raise NoToken(f"the token is shorter than {redact.MIN_LEN} characters")
     redact.register(token)
-    redact.register(basic_form(token, source.kind))
+    redact.register(basic_form(token, source.kind, forge=account.forge))
     return token
 
 

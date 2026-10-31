@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 
-from kraft.adapters.forge import credentials
+from kraft.adapters.forge import credentials, git
 from kraft.adapters.forge.http import HttpTransport
 from kraft.adapters.forge.models import ForgeError
 from kraft.adapters.forge.transport import ApiResponse, Field, Transport
@@ -50,6 +50,10 @@ class ApiAccount:
 
     def _transport(self, repo: Path) -> Transport:
         return AccountTransport(self, repo)
+
+    async def push(self, *, repo: Path, branch: str) -> None:
+        # The pinned account's token authenticates the push, not git's own credential.
+        await git.push(repo, branch, account=(self.name, self.account))
 
     def _http_for(self, token: str) -> HttpTransport:
         if token not in self._by_token:
