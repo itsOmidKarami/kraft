@@ -629,7 +629,8 @@ def test_request_changes_for_an_earlier_node_does_not_stop_the_running_one(
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
     wid = _started(client, {"title": "t", "repo": str(repo), "chain_template": "review-early"})
-    _poll_node_started(client, wid, "work_item_summary")  # implementation already ran
+    # Implementation already ran; the summary's own session is what a pause would find.
+    _poll_node_started(client, wid, "work_item_summary", event="worker_session_started")
     _target_thread(client, wid, "implementation")
 
     r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "request_changes"})
@@ -647,7 +648,7 @@ def test_request_changes_on_the_running_node_reruns_it(client, repo, monkeypatch
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
     wid = _started(client, {"title": "t", "repo": str(repo), "chain_template": "review-early"})
-    _poll_node_started(client, wid, "work_item_summary")
+    _poll_node_started(client, wid, "work_item_summary", event="worker_session_started")
 
     r = client.post(
         f"/api/work-items/{wid}/review",
