@@ -337,3 +337,37 @@ def test_a_server_child_is_only_ready_when_its_own_process_answers(tmp_path, mon
     finally:
         foreign.shutdown()
         foreign.server_close()
+
+
+def test_on_a_free_port_moves_off_a_number_another_listener_holds(monkeypatch):
+    """A start that lost its number to whatever bound it first is stopped and
+    tried again on a fresh one."""
+    import socket
+
+    from support import server
+
+    with socket.create_server(("127.0.0.1", 0)) as taken:
+        ports = iter([taken.getsockname()[1]])
+        free_port = server._free_port
+        monkeypatch.setattr(server, "_free_port", lambda: next(ports, None) or free_port())
+
+        def start(port):
+            try:
+                return socket.create_server(("127.0.0.1", port))
+            except OSError:
+                return None
+
+        stopped = []
+        sock, port = server.on_a_free_port(start, lambda s, _: s and True, stopped.append)
+        with sock:
+            assert (port != taken.getsockname()[1], stopped) == (True, [None])
+
+
+def test_on_a_free_port_stops_and_raises_a_start_that_never_comes_up():
+    """Not up in time is a failure, not a lost race: stopped once, no retry."""
+    from support import server
+
+    stopped = []
+    with pytest.raises(TimeoutError):
+        server.on_a_free_port(lambda port: port, lambda *_: False, stopped.append, timeout=0.2)
+    assert len(stopped) == 1

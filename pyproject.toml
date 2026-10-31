@@ -48,7 +48,7 @@ dependencies = [
     # `kraft mcp` and the CLI must not reach it through a web framework's
     # transitive dependency.
     "pydantic>=2.9",
-    "psutil>=5",
+    "psutil>=6",
     "argcomplete>=3",
     "fastapi>=0.141.1",
     "uvicorn>=0.54.0",

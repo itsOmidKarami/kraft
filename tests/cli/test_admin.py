@@ -6,7 +6,6 @@ import asyncio
 import json
 import os
 import signal
-import socket
 import subprocess
 import sys
 import threading
@@ -18,7 +17,7 @@ import uvicorn
 import yaml
 from support.harness import fake_templates_dir
 from support.pidfile import hold_pidfile
-from support.server import child_env, output_of
+from support.server import child_env, health_pid, on_a_free_port, output_of
 
 from kraft import cli, client
 from kraft.paths import RunDirs
@@ -598,34 +597,37 @@ def _wait_for(predicate, timeout=10.0, interval=0.05) -> bool:
     return False
 
 
-def _answers(port: int) -> bool:
-    with socket.socket() as s:
-        return s.connect_ex(("127.0.0.1", port)) == 0
-
-
 def test_kraft_9oab_sigterm_stops_the_real_server(tmp_path):
     """Kraft-9oab: reproduce against the current build before concluding
     anything (the bead's own last line, and the spec's). A mock cannot tell
     us whether a real process actually exits — this spawns `kraft admin
     start` for real, sends a real SIGTERM, and times the real exit.
 
-    `_isolated_kraft_home` (autouse) already gives it KRAFT_HOME and a free
-    KRAFT_PORT; this only adds KRAFT_RUN_DIR/KRAFT_CONFIG_DIR on top."""
+    `_isolated_kraft_home` (autouse) already gives it KRAFT_HOME; this adds
+    KRAFT_RUN_DIR/KRAFT_CONFIG_DIR and a port of its own on top."""
     run_dir = tmp_path / "run"
     templates = fake_templates_dir(tmp_path, "true")
-    port = int(os.environ["KRAFT_PORT"])
-    spawned_at = time.monotonic()
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "kraft", "admin", "start"],
-        env=child_env({"KRAFT_RUN_DIR": str(run_dir), "KRAFT_CONFIG_DIR": str(templates)}),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    try:
+    spawned_at = 0.0
+
+    def start(port):
+        nonlocal spawned_at
+        spawned_at = time.monotonic()
+        env = {"KRAFT_RUN_DIR": str(run_dir), "KRAFT_CONFIG_DIR": str(templates)}
+        return subprocess.Popen(
+            [sys.executable, "-m", "kraft", "admin", "start"],
+            env=child_env({**env, "KRAFT_PORT": str(port)}),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+
+    def owns(proc, port):
         # Serving, not only past its pidfile: a SIGTERM during startup would time that too.
-        served = _wait_for(lambda: _answers(port) or proc.poll() is not None, timeout=30.0)
-        assert served and proc.poll() is None, f"server never served:\n{output_of(proc)}"
+        # And its own answer: a child that finds the number taken refuses and exits.
+        return None if proc.poll() is not None else health_pid(port) == proc.pid
+
+    proc, _ = on_a_free_port(start, owns, lambda p: print(output_of(p)), timeout=30.0)
+    try:
         # A clean exit costs less than the startup just took (both 1.2s on 2026-09-12), capped
         # under uvicorn's 10s backstop: past the cap a regression into the backstop would pass.
         budget = min(max(5.0, 2 * (time.monotonic() - spawned_at)), 9.0)
