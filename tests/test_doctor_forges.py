@@ -8,6 +8,7 @@ from datetime import date, timedelta
 import pytest
 
 from kraft import client, doctor
+from kraft.paths import config_dir
 
 
 @pytest.mark.parametrize(
@@ -40,6 +41,9 @@ def _probe(**kw):
     }  # fmt: skip
 
 
+_API_FILE = (
+    "accounts:\n  gl:\n    forge: gitlab\n    client: api\n    web_url: https://gl.example\n"
+)
 _SOON = (date.today() + timedelta(days=3)).isoformat()
 
 
@@ -56,10 +60,13 @@ _SOON = (date.today() + timedelta(days=3)).isoformat()
         (_api(_probe(warnings=["GH_TOKEN is read"])), True, True, "warning: GH_TOKEN is read"),
         ({"c": {"client": "cli", "forge": "gitlab", "probe": None}}, None, None, None),
         (ValueError("403"), True, False, "skipped: the server's forge accounts could not be read"),
+        (ValueError("403"), None, None, None),
+        (_api(_probe(state="unreachable", detail="no route")), True, True, "unreachable: no"),
     ],
     ids=[
         "ok", "expiring", "refused-with-sso", "no-probe-yet", "well-known-env-warns",
         "cli-account-has-no-row", "inside-a-session-skips",
+        "inside-a-session-without-an-api-account-has-no-row", "unreachable-warns",
     ],
 )  # fmt: skip
 def test_doctor_reports_a_forge_account_row(app, monkeypatch, accounts, ok, warn, says):
@@ -69,6 +76,8 @@ def test_doctor_reports_a_forge_account_row(app, monkeypatch, accounts, ok, warn
         return {"accounts": accounts}
 
     monkeypatch.setattr(client, "list_forges", listed)
+    if isinstance(accounts, Exception) and ok is not None:  # an API account is configured
+        (config_dir() / "forges.yaml").write_text(_API_FILE)
     rows = [r for r in asyncio.run(doctor.run_checks()) if r["name"].startswith("forge account")]
     if ok is None:
         assert rows == []

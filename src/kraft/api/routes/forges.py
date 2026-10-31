@@ -82,6 +82,8 @@ def _save(st, updated: forges.ForgesFile) -> None:
     updated.save(_file_path(st))
     apply_mod.record(st, forges.ForgesFile.FILE)
     st.forges = updated
+    for gone in set(st.forge_probes) - set(probe.api_accounts(st)):
+        del st.forge_probes[gone]  # a removed account must not keep /health degraded
     st.invalid_forges = "; ".join(forges.repo_problems(updated, st.templates_dir)) or None
 
 

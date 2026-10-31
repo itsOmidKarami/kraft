@@ -87,7 +87,7 @@ origin: src/kraft/api/routes/auth.py §health
 
 ## REQ probe-runs-in-the-server-not-per-poll
 The system SHALL probe API credentials in the server at start, at reload, on `kraft admin forge test` and on a timer, and SHALL NOT probe on a `/health` request.
-enforced-by: tests/api/test_forge_probe.py::test_probes_run_at_start_reload_test_and_timer_never_per_health_poll, tests/api/test_forge_probe.py::test_the_timer_probes_again_with_nothing_asking
+enforced-by: tests/adapters/forge/test_probe.py::test_probes_run_at_start_reload_test_and_timer_never_per_health_poll, tests/adapters/forge/test_probe.py::test_the_timer_probes_again_with_nothing_asking
 origin: src/kraft/adapters/forge/probe.py §loop
 
 ## REQ service-unit-holds-no-token

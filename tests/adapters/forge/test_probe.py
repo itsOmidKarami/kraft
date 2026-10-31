@@ -4,17 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import date
 
 import httpx
 import pytest
+from support import forge_probe as canned
 from support.harness import git, make_repo
 
 from kraft import config, redact
 from kraft.adapters.forge import credentials, probe
 from kraft.forges import ForgeAccount, TokenSource
-
-pytestmark = pytest.mark.real_probe
 
 TOK = "tok-1234567890"
 GH, GL = "https://api.github.com", "https://code.corp.example/gitlab"
@@ -51,6 +51,7 @@ def run(monkeypatch, tmp_path):
     return go
 
 
+@pytest.mark.real_probe
 @pytest.mark.parametrize(
     "account, routes, want",
     [
@@ -118,6 +119,15 @@ def run(monkeypatch, tmp_path):
             ("ada", None, None),
             id="expiry-not-a-date-is-unknown",
         ),
+        pytest.param(
+            gitlab(kind="pat"),
+            {
+                ("GET", f"{GL}/api/v4/user"): (200, GL_USER),
+                ("GET", f"{GL}/api/v4/personal_access_tokens/self"): (200, ["not", "an", "object"]),
+            },
+            ("ada", None, None),
+            id="token-info-not-an-object",
+        ),
     ],
 )
 async def test_the_probe_reports_who_the_token_signs_in_as(mock_http, run, account, routes, want):
@@ -126,6 +136,7 @@ async def test_the_probe_reports_who_the_token_signs_in_as(mock_http, run, accou
     assert (got.state, got.login, got.scopes, got.expires_on) == ("ok", *want)
 
 
+@pytest.mark.real_probe
 @pytest.mark.parametrize(
     "answer, state, text",
     [
@@ -159,8 +170,10 @@ async def test_the_probe_names_why_a_token_does_not_work(mock_http, run, answer,
     got = await run(m, acct(), no_token="nothing saved" if answer is None else None)
     assert got.state == state and text in got.detail
     assert bool(got.sso_url) is (state == "forbidden")
+    assert got.sso_url in got.text()  # what `kraft admin forge test` prints
 
 
+@pytest.mark.real_probe
 @pytest.mark.parametrize(
     "status, visible", [(200, True), (404, False)], ids=["visible", "not-found"]
 )
@@ -183,6 +196,7 @@ async def test_the_probe_says_whether_each_repo_is_visible(
     assert visible or ("HTTP 404" in seen["detail"] and "team/app" in seen["detail"])
 
 
+@pytest.mark.real_probe
 @pytest.mark.parametrize(
     "account, token, want",
     [
@@ -200,6 +214,7 @@ async def test_the_probe_warns_on_a_prefix_or_a_well_known_env_name(
     assert any(want in w for w in got.warnings)
 
 
+@pytest.mark.real_probe
 async def test_the_probe_never_puts_a_token_in_its_result(mock_http, run):
     m = mock_http({("GET", f"{GH}/user"): (401, {"message": f"bad token {TOK}"})})
     got = await run(m, acct())
@@ -210,6 +225,7 @@ async def _hangs(*a, **kw):
     await asyncio.sleep(10)
 
 
+@pytest.mark.real_probe
 @pytest.mark.parametrize(
     "token, slow, says",
     [
@@ -247,3 +263,65 @@ def test_health_rows_degrade_on_a_bad_state_or_a_near_expiry(state, days, degrad
     rows, bad = probe.health_rows({"corp": found}, today)
     assert rows == {"corp": {"state": state, "expires_on": expires}}
     assert bad == (["corp"] if degraded else [])
+
+
+# The server: when it probes. The canned probe (support.forge_probe) counts the passes.
+
+
+@pytest.fixture
+def templates_dir(templates_dir):
+    (templates_dir / "forges.yaml").write_text(
+        "accounts:\n  corp:\n    forge: gitlab\n    client: api\n"
+        "    web_url: https://code.corp.example/gitlab\n"
+        "    token: {from: env, env: CORP_GL, kind: pat}\n"
+    )
+    return templates_dir
+
+
+def until(n):
+    for _ in range(100):
+        if len(canned.CALLS) >= n:
+            break
+        time.sleep(0.05)
+    return len(canned.CALLS)
+
+
+def test_probes_run_at_start_reload_test_and_timer_never_per_health_poll(client, templates_dir):
+    assert until(1) == 1
+    for _ in range(3):
+        client.get("/api/health")
+    (templates_dir / "forges.yaml").write_text(
+        (templates_dir / "forges.yaml").read_text().replace("pat}", "oauth}")
+    )
+    client.post("/api/apply/reload")
+    assert until(2) == 2
+    for _ in range(3):
+        client.get("/api/health")
+    time.sleep(0.2)
+    assert len(canned.CALLS) == 2
+    assert client.post("/api/forges/corp/test").json()["ok"] is True
+    assert len(canned.CALLS) == 3
+    assert client.app.state.forge_probes["corp"].state == "ok"
+
+
+@pytest.fixture
+def fast_timer(monkeypatch):
+    monkeypatch.setattr(probe, "PROBE_INTERVAL_S", 0.05)
+
+
+def test_the_timer_probes_again_with_nothing_asking(fast_timer, client):
+    assert until(3) >= 3
+
+
+@pytest.mark.parametrize("how", ["reload", "delete"])
+def test_a_removed_account_leaves_health(client, templates_dir, how):
+    assert until(1) == 1
+    client.app.state.forge_probes["corp"] = probe.Probe("corp", "t", "refused", "HTTP 401")
+    assert client.get("/api/health").json()["status"] == "degraded"
+    if how == "delete":
+        assert client.delete("/api/forges/corp").status_code == 204
+    else:
+        (templates_dir / "forges.yaml").write_text("accounts: {}\n")
+        client.post("/api/apply/reload")
+    health = client.get("/api/health").json()
+    assert health["forge_tokens"] == {} and health["status"] == "ok", health

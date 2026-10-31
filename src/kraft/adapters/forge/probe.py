@@ -56,6 +56,8 @@ class Probe:
 
     def text(self) -> str:
         lines = [f"{self.state}: {self.detail}"]
+        if self.sso_url:
+            lines.append(f"authorize it: {self.sso_url}")
         if self.login:
             lines.append(f"signed in as {self.login}")
         if self.scopes is not None:
@@ -101,6 +103,8 @@ async def _info(account, http, web) -> tuple[tuple[str, ...] | None, str | None]
         except ForgeError as exc:
             if exc.reason not in ("auth", "not_found") or i == len(hows) - 1:
                 break
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            break  # an answer of another shape: no detail, the sign-in still worked
     return None, None
 
 
@@ -169,26 +173,26 @@ async def _probe_account(
             f"{source.env} is read by glab/gh for any host; Kraft takes it out of every process "
             "it starts, so a client: cli repo's gh/glab no longer sees it"
         )
-    projects = {}
     mine = ForgesFile(accounts={name: account})
-    for repo in repos:
+
+    async def sees(repo) -> tuple[str, dict] | None:
         remote = await asyncio.to_thread(
             config.git_read, Path(repo.path), "remote", "get-url", "origin", expected_failure=True
         )
         if not account_for(repo, mine, remote_host(remote) if remote else None):
-            continue
+            return None
         path = project_path(remote or "", account)
         if path is None:
-            continue
+            return None
         try:
             await api.rest("GET", f"repos/{path}" if github else f"projects/{quote(path, safe='')}")
-            projects[str(repo.path)] = {"project": path, "visible": True, "detail": ""}
+            return str(repo.path), {"project": path, "visible": True, "detail": ""}
         except ForgeError as exc:
-            projects[str(repo.path)] = {
-                "project": path,
-                "visible": False,
-                "detail": redact.redact(f"{path}: HTTP {exc.status}" if exc.status else str(exc)),
-            }
+            why = f"{path}: HTTP {exc.status}" if exc.status else str(exc)
+            return str(repo.path), {"project": path, "visible": False, "detail": redact.redact(why)}
+
+    # At once, not one after another: `forge test` waits on the slowest, not on the sum.
+    projects = dict(filter(None, await asyncio.gather(*(sees(r) for r in repos))))
     return done(
         "ok",
         f"signed in as {login}",
@@ -200,7 +204,7 @@ async def _probe_account(
     )
 
 
-def _api_accounts(st) -> dict[str, ForgeAccount]:
+def api_accounts(st) -> dict[str, ForgeAccount]:
     return {n: a for n, a in (st.forges.accounts if st.forges else {}).items() if a.client == "api"}
 
 
@@ -214,7 +218,7 @@ def _expose(st, repos: Sequence[config.RepoEntry]) -> list[Path]:
 async def refresh(st, accounts: Mapping[str, ForgeAccount] | None = None) -> dict[str, Probe]:
     """Probe `accounts` (every API account by default). Kept only for an account the server
     still runs: one removed meanwhile, or not reloaded yet, must not reach `/health`."""
-    accounts = _api_accounts(st) if accounts is None else accounts
+    accounts = api_accounts(st) if accounts is None else accounts
     if not accounts:
         return {}
     try:
@@ -235,7 +239,7 @@ async def refresh(st, accounts: Mapping[str, ForgeAccount] | None = None) -> dic
             for n, a in accounts.items()
         )
     )
-    running = _api_accounts(st)
+    running = api_accounts(st)
     for p in probes:
         if p.account in running:
             st.forge_probes[p.account] = p
@@ -244,7 +248,7 @@ async def refresh(st, accounts: Mapping[str, ForgeAccount] | None = None) -> dic
 
 def kick(st, names: Iterable[str] | None = None) -> None:
     """Probe these accounts (all when None) soon; the loop does it."""
-    st.forge_probe_due.update(_api_accounts(st) if names is None else names)
+    st.forge_probe_due.update(api_accounts(st) if names is None else names)
     st.forge_probe_wake.set()
 
 
@@ -252,7 +256,7 @@ async def loop(app) -> None:
     st = app.state
     due = None  # the first pass, and the timer's, take every account
     while True:
-        accounts = _api_accounts(st)
+        accounts = api_accounts(st)
         try:
             await refresh(
                 st, accounts if due is None else {n: a for n, a in accounts.items() if n in due}

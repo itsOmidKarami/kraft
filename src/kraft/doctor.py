@@ -115,7 +115,8 @@ async def run_checks() -> list[dict]:
             accounts = (await client.list_forges())["accounts"]
         except ValueError:
             accounts = None  # inside a Kraft session, or a server older than the route
-    checks.extend(_forge_account_checks(accounts, "no server" if health is None else None))
+    if accounts is not None or _has_api_account():
+        checks.extend(_forge_account_checks(accounts, "no server" if health is None else None))
     checks.append(_pidfile_check())
     checks.extend(_agent_checks())
     checks.append(await _mcp_check(health))
@@ -1449,6 +1450,16 @@ def _credential_check(repo: config.RepoEntry, policy) -> dict | None:
     return _check(f"credentials {_label(repo)}", not missing, detail, warn=bool(orphans))
 
 
+def _has_api_account() -> bool:
+    """Whether forges.yaml names a `client: api` account: a skipped row for none would be a
+    change a user who never touched the feature sees."""
+    try:
+        file = forges_mod.ForgesFile.load(config_dir() / forges_mod.ForgesFile.FILE)
+    except config.ConfigError:
+        return False  # the forges.yaml row says why
+    return any(a.client == "api" for a in file.accounts.values())
+
+
 def _forge_account_checks(accounts: dict[str, dict] | None, why: str | None = None) -> list[dict]:
     """One row per `client: api` account, from the probe the server holds. `accounts` is
     `GET /forges`'s, or None when it could not be read (`why`, when there is no server)."""
@@ -1466,7 +1477,9 @@ def _forge_account_checks(accounts: dict[str, dict] | None, why: str | None = No
             )
         elif p["state"] != "ok":
             sso = f" · authorize it: {p['sso_url']}" if p["sso_url"] else ""
-            checks.append(_check(label, False, f"{p['state']}: {p['detail']}{sso}"))
+            # As on /health: a network blip warns, it does not fail the server.
+            bad = p["state"] != "unreachable"
+            checks.append(_check(label, not bad, f"{p['state']}: {p['detail']}{sso}", warn=not bad))
         else:
             parts = [f"signs in as {p['login']}"]
             if p["scopes"] is not None:

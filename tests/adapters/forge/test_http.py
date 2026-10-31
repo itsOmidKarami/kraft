@@ -101,6 +101,13 @@ async def test_the_web_base_is_gitlabs_alone(mock_http, forge, web, ok):
             "POST", redirect(f"{GH}/b", 307), 1, "https://api.github.com", id="on-a-post-refused"
         ),
         pytest.param("GET", "chain", 6, "https://api.github.com", id="more-than-five-refused"),
+        pytest.param(
+            "GET",
+            redirect("https://user:pw@evil.example/b"),
+            1,
+            "https://evil.example:443,",
+            id="userinfo-in-location-never-shown",
+        ),
     ],
 )
 async def test_a_redirect_is_followed_only_within_the_origin(mock_http, method, first, sent, named):
@@ -119,8 +126,37 @@ async def test_a_redirect_is_followed_only_within_the_origin(mock_http, method, 
         with pytest.raises(ForgeError, match="not followed") as err:
             await tr(m).rest(method, "a")
         assert named in str(err.value) and err.value.reason == "unreachable"
+        assert "pw@" not in str(err.value)
     assert len(m.requests) == sent
     assert {r.headers["authorization"] for r in m.requests} == {f"Bearer {TOK}"}
+
+
+async def _never(req):
+    await asyncio.sleep(5)
+
+
+@pytest.mark.parametrize(
+    "answer, says",
+    [
+        pytest.param(_never, "did not answer in 0.05s", id="never-answers"),
+        pytest.param(
+            lambda req: httpx.Response(200, content=b"x" * 2048), "answered more than", id="too-big"
+        ),
+        pytest.param(
+            lambda req: httpx.Response(400, json={"message": "m" * 600}), "…", id="long-message"
+        ),
+    ],
+)
+async def test_a_call_is_bounded_and_its_error_stays_short(mock_http, monkeypatch, answer, says):
+    monkeypatch.setattr("kraft.adapters.forge.http.MAX_BODY", 1024)
+    with pytest.raises(ForgeError) as err:
+        await tr(mock_http(handler=answer), timeout=0.05).rest("GET", "x")
+    assert says in str(err.value) and len(str(err.value)) < 300, str(err.value)
+
+
+def test_a_transport_registers_its_token_with_the_redactor(mock_http):
+    tr(mock_http())
+    assert redact.redact(f"x {TOK} y") == f"x {redact.PLACEHOLDER} y"
 
 
 @pytest.mark.parametrize(
@@ -291,7 +327,14 @@ class _Ctx(ssl.SSLContext):
 
 @pytest.mark.parametrize(
     "case",
-    ["ca-file", "git-sslcainfo", "system", "system-empty-adds-certifi", "ca-file-missing-is-tls"],
+    [
+        "ca-file",
+        "git-sslcainfo",
+        "system",
+        "system-empty-adds-certifi",
+        "ca-file-missing-is-tls",
+        "git-sslcainfo-missing-is-tls",
+    ],
 )
 async def test_the_ca_comes_from_ca_file_then_git_then_the_system(
     mock_http, monkeypatch, tmp_path, case
@@ -306,7 +349,7 @@ async def test_the_ca_comes_from_ca_file_then_git_then_the_system(
 
     def git_read(argv, *, input=None, timeout):
         git_argv.append(argv)
-        out = "/etc/corp/ca.pem\n" if case == "git-sslcainfo" else ""
+        out = f"{tmp_path / 'git.pem'}\n" if case.startswith("git-sslcainfo") else ""
         return subprocess.CompletedProcess(argv, 0 if out else 1, out, "")
 
     real = httpx.AsyncClient
@@ -320,14 +363,16 @@ async def test_the_ca_comes_from_ca_file_then_git_then_the_system(
     monkeypatch.setattr(credentials, "neutral_run", git_read)
     monkeypatch.setattr(httpx, "AsyncClient", Spy)
     ca = tmp_path / "corp.pem"
-    if case != "ca-file-missing-is-tls":
+    if not case.endswith("missing-is-tls"):
         ca.write_text("x")
+        (tmp_path / "git.pem").write_text("x")
     m = mock_http({("GET", f"{GH}/x"): (200, {})})
     account = acct(ca_file=str(ca)) if case.startswith("ca-file") else acct()
-    if case == "ca-file-missing-is-tls":
-        # create() would accept anything: a file that does not exist must fail before it
+    if case.endswith("missing-is-tls"):
+        # create() would accept anything: a file that does not exist must fail before it,
+        # never fall back to the system store
         monkeypatch.setattr(ssl, "create_default_context", lambda *a, **kw: pytest.fail("built"))
-        with pytest.raises(ForgeError, match="corp.pem") as e:
+        with pytest.raises(ForgeError, match="corp.pem" if case[0] == "c" else "git.pem") as e:
             await tr(m, account).rest("GET", "x")
         assert e.value.reason == "tls" and m.requests == []
         return
@@ -335,7 +380,9 @@ async def test_the_ca_comes_from_ca_file_then_git_then_the_system(
     (kw, ctx) = made[0]
     assert len(made) == 1 and seen["verify"] is ctx
     assert ctx.verify_mode == ssl.CERT_REQUIRED and ctx.check_hostname
-    assert kw.get("cafile") == {"ca-file": str(ca), "git-sslcainfo": "/etc/corp/ca.pem"}.get(case)
+    assert kw.get("cafile") == {"ca-file": str(ca), "git-sslcainfo": str(tmp_path / "git.pem")}.get(
+        case
+    )
     assert bool(git_argv) == (case != "ca-file")
     assert git_argv == [] or git_argv[0][-1] == GH
     assert getattr(ctx, "loaded", []) == (

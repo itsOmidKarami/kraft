@@ -13,11 +13,12 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin
 
 import certifi
 import httpx
 
+from kraft import redact
 from kraft.adapters.forge import credentials, git
 from kraft.adapters.forge.models import ForgeError, reason_for
 from kraft.adapters.forge.transport import (
@@ -31,6 +32,7 @@ from kraft.adapters.forge.transport import (
 from kraft.forges import ForgeAccount, origin
 
 MAX_REDIRECTS = 5
+MAX_BODY = 32 << 20  # a forge answer bigger than this is not one Kraft can use
 _REDIRECTS = frozenset({301, 302, 303, 307, 308})
 _NOT_A_PATH = re.compile(r"^(//|[A-Za-z][A-Za-z0-9+.-]*:)")
 
@@ -49,29 +51,30 @@ def graphql_url(account: ForgeAccount) -> str:
     return f"{api.removesuffix('/v3')}/graphql" if api.endswith("/api/v3") else f"{api}/graphql"
 
 
+def _load_ca(path: str, named: str) -> ssl.SSLContext:
+    """A CA the person configured, or a refusal naming it: never the system store instead."""
+    try:
+        if not Path(path).is_file():
+            raise FileNotFoundError(path)
+        return ssl.create_default_context(cafile=path)
+    except (OSError, ssl.SSLError) as exc:
+        raise ForgeError(f"{named} {path} cannot be read as a CA bundle", reason="tls") from exc
+
+
 def ssl_context(account: ForgeAccount) -> ssl.SSLContext:
     """ca_file, else git's `http.sslCAInfo` for the API address, else the system's store
     (plus certifi's when that holds no CA). Always verifying, never a way to turn it off."""
     if account.ca_file:
-        try:
-            if not Path(account.ca_file).is_file():
-                raise FileNotFoundError(account.ca_file)
-            return ssl.create_default_context(cafile=account.ca_file)
-        except (OSError, ssl.SSLError) as exc:
-            raise ForgeError(
-                f"ca_file {account.ca_file} cannot be read as a CA bundle",
-                reason="tls",
-            ) from exc
+        return _load_ca(account.ca_file, "ca_file")
     try:
         done = credentials.neutral_run(
             ["git", "config", "--get-urlmatch", "http.sslCAInfo", account.api()],
             timeout=credentials.CREDENTIAL_TIMEOUT_S,
         )
-        path = done.stdout.strip() if done.returncode == 0 else ""
-        if path:
-            return ssl.create_default_context(cafile=path)
     except Exception:  # noqa: BLE001 - a git that cannot answer means the system store
-        pass
+        done = None
+    if done is not None and done.returncode == 0 and (path := done.stdout.strip()):
+        return _load_ca(path, "git's http.sslCAInfo")
     ctx = ssl.create_default_context()
     if ctx.cert_store_stats()["x509_ca"] == 0:
         ctx.load_verify_locations(certifi.where())  # the same context: a capath keeps its CAs
@@ -88,6 +91,16 @@ def _is_tls(exc: BaseException) -> bool:
     )
 
 
+async def _read(label: str, resp: httpx.Response) -> ApiResponse:
+    data = bytearray()
+    async for chunk in resp.aiter_bytes():
+        data += chunk
+        if len(data) > MAX_BODY:
+            raise ForgeError(f"{label}: answered more than {MAX_BODY} bytes", reason="unreachable")
+    text = data.decode(resp.charset_encoding or "utf-8", "replace")
+    return ApiResponse(resp.status_code, {k.lower(): v for k, v in resp.headers.items()}, text)
+
+
 class HttpTransport:
     def __init__(
         self,
@@ -101,6 +114,9 @@ class HttpTransport:
     ):
         if base == "web" and account.forge != "gitlab":
             raise ValueError("the web base is for GitLab only")
+        # Whoever built this transport, the token never reaches text Kraft writes.
+        redact.register(token)
+        redact.register(credentials.basic_form(token, account.source().kind))
         self.name, self.account, self._token = name, account, token
         self.base = account.web_url if base == "web" else account.api()
         self.timeout = git.CLI_TIMEOUT_S if timeout is None else timeout
@@ -116,44 +132,56 @@ class HttpTransport:
 
     async def _send(
         self, label: str, method: str, url: str, *, params=None, body=None
-    ) -> httpx.Response:
+    ) -> ApiResponse:
         here = origin(url)
+        shown = f"{here[0]}://{here[1]}:{here[2]}"
         if self._ctx is None:
             self._ctx = await asyncio.to_thread(ssl_context, self.account)
         try:
-            async with httpx.AsyncClient(
-                follow_redirects=False,
-                verify=self._ctx,
-                timeout=self.timeout,
-                trust_env=True,
-                transport=self._transport,
-            ) as client:
+            # The whole exchange, redirects included: httpx's own timeout is per phase.
+            async with (
+                asyncio.timeout(self.timeout),
+                httpx.AsyncClient(
+                    follow_redirects=False,
+                    verify=self._ctx,
+                    timeout=self.timeout,
+                    trust_env=True,
+                    transport=self._transport,
+                ) as client,
+            ):
                 for hop in range(MAX_REDIRECTS + 1):
-                    resp = await client.request(
+                    request = client.build_request(
                         method, url, params=params, json=body, headers=self._headers()
                     )
-                    if resp.status_code not in _REDIRECTS or "location" not in resp.headers:
-                        return resp
-                    url = urljoin(str(resp.url), resp.headers["location"])
-                    target = urlsplit(url)
+                    resp = await client.send(request, stream=True)
+                    try:
+                        if resp.status_code not in _REDIRECTS or "location" not in resp.headers:
+                            return await _read(label, resp)
+                        url = urljoin(str(resp.url), resp.headers["location"])
+                    finally:
+                        await resp.aclose()
+                    to = origin(url)
                     why = (
                         "it is not a GET"
                         if method != "GET"
                         else "another origin"
-                        if origin(url) != here
+                        if to != here
                         else "too many redirects"
                         if hop == MAX_REDIRECTS
                         else ""
                     )
-                    if why:
+                    if why:  # host and port only: a Location can carry userinfo
                         raise ForgeError(
-                            f"{label}: redirected to {target.scheme}://{target.netloc}, "
+                            f"{label}: redirected to {to[0]}://{to[1]}:{to[2]}, "
                             f"not followed ({why})",
                             reason="unreachable",
                         )
                     params = None  # the Location carries its own query
+        except TimeoutError:
+            raise ForgeError(
+                f"{label}: {shown} did not answer in {self.timeout:g}s", reason="unreachable"
+            ) from None
         except httpx.HTTPError as exc:
-            shown = f"{here[0]}://{here[1]}:{here[2]}"
             if _is_tls(exc):
                 raise ForgeError(
                     f"TLS verification failed for {shown}; set ca_file on forge account "
@@ -167,14 +195,11 @@ class HttpTransport:
 
     async def _call(self, label: str, method: str, url: str, **kw) -> ApiResponse:
         for attempt in (0, 1):
-            raw = await self._send(label, method, url, **kw)
-            resp = ApiResponse(
-                raw.status_code, {k.lower(): v for k, v in raw.headers.items()}, raw.text
-            )
+            resp = await self._send(label, method, url, **kw)
             if resp.status < 400:
                 return resp
             try:
-                message = str(resp.json().get("message", ""))
+                message = _clip(str(resp.json().get("message", "")))
             except (ForgeError, AttributeError):
                 message = ""
             reason = reason_for(resp.status, resp.headers, message)
