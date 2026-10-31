@@ -425,6 +425,16 @@ _IN_PROCESS_FIX = {
 }
 
 
+def _in_process_fix(cause: dict | None) -> str:
+    """The end of the reason for `cause` (`_forge_cause`'s facts), or the default."""
+    if cause and cause.get("sso_url"):
+        return (
+            "The forge needs the token authorized for single sign-on: "
+            f"{cause['sso_url']}. Authorize it, then retry."
+        )
+    return _IN_PROCESS_FIX.get(cause["cause"] if cause else "", _IN_PROCESS_FIX_DEFAULT)
+
+
 def _forge_cause(db, work_item_id: str, node: ResolvedNode, failed: list) -> dict | None:
     """`{"cause": ...}` when a failed forge task's log says the forge refused
     the credential or could not be reached (`forge.failure_cause`): a forge
@@ -437,7 +447,10 @@ def _forge_cause(db, work_item_id: str, node: ResolvedNode, failed: list) -> dic
                 _task_forge_error(db, work_item_id, node, t, "failed"),
             )
         ):
-            return {"cause": c}
+            sso = c == "forge_auth" and forge_mod.safe_sso_url(
+                (_task_forge_error(db, work_item_id, node, t, "failed") or {}).get("sso_url")
+            )
+            return {"cause": c, **({"sso_url": sso} if sso else {})}
     return None
 
 
@@ -2281,7 +2294,7 @@ async def _walk_node_once(
             cause = _forge_cause(db, work_item_id, node, blind_failures)
             # What to do depends on why it failed: a refused credential or an
             # unreachable forge is the machine's to fix, not a reinstall.
-            fix = _IN_PROCESS_FIX.get(cause["cause"] if cause else "", _IN_PROCESS_FIX_DEFAULT)
+            fix = _in_process_fix(cause)
             reason = (
                 f"{named} failed in node {node.id}"
                 f"{_in_process_causes(db, work_item_id, node, blind_failures)}, and those "

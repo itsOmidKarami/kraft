@@ -4,6 +4,7 @@ every node speaks in.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,6 +37,15 @@ Reason = Literal[
     "unreachable",
     "tls",
 ]
+
+
+_SSO_URL = re.compile(r"https://[^\s`]+")
+
+
+def safe_sso_url(url: object) -> str:
+    """`url` when it is an `https://` address with no whitespace or backtick (it is
+    shown as plain text and followed by a person), else ""."""
+    return url if isinstance(url, str) and _SSO_URL.fullmatch(url) else ""
 
 
 class ForgeError(RuntimeError):

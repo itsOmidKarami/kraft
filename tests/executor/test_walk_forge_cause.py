@@ -103,6 +103,58 @@ async def test_a_forge_task_failure_names_its_cause_in_the_stops_facts(
         assert "`" not in stop["reason"]
 
 
+_SSO = "https://github.com/orgs/acme/sso?authorization_request=abc"
+_SSO_FIX = (
+    f"The forge needs the token authorized for single sign-on: {_SSO}. Authorize it, then retry."
+)
+_TODAYS_FIX = (
+    "The forge refused the credentials on the Kraft server's machine. Fix them, then retry."
+)
+
+
+@pytest.mark.parametrize(
+    ("sso_url", "facts", "fix"),
+    [
+        (_SSO, {"cause": "forge_auth", "sso_url": _SSO}, _SSO_FIX),
+        ("", {"cause": "forge_auth"}, _TODAYS_FIX),
+        ("http://github.com/sso", {"cause": "forge_auth"}, _TODAYS_FIX),
+        ("javascript:alert(1)", {"cause": "forge_auth"}, _TODAYS_FIX),
+        ("https://github.com/sso then run it", {"cause": "forge_auth"}, _TODAYS_FIX),
+        ("https://github.com/sso`id`", {"cause": "forge_auth"}, _TODAYS_FIX),
+    ],
+    ids=[
+        "sso-on-a-cli-account",
+        "cli-account-unchanged",
+        "non-https-dropped",
+        "other-scheme-dropped",
+        "whitespace-dropped",
+        "backtick-dropped",
+    ],
+)
+@pytest.mark.parametrize(
+    ("fix_loop", "stop_kind"), [(True, "infra"), (False, "failed")], ids=["fix-loop", "no-loop"]
+)
+async def test_a_refused_token_stop_carries_the_sso_address_only_when_it_is_safe(
+    item_on, tmp_path, fake_agent, monkeypatch, sso_url, facts, fix, fix_loop, stop_kind
+):
+    """The forge's SSO address reaches the stop's facts and, in a fix-loop node,
+    the reason: only as an `https://` address with no whitespace or backtick
+    (the reason is plain text). Anything else is dropped and the stop reads as
+    it always did."""
+    error = {"reason": "forbidden", "sso_url": sso_url}
+    monkeypatch.setattr(_forge.run, "resolve", lambda name: _RaisingWith("HTTP 403", **error))
+    extra = {"fix_loop": {"tasks": [_agent("repair")]}} if fix_loop else {}
+    it = await item_on([_exec("checks", _forge_task("open", "mr.open_draft"), **extra)])
+
+    await _walk(it, repo_entry=FORGE_REPO, policy=_loop_policy(tmp_path))
+
+    stop = it.events("work_item_needs_human")[-1]["payload"]
+    assert (stop["kind"], stop["facts"]) == (stop_kind, facts)
+    if stop_kind == "infra":
+        assert stop["reason"].endswith(fix)
+        assert "`" not in stop["reason"]
+
+
 async def test_a_forge_rate_limit_parks_the_item_until_the_forge_allows_it(
     item_on, tmp_path, fake_agent, monkeypatch
 ):
