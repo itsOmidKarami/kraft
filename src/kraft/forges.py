@@ -193,8 +193,9 @@ class ForgesFile(config._Model):
     @classmethod
     def load(cls, path) -> ForgesFile:
         """As `_Model.load`, but a file that does not parse is named by its line and
-        column only. YAML's own message quotes the line, and this one is shown on
-        the open `/health` and is where a token will be pasted."""
+        column only. YAML's own message can quote the file (the line, an alias, a
+        tag), and this one is shown on the open `/health` and is where a token
+        will be pasted."""
         try:
             return super().load(path)
         except config.ConfigError as exc:
@@ -203,8 +204,7 @@ class ForgesFile(config._Model):
                 raise
             mark = cause.problem_mark
             where = f" at line {mark.line + 1}, column {mark.column + 1}" if mark else ""
-            what = cause.problem or cause.context or "invalid YAML"
-            raise config.ConfigError(f"{cls.FILE}: cannot parse: {what}{where}") from None
+            raise config.ConfigError(f"{cls.FILE}: not valid YAML{where}") from None
 
     def save(self, path) -> None:
         """Written over the file's own text: hand comments stay, defaults are not spelled out."""

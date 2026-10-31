@@ -56,6 +56,11 @@ def _names(st) -> list[str]:
     return [*CONFIG_FILES, *sorted(chains)]
 
 
+def file_digest(path: Path) -> str | None:
+    """What `pending_file` compares: the file's hash, None when it cannot be read."""
+    return _digest(path)
+
+
 def pending_file(st, name: str) -> bool:
     """`name` differs on disk from what was loaded."""
     return _digest(st.templates_dir / name) != getattr(st, "loaded_hashes", {}).get(name)

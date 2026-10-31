@@ -485,8 +485,12 @@ async def reload_templates_endpoint(request: Request, body: ReloadBody | None = 
         "refused_intake": getattr(st, "invalid_intake", None),
         # A `workers.yaml` that does not load: the running machines are kept.
         "refused_workers": getattr(st, "invalid_workers", None),
-        # A `forges.yaml` that does not load: the running accounts are kept.
-        "refused_forges": getattr(st, "invalid_forges", None),
+        # A `forges.yaml` the reload refused (or that never loaded): the running
+        # accounts are kept. An applied file's old repo/account mismatches are
+        # `invalid_forges` on /health, not a refusal.
+        "refused_forges": getattr(st, "invalid_forges", None)
+        if getattr(st, "forges", None) is None or apply_mod.pending_file(st, "forges.yaml")
+        else None,
     }
 
 

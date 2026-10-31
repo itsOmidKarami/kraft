@@ -159,6 +159,9 @@ def load_forges(app: FastAPI) -> None:
     """The accounts `forges.yaml` names; a file that does not load leaves
     `forges` None (no last-good copy), named by `invalid_forges`."""
     path = app.state.templates_dir / forges_mod.ForgesFile.FILE
+    # The bytes these accounts come from: an edit landing before startup records
+    # every file's hash must still read as pending (not applied).
+    app.state.forges_loaded_digest = apply_mod.file_digest(path)
     try:
         app.state.forges = forges_mod.ForgesFile.load(path)
     except config_mod.ConfigError as exc:
@@ -481,6 +484,8 @@ async def _lifespan(app: FastAPI):
     app.state.loaded_hashes = {}
     app.state.apply_signature = ()
     apply_mod.record(app.state)
+    if hasattr(app.state, "forges_loaded_digest"):
+        apply_mod.set_loaded(app.state, forges_mod.ForgesFile.FILE, app.state.forges_loaded_digest)
     if policy_obj:
         forge_git.CLI_TIMEOUT_S = policy_obj.forge_cli_timeout_s
         _subprocess.IDLE_MINUTES = policy_obj.agent_idle_minutes

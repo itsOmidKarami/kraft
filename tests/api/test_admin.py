@@ -350,14 +350,16 @@ _B = "b: {forge: github, web_url: 'https://github.com'}"
 
 
 @pytest.mark.parametrize(
-    "running, accounts, applied, says",
+    "running, accounts, applied, says, refused_it",
     [
-        pytest.param(["a"], _B, ["a"], "'a' names no account", id="new-mismatch-is-refused"),
+        pytest.param(["a"], _B, ["a"], "'a' names no account", True, id="new-mismatch-is-refused"),
+        # applied: the old mismatch is named on /health, and the reload is no refusal
         pytest.param(
             [],
             _B,
             ["b"],
             "'a' names no account",
+            False,
             id="old-mismatch-does-not-block-an-unrelated-edit",
         ),
         # nothing runs while forges.yaml has never loaded: any file that loads is taken
@@ -366,12 +368,13 @@ _B = "b: {forge: github, web_url: 'https://github.com'}"
             "a: {forge: gitlab, web_url: 'https://gitlab.example'}",
             ["a"],
             "'a' says forge: gitlab",
+            False,
             id="unreadable-since-startup-takes-a-file-that-loads",
         ),
     ],
 )
 def test_a_forges_yaml_that_leaves_a_repo_without_its_account_is_refused_on_reload(
-    client, running, accounts, applied, says
+    client, running, accounts, applied, says, refused_it
 ):
     st = client.app.state
     st.forges = (
@@ -389,5 +392,6 @@ def test_a_forges_yaml_that_leaves_a_repo_without_its_account_is_refused_on_relo
     )
     (st.templates_dir / "forges.yaml").write_text(f"accounts:\n  {accounts}\n")
     refused = client.post("/api/templates/reload").json()["refused_forges"]
-    assert refused and says in refused
+    assert (refused is not None) is refused_it
+    assert says in st.invalid_forges
     assert st.forges is not None and list(st.forges.accounts) == applied

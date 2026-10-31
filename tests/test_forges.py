@@ -117,6 +117,7 @@ def test_an_explicit_api_url_on_an_allowed_host_loads(tmp_path, forge, web_url, 
         ("accounts:\n  a: {forge: gitlab, web_url: 'https://g.example?x'}\n", "query"),
         ("accounts:\n  a: {forge: gitlab, web_url: 'https://g.example:99999'}\n", "plain https://"),
         ("accounts:\n  a:\n    token: ghp_SECRET: x\n", "at line 3, column"),
+        ("accounts: *ghp_SECRET\n", "not valid YAML at line 1"),
     ],
     ids=[
         "http-web-url",
@@ -130,6 +131,7 @@ def test_an_explicit_api_url_on_an_allowed_host_loads(tmp_path, forge, web_url, 
         "query",
         "bad-port",
         "unparseable-names-the-line-not-its-text",
+        "an-alias-is-not-quoted",
     ],
 )
 def test_a_bad_account_is_refused_naming_the_file_and_key(tmp_path, text, says):

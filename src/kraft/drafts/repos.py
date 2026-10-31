@@ -9,6 +9,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from kraft import apply as apply_mod
 from kraft import config as config_mod
 from kraft import detect
 from kraft.api import deps
@@ -295,8 +296,6 @@ def resolve(st, key, raw, files, published) -> dict:
 async def after_publish(app, written) -> None:
     """`repos.yaml` is read from disk per use: nothing to reload, but a publish can
     fix or add a repo/account mismatch, which `invalid_forges` names."""
-    from kraft import apply as apply_mod
-
     apply_mod.refresh_forge_problems(app.state)
 
 
