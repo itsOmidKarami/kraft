@@ -157,22 +157,43 @@ def test_an_agent_files_no_work_on_a_disabled_repo(client, tmp_path, door, calle
         assert f"is disabled: a person {needs}enables it in Settings › Repos" in r.json()["detail"]
 
 
-def test_an_agent_files_no_work_on_a_workspace_with_a_disabled_member(client, tmp_path):
+@pytest.mark.parametrize("shape", ["auto-connected-child", "connected-before-its-root"])
+def test_an_agent_files_no_work_on_a_workspace_with_a_disabled_member(client, tmp_path, shape):
     """A member runs its own test command at verification, so a disabled one
     stops an agent's workspace item as a disabled root would; a person may
-    still file it by hand."""
-    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
+    still file it by hand. A member connected on its own first (Kraft-d7aj3)
+    lives at its own path, not under the root: it is found by id."""
+    root, member = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
+    if shape == "connected-before-its-root":
+        held = {"path": str(member), "test_command": "evil"}
+        assert client.post("/api/repos", json=held, headers=_CALLERS["assistant"]).json()["held"]
     client.post("/api/repos", json={"path": str(root), "test_command": "true"})
-    item = {"title": "t", "repo": str(root), "autostart": False, "workspace": "ws"}
+    body = client.get("/api/repos").json()
+    ((ws_id, ws),) = body["workspaces"].items()
+    [member_id] = ws["members"]
+    item = {"title": "t", "repo": str(root), "autostart": False, "workspace": ws_id}
+    agent = _CALLERS["assistant"]
 
-    refused = client.post(
-        "/api/work-items", json={**item, "members": ["a"]}, headers=_CALLERS["assistant"]
-    )
-    root_only = client.post(
-        "/api/work-items", json={**item, "members": []}, headers=_CALLERS["assistant"]
-    )
-    by_hand = client.post("/api/work-items", json={**item, "members": ["a"]})
+    refused = client.post("/api/work-items", json={**item, "members": [member_id]}, headers=agent)
+    root_only = client.post("/api/work-items", json={**item, "members": []}, headers=agent)
+    by_hand = client.post("/api/work-items", json={**item, "members": [member_id]})
 
     assert refused.status_code == 403, refused.text
-    assert "libs/a is disabled" in refused.json()["detail"]
+    assert "is disabled: a person" in refused.json()["detail"]
     assert (root_only.status_code, by_hand.status_code) == (201, 201), root_only.text
+
+
+def test_an_agent_does_not_start_a_persons_item_on_a_disabled_repo(client, tmp_path):
+    """The person filing by hand is told to read the repo's commands before
+    starting it; an agent's resume would start it before they had."""
+    repo = make_repo(tmp_path)
+    path = client.post(
+        "/api/repos", json={"path": str(repo), "test_command": "evil"}, headers=_CALLERS["worker"]
+    ).json()["path"]
+    wid = client.post("/api/work-items", json={"title": "t", "repo": path}).json()["id"]
+
+    r = client.post(f"/api/work-items/{wid}/resume", json={}, headers=_CALLERS["assistant"])
+
+    assert r.status_code == 403, r.text
+    assert "is disabled: a person enables it" in r.json()["detail"]
+    assert client.get(f"/api/work-items/{wid}").json()["status"] == "paused"

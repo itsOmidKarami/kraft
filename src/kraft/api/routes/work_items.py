@@ -320,18 +320,20 @@ def _dry_run_response(
     }
 
 
-def refuse_agent_on_disabled_repo(st, request: Request, repo: str, members: list[str] = ()) -> None:
-    """403 when an agent or an MCP session files work on a disabled repo, or
-    a workspace whose member is one (#1198): a repo an agent connected with
-    its own commands is saved disabled, and its commands run for every item
-    on it, so a person enables it first. A person may still file by hand."""
+def refuse_agent_on_disabled_repo(st, request: Request, repo: str, target=None) -> None:
+    """403 when an agent or an MCP session files or starts work on a disabled
+    repo, or a workspace that selects a disabled member (#1198): a repo an
+    agent connected with its own commands is saved disabled, and its commands
+    run for every item on it, so a person enables it first. Members are found
+    by id, as verification runs them. A person may still file by hand."""
     who = gates._decided_by(request)
     if who == "human":
         return
-    repos = config_mod.load_repos(deps.repos_path(st))
-    entries = [deps.connected_or_422(st, repo)]
-    mounted = (str(Path(repo) / m) for m in members)  # a mount's path is the root's
-    entries += [e for m in mounted if (e := deps._connected(repos, m)) is not None]
+    deps.connected_or_422(st, repo)
+    try:
+        entries = [e for _rid, e in deps._repository_layers(st, repo, target)]
+    except PolicyError as exc:
+        raise HTTPException(422, str(exc)) from exc
     for found in entries:
         if found.enabled:
             continue
@@ -515,8 +517,7 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
             in_place=in_place_by is not None,
             members=[m.path for m in materialized.target.mounts.values()],
         )
-    members = [m.path for m in materialized.target.mounts.values()]
-    refuse_agent_on_disabled_repo(st, request, body.repo, members)
+    refuse_agent_on_disabled_repo(st, request, body.repo, materialized.target)
     if dry_run:
         # B33: every check up to and including `_check_node_overrides` has run;
         # nothing is written -- no row, no bead, no attachment copy, no spawn.
@@ -790,7 +791,6 @@ async def duplicate_work_item(wid: str, request: Request):
         detail = "; ".join(st.invalid_policy)
         raise HTTPException(503, f"policy config invalid, refusing work: {detail}")
     row = deps._work_item_row(st, wid)
-    refuse_agent_on_disabled_repo(st, request, row["repo"])
     one = None
     if row["chain_template"] == one_off.ONE_OFF_TEMPLATE:
         # Resolved again from what was authored, as a fresh filing, and unapproved.
@@ -819,6 +819,7 @@ async def duplicate_work_item(wid: str, request: Request):
     target = _duplicate_target(st, row) or entry.single_repo_target(
         row["repo"], in_place=in_place_by is not None
     )
+    refuse_agent_on_disabled_repo(st, request, row["repo"], target)
     policy = deps.item_policy_or_422(st, row["repo"], target)
     per_repository = deps.repository_policies_or_422(st, target)
     repo_steering = deps.repository_steering_or_422(st, row["repo"], target)
