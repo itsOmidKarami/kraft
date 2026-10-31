@@ -623,10 +623,10 @@ def test_kraft_9oab_sigterm_stops_the_real_server(tmp_path):
 
     def owns(proc, port):
         # Serving, not only past its pidfile: a SIGTERM during startup would time that too.
-        # And its own answer: another worker's server can hold the number instead.
+        # And its own answer: a child that finds the number taken refuses and exits.
         return None if proc.poll() is not None else health_pid(port) == proc.pid
 
-    proc, _ = on_a_free_port(start, owns, lambda p: print(output_of(p)))
+    proc, _ = on_a_free_port(start, owns, lambda p: print(output_of(p)), timeout=30.0)
     try:
         # A clean exit costs less than the startup just took (both 1.2s on 2026-09-12), capped
         # under uvicorn's 10s backstop: past the cap a regression into the backstop would pass.

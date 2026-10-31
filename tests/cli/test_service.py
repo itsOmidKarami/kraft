@@ -6,6 +6,7 @@ import argparse
 import pathlib
 import plistlib
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -202,6 +203,11 @@ def test_install_service_enables_systemd_unit_by_absolute_path(tmp_path, monkeyp
     assert enable_calls == [["systemctl", "--user", "enable", "--now", str(unit_path)]]
 
 
+def _accepts(port: int) -> bool:
+    with socket.socket() as s:
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
 def _install_on_a_free_port(monkeypatch, run_dir: pathlib.Path) -> None:
     """`install-service` on a free KRAFT_PORT, baked into the unit at write time,
     once the daemon it supervises answers health there with its own pid."""
@@ -211,9 +217,14 @@ def _install_on_a_free_port(monkeypatch, run_dir: pathlib.Path) -> None:
         cli.main(["admin", "install-service"])
 
     def owns(_, port):
-        if (answer := health_pid(port)) is None:
-            return False  # not serving yet: the pidfile comes before the listen
-        return True if answer == cli.admin._read_pid(RunDirs(run_dir).pid) else None
+        pid_path = RunDirs(run_dir).pid
+        answer = health_pid(port)
+        if answer is not None and answer == cli.admin._read_pid(pid_path):
+            return True
+        # Ours takes its pidfile before it listens: a listener while it has none is not ours.
+        if (answer is not None or _accepts(port)) and cli.admin._read_pid(pid_path) is None:
+            return None
+        return False
 
     def stop(_):
         cli.main(["admin", "uninstall-service"])

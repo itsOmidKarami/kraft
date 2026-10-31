@@ -35,25 +35,32 @@ def health_pid(port: int) -> int | None:
     return None
 
 
-def on_a_free_port(start, owns, stop, *, attempts: int = 3, timeout: float = 30.0):
+def on_a_free_port(start, owns, stop, *, attempts: int = 3, timeout: float = 15.0):
     """`start(port)` on a free number, until `owns(handle, port)` says what it
     started is listening there itself. Returns `(handle, port)`.
 
     `_free_port` closes its socket before the thing started binds the number,
-    so another xdist worker can take it in between: `owns` answers None when
-    the start lost it (exited, or someone else answers), False for not yet.
-    Lost, or not up by `timeout`, it is `stop(handle)`ed and tried again on a
-    fresh number."""
+    so another xdist worker can take it in between. `owns` answers None when
+    the start lost it that way, False for not yet: a lost start is
+    `stop(handle)`ped and tried again on a fresh number. Not up by `timeout`
+    is no race but a failure, stopped and raised at once, so a test's own
+    cleanup still runs inside pytest's 120s timeout."""
     for _ in range(attempts):
         port = _free_port()
         handle = start(port)
-        deadline = time.monotonic() + timeout
-        while (state := owns(handle, port)) is False and time.monotonic() < deadline:
-            time.sleep(0.05)
+        try:
+            deadline = time.monotonic() + timeout
+            while (state := owns(handle, port)) is False:
+                if time.monotonic() > deadline:
+                    raise TimeoutError(f"not up on port {port} after {timeout:.0f}s")
+                time.sleep(0.05)
+        except BaseException:
+            stop(handle)
+            raise
         if state:
             return handle, port
         stop(handle)
-    raise RuntimeError(f"never came up on its own port in {attempts} attempts")
+    raise RuntimeError(f"another listener took its port on all {attempts} attempts")
 
 
 @dataclass
