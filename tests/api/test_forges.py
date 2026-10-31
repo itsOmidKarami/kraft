@@ -108,12 +108,12 @@ def _done(code, out="", err=""):
         ),
         (
             "gitlab",
-            CliUnavailable("glab is not installed or not on PATH"),
+            CliUnavailable("raised-text"),
             None,
             False,
             "not installed",
         ),
-        ("github", ForgeError("gh auth status timed out after 30s"), None, False, "timed out"),
+        ("github", ForgeError("raised-text"), None, False, "timed out"),
     ],
     ids=["gh-ok", "glab-failed", "cli-missing", "timeout"],
 )
@@ -132,6 +132,7 @@ def test_test_runs_the_cli_auth_status_for_the_host(
     client.post("/api/forges", json={**GL, "forge": forge})
     body = client.post("/api/forges/corp/test").json()
     assert body["ok"] is ok and text in body["output"]
+    assert "raised-text" not in body["output"]  # an error's own text never reaches the answer
     assert calls == ([argv] if argv else calls) and len(calls) == 1
     assert client.post("/api/forges/nope/test").status_code == 404
 

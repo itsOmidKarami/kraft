@@ -152,6 +152,10 @@ async def test_forge(name: str, request: Request):
     )
     try:
         done = await git.run_cli(st.templates_dir, argv, errors="replace")
-    except ForgeError as exc:  # a timeout, or CliUnavailable
-        return {"ok": False, "output": str(exc)}
+    # Fixed text, not the exception's: nothing from inside a raised error
+    # reaches an API answer.
+    except git.CliUnavailable:
+        return {"ok": False, "output": f"{argv[0]} is not installed or cannot start on the server"}
+    except ForgeError:  # run_cli's only other failure: the CLI did not finish in time
+        return {"ok": False, "output": f"{' '.join(argv)} timed out"}
     return {"ok": done.returncode == 0, "output": done.stdout + done.stderr}
