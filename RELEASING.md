@@ -246,6 +246,15 @@ tag through setuptools-scm, and the `.vsix` gets its version from the
 `vsce package <version>` command line and its changelog from the build. The
 stamp pull request then brings `main` up to date.
 
+## Docs "What's new" page
+
+After a minor or major release, add its section to
+[What's new](docsite/content/6.project/3.whats-new.md): its highlights (one with
+sub-bullets counts as one) and at most two more of its most notable changes,
+a bullet each with a link to the
+page that describes it, in a `release::none` pull request. Nothing writes it
+for you, and a patch release adds nothing.
+
 ## Docs "Added in" notes
 
 A docs page, section or CLI verb that is new since the last release carries
