@@ -268,15 +268,15 @@ def test_add_repo_stores_probed_forge(client, tmp_path):
 
 def test_patch_repo_overrides_forge(client, tmp_path):
     repo = make_repo(tmp_path, name="patchrepo")
-    client.post("/api/repos", json={"path": str(repo), "forge_account": "corp", "enabled": False})
-    r = client.patch(f"/api/repos?path={repo}", json={"forge": "gitea", "project": "t/r"})
-    assert r.status_code == 200
+    client.post("/api/forges", json={"name": "corp", "forge": "gitlab", "web_url": "https://gl.x"})
+    client.post("/api/repos", json={"path": str(repo), "forge": "github", "enabled": False})
+    for body in ({"forge": "gitlab", "forge_account": "corp"}, {"project": "t/r"}):
+        assert client.patch(f"/api/repos?path={repo}", json=body).status_code == 200
     (entry,) = [
         x for x in client.get("/api/repos").json()["repos"] if x["path"] == str(repo.resolve())
     ]
-    assert entry["forge"] == "gitea"
-    assert entry["project"] == "t/r"
-    assert entry["forge_account"] == "corp"  # written by the connect, kept by the patch
+    assert (entry["forge"], entry["project"]) == ("gitlab", "t/r")
+    assert entry["forge_account"] == "corp"  # set by one patch, kept by the next
 
 
 def test_patch_repo_can_clear_a_field_with_an_explicit_null(client, tmp_path):

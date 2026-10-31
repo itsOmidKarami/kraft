@@ -5,6 +5,7 @@ token; `gh`/`glab` keep their own sign-in."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -26,6 +27,62 @@ def remote_host(remote: str) -> str | None:
     """The host of an origin URL (URL-style or scp-style), in `web_host`'s form."""
     match = next((m for rx in config._REMOTE if (m := rx.match(remote.strip()))), None)
     return match["host"].lower().removesuffix(".") if match else None
+
+
+def default_account(forges: ForgesFile, host: str | None) -> tuple[str, ForgeAccount] | None:
+    """The `default_for_host` account for `host`, whatever its forge."""
+    if not host:
+        return None
+    return next(
+        (
+            (n, a)
+            for n, a in forges.accounts.items()
+            if a.default_for_host and web_host(a.web_url) == host
+        ),
+        None,
+    )
+
+
+def account_for(
+    entry: config.RepoEntry, forges: ForgesFile, origin_host: str | None
+) -> tuple[str, ForgeAccount] | None:
+    """The account a repo uses: the one it names, else its host's default when
+    that default is on the repo's forge, else none (the CLI, as today). A
+    `forge_account` naming nothing is `account_problems`' to report, so None."""
+    if entry.forge_account:
+        acct = forges.accounts.get(entry.forge_account)
+        return (entry.forge_account, acct) if acct else None
+    found = default_account(forges, origin_host)
+    return found if found and found[1].forge == entry.forge else None
+
+
+def account_problems(forges: ForgesFile, repos: list[config.RepoEntry]) -> list[str]:
+    """What forges.yaml and repos.yaml say that cannot both hold."""
+    out = []
+    for r in repos:
+        if not r.forge_account:
+            continue
+        acct = forges.accounts.get(r.forge_account)
+        if acct is None:
+            out.append(
+                f"repo {r.path}: forge_account {r.forge_account!r} names no account in forges.yaml"
+            )
+        elif acct.forge != r.forge:
+            out.append(
+                f"repo {r.path}: forge_account {r.forge_account!r} says forge: {acct.forge}, "
+                f"the repo says forge: {r.forge}"
+            )
+    return out
+
+
+def repo_problems(forges: ForgesFile, templates_dir: Path) -> list[str]:
+    """`account_problems` against the repos.yaml in `templates_dir`; none when
+    that file does not load (its own check names that)."""
+    try:
+        repos = config.load_repos(templates_dir / "repos.yaml")
+    except config.ConfigError:
+        return []
+    return account_problems(forges, repos)
 
 
 def default_api_url(forge: str, web_url: str) -> str:

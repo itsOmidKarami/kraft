@@ -196,6 +196,9 @@ def retry_after_cap(
     # A stale pinned pipeline must not survive a manual retry any more than
     # the exhausted ci_infra counter above does (Kraft-ivh1).
     conn.execute("UPDATE work_items SET ci_pipeline_ref = NULL WHERE id = ?", (work_item_id,))
+    # Only a person's retry re-pins the forge account; Kraft's own relaunch keeps it.
+    if by_person:
+        conn.execute("UPDATE work_items SET forge_pins = NULL WHERE id = ?", (work_item_id,))
     events.append(
         conn,
         work_item_id,

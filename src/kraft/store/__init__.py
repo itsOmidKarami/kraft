@@ -4,6 +4,7 @@ from kraft.store._common import _now as _now  # test seam for wall-clock checks
 from kraft.store.budget import *  # noqa: F403
 from kraft.store.chain import *  # noqa: F403
 from kraft.store.counters import *  # noqa: F403
+from kraft.store.forge_pins import *  # noqa: F403
 from kraft.store.forks import *  # noqa: F403
 from kraft.store.gates import *  # noqa: F403
 from kraft.store.intake import *  # noqa: F403

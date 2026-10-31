@@ -276,6 +276,8 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         drop_lines = (*drop_lines, "runner         TEXT")
     if version < 58:
         drop_lines = (*drop_lines, "one_off_chain", "one_off_approval", "one_off_pending")
+    if version < 59:
+        drop_lines = (*drop_lines, "forge_pins", "-- {mount: {account, backend}}")
     if version < 56:
         old = "                    'waiting', 'conflict', 'infra', 'infra_stop')),"
         replace = (*replace, ("'infra_stop', 'merge_rejected')),", old))
@@ -588,6 +590,8 @@ ADDED_COLUMNS = [
     # NULL and 0: a row written before one-off chains has none, and needs no review
     (57, "work_items", ("one_off_chain", "one_off_approval"), None),
     (57, "work_items", ("one_off_pending",), 0),
+    # NULL: an item that started before pins has none, and pins at its next forge node
+    (58, "work_items", ("forge_pins",), None),
 ]
 
 

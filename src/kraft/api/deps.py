@@ -27,6 +27,7 @@ from fastapi import FastAPI, HTTPException
 from kraft import archive, executor, ids, storage, store, when_free
 from kraft import builtins as builtins_mod
 from kraft import config as config_mod
+from kraft import forges as forges_mod
 from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.forge import git as forge_git
 from kraft.adapters.forge import mr as forge_mr
@@ -1273,6 +1274,12 @@ def repository_steering(
     }
 
 
+def forges_now(st) -> tuple[forges_mod.ForgesFile | None, str | None]:
+    """The running accounts, and why forges.yaml did not load while there are none."""
+    forges = getattr(st, "forges", None)
+    return forges, getattr(st, "invalid_forges", None) if forges is None else None
+
+
 def launch(st, repo: str) -> executor.LaunchContext:
     """The repo config for one agent dispatch.
 
@@ -1309,6 +1316,7 @@ def launch(st, repo: str) -> executor.LaunchContext:
             repositories=cast("dict[str, RepoEntry]", _PoisonedRepoEntry(exc)),
             library_steering=steering,
             chain_revision_digest=digest,
+            forges=functools.partial(forges_now, st),
         )
     entry = _connected(repos, repo)
     repo_id = entry.id if entry is not None else None
@@ -1319,4 +1327,5 @@ def launch(st, repo: str) -> executor.LaunchContext:
         library_steering=steering,
         chain_revision_digest=functools.partial(digest, repo_id=repo_id),
         item_repo_id=repo_id,
+        forges=functools.partial(forges_now, st),
     )

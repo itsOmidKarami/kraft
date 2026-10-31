@@ -138,7 +138,6 @@ def start_background(app: FastAPI) -> None:
     # installs and restarts only what a person marked, or `update.yaml` allows.
     app.state.when_free_task = asyncio.ensure_future(when_free.loop(app))
     load_workers(app)
-    load_forges(app)
 
 
 def load_workers(app: FastAPI) -> None:
@@ -157,17 +156,18 @@ def load_workers(app: FastAPI) -> None:
 
 
 def load_forges(app: FastAPI) -> None:
-    """The accounts `forges.yaml` names; a file that does not load means none,
-    named by `invalid_forges`."""
+    """The accounts `forges.yaml` names; a file that does not load leaves
+    `forges` None (no last-good copy), named by `invalid_forges`."""
     path = app.state.templates_dir / forges_mod.ForgesFile.FILE
     try:
         app.state.forges = forges_mod.ForgesFile.load(path)
     except config_mod.ConfigError as exc:
         logger.warning("forges.yaml is unreadable, no accounts are used: %s", exc)
-        app.state.forges = forges_mod.ForgesFile()
+        app.state.forges = None  # unreadable, which is not the same as empty
         app.state.invalid_forges = str(exc)
     else:
-        app.state.invalid_forges = None
+        problems = forges_mod.repo_problems(app.state.forges, app.state.templates_dir)
+        app.state.invalid_forges = "; ".join(problems) or None
 
 
 async def _probation_timer(app: FastAPI) -> None:
@@ -396,6 +396,11 @@ async def _lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001 -- never a refused boot
         logger.exception("could not stop the process groups stopped sessions left")
 
+    # Before reattach and resumed walks, whose forge nodes read the accounts;
+    # nothing else runs yet, so the load needs no lock.
+    app.state.forges_lock = asyncio.Lock()
+    load_forges(app)
+
     booted_at = time.time()
     summary, adopted = await reattach.reattach(
         database,
@@ -503,9 +508,6 @@ async def _lifespan(app: FastAPI):
     app.state.workers_watch_task = asyncio.create_task(hub.runs.watch())
     app.state.workers_lock = asyncio.Lock()
     app.state.invalid_workers = None
-    app.state.forges = forges_mod.ForgesFile()
-    app.state.invalid_forges = None
-    app.state.forges_lock = asyncio.Lock()
 
     dist = Path(os.environ.get("KRAFT_FRONTEND_DIST") or DEFAULT_FRONTEND_DIST)
     app.state.frontend_dist = dist if dist.is_dir() else None

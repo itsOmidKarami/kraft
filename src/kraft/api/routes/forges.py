@@ -65,14 +65,17 @@ def _save(st, updated: forges.ForgesFile) -> None:
     updated.save(_file_path(st))
     apply_mod.record(st, forges.ForgesFile.FILE)
     st.forges = updated
-    st.invalid_forges = None
+    st.invalid_forges = "; ".join(forges.repo_problems(updated, st.templates_dir)) or None
 
 
 async def _read(st) -> forges.ForgesFile:
-    """The file; when it does not load, the accounts running, which a read may still show."""
+    """The file; when it does not load, the accounts running (a refused reload),
+    which a read may still show. None running means it never loaded: 409."""
     try:
         return await asyncio.to_thread(forges.ForgesFile.load, _file_path(st))
-    except config_mod.ConfigError:
+    except config_mod.ConfigError as exc:
+        if st.forges is None:
+            raise HTTPException(409, f"{exc}; fix the file first") from exc
         return st.forges
 
 

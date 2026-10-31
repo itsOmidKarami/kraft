@@ -17,6 +17,7 @@ from pydantic import AfterValidator, AliasChoices, BaseModel, Field
 from kraft import apply as apply_mod
 from kraft import config as config_mod
 from kraft import detect
+from kraft import forges as forges_mod
 from kraft.adapters.forge import settle
 from kraft.addons import repo_library
 from kraft.addons import review as addon_review
@@ -262,6 +263,16 @@ def _workspaces(st) -> dict:
     return dict(config_mod.read_yaml(deps.repos_path(st), {}).get("workspaces") or {})
 
 
+def _save_repos(st, repos: list[dict], workspaces: dict | None = None) -> None:
+    """Write repos.yaml, then recompute the repo/account mismatches `invalid_forges`
+    names. Not while forges.yaml is pending reload: its refused reason stays."""
+    config_mod.save_repos(deps.repos_path(st), repos, workspaces)
+    forges = getattr(st, "forges", None)
+    if forges is not None and not apply_mod.pending_file(st, forges_mod.ForgesFile.FILE):
+        problems = forges_mod.repo_problems(forges, st.templates_dir)
+        st.invalid_forges = "; ".join(problems) or None
+
+
 def _validate_repos(
     st, repos: list[dict], workspaces: dict | None = None, *, steering: bool = True
 ) -> None:
@@ -276,13 +287,35 @@ def _validate_repos(
         candidate = Path(tmp) / "repos.yaml"
         candidate.write_text(yaml.safe_dump({"repos": repos, "workspaces": workspaces}))
         try:
+            entries = None
             if steering:
                 # Against the library's profiles; with no library loaded
                 # there is nothing to name, and intake refuses the item.
-                config_mod.load_repos(candidate, steering=deps.library_steering(st))
+                entries = config_mod.load_repos(candidate, steering=deps.library_steering(st))
             config_mod.load_workspaces(candidate)
         except config_mod.ConfigError as exc:
             raise HTTPException(422, str(exc)) from exc
+    if entries is not None:
+        # Only a problem this save adds is refused; an old hand edit is doctor's.
+        forges = getattr(st, "forges", None)
+        try:
+            current = config_mod.load_repos(deps.repos_path(st))
+        except config_mod.ConfigError:
+            current = []
+        if forges is None:
+            # Unreadable since startup: no account can be checked, so none may be added.
+            had = {str(e.path): e.forge_account for e in current}
+            for e in entries:
+                if e.forge_account and had.get(str(e.path)) != e.forge_account:
+                    raise HTTPException(
+                        422,
+                        f"forge_account {e.forge_account}: forges.yaml does not load "
+                        f"({st.invalid_forges}); fix it first",
+                    )
+            forges = forges_mod.ForgesFile()
+        old = set(forges_mod.account_problems(forges, current))
+        if added := [p for p in forges_mod.account_problems(forges, entries) if p not in old]:
+            raise HTTPException(422, added[0])
     if steering:
         # An entry may name its own repo library and no other. Only what this
         # change adds is refused: a hand edit already on disk is not this
@@ -371,8 +404,10 @@ async def repo_library_accept(body: LibraryAccept, request: Request, path: str):
             )
         # The id first: a crash before the lock leaves an entry with an id and
         # nothing accepted, which the next check reads as a first load.
-        _validate_repos(st, repos)
-        config_mod.save_repos(deps.repos_path(st), repos)
+        # A forge removal must not check repos.yaml between this save's check and write.
+        async with st.forges_lock:
+            _validate_repos(st, repos)
+            _save_repos(st, repos)
         try:
             await deps._in_thread(
                 st, repo_library.accept, found, st.templates_dir, st.run_dirs.addons
@@ -588,8 +623,10 @@ async def _add_repo(body: RepoBody, st) -> dict:
     # back the same, and `forge: null`, `models: {}` and the rest are noise in
     # a file people edit by hand. The answer below keeps the whole entry.
     repos = [r if id(r) in had else _without_defaults(r) for r in repos]
-    _validate_repos(st, repos, workspaces)
-    config_mod.save_repos(deps.repos_path(st), repos, workspaces)
+    # A forge removal must not check repos.yaml between this save's check and write.
+    async with st.forges_lock:
+        _validate_repos(st, repos, workspaces)
+        _save_repos(st, repos, workspaces)
     # Index it now: a repo connected mid-session would otherwise stay invisible
     # to search (and to the intake picker) until the next restart. The scan is
     # `git ls-files .engineering/` — cheap enough to await. A scan failure must
@@ -694,8 +731,10 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
                 "cannot clear the test command of an enabled repo — "
                 "disable it, or set test scopes, in the same change",
             )
-    _validate_repos(st, repos)
-    config_mod.save_repos(deps.repos_path(st), repos)
+    # A forge removal must not check repos.yaml between this save's check and write.
+    async with st.forges_lock:
+        _validate_repos(st, repos)
+        _save_repos(st, repos)
     # The whole entry, defaults included, as the answer always was:
     # `kraft repo connect` reads the saved entry back from it, and a client
     # of the API may read any field. Only the file keeps to what was set.
@@ -750,7 +789,7 @@ async def remove_repo(request: Request, path: str):
             )
         except addon_update.Busy as exc:
             raise HTTPException(409, str(exc)) from exc
-    config_mod.save_repos(deps.repos_path(st), kept)
+    _save_repos(st, kept)
     if held:
         await deps.reload_templates(st)
         apply_mod.notify(request.app)

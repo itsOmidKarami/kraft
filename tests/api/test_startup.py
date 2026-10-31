@@ -13,6 +13,7 @@ from support.harness import IN_PLACE, git, make_item, make_repo, v1_named_chain,
 
 from kraft import db, inplace, store
 from kraft.adapters import hook_install
+from kraft.forges import ForgesFile
 from kraft.paths import RunDirs
 from kraft.worker import reattach
 
@@ -404,3 +405,72 @@ def client_factory(tmp_path, monkeypatch):
     from support.api import _client
 
     return lambda: _client(tmp_path, monkeypatch)
+
+
+_TWO_DEFAULTS = (
+    "accounts:\n"
+    "  a: {forge: github, web_url: 'https://github.com', default_for_host: true}\n"
+    "  b: {forge: github, web_url: 'https://github.com', default_for_host: true}\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("forges_text", "loaded", "invalid"),
+    [
+        ("accounts: {}\n", True, None),
+        (_TWO_DEFAULTS, False, "both default_for_host"),
+        ("accounts:\n  b: {forge: github, web_url: 'https://github.com'}\n", True, "'a' names no"),
+    ],
+    ids=["clean", "unreadable-leaves-none-not-empty", "old-repo-mismatch-named-from-boot"],
+)
+def test_load_forges_keeps_unreadable_apart_from_empty(tmp_path, forges_text, loaded, invalid):
+    from types import SimpleNamespace
+
+    from kraft.api import startup
+
+    (tmp_path / "forges.yaml").write_text(forges_text)
+    (tmp_path / "repos.yaml").write_text(
+        "repos:\n  - {path: /r, forge: github, forge_account: a}\n"
+        if invalid and loaded
+        else "repos: []\n"
+    )
+    app = SimpleNamespace(state=SimpleNamespace(templates_dir=tmp_path))
+
+    startup.load_forges(app)
+
+    assert (app.state.forges is not None) is loaded
+    assert (invalid in app.state.invalid_forges) if invalid else app.state.invalid_forges is None
+
+
+_LOADED = ForgesFile()
+
+
+@pytest.mark.parametrize(
+    ("forges", "invalid", "later", "error"),
+    [
+        (None, "bad yaml", None, "bad yaml"),
+        (_LOADED, "old mismatch", None, None),
+        (None, None, None, None),
+        # reattach builds a walk's launch before forges.yaml loads: it must read the loaded file
+        (None, None, _LOADED, None),
+    ],
+    ids=[
+        "unreadable-carries-the-reason",
+        "loaded-carries-none",
+        "unreadable-no-reason",
+        "built-before-load-reads-it-live",
+    ],
+)
+def test_launch_reads_the_running_forges_and_the_error_only_while_unloaded(
+    tmp_path, forges, invalid, later, error
+):
+    from types import SimpleNamespace
+
+    from kraft.api import deps
+
+    st = SimpleNamespace(templates_dir=tmp_path, skills_dir=None, forges=forges)
+    st.invalid_forges = invalid
+    launch = deps.launch(st, "/work/repo")
+    if later is not None:
+        st.forges = later
+    assert launch.forges() == (later or forges, error)

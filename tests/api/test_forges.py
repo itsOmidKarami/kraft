@@ -156,17 +156,40 @@ def test_an_unreadable_file_never_lets_remove_through_and_never_hides_the_runnin
         assert reply.status_code == status and list(reply.json()["accounts"]) == ["corp"]
 
 
-@pytest.mark.parametrize("write", ["add", "remove"])
-def test_a_write_is_applied_and_clears_a_stale_invalid_mark(client, write):
+@pytest.mark.parametrize(
+    ("write", "old_mismatch"),
+    [("add", False), ("remove", False), ("add", True), ("remove", True)],
+    ids=["add", "remove", "add-old-mismatch-stands", "remove-old-mismatch-stands"],
+)
+def test_a_write_is_applied_and_clears_a_stale_invalid_mark(client, write, old_mismatch):
     client.post("/api/forges", json={**GL, "name": "other", "web_url": "https://o.example"})
+    if old_mismatch:
+        (client.app.state.templates_dir / "repos.yaml").write_text(
+            "repos:\n  - {path: /r, forge: github, forge_account: ghost}\n"
+        )
     client.app.state.invalid_forges = "stale"
     if write == "add":
         client.post("/api/forges", json=GL)
     else:
         client.delete("/api/forges/other")
-    assert client.app.state.invalid_forges is None
+    invalid = client.app.state.invalid_forges
+    # The old problem is still named, not forgotten; the stale mark is gone.
+    assert (invalid is not None and "'ghost' names no account" in invalid) is old_mismatch
+    assert old_mismatch or invalid is None
     pending = client.get("/api/apply").json()
     assert "forges.yaml" not in str(pending)
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [("get", "/api/forges"), ("post", "/api/forges/corp/test")],
+    ids=["list", "test"],
+)
+def test_a_forges_yaml_unreadable_since_startup_answers_409_naming_it(client, method, path):
+    _file(client).write_text("accounts: [not: closed")
+    client.app.state.forges = None
+    reply = getattr(client, method)(path)
+    assert reply.status_code == 409 and "fix the file first" in reply.json()["detail"]
 
 
 def test_a_refused_add_names_the_field(client):
