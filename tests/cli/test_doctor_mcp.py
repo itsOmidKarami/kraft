@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -76,6 +77,16 @@ def _templates() -> Path:
     return Path(os.environ["KRAFT_CONFIG_DIR"])
 
 
+def _codex_only() -> None:
+    """Every profile on codex: the suite puts them on `fake`, which is claude."""
+    harnesses = _templates() / "harnesses.yaml"
+    table = yaml.safe_load(harnesses.read_text())
+    for profile in table["harnesses"].values():
+        profile["provider"] = "codex"
+        profile.pop("defaults", None)
+    harnesses.write_text(yaml.safe_dump(table))
+
+
 @pytest.mark.parametrize("connected", [True, False], ids=["a-repo-connected", "no-repo"])
 def test_mcp_check_only_warns_when_no_chain_launches_a_harness_that_asks_through_it(
     app, tmp_path, connected
@@ -85,13 +96,7 @@ def test_mcp_check_only_warns_when_no_chain_launches_a_harness_that_asks_through
     launch refuses only an unsandboxed task on a harness asking through the
     direct tool (`adapters.agent`), so doctor must be able to pass here."""
     (Path.home() / ".claude.json").unlink()
-    harnesses = _templates() / "harnesses.yaml"
-    table = yaml.safe_load(harnesses.read_text())
-    # Every profile on codex: the suite puts them on `fake`, which is claude.
-    for profile in table["harnesses"].values():
-        profile["provider"] = "codex"
-        profile.pop("defaults", None)
-    harnesses.write_text(yaml.safe_dump(table))
+    _codex_only()
     if connected:
         asyncio.run(client.ensure_repo(str(make_repo(tmp_path))))
     check = next(r for r in asyncio.run(doctor.run_checks()) if r["name"] == "mcp server")
@@ -114,3 +119,56 @@ def test_mcp_check_only_warns_when_every_connected_repo_is_sandboxed(app, tmp_pa
     repos.write_text(yaml.safe_dump(data))
     check = next(r for r in asyncio.run(doctor.run_checks()) if r["name"] == "mcp server")
     assert check["ok"] is True and check["warn"] is True
+
+
+@pytest.mark.parametrize(
+    ("server_up", "present", "repo", "ok", "warn"),
+    [
+        # Its workers get the server's PATH: the server's own answer decides.
+        pytest.param(True, False, None, False, False, id="server-says-not-on-its-path"),
+        # As with nothing registered: no launch here needs it until a chain does.
+        pytest.param(True, None, None, True, True, id="server-says-not-on-its-path-none-needs-it"),
+        # A repo's own PATH or own entry may still start it for that repo's workers.
+        pytest.param(True, False, "env-path", True, True, id="a-repo-sets-its-own-path"),
+        pytest.param(True, False, "own-entry", True, True, id="a-repo-registers-its-own"),
+        # Present with the server up is `test_mcp_check_passes_on_a_user_scope_registration`.
+        # This shell's PATH may not be the server's, a service's above all: only a warning.
+        pytest.param(False, False, None, True, True, id="no-server-not-on-this-path"),
+        pytest.param(False, True, None, True, False, id="no-server-on-this-path"),
+    ],
+)
+def test_mcp_check_says_when_claude_cannot_start_the_registered_server(
+    request, tmp_path, server_up, present, repo, ok, warn
+):
+    """Registered, but by a command Claude cannot find: the server never
+    starts, and an unsandboxed Claude worker is refused at launch -- unless
+    its repo's own PATH or own `kraft` entry starts it."""
+    if server_up:
+        request.getfixturevalue("app")
+    if present is None:
+        _codex_only()
+    if repo is not None:
+        checkout = make_repo(tmp_path)
+        asyncio.run(client.ensure_repo(str(checkout)))
+    if repo == "env-path":
+        repos = _templates() / "repos.yaml"
+        data = yaml.safe_load(repos.read_text())
+        for entry in data["repos"] if isinstance(data, dict) else data:
+            entry["env"] = {"PATH": str(tmp_path / "bin")}
+        repos.write_text(yaml.safe_dump(data))
+    elif repo == "own-entry":
+        own = {"mcpServers": {"kraft": {"command": sys.executable}}}
+        write(checkout, ".mcp.json", json.dumps(own))
+        git(checkout, "add", ".mcp.json")
+        git(checkout, "commit", "-qm", "mcp")
+    command = sys.executable if present else str(tmp_path / "nowhere" / "kraft")
+    registered = Path.home() / ".claude.json"
+    registered.write_text(json.dumps({"mcpServers": {"kraft": {"command": command}}}))
+    check = next(r for r in asyncio.run(doctor.run_checks()) if r["name"] == "mcp server")
+    assert (check["ok"], check["warn"]) == (ok, warn)
+    if not present:
+        assert repr(command) in check["detail"] and str(registered) in check["detail"]
+        assert "absolute path" in check["detail"]
+        assert ("the server's may differ" in check["detail"]) is (not server_up)
+        assert ("its own PATH" in check["detail"]) is (repo is not None)
+        assert ("before one does" in check["detail"]) is (present is None)

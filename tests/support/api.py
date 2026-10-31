@@ -130,7 +130,7 @@ def _poll_events(client, wid, want, timeout=30, count=1):
     raise AssertionError(f"{want} x{count} not seen; got {[e['type'] for e in seen]}")
 
 
-def _poll_node_started(client, wid, node_id, timeout=30):
+def _poll_node_started(client, wid, node_id, timeout=30, event="node_started"):
     """Like `_poll_events(..., "node_started")`, but waits for *this* node's
     own start, not just any `node_started` -- a plain type/count check can
     already be satisfied by an earlier node before the gate approval or skip
@@ -138,15 +138,19 @@ def _poll_node_started(client, wid, node_id, timeout=30):
     `skip_node` write their own event synchronously before the continuation
     is spawned in the background (Kraft-tsfpk added one more `await` -- a
     `bd blocked` check -- ahead of every dispatch, widening that race enough
-    to make it flake for real)."""
+    to make it flake for real).
+
+    `event="worker_session_started"` waits for the node's agent session
+    instead: a launch does work after `node_started` (registration reads,
+    a `git show`), and a pause before its session exists pauses no session."""
     deadline = time.monotonic() + timeout
     seen = []
     while time.monotonic() < deadline:
         seen = client.get(f"/api/work-items/{wid}/events").json()
-        if any(e["type"] == "node_started" and e["payload"]["node_id"] == node_id for e in seen):
+        if any(e["type"] == event and e["payload"]["node_id"] == node_id for e in seen):
             return seen
         time.sleep(_POLL)
-    raise AssertionError(f"node_started for {node_id!r} not seen; got {[e['type'] for e in seen]}")
+    raise AssertionError(f"{event} for {node_id!r} not seen; got {[e['type'] for e in seen]}")
 
 
 def _await_gate(client, wid, gate, timeout=30):

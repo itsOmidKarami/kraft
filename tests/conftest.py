@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
 import socket
+import sys
 import tempfile
 import threading
 from pathlib import Path
@@ -469,13 +471,13 @@ def _isolated_kraft_home(tmp_path, tmp_path_factory, monkeypatch):
     # `$HOME`'s global one.
     #
     # Outside `tmp_path`, which several tests list or build a `home/` in. It
-    # holds what `kraft admin init` registers: a Claude launch with no `kraft`
-    # MCP server is refused (`registration.permission_tool`), and an empty home
-    # would refuse every one. A test of that refusal removes it.
+    # registers `kraft` at user scope, as `kraft admin init` does: a Claude launch
+    # with no `kraft` MCP server is refused (`registration.permission_tool`), and
+    # so is one whose command is not on the worker's PATH -- by absolute path, so
+    # that never depends on this machine's. A test of either refusal changes it.
     home = tmp_path_factory.mktemp("home")
-    (home / ".claude.json").write_text(
-        '{"mcpServers": {"kraft": {"command": "kraft", "args": ["admin", "mcp"]}}}'
-    )
+    kraft = {"command": sys.executable, "args": ["-m", "kraft", "admin", "mcp"]}
+    (home / ".claude.json").write_text(json.dumps({"mcpServers": {"kraft": kraft}}))
     monkeypatch.setenv("HOME", str(home))
     # Nor this machine's managed MCP config, which overrides every other one.
     monkeypatch.setattr("kraft.registration.MANAGED_MCP", home / "managed-mcp.json")

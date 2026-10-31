@@ -40,6 +40,7 @@ from kraft.worker import callback as _callback
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
 from kraft.worker.ca import write_whole
+from kraft.worker.env import worker_env
 from kraft.worker.worktree_read import open_dir_no_symlinks
 
 if TYPE_CHECKING:
@@ -1438,6 +1439,7 @@ async def _run_agent_task(
         options["writable_dirs"] = _writable_dirs(
             run_dirs, files, work_item_id, cwd, in_copy=in_copy
         )
+    registered: tuple | None = None
     if channel and h.supports("mcp_config"):
         # Its only MCP server is the session's own, through the channel: the
         # host's registration is not in the sandbox (spike 5.5).
@@ -1450,12 +1452,20 @@ async def _run_agent_task(
         # empty until `before_launch`: ask of the person's checkout instead.
         checkout_dir = Path(item_row["repo"]) if in_copy else Path(cwd)
         found = await asyncio.to_thread(_registration.permission_tool, checkout_dir)
+        # Claude also starts a `.mcp.json` on disk where it runs, and above: more
+        # entries that may run, by the direct name (a copy's checkout too).
+        disk = await asyncio.to_thread(
+            _registration.on_disk, Path(cwd), *([checkout_dir] if in_copy else [])
+        )
+        if found is None and disk:
+            found = (_registration.DIRECT, disk[0][0], [])
         if found is None:
             raise LaunchRefused(
                 f"harness {harness!r} asks Kraft's permission gate through the `kraft` MCP "
                 f"server, and nothing registers it for Claude Code: {_registration.FIX}"
             )
         options["approval_channel"] = found[0]
+        registered = (*found[:2], found[2] + disk) if found[0] == _registration.DIRECT else found
         # Claude keys a checkout's own servers by its folder, never the copy's:
         # handed beside whatever else loads there, not instead of it.
         servers = (
@@ -1499,6 +1509,18 @@ async def _run_agent_task(
         if sandbox and h.config_env is not None
         else None,
     )
+    if registered is not None and not runner:
+        # Claude starts the server by its command, on the PATH the worker gets: the
+        # daemon's unless the repo's `env:` or the harness's own names say otherwise.
+        # A machine starts it on its own PATH, which only it can check.
+        path = worker_env(repo_entry, {**config_env, **rules_env}).get("PATH", os.defpath)
+        if _registration.starts(registered[2], path) is False:
+            raise LaunchRefused(
+                f"harness {harness!r} asks Kraft's permission gate through the `kraft` MCP "
+                f"server, which runs {_registration.named(registered[2])}, and Claude cannot "
+                f"find that on the PATH the worker gets, so it cannot start it: "
+                f"{_registration.PATH_FIX}"
+            )
     # An agent outside the walk does, in place, what the walk does around a
     # task (`dispatch._dispatch_task`): take the checkout once the session
     # holds its lease, mark it, and check it after. One in a copy only leases it.

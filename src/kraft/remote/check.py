@@ -9,7 +9,7 @@ import os
 import shutil
 import socket
 
-from kraft import harness
+from kraft import harness, registration
 from kraft.remote import machine, protocol
 from kraft.remote.transport import FRAME_LIMIT, WebSocketTransport
 from kraft.worker import backends
@@ -53,13 +53,15 @@ def _agents() -> list[dict]:
     """One row per agent CLI Kraft knows, and a failure when none is installed.
     A credential this check cannot see is only a warning: a CLI may keep its
     login in a store of its own."""
-    rows, installed = [], 0
+    rows, installed, asks = [], 0, False
     for hid, h in sorted(harness.load(None).valid.items()):
         path = shutil.which(h.command[0])
         if path is None:
             rows.append(_row(f"agent: {hid}", True, "not installed", skipped=True))
             continue
         installed += 1
+        channel = h.capabilities.get("approval_channel")
+        asks = asks or (channel is not None and channel.always == registration.DIRECT)
         rows.append(_row(f"agent: {hid}", True, path))
         wanted = sorted({c.env for c in h.credentials})
         if wanted and not any(os.environ.get(name) for name in wanted):
@@ -74,7 +76,29 @@ def _agents() -> list[dict]:
             )
     if not installed:
         rows.append(_row("agent CLIs", False, "none of the agent CLIs Kraft knows is on PATH"))
+    if asks:
+        rows.extend(_kraft_mcp())
     return rows
+
+
+def _kraft_mcp() -> list[dict]:
+    """An unsandboxed Claude step here names Kraft's permission tool, and this machine's Claude
+    starts the `kraft` MCP server by its registered command, on this PATH: one missing fails the
+    step at its first ask. Only a warning: a machine may take sandboxed steps only."""
+    found = registration.permission_tool(None)
+    if found is None:
+        detail = f"nothing registers it for Claude Code here; {registration.FIX}"
+        return [_row("kraft MCP server", True, detail, warn=True)]
+    starts = registration.starts(found[2], None)
+    if starts is None:
+        return []  # reached by `url`, or nothing Kraft can judge from here
+    if starts:
+        return [_row("kraft MCP server", True, registration.named(found[2]))]
+    detail = (
+        f"{registration.named(found[2])} is not on PATH, so an unsandboxed Claude step here "
+        f"fails at its first permission ask; {registration.PATH_FIX}"
+    )
+    return [_row("kraft MCP server", True, detail, warn=True)]
 
 
 async def _sandboxes() -> list[dict]:
