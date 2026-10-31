@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import json
+import os
+import re
+import secrets
+from types import SimpleNamespace
 
 import httpx
 import pytest
+from support.api_accounts import LEAK_PLACES, answers, checkout, logged_push_repo
 from support.api_accounts import account as accounts
-from support.api_accounts import answers, checkout
 
 from kraft.adapters.forge import credentials
 from kraft.adapters.forge.github_api import GitHubApi
 from kraft.adapters.forge.github_queries import owner_vars
 from kraft.adapters.forge.models import ForgeError
-from kraft.forges import ForgeAccount
+from kraft.forges import ForgeAccount, TokenSource
 
 TOK = "ghp_0123456789"
 NEW = "ghp_9876543210"
@@ -222,6 +226,15 @@ async def test_a_401_re_reads_the_token_once(tmp_path, mock_http, monkeypatch):
             SSO,
             id="sso-403-carries-the-link",
         ),
+        # Most pull request reads are GraphQL, which answers SSO with HTTP 200.
+        pytest.param(
+            lambda t: t.graphql("query", owner_vars()),
+            [(200, {"errors": [{"type": "FORBIDDEN", "message": "SAML enforcement"}]})],
+            200,
+            "forbidden",
+            SSO,
+            id="graphql-sso-at-200-carries-the-link",
+        ),
     ],
 )
 async def test_every_error_names_its_account_and_source(
@@ -238,3 +251,118 @@ async def test_every_error_names_its_account_and_source(
     assert (exc.account, exc.source, exc.status) == ("corp-gh", "env CORP_GH", status)
     assert not reason or exc.reason == reason
     assert exc.sso_url == sso
+
+
+@pytest.fixture
+def pushed(tmp_path, monkeypatch, mock_http):
+    """`GitHubApi` opening a pull request, reading labels (a 401 that quotes the Bearer it was
+    sent), then a job log (302 to blob storage), with a real `git push` (`logged_push_repo`)."""
+    tok = "ghp_" + secrets.token_hex(18)
+    got = logged_push_repo(
+        tmp_path, monkeypatch, env="CORP_GH", tok=tok, remote="https://github.com/o/r.git"
+    )
+
+    def handler(request):
+        if request.url.host == "blob.example":
+            return httpx.Response(200, text="log")
+        if request.url.path.endswith("/labels"):
+            return httpx.Response(401, json={"message": f"bad {request.headers['authorization']}"})
+        if request.url.path.endswith("/logs"):
+            return httpx.Response(302, headers={"location": "https://blob.example/l?sig=s"})
+        return httpx.Response(200, json={"number": 7, "html_url": "w"})
+
+    m = mock_http(handler=handler)
+    api = GitHubApi("corp-gh", account(), http=m.transport)
+
+    async def run() -> SimpleNamespace:
+        await api.open_mr(repo=got.repo, branch="kraft/abc", base="main", title="t", body="b")
+        with pytest.raises(ForgeError) as err:
+            await api.labels(repo=got.repo)
+        assert await api.job_log(repo=got.repo, job_id="1") == "log"
+        return SimpleNamespace(
+            tok=tok,
+            git=got.log.read_text(),
+            config=(got.repo / ".git" / "config").read_text(),
+            err=f"{err.value} {err.value!r} {err.value.args}",
+            requests=m.requests,
+            blob="\n".join(
+                f"{k}: {v}"
+                for r in m.requests
+                if r.url.host == "blob.example"
+                for k, v in r.headers.items()
+            ),
+        )
+
+    return run
+
+
+@pytest.mark.parametrize(
+    "place", [*LEAK_PLACES, pytest.param(lambda r: r.blob, id="blob-redirect")]
+)
+async def test_a_github_api_token_reaches_only_its_origin(pushed, place):
+    got = await pushed()
+    assert {r.url.host for r in got.requests} == {"api.github.com", "blob.example"}
+    assert all(
+        ("authorization" in r.headers) == (r.url.host == "api.github.com") for r in got.requests
+    ), "a Bearer went to the wrong host, or none to the API"
+    assert any(r.headers.get("authorization") == f"Bearer {got.tok}" for r in got.requests)
+    assert re.search(r"^ARGV .*\bpush\b", got.git, re.M), "git never pushed"
+    assert got.blob, "the blob request never happened"
+    assert got.tok not in place(got)
+
+
+@pytest.mark.e2e("git")
+@pytest.mark.skipif(
+    not (os.environ.get("E2E_GITHUB_TOKEN") and os.environ.get("E2E_GITHUB_REPO")),
+    reason="e2e: needs E2E_GITHUB_TOKEN (the workflow's read-only github.token) and "
+    "E2E_GITHUB_REPO (owner/name); the e2e-cli job in .github/workflows/test.yml sets both",
+)
+async def test_github_api_reads_this_repo(tmp_path, monkeypatch):
+    """Read-only, against this repository, with the workflow's `github.token`. It does not
+    call `probe_account`: an installation token gets 403 from `GET /user`."""
+    slug = os.environ["E2E_GITHUB_REPO"]
+    monkeypatch.setattr(credentials, "_TAKEN", {})
+    monkeypatch.setenv("E2E_GITHUB_TOKEN", os.environ["E2E_GITHUB_TOKEN"])  # restored at exit
+    credentials.take_env(["E2E_GITHUB_TOKEN"])
+    acct = ForgeAccount(
+        forge="github",
+        client="api",
+        web_url="https://github.com",
+        token=TokenSource(**{"from": "env", "env": "E2E_GITHUB_TOKEN", "kind": "unknown"}),
+    )
+    repo = checkout(tmp_path, f"https://github.com/{slug}.git")
+    api = GitHubApi("e2e-gh", acct)
+
+    assert "release::minor" in [label.name for label in await api.labels(repo=repo)]
+    merged = await api.merged_mrs(repo=repo, base="main", limit=5)
+    assert merged
+    # By number: a later pull request can reuse the head branch, so no `find_mr` on it.
+    pull = await api._api(repo, f"repos/{{owner}}/{{repo}}/pulls/{merged[0].number}")
+    assert {"merged_at", "title", "labels", "head", "base"} <= pull.keys()
+    assert pull["merged_at"] and pull["base"]["ref"] == "main" and pull["head"]["ref"]
+
+    # A skipped job has no log and answers 404, so the log is a succeeded job's.
+    done = [
+        p
+        for p in await api.pipelines(repo=repo, branch="main", base="main")
+        if p.status == "success"
+    ]
+    assert done
+    jobs = [j for p in done[:5] for j in await api.jobs(repo=repo, pipeline_id=p.id)]
+    assert jobs
+    ok = next(j for j in jobs if j.status == "success")
+    assert re.search(r"^\ufeff?\d{4}-\d\d-\d\dT", await api.job_log(repo=repo, job_id=ok.id), re.M)
+
+    junk = "ghp_" + secrets.token_hex(18)
+    monkeypatch.setenv("E2E_GITHUB_JUNK", junk)
+    credentials.take_env(["E2E_GITHUB_JUNK"])
+    bad = ForgeAccount(
+        forge="github",
+        client="api",
+        web_url="https://github.com",
+        token=TokenSource(**{"from": "env", "env": "E2E_GITHUB_JUNK", "kind": "unknown"}),
+    )
+    with pytest.raises(ForgeError) as err:
+        await GitHubApi("e2e-junk", bad).labels(repo=repo)
+    assert err.value.reason == "auth" and err.value.account == "e2e-junk"
+    assert junk not in str(err.value)
