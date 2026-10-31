@@ -583,6 +583,8 @@ def health_block(payload: dict) -> str:
         pairs.append(("invalid policy", str(payload["invalid_policy"])))
     if payload.get("invalid_intake"):
         pairs.append(("invalid intake", str(payload["invalid_intake"])))
+    if payload.get("invalid_forges"):
+        pairs.append(("invalid forges", str(payload["invalid_forges"])))
     stored = payload.get("storage")
     if stored:
         pairs.append(

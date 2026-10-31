@@ -19,6 +19,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from kraft import config as config_mod
+from kraft import forges as forges_mod
 from kraft import intake as intake_mod
 from kraft import storage
 from kraft.api import config_check, deps
@@ -29,7 +30,14 @@ logger = logging.getLogger(__name__)
 WATCH_INTERVAL_S = 5
 #: What `kraft admin addon` writes; a reload of only these touches nothing else.
 ADDON_FILES = ("addons.yaml", "addons.lock", "repo-libraries.lock")
-CONFIG_FILES = ("library.yaml", "policy.yaml", "intake.yaml", "workers.yaml", *ADDON_FILES)
+CONFIG_FILES = (
+    "library.yaml",
+    "policy.yaml",
+    "intake.yaml",
+    "workers.yaml",
+    "forges.yaml",
+    *ADDON_FILES,
+)
 
 
 def _digest(path: Path) -> str | None:
@@ -46,6 +54,16 @@ def _names(st) -> list[str]:
     }
     chains |= {n for n in getattr(st, "loaded_hashes", {}) if n.startswith("chains/")}
     return [*CONFIG_FILES, *sorted(chains)]
+
+
+def file_digest(path: Path) -> str | None:
+    """What `pending_file` compares: the file's hash, None when it cannot be read."""
+    return _digest(path)
+
+
+def pending_file(st, name: str) -> bool:
+    """`name` differs on disk from what was loaded."""
+    return _digest(st.templates_dir / name) != getattr(st, "loaded_hashes", {}).get(name)
 
 
 def set_loaded(st, name: str, digest: str | None) -> None:
@@ -182,6 +200,7 @@ async def reload(app, only: Sequence[str] | None = None) -> str | None:
         set_loaded(st, "intake.yaml", digest)
     await intake_mod.restart(app)
     _reload_workers(st)
+    _reload_forges(st)
     notify(app)
     # A lock pulled into config/ may name a store this machine does not have.
     # In the background: a restore may fetch for longer than a caller waits.
@@ -203,6 +222,43 @@ def _reload_workers(st) -> None:
     st.workers_hub.apply(file)
     st.invalid_workers = None
     set_loaded(st, workers_registry.FILE, digest)
+
+
+def _reload_forges(st) -> None:
+    """`forges.yaml` reread. A file that does not load keeps the running
+    accounts, its reason kept as `st.invalid_forges`, and stays pending. So does
+    an edit that adds a repo/account problem; old problems are named by
+    `invalid_forges` but block nothing. With nothing running (unreadable since
+    startup), any file that loads is taken."""
+    digest = _digest(st.templates_dir / forges_mod.ForgesFile.FILE)
+    try:
+        file = forges_mod.ForgesFile.load(st.templates_dir / forges_mod.ForgesFile.FILE)
+    except config_mod.ConfigError as exc:
+        st.invalid_forges = str(exc)
+        return
+    try:
+        repos = config_mod.load_repos(st.templates_dir / "repos.yaml")
+    except config_mod.ConfigError:
+        repos = []  # repos.yaml's own reload says why
+    old = forges_mod.account_problems(st.forges or forges_mod.ForgesFile(), repos)
+    new = forges_mod.account_problems(file, repos)
+    # Only a problem this edit adds keeps it pending; an old hand edit is doctor's.
+    # With nothing running (unreadable since startup) there is nothing to keep.
+    if st.forges is not None and (added := [p for p in new if p not in old]):
+        st.invalid_forges = "; ".join(added)
+        return
+    st.forges = file
+    st.invalid_forges = "; ".join(new) or None
+    set_loaded(st, forges_mod.ForgesFile.FILE, digest)
+
+
+def refresh_forge_problems(st) -> None:
+    """After a repos.yaml write: recompute the repo/account mismatches
+    `invalid_forges` names. Not while forges.yaml is pending reload, whose
+    refused reason stays, nor while it never loaded."""
+    forges = getattr(st, "forges", None)
+    if forges is not None and not pending_file(st, forges_mod.ForgesFile.FILE):
+        st.invalid_forges = "; ".join(forges_mod.repo_problems(forges, st.templates_dir)) or None
 
 
 def managed() -> bool:

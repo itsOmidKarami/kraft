@@ -468,8 +468,7 @@ def _one_task(raw, node_id="verify", step_id="checks"):
 async def test_each_task_kind_reaches_its_own_adapter(item_on, tmp_path, monkeypatch):
     """Ruling 3: the task's *type* chooses the adapter, and the model's own
     fields -- not a looked-up binding -- are what the adapter is handed. The
-    adapters are recorded rather than run: this is about which one is picked and
-    with what, and each one's own behaviour has its own tests."""
+    adapters are recorded, not run: each one's behaviour has its own tests."""
     seen: dict[str, dict] = {}
 
     def record(name, first_only=False):
@@ -500,7 +499,8 @@ async def test_each_task_kind_reaches_its_own_adapter(item_on, tmp_path, monkeyp
         ({"id": "t", "kind": "forge", "target": "mr.open_draft"}, None),
     ):
         it = await item_on(_one_task(raw), wid=raw["kind"])
-        launch = replace(NO_SETUP, repo_entry=entry_of(entry)) if entry else NO_SETUP
+        launch = replace(NO_SETUP, repo_entry=entry_of(entry or {"setup_command": ""}))
+        launch = replace(launch, forges=lambda: ("live", "unreadable"))
         assert await _dispatch_one(it, launch) == "done", raw
 
     assert set(seen) == {"subprocess", "agent", "forge"}
@@ -511,8 +511,8 @@ async def test_each_task_kind_reaches_its_own_adapter(item_on, tmp_path, monkeyp
     assert seen["agent"]["harness"] == "fake"
     assert "do the work" in seen["agent"]["task_instruction"]
     # The chain writes the lifecycle point; the adapter owns which handler runs.
-    assert seen["forge"]["handler"] == "open_mr"
-    assert seen["forge"]["hook_point"] == "verify.checks.t"
+    assert (seen["forge"]["handler"], seen["forge"]["hook_point"]) == ("open_mr", "verify.checks.t")
+    assert (seen["forge"]["forges"], seen["forge"]["forges_error"]) == ("live", "unreadable")
 
 
 async def test_an_agent_task_contract_precedes_its_skill_and_steering(

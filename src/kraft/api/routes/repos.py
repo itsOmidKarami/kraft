@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from itertools import count
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlsplit
 
 import yaml
 from fastapi import HTTPException, Request
@@ -17,6 +18,7 @@ from pydantic import AfterValidator, AliasChoices, BaseModel, Field
 from kraft import apply as apply_mod
 from kraft import config as config_mod
 from kraft import detect
+from kraft import forges as forges_mod
 from kraft.adapters.forge import settle
 from kraft.addons import repo_library
 from kraft.addons import review as addon_review
@@ -51,6 +53,7 @@ class RepoBody(BaseModel):
     test_scopes: list[dict] | None = None
     setup_command: str | None = None
     forge: str | None = None
+    forge_account: str | None = None
     project: str | None = None
     # None means "pick a safe default": enabled if a test command was given or
     # probed, disabled otherwise. An explicit True/False always wins, so a
@@ -72,6 +75,8 @@ class ProbeBody(BaseModel):
     #: The root's test command, as `POST /repos` takes it: the proposal is
     #: what connecting with it would save.
     test_command: str | None = None
+    #: The forge the caller already knows (connect's `--forge`): nothing to ask.
+    forge: str | None = None
 
 
 #: How long probing all of a connect's submodules may take, together.
@@ -107,6 +112,55 @@ def _probe_children(
             out[rel] = config_mod.probe_repo(where, templates_dir=templates_dir, timeout=left)
         except config_mod.ConfigError:
             continue
+    return out
+
+
+def _told_forge(
+    forges_file: forges_mod.ForgesFile | None,
+    probed: dict,
+    forge: str | None = None,
+    account: str | None = None,
+) -> dict:
+    """The probe with its forge settled. A host that names no forge takes the one
+    of the account the repo names (`account`), else of its host's
+    `default_for_host` account; with neither, `needs_forge` says connect must
+    ask. A host that names its forge is left as it is."""
+    remote = (
+        config_mod.git_read(
+            Path(probed["path"]), "remote", "get-url", "origin", expected_failure=True
+        )
+        or ""
+    )
+    host = forges_mod.remote_host(remote)
+    path = forges_mod.remote_path(remote)
+    # Only an HTTPS remote's path and port are the web address's: SSH has its own.
+    try:
+        parts = urlsplit(remote)
+        https = parts.scheme in ("http", "https")
+        port = parts.port if https else None
+    except ValueError:
+        https, port = False, None
+    out = {
+        **probed,
+        "remote_host": host,
+        "remote_path": path,
+        "remote_port": port,
+        "needs_forge": False,
+    }
+    if probed["forge"] is not None:
+        return out
+    known = forges_file or forges_mod.ForgesFile()
+    found = (
+        (account, known.accounts[account])
+        if account in known.accounts
+        else forges_mod.default_account(known, host)
+    )
+    if forge is None and found is None:
+        out["needs_forge"] = bool(host)
+        return out
+    prefix = urlsplit(found[1].web_url).path.strip("/") if found and https else ""
+    out["forge"] = forge or found[1].forge
+    out["project"] = path.removeprefix(prefix + "/") if prefix and path else path
     return out
 
 
@@ -262,6 +316,12 @@ def _workspaces(st) -> dict:
     return dict(config_mod.read_yaml(deps.repos_path(st), {}).get("workspaces") or {})
 
 
+def _save_repos(st, repos: list[dict], workspaces: dict | None = None) -> None:
+    """Write repos.yaml, then recompute the repo/account mismatches `invalid_forges` names."""
+    config_mod.save_repos(deps.repos_path(st), repos, workspaces)
+    apply_mod.refresh_forge_problems(st)
+
+
 def _validate_repos(
     st, repos: list[dict], workspaces: dict | None = None, *, steering: bool = True
 ) -> None:
@@ -276,13 +336,35 @@ def _validate_repos(
         candidate = Path(tmp) / "repos.yaml"
         candidate.write_text(yaml.safe_dump({"repos": repos, "workspaces": workspaces}))
         try:
+            entries = None
             if steering:
                 # Against the library's profiles; with no library loaded
                 # there is nothing to name, and intake refuses the item.
-                config_mod.load_repos(candidate, steering=deps.library_steering(st))
+                entries = config_mod.load_repos(candidate, steering=deps.library_steering(st))
             config_mod.load_workspaces(candidate)
         except config_mod.ConfigError as exc:
             raise HTTPException(422, str(exc)) from exc
+    if entries is not None:
+        # Only a problem this save adds is refused; an old hand edit is doctor's.
+        forges = getattr(st, "forges", None)
+        try:
+            current = config_mod.load_repos(deps.repos_path(st))
+        except config_mod.ConfigError:
+            current = []
+        if forges is None:
+            # Unreadable since startup: no account can be checked, so none may be added.
+            had = {str(e.path): e.forge_account for e in current}
+            for e in entries:
+                if e.forge_account and had.get(str(e.path)) != e.forge_account:
+                    raise HTTPException(
+                        422,
+                        f"forge_account {e.forge_account}: forges.yaml does not load "
+                        f"({st.invalid_forges}); fix it first",
+                    )
+            forges = forges_mod.ForgesFile()
+        old = set(forges_mod.account_problems(forges, current))
+        if added := [p for p in forges_mod.account_problems(forges, entries) if p not in old]:
+            raise HTTPException(422, added[0])
     if steering:
         # An entry may name its own repo library and no other. Only what this
         # change adds is refused: a hand edit already on disk is not this
@@ -371,8 +453,10 @@ async def repo_library_accept(body: LibraryAccept, request: Request, path: str):
             )
         # The id first: a crash before the lock leaves an entry with an id and
         # nothing accepted, which the next check reads as a first load.
-        _validate_repos(st, repos)
-        config_mod.save_repos(deps.repos_path(st), repos)
+        # A forge removal must not check repos.yaml between this save's check and write.
+        async with st.forges_lock:
+            _validate_repos(st, repos)
+            _save_repos(st, repos)
         try:
             await deps._in_thread(
                 st, repo_library.accept, found, st.templates_dir, st.run_dirs.addons
@@ -453,7 +537,8 @@ async def probe_repo(body: ProbeBody, request: Request):
     st = request.app.state
     if not body.detect:  # what needs no detector table is quick, and never queued
         try:
-            return await asyncio.to_thread(config_mod.probe_repo, body.path, detect=False)
+            facts = await asyncio.to_thread(config_mod.probe_repo, body.path, detect=False)
+            return await asyncio.to_thread(_told_forge, st.forges, facts, body.forge)
         except config_mod.ConfigError as exc:
             raise HTTPException(400, str(exc)) from exc
     # Each probe is a process of up to 2 GB for up to two minutes: a few at
@@ -464,12 +549,13 @@ async def probe_repo(body: ProbeBody, request: Request):
         raise HTTPException(429, "Kraft is already probing other repositories; try again shortly")
     async with st.probing:
         try:
-            return await asyncio.to_thread(
+            probed = await asyncio.to_thread(
                 config_mod.probe_repo,
                 body.path,
                 templates_dir=st.templates_dir,
                 test_command=body.test_command,
             )
+            return await asyncio.to_thread(_told_forge, st.forges, probed, body.forge)
         except config_mod.ConfigError as exc:
             raise HTTPException(400, str(exc)) from exc
 
@@ -541,6 +627,14 @@ async def _add_repo(body: RepoBody, st, *, hold: bool = False) -> dict:
         child_probes = await asyncio.to_thread(
             _probe_children, probed["path"], probed["submodules"], templates_dir
         )
+        # A host that names no forge takes its default account's: never asked here.
+        probed = await asyncio.to_thread(
+            _told_forge, st.forges, probed, body.forge, body.forge_account
+        )
+        child_probes = {
+            rel: await asyncio.to_thread(_told_forge, st.forges, child)
+            for rel, child in child_probes.items()
+        }
     except config_mod.ConfigError as exc:
         raise HTTPException(400, str(exc)) from exc
     # From here to the save, nothing awaits: PATCH and DELETE save without the
@@ -573,6 +667,7 @@ async def _add_repo(body: RepoBody, st, *, hold: bool = False) -> dict:
         "setup_command": setup_command,
         "forge": body.forge or probed["forge"],
         "project": body.project or probed["project"],
+        **({"forge_account": body.forge_account} if body.forge_account else {}),
         "enabled": False
         if hold
         else body.enabled
@@ -599,8 +694,10 @@ async def _add_repo(body: RepoBody, st, *, hold: bool = False) -> dict:
     # back the same, and `forge: null`, `models: {}` and the rest are noise in
     # a file people edit by hand. The answer below keeps the whole entry.
     repos = [r if id(r) in had else _without_defaults(r) for r in repos]
-    _validate_repos(st, repos, workspaces)
-    config_mod.save_repos(deps.repos_path(st), repos, workspaces)
+    # A forge removal must not check repos.yaml between this save's check and write.
+    async with st.forges_lock:
+        _validate_repos(st, repos, workspaces)
+        _save_repos(st, repos, workspaces)
     # Index it now: a repo connected mid-session would otherwise stay invisible
     # to search (and to the intake picker) until the next restart. The scan is
     # `git ls-files .engineering/` — cheap enough to await. A scan failure must
@@ -643,6 +740,7 @@ class RepoPatch(BaseModel):
     test_scopes: list[dict] | None = None
     setup_command: str | None = None
     forge: str | None = None
+    forge_account: str | None = None
     project: str | None = None
     enabled: bool | None = None
     models: dict[str, str] | None = None
@@ -721,8 +819,10 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
                 "cannot clear the test command of an enabled repo — "
                 "disable it, or set test scopes, in the same change",
             )
-    _validate_repos(st, repos)
-    config_mod.save_repos(deps.repos_path(st), repos)
+    # A forge removal must not check repos.yaml between this save's check and write.
+    async with st.forges_lock:
+        _validate_repos(st, repos)
+        _save_repos(st, repos)
     # The whole entry, defaults included, as the answer always was:
     # `kraft repo connect` reads the saved entry back from it, and a client
     # of the API may read any field. Only the file keeps to what was set.
@@ -777,7 +877,7 @@ async def remove_repo(request: Request, path: str):
             )
         except addon_update.Busy as exc:
             raise HTTPException(409, str(exc)) from exc
-    config_mod.save_repos(deps.repos_path(st), kept)
+    _save_repos(st, kept)
     if held:
         await deps.reload_templates(st)
         apply_mod.notify(request.app)

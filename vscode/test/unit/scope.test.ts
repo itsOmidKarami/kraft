@@ -12,6 +12,7 @@ describe("configFile", () => {
     [`${T}/sandbox.yaml`, "sandbox.yaml"],
     [`${T}/addons.yaml`, "addons.yaml"],
     [`${T}/workers.yaml`, "workers.yaml"],
+    [`${T}/forges.yaml`, "forges.yaml"],
     [`${T}/chains/default.yaml`, "chains/default.yaml"],
     [`${T}/chains/Bad Name.yaml`, undefined],
     [`${T}/chains/nested/x.yaml`, undefined],

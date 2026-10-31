@@ -113,12 +113,23 @@ async def test_clear_loop_counters_with_no_key_still_clears_ci_counters(database
     assert _counter(database, "ci_infra:mr_checks") is None
 
 
-async def test_retry_after_cap_clears_ci_pipeline_ref(database):
-    await database.write(lambda c: store.set_ci_pipeline_ref(c, "w1", "abc123:456"))
+@pytest.mark.parametrize(
+    ("column", "seed", "by_person", "cleared"),
+    [
+        ("ci_pipeline_ref", lambda c: store.set_ci_pipeline_ref(c, "w1", "abc123:456"), True, True),
+        ("forge_pins", lambda c: store.set_forge_pin(c, "w1", "", "a", "gh"), True, True),
+        ("forge_pins", lambda c: store.set_forge_pin(c, "w1", "", "a", "gh"), False, False),
+    ],
+    ids=["ci-pipeline-ref", "forge-pins-by-person", "forge-pins-kept-for-kraft-itself"],
+)
+async def test_retry_after_cap_clears_what_a_fresh_try_must_not_inherit(
+    database, column, seed, by_person, cleared
+):
+    await database.write(seed)
     await database.write(
-        lambda c: store.retry_after_cap(c, "w1", "mr_checks", None, None, by_person=True)
+        lambda c: store.retry_after_cap(c, "w1", "mr_checks", None, None, by_person=by_person)
     )
-    assert _item(database, "ci_pipeline_ref")[0] is None
+    assert (_item(database, column)[0] is None) is cleared
 
 
 async def test_retry_after_cap_clears_retry_at(database):

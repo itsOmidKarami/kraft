@@ -19,6 +19,7 @@ import yaml
 from pydantic import BaseModel, Field, ValidationError
 
 from kraft import config as config_mod
+from kraft import forges as forges_mod
 from kraft import harness as harness_mod
 from kraft import policy as policy_mod
 from kraft.adapters.agent import HarnessUnavailable, select_profile
@@ -65,6 +66,7 @@ FILES = frozenset(
         "addons.lock",
         "repo-libraries.lock",
         "workers.yaml",
+        "forges.yaml",
     }
 )
 CHAIN_FILE = re.compile(r"chains/([a-z][a-z0-9_-]*)\.yaml")
@@ -82,6 +84,8 @@ class CheckContext:
     addons: tuple[addons_load.InstalledAddon, ...] = ()
     #: `run/addons`, where their stores are. None: this process's own.
     addons_dir: Path | None = None
+    #: The running accounts (`st.forges`); None when forges.yaml never loaded or is unknown.
+    forges: forges_mod.ForgesFile | None = None
 
 
 def context(st) -> CheckContext:
@@ -93,6 +97,7 @@ def context(st) -> CheckContext:
         providers=harness_mod.load(None).valid,
         addons=getattr(getattr(st, "library", None), "addons", ()),
         addons_dir=st.run_dirs.addons if getattr(st, "run_dirs", None) else None,
+        forges=getattr(st, "forges", None),
     )
 
 
@@ -435,6 +440,26 @@ def _check_access(path, data, ctx):
         TemplateIssue(path, None, why, loc=("allowed_hosts", index))
         for index, entry in enumerate(data.get("allowed_hosts") or [])
         if (why := config_mod.host_entry_problem(entry))
+    ]
+
+
+def _check_forges(path, data, ctx):
+    try:
+        file = forges_mod.ForgesFile.model_validate(data)
+    except ValidationError as exc:
+        return [_pydantic_issue(path, exc)]
+    try:
+        repos = config_mod.load_repos(ctx.templates_dir / "repos.yaml")
+    except config_mod.ConfigError:
+        return []  # repos.yaml's own check says why
+    if ctx.forges is None:
+        return []  # nothing running (unreadable since startup): the reload takes any file
+    # Only a problem this candidate adds is refused; old ones are doctor's.
+    old = set(forges_mod.account_problems(ctx.forges, repos))
+    return [
+        TemplateIssue(path, None, why)
+        for why in forges_mod.account_problems(file, repos)
+        if why not in old
     ]
 
 
@@ -933,7 +958,7 @@ def _check_repos(path, data, ctx):
         candidate = Path(tmp) / "repos.yaml"
         candidate.write_text(yaml.safe_dump(data))
         try:
-            config_mod.load_repos(candidate, steering=profiles)
+            loaded = config_mod.load_repos(candidate, steering=profiles)
         except config_mod.ConfigError as exc:
             entries = data.get("repos")
             loc = None
@@ -941,11 +966,33 @@ def _check_repos(path, data, ctx):
                 loc = loc or _first_loc(config_mod.RepoEntry, entry, ("repos", index))
             message = str(exc).replace(str(candidate), str(path))
             return [TemplateIssue(path, None, message, loc=loc)]
-    return [
-        TemplateIssue(path, None, f"would leave {_what(addon)} out: {why}")
-        for addon in ctx.addons
-        if addon.left_out is None and (why := _unmet_requires(addon, ctx, repos=data)) is not None
-    ] + scope_issues(path, data, ctx)
+        forges = ctx.forges
+        if forges is None:  # unreadable since startup: what is on disk
+            try:
+                forges = forges_mod.ForgesFile.load(ctx.templates_dir / forges_mod.ForgesFile.FILE)
+            except config_mod.ConfigError:
+                forges = forges_mod.ForgesFile()  # the forges.yaml check says why
+        try:
+            current = config_mod.load_repos(ctx.templates_dir / "repos.yaml")
+        except config_mod.ConfigError:
+            current = []
+        # Only a problem this candidate adds is refused; an old hand edit is doctor's.
+        old = set(forges_mod.account_problems(forges, current))
+        issues = [
+            TemplateIssue(path, None, why)
+            for why in forges_mod.account_problems(forges, loaded)
+            if why not in old
+        ]
+    return (
+        issues
+        + [
+            TemplateIssue(path, None, f"would leave {_what(addon)} out: {why}")
+            for addon in ctx.addons
+            if addon.left_out is None
+            and (why := _unmet_requires(addon, ctx, repos=data)) is not None
+        ]
+        + scope_issues(path, data, ctx)
+    )
 
 
 _CHECKERS: dict[str, Callable[[Path, dict, CheckContext], list[TemplateIssue]]] = {
@@ -962,4 +1009,5 @@ _CHECKERS: dict[str, Callable[[Path, dict, CheckContext], list[TemplateIssue]]] 
     "addons.lock": _check_lock,
     "repo-libraries.lock": _check_repo_lock,
     "workers.yaml": _check_workers,
+    "forges.yaml": _check_forges,
 }

@@ -20,6 +20,7 @@ from pathlib import Path
 import yaml
 
 from kraft import auth, capabilities, client, config, detect, harness, pidfile, registration, render
+from kraft import forges as forges_mod
 from kraft import policy as policy_mod
 from kraft import skill as skill_mod
 from kraft.adapters import forge
@@ -178,6 +179,12 @@ def _health_checks(payload: dict) -> list[dict]:
             else f"invalid intake.yaml, not applied: the running auto-intake and schedules are "
             f"kept; fix the file and reload: {payload['invalid_intake']}"
         )
+    if payload.get("invalid_forges"):
+        reasons.append(
+            f"forges.yaml, or a repo's forge_account, needs fixing (an edit that does "
+            f"not load or adds a conflict is not applied); fix it and reload: "
+            f"{payload['invalid_forges']}"
+        )
     reasons.extend(f"index: {error}" for error in index.get("errors") or [])
     orphaned = (payload.get("reattach_summary") or {}).get("unknown") or []
     if orphaned:
@@ -311,6 +318,7 @@ def _config_checks() -> list[dict]:
             _check("capabilities", True, "skipped: no config dir", skipped=True),
             _check("detectors.yaml", True, "skipped: no config dir", skipped=True),
             _check("notify.yaml", True, "skipped: no config dir", skipped=True),
+            _check("forges.yaml", True, "skipped: no config dir", skipped=True),
             _check("add-ons", True, "skipped: no config dir", skipped=True),
             _check("add-on updates", True, "skipped: no config dir", skipped=True),
             _token_check(),
@@ -348,6 +356,7 @@ def _config_checks() -> list[dict]:
         checks.append(_check("access.yaml", False, str(exc)))
     checks.append(_detectors_check(templates))
     checks.append(_notify_check(templates))
+    checks.append(_forges_check(templates))
     checks.append(_moved_keys_check(templates))
     checks.append(_chain_templates_check())
     checks.append(_chains_check(templates))
@@ -468,6 +477,16 @@ def _notify_check(templates: Path) -> dict:
     if not cfg["enabled"]:
         return _check("notify.yaml", True, "parses (enabled: false)")
     return _check("notify.yaml", True, f"parses (enabled, {len(cfg['events'])} event type(s))")
+
+
+def _forges_check(templates: Path) -> dict:
+    """`forges.yaml`: this reads the file, so a hand edit the server has not
+    reloaded yet shows here."""
+    try:
+        file = forges_mod.ForgesFile.load(templates / forges_mod.ForgesFile.FILE)
+    except config.ConfigError as exc:
+        return _check("forges.yaml", False, f"{exc}; fix it, then kraft admin reload")
+    return _check("forges.yaml", True, f"parses ({len(file.accounts)} account(s))")
 
 
 def _pidfile_check() -> dict:
@@ -1419,7 +1438,7 @@ def _credential_check(repo: config.RepoEntry, policy) -> dict | None:
     return _check(f"credentials {_label(repo)}", not missing, detail, warn=bool(orphans))
 
 
-def _forge_check(repo: config.RepoEntry) -> dict:
+def _forge_check(repo: config.RepoEntry, forges: forges_mod.ForgesFile | None = None) -> dict:
     """Can this repo's `backend: auto` forge nodes actually run?
 
     Fails rather than reporting with detail: a chain that runs a forge task
@@ -1437,7 +1456,24 @@ def _forge_check(repo: config.RepoEntry) -> dict:
         return _check(name, True, "fake · dev only: opens, merges and pushes nothing", warn=True)
     if not shutil.which(cli):
         return _check(name, False, f"`{cli}` is not on PATH — the forge nodes cannot run")
-    return _check(name, True, f"{repo.forge} · {cli}")
+    if forges is not None and (problems := forges_mod.account_problems(forges, [repo])):
+        return _check(name, False, problems[0])
+    detail = f"{repo.forge} · {cli}"
+    if forges is not None and forges.accounts:
+        origin = config.git_read(
+            Path(repo.path), "remote", "get-url", "origin", expected_failure=True
+        )
+        host = forges_mod.remote_host(origin) if origin else None
+        if (found := forges_mod.account_for(repo, forges, host)) is not None:
+            detail += f" · account {found[0]}"
+        elif (
+            skipped := forges_mod.default_account(forges, host)
+        ) is not None and not repo.forge_account:
+            detail += (
+                f" · default account {skipped[0]} skipped: it says forge: {skipped[1].forge}, "
+                f"the repo says forge: {repo.forge}"
+            )
+    return _check(name, True, detail)
 
 
 async def _tls_listener_check() -> dict:
@@ -1546,6 +1582,10 @@ async def _repo_checks() -> list[dict]:
         config.RepoEntry.model_validate(r, context={"unrecognised_keys_reported": True})
         for r in await client.repos()
     ]
+    try:
+        forges = forges_mod.ForgesFile.load(live / forges_mod.ForgesFile.FILE)
+    except config.ConfigError:
+        forges = None  # no account checks; `_forges_check` names the fault
     networked = False
     asked: set[str] = set()
     for repo in repos:
@@ -1615,7 +1655,7 @@ async def _repo_checks() -> list[dict]:
                 if extra is not None:
                     checks.append(extra)
         if auto:
-            checks.append(_forge_check(repo))
+            checks.append(_forge_check(repo, forges))
         if repo.steering and profiles is not None:
             checks.append(_steering_check(repo, profiles))
     checks.extend(_duplicate_repo_checks(repos))

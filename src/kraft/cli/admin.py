@@ -28,7 +28,7 @@ import uvicorn
 import yaml
 
 from kraft import answers, client, config, permission_hooks, pidfile, render
-from kraft.cli import addon, common, templates, worker
+from kraft.cli import addon, common, forge, templates, worker
 from kraft.paths import (
     BUNDLED,
     LEGACY_CONFIG_DIR_VAR,
@@ -652,6 +652,7 @@ MACHINE_CONFIG = (
     "repos.yaml",
     "intake.yaml",
     "workers.yaml",
+    "forges.yaml",
     "machine.yaml",
     "harnesses",
 )
@@ -2231,6 +2232,7 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
     templates.add(subs, common)
     addon.add(subs, common)
     worker.add(subs, common)
+    forge.add(subs, common)
 
     init = subs.add_parser(
         "init", parents=[common], help="register Kraft's MCP server and skills with an agent"

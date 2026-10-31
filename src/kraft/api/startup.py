@@ -27,6 +27,7 @@ from kraft import (
 from kraft import auth as auth_mod
 from kraft import builtins as _builtins
 from kraft import config as config_mod
+from kraft import forges as forges_mod
 from kraft import intake as intake_mod
 from kraft import notify as notify_mod
 from kraft import policy as policy_mod
@@ -152,6 +153,24 @@ def load_workers(app: FastAPI) -> None:
     else:
         app.state.invalid_workers = None
     app.state.workers_hub.apply(file)
+
+
+def load_forges(app: FastAPI) -> None:
+    """The accounts `forges.yaml` names; a file that does not load leaves
+    `forges` None (no last-good copy), named by `invalid_forges`."""
+    path = app.state.templates_dir / forges_mod.ForgesFile.FILE
+    # The bytes these accounts come from: an edit landing before startup records
+    # every file's hash must still read as pending (not applied).
+    app.state.forges_loaded_digest = apply_mod.file_digest(path)
+    try:
+        app.state.forges = forges_mod.ForgesFile.load(path)
+    except config_mod.ConfigError as exc:
+        logger.warning("forges.yaml is unreadable, no accounts are used: %s", exc)
+        app.state.forges = None  # unreadable, which is not the same as empty
+        app.state.invalid_forges = str(exc)
+    else:
+        problems = forges_mod.repo_problems(app.state.forges, app.state.templates_dir)
+        app.state.invalid_forges = "; ".join(problems) or None
 
 
 async def _probation_timer(app: FastAPI) -> None:
@@ -380,6 +399,11 @@ async def _lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001 -- never a refused boot
         logger.exception("could not stop the process groups stopped sessions left")
 
+    # Before reattach and resumed walks, whose forge nodes read the accounts;
+    # nothing else runs yet, so the load needs no lock.
+    app.state.forges_lock = asyncio.Lock()
+    load_forges(app)
+
     booted_at = time.time()
     summary, adopted = await reattach.reattach(
         database,
@@ -460,6 +484,7 @@ async def _lifespan(app: FastAPI):
     app.state.loaded_hashes = {}
     app.state.apply_signature = ()
     apply_mod.record(app.state)
+    apply_mod.set_loaded(app.state, forges_mod.ForgesFile.FILE, app.state.forges_loaded_digest)
     if policy_obj:
         forge_git.CLI_TIMEOUT_S = policy_obj.forge_cli_timeout_s
         _subprocess.IDLE_MINUTES = policy_obj.agent_idle_minutes

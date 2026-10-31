@@ -6,6 +6,9 @@ import pytest
 import yaml
 from support.harness import make_repo
 
+from kraft import apply as apply_mod
+from kraft.forges import ForgesFile
+
 pytestmark = pytest.mark.api_client(default_setup=False)
 
 
@@ -53,3 +56,63 @@ def test_a_save_turning_a_sandboxed_repo_in_place_is_refused(client, templates_d
     assert reply.status_code == 422, reply.text
     assert "'worktrees: false'" in reply.json()["detail"]
     assert "drop 'sandbox'" in reply.json()["detail"]
+
+
+_ACCOUNTS = {"gl": {"forge": "gitlab", "web_url": "https://code.example"}}
+
+
+@pytest.mark.parametrize(
+    ("running", "account", "says"),
+    [
+        (True, "ghost", "names no account"),
+        (True, "gl", "says forge: gitlab"),
+        (False, "gl", "forges.yaml does not load (broken)"),
+    ],
+    ids=["unknown-account", "forge-mismatch", "unreadable-since-startup"],
+)
+def test_a_save_naming_a_bad_forge_account_is_422(client, templates_dir, running, account, says):
+    st = client.app.state
+    st.forges = ForgesFile.model_validate({"accounts": _ACCOUNTS}) if running else None
+    st.invalid_forges = None if running else "broken"
+    text = yaml.safe_dump({"repos": [{"path": "/r", "forge": "github"}]})
+    (templates_dir / "repos.yaml").write_text(text)
+    reply = client.patch("/api/repos?path=/r", json={"forge_account": account})
+    assert reply.status_code == 422, reply.text
+    assert account in reply.json()["detail"] and says in reply.json()["detail"]
+    assert (templates_dir / "repos.yaml").read_text() == text
+
+
+@pytest.mark.parametrize(
+    ("pending", "after"),
+    [(False, None), (True, "refused reload reason")],
+    ids=["recomputed", "kept-while-forges-yaml-is-pending"],
+)
+def test_a_repos_save_recomputes_what_invalid_forges_names(client, templates_dir, pending, after):
+    st = client.app.state
+    (templates_dir / "forges.yaml").write_text(yaml.safe_dump({"accounts": _ACCOUNTS}))
+    st.forges = ForgesFile.model_validate({"accounts": _ACCOUNTS})
+    apply_mod.record(st, "forges.yaml")
+    if pending:
+        (templates_dir / "forges.yaml").write_text(yaml.safe_dump({"accounts": {}}))
+    (templates_dir / "repos.yaml").write_text(
+        yaml.safe_dump({"repos": [{"path": "/r", "forge": "github", "forge_account": "ghost"}]})
+    )
+    st.invalid_forges = "refused reload reason" if pending else "'ghost' names no account"
+    reply = client.patch("/api/repos?path=/r", json={"forge_account": None})
+    assert reply.status_code == 200, reply.text
+    assert client.get("/api/health").json()["invalid_forges"] == after
+
+
+def test_an_old_bad_forge_account_does_not_block_another_save(client, templates_dir):
+    (templates_dir / "repos.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "repos": [
+                    {"path": "/r", "forge": "github", "forge_account": "ghost"},
+                    {"path": "/other", "forge": "github"},
+                ]
+            }
+        )
+    )
+    reply = client.patch("/api/repos?path=/other", json={"setup_command": "uv sync"})
+    assert reply.status_code == 200, reply.text

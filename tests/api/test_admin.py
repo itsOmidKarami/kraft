@@ -12,6 +12,7 @@ import pytest
 import yaml
 
 from kraft import apply as apply_mod
+from kraft import forges as forges_mod
 from kraft import storage
 from kraft.cli import admin
 
@@ -81,10 +82,31 @@ def test_a_changed_file_is_pending_by_its_bytes_not_its_mtime(client, templates_
     assert "problem" not in got[0]
 
 
-def test_a_file_that_would_not_load_carries_its_problem(client, templates_dir):
-    put_file(templates_dir, "policy.yaml", "defaults: [not, a, mapping]\n")
+@pytest.mark.parametrize(
+    ("file", "text", "running", "problem"),
+    [
+        ("policy.yaml", "defaults: [not, a, mapping]\n", None, ""),
+        # the running accounts are the baseline, not forges.yaml as it is on disk
+        ("forges.yaml", "accounts: {}\n", ["a"], "'a' names no account"),
+    ],
+    ids=["policy-not-a-mapping", "forges-drops-an-account-a-repo-names"],
+)
+def test_a_file_that_would_not_load_carries_its_problem(
+    client, templates_dir, file, text, running, problem
+):
+    if running:
+        client.app.state.forges = forges_mod.ForgesFile(
+            accounts={
+                n: forges_mod.ForgeAccount(forge="github", web_url="https://github.com")
+                for n in running
+            }
+        )
+        (templates_dir / "repos.yaml").write_text(
+            "repos:\n  - path: /r\n    forge: github\n    forge_account: a\n"
+        )
+    put_file(templates_dir, file, text)
     (item,) = pending(client)["reload"]
-    assert item["id"] == "disk:policy.yaml" and item["problem"]
+    assert item["id"] == f"disk:{file}" and item["problem"] and problem in item["problem"]
 
 
 def test_a_hand_edited_workers_file_is_pending_and_a_broken_one_carries_its_problem(
@@ -298,3 +320,78 @@ def test_publishing_a_draft_announces_what_is_left_pending(client, templates_dir
         {"restart": 0, "reload": 1}
     ]
     assert yaml.safe_load((templates_dir / "intake.yaml").read_text())["interval_s"] == 90
+
+
+_TWO_DEFAULTS = (
+    "accounts:\n"
+    "  a: {forge: gitlab, web_url: 'https://g.example', default_for_host: true}\n"
+    "  b: {forge: gitlab, web_url: 'https://g.example', default_for_host: true}\n"
+)
+
+
+def test_a_hand_edited_forges_yaml_is_reloaded_and_a_broken_one_degrades_health(client):
+    st = client.app.state
+    path = st.templates_dir / "forges.yaml"
+    path.write_text("accounts:\n  a: {forge: github, web_url: 'https://github.com'}\n")
+    assert client.post("/api/templates/reload").json()["refused_forges"] is None
+    assert list(st.forges.accounts) == ["a"]
+    path.write_text(_TWO_DEFAULTS)
+    refused = client.post("/api/templates/reload").json()["refused_forges"]
+    assert refused and "forges.yaml" in refused
+    assert list(st.forges.accounts) == ["a"]
+    health = client.get("/api/health").json()
+    assert health["status"] == "degraded" and health["invalid_forges"] == refused
+    path.write_text("accounts: {}\n")
+    assert client.post("/api/templates/reload").json()["refused_forges"] is None
+    assert client.get("/api/health").json()["invalid_forges"] is None
+
+
+_B = "b: {forge: github, web_url: 'https://github.com'}"
+
+
+@pytest.mark.parametrize(
+    "running, accounts, applied, says, refused_it",
+    [
+        pytest.param(["a"], _B, ["a"], "'a' names no account", True, id="new-mismatch-is-refused"),
+        # applied: the old mismatch is named on /health, and the reload is no refusal
+        pytest.param(
+            [],
+            _B,
+            ["b"],
+            "'a' names no account",
+            False,
+            id="old-mismatch-does-not-block-an-unrelated-edit",
+        ),
+        # nothing runs while forges.yaml has never loaded: any file that loads is taken
+        pytest.param(
+            None,
+            "a: {forge: gitlab, web_url: 'https://gitlab.example'}",
+            ["a"],
+            "'a' says forge: gitlab",
+            False,
+            id="unreadable-since-startup-takes-a-file-that-loads",
+        ),
+    ],
+)
+def test_a_forges_yaml_that_leaves_a_repo_without_its_account_is_refused_on_reload(
+    client, running, accounts, applied, says, refused_it
+):
+    st = client.app.state
+    st.forges = (
+        None
+        if running is None
+        else forges_mod.ForgesFile(
+            accounts={
+                n: forges_mod.ForgeAccount(forge="github", web_url="https://github.com")
+                for n in running
+            }
+        )
+    )
+    (st.templates_dir / "repos.yaml").write_text(
+        "repos:\n  - path: /r\n    forge: github\n    forge_account: a\n"
+    )
+    (st.templates_dir / "forges.yaml").write_text(f"accounts:\n  {accounts}\n")
+    refused = client.post("/api/templates/reload").json()["refused_forges"]
+    assert (refused is not None) is refused_it
+    assert says in st.invalid_forges
+    assert st.forges is not None and list(st.forges.accounts) == applied

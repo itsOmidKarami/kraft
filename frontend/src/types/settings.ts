@@ -21,6 +21,8 @@ export interface Repo {
   /** How a fresh worktree is prepared; `""` for nothing to run, null for none declared. */
   setup_command?: string | null;
   forge: string | null;
+  /** The forges.yaml account the repo names, if any. */
+  forge_account?: string | null;
   project: string | null;
   enabled: boolean;
   /** Model per harness profile id (Ruling 165), e.g. `{claude: "opus"}`. */
@@ -79,6 +81,11 @@ export interface RepoProbe {
   setup_command: string | null;
   forge: string | null;
   project: string | null;
+  /** The host names no forge and no account matches: `repo connect` asks. */
+  needs_forge?: boolean;
+  remote_host?: string | null;
+  remote_path?: string | null;
+  remote_port?: number | null;
   /** Every command the evidence supports, chosen or not. Told, never stored. */
   candidates?: ProbeCandidate[];
   /** The commit the proposal was read from (`refs/remotes/origin/main`). */

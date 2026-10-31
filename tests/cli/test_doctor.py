@@ -181,13 +181,18 @@ def test_degraded_health_is_spelled_out_one_reason_per_line(app, monkeypatch, in
             "invalid_policy": "budget: not a number",
             "invalid_intake": "intake.yaml: 'schedules'.0.cron: field '61': ...",
             "intake_off": intake_off,
+            "invalid_forges": "forges.yaml: two defaults",
             "index": {"errors": ["scan failed"], "embeddings": {"available": True}},
             "reattach_summary": {"unknown": []},
         }
 
     monkeypatch.setattr(client, "health", degraded)
     details = [row["detail"] for row in asyncio.run(doctor.run_checks()) if row["name"] == "health"]
-    assert len(details) == 4
+    assert len(details) == 5
+    assert any(
+        "forges.yaml, or a repo's forge_account, needs fixing" in d and "two defaults" in d
+        for d in details
+    )
     assert any("quick-task.yaml" in d for d in details)
     (line,) = [d for d in details if d.startswith("invalid intake.yaml")]
     assert "'61'" in line and said in line and ("policy.yaml still fires" in line) is intake_off
@@ -314,6 +319,7 @@ def test_every_config_check_reports_even_with_no_templates_dir(tmp_path, monkeyp
     # Not the upgrade guide: a home never seeded has nothing to upgrade.
     assert _by_name(rows, "capabilities")["detail"] == "skipped: no config dir"
     assert _by_name(rows, "notify.yaml")["detail"] == "skipped: no config dir"
+    assert _by_name(rows, "forges.yaml")["detail"] == "skipped: no config dir"
 
 
 def test_doctor_on_a_never_started_home_says_so(tmp_path, monkeypatch):
