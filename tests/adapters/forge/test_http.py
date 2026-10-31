@@ -171,6 +171,27 @@ async def test_an_absolute_or_protocol_relative_path_is_refused(mock_http, path)
     assert m.requests == []
 
 
+@pytest.mark.parametrize(
+    "path",
+    ["projects/1/notes?per_page=100", "projects/1/commits/a#b"],
+    ids=["query", "fragment"],
+)
+async def test_a_path_with_a_query_or_fragment_is_refused(mock_http, path):
+    """httpx drops a query written in the URL when `params` is given, so it would be lost."""
+    m = mock_http()
+    with pytest.raises(ForgeError, match="fields, not in the path") as err:
+        await tr(m).rest("GET", path)
+    assert "per_page" not in str(err.value) and m.requests == []
+
+
+async def test_a_trace_read_keeps_its_tail(mock_http, monkeypatch):
+    monkeypatch.setattr("kraft.adapters.forge.http.MAX_BODY", 1024)
+    body = b"a" * 4000 + b"the end"
+    m = mock_http(handler=lambda req: httpx.Response(200, content=body))
+    got = await tr(m).rest("GET", "x", tail=True)
+    assert got.text == (b"a" * 1017 + b"the end").decode() and len(got.text) == 1024
+
+
 @pytest.mark.parametrize("method", ["GET", "POST"])
 async def test_fields_go_as_query_on_get_and_json_otherwise(mock_http, method):
     m = mock_http({(method, f"{GH}/x"): (200, {})})

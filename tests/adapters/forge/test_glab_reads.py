@@ -30,6 +30,15 @@ _MERGED = (
 _LABELS = "api projects/:id/labels -X GET -i -F per_page=100 -F include_ancestor_groups=true"
 
 
+_JOBS = "api projects/:id/pipelines/901/jobs -X GET -i -F per_page=100 -F include_retried=false"
+
+
+def _jobs(n: int) -> str:
+    return json.dumps(
+        [{"id": i, "name": "j", "stage": "s", "status": "success", "web_url": ""} for i in range(n)]
+    )
+
+
 def _labels(n: int) -> str:
     return json.dumps([{"name": f"l{i}", "description": None, "color": "#fff"} for i in range(n)])
 
@@ -146,7 +155,7 @@ def _labels(n: int) -> str:
             {"api projects/:id/pipelines/901/jobs": GLAB_PIPELINE_JOBS},
             [
                 "api projects/:id/pipelines/901/jobs -X GET -i"
-                " -F per_page=100 -F include_retried=false"
+                " -F per_page=100 -F include_retried=false -F page=1"
             ],
             (
                 forge.Job(
@@ -205,6 +214,13 @@ def _labels(n: int) -> str:
             ],
             (forge.MergedMR(53, "Fix it", (), "", "2026-10-29T12:00:00.000Z"),),
             id="merged-on-an-old-server",
+        ),
+        pytest.param(
+            lambda g, r: g.jobs(repo=r, pipeline_id="901"),
+            {"api*page=1": _jobs(100), "api*page=2": _jobs(3)},
+            [f"{_JOBS} -F page=1", f"{_JOBS} -F page=2"],
+            tuple(forge.Job(str(i), "j", "s", "success", None, "") for i in (*range(100), 0, 1, 2)),
+            id="jobs-two-pages",
         ),
         pytest.param(
             lambda g, r: g.labels(repo=r),

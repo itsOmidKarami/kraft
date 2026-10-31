@@ -91,13 +91,15 @@ def _is_tls(exc: BaseException) -> bool:
     )
 
 
-async def _read(label: str, resp: httpx.Response) -> ApiResponse:
+async def _read(label: str, resp: httpx.Response, tail: bool = False) -> ApiResponse:
     data = bytearray()
     async for chunk in resp.aiter_bytes():
         data += chunk
-        if len(data) > MAX_BODY:
+        if tail and len(data) > 2 * MAX_BODY:  # amortised: trim at twice the cap, not per chunk
+            del data[:-MAX_BODY]
+        elif not tail and len(data) > MAX_BODY:
             raise ForgeError(f"{label}: answered more than {MAX_BODY} bytes", reason="unreachable")
-    text = data.decode(resp.charset_encoding or "utf-8", "replace")
+    text = data[-MAX_BODY:].decode(resp.charset_encoding or "utf-8", "replace")
     return ApiResponse(resp.status_code, {k.lower(): v for k, v in resp.headers.items()}, text)
 
 
@@ -131,7 +133,7 @@ class HttpTransport:
         return headers
 
     async def _send(
-        self, label: str, method: str, url: str, *, params=None, body=None
+        self, label: str, method: str, url: str, *, params=None, body=None, tail: bool = False
     ) -> ApiResponse:
         here = origin(url)
         shown = f"{here[0]}://{here[1]}:{here[2]}"
@@ -156,7 +158,7 @@ class HttpTransport:
                     resp = await client.send(request, stream=True)
                     try:
                         if resp.status_code not in _REDIRECTS or "location" not in resp.headers:
-                            return await _read(label, resp)
+                            return await _read(label, resp, tail)
                         url = urljoin(str(resp.url), resp.headers["location"])
                     finally:
                         await resp.aclose()
@@ -222,9 +224,17 @@ class HttpTransport:
         raise AssertionError("unreachable")  # pragma: no cover
 
     async def rest(
-        self, method: str, path: str, *, fields: Mapping[str, Field] | None = None
+        self,
+        method: str,
+        path: str,
+        *,
+        fields: Mapping[str, Field] | None = None,
+        tail: bool = False,
     ) -> ApiResponse:
         label = f"{method} {path}"
+        if "?" in path or "#" in path:  # httpx drops a URL's query when params are given
+            bare = re.split("[?#]", path)[0]
+            raise ForgeError(f"{method} {bare}: a query goes in fields, not in the path")
         if _NOT_A_PATH.match(path):
             raise ForgeError(f"{label}: a path, not an address, goes under the account's API")
         url = f"{self.base.rstrip('/')}/{path.lstrip('/')}"
@@ -235,7 +245,7 @@ class HttpTransport:
             for k, v in (fields or {}).items()
             for x in (v if isinstance(v, list) else [v])
         ]
-        return await self._call(label, method, url, params=params)
+        return await self._call(label, method, url, params=params, tail=tail)
 
     async def graphql(self, query: str, variables: Mapping[str, Field] | None = None) -> dict:
         resp = await self._call(

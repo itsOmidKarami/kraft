@@ -211,6 +211,33 @@ class GlabCli(mr_ops.CliWaits):
         resp = await self._transport(repo).rest(method, path, fields=fields)
         return resp.json() if resp.text.strip() else None
 
+    async def _paged(
+        self,
+        repo: Path,
+        path: str,
+        fields: Mapping[str, str | int | bool] | None = None,
+        *,
+        pages: int = 10,
+        strict: bool = False,
+    ) -> list:
+        """Up to `pages` pages of 100, until a short page, as glab follows X-Next-Page
+        (get.go:117-124). A non-list answer is a `ForgeError`; `strict` also raises when
+        the cap is hit without a short page, so a caller never reads a truncated list as whole."""
+        out: list = []
+        for page in range(1, pages + 1):
+            query = {"per_page": 100, **(fields or {}), "page": page}
+            got = await self._api(repo, path, fields=query)
+            if got is None:
+                got = []
+            if not isinstance(got, list):
+                raise ForgeError(f"GET {path}: answered without a list")
+            out += got
+            if len(got) < 100:
+                return out
+        if strict:
+            raise ForgeError(f"GET {path}: more than {pages * 100} rows")
+        return out
+
     async def open_mr(
         self,
         *,
@@ -622,24 +649,13 @@ class GlabCli(mr_ops.CliWaits):
             return (), _UNREADABLE_JOBS
         try:
             data = await self._api(repo, f"projects/:id/pipelines/{pipeline_id}")
-            jobs_all: list = []
-            page = 1
-            if isinstance(data, dict):
-                while True:
-                    # Until a short page, as glab follows X-Next-Page (get.go:117-124).
-                    got = await self._api(
-                        repo,
-                        f"projects/:id/pipelines/{pipeline_id}/jobs",
-                        fields={"per_page": 100, "page": page},
-                    )
-                    # A page >= 2 that errors (here or in the except below) drops the
-                    # failures already read from page 1: all-or-unreadable.
-                    if not isinstance(got, list):
-                        return (), _UNREADABLE_JOBS
-                    jobs_all += got
-                    if len(got) < 100:
-                        break
-                    page += 1
+            # A page that errors, or a cap hit without a short page, drops the
+            # failures already read: all-or-unreadable, never `((), ())`.
+            jobs_all = (
+                await self._paged(repo, f"projects/:id/pipelines/{pipeline_id}/jobs", strict=True)
+                if isinstance(data, dict)
+                else []
+            )
         except ForgeError:
             return (), _UNREADABLE_JOBS
         if not isinstance(data, dict):
@@ -664,7 +680,7 @@ class GlabCli(mr_ops.CliWaits):
             detail += (f"job {name}: failed" + (f" ({reason})" if reason else ""),)
             try:
                 resp = await self._transport(repo).rest(
-                    "GET", f"projects/:id/jobs/{j.get('id')}/trace"
+                    "GET", f"projects/:id/jobs/{j.get('id')}/trace", tail=True
                 )
             except ForgeError:
                 continue
@@ -690,7 +706,7 @@ class GlabCli(mr_ops.CliWaits):
         mr = await self._mr(repo, branch)
         iid = mr["iid"]
         discussions = await self._api(
-            repo, f"projects/:id/merge_requests/{iid}/discussions?per_page=100"
+            repo, f"projects/:id/merge_requests/{iid}/discussions", fields={"per_page": 100}
         )
         findings = tuple(
             f"{(n.get('position') or {}).get('new_path')}:"
@@ -735,7 +751,9 @@ class GlabCli(mr_ops.CliWaits):
         statuses: list = []
         for project, sha in commits:
             got = await self._api(
-                repo, f"projects/{project}/repository/commits/{sha}/statuses?per_page=100"
+                repo,
+                f"projects/{project}/repository/commits/{sha}/statuses",
+                fields={"per_page": 100},
             )
             statuses += got if isinstance(got, list) else []
         mine = sorted((s for s in statuses if s.get("name") == check), key=lambda s: s["id"])
@@ -770,10 +788,12 @@ class GlabCli(mr_ops.CliWaits):
         if any(r.bot is not None for r in reviewers):
             # ponytail: one page of 100 of each -- paginate if an MR ever has more.
             notes = await self._api(
-                repo, f"projects/:id/merge_requests/{mr['iid']}/notes?per_page=100"
+                repo, f"projects/:id/merge_requests/{mr['iid']}/notes", fields={"per_page": 100}
             )
             discussions = await self._api(
-                repo, f"projects/:id/merge_requests/{mr['iid']}/discussions?per_page=100"
+                repo,
+                f"projects/:id/merge_requests/{mr['iid']}/discussions",
+                fields={"per_page": 100},
             )
         out = []
         for r in reviewers:
@@ -1090,7 +1110,8 @@ class GlabCli(mr_ops.CliWaits):
         try:
             notes = await self._api(
                 repo,
-                f"projects/:id/merge_requests/{iid}/notes?sort=desc&order_by=created_at&per_page=20",
+                f"projects/:id/merge_requests/{iid}/notes",
+                fields={"sort": "desc", "order_by": "created_at", "per_page": 20},
             )
         except ForgeError:
             return ""
@@ -1189,10 +1210,8 @@ class GlabCli(mr_ops.CliWaits):
         )
 
     async def jobs(self, *, repo: Path, pipeline_id: str) -> tuple[Job, ...]:
-        rows = await self._api(
-            repo,
-            f"projects/:id/pipelines/{pipeline_id}/jobs",
-            fields={"per_page": 100, "include_retried": False},
+        rows = await self._paged(
+            repo, f"projects/:id/pipelines/{pipeline_id}/jobs", {"include_retried": False}
         )
         return tuple(
             Job(
@@ -1203,11 +1222,14 @@ class GlabCli(mr_ops.CliWaits):
                 failure_reason=str(j["failure_reason"]) if j.get("failure_reason") else None,
                 url=str(j.get("web_url") or ""),
             )
-            for j in rows or ()
+            for j in rows
         )
 
     async def job_log(self, *, repo: Path, job_id: str) -> str:
-        return (await self._transport(repo).rest("GET", f"projects/:id/jobs/{job_id}/trace")).text
+        resp = await self._transport(repo).rest(
+            "GET", f"projects/:id/jobs/{job_id}/trace", tail=True
+        )
+        return resp.text
 
     async def merged_mrs(self, *, repo: Path, base: str, limit: int) -> tuple[MergedMR, ...]:
         fields = {
@@ -1244,24 +1266,15 @@ class GlabCli(mr_ops.CliWaits):
         )
 
     async def labels(self, *, repo: Path) -> tuple[Label, ...]:
-        out: list[Label] = []
-        for page in range(1, 11):
-            rows = await self._api(
-                repo,
-                "projects/:id/labels",
-                fields={"per_page": 100, "include_ancestor_groups": True, "page": page},
+        rows = await self._paged(repo, "projects/:id/labels", {"include_ancestor_groups": True})
+        return tuple(
+            Label(
+                name=str(r["name"]),
+                description=str(r.get("description") or ""),
+                color=str(r.get("color") or ""),
             )
-            out += [
-                Label(
-                    name=str(r["name"]),
-                    description=str(r.get("description") or ""),
-                    color=str(r.get("color") or ""),
-                )
-                for r in rows or ()
-            ]
-            if len(rows or ()) < 100:
-                break
-        return tuple(out)
+            for r in rows
+        )
 
 
 #: How GitLab marks a draft: the title's prefix, which `mark_ready` strips as
