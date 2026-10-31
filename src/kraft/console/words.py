@@ -335,7 +335,9 @@ FORGE_LOGIN_HINT = (
     "(`gh auth setup-git`, your SSH key or credential helper). Then Retry."
 )
 #: `cause.tsx`: a forge token that needs single sign-on, fixed on the forge's website.
-FORGE_SSO_HINT = "Authorize the token for single sign-on: {sso_url}. Then Retry."
+FORGE_SSO_HINT = (
+    "Open this address to authorize the forge CLI's token for single sign-on, then Retry: {sso_url}"
+)
 #: `bannerWords.ts`: a failure the repo's settings can answer.
 REPO_FIX = "Check the repo settings."
 
@@ -365,9 +367,9 @@ def _offers_raise(item: dict) -> bool:
 
 
 def _sso_url(facts: dict) -> str:
-    """`ssoUrl`: `facts.sso_url` when it is an `https://` address with no whitespace or backtick."""
+    """`ssoUrl`: `facts.sso_url` when it is `https://` printable ASCII, no backtick."""
     url = facts.get("sso_url")
-    return url if isinstance(url, str) and re.fullmatch(r"https://[^\s`]+", url) else ""
+    return url if isinstance(url, str) and re.fullmatch(r"https://[!-_a-~]+", url) else ""
 
 
 def _failed_fix(stop: dict) -> str:

@@ -464,11 +464,16 @@
     {
       "name": "failed-on-forge-sso",
       "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "draft_merge_request", "reason": "gh: HTTP 403", "facts": { "cause": "forge_auth", "sso_url": "https://github.com/orgs/acme/sso?authorization_request=abc" } } },
-      "banner": { "kind": "failed", "node": "draft_merge_request", "name": "draft merge request", "text": "Gh: HTTP 403.", "way": "Authorize the token for single sign-on: https://github.com/orgs/acme/sso?authorization_request=abc. Then Retry." }
+      "banner": { "kind": "failed", "node": "draft_merge_request", "name": "draft merge request", "text": "Gh: HTTP 403.", "way": "Open this address to authorize the forge CLI's token for single sign-on, then Retry: https://github.com/orgs/acme/sso?authorization_request=abc" }
     },
     {
       "name": "failed-on-forge-sso-unsafe-address",
       "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "draft_merge_request", "reason": "gh: HTTP 403", "facts": { "cause": "forge_auth", "sso_url": "http://github.com/sso" } } },
+      "banner": { "kind": "failed", "node": "draft_merge_request", "name": "draft merge request", "text": "Gh: HTTP 403.", "way": "Sign the forge CLI in on the server's machine: `gh auth login`, or `glab auth login` for GitLab. If git itself can't authenticate, check its credentials there too (`gh auth setup-git`, your SSH key or credential helper). Then Retry." }
+    },
+    {
+      "name": "failed-on-forge-sso-control-character",
+      "item": { "display_status": "failed", "stop": { "kind": "infra", "node": "draft_merge_request", "reason": "gh: HTTP 403", "facts": { "cause": "forge_auth", "sso_url": "https://github.com/sso\u0007bell" } } },
       "banner": { "kind": "failed", "node": "draft_merge_request", "name": "draft merge request", "text": "Gh: HTTP 403.", "way": "Sign the forge CLI in on the server's machine: `gh auth login`, or `glab auth login` for GitLab. If git itself can't authenticate, check its credentials there too (`gh auth setup-git`, your SSH key or credential helper). Then Retry." }
     },
     {

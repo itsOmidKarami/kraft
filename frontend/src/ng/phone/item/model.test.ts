@@ -183,10 +183,11 @@ describe("the failed card's cause (R15b-01)", () => {
     ["forge_auth with an sso_url hints sso", "https://github.com/orgs/a/sso?x=1", FORGE_SSO_HINT.replace("{sso_url}", "https://github.com/orgs/a/sso?x=1")],
     ["forge_auth with a non-https sso_url hints the login", "http://github.com/sso", FORGE_LOGIN_HINT],
     ["forge_auth with a backticked sso_url hints the login", "https://github.com/sso`id`", FORGE_LOGIN_HINT],
-  ] as const)("%s, labelled single sign-on among the facts", (_name, sso_url, hint) => {
+    ["forge_auth with a control character in the sso_url hints the login", "https://github.com/sso\u0007bell", FORGE_LOGIN_HINT],
+  ] as const)("%s, and the address is never a fact of its own", (_name, sso_url, hint) => {
     const card = cardOf(mk("failed", stop("failed", { facts: { cause: "forge_auth", sso_url } })));
     expect(card?.hint).toBe(hint);
-    expect(card?.facts).toEqual([["single sign-on", sso_url]]);
+    expect(card?.facts).toEqual([]);
   });
 
   it("says what the run kept, as the desktop's card does: branch, files, passing tests", () => {

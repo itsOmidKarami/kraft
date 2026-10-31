@@ -15,7 +15,7 @@ import { actionPath, taskName } from "./paths";
 import { pathSel, placeUrl } from "./url";
 import { useLogLines } from "./useLogLines";
 import { totals } from "./Top";
-import { BROKEN_BASE_TEXT, brokenBase, forgeHint, failedFix, failureFacts, headline, keptLine, withCode } from "./cause";
+import { BROKEN_BASE_TEXT, brokenBase, forgeHint, failedFix, failureFacts, headline, hintText, keptLine } from "./cause";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
 import { CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, WAITING_ON_THE_PROVIDER, waitTitle, ABANDONED, ABANDONED_TEXT, NO_REASON_GIVEN } from "./sharedWords";
@@ -155,7 +155,7 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
       tone: "bad", glyph: <X size={14} aria-hidden />, title: "Failed", where, text: (structured ? headline(stop.reason) : stop.reason) ?? undefined, node: stop.node,
       body: (
         <>
-          {forgeHint(item) ? <p className="item-card-text item-card-fix">{withCode(forgeHint(item)!)}</p> : unexplained ? <FailedTail item={item} to={h.logUrl} /> : null}
+          {forgeHint(item) ? <p className="item-card-text item-card-fix">{hintText(forgeHint(item)!)}</p> : unexplained ? <FailedTail item={item} to={h.logUrl} /> : null}
           {retries && item.steerable !== false && <textarea aria-label="Steer for the retry" className="item-input" rows={2} placeholder="Steer the next attempt (optional)" value={h.steer} onChange={(e) => h.setSteer(e.target.value)} onKeyDown={sendOnModEnter(() => void retry.run(), !!h.steer.trim())} />}
         </>
       ),

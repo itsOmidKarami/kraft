@@ -204,6 +204,32 @@ describe("StateCard", () => {
     expect(within(screen.getByRole("region", { name: "Failed" })).queryByRole("button", { name: /Check the repo settings/ })).toBeNull();
   });
 
+  // The forge's authorize address is the hint's last words and a link, only when it is a plain https address.
+  it.each([
+    ["https", "https://github.com/orgs/acme/sso?authorization_request=abc", true],
+    ["http", "http://github.com/sso", false],
+    ["a backtick", "https://github.com/sso`id`", false],
+    ["a control character", "https://github.com/sso\u0007bell", false],
+  ])("a forge_auth stop with an sso_url of %s: the SSO hint with the address as its link last, or the login hint", (_name, sso_url, safe) => {
+    stubFetch();
+    show({ display_status: "failed", stop: stop("failed", { facts: { cause: "forge_auth", sso_url } }) });
+    const card = screen.getByRole("region", { name: "Failed" });
+    const hint = card.querySelector(".item-card-fix")!;
+    expect(card).not.toHaveTextContent("single sign-on fact");
+    expect(within(card).queryByText("sso_url")).toBeNull();
+    if (!safe) {
+      expect(within(card).queryByRole("link", { name: sso_url })).toBeNull();
+      expect(hint).toHaveTextContent("Sign the forge CLI in on the server's machine");
+      return;
+    }
+    expect(hint.textContent).toBe(`Open this address to authorize the forge CLI's token for single sign-on, then Retry: ${sso_url}`);
+    const link = within(card).getByRole("link", { name: sso_url });
+    expect(link).toHaveAttribute("href", sso_url);
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(within(card).queryByText("single sign-on")).toBeNull();
+  });
+
   it("failed with failing test scopes: each as a row, the paragraph stops at the node, no log tail", () => {
     const calls = stubFetch();
     const scopes = [{ command: "npm test", scope: "web/**", exit_code: 1 }, { command: "just test-c", setup: true, area: "c", exit_code: 2 }];

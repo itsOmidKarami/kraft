@@ -227,6 +227,7 @@ export const STATES: State[] = [
   { area: "phone", state: "item-gate", viewport: "phone", app: appPhone(item("needs-gate")) },
   { area: "phone", state: "item-capped", viewport: "phone", app: appPhone(item("capped")) },
   { area: "phone", state: "item-question", viewport: "phone", app: appPhone(item("needs-you")) },
+  { area: "phone", state: "item-failed-forge-sso", viewport: "phone", app: appPhone(item("failed"), { tweak: withStop("infra", { cause: "forge_auth", sso_url: "https://github.com/orgs/acme/sso?authorization_request=L3BhdGgtdG8tYXV0aG9yaXplLXRoZS10b2tlbg" }) }) },
   { area: "phone", state: "node", viewport: "phone", app: appPhone(item("running", "/nodes/verification")) },
   { area: "phone", state: "node-earlier-pass", viewport: "phone", app: appPhone(item("running", "/nodes/verification?pass=1"), { tweak: withScopes, ready: (pg) => pg.getByRole("button", { name: /^pass 1 ·/, pressed: true }).waitFor({ timeout: 8000 }) }) },
   { area: "phone", state: "scope", viewport: "phone", app: appPhone(item("running", `/nodes/verification?sel=verification.test.unit_tests&${new URLSearchParams({ scope: ":just test-unit" })}`), { tweak: withScopes, ready: (pg) => pg.getByRole("heading", { level: 1, name: "just test-unit" }).waitFor({ timeout: 8000 }) }) },
@@ -249,7 +250,7 @@ export const STATES: State[] = [
   { area: "follow-ups", state: "recent-committed", ...at("Recent: the fix committed a change", item("running"), { tweak: withFixRoundOutcome(true) }) },
   { area: "follow-ups", state: "gate-tests-fail", ...at("gate pane: tests ✗ 1 of 3 scopes", item("needs-gate", "?sel=final_review"), { tweak: withTestResult(3, 1) }) },
   { area: "follow-ups", state: "failed-forge-auth", ...at("failed card, forge_auth", item("failed"), { tweak: withStop("infra", { cause: "forge_auth" }) }) },
-  { area: "follow-ups", state: "failed-forge-sso", ...at("failed card, banner and phone card: forge_auth with an sso_url", item("failed"), { tweak: withStop("infra", { cause: "forge_auth", sso_url: "https://github.com/orgs/acme/sso?authorization_request=L3BhdGgtdG8tYXV0aG9yaXplLXRoZS10b2tlbg" }) }) },
+  { area: "follow-ups", state: "failed-forge-sso", ...at("failed card: forge_auth with an sso_url, a link last in the hint", item("failed"), { tweak: withStop("infra", { cause: "forge_auth", sso_url: "https://github.com/orgs/acme/sso?authorization_request=L3BhdGgtdG8tYXV0aG9yaXplLXRoZS10b2tlbg" }) }) },
   { area: "follow-ups", state: "capped-limit", ...at("capped item whose stop names its limit: header, banner, spent line", item("capped"), { tweak: withCapLimit }) },
   { area: "follow-ups", state: "capped-limit-peek", ...at("…and its board peek", "/", { tweak: withCapLimit, ready: async (pg) => { await pg.getByRole("button", { name: /^Fix flaky retry test/ }).first().click(); await pg.waitForTimeout(700); } }) },
 

@@ -556,6 +556,21 @@ describe("the failed card's cause (R15b-01)", () => {
     expect(await sheetLabels()).not.toContain("Check the repo settings");
   });
 
+  it.each([
+    ["an https address", "https://github.com/orgs/a/sso?x=1", true],
+    ["a control character", "https://github.com/sso\u0007bell", false],
+  ])("an sso_url of %s: the address is the hint's last words and a link, once, not a fact", async (_name, sso_url, safe) => {
+    mount(item("failed", stop("failed", { facts: { cause: "forge_auth", sso_url } })));
+    const card = await screen.findByRole("region", { name: "Failed" });
+    expect(card).not.toHaveTextContent("single sign-on fact");
+    if (!safe) return expect(within(card).queryByRole("link")).toBeNull();
+    const link = within(card).getByRole("link", { name: sso_url });
+    expect(link).toHaveAttribute("href", sso_url);
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(card.querySelector(".ph-statecard-fix")!.textContent).toBe(`Open this address to authorize the forge CLI's token for single sign-on, then Retry: ${sso_url}`);
+    expect(card.textContent!.split(sso_url).length).toBe(2);
+  });
+
   it("any other infrastructure stop offers the repo settings from the ⋮ sheet, and no forge login words", async () => {
     mount(item("failed", stop("infra", { facts: { cause: "git" } })));
     const card = await screen.findByRole("region", { name: "Failed" });
