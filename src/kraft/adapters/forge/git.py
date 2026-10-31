@@ -800,7 +800,12 @@ async def _push(repo: Path, branch: str, auth: git_auth.GitAuth | None) -> None:
     await run_git(repo, ["git", "update-ref", pushed_ref, head], env=plain)
 
 
-_LFS_ENDPOINT_KEYS = ("lfs.url", "remote.origin.lfsurl", "remote.origin.lfspushurl")
+_LFS_ENDPOINT_KEYS = (
+    "lfs.url",
+    "lfs.pushurl",
+    "remote.origin.lfsurl",
+    "remote.origin.lfspushurl",
+)
 
 
 def _lfs_refusal(repo: Path, name: str) -> str | None:
@@ -824,9 +829,9 @@ def _lfs_refusal(repo: Path, name: str) -> str | None:
         )
     if any(git_read(repo, "config", "--get", k, expected_failure=True) for k in _LFS_ENDPOINT_KEYS):
         return (
-            f"forge account {name}: git-lfs is pointed elsewhere by lfs.url or "
-            "remote.origin.lfsurl; Kraft sends its token only to origin's own LFS endpoint, "
-            "so unset it and retry"
+            f"forge account {name}: git-lfs is pointed elsewhere by lfs.url, "
+            "lfs.pushurl or remote.origin.lfsurl; Kraft sends its token only to origin's own "
+            "LFS endpoint, so unset it and retry"
         )
     origin = urlsplit(git_read(repo, "remote", "get-url", "origin", expected_failure=True) or "")
     stem = origin.path.rstrip("/").removesuffix(".git")

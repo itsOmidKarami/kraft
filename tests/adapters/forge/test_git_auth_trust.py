@@ -86,6 +86,7 @@ async def test_an_lfs_push_with_no_endpoint_override_runs_git_lfs(remote, fake_l
     "key",
     [
         pytest.param(("lfs.url", "https://other.example/x"), id="lfs-url"),
+        pytest.param(("lfs.pushurl", "https://other.example/x"), id="lfs-pushurl"),
         pytest.param(("remote.origin.lfsurl", "https://other.example/x"), id="remote-lfsurl"),
         pytest.param(
             ("remote.origin.lfspushurl", "https://other.example/x"), id="remote-lfspushurl"
@@ -160,7 +161,9 @@ def _base_lfsconfig(r, text):
         pytest.param("ssh://git@other.example/x/info/lfs", True, id="ssh-endpoint"),
     ],
 )
-@pytest.mark.parametrize("key", ["lfs.url", "remote.origin.lfsurl", "remote.origin.lfspushurl"])
+@pytest.mark.parametrize(
+    "key", ["lfs.url", "lfs.pushurl", "remote.origin.lfsurl", "remote.origin.lfspushurl"]
+)
 async def test_a_base_lfsconfig_endpoint_is_refused_unless_it_is_origins_own(
     remote, fake_lfs, key, value, refused
 ):
@@ -172,7 +175,8 @@ async def test_a_base_lfsconfig_endpoint_is_refused_unless_it_is_origins_own(
     if refused:
         with pytest.raises(ForgeError, match="base branch's .lfsconfig sends LFS") as caught:
             await forge_git.push(remote.repo, "kraft/abc", account=remote.pinned)
-        assert "then retry" in str(caught.value)
+        assert "push this branch yourself" in str(caught.value)
+        assert "move LFS to origin" in str(caught.value)
         assert "other.example" not in str(caught.value) and value not in str(caught.value)
         assert not fake_lfs.exists()
     else:
@@ -406,9 +410,9 @@ async def test_an_ssh_lfs_endpoint_never_runs_ssh_with_the_header_env(
     "dotgit", [pytest.param(True, id="dot-git"), pytest.param(False, id="no-dot-git")]
 )
 async def test_fetch_push_and_lfs_still_carry_the_header_at_the_exact_urls(remote, dotgit):
-    """The header is pinned at the exact URLs only: `/info/refs`, `/git-upload-pack`,
-    and git-lfs's `/info/lfs/objects/batch` (which lives under `<url>.git`
-    for a remote without `.git`) all still carry it."""
+    """The header is pinned at the exact URL only, one spelling: `/info/refs`, `/git-upload-pack`
+    and git-lfs's `/info/lfs/objects/batch` (under `<url>.git` for a remote without `.git`) all
+    still carry it, for a remote with and without a `.git` suffix."""
     git(
         remote.repo,
         "remote",

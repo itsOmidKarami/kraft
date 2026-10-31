@@ -140,7 +140,7 @@ def expected(*targets: str, ca: str = CA) -> list[tuple[str, str]]:
     return out
 
 
-URL_NOGIT = URL.removesuffix(".git")
+URL_OTHER = f"{WEB}/team/mirror.git"
 PINS = expected(f"{WEB}/.", f"{URL}.")
 NOISE = {
     k: "1"
@@ -162,9 +162,9 @@ NOISE = {
         pytest.param(HARD, auth(), lambda e: pins(e) == pins(HARD) + PINS, id="appended"),
         pytest.param(
             HARD,
-            auth(urls=(URL, URL_NOGIT)),
-            lambda e: pins(e) == pins(HARD) + expected(f"{WEB}/.", f"{URL}.", f"{URL_NOGIT}."),
-            id="every-dialed-url-is-pinned-in-both-spellings",
+            auth(urls=(URL, URL_OTHER)),
+            lambda e: pins(e) == pins(HARD) + expected(f"{WEB}/.", f"{URL}.", f"{URL_OTHER}."),
+            id="every-dialed-url-is-pinned",
         ),
         pytest.param(
             HARD,
@@ -755,3 +755,15 @@ async def test_a_url_that_names_a_user_is_refused_without_quoting_it(
         await git_auth.auth_for_account(repo, "corp-gl", acct(), push=push)
     assert "git@" not in str(caught.value) and "pw" not in str(caught.value)
     assert "`" not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    ("url", "keys"),
+    [
+        pytest.param(f"{WEB}/team/app.git", [f"{WEB}/team/app.git"], id="dot-git"),
+        pytest.param(f"{WEB}/team/app/", [f"{WEB}/team/app"], id="no-dot-git-and-a-slash"),
+        pytest.param(f"{WEB}/", [], id="no-path"),
+    ],
+)
+def test_one_key_names_a_dialed_url(url, keys):
+    assert git_auth._exact(WEB, url) == keys

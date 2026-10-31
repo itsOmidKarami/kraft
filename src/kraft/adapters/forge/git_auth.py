@@ -151,13 +151,11 @@ def _origin(account: ForgeAccount) -> str:
 
 
 def _exact(origin: str, url: str) -> list[str]:
-    """`url` as git's `http.<url>.*` key wants it (the origin and the path, no trailing slash),
-    in its `.git` and its no-`.git` spelling: a bare `<url>` key does not match `<url>.git`."""
+    """`url` as git's `http.<url>.*` key wants it: the origin and the path, no trailing slash.
+    One spelling is enough: git-lfs matches the key against the remote URL as given, and its
+    `<url>.git/info/lfs` requests still carry the header (checked with git-lfs 3.4.1)."""
     path = urlsplit(url).path.rstrip("/")
-    if not path:
-        return []
-    other = path.removesuffix(".git") if path.endswith(".git") else path + ".git"
-    return [origin + path, origin + other]
+    return [origin + path] if path else []
 
 
 def _injected(account: ForgeAccount) -> bool:
