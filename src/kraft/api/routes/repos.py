@@ -115,24 +115,49 @@ def _probe_children(
 
 
 def _told_forge(
-    forges_file: forges_mod.ForgesFile | None, probed: dict, forge: str | None = None
+    forges_file: forges_mod.ForgesFile | None,
+    probed: dict,
+    forge: str | None = None,
+    account: str | None = None,
 ) -> dict:
     """The probe with its forge settled. A host that names no forge takes the one
-    of its `default_for_host` account; with no such account, `needs_forge` says
-    connect must ask. A host that names its forge is left as it is."""
-    remote = config_mod.git_read(
-        Path(probed["path"]), "remote", "get-url", "origin", expected_failure=True
+    of the account the repo names (`account`), else of its host's
+    `default_for_host` account; with neither, `needs_forge` says connect must
+    ask. A host that names its forge is left as it is."""
+    remote = (
+        config_mod.git_read(
+            Path(probed["path"]), "remote", "get-url", "origin", expected_failure=True
+        )
+        or ""
     )
-    host = forges_mod.remote_host(remote or "")
-    path = forges_mod.remote_path(remote or "")
-    out = {**probed, "remote_host": host, "remote_path": path, "needs_forge": False}
-    if probed["forge"] is not None or not host:
+    host = forges_mod.remote_host(remote)
+    path = forges_mod.remote_path(remote)
+    # Only an HTTPS remote's path and port are the web address's: SSH has its own.
+    try:
+        parts = urlsplit(remote)
+        https = parts.scheme in ("http", "https")
+        port = parts.port if https else None
+    except ValueError:
+        https, port = False, None
+    out = {
+        **probed,
+        "remote_host": host,
+        "remote_path": path,
+        "remote_port": port,
+        "needs_forge": False,
+    }
+    if probed["forge"] is not None:
         return out
-    found = forges_mod.default_account(forges_file or forges_mod.ForgesFile(), host)
+    known = forges_file or forges_mod.ForgesFile()
+    found = (
+        (account, known.accounts[account])
+        if account in known.accounts
+        else forges_mod.default_account(known, host)
+    )
     if forge is None and found is None:
-        out["needs_forge"] = True
+        out["needs_forge"] = bool(host)
         return out
-    prefix = urlsplit(found[1].web_url).path.strip("/") if found else ""
+    prefix = urlsplit(found[1].web_url).path.strip("/") if found and https else ""
     out["forge"] = forge or found[1].forge
     out["project"] = path.removeprefix(prefix + "/") if prefix and path else path
     return out
@@ -596,7 +621,9 @@ async def _add_repo(body: RepoBody, st) -> dict:
             _probe_children, probed["path"], probed["submodules"], templates_dir
         )
         # A host that names no forge takes its default account's: never asked here.
-        probed = await asyncio.to_thread(_told_forge, st.forges, probed, body.forge)
+        probed = await asyncio.to_thread(
+            _told_forge, st.forges, probed, body.forge, body.forge_account
+        )
         child_probes = {
             rel: await asyncio.to_thread(_told_forge, st.forges, child)
             for rel, child in child_probes.items()

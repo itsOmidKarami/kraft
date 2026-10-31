@@ -316,15 +316,21 @@ def test_a_library_that_cannot_be_checked_does_not_fail_the_connect(
 
 
 def _origin(repo, url):
-    """An origin, and a test command found, so the only questions are the forge's."""
+    """An origin (none for None), and a test command found, so the only
+    questions are the forge's."""
     (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n[tool.pytest.ini_options]\n")
     (repo / "uv.lock").write_text("version = 1\n")
     commit_all(repo)
-    git(repo, "remote", "add", "origin", url)
+    if url:
+        git(repo, "remote", "add", "origin", url)
 
 
 def _forges_yaml():
     return Path(os.environ["KRAFT_CONFIG_DIR"]) / "forges.yaml"
+
+
+def _accounts():
+    return yaml.safe_load(_forges_yaml().read_text())["accounts"]
 
 
 def _prompts(monkeypatch, answers):
@@ -336,62 +342,173 @@ def _prompts(monkeypatch, answers):
     return seen
 
 
-def test_an_existing_user_sees_no_change(app, capsys, repo, monkeypatch):
-    """The spec's anti-goal: a github.com remote, no forges.yaml, and connect asks
-    what it asked before the forge questions existed -- nothing here -- and
-    writes no forges.yaml."""
-    _origin(repo, "https://github.com/acme/app.git")
-    seen = _prompts(monkeypatch, [])
+def _posted(monkeypatch):
+    """Every body `POST /repos` was sent."""
+    posted, post = [], client.transport._post
+
+    async def spy(path, payload, **kw):
+        if path == "/repos":
+            posted.append(payload)
+        return await post(path, payload, **kw)
+
+    monkeypatch.setattr(client.transport, "_post", spy)
+    return posted
+
+
+@pytest.mark.parametrize(
+    "remote, forge, project",
+    [
+        pytest.param("https://github.com/acme/app.git", "github", "acme/app", id="github-https"),
+        pytest.param("git@github.com:acme/app.git", "github", "acme/app", id="github-ssh"),
+        pytest.param(None, None, None, id="no-origin"),
+    ],
+)
+def test_an_existing_user_sees_no_change(app, capsys, repo, monkeypatch, remote, forge, project):
+    """The spec's anti-goal: no forges.yaml, and connect asks what it asked
+    before the forge questions existed -- nothing here -- posts the body it
+    posted, and writes no forges.yaml."""
+    _origin(repo, remote)
+    seen, posted = _prompts(monkeypatch, []), _posted(monkeypatch)
     cli.main(["repo", "connect", str(repo)])
     [entry] = asyncio.run(client.repos())
-    assert (seen, entry["forge"], entry["project"], entry.get("forge_account")) == (
-        [],
-        "github",
-        "acme/app",
-        None,
-    )
+    assert (seen, posted) == ([], [{"path": str(repo)}])
+    assert (entry["forge"], entry["project"], entry.get("forge_account")) == (forge, project, None)
     assert not _forges_yaml().exists()
 
 
 _SELF_HOSTED = "git@code.corp.example:gitlab/team/app.git"
 
 
-def test_a_self_hosted_host_asks_forge_then_web_address(app, capsys, repo, monkeypatch):
-    _origin(repo, _SELF_HOSTED)
+@pytest.mark.parametrize(
+    "remote, web_url, project",
+    [
+        # An SSH path carries no web prefix: `gitlab` is offered, and stays a group.
+        pytest.param(_SELF_HOSTED, "https://code.corp.example/gitlab", "gitlab/team/app", id="ssh"),
+        pytest.param(
+            "https://code.corp.example/gitlab/team/app.git",
+            "https://code.corp.example/gitlab",
+            "team/app",
+            id="https-prefix-stripped",
+        ),
+        pytest.param(
+            "https://code.corp.example:8443/gitlab/team/app.git",
+            "https://code.corp.example:8443/gitlab",
+            "team/app",
+            id="https-port-kept",
+        ),
+    ],
+)
+def test_a_self_hosted_host_asks_forge_then_web_address(
+    app, capsys, repo, monkeypatch, remote, web_url, project
+):
+    _origin(repo, remote)
     seen = _prompts(monkeypatch, ["gitlab", "2"])
     cli.main(["repo", "connect", str(repo)])
-    assert len(seen) == 2
-    assert yaml.safe_load(_forges_yaml().read_text()) == {
-        "accounts": {
-            "code.corp.example": {
-                "forge": "gitlab",
-                "web_url": "https://code.corp.example/gitlab",
-                "default_for_host": True,
-            }
-        }
+    assert seen == ["  which forge is it? [github/gitlab] ", "  number, or type an address [1] "]
+    assert _accounts() == {
+        "code.corp.example": {"forge": "gitlab", "web_url": web_url, "default_for_host": True}
     }
     [entry] = asyncio.run(client.repos())
-    assert (entry["forge"], entry["project"]) == ("gitlab", "team/app")
+    assert (entry["forge"], entry["project"], entry.get("forge_account")) == (
+        "gitlab",
+        project,
+        None,
+    )
+
+
+_GH_DEFAULT = {"forge": "github", "web_url": "https://github.com", "default_for_host": True}
+_CORP = {"forge": "gitlab", "web_url": "https://code.corp.example/gitlab"}
 
 
 @pytest.mark.parametrize(
-    "extra, account",
+    "remote, flags, before, accounts, named",
     [
-        pytest.param([], "code.corp.example", id="named-for-the-host"),
-        pytest.param(["--forge-account", "corp"], "corp", id="named-by-flag"),
+        pytest.param(
+            _SELF_HOSTED,
+            ["--forge", "gitlab", "--web-url", "https://code.corp.example/gitlab"],
+            {},
+            {"code.corp.example": {**_CORP, "default_for_host": True}},
+            None,
+            id="named-for-the-host",
+        ),
+        pytest.param(
+            _SELF_HOSTED,
+            ["--forge", "gitlab", "--web-url", "https://code.corp.example/gitlab"]
+            + ["--forge-account", "corp"],
+            {},
+            {"corp": {**_CORP, "default_for_host": True}},
+            "corp",
+            id="named-by-flag",
+        ),
+        # An SSH alias's address is on another host: the account is no host's
+        # default, and the repo names it.
+        pytest.param(
+            "git@github-work:acme/app.git",
+            ["--forge", "github", "--web-url", "https://github.com"],
+            {},
+            {"github-work": {"forge": "github", "web_url": "https://github.com"}},
+            "github-work",
+            id="alias-names-a-non-default-account",
+        ),
+        pytest.param(
+            _SELF_HOSTED,
+            ["--forge", "gitlab", "--web-url", "https://git.corp.example"],
+            {},
+            {"code.corp.example": {"forge": "gitlab", "web_url": "https://git.corp.example"}},
+            "code.corp.example",
+            id="typed-url-on-another-host",
+        ),
+        pytest.param(
+            "git@github-work:acme/app.git",
+            ["--forge", "github", "--web-url", "https://github.com"],
+            {"gh": _GH_DEFAULT},
+            {
+                "gh": _GH_DEFAULT,
+                "github-work": {"forge": "github", "web_url": "https://github.com"},
+            },
+            "github-work",
+            id="existing-github.com-default-untouched",
+        ),
+        # An account that exists: its forge, and nothing asked or written.
+        pytest.param(
+            _SELF_HOSTED,
+            ["--forge-account", "corp"],
+            {"corp": _CORP},
+            {"corp": _CORP},
+            "corp",
+            id="existing-account-named",
+        ),
     ],
 )
-def test_flags_answer_the_questions(app, capsys, repo, monkeypatch, extra, account):
-    _origin(repo, _SELF_HOSTED)
+def test_flags_answer_the_questions(
+    app, capsys, repo, monkeypatch, remote, flags, before, accounts, named
+):
+    _origin(repo, remote)
+    for name, acct in before.items():
+        asyncio.run(client.add_forge(name, **acct))
     seen = _prompts(monkeypatch, [])
-    cli.main(
-        ["repo", "connect", str(repo), "--forge", "gitlab", "-y"]
-        + ["--web-url", "https://code.corp.example/gitlab", *extra]
+    cli.main(["repo", "connect", str(repo), "-y", *flags])
+    assert seen == [] and _accounts() == accounts
+    [entry] = asyncio.run(client.repos())
+    assert (entry["forge"], entry.get("forge_account")) == (
+        accounts[named or "code.corp.example"]["forge"],
+        named,
     )
-    assert seen == []
-    accounts = yaml.safe_load(_forges_yaml().read_text())["accounts"]
-    assert list(accounts) == [account] and accounts[account]["forge"] == "gitlab"
-    assert asyncio.run(client.repos())[0]["forge"] == "gitlab"
+
+
+def test_an_existing_account_named_in_a_terminal_asks_nothing(app, capsys, repo, monkeypatch):
+    """...and the project loses the account's web prefix, as for a host's default."""
+    _origin(repo, "https://code.corp.example/gitlab/team/app.git")
+    asyncio.run(client.add_forge("corp", **_CORP))
+    seen = _prompts(monkeypatch, [])
+    cli.main(["repo", "connect", str(repo), "--forge-account", "corp"])
+    [entry] = asyncio.run(client.repos())
+    assert (seen, entry["forge"], entry["forge_account"], entry["project"]) == (
+        [],
+        "gitlab",
+        "corp",
+        "team/app",
+    )
 
 
 def test_a_host_with_an_account_asks_nothing(app, capsys, repo, monkeypatch):
@@ -402,23 +519,89 @@ def test_a_host_with_an_account_asks_nothing(app, capsys, repo, monkeypatch):
     assert seen == [] and asyncio.run(client.repos())[0]["forge"] == "gitlab"
 
 
-def test_an_account_name_already_taken_asks_for_forge_account(app, capsys, repo):
+@pytest.mark.parametrize(
+    "flags, before, refusal",
+    [
+        pytest.param(
+            ["--forge", "gitlab", "--web-url", "https://code.corp.example"],
+            {"code.corp.example": {"forge": "gitlab", "web_url": "https://other.example"}},
+            "name this one with --forge-account",
+            id="name-taken",
+        ),
+        pytest.param(
+            ["--web-url", "https://code.corp.example"],
+            {},
+            "--web-url needs --forge",
+            id="web-url-alone",
+        ),
+        pytest.param(
+            ["--forge", "gitlab", "--api-url", "https://code.corp.example/api/v4"],
+            {},
+            "--api-url needs --web-url",
+            id="api-url-without-web-url",
+        ),
+        pytest.param(
+            ["--forge", "github", "--forge-account", "corp"],
+            {"corp": _CORP},
+            "forge account 'corp' is gitlab, not github",
+            id="forge-differs-from-named-account",
+        ),
+    ],
+)
+def test_flags_that_cannot_hold_are_refused_before_connecting(
+    app, capsys, repo, monkeypatch, flags, before, refusal
+):
     _origin(repo, _SELF_HOSTED)
-    asyncio.run(client.add_forge("code.corp.example", "gitlab", "https://other.example"))
+    for name, acct in before.items():
+        asyncio.run(client.add_forge(name, **acct))
+    seen = _prompts(monkeypatch, [])
     with pytest.raises(SystemExit) as caught:
-        cli.main(
-            [
-                "repo",
-                "connect",
-                str(repo),
-                "--forge",
-                "gitlab",
-                "--web-url",
-                "https://code.corp.example",
-            ]
-        )
-    assert "--forge-account" in str(caught.value)
+        cli.main(["repo", "connect", str(repo), *flags])
+    assert refusal in str(caught.value) and seen == []
     assert asyncio.run(client.repos()) == []
+    assert (_accounts() if _forges_yaml().exists() else {}) == before
+
+
+def test_an_unreadable_forges_yaml_is_said_before_asking(app, capsys, repo, monkeypatch):
+    _origin(repo, _SELF_HOSTED)
+    _forges_yaml().write_text("accounts: [\n")
+    seen = _prompts(monkeypatch, [])
+    with pytest.raises(SystemExit):
+        cli.main(["repo", "connect", str(repo)])
+    assert seen == [] and "forges.yaml" in capsys.readouterr().err
+
+
+def test_a_failed_connect_keeps_the_account_it_wrote(app, capsys, repo, monkeypatch):
+    _origin(repo, _SELF_HOSTED)
+
+    async def refused(*a, **kw):
+        raise client.status_error(400, "no")
+
+    monkeypatch.setattr(client, "ensure_repo", refused)
+    with pytest.raises(SystemExit):
+        cli.main(
+            ["repo", "connect", str(repo), "-y", "--forge", "gitlab"]
+            + ["--web-url", "https://code.corp.example/gitlab"]
+        )
+    assert "the forge account stays in forges.yaml" in capsys.readouterr().out
+    assert list(_accounts()) == ["code.corp.example"]
+
+
+@pytest.mark.parametrize(
+    "remote, again, said",
+    [
+        pytest.param(_SELF_HOSTED, True, "is connected already", id="connected"),
+        pytest.param("git@github.com:acme/app.git", False, "github.com is github", id="host-says"),
+    ],
+)
+def test_an_ignored_forge_says_so(app, capsys, repo, remote, again, said):
+    _origin(repo, remote)
+    if again:
+        cli.main(["repo", "connect", str(repo), "-y", "--forge", "github"])
+        capsys.readouterr()
+    cli.main(["repo", "connect", str(repo), "-y", "--forge", "gitlab"])
+    assert "--forge ignored: " in (out := capsys.readouterr().out) and said in out
+    assert asyncio.run(client.repos())[0]["forge"] == "github"
 
 
 def test_yes_without_forge_asks_nothing_and_writes_no_account(app, capsys, repo):
