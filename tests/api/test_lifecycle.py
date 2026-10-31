@@ -523,6 +523,21 @@ def test_post_triggers_files_a_paused_item(client, repo):
     assert body["title"] == "from a trigger"
 
 
+def test_post_triggers_files_the_connected_path_not_an_alias(client, repo, tmp_path, monkeypatch):
+    from support.harness import entry_of
+
+    from kraft.api import deps
+
+    alias = tmp_path / "alias"
+    alias.symlink_to(repo)
+    monkeypatch.setattr(
+        deps, "_connected", lambda repos, path: entry_of({"path": str(repo), "setup_command": ""})
+    )
+    r = client.post("/api/triggers", json={"repo": str(alias), "title": "t"})
+    assert r.status_code == 201, r.text
+    assert r.json()["repo"] == str(repo)
+
+
 def _seed_counter(wid: str, key: str, *, count: int = 2) -> None:
     """A retry_counters row, as if the node had already re-entered a wait or
     an infra retry a couple of times (Kraft-cs4s)."""

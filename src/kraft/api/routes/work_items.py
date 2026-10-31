@@ -999,7 +999,7 @@ async def fire_trigger(body: TriggerBody, request: Request):
             st.run_dirs,
             title=body.title,
             description=body.description,
-            repo=body.repo,
+            repo=entry_.path,
             chain=chain,
             effective_policy=policy,
             repository_steering=repo_steering,
