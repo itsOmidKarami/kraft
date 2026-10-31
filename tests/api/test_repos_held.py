@@ -71,6 +71,8 @@ def test_a_repo_an_agent_connects_with_its_own_commands_waits_for_a_person(
         ("on:assistant", {"test_scopes": [{"paths": ["**"], "command": "x"}]}, 403),
         ("on:assistant", {"name": "renamed"}, 200),
         ("on:person", {"setup_command": "./configure"}, 200),
+        ("worker", {"forge_account": "corp"}, 403),
+        ("on:assistant", {"forge_account": None}, 403),
     ],
     ids=[
         "assistant-enables",
@@ -82,6 +84,8 @@ def test_a_repo_an_agent_connects_with_its_own_commands_waits_for_a_person(
         "assistant-sets-scopes-on-an-enabled-repo",
         "assistant-renames-an-enabled-repo",
         "person-sets-commands-on-an-enabled-repo",
+        "worker-names-a-forge-account",
+        "assistant-clears-a-forge-account",
     ],
 )
 def test_turning_a_repo_on_is_a_persons_call(client, tmp_path, caller, patch, status):
@@ -213,3 +217,30 @@ def test_an_agent_does_not_start_a_persons_item_on_a_disabled_repo(
     if status == 403:
         assert "is disabled: a person enables it" in r.json()["detail"]
         assert client.get(f"/api/work-items/{wid}").json()["status"] == "paused"
+
+
+@pytest.mark.parametrize(
+    ("caller", "status"),
+    [("assistant", 403), ("worker", 403), ("person", 201)],
+    ids=[
+        "assistant-connects-naming-one",
+        "worker-connects-naming-one",
+        "person-connects-naming-one",
+    ],
+)
+def test_an_agent_does_not_choose_a_repos_forge_account(client, tmp_path, caller, status):
+    """The account decides whose token the forge calls use: refused, not held,
+    since there is nothing for a person to review."""
+    repo = make_repo(tmp_path)
+    client.post("/api/forges", json={"name": "corp", "forge": "gitlab", "web_url": "https://gl.x"})
+    body = {"path": str(repo), "forge": "gitlab", "forge_account": "corp", "enabled": False}
+
+    r = client.post("/api/repos", json=body, headers=_CALLERS[caller])
+
+    assert r.status_code == status, r.text
+    saved = client.get("/api/repos").json()["repos"]
+    if status == 403:
+        assert "a person's to choose" in r.json()["detail"]
+        assert saved == []
+    else:
+        assert saved[0]["forge_account"] == "corp"
