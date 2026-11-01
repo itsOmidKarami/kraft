@@ -53,7 +53,7 @@ No key on an entry passes silently. A key within two edits of a field below (`au
 | `enabled` | boolean | `true` | Set `false` to keep auto-intake off this repo without disconnecting it. See [`enabled`](#enabled). |
 | `managed` | boolean | `true` | Keeps a repo you connected out of Settings › Repos' "Detected · not connected" section. Auto-connected submodules are written with `managed: false`. |
 | `forge` | string | `null` | `github` or `gitlab`: which forge adapter `backend: auto` resolves to for this repo. `kraft repo connect` sets it from the host of the repo's remote: `github.com`, `gitlab.com`, or a self-hosted host that names one (`gitlab.example.com`). |
-| `forge_account` | string | `null` | The account in [forges.yaml](/reference/configuration/forges) this repo uses. Unset: the host's default account, else the CLI. A person sets it, never an agent: it decides whose token the forge calls use. _Added in next_ |
+| `forge_account` | string | `null` | The account in [forges.yaml](/reference/configuration/forges) this repo uses. Unset: the host's default account, else the CLI. A person sets it, never an agent: it decides whose token the forge calls use. _Added in 2.5_ |
 | `project` | string | `null` | The GitLab project path, when `forge: gitlab`. |
 | `default_chain` | string | `null` | The chain a [work item](/concepts/vocabulary#work-item) on this repo runs when none is named. Unset, it is the repo library's `default` chain when one is loaded, else `default`. See [`default_chain`](#default_chain). |
 | `models` | mapping of [harness profile](/concepts/vocabulary#harness-profile) id to string | `{}` | The model an agent task runs with on this repo, per harness profile id (`claude: opus`). See [`models`](#models). |
@@ -208,7 +208,7 @@ This is not a place for target-repo files. Kraft never copies `CLAUDE.md`, `AGEN
 
 ### Pull-request rules
 
-_Added in next_
+_Added in 2.5_
 
 A repo can keep its own rules for driving a pull request in a skill: the checks to run before a change, how to regenerate generated files, what its reviews and CI expect. Claude Code reads the same file before it works a pull request in the cloud.
 

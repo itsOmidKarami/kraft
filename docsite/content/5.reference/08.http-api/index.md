@@ -33,10 +33,10 @@ The answer carries:
 |---|---|
 | `status` | `ok` or `degraded`. |
 | `invalid_templates`, `invalid_policy`, `invalid_intake`, `invalid_forges` | The reasons it is degraded. `invalid_intake` is why `intake.yaml` does not load, else `null`; `invalid_forges` is the same for `forges.yaml`. |
-| `forge_tokens` | Each `client: api` account's last token check, by name: `{state, expires_on}`, never who it signs in as. A `state` of `no_token`, `refused`, `forbidden` or `tls`, or an `expires_on` within 7 days, makes `status` `degraded`. _Added in next_ |
+| `forge_tokens` | Each `client: api` account's last token check, by name: `{state, expires_on}`, never who it signs in as. A `state` of `no_token`, `refused`, `forbidden` or `tls`, or an `expires_on` within 7 days, makes `status` `degraded`. _Added in 2.5_ |
 | `storage` | `null` without `storage.worktrees.limit`, else `{state, used_bytes, quota_bytes, limit_bytes, measured_at, too_recent}`. `state` is `ok`, `over_quota` or `held`, and `held` makes `status` `degraded`. `too_recent` counts finished items the last automatic clean-up left because they ended less than `min_age` ago. |
 | `intake_off` | Whether [auto-intake](/concepts/vocabulary#auto-intake) and `intake.yaml`'s schedules are off for it. |
-| `mcp_command_on_path` | Whether Claude can start its user- or plugin-scope `kraft` MCP server on the server's `PATH`, which workers get. It leaves out a repo's own entries, which a launch also counts. `null`: nothing to check. _Added in next_ |
+| `mcp_command_on_path` | Whether Claude can start its user- or plugin-scope `kraft` MCP server on the server's `PATH`, which workers get. It leaves out a repo's own entries, which a launch also counts. `null`: nothing to check. _Added in 2.5_ |
 | `addon_updates` | Each auto-updating add-on's last update, by add-on id: `{outcome, kind}`, without the message, which `kraft admin doctor` shows. Empty when none has run. See [Auto-update](/reference/configuration/addons#auto-update). |
 | `run_dir`, `pid`, `uptime_s`, `bind`, `port` | Which instance this is. |
 | `version` | The version it runs. |
@@ -173,7 +173,7 @@ The pages can change in any release. A script that must keep working calls the [
 | Route | What it does |
 |---|---|
 | [`POST /api/work-items`](/reference/http-api/work-items#post-apiwork-items) | Files a work item, paused unless the body starts it. |
-| [`GET /api/work-items/{id}/forge/...`](/reference/http-api/work-items#forge-reads) | Reads the item's merge request, pipelines, jobs, job logs, merged requests and labels. _Added in next_ |
+| [`GET /api/work-items/{id}/forge/...`](/reference/http-api/work-items#forge-reads) | Reads the item's merge request, pipelines, jobs, job logs, merged requests and labels. _Added in 2.5_ |
 | [`POST /api/work-items/{id}/duplicate`](/reference/http-api/work-items#post-apiwork-itemsidduplicate) | Files a fresh paused item from an existing one. |
 | [`GET /api/work-items`](/reference/http-api/work-items#get-apiwork-items) | Lists the items on the board. |
 | [`GET /api/work-items/{id}`](/reference/http-api/work-items#get-apiwork-itemsid) | Answers one item in full. |
@@ -285,7 +285,7 @@ _Added in 2.4_
 | Route | What it does |
 |---|---|
 | [`GET /api/repos`](/reference/http-api/repos-chains-harnesses-and-server#get-apirepos) | Lists the connected repos and workspaces. |
-| [`GET /api/repos/silent-reviewers`](/reference/http-api/repos-chains-harnesses-and-server#get-apirepossilent-reviewers) | Lists review bots that have never posted in a repo, across three items or more. _Added in next_ |
+| [`GET /api/repos/silent-reviewers`](/reference/http-api/repos-chains-harnesses-and-server#get-apirepossilent-reviewers) | Lists review bots that have never posted in a repo, across three items or more. _Added in 2.5_ |
 | [`POST /api/repos/probe`](/reference/http-api/repos-chains-harnesses-and-server#post-apireposprobe) | Reads a repository and proposes how to connect it. |
 | [`POST /api/repos`](/reference/http-api/repos-chains-harnesses-and-server#post-apirepos) | Connects a repository. |
 | [`PATCH /api/repos?path=`](/reference/http-api/repos-chains-harnesses-and-server#patch-apirepospath) | Changes a connected repo's entry in `repos.yaml`. |
