@@ -102,9 +102,6 @@ heading, never a version number.
 
 ## Ask the user first
 
-- Pushing a `kraft/<branch>-screenshots` branch for a pull request that changes
-  a screen. CONTRIBUTING.md, "A pull request that changes a screen", says what
-  it holds.
 - Any change to `.github/workflows/`, `RELEASING.md` or
   `.claude/skills/release/`, unless the pull request is about them.
 - Changing a label on a pull request you did not open.
