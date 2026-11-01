@@ -542,7 +542,7 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
     waits = st.db.read(lambda c: store.any_unfinished(c, depends_on))
     start_now = autostart and not waits
     duplicates = st.db.read(
-        lambda c: store.open_duplicates(c, body.repo, body.title, body.implements_beads)
+        lambda c: store.open_duplicates(c, repo_entry.path, body.title, body.implements_beads)
     )
     try:
         wid = await executor.intake(
@@ -550,7 +550,7 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
             st.run_dirs,
             title=body.title,
             description=body.description,
-            repo=body.repo,
+            repo=repo_entry.path,
             chain=chain,
             effective_policy=policy,
             # `chain_template_for`'s value, not the resolved template's id

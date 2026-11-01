@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import shutil
 import sys
@@ -310,9 +311,25 @@ async def test_a_hung_lookup_times_out_naming_what_may_wait(
         os.kill(pid, 0)
 
 
-async def test_a_read_token_and_its_basic_form_are_registered(tmp_path):
-    tok = await read(tmp_path, **{"from": "command", "command": f"echo {TOK}"})
-    assert redact.redact(f"{tok} {basic_form(tok, 'pat')}") == "<redacted> <redacted>"
+@pytest.mark.parametrize(
+    ("forge", "user"),
+    [
+        pytest.param("gitlab", "oauth2", id="gitlab-oauth2"),
+        pytest.param("github", "x-access-token", id="github-x-access-token"),
+        pytest.param(None, "oauth2", id="no-forge-keeps-the-kinds-user"),
+    ],
+)
+async def test_a_read_token_and_its_basic_form_are_registered(tmp_path, forge, user):
+    acc = ForgeAccount(
+        forge=forge or "gitlab",
+        client="api",
+        web_url=URL,
+        token=TokenSource(**{"from": "command", "command": f"echo {TOK}"}),
+    )
+    tok = await read_token(acc, repos=[], worktrees=tmp_path / "wt", expose=[])
+    sent = basic_form(tok, "unknown", forge=forge)
+    assert base64.b64decode(sent).decode() == f"{user}:{tok}"
+    assert redact.redact(f"{tok} {sent}") == "<redacted> <redacted>"
 
 
 @pytest.mark.parametrize(
@@ -521,3 +538,87 @@ def test_a_token_file_under_a_closed_directory_never_stops_boot(tmp_path, monkey
     path.write_text("accounts:\n  gh: {token: {from: file, file: /closed/tok}}\nbad: [\n")
     credentials.set_secret_files(path)
     assert credentials.secret_files() == (Path("/closed/tok"),)
+
+
+def test_a_pasted_token_is_0600_in_a_0700_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "home"))
+    secrets = tmp_path / "home" / "secrets"
+    secrets.mkdir(parents=True)
+    secrets.chmod(0o755)
+    path = credentials.write_pasted("corp", TOK)
+    assert path == secrets / "corp" and path.read_text().strip() == TOK
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert secrets.stat().st_mode & 0o777 == 0o700
+    credentials.write_pasted("corp", TOK + "2")
+    assert path.read_text().strip() == TOK + "2"
+    assert [p.name for p in secrets.iterdir()] == ["corp"]  # no temp file left
+
+
+@pytest.mark.parametrize(
+    ("steps", "reads"),
+    [
+        (["", ""], 1),
+        (["", "other-api"], 2),
+        (["", "fresh"], 2),
+        (["", "forget"], 2),
+    ],
+    ids=["cached", "account-edited-misses", "fresh-reads-again", "forgotten-reads-again"],
+)
+async def test_a_token_is_read_once_per_account_until_it_changes(monkeypatch, steps, reads):
+    seen = []
+
+    async def counting(acct, **kw):
+        seen.append(acct)
+        return TOK
+
+    monkeypatch.setattr(credentials, "read_token", counting)
+    acct = account(**{"from": "env", "env": "X_TOK"})
+    for step in steps:
+        who = (
+            acct.model_copy(update={"api_url": "https://api.example"})
+            if step == "other-api"
+            else acct
+        )
+        if step == "forget":
+            credentials.forget_tokens()
+        assert await credentials.token_for("a", who, fresh=step == "fresh") == TOK
+    assert len(seen) == reads
+    credentials.forget_tokens()
+    assert not credentials._LOCKS  # one lock per edit would grow without end
+
+
+async def test_concurrent_cold_reads_do_one_lookup(monkeypatch):
+    import asyncio
+
+    seen = []
+
+    async def slow(acct, **kw):
+        seen.append(1)
+        await asyncio.sleep(0.01)
+        return TOK
+
+    monkeypatch.setattr(credentials, "read_token", slow)
+    await asyncio.gather(
+        *(credentials.token_for("a", account(**{"from": "env", "env": "X_TOK"})) for _ in range(5))
+    )
+    assert len(seen) == 1
+
+
+@pytest.mark.parametrize(
+    ("context", "says"),
+    [
+        (None, "token reader is not running"),
+        (
+            credentials.ReadContext([], Path("wt"), [], repos_unread=True),
+            "repos.yaml does not load",
+        ),
+    ],
+    ids=["file-without-context-refused", "file-repos-unread-refused"],
+)
+async def test_a_file_token_needs_a_readable_context(monkeypatch, context, says):
+    async def ctx():
+        return context
+
+    credentials.set_token_context(None if context is None else ctx)
+    with pytest.raises(NoToken, match=says):
+        await credentials.token_for("a", account(**{"from": "file", "file": "/x/tok"}))

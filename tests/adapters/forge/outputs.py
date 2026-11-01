@@ -262,3 +262,27 @@ GLAB_MERGED_LIST = json.dumps(
         },
     ]
 )
+
+
+#: `GET version`, one body per release the request shapes branch on.
+GITLAB_VERSIONS = {
+    v: json.dumps({"version": v, "revision": "abc"})
+    for v in ("17.10.4", "17.11.0", "19.4.2", "19.5.0")
+}
+
+
+def labels_page(n: int, start: int = 0) -> str:
+    """`GET projects/:id/labels`: `n` labels named `l<start>`..."""
+    return json.dumps(
+        [{"name": f"l{i}", "description": "", "color": "#fff"} for i in range(start, start + n)]
+    )
+
+
+def jobs_page(n: int, start: int = 0) -> str:
+    """`GET projects/:id/pipelines/<id>/jobs`: `n` passing jobs."""
+    return json.dumps(
+        [
+            {"id": 7000 + i, "name": f"j{i}", "stage": "test", "status": "success"}
+            for i in range(start, start + n)
+        ]
+    )

@@ -21,21 +21,21 @@ from .outputs import glab_merged_results, glab_mr
 HEAD = "abc123"
 
 GH_PR = pr_by_branch(pull_request(oid=HEAD))
-GH_REVIEWS = "api repos/{owner}/{repo}/pulls/7/reviews?per_page=100"
-GH_COMMENTS = "api repos/{owner}/{repo}/pulls/7/reviews/51/comments?per_page=100"
+GH_REVIEWS = "api repos/{owner}/{repo}/pulls/7/reviews"
+GH_COMMENTS = "api repos/{owner}/{repo}/pulls/7/reviews/51/comments"
 GH_RUNS = f"api*commits/{HEAD}/check-runs*check_name=review-bot*"
 GH_STATUS = f"api repos/{{owner}}/{{repo}}/commits/{HEAD}/status"
 
 GLAB_MR = json.dumps({"iid": 9, "sha": HEAD})
 GLAB_APPROVALS = "api projects/:id/merge_requests/9/approvals"
-GLAB_DISCUSSIONS = "api projects/:id/merge_requests/9/discussions?per_page=100"
-GLAB_STATUSES = f"api projects/:id/repository/commits/{HEAD}/statuses?per_page=100"
+GLAB_DISCUSSIONS = "api projects/:id/merge_requests/9/discussions"
+GLAB_STATUSES = f"api projects/:id/repository/commits/{HEAD}/statuses"
 
 #: A merged results head pipeline built from HEAD: its jobs report on its merge
 #: commit, not on HEAD.
 MERGED, READ_MERGE_COMMIT, MERGE_COMMIT = glab_merged_results(HEAD)
 GLAB_MERGED_STATUSES = (
-    f"api projects/{MERGED['project_id']}/repository/commits/{MERGED['sha']}/statuses?per_page=100"
+    f"api projects/{MERGED['project_id']}/repository/commits/{MERGED['sha']}/statuses"
 )
 
 
@@ -164,7 +164,7 @@ async def test_a_bot_s_unresolved_feedback_is_actionable(cli, tmp_path, backend,
                     [_gh_review("COMMENTED", id=50), _gh_review("DISMISSED", id=51)]
                 ),
                 GH_COMMENTS: json.dumps([{"path": "calc.py", "line": 3, "body": "stale"}]),
-                "api repos/{owner}/{repo}/pulls/7/reviews/50/comments?per_page=100": "[]",
+                "api repos/{owner}/{repo}/pulls/7/reviews/50/comments": "[]",
             },
             "clean",
         ),

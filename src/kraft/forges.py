@@ -60,26 +60,59 @@ def origin(url: str) -> tuple[str, str, int]:
 
 def project_path(remote: str, account: ForgeAccount) -> str | None:
     """The remote's project path: without `.git`, and without the account's web_url path
-    prefix (`/gitlab`) when the remote is on the account's host."""
+    prefix (`/gitlab`) when the remote is an http(s) URL on the account's host. An SSH path
+    never carries GitLab's relative URL root."""
     path = remote_path(remote)
     if path is None:
         return None
-    if remote_host(remote) == web_host(account.web_url):
+    if remote.strip().lower().startswith(("http://", "https://")) and remote_host(
+        remote
+    ) == web_host(account.web_url):
         prefix = urlsplit(account.web_url).path.strip("/")
         if prefix and path.startswith(prefix + "/"):
             path = path[len(prefix) + 1 :]
     return path or None
 
 
+def repo_project(repo: Path, account: ForgeAccount) -> str | None:
+    """The repo's project on `account`: its push URL as configured (`pushurl`, else `url`;
+    not `insteadOf`-expanded, since the branch Kraft pushes lives there). None when there
+    is no origin. Raises ValueError for an http(s) push URL on another host than the
+    account's, without quoting it (a remote can carry `oauth2:<token>@`). Synchronous."""
+    remote = config.git_read(
+        repo, "config", "--get", "remote.origin.pushurl", expected_failure=True
+    ) or config.git_read(repo, "config", "--get", "remote.origin.url", expected_failure=True)
+    if (
+        remote
+        and remote.lower().startswith(("http://", "https://"))
+        and remote_host(remote) != web_host(account.web_url)
+    ):
+        raise ValueError(f"{repo.name}'s push URL is on a different host than the forge account's")
+    return project_path(remote or "", account)
+
+
+def github_owner_name(project: str, repo_name: str) -> tuple[str, str]:
+    """`project` as GitHub's (owner, name): exactly two segments, else ValueError worded
+    without the remote. The run (`GitHubApi`) and doctor's probe both ask this, so they
+    refuse a repository in the same words."""
+    owner, _, name = project.partition("/")
+    if not owner or not name or "/" in name or {owner, name} & {".", ".."}:
+        raise ValueError(f"{repo_name} has no origin URL Kraft can read a GitHub repository from")
+    return owner, name
+
+
 def env_name_problem(name: str) -> str | None:
     """Why an `env` token source may not name `name`, else None. Worded to follow `token.env`."""
     # Inside: worker.env imports a lot, and forges is imported early.
+    from kraft.adapters.forge.credentials import PREFIXES
     from kraft.worker.env import BASELINE
     from kraft.worker.sandbox import FORWARDED_ENV
 
     # Never quote an arbitrary name: a token pasted here would reach the open /health.
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
         return "must name an environment variable: letters, digits and _"
+    if name.startswith(tuple(PREFIXES)):
+        return "looks like a token, not a variable name"
     if name.startswith("KRAFT_"):
         return "names a KRAFT_ variable, which Kraft sets for itself"
     if name.startswith("GIT_"):
@@ -266,6 +299,21 @@ class ForgeAccount(BaseModel):
 
     def api(self) -> str:
         return self.api_url or default_api_url(self.forge, self.web_url)
+
+
+def validation_text(exc: ValidationError) -> str:
+    """What an account refused for, in words that quote nothing the person sent: an
+    unknown key is named by its parent only (`ForgesFile.load` does the same), since a
+    token pasted as a key would otherwise come back."""
+    out = []
+    for e in exc.errors():
+        loc = e["loc"]
+        if e["type"] == "extra_forbidden":
+            parent = str(loc[-2]) if len(loc) > 1 else "the body"
+            out.append(f"{parent} has a key forges.yaml does not know")
+        else:
+            out.append((f"{loc[-1]}: " if loc else "") + e["msg"].removeprefix("Value error, "))
+    return "; ".join(out)
 
 
 class ForgesFile(config._Model):

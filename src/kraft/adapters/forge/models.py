@@ -4,6 +4,7 @@ every node speaks in.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -38,6 +39,15 @@ Reason = Literal[
 ]
 
 
+_SSO_URL = re.compile(r"https://[!-_a-~]+")
+
+
+def safe_sso_url(url: object) -> str:
+    """`url` when it is an `https://` address of printable ASCII and no backtick (a person
+    follows it as a link; `ssoUrl` in the web and `_sso_url` in the console agree), else ""."""
+    return url if isinstance(url, str) and _SSO_URL.fullmatch(url) else ""
+
+
 class ForgeError(RuntimeError):
     """The forge could not be reached, or answered something unusable.
 
@@ -52,12 +62,16 @@ class ForgeError(RuntimeError):
         reason: Reason | None = None,
         retry_after: float | None = None,
         sso_url: str = "",
+        account: str = "",
+        source: str = "",
     ):
         super().__init__(redact.redact(message))
         self.status = status
         self.reason = reason
         self.retry_after = retry_after
         self.sso_url = sso_url
+        self.account = account
+        self.source = source
 
 
 def reason_for(status: int, headers: Mapping[str, str], message: str = "") -> Reason | None:

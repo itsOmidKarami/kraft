@@ -1,20 +1,45 @@
 import { Fragment, type ReactNode } from "react";
 import { plural } from "../../format";
 import type { KraftEvent } from "../../types";
+import { LinkButton } from "../ui/LinkButton";
 import { targetedWords } from "./TestsLine";
 import type { ItemDetail } from "./useItem";
 
 /** What a stop's `facts.cause` says to do about it, in one place for the desktop's state card and the phone's: a
- *  refused forge credential is fixed on the server's machine (Kraft holds no token), a stranded claim just needs a
+ *  refused forge credential is fixed on the server's machine (the CLI signed in, or for an API account its token
+ *  replaced where its source reads it: `forge_token`), one that only needs single
+ *  sign-on is authorized on the forge's website, a stranded claim just needs a
  *  retry, and any other infrastructure stop, or one naming no cause, says where to look. */
-export type FailedFix = "forge_login" | "retry" | "repo";
+export type FailedFix = "forge_login" | "forge_sso" | "forge_token" | "retry" | "repo";
 
 export const causeOf = (item: Pick<ItemDetail, "stop">): unknown => (item.stop?.facts as Record<string, unknown> | undefined)?.cause;
+
+/** `facts.sso_url` when it is an `https://` address of printable ASCII and no backtick (the server's `safe_sso_url` and
+ *  the console's `_sso_url` agree; it becomes a link, so nothing else gets through). */
+export const SSO_URL = /^https:\/\/[!-_a-~]+$/;
+const ssoUrl = (item: Pick<ItemDetail, "stop">): string | null => {
+  const url = (item.stop?.facts as Record<string, unknown> | undefined)?.sso_url;
+  return typeof url === "string" && SSO_URL.test(url) ? url : null;
+};
+
+/** `facts.account`/`source` when both are non-empty text with no backtick and the source is a kind the hints know
+ *  (the console's `_token_hint` agrees). */
+const tokenHint = (item: Pick<ItemDetail, "stop">): string | null => {
+  const f = (item.stop?.facts ?? {}) as Record<string, unknown>;
+  const { account, source } = f;
+  if (![account, source].every((v) => typeof v === "string" && v !== "" && !v.includes("`"))) return null;
+  const [kind, ...rest] = (source as string).split(" ");
+  const value = rest.join(" ");
+  const hint = Object.hasOwn(FORGE_TOKEN_HINTS, kind) ? FORGE_TOKEN_HINTS[kind] : undefined;
+  if (hint === undefined || (kind === "env" || kind === "file") !== (value !== "")) return null;
+  // A replacer function: a `$&` or `$'` in a path is not a pattern.
+  return hint.replace(/\{(account|value)\}/g, (_m, k: string) => (k === "account" ? (account as string) : value));
+};
 
 /** What the failed card offers besides Retry and Escalate (a forge task's failure carries its cause on a `failed` stop too). */
 export function failedFix(item: Pick<ItemDetail, "stop">): FailedFix {
   const cause = causeOf(item);
-  if (cause === "forge_auth") return "forge_login";
+  if (cause === "forge_auth") return ssoUrl(item) ? "forge_sso" : tokenHint(item) ? "forge_token" : "forge_login";
   if (item.stop?.kind !== "infra" || cause === "stranded") return "retry";
   return "repo";
 }
@@ -23,6 +48,53 @@ export function failedFix(item: Pick<ItemDetail, "stop">): FailedFix {
  *  GitHub's, `glab` GitLab's (`kraft.adapters.forge`); the repo's settings hold no token. Backticks mark the commands. */
 export const FORGE_LOGIN_HINT =
   "Sign the forge CLI in on the server's machine: `gh auth login`, or `glab auth login` for GitLab. If git itself can't authenticate, check its credentials there too (`gh auth setup-git`, your SSH key or credential helper). Then Retry.";
+
+/** The fix for `forge_sso`: the forge accepted the token but wants it authorized for the organization. The address
+ *  comes last, so a long one wraps with nothing after it. */
+export const FORGE_SSO_HINT = "Open this address to authorize the forge CLI's token for single sign-on, then Retry: {sso_url}";
+
+/** `FORGE_SSO_HINT` for an API account's token: the console's `FORGE_ACCOUNT_SSO_HINT`, byte for byte. */
+export const FORGE_ACCOUNT_SSO_HINT = "Open this address to authorize forge account {account}'s token for single sign-on, then Retry: {sso_url}";
+
+/** `FORGE_ACCOUNT_SSO_HINT` for an account whose name holds a backtick and so cannot be printed: neutral, not the CLI's. */
+export const FORGE_ACCOUNT_SSO_UNNAMED_HINT = "Open this address to authorize the forge account's token for single sign-on, then Retry: {sso_url}";
+
+/** The SSO hint for the stop's facts, with `{sso_url}` still in it: the account's when `facts.account` is plain text. */
+const ssoHint = (item: Pick<ItemDetail, "stop">): string => {
+  const account = (item.stop?.facts as Record<string, unknown> | undefined)?.account;
+  if (typeof account !== "string" || account === "") return FORGE_SSO_HINT;
+  return account.includes("`") ? FORGE_ACCOUNT_SSO_UNNAMED_HINT : FORGE_ACCOUNT_SSO_HINT.replace("{account}", () => account);
+};
+
+/** The fix for `forge_token`, by the kind of source (`TokenSource.label()`'s first word): an API account's token could
+ *  not sign in. A variable is read only at server start; a long path comes last. */
+export const FORGE_TOKEN_HINTS: Record<string, string> = {
+  env: "Set `{value}` to a new token where Kraft starts, then restart Kraft. Then Retry.",
+  file: "Put a new token in the file, then check it with `kraft admin forge test {account}`. Then Retry: `{value}`",
+  command: "Fix the token command for {account} in forges.yaml, then check it with `kraft admin forge test {account}`. Then Retry.",
+  "git-credential": "Save a new token in git's credential helper for this host, then check it with `kraft admin forge test {account}`. Then Retry.",
+};
+
+/** The hint under a failed forge stop (`FORGE_LOGIN_HINT`, `FORGE_TOKEN_HINTS` filled or `FORGE_SSO_HINT` with its address), or null for any other. */
+export function forgeHint(item: Pick<ItemDetail, "stop">): string | null {
+  const fix = failedFix(item);
+  if (fix === "forge_token") return tokenHint(item);
+  return fix === "forge_sso" ? ssoHint(item).replace("{sso_url}", ssoUrl(item) ?? "") : fix === "forge_login" ? FORGE_LOGIN_HINT : null;
+}
+
+/** A forge hint as the cards show it: the SSO hint's address is a link (and an account's name stays on one line), any
+ *  other hint is `withCode`. The shapes to match come from the hint constants, so a copy change cannot stop the link. */
+export function hintText(hint: string): ReactNode {
+  const at = hint.lastIndexOf(" https://") + 1; // the address has no space, so it starts after the last one
+  const head = hint.slice(0, at);
+  const url = hint.slice(at);
+  if (!at || !SSO_URL.test(url)) return withCode(hint);
+  const [before, after] = FORGE_ACCOUNT_SSO_HINT.replace("{sso_url}", "").split("{account}");
+  const account = head.startsWith(before) && head.endsWith(after) ? head.slice(before.length, head.length - after.length) : "";
+  const link = <LinkButton inline href={url} target="_blank" rel="noopener noreferrer">{url}</LinkButton>;
+  if (account && !account.includes("`")) return <>{before}<span style={{ whiteSpace: "nowrap" }}>{account}</span>{after}{link}</>;
+  return [FORGE_SSO_HINT, FORGE_ACCOUNT_SSO_UNNAMED_HINT].some((t) => head === t.replace("{sso_url}", "")) ? <>{head}{link}</> : withCode(hint);
+}
 
 /** The words of `text` with each `backticked` run as <code>. */
 export function withCode(text: string): ReactNode {
@@ -67,8 +139,8 @@ export function failureFacts(item: ItemDetail): { rows: [string, ReactNode][]; s
   if (scopes.length) rows.push(["tests failed", <ul key="scopes" className="item-card-list">{scopes.map((s, i) => <li key={i}>{scopeLine(s)}</li>)}</ul>]);
   const why = CAUSE_WORDS[text(facts.cause) ?? ""];
   if (why) rows.push(["why", why]);
-  // The scope's own keys (and the list) are the "tests failed" row above, not facts of their own.
-  const shown = new Set(["cause", "failed_scopes", ...(scopes.length ? ["command", "scope", "exit_code", "area", "setup", "session_id"] : [])]);
+  // `sso_url` is in the hint, as a link. The scope's own keys (and the list) are the "tests failed" row above, not facts of their own.
+  const shown = new Set(["cause", "sso_url", "account", "source", "failed_scopes", ...(scopes.length ? ["command", "scope", "exit_code", "area", "setup", "session_id"] : [])]);
   for (const [k, v] of Object.entries(facts)) if (!shown.has(k) && text(v)) rows.push([k, text(v)!]);
   return { rows, structured: scopes.length > 0 };
 }

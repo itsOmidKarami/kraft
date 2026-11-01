@@ -403,3 +403,46 @@ export interface RepoRow {
   merge_rank: number;
   state: string;
 }
+
+/** `GET /api/forges` token source (`routes/forges.py` `_row`): where the token is read, never its value. */
+export interface ForgeTokenSource {
+  from: "git-credential" | "command" | "env" | "file";
+  kind: "pat" | "oauth" | "unknown";
+  env?: string;
+  file?: string;
+  command?: string;
+}
+
+/** `probe.Probe.to_json`. */
+export interface ForgeProbe {
+  account: string;
+  checked_at: string;
+  state: "ok" | "no_token" | "refused" | "forbidden" | "tls" | "unreachable";
+  detail: string;
+  login: string | null;
+  scopes: string[] | null;
+  /** `YYYY-MM-DD`. */
+  expires_on: string | null;
+  warnings: string[];
+  /** `""` when there is none, not null. */
+  sso_url: string;
+  projects: Record<string, { project: string; visible: boolean; detail: string; sso_url?: string }>;
+}
+
+export interface ForgeAccountRow {
+  forge: "github" | "gitlab";
+  client: "cli" | "api";
+  web_url: string;
+  api_url: string;
+  default_for_host: boolean;
+  ca_file: string | null;
+  token: ForgeTokenSource | null;
+  probe: ForgeProbe | null;
+}
+
+/** `POST /api/forges/{name}/test`. */
+export interface ForgeTestAnswer {
+  ok: boolean;
+  output: string;
+  probe?: ForgeProbe;
+}

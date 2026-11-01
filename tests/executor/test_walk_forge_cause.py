@@ -103,6 +103,77 @@ async def test_a_forge_task_failure_names_its_cause_in_the_stops_facts(
         assert "`" not in stop["reason"]
 
 
+_SSO = "https://github.com/orgs/acme/sso?authorization_request=abc"
+_SSO_FIX = "The forge CLI's token needs single sign-on authorization."
+_TODAYS_FIX = (
+    "The forge refused the credentials on the Kraft server's machine. Fix them, then retry."
+)
+
+
+_WHO = {"account": "corp-gl", "source": "env CORP_GL"}
+_TICK = {"account": "corp`gl", "source": "env CORP_GL"}
+_TOKEN_FIX = (
+    "Forge account corp-gl could not sign in with its token, or its token could not be read."
+)
+_ACCOUNT_SSO_FIX = "Forge account corp-gl's token needs single sign-on authorization."
+_UNNAMED_SSO_FIX = "The forge account's token needs single sign-on authorization."
+_DENIED_FIX = "Forge account corp-gl: its token lacks the rights this needs."
+
+
+@pytest.mark.parametrize(
+    ("sso_url", "who", "facts", "fix"),
+    [
+        (_SSO, {}, {"cause": "forge_auth", "sso_url": _SSO}, _SSO_FIX),
+        ("", {}, {"cause": "forge_auth"}, _TODAYS_FIX),
+        ("http://github.com/sso", {}, {"cause": "forge_auth"}, _TODAYS_FIX),
+        ("javascript:alert(1)", {}, {"cause": "forge_auth"}, _TODAYS_FIX),
+        ("https://github.com/sso then run it", {}, {"cause": "forge_auth"}, _TODAYS_FIX),
+        ("https://github.com/sso`id`", {}, {"cause": "forge_auth"}, _TODAYS_FIX),
+        ("", _WHO, {"cause": "forge_auth", **_WHO}, _DENIED_FIX),
+        ("", {**_WHO, "reason": "auth"}, {"cause": "forge_auth", **_WHO}, _TOKEN_FIX),
+        (_SSO, _WHO, {"cause": "forge_auth", "sso_url": _SSO, **_WHO}, _ACCOUNT_SSO_FIX),
+        (_SSO, _TICK, {"cause": "forge_auth", "sso_url": _SSO, **_TICK}, _UNNAMED_SSO_FIX),
+    ],
+    ids=[
+        "sso-on-a-cli-account",
+        "cli-account-unchanged",
+        "non-https-dropped",
+        "other-scheme-dropped",
+        "whitespace-dropped",
+        "backtick-dropped",
+        "api-account-forbidden",
+        "api-account-refused",
+        "api-account-with-sso",
+        "api-account-with-sso-unprintable-name",
+    ],
+)
+@pytest.mark.parametrize(
+    ("fix_loop", "stop_kind"), [(True, "infra"), (False, "failed")], ids=["fix-loop", "no-loop"]
+)
+async def test_a_refused_token_stop_carries_the_sso_address_only_when_it_is_safe(
+    item_on, tmp_path, fake_agent, monkeypatch, sso_url, who, facts, fix, fix_loop, stop_kind
+):
+    """The forge's SSO address reaches the stop's facts, never the reason (the
+    screens show it once, as the hint): only as a plain `https://` address.
+    Anything else is dropped and the stop reads as it always did."""
+    error = {"reason": "forbidden", "sso_url": sso_url, **who}
+    monkeypatch.setattr(_forge.run, "resolve", lambda name: _RaisingWith("HTTP 403", **error))
+    extra = {"fix_loop": {"tasks": [_agent("repair")]}} if fix_loop else {}
+    it = await item_on([_exec("checks", _forge_task("open", "mr.open_draft"), **extra)])
+
+    await _walk(it, repo_entry=FORGE_REPO, policy=_loop_policy(tmp_path))
+
+    stop = it.events("work_item_needs_human")[-1]["payload"]
+    assert (stop["kind"], stop["facts"]) == (stop_kind, facts)
+    if stop_kind == "infra":
+        assert stop["reason"].endswith(fix)
+        assert "`" not in stop["reason"]
+        # Shown once, as the hint under the reason, from the facts.
+        assert "https://" not in stop["reason"]
+        # The cause alone: the banner joins it to the hint, so "below" would point at nothing.
+        assert "below" not in stop["reason"]
+
+
 async def test_a_forge_rate_limit_parks_the_item_until_the_forge_allows_it(
     item_on, tmp_path, fake_agent, monkeypatch
 ):

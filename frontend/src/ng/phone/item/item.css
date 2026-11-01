@@ -24,6 +24,7 @@
 .ph-statecard-title { margin: 0; font-size: var(--fs-body); font-weight: 600; overflow-wrap: anywhere; }
 .ph-statecard-where { margin: 0; font-size: var(--fs-label); color: var(--text-muted); overflow-wrap: anywhere; }
 .ph-statecard-text { margin: 0; font-size: var(--fs-meta); line-height: 1.55; color: var(--text-sub); overflow-wrap: anywhere; }
+.ph-statecard-fix { overflow-wrap: anywhere; }
 .ph-statecard-fix code { font: var(--fs-meta) ui-monospace, Menlo, monospace; }
 
 .ph-ticks-flush { padding-left: 0; }

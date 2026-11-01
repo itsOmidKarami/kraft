@@ -1,7 +1,8 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { Scenario, Variant } from "./mocks/fixtures";
 import { withCapLimit, withFixRoundOutcome, withOneOffPending, withProducer, withReviewer, withScopes, withStop, withTestResult } from "./mocks/fixtures";
 import { app, editorsRoute, item, type AppOpts } from "./kit";
+import { NAMED_MEANWHILE } from "./mocks/ngForges";
 
 /**
  * Every screen the icon audit visits: an area × state, with the steps that reach it on the app's mocked API.
@@ -70,6 +71,24 @@ const appPhone = (url: string | ((S: Scenario) => string), o: AppOpts = {}) => (
 const appReview = (data: Variant = "default", tail = "") => (p: Page) =>
   app(p, item("needs-gate", `/review${tail}`), { data, ready: (pg) => pg.locator(".review-page").waitFor({ timeout: 8000 }) });
 const appSettings = (url: string): Pick<State, "app"> => ({ app: (p) => app(p, url) });
+
+/** Settings > Forge accounts: the page, then the Edit dialog of `name`. */
+const FORGES = "/settings/forge-accounts";
+const forgeEdit = (name: string, then?: (p: Page) => Promise<unknown>) => async (p: Page) => {
+  await app(p, FORGES, { ready: (pg) => pg.getByRole("button", { name: `Edit ${name}`, exact: true }).waitFor() });
+  await p.getByRole("button", { name: `Edit ${name}`, exact: true }).click();
+  await p.getByRole("dialog").waitFor();
+  if (then) await then(p);
+  await p.waitForTimeout(500);
+};
+/** The phone's Forge accounts: the row of `name` tapped open to its menu. */
+const forgeRow = (name: string, then?: (p: Page) => Promise<unknown>) => async (p: Page) => {
+  await appPhone(FORGES, { ready: (pg) => pg.getByRole("button", { name: new RegExp(`^${name}`) }).waitFor() })(p);
+  await p.getByRole("button", { name: new RegExp(`^${name}`) }).click();
+  await p.waitForTimeout(500);
+  if (then) await then(p);
+  await p.waitForTimeout(500);
+};
 
 const FILE = '[data-file="kraft/progress.py"]';
 const num = (p: Page, side: string, n: number) => p.locator(FILE).getByRole("button", { name: `Pick ${side} line ${n}`, exact: true }).first();
@@ -155,6 +174,35 @@ export const STATES: State[] = [
   { area: "settings", state: "notifications", ...appSettings("/settings/notifications") },
   { area: "settings", state: "access", ...appSettings("/settings/access") },
   { area: "settings", state: "appearance", ...appSettings("/settings/appearance") },
+  // The fixture's account with a very long name, address and file path is in this table: at 1280 it must fit its card
+  // whole (every column visible, nothing scrolled), so a cell that grows to its longest string fails this state.
+  { area: "settings", state: "forge-accounts", app: async (p) => {
+    await app(p, FORGES, { ready: (pg) => pg.getByRole("table", { name: "Forge accounts" }).waitFor() });
+    const fits = await p.locator(".set-wk-scroll").evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
+    expect(fits, "the Forge accounts table fits its card at 1280").toBe(true);
+    await expect(p.getByRole("columnheader", { name: "Used by" })).toBeInViewport();
+    // A fixed layout can fit the card and still squeeze one cell into a column of letters (a td ~250px tall):
+    // no cell may be taller than 4x the shortest row (a one-line row is ~34px; the State cell's badge and two wrapped lines stay under 4x).
+    const rows = await p.getByRole("table", { name: "Forge accounts" }).locator("tbody tr").evaluateAll((trs) => trs.map((tr) => ({ row: tr.getBoundingClientRect().height, cells: [...tr.children].map((td) => td.getBoundingClientRect().height) })));
+    const shortest = Math.min(...rows.map((r) => r.row));
+    expect(Math.max(...rows.flatMap((r) => r.cells)), `no Forge accounts cell taller than 4x the shortest row (${shortest}px)`).toBeLessThanOrEqual(4 * shortest);
+  } },
+  { area: "settings", state: "forge-accounts-empty", app: (p) => app(p, FORGES, { mock: { forges: "empty" }, ready: (pg) => pg.getByText(/No forge accounts/).waitFor() }) },
+  { area: "settings", state: "forge-accounts-unloadable", app: (p) => app(p, FORGES, { mock: { forges: "unloadable" }, ready: (pg) => pg.getByRole("alert").waitFor() }) },
+  { area: "settings", state: "forge-accounts-add-paste", app: async (p) => { await app(p, FORGES, { ready: (pg) => pg.getByRole("button", { name: "Add account" }).first().waitFor() }); await p.getByRole("button", { name: "Add account" }).first().click(); await p.getByRole("radio", { name: "api" }).click(); await p.getByRole("radio", { name: "paste" }).click(); await p.waitForTimeout(500); } },
+  { area: "settings", state: "forge-accounts-edit-cli", app: forgeEdit("github-cli") },
+  { area: "settings", state: "forge-accounts-edit-file", app: forgeEdit("corp-gl") },
+  { area: "settings", state: "forge-accounts-edit-env", app: forgeEdit("old-gl") },
+  { area: "settings", state: "forge-accounts-edit-command", app: forgeEdit("vault-gl") },
+  { area: "settings", state: "forge-accounts-edit-named", app: forgeEdit("shared-gl") },
+  // Remove is not a dialog action but a toast: the row goes, Undo is offered for 5 s, then the DELETE the mock refuses (409) brings the row back with the server's words.
+  { area: "settings", state: "forge-accounts-remove-refused", app: forgeEdit(NAMED_MEANWHILE, async (p) => {
+    await p.getByRole("button", { name: "Remove account" }).click();
+    await p.getByRole("button", { name: `Edit ${NAMED_MEANWHILE}`, exact: true }).waitFor({ state: "detached" });
+    await p.getByRole("alert").filter({ hasText: "is named by" }).waitFor({ timeout: 10_000 }); // the undo window is real time: the clock is only fixed
+    await p.getByRole("button", { name: `Edit ${NAMED_MEANWHILE}`, exact: true }).waitFor();
+  }) },
+  { area: "settings", state: "forge-accounts-test-result", app: forgeEdit("corp-gl", async (p) => { await p.getByRole("button", { name: "Test", exact: true }).click(); await p.getByLabel("Test output").waitFor(); }) },
   { area: "settings", state: "board-and-code", ...appSettings("/settings/board-and-code") },
   { area: "settings", state: "about", ...appSettings("/settings/about") },
   // Item header (H1–H6): the main button's menu, ⋮, the four anchored cards, the diff line
@@ -227,6 +275,9 @@ export const STATES: State[] = [
   { area: "phone", state: "item-gate", viewport: "phone", app: appPhone(item("needs-gate")) },
   { area: "phone", state: "item-capped", viewport: "phone", app: appPhone(item("capped")) },
   { area: "phone", state: "item-question", viewport: "phone", app: appPhone(item("needs-you")) },
+  { area: "phone", state: "item-failed-forge-sso", viewport: "phone", app: appPhone(item("failed"), { tweak: withStop("infra", { cause: "forge_auth", sso_url: "https://github.com/orgs/acme/sso?authorization_request=L3BhdGgtdG8tYXV0aG9yaXplLXRoZS10b2tlbg" }, { reason: "The forge CLI's token needs single sign-on authorization." }) }) },
+  { area: "phone", state: "item-failed-forge-sso-account", viewport: "phone", app: appPhone(item("failed"), { tweak: withStop("infra", { cause: "forge_auth", account: "corp-gh", source: "env CORP_GH", sso_url: "https://github.com/orgs/acme/sso?authorization_request=L3BhdGgtdG8tYXV0aG9yaXplLXRoZS10b2tlbg" }, { reason: "Forge account corp-gh's token needs single sign-on authorization." }) }) },
+  { area: "phone", state: "item-failed-forge-token", viewport: "phone", app: appPhone(item("failed"), { tweak: withStop("infra", { cause: "forge_auth", account: "corp-gl", source: "env CORP_GL" }) }) },
   { area: "phone", state: "node", viewport: "phone", app: appPhone(item("running", "/nodes/verification")) },
   { area: "phone", state: "node-earlier-pass", viewport: "phone", app: appPhone(item("running", "/nodes/verification?pass=1"), { tweak: withScopes, ready: (pg) => pg.getByRole("button", { name: /^pass 1 ·/, pressed: true }).waitFor({ timeout: 8000 }) }) },
   { area: "phone", state: "scope", viewport: "phone", app: appPhone(item("running", `/nodes/verification?sel=verification.test.unit_tests&${new URLSearchParams({ scope: ":just test-unit" })}`), { tweak: withScopes, ready: (pg) => pg.getByRole("heading", { level: 1, name: "just test-unit" }).waitFor({ timeout: 8000 }) }) },
@@ -240,6 +291,14 @@ export const STATES: State[] = [
   { area: "phone", state: "chains", viewport: "phone", app: appPhone("/templates/chains") },
   { area: "phone", state: "policy", viewport: "phone", app: appPhone("/settings/policy") },
   { area: "phone", state: "policy-offline", viewport: "phone", app: appPhone("/settings/policy", { mock: { boardState: "offline" }, ready: (pg) => pg.getByRole("button", { name: "Retry now" }).waitFor() }) },
+  { area: "phone", state: "forge-accounts", viewport: "phone", app: appPhone(FORGES, { ready: (pg) => pg.getByRole("button", { name: /^corp-gl/ }).waitFor() }) },
+  { area: "phone", state: "forge-accounts-empty", viewport: "phone", app: appPhone(FORGES, { mock: { forges: "empty" }, ready: (pg) => pg.getByText(/No forge accounts/).waitFor() }) },
+  { area: "phone", state: "forge-accounts-unloadable", viewport: "phone", app: appPhone(FORGES, { mock: { forges: "unloadable" }, ready: (pg) => pg.getByRole("alert").waitFor() }) },
+  { area: "phone", state: "forge-account-menu-sso", viewport: "phone", app: forgeRow("acme-gh") },
+  { area: "phone", state: "forge-account-paste", viewport: "phone", app: forgeRow("corp-gl", async (p) => { await p.getByRole("button", { name: "Paste a new token" }).click(); }) },
+  { area: "phone", state: "forge-account-menu-command", viewport: "phone", app: forgeRow("vault-gl") },
+  { area: "phone", state: "forge-account-remove-confirm", viewport: "phone", app: forgeRow("corp-gl", async (p) => { await p.getByRole("button", { name: "Remove" }).click(); await p.getByText("Remove corp-gl?").waitFor(); }) },
+  { area: "phone", state: "forge-account-named", viewport: "phone", app: forgeRow("shared-gl") },
   { area: "phone", state: "sign-in", viewport: "phone", app: (p) => app(p, "/", { mock: { locked: true }, noShell: true, ready: (pg) => pg.getByLabel(/^Password/).waitFor() }) },
 
   // Follow-ups: what a seed adds, review ranges, the revealed sidebar, the phone
@@ -249,6 +308,9 @@ export const STATES: State[] = [
   { area: "follow-ups", state: "recent-committed", ...at("Recent: the fix committed a change", item("running"), { tweak: withFixRoundOutcome(true) }) },
   { area: "follow-ups", state: "gate-tests-fail", ...at("gate pane: tests ✗ 1 of 3 scopes", item("needs-gate", "?sel=final_review"), { tweak: withTestResult(3, 1) }) },
   { area: "follow-ups", state: "failed-forge-auth", ...at("failed card, forge_auth", item("failed"), { tweak: withStop("infra", { cause: "forge_auth" }) }) },
+  { area: "follow-ups", state: "failed-forge-sso", ...at("failed card: forge_auth with an sso_url, a link last in the hint", item("failed"), { tweak: withStop("infra", { cause: "forge_auth", sso_url: "https://github.com/orgs/acme/sso?authorization_request=L3BhdGgtdG8tYXV0aG9yaXplLXRoZS10b2tlbg" }, { reason: "The forge CLI's token needs single sign-on authorization." }) }) },
+  { area: "follow-ups", state: "failed-forge-sso-account", ...at("failed card: forge_auth with an sso_url on an API account, which the hint names", item("failed"), { tweak: withStop("infra", { cause: "forge_auth", account: "corp-gh", source: "env CORP_GH", sso_url: "https://github.com/orgs/acme/sso?authorization_request=L3BhdGgtdG8tYXV0aG9yaXplLXRoZS10b2tlbg" }, { reason: "Forge account corp-gh's token needs single sign-on authorization." }) }) },
+  { area: "follow-ups", state: "failed-forge-token", ...at("failed card: forge_auth naming an API account and where its token is read", item("failed"), { tweak: withStop("infra", { cause: "forge_auth", account: "corp-gl", source: "env CORP_GL" }) }) },
   { area: "follow-ups", state: "capped-limit", ...at("capped item whose stop names its limit: header, banner, spent line", item("capped"), { tweak: withCapLimit }) },
   { area: "follow-ups", state: "capped-limit-peek", ...at("…and its board peek", "/", { tweak: withCapLimit, ready: async (pg) => { await pg.getByRole("button", { name: /^Fix flaky retry test/ }).first().click(); await pg.waitForTimeout(700); } }) },
 

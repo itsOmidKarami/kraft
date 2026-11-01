@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
@@ -17,9 +18,12 @@ from kraft import builtins as _builtins
 from kraft import config, events, inplace, item_paths, reviewed_head, store, waits
 from kraft import forges as forges_mod
 from kraft.adapters import beads
-from kraft.adapters.forge import ci, git, settle
+from kraft.adapters.forge import ci, git, git_auth, settle
 from kraft.adapters.forge import mr as mr_ops
+from kraft.adapters.forge.api_account import ApiAccount
 from kraft.adapters.forge.gh import GhCli
+from kraft.adapters.forge.github_api import GitHubApi
+from kraft.adapters.forge.gitlab_api import GitLabApi
 from kraft.adapters.forge.glab import GlabCli
 from kraft.adapters.forge.models import (
     MR,
@@ -112,10 +116,8 @@ def resolve(name: str) -> Forge:
         case "fake":
             return _DEV_FAKE
         case "github-api" | "gitlab-api":
-            # Backstop: run_task and item_forge refuse an API account first.
             raise ForgeError(
-                f"the {name} backend is not in this release; set client: cli on its "
-                "forge account in forges.yaml, then a person's kraft item retry"
+                f"the {name} backend is built from its account (run.api_forge), never by name"
             )
         case _:
             raise ForgeError(f"unknown forge backend {name!r}; known: gh, glab, fake")
@@ -131,8 +133,16 @@ _RATE_LIMIT_WAIT_S = 60
 #: reaches the merge-request half of a chain. It opens nothing anywhere.
 _FORGE_CLI = {"gitlab": "glab", "github": "gh", "fake": "fake"}
 
-#: `client: api` accounts pin these; no release ships them yet (see `refuse_api_account`).
+#: `client: api` accounts pin these (see `api_account_for`).
 API_BACKENDS = {"github": "github-api", "gitlab": "gitlab-api"}
+
+
+def api_forge(name: str, account, *, http=None) -> Forge:
+    """The backend for forge account `name` on `client: api`, built from the account and
+    never by name (`http` is the tests' transport)."""
+    cls = GitHubApi if account.forge == "github" else GitLabApi
+    return cls(name, account, http=http)
+
 
 #: A pinned backend -> the forge it talks to.
 _BACKEND_FORGE = {
@@ -200,6 +210,31 @@ def _member_forges(item, backend: str, repo_forge: str | None) -> dict:
     return found
 
 
+def _mount_forges(pins, item, backend, repo_forge, forges, forges_error) -> tuple[Forge, dict]:
+    """The root's forge and each member's by mount, every one from its own pin: an API
+    root never lends its account (or its host) to a member pinned to the CLI, nor the CLI
+    to a member pinned to an account. One API instance per account."""
+    apis: dict = {}
+
+    def pinned_api(pin) -> Forge:
+        name, account = _pinned_api(pin, forges, forges_error)
+        if name not in apis:
+            apis[name] = api_forge(name, account)
+        return apis[name]
+
+    root_api = (pins.get("") or {}).get("backend") in API_BACKENDS.values()
+    live = pinned_api(pins[""]) if root_api else resolve(backend_for(backend, repo_forge))
+    members = _member_forges(item, backend, repo_forge)
+    for mount, pin in pins.items():
+        if not mount:
+            continue
+        if pin["backend"] in API_BACKENDS.values():
+            members[mount] = pinned_api(pin)
+        elif root_api and mount not in members:
+            members[mount] = resolve(pin["backend"])
+    return live, members
+
+
 async def _pin_forge_accounts(
     db, work_item_id, item, backend, repo_forge, repo_entry, repositories, forges, forges_error
 ) -> None:
@@ -246,7 +281,7 @@ async def _pin_forge_accounts(
                 )
             raise ForgeError(
                 f"forges.yaml does not load ({forges_error}); "
-                "fix it, then a person's kraft item retry"
+                "fix it, then a person's `kraft item retry`"
             )
         named = entry.forge_account
         if pin is not None and pin["account"] is not None:
@@ -262,7 +297,7 @@ async def _pin_forge_accounts(
                     now, then = ("api", "cli") if acct.client == "api" else ("cli", "api")
                     raise ForgeError(
                         f"forge account {pin['account']} now says client: {now}, was "
-                        f"client: {then}; a person's kraft item retry re-pins to what "
+                        f"client: {then}; a person's `kraft item retry` re-pins to what "
                         "is configured now"
                     )
                 raise ForgeError(
@@ -311,51 +346,77 @@ async def _pin_forge_accounts(
         await db.write(write)
 
 
-async def refuse_api_account(db, work_item_id, mount, entry, forges, forges_error=None) -> None:
-    """Stop (ForgeError) before any CLI runs for a mount on a `client: api`
-    account: no API backend ships yet, and falling back to gh/glab would be a
-    silent switch. A pin decides (a null-account CLI pin never stops); with no
-    pin, the live account for the mount's origin does, and a forges.yaml that
-    did not load (`forges` None, `forges_error` set) stops it as the walk does."""
+def _pinned_api(pin, forges, forges_error=None) -> tuple[str, forges_mod.ForgeAccount]:
+    """The account an API pin names, as forges.yaml says now; stops when it is gone or the
+    file does not load, never falling back to the CLI."""
+    name = pin["account"]
+    if forges is None:
+        raise ForgeError(
+            f"forges.yaml does not load ({forges_error or 'unreadable'}); "
+            "fix it, then a person's `kraft item retry`"
+        )
+    if name not in forges.accounts:
+        raise ForgeError(
+            f"forge account {name} was removed; a person's `kraft item retry` "
+            "re-pins to what is configured now"
+        )
+    acct = forges.accounts[name]
+    # api_forge picks its class from the account, so a changed account must stop here.
+    was = _BACKEND_FORGE[pin["backend"]]
+    if acct.forge != was:
+        raise ForgeError(
+            f"forge account {name} now says forge: {acct.forge}, was {was}; "
+            "a person's `kraft item retry` re-pins to what is configured now"
+        )
+    if acct.client != "api":
+        raise ForgeError(
+            f"forge account {name} now says client: cli, was client: api; "
+            "a person's `kraft item retry` re-pins to what is configured now"
+        )
+    return name, acct
+
+
+async def api_account_for(
+    db, work_item_id, mount, entry, forges, forges_error=None
+) -> tuple[str, forges_mod.ForgeAccount] | None:
+    """The `(name, account)` a mount talks to over an API, else None for the CLI. A pin
+    decides (a null-account CLI pin is the CLI); with no pin, the live account for the
+    mount's origin does, and a forges.yaml that did not load (`forges` None, `forges_error`
+    set) stops it as the walk does."""
     pin = db.read(lambda c: store.forge_pins(c, work_item_id)).get(mount)
     if pin is not None:
-        if pin["backend"] in API_BACKENDS.values():
-            _refuse_text(pin["account"], pin["backend"])
-        return
+        if pin["backend"] not in API_BACKENDS.values():
+            return None
+        return _pinned_api(pin, forges, forges_error)
     if entry is not None and forges is None and forges_error:
         raise ForgeError(
-            f"forges.yaml does not load ({forges_error}); fix it, then a person's kraft item retry"
+            f"forges.yaml does not load ({forges_error}); "
+            "fix it, then a person's `kraft item retry`"
         )
     if entry is None or forges is None:
-        return
+        return None
     if not any(a.client == "api" for a in forges.accounts.values()):
-        return  # no account could refuse: spare the git call
+        return None  # no account could be an API one: spare the git call
     origin = await asyncio.to_thread(
         config.git_read, Path(entry.path), "remote", "get-url", "origin", expected_failure=True
     )
     found = forges_mod.account_for(
         entry, forges, forges_mod.remote_host(origin) if origin else None
     )
-    if found and found[1].client == "api":
-        _refuse_text(found[0], API_BACKENDS[found[1].forge])
-
-
-def _refuse_text(account, backend) -> None:
-    raise ForgeError(
-        f"forge account {account} says client: api, and the {backend} backend is not in "
-        "this release; set client: cli on it in forges.yaml, then a person's kraft item retry"
-    )
+    if not found or found[1].client != "api":
+        return None
+    return found
 
 
 async def item_forge(
     db, row, entry, forges, forges_error: str | None = None, mount: str | None = None
 ) -> Forge:
-    """The CLI forge for an item's root (or workspace member `mount`) outside
-    the walk, after `refuse_api_account`. PR 5 turns this into `resolve(entry)`."""
+    """The forge for an item's root (or workspace member `mount`) outside the walk: the
+    API backend of the account its pin names, else the CLI."""
     repo_forge = entry.forge if entry else None
     if not mount:
-        await refuse_api_account(db, row["id"], "", entry, forges, forges_error)
-        return resolve(backend_for("auto", repo_forge))
+        api = await api_account_for(db, row["id"], "", entry, forges, forges_error)
+        return api_forge(*api) if api else resolve(backend_for("auto", repo_forge))
     try:
         by_id = {r.id: r for r in load_repos(config_dir() / "repos.yaml") if r.id}
     except ConfigError:
@@ -363,11 +424,12 @@ async def item_forge(
     rid = dict(_builtins.item_members(row)).get(mount)
     own = by_id.get(rid) if rid else None
     if own is not None and own.forge:
-        await refuse_api_account(db, row["id"], mount, own, forges, forges_error)
+        api = await api_account_for(db, row["id"], mount, own, forges, forges_error)
     else:  # no forge of its own: it uses the root's, so the root's account decides too
-        await refuse_api_account(db, row["id"], mount, None, None)
-        await refuse_api_account(db, row["id"], "", entry, forges, forges_error)
-    return member_forge(row, repo_forge, mount)
+        api = await api_account_for(
+            db, row["id"], mount, None, forges, forges_error
+        ) or await api_account_for(db, row["id"], "", entry, forges, forges_error)
+    return api_forge(*api) if api else member_forge(row, repo_forge, mount)
 
 
 def member_forge(item, repo_forge: str | None, mount: str) -> Forge:
@@ -2293,11 +2355,14 @@ async def run_task(
                         c, work_item_id, "", None, backend_for(backend, repo_forge)
                     )
                 )
-        for pin in db.read(lambda c: store.forge_pins(c, work_item_id)).values():
-            if pin["backend"] in API_BACKENDS.values():
-                _refuse_text(pin["account"], pin["backend"])
-        live_forge = resolve(backend_for(backend, repo_forge))
-        member_forges = _member_forges(item, backend, repo_forge)
+        live_forge, member_forges = _mount_forges(
+            db.read(lambda c: store.forge_pins(c, work_item_id)),
+            item,
+            backend,
+            repo_forge,
+            forges,
+            forges_error,
+        )
     except ForgeError as exc:
         # No forge this repo can reach: nothing was launched, so this is a
         # configuration stop naming its cause, never a failed task a fix loop
@@ -2518,6 +2583,7 @@ async def run_task(
             "reason": exc.reason,
             "retry_after": exc.retry_after,
             "sso_url": exc.sso_url,
+            **({"account": exc.account, "source": exc.source} if exc.account else {}),
         }
         if exc.reason == "rate_limited":
             # The forge says when to come back: stop the item until then, as a
@@ -2684,7 +2750,15 @@ async def _point_at_merged_members(
                 "its pointer is left where it was"
             )
         default = await _builtins.base_branch(db, work_item_id, sub_path, member=True)
-        await git.run_git(sub_path, ["git", "fetch", "origin", default])
+        auth = await git_auth.auth_for(sub_path)
+        try:
+            await git.run_git(
+                sub_path,
+                ["git", "fetch", "origin", default],
+                env=git_auth.git_env(os.environ, auth),
+            )
+        except ForgeError as exc:
+            raise (auth.stamp(exc) if auth else exc) from None
         git.assert_no_operation(sub_path)  # a checkout stores a planted autostash
         git.assert_lfsconfig_unmoved(sub_path, f"check {sub_path.name}'s merge out")
         await git.run_git(sub_path, ["git", "checkout", landed.merged_sha])
@@ -2808,13 +2882,27 @@ async def _bump_pointer_only_root(
     bumped = await _point_at_merged_members(forge, db, root_repo, branch, work_item_id)
     if not bumped:
         return "every member pointer already names its merged revision\n", False
+    # The item's pinned account, as every other push: never the live one, and a refusal here
+    # (an unreadable token, a push URL off its origin) is a stop, not a reason to try a merge
+    # request.
+    auth = (
+        await git_auth.auth_for_account(root_repo, forge.name, forge.account, push=True)
+        if isinstance(forge, ApiAccount)
+        else None
+    )
     try:
-        await git.run_git(root_repo, ["git", "push", "origin", f"HEAD:{base}"])
+        env = git_auth.git_env(os.environ, auth)
+        # --no-verify: hooks are pinned off, and a credentialed push runs none.
+        await git.run_git(
+            root_repo, ["git", "push", "--no-verify", "origin", f"HEAD:{base}"], env=env
+        )
         return (
             f"bumped {', '.join(bumped)} directly on {base}, no root merge request\n",
             False,
         )
     except ForgeError as exc:
+        if auth and auth.stops(str(exc)):
+            raise auth.stamp(exc) from None  # a refused token is not sent a second time
         refused = str(exc).strip().splitlines()[-1] if str(exc).strip() else "refused"
     await forge.push(repo=root_repo, branch=branch)
     mr = await forge.open_mr(

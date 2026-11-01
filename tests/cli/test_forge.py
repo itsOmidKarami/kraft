@@ -2,23 +2,29 @@
 
 from __future__ import annotations
 
+import io
 import json
+import sys
 
 import pytest
 
 from kraft import cli, client
+from kraft.client import transport
+from kraft.forges import ForgesFile
 
 ACCT = {"forge": "gitlab", "web_url": "https://code.corp.example", "default_for_host": True}
 
 
 def _run(capsys, *argv):
+    said = ""
     try:
         cli.main(["admin", "forge", *argv])
         code = 0
     except SystemExit as exc:
         code = exc.code
+        said = code if isinstance(code, str) else ""  # what the interpreter would print
     out = capsys.readouterr()
-    return (code if isinstance(code, int) else 1), out.out + out.err
+    return (code if isinstance(code, int) else 1), out.out + out.err + said
 
 
 def _stub(monkeypatch, name, answer):
@@ -48,7 +54,13 @@ def test_add_sends_the_flags_and_says_what_it_added(monkeypatch, capsys):
     assert seen == [
         (
             ("corp", "gitlab", "https://code.corp.example"),
-            {"api_url": None, "default_for_host": True},
+            {
+                "api_url": None,
+                "default_for_host": True,
+                "client": "cli",
+                "ca_file": None,
+                "token": None,
+            },
         )
     ]
 
@@ -86,3 +98,380 @@ def test_test_prints_the_output_and_exits_1_on_failure(monkeypatch, capsys, ok, 
     _stub(monkeypatch, "test_forge", {"ok": ok, "output": "signed in?\n"})
     got, out = _run(capsys, "test", "corp")
     assert got == code and out.splitlines() == ["signed in?", last]
+
+
+TOK = "ghp_FAKEPASTED0123456789"  # a made-up string
+URL = "https://code.corp.example"
+ADD = ["add", "corp", "--forge", "gitlab", "--web-url", URL]
+
+
+def _both(capsys, monkeypatch, flags):
+    """`add` and `edit` with the same flags: what each sent, and how each ended."""
+    sent = {
+        "add": _stub(monkeypatch, "add_forge", ACCT),
+        "edit": _stub(monkeypatch, "edit_forge", ACCT),
+    }
+    _stub(monkeypatch, "list_forges", {"accounts": {"corp": {"client": "cli", "ca_file": None}}})
+    ended = {"add": _run(capsys, *ADD, *flags)}
+    ended["edit"] = _run(capsys, "edit", "corp", *flags)
+    return sent, ended
+
+
+@pytest.mark.parametrize(
+    ("flags", "source"),
+    [
+        (["--token-from", "env:CORP_GL", "--kind", "pat"], {"from": "env", "env": "CORP_GL"}),
+        (["--token-from", "file:~/t"], {"from": "file", "file": "~/t"}),
+        (["--token-from", "git-credential"], {"from": "git-credential"}),
+        (["--client", "cli", "--token-from", "env:CORP_GL"], None),
+        (["--token-from", "env:" + TOK], None),
+        (["--token-from", TOK], None),
+    ],
+    ids=[
+        "env:CORP_GL",
+        "file:~/t",
+        "git-credential",
+        "client-cli-with-token-from-errors",
+        "token-pasted-as-a-variable-name",
+        "token-pasted-as-a-source",
+    ],
+)
+def test_add_and_edit_send_the_source(capsys, monkeypatch, flags, source):
+    sent, ended = _both(capsys, monkeypatch, flags)
+    kind = flags[flags.index("--kind") + 1] if "--kind" in flags else "unknown"
+    for verb, (code, out) in ended.items():
+        assert TOK not in out  # an error never quotes what was refused
+        if source is None:
+            assert code == 1 and "error:" in out and not sent[verb]
+            continue
+        assert code == 0
+        token = {**source, "kind": kind}
+        if verb == "add":
+            assert sent[verb] == [
+                (
+                    ("corp", "gitlab", URL),
+                    {
+                        "api_url": None,
+                        "default_for_host": False,
+                        "client": "api",
+                        "ca_file": None,
+                        "token": token,
+                    },
+                )
+            ]
+        else:
+            assert sent[verb] == [(("corp", {"client": "api", "token": token}), {})]
+
+
+@pytest.mark.parametrize(
+    ("verb", "put_fails", "remove_fails", "tty"),
+    [
+        ("add", False, False, False),
+        ("add", True, False, False),
+        ("add", True, True, False),
+        ("edit", False, False, False),
+        ("edit", True, False, False),
+        ("add", False, False, True),
+    ],
+    ids=[
+        "add-pasted",
+        "add-put-fails-removes-account",
+        "add-put-and-remove-fail-keeps-the-first-error",
+        "edit-pasted",
+        "edit-put-fails-puts-the-old-fields-back",
+        "terminal-is-not-echoed",
+    ],
+)
+def test_a_token_is_read_from_stdin_never_argv(
+    capsys, monkeypatch, verb, put_fails, remove_fails, tty
+):
+    monkeypatch.setattr(sys, "stdin", io.StringIO(TOK + "\n"))
+    if tty:
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+        # StringIO would give the token away through read(): only getpass may supply it.
+        monkeypatch.setattr(sys.stdin, "read", lambda: "")
+        monkeypatch.setattr("getpass.getpass", lambda prompt="": TOK)
+    sent = _stub(monkeypatch, "add_forge" if verb == "add" else "edit_forge", ACCT)
+    _stub(monkeypatch, "list_forges", {"accounts": {"corp": {"client": "cli", "ca_file": None}}})
+    removed = _stub(monkeypatch, "remove_forge", None)
+    pasted = []
+
+    async def paste(*args):
+        pasted.append(args)
+        if put_fails:
+            raise transport.ClientError("kraft: too short", kind=transport.Failure.SERVER_ERROR)
+        return ACCT
+
+    async def cannot_remove(*args):
+        raise transport.ClientError("kraft: gone", kind=transport.Failure.UNREACHABLE)
+
+    monkeypatch.setattr(client, "set_forge_token", paste)
+    if remove_fails:
+        monkeypatch.setattr(client, "remove_forge", cannot_remove)
+    argv = [*(ADD if verb == "add" else ["edit", "corp"]), "--token-stdin", "--kind", "pat"]
+    code, out = _run(capsys, *argv)
+    # The token reaches `set_forge_token` and nothing else: not argv, the payload, or stdout.
+    assert TOK not in " ".join(argv) and TOK not in out and TOK not in repr(sent)
+    assert pasted == [("corp", TOK, "pat")]
+    assert sent[0][1].get("token") is None
+    if verb == "edit":  # a failed paste puts a cli account back, never left as api
+        assert [a[0][1] for a in sent] == [{"client": "api"}] + (
+            [{"client": "cli"}] if put_fails else []
+        )
+    assert code == (1 if put_fails else 0) and ("too short" in out) is put_fails
+    assert removed == (
+        [(("corp",), {})] if verb == "add" and put_fails and not remove_fails else []
+    )
+
+
+def test_edit_kind_without_a_token_flag_is_refused_not_ignored(capsys, monkeypatch):
+    sent = _stub(monkeypatch, "edit_forge", ACCT)
+    code, out = _run(capsys, "edit", "corp", "--api-url", URL + "/api/v4", "--kind", "pat")
+    assert code == 1 and "--kind" in out and "--token-from" in out and not sent
+
+
+@pytest.fixture
+def disk(tmp_path, monkeypatch):
+    """forges.yaml in a config dir of its own, and a server that reloads it."""
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("KRAFT_WORK_ITEM_ID", raising=False)
+    calls = {"reload": 0, "answer": {}, "sees": True}
+
+    async def health():
+        return {}
+
+    async def reload():
+        calls["reload"] += 1
+        if calls.get("boom") and calls["reload"] == 1:
+            raise transport.ClientError("kraft: down", kind=transport.Failure.UNREACHABLE)
+        return calls["answer"]
+
+    async def listing():
+        # What the server reads: this file, or (sees False) another config dir's.
+        if not calls["sees"]:
+            return {"accounts": {}}
+        accounts = ForgesFile.load(tmp_path / "forges.yaml").accounts
+        return {
+            "accounts": {
+                n: {"token": a.token and {"from": a.token.from_}} for n, a in accounts.items()
+            }
+        }
+
+    monkeypatch.setattr(client, "health", health)
+    monkeypatch.setattr(client, "reload_templates", reload)
+    monkeypatch.setattr(client, "list_forges", listing)
+    return tmp_path / "forges.yaml", calls
+
+
+def _other_instance():
+    async def health():
+        raise transport.ClientError("other", kind=transport.Failure.OTHER_INSTANCE)
+
+    return health
+
+
+@pytest.mark.parametrize(
+    ("where", "code", "text", "written"),
+    [
+        ("same-run-dir", 0, "added corp", True),
+        ("other-run-dir", 1, "written on the server's machine", False),
+        ("in-a-worker", 1, "a worker does not set it", False),
+        ("reload-refused-restores", 1, "refused forges.yaml", False),
+        ("another-refusal-is-not-ours", 0, "added corp", True),
+        ("reload-raises-restores", 1, "kraft: down", False),
+        ("server-reads-another-dir", 1, "does not read", False),
+    ],
+    ids=[
+        "same-run-dir",
+        "other-run-dir",
+        "in-a-worker",
+        "reload-refused-restores",
+        "another-refusal-is-not-ours",
+        "reload-raises-restores",
+        "server-reads-another-dir",
+    ],
+)
+def test_a_command_source_is_written_on_the_servers_machine(
+    capsys, monkeypatch, disk, where, code, text, written
+):
+    path, calls = disk
+    path.write_text("# mine\naccounts: {}\n")
+    if where == "other-run-dir":
+        monkeypatch.setattr(client, "health", _other_instance())
+    if where == "in-a-worker":
+        monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "w1")
+    if where == "reload-refused-restores":
+        calls["answer"] = {"refused_forges": "token: nope"}
+    if where == "another-refusal-is-not-ours":
+        calls["answer"] = {"invalid_templates": ["x"], "refused_policy": None}
+    if where == "reload-raises-restores":
+        calls["boom"] = True
+    if where == "server-reads-another-dir":
+        calls["sees"] = False
+    http = _stub(monkeypatch, "add_forge", ACCT)  # a command source never goes over HTTP
+    got, out = _run(capsys, *ADD, "--token-from", "command:sh -c 'echo x'")
+    assert got == code and text in out and not http
+    if written:
+        token = ForgesFile.load(path).accounts["corp"].token
+        assert token.from_ == "command" and token.command == "sh -c 'echo x'"
+        assert calls["reload"] == 1
+    else:
+        assert path.read_text() == "# mine\naccounts: {}\n"
+        assert calls["reload"] == (0 if where in ("other-run-dir", "in-a-worker") else 2)
+
+
+@pytest.mark.parametrize(
+    ("argv", "stdin", "token", "client_", "secret"),
+    [
+        (["--token-from", "env:CORP_GL"], None, {"from": "env", "env": "CORP_GL"}, "api", False),
+        (["--token-from", "file:/t/x"], None, {"from": "file", "file": "/t/x"}, "api", False),
+        (["--client", "cli"], None, None, "cli", False),
+        (["--token-stdin", "--kind", "pat"], TOK + "\n", {"from": "file"}, "api", True),
+        (["--token-stdin"], "short\n", "shorter than", "api", False),
+    ],
+    ids=["env", "file", "client-cli", "token-stdin", "token-stdin-too-short-changes-nothing"],
+)
+def test_edit_moves_a_command_account_off_it_on_disk(
+    capsys, monkeypatch, disk, tmp_path, argv, stdin, token, client_, secret
+):
+    # The API refuses to replace a command, so the CLI writes forges.yaml, as it does to set one.
+    path, calls = disk
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "home"))
+    start = ForgesFile.model_validate(
+        {
+            "accounts": {
+                "corp": {
+                    **ACCT,
+                    "default_for_host": True,
+                    "client": "api",
+                    "ca_file": None,
+                    "token": {"from": "command", "command": "echo x"},
+                }
+            }
+        }
+    )
+    start.save(path)
+    before = path.read_text()
+    if stdin:
+        monkeypatch.setattr(sys, "stdin", io.StringIO(stdin))
+    http = [_stub(monkeypatch, n, ACCT) for n in ("edit_forge", "set_forge_token")]
+    got, out = _run(capsys, "edit", "corp", *argv)
+    assert TOK not in out and not any(http)  # never over HTTP
+    if isinstance(token, str):
+        assert got == 1 and token in out and path.read_text() == before
+        assert not (tmp_path / "home" / "secrets").exists()
+        return
+    assert got == 0 and out.strip() == "edited corp" and calls["reload"] == 1
+    account = ForgesFile.load(path).accounts["corp"]
+    assert account.client == client_
+    assert (
+        account.token
+        and {
+            k: v
+            for k, v in account.token.model_dump(by_alias=True, exclude_none=True).items()
+            if k in (token or {})
+        }
+    ) == token
+    if secret:
+        file = tmp_path / "home" / "secrets" / "corp"
+        assert file.read_text() == TOK + "\n" and file.stat().st_mode & 0o777 == 0o600
+        assert account.token.file == str(file) and account.token.kind == "pat"
+
+
+def _command_start(path, **others):
+    ForgesFile.model_validate(
+        {
+            "accounts": {
+                "corp": {
+                    **ACCT,
+                    "client": "api",
+                    "token": {"from": "command", "command": "echo x"},
+                },
+                **others,
+            }
+        }
+    ).save(path)
+
+
+@pytest.mark.parametrize(
+    ("argv", "body"),
+    [
+        (["--api-url", "https://api.corp.example"], {"api_url": "https://api.corp.example"}),
+        (["--ca-file", "/ca.pem"], {"ca_file": "/ca.pem"}),
+        (["--client", "api"], {"client": "api"}),
+    ],
+    ids=["api-url", "ca-file", "client-api"],
+)
+def test_edit_keeps_a_command_accounts_address_and_ca_on_http(
+    capsys, monkeypatch, disk, argv, body
+):
+    path, calls = disk
+    _command_start(path)
+    before = path.read_text()
+    monkeypatch.setattr(client, "list_forges", _listing_command)
+    seen = _stub(monkeypatch, "edit_forge", ACCT)
+    got, out = _run(capsys, "edit", "corp", *argv)
+    assert got == 0 and out.strip() == "edited corp"
+    assert seen == [(("corp", body), {})] and path.read_text() == before and not calls["reload"]
+
+
+async def _listing_command():
+    return {"accounts": {"corp": {"token": {"from": "command"}}}}
+
+
+@pytest.mark.parametrize(
+    ("argv", "stdin", "others", "answer", "said"),
+    [
+        (
+            ["--token-from", "env:SHARED_TOK"],
+            None,
+            {"token": {"from": "env", "env": "SHARED_TOK"}},
+            {},
+            "already read by another account",
+        ),
+        (
+            ["--token-from", "file:/t/shared"],
+            None,
+            {"token": {"from": "file", "file": "/t/shared"}},
+            {},
+            "already read by another account",
+        ),
+        (
+            ["--token-stdin"],
+            TOK + "\n",
+            {},
+            {"refused_forges": "token: nope"},
+            "refused forges.yaml",
+        ),
+    ],
+    ids=["shared-env", "shared-file", "refused-reload-restores-secret"],
+)
+def test_edit_off_a_command_on_disk_is_refused_and_leaves_no_trace(
+    capsys, monkeypatch, disk, tmp_path, argv, stdin, others, answer, said
+):
+    path, calls = disk
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "home"))
+    _command_start(path, other={**ACCT, "web_url": "https://o.example", "client": "api", **others})
+    before = path.read_text()
+    calls["answer"] = answer
+    if stdin:
+        monkeypatch.setattr(sys, "stdin", io.StringIO(stdin))
+    got, out = _run(capsys, "edit", "corp", *argv)
+    assert got == 1 and said in out and TOK not in out
+    assert path.read_text() == before
+    assert not (tmp_path / "home" / "secrets" / "corp").exists()
+
+
+def test_edit_writes_the_resolved_secret_path_for_a_symlinked_home(
+    capsys, monkeypatch, disk, tmp_path
+):
+    path, _ = disk
+    (tmp_path / "real").mkdir()
+    (tmp_path / "link").symlink_to(tmp_path / "real")
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "link"))
+    _command_start(path)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(TOK + "\n"))
+    got, _ = _run(capsys, "edit", "corp", "--token-stdin")
+    assert got == 0
+    file = ForgesFile.load(path).accounts["corp"].token.file
+    assert file == str(tmp_path / "real" / "secrets" / "corp")

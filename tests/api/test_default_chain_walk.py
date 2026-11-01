@@ -46,7 +46,9 @@ def _on_a_fake_forge(monkeypatch, **states) -> forge.FakeForge:
     fake = forge.FakeForge(**states)
     monkeypatch.setattr(forge.run, "_DEV_FAKE", fake)
     reviewed = {"setup_command": "", "forge": "fake", "automated_review": {"check": "review"}}
-    monkeypatch.setattr(deps, "_connected", lambda repos, path: entry_of(reviewed))
+    monkeypatch.setattr(
+        deps, "_connected", lambda repos, path: entry_of({**reviewed, "path": path})
+    )
     return fake
 
 

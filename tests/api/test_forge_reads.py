@@ -225,44 +225,92 @@ def test_the_job_log_keeps_what_a_carriage_return_left(
     assert client.get(url, params={"lines": lines}).json() == expected
 
 
+def _add_member(client, wid, repo, mount) -> None:
+    client.portal.call(
+        client.app.state.db.write,
+        lambda c: store.repos.add_repo(
+            c,
+            work_item_id=wid,
+            repo_path=str(repo),
+            role="submodule",
+            merge_rank=0,
+            submodule_path=mount,
+        ),
+    )
+
+
+def test_an_api_account_item_reads_nothing_through_the_cli_when_forges_yaml_is_broken(
+    client, repo, monkeypatch
+):
+    # the broken file may hold the API host default: reading it as no accounts is the switch
+    wid = _item(client, repo, monkeypatch, _spy())
+    _on_api_account(client, repo, monkeypatch, wid, pinned=False)
+    monkeypatch.setattr(client.app.state, "forges", None)
+    monkeypatch.setattr(client.app.state, "invalid_forges", "bad yaml", raising=False)
+    got = client.get(f"/api/work-items/{wid}/forge/pipelines")
+    assert got.status_code == 502
+    assert "forges.yaml does not load (bad yaml)" in got.json()["detail"]
+
+
 @pytest.mark.parametrize(
-    "pinned, mount, unreadable, want",
+    "forge, mount, pinned",
     [
-        (False, None, False, "forge account corp-gl says client: api"),
-        (True, None, False, "forge account corp-gl says client: api"),
-        (False, "libs/core", False, "forge account corp-gl says client: api"),
-        # the broken file may hold the API host default: reading it as no accounts is the switch
-        (False, None, True, "forges.yaml does not load (bad yaml)"),
+        ("gitlab", None, True),
+        ("gitlab", "libs/core", True),
+        ("github", None, False),
+        ("github", None, True),
+        ("github", "libs/core", False),
     ],
     ids=[
-        "before-any-pin",
-        "pinned",
-        "member-with-no-forge-of-its-own",
-        "unreadable-file-before-any-pin",
+        "gitlab-root",
+        "gitlab-member",
+        "github-before-any-pin",
+        "github-pinned",
+        "github-member-with-no-forge-of-its-own",
     ],
 )
-def test_an_api_account_item_reads_nothing_through_the_cli(
-    client, repo, monkeypatch, pinned, mount, unreadable, want
+def test_an_api_account_item_reads_through_its_account(
+    client, repo, monkeypatch, forge, mount, pinned
 ):
-    wid = _item(client, repo, monkeypatch, _spy())
-    _on_api_account(client, repo, monkeypatch, wid, pinned=pinned)
-    if unreadable:
-        monkeypatch.setattr(client.app.state, "forges", None)
-        monkeypatch.setattr(client.app.state, "invalid_forges", "bad yaml", raising=False)
+    fake, built = _spy(), []
+    wid = _item(client, repo, monkeypatch, fake)
+    _on_api_account(client, repo, monkeypatch, wid, pinned=pinned, forge=forge)
+    monkeypatch.setattr(
+        "kraft.adapters.forge.run.api_forge", lambda name, account: built.append(name) or fake
+    )
     if mount:
-        client.portal.call(
-            client.app.state.db.write,
-            lambda c: store.repos.add_repo(
-                c,
-                work_item_id=wid,
-                repo_path=str(repo),
-                role="submodule",
-                merge_rank=0,
-                submodule_path=mount,
-            ),
-        )
+        _add_member(client, wid, repo, mount)
     got = client.get(
         f"/api/work-items/{wid}/forge/pipelines", params={"repo": mount} if mount else None
     )
+    assert got.status_code == 200, got.text
+    assert built == [{"github": "corp-gh", "gitlab": "corp-gl"}[forge]]
+    assert fake.calls[0][0] == "pipelines"
+
+
+@pytest.mark.parametrize(
+    "pin_forge, edit, want",
+    [
+        ("gitlab", {"forge": "github"}, "now says forge: github, was gitlab"),
+        ("github", {"client": "cli"}, "now says client: cli, was client: api"),
+        ("gitlab", {"client": "cli"}, "now says client: cli, was client: api"),
+        ("github", {"forge": "gitlab"}, "now says forge: gitlab, was github"),
+    ],
+    ids=[
+        "gitlab-pin-account-now-github",
+        "github-pin-account-now-cli",
+        "gitlab-pin-account-now-cli",
+        "github-pin-account-now-gitlab",
+    ],
+)
+def test_a_pin_is_not_read_through_an_account_edited_under_it(
+    client, repo, monkeypatch, pin_forge, edit, want
+):
+    wid = _item(client, repo, monkeypatch, _spy())
+    _on_api_account(client, repo, monkeypatch, wid, forge=pin_forge)
+    accounts = client.app.state.forges.accounts
+    name = next(iter(accounts))
+    accounts[name] = accounts[name].model_copy(update=edit)
+    got = client.get(f"/api/work-items/{wid}/forge/pipelines")
     assert got.status_code == 502
     assert want in got.json()["detail"]

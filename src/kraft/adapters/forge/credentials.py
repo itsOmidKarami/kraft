@@ -17,7 +17,7 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -25,6 +25,7 @@ from urllib.parse import urlsplit
 from kraft import redact
 from kraft.config import ConfigError, RepoEntry
 from kraft.forges import ForgeAccount, ForgesFile, env_name_problem
+from kraft.paths import kraft_home
 
 CREDENTIAL_TIMEOUT_S = 10.0
 
@@ -48,6 +49,12 @@ PREFIXES = {"ghp_": "pat", "github_pat_": "pat", "gho_": "oauth", "ghu_": "oauth
 # Taken from the server's environment at startup, so a worker's env cannot supply it.
 _TAKEN: dict[str, str] = {}
 
+
+# Read once per (name, account as running): an edited source, web_url or api_url misses.
+_TOKENS: dict[tuple[str, str], str] = {}
+_LOCKS: dict[tuple[str, str], asyncio.Lock] = {}
+_CONTEXT: Callable[[], Awaitable[ReadContext]] | None = None
+REPOS_UNREAD = "repos.yaml does not load, so a file token cannot be checked; fix repos.yaml"
 
 # Token files, kept from every sandbox's view (set at load and on reload).
 _SECRET_FILES: tuple[Path, ...] = ()
@@ -75,8 +82,14 @@ def prefix_warning(token: str, kind: str) -> str | None:
     return None
 
 
-def basic_form(token: str, kind: str) -> str:
-    return base64.b64encode(f"{KINDS[kind].git_username}:{token}".encode()).decode()
+#: A forge whose git login is not the kind's `git_username`: GitHub documents this one for
+#: installation tokens and GITHUB_TOKEN, and ignores the name for a PAT.
+GIT_USERNAME = {"github": "x-access-token"}
+
+
+def basic_form(token: str, kind: str, *, forge: str | None = None) -> str:
+    user = GIT_USERNAME.get(forge or "", KINDS[kind].git_username)
+    return base64.b64encode(f"{user}:{token}".encode()).decode()
 
 
 def _kill(proc: subprocess.Popen) -> None:
@@ -319,8 +332,112 @@ async def read_token(
     if len(token) < redact.MIN_LEN:
         raise NoToken(f"the token is shorter than {redact.MIN_LEN} characters")
     redact.register(token)
-    redact.register(basic_form(token, source.kind))
+    redact.register(basic_form(token, source.kind, forge=account.forge))
     return token
+
+
+@dataclass(frozen=True)
+class ReadContext:
+    """What a `file` source is checked against."""
+
+    repos: Sequence[RepoEntry]
+    worktrees: Path
+    expose: Sequence[Path]
+    repos_unread: bool = False
+
+
+def set_token_context(fn: Callable[[], Awaitable[ReadContext]] | None) -> None:
+    """The server installs its reader of the repos and roots a file token is checked against."""
+    global _CONTEXT
+    _CONTEXT = fn
+
+
+async def token_for(name: str, account: ForgeAccount, *, fresh: bool = False) -> str:
+    """The account's token: cached, or read from its source (always, when `fresh`)."""
+    key = (name, account.model_dump_json())  # pydantic models do not hash
+    async with _LOCKS.setdefault(key, asyncio.Lock()):  # concurrent cold reads do one lookup
+        if not fresh and key in _TOKENS:
+            return _TOKENS[key]
+        repos, worktrees, expose = (), Path(), ()
+        if account.source().from_ == "file":
+            if _CONTEXT is None:
+                raise NoToken("the server's token reader is not running")
+            ctx = await _CONTEXT()
+            if ctx.repos_unread:
+                raise NoToken(REPOS_UNREAD)
+            repos, worktrees, expose = ctx.repos, ctx.worktrees, ctx.expose
+        _TOKENS[key] = await read_token(account, repos=repos, worktrees=worktrees, expose=expose)
+        return _TOKENS[key]
+
+
+def forget_tokens() -> None:
+    """Drop every cached token, and the read locks nobody holds, so an account edited over
+    and over does not leave one lock per edit."""
+    _TOKENS.clear()
+    for key in [k for k, lock in _LOCKS.items() if not lock.locked()]:
+        del _LOCKS[key]
+
+
+ACCOUNT_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
+
+
+def clean_paste(value: str) -> str:
+    """A pasted token as it is kept, or a ValueError saying why not (never quoting it)."""
+    value = value.strip()
+    if any(c.isspace() or not c.isprintable() for c in value):
+        raise ValueError("the token holds whitespace or a control character")
+    if len(value) < redact.MIN_LEN:
+        raise ValueError(f"the token is shorter than {redact.MIN_LEN} characters")
+    return value
+
+
+def real_path(spec: str) -> str:
+    return os.path.realpath(os.path.expandvars(os.path.expanduser(spec)))
+
+
+def _same(a, b) -> bool:
+    """The same file, even where the disk ignores case (realpath keeps the case typed);
+    paths that do not exist yet compare as text."""
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return str(a) == str(b)
+
+
+def shares_secret(updated: ForgesFile, name: str) -> bool:
+    """Whether `name` reads a secret another account already reads, or another name's
+    pasted file."""
+    token = updated.accounts[name].token
+    if token is None:
+        return False
+    others = [a.token for n, a in updated.accounts.items() if n != name and a.token]
+    if token.env and any(o.env == token.env for o in others):
+        return True
+    if token.file:
+        real = real_path(token.file)
+        secrets = kraft_home().resolve() / "secrets"
+        under = any(_same(str(p), secrets) for p in (Path(real), *Path(real).parents))
+        return any(o.file and _same(real_path(o.file), real) for o in others) or (
+            under and not _same(real, secrets / name)
+        )
+    return False
+
+
+def write_pasted(name: str, value: str) -> Path:
+    """A pasted token, in a file only the server's user can open: its directory 0700
+    (an existing one too), the file 0600 from its first byte, replaced whole."""
+    folder = kraft_home() / "secrets"
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    folder.chmod(0o700)
+    fd, temp = tempfile.mkstemp(dir=folder, prefix=".pasted-")  # mkstemp opens 0600
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(value + "\n")
+        os.replace(temp, folder / name)
+    except BaseException:
+        Path(temp).unlink(missing_ok=True)
+        raise
+    return folder / name
 
 
 def take_env(names: Iterable[str]) -> list[str]:

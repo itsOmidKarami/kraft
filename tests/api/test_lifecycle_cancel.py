@@ -348,8 +348,10 @@ def test_reopen_mr_with_a_forge_failure_answers_502_and_the_item_stays_stopped(
 
 
 def test_cancel_closes_nothing_through_the_cli_on_an_api_account(client, repo, monkeypatch):
-    wid = _stopped_item_with_mr(client, repo, _fake_forge_cancel(monkeypatch))
+    fake = _fake_forge_cancel(monkeypatch)
+    wid = _stopped_item_with_mr(client, repo, fake)
     _on_api_account(client, repo, monkeypatch, wid)
+    monkeypatch.setattr("kraft.adapters.forge.run.api_forge", lambda name, account: fake)
 
     async def still_open(st, row):  # past the preview's own refusal, to the close itself
         return "open"
@@ -358,17 +360,17 @@ def test_cancel_closes_nothing_through_the_cli_on_an_api_account(client, repo, m
     r = client.post(f"/api/work-items/{wid}/cancel", json={"reason": "no", "close_mr": True})
 
     assert r.status_code == 200, r.text
-    close = r.json()["close_mr"]
-    assert close["ok"] is False
-    assert "forge account corp-gl says client: api" in close["error"]
+    assert r.json()["close_mr"]["ok"] is True
+    assert fake.closed == [1]
 
 
 def test_reopen_runs_nothing_through_the_cli_on_an_api_account(client, repo, monkeypatch):
-    wid = _stopped_item_with_closed_mr(client, repo, _fake_forge_cancel(monkeypatch))
+    fake = _fake_forge_cancel(monkeypatch)
+    wid = _stopped_item_with_closed_mr(client, repo, fake)
     _on_api_account(client, repo, monkeypatch, wid)
+    monkeypatch.setattr("kraft.adapters.forge.run.api_forge", lambda name, account: fake)
 
     r = client.post(f"/api/work-items/{wid}/reopen-mr")
 
-    assert r.status_code == 502, r.text
-    assert "forge account corp-gl says client: api" in r.json()["detail"]
-    assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
+    assert r.status_code == 200, r.text
+    assert fake.reopened == [1]

@@ -12,6 +12,7 @@ import pytest
 from support.harness import make_repo, own_files
 
 from kraft.adapters import forge
+from kraft.forges import ForgeAccount
 
 from . import api_outputs, outputs
 from .nodes import back_half
@@ -40,11 +41,28 @@ def test_resolve_returns_each_named_backend(name, cls):
     assert isinstance(forge.resolve(name), cls)
 
 
-def test_resolve_rejects_an_unknown_backend():
+@pytest.mark.parametrize(
+    "name, says",
+    [
+        ("bitbucket", "bitbucket"),
+        ("gitlab-api", "the gitlab-api backend is built from its account"),
+        ("github-api", "the github-api backend is built from its account"),
+    ],
+    ids=["unknown", "gitlab-api-is-built-from-its-account", "github-api-is-built-from-its-account"],
+)
+def test_resolve_rejects_what_a_name_cannot_build(name, says):
     """Named, never probed: an unusable backend must fail loudly rather than
     silently taking a different path than the one configured."""
-    with pytest.raises(forge.ForgeError, match="bitbucket"):
-        forge.resolve("bitbucket")
+    with pytest.raises(forge.ForgeError, match=says):
+        forge.resolve(name)
+
+
+@pytest.mark.parametrize(
+    "kind, cls", [("github", forge.GitHubApi), ("gitlab", forge.GitLabApi)], ids=["gh", "gl"]
+)
+def test_api_forge_builds_the_backend_of_the_accounts_forge(kind, cls):
+    acct = ForgeAccount(forge=kind, web_url="https://h.example", client="api")
+    assert type(forge.api_forge("a", acct)) is cls
 
 
 @pytest.mark.parametrize(

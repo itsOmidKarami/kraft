@@ -70,6 +70,7 @@ PROBES: dict[str, dict[str, str]] = {
     "GET /api/drafts/{area}/{key}": {"area": "chains", "key": "default"},
     "GET /api/drafts/{area}/{key}/fragment": {"area": "chains", "key": "default", "path": "spec"},
     "GET /api/editors": {},
+    "GET /api/forges": {},
     "GET /api/harnesses": {},
     "GET /api/harnesses/profiles": {},
     "GET /api/harnesses/providers": {},
@@ -119,6 +120,7 @@ PROBES: dict[str, dict[str, str]] = {
 SHALLOW: dict[str, str] = {
     "GET /api/editors": "`available` lists the editors this machine has",
     "GET /api/harnesses": "`capabilities` holds what each provider supports, by name",
+    "GET /api/forges": "`accounts` is keyed by account name",
     "GET /api/harnesses/providers": "`valid` and `invalid` are keyed by provider id",
     "GET /api/intake": "`repo_pickups` is keyed by repository path",
     "GET /api/templates/chains": "a chain's `uses` is keyed by node id",
@@ -135,7 +137,6 @@ SKIPS: dict[str, str] = {
     "GET /api/intake/checks": "empty on a fresh server, where no intake check has run",
     "GET /api/repos/library": "the SPA never calls it (`kraft repo library`)",
     "GET /api/repos/silent-reviewers": "the SPA never calls it (`kraft admin doctor`)",
-    "GET /api/forges": "the SPA never calls it (`kraft admin forge list`)",
     "GET /api/templates/chains/{tid}/resolved": "the SPA never calls it",
     "GET /api/templates/library/{ref}": "the SPA never calls it: it reads the whole library",
     "GET /api/templates/lint": "the SPA never calls it (`kraft admin templates lint`)",

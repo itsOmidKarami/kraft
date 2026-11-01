@@ -127,7 +127,8 @@ kraft admin worker list / kraft admin worker remove NAME  # remove is refused wh
 kraft admin worker serve --server URL --token T | --stdio  # on the machine; --stdio is what the server's ssh runs
 kraft admin worker check [--server URL --token T]  # on the machine: git, agent CLIs, credentials, sandbox runtime
 kraft admin worker local --run-dir D [--install ID]  # run by the server, not by hand: the local worker (one per installed kraft) that starts every local session
-kraft admin forge add NAME --forge github|gitlab --web-url URL [--api-url URL] [--default-for-host]  # name a forge account (`client: cli`); needs a running server
+kraft admin forge add NAME --forge github|gitlab --web-url URL [--api-url URL] [--default-for-host] [--client cli|api] [--ca-file P] [--token-from git-credential|env:N|file:P|command:C | --token-stdin] [--kind pat|oauth|unknown]  # name a forge account; a token flag implies `--client api`; `command:` is written on the server's machine; needs a running server
+kraft admin forge edit NAME [--api-url URL] [--ca-file P] [--client cli|api] [--token-from S | --token-stdin] [--kind K]  # only the flags given change
 kraft admin forge list / kraft admin forge remove NAME   # remove is refused (409) while a repo's forge_account names it
 kraft admin forge test NAME                  # cli account: the server runs `gh|glab auth status`; api account: probes the token; exit 1 on failure
 kraft admin init [--repo] / kraft admin mcp  # register Kraft with an agent

@@ -9,12 +9,14 @@
   "dependencies": {
     "docus": "5.13.0",
     "better-sqlite3": "^12.11.1",
-    "nuxt": "^4.6.2"
+    "nuxt": "^4.6.3"
   },
   "overrides": {
     "fontless": {
       "esbuild": "^0.28.1"
     },
-    "simple-git": "^4.0.1"
+    "simple-git": "^4.0.1",
+    "glob": "^14.0.2",
+    "minimatch": "^11.0.1"
   }
 }

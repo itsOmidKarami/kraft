@@ -4,7 +4,7 @@ import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DiffFile, ItemAction, WorkerSession } from "../../types";
-import { BROKEN_BASE_TEXT } from "./cause";
+import { BROKEN_BASE_TEXT, FORGE_ACCOUNT_SSO_HINT, FORGE_ACCOUNT_SSO_UNNAMED_HINT, FORGE_SSO_HINT, hintText } from "./cause";
 import { ComesAfterCard, PausedCard, StateCard, useFolded } from "./StateCard";
 import { acceptWrites, detail, stubFetch, type Call } from "./testkit";
 
@@ -202,6 +202,78 @@ describe("StateCard", () => {
     unmount();
     show({ display_status: "failed", stop: stop("failed", { facts: { cause: "forge_unreachable" } }) });
     expect(within(screen.getByRole("region", { name: "Failed" })).queryByRole("button", { name: /Check the repo settings/ })).toBeNull();
+  });
+
+  it.each([
+    ["env", "env CORP_GL", "Set CORP_GL to a new token where Kraft starts, then restart Kraft. Then Retry."],
+    ["file, its path last", "file /etc/kraft/gl.token", "Put a new token in the file, then check it with kraft admin forge test corp-gl. Then Retry: /etc/kraft/gl.token"],
+    ["command", "command", "Fix the token command for corp-gl in forges.yaml, then check it with kraft admin forge test corp-gl. Then Retry."],
+    ["git-credential", "git-credential", "Save a new token in git's credential helper for this host, then check it with kraft admin forge test corp-gl. Then Retry."],
+    ["a path holding replacement patterns, taken literally", "file /srv/$&/$'/$$.token", "Put a new token in the file, then check it with kraft admin forge test corp-gl. Then Retry: /srv/$&/$'/$$.token"],
+  ])("a forge_auth stop naming an account and a %s source: that source's token hint, with neither a fact row", (_name, source, hint) => {
+    stubFetch();
+    show({ display_status: "failed", stop: stop("failed", { facts: { cause: "forge_auth", account: "corp-gl", source } }) });
+    const card = screen.getByRole("region", { name: "Failed" });
+    expect(card.querySelector(".item-card-fix")!.textContent).toBe(hint);
+    expect(within(card).queryByText("account")).toBeNull();
+    expect(within(card).queryByText("source")).toBeNull();
+  });
+
+  // The forge's authorize address is the hint's last words and a link, only when it is a plain https address.
+  it.each([
+    ["https", "https://github.com/orgs/acme/sso?authorization_request=abc", true],
+    ["http", "http://github.com/sso", false],
+    ["a backtick", "https://github.com/sso`id`", false],
+    ["a control character", "https://github.com/sso\u0007bell", false],
+  ])("a forge_auth stop with an sso_url of %s: the SSO hint with the address as its link last, or the login hint", (_name, sso_url, safe) => {
+    stubFetch();
+    show({ display_status: "failed", stop: stop("failed", { facts: { cause: "forge_auth", sso_url } }) });
+    const card = screen.getByRole("region", { name: "Failed" });
+    const hint = card.querySelector(".item-card-fix")!;
+    expect(card).not.toHaveTextContent("single sign-on fact");
+    expect(within(card).queryByText("sso_url")).toBeNull();
+    if (!safe) {
+      expect(within(card).queryByRole("link", { name: sso_url })).toBeNull();
+      expect(hint).toHaveTextContent("Sign the forge CLI in on the server's machine");
+      return;
+    }
+    expect(hint.textContent).toBe(`Open this address to authorize the forge CLI's token for single sign-on, then Retry: ${sso_url}`);
+    const link = within(card).getByRole("link", { name: sso_url });
+    expect(link).toHaveAttribute("href", sso_url);
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(within(card).queryByText("single sign-on")).toBeNull();
+  });
+
+  it("a forge_auth stop with an sso_url and an API account: the account's SSO hint, the address still its link last", () => {
+    stubFetch();
+    const sso = "https://github.com/orgs/acme/sso?authorization_request=abc";
+    show({ display_status: "failed", stop: stop("failed", { facts: { cause: "forge_auth", account: "corp-gh", source: "env CORP_GH", sso_url: sso } }) });
+    const card = screen.getByRole("region", { name: "Failed" });
+    expect(card.querySelector(".item-card-fix")!.textContent).toBe(`Open this address to authorize forge account corp-gh's token for single sign-on, then Retry: ${sso}`);
+    expect(within(card).getByRole("link", { name: sso })).toHaveAttribute("href", sso);
+    expect(within(card).queryByText("account")).toBeNull();
+    // On a phone "corp-gh's" must not break after the hyphen: the name is one non-breaking element.
+    expect(within(card).getByText("corp-gh")).toHaveStyle({ whiteSpace: "nowrap" });
+  });
+
+  it.each([
+    ["the CLI's", FORGE_SSO_HINT],
+    ["an account's", FORGE_ACCOUNT_SSO_HINT.replace("{account}", "corp-gh")],
+    ["an unprintable account's", FORGE_ACCOUNT_SSO_UNNAMED_HINT],
+  ])("%s SSO hint, built from the constants: the address is its link whatever the copy says", (_name, hint) => {
+    const sso = "https://github.com/orgs/acme/sso?x=1";
+    const { container } = render(<p>{hintText(hint.replace("{sso_url}", sso))}</p>);
+    expect(within(container).getByRole("link", { name: sso })).toHaveAttribute("href", sso);
+  });
+
+  it("a forge_auth stop with an sso_url and an account name that cannot be printed: the neutral hint, address still its link", () => {
+    stubFetch();
+    const sso = "https://github.com/orgs/acme/sso?authorization_request=abc";
+    show({ display_status: "failed", stop: stop("failed", { facts: { cause: "forge_auth", account: "corp`gh", source: "env CORP_GH", sso_url: sso } }) });
+    const card = screen.getByRole("region", { name: "Failed" });
+    expect(card.querySelector(".item-card-fix")!.textContent).toBe(`Open this address to authorize the forge account's token for single sign-on, then Retry: ${sso}`);
+    expect(within(card).getByRole("link", { name: sso })).toHaveAttribute("href", sso);
   });
 
   it("failed with failing test scopes: each as a row, the paragraph stops at the node, no log tail", () => {

@@ -425,8 +425,32 @@ _IN_PROCESS_FIX = {
 }
 
 
-def _forge_cause(db, work_item_id: str, node: ResolvedNode, failed: list) -> dict | None:
-    """`{"cause": ...}` when a failed forge task's log says the forge refused
+def _in_process_fix(cause: dict | None, forbidden: bool = False) -> str:
+    """The end of the reason for `cause` (`_forge_cause`'s facts), or the default."""
+    if cause and cause.get("account") and not cause.get("sso_url"):
+        # Neutral: a missing token also stops here, so it does not claim a refusal. Where to
+        # fix it is the card's hint, by the source (`facts.source`), not repeated here.
+        if forbidden:
+            return f"Forge account {cause['account']}: its token lacks the rights this needs."
+        return (
+            f"Forge account {cause['account']} could not sign in with its token, "
+            "or its token could not be read."
+        )
+    if cause and cause.get("sso_url"):
+        # The address is `facts.sso_url`, which every screen shows once, as the hint.
+        account = cause.get("account")
+        if isinstance(account, str) and account and "`" not in account:
+            return f"Forge account {account}'s token needs single sign-on authorization."
+        if isinstance(account, str) and account:
+            return "The forge account's token needs single sign-on authorization."
+        return "The forge CLI's token needs single sign-on authorization."
+    return _IN_PROCESS_FIX.get(cause["cause"] if cause else "", _IN_PROCESS_FIX_DEFAULT)
+
+
+def _forge_cause(
+    db, work_item_id: str, node: ResolvedNode, failed: list
+) -> tuple[dict | None, bool]:
+    """`({"cause": ...}, forbidden)` when a failed forge task's log says the forge refused
     the credential or could not be reached (`forge.failure_cause`): a forge
     CLI's failure is a failed task (an infra stop only in a fix-loop node), so the
     card reads the cause from the stop's facts."""
@@ -437,8 +461,17 @@ def _forge_cause(db, work_item_id: str, node: ResolvedNode, failed: list) -> dic
                 _task_forge_error(db, work_item_id, node, t, "failed"),
             )
         ):
-            return {"cause": c}
-    return None
+            record = _task_forge_error(db, work_item_id, node, t, "failed") or {}
+            auth = c == "forge_auth"
+            sso = auth and forge_mod.safe_sso_url(record.get("sso_url"))
+            who = auth and record.get("account") and record.get("source")
+            facts = {
+                "cause": c,
+                **({"sso_url": sso} if sso else {}),
+                **({"account": record["account"], "source": record["source"]} if who else {}),
+            }
+            return facts, record.get("reason") == "forbidden"
+    return None, False
 
 
 def _in_process_causes(db, work_item_id: str, node: ResolvedNode, failed: list) -> str:
@@ -1906,7 +1939,7 @@ async def _walk_node_once(
                     reason += " (after on_failure)"
                 facts = {
                     **(_scope_facts(scopes) or {}),
-                    **(_forge_cause(db, work_item_id, node, failed) or {}),
+                    **(_forge_cause(db, work_item_id, node, failed)[0] or {}),
                 }
                 return _Stuck(reason, kind=StopKind.FAILED, facts=facts or None)
         await node_runs.completed(
@@ -2278,10 +2311,10 @@ async def _walk_node_once(
             named = ", ".join(
                 sorted(prompts.named_with_kind(t) for t in blind_failures if _in_process(t))
             )
-            cause = _forge_cause(db, work_item_id, node, blind_failures)
+            cause, forbidden = _forge_cause(db, work_item_id, node, blind_failures)
             # What to do depends on why it failed: a refused credential or an
             # unreachable forge is the machine's to fix, not a reinstall.
-            fix = _IN_PROCESS_FIX.get(cause["cause"] if cause else "", _IN_PROCESS_FIX_DEFAULT)
+            fix = _in_process_fix(cause, forbidden)
             reason = (
                 f"{named} failed in node {node.id}"
                 f"{_in_process_causes(db, work_item_id, node, blind_failures)}, and those "
@@ -3015,9 +3048,16 @@ async def run_once(
         failing_node = nodes[start_index].id
         reason = str(exc)
         kind = StopKind.CONFIG if isinstance(exc, _config.ConfigError) else StopKind.INFRA
+        # A token stop (a base fetch the account's token could not authenticate) names it.
+        cause = getattr(exc, "account", "") and forge_mod.failure_cause(
+            reason, {"reason": getattr(exc, "reason", None)}
+        )
+        facts = {"cause": cause, "account": exc.account, "source": exc.source} if cause else None
         await node_runs.entered(db, inplace.item_folder(run_dirs, row), work_item_id, failing_node)
         await db.write(
-            lambda c: store.mark_needs_human(c, work_item_id, failing_node, reason, kind=kind)
+            lambda c: store.mark_needs_human(
+                c, work_item_id, failing_node, reason, kind=kind, facts=facts
+            )
         )
         return "needs_human"
     if report is not None:

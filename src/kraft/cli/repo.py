@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
+import getpass
 import os
 import sys
 
 from kraft import client, detect, render
 from kraft import forges as forges_mod
 from kraft.cli import common
+from kraft.cli import forge as forge_cli
 
 _REPO_COLUMNS = [
     ("", "here"),
@@ -560,6 +563,169 @@ def _forge_accounts() -> dict:
     return asyncio.run(client.list_forges())["accounts"]
 
 
+_SOURCE_QUESTION = (
+    "  git has no saved credential for {host}. Where does the token come from? "
+    "[1] paste it  [2] an environment variable the server reads at start  "
+    "[3] a command that prints it "
+)
+
+
+def _test_account(name: str, say) -> str:
+    """The server's test of the account's token, shown; its state."""
+    result = asyncio.run(client.test_forge(name))
+    for line in result["output"].splitlines():
+        say(f"  {line}")
+    return result["probe"]["state"] if result.get("probe") else "unreachable"
+
+
+def _env_note(say, var: str) -> None:
+    say(f"  the server reads {var} once, when it starts: set it where Kraft starts and restart it")
+
+
+def _give_token(name: str, host: str, kind: str, say) -> str | None:
+    """Step 4's question and its answer applied. The environment variable's name, for an
+    `env` answer: its test may say `no_token` until the server restarts."""
+    while (answer := input(_SOURCE_QUESTION.format(host=host)).strip()) not in ("1", "2", "3"):
+        _print("  1, 2 or 3")
+    if answer == "1":
+        # Never argv, never echoed; it goes to `set_forge_token` and nowhere else.
+        asyncio.run(client.set_forge_token(name, getpass.getpass("  token (not shown): "), kind))
+        return None
+    if answer == "2":
+        while why := forges_mod.env_name_problem(var := input("  variable name: ").strip()):
+            _print(f"  the name {why}")
+        asyncio.run(client.edit_forge(name, {"token": {"from": "env", "env": var, "kind": kind}}))
+        _env_note(say, var)
+        return var
+    command = input("  command: ").strip()
+    forge_cli.set_command_source(
+        name, {"token": {"from": "command", "command": command, "kind": kind}}
+    )
+    return None
+
+
+def _prove_account(name, host, ns, interactive, source, stdin, say) -> None:
+    """Steps 4 to 6 for an account just made. Returns when it may stay; raises
+    SystemExit when it may not (the caller removes it)."""
+    env = source["env"] if source and source["from"] == "env" else None
+    if env:
+        _env_note(say, env)
+    state = _test_account(name, say)
+    if state == "no_token" and not (source or stdin):
+        if not interactive:
+            raise SystemExit(
+                f"error: git has no saved credential for {host}: pass --token-from or "
+                "--token-stdin; the account was not kept"
+            )
+        env = _give_token(name, host, ns.kind, say)
+        state = _test_account(name, say)
+    if state == "unreachable" and not ns.api_url and interactive:
+        derived = _forge_accounts()[name]["api_url"]
+        answer = input(f"  the API did not answer at {derived}. API address [{derived}] ").strip()
+        if answer and answer != derived:
+            asyncio.run(client.edit_forge(name, {"api_url": answer}))
+            state = _test_account(name, say)
+    if state == "ok" or (env and state == "no_token"):
+        return
+    if interactive and input(f"  keep forge account {name} anyway? [y/N] ").strip().lower() in (
+        "y",
+        "yes",
+    ):
+        return
+    raise SystemExit(f"error: forge account {name} did not pass its test; it was not kept")
+
+
+def _settle_api(
+    ns: argparse.Namespace, *, interactive: bool, source: dict | None, stdin: bool
+) -> tuple[dict, bool, bool | None]:
+    """`_settle_forge` for `--client api`, `--token-from` and `--token-stdin`: a `client: api`
+    account for the host exists before the repo is connected, its token tested."""
+    say = _print if not ns.json else (lambda _: None)
+    resolved, connected = _resolve(ns.path)
+    if connected:
+        say(f"{resolved['path']} is connected already: the forge flags change nothing")
+        return {"forge_account": ns.forge_account}, False, True
+    host = resolved["remote_host"]
+    if not host:
+        raise SystemExit("error: the repo has no origin to name a forge host")
+    accounts = _forge_accounts()
+    name = ns.forge_account or next(
+        (
+            n
+            for n, a in accounts.items()
+            if a["default_for_host"] and forges_mod.web_host(a["web_url"]) == host
+        ),
+        host,
+    )
+    if (same := accounts.get(name)) is not None:
+        if same["client"] != "api":
+            raise SystemExit(
+                f"error: forge account {name!r} is client: cli; change it with "
+                f"`kraft admin forge edit {name} --client api`"
+            )
+        if (
+            source
+            or stdin
+            or (ns.web_url and ns.web_url.rstrip("/") != same["web_url"].rstrip("/"))
+        ):
+            raise SystemExit(
+                f"error: forge account {name!r} exists ({same['forge']}, {same['web_url']}); "
+                f"change it with `kraft admin forge edit {name}`, or name this one "
+                "with --forge-account"
+            )
+        say(f"using forge account {name} ({same['forge']}, {same['web_url']})")
+        named = ns.forge_account or (None if same["default_for_host"] else name)
+        return {"forge": same["forge"], "forge_account": named}, False, False
+    if not (interactive or ns.forge):  # only a new account needs asking
+        raise SystemExit(
+            "error: no terminal to ask: pass --forge, --web-url (a self-hosted forge) and "
+            "--token-from or --token-stdin"
+        )
+    if ns.forge and resolved["forge"] and ns.forge != resolved["forge"]:
+        say(f"--forge ignored: {host} is {resolved['forge']}")
+    forge = resolved["forge"] or ns.forge or _ask_forge()
+    web_url = ns.web_url or (
+        _ask_web_url(host, resolved["remote_path"], resolved["remote_port"])
+        if interactive and resolved["needs_forge"]
+        else _web_choices(host, None, resolved["remote_port"])[0]
+    )
+    default = forges_mod.web_host(web_url) == host
+    token = forge_cli._read_stdin_token() if stdin else None
+    forge_cli.create_account(
+        name,
+        {
+            "forge": forge,
+            "web_url": web_url,
+            "api_url": ns.api_url,
+            "default_for_host": default,
+            "ca_file": None,
+        },
+        source=source,
+        token=token,
+        kind=ns.kind,
+        as_api=True,
+    )
+    say(f"added forge account {name} ({forge}, {web_url}, client: api)")
+    try:
+        _prove_account(name, host, ns, interactive, source, stdin, say)
+    except BaseException:
+        with contextlib.suppress(ValueError):
+            asyncio.run(client.remove_forge(name))
+        raise
+    return {"forge": forge, "forge_account": ns.forge_account if default else name}, True, False
+
+
+def _show_api_account(result: dict) -> None:
+    """A repo just connected on a host whose account is `client: api`, which the server
+    names in its answer: that account's test, shown. Never fails the connect."""
+    if name := result.get("api_account"):
+        try:
+            _print(f"forge account {name}:")
+            _test_account(name, _print)
+        except ValueError:
+            pass
+
+
 def _settle_forge(ns: argparse.Namespace, *, interactive: bool) -> tuple[dict, bool, bool | None]:
     """The `forge` and `forge_account` to connect with, naming an account for the
     host when it needs one: only when the host names no forge and no account
@@ -573,6 +739,15 @@ def _settle_forge(ns: argparse.Namespace, *, interactive: bool) -> tuple[dict, b
         raise SystemExit("error: --api-url needs --web-url")
     if ns.web_url and os.environ.get("KRAFT_WORK_ITEM_ID"):
         raise SystemExit("error: a worker does not change the instance's forge accounts")
+    source, stdin = (
+        forge_cli._token_flags(ns)
+        if ns.client or ns.token_from or ns.token_stdin
+        else (None, False)
+    )
+    if ns.client == "api" or source or stdin:
+        if os.environ.get("KRAFT_WORK_ITEM_ID"):
+            raise SystemExit("error: a worker does not change the instance's forge accounts")
+        return _settle_api(ns, interactive=interactive, source=source, stdin=stdin)
     say = _print if not ns.json else (lambda _: None)
     if ns.forge_account and not ns.web_url:
         if (named := _forge_accounts().get(ns.forge_account)) is not None:
@@ -674,6 +849,9 @@ def _cmd_connect(ns: argparse.Namespace) -> None:
                 _print("saved worktrees: false: its items run in place")
     elif not ns.json:
         _say_connected(result)
+    if not (ns.json or added or result.get("already_connected")):
+        if not os.environ.get("KRAFT_WORK_ITEM_ID"):
+            _show_api_account(result)
     if not ns.json and not os.environ.get("KRAFT_WORK_ITEM_ID"):
         _offer_library(result["path"], ask=interactive)
     passed = True
@@ -761,6 +939,24 @@ def _add_repo(subs, common: argparse.ArgumentParser) -> None:
     )
     connect.add_argument(
         "--forge-account", metavar="NAME", help="the forge account to name (default: the host)"
+    )
+    connect.add_argument(
+        "--client",
+        choices=("cli", "api"),
+        help="api: Kraft reads a token for the host, tests it, and keeps it as a forge account "
+        "(implied by --token-*)",
+    )
+    source = connect.add_mutually_exclusive_group()
+    source.add_argument(
+        "--token-from",
+        metavar="SOURCE",
+        help="where the token is read from: git-credential, env:NAME, file:PATH or command:CMD",
+    )
+    source.add_argument(
+        "--token-stdin", action="store_true", help="read the token from stdin; never from argv"
+    )
+    connect.add_argument(
+        "--kind", choices=("pat", "oauth", "unknown"), default="unknown", help="what the token is"
     )
     connect.add_argument(
         "--in-place",

@@ -2,7 +2,7 @@
 
 import pytest
 
-from kraft.adapters.forge import credentials, probe
+from kraft.adapters.forge import credentials, git_auth, probe
 
 #: The accounts the canned probe was asked about, for a test that counts probes.
 CALLS: list[str] = []
@@ -15,6 +15,10 @@ def _canned_probe(request, monkeypatch):
     CALLS.clear()
     monkeypatch.setattr(credentials, "_TAKEN", {})
     monkeypatch.setattr(credentials, "_SECRET_FILES", ())
+    monkeypatch.setattr(credentials, "_TOKENS", {})
+    monkeypatch.setattr(credentials, "_LOCKS", {})
+    monkeypatch.setattr(credentials, "_CONTEXT", None)
+    monkeypatch.setattr(git_auth, "_READER", None)
     if request.node.get_closest_marker("real_probe"):
         return
 

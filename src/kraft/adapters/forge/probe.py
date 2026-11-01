@@ -20,7 +20,14 @@ from kraft import config, redact
 from kraft.adapters.forge import credentials
 from kraft.adapters.forge.http import HttpTransport
 from kraft.adapters.forge.models import ForgeError
-from kraft.forges import ForgeAccount, ForgesFile, account_for, project_path, remote_host
+from kraft.forges import (
+    ForgeAccount,
+    ForgesFile,
+    account_for,
+    github_owner_name,
+    remote_host,
+    repo_project,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -184,15 +191,30 @@ async def _probe_account(
         )
         if not account_for(repo, mine, remote_host(remote) if remote else None):
             return None
-        path = project_path(remote or "", account)
+        try:
+            path = await asyncio.to_thread(repo_project, Path(repo.path), account)
+            if path and github:  # the run's own check, so doctor never says "HTTP 404" for it
+                github_owner_name(path, Path(repo.path).name)
+        except ValueError as exc:
+            return str(repo.path), {
+                "project": "",
+                "visible": False,
+                "detail": str(exc),
+                "sso_url": "",
+            }
         if path is None:
             return None
         try:
             await api.rest("GET", f"repos/{path}" if github else f"projects/{quote(path, safe='')}")
-            return str(repo.path), {"project": path, "visible": True, "detail": ""}
+            return str(repo.path), {"project": path, "visible": True, "detail": "", "sso_url": ""}
         except ForgeError as exc:
             why = f"{path}: HTTP {exc.status}" if exc.status else str(exc)
-            return str(repo.path), {"project": path, "visible": False, "detail": redact.redact(why)}
+            return str(repo.path), {
+                "project": path,
+                "visible": False,
+                "detail": redact.redact(why),
+                "sso_url": exc.sso_url,
+            }
 
     # At once, not one after another: `forge test` waits on the slowest, not on the sum.
     projects = dict(filter(None, await asyncio.gather(*(sees(r) for r in repos))))
@@ -218,34 +240,40 @@ def _expose(st, repos: Sequence[config.RepoEntry]) -> list[Path]:
     return [Path(e).expanduser() for box in boxes if box for e in box.expose or ()]
 
 
+async def read_context(st) -> credentials.ReadContext:
+    try:
+        repos = await asyncio.to_thread(config.load_repos, st.templates_dir / "repos.yaml")
+        unread = False
+    except config.ConfigError:
+        repos, unread = [], True  # repos.yaml's own check says why
+    return credentials.ReadContext(
+        repos, st.run_dirs.worktrees, _expose(st, repos), repos_unread=unread
+    )
+
+
 async def refresh(st, accounts: Mapping[str, ForgeAccount] | None = None) -> dict[str, Probe]:
     """Probe `accounts` (every API account by default). Kept only for an account the server
     still runs: one removed meanwhile, or not reloaded yet, must not reach `/health`."""
     accounts = api_accounts(st) if accounts is None else accounts
     if not accounts:
         return {}
-    try:
-        repos = await asyncio.to_thread(config.load_repos, st.templates_dir / "repos.yaml")
-        unread = False
-    except config.ConfigError:
-        repos, unread = [], True  # repos.yaml's own check says why
-    expose = _expose(st, repos)
+    ctx = await read_context(st)
 
     async def one(n: str, a: ForgeAccount) -> Probe:
-        if unread and a.source().from_ == "file":
+        if ctx.repos_unread and a.source().from_ == "file":
             # Without the repos, the file's place cannot be checked against them: refuse.
             return Probe(
                 n,
                 datetime.now(UTC).isoformat(timespec="seconds"),
                 "no_token",
-                "repos.yaml does not load, so a file token cannot be checked; fix repos.yaml",
+                credentials.REPOS_UNREAD,
             )
         return await probe_account(
             n,
             a,
-            repos=repos,
-            worktrees=st.run_dirs.worktrees,
-            expose=expose,
+            repos=ctx.repos,
+            worktrees=ctx.worktrees,
+            expose=ctx.expose,
             transport=getattr(st, "forge_http_transport", None),
         )
 

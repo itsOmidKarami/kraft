@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from kraft.adapters.forge import git
-from kraft.adapters.forge.models import ForgeError, Reason, reason_for
+from kraft.adapters.forge.models import ForgeError, Reason, reason_for, safe_sso_url
 from kraft.config import _REMOTE, git_read
 
 #: Values `gh api` expands itself, so they go as `-F` and nothing else does.
@@ -50,7 +50,13 @@ class ApiResponse:
 
 class Transport(Protocol):
     async def rest(
-        self, method: str, path: str, *, fields: Mapping[str, Field] | None = None
+        self,
+        method: str,
+        path: str,
+        *,
+        fields: Mapping[str, Field] | None = None,
+        tail: bool = False,
+        download: bool = False,
     ) -> ApiResponse: ...
 
     async def graphql(self, query: str, variables: Mapping[str, Field] | None = None) -> dict: ...
@@ -178,7 +184,7 @@ def _flags(fields: Mapping[str, Field] | None) -> list[str]:
 
 def _sso_url(header: str) -> str:
     match = re.search(r"url=(\S+)", header)
-    return match[1] if match else ""
+    return safe_sso_url(match[1]) if match else ""
 
 
 class CliTransport:
@@ -220,7 +226,13 @@ class CliTransport:
         return ["--hostname", host] if host and host != "github.com" else []
 
     async def rest(
-        self, method: str, path: str, *, fields: Mapping[str, Field] | None = None
+        self,
+        method: str,
+        path: str,
+        *,
+        fields: Mapping[str, Field] | None = None,
+        tail: bool = False,  # the CLI hands over the whole body; only HTTP windows it
+        download: bool = False,  # gh follows a log's redirect itself and drops the token
     ) -> ApiResponse:
         args = [path, "-X", method, "-i", *_flags(fields), *await self._host()]
         return (await self._call(f"{method} {path}", args))[0]

@@ -48,3 +48,26 @@ async def test_needs_human_names_the_session_that_failed(item_on, fake_agent, mo
         "needs_human does not name the session whose log holds the reason"
     )
     assert it.row()["stop_kind"] == "failed"
+
+
+async def test_a_refused_base_fetch_stops_naming_the_account(item_on, fake_agent, monkeypatch):
+    """The start door's stop carries a token stop's facts, so the card names the account."""
+    it = await item_on(fake_agent.quick_task)
+
+    async def refused(*a, **kw):
+        raise kraft_builtins.BaseFetchRefused(
+            "forge account corp-gl could not fetch main",
+            reason="auth",
+            account="corp-gl",
+            source="env CORP_GL",
+        )
+
+    monkeypatch.setattr(kraft_builtins, "ensure_worktree", refused)
+
+    assert await _walk(it) == "needs_human"
+    assert it.row()["stop_kind"] == "infra"
+    assert it.events("work_item_needs_human")[-1]["payload"]["facts"] == {
+        "cause": "forge_auth",
+        "account": "corp-gl",
+        "source": "env CORP_GL",
+    }

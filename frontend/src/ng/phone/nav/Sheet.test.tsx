@@ -32,6 +32,11 @@ describe("the three shapes (A.5)", () => {
     expect(screen.getByLabelText("Port", { selector: "input" })).toHaveFocus();
   });
 
+  it.each([[true, "ph-is-secret"], [false, ""]])("marks a secret field's form so its button spans the sheet: secret=%s", (secret, cls) => {
+    render(<EditSheet title="Token" secret={secret} onSubmit={() => {}} onClose={() => {}} />);
+    expect(screen.getByLabelText("Token", { selector: "input" }).closest("form")!.classList.contains("ph-is-secret")).toBe(!!cls);
+  });
+
   it("keeps a failure inside the sheet and the sheet open", async () => {
     const onSubmit = vi.fn();
     render(<EditSheet title="Port" error="port is in use" onSubmit={onSubmit} onClose={() => {}} />);

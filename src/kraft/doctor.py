@@ -1526,20 +1526,29 @@ def _forge_check(
         found = forges_mod.account_for(repo, forges, host)
     if found is not None and found[1].client == "api":
         backend = API_BACKENDS[found[1].forge]
-        detail = (
-            f"{repo.forge} · {backend} · account {found[0]}: client: api, and the {backend} "
-            "backend is not in this release; forge nodes stop on this repo"
-        )
+        probe = (accounts.get(found[0]) or {}).get("probe") if accounts is not None else None
+        seen = ((probe or {}).get("projects") or {}).get(str(repo.path))
+        detail = f"{repo.forge} · {backend} · account {found[0]}"
         if accounts is None:
-            detail += " · not probed: the forge accounts could not be read"
-        elif (
-            seen := ((accounts.get(found[0]) or {}).get("probe") or {})
-            .get("projects", {})
-            .get(str(repo.path))
-        ):
-            verb = "sees" if seen["visible"] else "cannot see"
-            detail += f" · {verb} {seen['project']}"
-        return _check(name, False, detail)
+            return _check(
+                name,
+                True,
+                f"{detail} · not probed: the forge accounts could not be read",
+                warn=True,
+            )
+        if not probe:
+            return _check(name, True, f"{detail} · not probed yet", warn=True)
+        if probe["state"] != "ok":
+            return _check(name, False, f"{detail} · token {probe['state']}")
+        if not seen:
+            return _check(name, True, f"{detail} · project not probed yet", warn=True)
+        if seen["visible"]:
+            return _check(name, True, f"{detail} · sees {seen['project']}")
+        why = f" ({seen['detail']})" if seen.get("detail") else ""
+        # No project when the repo's remote names none: the reason is all there is.
+        what = seen["project"] or "its project"
+        sso = f" · authorize it: {seen['sso_url']}" if seen.get("sso_url") else ""
+        return _check(name, False, f"{detail} · cannot see {what}{why}{sso}")
     if not shutil.which(cli):
         return _check(name, False, f"`{cli}` is not on PATH — the forge nodes cannot run")
     if forges is not None and (problems := forges_mod.account_problems(forges, [repo])):

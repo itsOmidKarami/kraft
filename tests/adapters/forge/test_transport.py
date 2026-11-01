@@ -138,6 +138,31 @@ def test_rate_limited_403_carries_retry_after_and_the_sso_url(cli, tmp_path):
     assert exc.value.sso_url == "https://github.com/sso?x=1"
 
 
+@pytest.mark.parametrize(
+    ("header", "url"),
+    [
+        ("required; url=https://github.com/sso?x=1", "https://github.com/sso?x=1"),
+        ("required; url=http://github.com/sso", ""),
+        ("required; url=javascript:alert(1)", ""),
+        ("required; url=https://github.com/sso`id`", ""),
+        ("required; url=https://github.com/sso\x07bell", ""),
+        ("required; url=https://github.com/s\u00e9", ""),
+        ("required", ""),
+    ],
+    ids=[
+        "https",
+        "plain-http-dropped",
+        "other-scheme-dropped",
+        "backtick-dropped",
+        "control-character-dropped",
+        "non-ascii-dropped",
+        "no-url",
+    ],
+)
+def test_an_sso_address_is_kept_only_when_it_is_https_and_plain(header, url):
+    assert transport._sso_url(header) == url
+
+
 _SPENT = {"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1000600"}
 
 

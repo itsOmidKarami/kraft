@@ -159,6 +159,8 @@ type DryRunNode = { id: string; kind: string; covered_by: string | null; fix_loo
 export const NG_EXTENDING_CHAIN = { ...draftViews.extending, nodes: draftViews.extending.nodes satisfies DryRunNode[] as DryRunNode[] };
 export const NG_REPOS = ["kraft-plugins", "kraft-core", "kraft-api", "kraft-vscode", "kraft-docs", "kraft-lite", "vendor-schemas"].map((name, i) => ({
   ...repo(R(name), i), id: name, enabled: true, default_chain: name === "kraft-docs" ? "docs_only" : "default",
+  // Two repos name shared-gl (repo 0 does in `repo()`): the Forge accounts table's "Used by" cell holds a list, not one name.
+  ...(name === "kraft-api" && { forge_account: "shared-gl" }),
 }));
 /** kraft-plugins roots a workspace with two members: the draft page's cross-repo picker (G.5). */
 export const NG_WORKSPACES = {

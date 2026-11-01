@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { DOLLARS_HINT, dollars, dollarsText, elapsedBetween, plural, shortId } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
-import { withCode } from "../../item/cause";
+import { hintText } from "../../item/cause";
 import { retryBody } from "../../item/paths";
 import { act, draftToStart } from "../../item/actions";
 import { lines as draftLines } from "../../item/draft/view";
@@ -160,7 +160,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
             <h2 className="ph-statecard-title">{card.icon && <MessageSquare size={16} className="ph-statecard-icon" aria-hidden="true" />}{card.title}</h2>
             {card.where && <p className="ph-statecard-where">{card.where}</p>}
             {card.text && <p className="ph-statecard-text">{card.text}</p>}
-            {card.hint && <p className="ph-statecard-text ph-statecard-fix">{withCode(card.hint)}</p>}
+            {card.hint && <p className="ph-statecard-text ph-statecard-fix">{hintText(card.hint)}</p>}
             {card.facts.length > 0 && (
               <dl className="ph-facts">
                 {card.facts.map(([k, v, to], i) => <div key={i} className="ph-fact"><dt>{k}</dt><dd>{to ? <button type="button" className="ph-linkbtn ph-factlink ph-underline" onClick={() => navigate(itemUrl(to))}>{v}</button> : v}</dd></div>)}

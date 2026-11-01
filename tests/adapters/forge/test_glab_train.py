@@ -19,7 +19,7 @@ _REMOVED = "removed this merge request from the merge train because "
 TRAIN_PROJECT = '{"id":1,"merge_trains_enabled":true,"merge_pipelines_enabled":true}'
 _TRAIN_CAR = "api projects/:id/merge_trains/merge_requests/7"
 _TRAIN_POST = _TRAIN_CAR
-_TRAIN_NOTES = "api projects/:id/merge_requests/7/notes?sort=desc&order_by=created_at&per_page=20"
+_TRAIN_NOTES = "api projects/:id/merge_requests/7/notes"
 _TRAIN_PIPELINE = {
     "id": 2826926700,
     "sha": "f" * 40,

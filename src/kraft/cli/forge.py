@@ -5,9 +5,19 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
+import getpass
+import os
+import sys
 
-from kraft import client
+from pydantic import ValidationError
+
+from kraft import client, config, forges
 from kraft.cli import common
+from kraft.client import transport
+from kraft.paths import config_dir, kraft_home
+
+_SOURCES = "git-credential, env:NAME, file:PATH or command:CMD"
 
 
 def _render_list(result: dict) -> str:
@@ -20,17 +30,284 @@ def _render_list(result: dict) -> str:
     )
 
 
-def _cmd_add(ns: argparse.Namespace) -> None:
+def parse_source(text: str, kind: str) -> dict:
+    """`--token-from`'s text as the `token:` the server takes. Never quotes `text`: a
+    token pasted here by mistake must not come back in an error."""
+    if text == "git-credential":
+        return {"from": text, "kind": kind}
+    head, _, rest = text.partition(":")
+    if head not in ("env", "file", "command") or not rest:
+        raise ValueError(f"--token-from takes {_SOURCES}")
+    if head == "env" and (why := forges.env_name_problem(rest)):
+        raise ValueError(f"--token-from env: the name {why}")
+    return {"from": head, head: rest, "kind": kind}
+
+
+def _die(message: str) -> SystemExit:
+    return SystemExit(f"error: {message}")
+
+
+def _token_flags(ns: argparse.Namespace) -> tuple[dict | None, bool]:
+    """(the source to send, whether a token is read from stdin). Either implies
+    `--client api`; with `--client cli` it is an error."""
+    given = bool(ns.token_from or ns.token_stdin)
+    if given and ns.client == "cli":
+        raise _die("--client cli keeps no token: gh and glab keep their own sign-in")
+    try:
+        source = parse_source(ns.token_from, ns.kind or "unknown") if ns.token_from else None
+    except ValueError as exc:
+        raise _die(str(exc)) from None
+    return source, bool(ns.token_stdin)
+
+
+def _read_stdin_token() -> str:
+    # Whole stdin, never argv: a process listing shows argv. A terminal is not echoed.
+    value = (
+        getpass.getpass("token (not shown): ") if sys.stdin.isatty() else sys.stdin.read()
+    ).strip()
+    if not value:
+        raise _die("--token-stdin: nothing on stdin")
+    return value
+
+
+def _on_this_machine() -> None:
+    """A command source runs code as the server's user, so it is written where the server
+    runs, by a person: not from a worker, not over the network."""
+    if os.environ.get("KRAFT_WORK_ITEM_ID"):
+        raise _die("a command source runs code on the server's machine: a worker does not set it")
+    try:
+        asyncio.run(client.health())  # raises when the server's run_dir is not this machine's
+    except transport.ClientError as exc:
+        if exc.kind is not transport.Failure.OTHER_INSTANCE:
+            raise
+        raise _die("a command source is written on the server's machine; run this there") from None
+
+
+def _is_command(row: dict | None) -> bool:
+    return bool(row and (row.get("token") or {}).get("from") == "command")
+
+
+_SHARED = (
+    "that token source is already read by another account, or is another account's pasted "
+    "file: a token is sent only to the host it was set for. Use a source of its own"
+)
+
+
+def _write_command(name: str, change, *, expect=_is_command, stage=None) -> dict:
+    """forges.yaml on disk with `change(accounts)` applied, then the server asked to reload.
+    A reload that refuses it puts the old text back. `stage()` runs once the new file is
+    known valid, before it is saved, and returns the undo for what it wrote; `expect` says
+    what the account must look like in the server's listing afterwards."""
+    _on_this_machine()
+    path = config_dir() / forges.ForgesFile.FILE
+    old = path.read_text() if path.exists() else None
+    try:
+        accounts = dict(forges.ForgesFile.load(path).accounts)
+        change(accounts)
+        valid = forges.ForgesFile.model_validate({"accounts": accounts})
+    except config.ConfigError as exc:
+        raise _die(f"{exc}; fix the file first") from None
+    except ValidationError as exc:
+        raise _die(forges.validation_text(exc)) from None
+    undo = stage() if stage else None
+
+    def restore() -> None:
+        if undo:
+            undo()
+        if old is None:
+            path.unlink(missing_ok=True)
+        else:
+            config.write_text(path, old)
+        with contextlib.suppress(Exception):
+            asyncio.run(client.reload_templates())  # the refusal's mark is not the file's
+
+    try:
+        valid.save(path)
+        result = asyncio.run(client.reload_templates())
+        # Only a refused forges.yaml undoes this write: another file's refusal is not ours.
+        refused = result.get("refused_forges")
+        accounts = {} if refused else asyncio.run(client.list_forges())["accounts"]
+    except config.ConfigError as exc:
+        restore()
+        raise _die(f"{exc}; fix the file first") from None
+    except BaseException:
+        restore()
+        raise
+    if refused:
+        restore()
+        raise _die(f"the server refused forges.yaml: {refused}")
+    if not expect(accounts.get(name)):
+        restore()
+        raise _die(
+            f"the server does not read the forges.yaml written here ({config_dir()}); "
+            "its config directory is another one. Nothing was changed"
+        )
+    return result
+
+
+def create_account(
+    name: str, account: dict, *, source: dict | None, token: str | None, kind: str, as_api: bool
+) -> dict:
+    """The account added: `account` is the forge, web_url, api_url, default_for_host and
+    ca_file to send. A `command` source is written on disk; a pasted `token` goes to
+    `set_forge_token` alone, and a failed paste leaves no half-made account behind."""
+    if source and source["from"] == "command":
+
+        def put(accounts: dict) -> None:
+            if name in accounts:
+                raise _die(f"forge account {name!r} already exists")
+            accounts[name] = {
+                **{k: v for k, v in account.items() if v},
+                "client": "api",
+                "token": source,
+            }
+
+        _write_command(name, put)
+        return {"name": name, **account}
     result = asyncio.run(
         client.add_forge(
-            ns.name,
-            ns.forge,
-            ns.web_url,
-            api_url=ns.api_url,
-            default_for_host=ns.default_for_host,
+            name,
+            account["forge"],
+            account["web_url"],
+            api_url=account["api_url"],
+            default_for_host=account["default_for_host"],
+            client="api" if as_api else "cli",
+            ca_file=account["ca_file"],
+            token=source,
         )
     )
+    if token is not None:
+        try:
+            result = asyncio.run(client.set_forge_token(name, token, kind))
+        except Exception:
+            # No half-made account: an API account with no token would only fail later.
+            with contextlib.suppress(Exception):  # the paste's error is the one to show
+                asyncio.run(client.remove_forge(name))
+            raise
+    return result
+
+
+def set_command_source(name: str, fields: dict, *, paste: str | None = None) -> dict:
+    """`fields` applied to the account in forges.yaml on disk: how a command source gets in,
+    and how an account that reads one is changed (the API refuses both). A `paste` is the
+    pasted token: written to the account's private file, which `fields["token"]` names."""
+    moves_off = (fields.get("token") or {}).get("from") != "command"
+
+    def change(accounts: dict) -> None:
+        if name not in accounts:
+            raise _die(f"no forge account named {name!r}")
+        accounts[name] = {
+            **accounts[name].model_dump(by_alias=True, exclude_none=True),
+            **fields,
+        }
+        if fields.get("token"):  # as the route does for a token it is sent
+            from kraft.adapters.forge import credentials  # lazy, as in stage()
+
+            checked = forges.ForgesFile.model_validate({"accounts": accounts})
+            if credentials.shares_secret(checked, name):
+                raise _die(_SHARED)
+
+    def stage():
+        # Lazy: the package pulls in the server, and the permission hook imports this module.
+        from kraft.adapters.forge import credentials
+
+        target = kraft_home().resolve() / "secrets" / name
+        previous = target.read_bytes() if target.is_file() else None
+        credentials.write_pasted(name, paste)
+
+        def undo() -> None:
+            if previous is None:
+                target.unlink(missing_ok=True)
+            else:
+                credentials.write_pasted(name, previous.decode().strip())
+
+        return undo
+
+    return _write_command(
+        name,
+        change,
+        expect=(lambda row: row is not None and not _is_command(row)) if moves_off else _is_command,
+        stage=stage if paste is not None else None,
+    )
+
+
+def _cmd_add(ns: argparse.Namespace) -> None:
+    source, stdin = _token_flags(ns)
+    account = {
+        "forge": ns.forge,
+        "web_url": ns.web_url,
+        "api_url": ns.api_url,
+        "default_for_host": ns.default_for_host,
+        "ca_file": ns.ca_file,
+    }
+    result = create_account(
+        ns.name,
+        account,
+        source=source,
+        token=_read_stdin_token() if stdin else None,
+        kind=ns.kind,
+        as_api=bool(source or stdin) or ns.client == "api",
+    )
+    if source and source["from"] == "command":
+        common.emit({"name": ns.name}, lambda r: f"added {r['name']} (client: api)", ns.json)
+        return
     common.emit(result, lambda r: f"added {ns.name} ({r['forge']}, {r['web_url']})", ns.json)
+
+
+def _cmd_edit(ns: argparse.Namespace) -> None:
+    source, stdin = _token_flags(ns)
+    if ns.kind and not (source or stdin):
+        raise _die("--kind says what a token is: give --token-from or --token-stdin with it")
+    fields = {
+        k: v
+        for k, v in {
+            "api_url": ns.api_url,
+            "ca_file": ns.ca_file,
+            "client": "api" if source or stdin else ns.client,
+            "token": source,
+        }.items()
+        if v is not None
+    }
+    if not fields:
+        raise _die("nothing to change: give a flag")
+    if source and source["from"] == "command":
+        set_command_source(ns.name, fields)
+        common.emit({"name": ns.name}, lambda r: f"edited {r['name']}", ns.json)
+        return
+    token = _read_stdin_token() if stdin else None
+    before = asyncio.run(client.list_forges())["accounts"].get(ns.name) or {}
+    if _is_command(before) and (source or stdin or fields.get("client") == "cli"):
+        # The API will not replace a command (the browser must not); the server's machine can.
+        from kraft.adapters.forge import credentials  # lazy, as in stage()
+
+        paste = None
+        if token is not None:
+            try:
+                paste = credentials.clean_paste(token)
+            except ValueError as exc:
+                raise _die(f"--token-stdin: {exc}") from None
+            if not credentials.ACCOUNT_NAME.fullmatch(ns.name):
+                raise _die("--token-stdin: the account's name cannot name a secret file")
+            fields["token"] = {
+                "from": "file",
+                "file": str(kraft_home().resolve() / "secrets" / ns.name),
+                "kind": ns.kind or "unknown",
+            }
+        if fields.get("client") == "cli":  # gh/glab keep their own sign-in
+            fields = {**fields, "token": None, "ca_file": None}
+        set_command_source(ns.name, fields, paste=paste)
+        common.emit({"name": ns.name}, lambda r: f"edited {r['name']}", ns.json)
+        return
+    result = asyncio.run(client.edit_forge(ns.name, fields))
+    if token is not None:
+        try:
+            result = asyncio.run(client.set_forge_token(ns.name, token, ns.kind or "unknown"))
+        except Exception:
+            # Not left as api with no token; the paste's own error is the one to show.
+            with contextlib.suppress(Exception):
+                asyncio.run(client.edit_forge(ns.name, {k: before.get(k) for k in fields}))
+            raise
+    common.emit(result, lambda r: f"edited {ns.name}", ns.json)
 
 
 def _cmd_list(ns: argparse.Namespace) -> None:
@@ -51,6 +328,27 @@ def _cmd_test(ns: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def _token_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--client",
+        choices=["cli", "api"],
+        help="cli: gh/glab keep their own sign-in; api: Kraft reads a token (implied by --token-*)",
+    )
+    p.add_argument("--ca-file", metavar="PATH", help="the CA that signs the forge (api only)")
+    source = p.add_mutually_exclusive_group()
+    source.add_argument(
+        "--token-from",
+        metavar="SOURCE",
+        help=f"where the token is read from: {_SOURCES}; command runs on the server's machine",
+    )
+    source.add_argument(
+        "--token-stdin", action="store_true", help="read the token from stdin; never from argv"
+    )
+    p.add_argument(
+        "--kind", choices=["pat", "oauth", "unknown"], default="unknown", help="what the token is"
+    )
+
+
 def add(subs, common_parser: argparse.ArgumentParser) -> None:
     forge_p = subs.add_parser("forge", help="forge accounts: a host's forge and web address")
     verbs = forge_p.add_subparsers(dest="forge_verb", metavar="verb", required=True)
@@ -69,7 +367,18 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="repos on this host use it unless they name another account",
     )
+    _token_args(add_p)
     add_p.set_defaults(func=_cmd_add)
+
+    edit_p = verbs.add_parser(
+        "edit",
+        parents=[common_parser],
+        help="change an account; only the flags given change",
+    )
+    edit_p.add_argument("name")
+    edit_p.add_argument("--api-url", metavar="URL", help="same origin as the web address")
+    _token_args(edit_p)
+    edit_p.set_defaults(func=_cmd_edit, kind=None)  # None: a --kind with no token is refused
 
     list_p = verbs.add_parser("list", parents=[common_parser], help="the accounts")
     list_p.set_defaults(func=_cmd_list)

@@ -193,17 +193,14 @@ async def bring_home(checkout, branch: str, *, in_place: bool) -> bool:
     never touched, nor even fetched into."""
     if in_place:
         return False
-    from kraft.adapters.forge import git  # imports this module through `run`
+    from kraft.adapters.forge import git, git_auth  # `git` imports this module through `run`
     from kraft.adapters.forge.models import ForgeError
     from kraft.worker import sandbox
 
     checkout, ref = Path(checkout), f"refs/heads/{branch}"
     try:
-        await git.run_git(
-            checkout,
-            ["git", "fetch", "--refmap=", "origin", branch],
-            env=sandbox.hardened_git_env(),
-        )
+        env = await git_auth.remote_env(checkout, sandbox.hardened_git_env())
+        await git.run_git(checkout, ["git", "fetch", "--refmap=", "origin", branch], env=env)
     except ForgeError:
         return False
     fetched = _config.git_read(
