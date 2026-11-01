@@ -37,6 +37,11 @@ const bodyHasToken = () => document.body.innerHTML.includes(TOKEN);
 afterEach(() => vi.unstubAllGlobals());
 
 describe("AddForgeDialog", () => {
+  it("labels the first field Name", () => {
+    mount();
+    expect(screen.getByLabelText(/^Name/)).toBe(document.querySelector("[data-autofocus]"));
+  });
+
   it.each([
     ["cli", () => {}, { client: "cli" }],
     ["api-git-credential", () => pick("api"), { client: "api", token: { from: "git-credential", kind: "unknown" } }],

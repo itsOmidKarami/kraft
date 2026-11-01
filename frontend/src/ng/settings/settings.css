@@ -219,8 +219,8 @@
 .set-wk-state { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .set-wk-why { font-size: var(--fs-meta); color: var(--text-muted); overflow-wrap: anywhere; }
 .set-wk-dlg.dialog { box-sizing: border-box; width: min(560px, 100%); display: flex; flex-direction: column; max-height: calc(100dvh - 24vh); }
-/* A tall form scrolls inside the dialog, so the footer's Save and Cancel stay on screen; the 2px keeps a focus ring from being clipped. */
-.set-wk-dlg .dialog-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: -2px; padding: 2px; }
+/* A tall form scrolls inside the dialog, so the footer's Save and Cancel stay on screen. The 4px padding (cancelled by the margin) holds the whole 2px+2px focus ring, and scroll-padding keeps a control scrolled into view off the edge. */
+.set-wk-dlg .dialog-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: -4px; padding: 4px; scroll-padding: 8px; }
 .set-wk-dlg .dialog-title, .set-wk-dlg .dialog-footer { flex: none; }
 .set-wk-form, .set-wk-token { display: flex; flex-direction: column; gap: 14px; }
 .set-wk-field { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-meta); }
