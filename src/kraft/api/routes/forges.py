@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import re
 from pathlib import Path
 from typing import Any
 
@@ -26,10 +25,14 @@ from kraft.api import api_router
 from kraft.api.routes.workers import _forbid_sessions
 from kraft.paths import kraft_home
 
-_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
+_NAME = credentials.ACCOUNT_NAME
 _COMMAND_403 = (
     "a command source runs code on the server's machine, so it is set there: "
     "kraft admin forge add … --token-from 'command:…', or by hand in forges.yaml"
+)
+_KEEPS_403 = (
+    "this account's token comes from a command; change it with "
+    "`kraft admin forge edit NAME --token-from …` on the server's machine"
 )
 _SHARED_403 = (
     "that token source is already read by another account, or is another account's pasted "
@@ -135,17 +138,7 @@ def _own_file(name: str, account: forges.ForgeAccount | None) -> Path | None:
     return mine if os.path.realpath(mine) == _real(token.file) else None
 
 
-def _real(spec: str) -> str:
-    return os.path.realpath(os.path.expandvars(os.path.expanduser(spec)))
-
-
-def _same(a, b) -> bool:
-    """The same file, even where the disk ignores case (realpath keeps the case typed);
-    paths that do not exist yet compare as text."""
-    try:
-        return os.path.samefile(a, b)
-    except OSError:
-        return str(a) == str(b)
+_real = credentials.real_path
 
 
 def _drop_own_file(name: str, before: forges.ForgeAccount | None, after: forges.ForgesFile) -> None:
@@ -175,25 +168,19 @@ def _no_command(sent, updated: forges.ForgeAccount) -> None:
         raise HTTPException(403, _COMMAND_403)
 
 
+def _keeps_command(old: forges.ForgeAccount | None, replaces_token: bool) -> None:
+    """The file can gain a command source while a browser dialog is open, so the guard reads
+    the account as it is now: no write over HTTP replaces or erases a command."""
+    if replaces_token and old is not None and old.token and old.token.from_ == "command":
+        raise HTTPException(403, _KEEPS_403)
+
+
 def _no_shared(updated: forges.ForgesFile, name: str, sent) -> None:
     """A write over HTTP never points an account at a secret another account already reads,
     nor at another name's pasted file: the probe would send it to this account's host.
     Fixed words, never the name or path. Hand edits on disk are not checked here."""
-    token = updated.accounts[name].token
-    if sent is None or token is None:
-        return
-    others = [a.token for n, a in updated.accounts.items() if n != name and a.token]
-    if token.env and any(o.env == token.env for o in others):
+    if sent is not None and credentials.shares_secret(updated, name):
         raise HTTPException(403, _SHARED_403)
-    if token.file:
-        real = _real(token.file)
-        secrets = kraft_home().resolve() / "secrets"
-        own = secrets / name
-        under = any(_same(str(p), secrets) for p in (Path(real), *Path(real).parents))
-        if any(o.file and _same(_real(o.file), real) for o in others) or (
-            under and not _same(real, own)
-        ):
-            raise HTTPException(403, _SHARED_403)
 
 
 async def _json(request: Request):
@@ -283,6 +270,7 @@ async def edit_forge(name: str, request: Request):
         if old is None:
             raise HTTPException(404, f"no forge account named {name!r}")
         sent = body.model_dump(exclude_unset=True)
+        _keeps_command(old, "token" in sent or sent.get("client") == "cli")
         fields = {**old.model_dump(by_alias=True, exclude_none=True), **sent}
         if fields.get("client") == "cli":  # gh/glab keep their own sign-in
             fields.pop("token", None)
@@ -309,11 +297,10 @@ async def set_token(name: str, request: Request):
     value, kind = (body.get("value"), body.get("kind")) if isinstance(body, dict) else (None, None)
     if not isinstance(value, str) or not isinstance(kind, str) or kind not in credentials.KINDS:
         raise HTTPException(422, _TOKEN_BODY)
-    value = value.strip()
-    if any(c.isspace() or not c.isprintable() for c in value):
-        raise HTTPException(422, "the token holds whitespace or a control character")
-    if len(value) < redact.MIN_LEN:
-        raise HTTPException(422, f"the token is shorter than {redact.MIN_LEN} characters")
+    try:
+        value = credentials.clean_paste(value)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     if not _NAME.fullmatch(name):
         raise HTTPException(422, "name: lowercase letters, digits, . - and _, starting with one")
     async with st.forges_lock:
@@ -321,6 +308,7 @@ async def set_token(name: str, request: Request):
         old = current.accounts.get(name)
         if old is None:
             raise HTTPException(404, f"no forge account named {name!r}")
+        _keeps_command(old, True)
         if old.client == "cli":
             raise HTTPException(
                 409, f"forge account {name!r} is client: cli, which keeps no token; edit it first"

@@ -53,6 +53,7 @@ export const SCREENS: PhoneScreen[] = [
   { id: "profile", route: "/settings/harnesses/profiles/:name", taps: [...more("Harnesses"), { css: "a.ph-row[href*='/profiles/']" }], data: true },
   { id: "repos", route: "/settings/repos", taps: more("Repos"), heading: "Repos" },
   { id: "repo", route: "/settings/repos/:repo", taps: [...more("Repos"), row], data: true },
+  { id: "forge-accounts", route: "/settings/forge-accounts", taps: more("Forge accounts"), heading: "Forge accounts" },
   { id: "workers", route: "/settings/workers", taps: more("Workers"), heading: "Workers" },
   { id: "policy", route: "/settings/policy/:section", taps: more("Policy"), heading: "Policy" },
   { id: "intake", route: "/settings/auto-intake", taps: more("Auto-intake"), heading: "Auto-intake" },

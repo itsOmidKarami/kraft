@@ -16,7 +16,7 @@ export const causeOf = (item: Pick<ItemDetail, "stop">): unknown => (item.stop?.
 
 /** `facts.sso_url` when it is an `https://` address of printable ASCII and no backtick (the server's `safe_sso_url` and
  *  the console's `_sso_url` agree; it becomes a link, so nothing else gets through). */
-const SSO_URL = /^https:\/\/[!-_a-~]+$/;
+export const SSO_URL = /^https:\/\/[!-_a-~]+$/;
 const ssoUrl = (item: Pick<ItemDetail, "stop">): string | null => {
   const url = (item.stop?.facts as Record<string, unknown> | undefined)?.sso_url;
   return typeof url === "string" && SSO_URL.test(url) ? url : null;

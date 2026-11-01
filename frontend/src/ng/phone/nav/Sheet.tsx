@@ -97,6 +97,7 @@ export interface Option<T extends string = string> {
   label: string;
   hint?: string;
   danger?: boolean;
+  disabled?: boolean;
 }
 
 export function ChoiceSheet<T extends string>({ title, text, options, value, onPick, onClose, children }: { title: string; text?: string; options: Option<T>[]; value?: T | null; onPick: (v: T) => void; onClose: () => void; children?: ReactNode }) {
@@ -113,6 +114,7 @@ export function ChoiceSheet<T extends string>({ title, text, options, value, onP
               role={single ? "radio" : undefined}
               aria-checked={single ? value === o.value : undefined}
               className={`ph-sheet-option${o.danger ? " ph-is-danger" : ""}`}
+              disabled={o.disabled}
               onClick={() => onPick(o.value)}
             >
               <span className="ph-sheet-check" aria-hidden="true">{value === o.value ? "✓" : ""}</span>
@@ -129,12 +131,16 @@ export function ChoiceSheet<T extends string>({ title, text, options, value, onP
 /** The values a text edit takes (or, `multiple`, its comma-separated values), listed as you type. A `closed` set sets nothing else. */
 export type Listed = { choices: Choice[]; closed?: boolean; multiple?: boolean; noun: string };
 
+/** Chrome ignores autocomplete="off" on a password field, and the sheet closing after a fetch reads as a submit, so it offers
+ *  to save the pasted token. "new-password" and the two manager opt-outs keep it (and 1Password, LastPass) quiet. */
+const SECRET_FIELD = { autoComplete: "new-password", "data-1p-ignore": true, "data-lpignore": "true", spellCheck: false } as const;
+
 export function EditSheet({ title, text, initial = "", placeholder, secret, multiline, listed, inputMode, submitLabel = "Set", none, error, busy, onSubmit, onClose }: { title: string; text?: string; initial?: string; placeholder?: string; secret?: boolean; multiline?: boolean; listed?: Listed; /** The keyboard a phone shows: digits for an amount. */ inputMode?: "decimal" | "numeric"; submitLabel?: string; /** A tick that says the empty command: no tests, no setup. Ticked, the field is not read. */ none?: { label: string; on: boolean }; error?: string | null; busy?: boolean; onSubmit: (value: string, none: boolean) => void; onClose: () => void }) {
   const [value, setValue] = useState(initial);
   const [skip, setSkip] = useState(!!none?.on);
   return (
     <Frame title={title} text={text} onClose={onClose}>
-      <form className="ph-sheet-edit" onSubmit={(e) => { e.preventDefault(); onSubmit(value, skip); }}>
+      <form className={secret ? "ph-sheet-edit ph-is-secret" : "ph-sheet-edit"} onSubmit={(e) => { e.preventDefault(); onSubmit(value, skip); }}>
         {none && (
           <label className="ph-sheet-none">
             <input type="checkbox" checked={skip} onChange={(e) => setSkip(e.target.checked)} /> {none.label}
@@ -145,7 +151,7 @@ export function EditSheet({ title, text, initial = "", placeholder, secret, mult
         ) : listed ? (
           <Combobox className="ph-input" aria-label={title} value={value} placeholder={placeholder} choices={listed.choices} closed={listed.closed} multiple={listed.multiple} noun={listed.noun} listLabel={title} invalid={!!error} inline onChange={setValue} />
         ) : (
-          <input className="ph-input" aria-label={title} type={secret ? "password" : "text"} inputMode={inputMode} disabled={skip} value={value} placeholder={placeholder} autoComplete="off" onChange={(e) => setValue(e.target.value)} />
+          <input className="ph-input" aria-label={title} type={secret ? "password" : "text"} inputMode={inputMode} disabled={skip} value={value} placeholder={placeholder} {...(secret ? SECRET_FIELD : { autoComplete: "off" })} onChange={(e) => setValue(e.target.value)} />
         )}
         {/* Pressing Set would blur a listed field first, and its inline list
             would close and move Set out from under the tap: keep the focus. */}

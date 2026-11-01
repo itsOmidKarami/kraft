@@ -212,12 +212,16 @@
 .set-wk-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); color: var(--text); vertical-align: middle; }
 .set-wk-table .is-num { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
 .set-wk-table tr.is-off td.is-dim { color: var(--text-muted); }
-.set-wk-dash { color: var(--text-muted); }
+.set-wk-dash, .set-fg-url { color: var(--text-muted); }
 .set-wk-note { padding: 0 4px; }
+.set-fg-note { padding: 0; }
 .set-wk-table .is-act { text-align: right; white-space: nowrap; }
 .set-wk-state { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .set-wk-why { font-size: var(--fs-meta); color: var(--text-muted); overflow-wrap: anywhere; }
-.set-wk-dlg.dialog { box-sizing: border-box; width: min(560px, 100%); }
+.set-wk-dlg.dialog { box-sizing: border-box; width: min(560px, 100%); display: flex; flex-direction: column; max-height: calc(100dvh - 24vh); }
+/* A tall form scrolls inside the dialog, so the footer's Save and Cancel stay on screen. The 4px padding (cancelled by the margin) holds the whole 2px+2px focus ring, and scroll-padding keeps a control scrolled into view off the edge. */
+.set-wk-dlg .dialog-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: -4px; padding: 4px; scroll-padding: 8px; }
+.set-wk-dlg .dialog-title, .set-wk-dlg .dialog-footer { flex: none; }
 .set-wk-form, .set-wk-token { display: flex; flex-direction: column; gap: 14px; }
 .set-wk-field { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-meta); }
 .set-wk-lead { margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: var(--fs-body); }
@@ -236,3 +240,24 @@
 .set-wk-rotate { display: flex; gap: 8px; }
 .set-wk-remove { margin-right: auto; }
 @media (max-width: 767px) { .set-wk-pair { grid-template-columns: minmax(0, 1fr); } }
+/* Fixed layout: a cell never grows to its longest unbroken string, so the table fits its card at 1280. */
+.set-fg-table { table-layout: fixed; }
+.set-fg-table th:nth-child(1) { width: 15%; }
+.set-fg-table th:nth-child(2) { width: 17%; }
+.set-fg-table th:nth-child(3) { width: 16%; }
+.set-fg-table th:nth-child(4) { width: 16%; }
+.set-fg-table th:nth-child(5) { width: 9%; }
+.set-fg-table th:nth-child(6) { width: 16%; min-width: 110px; }
+.set-fg-table th:nth-child(7) { width: 72px; }
+/* Words break only between words; a long unbroken string (a path, a URL, a name) ellipsises in .set-fg-clip. Only the
+   free-text .set-wk-why may break inside a word, and it has a column wide enough for several letters per line. */
+.set-fg-table td { overflow-wrap: normal; word-break: normal; }
+.set-fg-table .set-fg-clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.set-fg-url { display: block; }
+.set-fg-fixed { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 4px 14px; margin: 0; font-size: var(--fs-meta); }
+.set-fg-fixed dt { color: var(--text-muted); }
+.set-fg-fixed dd { margin: 0; overflow-wrap: anywhere; }
+.set-fg-replace { padding-top: 14px; border-top: 1px solid var(--line); }
+.set-fg-sub { margin: 0; font-size: var(--fs-body); font-weight: 600; }
+.set-fg-live:empty { position: absolute; }
+.set-fg-test[aria-disabled="true"], .set-fg-replace button[aria-disabled="true"] { opacity: .5; cursor: default; }
