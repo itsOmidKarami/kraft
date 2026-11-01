@@ -81,7 +81,7 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
 
 - Fixed: on a machine, a step that follows a local commit or a rebase of the item's branch is published instead of being kept unsynced. (#1107)
 
-- Fix: `POST /api/triggers` now answers 422 with the reason instead of 502 when a chain breaks an administrator maximum, matching `POST /api/work-items`. (#1131)
+
 .
 
 ## 2.3.0
