@@ -81,9 +81,6 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
 
 - Fixed: on a machine, a step that follows a local commit or a rebase of the item's branch is published instead of being kept unsynced. (#1107)
 
-
-.
-
 ## 2.3.0
 
 ### Highlights
