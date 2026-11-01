@@ -6,6 +6,102 @@ Kraft's release notes for that version. The release workflow writes them; do not
 edit this file by hand. Earlier releases are in Kraft's
 [CHANGELOG](https://github.com/itsOmidKarami/kraft/blob/main/CHANGELOG.md).
 
+## 2.5.0
+
+### Highlights
+
+- New: a GitLab forge account can be `client: api`: Kraft runs every forge node and forge read over GitLab's REST API with the account's token, without `glab`, on gitlab.com or a self-hosted GitLab on any domain or path. A refused token stops the item naming the account and how to fix its token source. Fix: a pipeline with more than 100 jobs now reads all its jobs (up to 1,000) on the `glab` backend too. (#1218)
+
+- New: a GitHub forge account can be `client: api`: Kraft runs every forge node and forge read over GitHub's REST and GraphQL APIs with the account's token, without `gh`, on github.com, GitHub Enterprise Server and `ghe.com`. A job log is fetched from GitHub's storage without sending the token there. A single sign-on stop names the API account. Fix: a run with more than 100 jobs is now read in full with `gh` too. (#1221)
+
+### New
+
+- New: Kraft's repository is a collection, `kraft-sdlc`. Install `kraft-default` for Kraft's shipped chains kept current, or `kraft-superpowers` for the same chains run with superpowers' methods for the spec, plan, implementation, repairs and review feedback. (#1112)
+
+- New: `kraft admin addon collection add SOURCE --replace` moves a collection to a fork, a mirror or a local directory; its add-ons switch over through the next reviewed update. (#1133)
+
+- Merge request descriptions no longer end with a commit list and branch line. When the agent writes no description, the work item's brief is used. Every description ends with a short "Opened by Kraft" footer naming the work item, which `attribution.mr: false` in `policy.yaml` (or Settings › Policy › Housekeeping) turns off. (#1157)
+
+- New: `kraft admin doctor` warns about a review bot that has never posted in a repo across three items, and about repos whose bot summaries nothing reads; each settled review records which bots posted (`automated_review_settled`). (#1163)
+
+- Agents that work a merge request now follow the repository's own pull-request rules: its committed steward or babysit skill under `.claude/skills/` or `.agents/skills/`. (#1164)
+
+- Change: a collapsed sidebar opens when you hover its button in the top-left corner, instead of when the pointer reaches the window's left edge, and the button shows the Board's Needs you dot. (#1174)
+
+- New: a gate's reviewer can check first (`auto_review_mode: checks_first`). It rejects work that is not ready or hands the gate to you as "ready for you", and never clears the gate itself. A `gate_reviewer` task ships in the library. (#1175)
+
+- File a work item with a chain of its own (**Customize for this item**, `kraft item create --chain-file`, or MCP `chain_yaml`). Custom prompts, commands, tools or gates in it run only after a person approves the chain in the web UI. (#1181)
+
+- New: `kraft view mr|pipelines|jobs|job-log|merged|labels` and matching MCP tools read an item's merge request and CI through Kraft; Kraft's own skills use them instead of `gh`/`glab`, so a sandboxed worker no longer needs a forge CLI or login. A workspace member is read with `--repo`. (#1185)
+
+- New: `config/forges.yaml` names forge accounts, `kraft admin forge` manages them, `kraft repo connect` asks which forge a self-hosted host is, and an item keeps the account it started with. (#1203)
+
+- New: a forge account can be `client: api`, its token read from git's credential helper, a command, an environment variable or a private file; the server tests it; `kraft admin doctor` and `kraft admin forge test` show who it signs in as and when it expires, and `kraft admin health` warns when it is refused or about to expire. (#1215)
+
+- New: `kraft admin forge add|edit` creates and edits API accounts, a token can be pasted (`--token-stdin`) or read from a source, `kraft repo connect --client api` sets one up, and a forge stop that needs single sign-on links to the page that authorizes the token. (#1216)
+
+- New: Settings › Forge accounts lists the accounts in forges.yaml with who each API token signs in as, when it expires, single sign-on and which repos it sees, and adds, edits, tests and removes them; a token is pasted once and never shown again. On a phone it shows every account, tests it, takes a new token and removes it. The browser can no longer replace a token that comes from a command; `kraft admin forge edit` on the server's machine still can. (#1222)
+
+- New: on a `client: api` forge account whose token comes from a command, an environment variable or a file, git push and fetch over HTTPS use that token, per call and only to the repo's own URL: it is never written to `.git/config`, never seen by a hook, and repository config cannot route it elsewhere. A base fetch the token cannot authenticate stops the item naming the account, instead of starting from a stale base. (#1223)
+
+### Fixes
+
+- Fix: installing or updating a Kraft add-on downloads only the commit it reads, not the collection repository's whole history. (#1111)
+
+- Fix: a mistyped `kraft` command or verb names `command` or `verb` instead of an internal field. (#1132)
+
+- Fix: blocked browser storage or a refused Notification constructor no longer interrupts browser notification handling. (#1134)
+
+- Build(deps): Bump qs from 6.16.0 to 6.17.0 in /vscode in the npm_and_yarn group across 1 directory (#1136)
+
+- Fix: Kraft's push no longer runs a pre-push hook from a `core.hooksPath` inside the working tree, which the agent can edit, and logs a warning when it skips one; a hook from outside the working tree still runs. (#1137)
+
+- Fix: Kraft stops an item for you, rather than pushing, when its own work changes `.lfsconfig`, since git-lfs on your machine would send the push's objects wherever that file points. (#1138)
+
+- Fix: Kraft stops an item for you, rather than rebasing or checking it out on your machine, when its own work changes `.lfsconfig`, since git-lfs would fetch from wherever that file points. (#1139)
+
+- Build(deps): Bump lucide-react from 1.59.0 to 1.61.0 in /frontend (#1145)
+
+- Build(deps): Bump fastapi from 0.143.5 to 0.162.0 (#1146)
+
+- Build(deps-dev): Bump vite from 8.3.4 to 8.3.5 in /frontend (#1147)
+
+- Build(deps-dev): Bump ruff from 0.17.1 to 0.17.2 (#1148)
+
+- Build(deps): Bump websockets from 17.2 to 17.3 (#1149)
+
+- Fix: on a chain without the triage step, a review bot that only comments no longer stalls every item for 30 minutes; Kraft waits for the bot to go quiet after the push and reads its open threads itself. A GitLab bot's approval now counts as it having reviewed. (#1156)
+
+- Fix: a multi-repo item no longer stalls for 30 minutes on a review bot that only comments; each repository's bot is waited for until it has finished with that repository's push. (#1158)
+
+- Fix: a merge request description of long non-ASCII text no longer crashes the step that opens or updates the MR. The Policy page now says Housekeeping changes, the forge timeout included, apply as soon as you publish. (#1159)
+
+- Fix: on a multi-repo item, a review bot's unresolved threads now reach the fix loop, with each member repo's paths given from the item's checkout. (#1160)
+
+- Fix: a forge CLI that cannot start stops the item for you with the cause named, and a new auto-archive age applies as soon as you publish it. (#1162)
+
+- Fix: a forge rate limit stops the item until the forge allows it again, instead of reading as a login failure, and gh's API calls go to the repo's own GitHub host. (#1170)
+
+- Fix: Kraft's push from the host runs no git hook, so a hook that reads the working tree (pre-commit's pre-push, say) can no longer run an agent's commands outside the sandbox. Your own pre-push hooks no longer run on Kraft's push; Kraft uploads Git LFS objects itself. (#1172)
+
+- Fix: the agent that answers review comments now starts on every harness, and is no longer told to commit and run tests while answering. (#1183)
+
+- Fix: on an in-place item, the review reply agent and a gate reviewer that checks first no longer switch or touch your checkout: each works in a throwaway copy of the item's branch. (#1187)
+
+- Fix: in place, the checks-first reviewer and the reply agent keep your other MCP servers in their copy of the branch, and a `kraft admin start` that loses its port to another process exits before it marks running sessions unknown and stops their items. (#1193)
+
+- An agent can no longer put its own text into a task without a person seeing it. A node's `extra_prompt`, a retry that changes a task's prompt or command, and writing or applying an item's chain draft now answer `403` to an MCP session or a Kraft worker; a person's web UI and terminal are unchanged. (#1194)
+
+- Fix: a Claude worker whose `kraft` MCP server cannot start, because its registered command is not on the worker's `PATH`, is refused at launch with the fix named instead of failing at its first permission ask; `kraft admin doctor`, `/api/health` (`mcp_command_on_path`) and `kraft admin worker check` report it. (#1199)
+
+- A repo an agent connects with its own test or setup command is saved disabled. An agent cannot file or start work on a disabled repo, or change a connected repo's commands. A person reads them and enables the repo in Settings › Repos. (#1201)
+
+- Web UI: the side pane slides out of its rail when expanded and back into it when collapsed. (#1211)
+
+- Fix: a trigger filed with a symlinked or `~` repo path is stored under the connected repo's own path. (#1212)
+
+- Fix: an item filed through `kraft item create` with a symlinked repo path is stored under the connected repo's own path. (#1214)
+
 ## 2.4.0
 
 ### Highlights

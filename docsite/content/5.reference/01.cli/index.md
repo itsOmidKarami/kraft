@@ -66,7 +66,7 @@ Each command links to its entry.
 | Reject, and say why | [`kraft item reject --note "why"`](/reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget) |
 | Comment on a line of the change | [`kraft item comment`](/reference/cli/item#comment-on-a-change) |
 | Send my comments with an outcome | [`kraft item review`](/reference/cli/item#send-a-review) |
-| Read the item's merge request, pipelines, job logs, merged requests or labels | [`kraft view mr`, `pipelines`, `jobs`, `job-log`, `merged`, `labels`](/reference/cli/view#reading-the-forge) _Added in next_ |
+| Read the item's merge request, pipelines, job logs, merged requests or labels | [`kraft view mr`, `pipelines`, `jobs`, `job-log`, `merged`, `labels`](/reference/cli/view#reading-the-forge) _Added in 2.5_ |
 | List [review threads](/concepts/vocabulary#review-thread) | [`kraft view threads`](/reference/cli/view#reviewing-threads-and-comparing-attempts) |
 | Mark a thread resolved, or reopen it | [`kraft item resolve`, `kraft item reopen`](/reference/cli/item#reviewing-a-change) |
 | Pass a gate without running it | [`kraft item skip`](/reference/cli/item#skip-escalate-end-or-drop-an-item) |
