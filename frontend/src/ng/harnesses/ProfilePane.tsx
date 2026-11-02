@@ -90,7 +90,7 @@ export function ProfilePane(p: Props) {
       <Button type="submit" variant="primary" disabled={!id.trim()}>{mode === "rename" ? "Rename" : "Copy"}</Button>
       <Button onClick={() => { setMode(null); clear(); }}>Cancel</Button>
     </form>
-  ) : (
+  ) : profile?.source === "package" ? undefined : (
     <>
       <Button onClick={() => { setMode("rename"); setId(name); clear(); }}>Rename</Button>
       <Button onClick={() => { setMode("copy"); setId(""); clear(); }}>Copy</Button>
@@ -114,6 +114,7 @@ export function ProfilePane(p: Props) {
       footer={footer}
     >
       <Head>Profile</Head>
+      {profile?.source === "package" && <Note>From Kraft's package. Define it in harnesses.yaml to change it.</Note>}
       <Note>Model and effort are per provider: click a lane. Read live at every launch. {p.onYaml ? <LinkButton inline onClick={() => p.onYaml!("harnesses.yaml")}>Edit in YAML</LinkButton> : null}</Note>
       {Object.keys(profile?.providers ?? {}).length === 0 && <Note>No provider entries yet.</Note>}
       <Head>Used by · {profile?.tasks.length ?? 0}</Head>

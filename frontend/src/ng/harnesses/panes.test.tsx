@@ -193,6 +193,14 @@ describe("profile and entry panes", () => {
     expect(p).toHaveTextContent("agent profile · 2 providers");
   });
 
+  it("labels a packaged profile and offers no Rename, Copy or Remove", async () => {
+    serve(view(resolved({ profiles: { strong: { providers: { claude: { model: "opus" } }, effort: null, tasks: [], used_by_fallback: [], source: "package" } } })));
+    renderPage("?profile=strong");
+    const p = await screen.findByRole("complementary", { name: "strong pane" });
+    expect(p).toHaveTextContent("From Kraft's package");
+    for (const name of ["Rename", "Copy", "Remove"]) expect(within(p).queryByRole("button", { name })).toBeNull();
+  });
+
   it.each([["strong", "Used by 2 tasks."], ["fast", "Used by 0 tasks."]])("an entry pane counts the tasks that use it: %s", async (profile, words) => {
     serve(view(resolved()));
     renderPage(`?profile=${profile}&lane=claude`);

@@ -76,6 +76,7 @@ def _agent_profiles_view(table, library, selections, path, providers) -> list[di
                 catalogue.addon_view(library, p.id, marks=False) if library is not None else None
             ),
             "effort": p.effort,
+            **({"source": "package"} if p.id in table.filled else {}),
             "model": p.model,
             "providers": {
                 n: {"model": e.model, "effort": e.effort} for n, e in p.providers.items()

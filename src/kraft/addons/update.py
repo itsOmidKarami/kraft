@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, NamedTuple
 import yaml
 from pydantic import ValidationError
 
-from kraft.addons import fetch, inherit, load, manifest
+from kraft.addons import builtin, fetch, inherit, load, manifest
 from kraft.addons.config import (
     ADDON_ID_PATTERN,
     AddonEntry,
@@ -1017,7 +1017,12 @@ def _judge(
         )
     except (fetch.AddonRefused, fetch.FetchError, manifest.ManifestError, OSError, ValueError):
         requires = found.requires  # an ancestor's store does not read; loading says why
-    if why := load.instance_problem(namespace, requires, ctx.config_dir):
+    if why := load.instance_problem(
+        namespace,
+        requires,
+        ctx.config_dir,
+        builtin_tree=builtin.is_tree((candidate, *ancestors)),
+    ):
         raise Refused([why])
     others = (
         set(holders)

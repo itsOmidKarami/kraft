@@ -487,7 +487,7 @@ def _content_problem(
     profiles read with theirs, and its limits under `maxima:`. None when it
     loads. `manifests` is what the store pass read, by add-on id."""
     from kraft import harness
-    from kraft.addons import inherit
+    from kraft.addons import builtin, inherit
     from kraft.config import ConfigError, read_yaml
     from kraft.policy import PolicyError, PolicyInput
     from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
@@ -498,6 +498,7 @@ def _content_problem(
         inherit.requirements(chain, manifests),
         config_dir,
         repo_library=addon.repo_id is not None,
+        builtin_tree=builtin.is_tree(chain),
     ):
         return why
     try:
@@ -554,6 +555,7 @@ def instance_problem(
     harnesses: Mapping | None = None,
     repos: Mapping | None = None,
     repo_library: bool = False,
+    builtin_tree: bool = False,
 ) -> str | None:
     """Why this instance cannot hold an add-on under `namespace` that declares
     `requires` (its manifest's): a harness or agent profile `harnesses.yaml`
@@ -571,6 +573,10 @@ def instance_problem(
             repos = read_yaml(config_dir / "repos.yaml")
     except ConfigError:
         return None  # that file's own check says why
+    if builtin_tree:
+        from kraft.addons import builtin
+
+        harnesses = builtin.harness_fallback(harnesses)[0]
     for section, what, wanted in (
         ("harnesses", "harness", requires.harnesses),
         ("profiles", "agent profile", requires.profiles),

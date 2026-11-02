@@ -4,8 +4,11 @@ not from a home."""
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
+
+import yaml
 
 import kraft
 from kraft import paths, update
@@ -57,6 +60,38 @@ def extracted() -> fetch.Extracted:
     if _memo is None or _memo[0] != stamp:
         _memo = (stamp, fetch.extract_dir(root, allow_hardlinks=True))
     return _memo[1]
+
+
+def required() -> dict[str, tuple[str, ...]]:
+    """The harnesses and agent profiles the built-in's manifest requires."""
+    requires = json.loads(extracted().files[".kraft/addon.json"][1]).get("requires", {})
+    return {k: tuple(requires.get(k, ())) for k in ("harnesses", "profiles")}
+
+
+def harness_fallback(data: object) -> tuple[object, tuple[str, ...]]:
+    """`data` (a parsed `harnesses.yaml`) with each harness and profile the
+    built-in requires, and the file lacks, filled in from the packaged
+    `harnesses.yaml`; and the names filled. An operator's own definition is
+    never replaced, and nothing is written to their file."""
+    if not isinstance(data, dict):
+        return data, ()
+    packaged = yaml.safe_load((source_dir() / "harnesses.yaml").read_text()) or {}
+    out, filled = dict(data), []
+    for section, names in required().items():
+        have = out.get(section)
+        if have is not None and not isinstance(have, dict):
+            continue  # the file's own error to name
+        have = have or {}
+        missing = {n: packaged[section][n] for n in names if n not in have}
+        if missing:
+            out[section] = {**have, **missing}
+            filled += missing
+    return out, tuple(filled)
+
+
+def is_tree(chain) -> bool:
+    """Whether an add-on's `inherit.ancestry` (itself first) ends at the built-in."""
+    return bool(chain) and chain[-1].id == ID
 
 
 # --- seed (Task 6) ---

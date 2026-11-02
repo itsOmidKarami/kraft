@@ -27,7 +27,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from kraft import client, harness, update
-from kraft.addons import fetch, flow, inherit, load, manifest, review
+from kraft.addons import builtin, fetch, flow, inherit, load, manifest, review
 from kraft.addons import update as addon_update
 from kraft.addons.config import AddonsConfig, AddonsLock
 from kraft.addons.load import InstalledAddon
@@ -144,7 +144,14 @@ def _lint_in(
     held = next((p.id for p in loaded if p.namespace == found.name), None)
     if held is not None:
         return [{"file": str(root), "message": f"namespace {found.name!r} is taken by {held}"}], []
-    if why := load.instance_problem(found.name, found.requires, config_dir):
+    pool = {p.id: p for p in (*loaded, *ancestors)}
+    chain, nxt = [], found.parent[0] if found.parent else None
+    while nxt in pool and len(chain) < inherit.MAX_DEPTH:
+        chain.append(pool[nxt])
+        nxt = pool[nxt].parent
+    if why := load.instance_problem(
+        found.name, found.requires, config_dir, builtin_tree=builtin.is_tree(chain)
+    ):
         return [{"file": str(root), "message": why}], []
     with tempfile.TemporaryDirectory() as tmp:
         store = fetch.write_scratch(Path(tmp), extracted)

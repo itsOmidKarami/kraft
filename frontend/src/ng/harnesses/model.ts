@@ -46,6 +46,8 @@ export interface ProfileView {
   effort: string | null;
   tasks: { chain: string; path: string }[];
   used_by_fallback: string[];
+  /** "package": Kraft's own, filled in because harnesses.yaml has no such profile. */
+  source?: "package";
 }
 /** `result.resolved` of the `harnesses` draft (docsite "Harnesses ops"). */
 export interface Resolved {

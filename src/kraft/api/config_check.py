@@ -803,6 +803,15 @@ def _what(addon) -> str:
     return f"repo library {addon.repo_id}" if addon.repo_id else f"add-on {addon.id}"
 
 
+def _on_builtin(addon, ctx: CheckContext) -> bool:
+    from kraft.addons import builtin, inherit
+
+    try:
+        return builtin.is_tree(inherit.ancestry(addon, ctx.addons))
+    except inherit.InheritanceError:
+        return False
+
+
 def _unmet_requires(
     addon, ctx: CheckContext, *, harnesses: dict | None = None, repos: dict | None = None
 ) -> str | None:
@@ -824,6 +833,7 @@ def _unmet_requires(
         harnesses,
         repos,
         repo_library=addon.repo_id is not None,
+        builtin_tree=_on_builtin(addon, ctx),
     )
 
 
