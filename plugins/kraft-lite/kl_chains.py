@@ -824,6 +824,11 @@ def _freeze(library: Library, chain_id: str, source: str, expanded: dict) -> dic
                     "artifact": node.get("artifact"),
                     "reject_to": node.get("reject_to"),
                     "chain_finalized": node.get("chain_finalized") is True,
+                    # Optional keys: a chain frozen before them has neither.
+                    "auto_review": task(node["auto_review"], f"{id}.auto_review")
+                    if isinstance(node.get("auto_review"), dict)
+                    else None,
+                    "auto_review_mode": node.get("auto_review_mode"),
                 }
             )
             continue

@@ -226,8 +226,14 @@ Lite runs inside one session, so it cannot enforce a budget, a time cap, an
 allowed-tools list, a sandbox or a harness choice. It reads past `policy`
 (all but a node's `max_attempts`, which caps its fix loop), `wait`, `scope`, `execution`, `harness`, `inputs`, `skippable`, `read_only`,
 `icon`, `timeout`, `artifact_required`, `escalation`, and a gate's
-`auto_review` and `auto_review_mode`. A chain that sets them still runs. An escalation is you, as
+`auto_review` unless its `auto_review_mode` is `checks_first`. A chain that sets them still runs. An escalation is you, as
 for a fix loop past its cap.
+
+A gate whose reviewer checks first (`auto_review_mode: checks_first`) runs that
+reviewer before the gate reaches you, in a subagent that may not change files.
+On a `reject` it sends the work back with the reviewer's note; otherwise you get
+the gate with that note first. It never approves. A reviewer that `decides` is
+read past: in Lite it would be your own session approving its own gate.
 
 Lite stops, naming the file and the key, at what it cannot walk without
 changing what the chain means: a reference to an add-on, a step's or a

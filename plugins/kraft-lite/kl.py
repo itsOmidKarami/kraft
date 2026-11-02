@@ -71,6 +71,12 @@ ARTIFACT_LABEL = "kraft-artifact:"
 ARTIFACT_KIND = re.compile(r"[A-Za-z0-9_.-]+")
 #: Set once the node's `on_failure` ran in this round; a rewind clears it.
 ON_FAILURE_RAN_LABEL = "kraft-on-failure-ran"
+#: A gate's checks-first review this round: `kraft-reviewed:<report path>`. A
+#: rewind clears it, so the redone work is reviewed again.
+REVIEWED_LABEL = "kraft-reviewed:"
+#: The one `auto_review_mode` Lite runs: a reviewer that may reject or hand
+#: the gate on, never approve. `decides` is read past.
+CHECKS_FIRST = "checks_first"
 #: How many times `restart` has sent the walk back from this node because its
 #: base moved. Never cleared: the cap is the node's, over the whole run.
 RESTARTS_LABEL = "kraft-restarts:"
@@ -197,12 +203,22 @@ def _checked(chain_id: str) -> str:
     return chain_id
 
 
+def _reviewer(node: dict) -> dict | None:
+    """A gate's reviewer task when it checks first, the only kind Lite runs."""
+    if node.get("auto_review_mode") == CHECKS_FIRST:
+        return node.get("auto_review")
+    return None
+
+
 def _dispatched_tasks(chain: dict) -> list[dict]:
     """Every task the walk dispatches, in chain order: each exec node's own steps,
     its failure handler's, its fix loop's, the loop's judge, then its
-    merge-rejection repair's."""
+    merge-rejection repair's; a gate's checks-first reviewer."""
     found = []
-    for node in (n for n in chain["nodes"] if n["kind"] == "exec"):
+    for node in chain["nodes"]:
+        if node["kind"] == "gate":
+            found += [task for task in [_reviewer(node)] if task]
+            continue
         loop = node["fix_loop"]
         for container in (node, node["on_failure"], loop):
             found += kl_shape.node_tasks(container) if container else []
@@ -1161,7 +1177,13 @@ def rewind(
         record = bank_wait(record)
         # `WAITED_LABEL` is not dropped on purpose: those hours were spent,
         # whatever the redo goes on to cost.
-        for label in (GATE_LABEL, ATTEMPT_LABEL, BLOCKED_LABEL, ON_FAILURE_RAN_LABEL):
+        for label in (
+            GATE_LABEL,
+            ATTEMPT_LABEL,
+            BLOCKED_LABEL,
+            ON_FAILURE_RAN_LABEL,
+            REVIEWED_LABEL,
+        ):
             record = drop_label(record, label)
         reopened = dict(record, status="open")
         if offset == 0:
@@ -1584,6 +1606,7 @@ def _state(
         sliced=_sliced(everything, epic, node_id, chain),
     )
     if definition["kind"] == "gate":
+        reviewer = _reviewer(definition)
         state["gate"] = {
             "message": definition["message"],
             "artifact": definition["artifact"],
@@ -1591,6 +1614,8 @@ def _state(
             "reject_to": definition["reject_to"],
             "chain_finalized": definition["chain_finalized"],
             "slice_gate": node_id == getattr(_shape(chain), "slice_gate", None),
+            "reviewer": _dispatcher(root)(reviewer) if reviewer else None,
+            "review": label_value(node_record, REVIEWED_LABEL),
         }
         return state
     sliced = label_value(epic, SLICE_LAYER_LABEL) is not None
@@ -2113,6 +2138,10 @@ def _chain_flaw(chain: dict) -> str | None:
         if missing:
             return f"{where} has no {', '.join(missing)}"
         if kind == "gate":
+            if node.get("auto_review") is not None:
+                flaw = _task_flaw(node["auto_review"], f"{where}'s auto_review")
+                if flaw:
+                    return flaw
             continue
         for key in ("on_failure", "fix_loop"):
             if node[key] is not None:
@@ -2438,7 +2467,10 @@ def build_parser() -> argparse.ArgumentParser:
     produced = sub.add_parser("produced")
     produced.add_argument("--kind", required=True)
     produced.add_argument("--path", required=True)
-    sub.add_parser("mark").add_argument("--on-failure-ran", action="store_true", required=True)
+    mark = sub.add_parser("mark").add_mutually_exclusive_group(required=True)
+    mark.add_argument("--on-failure-ran", action="store_true")
+    # A checks-first reviewer's report: this round's review of the gate is done.
+    mark.add_argument("--reviewed", metavar="PATH", default=None)
     # The forge's merge train or queue dropped the PR: `on_merge_rejected`, not
     # `on_base_changed`.
     sub.add_parser("restart").add_argument("--merge-rejected", action="store_true")
@@ -2647,6 +2679,11 @@ def main(argv: list[str] | None = None) -> int:
             )
         prefix = f"{ARTIFACT_LABEL}{args.kind}="
         store.write([set_label(node_record, prefix, _artifact_path(root, Path(args.path)))])
+    elif args.verb == "mark" and args.reviewed is not None:
+        if definition["kind"] != "gate" or not _reviewer(definition):
+            raise SystemExit(f"kraft-lite: {node_id} has no checks-first reviewer to have run")
+        path = _artifact_path(root, Path(args.reviewed))
+        store.write([set_label(node_record, REVIEWED_LABEL, path)])
     elif args.verb == "mark":
         if not definition.get("on_failure"):
             raise SystemExit(f"kraft-lite: {node_id} has no on_failure to have run")
