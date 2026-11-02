@@ -232,8 +232,9 @@ for a fix loop past its cap.
 A gate whose reviewer checks first (`auto_review_mode: checks_first`) runs that
 reviewer before the gate reaches you, in a subagent that may not change files.
 On a `reject` it sends the work back with the reviewer's note; otherwise you get
-the gate with that note first. It never approves. A reviewer that `decides` is
-read past: in Lite it would be your own session approving its own gate.
+the gate with that note first. The reviewer never approves. A reviewer that
+`decides` (the default) is read past: in Lite it would be your own session
+approving its own gate.
 
 Lite stops, naming the file and the key, at what it cannot walk without
 changing what the chain means: a reference to an add-on, a step's or a
@@ -524,8 +525,8 @@ never product code, specs or plans, and is never merged. Specs and plans reach
 the children as messages. At the end the controller lists the branches that are
 safe for you to delete.
 
-Add `.kraft-lite/decisions/`, `.kraft-lite/messages/` and
-`.kraft-lite/proposals/` to `.gitignore`, and `.kraft-lite/registry.yaml.migrated`
+Add `.kraft-lite/decisions/`, `.kraft-lite/messages/`,
+`.kraft-lite/proposals/` and `.kraft-lite/reviews/` to `.gitignore`, and `.kraft-lite/registry.yaml.migrated`
 if `migrate` left one. `/kraft-lite:init` tells you to. Commit
 `.kraft-lite/harnesses/`: it holds what a run learned about your harness.
 

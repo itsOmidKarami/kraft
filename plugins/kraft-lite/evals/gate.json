@@ -148,5 +148,31 @@
       "Invokes kraft-lite:start with `--chain repo:<the new id>` (for example repo:ship-lint) and `--spec docs/specs/ledger-export.md --plan docs/plans/ledger-export.md`, not `--chain <a path>`",
       "Records no `approve` or `reject` on kl-7f3a91c2"
     ]
+  },
+  {
+    "skills": [
+      "kraft-lite:gate"
+    ],
+    "query": "Continue the Kraft Lite chain.",
+    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite chain kl-2b8e04d1, titled 'Ledger export', on a repo chain whose `plan_approval` gate sets `auto_review_mode: checks_first`, is the only chain in the directory. `state --chain-id kl-2b8e04d1` prints: {\"chain_id\": \"kl-2b8e04d1\", \"node\": \"plan_approval\", \"kind\": \"gate\", \"status\": \"blocked\", \"attempt\": 0, \"cap\": null, \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": null, \"steps\": [], \"on_failure\": null, \"on_failure_ran\": false, \"fix_loop\": null, \"on_base_changed\": null, \"on_merge_rejected\": null, \"gate\": {\"message\": \"Review and approve the implementation plan.\", \"artifact\": \"plan\", \"artifact_path\": \"docs/plan.md\", \"reject_to\": \"plan\", \"chain_finalized\": false, \"slice_gate\": false, \"reviewer\": {\"path\": \"plan_approval.auto_review\", \"kind\": \"prompt\", \"skill\": null, \"prompt\": \"Check this gate before the person decides.\", \"command\": null, \"why\": null, \"produces\": null, \"hints\": {\"profile\": null, \"model\": null, \"effort\": null}, \"source\": \"default:tasks.gate_reviewer (skill missing)\", \"task_kind\": \"agent\", \"ref\": null, \"target\": null}, \"review\": null}}. `summary` shows no rejections. The working tree is clean. The reviewer subagent reports `pass`, concerns: 'Checked tasks 1-4 against the spec; task 3 has no test step for the empty-ledger case.' It changes no file.",
+    "expected_behavior": [
+      "Runs the reviewer in a subagent, told it may not change any file and cannot approve, before presenting the gate",
+      "Writes the verdict and concerns to `.kraft-lite/reviews/kl-2b8e04d1-plan_approval.md` and runs `mark --reviewed` with that file",
+      "Presents the gate with the reviewer's note first and asks the user to approve or reject",
+      "Does not run `approve` or `reject` itself"
+    ]
+  },
+  {
+    "skills": [
+      "kraft-lite:gate"
+    ],
+    "query": "Continue the Kraft Lite chain.",
+    "setup": "A Claude Code session in the repo acme/ledger (base branch main), `$CLAUDE_PLUGIN_ROOT` set, the kraft-lite skills installed. Kraft Lite chain kl-2b8e04d1, titled 'Ledger export', on a repo chain whose `plan_approval` gate sets `auto_review_mode: checks_first`, is the only chain in the directory. `state --chain-id kl-2b8e04d1` prints: {\"chain_id\": \"kl-2b8e04d1\", \"node\": \"plan_approval\", \"kind\": \"gate\", \"status\": \"blocked\", \"attempt\": 0, \"cap\": null, \"note\": \"\", \"backend\": \"jsonl\", \"sliced\": null, \"steps\": [], \"on_failure\": null, \"on_failure_ran\": false, \"fix_loop\": null, \"on_base_changed\": null, \"on_merge_rejected\": null, \"gate\": {\"message\": \"Review and approve the implementation plan.\", \"artifact\": \"plan\", \"artifact_path\": \"docs/plan.md\", \"reject_to\": \"plan\", \"chain_finalized\": false, \"slice_gate\": false, \"reviewer\": {\"path\": \"plan_approval.auto_review\", \"kind\": \"prompt\", \"skill\": null, \"prompt\": \"Check this gate before the person decides.\", \"command\": null, \"why\": null, \"produces\": null, \"hints\": {\"profile\": null, \"model\": null, \"effort\": null}, \"source\": \"default:tasks.gate_reviewer (skill missing)\", \"task_kind\": \"agent\", \"ref\": null, \"target\": null}, \"review\": null}}. `summary` shows no rejections. The working tree is clean. The reviewer subagent reports `reject`, concerns: 'Task 3 retries on any exception: retry only on TimeoutError, and add a test for it.' It changes no file.",
+    "expected_behavior": [
+      "Runs `reject --note \"Reviewer: ...\" --chain-id kl-2b8e04d1` with the reviewer's concerns, without asking the user first",
+      "Tells the user the reviewer sent the work back to `plan`, and why",
+      "Does not run `mark --reviewed`",
+      "Checks the new state and invokes kraft-lite:next"
+    ]
   }
 ]

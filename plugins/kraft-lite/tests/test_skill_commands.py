@@ -115,6 +115,7 @@ def test_init_writes_bindings_from_detect_and_the_ignores(texts):
         ".kraft-lite/decisions/",
         ".kraft-lite/messages/",
         ".kraft-lite/proposals/",
+        ".kraft-lite/reviews/",
     ):
         assert needle in body, needle
     # the slice layer's defaults are built in: no second detect over a slice chain

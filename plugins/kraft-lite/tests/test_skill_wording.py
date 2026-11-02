@@ -162,6 +162,11 @@ SAYS = {
             "`extends` still resolve, and pass `--chain repo:<new id>`."
         ),
     },
+    ("gate", "1a"): {
+        "gate-reviewer-never-clears": "The reviewer never clears a gate.",
+        "gate-reviewer-edit-voids-verdict": "It changed something: its verdict is ignored.",
+        "gate-reviewer-reject-capped": "`KL summary` already shows 3 `rejections` on the node",
+    },
     ("gate", 2): {
         "gate-refused-slices-asks": (
             "If it refuses, tell the user what it said and ask whether to approve unsliced."

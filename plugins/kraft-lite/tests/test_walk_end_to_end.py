@@ -553,28 +553,30 @@ def reviewed_chain(root: Path, mode: str) -> str:
     return str(path)
 
 
-@pytest.mark.parametrize(
-    ("mode", "runs"),
-    [
-        pytest.param("checks_first", True, id="checks_first"),
-        # Lite never lets an agent clear a gate: a reviewer that decides is read past.
-        pytest.param("decides", False, id="decides"),
-    ],
-)
-def test_a_checks_first_reviewer_runs_once_per_round(kl_cli, tmp_path, mode, runs):
-    ref = reviewed_chain(tmp_path, mode)
-    kl_cli(tmp_path, "start", "--title", "t", "--chain", ref)
-    kl_cli(tmp_path, "close")
-    kl_cli(tmp_path, "gate")
+def at_reviewed_gate(kl_cli, root: Path, mode: str) -> dict:
+    """A reviewed chain started with its reviewer bound, and walked to its gate:
+    what `start` printed."""
+    (root / ".kraft-lite").mkdir()
+    (root / ".kraft-lite" / "bindings.yaml").write_text(
+        "tasks:\n  gate_reviewer: {kind: prompt, prompt: Check it.}\n"
+    )
+    started = kl_cli(root, "start", "--title", "t", "--chain", reviewed_chain(root, mode))
+    kl_cli(root, "close")
+    kl_cli(root, "gate")
+    return started
 
+
+def test_a_checks_first_reviewer_runs_once_per_round(kl_cli, tmp_path):
+    started = at_reviewed_gate(kl_cli, tmp_path, "checks_first")
+
+    assert started["unused_bindings"] == [], "the reviewer is a task bindings reach"
     gate = kl_cli(tmp_path, "state")["gate"]
     assert gate["review"] is None
-    if not runs:
-        assert gate["reviewer"] is None
-        refused = kl_cli(tmp_path, "mark", "--reviewed", "r.md", ok=False)
-        assert "has no checks-first reviewer" in refused.stderr
-        return
-    assert (gate["reviewer"]["path"], gate["reviewer"]["kind"]) == ("check.auto_review", "prompt")
+    reviewer = gate["reviewer"]
+    assert (reviewer["path"], reviewer["source"]) == (
+        "check.auto_review",
+        "bindings:tasks.gate_reviewer",
+    )
 
     kl_cli(tmp_path, "mark", "--reviewed", str(tmp_path / "r.md"))
     assert kl_cli(tmp_path, "state")["gate"]["review"] == "r.md"
@@ -583,6 +585,16 @@ def test_a_checks_first_reviewer_runs_once_per_round(kl_cli, tmp_path, mode, run
     kl_cli(tmp_path, "close")
     kl_cli(tmp_path, "gate")
     assert kl_cli(tmp_path, "state")["gate"]["review"] is None, "the redone work is reviewed again"
+
+
+def test_a_reviewer_that_decides_is_read_past(kl_cli, tmp_path):
+    """Lite never lets an agent clear a gate."""
+    started = at_reviewed_gate(kl_cli, tmp_path, "decides")
+
+    assert started["unused_bindings"] == ["tasks.gate_reviewer"]
+    assert kl_cli(tmp_path, "state")["gate"]["reviewer"] is None
+    refused = kl_cli(tmp_path, "mark", "--reviewed", "r.md", ok=False)
+    assert "has no checks-first reviewer" in refused.stderr
 
 
 def test_a_gate_frozen_before_reviewers_still_walks(kl_cli, tmp_path):
