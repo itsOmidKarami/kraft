@@ -282,10 +282,10 @@ jobs:
             exit 1
           fi
           for f in .kraft/addon.json chains/default.yaml; do
-            if ! unzip -l "$WHEEL" "kraft/_bundled/kraft-default/$f" >/dev/null 2>&1; then
+            unzip -l "$WHEEL" "kraft/_bundled/kraft-default/$f" >/dev/null 2>&1 || {
               echo "::error::the wheel has no kraft/_bundled/kraft-default/$f"
               exit 1
-            fi
+            }
           done
           # The web UI bundles react, lucide-react, the Inter font and more, and
           # their licenses ask for their notices to go wherever their code does.
