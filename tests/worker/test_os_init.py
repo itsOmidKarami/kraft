@@ -765,7 +765,10 @@ def test_launch_darwin_survives_a_sandbox_exec_that_will_not_start(launcher, tmp
 
 def test_launch_darwin_stops_copying_a_survivor_that_keeps_writing(launcher, tmp_path):
     survivor = "for i in $(seq 400); do echo x; sleep 0.05; done"
-    code = f"import subprocess; subprocess.Popen(['sh', '-c', {survivor!r}]); print('out')"
+    # flushed before the survivor starts: a buffered print lost the race to its first echo
+    code = (
+        f"import subprocess; print('out', flush=True); subprocess.Popen(['sh', '-c', {survivor!r}])"
+    )
     began = time.monotonic()
     r = run(launcher("launch", py(code), darwin=True, sweeps=tmp_path / "sweeps"))
     assert (r.stdout.startswith("out\n"), time.monotonic() - began < 10) == (True, True)
