@@ -13,9 +13,11 @@ from pathlib import Path
 
 import yaml
 
-from kraft import client
+from kraft import cli, client
 from kraft.addons import builtin, fetch, manifest, repo_library
+from kraft.addons.config import AddonsLock
 from kraft.addons.load import InstalledAddon, repo_library_id
+from kraft.cli import addon as addon_cli
 from kraft.config import read_yaml, write_yaml
 from support.harness import commit_all, git, make_repo, write
 
@@ -733,3 +735,57 @@ def launch_task(pins, **fields):
 
     task = AgentTask.model_validate({"id": "t", **AGENT, **fields})
     return agent.resolve_agent_task(task, None, steering={}, addons=pins)
+
+
+def run_addon_cli(capsys, *argv):
+    """`kraft admin addon *argv`: `(exit code, stdout + stderr)`."""
+    try:
+        cli.main(["admin", "addon", *argv])
+        code = 0
+    except SystemExit as exc:
+        code = exc.code
+    out = capsys.readouterr()
+    if isinstance(code, str):  # `SystemExit("error: ...")`: printed, and exit 1
+        return 1, out.out + out.err + code
+    return code, out.out + out.err
+
+
+def addon_cli_home(tmp_path, monkeypatch, published: dict[str, dict] | None = None):
+    """This process's Kraft home with no add-on installed, for `run_addon_cli`.
+    `published` (as `make_collection` takes them) is published as the collection
+    `acme` as `.repo`, not yet added. `.reloads` counts the reloads asked of a
+    running server."""
+    config_dir, addons_dir = instance(tmp_path)
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(addons_dir.parent))
+    monkeypatch.delenv("KRAFT_WORK_ITEM_ID", raising=False)
+    reloads = []
+
+    async def reload_addons():
+        reloads.append(1)
+        return {}
+
+    monkeypatch.setattr(addon_cli.client, "reload_addons", reload_addons)
+
+    class Home:
+        config = config_dir
+        addons = addons_dir
+        repo = make_collection(tmp_path, published) if published else None
+
+        def yaml(self):
+            return read_yaml(config_dir / "addons.yaml")
+
+        def locked(self, addon_id="release@acme"):
+            return AddonsLock.load(config_dir / "addons.lock").addons.get(addon_id)
+
+        def written(self):
+            lock = config_dir / "addons.lock"
+            store = addons_dir / "store"
+            return (
+                (config_dir / "addons.yaml").read_text(),
+                lock.read_text() if lock.exists() else "",
+                sorted(p.name for p in store.glob("*") if p.name != builtin.store_name()),
+            )
+
+    Home.reloads = reloads
+    return Home()

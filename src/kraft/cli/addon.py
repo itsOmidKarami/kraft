@@ -311,6 +311,9 @@ def _ancestors_for(
             parent = _in_dirs(parent_id, own, with_dirs)
             if parent is None and home is not None:
                 parent = _on_instance(parent_id, home, scratch, held, catalogues)
+            if parent is None and parent_id == builtin.ID:  # no instance: the running Kraft's own
+                fetch.write_scratch(scratch, builtin.extracted())
+                parent = builtin.entry(scratch)
         except (
             OSError,
             ValueError,
@@ -522,6 +525,12 @@ def _as_cli() -> Iterator[None]:
         raise _refuse(str(exc)) from exc
 
 
+def _not_the_builtin(*addon_ids: str) -> None:
+    """Refuse the built-in by name, before anything else is asked of the verb."""
+    if builtin.ID in addon_ids:
+        raise _refuse(builtin.REFUSED)
+
+
 def _not_a_worker() -> None:
     """Like `forbid_self_action`, consistency and not a security boundary: a
     worker does not change the instance it runs on."""
@@ -615,6 +624,8 @@ def _cmd_collection_add(ns: argparse.Namespace) -> None:
         manifest.ManifestError,
     ) as exc:
         raise _refuse(str(exc)) from exc
+    if name == builtin.COLLECTION:
+        raise _refuse(builtin.COLLECTION_REFUSED)
 
     moved = False
     left: list[str] = []  # the old source's mirror, once nothing reads it
@@ -831,6 +842,7 @@ def _run_update(
 
 
 def _cmd_install(ns: argparse.Namespace) -> None:
+    _not_the_builtin(ns.addon)
     _not_a_worker()
     with _as_cli():
         entries = flow.install_entries(
@@ -856,6 +868,7 @@ def _check_code(result: addon_update.Result) -> int:
 
 
 def _cmd_update(ns: argparse.Namespace) -> None:
+    _not_the_builtin(*ns.addons)
     if not ns.check:
         _not_a_worker()
     results = _run_update(ns, ns.addons or None, check=ns.check)
@@ -877,6 +890,7 @@ def _cmd_update(ns: argparse.Namespace) -> None:
 
 
 def _cmd_auto_update(ns: argparse.Namespace) -> None:
+    _not_the_builtin(ns.addon)
     _not_a_worker()
     on = ns.state == "on"
 
@@ -902,7 +916,12 @@ def _still_referenced(
     """Refuse while the instance's own files name the add-on's namespace: with
     the add-on gone each would stop resolving, or be handed to the agent as
     another tool's plugin skill. Refuse too while a connected repository's
-    library lists the add-on under `addons:`: its chains build on it."""
+    library lists the add-on under `addons:`: its chains build on it. Neither
+    holds for a copy of `kraft-default` the built-in has left out: the built-in
+    answers the references, and what builds on it is left out too."""
+    found = load.installed(config_dir, addons_dir)
+    if any(a.id == addon_id and a.left_out == builtin.SHIPS_IT.format(id=addon_id) for a in found):
+        return
     try:
         locked = AddonsLock.load(config_dir / AddonsLock.FILE).addons.get(addon_id)
     except ConfigError as exc:
@@ -919,9 +938,7 @@ def _still_referenced(
             f"cannot {verb} {addon_id}: its namespace {namespace!r} is still referenced by\n  "
             + "\n  ".join(uses)
         )
-    if built_on := addon_update.built_on_refusal(
-        addon_id, verb, load.installed(config_dir, addons_dir)
-    ):
+    if built_on := addon_update.built_on_refusal(addon_id, verb, found):
         said.append(built_on)
     if said:
         raise _refuse("\n".join(said))
@@ -949,6 +966,7 @@ def _parent_loads(raw: dict, config_dir: Path, addons_dir: Path, addon_id: str) 
 
 
 def _cmd_enable(ns: argparse.Namespace) -> None:
+    _not_the_builtin(ns.addon)
     _not_a_worker()
     on = ns.addon_verb == "enable"
     config_dir, addons_dir = flow.home()
@@ -968,6 +986,7 @@ def _cmd_enable(ns: argparse.Namespace) -> None:
 
 
 def _cmd_uninstall(ns: argparse.Namespace) -> None:
+    _not_the_builtin(ns.addon)
     _not_a_worker()
     config_dir, addons_dir = flow.home()
     lock_file = config_dir / AddonsLock.FILE

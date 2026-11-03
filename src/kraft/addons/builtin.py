@@ -99,6 +99,7 @@ SHIPS_IT = (
     "then `kraft admin addon uninstall {id}`"
 )
 REFUSED = "kraft-default@kraft comes with Kraft; upgrading Kraft updates it"
+COLLECTION_REFUSED = "the collection name 'kraft' is Kraft's own"
 
 
 def is_builtin(addon) -> bool:
