@@ -311,25 +311,32 @@ def test_the_builtins_store_survives_a_collection_and_no_release_drops_it(tmp_pa
     assert load.left_out_by("3.0.0", config) == []
 
 
-def test_the_builtin_wins_the_namespace_over_a_lock_that_still_holds_a_copy(tmp_path):
-    """A 2.5 home's lock holds `kraft-default@sdlc`: installing another copy is
-    refused with `REFUSED`, not sent to update the held one (which is refused too)."""
-    repo = fx.make_collection(tmp_path, {"kraft-default": {"library": {"tasks": {"b": fx.AGENT}}}})
-    config, addons = _home(
-        tmp_path, {"acme": {"git": repo.as_uri()}, "sdlc": {"git": repo.as_uri()}}
+@pytest.mark.parametrize("asked", ["kraft-default@acme", "kid@acme"], ids=["judge", "pull-in"])
+def test_the_builtin_wins_the_namespace_over_a_lock_that_still_holds_a_copy(tmp_path, asked):
+    """A 2.5 home's lock holds `kraft-default@sdlc`: a copy from another
+    collection, asked for or pulled in as a parent, is refused with `REFUSED`,
+    not sent to update the held one (which is refused too)."""
+    kid = {
+        "library": {"tasks": {"k": fx.AGENT}},
+        "manifest": fx.child_manifest("kraft-default@acme", "1"),
+    }
+    acme = fx.make_collection(
+        tmp_path, {"kraft-default": {"library": {"tasks": {"b": fx.AGENT}}}, "kid": kid}
     )
-    fx.install(config, addons, repo, "kraft-default", alias=None)
-    from kraft.addons.config import AddonsLock
-
-    assert any(
-        a.endswith("@acme") or a.endswith("@sdlc")
-        for a in AddonsLock.load(config / "addons.lock").addons
+    held = fx.make_collection(
+        tmp_path, {"kraft-default": {"library": {"tasks": {"b": fx.AGENT}}}}, name="sdlc"
     )
-    [result] = addon_update.update(
-        ["kraft-default@acme"],
+    config, addons = _home(tmp_path, {"acme": {"git": acme.as_uri()}})
+    fx.install(config, addons, held, "kraft-default")
+    listed = yaml.safe_load((config / "addons.yaml").read_text())
+    del listed["addons"]["kraft-default@sdlc"]  # only the lock still holds it
+    write_yaml(config / "addons.yaml", listed)
+    results = addon_update.update(
+        [asked],
         accept=lambda review: True,
-        entries={"kraft-default@acme": True},
+        entries={asked: True},
         config_dir=config,
         addons_root=addons,
     )
-    assert result.outcome == "refused" and builtin.REFUSED in result.problems
+    problems = [p for r in results if r.outcome == "refused" for p in r.problems]
+    assert problems and all(builtin.REFUSED in p for p in problems)
