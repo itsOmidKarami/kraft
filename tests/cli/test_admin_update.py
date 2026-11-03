@@ -26,6 +26,14 @@ from kraft.templates.models import AgentTask
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+@pytest.fixture(autouse=True)
+def _no_preview(monkeypatch):
+    """No wheel is downloaded: the kraft-default comparison has its own tests."""
+    from kraft.addons import builtin
+
+    monkeypatch.setattr(builtin, "preview", lambda *a, **k: builtin.Preview(None, (), None))
+
+
 def _pre_v1_home(root: Path) -> tuple[Path, dict[str, bytes]]:
     """A realistic pre-V1 templates home under `root`, and its `MACHINE_CONFIG`
     files' original bytes (what `replace_pre_v1_config` must carry across
