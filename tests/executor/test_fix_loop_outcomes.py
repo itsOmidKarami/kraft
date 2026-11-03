@@ -223,15 +223,25 @@ DOUBT = "No code changed: these failures are the host's, not the branch's."
 
 
 @pytest.mark.parametrize(
-    ("fix_status", "tail"),
+    ("fix_status", "tail", "earlier_thread_event"),
     [
-        pytest.param("done", "The repair ended done and gave no concerns.", id="done"),
-        pytest.param("failed", "The repair ended failed and gave no concerns.", id="failed"),
-        pytest.param("done_with_concerns", f"The repair said: fix: {DOUBT}", id="with-concerns"),
+        pytest.param("done", "The repair ended done and gave no concerns.", False, id="done"),
+        pytest.param("failed", "The repair ended failed and gave no concerns.", False, id="failed"),
+        pytest.param(
+            "done_with_concerns", f"The repair said: fix: {DOUBT}", False, id="with-concerns"
+        ),
+        # Only a thread update appended during the repair counts: one from
+        # before it must not hide that the round changed nothing.
+        pytest.param(
+            "done",
+            "The repair ended done and gave no concerns.",
+            True,
+            id="after-an-earlier-thread-update",
+        ),
     ],
 )
 async def test_a_fix_round_that_changed_nothing_stops_without_measuring_again(
-    item_on, script, fix_status, tail
+    item_on, script, fix_status, tail, earlier_thread_event
 ):
     """Kraft-6rph9: 3k7w4qfc's repair changed nothing and said so, and the
     whole node -- a 14-minute suite and a code review -- ran again on the
@@ -240,6 +250,11 @@ async def test_a_fix_round_that_changed_nothing_stops_without_measuring_again(
     script.plan = {"fix": [fix_status]}
     script.unchanged = {"fix"}
     it = await item_on(_node(_sub("check", ["false"]), [{"id": "repair", "tasks": [_sub("fix")]}]))
+    if earlier_thread_event:
+        payload = {"thread_id": "t0", "state": "claimed"}
+        await it.database.write(
+            lambda c: events.append(c, it.id, GateEvent.THREAD_UPDATED, payload)
+        )
     if fix_status == "done_with_concerns":
 
         async def concerned(_row):
