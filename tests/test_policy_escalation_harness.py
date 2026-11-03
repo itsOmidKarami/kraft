@@ -79,4 +79,4 @@ def test_policy_yaml_refuses_an_unknown_escalation_harness_naming_the_known(tmp_
         PolicyInput.from_yaml(path)
 
     assert "'gemini'" in str(refused.value)
-    assert "['cx']" in str(refused.value)
+    assert "['claude', 'cx']" in str(refused.value)
