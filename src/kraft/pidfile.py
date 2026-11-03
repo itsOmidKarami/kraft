@@ -73,7 +73,7 @@ def _not_a_kraft_server(pid: int, path: Path) -> str | None:
         cmdline = proc.cmdline()
     except psutil.NoSuchProcess:
         return "is not running"
-    except psutil.AccessDenied:
+    except (psutil.AccessDenied, SystemError):  # macOS psutil 7.2.2: SystemError, protected process
         return "belongs to another user"
     try:
         written = path.stat().st_mtime

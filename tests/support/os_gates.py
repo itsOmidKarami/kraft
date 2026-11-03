@@ -3,11 +3,12 @@ serving a `kind: os` session over its channel, and the pollers around it."""
 
 from __future__ import annotations
 
+import contextlib
 import http.server
 import stat
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -145,5 +146,25 @@ def wait_for(path: Path, what: str):
         time.sleep(0.1)
 
 
+def cmdline_of(p: psutil.Process) -> list[str]:
+    """`p`'s argv, or [] when it cannot be read. On macOS reading another process's argv races
+    its exit or a protected process, and psutil 7.2.2 raises `SystemError` as well as its own
+    errors (and `process_iter(["cmdline"])` lets them all out of the listing)."""
+    try:
+        return p.cmdline() or []
+    except (psutil.Error, SystemError):
+        return []
+
+
+def procs_where(match: Callable[[list[str]], bool]) -> list[psutil.Process]:
+    return [p for p in psutil.process_iter() if match(cmdline_of(p))]
+
+
 def procs(*argv: str) -> list[psutil.Process]:
-    return [p for p in psutil.process_iter(["cmdline"]) if p.info["cmdline"] == list(argv)]
+    return procs_where(lambda c: c == list(argv))
+
+
+def kill_where(match: Callable[[list[str]], bool]) -> None:
+    for p in procs_where(match):
+        with contextlib.suppress(psutil.Error):
+            p.kill()

@@ -199,11 +199,15 @@ def escapes(started):
 
 def gone(proc, timeout=10):
     end = time.monotonic() + timeout
-    while proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
+    while True:
+        try:
+            if not proc.is_running() or proc.status() == psutil.STATUS_ZOMBIE:
+                return True
+        except psutil.NoSuchProcess:  # exited between the two calls
+            return True
         if time.monotonic() > end:
             return False
         time.sleep(0.05)
-    return True
 
 
 @pytest.mark.e2e("sandbox-exec")
