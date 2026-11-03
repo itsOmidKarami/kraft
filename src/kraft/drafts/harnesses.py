@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from kraft import harness as harness_mod
 from kraft import storage
+from kraft.addons import builtin
 from kraft.api import config_check
 from kraft.drafts import authored, config, store
 from kraft.drafts import resolve as resolve_mod
@@ -90,8 +91,16 @@ def _rewrite(existing: list, universe: list[str], keep: set[str]) -> list[str]:
     return out + [h for h in universe if h in keep and h not in out]
 
 
+def _refuse_packaged_harness(d, name: str) -> None:
+    if name in builtin.filled_harnesses(d.file("harnesses.yaml")):
+        raise OpError(
+            f"{name} comes from Kraft's package; define it in harnesses.yaml to change it"
+        )
+
+
 def set_access(d, harness: str, state: str) -> None:
     universe = _universe(d.read("harnesses.yaml"))
+    _refuse_packaged_harness(d, harness)
     if harness not in universe:
         raise OpError(f"no harness {harness!r} in harnesses.yaml; known: {universe}")
     if state not in STATES:
@@ -163,6 +172,10 @@ def _profiles(d) -> dict:
 def _profile(d, name: str) -> dict:
     found = _profiles(d).get(name)
     if not isinstance(found, dict):
+        if name in builtin.harness_fallback(d.file("harnesses.yaml"))[1]:
+            raise OpError(
+                f"{name} comes from Kraft's package; define it in harnesses.yaml to change it"
+            )
         raise OpError(f"no profile {name!r}; known: {list(_profiles(d))}")
     return found
 
@@ -172,7 +185,9 @@ def _users(st, name: str) -> list[dict]:
     directly or in a `fallback:` list of their own."""
     return [
         {"chain": chain, "path": path}
-        for chain, path, task in config_check.selections(getattr(st, "library", None))
+        for chain, path, task in config_check.selections(
+            getattr(st, "library", None), st.templates_dir
+        )
         if task.profile == name or any(e.profile == name for e in task.fallback or ())
     ]
 
@@ -286,6 +301,7 @@ def set_harness(d, id: str, patch: dict) -> None:
     provider accepts is checked by the resolve, like any other file edit."""
     harness = _section(d.file("harnesses.yaml"), "harnesses").get(id)
     if not isinstance(harness, dict):
+        _refuse_packaged_harness(d, id)
         known = _universe(d.read("harnesses.yaml"))
         raise OpError(f"no harness {id!r} in harnesses.yaml; known: {known}")
     if not isinstance(patch, dict) or not patch:
@@ -538,7 +554,7 @@ def resolve(st, key, raw, files, published) -> dict:
         )
     except TemplateEnvironmentError:
         table = None
-    chosen = config_check.selections(getattr(st, "library", None))
+    chosen = config_check.selections(getattr(st, "library", None), st.templates_dir)
     linted = _lint_problems(st, policy, chosen)
     escalation = _section(policy, "defaults").get("escalation_harness")
     out["problems"] += (
@@ -549,7 +565,11 @@ def resolve(st, key, raw, files, published) -> dict:
     )
     tasks = _tasks_by_harness(chosen, table)
 
-    profiles = _section(harnesses_yaml, "profiles")
+    # The packaged profiles a launch would use, labelled in this view only:
+    # the draft's own file never holds them.
+    with_package, packaged = builtin.harness_fallback(harnesses_yaml)
+    filled = table.filled if table is not None else set(packaged)
+    profiles = _section(with_package, "profiles")
     efforts = {
         name: {e.get("effort") for e in _providers_of(body).values()}
         for name, body in profiles.items()
@@ -560,6 +580,19 @@ def resolve(st, key, raw, files, published) -> dict:
                 h, _section(harnesses_yaml, "harnesses")[h], states[h], providers, tasks.get(h, [])
             )
             for h in universe
+        ]
+        + [
+            {
+                **_harness_view(
+                    h,
+                    _section(with_package, "harnesses")[h],
+                    access(policy, [h])[h],
+                    providers,
+                    tasks.get(h, []),
+                ),
+                "source": "package",
+            }
+            for h in builtin.filled_harnesses(harnesses_yaml)
         ],
         "allowed_tools": _section(policy, "maxima").get("allowed_tools"),
         "escalation": {
@@ -577,6 +610,7 @@ def resolve(st, key, raw, files, published) -> dict:
                 "effort": next(iter(efforts[name])) if len(efforts[name]) == 1 else None,
                 "tasks": _users(st, name),
                 "used_by_fallback": _fallback_users(profiles, name),
+                **({"source": "package"} if name in filled else {}),
             }
             for name, body in profiles.items()
         },

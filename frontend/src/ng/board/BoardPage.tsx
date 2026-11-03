@@ -10,6 +10,7 @@ import { gateReviewUrl } from "../review/url";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { reload, useOffline } from "../offline";
 import { OLDER_SERVER, olderServer, useHealth } from "../shell/health";
+import { KraftDefaultBanner } from "../shell/KraftDefaultBanner";
 import { clearFirstRun, FirstRun, savedFirstRun } from "../shell/FirstRun";
 import { Kbd } from "../ui/Kbd";
 import { Menu } from "../ui/Menu";
@@ -304,6 +305,7 @@ export function BoardPage() {
       </HeaderActions>
 
       {restart}
+      <KraftDefaultBanner health={health} />
       <div className="board-filters">
         <label className="board-filter">
           <span className="board-visually-hidden">Filter</span>

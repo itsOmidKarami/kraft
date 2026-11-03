@@ -1,6 +1,6 @@
 ---
 name: check
-description: "Reports where a repo's Kraft config has drifted from what this Kraft version ships: chains that no longer resolve, nodes and capabilities the live config lacks, a missing setup command, skills a chain names that are not installed. Use after a Kraft upgrade or when chains or the library look stale; a server that is unhealthy is kraft:doctor."
+description: "Reports where a repo's Kraft config has drifted from what this Kraft version ships: chains that no longer resolve, a chain that hides Kraft's built-in kraft-default, settings-file capabilities the live config lacks, a missing setup command, skills a chain names that are not installed. Use after a Kraft upgrade or when chains or the library look stale; a server that is unhealthy is kraft:doctor."
 ---
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
@@ -15,20 +15,28 @@ carry the drift this skill exists to narrate. Doctor rows not listed here (the
 server, the MCP token) are `kraft:doctor`'s; say so rather than diagnosing them.
 
 - `lint` - every chain in `~/.kraft/config/chains/` that does not resolve
-  against `library.yaml`, each with its reason: a reference to a component that
+  against the library and the built-in `kraft-default` add-on, each with its reason: a reference to a component that
   isn't declared, a component extending one of another kind, a policy a chain
   widens past `policy.yaml`. It exits 1 on any error. A chain that does not
   resolve cannot be filed, so this comes first.
-- `chain_templates` (doctor) - a node a shipped chain has that the live copy in
-  `chains/` doesn't. It compares authored node **ids only** - a live node that
-  kept its id but lost a task, or whose `extends` now points somewhere else, is
-  invisible to it. A clean row is not proof the chain matches; `kraft admin
-  templates show ID --resolved` is what the chain actually runs.
+- `kraft-default` (doctor) - Kraft's own chains and library are the built-in
+  add-on `kraft-default`, read from the installed Kraft, so they cannot fall
+  behind and there is no drift to compare. The row is always `ok`, and warns
+  when it has something to say, one line each:
+  - `chains/<file>.yaml is a full copy and hides kraft-default:<id>` - a home
+    seeded before the built-in. It keeps its copy and Kraft never rewrites it;
+    point at the guide "Move onto kraft-default" and offer nothing more.
+  - an update that was held, or one that changed `kraft-default` - the line
+    says what; a held one is settled by an interactive `kraft admin update`.
+  - an old GitHub copy of `kraft-default` - the line gives the two commands
+    that move off it.
+  - `harnesses.yaml lacks ...; using the packaged ones`, a repository id
+    `kraft-default`, and `maxima:` clamping built-in tasks.
 - `agent: <profile>` (doctor) - a harness profile some chain selects whose
   executable is not on PATH, or which `harnesses.yaml` does not declare.
 - `capabilities` (doctor) - capabilities this Kraft has that the operator's
-  seeded config predates. `config/` is seeded once and never overwritten, so
-  an install keeps its original library and chains forever. Read the row's
+  seeded settings files predate (today the agent profiles in `harnesses.yaml`).
+  `config/` is seeded once and never overwritten. Read the row's
   `-> ` lines out as the edit each one needs; they are adoption instructions,
   not drift to be "fixed". Never offer to copy the shipped defaults over: a
   live library carries per-task `model`/`effort` choices the shipped defaults

@@ -38,9 +38,9 @@ origin: src/kraft/addons/load.py §qualify
 
 ## REQ addon-harness-and-bare-profile-are-the-instances
 
-WHEN an add-on's task names a harness or a bare agent profile, the system SHALL resolve it against the instance's `harnesses.yaml`.
-enforced-by: tests/templates/test_library_addons.py::test_addon_layer_resolution[addon-bare-profile-is-instance]
-origin: src/kraft/addons/load.py §qualify
+WHEN an add-on's task names a harness or a bare agent profile, the system SHALL resolve it against the instance's `harnesses.yaml`; EXCEPT that the harness and profile names the built-in `kraft-default` requires (and so every add-on built on it) SHALL fall back to the packaged `harnesses.yaml` when the instance lacks them, and only those names, never replacing one the instance defines.
+enforced-by: tests/templates/test_library_addons.py::test_addon_layer_resolution[addon-bare-profile-is-instance], tests/addons/test_builtin.py::test_the_builtins_profiles_fall_back_to_the_package[no-profiles-section], tests/addons/test_builtin.py::test_the_builtins_profiles_fall_back_to_the_package[fast-missing], tests/addons/test_builtin.py::test_the_builtins_profiles_fall_back_to_the_package[claude-harness-missing], tests/addons/test_builtin.py::test_the_builtins_profiles_fall_back_to_the_package[operator-defined-wins], tests/addons/test_builtin.py::test_only_the_builtin_tree_gets_the_fallback_at_load[builtin], tests/addons/test_builtin.py::test_only_the_builtin_tree_gets_the_fallback_at_load[other]
+origin: src/kraft/addons/load.py §qualify; src/kraft/addons/builtin.py §harness_fallback, src/kraft/templates/environment.py §HarnessProfileTable
 
 ## REQ addon-cannot-define-harness-profiles
 
@@ -68,26 +68,26 @@ origin: src/kraft/addons/fetch.py §fetch
 
 ## REQ kraft-publishes-its-shipped-config-as-an-addon
 
-The repository SHALL publish its shipped `config/` as the add-on `kraft-default` in the collection `kraft-sdlc`, and every add-on in that collection SHALL validate against an instance seeded from the shipped `config/`.
-enforced-by: tests/addons/test_kraft_sdlc_collection.py::test_the_published_collection_validates_against_the_shipped_config
-origin: .kraft/collection.json
+Kraft SHALL ship its `config/` as the built-in add-on `kraft-default@kraft`, read from the installed package, and every add-on in the collection `kraft-sdlc` SHALL validate against an instance whose chains come from it; a home seeded from the package SHALL run the built-in's chains.
+enforced-by: tests/addons/test_kraft_sdlc_collection.py::test_the_published_collection_validates_against_the_shipped_config, tests/addons/test_builtin_seed.py::test_a_seeded_home_runs_the_builtin_chain
+origin: src/kraft/addons/builtin.py
 
 ## REQ namespace-kraft-is-reserved
 
-IF an add-on is named `kraft` or installed under the alias `kraft`, THEN the system SHALL refuse it.
-enforced-by: tests/addons/test_manifest.py::test_an_addon_is_refused[kraft-name], tests/addons/test_config.py::test_addons_yaml_is_refused[kraft-alias], tests/addons/test_update.py::test_a_namespace_is_refused[kraft]
-origin: src/kraft/addons/config.py §AddonsConfig
+IF an add-on is named `kraft` or installed under the alias `kraft`, or an operator adds a collection named `kraft` (the built-in's own), THEN the system SHALL refuse it.
+enforced-by: tests/addons/test_manifest.py::test_an_addon_is_refused[kraft-name], tests/addons/test_config.py::test_addons_yaml_is_refused[kraft-alias], tests/addons/test_update.py::test_a_namespace_is_refused[kraft], tests/cli/test_addon_builtin.py::test_a_collection_named_kraft_is_refused
+origin: src/kraft/addons/config.py §AddonsConfig; src/kraft/cli/addon.py §_cmd_collection_add
 
 ## REQ addon-namespaces-are-unique
 
-IF an add-on's namespace equals another installed add-on's namespace or a `repos.yaml` entry's `id`, THEN the system SHALL refuse the install.
-enforced-by: tests/addons/test_config.py::test_addons_yaml_is_refused[duplicate-namespace], tests/addons/test_update.py::test_a_namespace_is_refused[taken-by-alias], tests/addons/test_update.py::test_a_namespace_is_refused[held-by-a-pending-alias], tests/addons/test_update.py::test_a_namespace_is_refused[taken-by-repo-id], tests/cli/test_addon.py::test_validate_against_a_kraft_home[namespace-taken]
-origin: src/kraft/addons/config.py §AddonsConfig
+IF an add-on's namespace equals another installed add-on's namespace or a `repos.yaml` entry's `id`, THEN the system SHALL refuse the install; the namespace `kraft-default` belongs to the built-in, so a GitHub copy of `kraft-default` that an older home installed SHALL be left out on its own (never refusing the whole `addons.yaml`) and a fresh install of one SHALL be refused naming the built-in.
+enforced-by: tests/addons/test_config.py::test_addons_yaml_is_refused[duplicate-namespace], tests/addons/test_update.py::test_a_namespace_is_refused[taken-by-alias], tests/addons/test_update.py::test_a_namespace_is_refused[held-by-a-pending-alias], tests/addons/test_update.py::test_a_namespace_is_refused[taken-by-repo-id], tests/cli/test_addon.py::test_validate_against_a_kraft_home[namespace-taken], tests/addons/test_builtin.py::test_a_github_kraft_default_is_left_out_by_the_builtin[copy-alone], tests/addons/test_builtin.py::test_a_github_kraft_default_is_left_out_by_the_builtin[child-of-copy], tests/addons/test_builtin.py::test_the_builtin_wins_the_namespace_over_a_lock_that_still_holds_a_copy[judge], tests/addons/test_builtin.py::test_the_builtin_wins_the_namespace_over_a_lock_that_still_holds_a_copy[pull-in]
+origin: src/kraft/addons/config.py §AddonsConfig; src/kraft/addons/load.py §_installed
 
 ## REQ an-addon-runs-on-one-kraft-major
 
-IF the running Kraft's release is below an add-on's `requires.kraft` version or in a different major, THEN the system SHALL refuse the add-on at validate, install and update, and SHALL leave it out at load.
-enforced-by: tests/addons/test_manifest.py::test_kraft_compatibility[below-minimum], tests/addons/test_manifest.py::test_kraft_compatibility[next-major], tests/addons/test_manifest.py::test_kraft_compatibility[earlier-major], tests/addons/test_manifest.py::test_kraft_compatibility[release-candidate], tests/addons/test_load.py::test_an_addon_for_another_major_is_left_out, tests/addons/test_update.py::test_an_update_for_another_major_keeps_the_lock
+IF the running Kraft's release is below an add-on's `requires.kraft` version or in a different major, THEN the system SHALL refuse the add-on at validate, install and update, and SHALL leave it out at load; the built-in is exempt, because it is the running Kraft's own.
+enforced-by: tests/addons/test_manifest.py::test_kraft_compatibility[below-minimum], tests/addons/test_manifest.py::test_kraft_compatibility[next-major], tests/addons/test_manifest.py::test_kraft_compatibility[earlier-major], tests/addons/test_manifest.py::test_kraft_compatibility[release-candidate], tests/addons/test_load.py::test_an_addon_for_another_major_is_left_out, tests/addons/test_update.py::test_an_update_for_another_major_keeps_the_lock, tests/addons/test_builtin.py::test_the_builtin_always_loads[requires-kraft-above-the-running-one]
 origin: src/kraft/addons/manifest.py §kraft_compatible
 
 ## REQ an-addon-has-at-most-one-parent
@@ -110,8 +110,8 @@ origin: src/kraft/addons/inherit.py §ancestry
 
 ## REQ every-child-accepts-its-parents-version
 
-IF an add-on's parent is locked at a version outside the range its `requires.addons` gives, THEN the system SHALL leave the add-on out, naming the version and the range; IF installing an add-on would put it outside its parent's range, THEN the system SHALL refuse that install, naming the version and the range; and IF updating an add-on would put it outside its parent's range, or its parent outside an installed child's range, THEN the system SHALL hold that update rather than refuse it, naming the version and the range.
-enforced-by: tests/addons/test_inherit.py::test_ancestry[out-of-range], tests/addons/test_inherit.py::test_ancestry[no-range-is-not-checked], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-out-of-range], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[parent-update-leaves-child-out-of-range], tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[child-held]
+IF an add-on's parent is locked at a version outside the range its `requires.addons` gives, THEN the system SHALL leave the add-on out, naming the version and the range; IF installing an add-on would put it outside its parent's range, THEN the system SHALL refuse that install, naming the version and the range; and IF updating an add-on would put it outside its parent's range, or its parent outside an installed child's range, THEN the system SHALL hold that update rather than refuse it, naming the version and the range. The built-in's version is the running Kraft's, so a range on it is checked against the running Kraft's major (a release candidate counts as its major), and not checked on a source build.
+enforced-by: tests/addons/test_inherit.py::test_ancestry[out-of-range], tests/addons/test_inherit.py::test_ancestry[no-range-is-not-checked], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-out-of-range], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[parent-update-leaves-child-out-of-range], tests/addons/test_update_tree.py::test_a_tree_moves_as_a_set[child-held], tests/addons/test_builtin.py::test_a_builtin_parent_range[in-major], tests/addons/test_builtin.py::test_a_builtin_parent_range[other-major], tests/addons/test_builtin.py::test_a_builtin_parent_range[rc], tests/addons/test_builtin.py::test_a_builtin_parent_range[source-checkout], tests/addons/test_builtin.py::test_a_builtin_parent_range[dev-checkout]
 origin: src/kraft/addons/inherit.py §ancestry
 
 ## REQ a-child-of-a-left-out-parent-is-left-out
@@ -242,14 +242,14 @@ origin: src/kraft/cli/addon.py §validate
 
 ## REQ validate-resolves-a-parent-from-path-or-with
 
-WHEN an author validates a child add-on, the system SHALL resolve each of its ancestors from, in order, the validated collection, each `--with` directory, the instance's installed add-on and the current version in the instance's collection, and IF an ancestor is found in none of them, or the tree is a cycle or too deep, THEN the system SHALL exit 1 saying so, alongside every problem the checks that need only the child's own files find.
-enforced-by: tests/cli/test_addon_validate.py::test_validate[child-with-parent-in-path], tests/cli/test_addon_validate.py::test_validate[child-with-grandparent-in-path], tests/cli/test_addon_validate.py::test_validate[child-with-parent-via-with], tests/cli/test_addon_validate.py::test_validate[child-parent-not-found], tests/cli/test_addon_validate.py::test_validate[child-against-instance], tests/cli/test_addon_validate.py::test_validate[child-against-instance-collection], tests/cli/test_addon_validate.py::test_validate_writes_nothing_and_prints_json, tests/cli/test_addon_validate.py::test_validate[child-parent-not-found-and-refused-content], tests/cli/test_addon_validate.py::test_validate[child-in-a-cycle], tests/cli/test_addon_validate.py::test_validate[with-dir-holds-neither], tests/cli/test_addon_validate.py::test_validate[with-dir-unreadable-before-the-parent]
+WHEN an author validates a child add-on, the system SHALL resolve each of its ancestors from, in order, the validated collection, each `--with` directory, the instance's installed add-on and the current version in the instance's collection, and the running Kraft's built-in `kraft-default@kraft`, and IF an ancestor is found in none of them, or the tree is a cycle or too deep, THEN the system SHALL exit 1 saying so, alongside every problem the checks that need only the child's own files find.
+enforced-by: tests/cli/test_addon_validate.py::test_validate[child-with-parent-in-path], tests/cli/test_addon_validate.py::test_validate[child-with-grandparent-in-path], tests/cli/test_addon_validate.py::test_validate[child-with-parent-via-with], tests/cli/test_addon_validate.py::test_validate[child-parent-not-found], tests/cli/test_addon_validate.py::test_validate[child-against-instance], tests/cli/test_addon_validate.py::test_validate[child-against-instance-collection], tests/cli/test_addon_validate.py::test_validate_writes_nothing_and_prints_json, tests/cli/test_addon_validate.py::test_validate[child-parent-not-found-and-refused-content], tests/cli/test_addon_validate.py::test_validate[child-in-a-cycle], tests/cli/test_addon_validate.py::test_validate[with-dir-holds-neither], tests/cli/test_addon_validate.py::test_validate[with-dir-unreadable-before-the-parent], tests/cli/test_addon_builtin.py::test_validate_finds_the_builtin_parent[with-home], tests/cli/test_addon_builtin.py::test_validate_finds_the_builtin_parent[without-home]
 origin: src/kraft/cli/addon.py §_ancestors_for
 
 ## REQ addons-load-only-from-the-lock
 
-The system SHALL load an add-on only when it has both an enabled `addons.yaml` entry and a lock entry, SHALL load it from the store the lock names, and SHALL NOT fetch a collection when it loads the library.
-enforced-by: tests/addons/test_load.py::test_load_reads_the_lock_not_the_ref, tests/addons/test_load.py::test_what_loads[listed-not-locked], tests/addons/test_load.py::test_what_loads[locked-not-listed], tests/addons/test_load.py::test_what_loads[disabled]
+The system SHALL load an add-on only when it has both an enabled `addons.yaml` entry and a lock entry, SHALL load it from the store the lock names, and SHALL NOT fetch a collection when it loads the library; the built-in `kraft-default@kraft` is the one exception: it is always loaded, is in neither file, and is read from the installed Kraft.
+enforced-by: tests/addons/test_load.py::test_load_reads_the_lock_not_the_ref, tests/addons/test_load.py::test_what_loads[listed-not-locked], tests/addons/test_load.py::test_what_loads[locked-not-listed], tests/addons/test_load.py::test_what_loads[disabled], tests/addons/test_builtin.py::test_the_builtin_always_loads[fresh-home], tests/addons/test_builtin.py::test_the_builtin_always_loads[with-addons], tests/addons/test_builtin.py::test_the_builtin_always_loads[corrupt-store-is-rebuilt], tests/addons/test_builtin.py::test_the_builtin_always_loads[repo-id-taken], tests/addons/test_builtin.py::test_the_builtin_always_loads[maxima-below-its-caps], tests/addons/test_builtin.py::test_the_builtin_always_loads[requires-unmet], tests/addons/test_builtin.py::test_the_builtin_always_loads[unreadable-addons-yaml]
 origin: src/kraft/addons/load.py §installed
 
 ## REQ a-broken-addon-affects-only-itself
@@ -296,8 +296,8 @@ origin: src/kraft/addons/update.py §problems
 
 ## REQ install-refuses-a-missing-parent-collection
 
-IF any ancestor of an add-on being installed or updated comes from a collection that is not in `addons.yaml`, THEN the system SHALL refuse it, naming that ancestor and collection and the `kraft admin addon collection add` to run, or, when the parent is disabled, the `kraft admin addon enable` to run; and an installed add-on with nothing to take SHALL be reported current, with why its ancestry does not hold, never refused.
-enforced-by: tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-missing-parent-collection], tests/addons/test_update_pull_in.py::test_install_pulls_in_missing_ancestors[missing-collection], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-of-a-disabled-parent], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[current-child-of-a-disabled-parent], tests/addons/test_update_pull_in.py::test_install_pulls_in_missing_ancestors[ancestor-disabled]
+IF any ancestor of an add-on being installed or updated comes from a collection that is not in `addons.yaml`, THEN the system SHALL refuse it, naming that ancestor and collection and the `kraft admin addon collection add` to run, or, when the parent is disabled, the `kraft admin addon enable` to run; and an installed add-on with nothing to take SHALL be reported current, with why its ancestry does not hold, never refused. A parent that is the built-in `kraft-default@kraft` has no collection to add and SHALL NOT be refused for one.
+enforced-by: tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-missing-parent-collection], tests/addons/test_update_pull_in.py::test_install_pulls_in_missing_ancestors[missing-collection], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[child-of-a-disabled-parent], tests/addons/test_update_inheritance.py::test_a_child_is_judged_with_its_ancestors[current-child-of-a-disabled-parent], tests/addons/test_update_pull_in.py::test_install_pulls_in_missing_ancestors[ancestor-disabled], tests/cli/test_addon_builtin.py::test_a_child_of_the_builtin_installs[no-collection], tests/cli/test_addon_builtin.py::test_a_child_of_the_builtin_installs[no-claude-harness]
 origin: src/kraft/addons/update.py §_ancestors
 
 ## REQ an-addon-cannot-run-commands-or-grant-permissions
@@ -452,8 +452,8 @@ origin: src/kraft/templates/revision.py §AddedNode
 
 ## REQ a-missing-store-is-restored-from-its-commit
 
-WHEN a store that the lock or a work item's pin names is missing, the system SHALL restore it from the recorded commit, SHALL load it only if its tree and digest match, and SHALL restore a work item's pinned store before a launch reads it.
-enforced-by: tests/addons/test_load.py::test_a_missing_store_is_restored_from_the_locked_commit[mirror-has-it], tests/addons/test_load.py::test_a_missing_store_is_restored_from_the_locked_commit[fetched-by-its-id], tests/addons/test_pins.py::test_a_launch_restores_the_pinned_store_it_needs, tests/api/test_deps.py::test_a_reload_restores_a_store_the_lock_names_and_this_machine_lacks, tests/api/test_deps.py::test_intake_on_an_addon_whose_store_is_away_says_retry_not_unknown, tests/addons/test_load.py::test_a_missing_repo_library_store_is_restored_from_the_checkout, tests/addons/test_pins.py::test_a_chain_through_a_repo_library_pins_its_commit_and_is_restored, tests/addons/test_pins_tree.py::test_an_item_keeps_its_tree_across_a_parent_update[restore-an-ancestor]
+WHEN a store that the lock or a work item's pin names is missing, the system SHALL restore it from the recorded commit, SHALL load it only if its tree and digest match, and SHALL restore a work item's pinned store before a launch reads it; the built-in's current store SHALL be rebuilt from the installed Kraft's package.
+enforced-by: tests/addons/test_load.py::test_a_missing_store_is_restored_from_the_locked_commit[mirror-has-it], tests/addons/test_load.py::test_a_missing_store_is_restored_from_the_locked_commit[fetched-by-its-id], tests/addons/test_pins.py::test_a_launch_restores_the_pinned_store_it_needs, tests/api/test_deps.py::test_a_reload_restores_a_store_the_lock_names_and_this_machine_lacks, tests/api/test_deps.py::test_intake_on_an_addon_whose_store_is_away_says_retry_not_unknown, tests/addons/test_load.py::test_a_missing_repo_library_store_is_restored_from_the_checkout, tests/addons/test_pins.py::test_a_chain_through_a_repo_library_pins_its_commit_and_is_restored, tests/addons/test_pins_tree.py::test_an_item_keeps_its_tree_across_a_parent_update[restore-an-ancestor], tests/addons/test_builtin.py::test_restoring_the_builtin[current-is-rebuilt], tests/addons/test_builtin.py::test_restoring_the_builtin[old-release-says-retry]
 origin: src/kraft/addons/load.py §restore
 
 ## REQ a-directory-store-is-restored-only-if-unchanged
@@ -464,8 +464,8 @@ origin: src/kraft/addons/load.py §restore
 
 ## REQ an-unrestorable-pin-stops-the-item
 
-IF a work item's pinned add-on store cannot be restored, THEN the system SHALL stop the launch as a configuration error and name the add-on, its version and why.
-enforced-by: tests/addons/test_pins.py::test_an_unrestorable_pin_stops_the_launch_and_says_why, tests/addons/test_load.py::test_a_store_that_cannot_be_restored_says_why[commit-not-on-the-remote], tests/addons/test_load.py::test_a_store_that_cannot_be_restored_says_why[collection-removed]
+IF a work item's pinned add-on store cannot be restored, THEN the system SHALL stop the launch as a configuration error and name the add-on, its version and why; for a built-in store of an older Kraft release the reason SHALL say that release's `kraft-default` is no longer installed and to retry the item onto the current one.
+enforced-by: tests/addons/test_pins.py::test_an_unrestorable_pin_stops_the_launch_and_says_why, tests/addons/test_load.py::test_a_store_that_cannot_be_restored_says_why[commit-not-on-the-remote], tests/addons/test_load.py::test_a_store_that_cannot_be_restored_says_why[collection-removed], tests/addons/test_builtin.py::test_restoring_the_builtin[current-is-rebuilt], tests/addons/test_builtin.py::test_restoring_the_builtin[old-release-says-retry]
 origin: src/kraft/adapters/agent.py §resolve_agent_task
 
 ## REQ gc-keeps-what-an-item-pins
@@ -659,3 +659,45 @@ origin: src/kraft/addons/update.py §auto_update
 IF a parent's move gives any installed descendant's effective chains a review line about what a run can reach, including a name the descendant now shadows, THEN auto-update SHALL hold the move's whole set for a person, even when the parent's own review has none.
 enforced-by: tests/addons/test_auto_update.py::test_auto_update_holds_for_a_descendant[descendant-limit-raised], tests/addons/test_auto_update.py::test_auto_update_holds_for_a_descendant[descendant-shadow], tests/addons/test_auto_update.py::test_auto_update_holds_for_a_descendant[descendant-off-still-protected]
 origin: src/kraft/addons/update.py §_below
+
+## REQ the-builtin-always-loads
+
+The system SHALL load the built-in add-on `kraft-default@kraft` on every home, from the installed Kraft, with no entry in `addons.yaml` or `addons.lock`, and SHALL NOT leave it out for a missing harness or profile, a `repos.yaml` id, a `maxima:` below its caps, a missing or corrupt store, or package files that are hard links; and the add-on commands (`install`, `update`, `update --check`, `uninstall`, `enable`, `disable`, `auto-update`) SHALL refuse it by name, saying it comes with Kraft.
+enforced-by: tests/addons/test_builtin.py::test_the_builtin_always_loads[fresh-home], tests/addons/test_builtin.py::test_the_builtin_always_loads[with-addons], tests/addons/test_builtin.py::test_the_builtin_always_loads[corrupt-store-is-rebuilt], tests/addons/test_builtin.py::test_the_builtin_always_loads[repo-id-taken], tests/addons/test_builtin.py::test_the_builtin_always_loads[maxima-below-its-caps], tests/addons/test_builtin.py::test_the_builtin_always_loads[requires-unmet], tests/addons/test_builtin.py::test_the_builtin_always_loads[unreadable-addons-yaml], tests/addons/test_builtin.py::test_hard_linked_package_files_load[builtin-accepts], tests/cli/test_addon_builtin.py::test_the_builtin_is_not_an_addon_verbs_to_change[install], tests/cli/test_addon_builtin.py::test_the_builtin_is_not_an_addon_verbs_to_change[update], tests/cli/test_addon_builtin.py::test_the_builtin_is_not_an_addon_verbs_to_change[update --check], tests/cli/test_addon_builtin.py::test_the_builtin_is_not_an_addon_verbs_to_change[uninstall], tests/cli/test_addon_builtin.py::test_the_builtin_is_not_an_addon_verbs_to_change[enable], tests/cli/test_addon_builtin.py::test_the_builtin_is_not_an_addon_verbs_to_change[disable], tests/cli/test_addon_builtin.py::test_the_builtin_is_not_an_addon_verbs_to_change[auto-update]
+origin: src/kraft/addons/builtin.py
+
+## REQ a-new-home-seeds-thin-chains
+
+WHEN Kraft seeds a home that has no config, it SHALL write `chains/default.yaml` and `chains/quick-task.yaml` as chains that only `extend: kraft-default:<id>`, and an empty `library.yaml`, so a release's changes to the built-in reach the home beneath any override.
+enforced-by: tests/addons/test_builtin_seed.py::test_a_seeded_home_runs_the_builtin_chain
+origin: src/kraft/addons/builtin.py §write_thin_seed
+
+## REQ an-existing-home-is-never-rewritten
+
+Kraft SHALL NOT write, rewrite or migrate any file under a home's config directory that already exists because of the built-in; a home that holds full copies of the chains SHALL keep running its own copy, and `kraft admin doctor` SHALL name each such copy and point to the guide.
+enforced-by: tests/addons/test_builtin_seed.py::test_an_existing_home_is_not_touched, tests/test_doctor_builtin.py::test_the_kraft_default_row[full-copy]
+origin: src/kraft/doctor.py §_builtin_check
+
+## REQ an-update-shows-kraft-default-before-installing
+
+WHEN `kraft admin update` is run in a terminal, the system SHALL download the new release's wheel, compare its `kraft-default` with the running one before installing anything, print the review (what changes how far a run goes, the chain changes, and any local `extends:` or override it would break), and ask before installing, accepting with `-y` and declining when there is no terminal; WHEN the comparison cannot be made, it SHALL say "cannot compare" and still ask; and a cross-major `--restart` SHALL print the same preview before it hands off to the when-free path.
+enforced-by: tests/cli/test_admin_update_builtin.py::test_the_update_shows_kraft_default_and_asks[accepted], tests/cli/test_admin_update_builtin.py::test_the_update_shows_kraft_default_and_asks[declined], tests/cli/test_admin_update_builtin.py::test_the_update_shows_kraft_default_and_asks[yes-flag], tests/cli/test_admin_update_builtin.py::test_the_update_shows_kraft_default_and_asks[offline-still-asks], tests/addons/test_builtin_preview.py::test_from_wheel[has-builtin], tests/addons/test_builtin_preview.py::test_from_wheel[older-release], tests/addons/test_builtin_preview.py::test_from_wheel[path-escape], tests/cli/test_admin_update_builtin.py::test_restart_across_a_major_prints_the_preview, tests/cli/test_admin_update_builtin.py::test_no_terminal_declines
+origin: src/kraft/cli/admin.py §update_prechecks
+
+## REQ an-unattended-update-holds-on-a-broken-override
+
+IF an unattended update (`--when-free` or an automatic path) would break one of the operator's overrides of `kraft-default`, or the comparison cannot be made, THEN the system SHALL NOT install it, SHALL record why, and `kraft admin doctor` SHALL say so and name the interactive `kraft admin update` as the way out; and otherwise it SHALL install and `doctor` SHALL list what changed in `kraft-default` until the next update.
+enforced-by: tests/cli/test_admin_update_builtin.py::test_unattended_prechecks_and_kraft_default[breaks-an-override], tests/cli/test_admin_update_builtin.py::test_unattended_prechecks_and_kraft_default[cannot-compare], tests/cli/test_admin_update_builtin.py::test_unattended_prechecks_and_kraft_default[changed-is-recorded], tests/test_doctor_builtin.py::test_the_kraft_default_row[held], tests/test_doctor_builtin.py::test_the_kraft_default_row[changed]
+origin: src/kraft/cli/admin.py §update_prechecks
+
+## REQ packaged-profiles-are-labelled-in-settings
+
+WHEN a home's `harnesses.yaml` lacks a harness or profile that `kraft-default` requires, Settings → Harnesses SHALL list the harnesses and profiles filled in from Kraft's package labelled as coming from the package and SHALL refuse to edit, rename, copy or remove them, and publishing a draft SHALL NOT write them into the home's file.
+enforced-by: tests/drafts/test_harnesses_builtin.py::test_settings_labels_packaged_profiles, tests/drafts/test_harnesses_builtin.py::test_every_op_on_a_packaged_profile_is_refused[set], tests/drafts/test_harnesses_builtin.py::test_every_op_on_a_packaged_profile_is_refused[rename], tests/drafts/test_harnesses_builtin.py::test_every_op_on_a_packaged_profile_is_refused[remove], tests/drafts/test_harnesses_builtin.py::test_every_op_on_a_packaged_profile_is_refused[copy], tests/drafts/test_harnesses_builtin.py::test_a_packaged_harness_is_labelled_and_refuses_edits, frontend/src/ng/harnesses/panes.test.tsx::profile and entry panes, frontend/src/ng/phone/areas/Harnesses.test.tsx::a profile (M.1)
+origin: src/kraft/drafts/harnesses.py §resolve
+
+## REQ drift-reaches-the-operator
+
+WHEN the server starts or reloads and the kraft-default drift lines are non-empty and their state differs from the last one notified, it SHALL show the state on `/api/health` (signature and count) and the lines on `GET /api/kraft-default`, SHALL send one webhook notice when the webhook and `kraft_default` are enabled, and SHALL NOT notify the same state twice.
+enforced-by: tests/api/test_health_drift.py::test_a_full_copy_shows_on_health_and_the_route, tests/api/test_health_drift.py::test_startup_sends_one_drift_notice, tests/test_notify_drift.py::test_a_send_that_lands_after_the_state_cleared_marks_nothing, tests/api/test_health_drift.py::test_the_route_is_refused_without_a_session, tests/test_notify_drift.py::test_a_new_state_is_sent_once, tests/test_notify_drift.py::test_a_changed_state_is_sent_again, tests/test_notify_drift.py::test_two_overlapping_refreshes_send_once, tests/test_notify_drift.py::test_a_cleared_state_notifies_again_when_it_returns
+origin: src/kraft/api/deps.py §refresh_drift

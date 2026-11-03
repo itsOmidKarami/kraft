@@ -79,6 +79,7 @@ from kraft.api.routes import (  # noqa: E402,F401
     forges,
     gates,
     harnesses,
+    kraft_default,
     lifecycle,
     one_off,
     one_off_editor,

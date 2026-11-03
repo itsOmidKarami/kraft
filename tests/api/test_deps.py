@@ -778,10 +778,10 @@ def test_the_server_takes_an_auto_update_and_loads_it(client, tmp_path):
     (st.templates_dir / "addons.yaml").write_text(yaml.safe_dump(written))
     repo = Path(written["collections"]["acme"]["git"].removeprefix("file://"))
     publish(repo, "release", version="1.1.0", skills={"notes": "new in 1.1.0"})
-
     client.portal.call(deps.auto_update_addons, client.app)
 
-    assert [p.version for p in st.library.addons] == ["1.1.0"] and not old.exists()
+    versions = [p.version for p in st.library.addons if p.id != "kraft-default@kraft"]
+    assert versions == ["1.1.0"] and not old.exists()
     health = client.get("/api/health").json()
     assert (health["status"], health["addon_updates"]["release@acme"]["outcome"]) == (
         "ok",

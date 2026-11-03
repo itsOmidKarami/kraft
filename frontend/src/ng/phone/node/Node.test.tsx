@@ -700,5 +700,50 @@ describe("the task screen (E)", () => {
     await userEvent.click(screen.getByRole("button", { name: "sys" }));
     expect(screen.getByText("No lines to show. Clear the filter, or the task has not started.")).toBeInTheDocument();
   });
+
+  it("picks one sub-agent from a sheet", async () => {
+    const sub = { src: "agent", agent_label: "Explore codebase", agent_type: "Explore" };
+    const lines = [
+      { n: 1, t: null, src: "agent", text: "x", summary: "main says hi" },
+      { n: 2, t: null, text: "x", summary: "↳ Explore codebase: Grep(foo)", agent: "a1", ...sub },
+      { n: 3, t: null, text: "x", summary: "↳ Review diff: Read(a.py)", agent: "a2", src: "agent", agent_label: "Review diff" },
+      { n: 4, t: null, src: "stdout", text: "plain stdout line", summary: "plain stdout line" },
+    ];
+    mount(item("running"), `${TASK}&tab=log`, { "GET /work-items/w1/sessions/s1/log": [200, { lines }] });
+    const chip = await screen.findByRole("button", { name: "agent: All ▾" });
+    // Its own row, not inside the scrolling Sources group.
+    expect(screen.getByRole("group", { name: "Sources" })).not.toContainElement(chip);
+    await userEvent.click(chip);
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("radio", { name: /Explore codebase/ }));
+    expect(screen.queryByText(/main says hi/)).toBeNull();
+    expect(screen.queryByText(/Review diff/)).toBeNull();
+    expect(screen.getByText(/Grep\(foo\)/)).toBeInTheDocument();
+    expect(screen.getByText(/plain stdout line/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "agent: Explore codebase ▾" })).toBeInTheDocument();
+  });
+
+  it("keeps the agent chip on an attempt with no sub-agents while a filter is set, so it can be cleared", async () => {
+    const sub = { src: "agent", agent_label: "Explore codebase", agent_type: "Explore" };
+    const first = [{ n: 1, t: null, src: "agent", text: "x", summary: "main says hi" }, { n: 2, t: null, text: "x", summary: "↳ Explore codebase: Grep(foo)", agent: "a1", ...sub }];
+    const second = [{ n: 1, t: null, src: "agent", text: "x", summary: "second attempt line" }];
+    mount(item("running", null, { worker_sessions: [session({ id: "s1", attempt: 1, status: "failed" }), session({ id: "s2", attempt: 2, status: "failed" })] }), `${TASK}&tab=log&attempt=1`, {
+      "GET /work-items/w1/sessions/s1/log": [200, { lines: first }],
+      "GET /work-items/w1/sessions/s2/log": [200, { lines: second }],
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "agent: All ▾" }));
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("radio", { name: /Explore codebase/ }));
+    await userEvent.click(screen.getByRole("button", { name: /#2/ }));
+    expect(await screen.findByText("No lines to show. Clear the filter, or the task has not started.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^agent:/ }));
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("radio", { name: "All" }));
+    expect(screen.getByText(/second attempt line/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^agent:/ })).toBeNull();
+  });
+
+  it("offers no agent chip when no line has an agent", async () => {
+    mount(item("running"), `${TASK}&tab=log`);
+    await screen.findByText(/loaded review_package/);
+    expect(screen.queryByRole("button", { name: /^agent:/ })).toBeNull();
+  });
 });
 void [Where];

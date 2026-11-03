@@ -1,9 +1,31 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, test as base, type Page } from "@playwright/test";
 import { scaledTimeout } from "../e2e-timing";
 
 // Extension point for shared Playwright fixtures. Specs import from here so
 // any future fixture wiring lands in one place.
-export { expect, test } from "@playwright/test";
+export { expect };
+
+/**
+ * The fixture home is built from `fake_templates_dir`, whose full copies of the built-in chains
+ * make `/api/health` report kraft-default drift. The board's banner for it arrives after the
+ * first paint and moves every row, which the layout specs measure. Drift has its own
+ * unit coverage (`KraftDefaultBanner.test.tsx`, `browserNotifyServer.test.ts` and the phone
+ * `Board.test.tsx`; the contract mocks always send no drift), so these specs see none.
+ */
+export const test = base.extend({
+  page: async ({ page }, use) => {
+    await page.route("**/api/health", async (route) => {
+      try {
+        const res = await route.fetch();
+        const body = await res.json();
+        await route.fulfill({ response: res, json: { ...body, kraft_default: { signature: null, count: 0 } } });
+      } catch {
+        // A poll still in flight when the test ends: nobody is left to answer.
+      }
+    });
+    await use(page);
+  },
+});
 
 /** The fixture repo e2e/serve.py seeds, and the name its chip shows. */
 export const REPO = process.env.KRAFT_E2E_REPO!;

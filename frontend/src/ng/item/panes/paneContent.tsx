@@ -49,6 +49,9 @@ export type PaneArgs = {
   attempt?: number;
   /** Pin the tabs to one attempt; undefined follows the newest. */
   setAttempt: (attempt: number | undefined) => void;
+  /** The sub-agent the task's log is filtered to (an id, or "main"); undefined shows every line. */
+  agent?: string;
+  setAgent: (agent: string | undefined) => void;
   docs: WorkItemDocument[];
   onDoc: (d: WorkItemDocument) => void;
   /** Open the pending gate's document (GET /artifact). */
@@ -332,7 +335,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
     ),
     input: <TaskInput item={item} s={at} current={current} />,
     output: <TaskOutput item={item} s={at} docs={a.docs} onDoc={a.onDoc} produces={produces} onProduced={() => produces && a.onProduced(produces, path)} />,
-    log: <Log key={at.id} workItemId={item.id} sessionId={at.id} running={look.running === true} title={task} crumb={crumbs.map((c) => c.label).join(" › ")} />,
+    log: <Log key={at.id} workItemId={item.id} sessionId={at.id} running={look.running === true} title={task} crumb={crumbs.map((c) => c.label).join(" › ")} agent={a.agent} onAgent={a.setAgent} />,
     config: <><TaskConfig path={path} s={at} /><AppliedRows applied={a.applied} path={path} /></>,
   };
   const live = sessions.some((s) => ["running", "pending"].includes(s.status));

@@ -485,6 +485,7 @@ def test_major_update_requires_acceptance_and_makes_backup(
     legacy_home, monkeypatch, capsys, accept
 ):
     from kraft import cli
+    from kraft.addons import load
     from kraft.templates.library import TemplateLibrary
 
     before = _tree(legacy_home)
@@ -499,8 +500,8 @@ def test_major_update_requires_acceptance_and_makes_backup(
     # The whole configuration it replaced, kept byte for byte beside it.
     [backup] = _backups(legacy_home)
     assert _tree(backup) == before
-    # The V1 configuration is installed, and resolves.
-    assert TemplateLibrary.from_yaml_dir(legacy_home).resolve_chain("default").id == "default"
+    library = TemplateLibrary.from_yaml_dir(legacy_home, addons=load.installed(legacy_home))
+    assert library.resolve_chain("default").id == "default"
     # What belongs to this machine, not to the template schema, is carried over.
     for name, text in MACHINE.items():
         assert (legacy_home / name).read_text() == text

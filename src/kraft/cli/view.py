@@ -244,12 +244,12 @@ def _cmd_logs(ns: argparse.Namespace) -> None:
             wid, session_id = ns.id or (await client.context.standing_item())[0], ns.session
         else:
             wid, session_id = await _logs_session(ns.id, ns.follow)
-        lines = await client.log_backlog(wid, session_id, ns.n)
+        lines = await client.log_backlog(wid, session_id, ns.n, ns.agent)
         for entry in lines:
             _print_log(entry, ns.json)
         if ns.follow:
             seen = lines[-1]["n"] + 1 if lines else await client.log_next_line(wid, session_id)
-            async for entry in client.stream_log(wid, session_id, after_line=seen):
+            async for entry in client.stream_log(wid, session_id, after_line=seen, agent=ns.agent):
                 _print_log(entry, ns.json)
 
     asyncio.run(run())
@@ -542,6 +542,7 @@ def _add_view(subs, common: argparse.ArgumentParser) -> None:
     logs.add_argument(
         "-n", type=int, default=50, help="backlog lines before following (0 for none)"
     )
+    logs.add_argument("--agent", help="only this sub-agent's lines (its id), or main")
     logs.set_defaults(func=_cmd_logs)
 
     events_p = subs.add_parser("events", parents=[common], help="the chain's own history")

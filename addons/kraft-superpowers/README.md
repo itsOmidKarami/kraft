@@ -12,8 +12,8 @@ kraft item create "title" --chain kraft-superpowers:default
 ```
 
 The superpowers plugin must be installed wherever the agent runs, and the
-instance needs the shipped `claude` harness. Installing this add-on installs
-`kraft-default`, which it builds on.
+instance needs the shipped `claude` harness. It builds on `kraft-default`,
+which comes with Kraft.
 
 `library.yaml` is the whole add-on: steering that names each method, set on the
 tasks it overrides. The methods are named in steering rather than `skill:`, and

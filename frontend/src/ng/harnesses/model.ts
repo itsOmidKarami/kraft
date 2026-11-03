@@ -36,6 +36,8 @@ export interface HarnessView {
   executable: string | null;
   defaults: Record<string, string>;
   tasks: TaskRef[];
+  /** "package": Kraft's own, filled in because harnesses.yaml does not define it. */
+  source?: "package";
 }
 export interface EntryView {
   model?: string;
@@ -46,6 +48,8 @@ export interface ProfileView {
   effort: string | null;
   tasks: { chain: string; path: string }[];
   used_by_fallback: string[];
+  /** "package": Kraft's own, filled in because harnesses.yaml has no such profile. */
+  source?: "package";
 }
 /** `result.resolved` of the `harnesses` draft (docsite "Harnesses ops"). */
 export interface Resolved {

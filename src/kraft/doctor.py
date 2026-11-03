@@ -18,8 +18,6 @@ from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
-import yaml
-
 from kraft import auth, capabilities, client, config, detect, harness, pidfile, registration, render
 from kraft import forges as forges_mod
 from kraft import policy as policy_mod
@@ -29,7 +27,6 @@ from kraft.adapters.forge.probe import EXPIRY_WARN_DAYS
 from kraft.adapters.forge.run import API_BACKENDS
 from kraft.addons import load as addons_load
 from kraft.api import config_check
-from kraft.automated_review import as_reviewers
 from kraft.executor import fallback
 from kraft.paths import (
     BUNDLED,
@@ -43,7 +40,7 @@ from kraft.paths import (
 )
 from kraft.remote import registry
 from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
-from kraft.templates.library import CHAINS_DIR, TemplateLibrary, TemplateLibraryError
+from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 from kraft.templates.models import AgentTask, ForgeTask
 from kraft.worker import backends, channel, egress, kit
 from kraft.worker import steering as steering_mod
@@ -323,7 +320,7 @@ def _config_checks() -> list[dict]:
         # or because an earlier branch returned before reaching it.
         return [
             _check("config", False, f"{templates} does not exist — start `kraft` once to seed it"),
-            _chain_templates_check(),
+            _check("kraft-default", True, "skipped: no config dir", skipped=True),
             _check("chains", True, "skipped: no config dir", skipped=True),
             # Nothing seeded yet, so nothing to upgrade: the first start seeds
             # every capability and stamps the version.
@@ -370,7 +367,7 @@ def _config_checks() -> list[dict]:
     checks.append(_notify_check(templates))
     checks.append(_forges_check(templates))
     checks.append(_moved_keys_check(templates))
-    checks.append(_chain_templates_check())
+    checks.append(_builtin_check(templates))
     checks.append(_chains_check(templates))
     checks += _addon_checks(templates)
     checks.append(_capabilities_check())
@@ -523,69 +520,16 @@ def _pidfile_check() -> dict:
     )
 
 
-def _chain_template_files(directory: Path) -> dict[str, set[str]]:
-    """Every chain file under `directory/chains/` -- one with a top-level
-    `nodes` list -- mapped to the ids of its nodes. By structure, not by
-    filename, so a chain added in a later version is picked up without a code
-    change here. Authored node ids: a chain's nodes are listed in the chain
-    file itself even when a node `extends` a library node."""
-    found: dict[str, set[str]] = {}
-    chains = directory / CHAINS_DIR
-    if not chains.is_dir():
-        return found
-    for path in sorted(chains.glob("*.yaml")):
-        try:
-            data = yaml.safe_load(path.read_text())
-        except (OSError, ValueError, yaml.YAMLError):
-            continue
-        if not isinstance(data, dict) or not isinstance(data.get("nodes"), list):
-            continue
-        found[path.name] = {
-            node["id"] for node in data["nodes"] if isinstance(node, dict) and "id" in node
-        }
-    return found
+def _builtin_check(templates: Path) -> dict:
+    """What an operator should know about the built-in `kraft-default` (the
+    lines are `addons.drift`'s). Always `ok`; `warn` when there is anything to say."""
+    from kraft import update as update_mod
+    from kraft.addons import drift
 
-
-def _chain_templates_check() -> dict:
-    """Nodes this version's chain templates ship, missing from the live
-    installed copy. `templates/` is seeded once and never
-    overwritten (`cli.seed_home`), so a template shipped or changed after an
-    operator's copy was seeded keeps missing the new node forever with
-    nothing to say so.
-
-    Always `ok`: which nodes a repo's chain actually runs is an operator's own
-    edit, not a fault.
-    """
-    shipped_dir = BUNDLED / "config"
-    if not (shipped_dir / CHAINS_DIR).is_dir():
-        return _check("chain_templates", True, "skipped: not an installed Kraft", skipped=True)
-    shipped = _chain_template_files(shipped_dir)
-    if not shipped:
-        return _check(
-            "chain_templates", True, "skipped: no chain templates in this version", skipped=True
-        )
-    live_dir = config_dir()
-    if not live_dir.is_dir():
-        # A home never started: nothing is missing from a copy not made yet.
-        return _check("chain_templates", True, "skipped: no config dir", skipped=True)
-    live = _chain_template_files(live_dir)
-    parts = []
-    for name, shipped_ids in shipped.items():
-        live_ids = live.get(name)
-        if live_ids is None:
-            parts.append(f"{name} missing entirely")
-            continue
-        absent = sorted(shipped_ids - live_ids)
-        if absent:
-            parts.append(f"{name}: {', '.join(absent)} missing")
-    if not parts:
-        return _check("chain_templates", True, f"{len(shipped)} template(s), no missing nodes")
-    return _check(
-        "chain_templates",
-        True,
-        f"{'; '.join(parts)} in {live_dir}, but shipped in this version's defaults — "
-        "Templates › Chains, or edit those files",
-    )
+    lines = drift.lines(templates, addons_load.addons_dir())
+    if not lines:
+        return _check("kraft-default", True, f"ships with Kraft {update_mod.installed()}")
+    return _check("kraft-default", True, "\n".join(lines), warn=True)
 
 
 def _chains_check(templates: Path) -> dict:
@@ -612,7 +556,7 @@ def _addon_checks(templates: Path) -> list[dict]:
     """The installed add-ons as the files say, with no server running: what
     does not load and why, what waits for a person, and each auto-updating
     add-on's last outcome."""
-    from kraft.addons import fetch
+    from kraft.addons import builtin, fetch
     from kraft.addons import update as addon_update
     from kraft.addons.config import AddonsConfig, AddonsLock
 
@@ -627,8 +571,16 @@ def _addon_checks(templates: Path) -> list[dict]:
     lock = AddonsLock.load(templates / AddonsLock.FILE)
     everything = addons_load.installed(templates, root, verify=True)
     found = [p for p in everything if p.repo_id is None]
+    # The built-in is not an add-on people manage: counted out, named only when broken.
+    found = [p for p in found if p.left_out is not None or not builtin.is_builtin(p)]
     broken = [f"{p.id}: {p.left_out}" for p in found if p.left_out is not None and not p.quiet]
-    notes = [f"{p.id} {p.left_out}" for p in found if p.quiet and p.left_out != "is disabled"]
+    # An old GitHub copy is named by the kraft-default row instead.
+    shipped = {builtin.SHIPS_IT.format(id=p.id) for p in found}
+    notes = [
+        f"{p.id} {p.left_out}"
+        for p in found
+        if p.quiet and p.left_out != "is disabled" and p.left_out not in shipped
+    ]
     auto = []
     for addon_id, locked in lock.addons.items():
         if addon_id not in listed.addons:
@@ -751,7 +703,7 @@ def _repo_libraries_check(
 def _capabilities_check() -> dict:
     """What this version can do that the live seeded config cannot (Kraft-hxt6x).
 
-    Always `ok`, like `_chain_templates_check`: whether to
+    Always `ok`: whether to
     adopt a capability is an operator's decision, not a fault. The row exists
     because the alternative is silence -- `templates/` is seeded once and never
     overwritten, and on a real install two capabilities shipped within a week
@@ -961,14 +913,15 @@ def _pairing_checks(live: Path, table: HarnessProfileTable, harnesses) -> list[d
 
 
 def _resolved_chains(live: Path) -> list:
-    """Every chain of the live library that resolves; `[]` when the library
-    itself does not load."""
+    """Every chain the operator runs of the live library that resolves (not a
+    built-in chain no local chain extends); `[]` when the library itself does
+    not load."""
     try:
         library = TemplateLibrary.from_yaml_dir(live, addons=addons_load.installed(live))
     except TemplateLibraryError:
         return []
     chains = []
-    for id in library.chain_ids:
+    for id in library.run_chain_ids(config_check.named_chains(live)):
         try:
             chains.append(library.resolve_chain(id))
         except TemplateLibraryError:
@@ -1619,9 +1572,8 @@ def _tests_check(repo: config.RepoEntry, probed: detect.Proposal | None) -> dict
 
 async def _review_bots_check() -> dict:
     """Review bots that may not be reviewing at all. Always `ok`: a silence is
-    a bot with nothing to say until it repeats, and a missing triage step is a
-    choice the capabilities row offers. A warn when either holds, so neither
-    passes as a clean row."""
+    a bot with nothing to say until it repeats. A warn when one is silent, so
+    it does not pass as a clean row."""
     try:
         found = await client.silent_reviewers()
     except ValueError:  # a server older than the route
@@ -1631,20 +1583,6 @@ async def _review_bots_check() -> dict:
         "check the login, and that the bot is on that project"
         for r in found["reviewers"]
     ]
-    triage = next(c for c in capabilities.MANIFEST if c.name == "triage_review_feedback")
-    if not capabilities.adopted(triage, config_dir()):
-        quiet = {"unrecognised_keys_reported": True}  # as `_repo_checks` reads them
-        entries = [config.RepoEntry.model_validate(r, context=quiet) for r in await client.repos()]
-        named = [
-            _label(repo)
-            for repo in entries
-            if any(r.bot is not None for r in as_reviewers(repo.automated_review))
-        ]
-        if named:
-            lines.append(
-                f"no triage step reads a bot's summary for {', '.join(named)}: the library "
-                "has none (the capabilities row has the edit)"
-            )
     if not lines:
         return _check("review bots", True, f"no review bot silent across {found['run']} items")
     return _check("review bots", True, "\n".join(lines), warn=True)

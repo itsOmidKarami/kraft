@@ -102,7 +102,7 @@ def test_an_absent_profiles_section_is_an_empty_table():
     table = HarnessProfileTable.from_mapping(
         {"harnesses": HARNESSES}, "harnesses.yaml", harnesses=_harness.load(None).valid
     )
-    assert table.agent_profiles == {}
+    assert set(table.agent_profiles) == table.filled == {"strong", "fast"}
     assert set(table.profiles) == {"claude", "codex"}
 
 
@@ -397,7 +397,7 @@ def test_only_the_task_pairing_a_missing_provider_is_refused(tmp_path, monkeypat
         (
             {"harness": "claude", "profile": "gone"},
             "profile 'gone' is not defined in harnesses.yaml; "
-            "known are ['deep', 'fast', 'maxed', 'wrong']",
+            "known are ['deep', 'fast', 'maxed', 'strong', 'wrong']",
         ),
         (
             {"harness": "codex", "profile": "fast"},
@@ -607,27 +607,18 @@ def test_a_fresh_seed_gets_the_library_and_its_profiles_together(tmp_path, monke
     assert _launches(home, monkeypatch) == SHIPPED_LAUNCHES
 
 
-def test_the_shipped_library_on_an_rc_harnesses_file_is_named_not_substituted(
+def test_the_shipped_library_on_an_rc_harnesses_file_uses_the_packaged_profiles(
     tmp_path, monkeypatch
 ):
     """The one mixed case -- someone copies the new library over an rc home by
-    hand -- stops for a human naming the profile, never runs a guessed model."""
+    hand -- runs on the packaged `strong` and `fast`, not a guessed model."""
     home = tmp_path / "templates"
     shutil.copytree(SHIPPED, home)
     shutil.copy(RC / "harnesses.yaml", home / "harnesses.yaml")
     monkeypatch.setenv("KRAFT_CONFIG_DIR", str(home))
     # Only the profile rows: whether `claude` is on this machine's PATH is not the point.
     failed = [r for r in doctor._agent_checks() if not r["ok"] and r["name"].startswith("profile")]
-    assert sorted(r["name"] for r in failed) == ["profile: fast", "profile: strong"]
-    [strong] = [r for r in failed if r["name"] == "profile: strong"]
-    assert "profile 'strong' is not defined in harnesses.yaml" in strong["detail"]
-
-
-def test_the_capability_manifest_tells_an_rc_home_about_profiles():
-    from kraft import capabilities
-
-    [entry] = [c for c in capabilities.added_since("1.0.0rc5") if c.name == "profiles"]
-    assert "harnesses.yaml" in entry.how and "profile:" in entry.how
+    assert not any("is not defined in harnesses.yaml" in r["detail"] for r in failed)
 
 
 def test_write_harness_profiles_keeps_the_profiles_section(tmp_path):

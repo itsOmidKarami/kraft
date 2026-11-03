@@ -151,14 +151,15 @@ dev_env := "KRAFT_HOME=" + justfile_directory() + "/.dev" + \
 # The fake agent ahead of the real `claude`, so a dev instance never spends tokens.
 fake_agent := "PATH=" + justfile_directory() + "/fixtures/bin:$PATH"
 
-# A dev home starts as a copy of the tracked config/, plus the throwaway repo
+# A dev home starts as a copy of the tracked config/ with thin chains that extend
+# the built-in kraft-default (read from this checkout), plus the throwaway repo
 # beads and the seeded work items live in. Copied, not pointed at: the Settings
 # screens write to this directory, and dev edits must not land in the repo's real
 # config. access.yaml never comes along — it is this machine's bind address and
 # password hash, and a dev instance must stay on unauthenticated loopback.
 _dev-home:
     @mkdir -p .dev
-    @[ -d .dev/config ] || {{ '{' }} [ -d .dev/templates ] && mv .dev/templates .dev/config; {{ '}' }} || cp -R config .dev/config
+    @[ -d .dev/config ] || {{ '{' }} [ -d .dev/templates ] && mv .dev/templates .dev/config; {{ '}' }} || {{ '{' }} rm -rf .dev/config.tmp && cp -R config .dev/config.tmp && rm -rf .dev/config.tmp/chains .dev/config.tmp/library.yaml .dev/config.tmp/.kraft && {{dev_env}} uv run python -c 'import sys,pathlib; from kraft.addons import builtin; builtin.write_thin_seed(pathlib.Path(sys.argv[1]))' .dev/config.tmp && mv .dev/config.tmp .dev/config; {{ '}' }}
     @rm -f .dev/config/access.yaml
     @{{dev_env}} uv run python dev/seed.py --repo-only
 
@@ -235,6 +236,7 @@ bundle:
     mkdir -p src/kraft/_bundled
     cp -R frontend/dist src/kraft/_bundled/web
     cp -R config src/kraft/_bundled/config
+    cp -R config src/kraft/_bundled/kraft-default
     # The agent skills live in plugins/kraft/ so they can be published beside
     # kraft-lite in one marketplace. An installed Kraft has no plugins/ beside
     # it, so they ride into the wheel here with the SPA.
@@ -245,8 +247,10 @@ bundle:
     # them out of the commit, not out of the wheel or the homes it seeds.
     rm -f src/kraft/_bundled/config/access.yaml
     rm -f src/kraft/_bundled/config/notify.yaml
-    # `config/.kraft/` publishes config/ as the add-on kraft-default; a seeded
-    # home is the operator's own config, not an add-on.
+    rm -f src/kraft/_bundled/kraft-default/access.yaml
+    rm -f src/kraft/_bundled/kraft-default/notify.yaml
+    # The seed source has no manifest (a seeded home is the operator's own
+    # config, not an add-on); the built-in is read from `_bundled/kraft-default`.
     rm -rf src/kraft/_bundled/config/.kraft
 
 # Refresh Kraft Lite's bundled copy of the packaged library (library.yaml and

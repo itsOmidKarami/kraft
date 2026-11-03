@@ -264,7 +264,7 @@ def test_resolve_a_complete_library_in_isolation_without_writing(client, templat
 
     assert response.status_code == 200
     body = response.json()
-    assert [c["id"] for c in body["chains"]] == ["solo"]
+    assert [c["id"] for c in body["chains"] if ":" not in c["id"]] == ["solo"]
     assert [i["chain"] for i in body["issues"]] == ["borrowing"]
     assert "implementer" in body["issues"][0]["message"]
     assert snapshot(templates_dir) == before
@@ -350,7 +350,7 @@ def test_a_registry_beside_the_library_configures_no_task(tmp_path, monkeypatch)
 
     assert health["status"] == "ok", health
     assert health["invalid_templates"] == {}
-    assert listed == ["default", "quick-task"]
+    assert [c for c in listed if ":" not in c] == ["default", "quick-task"]
     implement = resolved["chain"]["nodes"][0]["tasks"][0]
     assert implement["kind"] == "agent"
     assert implement["harness"] == "claude"

@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from support.harness import seed_v1_library, v1_named_chain
+from support.harness import git, seed_v1_library, v1_named_chain
 
 from kraft.executor import dispatch
 
@@ -53,7 +53,9 @@ class Script:
     unplanned); a task id in `real` runs the real dispatch instead, and
     `effects[id]` is awaited with the work item's row before it answers. `log` is
     every `("start"|"end", id)` in the order it happened, `steers[id]` the
-    steer each launch was handed and `instructions[id]` its override."""
+    steer each launch was handed and `instructions[id]` its override. A
+    scripted fix-loop task commits, as a real repair does, unless it is
+    listed in `unchanged`."""
 
     def __init__(self, real_dispatch):
         self._real = real_dispatch
@@ -61,6 +63,7 @@ class Script:
         self.plan: dict[str, list[str]] = {}
         self.delay: dict[str, float] = {}
         self.effects: dict = {}
+        self.unchanged: set[str] = set()
         self.log: list[tuple[str, str]] = []
         self.steers: dict[str, list] = {}
         self.instructions: dict[str, list] = {}
@@ -85,6 +88,20 @@ class Script:
             await asyncio.sleep(self.delay.get(tid, 0))
             seq = self.plan.get(tid, ["done"])
             status = seq.pop(0) if len(seq) > 1 else seq[0]
+            if (
+                wt is not None
+                and tid not in self.unchanged
+                and status in ("done", "done_with_concerns", "failed")
+                and task.task.kind.value in ("agent", "subprocess")
+                and ".fix_loop." in task.path
+                and not task.path.endswith(".fix_loop.judge")
+            ):
+                # A file, not an empty commit: `read_only.changed` names files,
+                # and a commit that touches none reads as nothing changed.
+                name = f"scripted-{tid}-{len(self.steers[tid])}.txt"
+                (Path(wt) / name).write_text("x")
+                git(wt, "add", name)
+                git(wt, "commit", "-qm", f"scripted {tid}")
         self.log.append(("end", tid))
         return status
 

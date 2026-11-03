@@ -35,3 +35,4 @@
 .ph-skeleton { display: flex; flex-direction: column; gap: 10px; }
 .ph-skeleton > span { height: 96px; border-radius: 12px; background: var(--surface); }
 .ph-restart { margin: 8px 2px 0; padding: 10px 12px; border: 1px solid color-mix(in oklab, var(--warn) 40%, transparent); border-radius: 10px; background: color-mix(in oklab, var(--warn) 10%, var(--bg)); font-size: var(--fs-meta); line-height: 1.45; color: var(--text); overflow-wrap: anywhere; }
+.ph-restart button { display: block; min-height: 44px; min-width: 44px; margin-top: 4px; padding: 0 12px; border-radius: 8px; border: 1px solid color-mix(in oklab, var(--warn) 40%, transparent); background: transparent; color: var(--accent); font: inherit; }

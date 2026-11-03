@@ -87,7 +87,7 @@ def _run(tmp_path, monkeypatch, entries, *, attempts=3, severities=None, measure
     entry.
     """
     call_dir = Path(tempfile.mkdtemp(dir=tmp_path))
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "stall")
     plan = call_dir / "review-plan.json"
     plan.write_text(json.dumps(entries))
     monkeypatch.setenv("KRAFT_FAKE_REVIEW_PLAN", str(plan))
@@ -591,7 +591,7 @@ def test_retry_after_no_progress_dispatches_a_fix_instead_of_re_escalating(tmp_p
     that first re-measurement — on code nothing has touched yet — would report
     the same fingerprints as the escalating cycle and bounce straight back to
     needs_human, and the steered retry would never reach a fix agent."""
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "stall")
     same = [_finding("unfixed")]
     call_dir = Path(tempfile.mkdtemp(dir=tmp_path))
     plan = call_dir / "review-plan.json"
@@ -681,7 +681,7 @@ def _run_template(tmp_path, monkeypatch, node, *, attempts=3):
     """Like `_run`, but for a caller-supplied node instead of the
     scripted-reviewer `review` node -- the blind-failure tests need a real
     subprocess, not the fake reviewer's plan file."""
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "stall")
     return run_chain(
         tmp_path,
         v1_seeded_chain(tmp_path / "templates", [node], agent_command=_FAKE),

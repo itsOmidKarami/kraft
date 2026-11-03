@@ -21,7 +21,7 @@ def snapshot(root: Path) -> dict[str, bytes]:
 #: A chain whose one agent task asks the `claude` profile for `effort: max`,
 #: which the claude provider accepts and codex does not.
 MAX_EFFORT_CHAIN = {
-    "id": "max-effort",
+    "id": "a-max-effort",
     "nodes": [
         {
             "id": "run",
@@ -35,7 +35,7 @@ MAX_EFFORT_CHAIN = {
 
 
 def _max_effort_chain(templates_dir):
-    (templates_dir / "chains" / "max-effort.yaml").write_text(yaml.safe_dump(MAX_EFFORT_CHAIN))
+    (templates_dir / "chains" / "a-max-effort.yaml").write_text(yaml.safe_dump(MAX_EFFORT_CHAIN))
     # The library's claude model pins would be refused by codex first; drop
     # them so `effort: max` is the one thing the provider change breaks.
     path = templates_dir / "library.yaml"
@@ -264,11 +264,11 @@ def test_a_save_that_stops_a_chain_launching_is_refused(client, templates_dir, b
 
 @pytest.mark.api_client(edit_templates=_max_effort_chain)
 def test_a_provider_change_the_selecting_task_cannot_run_on_is_refused(client, templates_dir):
-    """codex takes no `effort: max`, which `max-effort`'s task asks for."""
+    """codex takes no `effort: max`, which `a-max-effort`'s task asks for."""
     before = snapshot(templates_dir)
     response = client.put("/api/harnesses/profiles/claude", json={"provider": "codex"})
     assert response.status_code == 422
-    assert "max-effort" in response.json()["detail"]
+    assert "a-max-effort" in response.json()["detail"]
     assert "'max'" in response.json()["detail"]
     assert snapshot(templates_dir) == before
 

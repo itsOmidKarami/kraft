@@ -639,9 +639,18 @@ def _move_missing(source: Path, target: Path) -> None:
 def _stage_bundle(templates_dir: Path) -> Path:
     """The bundled config, copied beside `templates_dir` under a staging name
     for the caller to rename into place. Returns the staging directory."""
+    from kraft.addons import builtin
+
     staging = templates_dir.with_name(templates_dir.name + ".seeding")
     shutil.rmtree(staging, ignore_errors=True)
-    shutil.copytree(BUNDLED / "config", staging)
+    # Kraft's own chains and library are the built-in add-on's; a home holds
+    # only thin chains that extend it.
+    shutil.copytree(
+        BUNDLED / "config",
+        staging,
+        ignore=shutil.ignore_patterns("chains", "library.yaml", ".kraft"),
+    )
+    builtin.write_thin_seed(staging)
     (staging / "access.yaml").unlink(missing_ok=True)
     (staging / "notify.yaml").unlink(missing_ok=True)
     # What this home was seeded from, for `capabilities.added_since` (Kraft-hxt6x).
@@ -1978,9 +1987,26 @@ def update_prechecks(
             _exit(why)
         return why
     version = release.tag.removeprefix("v")
+    from kraft.addons import builtin
+
+    root = addons_load.addons_dir()
+    preview = builtin.preview(release, config_dir(), root, channel=channel)
     if interactive:
         _confirm_dropped_addons(version, assume_yes)
+        print(builtin.show(preview))
+        if (
+            not assume_yes
+            and builtin.needs_answer(preview)
+            and not (
+                sys.stdin.isatty() and input("Install it? [y/N] ").strip().lower() in ("y", "yes")
+            )
+        ):
+            _exit("nothing installed.")
+        builtin.clear(root)  # the operator has now seen and taken what was held
         return None
+    if held := builtin.held(preview):
+        builtin.record(root, status="held", from_=update.installed(), to=version, lines=list(held))
+        return "kraft-default: " + "; ".join(held)
     if dropped := addons_load.left_out_by(version):
         return (
             f"kraft {version} would stop loading {', '.join(dropped)}; "
@@ -1991,6 +2017,17 @@ def update_prechecks(
             "uv still has a `kraft` tool from before the rename; "
             "`kraft admin update` says what to run"
         )
+    # Last, so a refusal above leaves no note about a release that never installed.
+    if builtin.changed(preview):
+        builtin.record(
+            root,
+            status="changed",
+            from_=update.installed(),
+            to=version,
+            lines=[*preview.review.reach, *preview.review.content],
+        )
+    else:
+        builtin.clear(root)
     return None
 
 
@@ -2075,6 +2112,16 @@ def _cmd_update(ns: argparse.Namespace) -> None:
         running = _running_server_version()
         if running is not None and not now and _crosses_major(running, release.tag):
             # The new major cannot take over the steps of the old: they finish first.
+            from kraft.addons import builtin
+            from kraft.addons import load as addons_load
+
+            p = builtin.preview(release, config_dir(), addons_load.addons_dir(), channel=channel)
+            print(builtin.show(p))
+            if builtin.held(p):
+                print(
+                    "the update will be held until you run `kraft admin update` "
+                    "without --restart and accept"
+                )
             ns.when_free = release.tag
             _update_when_free(ns)
             print(

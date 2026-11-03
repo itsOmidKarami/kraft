@@ -16,6 +16,7 @@ import yaml
 from support.harness import connected_repo, make_repo
 
 from kraft import auth, capabilities, cli, client, doctor, harness
+from kraft.addons import builtin
 
 
 def _names(rows):
@@ -307,14 +308,17 @@ def test_every_config_check_reports_even_with_no_templates_dir(tmp_path, monkeyp
     red pipeline while passing on a developer machine that had the directory.
     """
     monkeypatch.setenv("KRAFT_CONFIG_DIR", str(tmp_path / "nope"))
-    # An installed Kraft's bundle: never started, its chains are not "missing".
-    (_chains(tmp_path / "bundled" / "config") / "default.yaml").write_text("nodes: [{id: a}]\n")
-    monkeypatch.setattr(doctor, "BUNDLED", tmp_path / "bundled")
 
     rows = asyncio.run(doctor.run_checks())
     assert _by_name(rows, "config")["ok"] is False
-    chains = _by_name(rows, "chain_templates")
-    assert chains == {**chains, "ok": True, "skipped": True, "detail": "skipped: no config dir"}
+    assert "chain_templates" not in {r["name"] for r in rows}
+    builtin_row = _by_name(rows, "kraft-default")
+    assert builtin_row == {
+        **builtin_row,
+        "ok": True,
+        "skipped": True,
+        "detail": "skipped: no config dir",
+    }
     assert _by_name(rows, "chains")["skipped"] is True
     # Not the upgrade guide: a home never seeded has nothing to upgrade.
     assert _by_name(rows, "capabilities")["detail"] == "skipped: no config dir"
@@ -334,78 +338,6 @@ def test_doctor_on_a_never_started_home_says_so(tmp_path, monkeypatch):
     assert rows[0]["name"] == "home" and rows[0]["warn"]
     assert "until `kraft` has started once" in rows[0]["detail"]
     assert "start `kraft` once to seed it" in _by_name(rows, "harnesses.yaml")["detail"]
-
-
-def _chains(root: Path) -> Path:
-    d = root / "chains"
-    d.mkdir(parents=True)
-    return d
-
-
-def test_chain_templates_check_names_a_node_missing_from_the_live_copy(tmp_path, monkeypatch):
-    bundled = tmp_path / "bundled"
-    (_chains(bundled / "config") / "default.yaml").write_text(
-        "id: default\nnodes:\n  - {id: spec, extends: spec}\n  - {id: review, extends: review}\n"
-    )
-    live = tmp_path / "templates"
-    (_chains(live) / "default.yaml").write_text("id: default\nnodes:\n  - {id: spec}\n")
-    monkeypatch.setattr(doctor, "BUNDLED", bundled)
-    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(live))
-
-    check = _by_name(asyncio.run(doctor.run_checks()), "chain_templates")
-    assert check["ok"] is True  # an operator's own chain, not a failure
-    assert "review" in check["detail"]
-    assert "default.yaml" in check["detail"]
-
-
-def test_chain_templates_check_names_a_template_missing_entirely(tmp_path, monkeypatch):
-    bundled = tmp_path / "bundled"
-    (_chains(bundled / "config") / "quick-task.yaml").write_text(
-        "id: quick-task\nnodes:\n  - {id: implementation}\n"
-    )
-    live = tmp_path / "templates"
-    _chains(live)  # live has no quick-task.yaml at all
-    monkeypatch.setattr(doctor, "BUNDLED", bundled)
-    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(live))
-
-    check = _by_name(asyncio.run(doctor.run_checks()), "chain_templates")
-    assert check["ok"] is True
-    assert "quick-task.yaml missing entirely" in check["detail"]
-
-
-def test_chain_templates_check_reads_only_chains(tmp_path, monkeypatch):
-    """A top-level file -- `library.yaml`, whose `nodes:` is a mapping, or a
-    legacy chain left beside it -- is not a chain the V1 loader reads."""
-    bundled = tmp_path / "bundled"
-    (bundled / "config").mkdir(parents=True)
-    (bundled / "config" / "legacy.yaml").write_text("id: legacy\nnodes:\n  - {id: x}\n")
-    live = tmp_path / "templates"
-    live.mkdir()
-    monkeypatch.setattr(doctor, "BUNDLED", bundled)
-    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(live))
-
-    check = _by_name(asyncio.run(doctor.run_checks()), "chain_templates")
-    assert check["ok"] is True
-    assert check["skipped"] is True  # no chains/ in the bundle, nothing to diff
-
-
-def test_chain_templates_check_ignores_files_with_no_nodes_list(tmp_path, monkeypatch):
-    bundled = tmp_path / "bundled"
-    (_chains(bundled / "config") / "notes.yaml").write_text("enabled: false\n")
-    live = tmp_path / "templates"
-    live.mkdir()
-    monkeypatch.setattr(doctor, "BUNDLED", bundled)
-    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(live))
-
-    check = _by_name(asyncio.run(doctor.run_checks()), "chain_templates")
-    assert check["ok"] is True
-    assert check["skipped"] is True  # no chain templates found at all, nothing to diff
-
-
-def test_chain_templates_check_is_skipped_without_a_bundle(tmp_path, monkeypatch):
-    monkeypatch.setattr(doctor, "BUNDLED", tmp_path / "absent")
-    check = _by_name(asyncio.run(doctor.run_checks()), "chain_templates")
-    assert check["skipped"] is True
 
 
 def test_bundle_check_fails_when_the_spa_is_missing(monkeypatch, tmp_path):
@@ -647,8 +579,7 @@ def test_a_missing_agent_names_the_chains_it_stops(tmp_path, monkeypatch, chains
     (fake / "claude").chmod(0o755)
     monkeypatch.setenv("PATH", str(fake))
     row = _by_name(doctor._agent_checks(), "agent: gone")
-    assert row["ok"] is False
-    assert row["detail"] == f"`agy` is not on PATH — {says}"
+    assert (row["ok"], row["detail"]) == (False, f"`agy` is not on PATH — {says}")
 
 
 def test_a_selected_profile_harnesses_yaml_lacks_fails(tmp_path, monkeypatch):
@@ -743,8 +674,9 @@ def test_a_chain_that_does_not_resolve_fails_doctor_by_name(tmp_path, monkeypatc
 
 def test_the_chains_row_passes_when_every_chain_resolves(tmp_path, monkeypatch):
     _live(tmp_path, monkeypatch, {"a": "claude"}, ["a"])
+    shipped = len(list((builtin.source_dir() / "chains").glob("*.yaml")))  # resolved too
     row = _by_name(doctor._config_checks(), "chains")
-    assert row["ok"] is True and "1 chain" in row["detail"]
+    assert row["ok"] is True and f"{1 + shipped} chain" in row["detail"]
 
 
 @pytest.mark.parametrize(

@@ -195,9 +195,13 @@ export function logLines(sessionId: string, n: number, long: boolean): any[] {
       : src === "agent" ? `Reading frontend/src/views/work_item/Inspector/Changes.tsx to see how the tree groups files before I touch the diff pane.`
       : `{"type":"tool_use","name":"Edit","input":{"file_path":"frontend/src/views/work_item/Inspector/Changes.tsx","old_string":"const rows = files.map(","new_string":"const rows = groupTree(files).map("}}`;
     if (long && i % 37 === 0) text = "x".repeat(600) + " " + "https://gitlab.example.com/acme-corporation/platform-engineering/payment-reconciliation-service/-/merge_requests/1842/diffs?commit_id=" + hex(i) + " " + "y".repeat(1200);
+    // Some agent and tool rows are a sub-agent's: tagged, and prefixed as the server's `logs.summary` writes them.
+    const sub = (src === "agent" || src === "tool") && (i % 8 === 2 || i % 8 === 3) ? { agent: "fa0001", agent_label: "Explore codebase", agent_type: "Explore" }
+      : src === "agent" && i % 8 === 6 ? { agent: "fa0002", agent_label: "Review diff", agent_type: "general-purpose" } : null;
+    const summary = src === "tool" ? "Edit frontend/src/views/work_item/Inspector/Changes.tsx" : undefined;
     out.push({
       n: i, t: t(i / 10), src, text,
-      ...(src === "tool" ? { summary: "Edit frontend/src/views/work_item/Inspector/Changes.tsx" } : {}),
+      ...(sub ? { ...sub, summary: `↳ ${sub.agent_label}: ${summary ?? "Reading Changes.tsx"}` } : summary ? { summary } : {}),
     });
   }
   return out;
@@ -758,7 +762,7 @@ function settingsFor(variant: Variant, theme: { mode?: string; density?: string;
       { id: hex(5001), label: long ? "Mozilla/5.0 (iPhone; CPU iPhone OS 19_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.0 Mobile/15E148 Safari/604.1" : "Safari on iPhone", ip: "10.0.0.44", created_at: t(-3000), last_seen_at: t(100), expires_at: t(4000), current: false },
       ...(long ? Array.from({ length: 8 }, (_, i) => ({ id: hex(5010 + i), label: null, ip: `10.0.${i}.${i * 17}`, created_at: t(-i * 400), last_seen_at: t(i * 20), expires_at: t(5000), current: false })) : []),
     ] },
-    health: { status: long ? "degraded" : "ok", invalid_templates: long ? { "docs-only": "node 'implement' references unknown task on.docs.write" } : {}, invalid_policy: long ? ["loops.an_extremely_long_loop_name_that_nobody_should_have_typed.wall_clock_s exceeds 24h"] : [], bind: "127.0.0.1", port: 8765, session_expiry_days: 7, version: "0.9.3", installed: "0.9.3", run_dir: "/Users/you/.kraft", pid: 41822, uptime_s: 3 * 86_400 + 4 * 3600 + 240,
+    health: { status: long ? "degraded" : "ok", invalid_templates: long ? { "docs-only": "node 'implement' references unknown task on.docs.write" } : {}, invalid_policy: long ? ["loops.an_extremely_long_loop_name_that_nobody_should_have_typed.wall_clock_s exceeds 24h"] : [], bind: "127.0.0.1", port: 8765, session_expiry_days: 7, version: "0.9.3", installed: "0.9.3", kraft_default: { signature: null, count: 0 }, run_dir: "/Users/you/.kraft", pid: 41822, uptime_s: 3 * 86_400 + 4 * 3600 + 240,
       index: { documents: 214, last_scan_at: null as string | null, errors: [] as string[], repos_scanned: repos.length, embeddings: { available: true, model: "BAAI/bge-small-en-v1.5", chunks: 1830, reason: null, state: "ready" } },
       // Nothing held, refused or left over from a restart: `storage` is null without a worktree limit in health's terms.
       invalid_intake: null, invalid_forges: null, forge_tokens: {}, intake_off: false, mcp_command_on_path: true, addon_updates: {}, storage: null, reattach_summary: { scanned: 0, adopted: [], resolved_from_file: [], resumed_work_items: [], unknown: [] } },

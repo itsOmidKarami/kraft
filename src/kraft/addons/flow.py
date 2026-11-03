@@ -9,7 +9,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from kraft import paths
-from kraft.addons import fetch, load, manifest, review
+from kraft.addons import builtin, fetch, load, manifest, review
 from kraft.addons import update as addon_update
 from kraft.addons.config import AddonEntry, AddonsConfig, AddonsLock
 from kraft.config import ConfigError
@@ -85,7 +85,7 @@ def addon_rows() -> list[dict]:
         raise refusal(str(exc)) from exc
     rows = []
     for addon in load.installed(config_dir, addons_dir):
-        if addon.repo_id is not None:
+        if addon.repo_id is not None or builtin.is_builtin(addon):
             continue  # `kraft repo library` is how a repo library is listed and taken
         collection = config.collections.get(addon.id.split("@", 1)[1])
         listed = addon.id in config.addons

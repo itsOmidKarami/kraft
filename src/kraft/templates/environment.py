@@ -682,6 +682,10 @@ class HarnessProfileTable:
     profiles: dict[str, HarnessProfile]
     #: `profiles:`, the named model tiers (Kraft-ps1ao). Absent is `{}`.
     agent_profiles: dict[str, AgentProfile] = field(default_factory=dict)
+    #: What the built-in's fallback filled in from the package (never written to the file).
+    filled: frozenset[str] = frozenset()
+    #: The same for harnesses (a name may be in both).
+    filled_harnesses: frozenset[str] = frozenset()
 
     @classmethod
     def from_yaml(
@@ -719,6 +723,11 @@ class HarnessProfileTable:
         """`from_yaml` for a file's already-parsed content -- a candidate the
         Harnesses screen would save as `path` -- so a save is checked by the
         very parse a load makes (Kraft-archr)."""
+        # Imported here: `kraft.addons` imports this module.
+        from kraft.addons import builtin
+
+        filled_harnesses = builtin.filled_harnesses(data)
+        data, filled = builtin.harness_fallback(data)
         path = Path(path)
         profiles: dict[str, HarnessProfile] = {}
         for id, body in _section(data, "harnesses", path).items():
@@ -774,7 +783,12 @@ class HarnessProfileTable:
                         f"{path}: profiles.{p.id}.fallback[{n}]: profile {entry.profile!r} "
                         f"is not defined; known are {sorted(agent_profiles)}"
                     )
-        return cls(profiles=profiles, agent_profiles=agent_profiles)
+        return cls(
+            profiles=profiles,
+            agent_profiles=agent_profiles,
+            filled=frozenset(filled),
+            filled_harnesses=frozenset(filled_harnesses),
+        )
 
     def pairing_detail(
         self, name: str, harness: HarnessProfile, providers: Mapping[str, Harness]

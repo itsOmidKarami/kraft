@@ -83,3 +83,32 @@ export function maybeNotify(ev: KraftEvent, title: string): void {
     location.href = withBase(`/work-items/${ev.work_item_id}`);
   };
 }
+
+const SERVER_KEY = "kraft.kraftDefault.notified";
+
+/** Tell a hidden tab, once per drift signature, that Kraft's own chains need attention.
+ *  A state the board already showed (it stores the same key) is not announced later. */
+export function notifyServer(signature: string, count: number): void {
+  if (!isEnabled()) return;
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  if (!document.hidden) return;
+  try {
+    if (localStorage.getItem(SERVER_KEY) === signature) return;
+    localStorage.setItem(SERVER_KEY, signature);
+  } catch {
+    return; // Without the store it cannot tell "once" from "every minute".
+  }
+  try {
+    const n = new Notification("Kraft's own chains need attention", {
+      body: `${count} item(s). Run kraft admin doctor.`,
+      tag: "kraft-default",
+      icon: withBase("/icon.svg"),
+    });
+    n.onclick = () => {
+      window.focus();
+      location.href = withBase("/");
+    };
+  } catch {
+    // Some browsers expose Notification but refuse its constructor.
+  }
+}

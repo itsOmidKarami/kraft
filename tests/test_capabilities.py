@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-import yaml
 
 from kraft import capabilities
 from kraft.capabilities import Capability
@@ -51,119 +50,13 @@ def test_an_unparseable_stamp_is_treated_as_oldest_rather_than_raising(manifest)
     assert capabilities.added_since("not-a-version") == list(manifest)
 
 
-def test_the_mr_rebase_entry_gives_the_exact_shipped_yaml():
-    """Kraft-3llig review fix 2: the capability shipped invisibly to every
-    existing install without one -- the `how` an operator pastes in must be
-    the *shipped* YAML, not a paraphrase that drifts from it."""
-    [entry] = [c for c in capabilities.MANIFEST if c.version == "1.0.3" and c.name == "mr_rebase"]
-    library = (ROOT / "config" / "library.yaml").read_text()
-    chain = (ROOT / "config" / "chains" / "default.yaml").read_text()
-    assert "  mr_rebase:\n    kind: builtin\n    ref: kraft.mr_rebase\n" in library
-    assert "  mr_rebase:\n    kind: builtin\n    ref: kraft.mr_rebase\n" in entry.how
-    steps = (
-        "    steps:\n"
-        "      - id: rebase\n"
-        "        tasks:\n"
-        "          - id: rebase\n"
-        "            extends: mr_rebase\n"
-        "      - id: open\n"
-        "        tasks:\n"
-        "          - id: open\n"
-        "            extends: open_draft_mr\n"
-    )
-    assert steps in chain
-    assert steps.rstrip("\n") in entry.how
-
-
-def test_the_triage_entry_gives_the_exact_shipped_yaml():
-    """Review-bot triage is a library task and a step an existing install's
-    never-overwritten library does not have, so the `how` an operator pastes in
-    must be the *shipped* YAML."""
-    [entry] = [c for c in capabilities.MANIFEST if c.name == "triage_review_feedback"]
-    library = (ROOT / "config" / "library.yaml").read_text()
-    task = (
-        "  triage_review_feedback:\n"
-        "    kind: agent\n"
-        "    harness: claude\n"
-        "    profile: fast\n"
-        "    prompt: Decide which of the review bots' feedback on this merge request needs a "
-        "change.\n"
-        "    skill: kraft:review-feedback\n"
-        "    inputs: [bot_feedback, previous_review, pr_rules]\n"
-    )
-    step = (
-        "      - id: review_feedback\n"
-        "        read_only: true\n"
-        "        tasks:\n"
-        "          - id: triage\n"
-        "            extends: triage_review_feedback\n"
-    )
-    assert task in library and task.rstrip("\n") in entry.how
-    brief = (
-        "    produces: review_brief\n    skill: kraft:review-brief\n    inputs: [triage_verdict]\n"
-    )
-    assert brief in library and "    inputs: [triage_verdict]" in entry.how
-    assert step in library and step.rstrip("\n") in entry.how
-    assert entry.present == ("library.yaml", "tasks", "triage_review_feedback")
-
-
-@pytest.mark.parametrize("seeded", ["1.0.0", "1.0.1", "1.0.2"])
-def test_every_install_seeded_before_the_rebase_shipped_is_told_about_it(seeded):
-    """`mr_rebase` shipped in 1.0.3; 1.0.1 and 1.0.2 went out without it, so an
-    install first seeded by either has a `draft_merge_request` with no rebase
-    and must still be told (`added_since` is strictly newer)."""
-    assert "mr_rebase" in [c.name for c in capabilities.added_since(seeded)]
-
-
-def test_the_never_signal_steering_entry_gives_the_exact_shipped_yaml():
-    """Kraft-c82sp: SAFETY_RULES left the code and became opt-in steering, so
-    templates are seeded once and never overwritten -- an install first set up
-    on 1.0.x has no `never-signal-processes-you-didnt-start` profile, and one
-    upgraded from 0.x has the migrated profile but no repo naming it, because
-    it used to be automatic. Either way the `how` an operator pastes in must
-    be the *shipped* YAML, not a paraphrase that drifts from it."""
-    [entry] = [
-        c
-        for c in capabilities.MANIFEST
-        if c.version == "1.1.0" and c.name == "never_signal_steering"
-    ]
-    library = (ROOT / "config" / "library.yaml").read_text()
-    block = (
-        "  never-signal-processes-you-didnt-start:\n"
-        "    instructions: >-\n"
-        "      Never signal a process you did not start. If something is already\n"
-        "      listening on a port you need, it is not a stale leftover to clear -- it\n"
-        "      might be the Kraft daemon serving other work right now. Check\n"
-        "      $KRAFT_DAEMON_PID and $KRAFT_DAEMON_PORT in your environment before\n"
-        "      touching anything you find on a port: if the pid or the port matches, it\n"
-        "      is the daemon, and `kill`, `pkill`, or piping `lsof` into `xargs kill`\n"
-        "      would take down orchestration for every other work item on this install,\n"
-        "      including this one. Ask any server you start yourself for an ephemeral\n"
-        "      port (bind port 0, or leave KRAFT_PORT unset) rather than reuse the\n"
-        "      daemon's. If a task genuinely needs the daemon's own port, that is a\n"
-        "      question for a human, not something to resolve by killing what is\n"
-        "      already there.\n"
-    )
-    assert block in library
-    assert block.rstrip("\n") in entry.how
-    assert "steering: [never-signal-processes-you-didnt-start]" in entry.how
-    # A direct check the operator can answer by looking at their own file --
-    # not "skip this if migrate_files already ran", which asks them to recall
-    # an internal mechanism instead of just reading library.yaml.
-    assert (
-        "if your library.yaml does not already have a "
-        "`never-signal-processes-you-didnt-start` steering profile" in entry.how
-    )
-    # It must say plainly that the rule is no longer automatic, and that a
-    # repo whose tests start servers should name it.
-    assert "no longer" in entry.what and "automatically" in entry.what
-    assert "start servers of their own should name it" in entry.what
-
-
 def test_the_shipped_templates_have_adopted_every_capability():
     """What a fresh seed gets, so each entry's `present` must name what the
     edit adds: doctor stops listing it once an operator hand-merges it
-    (Kraft-9efnk.36)."""
+    (Kraft-9efnk.36). Settings files only: chains and the library come from the
+    built-in kraft-default."""
+    # `profiles` was retired: the kraft-default row names a home lacking it.
+    assert capabilities.MANIFEST == ()
     for c in capabilities.MANIFEST:
         assert capabilities.adopted(c, ROOT / "config"), c.name
 
@@ -174,34 +67,3 @@ def test_a_live_dir_without_the_key_has_not_adopted_it(tmp_path):
     assert not capabilities.adopted(c, tmp_path)
     (tmp_path / "harnesses.yaml").write_text("harnesses: {}\nprofiles: {}\n")
     assert capabilities.adopted(c, tmp_path)
-
-
-@pytest.mark.parametrize(
-    ("inputs", "adopted"),
-    [(["bot_feedback"], False), (["bot_feedback", "pr_rules"], True)],
-    ids=["without-pr-rules", "with-pr-rules"],
-)
-def test_pr_rules_is_adopted_once_the_task_lists_it(tmp_path, inputs, adopted):
-    """A key path steps into a list by member: `pr_rules` is an item of a
-    task's `inputs:`, not a key, and a task that lists something else has not
-    adopted it."""
-    [entry] = [c for c in capabilities.MANIFEST if c.name == "pr_rules"]
-    library = {"tasks": {"repair_mr_feedback": {"inputs": inputs}}}
-    (tmp_path / "library.yaml").write_text(yaml.safe_dump(library))
-
-    assert capabilities.adopted(entry, tmp_path) is adopted
-
-
-@pytest.mark.parametrize(
-    ("tasks", "listed"),
-    [({"code_review": {}}, True), ({"gate_reviewer": {}}, False)],
-    ids=["without-it", "with-it"],
-)
-def test_an_install_at_2_4_is_told_about_gate_reviewer_until_its_library_has_it(
-    tmp_path, tasks, listed
-):
-    (tmp_path / "library.yaml").write_text(yaml.safe_dump({"tasks": tasks}))
-    new = capabilities.added_since("2.4.0")
-    missing = [c.name for c in new if not capabilities.adopted(c, tmp_path)]
-
-    assert ("gate_reviewer" in missing) is listed

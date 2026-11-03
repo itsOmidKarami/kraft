@@ -12,9 +12,11 @@ per-task `model` and `effort` choices -- so a diff reports
 every deliberate edit as drift, and applying one destroys the edits. This list
 answers the useful question instead: what is available, and how do I take it.
 
-**Add an entry in the same change that adds the capability.** One shipped
-without an entry is invisible to every existing install, which is the whole
-failure this exists to close.
+**Settings files only.** Chains and the library come from the built-in
+`kraft-default` add-on, which every release updates by itself. Add an entry
+in the same change that adds a capability to a settings file (`harnesses.yaml`
+and the like): one shipped without an entry is invisible to every existing
+install, which is the whole failure this exists to close.
 """
 
 from __future__ import annotations
@@ -56,133 +58,12 @@ def _key(version: str) -> tuple[int, ...]:
 
 #: Oldest first. `added_since` relies on this order for its output.
 #:
-#: Empty since Template Schema V1: every entry before it told an operator how to
-#: adopt a capability in the legacy `registry.yaml` and hook-chain files, which
-#: V1 does not read. A V1 home is seeded from the V1 bundle (or replaced by
-#: `kraft admin update`), so it already has everything those entries described.
-MANIFEST: tuple[Capability, ...] = (
-    Capability(
-        version="1.0.0",
-        name="profiles",
-        what="named model tiers (deep, strong, fast) a library agent task selects "
-        "instead of spelling out model/effort",
-        how="copy the `profiles:` section of the shipped harnesses.yaml into yours, then "
-        "set `profile: strong` on a task in place of its `model:`/`effort:`",
-        present=("harnesses.yaml", "profiles"),
-    ),
-    Capability(
-        version="1.0.3",
-        name="mr_rebase",
-        what="draft_merge_request rebases onto the item's base branch before opening the "
-        "draft MR, instead of opening on whatever base the worktree was cut from",
-        how=(
-            "add to library.yaml's `tasks:`:\n"
-            "  mr_rebase:\n"
-            "    kind: builtin\n"
-            "    ref: kraft.mr_rebase\n"
-            "then in chains/default.yaml, replace draft_merge_request's `tasks:` with:\n"
-            "    steps:\n"
-            "      - id: rebase\n"
-            "        tasks:\n"
-            "          - id: rebase\n"
-            "            extends: mr_rebase\n"
-            "      - id: open\n"
-            "        tasks:\n"
-            "          - id: open\n"
-            "            extends: open_draft_mr"
-        ),
-        present=("library.yaml", "tasks", "mr_rebase"),
-    ),
-    Capability(
-        version="1.1.0",
-        name="never_signal_steering",
-        what="the never-signal-processes-you-didnt-start rule (never kill a process "
-        "you didn't start -- it might be the Kraft daemon) is no longer appended to "
-        "every agent launch automatically; it is now an opt-in library steering "
-        "profile a repository names for itself. A repository whose tests start "
-        "servers of their own should name it.",
-        how=(
-            "if your library.yaml does not already have a "
-            "`never-signal-processes-you-didnt-start` steering profile (an install "
-            "upgraded from 0.x does -- migrate_files already carried it over), add to "
-            "library.yaml's `steering:`:\n"
-            "  never-signal-processes-you-didnt-start:\n"
-            "    instructions: >-\n"
-            "      Never signal a process you did not start. If something is already\n"
-            "      listening on a port you need, it is not a stale leftover to clear -- it\n"
-            "      might be the Kraft daemon serving other work right now. Check\n"
-            "      $KRAFT_DAEMON_PID and $KRAFT_DAEMON_PORT in your environment before\n"
-            "      touching anything you find on a port: if the pid or the port matches, it\n"
-            "      is the daemon, and `kill`, `pkill`, or piping `lsof` into `xargs kill`\n"
-            "      would take down orchestration for every other work item on this install,\n"
-            "      including this one. Ask any server you start yourself for an ephemeral\n"
-            "      port (bind port 0, or leave KRAFT_PORT unset) rather than reuse the\n"
-            "      daemon's. If a task genuinely needs the daemon's own port, that is a\n"
-            "      question for a human, not something to resolve by killing what is\n"
-            "      already there.\n"
-            "then in repos.yaml, on any repository entry whose tests start their own "
-            "servers:\n"
-            "    steering: [never-signal-processes-you-didnt-start]"
-        ),
-        present=("library.yaml", "steering", "never-signal-processes-you-didnt-start"),
-    ),
-    Capability(
-        version="2.4.0",
-        name="triage_review_feedback",
-        what="review bots' feedback is collected once they settle and a cheap agent decides "
-        "what needs fixing, instead of every bot comment going to the fix loop",
-        how=(
-            "add to library.yaml's `tasks:`:\n"
-            "  triage_review_feedback:\n"
-            "    kind: agent\n"
-            "    harness: claude\n"
-            "    profile: fast\n"
-            "    prompt: Decide which of the review bots' feedback on this merge request needs "
-            "a change.\n"
-            "    skill: kraft:review-feedback\n"
-            "    inputs: [bot_feedback, previous_review, pr_rules]\n"
-            "then add a third step to post_draft_feedback's `steps:` in library.yaml, after "
-            "`automated_review`:\n"
-            "      - id: review_feedback\n"
-            "        read_only: true\n"
-            "        tasks:\n"
-            "          - id: triage\n"
-            "            extends: triage_review_feedback\n"
-            "and so the review brief reports what the triage declined, add to the "
-            "`write_summary` task:\n"
-            "    inputs: [triage_verdict]"
-        ),
-        present=("library.yaml", "tasks", "triage_review_feedback"),
-    ),
-    Capability(
-        version="2.5.0",
-        name="pr_rules",
-        what="the agents that work a merge request are pointed at the repository's own "
-        "rules for pull requests, its committed steward or babysit skill",
-        how=(
-            "in library.yaml, add `pr_rules` to the `inputs:` of repair_mr_feedback, "
-            "triage_review_feedback, repair_mr_checks, repair_merge_queue_failure and "
-            "describe_mr, e.g.\n"
-            "    inputs: [bot_feedback, previous_review, pr_rules]"
-        ),
-        present=("library.yaml", "tasks", "repair_mr_feedback", "inputs", "pr_rules"),
-    ),
-    Capability(
-        version="2.5.0",
-        name="gate_reviewer",
-        what="a library task for a gate's `auto_review`; with `auto_review_mode: checks_first` "
-        "on the gate it can only reject the work or hand it to the person, never approve",
-        how=(
-            "in library.yaml, under tasks:, add\n"
-            "  gate_reviewer:\n"
-            "    kind: agent\n"
-            "    harness: claude\n"
-            "    prompt: Check this gate before the person decides.\n"
-            "    skill: kraft:gate-review"
-        ),
-        present=("library.yaml", "tasks", "gate_reviewer"),
-    ),
-)
+#: Settings files only. Entries about `library.yaml` and chains were retired when
+#: Kraft's own chains and library became the built-in `kraft-default` add-on,
+#: which an upgrade updates and `doctor`'s kraft-default row reports on. The
+#: `profiles` entry went the same way: the package supplies the tiers a home
+#: lacks, and that row says so.
+MANIFEST: tuple[Capability, ...] = ()
 
 
 def adopted(capability: Capability, live_dir: Path) -> bool:

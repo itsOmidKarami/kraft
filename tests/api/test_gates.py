@@ -131,7 +131,7 @@ def test_a_fix_loop_breach_over_http(client, repo, tmp_path, monkeypatch):
     The shipped `default` chain's fix loop measures the changed-test-scope
     builtin, which the fixture neuters to `true`, so the loop is its own chain
     here."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "stall")
     plan_path = tmp_path / "review-plan.json"
     plan_path.write_text(
         json.dumps(

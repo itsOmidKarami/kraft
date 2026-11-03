@@ -23,7 +23,7 @@ from kraft import forges as forges_mod
 from kraft import harness as harness_mod
 from kraft import policy as policy_mod
 from kraft.adapters.agent import HarnessUnavailable, select_profile
-from kraft.addons import inherit
+from kraft.addons import builtin, inherit
 from kraft.addons import load as addons_load
 from kraft.addons import manifest as addon_manifest
 from kraft.addons.config import AddonsConfig, AddonsLock, RepoLibrariesLock
@@ -379,11 +379,13 @@ def _check_policy(path, data, ctx):
         except inherit.InheritanceError:
             continue  # left out already, by the cascade
         if (why := addons_load.limits_problem(addon, instance, ancestors)) is not None:
-            issues.append(
-                TemplateIssue(
-                    path, None, f"would leave add-on {addon.id} out: {why}", loc=("maxima",)
-                )
+            # The built-in is never left out: a run holds its caps to `maxima:`.
+            msg = (
+                f"maxima: clamps kraft-default task(s): {why}"
+                if builtin.is_builtin(addon)
+                else f"would leave add-on {addon.id} out: {why}"
             )
+            issues.append(TemplateIssue(path, None, msg, loc=("maxima",)))
     return issues + scope_issues(path, data, ctx)
 
 
@@ -543,10 +545,29 @@ def _check_notify(path, data, ctx):
 # ── harnesses ──
 
 
-def selections(library: TemplateLibrary | None) -> list[tuple[str, str, AgentTask]]:
-    """(chain, task path, task) for every agent task of every chain that resolves."""
+def named_chains(config_dir: Path) -> frozenset[str]:
+    """The `default_chain` of each `repos.yaml` entry in `config_dir`."""
+    try:
+        data = yaml.safe_load((Path(config_dir) / "repos.yaml").read_text())
+        return frozenset(
+            r[k]
+            for r in data["repos"]
+            for k in ("default_chain", "default_chain_template")
+            if isinstance(r, dict) and isinstance(r.get(k), str)
+        )
+    except (OSError, yaml.YAMLError, KeyError, TypeError):
+        return frozenset()
+
+
+def selections(
+    library: TemplateLibrary | None, config_dir: Path | None = None
+) -> list[tuple[str, str, AgentTask]]:
+    """(chain, task path, task) for every agent task of every chain the operator
+    runs that resolves (`TemplateLibrary.run_chain_ids`, with the chains the
+    repos in `config_dir` name)."""
     out = []
-    for chain in library.chain_ids if library is not None else ():
+    named = named_chains(config_dir) if config_dir is not None else ()
+    for chain in library.run_chain_ids(named) if library is not None else ():
         try:
             resolved = library.resolve_chain(chain)
         except TemplateLibraryError:
@@ -649,7 +670,7 @@ def runner_issues(templates_dir: Path, library: TemplateLibrary) -> list[Templat
     except config_mod.ConfigError:
         return []  # doctor's workers.yaml row says why
     issues = []
-    for chain_id in library.chain_ids:
+    for chain_id in library.run_chain_ids(named_chains(templates_dir)):
         try:
             resolved = library.resolve_chain(chain_id)
         except TemplateLibraryError:
@@ -707,7 +728,7 @@ def lint_report(
         except TemplateEnvironmentError:
             table = None
         problems = (
-            launch_problems(selections(library), table, path, providers)
+            launch_problems(selections(library, templates_dir), table, path, providers)
             if table is not None
             else {}
         )
@@ -770,7 +791,7 @@ def harness_breakage(
         )
     except TemplateEnvironmentError as exc:
         return str(exc)
-    chosen = selections(library)
+    chosen = selections(library, path.parent)
     before = launch_problems(chosen, before_table, path, providers)
     after = launch_problems(chosen, table, path, providers)
     broken = [m for key, m in sorted(after.items()) if key not in before]
@@ -803,6 +824,15 @@ def _what(addon) -> str:
     return f"repo library {addon.repo_id}" if addon.repo_id else f"add-on {addon.id}"
 
 
+def _on_builtin(addon, ctx: CheckContext) -> bool:
+    from kraft.addons import builtin, inherit
+
+    try:
+        return builtin.is_tree(inherit.ancestry(addon, ctx.addons))
+    except inherit.InheritanceError:
+        return False
+
+
 def _unmet_requires(
     addon, ctx: CheckContext, *, harnesses: dict | None = None, repos: dict | None = None
 ) -> str | None:
@@ -824,6 +854,7 @@ def _unmet_requires(
         harnesses,
         repos,
         repo_library=addon.repo_id is not None,
+        builtin_tree=_on_builtin(addon, ctx),
     )
 
 

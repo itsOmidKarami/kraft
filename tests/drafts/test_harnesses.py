@@ -128,7 +128,7 @@ def test_the_resolved_view_lists_each_harness_with_its_state(client):
 
 def test_a_task_selecting_a_never_harness_is_a_problem_naming_it(client):
     r = ops(client, *access({"claude": "never"}))
-    problems = r.json()["result"]["problems"]
+    problems = [p for p in r.json()["result"]["problems"] if p.get("chain") == "default"]
     assert (
         "spec.main.author: harness 'claude' is not in its allowed_harnesses"
         in problems[0]["message"]
@@ -311,8 +311,9 @@ def test_each_harness_lists_its_tasks_and_its_own_fields(client):
         for h in resolved(client, *access({"codex": "override"}))["resolved"]["harnesses"]
     }
     claude = view["claude"]
+    mine = [t for t in claude["tasks"] if not t["chain"].startswith("kraft-default:")]
     assert {"chain": "default", "path": "spec.main.author"} == {
-        k: claude["tasks"][0][k] for k in ("chain", "path")
+        k: mine[0][k] for k in ("chain", "path")
     }
     assert all(t["fallback"] is False for t in claude["tasks"])
     assert set(claude) >= {"provider", "enabled", "executable", "defaults", "tasks"}
@@ -339,7 +340,11 @@ def test_a_fallback_lists_its_task_under_the_harness_it_lands_on(client, templat
 
 def test_a_never_problem_names_its_task_by_path(client):
     """Mutate: leave `path` None, and the page cannot mark the task's glyph."""
-    problems = resolved(client, *access({"claude": "never"}))["problems"]
+    problems = [
+        p
+        for p in resolved(client, *access({"claude": "never"}))["problems"]
+        if p.get("chain") == "default"
+    ]
     assert problems[0]["path"] == "spec.main.author"
     assert problems[0]["chain"] == "default"
 

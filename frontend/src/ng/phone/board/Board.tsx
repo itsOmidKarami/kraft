@@ -18,6 +18,7 @@ import { Card } from "./Card";
 import { NoMatch } from "../../ui/NoMatch";
 import { useListLoad, useNow } from "./useListLoad";
 import { OLDER_SERVER, olderServer, restartWords, useHealth } from "../../shell/health";
+import { useKraftDefault } from "../../shell/KraftDefaultBanner";
 import "./board.css";
 import { Chip } from "../ui/Chip";
 
@@ -48,6 +49,7 @@ export function Board() {
   const { load, offline } = useListLoad();
   // R10c-01: an older server still running after an update says so over the board.
   const health = useHealth();
+  const drift = useKraftDefault(health);
   const byId = useStore((s) => s.workItems);
   const items = useMemo(() => Object.values(byId).filter((i) => i.display_status !== "archived"), [byId]);
   const [showAll, setShowAll] = useState(false);
@@ -127,6 +129,7 @@ export function Board() {
         {olderServer(health) && <p className="ph-restart" role="alert">{OLDER_SERVER} Run <code>kraft admin restart</code>.</p>}
         {/* An update or a rollback installed under this server, in a tab opened before it: the sidebar's line, which the phone has no sidebar for (R11b-08). */}
         {!olderServer(health) && restartWords(health) && <p className="ph-restart" role="status">Kraft {restartWords(health)}.</p>}
+        {drift && <div className="ph-restart" role="status"><strong>Kraft's own chains need attention</strong>: {drift.lines.length} item(s). Run <code>kraft admin doctor</code>. <button type="button" onClick={drift.hide}>Hide until it changes</button></div>}
         {load.state === "loading" && empty && <div className="ph-skeleton" aria-hidden="true"><span /><span /><span /></div>}
         {empty && load.state !== "loading" && !offline && (
           <p className="ph-empty">

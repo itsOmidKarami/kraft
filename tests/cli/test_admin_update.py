@@ -14,6 +14,7 @@ import yaml
 from kraft import cli, update
 from kraft import harness as _harness
 from kraft.adapters import agent as _agent
+from kraft.addons import load as addons_load
 from kraft.templates.environment import HarnessProfileTable
 from kraft.templates.library import TemplateLibrary
 from kraft.templates.models import AgentTask
@@ -104,9 +105,11 @@ def test_replace_pre_v1_config_carries_machine_config_and_installs_v1_harnesses(
     # (`kraft.adapters.agent.select_profile`/`resolve_profile`), never by
     # re-reading `harnesses.yaml`'s raw keys. If `MACHINE_CONFIG` ever carries
     # the operator's pre-V1 `harnesses.yaml` (no `profiles:`) over the bundled
-    # one, `resolve_profile` raises `ProfileUnavailable` here, naming
-    # `profile 'strong' is not defined in harnesses.yaml`.
-    library = TemplateLibrary.from_yaml_dir(home, skills_dir=None)
+    # one, the table's `filled` names the profiles the package had to supply
+    # (the fallback would otherwise hide that the v1 file never arrived).
+    library = TemplateLibrary.from_yaml_dir(
+        home, skills_dir=None, addons=addons_load.installed(home)
+    )
     resolved = library.resolve_chain("default")
     agent_tasks = [
         t.task
@@ -119,6 +122,7 @@ def test_replace_pre_v1_config_carries_machine_config_and_installs_v1_harnesses(
     harnesses_path = home / "harnesses.yaml"
     harnesses_env = _harness.load(None)
     table = HarnessProfileTable.from_yaml(harnesses_path, harnesses=harnesses_env.valid)
+    assert table.filled == frozenset()
     for task in agent_tasks:
         harness_profile = _agent.select_profile(table.profiles, task.harness, harnesses_path)
         model, effort = _agent.resolve_profile(

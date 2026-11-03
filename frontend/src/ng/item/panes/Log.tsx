@@ -1,31 +1,38 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { clock, lineCount, logLineText } from "../../../format";
+import { agentsIn, clock, inAgent, lineCount, logLineText } from "../../../format";
 import type { LogLine } from "../../../types";
 import { useModal } from "../../../useModal";
 import { Maximize2 } from "../../icons";
 import { logTextUrl } from "../../../api";
 import { POLL_MS, useLogLines } from "../useLogLines";
 import { LinkButton } from "../../ui/LinkButton";
+import { Menu, type MenuItem } from "../../ui/Menu";
 
 const SOURCES = ["sys", "stdout", "agent", "tool"] as const;
 export { POLL_MS };
 
+/** What the log says when it is filtered to a sub-agent none of the loaded lines name. */
+export const AGENT_LINES_EARLIER = "This sub-agent's lines are before the part shown.";
+
 /** A session's log (GAP §2 #4, #40): source chips, follow, copy, the whole
  *  file when the view was cut, full screen. Read again every few seconds
  *  while the session runs. */
-export function Log({ workItemId, sessionId, running, title, crumb }: { workItemId: string; sessionId: string; running: boolean; title: string; crumb?: string }) {
+export function Log({ workItemId, sessionId, running, title, crumb, agent, onAgent }: { workItemId: string; sessionId: string; running: boolean; title: string; crumb?: string; agent?: string; onAgent?: (agent: string | undefined) => void }) {
   const { lines, error } = useLogLines(workItemId, sessionId, running);
   const [off, setOff] = useState<Set<string>>(new Set());
   const [follow, setFollow] = useState(true);
   const [full, setFull] = useState(false);
 
   const cut = lines?.find((l) => l.truncated);
-  const shown = (lines ?? []).filter((l) => !l.truncated && !off.has(l.src));
+  const agents = agentsIn(lines ?? []);
+  const shown = (lines ?? []).filter((l) => !l.truncated && !off.has(l.src) && inAgent(l, agent));
+  const missing = !!agent && agent !== "main" && !!lines && !agents.some((a) => a.id === agent);
   const body = (big: boolean) => <LogBody lines={shown} follow={follow} onFollow={setFollow} big={big} />;
   const toggle = (s: string) => setOff((o) => { const n = new Set(o); if (n.has(s)) n.delete(s); else n.add(s); return n; });
   const controls = (
     <>
+      {(agents.length > 0 || agent) && <AgentMenu agents={agents} agent={agent} onAgent={onAgent} />}
       <span className="ip-chips" role="group" aria-label="Sources">
         {SOURCES.map((s) => <button key={s} type="button" className="ip-chip" aria-pressed={!off.has(s)} onClick={() => toggle(s)}>{s}</button>)}
       </span>
@@ -49,6 +56,11 @@ export function Log({ workItemId, sessionId, running, title, crumb }: { workItem
           {cut.truncated.lines} earlier lines are not shown. <LinkButton href={logTextUrl(workItemId, sessionId)} download={`${workItemId}-${sessionId}.log`}>Download the whole log</LinkButton>
         </p>
       )}
+      {missing && (
+        <p className="item-muted">
+          {AGENT_LINES_EARLIER} <LinkButton href={logTextUrl(workItemId, sessionId)} download={`${workItemId}-${sessionId}.log`}>Download the whole log</LinkButton>
+        </p>
+      )}
       {body(false)}
       {full && (
         <LogScreen title={title} crumb={crumb} count={lines ? `log · ${lineCount(shown.length)}` : "log · reading…"} controls={controls} onClose={() => setFull(false)}>
@@ -57,6 +69,28 @@ export function Log({ workItemId, sessionId, running, title, crumb }: { workItem
       )}
     </div>
   );
+}
+
+/** Which sub-agent's lines the log shows, as a pill and a menu in the pattern of the attempt menu: All, Main, then
+ *  each sub-agent with a status dot and its type. A menu, not chips, because it holds many long descriptions. */
+function AgentMenu({ agents, agent, onAgent }: { agents: ReturnType<typeof agentsIn>; agent?: string; onAgent?: (agent: string | undefined) => void }) {
+  // `Menu` keys its rows by label: two sub-agents given the same description are told apart by id.
+  const twin = (label: string) => agents.filter((a) => a.label === label).length > 1;
+  const named = agents.map((a) => ({ ...a, name: twin(a.label) ? `${a.label} (${a.id})` : a.label }));
+  const pick = (id: string | undefined): MenuItem["onSelect"] => () => onAgent?.(id);
+  const items: MenuItem[] = [
+    { label: "All", checked: !agent, onSelect: pick(undefined) },
+    { label: "Main", checked: agent === "main", onSelect: pick("main") },
+    ...named.map((a): MenuItem => ({
+      label: a.name,
+      hint: a.type,
+      icon: <span className={`ip-pill-dot ${a.status === "running" ? "is-live" : a.status === "completed" ? "is-ok" : "is-bad"}`} />,
+      checked: a.id === agent,
+      onSelect: pick(a.id),
+    })),
+  ];
+  const now = !agent ? "All" : agent === "main" ? "Main" : named.find((a) => a.id === agent)?.name ?? agent;
+  return <Menu label="Agents" triggerClass="ip-pill" trigger={<>agent: {now}<span className="ip-pill-caret" aria-hidden>▾</span></>} items={items} />;
 }
 
 /** The log over the whole viewport, not a dialog box: Escape or the exit button

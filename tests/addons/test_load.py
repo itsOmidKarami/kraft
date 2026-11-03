@@ -27,7 +27,7 @@ from support.harness import git
 
 import kraft
 from kraft import harness, update
-from kraft.addons import fetch, load, manifest
+from kraft.addons import builtin, fetch, load, manifest
 from kraft.addons.config import AddonsConfig
 from kraft.config import read_yaml, write_yaml
 from kraft.templates.environment import HarnessProfileTable
@@ -316,7 +316,7 @@ def test_installed_with_inheritance(tmp_path, team_library, company_requires, ch
 def test_an_unreadable_addons_file_loads_none_and_says_why(instance, file):
     config, addons, _ = instance
     (config / file).write_text("addons: [not, a, mapping]\n")
-    assert load.installed(config, addons) == ()
+    assert [a for a in load.installed(config, addons) if not builtin.is_builtin(a)] == []
     assert load.config_problem(config).startswith(file)
 
 
@@ -520,7 +520,7 @@ def _locked(tmp_path, *, directory=False):
         config_dir=config,
         addons_root=addons,
     )
-    (found,) = load.installed(config, addons)
+    (found,) = [a for a in load.installed(config, addons) if not builtin.is_builtin(a)]
     assert found.left_out is None
     return repo, config, addons, found, publish
 
@@ -554,7 +554,7 @@ def _remote_gone(repo, config, addons):
 
 def _source_not_recorded(repo, config, addons):
     """An older pin: it names a commit, and not the directory in it."""
-    (found,) = load.installed(config, addons)
+    (found,) = [a for a in load.installed(config, addons) if not builtin.is_builtin(a)]
     return replace(found, source=None)
 
 
@@ -670,7 +670,7 @@ def accepted(tmp_path):
 def test_an_accepted_repo_library_loads_under_the_repo_id(accepted):
     _repo, found = accepted
 
-    (library,) = load.installed(*found, verify=True)
+    (library,) = [a for a in load.installed(*found, verify=True) if not builtin.is_builtin(a)]
 
     assert (library.id, library.namespace, library.repo_id, library.left_out) == (
         "library@repo:app",
@@ -709,7 +709,7 @@ def test_why_a_repo_library_is_left_out(accepted, change, left_out, quiet):
 
     change(found)
 
-    (library,) = load.installed(*found)
+    (library,) = [a for a in load.installed(*found) if not builtin.is_builtin(a)]
     assert left_out in library.left_out
     assert library.quiet is quiet
 
@@ -724,7 +724,7 @@ def test_a_repo_library_is_not_left_out_for_owning_its_repo_id(accepted):
 
 def test_a_missing_repo_library_store_is_restored_from_the_checkout(accepted):
     _repo, found = accepted
-    (library,) = load.installed(*found)
+    (library,) = [a for a in load.installed(*found) if not builtin.is_builtin(a)]
     drop_store(library.root)
 
     load.restore(library, *found)
@@ -734,11 +734,11 @@ def test_a_missing_repo_library_store_is_restored_from_the_checkout(accepted):
 
 def test_installed_notices_a_changed_repo_library_lock(accepted):
     _repo, found = accepted
-    assert len(load.installed(*found)) == 1
+    assert len([a for a in load.installed(*found) if not builtin.is_builtin(a)]) == 1
 
     write_yaml(found[0] / "repo-libraries.lock", {"lock_version": 1, "repos": {}})
 
-    assert load.installed(*found) == ()
+    assert [a for a in load.installed(*found) if not builtin.is_builtin(a)] == []
 
 
 def _pin(addon_id):

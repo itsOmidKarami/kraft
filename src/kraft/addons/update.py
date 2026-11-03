@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, NamedTuple
 import yaml
 from pydantic import ValidationError
 
-from kraft.addons import fetch, inherit, load, manifest
+from kraft.addons import builtin, fetch, inherit, load, manifest
 from kraft.addons.config import (
     ADDON_ID_PATTERN,
     AddonEntry,
@@ -996,6 +996,15 @@ def _judge(
     refused. Returns why its ancestry does not hold there, which refuses a
     move and is a note on a current add-on."""
     addon_id, namespace = candidate.id, candidate.namespace
+    if namespace == builtin.NAMESPACE:  # the built-in wins, whatever a lock still holds
+        # An installed GitHub copy is told how to move off it; a fresh one is just refused.
+        raise Refused(
+            [
+                builtin.SHIPS_IT.format(id=addon_id)
+                if addon_id in ctx.lock.addons
+                else builtin.REFUSED
+            ]
+        )
     holders = {
         held.namespace: other for other, held in ctx.lock.addons.items() if other != addon_id
     }
@@ -1017,7 +1026,12 @@ def _judge(
         )
     except (fetch.AddonRefused, fetch.FetchError, manifest.ManifestError, OSError, ValueError):
         requires = found.requires  # an ancestor's store does not read; loading says why
-    if why := load.instance_problem(namespace, requires, ctx.config_dir):
+    if why := load.instance_problem(
+        namespace,
+        requires,
+        ctx.config_dir,
+        builtin_tree=builtin.is_tree((candidate, *ancestors)),
+    ):
         raise Refused([why])
     others = (
         set(holders)
@@ -1509,7 +1523,12 @@ def update(
             if parent_id in pulled:
                 pulled[parent_id].append(child.addon_id)
                 continue
-            if parent_id in lock.addons or parent_id in moves or parent_id in results:
+            if (
+                parent_id == builtin.ID
+                or parent_id in lock.addons
+                or parent_id in moves
+                or parent_id in results
+            ):
                 continue
             # One listed but turned off is the operator's to turn on, not ours.
             if parent_id in config.addons and not config.entry(parent_id).enabled:
@@ -1534,17 +1553,20 @@ def update(
             holders = {config.namespace(o): o for o in config.addons} | {
                 e.namespace: o for o, e in lock.addons.items()
             }
-            holder = holders.get(
-                config.namespace(parent_id) if parent_id in config.addons else name
-            )
+            wanted = config.namespace(parent_id) if parent_id in config.addons else name
+            holder = builtin.ID if wanted == builtin.NAMESPACE else holders.get(wanted)
             if holder not in (None, parent_id):
                 results[parent_id] = Result(
                     parent_id,
                     "refused",
                     problems=(
-                        f"{parent_id} installs under its name {name}, which {holder} holds; "
-                        "install it first with its own --as: kraft admin addon install "
-                        f"{parent_id} --as ALIAS",
+                        (builtin.REFUSED,)
+                        if holder == builtin.ID
+                        else (
+                            f"{parent_id} installs under its name {name}, which {holder} holds; "
+                            "install it first with its own --as: kraft admin addon install "
+                            f"{parent_id} --as ALIAS",
+                        )
                     ),
                 )
                 continue

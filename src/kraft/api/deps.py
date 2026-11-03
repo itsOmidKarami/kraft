@@ -33,6 +33,7 @@ from kraft.adapters.forge import git as forge_git
 from kraft.adapters.forge import git_auth
 from kraft.adapters.forge import mr as forge_mr
 from kraft.adapters.forge.models import ForgeError
+from kraft.addons import drift
 from kraft.addons import load as addons_load
 from kraft.config import RepoEntry
 from kraft.policy import (
@@ -477,6 +478,41 @@ def lint_loaded(st) -> None:
     a `maxima:` ceiling is one of its issues."""
     issues = st.library.lint(getattr(st, "instance_policy", None)) if st.library else []
     st.invalid_chains = {issue.chain: issue.message for issue in issues}
+    refresh_drift(st)
+
+
+def refresh_drift(st) -> None:
+    """Recompute the kraft-default drift and tell the webhook once per new state.
+    Runs on the event loop: cheap, a metadata lookup and a memoized extract."""
+    try:
+        lines = drift.lines(st.templates_dir, st.run_dirs.addons)
+    except Exception as exc:  # noqa: BLE001 -- drift never breaks a load or startup
+        lines = [f"cannot check kraft-default: {exc}"]
+    signature = drift.signature(lines)
+    st.kraft_default = {"lines": lines, "signature": signature}
+    addons = st.run_dirs.addons
+    if signature is None:
+        drift.mark_notified(addons, None)
+        st.kraft_default_sent = None
+    elif signature not in (getattr(st, "kraft_default_sent", None), drift.notified(addons)):
+        # Only a scheduled notice counts as sent: at startup the library loads before
+        # the notifier exists, and a no-loop caller cannot send. Set before the task
+        # runs, so two overlapping reloads send once.
+        if notifier := getattr(st, "notifier", None):
+            text = (
+                f"Kraft's own chains need attention: {len(lines)} item(s). Run kraft admin doctor."
+            )
+            if notifier.send_notice(
+                "kraft_default_drift",
+                text,
+                # A retry can land after a reload moved or cleared the state.
+                on_sent=lambda: (
+                    drift.mark_notified(addons, signature)
+                    if (st.kraft_default or {}).get("signature") == signature
+                    else None
+                ),
+            ):
+                st.kraft_default_sent = signature
 
 
 def invalid_templates(st) -> dict[str, str]:

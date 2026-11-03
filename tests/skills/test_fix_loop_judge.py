@@ -335,7 +335,7 @@ _SUCCEEDS_WITH_FINDING_SCRIPT = (
 def _run_judge_loop(tmp_path, monkeypatch, plan, *, attempts, check_script=None, prompt_log=None):
     plan_path = tmp_path / "plan.json"
     plan_path.write_text(json.dumps(plan))
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "stall")
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PLAN", str(plan_path))
     if prompt_log is not None:
         monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompt_log))
@@ -486,7 +486,7 @@ async def test_retry_fixes_freely_no_judge_call_on_the_first_post_retry_cycle(
     ]
     plan_path = tmp_path / "plan.json"
     plan_path.write_text(json.dumps(plan))
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "stall")
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PLAN", str(plan_path))
     tracker = isolated_bd(tmp_path)
 
@@ -634,7 +634,7 @@ async def test_needs_context_question_ignores_a_judge_session(tmp_path, database
 
 
 def _seeded_judge_scenario(tmp_path, monkeypatch, *, steer):
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "stall")
     plan_path = tmp_path / "plan.json"
     plan_path.write_text(json.dumps([{"status": "done", "verdict": "continue"}]))
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PLAN", str(plan_path))

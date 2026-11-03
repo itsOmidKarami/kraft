@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NO_ENTRY, TASKS, renderPage, resolved, serve, view } from "./testkit";
@@ -122,6 +122,20 @@ describe("harness pane", () => {
     expect(server.ops).toEqual([[{ op: "set_access", harness: "claude", state: "never" }], [{ op: "set_access", harness: "claude", state: "override" }]]);
   });
 
+  it("shows a package harness read-only: the note, no access control, no switch, no editors", async () => {
+    const r = resolved();
+    r.harnesses = r.harnesses.map((h) => (h.id === "claude" ? { ...h, source: "package" as const } : h));
+    serve(view(r));
+    renderPage("?harness=claude");
+    const p = await pane("claude");
+    expect(p).toHaveTextContent("From Kraft's package. Define it in harnesses.yaml to change it.");
+    expect(p).toHaveTextContent("acceptEdits");
+    // about the whole harness, so it comes before the first section heading
+    const note = within(p).getByText(/^From Kraft's package/);
+    expect(note.compareDocumentPosition(within(p).getByRole("heading", { name: "Who may use it" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    for (const role of ["radio", "switch", "textbox", "combobox"] as const) expect(within(p).queryByRole(role)).toBeNull();
+  });
+
   it("shows the access help for the current state and a note when escalation runs here", async () => {
     serve(view(resolved({ access: { cursor: "override" } })));
     renderPage("?harness=cursor");
@@ -191,6 +205,28 @@ describe("profile and entry panes", () => {
     const p = await pane("strong");
     expect(within(p).getByRole("link", { name: `default › ${TASKS.implementer.path}` })).toHaveAttribute("href", "/templates/chains/default/nodes/implement");
     expect(p).toHaveTextContent("agent profile · 2 providers");
+  });
+
+  it("labels a packaged profile and offers no Rename, Copy or Remove", async () => {
+    serve(view(resolved({ profiles: { strong: { providers: { claude: { model: "opus" } }, effort: null, tasks: [], used_by_fallback: [], source: "package" } } })));
+    renderPage("?profile=strong");
+    const p = await screen.findByRole("complementary", { name: "strong pane" });
+    expect(p).toHaveTextContent("From Kraft's package");
+    for (const name of ["Rename", "Copy", "Remove"]) expect(within(p).queryByRole("button", { name })).toBeNull();
+  });
+
+  it("shows a packaged profile's entry read-only: no editor, no Remove, no click-a-lane hint", async () => {
+    serve(view(resolved({ profiles: { strong: { providers: { claude: { model: "opus", effort: "high" } }, effort: null, tasks: [], used_by_fallback: [], source: "package" } } })));
+    renderPage("?profile=strong&lane=claude");
+    const p = await pane("claude");
+    expect(p).toHaveTextContent("opus");
+    expect(within(p).queryByRole("textbox")).toBeNull();
+    expect(within(p).queryByRole("radiogroup")).toBeNull();
+    expect(within(p).queryByRole("button", { name: "Remove entry" })).toBeNull();
+    cleanup();
+    serve(view(resolved({ profiles: { strong: { providers: { claude: { model: "opus" } }, effort: null, tasks: [], used_by_fallback: [], source: "package" } } })));
+    renderPage("?profile=strong");
+    expect(await screen.findByRole("complementary", { name: "strong pane" })).not.toHaveTextContent("click a lane");
   });
 
   it.each([["strong", "Used by 2 tasks."], ["fast", "Used by 0 tasks."]])("an entry pane counts the tasks that use it: %s", async (profile, words) => {

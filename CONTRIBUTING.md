@@ -148,8 +148,9 @@ title containing `KRAFT_FAIL` or `KRAFT_SLOW` steers that item's fake agent.
 `just dev-seed --rich` instead fills it for judging the dashboard under load: about
 40 items over every board state, long and non-ASCII text, a 30-node chain, three
 repos (one on a long path), and a review with a 41-file diff and long threads. It
-also uses `KRAFT_HANG` (an agent that stays running), `KRAFT_MANY_FILES` (a wide
-change) and `KRAFT_COST_<usd>` (what a run reports it cost). Usage and cost all
+also uses `KRAFT_HANG` (an agent that stays running), `KRAFT_SUBAGENTS` (two
+sub-agents, one that fails), `KRAFT_MANY_FILES` (a wide change) and
+`KRAFT_COST_<usd>` (what a run reports it cost). Usage and cost all
 land in the current week: the API gives a caller no way to backdate a row.
 
 To run the VS Code extension from source, open the `vscode/` folder in VS Code
@@ -254,12 +255,12 @@ vscode/           the VS Code extension
 install.sh        the one-line installer the README points to
 ```
 
-**Kraft's own collection.** `config/.kraft/addon.json` publishes `config/`'s
-`library.yaml` and `chains/` as the add-on `kraft-default`, and `addons/` holds
-the add-ons that build on it. An installed instance sees an update only when an
-add-on's `version` changes, so a change to `config/library.yaml`,
-`config/chains/` or an add-on under `addons/` raises that add-on's `version` in
-the same pull request: patch for a fix, minor for something new, major for a
+**Kraft's own collection.** `kraft-default` (`config/`'s `library.yaml` and
+`chains/`) ships inside Kraft and takes Kraft's own version, so a change to
+`config/` needs no version raise. `addons/` holds the add-ons that build on it,
+and `.kraft/collection.json` lists them. An installed instance sees an update
+only when an add-on's `version` changes, so a change to an add-on under
+`addons/` raises that add-on's `version` in the same pull request: patch for a fix, minor for something new, major for a
 removed or renamed chain or task. When the change uses something the last
 release cannot read, raise `requires.kraft` too.
 `dev/check_addon_versions.py` (in `just ci-checks` and CI's lint job) fails when

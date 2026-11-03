@@ -46,7 +46,8 @@ def exec_landed(proc: subprocess.Popen) -> subprocess.Popen:
     """`proc` once the kernel shows the program it was started with. On Linux
     `Popen` returns as soon as `exec` closes its close-on-exec pipe, a moment
     before the new program's argv is filled in; until then the cmdline reads
-    empty (or as the parent's), and `kraft.pidfile` calls it "another program"."""
+    empty (or as the parent's), and `kraft.pidfile` calls it "is not running"
+    (or names the parent)."""
     deadline = time.monotonic() + 10
     while psutil.Process(proc.pid).cmdline() != list(proc.args):
         assert time.monotonic() < deadline, f"{proc.args[0]} never exec'd"

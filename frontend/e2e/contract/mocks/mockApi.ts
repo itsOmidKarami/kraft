@@ -897,6 +897,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       if (!worker) return json({ detail: `no machine named ${name}` }, 404);
       return json(method === "DELETE" ? { removed: name } : { worker: { ...worker, ...(req.json() ?? {}) } });
     }
+    if (p === "/kraft-default") return json({ lines: [], signature: null });
     if (p === "/storage") return json(storageFor([...S.ngBoard, ...S.ngArchived].map((id) => S.bundles[id].item)));
     if (p === "/storage/preview" && method === "POST") {
       const usage = storageFor([...S.ngBoard, ...S.ngArchived].map((id) => S.bundles[id].item));

@@ -15,6 +15,7 @@ from support.pidfile import hold_pidfile
 from support.server import child_env
 
 from kraft import cli, paths
+from kraft.addons import builtin
 
 
 def test_kraft_home_follows_env(monkeypatch, tmp_path):
@@ -47,7 +48,19 @@ def _bundle(monkeypatch, tmp_path) -> Path:
     (bundled / "library.yaml").write_text("tasks: {}\n")
     (bundled / "chains").mkdir()
     (bundled / "chains" / "default.yaml").write_text("id: default\n")
+    # What the bundle must not carry into a home: the add-on manifest, and a
+    # full chain the built-in does not ship (the seed writes only thin ones).
+    (bundled / ".kraft").mkdir()
+    (bundled / ".kraft" / "addon.json").write_text("{}\n")
+    (bundled / "chains" / "stray.yaml").write_text("id: stray\n")
     monkeypatch.setattr(cli.admin, "BUNDLED", tmp_path / "_bundled")
+    # Kraft's own chains are the built-in's, not the bundle's: a home gets thin
+    # `extends:` chains, one per chain the built-in ships.
+    builtin_dir = tmp_path / "kraft-default"
+    (builtin_dir / "chains").mkdir(parents=True)
+    for chain in ("default", "quick-task"):
+        (builtin_dir / "chains" / f"{chain}.yaml").write_text(f"id: {chain}\n")
+    monkeypatch.setattr(builtin, "source_dir", lambda: builtin_dir)
     return bundled
 
 
@@ -73,8 +86,12 @@ def test_seed_home_installs_the_v1_library_and_its_chains(monkeypatch, tmp_path)
     home = tmp_path / "home" / "templates"
 
     assert cli.seed_home(home) is True
-    assert (home / "library.yaml").read_text() == "tasks: {}\n"
-    assert (home / "chains" / "default.yaml").read_text() == "id: default\n"
+    assert (home / "library.yaml").read_text().endswith("\ntasks: {}\n")
+    for chain in ("default", "quick-task"):
+        text = (home / "chains" / f"{chain}.yaml").read_text()
+        assert text.endswith(f"id: {chain}\nextends: kraft-default:{chain}\n")
+    assert not (home / ".kraft").exists()
+    assert not (home / "chains" / "stray.yaml").exists()
 
 
 def test_a_seeded_home_is_the_operators_alone(monkeypatch, tmp_path):
@@ -123,8 +140,12 @@ def test_a_templates_dir_made_before_the_first_start_gets_the_rest_seeded(monkey
     assert (home / "sandbox.yaml").read_text() == "cli: podman\n"
     assert (home / "policy.yaml").read_text() == "loops: {mine: 1}\n"
     assert (home / "chains" / "mine.yaml").read_text() == "id: mine\n"
-    assert (home / "library.yaml").read_text() == "tasks: {}\n"
-    assert (home / "chains" / "default.yaml").read_text() == "id: default\n"
+    assert (home / "library.yaml").read_text().endswith("\ntasks: {}\n")
+    assert (
+        (home / "chains" / "default.yaml")
+        .read_text()
+        .endswith("id: default\nextends: kraft-default:default\n")
+    )
     assert not (home / "notify.yaml").exists()
     assert not home.with_name("templates.seeding").exists()
     modes = {p.relative_to(home).as_posix(): p.stat().st_mode & 0o777 for p in home.rglob("*")}

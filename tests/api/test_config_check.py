@@ -293,11 +293,8 @@ def test_lint_report_with_and_without_the_instance_addons(tmp_path):
     install(config, addons, make_collection(tmp_path, {"release": release}), "release")
 
     online = config_check.lint_report(config, addons=load.installed(config, addons))
-    assert (online["valid"], online["chains"], online["unchecked"]) == (
-        True,
-        ["release:ship", "local"],
-        [],
-    )
+    chains = [c for c in online["chains"] if not c.startswith("kraft-default:")]
+    assert (online["valid"], chains, online["unchecked"]) == (True, ["release:ship", "local"], [])
     offline = config_check.lint_report(config, addons=None)
     assert (offline["valid"], offline["chains"]) == (True, [])
     assert [u["message"].endswith("not checked (add-on)") for u in offline["unchecked"]] == [True]

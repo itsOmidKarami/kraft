@@ -264,6 +264,8 @@ def _unstartable_agent(task_id):
 
 _FAILS = _sub("check", ["false"])
 _FIX = {"tasks": [_sub("fix", ["true"])]}
+#: A repair that changes the checkout: one that changes nothing stops the loop.
+_FIX_EDITS = {"tasks": [_sub("fix", [sys.executable, "-c", "open('left.txt', 'a').write('x')"])]}
 _OPEN_WITHOUT_A_FORGE = _exec("draft", _forge_task("open", "mr.open_draft"))
 
 
@@ -373,7 +375,7 @@ async def test_a_fix_loop_that_caps_out_on_a_raising_task_names_the_exception(
         return await real_run_task(*a, cmd=cmd, **kw)
 
     monkeypatch.setattr(dispatch._subprocess, "run_task", boom)
-    it = await item_on([_exec("build", _FAILS, fix_loop=_FIX)])
+    it = await item_on([_exec("build", _FAILS, fix_loop=_FIX_EDITS)])
 
     assert await _walk(it, policy=_loop_policy(tmp_path, attempts=1)) == "needs_human"
     assert "exhausted" in _stop_reason(it)
@@ -839,7 +841,7 @@ async def test_a_fix_loop_attempt_remeasures_the_node_from_its_first_step(
                     {"id": "prep", "tasks": [_sub("prep", ["true"])]},
                     {"id": "check", "tasks": [_sub("test", [sys.executable, "-c", fail_once])]},
                 ],
-                "fix_loop": {"tasks": [_sub("fix", ["true"])]},
+                "fix_loop": _FIX_EDITS,
             }
         ]
     )

@@ -29,7 +29,15 @@ from pathlib import Path
 import psutil
 import pytest
 from support.harness import git
-from support.os_gates import WAIT_S, os_daemon, procs, running, wait_for
+from support.os_gates import (
+    WAIT_S,
+    cmdline_of,
+    kill_where,
+    os_daemon,
+    procs,
+    running,
+    wait_for,
+)
 from support.session_files import own_files
 
 from kraft.adapters import subprocess as sp
@@ -316,7 +324,7 @@ def _wait_ready(daemon, fut):
 
 def _launcher(daemon, sid: str) -> psutil.Process:
     wrapper = psutil.Process(running(daemon.client, sid)["pid"])
-    (launcher,) = [c for c in wrapper.children() if any("os_init.py" in a for a in c.cmdline())]
+    (launcher,) = [c for c in wrapper.children() if any("os_init.py" in a for a in cmdline_of(c))]
     return launcher
 
 
@@ -459,11 +467,7 @@ while :; do sleep 0.2; done
         assert status == "paused"
         assert files.result.read_text().strip() == "flushed"
     finally:  # a hang must not leave the agent's loop running
-        for p in procs("sleep", "0.2"):
-            p.kill()
-        for p in psutil.process_iter(["cmdline"]):
-            if any("s-pause.sh" in a for a in p.info["cmdline"] or ()):
-                p.kill()
+        kill_where(lambda c: c == ["sleep", "0.2"] or any("s-pause.sh" in a for a in c))
 
 
 @pytest.mark.e2e("sandbox-exec")

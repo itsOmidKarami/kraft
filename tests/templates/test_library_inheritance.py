@@ -23,6 +23,7 @@ from support.addons import (
     installed,
     instance,
     make_collection,
+    others,
     repo_library_child,
 )
 
@@ -417,7 +418,7 @@ def test_a_root_addon_with_remove_is_left_out(tmp_path):
     collection = make_collection(tmp_path, {"release": {"library": stray}})
     config, addons = instance(tmp_path)
     install(config, addons, collection, "release")
-    (found,) = load.installed(config, addons)
+    (found,) = others(load.installed(config, addons))
     assert found.left_out.endswith(REMOVE_OUTSIDE)
 
 
