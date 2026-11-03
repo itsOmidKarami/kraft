@@ -72,6 +72,19 @@ _IDENTITY = {
     "GIT_COMMITTER_NAME": "user.name",
     "GIT_COMMITTER_EMAIL": "user.email",
 }
+#: `git config -z --get-regexp IDENTITY_KEYS` asks for both keys in one process.
+IDENTITY_KEYS = r"^user\.(name|email)$"
+
+
+def identity_values(config_z: str) -> dict[str, str]:
+    """`user.name` and `user.email` out of that output: the last value of each, which is what
+    `git config --get` answers for a key set more than once."""
+    values = {}
+    for entry in config_z.split("\0"):
+        key, _, value = entry.partition("\n")
+        if key:
+            values[key] = value.strip()
+    return values
 
 
 def git_identity(cwd: Path) -> dict[str, str]:
@@ -88,21 +101,21 @@ def git_identity(cwd: Path) -> dict[str, str]:
     env = dict(os.environ)
     harden_host_git_env(env)
     found: dict[str, str] = {}
-    looked_up: dict[str, str | None] = {}
+    configured: dict[str, str] | None = None
     for name, key in _IDENTITY.items():
         if os.environ.get(name):
             found[name] = os.environ[name]
             continue
-        if key not in looked_up:
+        if configured is None:
             done = subprocess.run(
-                ["git", f"--git-dir={gitdir}", "config", "--get", key],
+                ["git", f"--git-dir={gitdir}", "config", "-z", "--get-regexp", IDENTITY_KEYS],
                 capture_output=True,
                 text=True,
                 env=env,
             )
-            looked_up[key] = done.stdout.strip() if done.returncode == 0 else None
-        if looked_up[key]:
-            found[name] = looked_up[key]
+            configured = identity_values(done.stdout)
+        if configured.get(key):
+            found[name] = configured[key]
     return found
 
 

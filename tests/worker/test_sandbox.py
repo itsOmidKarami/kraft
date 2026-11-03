@@ -1,6 +1,7 @@
 import os
 import subprocess
 
+import pytest
 from support.harness import make_repo
 
 from kraft.worker import sandbox
@@ -107,3 +108,64 @@ def test_git_identity_comes_from_the_repository_when_the_daemon_has_none(
         "GIT_COMMITTER_NAME": "Op",
         "GIT_COMMITTER_EMAIL": "op@x",
     }
+
+
+def _identity(name, email):
+    return {
+        "GIT_AUTHOR_NAME": name,
+        "GIT_AUTHOR_EMAIL": email,
+        "GIT_COMMITTER_NAME": name,
+        "GIT_COMMITTER_EMAIL": email,
+    }
+
+
+@pytest.mark.parametrize(
+    ("config", "daemon", "expected", "spawns"),
+    [
+        pytest.param(
+            [["user.name", "Op"], ["user.email", "op@x"]],
+            {},
+            _identity("Op", "op@x"),
+            1,
+            id="both-keys-in-one-process",
+        ),
+        pytest.param(
+            [["--add", "user.name", "Second"], ["user.email", "op@x"]],
+            {},
+            _identity("Second", "op@x"),
+            1,
+            id="the-last-value-wins-as-get-does",
+        ),
+        pytest.param(
+            [["--unset-all", "user.name"], ["--unset-all", "user.email"]],
+            {},
+            {},
+            1,
+            id="nothing-configured-finds-nothing",
+        ),
+        pytest.param(
+            [["user.name", "Op"], ["user.email", "op@x"]],
+            _identity("Daemon", "daemon@x"),
+            _identity("Daemon", "daemon@x"),
+            0,
+            id="the-daemons-own-asks-git-nothing",
+        ),
+    ],
+)
+def test_git_identity_asks_git_once_for_both_keys(
+    repo, monkeypatch, config, daemon, expected, spawns
+):
+    for name in _identity("", ""):
+        monkeypatch.delenv(name, raising=False)
+    for args in config:
+        subprocess.run(["git", "config", *args], cwd=repo, check=True)
+    for name, value in daemon.items():
+        monkeypatch.setenv(name, value)
+    asked = []
+    real_run = subprocess.run
+    monkeypatch.setattr(
+        subprocess, "run", lambda argv, *a, **k: asked.append(argv) or real_run(argv, *a, **k)
+    )
+
+    assert sandbox.git_identity(repo) == expected
+    assert len(asked) == spawns

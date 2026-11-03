@@ -405,8 +405,19 @@ def _pin_identity(repo: Path, worktree: Path, work_item_id: str) -> None:
     instead (`adapters.subprocess.run_task`). An old-layout member's separate
     gitdir (`modules/<rel>`) is still pinned this way.
     """
-    name = git_read(repo, "config", "--get", "user.name", expected_failure=True)
-    email = git_read(repo, "config", "--get", "user.email", expected_failure=True)
+    configured = _sandbox.identity_values(
+        git_read(
+            repo,
+            "config",
+            "-z",
+            "--get-regexp",
+            _sandbox.IDENTITY_KEYS,
+            expected_failure=True,
+            strip=False,
+        )
+        or ""
+    )
+    name, email = configured.get("user.name"), configured.get("user.email")
     if not name or not email:
         missing = "user.name" if not name else "user.email"
         raise RuntimeError(f"no {missing} configured in {repo}; set it before Kraft can commit")
