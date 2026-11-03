@@ -906,13 +906,20 @@ def restore(
 
 
 def _restore(addon: InstalledAddon, config_dir: Path, root: Path) -> Path:
-    from kraft.addons import fetch, update
+    from kraft.addons import builtin, fetch, update
     from kraft.addons.config import AddonsConfig
     from kraft.config import ConfigError
 
     if addon.repo_id is not None:
         return _restore_repo_library(addon, config_dir, root)
     what = f"{addon.id} {addon.version}"
+    if builtin.is_builtin(addon):
+        if addon.root.name == builtin.store_name():
+            return builtin.ensure_store(root)
+        raise RestoreError(
+            f"{what}: that release's kraft-default is no longer installed; "
+            "retry the item to move it onto this Kraft's"
+        )
     collection_name = addon.id.split("@", 1)[1]
     try:
         collection = AddonsConfig.load(config_dir / AddonsConfig.FILE).collections.get(

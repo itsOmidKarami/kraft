@@ -340,3 +340,38 @@ def test_the_builtin_wins_the_namespace_over_a_lock_that_still_holds_a_copy(tmp_
     )
     problems = [p for r in results if r.outcome == "refused" for p in r.problems]
     assert problems and all(builtin.REFUSED in p for p in problems)
+
+
+@pytest.mark.parametrize(
+    ("version", "digest", "expect"),
+    [
+        pytest.param("2.6.0", None, None, id="current-is-rebuilt"),
+        pytest.param(
+            "2.5.0", "f" * 64, ("no longer installed", "retry"), id="old-release-says-retry"
+        ),
+    ],
+)
+def test_restoring_the_builtin(tmp_path, version, digest, expect):
+    config, addons = _home(tmp_path)
+    mine = builtin.entry(addons / "store")
+    if digest:
+        mine = load.InstalledAddon(
+            mine.id,
+            mine.name,
+            mine.namespace,
+            version,
+            addons / "store" / digest,
+            source=mine.source,
+        )
+    if expect is None:
+        assert load.restore(mine, config, addons) == builtin.ensure_store(addons)
+        assert mine.root.is_dir()
+        return
+    with pytest.raises(load.RestoreError) as err:
+        load.restore(mine, config, addons)
+    assert all(part in str(err.value) for part in expect)
+
+
+def test_a_major_update_never_drops_the_builtin(tmp_path):
+    config, _ = _home(tmp_path)
+    assert load.left_out_by("3.0.0", config) == []
