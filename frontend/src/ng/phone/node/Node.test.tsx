@@ -700,5 +700,32 @@ describe("the task screen (E)", () => {
     await userEvent.click(screen.getByRole("button", { name: "sys" }));
     expect(screen.getByText("No lines to show. Clear the filter, or the task has not started.")).toBeInTheDocument();
   });
+
+  it("picks one sub-agent from a sheet", async () => {
+    const sub = { src: "agent", agent_label: "Explore codebase", agent_type: "Explore" };
+    const lines = [
+      { n: 1, t: null, src: "agent", text: "x", summary: "main says hi" },
+      { n: 2, t: null, text: "x", summary: "↳ Explore codebase: Grep(foo)", agent: "a1", ...sub },
+      { n: 3, t: null, text: "x", summary: "↳ Review diff: Read(a.py)", agent: "a2", src: "agent", agent_label: "Review diff" },
+      { n: 4, t: null, src: "stdout", text: "plain stdout line", summary: "plain stdout line" },
+    ];
+    mount(item("running"), `${TASK}&tab=log`, { "GET /work-items/w1/sessions/s1/log": [200, { lines }] });
+    const chip = await screen.findByRole("button", { name: "agent: All ▾" });
+    // Its own row, not inside the scrolling Sources group.
+    expect(screen.getByRole("group", { name: "Sources" })).not.toContainElement(chip);
+    await userEvent.click(chip);
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("radio", { name: /Explore codebase/ }));
+    expect(screen.queryByText(/main says hi/)).toBeNull();
+    expect(screen.queryByText(/Review diff/)).toBeNull();
+    expect(screen.getByText(/Grep\(foo\)/)).toBeInTheDocument();
+    expect(screen.getByText(/plain stdout line/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "agent: Explore codebase ▾" })).toBeInTheDocument();
+  });
+
+  it("offers no agent chip when no line has an agent", async () => {
+    mount(item("running"), `${TASK}&tab=log`);
+    await screen.findByText(/loaded review_package/);
+    expect(screen.queryByRole("button", { name: /^agent:/ })).toBeNull();
+  });
 });
 void [Where];
