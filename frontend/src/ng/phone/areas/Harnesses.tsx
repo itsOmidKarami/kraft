@@ -84,7 +84,7 @@ export function HarnessView() {
             rows={[
               { label: ACCESS_SECTION.toLowerCase(), value: ACCESS_WORD[h.state], changed: changedAt(draft, id), onEdit: !own ? undefined : () => edit({ kind: "choice", title: ACCESS_SECTION, help: ACCESS_HELP[h.state], value: h.state, options: ACCESS.map((a) => ({ value: a.value, label: a.label })), set: (v) => send(draft, { op: "set_access", harness: id, state: v as Access }) }) },
               { label: HARNESS_FIELD.provider, value: h.provider ?? "not set", mono: true },
-              { label: HARNESS_FIELD.enabled, sub: enabledHelp(h.enabled), ...(own ? { sw: h.enabled, changed: changedAt(draft, id), onSwitch: (enabled: boolean) => void send(draft, { op: "set_harness", id, patch: { enabled } }) } : { value: h.enabled ? "yes" : "no" }) },
+              { label: HARNESS_FIELD.enabled, ...(own ? { sub: enabledHelp(h.enabled), sw: h.enabled, changed: changedAt(draft, id), onSwitch: (enabled: boolean) => void send(draft, { op: "set_harness", id, patch: { enabled } }) } : { value: h.enabled ? "yes" : "no", sub: h.enabled ? undefined : enabledHelp(false) }) },
               { label: HARNESS_FIELD.executable, value: h.executable ?? "the provider's own command", sub: executableWord(h.executable_found), mono: true },
               ...Object.entries(h.defaults).map(([k, v]): RowSpec => ({ key: k, label: defaultLabel(k), value: v, mono: true })),
             ]}

@@ -112,6 +112,7 @@ describe("a harness (M.1, R65)", () => {
     expect(screen.queryByRole("switch")).toBeNull();
     expect(screen.queryByRole("button", { name: /who may use it/ })).toBeNull();
     expect(screen.getByText("Available")).toBeInTheDocument();
+    expect(screen.getAllByText("enabled")).toHaveLength(1); // the label, not its help repeated beneath it
     cleanup();
     open("claude");
     expect(await screen.findByRole("switch")).toBeInTheDocument();
