@@ -235,8 +235,11 @@ chain, task, profile, provider and harness: on the Settings view of
 `harnesses.yaml`, as a failing `kraft admin doctor` check, and by refusing a
 harness save that would cause it. At launch such a task SHALL stop for a human
 (`ProfileUnavailable`) and SHALL NOT run a substituted model. A profile that
-omits a provider no task pairs it with SHALL be no problem.
-enforced-by: tests/test_agent_profiles.py::test_a_profile_omitting_a_provider_nobody_pairs_is_no_problem, tests/test_agent_profiles.py::test_only_the_task_pairing_a_missing_provider_is_refused, tests/test_agent_profiles.py::test_doctor_fails_a_pairing_the_launch_would_refuse[missing], tests/test_agent_profiles.py::test_doctor_fails_a_pairing_the_launch_would_refuse[no-provider], tests/test_agent_profiles.py::test_doctor_fails_a_pairing_the_launch_would_refuse[effort], tests/test_agent_profiles.py::test_doctor_fails_a_pairing_the_launch_would_refuse[model], tests/test_agent_profiles.py::test_doctor_is_quiet_about_a_clean_pairing, tests/test_agent_profiles.py::test_a_harness_save_that_breaks_a_pairing_is_refused, tests/test_agent_profiles.py::test_a_profile_missing_at_launch_stops_the_task_for_a_human, tests/test_agent_profiles.py::test_the_shipped_library_on_an_rc_harnesses_file_uses_the_packaged_profiles
+omits a provider no task pairs it with SHALL be no problem. The harness and
+profile names the built-in `kraft-default` requires are the one exception to
+"never substituted": when a home lacks them they come from Kraft's package, and
+the Settings view labels them as from the package.
+enforced-by: tests/addons/test_builtin.py::test_the_builtins_profiles_fall_back_to_the_package[no-profiles-section], tests/test_agent_profiles.py::test_a_profile_omitting_a_provider_nobody_pairs_is_no_problem, tests/test_agent_profiles.py::test_only_the_task_pairing_a_missing_provider_is_refused, tests/test_agent_profiles.py::test_doctor_fails_a_pairing_the_launch_would_refuse[missing], tests/test_agent_profiles.py::test_doctor_fails_a_pairing_the_launch_would_refuse[no-provider], tests/test_agent_profiles.py::test_doctor_fails_a_pairing_the_launch_would_refuse[effort], tests/test_agent_profiles.py::test_doctor_fails_a_pairing_the_launch_would_refuse[model], tests/test_agent_profiles.py::test_doctor_is_quiet_about_a_clean_pairing, tests/test_agent_profiles.py::test_a_harness_save_that_breaks_a_pairing_is_refused, tests/test_agent_profiles.py::test_a_profile_missing_at_launch_stops_the_task_for_a_human, tests/test_agent_profiles.py::test_the_shipped_library_on_an_rc_harnesses_file_uses_the_packaged_profiles
 origin: src/kraft/templates/environment.py §pairing_problem -- Kraft-ps1ao. The one reason text; `api/routes/harnesses.py` §_problems, `doctor.py` §_pairing_checks and `adapters/profiles.py` §resolve_profile all call it.
 
 ## REQ agent-profiles-are-listed-read-only
@@ -244,8 +247,10 @@ origin: src/kraft/templates/environment.py §pairing_problem -- Kraft-ps1ao. The
 `GET /harnesses/profiles`, `kraft admin harnesses` and Settings → Harnesses
 SHALL list each agent profile with its effort, its model per provider, the
 library tasks that select it (as `extends` resolves them) and any pairing
-problem. Profiles SHALL be edited in the file only.
-enforced-by: tests/test_agent_profiles.py::test_a_profile_omitting_a_provider_nobody_pairs_is_no_problem, tests/test_agent_profiles.py::test_a_task_overriding_its_parents_profile_does_not_use_it, tests/cli/test_admin_harnesses.py::test_the_agent_profiles_follow_with_their_model_per_provider, frontend/src/ng/harnesses/problems.test.tsx::problems
+problem. Profiles SHALL be edited in the file only; a profile filled in from
+Kraft's package because the file lacks it SHALL be labelled as such and refused
+for edits.
+enforced-by: tests/test_agent_profiles.py::test_a_profile_omitting_a_provider_nobody_pairs_is_no_problem, tests/test_agent_profiles.py::test_a_task_overriding_its_parents_profile_does_not_use_it, tests/cli/test_admin_harnesses.py::test_the_agent_profiles_follow_with_their_model_per_provider, frontend/src/ng/harnesses/problems.test.tsx::problems, tests/drafts/test_harnesses_builtin.py::test_settings_labels_packaged_profiles
 origin: src/kraft/api/routes/harnesses.py §_agent_profiles_view -- Kraft-ps1ao. Settings → Harnesses renders it in `HarnessesPage`'s agent profiles panel.
 
 ## REQ shipped-library-selects-profiles-and-upgrades-unchanged
@@ -255,11 +260,12 @@ The shipped library's `implementer`, `repair_verification`,
 `profile: strong`, and every shipped agent task SHALL launch with the same
 harness, model and effort as before profiles existed. An install seeded
 before then SHALL keep its `library.yaml` and `harnesses.yaml` (nothing is
-migrated) and SHALL launch every task as before; a fresh seed SHALL get the
-library and the profiles it selects together; the capability manifest SHALL
-tell an older home how to adopt profiles.
+migrated) and SHALL launch every task as before; a fresh seed SHALL get
+the profiles with thin chains that extend the built-in `kraft-default`, which
+carries the library; the capability manifest SHALL tell an older home how to
+adopt profiles.
 enforced-by: tests/test_agent_profiles.py::test_the_shipped_library_selects_profiles_and_launches_as_before, tests/test_agent_profiles.py::test_an_rc_home_keeps_its_files_and_launches_as_before, tests/test_agent_profiles.py::test_a_fresh_seed_gets_the_library_and_its_profiles_together, tests/test_agent_profiles.py::test_the_capability_manifest_tells_an_rc_home_about_profiles
-origin: config/library.yaml -- Kraft-ps1ao. `config/harnesses.yaml` ships the tiers; `cli/admin.py` §seed_home copies the bundle whole; `capabilities.py` §MANIFEST carries the adoption line.
+origin: config/library.yaml -- Kraft-ps1ao. `config/harnesses.yaml` ships the tiers; `addons/builtin.py` §write_thin_seed seeds the thin chains over the built-in; `capabilities.py` §MANIFEST carries the adoption line.
 
 ## REQ node-override-extra-prompt-is-appended
 
