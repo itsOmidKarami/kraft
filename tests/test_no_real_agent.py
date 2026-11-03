@@ -318,24 +318,34 @@ def test_an_e2e_test_gets_back_only_the_clis_it_names():
 
 
 @pytest.mark.parametrize(
-    ("e2e_names", "quiet"),
+    ("marked", "quiet"),
     [
         (frozenset(), True),
         (frozenset({"claude"}), True),
         (frozenset({"docker"}), False),
         (frozenset({"podman"}), False),
+        (frozenset({"docker", "podman", "claude"}), False),
     ],
-    ids=["unit", "e2e-other-cli", "e2e-docker", "e2e-podman"],
+    ids=["unit", "e2e-other-cli", "e2e-docker", "e2e-podman", "e2e-all"],
 )
 def test_docker_and_podman_answer_no_daemon_at_once_unless_an_e2e_test_names_one(
-    monkeypatch, e2e_names, quiet
+    monkeypatch, marked, quiet
 ):
     """The unit tier never starts a container runtime: an installed `docker` was
     a ~30ms process that every app startup ran twice. A quiet stand-in exits 1
-    ("no daemon") before the machine's own, and is not a refused call."""
-    guard = real_binaries.install(monkeypatch, "probe", e2e_names)
+    ("no daemon") before the machine's own, and is not a refused call. `marked` is
+    the names on an `e2e` mark, read through the helper `_no_real_agent_binary` uses:
+    an earlier version dropped docker and podman there, and the e2e job found out."""
+    guard = real_binaries.install(monkeypatch, "probe", real_binaries.allowed_by(marked))
     assert (str(real_binaries.quiet_dir()) in os.environ["PATH"].split(os.pathsep)) is quiet
     if quiet:
         assert shutil.which("docker") == str(real_binaries.quiet_dir() / "docker")
         assert subprocess.run(["docker", "ps"], capture_output=True).returncode == 1
     assert guard.calls() == []
+
+
+@pytest.mark.e2e("docker")
+def test_an_e2e_docker_test_is_not_answered_by_the_quiet_stand_in():
+    """Through the real `_no_real_agent_binary` fixture: where docker is installed (CI's e2e
+    job), the test that names it gets the machine's own."""
+    assert shutil.which("docker") != str(real_binaries.quiet_dir() / "docker")

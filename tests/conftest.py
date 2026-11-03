@@ -17,7 +17,6 @@ from support import harness, real_binaries, server
 from support.fake_beads import Bd, FakeBeads
 from support.harness import REAL_AGENT_BINARIES as _REAL_AGENT_BINARIES
 from support.harness import entry_of, fake_templates_dir, isolated_bd, make_repo
-from support.real_binaries import GUARDED_BINARIES as _GUARDED_BINARIES
 
 from kraft import client as kraft_client
 from kraft import db
@@ -113,7 +112,7 @@ def _no_real_agent_binary(request, monkeypatch):
     if "real_executor" in request.keywords:
         yield None
         return
-    allowed = _GUARDED_BINARIES & _e2e_binaries(request.node)
+    allowed = real_binaries.allowed_by(_e2e_binaries(request.node))
     guard = real_binaries.install(monkeypatch, request.node.nodeid, allowed)
     refused = _REAL_AGENT_BINARIES - allowed
 

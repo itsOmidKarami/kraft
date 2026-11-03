@@ -238,6 +238,12 @@ class Guard:
         return __init__
 
 
+def allowed_by(named: set[str] | frozenset[str]) -> frozenset[str]:
+    """The binaries of `named` (an `e2e` test's marks) that the guard gives back: a guarded CLI
+    stops being refused, a container runtime stops being answered "no daemon" at once."""
+    return (GUARDED_BINARIES | QUIET_BINARIES) & frozenset(named)
+
+
 def install(monkeypatch, nodeid: str, e2e_names: frozenset[str] = frozenset()) -> Guard:
     """Both layers, for one test, undone by `monkeypatch`."""
     names = shadowed_for(e2e_names)
