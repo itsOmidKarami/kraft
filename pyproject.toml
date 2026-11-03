@@ -149,6 +149,7 @@ markers = [
     "slow: subprocess servers, real uvicorn, multi-second sleeps -- included in the main CI test job, just kept separable for local runs",
     "api_client(**kwargs): options for the `client` fixture, passed to support.api._client (peer, env, default_setup)",
     "real_probe: keeps the real kraft.adapters.forge.probe.probe_account (against a mock transport) instead of tests/support/forge_probe.py's canned answer",
+    "real_repo_probe: keeps the child interpreter kraft.detect.probe runs `propose` in (its time limit, output cap, environment and kills) instead of tests/support/forge_probe.py's in-process run",
     "real_executor: turns off tests/conftest.py's real-binary guard for the test (the PATH stubs, the Popen check and run_task's refusal by name), and tests/test_intake_poller.py's file-local executor.run stub; for a test that drives the real executor on purpose",
 ]
 

@@ -14,6 +14,9 @@ from support.probe import JEST
 
 from kraft import config as config_mod
 
+#: The probe's child interpreter is part of what these tests prove (its time limit, its output).
+pytestmark = pytest.mark.real_repo_probe
+
 
 #: Reads real config: no default repo entry stands in for the one under test.
 @pytest.mark.api_client(default_setup=False)

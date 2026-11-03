@@ -7,6 +7,7 @@ import ast
 import errno
 import os
 import socket
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -173,3 +174,64 @@ def test_the_kraft_port_every_test_starts_with_is_held_and_answers_nothing():
     assert raised.value.errno == errno.EADDRINUSE
     with socket.socket() as caller:
         assert caller.connect_ex(("127.0.0.1", port)) == errno.ECONNREFUSED
+
+
+def _child_spawns(monkeypatch) -> list[list[str]]:
+    """Every probe child `subprocess.Popen` starts from here on."""
+    seen = []
+    real = subprocess.Popen.__init__
+
+    def spy(self, args, *a, **k):
+        if "kraft.detect" in " ".join(args):
+            seen.append(list(args))
+        return real(self, args, *a, **k)
+
+    monkeypatch.setattr(subprocess.Popen, "__init__", spy)
+    return seen
+
+
+@pytest.mark.parametrize(
+    "children",
+    [0, pytest.param(1, marks=pytest.mark.real_repo_probe)],
+    ids=["in-process", "child"],
+)
+def test_the_repository_probe_answers_alike_in_this_process_and_in_its_child(
+    tmp_path, monkeypatch, children
+):
+    """`detect.probe` costs ~0.3 s of imports in its child interpreter, 600 of them 5% of a full
+    run: a test gets the same proposal, and the same one-line failure, in this process unless it
+    says `@pytest.mark.real_repo_probe`."""
+    from support.harness import git
+    from support.probe import propose, repo_with
+
+    from kraft import config, detect
+
+    repo = repo_with(tmp_path, {"go.mod": "module x\n", "x_test.go": ""})
+    spawned = _child_spawns(monkeypatch)
+
+    found = detect.probe(repo)
+
+    assert found == propose(repo)
+    assert found.test_command == "go test ./..."
+    tree = git(repo, "rev-parse", "HEAD^{tree}")
+    (repo / ".git" / "objects" / tree[:2] / tree[2:]).unlink()
+    with pytest.raises(config.ConfigError, match=r"^git ls-tree .* failed") as raised:
+        detect.probe(repo)
+    assert "\n" not in str(raised.value)
+    assert len(spawned) == 2 * children
+
+
+def test_an_in_process_probe_failure_keeps_the_last_line_the_childs_stderr_would_give(
+    tmp_path, monkeypatch
+):
+    from kraft import config, detect
+
+    def refuse(*args, **kwargs):
+        raise config.ConfigError("git ls-tree failed:\nfatal: bad object")
+
+    monkeypatch.setattr(detect, "propose", refuse)
+
+    with pytest.raises(config.ConfigError) as raised:
+        detect.probe(tmp_path)
+
+    assert str(raised.value) == "fatal: bad object"

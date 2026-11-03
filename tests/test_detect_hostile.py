@@ -15,6 +15,9 @@ from support.probe import repo_with as _repo
 
 from kraft import config, detect
 
+#: The probe's child interpreter is what contains a hostile repository (its time limit, its output).
+pytestmark = pytest.mark.real_repo_probe
+
 #: Seconds of CPU: comfortably above the costliest case below, which is about
 #: 1.3s bare and 2.8s under CI's coverage tracer (`COVERAGE_CORE=ctrace`), and
 #: far below the tens of seconds each case took before its fix.
