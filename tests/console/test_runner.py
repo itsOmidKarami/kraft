@@ -5,9 +5,11 @@ real `python -m kraft` with no server."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import signal
 
+import psutil
 import pytest
 
 from kraft.console import runner
@@ -156,6 +158,17 @@ async def _started(run: runner.Run, lines: list[str], count: int) -> asyncio.Tas
     return task
 
 
+def _group(run: runner.Run) -> list[tuple[int, str, str]]:
+    """Who is left in the run's process group: (pid, state, last word of its argv)."""
+    left = []
+    for proc in psutil.process_iter(["pid", "status", "cmdline"]):
+        with contextlib.suppress(ProcessLookupError, psutil.Error):
+            if os.getpgid(proc.info["pid"]) == run.process.pid:
+                argv = proc.info["cmdline"] or [""]
+                left.append((proc.info["pid"], proc.info["status"], argv[-1][:40]))
+    return left
+
+
 STOPS_WITH_ITS_CHILD = """
 import os, subprocess, sys, time
 # No flush: this only arrives before the exit if output is unbuffered.
@@ -199,8 +212,12 @@ async def test_a_command_runs_with_no_terminal_and_stops_with_what_it_started(kr
         os.close(typed)
     assert run.code is None
     run.stop()
-    async with asyncio.timeout(10):
-        code = await task
+    try:
+        async with asyncio.timeout(10):
+            code = await task
+    except TimeoutError:
+        # Seen once in CI, never in 1,350 runs under CPU starvation: say who held the pipe.
+        pytest.fail(f"the output pipe was open 10s after stop: {lines=} group={_group(run)}")
     assert lines == ["'' 0", "grandchild up", "grandchild stopped", "child stopped"]
     assert code == 130
 
