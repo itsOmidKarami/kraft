@@ -86,8 +86,8 @@ origin: src/kraft/addons/config.py §AddonsConfig; src/kraft/addons/load.py §_i
 
 ## REQ an-addon-runs-on-one-kraft-major
 
-IF the running Kraft's release is below an add-on's `requires.kraft` version or in a different major, THEN the system SHALL refuse the add-on at validate, install and update, and SHALL leave it out at load.
-enforced-by: tests/addons/test_manifest.py::test_kraft_compatibility[below-minimum], tests/addons/test_manifest.py::test_kraft_compatibility[next-major], tests/addons/test_manifest.py::test_kraft_compatibility[earlier-major], tests/addons/test_manifest.py::test_kraft_compatibility[release-candidate], tests/addons/test_load.py::test_an_addon_for_another_major_is_left_out, tests/addons/test_update.py::test_an_update_for_another_major_keeps_the_lock
+IF the running Kraft's release is below an add-on's `requires.kraft` version or in a different major, THEN the system SHALL refuse the add-on at validate, install and update, and SHALL leave it out at load; the built-in is exempt, because it is the running Kraft's own.
+enforced-by: tests/addons/test_manifest.py::test_kraft_compatibility[below-minimum], tests/addons/test_manifest.py::test_kraft_compatibility[next-major], tests/addons/test_manifest.py::test_kraft_compatibility[earlier-major], tests/addons/test_manifest.py::test_kraft_compatibility[release-candidate], tests/addons/test_load.py::test_an_addon_for_another_major_is_left_out, tests/addons/test_update.py::test_an_update_for_another_major_keeps_the_lock, tests/addons/test_builtin.py::test_the_builtin_always_loads[requires-kraft-above-the-running-one]
 origin: src/kraft/addons/manifest.py §kraft_compatible
 
 ## REQ an-addon-has-at-most-one-parent
