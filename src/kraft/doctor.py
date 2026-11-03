@@ -559,16 +559,12 @@ def _builtin_check(templates: Path) -> dict:
 
     lines: list[str] = []
     running = update_mod.installed()
-    if note := builtin.recorded(addons_load.addons_dir()):
-        raw = note.get("lines")
-        if not isinstance(raw, list):
-            return _check(
-                "kraft-default",
-                True,
-                "cannot read kraft-default: its update record is malformed",
-                warn=True,
-            )
-        to, lines_ = str(note.get("to")), [str(x) for x in raw]
+    note = builtin.recorded(addons_load.addons_dir())
+    if note and not isinstance(note.get("lines"), list):
+        lines.append("cannot read kraft-default: its update record is malformed")
+        note = None  # the rest of the row still reports
+    if note:
+        to, lines_ = str(note.get("to")), [str(x) for x in note["lines"]]
         # s3 records before the install runs, so a record can name a release that never installed.
         if note.get("status") == "held" and update_mod.is_older(running, to):
             msg = (

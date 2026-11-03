@@ -130,8 +130,11 @@ _OVERRIDE = "after accepting, fix the override it names"
         ({"record": _recorded("changed", "installed")}, ["changed kraft-default:", "node gone"]),
         ({"record": _recorded("changed", _FUTURE)}, []),
         (
-            {"raw": '{"status": "held", "to": "99.0.0", "lines": 5}'},
-            ["cannot read kraft-default: its update record is malformed"],
+            {
+                "raw": '{"status": "held", "to": "99.0.0", "lines": 5}',
+                "files": {"default": "nodes: []\n"},
+            },
+            ["cannot read kraft-default: its update record is malformed", _COPY],
         ),
         ({"raw": "[1]"}, []),
         (
