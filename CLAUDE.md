@@ -89,7 +89,7 @@ kraft item comment --reply THREAD --body "..."
 kraft item resolve THREAD / kraft item reopen THREAD
 kraft item review [ID] comment|approve|request-changes [--summary "..."] [--node N] [--head H]
 kraft view search "query"
-kraft view logs [ID] [-f] [-n N]            # a worker session's log; --json is NDJSON
+kraft view logs [ID] [-f] [-n N] [--agent ID|main]  # a worker session's log; --json is NDJSON
 kraft view storage                          # worktree disk use against the quota and limit, item by item
 kraft view events [ID] [--after N] [--type T]
 kraft view watch                            # live board, needs a terminal

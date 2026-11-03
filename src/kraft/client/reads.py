@@ -10,7 +10,7 @@ from pathlib import Path
 
 import httpx
 
-from kraft import auth, ids
+from kraft import auth, ids, logs
 from kraft.client import context, transport
 from kraft.paths import RunDirs, default_run_dir
 from kraft.vocab import ThreadState, WorkItemStatus
@@ -250,7 +250,10 @@ def _log_path(work_item_id: str | None, session_id: str) -> str:
 
 
 async def log_backlog(
-    work_item_id: str | None, session_id: str, limit: int | None = None
+    work_item_id: str | None,
+    session_id: str,
+    limit: int | None = None,
+    agent: str | None = None,
 ) -> list[dict]:
     """The lines already written to one worker session's log, oldest first.
 
@@ -264,9 +267,13 @@ async def log_backlog(
     The server bounds what it returns and leads with a `truncated` marker row
     when it had to. `limit` is the reader's own cut, the marker the server's:
     it stays whenever the slice reaches back to it, so the cap is never silent.
+
+    `agent` is a sub-agent's id, or `"main"`: the filter (`logs.in_agent`) runs
+    here, over the whole bounded window and before `limit`, so `-n 5` is the
+    agent's last five lines and not the agent's share of the log's last five.
     """
     payload = await transport._get(_log_path(work_item_id, session_id), format="jsonl")
-    lines = payload.get("lines", [])
+    lines = [line for line in payload.get("lines", []) if logs.in_agent(line, agent)]
     if limit is None:
         return lines
     rows = [line for line in lines if "truncated" not in line]
@@ -285,7 +292,7 @@ async def log_next_line(work_item_id: str | None, session_id: str) -> int:
 
 
 async def stream_log(
-    work_item_id: str | None, session_id: str, after_line: int = 0
+    work_item_id: str | None, session_id: str, after_line: int = 0, agent: str | None = None
 ) -> AsyncIterator[dict]:
     """Follow one worker session's log until the session stops.
 
@@ -296,7 +303,8 @@ async def stream_log(
     `after_line` is applied here rather than sent: the follow endpoint replays
     the log's bounded tail (a `truncated` marker row, `n` -1, first when it
     had to cut) and takes no offset, so skipping is the client's
-    job. Cheap, and it keeps the resume semantics in one place.
+    job. Cheap, and it keeps the resume semantics in one place. `agent` filters
+    each streamed row, as `log_backlog` does.
 
     Not an MCP tool: a tool returns a value and a generator has none. An agent
     that wants history calls `events()`.
@@ -319,7 +327,7 @@ async def stream_log(
                         payload = raw[6:].strip()
                         if payload and payload != "{}":
                             line = json.loads(payload)
-                            if line.get("n", 0) >= after_line:
+                            if line.get("n", 0) >= after_line and logs.in_agent(line, agent):
                                 yield line
         except httpx.ConnectError as exc:
             raise transport._unreachable() from exc
