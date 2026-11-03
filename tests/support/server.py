@@ -28,6 +28,18 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+def hold_port() -> socket.socket:
+    """A loopback port nothing listens on, held by the returned socket (bound,
+    never listening): a call to it is refused, and nobody can bind the number
+    while the caller keeps the socket open. `_free_port` frees it, so another
+    xdist worker's listener can take it before the thing started binds. For a
+    port a test only needs to find empty; one that serves picks its own
+    (`on_a_free_port`)."""
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    return probe
+
+
 def health_pid(port: int) -> int | None:
     """The pid in whatever answers `/api/health` on `port`, or None for no answer."""
     with contextlib.suppress(httpx.HTTPError, ValueError, AttributeError):
