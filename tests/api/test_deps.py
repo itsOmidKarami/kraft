@@ -643,9 +643,10 @@ def _addon_task_done(client):
     client.portal.call(done)
 
 
-def _other_version(st, tmp_path):
-    """A second extracted add-on in the store that the lock does not name."""
-    return fetch.write_store(st.run_dirs.addons, extracted(skills={"old": "an older method"}))
+def _other_version(client):
+    """A second add-on store the lock does not name, written after startup's collection."""
+    _addon_task_done(client)
+    return fetch.write_store(client.app.state.run_dirs.addons, extracted(skills={"old": "older"}))
 
 
 @pytest.mark.parametrize(
@@ -668,10 +669,9 @@ def _other_version(st, tmp_path):
 def test_gc_keeps_what_the_lock_the_library_and_unfinished_items_read(
     client, tmp_path, status, pinned, kept
 ):
-
     st = client.app.state
     locked = _install_release(client, tmp_path)
-    old = _other_version(st, tmp_path)
+    old = _other_version(client)
     (st.run_dirs.addons / "staging" / "half-written").mkdir(parents=True)
     snapshot = {"addons": {"release": {"id": "release@acme", "digest": f"sha256:{old.name}"}}}
     stored = json.dumps(snapshot if pinned else {})
@@ -697,7 +697,7 @@ def test_gc_keeps_what_the_lock_the_library_and_unfinished_items_read(
 def test_gc_runs_after_a_reload_and_never_while_the_lock_does_not_read(client, tmp_path):
     st = client.app.state
     locked = _install_release(client, tmp_path)
-    old = _other_version(st, tmp_path)
+    old = _other_version(client)
     lock = st.templates_dir / "addons.lock"
     good = lock.read_text()
     lock.write_text("addons: [\n")
@@ -722,7 +722,7 @@ def test_gc_does_not_wait_for_an_addon_change_that_is_running(client, tmp_path):
     collection takes what this one left."""
     st = client.app.state
     _install_release(client, tmp_path)
-    old = _other_version(st, tmp_path)
+    old = _other_version(client)
 
     started = time.monotonic()
     with addon_update.write_lock(st.run_dirs.addons):

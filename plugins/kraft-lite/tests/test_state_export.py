@@ -32,20 +32,19 @@ def dirs(tmp_path, *names):
 
 @pytest.mark.parametrize("backend", ["jsonl", "bd"])
 def test_a_fresh_directory_resumes_from_an_export(
-    backend, walk, walk_in_process, fake_bds, monkeypatch, tmp_path
+    backend, walk, kl_cli, fake_bds, monkeypatch, tmp_path
 ):
     here, there = dirs(tmp_path, "here", "there")
     out = tmp_path / "state"
     if backend == "bd":
         # One bd per directory, each exporting newest first, in no useful order.
         monkeypatch.setattr(kl, "store_for", lambda root: kl.BdStore(run=fake_bds[root]))
-        walk = walk_in_process
+        run = walk.run
 
         def stored_in(cwd):
             return sorted(fake_bds[cwd.resolve()].stored.values(), key=lambda r: r["id"])
     else:
-        stored_in = stored
-    run = walk.run
+        run, stored_in = kl_cli, stored
     chain_id = walk.slice(here)
     run(here, "slice-set", "--slice", "a", "--status", "running", "--session", "s-1")
     run(here, "decide", "--question", "q1", "--why", "w", "--answer", "a1", "--slice", "a")
@@ -64,14 +63,14 @@ def test_a_fresh_directory_resumes_from_an_export(
 
 
 @pytest.mark.parametrize("newer", ["local", "exported"])
-def test_import_keeps_the_copy_written_last(newer, walk_in_process, monkeypatch, tmp_path):
+def test_import_keeps_the_copy_written_last(newer, walk, monkeypatch, tmp_path):
     """Every write inside one second, as a controller's back-to-back verbs are:
     the wall-clock stamp ties, and the later write must still win."""
     monkeypatch.setattr(kl, "_now", lambda: dt.datetime(2026, 10, 20, 10, 0, 0))
     here, there = dirs(tmp_path, "here", "there")
     old, new = tmp_path / "old", tmp_path / "new"
-    run = walk_in_process.run
-    walk_in_process.slice(here)
+    run = walk.run
+    walk.slice(here)
     run(here, "export", "--to", str(old))
     run(there, "import", "--from", str(old))
     run(here, "slice-set", "--slice", "a", "--status", "running")
@@ -85,9 +84,9 @@ def test_import_keeps_the_copy_written_last(newer, walk_in_process, monkeypatch,
         assert result["kept_local"] >= 1 and result["imported"] == 0
 
 
-def test_every_write_moves_the_records_sequence_on(walk_in_process, tmp_path):
-    run = walk_in_process.run
-    walk_in_process.slice(tmp_path)
+def test_every_write_moves_the_records_sequence_on(walk, tmp_path):
+    run = walk.run
+    walk.slice(tmp_path)
 
     def seq():
         [alpha] = [
@@ -103,17 +102,15 @@ def test_every_write_moves_the_records_sequence_on(walk_in_process, tmp_path):
     assert seq() == "3"
 
 
-def test_import_keeps_the_later_write_when_its_clock_runs_behind(
-    walk_in_process, monkeypatch, tmp_path
-):
+def test_import_keeps_the_later_write_when_its_clock_runs_behind(walk, monkeypatch, tmp_path):
     """The controller moved machines, and the new one's clock is an hour slow:
     its write is still the later one."""
     clock = {"now": dt.datetime(2026, 10, 20, 11, 0, 0)}
     monkeypatch.setattr(kl, "_now", lambda: clock["now"])
     here, there = dirs(tmp_path, "here", "there")
     old, new = tmp_path / "old", tmp_path / "new"
-    run = walk_in_process.run
-    walk_in_process.slice(here)
+    run = walk.run
+    walk.slice(here)
     run(here, "slice-set", "--slice", "a", "--status", "running")
     run(here, "export", "--to", str(old))
     run(there, "import", "--from", str(old))

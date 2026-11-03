@@ -139,7 +139,7 @@ SLICE_PLAN = {
 
 class Walk:
     """The default chain walked as far as a test needs it, through `run(cwd,
-    *args)`: `kl_cli` for the real CLI, or `kl.main` in-process."""
+    *args)`."""
 
     def __init__(self, run):
         self.run = run
@@ -214,18 +214,15 @@ class Walk:
 
 
 @pytest.fixture
-def walk(kl_cli):
-    return Walk(kl_cli)
-
-
-@pytest.fixture
-def walk_in_process(monkeypatch, capsys):
-    """`Walk` over `kl.main` in this process, so a test can swap `kl.store_for`."""
+def walk(monkeypatch, capsys):
+    """`Walk` over `kl.main` in this process: a walk is a test's setup, and a
+    child per verb made it most of the suite's time. A test can swap
+    `kl.store_for` under it. What the human sees is `kl_cli`'s to check."""
 
     def run(cwd: Path, *args: str):
         monkeypatch.chdir(cwd)
         capsys.readouterr()
-        kl.main(list(args))
+        assert kl.main(list(args)) == 0
         out = capsys.readouterr().out
         return json.loads(out) if out.strip() else {}
 

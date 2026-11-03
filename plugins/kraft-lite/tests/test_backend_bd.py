@@ -142,10 +142,10 @@ def test_close_advances_and_gate_blocks(tmp_path, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["node"] == "plan"
 
 
-def test_attempt_increments_and_reports_the_cap(tmp_path, monkeypatch, capsys, walk_in_process):
+def test_attempt_increments_and_reports_the_cap(tmp_path, monkeypatch, capsys, walk):
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
-    walk_in_process.start(tmp_path)
-    walk_in_process.to(tmp_path, "verification")
+    walk.start(tmp_path)
+    walk.to(tmp_path, "verification")
     capsys.readouterr()
 
     kl.main(["state"])
@@ -199,10 +199,10 @@ def test_an_unstarted_chain_is_not_reported_as_done(tmp_path, monkeypatch, capsy
     assert state["chain_id"] is None
 
 
-def test_a_finished_chain_is_still_reported_as_done(tmp_path, monkeypatch, capsys, walk_in_process):
+def test_a_finished_chain_is_still_reported_as_done(tmp_path, monkeypatch, capsys, walk):
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
-    walk_in_process.start(tmp_path)
-    walk_in_process.finish(tmp_path)
+    walk.start(tmp_path)
+    walk.finish(tmp_path)
     capsys.readouterr()
 
     kl.main(["state"])
@@ -308,12 +308,12 @@ def test_write_stamps_updated_at_even_when_the_record_has_none():
     assert json.loads(fake_run.payload.strip())["updated_at"].endswith("Z")
 
 
-def test_a_second_start_becomes_the_live_chain(tmp_path, monkeypatch, capsys, walk_in_process):
+def test_a_second_start_becomes_the_live_chain(tmp_path, monkeypatch, capsys, walk):
     """A repo accumulates one epic per start. Walking the first one found means
     the second chain is invisible and every verb exits 'no open node'."""
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
-    walk_in_process.start(tmp_path)
-    walk_in_process.finish(tmp_path)
+    walk.start(tmp_path)
+    walk.finish(tmp_path)
     capsys.readouterr()
     kl.main(["state"])
     assert json.loads(capsys.readouterr().out)["status"] == "done"
@@ -536,10 +536,10 @@ def test_chains_is_empty_in_a_fresh_directory(tmp_path, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out) == []
 
 
-def test_a_finished_chain_is_listed_as_done(tmp_path, monkeypatch, capsys, walk_in_process):
+def test_a_finished_chain_is_listed_as_done(tmp_path, monkeypatch, capsys, walk):
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
-    chain_id = walk_in_process.start(tmp_path)
-    walk_in_process.finish(tmp_path)
+    chain_id = walk.start(tmp_path)
+    walk.finish(tmp_path)
     capsys.readouterr()
 
     kl.main(["chains"])
@@ -578,11 +578,11 @@ def test_the_newest_chain_is_the_one_most_recently_updated(older_at, newer_at):
 
 
 @pytest.fixture
-def at_final_review(tmp_path, monkeypatch, capsys, walk_in_process):
+def at_final_review(tmp_path, monkeypatch, capsys, walk):
     """A default chain walked to `final_review`, blocked there."""
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
-    walk_in_process.start(tmp_path)
-    walk_in_process.to(tmp_path, "final_review")
+    walk.start(tmp_path)
+    walk.to(tmp_path, "final_review")
     kl.main(["gate"])
     capsys.readouterr()
 
@@ -600,9 +600,7 @@ def test_a_rejection_can_send_the_chain_back_to_an_earlier_node(at_final_review,
     assert "the fix is wrong" in state["note"]
 
 
-def test_a_rewind_reopens_every_node_after_the_named_one(
-    at_final_review, capsys, walk_in_process, tmp_path
-):
+def test_a_rewind_reopens_every_node_after_the_named_one(at_final_review, capsys, walk, tmp_path):
     """Reopening implementation alone would run it and jump straight back to
     final_review, because verification and the MR nodes are still closed - so
     the new code would never be verified."""
@@ -610,9 +608,9 @@ def test_a_rewind_reopens_every_node_after_the_named_one(
     capsys.readouterr()
 
     walked = []
-    while (state := walk_in_process.run(tmp_path, "state"))["node"] != "final_review":
+    while (state := walk.run(tmp_path, "state"))["node"] != "final_review":
         walked.append(state["node"])
-        walk_in_process.advance(tmp_path)
+        walk.advance(tmp_path)
     assert walked == [
         "implementation",
         "verification",
@@ -625,14 +623,12 @@ def test_a_rewind_reopens_every_node_after_the_named_one(
     ]
 
 
-def test_a_rewind_clears_the_gate_and_attempt_labels(
-    tmp_path, monkeypatch, capsys, walk_in_process
-):
+def test_a_rewind_clears_the_gate_and_attempt_labels(tmp_path, monkeypatch, capsys, walk):
     """A reopened node still carrying its old gate label reports `blocked`, and a
     spent attempt count would shrink the fix loop on the retry."""
     monkeypatch.setattr(kl.shutil, "which", lambda name: None)
-    walk_in_process.start(tmp_path)
-    walk_in_process.to(tmp_path, "verification")
+    walk.start(tmp_path)
+    walk.to(tmp_path, "verification")
     kl.main(["attempt"])
     kl.main(["attempt"])
     capsys.readouterr()
