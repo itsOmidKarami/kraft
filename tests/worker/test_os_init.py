@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+import types
 from pathlib import Path
 
 import psutil
@@ -779,16 +780,18 @@ def test_copy_keeps_the_last_output_of_a_command_that_ends_as_the_wait_times_out
 ):
     out_r, out_w = os.pipe()
     st_r, st_w = os.pipe()
-    ended, real = threading.Event(), os_init.select.select
+    ended, real = threading.Event(), os_init.select
 
     def wait_runs_out_then_the_command_writes_and_ends(*args):
-        monkeypatch.setattr(os_init.select, "select", real)
-        ready = real(*args)  # nothing yet
+        monkeypatch.setattr(os_init, "select", real)
+        ready = real.select(*args)  # nothing yet
         os.write(out_w, b"last words\n")
         ended.set()
         return ready
 
-    monkeypatch.setattr(os_init.select, "select", wait_runs_out_then_the_command_writes_and_ends)
+    # os_init's own stand-in, so no other thread's select is touched
+    fake = types.SimpleNamespace(select=wait_runs_out_then_the_command_writes_and_ends)
+    monkeypatch.setattr(os_init, "select", fake)
     os_init._copy(out_r, st_r, None, ended)
     os.close(out_w)
     os.close(st_w)
