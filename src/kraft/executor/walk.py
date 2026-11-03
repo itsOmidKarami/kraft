@@ -656,9 +656,9 @@ class _Stuck:
 
     **The one definition of the stuck set** (Ruling 176): a task failed after
     recovery, an exhausted fix-loop cap, a stall, the judge's
-    `stop_needs_human`, and a node-level repair that finished with concerns in
-    a node with no fix loop (Kraft-yi005) -- the five places this is
-    constructed. Automatic
+    `stop_needs_human`, a node-level repair that finished with concerns in
+    a node with no fix loop (Kraft-yi005), and a fix round that changed
+    nothing (Kraft-6rph9) -- the six places this is constructed. Automatic
     escalation answers these and nothing else: the node's declared escalation
     reads this value, and the generic `gates.auto_escalate_stuck` reads the
     `stuck` mark `_stop_stuck` records from it. Every other stop (config,
@@ -2505,6 +2505,7 @@ async def _walk_node_once(
         if judge_ran:
             instruction += prompts.judge_note(reasoning)
         instruction += prompts.repair_doubts_fix_note(repair_doubted)
+        instruction += prompts.FIX_NO_CHANGE_NOTE
         # Every round, not just the last one (Kraft-s7c04.7). `last_measurement`
         # gives the fixer one round of memory, which is why round N+2 reverted
         # the security property round N established on e983d85c -- the loop had
@@ -2522,6 +2523,15 @@ async def _walk_node_once(
         instruction += prompts.round_history_note(history, dispatch.regressed_fingerprints(history))
         instruction += prompts.previous_attempt_note(previous_fix, run_dirs=run_dirs)
         head_before = _config.git_read(Path(worktree), "rev-parse", "HEAD")
+        # What "the round changed nothing" is judged against (Kraft-6rph9).
+        before = _read_only.snapshot(db, row, launch, worktree)
+        meta_before = forge_mod.read_mr_meta(Path(worktree), work_item_id, run_dirs)
+        seq_before = db.read(
+            lambda c: c.execute(
+                "SELECT COALESCE(MAX(seq), 0) FROM events WHERE work_item_id = ?",
+                (work_item_id,),
+            ).fetchone()[0]
+        )
         # The fix loop is an ordered shape of its own (`fix-loop-supports-one-
         # ordered-repair-shape`), so the repair runs through the same steps
         # walk every other group does rather than one hardcoded task.
@@ -2585,9 +2595,57 @@ async def _walk_node_once(
                 c, work_item_id, ChainEvent.FIX_CYCLE_FINISHED, finished
             )
         )
+        if _changed_nothing(
+            db, run_dirs, work_item_id, row, launch, worktree, before, seq_before, meta_before
+        ):
+            return _Stuck(
+                _changed_nothing_reason(db, work_item_id, node, count, fix),
+                kind=StopKind.STUCK,
+            )
         round = count
         _first_iteration = False
         repair_doubted = []
+
+
+def _changed_nothing(
+    db,
+    run_dirs,
+    work_item_id: str,
+    row,
+    launch,
+    worktree,
+    before: _read_only.Snapshot | None,
+    seq: int,
+    meta: forge_mod.MRMeta,
+) -> bool:
+    """Whether a fix round left what the next measurement reads as it was
+    (Kraft-6rph9): the checkout, for the root and every member mount, the
+    item's review threads, and its `mr_meta` document. That one lives outside
+    the checkout, and the loop's `sync` step writes an edited description to the
+    forge and re-runs the checks that read the old one. A snapshot that was or
+    cannot be taken counts as a change, so the loop measures again as it always
+    has."""
+    if before is None or _read_only.changed(db, row, launch, worktree, before):
+        return False
+    if forge_mod.read_mr_meta(Path(worktree), work_item_id, run_dirs) != meta:
+        return False
+    moved = db.read(lambda c: events.read_after(c, seq, work_item_id))
+    return not any(e["type"] == GateEvent.THREAD_UPDATED for e in moved)
+
+
+def _changed_nothing_reason(db, work_item_id: str, node: ResolvedNode, count: int, fix: str) -> str:
+    """The stop's reason: the repair's own concerns, else how it ended."""
+    repair = [t for step in node.fix_loop for t in step.tasks]
+    doubts = dispatch.repair_doubts(db, work_item_id, node, repair)
+    said = (
+        f"The repair said: {'; '.join(doubts)}"
+        if doubts
+        else f"The repair ended {'done' if fix == 'ok' else fix} and gave no concerns."
+    )
+    return (
+        f"stuck: fix attempt {count} in node {node.id} changed nothing, so measuring "
+        f"again would see the same code. {said}"
+    )
 
 
 def _repair_outcome(fix: str, fix_failed: list[ResolvedTask]) -> bool:

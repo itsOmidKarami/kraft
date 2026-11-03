@@ -96,7 +96,12 @@ class Script:
                 and ".fix_loop." in task.path
                 and not task.path.endswith(".fix_loop.judge")
             ):
-                git(wt, "commit", "--allow-empty", "-qm", f"scripted {tid}")
+                # A file, not an empty commit: `read_only.changed` names files,
+                # and a commit that touches none reads as nothing changed.
+                name = f"scripted-{tid}-{len(self.steers[tid])}.txt"
+                (Path(wt) / name).write_text("x")
+                git(wt, "add", name)
+                git(wt, "commit", "-qm", f"scripted {tid}")
         self.log.append(("end", tid))
         return status
 

@@ -70,7 +70,7 @@ def _run(tmp_path, monkeypatch, prompts_path):
 
     Returns the fix task's worker_sessions rows, ordered by round.
     """
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")  # never patches calc.py
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "stall")  # never patches calc.py
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompts_path))
     monkeypatch.setenv("KRAFT_FAKE_TESTRUN_COUNTER", str(tmp_path / "attempt.count"))
     out = run_chain(
@@ -157,7 +157,7 @@ async def test_fix_cycle_names_the_post_retry_attempt_not_the_abandoned_one(
     post-retry cycle's result -- never the abandoned attempt sharing its round
     number, which a round-keyed, first-match lookup would return instead
     (it was created first)."""
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")  # never fixes calc.py, either side of the retry
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "stall")  # never fixes calc.py, either side of the retry
     prompts_path = tmp_path / "prompts.txt"
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompts_path))
     monkeypatch.setenv("KRAFT_FAKE_TESTRUN_COUNTER", str(tmp_path / "attempt.count"))
@@ -219,7 +219,7 @@ async def test_fix_dispatch_after_resume_still_carries_the_previous_attempt(
     `worker_sessions`. A round-keyed lookup finds nothing at round 0 and the
     handoff silently vanishes; the fix dispatched after resume must still
     carry it forward."""
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")  # keeps failing so a 2nd cycle dispatches
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "stall")  # keeps failing so a 2nd cycle dispatches
     prompts_path = tmp_path / "prompts.txt"
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompts_path))
     monkeypatch.setenv("KRAFT_FAKE_TESTRUN_COUNTER", str(tmp_path / "attempt.count"))

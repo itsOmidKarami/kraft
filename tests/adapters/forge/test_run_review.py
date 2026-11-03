@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 import yaml
 from pydantic import ValidationError
-from support.harness import commit_all, entry_of, fake_harness_home, v1_resolved, write
+from support.harness import commit_all, entry_of, fake_harness_home, git, v1_resolved, write
 
 from kraft import builtins as _builtins
 from kraft import executor, policy, store, waits
@@ -197,6 +197,11 @@ def rig(item_on, database, run_dirs, monkeypatch, wait_clock, tmp_path):
 
             async def launched(db, run_dirs, t, node, row, worktree, *, task, common, **_):
                 self.triaged.append(task.path)
+                if ".fix_loop." in task.path:
+                    # A repair that changes nothing stops the loop.
+                    (Path(worktree) / "repaired.txt").write_text("x")
+                    git(worktree, "add", "repaired.txt")
+                    git(worktree, "commit", "-qm", "repair")
                 found = self.verdicts.pop(0) if t.id == "triage" and self.verdicts else []
                 _, log, result = await _builtins.start_session(db, run_dirs, **common)
                 status = await _builtins.finish_session(

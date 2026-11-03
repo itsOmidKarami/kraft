@@ -55,6 +55,13 @@ FIX_REPEAT_NOTE = (
     "still reports it. Do not repeat the same approach."
 )
 
+#: Appended to every fix instruction (Kraft-6rph9): a round that changes
+#: nothing stops the loop, so say why rather than end `done` silently.
+FIX_NO_CHANGE_NOTE = (
+    "\n\nIf you change nothing, end done_with_concerns and say why in your "
+    "concerns: Kraft stops for a person rather than measuring the same code again."
+)
+
 #: The judge's own read of why the findings are not going down, handed to the
 #: fix task it has just let through (Kraft-s7c04.5). On `continue` only -- a
 #: stop verdict dispatches no fix task at all.

@@ -3,8 +3,8 @@
        --output-format stream-json --verbose
 CWD is the worktree. Mode via KRAFT_FAKE_AGENT: fix (default) | noop | stall | error |
 rate_limit (rejects with KRAFT_FAKE_AGENT_RESETS_AT, default 1788968400).
-`stall` is `noop` that, as a fix-loop repair, still makes an empty commit: a
-repair that tries and fixes nothing, yet moves the checkout.
+`stall` is `noop` that, as a fix-loop repair, still commits a file: a repair
+that fixes nothing, yet moves the checkout.
 KRAFT_FAKE_AGENT_SHELL, when set, is run with `sh -c` before it reports.
 KRAFT_FAKE_AGENT_RATE_LIMIT_MODELS (comma-separated `--model` values, `-` for a
 launch that names none) puts only those launches in rate_limit mode.
@@ -176,19 +176,13 @@ def main() -> int:
     if mode == "stall":
         hook = _ctx_fields(sys.argv).get("Hook point", "")
         if ".fix_loop." in hook and not hook.endswith(".fix_loop.judge"):
-            subprocess.run(
-                [
-                    "git",
-                    "-c",
-                    "user.name=t",
-                    "-c",
-                    "user.email=t@t",
-                    "commit",
-                    "--allow-empty",
-                    "-qm",
-                    "stall",
-                ]
-            )
+            # A file, not an empty commit: a commit touching none reads as
+            # nothing changed.
+            name = f"stall-{os.getpid()}.txt"
+            pathlib.Path(name).write_text("x")
+            ident = ["git", "-c", "user.name=t", "-c", "user.email=t@t"]
+            subprocess.run([*ident, "add", name])
+            subprocess.run([*ident, "commit", "-qm", "stall"])
     if mode == "rebase":
         # Kraft-s7c04.23's resolver dispatch: no real agent runs `git`, so
         # the fake re-runs the rebase itself, resolves by taking "theirs",

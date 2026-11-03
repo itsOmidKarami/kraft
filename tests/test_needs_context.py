@@ -191,6 +191,8 @@ async def test_needs_context_ignores_a_stale_row_from_an_earlier_pass(
     # needs_context row from pass 1 is still sitting in worker_sessions
     # at round 0, right alongside this new one.
     monkeypatch.setenv("KRAFT_FAKE_AGENT_STATUS", "failed")
+    # The fix changes something, so the cap is what stops it.
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "stall")
     await database.write(lambda c: store.set_steer(c, wid, "use main"))
     steer = await database.write(lambda c: store.take_steer(c, wid))
     await database.write(lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"]))
@@ -206,8 +208,8 @@ async def test_needs_context_ignores_a_stale_row_from_an_earlier_pass(
     )
     # A first-match scan would see the stale round-0 needs_context row
     # and stop again with the *same* question, forever. The real
-    # outcome here is a cap breach (attempts=1, the agent never fixes
-    # anything under status=failed) — a different needs_human, and
+    # outcome here is a cap breach (attempts=1, the agent's fix never
+    # makes the measuring task pass under status=failed) — a different needs_human, and
     # never needs_context.
     assert result2 == "needs_human"
     reason2 = _reason(database, wid)
