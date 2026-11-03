@@ -200,6 +200,15 @@ def _unmet(tmp_path, config, addons):
     write_yaml(config / "harnesses.yaml", {})
 
 
+def _newer_requires(tmp_path, config, addons, monkeypatch):
+    copy = tmp_path / "newer"
+    shutil.copytree(CONFIG, copy)
+    manifest_path = copy / ".kraft" / "addon.json"
+    manifest_path.write_text(manifest_path.read_text().replace('"kraft": "2.5"', '"kraft": "9.0"'))
+    monkeypatch.setattr(builtin, "source_dir", lambda: copy)
+    monkeypatch.setattr(update, "installed", lambda: "2.6.0")  # a release, not a source build
+
+
 def _corrupt(tmp_path, config, addons):
     victim = next(p for p in builtin.ensure_store(addons).rglob("*.yaml"))
     victim.chmod(0o644)
@@ -240,6 +249,7 @@ def _no_source_with_addon(tmp_path, config, addons, monkeypatch):
         pytest.param(_repo_id, id="repo-id-taken"),
         pytest.param(_maxima, id="maxima-below-its-caps"),
         pytest.param(_unmet, id="requires-unmet"),
+        pytest.param(_newer_requires, id="requires-kraft-above-the-running-one"),
         pytest.param(_worker, id="worker-with-store-missing"),
         pytest.param(
             _locked,
@@ -253,7 +263,7 @@ def _no_source_with_addon(tmp_path, config, addons, monkeypatch):
 def test_the_builtin_always_loads(tmp_path, monkeypatch, setup):
     config, addons = _home(tmp_path)
     expect = None
-    if setup in (_worker, _locked, _no_source, _no_source_with_addon):
+    if setup in (_worker, _locked, _no_source, _no_source_with_addon, _newer_requires):
         expect = setup(tmp_path, config, addons, monkeypatch)
     elif setup:
         setup(tmp_path, config, addons)

@@ -32,7 +32,7 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 
 ## How Kraft treats the directory
 
-- **Seeding.** Kraft copies the shipped defaults into `config/` on first run and never overwrites it afterwards, so an upgrade cannot clobber an edited policy. [Upgrade your configuration](/guides/run/upgrade-your-configuration) takes what a new release ships in `library.yaml` and `chains/`. The files marked "You", "`kraft admin addon`" or "The first save in Settings" are never seeded.
+- **Seeding.** Kraft copies the shipped defaults into `config/` on first run and never overwrites it afterwards, so an upgrade cannot clobber an edited policy. Kraft's own chains and library are the built-in add-on `kraft-default`, not seeded files: a new home's `default` and `quick-task` extend it. [Move onto kraft-default](/guides/run/upgrade-your-configuration) moves an older home's copies onto it. The files marked "You", "`kraft admin addon`" or "The first save in Settings" are never seeded.
 - **Editing.** The **Templates** screens edit `library.yaml` and `chains/`. **Settings** edits the rest, except `sandbox.yaml`, `detectors.yaml`, `harnesses/` and the add-on files and locks, which no screen edits. Editing any file by hand is equally supported.
 - **Moving it.** `KRAFT_HOME` and `KRAFT_CONFIG_DIR` move the directory; see [Environment variables](/reference/configuration/environment-variables).
 - **Validation.** Kraft validates each file when it loads it, and reports a file that fails with the offending key named. Chain rules such as `extends` and `reject_to` are in [Chain file keys](/reference/chain-nodes).

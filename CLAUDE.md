@@ -144,7 +144,12 @@ Installed Kraft keeps state in `$KRAFT_HOME` (default `~/.kraft`): `run/` for th
 databases, logs and worktrees, `config/` for the YAML the Templates and
 Settings screens edit (`templates/` before 2.0), seeded from the packaged
 defaults in the repo's `config/` on first run and never overwritten after. Only
-`library.yaml` and `chains/` are templates; the rest is configuration.
+`library.yaml` and `chains/` are templates; the rest is configuration. Kraft's
+own chains and library are not copied there: they are the built-in add-on
+`kraft-default@kraft`, read from the installed Kraft (a source checkout reads
+the repo's `config/`), so a seeded home holds only thin `default` and
+`quick-task` chains that `extends: kraft-default:<id>` and an empty
+`library.yaml`. Override on those chains; a bare `default` stays the local chain.
 
 ## Architecture Overview
 
