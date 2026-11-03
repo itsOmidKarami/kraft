@@ -997,7 +997,14 @@ def _judge(
     move and is a note on a current add-on."""
     addon_id, namespace = candidate.id, candidate.namespace
     if namespace == builtin.NAMESPACE:  # the built-in wins, whatever a lock still holds
-        raise Refused([builtin.REFUSED])
+        # An installed GitHub copy is told how to move off it; a fresh one is just refused.
+        raise Refused(
+            [
+                builtin.SHIPS_IT.format(id=addon_id)
+                if addon_id in ctx.lock.addons
+                else builtin.REFUSED
+            ]
+        )
     holders = {
         held.namespace: other for other, held in ctx.lock.addons.items() if other != addon_id
     }

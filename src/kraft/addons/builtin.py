@@ -78,7 +78,15 @@ def harness_fallback(data: object) -> tuple[object, tuple[str, ...]]:
     try:
         packaged = yaml.safe_load((source_dir() / "harnesses.yaml").read_text()) or {}
         needs = required()
-    except (OSError, fetch.AddonRefused, KeyError):
+    except (
+        OSError,
+        fetch.AddonRefused,
+        KeyError,
+        ValueError,
+        yaml.YAMLError,
+        AttributeError,
+        TypeError,
+    ):
         return data, ()  # no source: the built-in is left out, and fills nothing
     out, filled = dict(data), []
     for section, names in needs.items():
@@ -134,14 +142,21 @@ def entry(store: Path):
 
 
 def ensure_store(addons_root: Path, *, wait: float | None = None) -> Path:
-    """The current store's directory, written first if it is missing. Never
-    in a worker, which only reads."""
+    """The current store's directory, written first if it is missing or fails
+    verification (`write_store` replaces it). Never in a worker, which only
+    reads."""
     from kraft.addons import update as addon_update
 
     final = addons_root / "store" / store_name()
+    worker = bool(os.environ.get("KRAFT_WORK_ITEM_ID"))
     if final.is_dir():
-        return final
-    if os.environ.get("KRAFT_WORK_ITEM_ID"):
+        try:
+            fetch.verify_store(final)
+            return final
+        except (fetch.AddonRefused, OSError):
+            if worker:
+                return final  # a worker only reads; the load judges it as it is
+    if worker:
         raise RuntimeError(
             f"the kraft-default store {final.name} is missing; a worker does not write it"
         )

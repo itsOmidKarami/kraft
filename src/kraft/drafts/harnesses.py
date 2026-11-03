@@ -177,7 +177,9 @@ def _users(st, name: str) -> list[dict]:
     directly or in a `fallback:` list of their own."""
     return [
         {"chain": chain, "path": path}
-        for chain, path, task in config_check.selections(getattr(st, "library", None))
+        for chain, path, task in config_check.selections(
+            getattr(st, "library", None), st.templates_dir
+        )
         if task.profile == name or any(e.profile == name for e in task.fallback or ())
     ]
 
@@ -543,7 +545,7 @@ def resolve(st, key, raw, files, published) -> dict:
         )
     except TemplateEnvironmentError:
         table = None
-    chosen = config_check.selections(getattr(st, "library", None))
+    chosen = config_check.selections(getattr(st, "library", None), st.templates_dir)
     linted = _lint_problems(st, policy, chosen)
     escalation = _section(policy, "defaults").get("escalation_harness")
     out["problems"] += (

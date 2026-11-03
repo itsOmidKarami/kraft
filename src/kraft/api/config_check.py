@@ -543,10 +543,29 @@ def _check_notify(path, data, ctx):
 # ── harnesses ──
 
 
-def selections(library: TemplateLibrary | None) -> list[tuple[str, str, AgentTask]]:
-    """(chain, task path, task) for every agent task of every chain that resolves."""
+def named_chains(config_dir: Path) -> frozenset[str]:
+    """The `default_chain` of each `repos.yaml` entry in `config_dir`."""
+    try:
+        data = yaml.safe_load((Path(config_dir) / "repos.yaml").read_text())
+        return frozenset(
+            r[k]
+            for r in data["repos"]
+            for k in ("default_chain", "default_chain_template")
+            if isinstance(r, dict) and isinstance(r.get(k), str)
+        )
+    except (OSError, yaml.YAMLError, KeyError, TypeError):
+        return frozenset()
+
+
+def selections(
+    library: TemplateLibrary | None, config_dir: Path | None = None
+) -> list[tuple[str, str, AgentTask]]:
+    """(chain, task path, task) for every agent task of every chain the operator
+    runs that resolves (`TemplateLibrary.run_chain_ids`, with the chains the
+    repos in `config_dir` name)."""
     out = []
-    for chain in library.run_chain_ids if library is not None else ():
+    named = named_chains(config_dir) if config_dir is not None else ()
+    for chain in library.run_chain_ids(named) if library is not None else ():
         try:
             resolved = library.resolve_chain(chain)
         except TemplateLibraryError:
@@ -649,7 +668,7 @@ def runner_issues(templates_dir: Path, library: TemplateLibrary) -> list[Templat
     except config_mod.ConfigError:
         return []  # doctor's workers.yaml row says why
     issues = []
-    for chain_id in library.run_chain_ids:
+    for chain_id in library.run_chain_ids(named_chains(templates_dir)):
         try:
             resolved = library.resolve_chain(chain_id)
         except TemplateLibraryError:
@@ -707,7 +726,7 @@ def lint_report(
         except TemplateEnvironmentError:
             table = None
         problems = (
-            launch_problems(selections(library), table, path, providers)
+            launch_problems(selections(library, templates_dir), table, path, providers)
             if table is not None
             else {}
         )
@@ -770,7 +789,7 @@ def harness_breakage(
         )
     except TemplateEnvironmentError as exc:
         return str(exc)
-    chosen = selections(library)
+    chosen = selections(library, path.parent)
     before = launch_problems(chosen, before_table, path, providers)
     after = launch_problems(chosen, table, path, providers)
     broken = [m for key, m in sorted(after.items()) if key not in before]

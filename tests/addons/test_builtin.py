@@ -100,8 +100,28 @@ def test_the_builtins_profiles_fall_back_to_the_package(data, filled):
         data, "harnesses.yaml", harnesses=harness.load(None).valid
     )
     assert {"strong", "fast"} <= set(table.agent_profiles)
+    assert "claude" in table.profiles  # the harness half of the fill
     assert table.filled == filled
     assert table.agent_profiles["strong"].providers or table.agent_profiles["strong"].model
+
+
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [
+        ("harnesses.yaml", ": : ["),
+        ("harnesses.yaml", "- a list"),
+        (".kraft/addon.json", "{not json"),
+        (".kraft/addon.json", "[]"),
+    ],
+    ids=["yaml-syntax", "yaml-list", "json-syntax", "json-list"],
+)
+def test_a_malformed_packaged_file_fills_nothing(tmp_path, monkeypatch, name, text):
+    shipped = tmp_path / "shipped"
+    shutil.copytree(builtin.source_dir(), shipped)
+    (shipped / name).write_text(text)
+    monkeypatch.setattr(builtin, "source_dir", lambda: shipped)
+    data = _without(profiles=["fast"])  # a healthy package would fill `fast`
+    assert builtin.harness_fallback(data) == (_without(profiles=["fast"]), ())
 
 
 def test_an_operator_profile_is_never_replaced():
@@ -180,6 +200,12 @@ def _unmet(tmp_path, config, addons):
     write_yaml(config / "harnesses.yaml", {})
 
 
+def _corrupt(tmp_path, config, addons):
+    victim = next(p for p in builtin.ensure_store(addons).rglob("*.yaml"))
+    victim.chmod(0o644)
+    victim.write_text("")
+
+
 def _worker(tmp_path, config, addons, monkeypatch):
     monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "w1")
     return "store"
@@ -209,6 +235,7 @@ def _no_source_with_addon(tmp_path, config, addons, monkeypatch):
     [
         pytest.param(None, id="fresh-home"),
         pytest.param(_with_addons, id="with-addons"),
+        pytest.param(_corrupt, id="corrupt-store-is-rebuilt"),
         pytest.param(_bad_yaml, id="unreadable-addons-yaml"),
         pytest.param(_repo_id, id="repo-id-taken"),
         pytest.param(_maxima, id="maxima-below-its-caps"),
@@ -236,6 +263,7 @@ def test_the_builtin_always_loads(tmp_path, monkeypatch, setup):
     if expect is None:
         assert mine.left_out is None
         assert mine.root.is_dir() and _resolves(config, found)
+        fetch.verify_store(mine.root)
         return
     assert expect in mine.left_out and not mine.quiet
     if setup is _worker:
@@ -389,3 +417,21 @@ def test_restoring_the_builtin(tmp_path, monkeypatch, version, digest, expect):
     with pytest.raises(load.RestoreError) as err:
         load.restore(mine, config, addons)
     assert all(part in str(err.value) for part in expect)
+
+
+def test_an_installed_github_copy_is_told_how_to_move_off_it(tmp_path):
+    repo = fx.make_collection(
+        tmp_path, {"kraft-default": {"library": {"tasks": {"b": fx.AGENT}}}}, name="sdlc"
+    )
+    config, addons = _home(tmp_path, {"sdlc": {"git": repo.as_uri()}})
+    fx.install(config, addons, repo, "kraft-default")
+    fx.publish(repo, "kraft-default", version="1.1.0")
+    asked = "kraft-default@sdlc"
+    [result] = addon_update.update(
+        [asked],
+        accept=lambda review: True,
+        entries={asked: True},
+        config_dir=config,
+        addons_root=addons,
+    )
+    assert result.outcome == "refused" and builtin.SHIPS_IT.format(id=asked) in result.problems

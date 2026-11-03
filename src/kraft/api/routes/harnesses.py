@@ -126,7 +126,7 @@ def _view(st) -> dict:
     tasks = library.component_names(Namespace.TASKS) if library is not None else ()
     used_by = {name: _task_harness(library, name) for name in tasks}
     chains: dict[str, set[str]] = {}
-    for chain, _, task in config_check.selections(library):
+    for chain, _, task in config_check.selections(library, path.parent):
         chains.setdefault(task.harness, set()).add(chain)
     listed = [
         {
@@ -145,7 +145,7 @@ def _view(st) -> dict:
         "error": error,
         "profiles": listed,
         "agent_profiles": _agent_profiles_view(
-            table, library, config_check.selections(library), path, providers
+            table, library, config_check.selections(library, path.parent), path, providers
         ),
     }
 

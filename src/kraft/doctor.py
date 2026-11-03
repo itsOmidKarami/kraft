@@ -971,7 +971,7 @@ def _resolved_chains(live: Path) -> list:
     except TemplateLibraryError:
         return []
     chains = []
-    for id in library.run_chain_ids:
+    for id in library.run_chain_ids(config_check.named_chains(live)):
         try:
             chains.append(library.resolve_chain(id))
         except TemplateLibraryError:

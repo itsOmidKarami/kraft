@@ -437,8 +437,7 @@ def _builtin(store: Path, verify: bool, manifests: dict[str, AddonManifest]) -> 
             left_out=f"its files could not be read: {exc}",
         )
     try:
-        if not addon.root.is_dir():
-            builtin.ensure_store(store.parent)
+        builtin.ensure_store(store.parent)  # writes it when missing or corrupt
     except (addon_update.Busy, OSError, RuntimeError, fetch.AddonRefused) as exc:
         return replace(addon, left_out=f"its store could not be written: {exc}")
     return _with_store_problem(addon, verify, manifests)
