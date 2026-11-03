@@ -38,12 +38,15 @@ def _bash(script: str, env: dict[str, str], cwd: Path | None = None):
 
 
 def _changes(repo: Path, base: str, event: str) -> list[str]:
-    """What the `changes` job writes to its outputs for `base..HEAD` in `repo`."""
+    """What the `changes` job writes to its outputs for `base..HEAD` in `repo`,
+    run in a one-commit clone of it, as the job's shallow checkout is."""
     out = repo.parent / "github-output"
+    clone = repo.parent / "checkout"
+    git(repo.parent, "clone", "--quiet", "--depth=1", f"file://{repo}", str(clone))
     ran = _bash(
         _script("changes"),
         {"GITHUB_EVENT_NAME": event, "BASE": base, "GITHUB_OUTPUT": str(out)},
-        cwd=repo,
+        cwd=clone,
     )
     assert ran.returncode == 0, ran.stderr
     return out.read_text().split()

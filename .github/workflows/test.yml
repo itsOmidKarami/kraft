@@ -45,15 +45,15 @@ jobs:
     # real-CLI tier skips. Pushes to main run everything, and so does a PR if
     # this job fails: nothing is trimmed or skipped except on an explicit
     # 'false'. The unit tests that read the docs still run on a docs-only
-    # pull request, in `docs-tests`.
+    # pull request, in `docs-tests`. The checkout is shallow and the step
+    # fetches the base commit alone: `git diff` compares two trees and needs
+    # no history, and a full-history clone took 11 minutes on a slow day.
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.diff.outputs.code }}
       python: ${{ steps.diff.outputs.python }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
       - id: diff
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
@@ -61,6 +61,7 @@ jobs:
           code=true
           python=true
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            git fetch --no-tags --depth=1 origin "$BASE"
             # --no-renames: a rename is named by its new path alone, and a
             # Python file moved into docs/ would read as a docs change.
             files=$(git diff --name-only --no-renames "$BASE" HEAD)
