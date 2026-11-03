@@ -55,7 +55,8 @@ def test_the_shipped_templates_have_adopted_every_capability():
     edit adds: doctor stops listing it once an operator hand-merges it
     (Kraft-9efnk.36). Settings files only: chains and the library come from the
     built-in kraft-default."""
-    assert [c.name for c in capabilities.MANIFEST] == ["profiles"]
+    # `profiles` was retired: the kraft-default row names a home lacking it.
+    assert capabilities.MANIFEST == ()
     for c in capabilities.MANIFEST:
         assert capabilities.adopted(c, ROOT / "config"), c.name
 
