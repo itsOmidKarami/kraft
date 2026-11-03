@@ -52,11 +52,26 @@ def checkout_copy(monkeypatch, tmp_path):
     return copy
 
 
-def test_an_edited_checkout_is_read_again(checkout_copy):
+@pytest.mark.parametrize("edited", ["library.yaml", "chains/default.yaml"])
+def test_an_edited_checkout_is_read_again(checkout_copy, monkeypatch, edited):
+    monkeypatch.setattr(update, "installed", lambda: "0.0.0+source")
     before = fetch.digest(builtin.extracted().files)
-    lib = checkout_copy / "library.yaml"
-    lib.write_text(lib.read_text() + "\n# edited\n")
+    file = checkout_copy / edited
+    file.write_text(file.read_text() + "\n# edited\n")
     assert fetch.digest(builtin.extracted().files) != before
+    assert load._builtin_stamps() != ()
+
+
+def test_an_installed_release_keeps_the_bundle_it_started_with(checkout_copy, monkeypatch):
+    """`uv tool install` replaces the bundle under a running server; the old code
+    must not read the new release's chains."""
+    monkeypatch.setattr(update, "installed", lambda: "2.6.0")
+    first = builtin.extracted()
+    file = checkout_copy / "chains" / "default.yaml"
+    file.write_text(file.read_text() + "\n# the next release\n")
+    monkeypatch.setattr(update, "installed", lambda: "2.7.0")  # the metadata moved too
+    assert builtin.extracted() is first
+    assert load._builtin_stamps() == ()
 
 
 @pytest.mark.parametrize(

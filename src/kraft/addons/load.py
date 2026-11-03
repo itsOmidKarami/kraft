@@ -286,6 +286,8 @@ def _builtin_stamps() -> tuple:
     `config/` is read again."""
     from kraft.addons import builtin
 
+    if builtin.frozen():
+        return ()  # read once per process: nothing to notice
     try:
         return builtin._stamp(builtin.source_dir())
     except OSError:

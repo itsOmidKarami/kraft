@@ -39,7 +39,14 @@ def source_dir() -> Path:
     raise FileNotFoundError("this Kraft was built without its kraft-default; reinstall it")
 
 
-_memo: tuple[tuple, fetch.Extracted] | None = None
+_memo: tuple[Path, tuple, fetch.Extracted] | None = None
+
+
+def frozen() -> bool:
+    """An installed release reads its bundle once: `uv tool install` replaces the
+    files in place under a server that keeps running, and that server's code must
+    not read the next release's chains. A checkout re-reads its edits."""
+    return not manifest.is_source_build(update.installed())
 
 
 def _stamp(root: Path) -> tuple:
@@ -57,14 +64,17 @@ def _stamp(root: Path) -> tuple:
 
 def extracted() -> fetch.Extracted:
     """The built-in as `fetch.extract_dir` reads it, memoized per process until
-    a file's stamp changes. Hard links are fine: the package is not an operator
-    directory, and uv may link its files from a cache."""
+    a file's stamp changes (never, for an installed release: see `frozen`). Hard
+    links are fine: the package is not an operator directory, and uv may link its
+    files from a cache."""
     global _memo
     root = source_dir()
+    if _memo is not None and _memo[0] == root and frozen():
+        return _memo[2]
     stamp = _stamp(root)
-    if _memo is None or _memo[0] != stamp:
-        _memo = (stamp, fetch.extract_dir(root, allow_hardlinks=True))
-    return _memo[1]
+    if _memo is None or _memo[:2] != (root, stamp):
+        _memo = (root, stamp, fetch.extract_dir(root, allow_hardlinks=True))
+    return _memo[2]
 
 
 def required() -> dict[str, tuple[str, ...]]:
