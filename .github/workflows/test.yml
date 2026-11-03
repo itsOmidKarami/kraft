@@ -404,14 +404,17 @@ jobs:
     # error, as for the Linux job. Nothing is installed beyond the repo's own
     # setup (uv): the runner's own macOS, git, curl and sh are what the sandbox
     # shows a worker. macos-15-intel is the x86_64 runner: the variadic
-    # `sandbox_check` call and Homebrew under /usr/local differ there.
+    # `sandbox_check` call and Homebrew under /usr/local differ there. macos-15
+    # is pinned rather than macos-latest: the alias moves to a new image with
+    # little capacity at first, and its jobs then wait for a runner until
+    # GitHub cancels them.
     name: e2e (macOS sandbox, ${{ matrix.os }})
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.python != 'false' }}
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, macos-15-intel]
+        os: [macos-15, macos-15-intel]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     # The runner's Homebrew Python links openssl from /opt/homebrew, which a sandbox
