@@ -81,9 +81,11 @@ def _not_a_kraft_server(pid: int, path: Path) -> str | None:
         return "is not running"
     if created > written + _CLOCK_SLACK_S:
         return "started after the pidfile was written, so the pid was reused"
+    # No argv, yet not a zombie (psutil raises for that): a server in the last instant of its exit.
+    if not cmdline:
+        return "is not running"
     if not runs_the_server(cmdline):
-        name = cmdline[0] if cmdline else "another program"
-        return f"is {os.path.basename(name)}, not Kraft"
+        return f"is {os.path.basename(cmdline[0])}, not Kraft"
     return None
 
 

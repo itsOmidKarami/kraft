@@ -14,7 +14,7 @@ import psutil
 import pytest
 from support.pidfile import exec_landed, hold_pidfile
 
-from kraft import pidfile
+from kraft import cli, pidfile
 
 
 @pytest.fixture
@@ -90,6 +90,24 @@ def test_a_process_that_only_mentions_kraft_is_stale(tmp_path, started):
 
     assert not state.running
     assert state.why.endswith(", not Kraft")
+
+
+def test_a_process_with_no_command_line_is_gone_not_another_program(
+    tmp_path, started, monkeypatch, capsys
+):
+    """A server's last instant: its lock is dropped and its argv is gone, but it
+    is not yet a zombie (the one state psutil raises for), so `cmdline()` is
+    `[]`. `kraft admin stop` polls through it and called the server "another
+    program"."""
+    proc = started("sleep", "60")
+    path = _pidfile_after(tmp_path, proc)
+    # Faked last: `started` waits on the real `cmdline()`.
+    monkeypatch.setattr(psutil.Process, "cmdline", lambda self: [])
+
+    assert pidfile.read(path) == pidfile.State(proc.pid, False, "is not running")
+    assert cli.admin._read_pid(path) is None
+    assert capsys.readouterr().err == ""
+    assert not path.exists()
 
 
 @pytest.mark.parametrize(
