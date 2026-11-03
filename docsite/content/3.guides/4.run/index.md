@@ -18,7 +18,7 @@ Each guide takes one task from start to finish.
 - [Logs and disk space](/guides/run/logs-and-disk-space): find the logs, and reclaim the space worktrees use.
 - [Run Kraft as a service](/guides/run/run-as-a-service): start Kraft at login, and run a second instance.
 - [Upgrade Kraft](/guides/run/upgrade-kraft): back up, upgrade and check an installed Kraft, pin a version, and roll back to an earlier 2.x release.
-- [Upgrade your configuration](/guides/run/upgrade-your-configuration): take new shipped chains, library tasks and policy after an upgrade without losing your edits.
+- [Move onto kraft-default](/guides/run/upgrade-your-configuration): replace the full copies of Kraft's chains in an older home with chains that extend the built-in, keeping your edits.
 - [Upgrade from 1.4](/guides/run/upgrade-from-1-4): what 2.0 changes from 1.4, and the steps to update from it.
 - [Upgrade from 0.x or a release candidate](/guides/run/upgrade-from-0-x-or-a-release-candidate): move from a 1.5.0 release candidate, an install from before the `kraft-sdlc` rename, or a 0.x home with the old template configuration.
 - [Roll back to 1.4](/guides/run/roll-back): what a rollback does to the database and config, and the steps from 2.0 back to 1.4.
