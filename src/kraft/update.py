@@ -333,6 +333,19 @@ def latest_in_major(
     return (_fetch_majors(now, channel) or {}).get(major)
 
 
+def download(url: str, dest: Path, *, timeout: float = 120.0) -> Path:
+    """Stream `url` to the file `dest`. The wheel carries the web UI, so this
+    gets a real timeout, not the metadata `TIMEOUT`. Raises `httpx.HTTPError`."""
+    import httpx
+
+    with httpx.stream("GET", url, timeout=timeout, follow_redirects=True) as response:
+        response.raise_for_status()
+        with dest.open("wb") as out:
+            for chunk in response.iter_bytes():
+                out.write(chunk)
+    return dest
+
+
 def release_for(tag: str, *, channel: str = "stable") -> Release | None:
     """The release named `tag`, if the feed lists it with a wheel on `channel`.
     A person marking a version by hand may name any of them, not only the

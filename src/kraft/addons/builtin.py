@@ -6,6 +6,9 @@ from __future__ import annotations
 
 import json
 import os
+import time
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import yaml
@@ -196,4 +199,132 @@ def write_thin_seed(target: Path) -> None:
 
 
 # --- update preview (Tasks 7-8) ---
+_WHEEL_DIR = "kraft/_bundled/kraft-default/"
+
+
+def from_wheel(wheel: Path, scratch: Path) -> fetch.Extracted | None:
+    """The built-in a release wheel ships, unpacked under `scratch`; None for a
+    wheel with none (an older release). A member that escapes `scratch` is a
+    ValueError."""
+    import zipfile
+
+    root = scratch / "kraft-default"
+    found = False
+    with zipfile.ZipFile(wheel) as z:
+        members = [i for i in z.infolist() if i.filename.startswith(_WHEEL_DIR) and not i.is_dir()]
+        if len(members) > fetch.MAX_FILES or sum(i.file_size for i in members) > fetch.MAX_TOTAL:
+            raise ValueError("the wheel's kraft-default is larger than an add-on may be")
+        for info in members:
+            name = info.filename
+            rel = Path(name.removeprefix(_WHEEL_DIR))
+            if rel.is_absolute() or ".." in rel.parts or name.startswith("/"):
+                raise ValueError(f"the wheel holds an unsafe path: {name}")
+            target = root / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(z.read(info))
+            found = True
+    return fetch.extract_dir(root, allow_hardlinks=True) if found else None
+
+
+@dataclass(frozen=True)
+class Preview:
+    """What installing `release` would change in the built-in. `note` says why
+    no comparison was made."""
+
+    review: object | None  # review.Review
+    breaks: tuple[str, ...]
+    note: str | None
+
+
+def preview(
+    release: update.Release, config_dir: Path, addons_root: Path, *, channel: str = "stable"
+) -> Preview:
+    """Compare the running built-in with the one `release` ships, before
+    anything is installed. Never raises: a failure is a `note`."""
+    import tempfile
+
+    from kraft.addons import load
+    from kraft.addons import review as addon_review
+    from kraft.addons import update as addon_update
+
+    try:
+        if not release.wheel_url:
+            release = update.release_for(release.tag, channel=channel) or release
+            if not release.wheel_url:
+                return Preview(None, (), f"cannot compare: no wheel found for {release.tag}")
+        with tempfile.TemporaryDirectory() as tmp:
+            scratch = Path(tmp)
+            wheel = update.download(release.wheel_url, scratch / "kraft.whl")
+            new = from_wheel(wheel, scratch / "wheel")
+            if new is None:
+                return Preview(None, (), f"{release.tag} ships no built-in kraft-default")
+            reviewed = replace(
+                addon_review.review(ID, extracted(), new),
+                old_version=update.installed(),
+                new_version=release.tag.removeprefix("v"),
+            )
+            found = load.installed(config_dir, addons_root)
+            root = fetch.write_scratch(scratch / "store", new)
+            after = [replace(a, root=root) if is_builtin(a) else a for a in found]
+            broke = addon_update.breaks(
+                addon_update.state_of(config_dir, found),
+                addon_update.state_of(config_dir, after),
+                config_dir,
+                NAMESPACE,
+            )
+            return Preview(reviewed, tuple(broke), None)
+    except Exception as exc:  # noqa: BLE001 -- a failed comparison is a note, never a crash
+        return Preview(None, (), f"cannot compare: {exc}")
+
+
+def changed(p: Preview) -> bool:
+    """Whether the new built-in differs in a way worth showing (`Review.changed`
+    also counts a version bump, which every release has)."""
+    return p.review is not None and bool(p.review.reach or p.review.content)
+
+
+def show(p: Preview) -> str:
+    from kraft.addons import review as addon_review
+
+    lines = [addon_review.render(p.review)] if changed(p) else []
+    lines += [f"  breaks: {line}" for line in p.breaks]
+    if p.note:
+        lines.append(f"kraft-default: {p.note}")
+    return addon_review.escape("\n".join(lines)) if lines else "kraft-default: unchanged"
+
+
+def held(p: Preview) -> list[str]:
+    """Why an unattended update must not install: a break, or no comparison."""
+    if p.breaks:
+        return list(p.breaks)
+    return [p.note] if p.note and p.note.startswith("cannot compare") else []
+
+
+def clear(addons_root: Path) -> None:
+    (addons_root / "builtin.json").unlink(missing_ok=True)
+
+
+def needs_answer(p: Preview) -> bool:
+    return changed(p) or bool(p.breaks) or bool(p.note)
+
+
+def record(addons_root: Path, *, status: str, from_: str, to: str, lines: Sequence[str]) -> None:
+    """What an unattended update held or changed, for `doctor`. Not operator
+    config: it lives beside the stores."""
+    addons_root.mkdir(parents=True, exist_ok=True)
+    (addons_root / "builtin.json").write_text(
+        json.dumps(
+            {"status": status, "from": from_, "to": to, "lines": list(lines), "at": time.time()}
+        )
+    )
+
+
+def recorded(addons_root: Path) -> dict | None:
+    try:
+        data = json.loads((addons_root / "builtin.json").read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 # --- doctor support (Task 9) ---
