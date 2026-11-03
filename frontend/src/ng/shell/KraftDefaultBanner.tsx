@@ -60,15 +60,17 @@ export function KraftDefaultBanner({ health }: { health: Health | null | undefin
   if (!drift) return null;
   const more = drift.lines.length - 3;
   return (
-    <div className="ng-offline ng-offline-warn" role="status">
+    <div className="ng-offline ng-offline-warn ng-offline-tall" role="status">
       <span className="ng-offline-mark" aria-hidden>!</span>
       <span className="ng-offline-text">
         <strong>Kraft's own chains need attention</strong>
-        {drift.lines.slice(0, 3).map((l, i) => <span key={i} className="ng-offline-line" style={{ display: "block" }}>{l}</span>)}
-        {more > 0 && <span style={{ display: "block" }}>and {more} more</span>}
-        Run <code>kraft admin doctor</code> for the fix.{" "}
-        <button type="button" className="btn" onClick={drift.hide}>Hide until it changes</button>
+        <ul className="ng-offline-lines">
+          {drift.lines.slice(0, 3).map((l, i) => <li key={i}>{l}</li>)}
+          {more > 0 && <li>and {more} more</li>}
+        </ul>
+        Run <code>kraft admin doctor</code> for the fix.
       </span>
+      <button type="button" className="btn ng-offline-act" onClick={drift.hide}>Hide until it changes</button>
     </div>
   );
 }

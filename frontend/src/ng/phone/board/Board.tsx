@@ -129,7 +129,7 @@ export function Board() {
         {olderServer(health) && <p className="ph-restart" role="alert">{OLDER_SERVER} Run <code>kraft admin restart</code>.</p>}
         {/* An update or a rollback installed under this server, in a tab opened before it: the sidebar's line, which the phone has no sidebar for (R11b-08). */}
         {!olderServer(health) && restartWords(health) && <p className="ph-restart" role="status">Kraft {restartWords(health)}.</p>}
-        {drift && <p className="ph-restart" role="status">Kraft's own chains need attention: {drift.lines.length} item(s). Run <code>kraft admin doctor</code>. <button type="button" onClick={drift.hide}>Hide until it changes</button></p>}
+        {drift && <div className="ph-restart" role="status"><strong>Kraft's own chains need attention</strong>: {drift.lines.length} item(s). Run <code>kraft admin doctor</code>. <button type="button" onClick={drift.hide}>Hide until it changes</button></div>}
         {load.state === "loading" && empty && <div className="ph-skeleton" aria-hidden="true"><span /><span /><span /></div>}
         {empty && load.state !== "loading" && !offline && (
           <p className="ph-empty">
