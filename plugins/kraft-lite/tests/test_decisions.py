@@ -228,10 +228,10 @@ def test_mark_needs_unreported_and_a_sliced_run(sliced, flags, named, walk, kl_c
     assert len(kl_cli(tmp_path, "decisions", "--unreported")) == 2
 
 
-def test_decisions_never_reach_the_issue_store(walk_in_process, fake_bd, monkeypatch, tmp_path):
+def test_decisions_never_reach_the_issue_store(walk, fake_bd, monkeypatch, tmp_path):
     monkeypatch.setattr(kl, "store_for", lambda root: kl.BdStore(run=fake_bd))
-    run = walk_in_process.run
-    chain_id = walk_in_process.slice(tmp_path)
+    run = walk.run
+    chain_id = walk.slice(tmp_path)
 
     texts = ("QUESTION-ONE", "WHY-ONE", "QUESTION-TWO", "WHY-TWO", "ANSWER-ONE", "ANSWER-TWO")
     held = run(tmp_path, "decide", "--question", texts[0], "--why", texts[1], "--held")
