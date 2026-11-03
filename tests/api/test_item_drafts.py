@@ -49,7 +49,12 @@ def test_put_replaces_the_op_list_get_reads_it_and_an_empty_list_deletes_it(clie
     assert _ids(put.json())[_ids(empty).index("verification") + 1] == "again"
     assert client.get(url).json() == put.json()
 
-    assert client.put(url, json={"ops": [{"op": "rename"}]}).status_code == 422
+    bad = client.put(url, json={"ops": [{"op": "rename"}]})
+    assert bad.status_code == 422
+    detail = bad.json()["detail"]
+    assert isinstance(detail, str)
+    assert "\n" not in detail, f"detail must be one line, got: {detail!r}"
+    assert "pydantic" not in detail.lower()
     assert client.put(url, json={"ops": []}).json()["ops"] == []
     assert client.delete(url).status_code == 404
     client.put(url, json={"ops": [OVERRIDE]})
