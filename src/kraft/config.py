@@ -47,6 +47,7 @@ from kraft.automated_review import OneOrManyReviewers
 from kraft.policy import PolicyError, SandboxPolicy, TemplatePolicyOverride, ToolNames, _cron_fields
 from kraft.vocab import BY_VALUE
 from kraft.worker import steering as _steering
+from kraft.yamlload import safe_load
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -99,7 +100,7 @@ def read_yaml(path: str | Path, default: dict | None = None) -> dict:
     if not path.exists():
         return dict(default or {})
     try:
-        data = yaml.safe_load(path.read_text())
+        data = safe_load(path.read_text())
     # ValueError covers the UnicodeDecodeError `read_text()` raises on a file
     # with invalid bytes: not an OSError, and not a yaml.YAMLError, so without
     # it a broken config crashes startup instead of being reported as broken.

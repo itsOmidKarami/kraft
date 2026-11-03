@@ -31,6 +31,7 @@ from pydantic import (
 )
 
 from kraft.harness import Harness
+from kraft.yamlload import safe_load
 
 if TYPE_CHECKING:
     from kraft.addons.load import InstalledAddon
@@ -701,7 +702,7 @@ class HarnessProfileTable:
         """
         path = Path(path)
         try:
-            data = yaml.safe_load(path.read_text())
+            data = safe_load(path.read_text())
         except (OSError, ValueError, yaml.YAMLError) as exc:
             raise TemplateEnvironmentError(f"{path}: cannot read/parse: {exc}") from exc
         return cls.from_mapping(data, path, harnesses=harnesses, addons=addons)

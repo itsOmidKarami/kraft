@@ -48,6 +48,7 @@ from kraft.templates.models import (
     first_error,
 )
 from kraft.templates.positions import Position
+from kraft.yamlload import safe_load
 
 LIBRARY_FILE = "library.yaml"
 CHAINS_DIR = "chains"
@@ -238,7 +239,7 @@ def _read(path: Path, *, bounded: bool = False) -> Mapping[str, object]:
     wrote: alias expansion is budgeted, where the operator's own file is not."""
     try:
         text = path.read_text()
-        data = bounded_yaml(text, [ADDON_YAML_NODES]) if bounded else yaml.safe_load(text)
+        data = bounded_yaml(text, [ADDON_YAML_NODES]) if bounded else safe_load(text)
     except (OSError, ValueError, yaml.YAMLError) as exc:
         raise TemplateLibraryError(f"{path}: cannot read/parse: {exc}") from exc
     return _as_mapping(path, data)

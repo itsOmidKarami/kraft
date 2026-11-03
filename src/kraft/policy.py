@@ -39,6 +39,7 @@ from kraft.cap_levels import (
     PositiveUsd,
 )
 from kraft.findings import SEVERITIES
+from kraft.yamlload import safe_load
 
 logger = logging.getLogger(__name__)
 
@@ -273,7 +274,7 @@ class PolicyInput(BaseModel):
             # ValueError covers UnicodeDecodeError: a policy file with one
             # invalid byte is bad config, not a crash three frames up in
             # `lifespan`.
-            data = yaml.safe_load(path.read_text())
+            data = safe_load(path.read_text())
         except (OSError, ValueError, yaml.YAMLError) as exc:
             raise PolicyError(f"{path.name}: cannot read/parse: {exc}") from exc
         if not isinstance(data, dict):

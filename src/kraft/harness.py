@@ -33,6 +33,7 @@ from pydantic import (
 
 from kraft.paths import default_harnesses_dir
 from kraft.policy import DEFAULT_SENTINEL, SandboxCredential, host_pattern
+from kraft.yamlload import safe_load
 
 #: Harnesses that ship with Kraft. Read from the package, never from
 #: `$KRAFT_HOME/config/`, because `cli.seed_home` copies templates once and
@@ -633,7 +634,7 @@ def load(harnesses_dir: Path | None) -> HarnessSet:
             if stem in valid or stem in invalid:
                 continue
             try:
-                data = yaml.safe_load(path.read_text())
+                data = safe_load(path.read_text())
             except (OSError, ValueError, yaml.YAMLError) as exc:
                 invalid[stem] = f"{path}: cannot read/parse: {exc}"
                 continue
