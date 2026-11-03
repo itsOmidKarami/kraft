@@ -165,5 +165,35 @@ def ensure_store(addons_root: Path, *, wait: float | None = None) -> Path:
 
 
 # --- seed (Task 6) ---
+_CHAIN_SEED = """\
+# Kraft's own `{id}` chain. It comes from the kraft-default add-on that ships
+# with Kraft, so upgrading Kraft updates it. To change a node, add it under
+# `overrides:` here; a library.yaml entry of your own does not change this chain.
+id: {id}
+extends: kraft-default:{id}
+"""
+
+_LIBRARY_SEED = """\
+# Your own tasks, steps, nodes and steering. Kraft's own come from the
+# kraft-default add-on that ships with Kraft. An entry here changes only the
+# chains that name it; to change what `default` runs, override its node in
+# chains/default.yaml.
+tasks: {}
+"""
+
+
+def write_thin_seed(target: Path) -> None:
+    """Write a new home's chains and library: one `extends: kraft-default:<id>`
+    chain per built-in chain and an empty library, so releases flow underneath
+    any edit. Seeding a home that has none is the only write Kraft makes to one."""
+    chains = target / "chains"
+    chains.mkdir(parents=True, exist_ok=True)
+    for name in sorted(extracted().files):
+        if name.startswith("chains/") and name.endswith(".yaml"):
+            chain_id = name.removeprefix("chains/").removesuffix(".yaml")
+            (chains / f"{chain_id}.yaml").write_text(_CHAIN_SEED.format(id=chain_id))
+    (target / "library.yaml").write_text(_LIBRARY_SEED)
+
+
 # --- update preview (Tasks 7-8) ---
 # --- doctor support (Task 9) ---

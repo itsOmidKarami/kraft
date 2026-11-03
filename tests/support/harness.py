@@ -272,7 +272,7 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
     `templates_dir`.
 
     The *shipped* seed, copied rather than hand-written, so a fixture cannot
-    drift from the chain an operator actually gets.
+    drift from the chain an operator gets (full copies; executor tests fake `kind: builtin`).
     """
     templates_dir.mkdir(parents=True, exist_ok=True)
     library = (_REPO_ROOT / "config" / "library.yaml").read_text()

@@ -151,14 +151,15 @@ dev_env := "KRAFT_HOME=" + justfile_directory() + "/.dev" + \
 # The fake agent ahead of the real `claude`, so a dev instance never spends tokens.
 fake_agent := "PATH=" + justfile_directory() + "/fixtures/bin:$PATH"
 
-# A dev home starts as a copy of the tracked config/, plus the throwaway repo
+# A dev home starts as a copy of the tracked config/ with thin chains that extend
+# the built-in kraft-default (read from this checkout), plus the throwaway repo
 # beads and the seeded work items live in. Copied, not pointed at: the Settings
 # screens write to this directory, and dev edits must not land in the repo's real
 # config. access.yaml never comes along — it is this machine's bind address and
 # password hash, and a dev instance must stay on unauthenticated loopback.
 _dev-home:
     @mkdir -p .dev
-    @[ -d .dev/config ] || {{ '{' }} [ -d .dev/templates ] && mv .dev/templates .dev/config; {{ '}' }} || cp -R config .dev/config
+    @[ -d .dev/config ] || {{ '{' }} [ -d .dev/templates ] && mv .dev/templates .dev/config; {{ '}' }} || {{ '{' }} rm -rf .dev/config.tmp && cp -R config .dev/config.tmp && rm -rf .dev/config.tmp/chains .dev/config.tmp/library.yaml .dev/config.tmp/.kraft && {{dev_env}} uv run python -c 'import sys,pathlib; from kraft.addons import builtin; builtin.write_thin_seed(pathlib.Path(sys.argv[1]))' .dev/config.tmp && mv .dev/config.tmp .dev/config; {{ '}' }}
     @rm -f .dev/config/access.yaml
     @{{dev_env}} uv run python dev/seed.py --repo-only
 
