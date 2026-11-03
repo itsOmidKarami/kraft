@@ -122,6 +122,17 @@ describe("harness pane", () => {
     expect(server.ops).toEqual([[{ op: "set_access", harness: "claude", state: "never" }], [{ op: "set_access", harness: "claude", state: "override" }]]);
   });
 
+  it("shows a package harness read-only: the note, no access control, no switch, no editors", async () => {
+    const r = resolved();
+    r.harnesses = r.harnesses.map((h) => (h.id === "claude" ? { ...h, source: "package" as const } : h));
+    serve(view(r));
+    renderPage("?harness=claude");
+    const p = await pane("claude");
+    expect(p).toHaveTextContent("From Kraft's package. Define it in harnesses.yaml to change it.");
+    expect(p).toHaveTextContent("acceptEdits");
+    for (const role of ["radio", "switch", "textbox", "combobox"] as const) expect(within(p).queryByRole(role)).toBeNull();
+  });
+
   it("shows the access help for the current state and a note when escalation runs here", async () => {
     serve(view(resolved({ access: { cursor: "override" } })));
     renderPage("?harness=cursor");

@@ -104,6 +104,20 @@ describe("a harness (M.1, R65)", () => {
     expect(screen.getByText(/edited in YAML on a computer/)).toBeInTheDocument();
   });
 
+  it("shows a package harness read-only: the note, no pencil on access, no enabled switch", async () => {
+    const r = resolved();
+    r.harnesses = r.harnesses.map((h) => (h.id === "claude" ? { ...h, source: "package" as const } : h));
+    open("claude", ans(hview(r)));
+    expect(await screen.findByText("From Kraft's package. Define it in harnesses.yaml to change it.")).toBeInTheDocument();
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(screen.queryByRole("button", { name: /who may use it/ })).toBeNull();
+    expect(screen.getByText("Available")).toBeInTheDocument();
+    cleanup();
+    open("claude");
+    expect(await screen.findByRole("switch")).toBeInTheDocument();
+    expect(screen.queryByText(/From Kraft's package/)).toBeNull();
+  });
+
   it("has an enabled switch, sent as the desktop sends it", async () => {
     const { calls } = open("claude");
     const row = await screen.findByRole("switch", { name: new RegExp(`^${HARNESS_FIELD.enabled}`) });

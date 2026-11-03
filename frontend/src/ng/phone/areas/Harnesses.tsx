@@ -71,22 +71,25 @@ export function HarnessView() {
   const r = draft.view ? resolvedOf(draft.view.result) : null;
   const h = r?.harnesses.find((x) => x.id === id);
   const problems = r ? problemsOfHarness(r, (draft.view!.result.problems ?? []) as HProblem[], id) : [];
+  // A package harness is read-only: the server refuses set_access and set_harness on it.
+  const own = h?.source !== "package";
   return (
     <AreaScreen title={id} sub={h?.executable ?? h?.provider ?? undefined} draft={draft}>
       {r && !h && <p className="ph-empty">There is no harness {id}.</p>}
       {problems.length > 0 && <Group title="Problems" rows={problemRows(problems)} />}
+      {h?.source === "package" && <p className="ph-note">From Kraft's package. Define it in harnesses.yaml to change it.</p>}
       {h && (
         <>
           <Group
             rows={[
-              { label: ACCESS_SECTION.toLowerCase(), value: ACCESS_WORD[h.state], changed: changedAt(draft, id), onEdit: () => edit({ kind: "choice", title: ACCESS_SECTION, help: ACCESS_HELP[h.state], value: h.state, options: ACCESS.map((a) => ({ value: a.value, label: a.label })), set: (v) => send(draft, { op: "set_access", harness: id, state: v as Access }) }) },
+              { label: ACCESS_SECTION.toLowerCase(), value: ACCESS_WORD[h.state], changed: changedAt(draft, id), onEdit: !own ? undefined : () => edit({ kind: "choice", title: ACCESS_SECTION, help: ACCESS_HELP[h.state], value: h.state, options: ACCESS.map((a) => ({ value: a.value, label: a.label })), set: (v) => send(draft, { op: "set_access", harness: id, state: v as Access }) }) },
               { label: HARNESS_FIELD.provider, value: h.provider ?? "not set", mono: true },
-              { label: HARNESS_FIELD.enabled, sub: enabledHelp(h.enabled), sw: h.enabled, changed: changedAt(draft, id), onSwitch: (enabled) => void send(draft, { op: "set_harness", id, patch: { enabled } }) },
+              { label: HARNESS_FIELD.enabled, sub: enabledHelp(h.enabled), ...(own ? { sw: h.enabled, changed: changedAt(draft, id), onSwitch: (enabled: boolean) => void send(draft, { op: "set_harness", id, patch: { enabled } }) } : { value: h.enabled ? "yes" : "no" }) },
               { label: HARNESS_FIELD.executable, value: h.executable ?? "the provider's own command", sub: executableWord(h.executable_found), mono: true },
               ...Object.entries(h.defaults).map(([k, v]): RowSpec => ({ key: k, label: defaultLabel(k), value: v, mono: true })),
             ]}
           />
-          <p className="ph-note">Who may use it and enabled are edited here; a harness's other fields are edited in YAML on a computer.</p>
+          {own && <p className="ph-note">Who may use it and enabled are edited here; a harness's other fields are edited in YAML on a computer.</p>}
           <Group title={`Tasks · ${h.tasks.length}`} rows={h.tasks.map((t, i): RowSpec => ({ key: `${t.chain}:${t.path}:${i}`, label: taskTile(t), sub: [t.chain, t.profile, t.fallback ? "fallback" : null].filter(Boolean).join(" · ") }))} />
         </>
       )}
