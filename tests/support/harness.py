@@ -267,6 +267,21 @@ def fake_templates_dir(tmp_path: Path, agent_command: str, name: str = "template
     return d
 
 
+#: libyaml's loader and dumper when PyYAML has them: the same bytes as the pure-Python pair
+#: (compared on every file `fake_templates_dir` writes), ~8x faster. A templates dir parses
+#: and dumps the shipped library and profiles ten times, for every test that takes a `client`.
+_YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+_YAML_DUMPER = getattr(yaml, "CSafeDumper", yaml.SafeDumper)
+
+
+def _yaml_load(text: str):
+    return yaml.load(text, Loader=_YAML_LOADER)
+
+
+def _yaml_dump(data) -> str:
+    return yaml.dump(data, Dumper=_YAML_DUMPER, sort_keys=False)
+
+
 def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) -> Path:
     """Put the shipped V1 layout -- `library.yaml` plus `chains/*.yaml` -- into
     `templates_dir`.
@@ -276,7 +291,7 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
     """
     templates_dir.mkdir(parents=True, exist_ok=True)
     library = (_REPO_ROOT / "config" / "library.yaml").read_text()
-    shipped_profiles = yaml.safe_load((_REPO_ROOT / "config" / "harnesses.yaml").read_text())
+    shipped_profiles = _yaml_load((_REPO_ROOT / "config" / "harnesses.yaml").read_text())
     agent_profiles = shipped_profiles.get("profiles") or {}
     if agent_command is None:
         write_harness_profiles(templates_dir, shipped_profiles["harnesses"])
@@ -310,12 +325,12 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
         # so the nested run finishes the whole suite before the outer one
         # continues. A test that means to exercise the real builtin builds its
         # own chain (tests/executor/test_dispatch.py) and is untouched by this.
-        parsed = yaml.safe_load(library)
+        parsed = _yaml_load(library)
         for task in parsed.get("tasks", {}).values():
             if task.get("kind") == "builtin":
                 task.clear()
                 task.update({"kind": "subprocess", "command": "true"})
-        library = yaml.safe_dump(parsed, sort_keys=False)
+        library = _yaml_dump(parsed)
         # `$KRAFT_HOME/config/harnesses`, which is what
         # `paths.default_harnesses_dir()` reads -- *not* `templates_dir`, which
         # is `KRAFT_CONFIG_DIR` and a different directory under pytest
@@ -385,9 +400,9 @@ def write_harness_profiles(templates_dir: Path, profiles: dict) -> None:
     each other."""
     path = Path(templates_dir) / "harnesses.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
-    existing = (yaml.safe_load(path.read_text()) or {}) if path.is_file() else {}
+    existing = (_yaml_load(path.read_text()) or {}) if path.is_file() else {}
     merged = {**(existing.get("harnesses") or {}), **profiles}
-    path.write_text(yaml.safe_dump({**existing, "harnesses": merged}, sort_keys=False))
+    path.write_text(_yaml_dump({**existing, "harnesses": merged}))
 
 
 def write_agent_profiles(templates_dir: Path, profiles: dict) -> None:
@@ -395,8 +410,8 @@ def write_agent_profiles(templates_dir: Path, profiles: dict) -> None:
     Kraft-ps1ao), keeping its `harnesses:`."""
     path = Path(templates_dir) / "harnesses.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
-    existing = (yaml.safe_load(path.read_text()) or {}) if path.is_file() else {}
-    path.write_text(yaml.safe_dump({**existing, "profiles": profiles}, sort_keys=False))
+    existing = (_yaml_load(path.read_text()) or {}) if path.is_file() else {}
+    path.write_text(_yaml_dump({**existing, "profiles": profiles}))
 
 
 def harness_without(capability: str, harness_id: str = "claude"):
