@@ -20,6 +20,8 @@ export interface Health {
    *  `version` between `kraft admin update` and the restart that finishes it.
    *  Absent on an older server, whose `version` was the installed one. */
   installed?: string;
+  /** Public: a signature and count of the kraft-default drift lines, never their text. */
+  kraft_default?: { signature: string | null; count: number };
   /** The directory holding this instance's databases, logs and worktrees. */
   run_dir?: string;
   pid?: number;

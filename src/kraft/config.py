@@ -1358,6 +1358,9 @@ class Notify(_Model):
     enabled: bool = False
     url: str | None = None
     base_url: str | None = None
+    kraft_default: bool = Field(
+        True, description="Send one message when Kraft's own chains need attention"
+    )
     events: list[str] = Field(
         ["gate_requested", "work_item_needs_human"],
         json_schema_extra={"items": {"type": "string", "enum": sorted(BY_VALUE)}},

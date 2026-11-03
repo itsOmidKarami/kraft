@@ -71,6 +71,7 @@ PROBES: dict[str, dict[str, str]] = {
     "GET /api/drafts/{area}/{key}/fragment": {"area": "chains", "key": "default", "path": "spec"},
     "GET /api/editors": {},
     "GET /api/forges": {},
+    "GET /api/kraft-default": {},
     "GET /api/harnesses": {},
     "GET /api/harnesses/profiles": {},
     "GET /api/harnesses/providers": {},

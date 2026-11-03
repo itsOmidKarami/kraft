@@ -89,6 +89,10 @@
 .ng-offline-text { flex: 1; color: var(--text); }
 .ng-offline-warn { border-bottom-color: color-mix(in oklab, var(--warn) 40%, transparent); background: color-mix(in oklab, var(--warn) 10%, var(--bg)); }
 .ng-offline-warn .ng-offline-mark { background: var(--warn); }
+.ng-offline-tall { align-items: flex-start; }
+.ng-offline-tall .ng-offline-mark { margin-top: 1px; }
+.ng-offline-lines { margin: 4px 0; padding-left: 18px; overflow-wrap: anywhere; }
+.ng-offline-act { flex: none; }
 .ng-shortcuts-list { margin: 0; display: grid; gap: 8px; }
 .ng-shortcuts-page { margin: 12px 0 0; font-size: var(--fs-label); font-weight: 600; color: var(--text-sub); }
 .ng-shortcut { display: flex; align-items: center; gap: 12px; }

@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -290,6 +291,61 @@ class Notifier:
             raise
         except Exception:
             logger.exception("could not record notification_failed for %s", ev["work_item_id"])
+
+    def send_notice(
+        self, kind: str, text: str, *, on_sent: Callable[[], None] | None = None
+    ) -> bool:
+        """A server-wide message that belongs to no work item (`kraft_default_drift`).
+        Scheduled like `_dispatch`, so `stop()` cancels a pending send. `on_sent`
+        runs once the endpoint took it, or at once when the switch is off, so a
+        later enable does not replay old news. A failure only logs: no item to
+        hang a `notification_failed` event on, and the next start retries. Returns
+        whether a send was scheduled: False with no running loop (a sync caller)."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return False
+        task = asyncio.create_task(self._send_notice(kind, text, on_sent))
+        self._inflight.add(task)
+        task.add_done_callback(self._inflight.discard)
+        return True
+
+    async def _send_notice(self, kind: str, text: str, on_sent) -> None:
+        cfg = self._config
+        url = cfg.get("url")
+        if not (cfg.get("enabled") and url and cfg.get("kraft_default")):
+            if on_sent:
+                on_sent()
+            return
+        host = urlsplit(url).hostname if isinstance(url, str) else None
+        body = {
+            "work_item_id": None,
+            "title": "Kraft",
+            "type": kind,
+            "gate": None,
+            "url": self._base_url(),
+            "text": text,
+        }
+        for attempt in (0, 1):
+            if attempt:
+                await asyncio.sleep(self._retry_delay)
+            try:
+                async with httpx.AsyncClient(
+                    timeout=self._timeout, transport=self._transport
+                ) as client:
+                    res = await client.post(url, json=body)
+                if res.status_code < 400:
+                    if on_sent:
+                        on_sent()
+                    return
+                error = f"status {res.status_code}"
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 -- the URL is a secret: class name only
+                error = type(exc).__name__
+            logger.warning(
+                "%s notice to %s failed (attempt %d): %s", kind, host, attempt + 1, error
+            )
 
     async def send_test(self) -> dict:
         """`POST /notify/test`: a synchronous one-shot send, unlike `_dispatch`/`_send`

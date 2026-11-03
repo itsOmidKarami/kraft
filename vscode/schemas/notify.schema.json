@@ -167,6 +167,12 @@
       "title": "Events",
       "type": "array"
     },
+    "kraft_default": {
+      "default": true,
+      "description": "Send one message when Kraft's own chains need attention",
+      "title": "Kraft Default",
+      "type": "boolean"
+    },
     "url": {
       "anyOf": [
         {

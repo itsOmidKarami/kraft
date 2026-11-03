@@ -23,6 +23,13 @@ from kraft import db as kdb
 from kraft.vocab import BY_VALUE
 
 DEFAULT_EVENTS = ["gate_requested", "work_item_needs_human"]
+DEFAULTS = {
+    "enabled": False,
+    "url": None,
+    "base_url": None,
+    "kraft_default": True,
+    "events": DEFAULT_EVENTS,
+}
 #: A `notify.yaml` that does not parse. The token sits on the broken line, the
 #: one a parser error would quote back.
 MALFORMED = b'url: "https://hook.invalid/t0ken\n'
@@ -35,10 +42,13 @@ INVALID_UTF8 = b'url: "https://hook.invalid/t0ken"\nbad: "\xff\xfe garbage"\n'
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        (None, {"enabled": False, "url": None, "base_url": None, "events": DEFAULT_EVENTS}),
+        (
+            None,
+            DEFAULTS,
+        ),
         (
             "enabled: true\n",
-            {"enabled": True, "url": None, "base_url": None, "events": DEFAULT_EVENTS},
+            {**DEFAULTS, "enabled": True},
         ),
     ],
     ids=["no-file", "partial-file"],
@@ -494,21 +504,21 @@ def test_get_notify_never_returns_the_url(client):
             {"enabled": True, "url": "https://hook.invalid/t0ken"},
             {"events": ["gate_requested"]},
             {
+                **DEFAULTS,
                 "enabled": True,
                 "url": "https://hook.invalid/t0ken",
-                "base_url": None,
                 "events": ["gate_requested"],
             },
         ),
         (
             {"url": "https://hook.invalid/t0ken"},
             {"url": ""},
-            {"enabled": False, "url": None, "base_url": None, "events": DEFAULT_EVENTS},
+            DEFAULTS,
         ),
         (
             {"enabled": True, "url": "https://hook.invalid/t0ken"},
             {"url": ""},
-            {"enabled": False, "url": None, "base_url": None, "events": DEFAULT_EVENTS},
+            DEFAULTS,
         ),
     ],
     ids=["omitted-url-is-kept", "empty-url-clears", "empty-url-clears-and-disables"],

@@ -125,6 +125,9 @@ export const getTemplates = () => req<TemplateSummary[]>("/templates/chains");
 
 export const getHealth = () => req<Health>("/health");
 
+/** The kraft-default drift lines behind `health.kraft_default` (the public route carries only their count). */
+export const getKraftDefault = () => req<{ lines: string[]; signature: string | null }>("/kraft-default");
+
 export const getAnalytics = (params: { range: string; repo?: string; template?: string }) => {
   const qs = new URLSearchParams({ range: params.range });
   if (params.repo) qs.set("repo", params.repo);
