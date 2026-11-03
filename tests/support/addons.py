@@ -14,7 +14,7 @@ from pathlib import Path
 import yaml
 
 from kraft import cli, client
-from kraft.addons import builtin, fetch, manifest, repo_library
+from kraft.addons import builtin, fetch, manifest, repo_library, update
 from kraft.addons.config import AddonsLock
 from kraft.addons.load import InstalledAddon, repo_library_id
 from kraft.cli import addon as addon_cli
@@ -263,25 +263,28 @@ def install(
     listed = manifest.collection(manifest.parse(text, where), where)
     source = next(e.source for e in listed.addons if e.name == addon)
     extracted = fetch.extract_git(mirror, commit, source)
-    store = fetch.write_store(addons_dir, extracted)
-    addon_id = f"{addon}@{listed.name}"
-    config = read_yaml(config_dir / "addons.yaml", {"collections": {}, "addons": {}})
-    config["collections"][listed.name] = {"git": url, **({"ref": ref} if ref else {})}
-    config["addons"][addon_id] = {"as": alias} if alias else True
-    lock = read_yaml(config_dir / "addons.lock", {"lock_version": 1, "addons": {}})
-    lock["addons"][addon_id] = {
-        "namespace": alias or addon,
-        "ref": ref,
-        "git": url,
-        "commit": commit,
-        "source": source,
-        "tree": extracted.tree,
-        "digest": fetch.digest(extracted.files),
-        "version": json.loads(extracted.files[manifest.ADDON_JSON][1])["version"],
-        "updated_at": "2026-10-08T12:00:00Z",
-    }
-    write_yaml(config_dir / "addons.yaml", config)
-    write_yaml(config_dir / "addons.lock", lock)
+    # Held as a real install holds it: the server's store collection runs in the
+    # background and deletes a store the lock does not name yet.
+    with update.write_lock(addons_dir):
+        store = fetch.write_store(addons_dir, extracted)
+        addon_id = f"{addon}@{listed.name}"
+        config = read_yaml(config_dir / "addons.yaml", {"collections": {}, "addons": {}})
+        config["collections"][listed.name] = {"git": url, **({"ref": ref} if ref else {})}
+        config["addons"][addon_id] = {"as": alias} if alias else True
+        lock = read_yaml(config_dir / "addons.lock", {"lock_version": 1, "addons": {}})
+        lock["addons"][addon_id] = {
+            "namespace": alias or addon,
+            "ref": ref,
+            "git": url,
+            "commit": commit,
+            "source": source,
+            "tree": extracted.tree,
+            "digest": fetch.digest(extracted.files),
+            "version": json.loads(extracted.files[manifest.ADDON_JSON][1])["version"],
+            "updated_at": "2026-10-08T12:00:00Z",
+        }
+        write_yaml(config_dir / "addons.yaml", config)
+        write_yaml(config_dir / "addons.lock", lock)
     # The instance defines the harness the fixture add-ons require.
     harnesses = read_yaml(config_dir / "harnesses.yaml")
     if "codex" not in (harnesses.get("harnesses") or {}):
