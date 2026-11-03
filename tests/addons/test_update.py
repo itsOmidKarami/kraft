@@ -13,11 +13,12 @@ from support.addons import (
     drop_store,
     instance,
     make_collection,
+    others,
     publish,
 )
 from support.harness import git
 
-from kraft.addons import load, manifest, update
+from kraft.addons import builtin, load, manifest, update
 from kraft.addons.config import AddonEntry, AddonsLock
 from kraft.config import read_yaml, write_yaml
 from kraft.policy import PolicyError
@@ -205,7 +206,7 @@ def _written(home):
     return (
         (config_dir / "addons.yaml").read_text(),
         (config_dir / "addons.lock").read_text() if (config_dir / "addons.lock").exists() else "",
-        sorted(p.name for p in store.iterdir()) if store.is_dir() else [],
+        sorted(p.name for p in store.glob("*") if p.name != builtin.store_name()),
     )
 
 
@@ -226,7 +227,7 @@ def test_install_locks_the_resolved_commit(acme):
         "release",
         None,
     )
-    assert [(p.id, p.left_out) for p in load.installed(*home, verify=True)] == [(ID, None)]
+    assert [(p.id, p.left_out) for p in others(load.installed(*home, verify=True))] == [(ID, None)]
     mirror = next((home[1] / "mirrors").iterdir())
     assert git(mirror, "rev-parse", f"refs/kraft/pinned/{head}") == head
 
@@ -555,7 +556,7 @@ def test_a_left_out_addon_still_updates(acme):
 
     assert _run(home)[ID].outcome == "applied"
 
-    assert [(p.version, p.left_out) for p in load.installed(*home)] == [("1.1.0", None)]
+    assert [(p.version, p.left_out) for p in others(load.installed(*home))] == [("1.1.0", None)]
 
 
 def _alias_released(home):
@@ -618,7 +619,7 @@ def test_a_renamed_collection_is_refused(tmp_path):
 
     assert result.outcome == "refused"
     assert "now calls itself acme; re-add it under that name" in result.problems[0]
-    assert not (home[1] / "store").exists()
+    assert not [p for p in (home[1] / "store").glob("*") if p.name != builtin.store_name()]
 
 
 def test_an_unpublished_addon_stays_locked(acme):

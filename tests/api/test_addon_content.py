@@ -233,7 +233,11 @@ def test_the_library_view_carries_the_addons_components_beside_its_own(loaded):
     """Shown on the Library screen, and never among the files a publish writes."""
     view = loaded.get("/api/drafts/library/library").json()
 
-    assert view["addon_library"] == {
+    own = {
+        section: {k: v for k, v in found.items() if not k.startswith("kraft-default:")}
+        for section, found in view["addon_library"].items()
+    }
+    assert {section: found for section, found in own.items() if found} == {
         "tasks": {
             "release:base": {
                 "kind": "agent",

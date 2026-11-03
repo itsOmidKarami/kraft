@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from kraft import harness as harness_mod
 from kraft import storage
+from kraft.addons import builtin
 from kraft.api import config_check
 from kraft.drafts import authored, config, store
 from kraft.drafts import resolve as resolve_mod
@@ -163,6 +164,10 @@ def _profiles(d) -> dict:
 def _profile(d, name: str) -> dict:
     found = _profiles(d).get(name)
     if not isinstance(found, dict):
+        if name in builtin.harness_fallback(d.file("harnesses.yaml"))[1]:
+            raise OpError(
+                f"{name} comes from Kraft's package; define it in harnesses.yaml to change it"
+            )
         raise OpError(f"no profile {name!r}; known: {list(_profiles(d))}")
     return found
 
@@ -172,7 +177,9 @@ def _users(st, name: str) -> list[dict]:
     directly or in a `fallback:` list of their own."""
     return [
         {"chain": chain, "path": path}
-        for chain, path, task in config_check.selections(getattr(st, "library", None))
+        for chain, path, task in config_check.selections(
+            getattr(st, "library", None), st.templates_dir
+        )
         if task.profile == name or any(e.profile == name for e in task.fallback or ())
     ]
 
@@ -538,7 +545,7 @@ def resolve(st, key, raw, files, published) -> dict:
         )
     except TemplateEnvironmentError:
         table = None
-    chosen = config_check.selections(getattr(st, "library", None))
+    chosen = config_check.selections(getattr(st, "library", None), st.templates_dir)
     linted = _lint_problems(st, policy, chosen)
     escalation = _section(policy, "defaults").get("escalation_harness")
     out["problems"] += (
@@ -549,7 +556,11 @@ def resolve(st, key, raw, files, published) -> dict:
     )
     tasks = _tasks_by_harness(chosen, table)
 
-    profiles = _section(harnesses_yaml, "profiles")
+    # The packaged profiles a launch would use, labelled in this view only:
+    # the draft's own file never holds them.
+    with_package, packaged = builtin.harness_fallback(harnesses_yaml)
+    filled = table.filled if table is not None else set(packaged)
+    profiles = _section(with_package, "profiles")
     efforts = {
         name: {e.get("effort") for e in _providers_of(body).values()}
         for name, body in profiles.items()
@@ -577,6 +588,7 @@ def resolve(st, key, raw, files, published) -> dict:
                 "effort": next(iter(efforts[name])) if len(efforts[name]) == 1 else None,
                 "tasks": _users(st, name),
                 "used_by_fallback": _fallback_users(profiles, name),
+                **({"source": "package"} if name in filled else {}),
             }
             for name, body in profiles.items()
         },

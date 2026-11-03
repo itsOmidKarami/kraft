@@ -16,6 +16,7 @@ import yaml
 from support.harness import connected_repo, make_repo
 
 from kraft import auth, capabilities, cli, client, doctor, harness
+from kraft.addons import builtin
 
 
 def _names(rows):
@@ -647,8 +648,7 @@ def test_a_missing_agent_names_the_chains_it_stops(tmp_path, monkeypatch, chains
     (fake / "claude").chmod(0o755)
     monkeypatch.setenv("PATH", str(fake))
     row = _by_name(doctor._agent_checks(), "agent: gone")
-    assert row["ok"] is False
-    assert row["detail"] == f"`agy` is not on PATH — {says}"
+    assert (row["ok"], row["detail"]) == (False, f"`agy` is not on PATH — {says}")
 
 
 def test_a_selected_profile_harnesses_yaml_lacks_fails(tmp_path, monkeypatch):
@@ -743,8 +743,9 @@ def test_a_chain_that_does_not_resolve_fails_doctor_by_name(tmp_path, monkeypatc
 
 def test_the_chains_row_passes_when_every_chain_resolves(tmp_path, monkeypatch):
     _live(tmp_path, monkeypatch, {"a": "claude"}, ["a"])
+    shipped = len(list((builtin.source_dir() / "chains").glob("*.yaml")))  # resolved too
     row = _by_name(doctor._config_checks(), "chains")
-    assert row["ok"] is True and "1 chain" in row["detail"]
+    assert row["ok"] is True and f"{1 + shipped} chain" in row["detail"]
 
 
 @pytest.mark.parametrize(

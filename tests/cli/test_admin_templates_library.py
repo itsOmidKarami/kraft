@@ -11,7 +11,8 @@ import yaml
 from kraft import cli
 
 
-def test_the_table_lists_each_component_its_kind_and_the_chains_using_it(app, capsys):
+def test_the_table_lists_each_component_its_kind_and_the_chains_using_it(app, capsys, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "400")
     cli.main(["admin", "templates", "library"])
     rows = {line.split()[0]: line.split() for line in capsys.readouterr().out.splitlines()[1:]}
     assert rows["tasks.implementer"][1:] == ["tasks", "default,", "quick-task"]

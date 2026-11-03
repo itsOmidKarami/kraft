@@ -43,7 +43,8 @@ def ancestry(addon: InstalledAddon, addons: Sequence[InstalledAddon]) -> tuple[I
     link that does not hold: a parent not installed or not loaded, a parent
     outside its child's range, a cycle, a tree deeper than `MAX_DEPTH`, or an
     ancestor whose name a descendant has."""
-    from kraft.addons import manifest
+    from kraft import update
+    from kraft.addons import builtin, manifest
 
     by_id = {a.id: a for a in addons if a.repo_id is None}
     chain = [addon]
@@ -60,7 +61,9 @@ def ancestry(addon: InstalledAddon, addons: Sequence[InstalledAddon]) -> tuple[I
             raise InheritanceError(f"its parent {parent_id} is not installed")
         if parent.left_out is not None:
             raise InheritanceError(f"its parent {parent_id} is not loaded: {parent.left_out}")
-        if current.parent_range is not None:
+        # A checkout's version has no major to hold a range to.
+        skip = builtin.is_builtin(parent) and manifest.is_source_build(update.installed())
+        if current.parent_range is not None and not skip:
             try:
                 why = manifest.version_in_range(current.parent_range, parent.version)
             except ValueError as exc:
@@ -138,9 +141,12 @@ def _breaks(addon_id: str, sides: Mapping[str, Side]) -> list[tuple[str, str]]:
     its kept or locked side), as `(other id, why)`: its own range or missing
     parent first, then each child's range, in child-id order. A range that
     does not parse breaks, worded with its error."""
-    from kraft.addons import manifest
+    from kraft import update
+    from kraft.addons import builtin, manifest
 
-    def outside(range_: str, version: str) -> str | None:
+    def outside(range_: str, version: str, owner: str) -> str | None:
+        if owner == builtin.ID and manifest.is_source_build(update.installed()):
+            return None  # a checkout's version has no major to hold a range to
         try:
             return manifest.version_in_range(range_, version)
         except ValueError as exc:
@@ -152,7 +158,7 @@ def _breaks(addon_id: str, sides: Mapping[str, Side]) -> list[tuple[str, str]]:
         parent = sides.get(side.parent)
         if parent is None:
             out.append((side.parent, f"its parent {side.parent} is not installed"))
-        elif side.range is not None and (why := outside(side.range, parent.version)):
+        elif side.range is not None and (why := outside(side.range, parent.version, side.parent)):
             out.append(
                 (
                     side.parent,
@@ -163,7 +169,7 @@ def _breaks(addon_id: str, sides: Mapping[str, Side]) -> list[tuple[str, str]]:
     for child_id in sorted(sides):
         child = sides[child_id]
         if child_id != addon_id and child.parent == addon_id and child.range is not None:
-            if why := outside(child.range, side.version):
+            if why := outside(child.range, side.version, addon_id):
                 out.append(
                     (
                         child_id,

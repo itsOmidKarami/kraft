@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import functools
 from collections import ChainMap
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
@@ -1030,6 +1030,19 @@ class TemplateLibrary:
                 parent = self._all_chains.get(name)
                 name = parent.data.get("extends") if parent is not None else None
         return tuple(sorted(out))
+
+    def run_chain_ids(self, named: Collection[str] = ()) -> tuple[str, ...]:
+        """The chains an operator's checks judge: each chain except a built-in
+        `kraft-default:` one that no local chain extends and that is not in
+        `named` (their thin local `default` resolves to the same tasks under its
+        own id). Chains named by an open item or a trigger are not judged."""
+        return tuple(
+            id
+            for id in self.chain_ids
+            if not id.startswith("kraft-default:")
+            or id in named
+            or any(":" not in other for other in self.extended_by(id))
+        )
 
     def _expansion(self, id: str) -> _Resolution:
         raw = self._all_chains[id]

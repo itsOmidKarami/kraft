@@ -10,6 +10,7 @@ from support.addons import chain, install, instance, make_collection, publish
 
 from cli.test_addon import GOOD, TEAM, _run
 from kraft import update
+from kraft.addons import builtin
 
 #: The message validate gives for a parent it finds nowhere.
 NOT_FOUND = (
@@ -267,6 +268,7 @@ def test_validate_against_an_instance_writes_nothing(tmp_path, capsys, monkeypat
             if p.is_file()
         }
 
+    builtin.ensure_store(tmp_path / "run" / "addons")  # the one write a command that loads makes
     before = files()
     got, out = _run(capsys, "validate", *argv)
     assert got == 0 and files() == before, out

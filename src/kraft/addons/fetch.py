@@ -310,11 +310,12 @@ def extract_git(mirror: Path, commit: str, source: str) -> Extracted:
     return Extracted(files, tuple(skipped), tree.decode().strip())
 
 
-def extract_dir(root: Path) -> Extracted:
+def extract_dir(root: Path, *, allow_hardlinks: bool = False) -> Extracted:
     """The add-on in the directory `root`, as it stands: a directory
     collection. Nothing is followed: a symlink is reported as one, a file is
     opened with `O_NOFOLLOW`, and a layout file with a second hard link is
-    refused, so the bytes reviewed are the bytes in this directory."""
+    refused (unless `allow_hardlinks`: the installed package's own files may be
+    hard-linked from uv's cache), so the bytes reviewed are the bytes in this directory."""
     where = str(root)
     found: dict[str, tuple[str, int]] = {}
     for dirpath, dirnames, filenames in os.walk(root):
@@ -331,7 +332,7 @@ def extract_dir(root: Path) -> Extracted:
             if stat.S_ISLNK(st.st_mode):
                 found[rel] = ("120000", 0)
             elif stat.S_ISREG(st.st_mode):
-                if st.st_nlink > 1 and manifest.in_layout(rel):
+                if st.st_nlink > 1 and not allow_hardlinks and manifest.in_layout(rel):
                     raise AddonRefused(f"{where}/{rel}: has a second hard link")
                 found[rel] = ("100755" if st.st_mode & 0o100 else "100644", st.st_size)
         dirnames[:] = [d for d in entered if not (Path(dirpath) / d).is_symlink()]

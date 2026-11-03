@@ -54,6 +54,8 @@ try {
     daemon.kill("SIGTERM");
     await exited;
   }
+  // The built-in add-on's store under run/addons is read-only by design, so rm cannot remove it until it is writable.
+  spawnSync("chmod", ["-R", "u+w", home]);
   rmSync(home, { recursive: true, force: true });
 }
 process.exit(code);

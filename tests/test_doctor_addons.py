@@ -15,7 +15,7 @@ from support.addons import (
 )
 
 from kraft import doctor
-from kraft.addons import update
+from kraft.addons import builtin, update
 from kraft.config import read_yaml, write_yaml
 
 ID = "release@acme"
@@ -35,7 +35,7 @@ def installed(tmp_path, monkeypatch):
         config_dir=config_dir,
         addons_root=addons_dir,
     )
-    (store,) = (addons_dir / "store").iterdir()
+    (store,) = (p for p in (addons_dir / "store").iterdir() if p.name != builtin.store_name())
     return config_dir, addons_dir, store, repo
 
 

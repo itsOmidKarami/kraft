@@ -28,7 +28,7 @@ def test_the_published_collection_validates_against_the_shipped_config(tmp_path)
     report = validate(REPO, (_shipped_config(tmp_path), tmp_path / "addons"))
 
     assert report["problems"] == []
-    assert {a["name"] for a in report["addons"]} == {"kraft-default", *CHILDREN}
+    assert {a["name"] for a in report["addons"]} == set(CHILDREN)
 
 
 @pytest.fixture(scope="module")

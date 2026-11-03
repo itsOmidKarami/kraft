@@ -11,36 +11,24 @@ from support.addons import (
     AGENT,
     a_terminal,
     accept_repo_library,
+    addon_cli_home,
     chain,
     child_manifest,
     edit_addons_yaml,
     install,
-    instance,
     make_collection,
     publish,
     repo_with_library,
 )
+from support.addons import run_addon_cli as _run
 
 from kraft import cli
 from kraft.addons import fetch
-from kraft.addons.config import AddonsLock
 from kraft.cli import addon as addon_cli
 from kraft.client import actions
-from kraft.config import read_yaml, write_yaml
+from kraft.config import write_yaml
 
 GOOD = {"release": {"library": {"tasks": {"base": AGENT}}, "chains": {"ship": chain("base")}}}
-
-
-def _run(capsys, *argv):
-    try:
-        cli.main(["admin", "addon", *argv])
-        code = 0
-    except SystemExit as exc:
-        code = exc.code
-    out = capsys.readouterr()
-    if isinstance(code, str):  # `SystemExit("error: ...")`: printed, and exit 1
-        return 1, out.out + out.err + code
-    return code, out.out + out.err
 
 
 # ── collections, install, update ──
@@ -52,42 +40,8 @@ TWO = {**GOOD, "tools": GOOD["release"]}
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     """This process's Kraft home, no add-on installed, and the collection
-    `acme` (a git repository publishing `release` and `tools`) not yet added.
-    `home.reloads` counts the reloads asked of a running server."""
-    config_dir, addons_dir = instance(tmp_path)
-    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(config_dir))
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(addons_dir.parent))
-    monkeypatch.delenv("KRAFT_WORK_ITEM_ID", raising=False)
-    reloads = []
-
-    async def reload_addons():
-        reloads.append(1)
-        return {}
-
-    monkeypatch.setattr(addon_cli.client, "reload_addons", reload_addons)
-
-    class Home:
-        config = config_dir
-        addons = addons_dir
-        repo = make_collection(tmp_path, TWO)
-
-        def yaml(self):
-            return read_yaml(config_dir / "addons.yaml")
-
-        def locked(self, addon_id=ID):
-            return AddonsLock.load(config_dir / "addons.lock").addons.get(addon_id)
-
-        def written(self):
-            lock = config_dir / "addons.lock"
-            store = addons_dir / "store"
-            return (
-                (config_dir / "addons.yaml").read_text(),
-                lock.read_text() if lock.exists() else "",
-                sorted(p.name for p in store.iterdir()) if store.is_dir() else [],
-            )
-
-    Home.reloads = reloads
-    return Home()
+    `acme` (publishing `release` and `tools`) not yet added."""
+    return addon_cli_home(tmp_path, monkeypatch, TWO)
 
 
 @pytest.fixture

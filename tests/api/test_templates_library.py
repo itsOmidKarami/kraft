@@ -56,7 +56,7 @@ def _components(client) -> dict[str, dict]:
 
 def test_the_library_lists_every_component_with_the_chains_that_use_it(client, templates_dir):
     body = client.get("/api/templates/library").json()
-    components = {c["id"]: c for c in body["components"]}
+    components = {c["id"]: c for c in body["components"] if "kraft-default:" not in c["id"]}
     shipped = yaml.safe_load((templates_dir / "library.yaml").read_text())
 
     assert body["file"] == str(templates_dir / "library.yaml")

@@ -235,6 +235,7 @@ bundle:
     mkdir -p src/kraft/_bundled
     cp -R frontend/dist src/kraft/_bundled/web
     cp -R config src/kraft/_bundled/config
+    cp -R config src/kraft/_bundled/kraft-default
     # The agent skills live in plugins/kraft/ so they can be published beside
     # kraft-lite in one marketplace. An installed Kraft has no plugins/ beside
     # it, so they ride into the wheel here with the SPA.
@@ -245,8 +246,10 @@ bundle:
     # them out of the commit, not out of the wheel or the homes it seeds.
     rm -f src/kraft/_bundled/config/access.yaml
     rm -f src/kraft/_bundled/config/notify.yaml
-    # `config/.kraft/` publishes config/ as the add-on kraft-default; a seeded
-    # home is the operator's own config, not an add-on.
+    rm -f src/kraft/_bundled/kraft-default/access.yaml
+    rm -f src/kraft/_bundled/kraft-default/notify.yaml
+    # The seed source has no manifest (a seeded home is the operator's own
+    # config, not an add-on); the built-in is read from `_bundled/kraft-default`.
     rm -rf src/kraft/_bundled/config/.kraft
 
 # Refresh Kraft Lite's bundled copy of the packaged library (library.yaml and

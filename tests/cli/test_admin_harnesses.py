@@ -48,12 +48,8 @@ def test_the_agent_profiles_follow_with_their_model_per_provider(app, capsys, mo
     assert tiers[0].split() == ["PROFILE", "EFFORT", "MODEL", "USED", "BY"]
     rows = {line.split()[0]: line.split() for line in tiers[1:]}
     assert set(rows) == {"deep", "strong", "fast"}
-    assert rows["fast"][1:] == [
-        "medium",
-        "claude=haiku,",
-        "fake=haiku",
-        "tasks.triage_review_feedback",
-    ]
+    own = [t.rstrip(",") for t in rows["fast"][1:] if ":" not in t]  # not the built-in's tasks
+    assert own == ["medium", "claude=haiku", "fake=haiku", "tasks.triage_review_feedback"]
     assert "tasks.implementer," in rows["strong"]
 
 

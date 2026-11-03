@@ -51,7 +51,8 @@ def test_reload_templates_returns_the_template_set(app):
 def test_reload_prints_the_count(app, capsys):
     cli.main(["admin", "reload"])
     out = capsys.readouterr().out
-    assert "reloaded 2 template(s)" in out
+    valid = asyncio.run(client.reload_templates())["valid"]  # the built-in's chains are in it
+    assert f"reloaded {len(valid)} template(s)" in out
 
 
 def test_reload_reports_invalid_templates_and_exits_1(app, capsys):
@@ -730,7 +731,7 @@ def test_client_refuses_a_mismatched_run_dir(app, monkeypatch):
 
 def test_reload_exits_1_on_a_chain_that_does_not_resolve(app, capsys):
     """Kraft-n1zp9: the library parses, one chain does not resolve -- reload
-    used to print "reloaded 2 template(s)" and exit 0."""
+    used to print "reloaded N template(s)" and exit 0."""
     templates_dir = Path(os.environ["KRAFT_CONFIG_DIR"])
     (templates_dir / "chains" / "broken.yaml").write_text(
         "id: broken\nnodes:\n  - {id: n, extends: no_such_node}\n"
