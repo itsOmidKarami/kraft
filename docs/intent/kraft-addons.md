@@ -693,7 +693,7 @@ origin: src/kraft/cli/admin.py §update_prechecks
 ## REQ packaged-profiles-are-labelled-in-settings
 
 WHEN a home's `harnesses.yaml` lacks a harness or profile that `kraft-default` requires, Settings → Harnesses SHALL list the profiles filled in from Kraft's package labelled as coming from the package and SHALL refuse to edit, rename, copy or remove them, and publishing a draft SHALL NOT write them into the home's file.
-enforced-by: tests/drafts/test_harnesses_builtin.py::test_settings_labels_packaged_profiles, frontend/src/ng/harnesses/panes.test.tsx::profile and entry panes
+enforced-by: tests/drafts/test_harnesses_builtin.py::test_settings_labels_packaged_profiles, frontend/src/ng/harnesses/panes.test.tsx::profile and entry panes, frontend/src/ng/phone/areas/Harnesses.test.tsx::a profile (M.1)
 origin: src/kraft/drafts/harnesses.py §resolve
 
 ## REQ drift-reaches-the-operator

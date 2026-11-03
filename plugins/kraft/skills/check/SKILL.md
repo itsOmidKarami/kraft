@@ -15,7 +15,7 @@ carry the drift this skill exists to narrate. Doctor rows not listed here (the
 server, the MCP token) are `kraft:doctor`'s; say so rather than diagnosing them.
 
 - `lint` - every chain in `~/.kraft/config/chains/` that does not resolve
-  against `library.yaml`, each with its reason: a reference to a component that
+  against the library and the built-in `kraft-default` add-on, each with its reason: a reference to a component that
   isn't declared, a component extending one of another kind, a policy a chain
   widens past `policy.yaml`. It exits 1 on any error. A chain that does not
   resolve cannot be filed, so this comes first.

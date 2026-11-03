@@ -254,12 +254,12 @@ vscode/           the VS Code extension
 install.sh        the one-line installer the README points to
 ```
 
-**Kraft's own collection.** `config/.kraft/addon.json` publishes `config/`'s
-`library.yaml` and `chains/` as the add-on `kraft-default`, and `addons/` holds
-the add-ons that build on it. An installed instance sees an update only when an
-add-on's `version` changes, so a change to `config/library.yaml`,
-`config/chains/` or an add-on under `addons/` raises that add-on's `version` in
-the same pull request: patch for a fix, minor for something new, major for a
+**Kraft's own collection.** `kraft-default` (`config/`'s `library.yaml` and
+`chains/`) ships inside Kraft and takes Kraft's own version, so a change to
+`config/` needs no version raise. `addons/` holds the add-ons that build on it,
+and `.kraft/collection.json` lists them. An installed instance sees an update
+only when an add-on's `version` changes, so a change to an add-on under
+`addons/` raises that add-on's `version` in the same pull request: patch for a fix, minor for something new, major for a
 removed or renamed chain or task. When the change uses something the last
 release cannot read, raise `requires.kraft` too.
 `dev/check_addon_versions.py` (in `just ci-checks` and CI's lint job) fails when
