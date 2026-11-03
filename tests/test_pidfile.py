@@ -154,8 +154,13 @@ def test_only_the_servers_own_command_line_counts_as_kraft(cmdline, server):
     [
         SimpleNamespace(uids=lambda: SimpleNamespace(real=os.getuid() + 1)),
         SimpleNamespace(uids=lambda: (_ for _ in ()).throw(psutil.AccessDenied(1))),
+        SimpleNamespace(
+            uids=lambda: SimpleNamespace(real=os.getuid()),
+            create_time=lambda: 0.0,
+            cmdline=lambda: (_ for _ in ()).throw(SystemError("proc_cmdline set an exception")),
+        ),
     ],
-    ids=["another-uid", "access-denied"],
+    ids=["another-uid", "access-denied", "macos-system-error"],
 )
 def test_another_users_process_is_never_this_users_server(tmp_path, monkeypatch, process):
     """pid 1, say: a server this user started runs as this user."""
