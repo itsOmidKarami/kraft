@@ -222,7 +222,7 @@ def walk(monkeypatch, capsys):
     def run(cwd: Path, *args: str):
         monkeypatch.chdir(cwd)
         capsys.readouterr()
-        kl.main(list(args))
+        assert kl.main(list(args)) == 0
         out = capsys.readouterr().out
         return json.loads(out) if out.strip() else {}
 
