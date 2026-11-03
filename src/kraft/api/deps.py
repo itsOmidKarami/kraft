@@ -505,7 +505,12 @@ def refresh_drift(st) -> None:
             if notifier.send_notice(
                 "kraft_default_drift",
                 text,
-                on_sent=lambda: drift.mark_notified(addons, signature),
+                # A retry can land after a reload moved or cleared the state.
+                on_sent=lambda: (
+                    drift.mark_notified(addons, signature)
+                    if (st.kraft_default or {}).get("signature") == signature
+                    else None
+                ),
             ):
                 st.kraft_default_sent = signature
 
