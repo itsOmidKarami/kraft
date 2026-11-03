@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Stand-in for `claude` headless. Invoked as:
 #   fake-claude.sh -p <instr> --append-system-prompt <ctx> --output-format stream-json --verbose
-# CWD is the worktree. Modes via KRAFT_FAKE_CLAUDE: fix (default) | noop | slow.
+# CWD is the worktree. Modes via KRAFT_FAKE_CLAUDE: fix (default) | noop | slow | stall.
+# `stall` is `noop` that, as a fix-loop repair, still makes an empty commit. The
+# default `fix` mode edits calc.py only once, so a second fix round edits
+# nothing and a `just dev` fix loop stops after its first round: that is the
+# product's behaviour (a round that changed nothing stops), not a fake bug.
 # The reported status defaults to "done"; KRAFT_FAKE_CLAUDE_STATUS overrides it,
 # and KRAFT_FAKE_CLAUDE_CONCERNS / KRAFT_FAKE_CLAUDE_QUESTION set the field that
 # goes with done_with_concerns / needs_context.
@@ -148,6 +152,13 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 field() { printf '%s\n' "$ctx" | sed -n "s/^$1: //p" | head -1; }
+
+if [ "$mode" = "stall" ]; then
+  case "$(field 'Hook point')" in
+    *.fix_loop.judge) ;;
+    *.fix_loop.*) git -c user.name=t -c user.email=t@t commit --allow-empty -qm stall >/dev/null 2>&1 || true ;;
+  esac
+fi
 
 # The summary goes where the context says; Kraft records it itself, so the
 # result file reports no session_summary_ref.
