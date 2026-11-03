@@ -574,7 +574,13 @@ def _addon_checks(templates: Path) -> list[dict]:
     # The built-in is not an add-on people manage: counted out, named only when broken.
     found = [p for p in found if p.left_out is not None or not builtin.is_builtin(p)]
     broken = [f"{p.id}: {p.left_out}" for p in found if p.left_out is not None and not p.quiet]
-    notes = [f"{p.id} {p.left_out}" for p in found if p.quiet and p.left_out != "is disabled"]
+    # An old GitHub copy is named by the kraft-default row instead.
+    shipped = {builtin.SHIPS_IT.format(id=p.id) for p in found}
+    notes = [
+        f"{p.id} {p.left_out}"
+        for p in found
+        if p.quiet and p.left_out != "is disabled" and p.left_out not in shipped
+    ]
     auto = []
     for addon_id, locked in lock.addons.items():
         if addon_id not in listed.addons:
