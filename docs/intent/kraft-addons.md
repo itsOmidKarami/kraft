@@ -692,12 +692,12 @@ origin: src/kraft/cli/admin.py §update_prechecks
 
 ## REQ packaged-profiles-are-labelled-in-settings
 
-WHEN a home's `harnesses.yaml` lacks a harness or profile that `kraft-default` requires, Settings → Harnesses SHALL list the profiles filled in from Kraft's package labelled as coming from the package and SHALL refuse to edit, rename, copy or remove them, and publishing a draft SHALL NOT write them into the home's file.
-enforced-by: tests/drafts/test_harnesses_builtin.py::test_settings_labels_packaged_profiles, frontend/src/ng/harnesses/panes.test.tsx::profile and entry panes
+WHEN a home's `harnesses.yaml` lacks a harness or profile that `kraft-default` requires, Settings → Harnesses SHALL list the harnesses and profiles filled in from Kraft's package labelled as coming from the package and SHALL refuse to edit, rename, copy or remove them, and publishing a draft SHALL NOT write them into the home's file.
+enforced-by: tests/drafts/test_harnesses_builtin.py::test_settings_labels_packaged_profiles, tests/drafts/test_harnesses_builtin.py::test_every_op_on_a_packaged_profile_is_refused[set], tests/drafts/test_harnesses_builtin.py::test_every_op_on_a_packaged_profile_is_refused[rename], tests/drafts/test_harnesses_builtin.py::test_every_op_on_a_packaged_profile_is_refused[remove], tests/drafts/test_harnesses_builtin.py::test_every_op_on_a_packaged_profile_is_refused[copy], tests/drafts/test_harnesses_builtin.py::test_a_packaged_harness_is_labelled_and_refuses_edits, frontend/src/ng/harnesses/panes.test.tsx::profile and entry panes
 origin: src/kraft/drafts/harnesses.py §resolve
 
 ## REQ drift-reaches-the-operator
 
 WHEN the server starts or reloads and the kraft-default drift lines are non-empty and their state differs from the last one notified, it SHALL show the state on `/api/health` (signature and count) and the lines on `GET /api/kraft-default`, SHALL send one webhook notice when the webhook and `kraft_default` are enabled, and SHALL NOT notify the same state twice.
-enforced-by: tests/api/test_health_drift.py::test_a_full_copy_shows_on_health_and_the_route, tests/api/test_health_drift.py::test_the_route_is_refused_without_a_session, tests/test_notify_drift.py::test_a_new_state_is_sent_once, tests/test_notify_drift.py::test_a_changed_state_is_sent_again, tests/test_notify_drift.py::test_two_overlapping_refreshes_send_once, tests/test_notify_drift.py::test_a_cleared_state_notifies_again_when_it_returns
+enforced-by: tests/api/test_health_drift.py::test_a_full_copy_shows_on_health_and_the_route, tests/api/test_health_drift.py::test_startup_sends_one_drift_notice, tests/test_notify_drift.py::test_a_send_that_lands_after_the_state_cleared_marks_nothing, tests/api/test_health_drift.py::test_the_route_is_refused_without_a_session, tests/test_notify_drift.py::test_a_new_state_is_sent_once, tests/test_notify_drift.py::test_a_changed_state_is_sent_again, tests/test_notify_drift.py::test_two_overlapping_refreshes_send_once, tests/test_notify_drift.py::test_a_cleared_state_notifies_again_when_it_returns
 origin: src/kraft/api/deps.py §refresh_drift
