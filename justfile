@@ -334,8 +334,10 @@ test *ARGS:
         echo "error: every test the given args name was deselected (by testmon, or by -k/-m), so none ran -- pass --no-testmon to run them" >&2
         exit 1
     fi
-    # Under xdist an emptied selection prints no "deselected" count, only "5 warnings in 2s".
-    if [ "$status" -eq 0 ] && [ -n "$*" ] && ! grep -E ' in [0-9.]+s' "$log" | tail -1 | grep -qE '[0-9]+ (passed|failed|skipped|xfailed|xpassed|errors?)'; then
+    # Under xdist an emptied selection prints no "deselected" count, only "5 warnings in 2s",
+    # and `-q` hides its "N workers [0 items]" header. No summary at all (--help) is not a fail.
+    summary=$(grep -E ' in [0-9.]+s' "$log" | tail -1)
+    if [ -n "$*" ] && [ -n "$summary" ] && ! printf '%s\n' "$summary" | grep -qE '[0-9]+ (passed|failed|skipped|xfailed|xpassed|errors?|tests? collected)'; then
         echo "error: no test ran for the given args (testmon deselected them all?) -- pass --no-testmon to run them" >&2
         exit 1
     fi
