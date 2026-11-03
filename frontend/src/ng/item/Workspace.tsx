@@ -204,6 +204,8 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
     focus: (node) => dispatch({ type: "focus", node }),
     attempt: place.attempt,
     setAttempt: (attempt) => go({ ...place, attempt }),
+    agent: place.agent,
+    setAgent: (agent) => go({ ...place, agent }),
     onDoc: (d: WorkItemDocument) => go({ ...place, doc: d.document_id, q: undefined }),
     onArtifact: () => setArtifact(true),
     onProduced: (kind, path) => setProduced({ kind, path }),

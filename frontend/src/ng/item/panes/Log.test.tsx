@@ -1,8 +1,9 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubFetch } from "../testkit";
-import { Log, POLL_MS } from "./Log";
+import { AGENT_LINES_EARLIER, Log, POLL_MS } from "./Log";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 const lines = [
@@ -99,5 +100,61 @@ describe("Log", () => {
     rerender(<Log workItemId="w1" sessionId="s1" running title="t" />);
     expect(await screen.findByText(/reading cache\.py/)).toBeInTheDocument();
     expect(screen.queryByText("No log for this attempt yet.")).toBeNull();
+  });
+
+  describe("sub-agents", () => {
+    const sub = { agent_label: "Explore codebase", agent_type: "Explore" };
+    const agentLines = [
+      { n: 1, t: null, src: "agent", text: "main says hi", summary: "main says hi" },
+      { n: 2, t: null, src: "agent", text: "x", summary: "↳ Explore codebase: Grep(foo)", agent: "a1", ...sub },
+      { n: 3, t: null, src: "agent", text: "x", summary: "↳ Explore codebase: done", agent: "a1", agent_status: "completed", ...sub },
+      { n: 4, t: null, src: "agent", text: "x", summary: "↳ Review diff: Read(a.py)", agent: "a2", agent_label: "Review diff" },
+      { n: 5, t: null, src: "stdout", text: "plain stdout line" },
+    ];
+    const serve = (rows: unknown[]) => stubFetch({ "GET /work-items/w1/sessions/s1/log": [200, { session_id: "s1", status: "running", lines: rows }] } as never);
+    const Controlled = ({ onAgent, start }: { onAgent?: (a: string | undefined) => void; start?: string }) => {
+      const [agent, setAgent] = useState(start);
+      return <Log workItemId="w1" sessionId="s1" running={false} title="t" agent={agent} onAgent={(a) => { setAgent(a); onAgent?.(a); }} />;
+    };
+
+    it("shows no agent menu when no row has an agent", async () => {
+      stubFetch(answer as never);
+      render(<Log workItemId="w1" sessionId="s1" running={false} title="t" />);
+      await screen.findByText(/reading cache\.py/);
+      expect(screen.queryByRole("button", { name: /^agent:/ })).toBeNull();
+    });
+
+    it("filters to one sub-agent from the agent menu", async () => {
+      serve(agentLines);
+      const onAgent = vi.fn();
+      render(<Controlled onAgent={onAgent} />);
+      await screen.findByText(/main says hi/);
+      await userEvent.click(screen.getByRole("button", { name: "agent: All" }));
+      await userEvent.click(screen.getByRole("menuitemradio", { name: /Explore codebase/ }));
+      expect(onAgent).toHaveBeenCalledWith("a1");
+      expect(screen.queryByText(/main says hi/)).toBeNull();
+      expect(screen.queryByText(/Review diff/)).toBeNull();
+      expect(screen.getAllByText(/↳ Explore codebase/)).toHaveLength(2);
+      expect(screen.getByText(/plain stdout line/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "agent: Explore codebase" })).toBeInTheDocument();
+    });
+
+    it("says when a sub-agent's lines are before the part shown", async () => {
+      serve(agentLines);
+      render(<Controlled start="gone" />);
+      expect(await screen.findByText(new RegExp(AGENT_LINES_EARLIER))).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Download the whole log" })).toBeInTheDocument();
+    });
+
+    it("copies what is shown, prefix and all", async () => {
+      serve(agentLines);
+      const writeText = vi.fn();
+      vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+      render(<Controlled start="a1" />);
+      await screen.findByText(/plain stdout line/);
+      await userEvent.click(screen.getByRole("button", { name: "copy" }));
+      expect(writeText.mock.calls[0][0]).toContain("↳ Explore codebase: Grep(foo)");
+      expect(writeText.mock.calls[0][0]).not.toContain("main says hi");
+    });
   });
 });

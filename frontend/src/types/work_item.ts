@@ -584,6 +584,12 @@ export interface LogLine {
   /** present only on the marker row (`n: -1`) a reader gets in place of the
    *  lines it skipped, when the log is over the server's read cap */
   truncated?: { lines: number; bytes: number };
+  /** present only on a Claude Code sub-agent's row: its id, description and
+   *  type; `agent_status` (Claude Code's own word) on its updated/finished rows */
+  agent?: string;
+  agent_label?: string;
+  agent_type?: string;
+  agent_status?: string;
 }
 
 export interface GateAttempt {
