@@ -18,6 +18,13 @@ Run `KL state`. Only proceed if `kind` is `gate` and `status` is `blocked`;
 otherwise stop and invoke `kraft-lite:next`, because `approve` answers a gate
 whether or not the user has seen it.
 
+If `gate.reviewer` is set and `gate.review` is null, the gate's reviewer checks
+first (`auto_review_mode: checks_first`): run it before the user sees the gate,
+as section 1a says. With `gate.review` set, this round's review is done: read
+that report and lead with it below, as "Reviewer: ready for you", or "Reviewer:
+could not decide" when its verdict was ignored. A report file that has gone
+missing is a review to run again.
+
 Then show the user what the gate is about: `gate.message`, and the file at
 `gate.artifact_path`, the newest file of kind `gate.artifact` the run produced
 (when it is null, find the file and say so); at the slice gate
@@ -46,6 +53,39 @@ resolve, and pass `--chain repo:<new id>`. Invoke `kraft-lite:start` with
 and plan the earlier gates approved, so the new chain starts at the chain revision rather
 than writing and approving them again. The old chain then stays unfinished in
 `chains`, and the user decides what to do with it.
+
+## 1a. A reviewer that checks first
+
+Run `gate.reviewer` by its `kind`, as `kraft-lite:next` runs a task, in a
+subagent with the model its `hints` name, so it reads the work fresh. Its
+instruction: the gate's id, `gate.message`, the document it is about (the file
+section 1 finds; with no `gate.artifact`, the worktree and the diff), and that it
+checks before the user and cannot approve. It must not change, write or commit
+any file. It reports one verdict with its `concerns`: `pass` hands the gate to
+the user, the default whenever it is unsure; `reject` only for a concrete defect,
+its `concerns` written as an instruction for whoever redoes the work.
+
+Before it runs, note `git status --porcelain`, `git rev-parse HEAD` and a
+checksum of the gate's document, and compare them after. Then:
+
+- It changed something: its verdict is ignored. Tell the user what it changed,
+  and leave the changes for them.
+- `reject` with `concerns`: `KL reject --note "Reviewer: <concerns>"`, with no
+  question to the user: the chain asked for this. Tell the user the reviewer sent
+  the work back, and why, then section 3. Three cases make it a `pass` instead,
+  each said to the user: `KL summary` already shows 3 `rejections` on the node it
+  would land on (`gate.reject_to`, else the nearest exec node before the gate),
+  so the reviewer keeps sending it back; `sliced` is not null, where which slices
+  to redo is the user's call; and the slice gate, where the slicing is theirs.
+- Anything else is a `pass`: a `reject` with no `concerns`, an `approve`, or a
+  reviewer bound to `skip` or `subprocess`, whose `why` or output is its note.
+  The reviewer never clears a gate.
+
+After a `pass` or an ignored verdict, write the verdict and `concerns` (or what
+it changed) to `.kraft-lite/reviews/<chain-id>-<gate node>.md` and record it, so
+a cleared session does not review again: `KL mark --reviewed <that file>`. Then
+present the gate as below, with the reviewer's note first. The user decides it
+as any other gate.
 
 ## 2. Record the answer
 

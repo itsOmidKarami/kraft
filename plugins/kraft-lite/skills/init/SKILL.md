@@ -59,9 +59,10 @@ the diff show the difference, and let the user choose. `start` refuses a file it
 cannot use and names the entry, but catching a gap now is cheaper.
 
 Then print the path and say it is meant to be edited and committed. Tell the user
-to add `.kraft-lite/decisions/`, `.kraft-lite/messages/` and `.kraft-lite/proposals/`
-to `.gitignore`: a sliced run writes its decisions log, messages and proposals
-there, and they are not for the repo. After a migrate, `.kraft-lite/registry.yaml.migrated`
+to add `.kraft-lite/decisions/`, `.kraft-lite/messages/`, `.kraft-lite/proposals/`
+and `.kraft-lite/reviews/` to `.gitignore`: a sliced run writes its decisions log,
+messages and proposals there, and a gate's reviewer its reports, and they are not
+for the repo. After a migrate, `.kraft-lite/registry.yaml.migrated`
 goes there too, or is deleted. `bindings.yaml` stays committed, and so does
 `.kraft-lite/harnesses/`, what a sliced run learned about a harness's tools.
 

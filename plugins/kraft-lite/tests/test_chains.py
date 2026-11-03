@@ -365,6 +365,14 @@ def _looped(loop: str) -> str:
     )
 
 
+def _reviewed(review: str) -> str:
+    """A build node, then a gate whose own keys are `review`."""
+    return (
+        "nodes:\n  - {id: a, kind: exec, tasks: [{id: t, extends: worker}]}\n"
+        f"  - {{id: g, kind: gate, message: Go, {review}}}\n"
+    )
+
+
 def _task_chain(task: str) -> str:
     return f"nodes:\n  - {{id: a, kind: exec, tasks: [{task}]}}\n"
 
@@ -654,6 +662,21 @@ def _rejecting(rejected: str, before: str = "", tasks: str = MERGE_TASK, extra: 
             },
             "'extends' cycle: loop_a -> loop_b -> loop_a",
             id="component_cycle",
+        ),
+        pytest.param(
+            {"c": _reviewed("auto_review_mode: checks_first, auto_review: {extends: worker}")},
+            "g.auto_review: must be a task with an id",
+            id="reviewer_without_id",
+        ),
+        pytest.param(
+            {"c": _reviewed("auto_review: {id: r, kind: subprocess, command: make lint}")},
+            "g.auto_review: must be an agent task",
+            id="reviewer_not_an_agent",
+        ),
+        pytest.param(
+            {"c": _reviewed("auto_review_mode: checks_frist")},
+            "g.auto_review_mode: must be 'decides' or 'checks_first', not 'checks_frist'",
+            id="reviewer_mode_unknown",
         ),
     ],
 )

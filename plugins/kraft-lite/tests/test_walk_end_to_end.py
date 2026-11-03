@@ -102,6 +102,8 @@ def test_state_reports_a_gate_node(walk, kl_cli, tmp_path):
         "reject_to": "spec",
         "chain_finalized": False,
         "slice_gate": False,
+        "reviewer": None,
+        "review": None,
     }
     [spec] = [r for r in stored(tmp_path).values() if r["title"] == "spec"]
     assert [x for x in spec["labels"] if x.startswith(kl.ARTIFACT_LABEL)] == [
@@ -530,3 +532,82 @@ def test_a_rewind_banks_the_wait_it_interrupts(kl_cli, tmp_path):
 
     node = kl_cli(tmp_path, "summary")["nodes"][1]
     assert node["blocked_seconds"] is not None, "the gate held someone, then was rewound"
+
+
+REVIEWED_CHAIN = """\
+nodes:
+  - {id: build, kind: exec, tasks: [{id: t, kind: agent, prompt: Go.}]}
+  - id: check
+    kind: gate
+    message: Approve the build.
+    artifact: plan
+    auto_review_mode: %s
+    auto_review: {id: reviewer, extends: gate_reviewer}
+"""
+
+
+def reviewed_chain(root: Path, mode: str) -> str:
+    """A chain file, so its `extends` resolve against the bundled library."""
+    path = root / "reviewed.yaml"
+    path.write_text(REVIEWED_CHAIN % mode)
+    return str(path)
+
+
+def at_reviewed_gate(kl_cli, root: Path, mode: str) -> dict:
+    """A reviewed chain started with its reviewer bound, and walked to its gate:
+    what `start` printed."""
+    (root / ".kraft-lite").mkdir()
+    (root / ".kraft-lite" / "bindings.yaml").write_text(
+        "tasks:\n  gate_reviewer: {kind: prompt, prompt: Check it.}\n"
+    )
+    started = kl_cli(root, "start", "--title", "t", "--chain", reviewed_chain(root, mode))
+    kl_cli(root, "close")
+    kl_cli(root, "gate")
+    return started
+
+
+def test_a_checks_first_reviewer_runs_once_per_round(kl_cli, tmp_path):
+    started = at_reviewed_gate(kl_cli, tmp_path, "checks_first")
+
+    assert started["unused_bindings"] == [], "the reviewer is a task bindings reach"
+    gate = kl_cli(tmp_path, "state")["gate"]
+    assert gate["review"] is None
+    reviewer = gate["reviewer"]
+    assert (reviewer["path"], reviewer["source"]) == (
+        "check.auto_review",
+        "bindings:tasks.gate_reviewer",
+    )
+
+    kl_cli(tmp_path, "mark", "--reviewed", str(tmp_path / "r.md"))
+    assert kl_cli(tmp_path, "state")["gate"]["review"] == "r.md"
+
+    kl_cli(tmp_path, "reject", "--note", "Reviewer: redo it")
+    kl_cli(tmp_path, "close")
+    kl_cli(tmp_path, "gate")
+    assert kl_cli(tmp_path, "state")["gate"]["review"] is None, "the redone work is reviewed again"
+
+
+def test_a_reviewer_that_decides_is_read_past(kl_cli, tmp_path):
+    """Lite never lets an agent clear a gate."""
+    started = at_reviewed_gate(kl_cli, tmp_path, "decides")
+
+    assert started["unused_bindings"] == ["tasks.gate_reviewer"]
+    assert kl_cli(tmp_path, "state")["gate"]["reviewer"] is None
+    refused = kl_cli(tmp_path, "mark", "--reviewed", "r.md", ok=False)
+    assert "has no checks-first reviewer" in refused.stderr
+
+
+def test_a_gate_frozen_before_reviewers_still_walks(kl_cli, tmp_path):
+    ref = reviewed_chain(tmp_path, "checks_first")
+    kl_cli(tmp_path, "start", "--title", "t", "--chain", ref)
+    [frozen] = (tmp_path / kl.STATE_DIR / "chains").glob("*.json")
+    chain = json.loads(frozen.read_text())
+    for node in chain["nodes"]:
+        node.pop("auto_review", None)
+        node.pop("auto_review_mode", None)
+    frozen.write_text(json.dumps(chain))
+
+    kl_cli(tmp_path, "close")
+    kl_cli(tmp_path, "gate")
+
+    assert kl_cli(tmp_path, "state")["gate"]["reviewer"] is None

@@ -71,6 +71,11 @@ def only(*nodes: dict):
             id="gate_without_message",
         ),
         pytest.param(
+            edited("plan_approval", lambda n: n.update(auto_review={})),
+            "gate node 'plan_approval''s auto_review has a task with no path",
+            id="gate_reviewer_without_path",
+        ),
+        pytest.param(
             edited("implementation", lambda n: n["steps"][0]["tasks"][0].pop("path")),
             "exec node 'implementation' has a task with no path",
             id="task_without_path",

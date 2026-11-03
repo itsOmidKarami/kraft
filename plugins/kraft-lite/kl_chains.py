@@ -657,8 +657,20 @@ class _Validator:
                 if node.get("on_merge_rejected") is not None:
                     self.rejected(node, seen, final)
             elif kind == "gate":
-                if isinstance(node.get("auto_review"), dict):
-                    self.task(node["auto_review"], f"{id}.auto_review")
+                # As Kraft's `GateNode`: an agent reviewer with an id, one of two modes.
+                mode = node.get("auto_review_mode")
+                if mode not in (None, "decides", "checks_first"):
+                    raise self.fail(
+                        f"{id}.auto_review_mode",
+                        f"must be 'decides' or 'checks_first', not {mode!r}",
+                    )
+                review = node.get("auto_review")
+                if review is not None:
+                    if not isinstance(review, dict) or not isinstance(review.get("id"), str):
+                        raise self.fail(f"{id}.auto_review", "must be a task with an id")
+                    if review.get("kind") != "agent":
+                        raise self.fail(f"{id}.auto_review", "must be an agent task")
+                    self.task(review, f"{id}.auto_review")
                 target = node.get("reject_to")
                 if target is not None and seen.get(target) != "exec":
                     raise self.fail(id, f"reject_to {target!r} must name an earlier execution node")
@@ -824,6 +836,11 @@ def _freeze(library: Library, chain_id: str, source: str, expanded: dict) -> dic
                     "artifact": node.get("artifact"),
                     "reject_to": node.get("reject_to"),
                     "chain_finalized": node.get("chain_finalized") is True,
+                    # Optional keys: a chain frozen before them has neither.
+                    "auto_review": task(node["auto_review"], f"{id}.auto_review")
+                    if isinstance(node.get("auto_review"), dict)
+                    else None,
+                    "auto_review_mode": node.get("auto_review_mode"),
                 }
             )
             continue
