@@ -14,6 +14,7 @@ CHANGED = builtin.Preview(
     review.Review(builtin.ID, "2.5.0", "2.6.0", reach=("gate removed: review",)), (), None
 )
 UNCHANGED = builtin.Preview(review.Review(builtin.ID, "2.5.0", "2.6.0"), (), None)
+OLDER = builtin.Preview(None, (), "v2.6.0 ships no built-in kraft-default")
 OFFLINE = builtin.Preview(None, (), "cannot compare: no network")
 BREAKS = builtin.Preview(UNCHANGED.review, ("chains/default.yaml: node 'verify' is gone",), None)
 
@@ -80,6 +81,7 @@ def test_no_terminal_declines(monkeypatch, setup) -> None:
         pytest.param(OFFLINE, "kraft-default: cannot compare", "held", id="cannot-compare"),
         pytest.param(CHANGED, None, "changed", id="changed-is-recorded"),
         pytest.param(UNCHANGED, None, None, id="unchanged-records-nothing"),
+        pytest.param(OLDER, None, None, id="ships-no-builtin-is-not-held"),
     ],
 )
 def test_unattended_prechecks_and_kraft_default(

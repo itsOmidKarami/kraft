@@ -35,6 +35,11 @@ def _wheel(path: Path, members: dict[str, bytes]) -> Path:
             ValueError,
             id="too-many-files",
         ),
+        pytest.param(
+            {PREFIX + f"chains/{n}.yaml": b"0" * fetch.MAX_YAML for n in range(21)},
+            ValueError,
+            id="too-many-bytes",
+        ),
     ],
 )
 def test_from_wheel(tmp_path: Path, members, expect) -> None:
