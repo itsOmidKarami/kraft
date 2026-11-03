@@ -346,14 +346,19 @@ def test_the_builtin_wins_the_namespace_over_a_lock_that_still_holds_a_copy(tmp_
     ("version", "digest", "expect"),
     [
         pytest.param("2.6.0", None, None, id="current-is-rebuilt"),
+        pytest.param("2.6.0", None, ("worker",), id="a-worker-fails-cleanly"),
         pytest.param(
             "2.5.0", "f" * 64, ("no longer installed", "retry"), id="old-release-says-retry"
         ),
     ],
 )
-def test_restoring_the_builtin(tmp_path, version, digest, expect):
+def test_restoring_the_builtin(tmp_path, monkeypatch, version, digest, expect):
     config, addons = _home(tmp_path)
     mine = builtin.entry(addons / "store")
+    shutil.rmtree(mine.root, ignore_errors=True)
+    if expect == ("worker",):
+        monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "x")
+        expect = ("does not write it",)
     if digest:
         mine = load.InstalledAddon(
             mine.id,
@@ -364,7 +369,8 @@ def test_restoring_the_builtin(tmp_path, version, digest, expect):
             source=mine.source,
         )
     if expect is None:
-        assert load.restore(mine, config, addons) == builtin.ensure_store(addons)
+        assert not mine.root.exists()
+        assert load.restore(mine, config, addons) == mine.root
         assert mine.root.is_dir()
         return
     with pytest.raises(load.RestoreError) as err:

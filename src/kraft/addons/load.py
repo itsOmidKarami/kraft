@@ -915,7 +915,10 @@ def _restore(addon: InstalledAddon, config_dir: Path, root: Path) -> Path:
     what = f"{addon.id} {addon.version}"
     if builtin.is_builtin(addon):
         if addon.root.name == builtin.store_name():
-            return builtin.ensure_store(root)
+            try:
+                return builtin.ensure_store(root)
+            except (update.Busy, OSError, RuntimeError) as exc:
+                raise RestoreError(f"{what}: {exc}") from exc
         raise RestoreError(
             f"{what}: that release's kraft-default is no longer installed; "
             "retry the item to move it onto this Kraft's"
