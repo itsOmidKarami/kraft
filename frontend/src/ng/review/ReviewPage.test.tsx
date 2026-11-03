@@ -46,12 +46,11 @@ describe("threads on files not drawn", () => {
   const thread = (id: string, file_path: string) => ({ id, work_item_id: "w1", gate: null, node_id: null, file_path, side: "new", start_line: 40, end_line: 40, quote: null, anchor_sha: "h", label: null, state: "open", resolved_at: null, created_at: "t", draft: false, comments: [{ id: `c${id}`, thread_id: id, review_id: null, author: "you", attempt: null, body: `on ${file_path}`, suggestion: null, claim: null, created_at: "t", draft: false }] });
 
   it.each([
-    ["from the last review", "", "?from=base&file=c.py"],
-    ["to an attempt", "?from=base&to=attempt:1", "?from=base&file=c.py"],
-    ["of one node", "?from=base&nodes=implementation", "?from=base&file=c.py"],
-    // The whole change already: no file here is anywhere else.
-    ["of the whole change (none: nothing to offer)", "?from=base", null],
-  ])("shows a thread only with its file, and offers the whole change for one on a file a comparison %s leaves out", async (_, at, widened) => {
+    ["offers the whole change off a comparison from the last review", "", true],
+    ["offers the whole change off a comparison to an attempt", "?from=base&to=attempt:1", true],
+    ["offers the whole change off a comparison of one node", "?from=base&nodes=implementation", true],
+    ["offers nothing on the whole change itself", "?from=base", false],
+  ])("shows a thread only with its file; %s", async (_, at, offered) => {
     vi.spyOn(http, "request").mockImplementation(async (p) =>
       String(p).includes("/compare")
         ? { status: 200, body: { from: { target: "last_review", sha: "h1" }, to: { target: "latest", sha: null }, rebased: false, files: [file("a.py"), file("b.py")], groups: [], diff: PATCH, untracked: [], truncated: false, ignore_whitespace: false, diff_max_bytes: 100000 } }
@@ -71,8 +70,12 @@ describe("threads on files not drawn", () => {
     await screen.findByRole("region", { name: "b.py" });
     expect(screen.getByRole("region", { name: "Threads on files not in this comparison" })).toHaveTextContent("on b.py");
     const widen = screen.queryByRole("button", { name: "Show the whole change" });
-    if (widen) fireEvent.click(widen);
-    expect(widen && search).toBe(widened);
+    expect(!!widen).toBe(offered);
+    if (!offered) return;
+    fireEvent.click(widen!);
+    expect(search).toBe("?from=base&file=c.py");
+    // The button goes with the narrow comparison; the focus lands on the one now shown.
+    expect(document.activeElement?.textContent).toMatch(/^Compare from base/);
   });
 });
 

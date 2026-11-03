@@ -56,7 +56,8 @@ export function useComments({ itemId, compare, files, drawn = files, patch, thre
 
   const visible = new Set<string>();
   for (const f of drawn) {
-    visible.add(`${f.path}|top`);
+    // A file with no patch (cut for size) draws no block: its file threads go to the list.
+    if (patch.has(f.path)) visible.add(`${f.path}|top`);
     for (const h of patch.get(f.path)?.hunks ?? [])
       for (const l of h.lines) {
         if (l.old !== null) visible.add(`${f.path}|old|${l.old}`);
