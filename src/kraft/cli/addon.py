@@ -558,6 +558,9 @@ def _edit(
     config_dir, addons_dir = flow.home()
     path = config_dir / AddonsConfig.FILE
     try:
+        # The built-in's store is written here if missing: `change` loads add-ons,
+        # and a write under the held lock would wait on it until `Busy`.
+        load.installed(config_dir, addons_dir)
         with addon_update.write_lock(addons_dir):
             raw = read_yaml(path, {})
             for section in ("collections", "addons"):

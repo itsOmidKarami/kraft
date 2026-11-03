@@ -110,3 +110,21 @@ def test_validate_finds_the_builtin_parent(tmp_path, home, capsys, monkeypatch, 
         monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "empty"))
     code, out = run_addon_cli(capsys, "validate", str(repo))
     assert code == 0 and "error" not in out and "could not be found" not in out, out
+
+
+def test_enable_writes_the_missing_builtin_store_outside_the_lock(
+    tmp_path, home, capsys, monkeypatch
+):
+    from kraft.addons import update
+
+    monkeypatch.setattr(update, "LOCK_WAIT_S", 0.3)  # the bug is a wait; keep it short
+    repo = make_collection(tmp_path / "x", {"kid": ON_BUILTIN})
+    install(home.config, home.addons, repo, "kid")
+    raw = read_yaml(home.config / "addons.yaml")
+    raw["addons"]["kid@acme"] = {"enabled": False}
+    write_yaml(home.config / "addons.yaml", raw)
+    shutil.rmtree(home.addons / "store" / builtin.store_name(), ignore_errors=True)
+
+    code, out = run_addon_cli(capsys, "enable", "kid@acme")
+    assert code == 0, out
+    assert "another add-on change is running" not in out
