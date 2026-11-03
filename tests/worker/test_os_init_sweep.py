@@ -264,13 +264,14 @@ def test_launch_sweeps_when_the_command_exits(tmp_path, markers, started):
     p = subprocess.Popen(
         [*argv, "--", *sandbox, "-I", "-S", "-c", HOLDER], stdout=subprocess.PIPE, text=True, env={}
     )
-    started.append(psutil.Process(int(p.stdout.readline())))
+    pid = int(p.stdout.readline())
+    try:
+        started.append(psutil.Process(pid))
+    except psutil.NoSuchProcess:
+        pass  # the sweep beat us to it: the orphan only ends when it is swept
     assert p.wait(timeout=30) == 0
-    assert (gone(started[0]), markers["a"].exists(), (tmp_path / "tmp").exists()) == (
-        True,
-        False,
-        False,
-    )
+    swept = gone(started[0]) if started else True
+    assert (swept, markers["a"].exists(), (tmp_path / "tmp").exists()) == (True, False, False)
 
 
 # Every generation forks and exits, hopping pid for pid; it ends itself after 8 s, so a
