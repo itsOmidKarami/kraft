@@ -130,6 +130,9 @@ describe("harness pane", () => {
     const p = await pane("claude");
     expect(p).toHaveTextContent("From Kraft's package. Define it in harnesses.yaml to change it.");
     expect(p).toHaveTextContent("acceptEdits");
+    // about the whole harness, so it comes before the first section heading
+    const note = within(p).getByText(/^From Kraft's package/);
+    expect(note.compareDocumentPosition(within(p).getByRole("heading", { name: "Who may use it" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     for (const role of ["radio", "switch", "textbox", "combobox"] as const) expect(within(p).queryByRole(role)).toBeNull();
   });
 

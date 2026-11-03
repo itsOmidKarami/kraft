@@ -173,8 +173,8 @@ export function HarnessPane({ h, lane, onLane, onProfile, onYaml, ...c }: Common
       onCollapse={c.onCollapse}
       onExpand={c.onExpand}
     >
-      <Head>{ACCESS_SECTION}</Head>
       {h.source === "package" && <Note>From Kraft's package. Define it in harnesses.yaml to change it.</Note>}
+      <Head>{ACCESS_SECTION}</Head>
       {h.source === "package" ? (
         <div className="hn-field">
           <Kv k="tasks may" v={ACCESS_WORD[h.state]} />
