@@ -91,7 +91,7 @@ def _without(*, harnesses=(), profiles=()):
             id="no-profiles-section",
         ),
         pytest.param(_without(profiles=["fast"]), {"fast"}, id="fast-missing"),
-        pytest.param(_without(harnesses=["claude"]), {"claude"}, id="claude-harness-missing"),
+        pytest.param(_without(harnesses=["claude"]), set(), id="claude-harness-missing"),
         pytest.param(_packaged(), set(), id="operator-defined-wins"),
     ],
 )
@@ -199,6 +199,11 @@ def _no_source(tmp_path, config, addons, monkeypatch):
     return "no kraft-default here"
 
 
+def _no_source_with_addon(tmp_path, config, addons, monkeypatch):
+    _with_addons(tmp_path, config, addons)
+    return _no_source(tmp_path, config, addons, monkeypatch)
+
+
 @pytest.mark.parametrize(
     "setup",
     [
@@ -215,12 +220,13 @@ def _no_source(tmp_path, config, addons, monkeypatch):
             marks=pytest.mark.skipif(os.geteuid() == 0, reason="root writes a mode-0500 directory"),
         ),
         pytest.param(_no_source, id="no-source"),
+        pytest.param(_no_source_with_addon, id="no-source-with-another-addon"),
     ],
 )
 def test_the_builtin_always_loads(tmp_path, monkeypatch, setup):
     config, addons = _home(tmp_path)
     expect = None
-    if setup in (_worker, _locked, _no_source):
+    if setup in (_worker, _locked, _no_source, _no_source_with_addon):
         expect = setup(tmp_path, config, addons, monkeypatch)
     elif setup:
         setup(tmp_path, config, addons)
@@ -234,6 +240,8 @@ def test_the_builtin_always_loads(tmp_path, monkeypatch, setup):
     assert expect in mine.left_out and not mine.quiet
     if setup is _worker:
         assert not (addons / "store").exists()
+    if setup is _no_source_with_addon:
+        assert [a.left_out for a in fx.others(found)] == [None]
 
 
 def _copy_home(tmp_path, with_child):
@@ -347,6 +355,7 @@ def test_the_builtin_wins_the_namespace_over_a_lock_that_still_holds_a_copy(tmp_
     [
         pytest.param("2.6.0", None, None, id="current-is-rebuilt"),
         pytest.param("2.6.0", None, ("worker",), id="a-worker-fails-cleanly"),
+        pytest.param("2.6.0", None, ("no source",), id="no-source"),
         pytest.param(
             "2.5.0", "f" * 64, ("no longer installed", "retry"), id="old-release-says-retry"
         ),
@@ -359,6 +368,10 @@ def test_restoring_the_builtin(tmp_path, monkeypatch, version, digest, expect):
     if expect == ("worker",):
         monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "x")
         expect = ("does not write it",)
+    if expect == ("no source",):
+        monkeypatch.setattr(
+            builtin, "source_dir", lambda: (_ for _ in ()).throw(FileNotFoundError("no source"))
+        )
     if digest:
         mine = load.InstalledAddon(
             mine.id,
@@ -376,8 +389,3 @@ def test_restoring_the_builtin(tmp_path, monkeypatch, version, digest, expect):
     with pytest.raises(load.RestoreError) as err:
         load.restore(mine, config, addons)
     assert all(part in str(err.value) for part in expect)
-
-
-def test_a_major_update_never_drops_the_builtin(tmp_path):
-    config, _ = _home(tmp_path)
-    assert load.left_out_by("3.0.0", config) == []

@@ -585,7 +585,7 @@ def test_doctor_checks_every_selected_profile(tmp_path, monkeypatch):
     _live(tmp_path, monkeypatch, {"a": "claude", "b": "codex"}, ["a", "b"])
     rows = doctor._agent_checks()
     # b is codex on its default model, which prices.json cannot price.
-    assert {r["name"] for r in rows} == {"agent: a", "agent: b", "cost: b", "agent: claude"}
+    assert {r["name"] for r in rows} == {"agent: a", "agent: b", "cost: b"}
 
 
 def test_doctor_does_not_check_a_profile_nothing_selects(tmp_path, monkeypatch):
@@ -625,11 +625,6 @@ def test_a_profile_s_own_executable_is_what_is_checked(tmp_path, monkeypatch):
 def test_a_missing_agent_names_the_chains_it_stops(tmp_path, monkeypatch, chains, says):
     """Only the chains that select a profile need its executable: saying "no
     chain can run" for one custom chain sent an operator after the rest."""
-    if says == "no chain can run":  # the built-in's chains are left out
-        real = doctor._resolved_chains
-        monkeypatch.setattr(
-            doctor, "_resolved_chains", lambda d: [c for c in real(d) if ":" not in c.id]
-        )
     live = _live(tmp_path, monkeypatch, {"a": "claude", "gone": "claude"}, ["a", "gone"])
     (live / "harnesses.yaml").write_text(
         yaml.safe_dump(

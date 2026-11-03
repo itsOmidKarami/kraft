@@ -556,8 +556,9 @@ def resolve(st, key, raw, files, published) -> dict:
 
     # The packaged profiles a launch would use, labelled in this view only:
     # the draft's own file never holds them.
-    filled = table.filled if table is not None else set(builtin.harness_fallback(harnesses_yaml)[1])
-    profiles = _section(builtin.harness_fallback(harnesses_yaml)[0], "profiles")
+    with_package, packaged = builtin.harness_fallback(harnesses_yaml)
+    filled = table.filled if table is not None else set(packaged)
+    profiles = _section(with_package, "profiles")
     efforts = {
         name: {e.get("effort") for e in _providers_of(body).values()}
         for name, body in profiles.items()

@@ -71,21 +71,29 @@ def required() -> dict[str, tuple[str, ...]]:
 def harness_fallback(data: object) -> tuple[object, tuple[str, ...]]:
     """`data` (a parsed `harnesses.yaml`) with each harness and profile the
     built-in requires, and the file lacks, filled in from the packaged
-    `harnesses.yaml`; and the names filled. An operator's own definition is
+    `harnesses.yaml`; and the profile names filled. An operator's own definition is
     never replaced, and nothing is written to their file."""
     if not isinstance(data, dict):
         return data, ()
-    packaged = yaml.safe_load((source_dir() / "harnesses.yaml").read_text()) or {}
+    try:
+        packaged = yaml.safe_load((source_dir() / "harnesses.yaml").read_text()) or {}
+        needs = required()
+    except (OSError, fetch.AddonRefused, KeyError):
+        return data, ()  # no source: the built-in is left out, and fills nothing
     out, filled = dict(data), []
-    for section, names in required().items():
+    for section, names in needs.items():
         have = out.get(section)
         if have is not None and not isinstance(have, dict):
             continue  # the file's own error to name
         have = have or {}
-        missing = {n: packaged[section][n] for n in names if n not in have}
+        try:
+            missing = {n: packaged[section][n] for n in names if n not in have}
+        except (KeyError, TypeError):
+            return data, ()  # a packaged file that lacks what the manifest requires
         if missing:
             out[section] = {**have, **missing}
-            filled += missing
+            if section == "profiles":  # the label is for profiles only
+                filled += missing
     return out, tuple(filled)
 
 

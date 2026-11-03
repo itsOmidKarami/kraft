@@ -624,8 +624,6 @@ def instance_problem(
     except ConfigError:
         return None  # that file's own check says why
     if builtin_tree:
-        from kraft.addons import builtin
-
         harnesses = builtin.harness_fallback(harnesses)[0]
     for section, what, wanted in (
         ("harnesses", "harness", requires.harnesses),
@@ -914,11 +912,11 @@ def _restore(addon: InstalledAddon, config_dir: Path, root: Path) -> Path:
         return _restore_repo_library(addon, config_dir, root)
     what = f"{addon.id} {addon.version}"
     if builtin.is_builtin(addon):
-        if addon.root.name == builtin.store_name():
-            try:
+        try:
+            if addon.root.name == builtin.store_name():
                 return builtin.ensure_store(root)
-            except (update.Busy, OSError, RuntimeError) as exc:
-                raise RestoreError(f"{what}: {exc}") from exc
+        except (update.Busy, OSError, RuntimeError, fetch.AddonRefused) as exc:
+            raise RestoreError(f"{what}: {exc}") from exc
         raise RestoreError(
             f"{what}: that release's kraft-default is no longer installed; "
             "retry the item to move it onto this Kraft's"

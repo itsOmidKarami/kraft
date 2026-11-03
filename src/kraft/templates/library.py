@@ -1031,6 +1031,18 @@ class TemplateLibrary:
                 name = parent.data.get("extends") if parent is not None else None
         return tuple(sorted(out))
 
+    @property
+    def run_chain_ids(self) -> tuple[str, ...]:
+        """The chains an operator's checks judge: each chain except a built-in
+        `kraft-default:` one that no local chain extends (their thin local
+        `default` resolves to the same tasks under its own id)."""
+        return tuple(
+            id
+            for id in self.chain_ids
+            if not id.startswith("kraft-default:")
+            or any(":" not in other for other in self.extended_by(id))
+        )
+
     def _expansion(self, id: str) -> _Resolution:
         raw = self._all_chains[id]
         resolution = _Resolution(self, raw.source)

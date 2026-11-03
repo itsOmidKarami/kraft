@@ -963,14 +963,15 @@ def _pairing_checks(live: Path, table: HarnessProfileTable, harnesses) -> list[d
 
 
 def _resolved_chains(live: Path) -> list:
-    """Every chain of the live library that resolves; `[]` when the library
-    itself does not load."""
+    """Every chain the operator runs of the live library that resolves (not a
+    built-in chain no local chain extends); `[]` when the library itself does
+    not load."""
     try:
         library = TemplateLibrary.from_yaml_dir(live, addons=addons_load.installed(live))
     except TemplateLibraryError:
         return []
     chains = []
-    for id in library.chain_ids:
+    for id in library.run_chain_ids:
         try:
             chains.append(library.resolve_chain(id))
         except TemplateLibraryError:

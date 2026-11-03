@@ -49,6 +49,18 @@ def test_the_builtin_is_not_an_addon_verbs_to_change(home, capsys, argv):
     assert home.written() == before and home.reloads == []
 
 
+def test_the_refusal_comes_before_the_worker_check(home, capsys, monkeypatch):
+    monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "w1")
+    code, out = run_addon_cli(capsys, "update", builtin.ID)
+    assert code == 1 and builtin.REFUSED in out and "worker" not in out
+
+
+@pytest.mark.parametrize("flags", [["--check"], ["-y"]], ids=["check", "apply"])
+def test_a_bare_update_skips_the_builtin_silently(home, capsys, flags):
+    code, out = run_addon_cli(capsys, "update", *flags)
+    assert code == 0 and builtin.REFUSED not in out and builtin.ID not in out
+
+
 def test_a_collection_named_kraft_is_refused(tmp_path, home, capsys):
     repo = make_collection(tmp_path / "x", {"kid": KID}, name=builtin.COLLECTION)
     code, out = run_addon_cli(capsys, "collection", "add", repo.as_uri())

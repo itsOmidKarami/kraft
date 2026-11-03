@@ -546,7 +546,7 @@ def _check_notify(path, data, ctx):
 def selections(library: TemplateLibrary | None) -> list[tuple[str, str, AgentTask]]:
     """(chain, task path, task) for every agent task of every chain that resolves."""
     out = []
-    for chain in library.chain_ids if library is not None else ():
+    for chain in library.run_chain_ids if library is not None else ():
         try:
             resolved = library.resolve_chain(chain)
         except TemplateLibraryError:
@@ -649,7 +649,7 @@ def runner_issues(templates_dir: Path, library: TemplateLibrary) -> list[Templat
     except config_mod.ConfigError:
         return []  # doctor's workers.yaml row says why
     issues = []
-    for chain_id in library.chain_ids:
+    for chain_id in library.run_chain_ids:
         try:
             resolved = library.resolve_chain(chain_id)
         except TemplateLibraryError:
