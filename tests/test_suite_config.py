@@ -4,6 +4,9 @@ does what it claims, checked by running a throwaway suite under it."""
 from __future__ import annotations
 
 import ast
+import errno
+import os
+import socket
 import tomllib
 from pathlib import Path
 
@@ -157,3 +160,16 @@ def test_every_kraft_child_process_gets_its_env_from_child_env():
         for n in ast.walk(ast.parse((_ROOT / "tests" / "cli" / "test_admin.py").read_text()))
         if isinstance(n, ast.Call)
     )
+
+
+def test_the_kraft_port_every_test_starts_with_is_held_and_answers_nothing():
+    """`_isolated_kraft_home` pins KRAFT_PORT to a number no daemon is on. It is
+    held for the whole test, so a listener another xdist worker starts cannot
+    take it (CI once answered a "no server" check with another test's relay),
+    and it never listens, so a call to it is refused."""
+    port = int(os.environ["KRAFT_PORT"])
+    with socket.socket() as taker, pytest.raises(OSError) as raised:
+        taker.bind(("127.0.0.1", port))
+    assert raised.value.errno == errno.EADDRINUSE
+    with socket.socket() as caller:
+        assert caller.connect_ex(("127.0.0.1", port)) == errno.ECONNREFUSED

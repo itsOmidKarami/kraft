@@ -432,7 +432,7 @@ _SUITE_SWITCHES = frozenset({"KRAFT_E2E", "KRAFT_E2E_REQUIRE", "KRAFT_TEST_REAL_
 
 
 @pytest.fixture(autouse=True)
-def _isolated_kraft_home(tmp_path, tmp_path_factory, monkeypatch):
+def _isolated_kraft_home(request, tmp_path, tmp_path_factory, monkeypatch):
     """No test may reach the operator's real `~/.kraft`.
 
     `kraft_home()` falls back to `~/.kraft` (paths.py:16). Only KRAFT_RUN_DIR and
@@ -457,10 +457,15 @@ def _isolated_kraft_home(tmp_path, tmp_path_factory, monkeypatch):
     # doesn't opt into the `app` fixture's ASGI transport falls through to a
     # real HTTP call in `client.base_url()`, and a developer machine running
     # `kraft` for real answers it — turning an expected ConnectError into a
-    # live 401. Pin an ephemeral port nothing is listening on yet instead.
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind(("127.0.0.1", 0))
-        monkeypatch.setenv("KRAFT_PORT", str(probe.getsockname()[1]))
+    # live 401. Pin an ephemeral port nothing is listening on yet instead --
+    # held, bound and never listening, until the test ends: released, another
+    # xdist worker's listener can take the number, and a "no server" check is
+    # answered by it (CI saw a 403 from another test's relay). Calls to it are
+    # still refused. Tests that serve on a port pick their own (`on_a_free_port`).
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    request.addfinalizer(probe.close)
+    probe.bind(("127.0.0.1", 0))
+    monkeypatch.setenv("KRAFT_PORT", str(probe.getsockname()[1]))
     # No test may reach the release feed either. `doctor`'s version check and the
     # notice at boot both call out to gitlab.com, which would make this suite
     # depend on that host being up and cost every offline run a timeout. The
