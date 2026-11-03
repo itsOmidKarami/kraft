@@ -414,6 +414,7 @@ def rich_items(repos: list[Path]) -> list[dict]:
         desc=paragraphs(5, "reconciliation job"),
     )
     add("Move the avatar upload to the CDN KRAFT_HANG", "running", b, key="avatar")
+    add("Map the plugin loader KRAFT_SUBAGENTS KRAFT_HANG", "running", a)
 
     for title, cost, repo in [
         ("Fix add() so the tests pass", 0.42, a),

@@ -38,6 +38,9 @@ async def _walk_from(node, item_on, tmp_path, monkeypatch):
     monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
     argv_log = tmp_path / "argv.log"
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_ARGV_LOG", str(argv_log))
+    # Every repair commits something, so the walk reaches the stall it is about
+    # rather than the stop for a fix round that changed nothing.
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "stall")
     monkeypatch.setattr(
         forge.run,
         "resolve",

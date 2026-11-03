@@ -189,7 +189,7 @@ def test_the_fix_after_a_steered_retry_still_marks_the_finding_repeat(tmp_path, 
 
     It does NOT carry the repeat *note* here -- see the sibling test.
     """
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")  # never patches the code
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "stall")  # never patches the code
     log = tmp_path / "prompts.log"
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(log))
     call_dir = Path(tempfile.mkdtemp(dir=tmp_path))

@@ -144,27 +144,34 @@ def _measured(node_id="verify", **finding):
 # --------------------------------------------------------------------------
 
 
-def _loop_chain(tmp_path):
+def _loop_chain(tmp_path, *, edits_uncommitted=False):
     """`review` is the fix-loop node under test, measured by the scripted
-    reviewer. No `env_setup` node: V1 prepares the worktree first."""
+    reviewer. No `env_setup` node: V1 prepares the worktree first.
+    `edits_uncommitted`: the repair is a subprocess appending to an untracked
+    file, so a round changes the checkout without moving HEAD (an agent's
+    leftovers are swept into a commit, a subprocess's are not)."""
     reviewer = {
         "id": "review",
         "kind": "subprocess",
         "command": shlex.join([sys.executable, str(_FAKE_REVIEWER)]),
     }
-    return v1_seeded_chain(
-        tmp_path / "templates", [v1_fix_loop_node("review", reviewer)], agent_command=_FAKE
-    )
+    node = v1_fix_loop_node("review", reviewer)
+    if edits_uncommitted:
+        code = "open('left.txt', 'a').write('x')"
+        node["fix_loop"]["tasks"] = [
+            {"id": "fix", "kind": "subprocess", "command": shlex.join([sys.executable, "-c", code])}
+        ]
+    return v1_seeded_chain(tmp_path / "templates", [node], agent_command=_FAKE)
 
 
-def _run_loop(tmp_path, monkeypatch, entries, *, attempts=3):
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+def _run_loop(tmp_path, monkeypatch, entries, *, attempts=3, edits_uncommitted=False):
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "stall")
     plan = tmp_path / "review-plan.json"
     plan.write_text(json.dumps(entries))
     monkeypatch.setenv("KRAFT_FAKE_REVIEW_PLAN", str(plan))
     return run_chain(
         tmp_path,
-        _loop_chain(tmp_path),
+        _loop_chain(tmp_path, edits_uncommitted=edits_uncommitted),
         policy=loop_policy(tmp_path, "review.fix_loop", attempts=attempts),
         title="review me",
     )
@@ -434,6 +441,7 @@ def test_a_downgraded_repeat_does_not_let_the_loop_exit(tmp_path, monkeypatch):
             {"status": "done", "findings": [_finding(_FIRST)]},
             {"status": "done", "findings": [_finding("reworded", severity="minor", same_as=_TAG)]},
         ],
+        edits_uncommitted=True,
     )
     # It stayed in the loop rather than completing on the downgrade.
     assert out["result"] == "needs_human"
@@ -451,6 +459,7 @@ def test_the_reviewers_own_rating_is_recorded_not_erased(tmp_path, monkeypatch):
             {"status": "done", "findings": [_finding(_FIRST)]},
             {"status": "done", "findings": [_finding("reworded", severity="minor", same_as=_TAG)]},
         ],
+        edits_uncommitted=True,
     )
     later = [p for p in _findings_payloads(out) if p]
     floored = [f for round_ in later for f in round_ if f.get("reported_severity")]

@@ -59,7 +59,7 @@ async def test_fix_loop_succeeds_first_cycle(tmp_path, monkeypatch, database, ru
 
 
 async def test_fix_loop_cap_breach(tmp_path, monkeypatch, database, run_dirs, repo):
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "stall")
     tracker = isolated_bd(tmp_path)
 
     # attempts=1, not 2: on.test.run's blind failure is now a stable
@@ -129,7 +129,7 @@ async def test_fix_loop_wall_clock_breach_names_timeout_minutes_as_the_limit(
 ):
     """The loop's clock ran out with attempts to spare: `stop.limit` is the
     node's `timeout_minutes`, not its `max_attempts`."""
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "stall")
     # An hour past the counter's own start, whatever the real run took.
     _clock_ahead(monkeypatch, hours=1)
     tracker = isolated_bd(tmp_path)
@@ -160,7 +160,7 @@ async def test_fix_loop_per_item_attempts_override_breaches_before_policy_cap(
     """A per-node `node_overrides` attempts value must be what `resolve_cap`
     actually applies, not just what's stored -- the policy default alone
     would let this item run 5 cycles; the override caps it at 1."""
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "stall")
     tracker = isolated_bd(tmp_path)
 
     pol = loop_policy(tmp_path, "verify.fix_loop", attempts=5)
@@ -273,7 +273,7 @@ async def test_resume_mid_fix_loop_reenters_and_continues_budget(
 
 
 async def test_fix_loop_wall_clock_breach(tmp_path, monkeypatch, database, run_dirs, repo):
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "stall")
     tracker = isolated_bd(tmp_path)
     # A day past the counter's own start, so the very first breach check trips
     # on elapsed wall-clock, regardless of the (large) attempts cap.
@@ -321,7 +321,7 @@ async def test_retry_after_cap_clears_the_budget_and_steers_cycle_one(
         bd_cwd=str(tracker),
     )
     # an agent that fixes nothing burns the whole budget
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "stall")
     assert (
         await executor.run(
             database,
@@ -418,7 +418,7 @@ _REPAIR_SCRIPT_NOOP = "pass\n"
 
 def _run_repair_fixloop(tmp_path, repair_script: str, *, attempts=3, monkeypatch=None):
     if monkeypatch is not None:
-        monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+        monkeypatch.setenv("KRAFT_FAKE_AGENT", "stall")
     out = run_chain(
         tmp_path,
         _repair_fixloop_template(tmp_path, repair_script),

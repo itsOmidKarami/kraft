@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from kraft import logs
 from kraft.api.routes import sessions
 
@@ -210,3 +212,91 @@ def test_the_backlog_payload_says_where_the_next_line_starts(tmp_path, monkeypat
     request = SimpleNamespace(app=SimpleNamespace(state=None))
     body = asyncio.run(sessions.get_log("w", "s", request, format="jsonl"))
     assert body["next_line"] == 2
+
+
+_SUB_STARTED = {
+    "type": "system",
+    "subtype": "task_started",
+    "task_id": "af2a65",
+    "tool_use_id": "toolu_01EX",
+    "task_type": "local_agent",
+    "description": "List root directory entries",
+    "subagent_type": "general-purpose",
+}
+_SUB_MESSAGE = {
+    "type": "assistant",
+    "parent_tool_use_id": "toolu_01EX",
+    "agent_id": "af2a65",
+    "subagent_type": "general-purpose",
+    "task_description": "List root directory entries",
+    "message": {"content": [{"type": "text", "text": "bin"}]},
+}
+_SUB_DONE = {
+    "type": "system",
+    "subtype": "task_notification",
+    "task_id": "af2a65",
+    "status": "completed",
+    "summary": "bin",
+}
+
+
+def _jsonl(*lines) -> bytes:
+    return b"".join((x if isinstance(x, str) else json.dumps(x)).encode() + b"\n" for x in lines)
+
+
+@pytest.mark.parametrize(
+    ("body", "tagged"),
+    [
+        pytest.param(
+            _jsonl(
+                _SUB_STARTED,
+                *(["x" * 1000] * (logs.MAX_LOG_BYTES // 1000)),
+                _SUB_MESSAGE,
+                _SUB_MESSAGE,
+            ),
+            2,
+            id="window-after-start",
+        ),
+        pytest.param(_jsonl(_SUB_MESSAGE, _SUB_DONE), 2, id="notification-after-known"),
+        pytest.param(_jsonl('{"type":"assistant","agent_id":"af2a65",'), 0, id="undecodable"),
+    ],
+)
+def test_a_tail_tags_subagent_rows(tmp_path, body, tagged):
+    log = tmp_path / "s.log"
+    log.write_bytes(body)
+    rows = logs.Tail(log).read()
+    mine = [r for r in rows if r.get("agent") == "af2a65"]
+    assert len(mine) == tagged
+    assert all(r["agent_label"] == "List root directory entries" for r in mine)
+    if not tagged:
+        assert rows[0]["src"] == "stdout" and "agent" not in rows[0]
+
+
+def test_a_tail_keeps_a_subagent_tag_across_reads(tmp_path):
+    """The reader remembers the id: the `task_notification` that ends a sub-agent
+    names no agent of its own, and arrives in a later read than its start."""
+    log = tmp_path / "s.log"
+    log.write_bytes(_jsonl(_SUB_STARTED))
+    tail = logs.Tail(log)
+    assert [r["agent"] for r in tail.read()] == ["af2a65"]
+    with log.open("ab") as fh:
+        fh.write(_jsonl(_SUB_DONE))
+    (row,) = tail.read()
+    assert row["agent"] == "af2a65" and row["agent_label"] == "List root directory entries"
+    assert row["agent_status"] == "completed"
+
+
+_ALL = (None, "main", "af2a65", "other")
+
+
+@pytest.mark.parametrize(
+    ("row", "kept_by"),
+    [
+        pytest.param({"src": "agent"}, (None, "main"), id="main"),
+        pytest.param({"src": "agent", "agent": "af2a65"}, (None, "af2a65"), id="subagent"),
+        pytest.param({"src": "stdout"}, _ALL, id="stdout"),
+        pytest.param({"src": "sys", "truncated": {}}, _ALL, id="marker"),
+    ],
+)
+def test_in_agent(row, kept_by):
+    assert {a for a in _ALL if logs.in_agent(row, a)} == set(kept_by)

@@ -3,7 +3,7 @@ import { nameOf } from "../../board/rowText";
 import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ago, elapsed, lineCount, tokenText, usd } from "../../../format";
+import { agentsIn, ago, elapsed, inAgent, lineCount, tokenText, usd } from "../../../format";
 import type { WorkerSession } from "../../../types";
 import { escalationsIn, ESCALATION, FIX_LOOP, isSessionDoc, inHandler, JUDGE, lookWord, loopIdle, loopIdleSentence, loopRounds, NO_DOCUMENTS, progressWords, subTasks, NOT_RUN_IN_ROUND, messagesThrough, passWords, roundShown, sessionLook, sessionsOf, statusWords } from "../../item/nodeGraph";
 import { stepsOf, taskName } from "../../item/paths";
@@ -14,6 +14,7 @@ import { useEventLog } from "../../item/useEvents";
 import { LogLines } from "../log/LogLines";
 import { useLog } from "../log/useLog";
 import { ScreenHeader } from "../nav/ScreenHeader";
+import { ChoiceSheet, useSheet } from "../nav/Sheet";
 import { Block, Facts, TabStrip } from "../ui/Rows";
 import type { PlaceProps } from "./NodeScreen";
 import "./node.css";
@@ -195,7 +196,13 @@ export function TaskLog({ workItemId, session }: { workItemId: string; session?:
   const [src, setSrc] = useState<(typeof SOURCES)[number]>("all");
   const running = session?.status === "running" || session?.status === "pending";
   const { lines, error } = useLog(workItemId, session?.id ?? null, !!running);
-  const shown = (lines ?? []).filter((l) => src === "all" || l.src === src);
+  const [agent, setAgent] = useState<string>();
+  const sheet = useSheet();
+  const agents = agentsIn(lines ?? []);
+  const shown = (lines ?? []).filter((l) => (src === "all" || l.src === src) && inAgent(l, agent));
+  // Two sub-agents given the same description are told apart by id.
+  const name = (a: (typeof agents)[number]) => (agents.filter((b) => b.label === a.label).length > 1 ? `${a.label} (${a.id})` : a.label);
+  const now = !agent ? "All" : agent === "main" ? "Main" : agents.find((a) => a.id === agent)?.label ?? agent;
   return (
     <>
       <div className="ph-chips ph-chips-inline" role="group" aria-label="Sources">
@@ -203,6 +210,20 @@ export function TaskLog({ workItemId, session }: { workItemId: string; session?:
         <span className="ph-spacer" />
         <span className="ph-count">{lines ? `${lineCount(lines.length)}${running ? " · following" : ""}` : session ? "Reading…" : lineCount(0)}</span>
       </div>
+      {(agents.length > 0 || agent) && (
+        <div className="ph-chips ph-chips-inline">
+          <Chip pressed={!!agent} onClick={() => sheet.open("agent")}>agent: {now} ▾</Chip>
+        </div>
+      )}
+      {sheet.is("agent") && (
+        <ChoiceSheet
+          title="Show lines from"
+          value={agent ?? "all"}
+          options={[{ value: "all", label: "All" }, { value: "main", label: "Main" }, ...agents.map((a) => ({ value: a.id, label: name(a), hint: a.type }))]}
+          onPick={(v) => { setAgent(v === "all" ? undefined : v); sheet.close(); }}
+          onClose={sheet.close}
+        />
+      )}
       {error ? <p className="ph-note">{error}</p> : <LogLines lines={shown} empty="No lines to show. Clear the filter, or the task has not started." />}
     </>
   );

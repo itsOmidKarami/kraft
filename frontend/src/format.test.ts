@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { ago, cleanTitle, docBody, docTitle, dollars, dollarsText, elapsed, elapsedBetween, logLineText, nodeRunSpan, plural, shortId, tokenText, tokenTip, tokenTotal, tokens, until, usd } from "./format";
+import { agentsIn, ago, cleanTitle, docBody, docTitle, dollars, dollarsText, elapsed, elapsedBetween, inAgent, logLineText, nodeRunSpan, plural, shortId, tokenText, tokenTip, tokenTotal, tokens, until, usd } from "./format";
 import type { KraftEvent, LogLine, WorkerSession } from "./types/work_item";
 import type { EventType } from "./types/vocab.generated";
 
@@ -191,6 +191,33 @@ describe("logLineText", () => {
     ["passes plain stdout/sys text through untouched", { src: "stdout", text: "collected 12 items" }, "collected 12 items"],
   ])("%s", (_, over, want) => {
     expect(logLineText(logLine(over))).toBe(want);
+  });
+});
+
+describe("inAgent", () => {
+  const ALL = [undefined, "main", "a1", "other"];
+  it.each<[string, Partial<LogLine>, (string | undefined)[]]>([
+    ["a main row", {}, [undefined, "main"]],
+    ["a sub-agent row", { agent: "a1" }, [undefined, "a1"]],
+    ["a plain stdout row", { src: "stdout" }, ALL],
+    ["the truncation marker", { n: -1, src: "sys", truncated: { lines: 4, bytes: 9 } }, ALL],
+  ])("%s", (_, over, kept) => {
+    expect(ALL.filter((a) => inAgent(logLine(over), a))).toEqual(kept);
+  });
+});
+
+describe("agentsIn", () => {
+  it("lists each sub-agent once, in first-seen order, with the last status it reported", () => {
+    const rows = [
+      logLine({ n: 1 }),
+      logLine({ n: 2, agent: "a1", agent_label: "Explore codebase", agent_type: "Explore" }),
+      logLine({ n: 3, agent: "a2", agent_label: "Review diff" }),
+      logLine({ n: 4, agent: "a1", agent_label: "Explore codebase", agent_type: "Explore", agent_status: "completed" }),
+    ];
+    expect(agentsIn(rows)).toEqual([
+      { id: "a1", label: "Explore codebase", type: "Explore", status: "completed" },
+      { id: "a2", label: "Review diff", type: undefined, status: "running" },
+    ]);
   });
 });
 

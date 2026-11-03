@@ -265,7 +265,7 @@ def test_logs_defaults_to_the_session_that_stopped_the_item(
     async def fake_next_line(work_item_id, session_id):
         return 0
 
-    async def fake_stream(work_item_id, session_id, after_line=0):
+    async def fake_stream(work_item_id, session_id, after_line=0, agent=None):
         asked.append(f"follow {work_item_id}/{session_id}")
         return
         yield
@@ -323,6 +323,78 @@ def test_logs_n_limits_the_backlog(app, monkeypatch, capsys, make_item, repo):
     out = capsys.readouterr().out.strip().splitlines()
     assert len(out) == 3
     assert "line9" in out[-1]
+
+
+def _agent_rows() -> list[dict]:
+    """Rows 1-10: odd ones the main agent's, even ones sub-agent a1's, but 7 is
+    plain stdout (it did not decode, so it says nothing about who wrote it)."""
+    rows = []
+    for n in range(1, 11):
+        row = {"n": n, "t": None, "src": "agent", "text": f"row{n}", "summary": f"row{n}"}
+        if n == 7:
+            row["src"] = "stdout"
+        elif n % 2 == 0:
+            row["agent"] = "a1"
+        rows.append(row)
+    return rows
+
+
+@pytest.mark.parametrize(
+    ("agent", "rows"),
+    [
+        pytest.param("a1", ["row7", "row8", "row10"], id="agent-id"),
+        pytest.param("main", ["row5", "row7", "row9"], id="main"),
+    ],
+)
+def test_logs_agent_filters_before_the_limit(
+    app, monkeypatch, capsys, make_item, repo, agent, rows
+):
+    wid = make_item(repo)
+
+    async def fake_get(path, **params):
+        return {"session_id": "sess-1", "status": "stopped", "lines": _agent_rows()}
+
+    _serves(monkeypatch, _session("sess-1"))
+    monkeypatch.setattr(client.transport, "_get", fake_get)
+    cli.main(["view", "logs", wid, "--agent", agent, "-n", "3"])
+    out = capsys.readouterr().out.strip().splitlines()
+    assert [line.split()[-1] for line in out] == rows
+
+
+def test_stream_log_with_an_agent_yields_only_its_rows_and_plain_output(monkeypatch):
+    frames = [f"data: {json.dumps(row)}" for row in _agent_rows()] + ["event: end"]
+
+    class _Response:
+        status_code = 200
+
+        async def aiter_lines(self):
+            for frame in frames:
+                yield frame
+
+    class _Stream:
+        async def __aenter__(self):
+            return _Response()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class _Http:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        def stream(self, *args, **kwargs):
+            return _Stream()
+
+    monkeypatch.setattr(client.transport, "http", lambda: _Http())
+
+    async def collect(agent):
+        return [r["text"] async for r in client.stream_log("w1", "s1", agent=agent)]
+
+    assert asyncio.run(collect("a1")) == ["row2", "row4", "row6", "row7", "row8", "row10"]
+    assert len(asyncio.run(collect(None))) == 10
 
 
 def test_logs_json_is_ndjson(app, monkeypatch, capsys, make_item, repo):
@@ -440,28 +512,33 @@ def test_logs_n_zero_prints_no_backlog(app, monkeypatch, capsys, make_item, repo
     assert capsys.readouterr().out == ""
 
 
+@pytest.mark.parametrize("agent", [None, "a1", "main"], ids=["no-flag", "agent-id", "main"])
 def test_logs_n_zero_follow_starts_after_the_lines_already_written(
-    app, monkeypatch, capsys, make_item, repo
+    app, monkeypatch, capsys, make_item, repo, agent
 ):
     """Kraft-tbnse: `-n 0 -f` prints only what is written after it started.
     The follow endpoint replays the log's bounded tail, so with no backlog
     line to resume after, the cursor comes from the payload's `next_line`."""
     wid = make_item(repo)
     asked = []
+    agents = []
 
     async def fake_get(path, **params):
         rows = [{"n": i, "t": None, "src": "stdout", "text": f"l{i}"} for i in range(5)]
         return {"lines": rows, "next_line": 5}
 
-    async def fake_stream(work_item_id, session_id, after_line=0):
+    async def fake_stream(work_item_id, session_id, after_line=0, agent=None):
         asked.append(after_line)
+        agents.append(agent)
         yield {"n": 5, "t": None, "src": "stdout", "text": "new"}
 
     _serves(monkeypatch, _session("sess-1"))
     monkeypatch.setattr(client.transport, "_get", fake_get)
     monkeypatch.setattr(client, "stream_log", fake_stream)
-    cli.main(["view", "logs", wid, "-n", "0", "-f"])
+    cli.main(["view", "logs", wid, "-n", "0", "-f", *(["--agent", agent] if agent else [])])
     assert asked == [5]
+    # `-f --agent` hands the filter to the stream, which does the filtering.
+    assert agents == [agent]
     out = capsys.readouterr().out
     assert "new" in out and "l4" not in out
 

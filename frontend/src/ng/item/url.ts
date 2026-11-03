@@ -17,6 +17,8 @@ export interface Place {
   pass?: number;
   /** The scope of an open changed-test-scope task, picked: its chip's key (`scopeKey`). Only with that task selected. */
   scope?: string;
+  /** The sub-agent an open task's log is filtered to: its id, or "main". Only with that task selected. */
+  agent?: string;
   /** The document id open over the page (`?doc=`), so ⌘K and a pasted link land on it. */
   doc?: string;
   /** The search that opened `doc` (`?q=`), highlighted in it. */
@@ -72,7 +74,7 @@ export function readPlace(nodeParam: string | undefined, search: URLSearchParams
   const raw = search.get("sel");
   const sel = (raw && pathSel(raw, nodes)) || floor;
   const count = (k: string) => { const n = Number(search.get(k)); return Number.isInteger(n) && n > 0 ? n : undefined; };
-  return { node, sel, tab: search.get("tab") ?? undefined, attempt: count("attempt"), round: node ? count("round") : undefined, pass: node ? count("pass") : undefined, scope: (sel.kind === "task" && search.get("scope")) || undefined, doc: search.get("doc") || undefined, q: (search.get("doc") && search.get("q")) || undefined };
+  return { node, sel, tab: search.get("tab") ?? undefined, attempt: count("attempt"), round: node ? count("round") : undefined, pass: node ? count("pass") : undefined, scope: (sel.kind === "task" && search.get("scope")) || undefined, agent: (sel.kind === "task" && search.get("agent")) || undefined, doc: search.get("doc") || undefined, q: (search.get("doc") && search.get("q")) || undefined };
 }
 
 /** The URL for a place. */
@@ -85,6 +87,7 @@ export function placeUrl(id: string, p: Place): string {
   if (p.round && p.node) q.set("round", String(p.round));
   if (p.pass && p.node) q.set("pass", String(p.pass));
   if (p.scope && p.sel.kind === "task") q.set("scope", p.scope);
+  if (p.agent && p.sel.kind === "task") q.set("agent", p.agent);
   if (p.doc) q.set("doc", p.doc);
   if (p.doc && p.q) q.set("q", p.q);
   const qs = q.toString();

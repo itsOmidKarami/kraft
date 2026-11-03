@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -110,15 +111,148 @@ def _tool_target(inp: object) -> str:
     return ""
 
 
-def summary(obj: dict | None, line: str) -> str:
+#: A sub-agent's label is cut here: it prefixes every one of its rows.
+LABEL_MAX = 200
+_ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+_RUNNING = "Running "
+
+
+def label(text: str) -> str:
+    """`text` as a one-line label: whitespace runs folded, escape sequences and
+    control characters dropped, cut to `LABEL_MAX`."""
+    text = _CONTROL.sub("", _ANSI.sub("", re.sub(r"\s+", " ", text))).strip()
+    return text if len(text) <= LABEL_MAX else text[: LABEL_MAX - 1] + "…"
+
+
+def _text(value: object) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def agent_fields(obj: dict | None, agents: dict[str, tuple[str, str | None]]) -> dict:
+    """Which Claude Code sub-agent wrote this line: its `agent`, `agent_label`
+    and `agent_type`, plus `agent_status` (Claude Code's own word) on a
+    `task_updated` or `task_notification`. `{}` for a main-agent line, a
+    background Bash job's line or one that did not decode.
+
+    `agents` is the reader's memory of the ids it has seen belong to a
+    sub-agent (id -> (label, type)); this learns into it. A `task_started`
+    names a sub-agent by `task_type: local_agent` (a job has none), a
+    `task_progress` by its `subagent_type`, a message line by `agent_id`. The
+    `task_updated` and `task_notification` lines carry neither, so they are a
+    sub-agent's only once its id is in `agents`.
+    """
+    if obj is None:
+        return {}
+    kind, subtype = obj.get("type"), obj.get("subtype")
+    own, fallback = "", ""
+    if kind == "system":
+        agent_id = _text(obj.get("task_id"))
+        if subtype == "task_started" and obj.get("task_type") == "local_agent":
+            own = label(_text(obj.get("description")))
+        elif subtype == "task_progress" and _text(obj.get("subagent_type")):
+            fallback = label(_text(obj.get("description")).removeprefix(_RUNNING))
+        elif subtype in ("task_updated", "task_notification") and agent_id in agents:
+            pass
+        else:
+            return {}
+    else:
+        agent_id = _text(obj.get("agent_id"))
+        own = label(_text(obj.get("task_description")))
+    if not agent_id:
+        return {}
+    known_label, known_type = agents.get(agent_id, ("", None))
+    kind_of = _text(obj.get("subagent_type")) or known_type
+    name = own or known_label or fallback or label(kind_of or "") or "sub-agent"
+    agents[agent_id] = (name, kind_of)
+    fields = {"agent": agent_id, "agent_label": name}
+    if kind_of:
+        fields["agent_type"] = kind_of
+    if subtype == "task_updated":
+        patch = obj.get("patch")
+        status = patch.get("status") if isinstance(patch, dict) else None
+    else:
+        status = obj.get("status") if subtype == "task_notification" else None
+    if isinstance(status, str) and status:
+        fields["agent_status"] = status
+    return fields
+
+
+def in_agent(row: dict, agent: str | None) -> bool:
+    """Whether `row` belongs in a view filtered to `agent` (an id, or `"main"`).
+
+    A row that did not decode (`src` stdout) says nothing about who wrote it,
+    and the truncation marker is no line at all: both stay in every filter.
+    """
+    if agent is None or "truncated" in row or row.get("src") == "stdout":
+        return True
+    if agent == "main":
+        return not row.get("agent")
+    return row.get("agent") == agent
+
+
+def _count(n: object) -> str:
+    return f"{round(n / 1000)}k" if isinstance(n, int | float) and n >= 1000 else str(n)
+
+
+def _seconds(ms: object) -> str:
+    secs = round(ms / 1000) if isinstance(ms, int | float) else 0
+    return f"{secs}s" if secs < 60 else f"{secs // 60}m {secs % 60}s"
+
+
+def _usage_bits(obj: dict, *, tools: bool) -> list[str]:
+    usage = obj.get("usage")
+    if not isinstance(usage, dict):
+        return []
+    bits = []
+    if isinstance(usage.get("total_tokens"), int | float):
+        bits.append(f"{_count(usage['total_tokens'])} tokens")
+    uses = usage.get("tool_uses")
+    if tools and isinstance(uses, int) and uses:
+        bits.append(f"{uses} tool use{'' if uses == 1 else 's'}")
+    if not tools and isinstance(usage.get("duration_ms"), int | float):
+        bits.append(_seconds(usage["duration_ms"]))
+    return bits
+
+
+def _agent_summary(obj: dict, line: str) -> str:
+    """What a sub-agent's row says after its prefix: the spec's table for the
+    `task_*` lines, today's summary for a message line."""
+    subtype = obj.get("subtype") if obj.get("type") == "system" else None
+    if subtype is None:
+        return summary(obj, line)
+    if subtype == "task_started":
+        kind = _text(obj.get("subagent_type"))
+        return f"started ({kind})" if kind else "started"
+    if subtype == "task_updated":
+        patch = obj.get("patch")
+        return _text(patch.get("status") if isinstance(patch, dict) else None) or "updated"
+    if subtype == "task_progress":
+        bits = ([_text(obj.get("last_tool_name"))] if obj.get("last_tool_name") else []) + (
+            _usage_bits(obj, tools=True)
+        )
+        return " · ".join(bits) or "progress"
+    answer = _text(obj.get("summary")).strip().splitlines()
+    head = ": ".join(
+        w for w in (_text(obj.get("status")), _shorten(answer[0], 200) if answer else "") if w
+    )
+    return " · ".join([head or "finished", *_usage_bits(obj, tools=False)])
+
+
+def summary(obj: dict | None, line: str, agent: dict | None = None) -> str:
     """One readable line for the modal and for `kraft view logs`.
 
     A wall of raw stream-json is not the log Kraft-77z asks for. `text` still
     carries the raw line and the plain-text endpoint still serves the file, so
     nothing is lost -- this is the column a reader scans.
+
+    With `agent` (the row's `agent_fields`) the line is a sub-agent's, and
+    starts `↳ <label>: ` so interleaved sub-agents stay readable in every view.
     """
     if obj is None:
         return _shorten(line)
+    if agent:
+        return f"↳ {agent['agent_label']}: {_agent_summary(obj, line)}"
     kind = obj.get("type")
     if kind == "system":
         model = obj.get("model")
@@ -196,15 +330,19 @@ MAX_LINE_BYTES = 1024 * 1024
 _CHUNK = 64 * 1024
 
 
-def _row(n: int, line: str, times: dict[int, str]) -> dict:
+def _row(
+    n: int, line: str, times: dict[int, str], agents: dict[str, tuple[str, str | None]]
+) -> dict:
     obj = _decode(line)
     src, t = _classify_obj(obj)
+    fields = agent_fields(obj, agents)
     return {
         "n": n,
         "t": t or times.get(n),
         "src": src,
         "text": _shorten(line),
-        "summary": summary(obj, line),
+        "summary": summary(obj, line, fields),
+        **fields,
     }
 
 
@@ -244,6 +382,7 @@ class Tail:
         self._pending_open = False  # a line has begun that has no newline yet
         self._times_offset = 0
         self._times: dict[int, str] = {}
+        self._agents: dict[str, tuple[str, str | None]] = {}  # sub-agent id -> (label, type)
 
     @property
     def next_line(self) -> int:
@@ -262,7 +401,7 @@ class Tail:
             return []
         first = self._n - len(lines)
         self._read_times(first)
-        rows += [_row(first + i, line, self._times) for i, line in enumerate(lines)]
+        rows += [_row(first + i, line, self._times, self._agents) for i, line in enumerate(lines)]
         self._times = {n: t for n, t in self._times.items() if n >= self._n}
         return rows
 

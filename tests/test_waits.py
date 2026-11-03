@@ -10,6 +10,8 @@ observation reads -- is tests/adapters/forge/test_waits.py.
 from __future__ import annotations
 
 import asyncio
+import shlex
+import sys
 from datetime import datetime
 
 import pytest
@@ -434,6 +436,8 @@ async def test_actionable_automated_review_is_repaired_resynced_and_remeasured(
     control repairs it and resyncs the draft, and the node is measured again
     from its first step -- where the review now settles clean."""
     review = {"id": "await_review", "kind": "forge", "target": "mr.automated_review"}
+    # The repair changes the checkout: a fix round that changes nothing stops the loop.
+    edit = shlex.join([sys.executable, "-c", "open('left.txt', 'a').write('x')"])
     node = {
         "id": "feedback",
         "kind": "exec",
@@ -443,7 +447,7 @@ async def test_actionable_automated_review_is_repaired_resynced_and_remeasured(
         ],
         control: {
             "steps": [
-                {"id": "repair", "tasks": [{"id": "fix", "kind": "subprocess", "command": "true"}]},
+                {"id": "repair", "tasks": [{"id": "fix", "kind": "subprocess", "command": edit}]},
                 {"id": "sync", "tasks": [{"id": "sync", "kind": "forge", "target": "mr.sync"}]},
             ]
         },

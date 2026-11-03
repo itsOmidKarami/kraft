@@ -19,6 +19,15 @@ describe("item URL", () => {
     });
   });
 
+  it("round-trips the sub-agent a task's log is filtered to, only with a task selected", () => {
+    const sel = { kind: "task", node: "verification", step: "checks", task: "lint" } as const;
+    const url = placeUrl("w1", { node: "verification", sel, tab: "log", agent: "a1" });
+    expect(url).toContain("agent=a1");
+    expect(readPlace("verification", new URLSearchParams(url.split("?")[1]), nodes)).toMatchObject({ sel, tab: "log", agent: "a1" });
+    expect(placeUrl("w1", { node: "verification", sel: { kind: "node", node: "verification" }, agent: "a1" })).not.toContain("agent");
+    expect(readPlace("verification", q("agent=a1"), nodes).agent).toBeUndefined();
+  });
+
   it("reads and writes a fix loop's tasks, the task `<step>.<task>` in a loop of steps, only on a node that has a loop", () => {
     const looped: ChainNode[] = [{ ...nodes[1], fix_loop: "verification.fix_loop" }];
     expect(readPlace("verification", q("sel=verification.fix_loop.judge"), looped).sel).toEqual({ kind: "task", node: "verification", step: "fix_loop", task: "judge" });

@@ -179,6 +179,40 @@ describe("Workspace", () => {
     expect(where()).toBe("/work-items/w1?sel=verification");
   });
 
+  describe("the sub-agent filter of a task's log", () => {
+    const sub = { src: "agent", agent_label: "Explore codebase", agent_type: "Explore" };
+    const lines = [
+      { n: 1, t: null, src: "agent", text: "x", summary: "main says hi" },
+      { n: 2, t: null, text: "x", summary: "↳ Explore codebase: Grep(foo)", agent: "a1", ...sub },
+      { n: 3, t: null, src: "agent", text: "x", summary: "↳ Review diff: Read(a.py)", agent: "a2", agent_label: "Review diff" },
+    ];
+    const TASK = "/work-items/w1?sel=verification.review.code_review&tab=log";
+    const ran = { worker_sessions: [{ id: "s1", work_item_id: "w1", node_id: "verification", hook_point: "verification.review.code_review", status: "done", attempt: 1, thread: 1, round: 0, created_at: "2026-09-13T09:00:00Z", started_at: "2026-09-13T09:00:00Z", exited_at: "2026-09-13T09:01:00Z", model: "claude-sonnet-4-5" } as unknown as WorkerSession] };
+    const serve = () => stubFetch({ "GET /work-items/w1/sessions/s1/log": [200, { session_id: "s1", status: "done", lines }] });
+
+    it("puts the sub-agent picked in the Log menu in the URL", async () => {
+      serve();
+      mount(TASK, ran);
+      await userEvent.click(await screen.findByRole("button", { name: "agent: All" }));
+      await userEvent.click(screen.getByRole("menuitemradio", { name: /Explore codebase/ }));
+      expect(where()).toBe("/work-items/w1?sel=verification.review.code_review&tab=log&agent=a1");
+      expect(screen.queryByText(/main says hi/)).toBeNull();
+      await userEvent.click(screen.getByRole("button", { name: "agent: Explore codebase" }));
+      await userEvent.click(screen.getByRole("menuitemradio", { name: "All" }));
+      expect(where()).not.toContain("agent=");
+      expect(screen.getByText(/main says hi/)).toBeInTheDocument();
+    });
+
+    it("opens a shared ?agent= with the log filtered to it", async () => {
+      serve();
+      mount(`${TASK}&agent=a1`, ran);
+      expect(await screen.findByText(/Grep\(foo\)/)).toBeInTheDocument();
+      expect(screen.queryByText(/main says hi/)).toBeNull();
+      expect(screen.queryByText(/Review diff/)).toBeNull();
+      expect(screen.getByRole("button", { name: "agent: Explore codebase" })).toBeInTheDocument();
+    });
+  });
+
   it("goes back to the chain's pane from a node's crumb", async () => {
     mount("/work-items/w1?sel=plan");
     await userEvent.click(within(screen.getByRole("complementary", { name: "plan pane" })).getByRole("button", { name: "default" }));

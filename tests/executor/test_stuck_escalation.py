@@ -158,7 +158,7 @@ async def test_the_generic_auto_escalation_does_not_follow_a_declared_one(
 # -- Ruling 176: one stuck set, read by both mechanisms ----------------------
 #
 # A node's declared escalation and the generic `auto_escalate_stuck` answer the
-# same five stops and nothing else. Every other stop goes straight to a human
+# same six stops and nothing else. Every other stop goes straight to a human
 # under its own named cause, declared escalation or not.
 
 _REVIEWER = Path(__file__).parents[1] / "support" / "fake_reviewer.py"
@@ -171,9 +171,9 @@ _FINDING = {
 }
 
 
-def _reviewing_node(**fields):
+def _reviewing_node(fix=None, **fields):
     """A fix-loop node whose measuring task reports the same finding every
-    round (`support/fake_reviewer.py`)."""
+    round (`support/fake_reviewer.py`). `fix` is the repair, `true` by default."""
     review = {
         "id": "check",
         "kind": "subprocess",
@@ -183,8 +183,15 @@ def _reviewing_node(**fields):
         "id": "build",
         "kind": "exec",
         "tasks": [review],
-        "fix_loop": {"tasks": [_sub("fix")], "max_attempts": 5, **fields},
+        "fix_loop": {"tasks": [fix or _sub("fix")], "max_attempts": 5, **fields},
     }
+
+
+def _editing_fix():
+    """A repair that changes the checkout: a round that changed nothing stops
+    before the judge or a stall is ever reached."""
+    code = "open('left.txt', 'a').write('x')"
+    return {"id": "fix", "kind": "subprocess", "command": shlex.join([sys.executable, "-c", code])}
 
 
 async def _stall(it, script, monkeypatch, tmp_path):
@@ -192,6 +199,11 @@ async def _stall(it, script, monkeypatch, tmp_path):
     plan.write_text(json.dumps([{"status": "done", "findings": [_FINDING]}]))
     monkeypatch.setenv("KRAFT_FAKE_REVIEW_PLAN", str(plan))
     script.real = {"check"}
+
+
+async def _unchanged(it, script, monkeypatch, tmp_path):
+    script.plan = {"check": ["failed"]}
+    script.unchanged = {"fix"}
 
 
 async def _judge(it, script, monkeypatch, tmp_path):
@@ -263,8 +275,13 @@ STUCK = {
         "finished with concerns, so the node was not measured again: repair: needs a code fix",
     ),
     "stall": (_reviewing_node, _stall, "stuck: "),
+    "fix round changed nothing": (
+        lambda: {**_loopless(), "fix_loop": {"tasks": [_sub("fix")], "max_attempts": 5}},
+        _unchanged,
+        "fix attempt 1 in node build changed nothing",
+    ),
     "judge stop_needs_human": (
-        lambda: _reviewing_node(judge=_sub("judge")),
+        lambda: _reviewing_node(_editing_fix(), judge=_sub("judge")),
         _judge,
         "judge: not converging",
     ),
@@ -344,7 +361,7 @@ async def _generic(it, monkeypatch):
 async def test_a_stuck_stop_is_escalated_by_exactly_one_mechanism(
     item_on, script, monkeypatch, tmp_path, stub_app, kind, declared
 ):
-    """Ruling 176: the five stuck stops. A node that declares an escalation
+    """Ruling 176: the six stuck stops. A node that declares an escalation
     hands them to it, and the generic fallback stands aside; a node that does
     not gets the generic one."""
     it = await _stopped(item_on, script, monkeypatch, tmp_path, stub_app, kind, declared=declared)

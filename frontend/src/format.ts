@@ -23,6 +23,26 @@ export function logLineText(l: LogLine): string {
   return l.text;
 }
 
+/** Whether a log row belongs in a view filtered to `agent` (an id, or "main"); the same rule as
+ *  `kraft.logs.in_agent`. Plain output that did not decode and the truncation marker stay in every
+ *  filter: neither says who wrote it. */
+export function inAgent(l: LogLine, agent?: string): boolean {
+  if (!agent || l.truncated || l.src === "stdout") return true;
+  return agent === "main" ? !l.agent : l.agent === agent;
+}
+
+/** The sub-agents a set of log rows names, in the order they first appear. `status` is the last one
+ *  reported (Claude Code's own word), else "running". */
+export function agentsIn(lines: LogLine[]): { id: string; label: string; type?: string; status: string }[] {
+  const seen = new Map<string, { id: string; label: string; type?: string; status: string }>();
+  for (const l of lines) {
+    if (!l.agent) continue;
+    const a = seen.get(l.agent) ?? { id: l.agent, label: l.agent_label ?? l.agent, type: l.agent_type, status: "running" };
+    seen.set(l.agent, { ...a, status: l.agent_status ?? a.status });
+  }
+  return [...seen.values()];
+}
+
 /** Relative age, compact ("just now", "12m ago", "3h ago", "4d ago"). */
 export function ago(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return "";

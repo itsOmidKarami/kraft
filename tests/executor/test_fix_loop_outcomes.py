@@ -4,15 +4,17 @@ or whose own plumbing failed, stops under its own named cause instead of
 spending a cycle and stopping as "stuck". And after a `/retry`, a repair is
 dispatched again rather than reused from before it (Kraft-znsvg)."""
 
+import json
 import shlex
 import sys
 
 import pytest
 from support.harness import entry_of, git, v1_node
 
-from kraft import executor, store
+from kraft import events, executor, store
 from kraft import policy as _policy
-from kraft.executor import walk
+from kraft.executor import prompts, walk
+from kraft.vocab import GateEvent
 
 NO_SETUP = entry_of({"setup_command": ""})
 KEY = "build.fix_loop"
@@ -108,6 +110,7 @@ async def test_a_failed_sync_step_stops_naming_it_without_spending_an_attempt(it
 
 
 async def test_a_repair_that_ran_and_failed_is_a_spent_attempt(item_on, script):
+    """Its fix commits, so the round changed something: spent, and measured again."""
     script.real = {"check"}
     script.plan = {"fix": ["failed"]}
     it = await item_on(
@@ -168,20 +171,20 @@ def _commits_a_file(name):
 
 
 @pytest.mark.parametrize(
-    ("fix_task", "committed"),
+    ("fix_task", "committed", "result"),
     [
-        pytest.param(_commits_a_file("fixed.txt"), True, id="fix-commits"),
-        pytest.param(_sub("fix"), False, id="fix-changes-nothing"),
+        pytest.param(_commits_a_file("fixed.txt"), True, "ok", id="fix-commits"),
+        pytest.param(_sub("fix"), False, "needs_human", id="fix-changes-nothing"),
     ],
 )
 async def test_a_finished_fix_round_records_whether_it_committed(
-    item_on, script, tmp_path, fix_task, committed
+    item_on, script, tmp_path, fix_task, committed, result
 ):
     script.real = {"check", "fix"}
     check = _sub("check", _fails_until(tmp_path / "n", passes_on=2))
     it = await item_on(_node(check, [{"id": "repair", "tasks": [fix_task]}]))
 
-    assert await _walk_node(it) == "ok"
+    assert await _walk_node(it) == result
     [finished] = [e["payload"] for e in it.events("fix_cycle_finished")]
     head = git(it.repo, "rev-parse", "HEAD")
     assert finished == {"node_id": "build", "cycle": 1, "committed": committed, "head_sha": head}
@@ -214,3 +217,97 @@ async def test_a_refunded_fix_round_has_no_finish(item_on, script):
 
     await _walk_node(it)
     assert it.events("fix_cycle_refunded") and not it.events("fix_cycle_finished")
+
+
+DOUBT = "No code changed: these failures are the host's, not the branch's."
+
+
+@pytest.mark.parametrize(
+    ("fix_status", "tail", "earlier_thread_event"),
+    [
+        pytest.param("done", "The repair ended done and gave no concerns.", False, id="done"),
+        pytest.param("failed", "The repair ended failed and gave no concerns.", False, id="failed"),
+        pytest.param(
+            "done_with_concerns", f"The repair said: fix: {DOUBT}", False, id="with-concerns"
+        ),
+        # Only a thread update appended during the repair counts: one from
+        # before it must not hide that the round changed nothing.
+        pytest.param(
+            "done",
+            "The repair ended done and gave no concerns.",
+            True,
+            id="after-an-earlier-thread-update",
+        ),
+    ],
+)
+async def test_a_fix_round_that_changed_nothing_stops_without_measuring_again(
+    item_on, script, fix_status, tail, earlier_thread_event
+):
+    """Kraft-6rph9: 3k7w4qfc's repair changed nothing and said so, and the
+    whole node -- a 14-minute suite and a code review -- ran again on the
+    same tree."""
+    script.real = {"check"}
+    script.plan = {"fix": [fix_status]}
+    script.unchanged = {"fix"}
+    it = await item_on(_node(_sub("check", ["false"]), [{"id": "repair", "tasks": [_sub("fix")]}]))
+    if earlier_thread_event:
+        payload = {"thread_id": "t0", "state": "claimed"}
+        await it.database.write(
+            lambda c: events.append(c, it.id, GateEvent.THREAD_UPDATED, payload)
+        )
+    if fix_status == "done_with_concerns":
+
+        async def concerned(_row):
+            result = {"status": "done_with_concerns", "concerns": DOUBT}
+            (it.run_dirs.results / "s-fix.json").write_text(json.dumps(result))
+            await it.session("s-fix", "build.fix_loop.repair.fix", "done_with_concerns")
+
+        script.effects["fix"] = concerned
+
+    assert await _walk_node(it) == "needs_human"
+    assert script.calls == ["check", "fix"]
+    assert _counter(it)["count"] == 1
+    assert _reasons(it) == [
+        "stuck: fix attempt 1 in node build changed nothing, so measuring again "
+        f"would see the same code. {tail}"
+    ]
+    assert it.row()["stop_kind"] == "stuck"
+    assert prompts.FIX_NO_CHANGE_NOTE in script.instructions["fix"][0]
+
+
+@pytest.mark.parametrize(
+    "change", ["uncommitted-edit", "thread-reply", "snapshot-refused", "mr-meta-edit"]
+)
+async def test_a_fix_round_that_changed_anything_measures_again(
+    item_on, script, tmp_path, monkeypatch, change
+):
+    check = _sub("check", _fails_until(tmp_path / "n", passes_on=2))
+    fix = _sub("fix")
+    script.real = {"check"}
+    script.unchanged = {"fix"}
+    if change == "uncommitted-edit":
+        # A subprocess repair is never swept, so the file stays uncommitted.
+        script.real = {"check", "fix"}
+        fix = _sub("fix", [sys.executable, "-c", "open('left.txt', 'w').write('x')"])
+    it = await item_on(_node(check, [{"id": "repair", "tasks": [fix]}]))
+    if change == "thread-reply":
+
+        async def answered(_row):
+            payload = {"thread_id": "t1", "state": "claimed"}
+            await it.database.write(
+                lambda c: events.append(c, it.id, GateEvent.THREAD_UPDATED, payload)
+            )
+
+        script.effects["fix"] = answered
+    if change == "snapshot-refused":
+        monkeypatch.setattr(walk._read_only, "snapshot", lambda *a, **k: None)
+    if change == "mr-meta-edit":
+        # The repair edits the MR description document, which lives outside the
+        # checkout; the loop's `sync` step then writes it and re-runs the checks.
+        docs = iter(["old", "new"])
+        monkeypatch.setattr(
+            walk.forge_mod, "read_mr_meta", lambda *a: walk.forge_mod.MRMeta(description=next(docs))
+        )
+
+    assert await _walk_node(it) == "ok"
+    assert script.calls == ["check", "fix", "check"]
