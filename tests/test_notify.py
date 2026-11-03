@@ -512,6 +512,7 @@ def test_get_notify_never_returns_the_url(client):
                 "enabled": True,
                 "url": "https://hook.invalid/t0ken",
                 "base_url": None,
+                "kraft_default": True,
                 "events": ["gate_requested"],
             },
         ),
