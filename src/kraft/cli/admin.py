@@ -639,9 +639,18 @@ def _move_missing(source: Path, target: Path) -> None:
 def _stage_bundle(templates_dir: Path) -> Path:
     """The bundled config, copied beside `templates_dir` under a staging name
     for the caller to rename into place. Returns the staging directory."""
+    from kraft.addons import builtin
+
     staging = templates_dir.with_name(templates_dir.name + ".seeding")
     shutil.rmtree(staging, ignore_errors=True)
-    shutil.copytree(BUNDLED / "config", staging)
+    # Kraft's own chains and library are the built-in add-on's; a home holds
+    # only thin chains that extend it.
+    shutil.copytree(
+        BUNDLED / "config",
+        staging,
+        ignore=shutil.ignore_patterns("chains", "library.yaml", ".kraft"),
+    )
+    builtin.write_thin_seed(staging)
     (staging / "access.yaml").unlink(missing_ok=True)
     (staging / "notify.yaml").unlink(missing_ok=True)
     # What this home was seeded from, for `capabilities.added_since` (Kraft-hxt6x).

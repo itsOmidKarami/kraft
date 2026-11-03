@@ -14,6 +14,7 @@ import yaml
 from kraft import cli, update
 from kraft import harness as _harness
 from kraft.adapters import agent as _agent
+from kraft.addons import load as addons_load
 from kraft.templates.environment import HarnessProfileTable
 from kraft.templates.library import TemplateLibrary
 from kraft.templates.models import AgentTask
@@ -106,7 +107,9 @@ def test_replace_pre_v1_config_carries_machine_config_and_installs_v1_harnesses(
     # the operator's pre-V1 `harnesses.yaml` (no `profiles:`) over the bundled
     # one, the table's `filled` names the profiles the package had to supply
     # (the fallback would otherwise hide that the v1 file never arrived).
-    library = TemplateLibrary.from_yaml_dir(home, skills_dir=None)
+    library = TemplateLibrary.from_yaml_dir(
+        home, skills_dir=None, addons=addons_load.installed(home)
+    )
     resolved = library.resolve_chain("default")
     agent_tasks = [
         t.task

@@ -9,6 +9,7 @@ from pathlib import Path
 from kraft import harness as _harness
 from kraft.adapters import agent
 from kraft.adapters.agent import Invocation
+from kraft.addons import load
 from kraft.executor import fallback
 from kraft.templates.library import TemplateLibrary
 from kraft.templates.models import AgentTask
@@ -23,8 +24,10 @@ def agent_launches(
     `KRAFT_CONFIG_DIR`, as at a launch: point it at `templates` first."""
     harnesses = harnesses if harnesses is not None else _harness.load(None)
     table = agent.harness_table(harnesses)[0]
-    library = TemplateLibrary.from_yaml_dir(templates)
+    library = TemplateLibrary.from_yaml_dir(templates, addons=load.installed(templates))
     for cid in library.chain_ids:
+        if ":" in cid:  # an add-on's own chain; a home's local ones are the subject
+            continue
         chain = library.resolve_chain(cid)
         for node in chain.nodes:
             for t in node.tasks():
