@@ -23,7 +23,7 @@ from kraft import forges as forges_mod
 from kraft import harness as harness_mod
 from kraft import policy as policy_mod
 from kraft.adapters.agent import HarnessUnavailable, select_profile
-from kraft.addons import inherit
+from kraft.addons import builtin, inherit
 from kraft.addons import load as addons_load
 from kraft.addons import manifest as addon_manifest
 from kraft.addons.config import AddonsConfig, AddonsLock, RepoLibrariesLock
@@ -379,11 +379,13 @@ def _check_policy(path, data, ctx):
         except inherit.InheritanceError:
             continue  # left out already, by the cascade
         if (why := addons_load.limits_problem(addon, instance, ancestors)) is not None:
-            issues.append(
-                TemplateIssue(
-                    path, None, f"would leave add-on {addon.id} out: {why}", loc=("maxima",)
-                )
+            # The built-in is never left out: a run holds its caps to `maxima:`.
+            msg = (
+                f"maxima: clamps kraft-default task(s): {why}"
+                if builtin.is_builtin(addon)
+                else f"would leave add-on {addon.id} out: {why}"
             )
+            issues.append(TemplateIssue(path, None, msg, loc=("maxima",)))
     return issues + scope_issues(path, data, ctx)
 
 

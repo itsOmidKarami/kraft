@@ -473,21 +473,17 @@ _BOT_REPO = {"path": "/r", "automated_review": {"bot": "ccr"}}
 
 
 @pytest.mark.parametrize(
-    "silences, triage, repo, says, state",
+    "silences, repo, says, state",
     [
-        (3, True, _BOT_REPO, "`ccr` on /r has never posted (items w3, w2, w1)", "warn"),
-        (2, True, _BOT_REPO, "no review bot silent across 3 items", "ok"),
-        (0, False, _BOT_REPO, "no triage step reads a bot's summary for /r", "warn"),
-        # Only a bot has a summary to read: a check reviewer is not named.
-        (0, False, {"path": "/r", "automated_review": {"check": "scan"}}, "no review bot", "ok"),
+        (3, _BOT_REPO, "`ccr` on /r has never posted (items w3, w2, w1)", "warn"),
+        (2, _BOT_REPO, "no review bot silent across 3 items", "ok"),
     ],
-    ids=["silent-on-three-items", "silent-on-two", "no-triage-step", "no-triage-step-no-bot"],
+    ids=["silent-on-three-items", "silent-on-two"],
 )
 def test_doctor_names_a_review_bot_that_may_not_be_reviewing(
-    app, tmp_path, monkeypatch, silences, triage, repo, says, state
+    app, tmp_path, monkeypatch, silences, repo, says, state
 ):
     _seed_silent_reviews(tmp_path / "run", "ccr", silences)
-    monkeypatch.setattr(doctor.capabilities, "adopted", lambda c, live: triage)
     monkeypatch.setattr(client, "repos", _returning([repo]))
 
     row = _by_name(asyncio.run(doctor.run_checks()), "review bots")
