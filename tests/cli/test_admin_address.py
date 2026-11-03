@@ -196,7 +196,11 @@ def test_a_start_listens_on_every_address_its_host_names(monkeypatch, host, foun
     try:
         got = set()
         for s in sockets:
-            assert s.getsockopt(socket.SOL_SOCKET, socket.SO_ACCEPTCONN) == 1
+            # Listening: macOS has no SO_ACCEPTCONN, so connect (not create_connection:
+            # getaddrinfo is patched above).
+            with socket.socket(s.family) as probe:
+                probe.settimeout(5)
+                probe.connect(s.getsockname())
             assert not s.get_inheritable()
             v6only = s.family == socket.AF_INET6 and bool(
                 s.getsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY)

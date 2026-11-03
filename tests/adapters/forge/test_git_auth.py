@@ -718,10 +718,10 @@ def neutral_home(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     ("ca_file", "env", "gitconfig", "want"),
     [
-        pytest.param("/acct.pem", "/env.pem", "/global.pem", ("/acct.pem", ""), id="account-first"),
-        pytest.param(None, "/env.pem", "/global.pem", ("/env.pem", ""), id="environment-next"),
-        pytest.param(None, None, "/global.pem", ("/global.pem", ""), id="global-gitconfig-last"),
-        pytest.param(None, None, None, (certifi.where(), ""), id="certifi-when-nothing-else"),
+        pytest.param("/acct.pem", "/env.pem", "/global.pem", "/acct.pem", id="account-first"),
+        pytest.param(None, "/env.pem", "/global.pem", "/env.pem", id="environment-next"),
+        pytest.param(None, None, "/global.pem", "/global.pem", id="global-gitconfig-last"),
+        pytest.param(None, None, None, certifi.where(), id="certifi-when-nothing-else"),
     ],
 )
 def test_trust_comes_from_sources_a_repo_cannot_write(
@@ -731,7 +731,9 @@ def test_trust_comes_from_sources_a_repo_cannot_write(
         (neutral_home / ".gitconfig").write_text(f'[http "{WEB}/"]\n\tsslCAInfo = {gitconfig}\n')
     if env:
         monkeypatch.setenv("GIT_SSL_CAINFO", env)
-    assert git_auth._trust(acct(ca_file=ca_file)) == want
+    info, path = git_auth._trust(acct(ca_file=ca_file))
+    # No source names a CA directory: an empty one, as macOS git refuses an empty value.
+    assert info == want and os.listdir(path) == []
 
 
 async def test_a_repos_own_ca_setting_is_never_the_trust_pin(tmp_path, monkeypatch, neutral_home):

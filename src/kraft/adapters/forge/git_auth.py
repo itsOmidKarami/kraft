@@ -5,8 +5,10 @@ argv or `.git/config`, and is keyed on the account's own origin."""
 from __future__ import annotations
 
 import asyncio
+import functools
 import os
 import re
+import tempfile
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -177,8 +179,15 @@ def _trust(account: ForgeAccount) -> tuple[str, str]:
         or conf.get("http.sslcainfo")
         or certifi.where()
     )
-    path = os.environ.get("GIT_SSL_CAPATH") or conf.get("http.sslcapath") or ""
+    path = os.environ.get("GIT_SSL_CAPATH") or conf.get("http.sslcapath") or _no_ca_dir()
     return os.path.expanduser(info), os.path.expanduser(path)
+
+
+@functools.cache
+def _no_ca_dir() -> str:
+    """`sslCAPath` when nothing names one: an empty directory only this user can write. The pin
+    must stay, or a repo could name its own, and macOS git refuses an empty value outright."""
+    return tempfile.mkdtemp(prefix="kraft-no-ca-")
 
 
 async def _git(repo: Path, *args: str) -> list[str]:

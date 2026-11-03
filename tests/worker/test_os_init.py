@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+import types
 from pathlib import Path
 
 import psutil
@@ -765,7 +766,33 @@ def test_launch_darwin_survives_a_sandbox_exec_that_will_not_start(launcher, tmp
 
 def test_launch_darwin_stops_copying_a_survivor_that_keeps_writing(launcher, tmp_path):
     survivor = "for i in $(seq 400); do echo x; sleep 0.05; done"
-    code = f"import subprocess; subprocess.Popen(['sh', '-c', {survivor!r}]); print('out')"
+    # flushed before the survivor starts: a buffered print lost the race to its first echo
+    code = (
+        f"import subprocess; print('out', flush=True); subprocess.Popen(['sh', '-c', {survivor!r}])"
+    )
     began = time.monotonic()
     r = run(launcher("launch", py(code), darwin=True, sweeps=tmp_path / "sweeps"))
     assert (r.stdout.startswith("out\n"), time.monotonic() - began < 10) == (True, True)
+
+
+def test_copy_keeps_the_last_output_of_a_command_that_ends_as_the_wait_times_out(
+    monkeypatch, capfd
+):
+    out_r, out_w = os.pipe()
+    st_r, st_w = os.pipe()
+    ended, real = threading.Event(), os_init.select
+
+    def wait_runs_out_then_the_command_writes_and_ends(*args):
+        monkeypatch.setattr(os_init, "select", real)
+        ready = real.select(*args)  # nothing yet
+        os.write(out_w, b"last words\n")
+        ended.set()
+        return ready
+
+    # os_init's own stand-in, so no other thread's select is touched
+    fake = types.SimpleNamespace(select=wait_runs_out_then_the_command_writes_and_ends)
+    monkeypatch.setattr(os_init, "select", fake)
+    os_init._copy(out_r, st_r, None, ended)
+    os.close(out_w)
+    os.close(st_w)
+    assert capfd.readouterr().out == "last words\n"
