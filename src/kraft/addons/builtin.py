@@ -78,8 +78,19 @@ def harness_fallback(data: object) -> tuple[object, tuple[str, ...]]:
     built-in requires, and the file lacks, filled in from the packaged
     `harnesses.yaml`; and the profile names filled. An operator's own definition is
     never replaced, and nothing is written to their file."""
+    out, filled = _fill(data)
+    return out, filled["profiles"]
+
+
+def filled_harnesses(data: object) -> tuple[str, ...]:
+    """The harness names `harness_fallback` fills in (profiles are its second answer)."""
+    return _fill(data)[1]["harnesses"]
+
+
+def _fill(data: object) -> tuple[object, dict[str, tuple[str, ...]]]:
+    none = {"harnesses": (), "profiles": ()}
     if not isinstance(data, dict):
-        return data, ()
+        return data, none
     try:
         packaged = yaml.safe_load((source_dir() / "harnesses.yaml").read_text()) or {}
         needs = required()
@@ -92,8 +103,8 @@ def harness_fallback(data: object) -> tuple[object, tuple[str, ...]]:
         AttributeError,
         TypeError,
     ):
-        return data, ()  # no source: the built-in is left out, and fills nothing
-    out, filled = dict(data), []
+        return data, none  # no source: the built-in is left out, and fills nothing
+    out, filled = dict(data), dict(none)
     for section, names in needs.items():
         have = out.get(section)
         if have is not None and not isinstance(have, dict):
@@ -102,12 +113,11 @@ def harness_fallback(data: object) -> tuple[object, tuple[str, ...]]:
         try:
             missing = {n: packaged[section][n] for n in names if n not in have}
         except (KeyError, TypeError):
-            return data, ()  # a packaged file that lacks what the manifest requires
+            return data, none  # a packaged file that lacks what the manifest requires
         if missing:
             out[section] = {**have, **missing}
-            if section == "profiles":  # the label is for profiles only
-                filled += missing
-    return out, tuple(filled)
+            filled[section] = tuple(missing)
+    return out, filled
 
 
 def is_tree(chain) -> bool:
