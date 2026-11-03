@@ -23,7 +23,7 @@ server, the MCP token) are `kraft:doctor`'s; say so rather than diagnosing them.
   add-on `kraft-default`, read from the installed Kraft, so they cannot fall
   behind and there is no drift to compare. The row is always `ok`, and warns
   when it has something to say, one line each:
-  - `chains/<id>.yaml is a full copy and hides kraft-default:<id>` - a home
+  - `chains/<file>.yaml is a full copy and hides kraft-default:<id>` - a home
     seeded before the built-in. It keeps its copy and Kraft never rewrites it;
     point at the guide "Move onto kraft-default" and offer nothing more.
   - an update that was held, or one that changed `kraft-default` - the line
