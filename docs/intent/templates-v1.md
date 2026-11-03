@@ -262,10 +262,9 @@ harness, model and effort as before profiles existed. An install seeded
 before then SHALL keep its `library.yaml` and `harnesses.yaml` (nothing is
 migrated) and SHALL launch every task as before; a fresh seed SHALL get
 the profiles with thin chains that extend the built-in `kraft-default`, which
-carries the library; the capability manifest SHALL tell an older home how to
-adopt profiles.
-enforced-by: tests/test_agent_profiles.py::test_the_shipped_library_selects_profiles_and_launches_as_before, tests/test_agent_profiles.py::test_an_rc_home_keeps_its_files_and_launches_as_before, tests/test_agent_profiles.py::test_a_fresh_seed_gets_the_library_and_its_profiles_together, tests/test_agent_profiles.py::test_the_capability_manifest_tells_an_rc_home_about_profiles
-origin: config/library.yaml -- Kraft-ps1ao. `config/harnesses.yaml` ships the tiers; `addons/builtin.py` §write_thin_seed seeds the thin chains over the built-in; `capabilities.py` §MANIFEST carries the adoption line.
+carries the library; the package SHALL supply the profiles an older home lacks.
+enforced-by: tests/test_agent_profiles.py::test_the_shipped_library_selects_profiles_and_launches_as_before, tests/test_agent_profiles.py::test_an_rc_home_keeps_its_files_and_launches_as_before, tests/test_agent_profiles.py::test_a_fresh_seed_gets_the_library_and_its_profiles_together, tests/test_agent_profiles.py::test_the_shipped_library_on_an_rc_harnesses_file_uses_the_packaged_profiles
+origin: config/library.yaml -- Kraft-ps1ao. `config/harnesses.yaml` ships the tiers; `addons/builtin.py` §write_thin_seed seeds the thin chains over the built-in.
 
 ## REQ node-override-extra-prompt-is-appended
 

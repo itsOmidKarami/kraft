@@ -88,7 +88,7 @@ def test_every_profile_is_listed_with_the_library_tasks_and_chains_selecting_it(
     assert "tasks.implementer" in claude["used_by"]
     assert "tasks.spec_author" in claude["used_by"]
     assert "tasks.verify_changed_scopes" not in claude["used_by"]
-    assert [c for c in claude["chains"] if ":" not in c] == ["default", "quick-task"]
+    assert claude["chains"] == ["default", "quick-task"]
     assert profiles["codex"]["used_by"] == []
     assert profiles["codex"]["chains"] == []
 

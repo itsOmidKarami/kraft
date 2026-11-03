@@ -621,13 +621,6 @@ def test_the_shipped_library_on_an_rc_harnesses_file_uses_the_packaged_profiles(
     assert not any("is not defined in harnesses.yaml" in r["detail"] for r in failed)
 
 
-def test_the_capability_manifest_tells_an_rc_home_about_profiles():
-    from kraft import capabilities
-
-    [entry] = [c for c in capabilities.added_since("1.0.0rc5") if c.name == "profiles"]
-    assert "harnesses.yaml" in entry.how and "profile:" in entry.how
-
-
 def test_write_harness_profiles_keeps_the_profiles_section(tmp_path):
     (tmp_path / "harnesses.yaml").write_text(json.dumps({"harnesses": {}, "profiles": PROFILES}))
     write_harness_profiles(tmp_path, {"claude": {"provider": "claude"}})

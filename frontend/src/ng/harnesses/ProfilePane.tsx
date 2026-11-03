@@ -49,11 +49,12 @@ export function ProfilePane(p: Props) {
   if (lane && profile) {
     const entry = profile.providers[lane];
     const hs = r.harnesses.filter((h) => h.provider === lane);
+    const packaged = profile.source === "package";
     return (
       <Inspector id="harnesses-entry" open={p.open} size={p.size} crumbs={[{ label: "Profiles", onClick: () => p.onLane(null) }, { label: name, onClick: () => p.onLane(null) }]} icon="bot" title={lane} sub={`provider entry of ${name}`} onCollapse={p.onCollapse} onExpand={p.onExpand}
-        footer={entry ? <><Button variant="danger" onClick={() => void run(entryOp(name, lane, null))}>Remove entry</Button></> : undefined}>
+        footer={entry && !packaged ? <><Button variant="danger" onClick={() => void run(entryOp(name, lane, null))}>Remove entry</Button></> : undefined}>
         <Head>Provider entry</Head>
-        {entry ? <EntryEditor draft={draft} profile={name} provider={lane} entry={entry} status={status(lane)} changed={changed} used={entryUsers(r, name, lane)} /> : <AddEntry draft={draft} profile={name} provider={lane} status={status(lane)} />}
+        {entry && packaged ? <><Kv k="model" v={entry.model || "not set"} mono />{entry.effort && <Kv k="effort" v={entry.effort} />}</> : entry ? <EntryEditor draft={draft} profile={name} provider={lane} entry={entry} status={status(lane)} changed={changed} used={entryUsers(r, name, lane)} /> : <AddEntry draft={draft} profile={name} provider={lane} status={status(lane)} />}
         <Head>Runs on · {hs.length}</Head>
         {hs.map((h) => <Kv key={h.id} k={h.id} v={`${h.state[0].toUpperCase()}${h.state.slice(1)} →`} onClick={() => p.onHarness(h.id)} />)}
         {error && <p className="hn-error" role="alert">{error}</p>}
@@ -115,7 +116,7 @@ export function ProfilePane(p: Props) {
     >
       <Head>Profile</Head>
       {profile?.source === "package" && <Note>From Kraft's package. Define it in harnesses.yaml to change it.</Note>}
-      <Note>Model and effort are per provider: click a lane. Read live at every launch. {p.onYaml ? <LinkButton inline onClick={() => p.onYaml!("harnesses.yaml")}>Edit in YAML</LinkButton> : null}</Note>
+      <Note>{profile?.source === "package" ? "" : "Model and effort are per provider: click a lane. "}Read live at every launch. {p.onYaml ? <LinkButton inline onClick={() => p.onYaml!("harnesses.yaml")}>Edit in YAML</LinkButton> : null}</Note>
       {Object.keys(profile?.providers ?? {}).length === 0 && <Note>No provider entries yet.</Note>}
       <Head>Used by · {profile?.tasks.length ?? 0}</Head>
       {(profile?.tasks ?? []).map((t) => (

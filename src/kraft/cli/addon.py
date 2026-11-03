@@ -550,14 +550,20 @@ def _reload() -> None:
 
 
 def _edit(
-    change: Callable[[dict, AddonsConfig], None], then: Callable[[], None] | None = None
+    change: Callable[[dict, AddonsConfig], None],
+    then: Callable[[], None] | None = None,
+    *,
+    loads: bool = False,
 ) -> AddonsConfig:
     """`addons.yaml` rewritten by `change(raw, parsed)` under the update lock,
     refused when the result is not a valid file. `then` runs after the write,
-    still under the lock."""
+    still under the lock. `loads`: `change` loads add-ons, so the built-in's store
+    is written before the lock is taken; a write under it would wait on it."""
     config_dir, addons_dir = flow.home()
     path = config_dir / AddonsConfig.FILE
     try:
+        if loads:
+            load.installed(config_dir, addons_dir)
         with addon_update.write_lock(addons_dir):
             raw = read_yaml(path, {})
             for section in ("collections", "addons"):
@@ -980,7 +986,7 @@ def _cmd_enable(ns: argparse.Namespace) -> None:
         if on:
             _parent_loads(raw, config_dir, addons_dir, ns.addon)
 
-    _edit(change)
+    _edit(change, loads=True)
     _reload()
     print(f"{ns.addon}: {'enabled' if on else 'disabled'}")
 
@@ -1011,7 +1017,7 @@ def _cmd_uninstall(ns: argparse.Namespace) -> None:
             current["addons"].pop(ns.addon, None)
             write_yaml(lock_file, current)
 
-    _edit(change, drop_lock_entry)
+    _edit(change, drop_lock_entry, loads=True)
     addon_update.clear_status(addons_dir, {ns.addon})
     _reload()
     common.emit({"uninstalled": ns.addon}, lambda v: f"uninstalled {ns.addon}", ns.json)

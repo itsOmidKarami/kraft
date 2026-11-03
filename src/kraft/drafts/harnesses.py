@@ -91,8 +91,16 @@ def _rewrite(existing: list, universe: list[str], keep: set[str]) -> list[str]:
     return out + [h for h in universe if h in keep and h not in out]
 
 
+def _refuse_packaged_harness(d, name: str) -> None:
+    if name in builtin.filled_harnesses(d.file("harnesses.yaml")):
+        raise OpError(
+            f"{name} comes from Kraft's package; define it in harnesses.yaml to change it"
+        )
+
+
 def set_access(d, harness: str, state: str) -> None:
     universe = _universe(d.read("harnesses.yaml"))
+    _refuse_packaged_harness(d, harness)
     if harness not in universe:
         raise OpError(f"no harness {harness!r} in harnesses.yaml; known: {universe}")
     if state not in STATES:
@@ -293,6 +301,7 @@ def set_harness(d, id: str, patch: dict) -> None:
     provider accepts is checked by the resolve, like any other file edit."""
     harness = _section(d.file("harnesses.yaml"), "harnesses").get(id)
     if not isinstance(harness, dict):
+        _refuse_packaged_harness(d, id)
         known = _universe(d.read("harnesses.yaml"))
         raise OpError(f"no harness {id!r} in harnesses.yaml; known: {known}")
     if not isinstance(patch, dict) or not patch:
@@ -571,6 +580,19 @@ def resolve(st, key, raw, files, published) -> dict:
                 h, _section(harnesses_yaml, "harnesses")[h], states[h], providers, tasks.get(h, [])
             )
             for h in universe
+        ]
+        + [
+            {
+                **_harness_view(
+                    h,
+                    _section(with_package, "harnesses")[h],
+                    access(policy, [h])[h],
+                    providers,
+                    tasks.get(h, []),
+                ),
+                "source": "package",
+            }
+            for h in builtin.filled_harnesses(harnesses_yaml)
         ],
         "allowed_tools": _section(policy, "maxima").get("allowed_tools"),
         "escalation": {

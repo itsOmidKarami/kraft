@@ -78,6 +78,21 @@ describe("the phone board, against a server older than its interface (R10c-01)",
   });
 });
 
+describe("the phone board, with Kraft's own chains drifted", () => {
+  it("says how many lines, and Hide stores the signature and removes the line", async () => {
+    localStorage.clear();
+    vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok", kraft_default: { signature: "abc", count: 2 } } as never);
+    vi.spyOn(api, "getKraftDefault").mockResolvedValue({ lines: ["one", "two"], signature: "abc" });
+    put(item("r1", "running"));
+    mount();
+    expect(await screen.findByText("Kraft's own chains need attention")).toBeInTheDocument();
+    expect(screen.getByText(/2 item\(s\)/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Hide until it changes" }));
+    expect(localStorage.getItem("kraft.kraftDefault.hidden")).toBe("abc");
+    expect(screen.queryByText("Kraft's own chains need attention")).toBeNull();
+  });
+});
+
 describe("the phone board (B)", () => {
   it("files items in the desktop's four groups, in its order, and the groups equal groupsOf", async () => {
     const list = [item("r1", "running"), gate("g2"), item("d3", "done"), item("p4", "paused", { current_node_id: null }), item("p5", "paused"), item("f6", "failed")];

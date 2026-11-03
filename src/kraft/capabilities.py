@@ -60,18 +60,10 @@ def _key(version: str) -> tuple[int, ...]:
 #:
 #: Settings files only. Entries about `library.yaml` and chains were retired when
 #: Kraft's own chains and library became the built-in `kraft-default` add-on,
-#: which an upgrade updates and `doctor`'s kraft-default row reports on.
-MANIFEST: tuple[Capability, ...] = (
-    Capability(
-        version="1.0.0",
-        name="profiles",
-        what="named model tiers (deep, strong, fast) a library agent task selects "
-        "instead of spelling out model/effort",
-        how="copy the `profiles:` section of the shipped harnesses.yaml into yours, then "
-        "set `profile: strong` on a task in place of its `model:`/`effort:`",
-        present=("harnesses.yaml", "profiles"),
-    ),
-)
+#: which an upgrade updates and `doctor`'s kraft-default row reports on. The
+#: `profiles` entry went the same way: the package supplies the tiers a home
+#: lacks, and that row says so.
+MANIFEST: tuple[Capability, ...] = ()
 
 
 def adopted(capability: Capability, live_dir: Path) -> bool:

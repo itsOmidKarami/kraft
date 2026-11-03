@@ -133,6 +133,7 @@ def _view(st) -> dict:
             "id": p.id,
             "provider": p.provider,
             "enabled": p.enabled,
+            **({"source": "package"} if p.id in table.filled_harnesses else {}),
             "executable": p.executable,
             "defaults": p.defaults,
             "used_by": [f"tasks.{t}" for t, h in used_by.items() if h == p.id],

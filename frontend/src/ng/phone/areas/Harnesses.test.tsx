@@ -104,6 +104,21 @@ describe("a harness (M.1, R65)", () => {
     expect(screen.getByText(/edited in YAML on a computer/)).toBeInTheDocument();
   });
 
+  it("shows a package harness read-only: the note, no pencil on access, no enabled switch", async () => {
+    const r = resolved();
+    r.harnesses = r.harnesses.map((h) => (h.id === "claude" ? { ...h, source: "package" as const } : h));
+    open("claude", ans(hview(r)));
+    expect(await screen.findByText("From Kraft's package. Define it in harnesses.yaml to change it.")).toBeInTheDocument();
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(screen.queryByRole("button", { name: /who may use it/ })).toBeNull();
+    expect(screen.getByText("Available")).toBeInTheDocument();
+    expect(screen.getAllByText("enabled")).toHaveLength(1); // the label, not its help repeated beneath it
+    cleanup();
+    open("claude");
+    expect(await screen.findByRole("switch")).toBeInTheDocument();
+    expect(screen.queryByText(/From Kraft's package/)).toBeNull();
+  });
+
   it("has an enabled switch, sent as the desktop sends it", async () => {
     const { calls } = open("claude");
     const row = await screen.findByRole("switch", { name: new RegExp(`^${HARNESS_FIELD.enabled}`) });
@@ -158,6 +173,10 @@ describe("a profile (M.1)", () => {
   it("says a profile filled from Kraft's package is changed in harnesses.yaml, as the desktop does", async () => {
     open("strong", ans(hview(resolved({ profiles: { strong: { providers: { claude: { model: "sonnet" } }, effort: null, tasks: [], used_by_fallback: [], source: "package" } } }))));
     expect(await screen.findByText("From Kraft's package. Define it in harnesses.yaml to change it.")).toBeInTheDocument();
+    const claude = screen.getByRole("region", { name: "claude" });
+    expect(within(claude).getByText("sonnet")).toBeInTheDocument();
+    expect(within(claude).queryByRole("button", { name: /^model/ })).toBeNull();
+    expect(within(claude).queryByRole("button", { name: /^effort/ })).toBeNull();
     cleanup();
     open("fast");
     await screen.findByRole("region", { name: "claude" });

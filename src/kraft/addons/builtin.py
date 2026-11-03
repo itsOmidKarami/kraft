@@ -39,7 +39,14 @@ def source_dir() -> Path:
     raise FileNotFoundError("this Kraft was built without its kraft-default; reinstall it")
 
 
-_memo: tuple[tuple, fetch.Extracted] | None = None
+_memo: tuple[Path, tuple, fetch.Extracted] | None = None
+
+
+def frozen() -> bool:
+    """An installed release reads its bundle once: `uv tool install` replaces the
+    files in place under a server that keeps running, and that server's code must
+    not read the next release's chains. A checkout re-reads its edits."""
+    return not manifest.is_source_build(update.installed())
 
 
 def _stamp(root: Path) -> tuple:
@@ -57,14 +64,17 @@ def _stamp(root: Path) -> tuple:
 
 def extracted() -> fetch.Extracted:
     """The built-in as `fetch.extract_dir` reads it, memoized per process until
-    a file's stamp changes. Hard links are fine: the package is not an operator
-    directory, and uv may link its files from a cache."""
+    a file's stamp changes (never, for an installed release: see `frozen`). Hard
+    links are fine: the package is not an operator directory, and uv may link its
+    files from a cache."""
     global _memo
     root = source_dir()
+    if _memo is not None and _memo[0] == root and frozen():
+        return _memo[2]
     stamp = _stamp(root)
-    if _memo is None or _memo[0] != stamp:
-        _memo = (stamp, fetch.extract_dir(root, allow_hardlinks=True))
-    return _memo[1]
+    if _memo is None or _memo[:2] != (root, stamp):
+        _memo = (root, stamp, fetch.extract_dir(root, allow_hardlinks=True))
+    return _memo[2]
 
 
 def required() -> dict[str, tuple[str, ...]]:
@@ -78,8 +88,19 @@ def harness_fallback(data: object) -> tuple[object, tuple[str, ...]]:
     built-in requires, and the file lacks, filled in from the packaged
     `harnesses.yaml`; and the profile names filled. An operator's own definition is
     never replaced, and nothing is written to their file."""
+    out, filled = _fill(data)
+    return out, filled["profiles"]
+
+
+def filled_harnesses(data: object) -> tuple[str, ...]:
+    """The harness names `harness_fallback` fills in (profiles are its second answer)."""
+    return _fill(data)[1]["harnesses"]
+
+
+def _fill(data: object) -> tuple[object, dict[str, tuple[str, ...]]]:
+    none = {"harnesses": (), "profiles": ()}
     if not isinstance(data, dict):
-        return data, ()
+        return data, none
     try:
         packaged = yaml.safe_load((source_dir() / "harnesses.yaml").read_text()) or {}
         needs = required()
@@ -92,8 +113,8 @@ def harness_fallback(data: object) -> tuple[object, tuple[str, ...]]:
         AttributeError,
         TypeError,
     ):
-        return data, ()  # no source: the built-in is left out, and fills nothing
-    out, filled = dict(data), []
+        return data, none  # no source: the built-in is left out, and fills nothing
+    out, filled = dict(data), dict(none)
     for section, names in needs.items():
         have = out.get(section)
         if have is not None and not isinstance(have, dict):
@@ -102,12 +123,11 @@ def harness_fallback(data: object) -> tuple[object, tuple[str, ...]]:
         try:
             missing = {n: packaged[section][n] for n in names if n not in have}
         except (KeyError, TypeError):
-            return data, ()  # a packaged file that lacks what the manifest requires
+            return data, none  # a packaged file that lacks what the manifest requires
         if missing:
             out[section] = {**have, **missing}
-            if section == "profiles":  # the label is for profiles only
-                filled += missing
-    return out, tuple(filled)
+            filled[section] = tuple(missing)
+    return out, filled
 
 
 def is_tree(chain) -> bool:

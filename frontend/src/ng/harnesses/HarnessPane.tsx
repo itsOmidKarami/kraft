@@ -8,7 +8,7 @@ import { Button } from "../ui/Button";
 import { Switch } from "../ui/Switch";
 import { useState } from "react";
 import { ModelField } from "./fields";
-import { ACCESS, ACCESS_HELP, ACCESS_SECTION, enabledHelp, enableLabel, executableWord, ACCESS_WORD, entryUsers, usedBy, HARNESS_FIELD, type EntryView, type HarnessView, type HProblem, type Resolved } from "./model";
+import { ACCESS, ACCESS_HELP, ACCESS_SECTION, enabledHelp, enableLabel, executableWord, ACCESS_WORD, defaultLabel, entryUsers, usedBy, HARNESS_FIELD, type EntryView, type HarnessView, type HProblem, type Resolved } from "./model";
 import { entryOp, useRun } from "./ops";
 import type { ProviderStatus } from "./useProviders";
 import { LinkButton } from "../ui/LinkButton";
@@ -83,6 +83,17 @@ function HarnessFields({ draft, h, status, changed, onYaml }: { draft: ConfigDra
   const modes = status?.capabilities.permission_mode?.values ?? [];
   const hasMode = !!status?.capabilities.permission_mode || !!h.defaults.permission_mode;
   const mark = changed ? " is-changed" : "";
+  // A package harness is read-only: the server refuses set_harness on it.
+  if (h.source === "package") {
+    return (
+      <>
+        <Kv k={HARNESS_FIELD.enabled} v={h.enabled ? "yes" : "no"} />
+        <Kv k={HARNESS_FIELD.executable} v={h.executable ?? status?.executable ?? "the provider's own"} mono />
+        <Kv k={HARNESS_FIELD.provider} v={h.provider ?? "unknown"} />
+        {Object.entries(h.defaults).map(([k, v]) => <Kv key={k} k={defaultLabel(k)} v={v} mono />)}
+      </>
+    );
+  }
   return (
     <>
       <div className="hn-field">
@@ -162,12 +173,20 @@ export function HarnessPane({ h, lane, onLane, onProfile, onYaml, ...c }: Common
       onCollapse={c.onCollapse}
       onExpand={c.onExpand}
     >
+      {h.source === "package" && <Note>From Kraft's package. Define it in harnesses.yaml to change it.</Note>}
       <Head>{ACCESS_SECTION}</Head>
+      {h.source === "package" ? (
+        <div className="hn-field">
+          <Kv k="tasks may" v={ACCESS_WORD[h.state]} />
+          <p className="hn-field-help">{ACCESS_HELP[h.state]}</p>
+        </div>
+      ) : (
       <div className="hn-field">
         <span className="hn-field-label">tasks may</span>
         <Segmented label={ACCESS_SECTION} options={ACCESS} value={h.state} onChange={(state) => void run({ op: "set_access", harness: h.id, state })} />
         <p className={`hn-field-help${c.changes.has(`access.${h.id}`) ? " is-changed" : ""}`}>{ACCESS_HELP[h.state]}</p>
       </div>
+      )}
       {c.r.escalation_effective.harness === h.id && <Note>Escalation turns run on this harness (area pane → Escalation).</Note>}
       {error && <p className="hn-error" role="alert">{error}</p>}
 

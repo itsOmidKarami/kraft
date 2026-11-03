@@ -48,10 +48,11 @@ on one Python version only: `just test-py 3.12` (or `3.13`, `3.14`).
   `version` in the files `dev/stamp_plugin_versions.py` lists (the plugin
   manifests under `plugins/`, `vscode/package.json`,
   `vscode/package-lock.json`).
-- The opposite rule for add-ons: a change to `config/library.yaml`,
-  `config/chains/` or `addons/<name>/` raises that add-on's `version` in
-  `config/.kraft/addon.json` or `addons/<name>/.kraft/addon.json`, in the same
-  pull request (CONTRIBUTING.md, "Kraft's own collection", says by how much).
+- The opposite rule for add-ons: a change to `addons/<name>/` raises that
+  add-on's `version` in `addons/<name>/.kraft/addon.json`, in the same pull
+  request (CONTRIBUTING.md, "Kraft's own collection", says by how much).
+  `kraft-default` (`config/`) ships with Kraft and takes Kraft's version, so a
+  `config/` change needs no raise.
 
 ## Merge conflicts
 

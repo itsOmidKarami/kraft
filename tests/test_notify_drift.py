@@ -126,6 +126,28 @@ async def test_a_failed_send_is_not_marked(tmp_path, database, lines):
     assert drift.notified(st.run_dirs.addons) is None
 
 
+async def test_a_send_that_lands_after_the_state_cleared_marks_nothing(tmp_path, database, lines):
+    import httpx
+
+    sends: list = []
+    n = _notifier(tmp_path, database, sends, retry_delay=0)
+    st = _state(tmp_path, n)
+
+    async def transport(request: httpx.Request) -> httpx.Response:
+        sends.append(request)
+        if len(sends) == 1:  # a reload clears the drift while the first post fails
+            lines["v"] = []
+            deps.refresh_drift(st)
+            return httpx.Response(500)
+        return httpx.Response(200)
+
+    n._transport = httpx.MockTransport(transport)
+    deps.refresh_drift(st)
+    await _settle(n)
+    assert len(sends) == 2
+    assert drift.notified(st.run_dirs.addons) is None
+
+
 async def test_a_cleared_state_notifies_again_when_it_returns(tmp_path, database, lines):
     sends: list = []
     n = _notifier(tmp_path, database, sends)

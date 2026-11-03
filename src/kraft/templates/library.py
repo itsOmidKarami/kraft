@@ -1033,15 +1033,11 @@ class TemplateLibrary:
 
     def run_chain_ids(self, named: Collection[str] = ()) -> tuple[str, ...]:
         """The chains an operator's checks judge: each chain except a built-in
-        `kraft-default:` one that no local chain extends and that is not in
-        `named` (their thin local `default` resolves to the same tasks under its
-        own id). Chains named by an open item or a trigger are not judged."""
+        `kraft-default:` one that is not in `named` (a thin local `default`
+        resolves to the same tasks under its own id). Chains named by an open
+        item or a trigger are not judged."""
         return tuple(
-            id
-            for id in self.chain_ids
-            if not id.startswith("kraft-default:")
-            or id in named
-            or any(":" not in other for other in self.extended_by(id))
+            id for id in self.chain_ids if not id.startswith("kraft-default:") or id in named
         )
 
     def _expansion(self, id: str) -> _Resolution:
