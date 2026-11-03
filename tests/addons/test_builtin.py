@@ -309,3 +309,27 @@ def test_the_builtins_store_survives_a_collection_and_no_release_drops_it(tmp_pa
     mine, _ = _builtin_in(config, addons)
     assert load.gc(set, addons) == [] and mine.root.is_dir()
     assert load.left_out_by("3.0.0", config) == []
+
+
+def test_the_builtin_wins_the_namespace_over_a_lock_that_still_holds_a_copy(tmp_path):
+    """A 2.5 home's lock holds `kraft-default@sdlc`: installing another copy is
+    refused with `REFUSED`, not sent to update the held one (which is refused too)."""
+    repo = fx.make_collection(tmp_path, {"kraft-default": {"library": {"tasks": {"b": fx.AGENT}}}})
+    config, addons = _home(
+        tmp_path, {"acme": {"git": repo.as_uri()}, "sdlc": {"git": repo.as_uri()}}
+    )
+    fx.install(config, addons, repo, "kraft-default", alias=None)
+    from kraft.addons.config import AddonsLock
+
+    assert any(
+        a.endswith("@acme") or a.endswith("@sdlc")
+        for a in AddonsLock.load(config / "addons.lock").addons
+    )
+    [result] = addon_update.update(
+        ["kraft-default@acme"],
+        accept=lambda review: True,
+        entries={"kraft-default@acme": True},
+        config_dir=config,
+        addons_root=addons,
+    )
+    assert result.outcome == "refused" and builtin.REFUSED in result.problems

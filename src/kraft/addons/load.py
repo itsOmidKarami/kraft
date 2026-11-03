@@ -613,6 +613,7 @@ def instance_problem(
     is a `harnesses.yaml` to judge in place of the file, `repos` likewise a
     `repos.yaml`: an edit not saved yet. `repo_library`: the namespace is a
     repository's own id, which must be there."""
+    from kraft.addons import builtin
     from kraft.config import ConfigError, read_yaml
 
     try:
@@ -640,7 +641,7 @@ def instance_problem(
     if repo_library:
         if namespace not in ids:
             return f"repository id {namespace!r} is no longer in repos.yaml"
-    elif namespace in ids and namespace != "kraft-default":
+    elif namespace in ids and namespace != builtin.NAMESPACE:
         return f"its namespace {namespace!r} is now a repository id"
     return None
 

@@ -996,11 +996,11 @@ def _judge(
     refused. Returns why its ancestry does not hold there, which refuses a
     move and is a note on a current add-on."""
     addon_id, namespace = candidate.id, candidate.namespace
-    holders = {builtin.NAMESPACE: builtin.ID} | {
+    if namespace == builtin.NAMESPACE:  # the built-in wins, whatever a lock still holds
+        raise Refused([builtin.REFUSED])
+    holders = {
         held.namespace: other for other, held in ctx.lock.addons.items() if other != addon_id
     }
-    if holders.get(namespace) == builtin.ID:
-        raise Refused([builtin.REFUSED])
     if namespace in holders:
         raise Refused(
             [
@@ -1543,14 +1543,11 @@ def update(
                 continue
             pulled[parent_id] = [child.addon_id]
             name = parent_id.split("@", 1)[0]
-            holders = (
-                {builtin.NAMESPACE: builtin.ID}
-                | {config.namespace(o): o for o in config.addons}
-                | {e.namespace: o for o, e in lock.addons.items()}
-            )
-            holder = holders.get(
-                config.namespace(parent_id) if parent_id in config.addons else name
-            )
+            holders = {config.namespace(o): o for o in config.addons} | {
+                e.namespace: o for o, e in lock.addons.items()
+            }
+            wanted = config.namespace(parent_id) if parent_id in config.addons else name
+            holder = builtin.ID if wanted == builtin.NAMESPACE else holders.get(wanted)
             if holder not in (None, parent_id):
                 results[parent_id] = Result(
                     parent_id,

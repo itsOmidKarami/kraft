@@ -614,8 +614,7 @@ def test_a_profile_s_own_executable_is_what_is_checked(tmp_path, monkeypatch):
     [
         ({"c": "a", "agy-impl": "gone"}, "chain agy-impl can't run"),
         ({"c": "a", "x": "gone", "y": "gone"}, "chains x, y can't run"),
-        # The built-in's chains run on `claude`, so these two are not all of them.
-        ({"x": "gone", "y": "gone"}, "chains x, y can't run"),
+        ({"x": "gone", "y": "gone"}, "no chain can run"),
         (
             {"c": "a", **{f"x{n}": "gone" for n in range(7)}},
             "chains x0, x1, x2, x3, x4 and 2 more can't run",
@@ -626,6 +625,11 @@ def test_a_profile_s_own_executable_is_what_is_checked(tmp_path, monkeypatch):
 def test_a_missing_agent_names_the_chains_it_stops(tmp_path, monkeypatch, chains, says):
     """Only the chains that select a profile need its executable: saying "no
     chain can run" for one custom chain sent an operator after the rest."""
+    if says == "no chain can run":  # the built-in's chains are left out
+        real = doctor._resolved_chains
+        monkeypatch.setattr(
+            doctor, "_resolved_chains", lambda d: [c for c in real(d) if ":" not in c.id]
+        )
     live = _live(tmp_path, monkeypatch, {"a": "claude", "gone": "claude"}, ["a", "gone"])
     (live / "harnesses.yaml").write_text(
         yaml.safe_dump(
@@ -648,8 +652,7 @@ def test_a_missing_agent_names_the_chains_it_stops(tmp_path, monkeypatch, chains
     (fake / "claude").chmod(0o755)
     monkeypatch.setenv("PATH", str(fake))
     row = _by_name(doctor._agent_checks(), "agent: gone")
-    assert row["ok"] is False
-    assert row["detail"] == f"`agy` is not on PATH — {says}"
+    assert (row["ok"], row["detail"]) == (False, f"`agy` is not on PATH — {says}")
 
 
 def test_a_selected_profile_harnesses_yaml_lacks_fails(tmp_path, monkeypatch):
