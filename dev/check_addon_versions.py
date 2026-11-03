@@ -13,7 +13,7 @@ the base lacks is new and passes.
 
     uv run python dev/check_addon_versions.py [--base REF]
 
-Needs `origin/main` (CI's lint job checks out with fetch-depth 0); without it,
+Needs `origin/main` (CI's lint job checks out with fetch-depth 0, blobless); without it,
 it only warns outside CI. Exits 1 on any finding.
 """
 

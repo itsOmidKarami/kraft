@@ -32,7 +32,7 @@ compares `docsite/content` with the latest release tag's:
     uv run python dev/check_docs_added_in.py              # this checkout against the latest tag
     uv run python dev/check_docs_added_in.py --ref v2.1.0 # a tag's own content: 1 and 2 only
 
-Needs the repository's tags (CI's lint job checks out with fetch-depth 0).
+Needs the repository's tags (CI's lint job checks out with fetch-depth 0, blobless).
 Exits 1 on any finding.
 """
 
