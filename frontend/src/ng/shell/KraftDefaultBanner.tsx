@@ -31,14 +31,16 @@ export function useKraftDefault(health: Health | null | undefined): { lines: str
   useEffect(() => {
     if (signature) notifyServer(signature, count);
   }, [signature, count]);
+  const have = found?.signature === signature;
+  // `health` is a new object each poll, so a failed read is asked again a minute later.
   useEffect(() => {
-    if (!shown) return;
+    if (!shown || have) return;
     let live = true;
     api.getKraftDefault().then((r) => live && setFound(r)).catch(() => {});
     return () => {
       live = false;
     };
-  }, [shown, signature]);
+  }, [shown, signature, have, health]);
   useEffect(() => {
     if (shown && found && found.signature === signature && signature) write(NOTIFIED_KEY, signature);
   }, [shown, found, signature]);
@@ -62,7 +64,7 @@ export function KraftDefaultBanner({ health }: { health: Health | null | undefin
       <span className="ng-offline-mark" aria-hidden>!</span>
       <span className="ng-offline-text">
         <strong>Kraft's own chains need attention</strong>
-        {drift.lines.slice(0, 3).map((l) => <span key={l} className="ng-offline-line" style={{ display: "block" }}>{l}</span>)}
+        {drift.lines.slice(0, 3).map((l, i) => <span key={i} className="ng-offline-line" style={{ display: "block" }}>{l}</span>)}
         {more > 0 && <span style={{ display: "block" }}>and {more} more</span>}
         Run <code>kraft admin doctor</code> for the fix.{" "}
         <button type="button" className="btn" onClick={drift.hide}>Hide until it changes</button>

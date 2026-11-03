@@ -36,10 +36,15 @@ def test_marking(tmp_path, how):
 
 
 def test_a_check_that_raises_is_one_line(tmp_path, monkeypatch):
+    """The row at base said only this line when the read failed, whatever the
+    update record had already added; the lines gathered so far are dropped."""
+
     def boom(*a, **k):
         raise RuntimeError("bad")
 
     monkeypatch.setattr(addons_load, "installed", boom)
     (tmp_path / "chains").mkdir()
-    found = drift.lines(tmp_path, tmp_path / "addons")
-    assert found[-1] == "cannot read kraft-default: bad"
+    addons = tmp_path / "addons"
+    addons.mkdir()
+    (addons / "builtin.json").write_text('{"to": "9.9.9", "status": "held", "lines": "oops"}')
+    assert drift.lines(tmp_path, addons) == ["cannot read kraft-default: bad"]

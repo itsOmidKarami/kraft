@@ -483,7 +483,7 @@ def lint_loaded(st) -> None:
 
 def refresh_drift(st) -> None:
     """Recompute the kraft-default drift and tell the webhook once per new state.
-    Runs on the event loop: `installed()` and `extracted()` are memoized."""
+    Runs on the event loop: cheap, a metadata lookup and a memoized extract."""
     try:
         lines = drift.lines(st.templates_dir, st.run_dirs.addons)
     except Exception as exc:  # noqa: BLE001 -- drift never breaks a load or startup
@@ -495,17 +495,19 @@ def refresh_drift(st) -> None:
         drift.mark_notified(addons, None)
         st.kraft_default_sent = None
     elif signature not in (getattr(st, "kraft_default_sent", None), drift.notified(addons)):
-        # Before the send, so two overlapping reloads send once.
-        st.kraft_default_sent = signature
+        # Only a scheduled notice counts as sent: at startup the library loads before
+        # the notifier exists, and a no-loop caller cannot send. Set before the task
+        # runs, so two overlapping reloads send once.
         if notifier := getattr(st, "notifier", None):
             text = (
                 f"Kraft's own chains need attention: {len(lines)} item(s). Run kraft admin doctor."
             )
-            notifier.send_notice(
+            if notifier.send_notice(
                 "kraft_default_drift",
                 text,
                 on_sent=lambda: drift.mark_notified(addons, signature),
-            )
+            ):
+                st.kraft_default_sent = signature
 
 
 def invalid_templates(st) -> dict[str, str]:

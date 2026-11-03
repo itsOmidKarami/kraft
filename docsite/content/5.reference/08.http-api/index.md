@@ -267,8 +267,8 @@ _Added in 2.1_
 | Route | What it does |
 |---|---|
 | [`GET /api/storage`](/reference/http-api/repos-chains-harnesses-and-server#get-apistorage) | Answers the disk the worktrees use, item by item. |
-| [`GET /api/kraft-default`](/reference/http-api/repos-chains-harnesses-and-server#get-apikraft-default) | Answers the lines about Kraft's own chains that need attention. |
 | [`POST /api/storage/preview`](/reference/http-api/repos-chains-harnesses-and-server#post-apistoragepreview) | Shows what archiving some items would free and lose. |
+| [`GET /api/kraft-default`](/reference/http-api/repos-chains-harnesses-and-server#get-apikraft-default) | Answers the lines about Kraft's own chains that need attention. |
 
 ### Workers
 

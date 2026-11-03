@@ -83,7 +83,7 @@ def lines(templates: Path, addons_root: Path) -> list[str]:
         lines += _full_copies(templates)
         found = addons_load.installed(templates, addons_root)
     except Exception as exc:  # a row that cannot read says so; it never crashes doctor
-        return [*lines, f"cannot read kraft-default: {exc}"]
+        return [f"cannot read kraft-default: {exc}"]  # the row at base said only this
     lines += [
         f"{a.id}: {a.left_out}" for a in found if (a.left_out or "").startswith("Kraft now ships")
     ]

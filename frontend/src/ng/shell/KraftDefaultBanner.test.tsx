@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
+import * as browserNotify from "../../browserNotify";
 import type { Health } from "../../types";
 import { KraftDefaultBanner } from "./KraftDefaultBanner";
 
@@ -25,6 +26,27 @@ describe("KraftDefaultBanner", () => {
     expect(localStorage.getItem("kraft.kraftDefault.notified")).toBe("aaa");
   });
 
+  it("keeps a repeated line as its own row", async () => {
+    vi.mocked(api.getKraftDefault).mockResolvedValue({ lines: ["same", "same"], signature: "aaa" });
+    render(<KraftDefaultBanner health={health("aaa", 2)} />);
+    expect(await screen.findAllByText("same")).toHaveLength(2);
+  });
+
+  it("offers a new signature to the browser notification", async () => {
+    const spy = vi.spyOn(browserNotify, "notifyServer");
+    render(<KraftDefaultBanner health={health("aaa", 5)} />);
+    await screen.findByRole("status");
+    expect(spy).toHaveBeenCalledWith("aaa", 5);
+  });
+
+  it("asks again when the first read failed", async () => {
+    vi.mocked(api.getKraftDefault).mockRejectedValueOnce(new Error("down"));
+    const { rerender } = render(<KraftDefaultBanner health={health("aaa", 5)} />);
+    await waitFor(() => expect(api.getKraftDefault).toHaveBeenCalledTimes(1));
+    rerender(<KraftDefaultBanner health={{ ...health("aaa", 5) }} />);
+    expect(await screen.findByRole("status")).toBeInTheDocument();
+  });
+
   it("shows nothing without drift", () => {
     render(<KraftDefaultBanner health={health(null, 0)} />);
     expect(screen.queryByRole("status")).toBeNull();
@@ -35,6 +57,7 @@ describe("KraftDefaultBanner", () => {
     const { rerender } = render(<KraftDefaultBanner health={health("aaa", 5)} />);
     await userEvent.click(await screen.findByRole("button", { name: "Hide until it changes" }));
     expect(screen.queryByRole("status")).toBeNull();
+    expect(localStorage.getItem("kraft.kraftDefault.hidden")).toBe("aaa");
     rerender(<KraftDefaultBanner health={health("aaa", 5)} />);
     expect(screen.queryByRole("status")).toBeNull();
     vi.mocked(api.getKraftDefault).mockResolvedValue({ lines: ["new"], signature: "bbb" });

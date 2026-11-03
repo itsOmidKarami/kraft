@@ -62,6 +62,19 @@ async def test_a_new_state_is_sent_once(tmp_path, database, lines):
     assert len(sends) == 1
 
 
+async def test_a_state_seen_before_the_notifier_exists_is_sent_when_it_does(
+    tmp_path, database, lines
+):
+    sends: list = []
+    n = _notifier(tmp_path, database, sends)
+    st = _state(tmp_path, None)
+    deps.refresh_drift(st)  # startup: lint_loaded runs before the notifier is built
+    st.notifier = n
+    deps.refresh_drift(st)
+    await _settle(n)
+    assert len(sends) == 1
+
+
 async def test_a_changed_state_is_sent_again(tmp_path, database, lines):
     sends: list = []
     n = _notifier(tmp_path, database, sends)

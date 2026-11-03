@@ -294,19 +294,21 @@ class Notifier:
 
     def send_notice(
         self, kind: str, text: str, *, on_sent: Callable[[], None] | None = None
-    ) -> None:
+    ) -> bool:
         """A server-wide message that belongs to no work item (`kraft_default_drift`).
         Scheduled like `_dispatch`, so `stop()` cancels a pending send. `on_sent`
         runs once the endpoint took it, or at once when the switch is off, so a
         later enable does not replay old news. A failure only logs: no item to
-        hang a `notification_failed` event on, and the next start retries."""
+        hang a `notification_failed` event on, and the next start retries. Returns
+        whether a send was scheduled: False with no running loop (a sync caller)."""
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return  # a reload with no loop (a sync caller): unmarked, so the next start sends it
+            return False
         task = asyncio.create_task(self._send_notice(kind, text, on_sent))
         self._inflight.add(task)
         task.add_done_callback(self._inflight.discard)
+        return True
 
     async def _send_notice(self, kind: str, text: str, on_sent) -> None:
         cfg = self._config
