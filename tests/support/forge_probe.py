@@ -52,6 +52,7 @@ def _repository_probe_in_process(request, monkeypatch):
             )
         except ConfigError as exc:
             # The child prints the message and the parent keeps its last line.
-            raise ConfigError(str(exc).strip().splitlines()[-1]) from None
+            lines = str(exc).strip().splitlines()
+            raise ConfigError(lines[-1] if lines else "probe failed") from None
 
     monkeypatch.setattr(detect, "probe", in_process)

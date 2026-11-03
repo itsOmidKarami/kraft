@@ -63,9 +63,15 @@ def test_slow_mode_delays(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("node", "slow"), [("spec", False), ("plan", True)], ids=["another-node", "the-slow-node"]
+    ("ctx", "slow"),
+    [
+        ("Node: spec\n", False),
+        ("Node: plan\n", True),
+        ("no node line here", True),
+    ],
+    ids=["another-node", "the-slow-node", "no-node-line"],
 )
-def test_slow_node_slows_only_the_tasks_of_that_node(tmp_path, node, slow):
+def test_slow_node_slows_only_the_tasks_of_that_node(tmp_path, ctx, slow):
     """A test that holds an item at a later node must not also wait out the delay of every node
     before it."""
     env = {
@@ -74,7 +80,7 @@ def test_slow_node_slows_only_the_tasks_of_that_node(tmp_path, node, slow):
         "KRAFT_FAKE_CLAUDE_SLOW_NODE": "plan",
     }
     start = time.monotonic()
-    proc = _run(tmp_path, env, ctx=f"Work item: w1\nNode: {node}\nHook point: {node}.main.a\n")
+    proc = _run(tmp_path, env, ctx=f"Work item: w1\n{ctx}Hook point: x.main.a\n")
     assert proc.returncode == 0
     assert (time.monotonic() - start >= 1.0) is slow
 

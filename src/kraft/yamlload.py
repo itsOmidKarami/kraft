@@ -13,10 +13,14 @@ from __future__ import annotations
 import yaml
 
 _FAST = getattr(yaml, "CSafeLoader", None)
+#: libyaml's composer recurses on the C stack: past ~20,000 levels (far fewer on a small thread
+#: stack) it kills the process where the pure-Python parser raises RecursionError. Nesting is
+#: never deeper than the brackets and dashes in the text, and no real config has this many.
+_MAX_OPENERS = 500
 
 
-def safe_load(text: str | bytes) -> object:
-    if _FAST is not None:
+def safe_load(text: str) -> object:
+    if _FAST is not None and text.count("[") + text.count("{") + text.count("- ") <= _MAX_OPENERS:
         try:
             return yaml.load(text, _FAST)  # noqa: S506 -- a SafeLoader
         except yaml.YAMLError:

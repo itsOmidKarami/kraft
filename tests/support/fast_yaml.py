@@ -1,4 +1,4 @@
-"""libyaml's loader and dumper when PyYAML has them, else the pure-Python pair.
+"""libyaml's loader (`kraft.yamlload`) and dumper when PyYAML has them, else the pure-Python pair.
 
 The bytes are the same (compared file by file on everything
 `harness.fake_templates_dir` writes) and it is ~8x faster: a templates dir parses
@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import yaml
 
-_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+from kraft.yamlload import safe_load
+
 _DUMPER = getattr(yaml, "CSafeDumper", yaml.SafeDumper)
 
 
-def load(text: str):
-    return yaml.load(text, Loader=_LOADER)
+load = safe_load
 
 
 def dump(data) -> str:

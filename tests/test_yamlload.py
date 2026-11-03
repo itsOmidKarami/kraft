@@ -3,6 +3,8 @@ hand back what `yaml.safe_load` would and fail with the words it would use."""
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -66,3 +68,22 @@ def test_it_parses_with_libyaml_where_pyyaml_has_it(monkeypatch):
 
     assert yamlload.safe_load("a: 1\n") == {"a": 1}
     assert loaders == [yaml.CSafeLoader]
+
+
+@pytest.mark.parametrize(
+    "document",
+    ["[" * 100_000 + "]" * 100_000, "- " * 100_000 + "x", "{a: " * 100_000 + "1" + "}" * 100_000],
+    ids=["flow-sequences", "block-sequences", "flow-mappings"],
+)
+def test_nesting_deep_enough_to_crash_libyaml_fails_as_it_always_did(document):
+    """libyaml's composer overflows the C stack at ~20,000 levels and kills the process; the
+    pure-Python parser raises RecursionError. Run apart: a crash fails the test, not the worker."""
+    code = (
+        "import sys\nfrom kraft import yamlload\n"
+        "try:\n    yamlload.safe_load(sys.stdin.read())\n"
+        "except RecursionError:\n    print('RecursionError')\n"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", code], input=document, capture_output=True, text=True
+    )
+    assert (done.returncode, done.stdout.strip()) == (0, "RecursionError")

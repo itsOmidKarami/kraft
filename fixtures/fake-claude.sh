@@ -137,7 +137,8 @@ if [ "$mode" = "slow" ] && [ -n "${KRAFT_FAKE_CLAUDE_SLOW_NODE:-}" ]; then
       "Node: "* | *$'\n'"Node: "*) node="$(printf '%s\n' "$arg" | sed -n 's/^Node: //p' | head -1)"; break ;;
     esac
   done
-  [ "$node" = "$KRAFT_FAKE_CLAUDE_SLOW_NODE" ] || mode="fix"
+  # No "Node:" line: slow, as without the knob, rather than quietly not slow.
+  [ -z "$node" ] || [ "$node" = "$KRAFT_FAKE_CLAUDE_SLOW_NODE" ] || mode="fix"
 fi
 
 if [ "$mode" = "slow" ]; then
