@@ -108,6 +108,7 @@ export function ProfileView() {
     <AreaScreen title={name} sub="Profile · model and effort per provider" draft={draft}>
       {r && !p && <p className="ph-empty">There is no profile {name}.</p>}
       {problems.length > 0 && <Group title="Problems" rows={problemRows(problems)} />}
+      {p?.source === "package" && <p className="ph-note">From Kraft's package. Define it in harnesses.yaml to change it.</p>}
       {p && Object.entries(p.providers).map(([prov, e]) => {
         const status = providers.find((x) => x.id === prov);
         return (

@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ESCALATION, NEVER, NO_ENTRY, resolved, STATUS, view as hview } from "../../harnesses/testkit";
@@ -153,5 +153,14 @@ describe("a profile (M.1)", () => {
     open("strong", ans(hview(resolved({ profiles: { strong: { providers: { cursor: { model: "x" } }, effort: null, tasks: [], used_by_fallback: [] } } }))));
     const cursor = await screen.findByRole("region", { name: "cursor" });
     expect(within(cursor).queryByRole("button", { name: /^effort/ })).toBeNull();
+  });
+
+  it("says a profile filled from Kraft's package is changed in harnesses.yaml, as the desktop does", async () => {
+    open("strong", ans(hview(resolved({ profiles: { strong: { providers: { claude: { model: "sonnet" } }, effort: null, tasks: [], used_by_fallback: [], source: "package" } } }))));
+    expect(await screen.findByText("From Kraft's package. Define it in harnesses.yaml to change it.")).toBeInTheDocument();
+    cleanup();
+    open("fast");
+    await screen.findByRole("region", { name: "claude" });
+    expect(screen.queryByText(/From Kraft's package/)).toBeNull();
   });
 });
