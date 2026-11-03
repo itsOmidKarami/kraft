@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from kraft import client
+from kraft.addons import builtin
 
 
 @pytest.fixture
@@ -28,3 +29,10 @@ def make_item(app):
         return asyncio.run(go())
 
     return make
+
+
+@pytest.fixture(autouse=True)
+def _no_preview(monkeypatch):
+    """No release wheel is downloaded by a test that runs `kraft admin update`:
+    the kraft-default comparison has its own tests."""
+    monkeypatch.setattr(builtin, "preview", lambda *a, **k: builtin.Preview(None, (), None))

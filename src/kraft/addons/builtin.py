@@ -211,10 +211,11 @@ def from_wheel(wheel: Path, scratch: Path) -> fetch.Extracted | None:
     root = scratch / "kraft-default"
     found = False
     with zipfile.ZipFile(wheel) as z:
-        for info in z.infolist():
+        members = [i for i in z.infolist() if i.filename.startswith(_WHEEL_DIR) and not i.is_dir()]
+        if len(members) > fetch.MAX_FILES or sum(i.file_size for i in members) > fetch.MAX_TOTAL:
+            raise ValueError("the wheel's kraft-default is larger than an add-on may be")
+        for info in members:
             name = info.filename
-            if not name.startswith(_WHEEL_DIR) or info.is_dir():
-                continue
             rel = Path(name.removeprefix(_WHEEL_DIR))
             if rel.is_absolute() or ".." in rel.parts or name.startswith("/"):
                 raise ValueError(f"the wheel holds an unsafe path: {name}")
@@ -289,7 +290,7 @@ def show(p: Preview) -> str:
     lines += [f"  breaks: {line}" for line in p.breaks]
     if p.note:
         lines.append(f"kraft-default: {p.note}")
-    return "\n".join(lines) if lines else "kraft-default: unchanged"
+    return addon_review.escape("\n".join(lines)) if lines else "kraft-default: unchanged"
 
 
 def held(p: Preview) -> list[str]:

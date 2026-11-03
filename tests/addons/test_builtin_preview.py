@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from kraft.addons import builtin
+from kraft.addons import builtin, fetch
 
 PREFIX = "kraft/_bundled/kraft-default/"
 
@@ -30,6 +30,11 @@ def _wheel(path: Path, members: dict[str, bytes]) -> Path:
         ),
         pytest.param({"kraft/__init__.py": b""}, None, id="older-release"),
         pytest.param({PREFIX + "../../evil": b"x"}, ValueError, id="path-escape"),
+        pytest.param(
+            {PREFIX + f"chains/{n}.yaml": b"" for n in range(fetch.MAX_FILES + 1)},
+            ValueError,
+            id="too-many-files",
+        ),
     ],
 )
 def test_from_wheel(tmp_path: Path, members, expect) -> None:
@@ -74,6 +79,7 @@ def _release_wheel(tmp_path: Path, drop: str | None = None, rename_task: bool = 
         pytest.param("renamed-node", "verify", id="a-chain-changes"),
         pytest.param("breaks-override", "chains/default.yaml", id="breaks-an-override"),
         pytest.param("offline", "cannot compare", id="offline"),
+        pytest.param("broken-policy", "cannot compare", id="broken-policy"),
         pytest.param("no-url", "cannot compare: no wheel found", id="no-wheel-found"),
         pytest.param("older", "ships no built-in kraft-default", id="older-release"),
     ],
@@ -91,8 +97,11 @@ def test_preview(tmp_path: Path, monkeypatch, mode, says) -> None:
             "id: default\nextends: kraft-default:default\n"
             "overrides:\n  spec.main.author: {policy: {time_cap_minutes: 5}}\n"
         )
+    if mode == "broken-policy":
+        (config / "policy.yaml").write_text("{{{ not yaml")
     wheel = {
         "unchanged": _release_wheel,
+        "broken-policy": _release_wheel,
         "renamed-node": lambda p: _release_wheel(p, "ship"),
         "breaks-override": lambda p: _release_wheel(p, rename_task=True),
     }.get(mode)

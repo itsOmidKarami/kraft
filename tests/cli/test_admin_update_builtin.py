@@ -93,6 +93,8 @@ def test_unattended_prechecks_and_kraft_default(
         assert why is not None and why.startswith(returns)
     got = builtin.recorded(tmp_path / "run" / "addons")
     assert (got or {}).get("status") == status
+    if status == "changed":
+        assert got["lines"] == list(CHANGED.review.reach)
 
 
 def test_restart_across_a_major_prints_the_preview(monkeypatch, setup, capsys) -> None:
@@ -120,12 +122,13 @@ def test_restart_across_a_major_prints_the_preview(monkeypatch, setup, capsys) -
     [
         pytest.param(True, False, id="refused-later-records-no-change"),
         pytest.param(False, True, id="accepting-clears-an-old-hold"),
+        pytest.param(False, False, id="an-unchanged-unattended-update-clears-it"),
     ],
 )
 def test_the_note_follows_what_happened(monkeypatch, setup, tmp_path, stale_tool, interactive):
     root = tmp_path / "run" / "addons"
     builtin.record(root, status="held", from_="2.4.0", to="2.5.0", lines=["old"])
-    monkeypatch.setattr(builtin, "preview", lambda *a, **k: CHANGED)
+    monkeypatch.setattr(builtin, "preview", lambda *a, **k: CHANGED if stale_tool else UNCHANGED)
     monkeypatch.setattr(update, "_stale_kraft_tool", lambda _run: stale_tool)
     a_terminal(monkeypatch, "y")
     cli.admin.update_prechecks(update.Release("v2.6.0", "u"), interactive=interactive)
