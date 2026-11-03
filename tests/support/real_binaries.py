@@ -45,6 +45,12 @@ FORGE_BINARIES = frozenset({"gh", "glab"})
 #: Every name the stub directory shadows.
 GUARDED_BINARIES = REAL_AGENT_BINARIES | FORGE_BINARIES
 
+#: Container runtimes a unit test never starts. An installed one is a ~30ms process that every app
+#: startup ran twice (`sweep_orphans`, `sweep_volumes`): 11,000 calls a full run. These answer "no
+#: daemon" at once, as an installed CLI with none behind it does; an `e2e("docker")` test keeps the
+#: real one, and a test's own fake docker, put first on `PATH`, still wins.
+QUIET_BINARIES = frozenset({"docker", "podman"})
+
 #: What a stub prints to stderr, so a log or a child's output says why.
 MESSAGE = (
     "refused by the test suite's real-binary guard (tests/support/real_binaries.py): "
@@ -86,6 +92,17 @@ def write_stub(path: Path, name: str, log: str) -> None:
     path.chmod(0o755)
 
 
+def quiet_dir() -> Path:
+    """A directory of `QUIET_BINARIES` that exit 1 at once, built once per process."""
+    d = _root_dir() / "quiet"
+    if not d.is_dir():
+        d.mkdir()
+        for name in sorted(QUIET_BINARIES):
+            (d / name).write_text("#!/bin/sh\nexit 1\n")
+            (d / name).chmod(0o755)
+    return d
+
+
 def stub_dir(names: frozenset[str] = GUARDED_BINARIES) -> Path:
     """A directory holding a refusing stub for each of `names`, built once per
     process for each distinct set."""
@@ -105,7 +122,7 @@ def shadowed_for(e2e_names: set[str] | frozenset[str]) -> frozenset[str]:
 
 
 def _without_stubs(path: str) -> str:
-    stubs = {str(d) for d in _dirs.values()}
+    stubs = {str(d) for d in _dirs.values()} | {str(quiet_dir())}
     return os.pathsep.join(p for p in path.split(os.pathsep) if p not in stubs)
 
 
@@ -139,6 +156,8 @@ class Guard:
     def __init__(self, nodeid: str, stubs: Path, real: dict[str, str]):
         self.nodeid = nodeid
         self.stubs = stubs
+        #: whether `quiet_dir()` sits behind the stubs on this test's `PATH`.
+        self.quiet = False
         #: `{real path: name}`: what `Popen` refuses to start.
         self.real = dict(real)
         self._refused: list[str] = []
@@ -225,7 +244,8 @@ def install(monkeypatch, nodeid: str, e2e_names: frozenset[str] = frozenset()) -
     stubs = stub_dir(names)
     path = _without_stubs(os.environ.get("PATH", os.defpath))
     guard = Guard(nodeid, stubs, installed(names, path))
-    monkeypatch.setenv("PATH", os.pathsep.join([str(stubs), path]))
+    guard.quiet = not QUIET_BINARIES & e2e_names
+    monkeypatch.setenv("PATH", os.pathsep.join([str(stubs), *_quiet(guard), path]))
     monkeypatch.setattr(
         subprocess.Popen, "__init__", guard.wrap_popen_init(subprocess.Popen.__init__)
     )
@@ -237,4 +257,8 @@ def stubbed_path(path: str) -> str:
     """`path` with the active guard's stubs first, for a child process's env."""
     if ACTIVE is None:
         return path
-    return os.pathsep.join([str(ACTIVE.stubs), _without_stubs(path)])
+    return os.pathsep.join([str(ACTIVE.stubs), *_quiet(ACTIVE), _without_stubs(path)])
+
+
+def _quiet(guard: Guard) -> list[str]:
+    return [str(quiet_dir())] if guard.quiet else []

@@ -315,3 +315,27 @@ def test_an_e2e_test_gets_back_only_the_clis_it_names():
     assert real_binaries.shadowed_for({"claude", "docker"}) == GUARDED_BINARIES - {"claude"}
     stubs = real_binaries.stub_dir(real_binaries.shadowed_for({"gh"}))
     assert sorted(p.name for p in stubs.iterdir()) == sorted(GUARDED_BINARIES - {"gh"})
+
+
+@pytest.mark.parametrize(
+    ("e2e_names", "quiet"),
+    [
+        (frozenset(), True),
+        (frozenset({"claude"}), True),
+        (frozenset({"docker"}), False),
+        (frozenset({"podman"}), False),
+    ],
+    ids=["unit", "e2e-other-cli", "e2e-docker", "e2e-podman"],
+)
+def test_docker_and_podman_answer_no_daemon_at_once_unless_an_e2e_test_names_one(
+    monkeypatch, e2e_names, quiet
+):
+    """The unit tier never starts a container runtime: an installed `docker` was
+    a ~30ms process that every app startup ran twice. A quiet stand-in exits 1
+    ("no daemon") before the machine's own, and is not a refused call."""
+    guard = real_binaries.install(monkeypatch, "probe", e2e_names)
+    assert (str(real_binaries.quiet_dir()) in os.environ["PATH"].split(os.pathsep)) is quiet
+    if quiet:
+        assert shutil.which("docker") == str(real_binaries.quiet_dir() / "docker")
+        assert subprocess.run(["docker", "ps"], capture_output=True).returncode == 1
+    assert guard.calls() == []
