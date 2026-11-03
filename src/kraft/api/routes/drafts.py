@@ -525,7 +525,7 @@ async def put_item_draft(wid: str, body: Ops, request: Request):
             item.OPS.validate_python(body.ops), mode="json", exclude_none=True
         )
     except ValidationError as exc:
-        raise HTTPException(422, str(exc)) from None
+        raise HTTPException(422, config_mod.first_error(exc, "ops")) from None
     await st.db.write(lambda c: store.put_item(c, wid, ops_) if ops_ else store.delete_item(c, wid))
     return _item_view(st, row, st.db.read(lambda c: store.get_item(c, wid)))
 
