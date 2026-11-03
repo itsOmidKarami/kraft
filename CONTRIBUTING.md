@@ -308,10 +308,12 @@ A Claude Code hook blocks it for agent sessions.
 
 **Your first `just test` is a full run.** testmon has no record yet of which
 tests touch which code (it keeps one in `.testmondata`), so it runs everything;
-later runs are change-selected. To start with one area, name it:
+later runs are change-selected. `just test` runs in parallel (`-n logical`)
+unless you pass `-n` yourself (`-n 0` stays in one process) or name a single
+test. To start with one area, name it:
 
 ```bash
-just test tests/cli -n auto            # one directory, in parallel
+just test tests/cli                    # one directory
 just test tests/cli/test_service.py -k systemd
 ```
 

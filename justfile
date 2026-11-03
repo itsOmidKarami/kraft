@@ -284,6 +284,12 @@ install: bundle
 # "collected N items / N deselected / 0 selected", or with -q only
 # "N deselected in 0.1s". Nothing ran, so nothing was shown to pass.
 #
+# In parallel (`-n logical`) unless the args say otherwise (`-n`, `-p no:xdist`)
+# or name one test (`::`), where xdist's workers cost 1-2s and gain nothing: a
+# cold testmon run in one process is ~4x slower on a directory and ~9x on the
+# suite (dev/targeted_tests.py), and testmon records fine under xdist. `-n 0`
+# opts out. A variable, not `set --`: the guards below read whether args were given.
+#
 # Testmon follows Python execution only. A test whose real input is a data
 # file -- a harness YAML, fixtures/fake-claude.sh, a script under
 # tests/support run as a subprocess, config/, a skill's .md, the sample
@@ -316,7 +322,9 @@ test *ARGS:
             printf '%s\n' "$changed" | head -20 | sed 's/^/  /' >&2
         fi
     fi
-    COVERAGE_CORE=ctrace uv run pytest ${mode:+"$mode"} "$@" 2>&1 | tee "$log"
+    par=-nlogical
+    case " $* " in *" -n"*|*" --numprocesses"*|*" -p no:xdist "*|*"::"*) par= ;; esac
+    COVERAGE_CORE=ctrace uv run pytest ${mode:+"$mode"} ${par:+"$par"} "$@" 2>&1 | tee "$log"
     status=${PIPESTATUS[0]}
     if [ -n "$*" ] && grep -qE '^collected 0 items$' "$log"; then
         echo "error: just test collected 0 items for the given args -- treating as a failure (Kraft-1v6ow)" >&2
