@@ -70,7 +70,7 @@ origin: src/kraft/addons/fetch.py §fetch
 
 Kraft SHALL ship its `config/` as the built-in add-on `kraft-default@kraft`, read from the installed package, and every add-on in the collection `kraft-sdlc` SHALL validate against an instance whose chains come from it; a home seeded from the package SHALL run the built-in's chains.
 enforced-by: tests/addons/test_kraft_sdlc_collection.py::test_the_published_collection_validates_against_the_shipped_config, tests/addons/test_builtin_seed.py::test_a_seeded_home_runs_the_builtin_chain
-origin: src/kraft/addons/builtin.py; .kraft/collection.json
+origin: src/kraft/addons/builtin.py
 
 ## REQ namespace-kraft-is-reserved
 
