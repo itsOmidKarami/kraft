@@ -14,9 +14,13 @@ export { expect };
 export const test = base.extend({
   page: async ({ page }, use) => {
     await page.route("**/api/health", async (route) => {
-      const res = await route.fetch();
-      const body = await res.json();
-      await route.fulfill({ response: res, json: { ...body, kraft_default: { signature: null, count: 0 } } });
+      try {
+        const res = await route.fetch();
+        const body = await res.json();
+        await route.fulfill({ response: res, json: { ...body, kraft_default: { signature: null, count: 0 } } });
+      } catch {
+        // A poll still in flight when the test ends: nobody is left to answer.
+      }
     });
     await use(page);
   },
