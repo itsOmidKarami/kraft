@@ -772,3 +772,24 @@ def test_launch_darwin_stops_copying_a_survivor_that_keeps_writing(launcher, tmp
     began = time.monotonic()
     r = run(launcher("launch", py(code), darwin=True, sweeps=tmp_path / "sweeps"))
     assert (r.stdout.startswith("out\n"), time.monotonic() - began < 10) == (True, True)
+
+
+def test_copy_keeps_the_last_output_of_a_command_that_ends_as_the_wait_times_out(
+    monkeypatch, capfd
+):
+    out_r, out_w = os.pipe()
+    st_r, st_w = os.pipe()
+    ended, real = threading.Event(), os_init.select.select
+
+    def wait_runs_out_then_the_command_writes_and_ends(*args):
+        monkeypatch.setattr(os_init.select, "select", real)
+        ready = real(*args)  # nothing yet
+        os.write(out_w, b"last words\n")
+        ended.set()
+        return ready
+
+    monkeypatch.setattr(os_init.select, "select", wait_runs_out_then_the_command_writes_and_ends)
+    os_init._copy(out_r, st_r, None, ended)
+    os.close(out_w)
+    os.close(st_w)
+    assert capfd.readouterr().out == "last words\n"

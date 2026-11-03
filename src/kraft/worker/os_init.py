@@ -232,8 +232,10 @@ def _copy(out_r, st_r, started_file, ended=None):
     broken = False
     stop_at = None
     while out_r in watch:
+        # read before the wait: whatever the command wrote before it ended is then ready
+        done = ended is not None and ended.is_set()
         ready = select.select(watch, [], [], None if ended is None else 0.2)[0]
-        if ended is not None and ended.is_set():
+        if done:
             stop_at = stop_at or time.monotonic() + DRAIN_SECONDS
             if not ready or time.monotonic() > stop_at:
                 break
