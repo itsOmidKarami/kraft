@@ -103,6 +103,8 @@ export function ProfileView() {
   const { edit, node } = useEditor();
   const r: Resolved | null = draft.view ? resolvedOf(draft.view.result) : null;
   const p = r?.profiles[name];
+  // A package profile is read-only: the server refuses an edit to it.
+  const own = p?.source !== "package";
   const problems = r ? problemsOfProfile(r, (draft.view!.result.problems ?? []) as HProblem[], name) : [];
   return (
     <AreaScreen title={name} sub="Profile · model and effort per provider" draft={draft}>
@@ -116,8 +118,8 @@ export function ProfileView() {
             key={prov}
             title={prov}
             rows={[
-              { label: "model", value: e.model || "not set", sub: usedBy(entryUsers(r!, name, prov)), mono: true, changed: changedAt(draft, `profiles.${name}.providers.${prov}`), onEdit: () => edit({ kind: "text", title: `${prov} model`, help: status?.models.length ? `Known: ${status.models.slice(0, 6).join(", ")}` : undefined, value: e.model ?? "", set: (v) => send(draft, entryOp(name, prov, { ...e, model: v.trim() })) }) },
-              ...((status?.efforts.length ?? 0) > 0 ? [{ label: "effort", value: e.effort || "default", changed: false, onEdit: () => edit({ kind: "choice", title: `${prov} effort`, help: `What ${prov} accepts.`, value: e.effort ?? "", options: [{ value: "", label: "default" }, ...status!.efforts.map((x) => ({ value: x, label: x }))], set: (v) => send(draft, entryOp(name, prov, { model: e.model, effort: v })) }) } as RowSpec] : []),
+              { label: "model", value: e.model || "not set", sub: usedBy(entryUsers(r!, name, prov)), mono: true, changed: changedAt(draft, `profiles.${name}.providers.${prov}`), onEdit: !own ? undefined : () => edit({ kind: "text", title: `${prov} model`, help: status?.models.length ? `Known: ${status.models.slice(0, 6).join(", ")}` : undefined, value: e.model ?? "", set: (v) => send(draft, entryOp(name, prov, { ...e, model: v.trim() })) }) },
+              ...((status?.efforts.length ?? 0) > 0 ? [{ label: "effort", value: e.effort || "default", changed: false, onEdit: !own ? undefined : () => edit({ kind: "choice", title: `${prov} effort`, help: `What ${prov} accepts.`, value: e.effort ?? "", options: [{ value: "", label: "default" }, ...status!.efforts.map((x) => ({ value: x, label: x }))], set: (v) => send(draft, entryOp(name, prov, { model: e.model, effort: v })) }) } as RowSpec] : []),
             ]}
           />
         );

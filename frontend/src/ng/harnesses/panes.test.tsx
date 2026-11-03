@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NO_ENTRY, TASKS, renderPage, resolved, serve, view } from "./testkit";
@@ -199,6 +199,20 @@ describe("profile and entry panes", () => {
     const p = await screen.findByRole("complementary", { name: "strong pane" });
     expect(p).toHaveTextContent("From Kraft's package");
     for (const name of ["Rename", "Copy", "Remove"]) expect(within(p).queryByRole("button", { name })).toBeNull();
+  });
+
+  it("shows a packaged profile's entry read-only: no editor, no Remove, no click-a-lane hint", async () => {
+    serve(view(resolved({ profiles: { strong: { providers: { claude: { model: "opus", effort: "high" } }, effort: null, tasks: [], used_by_fallback: [], source: "package" } } })));
+    renderPage("?profile=strong&lane=claude");
+    const p = await pane("claude");
+    expect(p).toHaveTextContent("opus");
+    expect(within(p).queryByRole("textbox")).toBeNull();
+    expect(within(p).queryByRole("radiogroup")).toBeNull();
+    expect(within(p).queryByRole("button", { name: "Remove entry" })).toBeNull();
+    cleanup();
+    serve(view(resolved({ profiles: { strong: { providers: { claude: { model: "opus" } }, effort: null, tasks: [], used_by_fallback: [], source: "package" } } })));
+    renderPage("?profile=strong");
+    expect(await screen.findByRole("complementary", { name: "strong pane" })).not.toHaveTextContent("click a lane");
   });
 
   it.each([["strong", "Used by 2 tasks."], ["fast", "Used by 0 tasks."]])("an entry pane counts the tasks that use it: %s", async (profile, words) => {
