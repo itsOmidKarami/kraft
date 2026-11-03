@@ -1034,14 +1034,33 @@ class TemplateLibrary:
     @property
     def run_chain_ids(self) -> tuple[str, ...]:
         """The chains an operator's checks judge: each chain except a built-in
-        `kraft-default:` one that no local chain extends (their thin local
-        `default` resolves to the same tasks under its own id)."""
+        `kraft-default:` one that no local chain extends and no repo names as
+        its `default_chain` (their thin local `default` resolves to the same
+        tasks under its own id). Chains named by an open item or a trigger are
+        not read here."""
+        named = self._default_chains()
         return tuple(
             id
             for id in self.chain_ids
             if not id.startswith("kraft-default:")
+            or id in named
             or any(":" not in other for other in self.extended_by(id))
         )
+
+    def _default_chains(self) -> set[str]:
+        """The `default_chain` of each repos.yaml entry beside `library.yaml`."""
+        if self.library_path is None:
+            return set()
+        try:
+            data = yaml.safe_load((self.library_path.parent / "repos.yaml").read_text())
+            return {
+                r[k]
+                for r in data["repos"]
+                for k in ("default_chain", "default_chain_template")
+                if isinstance(r, dict) and isinstance(r.get(k), str)
+            }
+        except (OSError, yaml.YAMLError, KeyError, TypeError):
+            return set()
 
     def _expansion(self, id: str) -> _Resolution:
         raw = self._all_chains[id]

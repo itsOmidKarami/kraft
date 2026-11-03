@@ -39,3 +39,11 @@ def test_a_codex_only_home_is_not_judged_on_chains_it_never_runs(
     _codex_only(tmp_path, monkeypatch, local_default)
     names = {r["name"] for r in doctor._agent_checks()}
     assert ("agent: claude" in names) is checked
+
+
+def test_a_repo_naming_a_builtin_chain_as_its_default_has_it_checked(tmp_path, monkeypatch):
+    _codex_only(tmp_path, monkeypatch, None)
+    live = tmp_path / "templates"
+    entry = {"id": "r", "path": "/x", "default_chain": "kraft-default:default"}
+    (live / "repos.yaml").write_text(yaml.safe_dump({"repos": [entry]}))
+    assert "agent: claude" in {r["name"] for r in doctor._agent_checks()}
