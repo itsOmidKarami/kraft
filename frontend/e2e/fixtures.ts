@@ -9,7 +9,8 @@ export { expect };
  * The fixture home is built from `fake_templates_dir`, whose full copies of the built-in chains
  * make `/api/health` report kraft-default drift. The board's banner for it arrives after the
  * first paint and moves every row, which the layout specs measure. Drift has its own
- * coverage (the contract suite, `KraftDefaultBanner.test.tsx`), so these specs see none.
+ * unit coverage (`KraftDefaultBanner.test.tsx`, `browserNotifyServer.test.ts` and the phone
+ * `Board.test.tsx`; the contract mocks always send no drift), so these specs see none.
  */
 export const test = base.extend({
   page: async ({ page }, use) => {

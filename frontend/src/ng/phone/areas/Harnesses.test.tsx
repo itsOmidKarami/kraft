@@ -158,6 +158,10 @@ describe("a profile (M.1)", () => {
   it("says a profile filled from Kraft's package is changed in harnesses.yaml, as the desktop does", async () => {
     open("strong", ans(hview(resolved({ profiles: { strong: { providers: { claude: { model: "sonnet" } }, effort: null, tasks: [], used_by_fallback: [], source: "package" } } }))));
     expect(await screen.findByText("From Kraft's package. Define it in harnesses.yaml to change it.")).toBeInTheDocument();
+    const claude = screen.getByRole("region", { name: "claude" });
+    expect(within(claude).getByText("sonnet")).toBeInTheDocument();
+    expect(within(claude).queryByRole("button", { name: /^model/ })).toBeNull();
+    expect(within(claude).queryByRole("button", { name: /^effort/ })).toBeNull();
     cleanup();
     open("fast");
     await screen.findByRole("region", { name: "claude" });
