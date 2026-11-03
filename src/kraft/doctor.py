@@ -612,7 +612,7 @@ def _addon_checks(templates: Path) -> list[dict]:
     """The installed add-ons as the files say, with no server running: what
     does not load and why, what waits for a person, and each auto-updating
     add-on's last outcome."""
-    from kraft.addons import fetch
+    from kraft.addons import builtin, fetch
     from kraft.addons import update as addon_update
     from kraft.addons.config import AddonsConfig, AddonsLock
 
@@ -627,6 +627,8 @@ def _addon_checks(templates: Path) -> list[dict]:
     lock = AddonsLock.load(templates / AddonsLock.FILE)
     everything = addons_load.installed(templates, root, verify=True)
     found = [p for p in everything if p.repo_id is None]
+    # The built-in is not an add-on people manage: counted out, named only when broken.
+    found = [p for p in found if p.left_out is not None or not builtin.is_builtin(p)]
     broken = [f"{p.id}: {p.left_out}" for p in found if p.left_out is not None and not p.quiet]
     notes = [f"{p.id} {p.left_out}" for p in found if p.quiet and p.left_out != "is disabled"]
     auto = []

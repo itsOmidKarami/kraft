@@ -7,7 +7,7 @@ import shutil
 import pytest
 from support.addons import AGENT, chain, child_manifest, install, make_tree, publish
 
-from kraft.addons import fetch, load, update
+from kraft.addons import builtin, fetch, load, update
 from kraft.addons.config import AddonsLock
 
 COMPANY = "company@corp"
@@ -47,7 +47,9 @@ def _files(home):
     store = home[1] / "store"
     return (
         [f.read_text() if f.exists() else None for f in files],
-        sorted(p.name for p in store.iterdir()) if store.exists() else [],
+        sorted(p.name for p in store.iterdir() if p.name != builtin.store_name())
+        if store.exists()
+        else [],
     )
 
 

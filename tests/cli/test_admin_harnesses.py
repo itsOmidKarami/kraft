@@ -19,7 +19,7 @@ def test_the_table_lists_each_profile_its_provider_and_the_tasks_using_it(app, c
     assert lines[0].split() == ["ID", "PROVIDER", "ENABLED", "CHAINS", "USED", "BY"]
     rows = {line.split()[0]: line.split() for line in lines[1:]}
     assert rows["codex"][1:] == ["fake", "yes", "-", "-"]
-    assert rows["claude"][1:5] == ["fake", "yes", "default,", "quick-task"]
+    assert rows["claude"][1:4] == ["fake", "yes", "default,"] and "quick-task" in rows["claude"]
     assert "tasks.implementer," in rows["claude"]
 
 
@@ -48,11 +48,11 @@ def test_the_agent_profiles_follow_with_their_model_per_provider(app, capsys, mo
     assert tiers[0].split() == ["PROFILE", "EFFORT", "MODEL", "USED", "BY"]
     rows = {line.split()[0]: line.split() for line in tiers[1:]}
     assert set(rows) == {"deep", "strong", "fast"}
-    assert rows["fast"][1:] == [
+    assert rows["fast"][1:5] == [
         "medium",
         "claude=haiku,",
         "fake=haiku",
-        "tasks.triage_review_feedback",
+        "tasks.triage_review_feedback,",
     ]
     assert "tasks.implementer," in rows["strong"]
 
@@ -93,7 +93,7 @@ def test_one_profile_prints_its_settings_and_users(app, capsys):
     out = capsys.readouterr().out
     assert "provider    fake" in out
     assert "model=sonnet" in out
-    assert "chains      default, quick-task" in out
+    assert "chains      default, kraft-default:default" in out
     assert "tasks.implementer" in out
 
 

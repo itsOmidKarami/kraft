@@ -585,7 +585,7 @@ def test_doctor_checks_every_selected_profile(tmp_path, monkeypatch):
     _live(tmp_path, monkeypatch, {"a": "claude", "b": "codex"}, ["a", "b"])
     rows = doctor._agent_checks()
     # b is codex on its default model, which prices.json cannot price.
-    assert {r["name"] for r in rows} == {"agent: a", "agent: b", "cost: b"}
+    assert {r["name"] for r in rows} == {"agent: a", "agent: b", "cost: b", "agent: claude"}
 
 
 def test_doctor_does_not_check_a_profile_nothing_selects(tmp_path, monkeypatch):
@@ -614,7 +614,8 @@ def test_a_profile_s_own_executable_is_what_is_checked(tmp_path, monkeypatch):
     [
         ({"c": "a", "agy-impl": "gone"}, "chain agy-impl can't run"),
         ({"c": "a", "x": "gone", "y": "gone"}, "chains x, y can't run"),
-        ({"x": "gone", "y": "gone"}, "no chain can run"),
+        # The built-in's chains run on `claude`, so these two are not all of them.
+        ({"x": "gone", "y": "gone"}, "chains x, y can't run"),
         (
             {"c": "a", **{f"x{n}": "gone" for n in range(7)}},
             "chains x0, x1, x2, x3, x4 and 2 more can't run",
@@ -744,7 +745,7 @@ def test_a_chain_that_does_not_resolve_fails_doctor_by_name(tmp_path, monkeypatc
 def test_the_chains_row_passes_when_every_chain_resolves(tmp_path, monkeypatch):
     _live(tmp_path, monkeypatch, {"a": "claude"}, ["a"])
     row = _by_name(doctor._config_checks(), "chains")
-    assert row["ok"] is True and "1 chain" in row["detail"]
+    assert row["ok"] is True and "3 chain" in row["detail"]
 
 
 @pytest.mark.parametrize(

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import subprocess
 
 import pytest
@@ -13,6 +14,7 @@ from support.harness import make_repo
 
 from kraft import client, config, doctor
 from kraft import forges as forges_mod
+from kraft.addons import builtin
 
 # `app` fixture: tests/conftest.py. It wires client.transport.http() to the ASGI app.
 
@@ -342,7 +344,7 @@ def test_doctor_warns_on_a_repo_on_the_dev_only_fake_forge(app, tmp_path):
     assert "nothing" in row["detail"]
 
 
-def test_no_forge_check_when_no_chain_runs_a_forge_task(app, tmp_path):
+def test_no_forge_check_when_no_chain_runs_a_forge_task(app, tmp_path, monkeypatch):
     """The check is about forge work the operator's chains actually do: a
     library whose chains run no forge task must not grow a row per repo telling
     them to fix something they are not using. `quick-task` runs none."""
@@ -350,6 +352,11 @@ def test_no_forge_check_when_no_chain_runs_a_forge_task(app, tmp_path):
     asyncio.run(client.ensure_repo(str(repo)))
     assert "forge quiet" in _names(asyncio.run(doctor.run_checks()))
     (tmp_path / "templates" / "chains" / "default.yaml").unlink()
+    # The built-in's `default` runs forge tasks too: read a copy without it.
+    shipped = tmp_path / "shipped"
+    shutil.copytree(builtin.source_dir(), shipped)
+    (shipped / "chains" / "default.yaml").unlink()
+    monkeypatch.setattr(builtin, "source_dir", lambda: shipped)
 
     names = _names(asyncio.run(doctor.run_checks()))
 

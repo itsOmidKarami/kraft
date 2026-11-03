@@ -8,11 +8,6 @@
   },
   "addons": [
     {
-      "name": "kraft-default",
-      "source": "./config",
-      "description": "Kraft's shipped chains and library"
-    },
-    {
       "name": "kraft-superpowers",
       "source": "./addons/kraft-superpowers",
       "description": "Kraft's chains with superpowers' methods for the spec, plan, implementation, repairs and review feedback"

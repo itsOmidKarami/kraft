@@ -781,7 +781,7 @@ def test_the_server_takes_an_auto_update_and_loads_it(client, tmp_path):
 
     client.portal.call(deps.auto_update_addons, client.app)
 
-    assert [p.version for p in st.library.addons] == ["1.1.0"] and not old.exists()
+    assert "1.1.0" in [p.version for p in st.library.addons] and not old.exists()
     health = client.get("/api/health").json()
     assert (health["status"], health["addon_updates"]["release@acme"]["outcome"]) == (
         "ok",

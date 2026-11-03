@@ -996,9 +996,11 @@ def _judge(
     refused. Returns why its ancestry does not hold there, which refuses a
     move and is a note on a current add-on."""
     addon_id, namespace = candidate.id, candidate.namespace
-    holders = {
+    holders = {builtin.NAMESPACE: builtin.ID} | {
         held.namespace: other for other, held in ctx.lock.addons.items() if other != addon_id
     }
+    if holders.get(namespace) == builtin.ID:
+        raise Refused([builtin.REFUSED])
     if namespace in holders:
         raise Refused(
             [
@@ -1514,7 +1516,12 @@ def update(
             if parent_id in pulled:
                 pulled[parent_id].append(child.addon_id)
                 continue
-            if parent_id in lock.addons or parent_id in moves or parent_id in results:
+            if (
+                parent_id == builtin.ID
+                or parent_id in lock.addons
+                or parent_id in moves
+                or parent_id in results
+            ):
                 continue
             # One listed but turned off is the operator's to turn on, not ours.
             if parent_id in config.addons and not config.entry(parent_id).enabled:
@@ -1536,9 +1543,11 @@ def update(
                 continue
             pulled[parent_id] = [child.addon_id]
             name = parent_id.split("@", 1)[0]
-            holders = {config.namespace(o): o for o in config.addons} | {
-                e.namespace: o for o, e in lock.addons.items()
-            }
+            holders = (
+                {builtin.NAMESPACE: builtin.ID}
+                | {config.namespace(o): o for o in config.addons}
+                | {e.namespace: o for o, e in lock.addons.items()}
+            )
             holder = holders.get(
                 config.namespace(parent_id) if parent_id in config.addons else name
             )
@@ -1547,9 +1556,13 @@ def update(
                     parent_id,
                     "refused",
                     problems=(
-                        f"{parent_id} installs under its name {name}, which {holder} holds; "
-                        "install it first with its own --as: kraft admin addon install "
-                        f"{parent_id} --as ALIAS",
+                        (builtin.REFUSED,)
+                        if holder == builtin.ID
+                        else (
+                            f"{parent_id} installs under its name {name}, which {holder} holds; "
+                            "install it first with its own --as: kraft admin addon install "
+                            f"{parent_id} --as ALIAS",
+                        )
                     ),
                 )
                 continue

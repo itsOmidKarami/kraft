@@ -22,7 +22,7 @@ from support.addons import (
 )
 
 from kraft import cli
-from kraft.addons import fetch
+from kraft.addons import builtin, fetch
 from kraft.addons.config import AddonsLock
 from kraft.cli import addon as addon_cli
 from kraft.client import actions
@@ -83,7 +83,7 @@ def home(tmp_path, monkeypatch):
             return (
                 (config_dir / "addons.yaml").read_text(),
                 lock.read_text() if lock.exists() else "",
-                sorted(p.name for p in store.iterdir()) if store.is_dir() else [],
+                sorted(p.name for p in store.glob("*") if p.name != builtin.store_name()),
             )
 
     Home.reloads = reloads

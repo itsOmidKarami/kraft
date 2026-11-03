@@ -277,7 +277,19 @@ def signature(config_dir: Path, found: tuple[InstalledAddon, ...] = ()) -> tuple
         tuple((p.root.is_dir(), *(stamp(p.root / f) for f in store_files)) for p in found),
         tuple(sorted(_unrestored.items())),
         update.installed(),
+        _builtin_stamps(),
     )
+
+
+def _builtin_stamps() -> tuple:
+    """The stamps of the built-in's source files, so an edit to a checkout's
+    `config/` is read again."""
+    from kraft.addons import builtin
+
+    try:
+        return builtin._stamp(builtin.source_dir())
+    except OSError:
+        return ()
 
 
 def installed(
@@ -326,7 +338,7 @@ def _installed(config_dir: Path, store: Path, verify: bool, config) -> tuple[Ins
     names); the left-out cascade; each loading add-on's content, judged with
     its ancestors, parents before children; the cascade again, which leaves
     out the children of a parent the third pass left out."""
-    from kraft.addons import inherit
+    from kraft.addons import builtin, inherit
     from kraft.addons.config import AddonsConfig, AddonsLock
     from kraft.config import ConfigError
 
@@ -334,7 +346,8 @@ def _installed(config_dir: Path, store: Path, verify: bool, config) -> tuple[Ins
         config = config or AddonsConfig.load(config_dir / AddonsConfig.FILE)
         lock = AddonsLock.load(config_dir / AddonsLock.FILE)
     except ConfigError:
-        return ()  # `config_problem` says why
+        # `config_problem` says why; the built-in needs neither file.
+        config, lock = AddonsConfig(), AddonsLock()
     found: list[InstalledAddon] = []
     #: Every manifest pass 1 read, by add-on id: pass 3 never reads a store again.
     manifests: dict[str, AddonManifest] = {}
@@ -382,6 +395,14 @@ def _installed(config_dir: Path, store: Path, verify: bool, config) -> tuple[Ins
                 )
             )
     found += _repo_libraries(config_dir, store, verify, manifests)
+    # Per entry, so one copy never takes `addons.yaml` down with it.
+    found = [
+        replace(a, left_out=builtin.SHIPS_IT.format(id=a.id), quiet=True)
+        if a.namespace == builtin.NAMESPACE and a.repo_id is None
+        else a
+        for a in found
+    ]
+    found.append(_builtin(store, verify, manifests))
     judged = list(inherit.cascade(found))
     depth = [len(inherit.ancestry(a, judged)) if a.left_out is None else 0 for a in judged]
     for i in sorted(range(len(judged)), key=depth.__getitem__):
@@ -395,6 +416,32 @@ def _installed(config_dir: Path, store: Path, verify: bool, config) -> tuple[Ins
         why = _content_problem(addon, chain, config_dir, manifests)
         judged[i] = replace(addon, left_out=why)
     return inherit.cascade(judged)
+
+
+def _builtin(store: Path, verify: bool, manifests: dict[str, AddonManifest]) -> InstalledAddon:
+    """The built-in `kraft-default@kraft`, its store written first when it is
+    missing and this is not a worker. Never raises: what stops it loading is
+    its `left_out`."""
+    from kraft.addons import builtin, fetch
+    from kraft.addons import update as addon_update
+
+    try:
+        addon = builtin.entry(store)
+    except (OSError, fetch.AddonRefused) as exc:  # no source files, or unreadable ones
+        return InstalledAddon(
+            builtin.ID,
+            "kraft-default",
+            builtin.NAMESPACE,
+            "",
+            store / "not-installed",
+            left_out=f"its files could not be read: {exc}",
+        )
+    try:
+        if not addon.root.is_dir():
+            builtin.ensure_store(store.parent)
+    except (addon_update.Busy, OSError, RuntimeError, fetch.AddonRefused) as exc:
+        return replace(addon, left_out=f"its store could not be written: {exc}")
+    return _with_store_problem(addon, verify, manifests)
 
 
 def _repo_libraries(
@@ -452,7 +499,7 @@ def _store_problem(addon: InstalledAddon, verify: bool) -> tuple[AddonManifest |
     parses, and this Kraft is one it accepts. The manifest is None when it
     could not be read; the problem is None when all pass."""
     from kraft import update
-    from kraft.addons import fetch, inherit, manifest
+    from kraft.addons import builtin, fetch, inherit, manifest
 
     root = addon.root
     if not root.is_dir():
@@ -469,7 +516,7 @@ def _store_problem(addon: InstalledAddon, verify: bool) -> tuple[AddonManifest |
     except (OSError, ValueError, fetch.AddonRefused, manifest.ManifestError) as exc:
         return None, f"its store cannot be read: {exc}"
     running = update.installed()
-    if addon.repo_id is None and not manifest.is_source_build(running):
+    if addon.repo_id is None and addon.id != builtin.ID and not manifest.is_source_build(running):
         if why := manifest.kraft_compatible(declared.requires.kraft, running):
             return declared, why
     return declared, None
@@ -525,6 +572,8 @@ def _content_problem(
         policy = PolicyInput.from_yaml(config_dir / "policy.yaml").instance_policy()
     except PolicyError:
         return None  # no policy.yaml, or one whose own check says why
+    if builtin.is_builtin(addon):
+        return None  # caps are held to `maxima:` when a run starts
     return limits_problem(addon, policy, chain[1:])
 
 
@@ -591,7 +640,7 @@ def instance_problem(
     if repo_library:
         if namespace not in ids:
             return f"repository id {namespace!r} is no longer in repos.yaml"
-    elif namespace in ids:
+    elif namespace in ids and namespace != "kraft-default":
         return f"its namespace {namespace!r} is now a repository id"
     return None
 
@@ -972,12 +1021,16 @@ def gc(keep: Callable[[], Collection[str]], addons_root: Path | None = None) -> 
     is not waited for (raises `update.Busy`): the next collection takes what
     this one left. Returns the digests deleted. Only the daemon calls this:
     it alone knows what its loaded library and its unfinished work items read."""
-    from kraft.addons import fetch, update
+    from kraft.addons import builtin, fetch, update
 
     root = Path(addons_root) if addons_root is not None else addons_dir()
     removed: list[str] = []
     with update.write_lock(root, wait=0):
-        kept = keep()
+        kept = {*keep()}
+        try:
+            kept.add(builtin.store_name())  # this Kraft's own, whatever the library says
+        except (OSError, fetch.AddonRefused):
+            pass  # no source: nothing to keep
         try:
             fetch.remove_tree(root / "staging")  # a replaced store's copy is read-only
         except OSError:
@@ -995,11 +1048,11 @@ def left_out_by(version: str, config_dir: Path | None = None) -> list[str]:
     """Each loaded add-on a Kraft `version` would leave out, with why: its
     `requires.kraft` names another major. What `kraft admin update` lists
     before it installs a release."""
-    from kraft.addons import fetch, manifest
+    from kraft.addons import builtin, fetch, manifest
 
     out = []
     for addon in installed(config_dir):
-        if addon.left_out is not None or addon.repo_id is not None:
+        if addon.left_out is not None or addon.repo_id is not None or builtin.is_builtin(addon):
             continue
         try:
             text = (fetch.open_store(addon.root).read(manifest.ADDON_JSON) or b"").decode()

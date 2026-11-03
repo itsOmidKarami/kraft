@@ -14,13 +14,18 @@ from pathlib import Path
 import yaml
 
 from kraft import client
-from kraft.addons import fetch, manifest, repo_library
+from kraft.addons import builtin, fetch, manifest, repo_library
 from kraft.addons.load import InstalledAddon, repo_library_id
 from kraft.config import read_yaml, write_yaml
 from support.harness import commit_all, git, make_repo, write
 
 #: The smallest agent task the V1 schema accepts.
 AGENT = {"kind": "agent", "harness": "codex", "prompt": "local base"}
+
+
+def others(found):
+    """`found` (`load.installed`'s answer) without the built-in every home has."""
+    return [a for a in found if not builtin.is_builtin(a)]
 
 
 def chain(extends: str) -> dict:

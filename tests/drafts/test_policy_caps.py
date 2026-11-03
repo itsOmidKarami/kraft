@@ -23,7 +23,9 @@ def below(body, level, cap):
 def test_a_library_component_that_sets_a_cap_is_listed_below_policy_with_its_source(client):
     body = resolved(client)
     tasks = below(body, "tasks", "time_cap_minutes")
-    implementer = next(b for b in tasks if b["via"] == "library:tasks.implementer")
+    implementer = next(
+        b for b in tasks if b["via"] == "library:tasks.implementer" and b["chain"] == "default"
+    )
     assert (implementer["layer"], implementer["chain"], implementer["value"]) == (
         "library",
         "default",

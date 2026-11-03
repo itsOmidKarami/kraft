@@ -94,6 +94,52 @@ def is_tree(chain) -> bool:
     return bool(chain) and chain[-1].id == ID
 
 
+SHIPS_IT = (
+    "Kraft now ships kraft-default itself; run `kraft admin addon update` on what builds on it, "
+    "then `kraft admin addon uninstall {id}`"
+)
+REFUSED = "kraft-default@kraft comes with Kraft; upgrading Kraft updates it"
+
+
+def is_builtin(addon) -> bool:
+    return addon.id == ID
+
+
+def store_name() -> str:
+    return fetch.digest(extracted().files).removeprefix("sha256:")
+
+
+def entry(store: Path):
+    """The built-in as `load.InstalledAddon`, its store named by content under
+    `store`. Writes nothing."""
+    from kraft.addons import load
+
+    return load.InstalledAddon(
+        ID,
+        "kraft-default",
+        NAMESPACE,
+        update.installed(),
+        store / store_name(),
+        source="./config",
+    )
+
+
+def ensure_store(addons_root: Path, *, wait: float | None = None) -> Path:
+    """The current store's directory, written first if it is missing. Never
+    in a worker, which only reads."""
+    from kraft.addons import update as addon_update
+
+    final = addons_root / "store" / store_name()
+    if final.is_dir():
+        return final
+    if os.environ.get("KRAFT_WORK_ITEM_ID"):
+        raise RuntimeError(
+            f"the kraft-default store {final.name} is missing; a worker does not write it"
+        )
+    with addon_update.write_lock(addons_root, wait=wait):
+        return fetch.write_store(addons_root, extracted())
+
+
 # --- seed (Task 6) ---
 # --- update preview (Tasks 7-8) ---
 # --- doctor support (Task 9) ---

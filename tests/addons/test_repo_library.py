@@ -18,7 +18,7 @@ from support.addons import (
 )
 from support.harness import commit_all, git, make_repo, write
 
-from kraft.addons import fetch, load, manifest, repo_library, update
+from kraft.addons import builtin, fetch, load, manifest, repo_library, update
 from kraft.addons.config import RepoLibrariesLock
 from kraft.config import read_yaml, write_yaml
 
@@ -152,7 +152,7 @@ def test_a_first_load_waits_with_everything_shown_as_new(app, home):
     assert found.review.old_version is None
     assert any("skill notes" in line for line in found.review.content)
     assert any(head[:12] in line for line in found.review.content)
-    assert load.installed(*home) == ()
+    assert [a for a in load.installed(*home) if not builtin.is_builtin(a)] == []
 
 
 def test_accept_writes_the_store_and_the_lock(app, home):
@@ -163,7 +163,7 @@ def test_accept_writes_the_store_and_the_lock(app, home):
 
     locked = RepoLibrariesLock.load(home[0] / "repo-libraries.lock").repos["app"]
     assert (locked.commit, locked.digest) == (head, found.digest)
-    (library,) = load.installed(*home, verify=True)
+    (library,) = [a for a in load.installed(*home, verify=True) if not builtin.is_builtin(a)]
     assert (library.namespace, library.left_out) == ("app", None)
     assert repo_library.check(app, "app", *home).outcome == "current"
 
@@ -352,7 +352,7 @@ def test_drop_forgets_the_accepted_version(app, home):
 
     assert repo_library.drop("app", *home) is True
     assert repo_library.drop("app", *home) is False
-    assert load.installed(*home) == ()
+    assert [a for a in load.installed(*home) if not builtin.is_builtin(a)] == []
 
 
 @pytest.mark.parametrize(
