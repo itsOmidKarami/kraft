@@ -39,6 +39,46 @@ describe("ReviewPage", () => {
   });
 });
 
+describe("threads on files not drawn", () => {
+  const PATCH = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y\n" + "diff --git a/b.py b/b.py\n--- a/b.py\n+++ b/b.py\n@@ -1 +1 @@\n-x\n+z\n";
+  const file = (path: string) => ({ path, insertions: 1, deletions: 1, touched_by: ["implementation"], viewed: false });
+  // On line 40, past the end of the diff's one-line files: no hunk has it.
+  const thread = (id: string, file_path: string) => ({ id, work_item_id: "w1", gate: null, node_id: null, file_path, side: "new", start_line: 40, end_line: 40, quote: null, anchor_sha: "h", label: null, state: "open", resolved_at: null, created_at: "t", draft: false, comments: [{ id: `c${id}`, thread_id: id, review_id: null, author: "you", attempt: null, body: `on ${file_path}`, suggestion: null, claim: null, created_at: "t", draft: false }] });
+
+  it.each([
+    ["offers the whole change off a comparison from the last review", "", true],
+    ["offers the whole change off a comparison to an attempt", "?from=base&to=attempt:1", true],
+    ["offers the whole change off a comparison of one node", "?from=base&nodes=implementation", true],
+    ["offers nothing on the whole change itself", "?from=base", false],
+  ])("shows a thread only with its file; %s", async (_, at, offered) => {
+    vi.spyOn(http, "request").mockImplementation(async (p) =>
+      String(p).includes("/compare")
+        ? { status: 200, body: { from: { target: "last_review", sha: "h1" }, to: { target: "latest", sha: null }, rebased: false, files: [file("a.py"), file("b.py")], groups: [], diff: PATCH, untracked: [], truncated: false, ignore_whitespace: false, diff_max_bytes: 100000 } }
+        : { status: 200, body: String(p).endsWith("/threads") ? [thread("t1", "b.py"), thread("t2", "c.py")] : [] },
+    );
+    render(
+      <MemoryRouter initialEntries={[`/work-items/w1/review${at}`]}>
+        <Routes><Route path="/work-items/:id/review" element={<><ReviewPage /><Where /></>} /></Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByRole("region", { name: "a.py" });
+    const foot = await screen.findByRole("region", { name: "Threads on files not in this comparison" });
+    // One file at a time, on a.py: b.py's thread waits for b.py; c.py's has no file here.
+    expect(foot).not.toHaveTextContent("on b.py");
+    expect(foot).toHaveTextContent("on c.py");
+    fireEvent.click(screen.getByRole("button", { name: "b.py" }));
+    await screen.findByRole("region", { name: "b.py" });
+    expect(screen.getByRole("region", { name: "Threads on files not in this comparison" })).toHaveTextContent("on b.py");
+    const widen = screen.queryByRole("button", { name: "Show the whole change" });
+    expect(!!widen).toBe(offered);
+    if (!offered) return;
+    fireEvent.click(widen!);
+    expect(search).toBe("?from=base&file=c.py");
+    // The button goes with the narrow comparison; the focus lands on the one now shown.
+    expect(document.activeElement?.textContent).toMatch(/^Compare from base/);
+  });
+});
+
 describe("Escape on the review page", () => {
   it("goes back to the item, as the gate review's × does, and leaves a text field's Escape to it (GR-1)", async () => {
     vi.spyOn(http, "request").mockImplementation(async (p) => (String(p).includes("/compare") ? { status: 404, body: { detail: "nothing to compare" } } : { status: 200, body: [] }));

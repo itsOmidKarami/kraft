@@ -108,9 +108,17 @@ function Review({ item, version, reload }: { item: ItemDetail; version: string; 
     itemId: item.id,
     compare: compare.state === "ready" ? compare.data : null,
     files,
+    drawn: diff.prefs.one_file_at_a_time ? files.filter((f) => f.path === current) : files,
     patch,
     threads: threadList,
     reload: threads.reload,
+    // A thread on a file the last review's diff, an attempt's or a node's leaves out: the whole change may have it.
+    // Already the whole change, there is nothing wider to offer.
+    onWiden: place.from === "base" && place.to === "latest" && !place.nodes ? undefined : (file) => {
+      setPlace({ from: "base", to: "latest", nodes: null, file });
+      // The button goes with the narrow comparison: the focus goes to the one now shown.
+      [...document.querySelectorAll<HTMLElement>(".rv-toolbar button")].find((b) => b.textContent?.startsWith("Compare from"))?.focus();
+    },
     // Sent or cancelled, the pick goes with it, and the focus goes back to the file's lines, or to the button that opened a whole-file composer.
     onClose: (t) => {
       setPicked(null);

@@ -187,8 +187,8 @@ describe("useComments", () => {
   const patch = new Map(parsePatch(PATCH).map((f) => [f.path, f]));
   const file = (touched_by: string[]): CompareFile => ({ path: "a.py", insertions: 1, deletions: 1, touched_by, viewed: false });
   const cmp = (to: Compare["to"]) => ({ to }) as Compare;
-  const hook = (touched_by: string[], to: Compare["to"], threads: ReviewThread[] = []) =>
-    renderHook(() => useComments({ itemId: "w1", compare: cmp(to), files: [file(touched_by)], patch, threads, reload: () => {} }));
+  const hook = (touched_by: string[], to: Compare["to"], threads: ReviewThread[] = [], extra: Partial<Parameters<typeof useComments>[0]> = {}) =>
+    renderHook(() => useComments({ itemId: "w1", compare: cmp(to), files: [file(touched_by)], patch, threads, reload: () => {}, ...extra }));
 
   it("posts the range, the one touching node, and the compared commit off latest", async () => {
     const req = vi.spyOn(http, "request").mockResolvedValue({ status: 201, body: {} });
@@ -319,12 +319,31 @@ describe("useComments", () => {
     expect(JSON.parse(req.mock.calls[0][1]!.body as string)).toEqual({ body: "split this file", file_path: "a.py", label: null });
   });
 
-  it("places a thread under its line and lists one with no place in the diff", () => {
-    const t = (id: string, file_path: string, end_line: number) => ({ id, file_path, side: "new", start_line: end_line, end_line, comments: [], draft: false, state: "open", label: null }) as unknown as ReviewThread;
-    const { result } = hook([], { target: "latest", sha: null }, [t("here", "a.py", 2), t("gone", "a.py", 40), t("other", "b.py", 1)]);
-    const { container } = render(<>{result.current.after("a.py", { side: "new", line: 2 })}{result.current.elsewhere}</>);
-    expect(container.querySelectorAll(".rv-thread")).toHaveLength(3);
-    expect(screen.getByRole("region", { name: "Threads on files not in this comparison" }).querySelectorAll(".rv-thread")).toHaveLength(2);
+  const t = (id: string, file_path: string, end_line: number | null) => ({ id, file_path, side: end_line && "new", start_line: end_line, end_line, comments: [{ id: `c${id}`, body: id, author: "you", draft: false }], draft: false, state: "open", label: null }) as unknown as ReviewThread;
+  const placed = (threads: ReviewThread[], extra: Partial<Parameters<typeof useComments>[0]> = {}) => hook([], { target: "latest", sha: null }, threads, extra).result.current;
+  const bodies = (el: Element | null) => [...(el?.querySelectorAll(".rv-thread") ?? [])].map((e) => e.querySelector("p")?.textContent);
+  const THREE = [t("here", "a.py", 2), t("gone", "a.py", 40), t("other", "b.py", 1)];
+  it.each([
+    ["under its line, and lists one with no place in the diff", THREE, {}, ["here"], ["gone", "other"]],
+    // One file at a time, on another file: a.py's threads wait for it; b.py, not in the comparison, stays listed.
+    ["nowhere while its file is not the one drawn", THREE, { drawn: [] }, [], ["other"]],
+    // A file cut for size draws no block, so no top to sit at.
+    ["on a file cut for size, on the file as a whole, in the list", [t("whole file", "a.py", null)], { patch: new Map() }, [], ["whole file"]],
+  ])("places a thread %s", (_, threads, extra, under, listed) => {
+    const c = placed(threads, extra);
+    const { container } = render(<><div className="under">{c.after("a.py", { side: "new", line: 2 })}{c.top("a.py")}</div>{c.elsewhere}</>);
+    expect(bodies(container.querySelector(".under"))).toEqual(under);
+    expect(bodies(screen.getByRole("region", { name: "Threads on files not in this comparison" }))).toEqual(listed);
+  });
+
+  it.each([
+    ["offers the whole change on a listed thread's file the comparison leaves out", THREE, ["b.py"]],
+    ["offers nothing when every listed thread's file is in the comparison", THREE.slice(0, 2), []],
+  ])("%s", (_, threads, widened) => {
+    const onWiden = vi.fn();
+    render(<>{placed(threads, { onWiden }).elsewhere}</>);
+    for (const b of screen.queryAllByRole("button", { name: "Show the whole change" })) fireEvent.click(b);
+    expect(onWiden.mock.calls.map(([f]) => f)).toEqual(widened);
   });
 
   it("lists a thread on no file as on the whole change, not on a file missing from the comparison", () => {

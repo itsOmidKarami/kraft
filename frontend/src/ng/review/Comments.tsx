@@ -1,4 +1,5 @@
 import { useRef, useState, type ReactNode } from "react";
+import { Button } from "../ui/Button";
 import type { Compare, CompareFile, ReviewThread } from "../../types";
 import { detailOf, jsonBody, request } from "../http";
 import { Composer, targetKey, type Draft, type Target } from "./Composer";
@@ -24,13 +25,15 @@ const placeOf = (t: ReviewThread) => (t.start_line === null ? `${t.file_path}|to
 
 /** Threads and the composer, placed in the diff (W8 F). `after` and `top`
  *  feed DiffView's slots; `whole` lists the threads on no file, and
- *  `elsewhere` those with no place in what is drawn (another file, a line
- *  outside the hunks). */
-export function useComments({ itemId, compare, files, patch, threads, reload, onClose, onRetarget }: {
+ *  `elsewhere` those with no place in what is drawn (a file not in the
+ *  comparison, a line outside the hunks). */
+export function useComments({ itemId, compare, files, drawn = files, patch, threads, reload, onClose, onRetarget, onWiden }: {
   itemId: string;
   compare: Compare | null;
-  /** The files drawn. */
+  /** The files in the comparison. */
   files: CompareFile[];
+  /** The files drawn now, when not all of them (one file at a time). */
+  drawn?: CompareFile[];
   patch: Map<string, PatchFile>;
   threads: ReviewThread[];
   reload: () => void;
@@ -38,6 +41,8 @@ export function useComments({ itemId, compare, files, patch, threads, reload, on
   onClose?: (t: Target) => void;
   /** The composer's own × moved its range: the page moves the pick with it. */
   onRetarget?: (t: Target) => void;
+  /** The whole change, on `file`: offered beside threads on files this comparison leaves out. */
+  onWiden?: (file: string) => void;
 }) {
   const drafts = useRef(new Map<string, Draft>()).current;
   const indexes = useRef(new WeakMap<PatchFile, ReturnType<typeof lineIndex>>()).current;
@@ -50,8 +55,9 @@ export function useComments({ itemId, compare, files, patch, threads, reload, on
   const [open, setOpen] = useState<{ target: Target; editing: ReviewThread | null } | null>(null);
 
   const visible = new Set<string>();
-  for (const f of files) {
-    visible.add(`${f.path}|top`);
+  for (const f of drawn) {
+    // A file with no patch (cut for size) draws no block: its file threads go to the list.
+    if (patch.has(f.path)) visible.add(`${f.path}|top`);
     for (const h of patch.get(f.path)?.hunks ?? [])
       for (const l of h.lines) {
         if (l.old !== null) visible.add(`${f.path}|old|${l.old}`);
@@ -67,8 +73,13 @@ export function useComments({ itemId, compare, files, patch, threads, reload, on
     const k = placeOf(t);
     if (!t.file_path) whole.push(t);
     else if (visible.has(k)) at.set(k, [...(at.get(k) ?? []), t]);
+    // On a file in the comparison but not drawn now: it shows with its file, and the tree counts it.
+    else if (!drawn.some((f) => f.path === t.file_path) && files.some((f) => f.path === t.file_path)) continue;
     else elsewhere.push(t);
   }
+
+  // The first file a listed thread is on that the comparison leaves out (not one cut for size).
+  const outside = elsewhere.find((t) => !files.some((f) => f.path === t.file_path))?.file_path;
 
   const submit = async (target: Target, editing: ReviewThread | null, d: Draft): Promise<string | null> => {
     const r = target.range;
@@ -165,7 +176,13 @@ export function useComments({ itemId, compare, files, patch, threads, reload, on
     after: (path: string, a: Anchor) => slot(`${path}|${a.side}|${a.line}`),
     top: (path: string) => slot(`${path}|top`),
     whole: whole.length ? <section className="rv-elsewhere rv-whole" aria-label={ON_THE_WHOLE_CHANGE}><h2>{ON_THE_WHOLE_CHANGE}</h2>{whole.map(card)}</section> : null,
-    elsewhere: elsewhere.length ? <section className="rv-elsewhere" aria-label="Threads on files not in this comparison"><h2>Threads on files not in this comparison</h2>{elsewhere.map(card)}</section> : null,
+    elsewhere: elsewhere.length ? (
+      <section className="rv-elsewhere" aria-label="Threads on files not in this comparison">
+        <h2>Threads on files not in this comparison</h2>
+        {onWiden && outside && <p><Button onClick={() => onWiden(outside)}>Show the whole change</Button></p>}
+        {elsewhere.map(card)}
+      </section>
+    ) : null,
     /** The pick the composer was opened on was edited (a handle, Shift-click, Shift+arrows): the composer follows, with its text. */
     retargetTo: (p: Pick, from: Pick | null) => {
       const r = open?.target.range;
