@@ -25,14 +25,16 @@ COLLECTION = "kraft"
 def source_dir() -> Path:
     """Where the built-in's files are: the checkout's `config/` for a source
     build (even beside a stale bundle), else the wheel's bundle, else a
-    release-tag checkout's `config/`."""
+    release-tag checkout's `config/`. A dev version installed from a checkout
+    (`just install` off a tag) has no checkout beside it: it takes the bundle."""
     checkout = Path(kraft.__file__).resolve().parents[2] / "config"
-    if manifest.is_source_build(update.installed()):
+    real_checkout = (checkout / ".kraft" / "addon.json").is_file()
+    if manifest.is_source_build(update.installed()) and real_checkout:
         return checkout
     bundled = paths.BUNDLED / "kraft-default"  # at call time: tests move it
     if bundled.is_dir():
         return bundled
-    if (checkout / ".kraft" / "addon.json").is_file():
+    if real_checkout:
         return checkout
     raise FileNotFoundError("this Kraft was built without its kraft-default; reinstall it")
 

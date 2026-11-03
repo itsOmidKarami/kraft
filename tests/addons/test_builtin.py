@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
+import kraft
 from kraft import harness, paths, update
 from kraft.addons import builtin, fetch, load
 from kraft.templates.environment import HarnessProfileTable
@@ -16,17 +17,22 @@ CONFIG = Path(__file__).resolve().parents[2] / "config"
 
 
 @pytest.mark.parametrize(
-    ("version", "bundled", "expect_bundle"),
+    ("version", "bundled", "expect_bundle", "checkout"),
     [
-        pytest.param("2.6.0", True, True, id="installed"),
-        pytest.param("0.0.0+source", False, False, id="source-checkout"),
-        pytest.param("0.0.0+source", True, False, id="source-build-ignores-a-stale-bundle"),
-        pytest.param("2.6.0", False, False, id="release-version-without-a-bundle"),
+        pytest.param("2.6.0", True, True, True, id="installed"),
+        pytest.param("0.0.0+source", False, False, True, id="source-checkout"),
+        pytest.param("0.0.0+source", True, False, True, id="source-build-ignores-a-stale-bundle"),
+        pytest.param("2.6.0", False, False, True, id="release-version-without-a-bundle"),
+        # `just install` off a tag: a dev version, the bundle, and no checkout beside it.
+        pytest.param("2.5.1.dev10+gabc", True, True, False, id="dev-tool-install"),
     ],
 )
-def test_the_source(monkeypatch, tmp_path, version, bundled, expect_bundle):
+def test_the_source(monkeypatch, tmp_path, version, bundled, expect_bundle, checkout):
     if bundled:
         (tmp_path / "kraft-default").mkdir()
+    if not checkout:
+        venv = tmp_path / "venv" / "lib" / "site-packages" / "kraft" / "__init__.py"
+        monkeypatch.setattr(kraft, "__file__", str(venv))
     monkeypatch.setattr(paths, "BUNDLED", tmp_path)
     monkeypatch.setattr(update, "installed", lambda: version)
     assert builtin.source_dir() == (tmp_path / "kraft-default" if expect_bundle else CONFIG)
