@@ -29,7 +29,6 @@ from kraft.adapters.forge.probe import EXPIRY_WARN_DAYS
 from kraft.adapters.forge.run import API_BACKENDS
 from kraft.addons import load as addons_load
 from kraft.api import config_check
-from kraft.automated_review import as_reviewers
 from kraft.executor import fallback
 from kraft.paths import (
     BUNDLED,
@@ -323,7 +322,7 @@ def _config_checks() -> list[dict]:
         # or because an earlier branch returned before reaching it.
         return [
             _check("config", False, f"{templates} does not exist — start `kraft` once to seed it"),
-            _chain_templates_check(),
+            _check("kraft-default", True, "skipped: no config dir", skipped=True),
             _check("chains", True, "skipped: no config dir", skipped=True),
             # Nothing seeded yet, so nothing to upgrade: the first start seeds
             # every capability and stamps the version.
@@ -370,7 +369,7 @@ def _config_checks() -> list[dict]:
     checks.append(_notify_check(templates))
     checks.append(_forges_check(templates))
     checks.append(_moved_keys_check(templates))
-    checks.append(_chain_templates_check())
+    checks.append(_builtin_check(templates))
     checks.append(_chains_check(templates))
     checks += _addon_checks(templates)
     checks.append(_capabilities_check())
@@ -523,69 +522,100 @@ def _pidfile_check() -> dict:
     )
 
 
-def _chain_template_files(directory: Path) -> dict[str, set[str]]:
-    """Every chain file under `directory/chains/` -- one with a top-level
-    `nodes` list -- mapped to the ids of its nodes. By structure, not by
-    filename, so a chain added in a later version is picked up without a code
-    change here. Authored node ids: a chain's nodes are listed in the chain
-    file itself even when a node `extends` a library node."""
-    found: dict[str, set[str]] = {}
-    chains = directory / CHAINS_DIR
-    if not chains.is_dir():
-        return found
-    for path in sorted(chains.glob("*.yaml")):
+def _full_copies(templates: Path) -> list[str]:
+    """Local chains that share an id with a `kraft-default` chain and do not
+    extend it: they hide the built-in's, so releases never reach them."""
+    from kraft.addons import builtin
+
+    ids = sorted(
+        Path(name).stem
+        for name in builtin.extracted().files
+        if name.startswith(f"{CHAINS_DIR}/") and name.endswith(".yaml")
+    )
+    out = []
+    for chain_id in ids:
         try:
-            data = yaml.safe_load(path.read_text())
+            data = yaml.safe_load((templates / CHAINS_DIR / f"{chain_id}.yaml").read_text())
         except (OSError, ValueError, yaml.YAMLError):
             continue
-        if not isinstance(data, dict) or not isinstance(data.get("nodes"), list):
+        if not isinstance(data, dict) or data.get("id") != chain_id:
             continue
-        found[path.name] = {
-            node["id"] for node in data["nodes"] if isinstance(node, dict) and "id" in node
-        }
-    return found
+        if data.get("extends") != f"{builtin.NAMESPACE}:{chain_id}":
+            out.append(
+                f"chains/{chain_id}.yaml is a full copy and hides {builtin.NAMESPACE}:{chain_id}; "
+                "see Move onto kraft-default"
+            )
+    return out
 
 
-def _chain_templates_check() -> dict:
-    """Nodes this version's chain templates ship, missing from the live
-    installed copy. `templates/` is seeded once and never
-    overwritten (`cli.seed_home`), so a template shipped or changed after an
-    operator's copy was seeded keeps missing the new node forever with
-    nothing to say so.
+def _builtin_check(templates: Path) -> dict:
+    """What an operator should know about the built-in `kraft-default`: a held
+    or installed update, full copies that hide it, an old GitHub copy, packaged
+    names standing in for missing ones, and a `maxima:` below its caps. Always
+    `ok`; `warn` when there is anything to say."""
+    from kraft import update as update_mod
+    from kraft.addons import builtin
+    from kraft.policy import PolicyError, PolicyInput
 
-    Always `ok`: which nodes a repo's chain actually runs is an operator's own
-    edit, not a fault.
-    """
-    shipped_dir = BUNDLED / "config"
-    if not (shipped_dir / CHAINS_DIR).is_dir():
-        return _check("chain_templates", True, "skipped: not an installed Kraft", skipped=True)
-    shipped = _chain_template_files(shipped_dir)
-    if not shipped:
-        return _check(
-            "chain_templates", True, "skipped: no chain templates in this version", skipped=True
-        )
-    live_dir = config_dir()
-    if not live_dir.is_dir():
-        # A home never started: nothing is missing from a copy not made yet.
-        return _check("chain_templates", True, "skipped: no config dir", skipped=True)
-    live = _chain_template_files(live_dir)
-    parts = []
-    for name, shipped_ids in shipped.items():
-        live_ids = live.get(name)
-        if live_ids is None:
-            parts.append(f"{name} missing entirely")
-            continue
-        absent = sorted(shipped_ids - live_ids)
-        if absent:
-            parts.append(f"{name}: {', '.join(absent)} missing")
-    if not parts:
-        return _check("chain_templates", True, f"{len(shipped)} template(s), no missing nodes")
-    return _check(
-        "chain_templates",
-        True,
-        f"{'; '.join(parts)} in {live_dir}, but shipped in this version's defaults — "
-        "Templates › Chains, or edit those files",
-    )
+    lines: list[str] = []
+    running = update_mod.installed()
+    if note := builtin.recorded(addons_load.addons_dir()):
+        to, lines_ = str(note.get("to")), [str(x) for x in note.get("lines") or ()]
+        # s3 records before the install runs, so a record can name a release that never installed.
+        if note.get("status") == "held" and update_mod.is_older(running, to):
+            msg = (
+                f"the {to} update was held: {'; '.join(lines_)}. "
+                "Run `kraft admin update` to see what it changes and decide"
+            )
+            lines.append(
+                msg
+                + (
+                    "; after accepting, fix the override it names"
+                    if not any(x.startswith("cannot compare") for x in lines_)
+                    else ""
+                )
+            )
+        elif note.get("status") == "changed" and to == running:
+            lines.append(f"{note.get('from')} -> {to} changed kraft-default:")
+            lines += [f"  {x}" for x in lines_]
+    try:
+        lines += _full_copies(templates)
+        found = addons_load.installed(templates, addons_load.addons_dir())
+    except Exception as exc:  # a row that cannot read says so; it never crashes doctor
+        return _check("kraft-default", True, f"cannot read kraft-default: {exc}", warn=True)
+    lines += [
+        f"{a.id}: {a.left_out}" for a in found if (a.left_out or "").startswith("Kraft now ships")
+    ]
+    try:
+        have = config.read_yaml(templates / "harnesses.yaml")
+    except config.ConfigError:
+        have = {}
+    have = have if isinstance(have, dict) else {}
+    lacking = [
+        name
+        for section, names in builtin.required().items()
+        for name in names
+        if not isinstance(have.get(section), dict) or name not in have[section]
+    ]
+    if lacking:
+        lines.append(f"harnesses.yaml lacks {', '.join(lacking)}; using the packaged ones")
+    try:
+        if any(r.id == builtin.NAMESPACE for r in config.load_repos(templates / "repos.yaml")):
+            lines.append(
+                f"repository id {builtin.NAMESPACE} is kraft-default's namespace; rename it"
+            )
+    except config.ConfigError:
+        pass  # repos.yaml's own row says why
+    try:
+        instance = PolicyInput.from_yaml(templates / "policy.yaml").instance_policy()
+        mine = next((a for a in found if builtin.is_builtin(a) and a.left_out is None), None)
+        if mine and (why := addons_load.limits_problem(mine, instance)):
+            lines.append(f"maxima: clamps kraft-default task(s): {why}")
+    except PolicyError:
+        pass  # policy.yaml's own check says why
+    if not lines:
+        return _check("kraft-default", True, f"ships with Kraft {running}")
+    return _check("kraft-default", True, "\n".join(lines), warn=True)
 
 
 def _chains_check(templates: Path) -> dict:
@@ -753,7 +783,7 @@ def _repo_libraries_check(
 def _capabilities_check() -> dict:
     """What this version can do that the live seeded config cannot (Kraft-hxt6x).
 
-    Always `ok`, like `_chain_templates_check`: whether to
+    Always `ok`: whether to
     adopt a capability is an operator's decision, not a fault. The row exists
     because the alternative is silence -- `templates/` is seeded once and never
     overwritten, and on a real install two capabilities shipped within a week
@@ -1622,9 +1652,8 @@ def _tests_check(repo: config.RepoEntry, probed: detect.Proposal | None) -> dict
 
 async def _review_bots_check() -> dict:
     """Review bots that may not be reviewing at all. Always `ok`: a silence is
-    a bot with nothing to say until it repeats, and a missing triage step is a
-    choice the capabilities row offers. A warn when either holds, so neither
-    passes as a clean row."""
+    a bot with nothing to say until it repeats. A warn when one is silent, so
+    it does not pass as a clean row."""
     try:
         found = await client.silent_reviewers()
     except ValueError:  # a server older than the route
@@ -1634,20 +1663,6 @@ async def _review_bots_check() -> dict:
         "check the login, and that the bot is on that project"
         for r in found["reviewers"]
     ]
-    triage = next(c for c in capabilities.MANIFEST if c.name == "triage_review_feedback")
-    if not capabilities.adopted(triage, config_dir()):
-        quiet = {"unrecognised_keys_reported": True}  # as `_repo_checks` reads them
-        entries = [config.RepoEntry.model_validate(r, context=quiet) for r in await client.repos()]
-        named = [
-            _label(repo)
-            for repo in entries
-            if any(r.bot is not None for r in as_reviewers(repo.automated_review))
-        ]
-        if named:
-            lines.append(
-                f"no triage step reads a bot's summary for {', '.join(named)}: the library "
-                "has none (the capabilities row has the edit)"
-            )
     if not lines:
         return _check("review bots", True, f"no review bot silent across {found['run']} items")
     return _check("review bots", True, "\n".join(lines), warn=True)
