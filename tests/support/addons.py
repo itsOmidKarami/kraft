@@ -631,24 +631,27 @@ def accept_repo_library(config_dir: Path, addons_dir: Path, repo: Path, repo_id:
     `repo_id`. Returns the store directory."""
     found = repo_library.remote(repo)
     extracted = repo_library.extract(repo, found.commit)
-    store = fetch.write_store(addons_dir, extracted)
-    repos = read_yaml(config_dir / "repos.yaml", {"repos": []})
-    entry = next((r for r in repos["repos"] if r.get("path") == str(repo)), None)
-    if entry is None:
-        repos["repos"].append({"path": str(repo), "id": repo_id})
-    else:
-        entry["id"] = repo_id
-    write_yaml(config_dir / "repos.yaml", repos)
-    lock = read_yaml(config_dir / "repo-libraries.lock", {"lock_version": 1, "repos": {}})
-    lock["repos"][repo_id] = {
-        "git": found.url,
-        "branch": found.branch,
-        "commit": found.commit,
-        "tree": extracted.tree,
-        "digest": fetch.digest(extracted.files),
-        "updated_at": datetime.now(UTC).isoformat(),
-    }
-    write_yaml(config_dir / "repo-libraries.lock", lock)
+    # Held as `install` holds it: the server's store collection runs in the
+    # background and deletes a store the lock does not name yet.
+    with update.write_lock(addons_dir):
+        store = fetch.write_store(addons_dir, extracted)
+        repos = read_yaml(config_dir / "repos.yaml", {"repos": []})
+        entry = next((r for r in repos["repos"] if r.get("path") == str(repo)), None)
+        if entry is None:
+            repos["repos"].append({"path": str(repo), "id": repo_id})
+        else:
+            entry["id"] = repo_id
+        write_yaml(config_dir / "repos.yaml", repos)
+        lock = read_yaml(config_dir / "repo-libraries.lock", {"lock_version": 1, "repos": {}})
+        lock["repos"][repo_id] = {
+            "git": found.url,
+            "branch": found.branch,
+            "commit": found.commit,
+            "tree": extracted.tree,
+            "digest": fetch.digest(extracted.files),
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+        write_yaml(config_dir / "repo-libraries.lock", lock)
     return store
 
 
