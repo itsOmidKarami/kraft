@@ -74,6 +74,20 @@ def test_an_installed_release_keeps_the_bundle_it_started_with(checkout_copy, mo
     assert load._builtin_stamps() == ()
 
 
+def test_an_installed_release_keeps_the_harness_profiles_it_started_with(
+    checkout_copy, monkeypatch
+):
+    """The packaged `harnesses.yaml` the fallback fills from is frozen with the bundle."""
+    monkeypatch.setattr(update, "installed", lambda: "2.6.0")
+    before, _ = builtin.harness_fallback({})
+    file = checkout_copy / "harnesses.yaml"
+    file.write_text(file.read_text().replace("model: sonnet", "model: the-next-release"))
+    monkeypatch.setattr(update, "installed", lambda: "2.7.0")
+    after, _ = builtin.harness_fallback({})
+    assert after == before
+    assert "the-next-release" not in str(after)
+
+
 @pytest.mark.parametrize(
     "who",
     [

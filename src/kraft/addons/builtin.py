@@ -4,6 +4,7 @@ not from a home."""
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import time
@@ -77,6 +78,19 @@ def extracted() -> fetch.Extracted:
     return _memo[2]
 
 
+_harnesses_memo: tuple[Path, object] | None = None
+
+
+def _packaged_harnesses() -> object:
+    """The packaged `harnesses.yaml` the fallback fills from, frozen with the
+    bundle for an installed release (see `frozen`)."""
+    global _harnesses_memo
+    root = source_dir()
+    if _harnesses_memo is None or _harnesses_memo[0] != root or not frozen():
+        _harnesses_memo = (root, yaml.safe_load((root / "harnesses.yaml").read_text()) or {})
+    return copy.deepcopy(_harnesses_memo[1])
+
+
 def required() -> dict[str, tuple[str, ...]]:
     """The harnesses and agent profiles the built-in's manifest requires."""
     requires = json.loads(extracted().files[".kraft/addon.json"][1]).get("requires", {})
@@ -102,7 +116,7 @@ def _fill(data: object) -> tuple[object, dict[str, tuple[str, ...]]]:
     if not isinstance(data, dict):
         return data, none
     try:
-        packaged = yaml.safe_load((source_dir() / "harnesses.yaml").read_text()) or {}
+        packaged = _packaged_harnesses()
         needs = required()
     except (
         OSError,
