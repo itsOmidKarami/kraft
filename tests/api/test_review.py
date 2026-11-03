@@ -16,6 +16,7 @@ from support.api import (
     _poll_node_started,
     _review_early,
     _set_status,
+    _slow_at,
     _started,
 )
 from support.permissions import add_session
@@ -626,8 +627,7 @@ def test_request_changes_for_an_earlier_node_does_not_stop_the_running_one(
     a later one is running must not touch the running node at all -- it is
     only recorded as a pending rewind, honoured when that node completes
     (`walk.run_once`), never by pausing what is in flight."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
+    _slow_at(monkeypatch, "work_item_summary")
     wid = _started(client, {"title": "t", "repo": str(repo), "chain_template": "review-early"})
     # Implementation already ran; the summary's own session is what a pause would find.
     _poll_node_started(client, wid, "work_item_summary", event="worker_session_started")
@@ -645,8 +645,7 @@ def test_request_changes_for_an_earlier_node_does_not_stop_the_running_one(
 
 @_REVIEW
 def test_request_changes_on_the_running_node_reruns_it(client, repo, monkeypatch):
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
+    _slow_at(monkeypatch, "work_item_summary")
     wid = _started(client, {"title": "t", "repo": str(repo), "chain_template": "review-early"})
     _poll_node_started(client, wid, "work_item_summary", event="worker_session_started")
 
@@ -681,8 +680,7 @@ def test_a_resume_that_fails_then_succeeds_on_retry_reports_success(client, repo
 
     from kraft.api.routes import review as review_routes
 
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
+    _slow_at(monkeypatch, "work_item_summary")
     wid = _started(client, {"title": "t", "repo": str(repo), "chain_template": "review-early"})
     _poll_node_started(client, wid, "work_item_summary")
 
@@ -731,8 +729,7 @@ def test_a_resume_that_fails_on_both_tries_in_the_rerun_branch_is_refused(
 
     from kraft.api.routes import review as review_routes
 
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
+    _slow_at(monkeypatch, "work_item_summary")
     wid = _started(client, {"title": "t", "repo": str(repo), "chain_template": "review-early"})
     _poll_node_started(client, wid, "work_item_summary")
 

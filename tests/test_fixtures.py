@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
+
+import pytest
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "fixtures" / "fake-claude.sh"
 
@@ -57,6 +60,23 @@ def test_slow_mode_delays(tmp_path):
     assert "a + b" in (tmp_path / "calc.py").read_text()
     assert json.loads((tmp_path / "result.json").read_text()) == {"status": "done"}
     assert json.loads(proc.stdout.strip().splitlines()[-1])["is_error"] is False
+
+
+@pytest.mark.parametrize(
+    ("node", "slow"), [("spec", False), ("plan", True)], ids=["another-node", "the-slow-node"]
+)
+def test_slow_node_slows_only_the_tasks_of_that_node(tmp_path, node, slow):
+    """A test that holds an item at a later node must not also wait out the delay of every node
+    before it."""
+    env = {
+        "KRAFT_FAKE_CLAUDE": "slow",
+        "KRAFT_FAKE_CLAUDE_DELAY": "1",
+        "KRAFT_FAKE_CLAUDE_SLOW_NODE": "plan",
+    }
+    start = time.monotonic()
+    proc = _run(tmp_path, env, ctx=f"Work item: w1\nNode: {node}\nHook point: {node}.main.a\n")
+    assert proc.returncode == 0
+    assert (time.monotonic() - start >= 1.0) is slow
 
 
 def test_status_defaults_to_done(tmp_path):

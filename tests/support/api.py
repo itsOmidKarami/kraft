@@ -316,13 +316,21 @@ def _one_off(client, repo, text, **body) -> str:
     return _paused(client, repo, one_off_chain=text, **body)
 
 
-def _held_at(client, repo, node_id, monkeypatch, *, delay="5", **body) -> str:
-    """Start an item and return its id once `node_id` has started, with every
-    fake agent task sleeping `delay` seconds first (`KRAFT_FAKE_CLAUDE=slow`,
-    the one sleep trigger: a `KRAFT_SLOW` title as well would sleep twice).
-    Held there, the item's worktree exists and no gate is pending yet."""
+def _slow_at(monkeypatch, node_id, delay="5") -> None:
+    """Every fake agent task of `node_id` sleeps `delay` seconds first
+    (`KRAFT_FAKE_CLAUDE=slow`, the one sleep trigger: a `KRAFT_SLOW` title as
+    well would sleep twice). The nodes before it run at once, so a test that
+    holds an item there does not also wait out each of their delays."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", delay)
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_SLOW_NODE", node_id)
+
+
+def _held_at(client, repo, node_id, monkeypatch, *, delay="5", **body) -> str:
+    """Start an item and return its id once `node_id` has started, its agent
+    tasks sleeping `delay` seconds first (`_slow_at`). Held there, the item's
+    worktree exists and no gate is pending yet."""
+    _slow_at(monkeypatch, node_id, delay)
     wid = _started(client, {"title": "t", "repo": str(repo), **body})
     _poll_node_started(client, wid, node_id)
     return wid

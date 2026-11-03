@@ -244,6 +244,9 @@ async def test_a_remote_standin_is_stopped_by_a_clean_stop(rig):
     row = _row(rig, "s1")
     sp.server_stopping()
     task.cancel()
+    # The machine's job outlives the stand-in; without this the wind-down waits the full 28 s
+    # of its `sleep 30` for it to deliver (`wait_delivered`), which this test is not about.
+    run.delivered.set()
     with contextlib.suppress(asyncio.CancelledError):
         await task
 

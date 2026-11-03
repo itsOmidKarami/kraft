@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Stand-in for `claude` headless. Invoked as:
 #   fake-claude.sh -p <instr> --append-system-prompt <ctx> --output-format stream-json --verbose
-# CWD is the worktree. Modes via KRAFT_FAKE_CLAUDE: fix (default) | noop | slow.
+# CWD is the worktree. Modes via KRAFT_FAKE_CLAUDE: fix (default) | noop | slow. Slow sleeps
+# KRAFT_FAKE_CLAUDE_DELAY first in every task, or only in the tasks of the node named by
+# KRAFT_FAKE_CLAUDE_SLOW_NODE.
 # The reported status defaults to "done"; KRAFT_FAKE_CLAUDE_STATUS overrides it,
 # and KRAFT_FAKE_CLAUDE_CONCERNS / KRAFT_FAKE_CLAUDE_QUESTION set the field that
 # goes with done_with_concerns / needs_context.
@@ -61,6 +63,18 @@ case "$*" in *KRAFT_MANY_FILES*) many_files=1 ;; esac
 # provider session id that line carries, the one `--resume` takes.
 printf '{"type":"system","subtype":"init","model":"fake-agent","tools":[]%s}\n' \
   "${KRAFT_FAKE_CLAUDE_SESSION_ID:+,\"session_id\":\"$KRAFT_FAKE_CLAUDE_SESSION_ID\"}"
+
+# KRAFT_FAKE_CLAUDE_SLOW_NODE=<node id>: only that node's tasks are slow, so a test that holds an
+# item at a later node does not also wait out the delay of every node before it.
+if [ "$mode" = "slow" ] && [ -n "${KRAFT_FAKE_CLAUDE_SLOW_NODE:-}" ]; then
+  node=""
+  for arg in "$@"; do
+    case "$arg" in
+      "Node: "* | *$'\n'"Node: "*) node="$(printf '%s\n' "$arg" | sed -n 's/^Node: //p' | head -1)"; break ;;
+    esac
+  done
+  [ "$node" = "$KRAFT_FAKE_CLAUDE_SLOW_NODE" ] || mode="fix"
+fi
 
 if [ "$mode" = "slow" ]; then
   sleep "${KRAFT_FAKE_CLAUDE_DELAY:-10}"
