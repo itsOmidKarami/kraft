@@ -527,22 +527,22 @@ def _full_copies(templates: Path) -> list[str]:
     extend it: they hide the built-in's, so releases never reach them."""
     from kraft.addons import builtin
 
-    ids = sorted(
+    ids = {
         Path(name).stem
         for name in builtin.extracted().files
         if name.startswith(f"{CHAINS_DIR}/") and name.endswith(".yaml")
-    )
+    }
     out = []
-    for chain_id in ids:
+    for path in sorted((templates / CHAINS_DIR).glob("*.yaml")):
         try:
-            data = yaml.safe_load((templates / CHAINS_DIR / f"{chain_id}.yaml").read_text())
+            data = yaml.safe_load(path.read_text())
         except (OSError, ValueError, yaml.YAMLError):
             continue
-        if not isinstance(data, dict) or data.get("id") != chain_id:
-            continue
-        if data.get("extends") != f"{builtin.NAMESPACE}:{chain_id}":
+        # A chain with no `id:` is named by its file, as the library reads it.
+        chain_id = data.get("id") or path.stem if isinstance(data, dict) else None
+        if chain_id in ids and data.get("extends") != f"{builtin.NAMESPACE}:{chain_id}":
             out.append(
-                f"chains/{chain_id}.yaml is a full copy and hides {builtin.NAMESPACE}:{chain_id}; "
+                f"chains/{path.name} is a full copy and hides {builtin.NAMESPACE}:{chain_id}; "
                 "see Move onto kraft-default"
             )
     return out
@@ -560,7 +560,15 @@ def _builtin_check(templates: Path) -> dict:
     lines: list[str] = []
     running = update_mod.installed()
     if note := builtin.recorded(addons_load.addons_dir()):
-        to, lines_ = str(note.get("to")), [str(x) for x in note.get("lines") or ()]
+        raw = note.get("lines")
+        if not isinstance(raw, list):
+            return _check(
+                "kraft-default",
+                True,
+                "cannot read kraft-default: its update record is malformed",
+                warn=True,
+            )
+        to, lines_ = str(note.get("to")), [str(x) for x in raw]
         # s3 records before the install runs, so a record can name a release that never installed.
         if note.get("status") == "held" and update_mod.is_older(running, to):
             msg = (

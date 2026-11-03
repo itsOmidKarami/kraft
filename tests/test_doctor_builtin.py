@@ -110,42 +110,66 @@ def _recorded(status, to, lines=("chains/default.yaml: node gone",)):
     return record
 
 
+_COPY = "chains/default.yaml is a full copy and hides kraft-default:default"
+_HELD = "Run `kraft admin update` to see what it changes and decide"
+_OVERRIDE = "after accepting, fix the override it names"
+
+
 @pytest.mark.parametrize(
     ("setup", "says"),
     [
-        (_recorded("held", _FUTURE), ["the 99.0.0 update was held", "fix the override it names"]),
-        (_recorded("held", _PAST), []),
         (
-            _recorded("held", _FUTURE, ("cannot compare: offline",)),
-            ["the 99.0.0 update was held: cannot compare: offline"],
+            {"record": _recorded("held", _FUTURE)},
+            ["the 99.0.0 update was held: chains/default.yaml: node gone. " + _HELD, _OVERRIDE],
         ),
-        (_recorded("changed", "installed"), ["changed kraft-default:", "node gone"]),
-        (_recorded("changed", _FUTURE), []),
+        ({"record": _recorded("held", _PAST)}, []),
+        (
+            {"record": _recorded("held", _FUTURE, ("cannot compare: offline",))},
+            ["the 99.0.0 update was held: cannot compare: offline. " + _HELD, "!" + _OVERRIDE],
+        ),
+        ({"record": _recorded("changed", "installed")}, ["changed kraft-default:", "node gone"]),
+        ({"record": _recorded("changed", _FUTURE)}, []),
+        (
+            {"raw": '{"status": "held", "to": "99.0.0", "lines": 5}'},
+            ["cannot read kraft-default: its update record is malformed"],
+        ),
+        ({"raw": "[1]"}, []),
         (
             {"chains": {"default": {"id": "default", "nodes": []}}},
-            [
-                "chains/default.yaml is a full copy and hides kraft-default:default",
-                "Move onto kraft-default",
-            ],
+            [_COPY, "Move onto kraft-default"],
         ),
+        ({"files": {"default": "nodes: []\n"}}, [_COPY]),
+        ({"files": {"mine": "id: default\nnodes: []\n"}}, ["chains/mine.yaml is a full copy"]),
         ({"chains": {"default": _THIN}}, []),
-        ("github-copy", ["kraft-default@acme: Kraft now ships kraft-default itself"]),
+        ({"stub": True}, ["kraft-default@acme: Kraft now ships kraft-default itself"]),
         (
             {"harnesses": {"harnesses": {"codex": {"provider": "codex"}}}},
-            [
-                "harnesses.yaml lacks claude, strong, fast; using the packaged ones",
-            ],
+            ["harnesses.yaml lacks claude, strong, fast; using the packaged ones"],
         ),
         (
             {"repos": {"repos": [{"id": "kraft-default", "path": "/x"}]}},
-            [
-                "repository id kraft-default is kraft-default's namespace; rename it",
-            ],
+            ["repository id kraft-default is kraft-default's namespace; rename it"],
         ),
         (
             {"policy": {"maxima": {"tasks": {"time_cap_minutes": 1}}}},
+            ["maxima: clamps kraft-default task(s): "],
+        ),
+        (
+            {
+                "record": _recorded("held", _FUTURE),
+                "files": {"default": "nodes: []\n"},
+                "stub": True,
+                "harnesses": {"harnesses": {}},
+                "repos": {"repos": [{"id": "kraft-default", "path": "/x"}]},
+                "policy": {"maxima": {"tasks": {"time_cap_minutes": 1}}},
+            },
             [
-                "maxima: clamps kraft-default task(s): ",
+                "update was held",
+                _COPY,
+                "kraft-default@acme",
+                "harnesses.yaml lacks",
+                "repository id",
+                "maxima:",
             ],
         ),
         ({}, []),
@@ -156,32 +180,49 @@ def _recorded(status, to, lines=("chains/default.yaml: node gone",)):
         "held-cannot-compare",
         "changed",
         "changed-then-rolled-back",
+        "malformed-record",
+        "non-dict-record",
         "full-copy",
+        "full-copy-without-an-id",
+        "full-copy-under-another-name",
         "thin-is-quiet",
         "github-copy",
         "fallback",
         "repo-id",
         "maxima",
+        "all-lines-in-order",
         "nothing-to-say",
     ],
 )
 def test_the_kraft_default_row(tmp_path, monkeypatch, setup, says):
-    kwargs = setup if isinstance(setup, dict) else {}
-    live = _home(tmp_path, monkeypatch, **kwargs)
-    if callable(setup):
-        setup(tmp_path)
-    if setup == "github-copy":
+    keys = ("chains", "harnesses", "repos", "policy")
+    live = _home(tmp_path, monkeypatch, **{k: v for k, v in setup.items() if k in keys})
+    for name, text in setup.get("files", {}).items():
+        (live / "chains" / f"{name}.yaml").write_text(text)
+    if "record" in setup:
+        setup["record"](tmp_path)
+    if "raw" in setup:
+        (tmp_path / "run" / "addons").mkdir(parents=True)
+        (tmp_path / "run" / "addons" / "builtin.json").write_text(setup["raw"])
+    if setup.get("stub"):
         old = SimpleNamespace(
             id="kraft-default@acme", left_out=builtin.SHIPS_IT.format(id="kraft-default@acme")
         )
-        monkeypatch.setattr(doctor.addons_load, "installed", lambda *a, **k: [old])
+        real = doctor.addons_load.installed
+        monkeypatch.setattr(doctor.addons_load, "installed", lambda *a, **k: [*real(*a, **k), old])
 
     row = doctor._builtin_check(live)
 
     assert row["name"] == "kraft-default" and row["ok"] is True
-    assert row["warn"] is bool(says), row
-    for text in says:
+    present = [t for t in says if not t.startswith("!")]
+    assert row["warn"] is bool(present), row
+    for text in present:
         assert text in row["detail"], row
+    for text in (t[1:] for t in says if t.startswith("!")):
+        assert text not in row["detail"], row
+    # Lines come in the plan's order.
+    at = [row["detail"].index(t) for t in present]
+    assert at == sorted(at), row
 
 
 def test_lowering_maxima_clamps_the_builtin(client):
