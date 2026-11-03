@@ -17,6 +17,7 @@ are not free: the derived vocabulary, and a claim reached through a helper.
 from __future__ import annotations
 
 import ast
+import functools
 import importlib.util
 import pathlib
 import shutil
@@ -495,6 +496,7 @@ def test_removing_any_real_bracket_is_caught_and_names_its_file(tmp_path, index)
     target.write_text(_without_bracket(path.read_text(), header, body_start, body_end))
 
     mod = _load(root)
+    mod.audit = functools.cache(mod.audit)  # `main` and the rows below share one tree walk
     assert mod.main([]) == 1, f"removing the bracket at {path.name}:{header} was not caught"
     bad = [r for r in mod.audit() if not (r[3] or r[4])]
     assert {r[0].rsplit(":", 1)[0].split("kraft/", 1)[1] for r in bad} == {
