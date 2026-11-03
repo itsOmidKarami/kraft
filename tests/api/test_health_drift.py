@@ -3,9 +3,14 @@ the lines on an authenticated route."""
 
 from __future__ import annotations
 
+import json
+import time
+
+import httpx
 import pytest
 import yaml
 
+from kraft import config, notify
 from kraft.addons import builtin, drift
 
 
@@ -62,3 +67,43 @@ def test_a_check_that_raises_is_one_line_and_startup_completes(request, monkeypa
             "cannot check kraft-default: nope"
             in client.get("/api/kraft-default").json()["lines"][0]
         )
+
+
+@pytest.fixture
+def webhook(monkeypatch):
+    """Every Notifier the app builds posts to a recording transport. `kraft.api.app`
+    is module-level, so the last test's notifier and sent mark are dropped first."""
+    from kraft.api import app
+
+    for name in ("notifier", "kraft_default_sent"):
+        monkeypatch.setattr(app.state, name, None, raising=False)
+    sends: list = []
+
+    async def transport(request: httpx.Request) -> httpx.Response:
+        sends.append(json.loads(request.content))
+        return httpx.Response(200)
+
+    init = notify.Notifier.__init__
+
+    def init_mocked(self, *a, **k):
+        init(self, *a, **k)
+        self._transport = httpx.MockTransport(transport)
+
+    monkeypatch.setattr(notify.Notifier, "__init__", init_mocked)
+    return sends
+
+
+def _drifted_with_webhook(templates_dir):
+    _one_full_copy(templates_dir)
+    config.Notify(enabled=True, url="https://hook.invalid/t0ken").save(
+        templates_dir / "notify.yaml"
+    )
+
+
+@pytest.mark.api_client(edit_templates=_drifted_with_webhook)
+def test_startup_sends_one_drift_notice(webhook, client):
+    for _ in range(100):  # the send is a detached task
+        if webhook:
+            break
+        time.sleep(0.02)
+    assert [body["type"] for body in webhook] == ["kraft_default_drift"]
