@@ -244,8 +244,9 @@ when `NEW` does not collect.
 ## Running
 
 - `just test <paths>` (testmon), never raw pytest. It runs in parallel
-  (`-n logical`) unless you pass `-n` or `-p no:xdist`, or name a single test;
-  `-n 0` stays in one process. `just test-ui` for the frontend.
+  (`-n logical`) unless you pass `-n` or `-p no:xdist`, name a single test, or
+  ask for live output (`-s`, `--capture`, `--trace`); `-n 0` stays in one
+  process. `just test-ui` for the frontend.
 - Testmon follows Python execution only, so it cannot see a change to a
   file a test reads or runs as a subprocess: a harness YAML, a skill's
   `.md`, `fixtures/fake-claude.sh`, the `tests/support/` files no test

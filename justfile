@@ -284,8 +284,10 @@ install: bundle
 # "collected N items / N deselected / 0 selected", or with -q only
 # "N deselected in 0.1s". Nothing ran, so nothing was shown to pass.
 #
-# In parallel (`-n logical`) unless the args say otherwise (`-n`, `-p no:xdist`)
-# or name one test (`::`), where xdist's workers cost 1-2s and gain nothing: a
+# In parallel (`-n logical`) unless the args say otherwise (`-n`, `-p no:xdist`),
+# ask for output a worker would lose (`-s` and its clusters, `--capture`,
+# `--log-cli*`, `--setup-show`, `--trace`) or name one test (`::`), where xdist's
+# workers cost 1-2s and gain nothing: a
 # cold testmon run in one process is ~4x slower on a directory and ~9x on the
 # suite (dev/targeted_tests.py), and testmon records fine under xdist. `-n 0`
 # opts out. A variable, not `set --`: the guards below read whether args were given.
@@ -324,6 +326,8 @@ test *ARGS:
     fi
     par=-nlogical
     case " $* " in *" -n"*|*" --numprocesses"*|*" -p no:xdist "*|*"::"*) par= ;; esac
+    case " $* " in *" --capture"*|*" --trace "*|*" --log-cli"*|*" --setup-show "*) par= ;; esac
+    [[ " $* " =~ [[:space:]]-[vqxl]*s[vqxsl]*[[:space:]] ]] && par=
     COVERAGE_CORE=ctrace uv run pytest ${mode:+"$mode"} ${par:+"$par"} "$@" 2>&1 | tee "$log"
     status=${PIPESTATUS[0]}
     if [ -n "$*" ] && grep -qE '^collected 0 items$' "$log"; then
@@ -407,7 +411,7 @@ test-ui:
 [doc("Launch every shipped (harness, model, effort) on the real CLI; spends a few cents")]
 smoke-models:
     @[ -n "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || { echo "smoke-models: export ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (claude setup-token) -- tests use a temp HOME, so claude login is not seen" >&2; exit 1; }
-    KRAFT_E2E=1 KRAFT_E2E_REQUIRE=claude just test tests/test_shipped_models.py -k real_cli --no-testmon
+    KRAFT_E2E=1 KRAFT_E2E_REQUIRE=claude just test tests/test_shipped_models.py -k real_cli --no-testmon -n 0
 
 # The pre-commit hook's door to smoke-models: a Kraft worker, a shell without
 # KRAFT_SMOKE_MODELS=1, or one with no credential skips it loudly instead of
@@ -510,7 +514,7 @@ vocab:
 # answers with, which frontend/demo/apiShapes.test.ts holds the mocked API to
 [doc("Rewrite the API response-shape table from the real server")]
 shapes:
-    WRITE_API_SHAPES=1 just test tests/api/test_api_shapes.py --no-testmon
+    WRITE_API_SHAPES=1 just test tests/api/test_api_shapes.py --no-testmon -n 0
 
 # Regenerate src/kraft/templates/lucide_icons.txt from the installed lucide-react
 # (the icon names a template's `icon:` is linted against). Run after every bump.
