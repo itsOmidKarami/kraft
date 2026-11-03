@@ -35,10 +35,25 @@ INVALID_UTF8 = b'url: "https://hook.invalid/t0ken"\nbad: "\xff\xfe garbage"\n'
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        (None, {"enabled": False, "url": None, "base_url": None, "events": DEFAULT_EVENTS}),
+        (
+            None,
+            {
+                "enabled": False,
+                "url": None,
+                "base_url": None,
+                "kraft_default": True,
+                "events": DEFAULT_EVENTS,
+            },
+        ),
         (
             "enabled: true\n",
-            {"enabled": True, "url": None, "base_url": None, "events": DEFAULT_EVENTS},
+            {
+                "enabled": True,
+                "url": None,
+                "base_url": None,
+                "kraft_default": True,
+                "events": DEFAULT_EVENTS,
+            },
         ),
     ],
     ids=["no-file", "partial-file"],
@@ -503,12 +518,24 @@ def test_get_notify_never_returns_the_url(client):
         (
             {"url": "https://hook.invalid/t0ken"},
             {"url": ""},
-            {"enabled": False, "url": None, "base_url": None, "events": DEFAULT_EVENTS},
+            {
+                "enabled": False,
+                "url": None,
+                "base_url": None,
+                "kraft_default": True,
+                "events": DEFAULT_EVENTS,
+            },
         ),
         (
             {"enabled": True, "url": "https://hook.invalid/t0ken"},
             {"url": ""},
-            {"enabled": False, "url": None, "base_url": None, "events": DEFAULT_EVENTS},
+            {
+                "enabled": False,
+                "url": None,
+                "base_url": None,
+                "kraft_default": True,
+                "events": DEFAULT_EVENTS,
+            },
         ),
     ],
     ids=["omitted-url-is-kept", "empty-url-clears", "empty-url-clears-and-disables"],

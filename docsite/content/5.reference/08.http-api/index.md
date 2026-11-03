@@ -43,6 +43,7 @@ The answer carries:
 | `installed` | The version installed on disk, which differs until a restart finishes an update. |
 | `reattach_summary` | What startup found of agent sessions that were running: `scanned`, `adopted`, `resolved_from_file`, `unknown` and `resumed_work_items`. Each `adopted`, `resolved_from_file` and `unknown` entry is `<work item id>/<session id>`, since a session id is unique only within its work item. |
 | `index` | The search index: `last_scan_at`, `repos_scanned`, `documents`, and the state of `embeddings`. |
+| `kraft_default` | `{signature, count}`: a short hash of the lines the `kraft-default` row of `kraft admin doctor` shows, and how many there are; `{signature: null, count: 0}` when there are none. The lines themselves are on [`GET /api/kraft-default`](/reference/http-api/repos-chains-harnesses-and-server#get-apikraft-default). Never makes `status` `degraded`. _Added in next_ |
 | `session_expiry_days` | How long a login lasts, which the login screen shows. |
 
 An add-on that is installed and did not load is under `invalid_templates`, as `add-on <id>` with the reason, and `status` is `degraded`. A held or failed entry of `addon_updates` leaves `status` as it is.
@@ -266,6 +267,7 @@ _Added in 2.1_
 | Route | What it does |
 |---|---|
 | [`GET /api/storage`](/reference/http-api/repos-chains-harnesses-and-server#get-apistorage) | Answers the disk the worktrees use, item by item. |
+| [`GET /api/kraft-default`](/reference/http-api/repos-chains-harnesses-and-server#get-apikraft-default) | Answers the lines about Kraft's own chains that need attention. |
 | [`POST /api/storage/preview`](/reference/http-api/repos-chains-harnesses-and-server#post-apistoragepreview) | Shows what archiving some items would free and lose. |
 
 ### Workers

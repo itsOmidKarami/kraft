@@ -114,6 +114,7 @@ const ALLOWED = [
   "review/sharedWords", // wording both layouts show, one source
   "analytics/sharedWords", // wording both layouts show, one source
   "shell/health", // olderServer and useHealth: the restart banner over the board, one test for both layouts
+  "shell/KraftDefaultBanner", // useKraftDefault: the drift line over the phone board, one hook for both layouts
 ];
 
 const ng = join(dirname(fileURLToPath(import.meta.url)), "..");

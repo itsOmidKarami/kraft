@@ -18,8 +18,6 @@ from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
-import yaml
-
 from kraft import auth, capabilities, client, config, detect, harness, pidfile, registration, render
 from kraft import forges as forges_mod
 from kraft import policy as policy_mod
@@ -42,7 +40,7 @@ from kraft.paths import (
 )
 from kraft.remote import registry
 from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
-from kraft.templates.library import CHAINS_DIR, TemplateLibrary, TemplateLibraryError
+from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 from kraft.templates.models import AgentTask, ForgeTask
 from kraft.worker import backends, channel, egress, kit
 from kraft.worker import steering as steering_mod
@@ -522,103 +520,15 @@ def _pidfile_check() -> dict:
     )
 
 
-def _full_copies(templates: Path) -> list[str]:
-    """Local chains that share an id with a `kraft-default` chain and do not
-    extend it: they hide the built-in's, so releases never reach them."""
-    from kraft.addons import builtin
-
-    ids = {
-        Path(name).stem
-        for name in builtin.extracted().files
-        if name.startswith(f"{CHAINS_DIR}/") and name.endswith(".yaml")
-    }
-    out = []
-    for path in sorted((templates / CHAINS_DIR).glob("*.yaml")):
-        try:
-            data = yaml.safe_load(path.read_text())
-        except (OSError, ValueError, yaml.YAMLError):
-            continue
-        # A chain with no `id:` is named by its file, as the library reads it.
-        chain_id = data.get("id") or path.stem if isinstance(data, dict) else None
-        if chain_id in ids and data.get("extends") != f"{builtin.NAMESPACE}:{chain_id}":
-            out.append(
-                f"chains/{path.name} is a full copy and hides {builtin.NAMESPACE}:{chain_id}; "
-                "see Move onto kraft-default"
-            )
-    return out
-
-
 def _builtin_check(templates: Path) -> dict:
-    """What an operator should know about the built-in `kraft-default`: a held
-    or installed update, full copies that hide it, an old GitHub copy, packaged
-    names standing in for missing ones, and a `maxima:` below its caps. Always
-    `ok`; `warn` when there is anything to say."""
+    """What an operator should know about the built-in `kraft-default` (the
+    lines are `addons.drift`'s). Always `ok`; `warn` when there is anything to say."""
     from kraft import update as update_mod
-    from kraft.addons import builtin
-    from kraft.policy import PolicyError, PolicyInput
+    from kraft.addons import drift
 
-    lines: list[str] = []
-    running = update_mod.installed()
-    note = builtin.recorded(addons_load.addons_dir())
-    if note and not isinstance(note.get("lines"), list):
-        lines.append("cannot read kraft-default: its update record is malformed")
-        note = None  # the rest of the row still reports
-    if note:
-        to, lines_ = str(note.get("to")), [str(x) for x in note["lines"]]
-        # s3 records before the install runs, so a record can name a release that never installed.
-        if note.get("status") == "held" and update_mod.is_older(running, to):
-            msg = (
-                f"the {to} update was held: {'; '.join(lines_)}. "
-                "Run `kraft admin update` to see what it changes and decide"
-            )
-            lines.append(
-                msg
-                + (
-                    "; after accepting, fix the override it names"
-                    if not any(x.startswith("cannot compare") for x in lines_)
-                    else ""
-                )
-            )
-        elif note.get("status") == "changed" and to == running:
-            lines.append(f"{note.get('from')} -> {to} changed kraft-default:")
-            lines += [f"  {x}" for x in lines_]
-    try:
-        lines += _full_copies(templates)
-        found = addons_load.installed(templates, addons_load.addons_dir())
-    except Exception as exc:  # a row that cannot read says so; it never crashes doctor
-        return _check("kraft-default", True, f"cannot read kraft-default: {exc}", warn=True)
-    lines += [
-        f"{a.id}: {a.left_out}" for a in found if (a.left_out or "").startswith("Kraft now ships")
-    ]
-    try:
-        have = config.read_yaml(templates / "harnesses.yaml")
-    except config.ConfigError:
-        have = {}
-    have = have if isinstance(have, dict) else {}
-    lacking = [
-        name
-        for section, names in builtin.required().items()
-        for name in names
-        if not isinstance(have.get(section), dict) or name not in have[section]
-    ]
-    if lacking:
-        lines.append(f"harnesses.yaml lacks {', '.join(lacking)}; using the packaged ones")
-    try:
-        if any(r.id == builtin.NAMESPACE for r in config.load_repos(templates / "repos.yaml")):
-            lines.append(
-                f"repository id {builtin.NAMESPACE} is kraft-default's namespace; rename it"
-            )
-    except config.ConfigError:
-        pass  # repos.yaml's own row says why
-    try:
-        instance = PolicyInput.from_yaml(templates / "policy.yaml").instance_policy()
-        mine = next((a for a in found if builtin.is_builtin(a) and a.left_out is None), None)
-        if mine and (why := addons_load.limits_problem(mine, instance)):
-            lines.append(f"maxima: clamps kraft-default task(s): {why}")
-    except PolicyError:
-        pass  # policy.yaml's own check says why
+    lines = drift.lines(templates, addons_load.addons_dir())
     if not lines:
-        return _check("kraft-default", True, f"ships with Kraft {running}")
+        return _check("kraft-default", True, f"ships with Kraft {update_mod.installed()}")
     return _check("kraft-default", True, "\n".join(lines), warn=True)
 
 

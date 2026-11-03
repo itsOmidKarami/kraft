@@ -135,6 +135,7 @@ async def health(request: Request):
     invalid_forges = getattr(st, "invalid_forges", None)
     tokens, bad_tokens = probe.health_rows(st.forge_probes, date.today())
     storage_health = storage.health(st)
+    kraft_default = getattr(st, "kraft_default", None) or {}
     held = (storage_health or {}).get("state") == "held"
     return {
         "status": "degraded"
@@ -193,4 +194,9 @@ async def health(request: Request):
         # update and the restart that finishes it; the SPA and `admin doctor`
         # both say so.
         "installed": update_mod.installed(),
+        # public: signature and count only, no text. `GET /kraft-default` has the lines.
+        "kraft_default": {
+            "signature": kraft_default.get("signature"),
+            "count": len(kraft_default.get("lines", [])),
+        },
     }

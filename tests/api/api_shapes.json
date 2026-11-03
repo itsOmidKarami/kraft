@@ -331,6 +331,10 @@
     "invalid_intake": "_",
     "invalid_policy": [],
     "invalid_templates": {},
+    "kraft_default": {
+     "count": "_",
+     "signature": "_"
+    },
     "mcp_command_on_path": "_",
     "pid": "_",
     "port": "_",
@@ -359,6 +363,15 @@
     "repo_pickups": "_",
     "repos": [],
     "schedules": []
+   }
+  },
+  "GET /api/kraft-default": {
+   "params": {},
+   "shape": {
+    "lines": [
+     "_"
+    ],
+    "signature": "_"
    }
   },
   "GET /api/notify": {
