@@ -512,14 +512,16 @@ def test_logs_n_zero_prints_no_backlog(app, monkeypatch, capsys, make_item, repo
     assert capsys.readouterr().out == ""
 
 
+@pytest.mark.parametrize("agent", [None, "a1", "main"], ids=["no-flag", "agent-id", "main"])
 def test_logs_n_zero_follow_starts_after_the_lines_already_written(
-    app, monkeypatch, capsys, make_item, repo
+    app, monkeypatch, capsys, make_item, repo, agent
 ):
     """Kraft-tbnse: `-n 0 -f` prints only what is written after it started.
     The follow endpoint replays the log's bounded tail, so with no backlog
     line to resume after, the cursor comes from the payload's `next_line`."""
     wid = make_item(repo)
     asked = []
+    agents = []
 
     async def fake_get(path, **params):
         rows = [{"n": i, "t": None, "src": "stdout", "text": f"l{i}"} for i in range(5)]
@@ -527,13 +529,16 @@ def test_logs_n_zero_follow_starts_after_the_lines_already_written(
 
     async def fake_stream(work_item_id, session_id, after_line=0, agent=None):
         asked.append(after_line)
+        agents.append(agent)
         yield {"n": 5, "t": None, "src": "stdout", "text": "new"}
 
     _serves(monkeypatch, _session("sess-1"))
     monkeypatch.setattr(client.transport, "_get", fake_get)
     monkeypatch.setattr(client, "stream_log", fake_stream)
-    cli.main(["view", "logs", wid, "-n", "0", "-f"])
+    cli.main(["view", "logs", wid, "-n", "0", "-f", *(["--agent", agent] if agent else [])])
     assert asked == [5]
+    # `-f --agent` hands the filter to the stream, which does the filtering.
+    assert agents == [agent]
     out = capsys.readouterr().out
     assert "new" in out and "l4" not in out
 

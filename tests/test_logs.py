@@ -100,6 +100,13 @@ def _line(**keys) -> dict:
             id="job-notification",
         ),
         pytest.param(
+            _line(subtype="task_progress", task_id="b9z1", description="Running sleep 600"),
+            KNOWN,
+            "system task_progress",
+            {},
+            id="job-progress",
+        ),
+        pytest.param(
             {
                 "type": "system",
                 "subtype": "background_tasks_changed",

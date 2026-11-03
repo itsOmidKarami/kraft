@@ -210,7 +210,7 @@ export function TaskLog({ workItemId, session }: { workItemId: string; session?:
         <span className="ph-spacer" />
         <span className="ph-count">{lines ? `${lineCount(lines.length)}${running ? " · following" : ""}` : session ? "Reading…" : lineCount(0)}</span>
       </div>
-      {agents.length > 0 && (
+      {(agents.length > 0 || agent) && (
         <div className="ph-chips ph-chips-inline">
           <Chip pressed={!!agent} onClick={() => sheet.open("agent")}>agent: {now} ▾</Chip>
         </div>

@@ -272,6 +272,20 @@ def test_a_tail_tags_subagent_rows(tmp_path, body, tagged):
         assert rows[0]["src"] == "stdout" and "agent" not in rows[0]
 
 
+def test_a_tail_keeps_a_subagent_tag_across_reads(tmp_path):
+    """The reader remembers the id: the `task_notification` that ends a sub-agent
+    names no agent of its own, and arrives in a later read than its start."""
+    log = tmp_path / "s.log"
+    log.write_bytes(_jsonl(_SUB_STARTED))
+    tail = logs.Tail(log)
+    assert [r["agent"] for r in tail.read()] == ["af2a65"]
+    with log.open("ab") as fh:
+        fh.write(_jsonl(_SUB_DONE))
+    (row,) = tail.read()
+    assert row["agent"] == "af2a65" and row["agent_label"] == "List root directory entries"
+    assert row["agent_status"] == "completed"
+
+
 _ALL = (None, "main", "af2a65", "other")
 
 

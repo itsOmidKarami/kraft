@@ -722,6 +722,24 @@ describe("the task screen (E)", () => {
     expect(screen.getByRole("button", { name: "agent: Explore codebase ▾" })).toBeInTheDocument();
   });
 
+  it("keeps the agent chip on an attempt with no sub-agents while a filter is set, so it can be cleared", async () => {
+    const sub = { src: "agent", agent_label: "Explore codebase", agent_type: "Explore" };
+    const first = [{ n: 1, t: null, src: "agent", text: "x", summary: "main says hi" }, { n: 2, t: null, text: "x", summary: "↳ Explore codebase: Grep(foo)", agent: "a1", ...sub }];
+    const second = [{ n: 1, t: null, src: "agent", text: "x", summary: "second attempt line" }];
+    mount(item("running", null, { worker_sessions: [session({ id: "s1", attempt: 1, status: "failed" }), session({ id: "s2", attempt: 2, status: "failed" })] }), `${TASK}&tab=log&attempt=1`, {
+      "GET /work-items/w1/sessions/s1/log": [200, { lines: first }],
+      "GET /work-items/w1/sessions/s2/log": [200, { lines: second }],
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "agent: All ▾" }));
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("radio", { name: /Explore codebase/ }));
+    await userEvent.click(screen.getByRole("button", { name: /#2/ }));
+    expect(await screen.findByText("No lines to show. Clear the filter, or the task has not started.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^agent:/ }));
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("radio", { name: "All" }));
+    expect(screen.getByText(/second attempt line/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^agent:/ })).toBeNull();
+  });
+
   it("offers no agent chip when no line has an agent", async () => {
     mount(item("running"), `${TASK}&tab=log`);
     await screen.findByText(/loaded review_package/);
