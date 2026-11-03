@@ -32,6 +32,51 @@ if [ -n "${KRAFT_FAKE_CLAUDE_ARGV_LOG:-}" ]; then
   printf '\000\n' >> "$KRAFT_FAKE_CLAUDE_ARGV_LOG"
 fi
 
+# KRAFT_SUBAGENTS in the title: the run spawns two Claude Code sub-agents, one
+# that completes and one that fails (shapes as claude 2.1.316 writes them), so
+# the log's agent filter and labels have something to show.
+subagents=""
+case "$*" in *KRAFT_SUBAGENTS*) subagents=1 ;; esac
+init_printed=""
+
+# The adapter runs the real CLI with `--output-format stream-json --verbose`,
+# which opens with an init line, before any work -- so a session paused
+# mid-run has already named itself. KRAFT_FAKE_CLAUDE_SESSION_ID is the
+# provider session id that line carries, the one `--resume` takes.
+print_init() {
+  printf '{"type":"system","subtype":"init","model":"fake-agent","tools":[]%s}\n' \
+    "${KRAFT_FAKE_CLAUDE_SESSION_ID:+,\"session_id\":\"$KRAFT_FAKE_CLAUDE_SESSION_ID\"}"
+  init_printed=1
+}
+
+# The two sub-agents' starts. Every sub-agent runs in the background headless,
+# so a start is the first thing a log shows of one.
+subagents_started=""
+print_subagent_starts() {
+  cat <<'LINES'
+{"type":"system","subtype":"task_started","task_id":"fa0001","run_id":"fr01","tool_use_id":"toolu_fa0001","description":"Explore codebase","subagent_type":"Explore","is_backgrounded":true,"spawn_depth":1,"task_type":"local_agent","prompt":"List the modules under src/"}
+{"type":"system","subtype":"task_started","task_id":"fa0002","run_id":"fr02","tool_use_id":"toolu_fa0002","description":"Review diff","subagent_type":"general-purpose","is_backgrounded":true,"spawn_depth":1,"task_type":"local_agent","prompt":"Review the diff for mistakes"}
+LINES
+  subagents_started=1
+}
+
+# What the two sub-agents then do: a tool call and an answer each, their
+# progress, and how each ended.
+print_subagent_work() {
+  cat <<'LINES'
+{"type":"assistant","parent_tool_use_id":"toolu_fa0001","agent_id":"fa0001","subagent_type":"Explore","task_description":"Explore codebase","timestamp":"2026-11-02T23:38:52.727Z","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"ls src/"}}]}}
+{"type":"assistant","parent_tool_use_id":"toolu_fa0002","agent_id":"fa0002","subagent_type":"general-purpose","task_description":"Review diff","timestamp":"2026-11-02T23:38:52.801Z","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"calc.py"}}]}}
+{"type":"system","subtype":"task_progress","task_id":"fa0001","run_id":"fr01","tool_use_id":"toolu_fa0001","description":"Running Explore codebase","subagent_type":"Explore","usage":{"total_tokens":31067,"tool_uses":1,"duration_ms":3452},"last_tool_name":"Bash"}
+{"type":"user","parent_tool_use_id":"toolu_fa0001","agent_id":"fa0001","subagent_type":"Explore","task_description":"Explore codebase","timestamp":"2026-11-02T23:38:52.910Z","message":{"content":[{"type":"tool_result","content":"kraft\n"}]}}
+{"type":"assistant","parent_tool_use_id":"toolu_fa0001","agent_id":"fa0001","subagent_type":"Explore","task_description":"Explore codebase","timestamp":"2026-11-02T23:38:54.194Z","message":{"content":[{"type":"text","text":"One package: kraft."}]}}
+{"type":"system","subtype":"task_updated","task_id":"fa0001","run_id":"fr01","patch":{"status":"completed","end_time":1793662734269}}
+{"type":"system","subtype":"task_notification","task_id":"fa0001","run_id":"fr01","tool_use_id":"toolu_fa0001","status":"completed","output_file":"tasks/fa0001.output","summary":"One package: kraft.","usage":{"total_tokens":31902,"tool_uses":1,"duration_ms":4992}}
+{"type":"assistant","parent_tool_use_id":"toolu_fa0002","agent_id":"fa0002","subagent_type":"general-purpose","task_description":"Review diff","timestamp":"2026-11-02T23:38:55.002Z","message":{"content":[{"type":"text","text":"I could not read the diff."}]}}
+{"type":"system","subtype":"task_updated","task_id":"fa0002","run_id":"fr02","patch":{"status":"failed","end_time":1793662735100}}
+{"type":"system","subtype":"task_notification","task_id":"fa0002","run_id":"fr02","tool_use_id":"toolu_fa0002","status":"failed","output_file":"tasks/fa0002.output","summary":"I could not read the diff.","usage":{"total_tokens":12000,"tool_uses":1,"duration_ms":2300}}
+LINES
+}
+
 # Per-invocation failure. KRAFT_FAKE_CLAUDE is per-server, so it cannot make one
 # work item fail while its neighbours succeed; the instruction can. The seed
 # script puts KRAFT_FAIL in a work item title to drive the needs_human path.
@@ -42,7 +87,10 @@ for arg in "$@"; do
     # and sleeping once per copy doubles the delay the seed script waits on.
     *KRAFT_SLOW*) sleep "${KRAFT_FAKE_CLAUDE_DELAY:-15}"; break ;;
     # Long enough that the item is still running when someone looks at it.
-    *KRAFT_HANG*) sleep "${KRAFT_FAKE_CLAUDE_HANG:-1800}"; break ;;
+    *KRAFT_HANG*)
+      # With sub-agents the log must already show them running while it hangs.
+      if [ -n "$subagents" ]; then print_init; print_subagent_starts; fi
+      sleep "${KRAFT_FAKE_CLAUDE_HANG:-1800}"; break ;;
   esac
 done
 
@@ -55,12 +103,7 @@ esac
 many_files=""
 case "$*" in *KRAFT_MANY_FILES*) many_files=1 ;; esac
 
-# The adapter runs the real CLI with `--output-format stream-json --verbose`,
-# which opens with an init line, before any work -- so a session paused
-# mid-run has already named itself. KRAFT_FAKE_CLAUDE_SESSION_ID is the
-# provider session id that line carries, the one `--resume` takes.
-printf '{"type":"system","subtype":"init","model":"fake-agent","tools":[]%s}\n' \
-  "${KRAFT_FAKE_CLAUDE_SESSION_ID:+,\"session_id\":\"$KRAFT_FAKE_CLAUDE_SESSION_ID\"}"
+if [ -z "$init_printed" ]; then print_init; fi
 
 if [ "$mode" = "slow" ]; then
   sleep "${KRAFT_FAKE_CLAUDE_DELAY:-10}"
@@ -209,5 +252,9 @@ sleep "${KRAFT_FAKE_CLAUDE_STREAM_DELAY:-0}"
 # Tokens follow the cost, so a dearer run reads as a bigger one (0.035 is 1000 in, 200 out).
 tin="$(awk -v c="$cost" 'BEGIN { printf "%.0f", 1000 * c / 0.035 }')"
 tout="$(awk -v c="$cost" 'BEGIN { printf "%.0f", 200 * c / 0.035 }')"
+if [ -n "$subagents" ]; then
+  if [ -z "$subagents_started" ]; then print_subagent_starts; fi
+  print_subagent_work
+fi
 printf '{"type":"assistant","request_id":"req_1","message":{"model":"fake-agent","usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":500}}}\n'
 printf '{"type":"result","is_error":false,"total_cost_usd":%s,"modelUsage":{"fake-agent":{"inputTokens":%s,"outputTokens":%s,"cacheReadInputTokens":500}},"usage":{"input_tokens":%s,"output_tokens":%s,"cache_read_input_tokens":500}}\n' "$cost" "$tin" "$tout" "$tin" "$tout"

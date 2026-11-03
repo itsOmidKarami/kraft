@@ -148,8 +148,9 @@ title containing `KRAFT_FAIL` or `KRAFT_SLOW` steers that item's fake agent.
 `just dev-seed --rich` instead fills it for judging the dashboard under load: about
 40 items over every board state, long and non-ASCII text, a 30-node chain, three
 repos (one on a long path), and a review with a 41-file diff and long threads. It
-also uses `KRAFT_HANG` (an agent that stays running), `KRAFT_MANY_FILES` (a wide
-change) and `KRAFT_COST_<usd>` (what a run reports it cost). Usage and cost all
+also uses `KRAFT_HANG` (an agent that stays running), `KRAFT_SUBAGENTS` (two
+sub-agents, one that fails), `KRAFT_MANY_FILES` (a wide change) and
+`KRAFT_COST_<usd>` (what a run reports it cost). Usage and cost all
 land in the current week: the API gives a caller no way to backdate a row.
 
 To run the VS Code extension from source, open the `vscode/` folder in VS Code

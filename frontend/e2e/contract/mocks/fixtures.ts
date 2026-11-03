@@ -195,9 +195,13 @@ export function logLines(sessionId: string, n: number, long: boolean): any[] {
       : src === "agent" ? `Reading frontend/src/views/work_item/Inspector/Changes.tsx to see how the tree groups files before I touch the diff pane.`
       : `{"type":"tool_use","name":"Edit","input":{"file_path":"frontend/src/views/work_item/Inspector/Changes.tsx","old_string":"const rows = files.map(","new_string":"const rows = groupTree(files).map("}}`;
     if (long && i % 37 === 0) text = "x".repeat(600) + " " + "https://gitlab.example.com/acme-corporation/platform-engineering/payment-reconciliation-service/-/merge_requests/1842/diffs?commit_id=" + hex(i) + " " + "y".repeat(1200);
+    // Some agent and tool rows are a sub-agent's: tagged, and prefixed as the server's `logs.summary` writes them.
+    const sub = (src === "agent" || src === "tool") && (i % 8 === 2 || i % 8 === 3) ? { agent: "fa0001", agent_label: "Explore codebase", agent_type: "Explore" }
+      : src === "agent" && i % 8 === 6 ? { agent: "fa0002", agent_label: "Review diff", agent_type: "general-purpose" } : null;
+    const summary = src === "tool" ? "Edit frontend/src/views/work_item/Inspector/Changes.tsx" : undefined;
     out.push({
       n: i, t: t(i / 10), src, text,
-      ...(src === "tool" ? { summary: "Edit frontend/src/views/work_item/Inspector/Changes.tsx" } : {}),
+      ...(sub ? { ...sub, summary: `↳ ${sub.agent_label}: ${summary ?? "Reading Changes.tsx"}` } : summary ? { summary } : {}),
     });
   }
   return out;
