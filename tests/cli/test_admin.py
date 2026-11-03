@@ -317,6 +317,11 @@ def test_stop_waits_for_the_process_to_actually_exit(tmp_path, monkeypatch, caps
     try:
         proc.stdout.readline()  # it holds the pidfile, as a server does
         cli.main(["admin", "stop"])
+        # `stop` returns the instant the lock is gone, which is the child's last moment; the
+        # reaper then needs a turn to record the exit, and `poll()` answers None until it has
+        # (CI saw `stopped (pid N)` beside a None). A stop that returned early leaves the child
+        # in its 1.5s handler, so waiting 0.5s for the reaper still tells the two apart.
+        reaper.join(timeout=0.5)
         assert proc.poll() is not None, "stop returned while the process was still alive"
         assert f"stopped (pid {proc.pid})" in capsys.readouterr().out
     finally:
