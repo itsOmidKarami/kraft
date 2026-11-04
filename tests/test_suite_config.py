@@ -70,11 +70,11 @@ def test_an_async_test_in_either_tree_keeps_its_plain_id(pytester):
 
 
 def _throwaway_suite(pytester, weights: dict[int, float] | None = None) -> list[str]:
-    """Thirteen two-test files across both testpaths, under the repo-root conftest.
+    """Sixteen two-test files across both testpaths, under the repo-root conftest.
     `weights` (file number to seconds) writes a `tests/shard_durations.json` naming
     those files; the rest of the files are not in it."""
     pytester.makeconftest((_ROOT / "conftest.py").read_text())
-    names = [f"tests/pkg{n % 3}/test_m{n}.py" for n in range(12)]
+    names = [f"tests/pkg{n % 3}/test_m{n}.py" for n in range(15)]
     names.append("plugins/kraft-lite/tests/test_b.py")
     for name in names:
         path = pytester.path / name
@@ -98,12 +98,12 @@ def test_testmon_keys_its_records_without_this_projects_own_version():
     assert not [p for p in keyed if p.split(" ")[0] in {project, "pytest-testmon"}]
 
 
-@pytest.mark.parametrize("count", [2, 3])
+@pytest.mark.parametrize("count", [2, 3, 4])
 @pytest.mark.parametrize(
     "weights",
     [
         pytest.param(None, id="no-table"),
-        pytest.param({n: 1 + (n * 7) % 11 for n in range(13)}, id="every-file-named"),
+        pytest.param({n: 1 + (n * 7) % 11 for n in range(16)}, id="every-file-named"),
         pytest.param({0: 50, 1: 40, 2: 30, 3: 20, 4: 10}, id="some-files-named"),
     ],
 )

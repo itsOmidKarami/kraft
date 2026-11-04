@@ -126,7 +126,7 @@ jobs:
 
   test:
     # The unit tier on the supported Pythons (`requires-python` in pyproject.toml
-    # is the floor, 3.12; the newest is 3.14), each in three shards
+    # is the floor, 3.12; the newest is 3.14), each in four shards
     # (`KRAFT_TEST_SHARD`, read by the repo-root conftest.py). One wheel serves
     # all of them, so this is the only place a version gap shows. `changes`
     # picks the Pythons: all three on a push to main, the floor and the newest
@@ -136,7 +136,7 @@ jobs:
     # version. Coverage and junit come from the newest Python only, one file
     # per shard, and `test-report` below puts them together. fail-fast off, so
     # one leg's failure doesn't hide another's.
-    name: test (python ${{ matrix.python-version }}, ${{ matrix.shard }}/3)
+    name: test (python ${{ matrix.python-version }}, ${{ matrix.shard }}/4)
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
@@ -144,7 +144,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ${{ fromJSON(needs.changes.outputs.pythons || '["3.12", "3.13", "3.14"]') }}
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     # Job-level, so it beats the workflow's UV_PYTHON for `uv run` too: `uv run`
     # rebuilds the venv whenever UV_PYTHON names another version than the one
     # `uv sync` just installed into, which would test 3.14 three times.
@@ -176,14 +176,14 @@ jobs:
       # below collects the whole suite, and must not see it.
       - if: matrix.python-version == '3.14'
         env:
-          KRAFT_TEST_SHARD: ${{ matrix.shard }}/3
+          KRAFT_TEST_SHARD: ${{ matrix.shard }}/4
           COVERAGE_FILE: .coverage.${{ matrix.shard }}
         run: >
           uv run pytest -m "not e2e" -n logical --durations=25
           --junitxml=junit-${{ matrix.shard }}.xml --cov=src/kraft --cov-report=
       - if: matrix.python-version != '3.14'
         env:
-          KRAFT_TEST_SHARD: ${{ matrix.shard }}/3
+          KRAFT_TEST_SHARD: ${{ matrix.shard }}/4
         run: uv run pytest -m "not e2e" -n logical --durations=25
       # ~5s, no tests run: catches a renamed pinned test the suite above would
       # not. Once per Python, not once per shard.
@@ -245,8 +245,8 @@ jobs:
           report_paths: junit-*.xml
       # On pull_request it posts or updates the PR comment; on push to main it
       # writes history and the badge to the data branch. Only when every shard
-      # passed: a shard that died wrote no data, and three shards' worth of
-      # coverage from two would read as a drop.
+      # passed: a shard that died wrote no data, and four shards' worth of
+      # coverage from three would read as a drop.
       - if: >-
           needs.test.result == 'success' &&
           (github.event_name == 'push' ||

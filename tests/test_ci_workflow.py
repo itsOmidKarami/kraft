@@ -223,3 +223,21 @@ def test_removals_are_judged_against_the_base_github_merged_into():
     ]
     assert 'check_removals.py "$(git rev-parse HEAD^1)"' in step["run"]
     assert "base.sha" not in str(step)
+
+
+def test_the_shard_count_is_the_same_everywhere_the_workflow_says_it():
+    """The matrix lists the shards; the job name and each `KRAFT_TEST_SHARD` repeat
+    how many there are. A matrix of three with `/4` in the variable runs three
+    quarters of the suite, and passes."""
+    job = _JOBS["test"]
+    shards = job["strategy"]["matrix"]["shard"]
+    count = len(shards)
+    assert shards == list(range(1, count + 1))
+    assert job["name"].endswith("${{ matrix.shard }}/" + f"{count})")
+    variables = [
+        step["env"]["KRAFT_TEST_SHARD"]
+        for step in job["steps"]
+        if "KRAFT_TEST_SHARD" in step.get("env", {})
+    ]
+    assert variables
+    assert set(variables) == {"${{ matrix.shard }}/" + str(count)}

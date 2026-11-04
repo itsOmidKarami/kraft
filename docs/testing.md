@@ -270,10 +270,10 @@ when `NEW` does not collect.
   `just test-py 3.12` reproduces one version's failure locally, in its own
   environment. A test must pass on the floor, so it never relies on a newer
   stdlib API or on 3.14's lazy annotations.
-- CI runs the unit tier in three shards, split by test file. A failure that
+- CI runs the unit tier in four shards, split by test file. A failure that
   only shows beside the other tests of its shard is reproduced with the
-  shard's name from the job, `test (python 3.14, 2/3)`:
-  `KRAFT_TEST_SHARD=2/3 just test --no-testmon -n auto`. The repo-root
+  shard's name from the job, `test (python 3.14, 2/4)`:
+  `KRAFT_TEST_SHARD=2/4 just test --no-testmon -n auto`. The repo-root
   `conftest.py` reads the variable; unset, every test runs.
 - The split is by time, not by name. `tests/shard_durations.json` holds the
   seconds each test file takes; the longest goes first onto the lightest shard,
