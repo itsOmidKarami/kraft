@@ -600,6 +600,9 @@ def test_live_updates_reach_the_frame_under_a_dialog(console, monkeypatch, dialo
 
     async def scenario(app, pilot):
         DIALOGS[dialog](app)
+        # The console's own first health poll answers on its own clock; a late "ok" would
+        # overwrite the "degraded" set below.
+        await console.until(pilot, lambda: app._health_answered)
         await pilot.pause()
         seen.clear()
         app._live_event([{"id": "a1", "display_status": "needs_you"}], [])

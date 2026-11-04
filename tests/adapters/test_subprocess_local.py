@@ -43,7 +43,9 @@ async def test_local_session_cancel_ends_the_group_quickly(run, database):  # no
 
     await _cancelled(task)
 
-    assert time.monotonic() - begun < 2
+    # Not the 10 s grace a leader left unreaped would cost. An init that reaps orphans slowly
+    # (a container's) holds the group's last zombie for a second or two on top of that.
+    assert time.monotonic() - begun < 5
     assert not psutil.pid_exists(row["pid"]) or psutil.Process(row["pid"]).status() == "zombie"
     assert link.jobs.running() == []
 
