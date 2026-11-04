@@ -15,9 +15,8 @@ import pytest
 import yaml
 from support.harness import commit_all, git, make_repo, write
 
-_JOBS = yaml.safe_load(
-    (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "test.yml").read_text()
-)["jobs"]
+_WORKFLOWS = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+_JOBS = yaml.safe_load((_WORKFLOWS / "test.yml").read_text())["jobs"]
 
 
 def _script(job: str) -> str:
@@ -241,3 +240,22 @@ def test_the_shard_count_is_the_same_everywhere_the_workflow_says_it():
     ]
     assert variables
     assert set(variables) == {"${{ matrix.shard }}/" + str(count)}
+
+
+def test_a_full_history_checkout_is_blobless():
+    """`fetch-depth: 0` alone fetches every branch and tag in full, mostly the
+    screenshots of branches that never merge, and one checkout took five minutes
+    on a slow day. `filter: blob:none` keeps the history and drops the bytes.
+    `release.yml` keeps its full clone: it publishes, and a lazy fetch that fails
+    there is not worth the half minute."""
+    full = [
+        f"{path.name}: {job}"
+        for path in sorted(_WORKFLOWS.glob("*.yml"))
+        if path.name != "release.yml"
+        for job, spec in yaml.safe_load(path.read_text())["jobs"].items()
+        for step in spec.get("steps", [])
+        if step.get("uses", "").startswith("actions/checkout")
+        and step.get("with", {}).get("fetch-depth") == 0
+        and step["with"].get("filter") != "blob:none"
+    ]
+    assert full == []
