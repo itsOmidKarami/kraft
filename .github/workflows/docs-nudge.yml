@@ -31,6 +31,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          # Blobless, as in test.yml: `git diff --name-only` needs few, if any,
+          # file contents.
+          filter: blob:none
 
       - name: check whether source moved without docs
         env:
@@ -81,6 +84,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          filter: blob:none
 
       - name: check whether the API moved without the mock
         env:

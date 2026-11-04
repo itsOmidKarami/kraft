@@ -32,6 +32,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          # Blobless, as in test.yml: every commit, but file contents only for
+          # what is checked out. The script's worktrees of the fork point and
+          # the head fetch the few old files they differ in.
+          filter: blob:none
 
       - name: show the test tree the PR changes
         env:

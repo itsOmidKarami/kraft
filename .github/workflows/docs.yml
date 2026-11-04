@@ -59,6 +59,9 @@ jobs:
           # The builds read the release tags' pages, and a shallow clone has
           # no tags.
           fetch-depth: 0
+          # Blobless, as in test.yml: a tag's files come with the `git archive`
+          # of it in dev/build_docs_site.sh, about 3s for the two it builds.
+          filter: blob:none
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
