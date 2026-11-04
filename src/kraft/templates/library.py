@@ -17,6 +17,7 @@ author has to correct (`template-resolution-preserves-source-context`).
 
 from __future__ import annotations
 
+import copy
 import functools
 from collections import ChainMap
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
@@ -245,6 +246,15 @@ def _read(path: Path, *, bounded: bool = False) -> Mapping[str, object]:
     return _as_mapping(path, data)
 
 
+@functools.lru_cache(maxsize=256)
+def _stored_yaml(raw: bytes, nodes: int) -> object:
+    """`bounded_yaml` of one stored file's bytes, once per distinct content: a store is named by
+    its content, so the same bytes are the same file whoever asks, and one server start reads each
+    of the built-in's about fifteen times. The budget is part of the key, so a lowered one still
+    refuses. A failure is not kept."""
+    return bounded_yaml(raw.decode(), [nodes])
+
+
 def _read_stored(store, rel: str, path: Path, *, optional: bool = False) -> Mapping[str, object]:
     """One YAML file of an add-on's store (`fetch.StoreFiles`), read through
     its digest, as a mapping; `path` is the file an error names. With
@@ -253,7 +263,8 @@ def _read_stored(store, rel: str, path: Path, *, optional: bool = False) -> Mapp
 
     try:
         raw = store.read(rel, optional=optional)
-        data = None if raw is None else bounded_yaml(raw.decode(), [ADDON_YAML_NODES])
+        # A copy: the cached parse is shared, and a caller may edit what it was handed.
+        data = None if raw is None else copy.deepcopy(_stored_yaml(raw, ADDON_YAML_NODES))
     except fetch.StoreMismatch as exc:
         raise TemplateLibraryError(f"{path}: {exc}") from exc
     except (OSError, ValueError, yaml.YAMLError) as exc:

@@ -15,7 +15,7 @@ from pathlib import Path
 import yaml
 
 import kraft
-from kraft import paths, update
+from kraft import paths, update, yamlload
 from kraft.addons import fetch, manifest
 
 ID = "kraft-default@kraft"
@@ -87,7 +87,7 @@ def _packaged_harnesses() -> object:
     global _harnesses_memo
     root = source_dir()
     if _harnesses_memo is None or _harnesses_memo[0] != root or not frozen():
-        _harnesses_memo = (root, yaml.safe_load((root / "harnesses.yaml").read_text()) or {})
+        _harnesses_memo = (root, yamlload.safe_load((root / "harnesses.yaml").read_text()) or {})
     return copy.deepcopy(_harnesses_memo[1])
 
 

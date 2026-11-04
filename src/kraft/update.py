@@ -18,8 +18,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as _pkg_version
+from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 
 from kraft.paths import default_run_dir
@@ -73,12 +72,27 @@ class Release:
     wheel_url: str
 
 
+_version_memo: tuple[str, str] | None = None
+
+
 def installed() -> str:
-    """This Kraft's version, or the answer for a checkout that was never installed."""
+    """This Kraft's version, or the answer for a checkout that was never installed.
+
+    The metadata is read every time, so an upgrade in place shows at once, but parsed again only
+    when its text differs: one server start asks about sixty times, and the parse is most of what
+    asking costs."""
+    global _version_memo
     try:
-        return _pkg_version("kraft-sdlc")
+        dist = distribution(PACKAGE)
+        text = dist.read_text("METADATA")
+        if text is not None and _version_memo is not None and _version_memo[0] == text:
+            return _version_memo[1]
+        version = dist.version
     except PackageNotFoundError:
         return "0.0.0+source"
+    if text is not None:
+        _version_memo = (text, version)
+    return version
 
 
 def shadowing_kraft() -> str | None:

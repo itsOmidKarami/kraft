@@ -15,6 +15,7 @@ import yaml
 from kraft import config
 from kraft.addons import load as addons_load
 from kraft.templates.library import CHAINS_DIR
+from kraft.yamlload import safe_load
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ def _full_copies(templates: Path) -> list[str]:
     out = []
     for path in sorted((templates / CHAINS_DIR).glob("*.yaml")):
         try:
-            data = yaml.safe_load(path.read_text())
+            data = safe_load(path.read_text())
         except (OSError, ValueError, yaml.YAMLError):
             continue
         # A chain with no `id:` is named by its file, as the library reads it.

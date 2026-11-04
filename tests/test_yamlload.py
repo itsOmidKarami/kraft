@@ -87,3 +87,41 @@ def test_nesting_deep_enough_to_crash_libyaml_fails_as_it_always_did(document):
         [sys.executable, "-c", code], input=document, capture_output=True, text=True
     )
     assert (done.returncode, done.stdout.strip()) == (0, "RecursionError")
+
+
+def _packaged_harnesses(tmp_path):
+    from kraft.addons import builtin
+
+    builtin._harnesses_memo = None
+    builtin._packaged_harnesses()
+
+
+def _drift_full_copies(tmp_path):
+    from kraft.addons import drift
+
+    (tmp_path / "chains").mkdir()
+    (tmp_path / "chains" / "mine.yaml").write_text("id: mine\nnodes: []\n")
+    drift._full_copies(tmp_path)
+
+
+@pytest.mark.skipif(not yaml.__with_libyaml__, reason="PyYAML was built without libyaml")
+@pytest.mark.parametrize(
+    "read",
+    [_packaged_harnesses, _drift_full_copies],
+    ids=["packaged-harnesses", "operators-chains-in-the-drift-check"],
+)
+def test_a_server_start_reads_kraft_and_the_operators_own_files_with_libyaml(
+    tmp_path, monkeypatch, read
+):
+    from kraft.addons import builtin
+
+    monkeypatch.setattr(builtin, "_harnesses_memo", None)
+    loaders = []
+    real = yaml.load
+    monkeypatch.setattr(
+        yaml, "load", lambda text, loader: loaders.append(loader) or real(text, loader)
+    )
+
+    read(tmp_path)
+
+    assert loaders and set(loaders) == {yaml.CSafeLoader}

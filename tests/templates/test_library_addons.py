@@ -1,10 +1,13 @@
 """The template library with add-on layers: an add-on's declarations are
 addressed as `<namespace>:<name>`, and a bare local name stays local."""
 
+from pathlib import Path
+
 import pytest
 from support.addons import AGENT, chain, edit_store, home, installed
 
 from kraft import harness
+from kraft.templates import library as library_mod
 from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
 from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 
@@ -175,3 +178,51 @@ def test_lint_dir_skips_addon_layers(tmp_path):
     online = TemplateLibrary.lint_dir(root, addons=())
     assert [i.chain for i in online.issues] == ["local"]
     assert online.unchecked == ()
+
+
+class _Store:
+    """The one method of `fetch.StoreFiles` a stored YAML read uses."""
+
+    def __init__(self, raw: bytes) -> None:
+        self.raw = raw
+
+    def read(self, rel, *, optional=False):
+        return self.raw
+
+
+def _stored(raw: bytes):
+    return library_mod._read_stored(_Store(raw), "library.yaml", Path("library.yaml"))
+
+
+def test_an_addon_file_is_parsed_once_per_content(tmp_path, monkeypatch):
+    """A server start reads each of the built-in's files about fifteen times."""
+    calls = []
+    real = library_mod.bounded_yaml
+    monkeypatch.setattr(
+        library_mod, "bounded_yaml", lambda text, budget: calls.append(text) or real(text, budget)
+    )
+    library_mod._stored_yaml.cache_clear()
+    addon = installed(tmp_path, "release", files={"library.yaml": "tasks: {}\n"})
+
+    TemplateLibrary.from_yaml_dir(home(tmp_path), addons=[addon])
+    first = len(calls)
+    TemplateLibrary.from_yaml_dir(home(tmp_path), addons=[addon])
+
+    assert first and len(calls) == first
+
+
+def test_a_cached_parse_is_not_shared_between_readers():
+    library_mod._stored_yaml.cache_clear()
+    mine = _stored(b"a: {b: 1}\n")
+    mine["a"]["b"] = 2
+
+    assert _stored(b"a: {b: 1}\n") == {"a": {"b": 1}}
+
+
+def test_a_lowered_budget_still_refuses_a_file_read_before(monkeypatch):
+    library_mod._stored_yaml.cache_clear()
+    assert _stored(b"a: [x, y, z]\n")
+    monkeypatch.setattr(library_mod, "ADDON_YAML_NODES", 2)
+
+    with pytest.raises(TemplateLibraryError, match="more YAML nodes"):
+        _stored(b"a: [x, y, z]\n")
