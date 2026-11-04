@@ -275,14 +275,9 @@ when `NEW` does not collect.
   shard's name from the job, `test (python 3.14, 2/4)`:
   `KRAFT_TEST_SHARD=2/4 just test --no-testmon -n auto`. The repo-root
   `conftest.py` reads the variable; unset, every test runs.
-- The split is by time, not by name. `tests/shard_durations.json` holds the
-  seconds each test file takes; the longest goes first onto the lightest shard,
-  and a shard imports only its own files. A file the table does not name is
-  placed by a hash of its path, so a new test file needs no entry. When the
-  shards drift apart (one job's `pytest` step much longer than the others'),
-  rebuild the table from a few recent green runs on `main`:
-  `gh run download RUN_ID -n test-reports -D /tmp/run-1`, then
-  `uv run python dev/shard_durations.py /tmp/run-1 /tmp/run-2 /tmp/run-3`.
+- A test file belongs to the shard its path hashes into, and a shard imports
+  only its own files: a module that fails to import fails one shard, and a new
+  test file needs no entry anywhere.
 - Only one heavy local test run at a time on a shared machine.
 - A test that runs past its timeout (120s, `pyproject.toml`) ends its whole
   process: pytest-timeout's `thread` method dumps every stack, then exits.

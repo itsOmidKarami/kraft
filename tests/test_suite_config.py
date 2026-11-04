@@ -5,8 +5,6 @@ from __future__ import annotations
 
 import ast
 import errno
-import importlib.util
-import json
 import os
 import socket
 import subprocess
@@ -69,10 +67,8 @@ def test_an_async_test_in_either_tree_keeps_its_plain_id(pytester):
     assert ids == ["plugins/kraft-lite/tests/test_b.py::test_x", "tests/test_a.py::test_x"]
 
 
-def _throwaway_suite(pytester, weights: dict[int, float] | None = None) -> list[str]:
-    """Sixteen two-test files across both testpaths, under the repo-root conftest.
-    `weights` (file number to seconds) writes a `tests/shard_durations.json` naming
-    those files; the rest of the files are not in it."""
+def _throwaway_suite(pytester) -> list[str]:
+    """Sixteen two-test files across both testpaths, under the repo-root conftest."""
     pytester.makeconftest((_ROOT / "conftest.py").read_text())
     names = [f"tests/pkg{n % 3}/test_m{n}.py" for n in range(15)]
     names.append("plugins/kraft-lite/tests/test_b.py")
@@ -80,9 +76,6 @@ def _throwaway_suite(pytester, weights: dict[int, float] | None = None) -> list[
         path = pytester.path / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("def test_one():\n    pass\n\n\ndef test_two():\n    pass\n")
-    if weights is not None:
-        table = {names[n]: seconds for n, seconds in weights.items()}
-        (pytester.path / "tests" / "shard_durations.json").write_text(json.dumps(table))
     return names
 
 
@@ -99,22 +92,13 @@ def test_testmon_keys_its_records_without_this_projects_own_version():
 
 
 @pytest.mark.parametrize("count", [2, 3, 4])
-@pytest.mark.parametrize(
-    "weights",
-    [
-        pytest.param(None, id="no-table"),
-        pytest.param({n: 1 + (n * 7) % 11 for n in range(16)}, id="every-file-named"),
-        pytest.param({0: 50, 1: 40, 2: 30, 3: 20, 4: 10}, id="some-files-named"),
-    ],
-)
 def test_shards_split_the_suite_with_nothing_lost_and_nothing_run_twice(
-    pytester, monkeypatch, count, weights
+    pytester, monkeypatch, count
 ):
     """CI's unit shards (`KRAFT_TEST_SHARD=K/N`) together run every test
     exactly once, each shard runs something, and a file's tests stay in one
-    shard. A test in no shard would be a test CI never runs, on a green run.
-    So with a durations table that names every file, some, or none."""
-    names = _throwaway_suite(pytester, weights)
+    shard. A test in no shard would be a test CI never runs, on a green run."""
+    names = _throwaway_suite(pytester)
 
     def collected(shard: str | None) -> list[str]:
         monkeypatch.delenv("KRAFT_TEST_SHARD", raising=False)
@@ -147,60 +131,18 @@ def test_a_malformed_shard_stops_the_run_instead_of_running_the_wrong_tests(
     result.stderr.fnmatch_lines(["*KRAFT_TEST_SHARD=*: want K/N with 1 <= K <= N*"])
 
 
-@pytest.mark.parametrize(
-    "text",
-    [
-        pytest.param("not json", id="not-json"),
-        pytest.param("[1, 2]", id="not-an-object"),
-        pytest.param('{"tests/a.py": "slow"}', id="a-word-for-seconds"),
-        pytest.param('{"tests/a.py": -1}', id="negative-seconds"),
-    ],
-)
-def test_a_durations_table_that_cannot_be_read_stops_a_shard_instead_of_unbalancing_it(
-    pytester, monkeypatch, text
-):
-    """Falling back to the hash on a bad table would leave three green jobs and
-    an uneven split nobody sees."""
+def test_a_shard_does_not_import_another_shards_files(pytester, monkeypatch):
+    """Collecting the whole suite to drop most of it was the bulk of the seconds
+    before a shard's first test. A file that fails on import fails only the shard
+    that owns it; the others never import it."""
     _throwaway_suite(pytester)
-    (pytester.path / "tests" / "shard_durations.json").write_text(text)
-    monkeypatch.setenv("KRAFT_TEST_SHARD", "1/3")
-    result = pytester.runpytest_inprocess("-p", "no:cacheprovider")
-    assert result.ret == pytest.ExitCode.USAGE_ERROR
-    result.stderr.fnmatch_lines(["*shard_durations.json*"])
-
-
-def _root_conftest():
-    spec = importlib.util.spec_from_file_location("kraft_root_conftest", _ROOT / "conftest.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_the_split_puts_the_longest_files_first_onto_the_lightest_shard():
-    """Nine files of 1s to 9s over three shards: longest first gives 14, 15 and
-    16 of 45. In name order, which here is shortest first, it is 12, 15 and 18."""
-    table = {f"tests/test_{letter}.py": float(n) for n, letter in enumerate("abcdefghi", 1)}
-    plan = _root_conftest()._split(table, 3)
-    loads = [sum(s for f, s in table.items() if plan[f] == k) for k in range(3)]
-    assert max(loads) - min(loads) <= 2
-
-
-def test_a_file_the_table_does_not_name_goes_where_its_path_hashes():
-    """A new test file runs without an entry in the table."""
-    path = "tests/test_brand_new_and_unlisted.py"
-    assert _root_conftest()._shard_of(path, 3) == zlib.crc32(path.encode()) % 3
-
-
-def test_the_shard_durations_table_is_there_and_names_test_files():
-    """Without it every file hashes and the shards are uneven again, with nothing
-    failing to say so."""
-    table = json.loads((_ROOT / "tests" / "shard_durations.json").read_text())
-    assert table
-    assert all(isinstance(seconds, int | float) and seconds >= 0 for seconds in table.values())
-    assert all(
-        path.startswith(("tests/", "plugins/kraft-lite/tests/")) and path.endswith(".py")
-        for path in table
-    )
+    boom = "tests/pkg0/test_boom.py"
+    (pytester.path / boom).write_text("raise RuntimeError('imported')\n")
+    owner = zlib.crc32(boom.encode()) % 4
+    for k in range(4):
+        monkeypatch.setenv("KRAFT_TEST_SHARD", f"{k + 1}/4")
+        result = pytester.runpytest_inprocess("--collect-only", "-q", "-p", "no:cacheprovider")
+        assert (result.ret == pytest.ExitCode.INTERRUPTED) == (k == owner), (k, owner)
 
 
 def _spawns_kraft(call) -> bool:
