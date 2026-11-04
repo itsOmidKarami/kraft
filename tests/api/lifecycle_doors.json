@@ -1,5 +1,5 @@
 {
-  "_doc": "Which lifecycle door takes which item state, and which answers it 409. tests/api/test_lifecycle.py::test_a_door_takes_only_the_states_this_table_lists drives every door against every state on the real routes; frontend/src/ng/item/status.test.ts reads the same table, so no surface may offer a door the table refuses. A state's fields are how the backend test builds it.",
+  "_doc": "Which lifecycle door takes which item state, and which answers it 409. tests/api/test_lifecycle_doors.py::test_a_door_takes_only_the_states_this_table_lists drives every door against every state on the real routes; frontend/src/ng/item/status.test.ts reads the same table, so no surface may offer a door the table refuses. A state's fields are how the backend test builds it.",
   "states": {
     "running": {
       "status": "active",

@@ -715,10 +715,3 @@ class TestPluginTestsAreChecked:
     def test_a_good_plugin_test_passes_it(self, ct, tmp_path, monkeypatch):
         self._tree_with(ct, tmp_path, monkeypatch, "def test_x():\n    assert 1 + 1 == 2\n")
         assert ct.main() == 0
-
-
-class TestSelfCheck:
-    def test_the_real_tree_passes_its_own_checker(self, ct):
-        """The live-fire version of every case above: run the checker for
-        real, against this repo's actual tests/ tree, exactly as CI does."""
-        assert ct.main() == 0
