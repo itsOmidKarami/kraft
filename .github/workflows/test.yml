@@ -102,7 +102,7 @@ jobs:
           # them took minutes on a slow day. A git command that wants an old
           # file fetches it then (`git archive <tag>` below: about 3s).
           filter: blob:none
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -155,7 +155,7 @@ jobs:
         with:
           fetch-depth: 0
           filter: blob:none
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -240,7 +240,7 @@ jobs:
       - if: >-
           github.event_name == 'pull_request' &&
           github.event.pull_request.head.repo.full_name == github.repository
-        uses: mikepenz/action-junit-report@6ef3fdcfcd5f0b5d14df3e659ef19b8c6820f93d # v6.6.1
+        uses: mikepenz/action-junit-report@8a133bfa3ecb0ea9024c1e2ae788b4c25f6cdb9d # v6.6.2
         with:
           report_paths: junit-*.xml
       # On pull_request it posts or updates the PR comment; on push to main it
@@ -272,7 +272,7 @@ jobs:
         with:
           fetch-depth: 0
           filter: blob:none
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -388,7 +388,7 @@ jobs:
         with:
           fetch-depth: 0
           filter: blob:none
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -449,7 +449,7 @@ jobs:
         with:
           fetch-depth: 0
           filter: blob:none
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -496,7 +496,7 @@ jobs:
         python-version: ["3.10", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - run: uv run --python ${{ matrix.python-version }} --no-project --with pytest pytest plugins/kraft-lite/tests -q
 
   frontend:
@@ -535,7 +535,7 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: vscode/package-lock.json
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       # No bd, as in every job but e2e-cli (Kraft-qmhfc): dev/seed.py skips
       # `bd init` without it and intake files no bead. The seed commits, so it
       # needs a git identity.
@@ -668,7 +668,7 @@ jobs:
           filter: blob:none
       # The project's floor Python, not the runner's default: the tests it parses
       # must be valid on it (Kraft-neyhg). Stdlib only, so nothing is synced.
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       # The body is read live, not off the event payload: a re-run replays the
       # original payload, and re-running this job after editing the body is
       # how a declaration is picked up.
