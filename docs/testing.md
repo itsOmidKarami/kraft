@@ -244,7 +244,7 @@ when `NEW` does not collect.
 ## Running
 
 - `just test <paths>` (testmon), never raw pytest. It runs in parallel
-  (`-n logical`) unless you pass `-n` or `-p no:xdist`, name a single test, or
+  (`-n` your logical CPUs + 2) unless you pass `-n` or `-p no:xdist`, name a single test, or
   ask for live output (`-s`, `--capture`, `--trace`); `-n 0` stays in one
   process. `just test-ui` for the frontend.
 - Testmon follows Python execution only, so it cannot see a change to a

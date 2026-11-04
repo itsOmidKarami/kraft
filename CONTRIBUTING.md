@@ -310,8 +310,8 @@ A Claude Code hook blocks it for agent sessions.
 
 **Your first `just test` is a full run.** testmon has no record yet of which
 tests touch which code (it keeps one in `.testmondata`), so it runs everything;
-later runs are change-selected. `just test` runs in parallel (`-n logical`)
-unless you pass `-n` yourself (`-n 0` stays in one process), name a single
+later runs are change-selected. `just test` runs in parallel (`-n` your logical
+CPUs + 2) unless you pass `-n` yourself (`-n 0` stays in one process), name a single
 test, or ask for live output (`-s`, `--capture`, `--log-cli-level`, `--trace`),
 which a worker would lose. To start with one area, name it:
 

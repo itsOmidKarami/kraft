@@ -22,7 +22,7 @@ change-tracking and burns the full ~14min suite.
 record yet of which tests touch which code: a fresh clone, worktree or
 container runs the whole suite on a bare `just test`. Name the paths you
 changed (`just test tests/<pkg>`) until it has one. It runs in parallel
-(`-n logical`); `-n 0` opts out, and so do naming a single test and `-s`,
+(`-n` your logical CPUs + 2); `-n 0` opts out, and so do naming a single test and `-s`,
 `--capture` or `--trace`, whose output a worker would lose.
 
 **Testing guideline:** see `docs/testing.md`. Two tiers (unmarked unit,
