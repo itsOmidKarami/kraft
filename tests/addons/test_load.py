@@ -501,6 +501,16 @@ def test_verify_and_an_unsaved_config_never_hit_the_cache(instance, monkeypatch)
     assert len(calls) == n + 2  # each of the two calls recomputed
 
 
+def test_a_verified_answer_is_kept_for_the_calls_after_it(instance, monkeypatch):
+    config, addons, _ = instance
+    calls = _counting(monkeypatch)
+    verified = load.installed(config, addons, verify=True)
+    n = len(calls)
+    assert n >= 1
+    assert load.installed(config, addons) == verified
+    assert len(calls) == n  # the plain call after it recomputed nothing
+
+
 # ── restoring a store that is gone ──
 
 
