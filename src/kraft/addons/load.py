@@ -587,8 +587,13 @@ def limits_problem(
     `maxima:`, lowered since the add-on was installed; None when all fit.
     `ancestors` (parent first) are read with it, so what it inherits and
     extends is checked too."""
+    from kraft.policy import InstancePolicy, InstancePolicyInput
     from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 
+    # `lint()` judges under exactly this policy, so the two passes below agree
+    # and nothing can be "over": skip the library build and both lint passes.
+    if instance_policy == InstancePolicy.from_input(InstancePolicyInput()):
+        return None
     try:
         library = TemplateLibrary.from_mappings(
             {}, (), library_path=addon.root / "local-library.yaml", addons=[addon, *ancestors]

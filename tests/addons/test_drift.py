@@ -48,3 +48,17 @@ def test_a_check_that_raises_is_one_line(tmp_path, monkeypatch):
     addons.mkdir()
     (addons / "builtin.json").write_text('{"to": "9.9.9", "status": "held", "lines": "oops"}')
     assert drift.lines(tmp_path, addons) == ["cannot read kraft-default: bad"]
+
+
+def test_a_policy_with_no_maxima_builds_no_library_to_judge_the_limits(monkeypatch):
+    """Under the default policy `lint()` and `lint(policy)` agree, so the answer is
+    None without building the add-on's library: server start asks this twice."""
+    from kraft.policy import InstancePolicy, InstancePolicyInput
+    from kraft.templates.library import TemplateLibrary
+
+    def boom(*a, **k):
+        raise AssertionError("the library was built")
+
+    monkeypatch.setattr(TemplateLibrary, "from_mappings", boom)
+    default = InstancePolicy.from_input(InstancePolicyInput())
+    assert addons_load.limits_problem(None, default) is None
