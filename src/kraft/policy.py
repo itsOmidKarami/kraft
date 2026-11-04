@@ -264,11 +264,15 @@ class PolicyInput(BaseModel):
         )
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> PolicyInput:
+    def from_yaml(cls, path: str | Path, *, check_harness: bool = True) -> PolicyInput:
         """Read and validate `path`'s policy.yaml. The only boundary I/O in
         this module: everything else works on an already-parsed `PolicyInput`
         or `Policy`. Raises `PolicyError`, never a raw `OSError`/`yaml.YAMLError`
-        /`ValidationError` -- `lifespan` catches only the former."""
+        /`ValidationError` -- `lifespan` catches only the former.
+
+        `check_harness=False` skips the `escalation_harness` check, which reads the
+        add-ons: for the add-on content check, which asks for the limits and is itself
+        what that read waits on."""
         path = Path(path)
         try:
             # ValueError covers UnicodeDecodeError: a policy file with one
@@ -288,7 +292,8 @@ class PolicyInput(BaseModel):
             parsed = cls.model_validate(raw)
         except ValidationError as exc:
             raise _field_error(path.name, exc) from exc
-        _check_escalation_harness(parsed.defaults.escalation_harness, path.name)
+        if check_harness:
+            _check_escalation_harness(parsed.defaults.escalation_harness, path.name)
         return parsed
 
 

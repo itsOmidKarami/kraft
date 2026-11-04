@@ -570,7 +570,9 @@ def _content_problem(
             return str(exc)
         return None
     try:
-        policy = PolicyInput.from_yaml(config_dir / "policy.yaml").instance_policy()
+        # The limits only: the file's harness check reads the add-ons, this being part of that.
+        policy = PolicyInput.from_yaml(config_dir / "policy.yaml", check_harness=False)
+        policy = policy.instance_policy()
     except PolicyError:
         return None  # no policy.yaml, or one whose own check says why
     if builtin.is_builtin(addon):

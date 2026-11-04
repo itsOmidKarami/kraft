@@ -7,6 +7,8 @@ from __future__ import annotations
 import pytest
 from support.harness import write_harness_profiles
 
+from kraft import policy as policy_mod
+from kraft.addons import load as addons_load
 from kraft.policy import (
     InstancePolicy,
     InstancePolicyInput,
@@ -80,3 +82,23 @@ def test_policy_yaml_refuses_an_unknown_escalation_harness_naming_the_known(tmp_
 
     assert "'gemini'" in str(refused.value)
     assert "['claude', 'cx']" in str(refused.value)
+
+
+def test_judging_the_add_ons_does_not_check_the_policy_file_against_them(tmp_path, monkeypatch):
+    """Checking the file's `escalation_harness` reads the add-ons, and judging an add-on reads the
+    file for its limits: each checking the other never ends."""
+    templates = tmp_path / "templates"
+    write_harness_profiles(templates, {"cx": {"provider": "codex"}})
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
+    (templates / "policy.yaml").write_text(
+        "default: {attempts: 3, wall_clock_s: 60}\ndefaults: {escalation_harness: cx}\n"
+    )
+    checked = []
+    real = policy_mod._check_escalation_harness
+    monkeypatch.setattr(
+        policy_mod, "_check_escalation_harness", lambda *a: checked.append(a) or real(*a)
+    )
+
+    addons_load.installed(templates, tmp_path / "addons")
+
+    assert checked == []
