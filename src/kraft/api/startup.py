@@ -569,7 +569,8 @@ async def _lifespan(app: FastAPI):
     app.state.trigger_last_fired = {}
     # Every background add-on task (`deps.in_background`), so shutdown reaches all.
     app.state.addon_tasks = set()
-    deps.refresh_drift(app.state)
+    # The library loaded above worked the lines out; the notifier exists now, so only send.
+    deps.refresh_drift(app.state, recompute=False)
     # Set at shutdown: the worker threads of those tasks stop between add-ons.
     app.state.addon_cancel = threading.Event()
     app.state.addon_threads = set()

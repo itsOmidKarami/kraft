@@ -107,3 +107,17 @@ def test_startup_sends_one_drift_notice(webhook, client):
             break
         time.sleep(0.02)
     assert [body["type"] for body in webhook] == ["kraft_default_drift"]
+
+
+def test_startup_works_the_drift_out_once(tmp_path, monkeypatch):
+    """The library loads before the notifier exists, so the lines are worked out then; the
+    refresh after the notifier is built only sends, instead of scanning every add-on again."""
+    calls = []
+    real = drift.lines
+    monkeypatch.setattr(drift, "lines", lambda *a: calls.append(a) or real(*a))
+    from support.api import _client
+
+    with _client(tmp_path, monkeypatch):
+        pass
+
+    assert len(calls) == 1

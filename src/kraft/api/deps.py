@@ -481,13 +481,20 @@ def lint_loaded(st) -> None:
     refresh_drift(st)
 
 
-def refresh_drift(st) -> None:
+def refresh_drift(st, *, recompute: bool = True) -> None:
     """Recompute the kraft-default drift and tell the webhook once per new state.
-    Runs on the event loop: cheap, a metadata lookup and a memoized extract."""
-    try:
-        lines = drift.lines(st.templates_dir, st.run_dirs.addons)
-    except Exception as exc:  # noqa: BLE001 -- drift never breaks a load or startup
-        lines = [f"cannot check kraft-default: {exc}"]
+    Runs on the event loop: cheap, a metadata lookup and a memoized extract.
+
+    `recompute=False` tells the webhook about the lines `st` already holds, if it holds any:
+    for startup, which loads the library (and works the lines out) before the notifier exists,
+    and would otherwise scan every add-on again moments later only to send."""
+    if not recompute and (held := getattr(st, "kraft_default", None)):
+        lines = held["lines"]
+    else:
+        try:
+            lines = drift.lines(st.templates_dir, st.run_dirs.addons)
+        except Exception as exc:  # noqa: BLE001 -- drift never breaks a load or startup
+            lines = [f"cannot check kraft-default: {exc}"]
     signature = drift.signature(lines)
     st.kraft_default = {"lines": lines, "signature": signature}
     addons = st.run_dirs.addons
