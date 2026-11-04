@@ -23,7 +23,7 @@ describe("KraftDefaultBanner", () => {
     expect(screen.queryByText("four")).toBeNull();
     expect(screen.getByRole("status")).toHaveTextContent("and 2 more");
     expect(screen.getByRole("status")).toHaveTextContent("kraft admin doctor");
-    expect(localStorage.getItem("kraft.kraftDefault.notified")).toBe("aaa");
+    await waitFor(() => expect(localStorage.getItem("kraft.kraftDefault.notified")).toBe("aaa"));
     // A <ul> is not phrasing content: its wrapper cannot be a <span>.
     expect(document.querySelector(".ng-offline-text")?.tagName).toBe("DIV");
   });
