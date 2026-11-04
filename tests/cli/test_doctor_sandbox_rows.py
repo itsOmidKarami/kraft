@@ -57,6 +57,9 @@ def test_doctor_reports_a_sandbox_with_no_network_policy(
     ready = AsyncMock(return_value=(True, "ready"))
     monkeypatch.setattr("kraft.worker.backends.docker.DockerBackend.health", ready)
     monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:3128")
+    # The server `app` holds is up, so its listener would answer: say it did not.
+    unanswered = "the egress TLS listener did not answer on 127.0.0.1:1 (refused): restart"
+    monkeypatch.setattr("kraft.worker.channel.tls_listener_problem", lambda run_dirs: unanswered)
     got = _sandboxed_doctor_rows(app, tmp_path, ("egress ", "proxy "), **fields)
     proxy = [("proxy", True, True)] * ("network" not in fields)
     assert [(r["name"].split()[0], r["ok"], r["warn"]) for r in got] == [("egress", ok, ok), *proxy]

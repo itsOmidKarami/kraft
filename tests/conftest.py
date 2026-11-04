@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import json
 import logging
 import os
@@ -653,35 +655,76 @@ def _hermetic_api(tmp_path, monkeypatch):
     return api
 
 
+class _KeptLifespan:
+    """The app's lifespan held open on a loop of its own for a whole test, entered
+    on the first call. `cli.main()` runs `asyncio.run()` per command, so a loop of
+    the caller's cannot hold it; each call is forwarded into this one instead."""
+
+    def __init__(self, app):
+        self.app = app
+        self.loop = None
+        self.transport = httpx.ASGITransport(app=app)
+
+    def _run(self, coro):
+        return asyncio.run_coroutine_threadsafe(coro, self.loop)
+
+    def _start(self):
+        self.loop = asyncio.new_event_loop()
+        self.thread = threading.Thread(target=self.loop.run_forever, daemon=True)
+        self.thread.start()
+        started = concurrent.futures.Future()
+
+        async def hold():
+            # One task enters and leaves it: anyio's cancel scopes insist on that.
+            self.stop = asyncio.Event()
+            try:
+                async with self.app.router.lifespan_context(self.app):
+                    started.set_result(None)
+                    await self.stop.wait()
+            except BaseException as exc:
+                if not started.done():
+                    started.set_exception(exc)
+                raise
+
+        self.task = self._run(hold())
+        started.result()
+
+    async def call(self, request):
+        if self.loop is None:
+            self._start()
+        return await asyncio.wrap_future(self._run(self.transport.handle_async_request(request)))
+
+    def close(self):
+        if self.loop is None:
+            return
+        self.loop.call_soon_threadsafe(self.stop.set)
+        self.task.result()
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        self.thread.join()
+        self.loop.close()
+
+
 @pytest.fixture
 def app(tmp_path, monkeypatch):
-    """The app wired to client.transport.http(), with its lifespan entered per call.
-
-    cli.main() runs asyncio.run() itself, so — unlike `wired`, where one
-    coroutine owns the loop — the lifespan cannot stay open across the call.
-    Each handler opens and closes its own loop, so each gets its own lifespan.
-    """
+    """The app wired to client.transport.http(), its lifespan entered once, on the
+    first call, and held until the test ends: one start per test, not per call.
+    Whatever the server reads only at start is read once; a test that edits it
+    between calls and needs the server to see it is not for this fixture."""
     api = _hermetic_api(tmp_path, monkeypatch)
     monkeypatch.delenv("NO_COLOR", raising=False)
+    kept = _KeptLifespan(api.app)
 
-    class Lifespan(httpx.AsyncClient):
-        """An AsyncClient that enters the app lifespan for the life of the client."""
-
-        async def __aenter__(self):
-            self._ctx = api.app.router.lifespan_context(api.app)
-            await self._ctx.__aenter__()
-            return await super().__aenter__()
-
-        async def __aexit__(self, *exc):
-            await super().__aexit__(*exc)
-            await self._ctx.__aexit__(*exc)
+    class Forward(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            return await kept.call(request)
 
     monkeypatch.setattr(
         kraft_client.transport,
         "http",
-        lambda: Lifespan(transport=httpx.ASGITransport(app=api.app), base_url="http://127.0.0.1"),
+        lambda: httpx.AsyncClient(transport=Forward(), base_url="http://127.0.0.1"),
     )
-    return api
+    yield api
+    kept.close()
 
 
 @pytest.fixture
