@@ -189,6 +189,11 @@ def _cmd_install_service(ns: argparse.Namespace) -> None:
             f"kraft admin install-service: a server is already running (pid {running}) - "
             "`kraft admin stop` first, then install the service so it starts the next one."
         )
+    # A missing program raises FileNotFoundError before `check` can see an exit
+    # status. Refuse before resolving `kraft` or writing the unit, or a
+    # container with no systemctl keeps ~/.config/systemd/user/kraft.service.
+    if sys.platform.startswith("linux") and shutil.which("systemctl") is None:
+        raise SystemExit("kraft admin install-service: the machine has no systemd user manager")
     kraft_bin = _kraft_executable()
     if sys.platform == "darwin":
         path = _write_launchd_plist(kraft_bin)
@@ -241,11 +246,18 @@ def _cmd_uninstall_service(ns: argparse.Namespace) -> None:
         print(f"kraft: removed {path}")
     elif sys.platform.startswith("linux"):
         path = _systemd_unit_path()
-        subprocess.run(["systemctl", "--user", "disable", "--now", _SYSTEMD_UNIT], check=False)
-        if path.is_file():
-            path.unlink()
-        subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
-        print(f"kraft: removed {path}")
+        # Same missing-program crash as install. There is no manager to
+        # disable; still drop a unit an earlier attempt left behind.
+        if shutil.which("systemctl") is None:
+            if path.is_file():
+                path.unlink()
+            print("kraft admin uninstall-service: the machine has no systemd user manager")
+        else:
+            subprocess.run(["systemctl", "--user", "disable", "--now", _SYSTEMD_UNIT], check=False)
+            if path.is_file():
+                path.unlink()
+            subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
+            print(f"kraft: removed {path}")
     else:
         raise SystemExit(f"kraft admin uninstall-service: unsupported platform {sys.platform}")
     _say_worker_outlives()

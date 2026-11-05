@@ -174,6 +174,7 @@ def test_service_files_survive_a_special_character_in_the_environment(tmp_path, 
 def test_service_files_never_carry_an_env_token(tmp_path, monkeypatch, capsys, platform):
     monkeypatch.setattr(cli.admin, "_read_pid", lambda *_: None)
     monkeypatch.setattr(cli.admin, "_kraft_executable", lambda: "/usr/local/bin/kraft")
+    monkeypatch.setattr(shutil, "which", lambda cmd, *_a, **_k: f"/usr/bin/{cmd}")
     monkeypatch.setattr(sys, "platform", platform)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
@@ -212,6 +213,9 @@ def test_install_service_enables_systemd_unit_by_absolute_path(tmp_path, monkeyp
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    # The enable call is faked below; the command still asks whether systemctl
+    # exists before it writes, and this test runs on boxes that have none.
+    monkeypatch.setattr(shutil, "which", lambda cmd, *_a, **_k: f"/usr/bin/{cmd}")
 
     calls = []
     monkeypatch.setattr(
@@ -225,6 +229,46 @@ def test_install_service_enables_systemd_unit_by_absolute_path(tmp_path, monkeyp
     unit_path = cli.admin._systemd_unit_path()
     enable_calls = [c for c in calls if c[:3] == ["systemctl", "--user", "enable"]]
     assert enable_calls == [["systemctl", "--user", "enable", "--now", str(unit_path)]]
+
+
+def _linux_without_systemctl(tmp_path, monkeypatch) -> None:
+    """A container-shaped Linux: the platform and $HOME are fake, and
+    `systemctl` is not on PATH. A call through to the real manager fails
+    the test instead of disabling a service on this machine."""
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setattr(shutil, "which", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: pytest.fail(f"called the service manager: {a!r}")
+    )
+
+
+def test_install_service_without_systemctl_refuses_and_writes_nothing(tmp_path, monkeypatch):
+    """No systemctl: say so, exit 1, and leave no unit behind."""
+    _linux_without_systemctl(tmp_path, monkeypatch)
+    with pytest.raises(SystemExit, match="the machine has no systemd user manager") as exc:
+        cli.main(["admin", "install-service"])
+    assert exc.value.code != 0
+    unit = cli.admin._systemd_unit_path()
+    assert not unit.exists()
+    assert not unit.parent.exists()
+
+
+def test_uninstall_service_without_systemctl_removes_a_leftover_unit(tmp_path, monkeypatch, capsys):
+    """No systemctl: say the same thing, delete a unit if one is there, exit 0."""
+    _linux_without_systemctl(tmp_path, monkeypatch)
+    unit = cli.admin._systemd_unit_path()
+    cli.main(["admin", "uninstall-service"])
+    assert "the machine has no systemd user manager" in capsys.readouterr().out
+    assert not unit.exists()
+
+    unit.parent.mkdir(parents=True)
+    unit.write_text("leftover\n")
+    cli.main(["admin", "uninstall-service"])
+    assert not unit.exists()
+    assert "the machine has no systemd user manager" in capsys.readouterr().out
 
 
 def _accepts(port: int) -> bool:
