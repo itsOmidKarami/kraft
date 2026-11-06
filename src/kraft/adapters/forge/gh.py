@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Mapping
 from datetime import datetime
@@ -33,6 +34,8 @@ from kraft.adapters.forge.models import (
 )
 from kraft.adapters.forge.transport import CliTransport, Field, Transport
 from kraft.automated_review import Reviewers
+
+logger = logging.getLogger(__name__)
 
 _GH_MR_STATES: dict[str, str] = {"OPEN": "open", "MERGED": "merged", "CLOSED": "closed"}
 
@@ -420,15 +423,21 @@ class GhCli(mr_ops.CliWaits):
         if meta.reviewers:
             people = [r for r in meta.reviewers if "/" not in r]
             teams = [r.split("/", 1)[1] for r in meta.reviewers if "/" in r]
-            await self._send(
-                repo,
-                f"repos/{{owner}}/{{repo}}/pulls/{number}/requested_reviewers",
-                method="POST",
-                fields={
-                    **({"reviewers": people} if people else {}),
-                    **({"team_reviewers": teams} if teams else {}),
-                },
-            )
+            # The pull request is already open: a refused request (the author
+            # as reviewer, a user who is not a collaborator, a missing team)
+            # costs the reviewers only, as `MRMeta` promises of every field.
+            try:
+                await self._send(
+                    repo,
+                    f"repos/{{owner}}/{{repo}}/pulls/{number}/requested_reviewers",
+                    method="POST",
+                    fields={
+                        **({"reviewers": people} if people else {}),
+                        **({"team_reviewers": teams} if teams else {}),
+                    },
+                )
+            except ForgeError as exc:
+                logger.warning("pull request %s: reviewers not requested: %s", number, exc)
         return MR(number=number, url=url)
 
     async def mark_ready(self, *, repo: Path, branch: str, mr: MR) -> None:

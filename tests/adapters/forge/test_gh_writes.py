@@ -100,6 +100,28 @@ async def test_gh_open_mr_creates_a_draft_then_adds_the_metadata(cli, tmp_path, 
     assert _rest(cli) == calls
 
 
+@pytest.mark.parametrize(
+    "answer",
+    [
+        pytest.param(
+            Api(422, '{"message": "Review cannot be requested from pull request author."}'),
+            id="the-author-as-reviewer",
+        ),
+        pytest.param(Api(404, '{"message": "Not Found"}'), id="a-team-that-does-not-exist"),
+    ],
+)
+async def test_gh_open_mr_keeps_the_pull_request_when_reviewers_are_refused(cli, tmp_path, answer):
+    """Reviewers are asked for after the pull request exists; the forge refusing
+    them costs the reviewers only, never the node that opened it."""
+    _stub(cli, **{"api*requested_reviewers*": answer})
+    cli.stub("git", "")
+
+    mr = await _open(tmp_path, meta=MRMeta(labels=("bug",), reviewers=("ada",)))
+
+    assert (mr.number, mr.url) == (7, URL)
+    assert f"api {_PULLS}/7/requested_reviewers -X POST -i -f reviewers[]=ada" in _rest(cli)
+
+
 async def test_gh_open_mr_targets_the_base_it_is_given(cli, tmp_path):
     """Kraft-v9gbi: the item's base branch, never the forge's default."""
     _stub(cli)

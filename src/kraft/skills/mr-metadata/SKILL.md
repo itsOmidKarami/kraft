@@ -27,7 +27,6 @@ rewrites the title or description after you: write it for the reviewer, not for 
   which does not make it optional. Look in CONTRIBUTING, the whole template
   (comments included) and the CI job that reads the body. If the repo ships a
   checker for the body, run it on your draft before you finish.
-- `CODEOWNERS` for who reviews the paths this diff touches.
 - What the project already does: `git log --oneline -30` for the title
   pattern (Conventional Commits or not), `kraft view merged --limit 20` for how
   merged ones are titled and labelled, and `kraft view labels` for the
@@ -57,7 +56,8 @@ describes the change that was planned, not the one that was made.
 - Do not restate the work item title as the description.
 - Do not invent a reviewer or a label. Empty is correct unless the repo names
   one, and a label that does not already exist in this project is a failed
-  API call, not a new label.
+  API call, not a new label. `CODEOWNERS` is not a reviewer list: the forge
+  asks code owners itself, and refuses to ask a merge request's own author.
 - A label or description section the project's rules require is not optional:
   every label goes in `labels` and every section in the description, or the
   merge request fails CI before anyone reads it.
