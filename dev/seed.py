@@ -288,7 +288,7 @@ def chain_yaml(chain_id: str, nodes: list) -> str:
                 "    kind: exec",
                 "    tasks:",
                 "      - id: work",
-                "        extends: implementer",
+                "        extends: kraft-default:implementer",
             ]
             previous = node
     return "\n".join(out) + "\n"
