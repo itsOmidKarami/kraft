@@ -687,7 +687,29 @@ class GlabCli(mr_ops.CliWaits):
             return (), _UNREADABLE_JOBS
         jobs_raw = [j for j in jobs_all if isinstance(j, dict)]
         failed_raw = [j for j in jobs_raw if str(j.get("status", "")) == "failed"]
+        # A downstream pipeline (`strategy: depend`) fails its bridge, a job the
+        # jobs list leaves out: red code, never the zero-jobs infrastructure
+        # shape below. Read beside the jobs, so a pipeline whose only failure is
+        # a bridge is not mistaken for one that ran nothing.
+        bridges: list[FailedJob] = []
+        try:
+            bridges_all = await self._paged(
+                repo, f"projects/:id/pipelines/{pipeline_id}/bridges", strict=True
+            )
+        except ForgeError:
+            if not failed_raw:
+                return (), _UNREADABLE_JOBS
+        else:
+            bridges = [
+                FailedJob(str(b.get("name", "")), "failed", "downstream_failed")
+                for b in bridges_all
+                if isinstance(b, dict) and str(b.get("status", "")) == "failed"
+            ]
         if not failed_raw:
+            if bridges:
+                return tuple(f"job {b.name}: failed ({b.failure_reason})" for b in bridges), tuple(
+                    bridges
+                )
             yaml_errors = data.get("yaml_errors")
             if yaml_errors:
                 return (f"pipeline config error: {yaml_errors}",), (
@@ -720,7 +742,8 @@ class GlabCli(mr_ops.CliWaits):
             )
             for j in failed_raw[2:]
         ]
-        return detail, tuple(failed_jobs)
+        detail += tuple(f"job {b.name}: failed ({b.failure_reason})" for b in bridges)
+        return detail, (*failed_jobs, *bridges)
 
     async def _bot_review(self, repo: Path, branch: str, bot: str) -> ReviewResult:
         """GitLab has no review state: `bot`'s unresolved discussions are

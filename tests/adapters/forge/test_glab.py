@@ -478,6 +478,7 @@ async def test_glab_ci_status_names_the_failed_job_and_why(cli, tmp_path, trace)
     assert [c for c in cli.calls("glab") if "/jobs" in c or "/pipelines/" in c] == [
         f"{PIPELINES}/2826926700 -X GET -i",
         f"{PIPELINES}/2826926700/jobs -X GET -i -F per_page=100 -F page=1",
+        f"{PIPELINES}/2826926700/bridges -X GET -i -F per_page=100 -F page=1",
         "api projects/:id/jobs/16392037104/trace -X GET -i",
     ]
 
@@ -497,13 +498,18 @@ async def test_glab_ci_status_does_not_chase_a_green_pipeline(cli, tmp_path):
     assert not any("/jobs" in call or "/trace" in call for call in cli.calls("glab"))
 
 
+_BRIDGE_FAILED = '[{"id":9,"name":"deploy","status":"failed"}]'
+_DOWNSTREAM = forge.FailedJob("deploy", "failed", "downstream_failed")
+
+
 @pytest.mark.parametrize(
-    "pipeline, jobs, failed_jobs, infra",
+    "pipeline, jobs, bridges, failed_jobs, infra",
     [
         # A job carrying its own `failure_reason` (Kraft-ddxn).
         (
             GLAB_PIPELINE_FAILED,
             '[{"id":16392037104,"name":"test","status":"failed","failure_reason":"script_failure"}]',
+            "[]",
             (forge.FailedJob("test", "failed", "script_failure"),),
             False,
         ),
@@ -513,16 +519,17 @@ async def test_glab_ci_status_does_not_chase_a_green_pipeline(cli, tmp_path):
             '{"id":2826926700,"status":"failed",'
             '"yaml_errors":"jobs config should contain at least one visible job"}',
             "[]",
+            "[]",
             (forge.FailedJob("(pipeline)", "failed", "config_error"),),
             False,
         ),
         # A read confirming no job ran at all, and no yaml_errors: infra-shaped.
-        (GLAB_PIPELINE_FAILED, "[]", (), True),
+        (GLAB_PIPELINE_FAILED, "[]", "[]", (), True),
         # The detail fetch itself failed: a genuine code failure must never
         # read as infra just because its own detail could not be read.
-        (FAIL, "[]", forge.glab._UNREADABLE_JOBS, False),
+        (FAIL, "[]", "[]", forge.glab._UNREADABLE_JOBS, False),
         # The jobs list failed after the pipeline was read: the same.
-        (GLAB_PIPELINE_FAILED, FAIL, forge.glab._UNREADABLE_JOBS, False),
+        (GLAB_PIPELINE_FAILED, FAIL, "[]", forge.glab._UNREADABLE_JOBS, False),
         # Only the first two failed jobs get a trace, but every failed job is
         # classified: a code failure third in line keeps the pipeline code-red.
         (
@@ -531,11 +538,33 @@ async def test_glab_ci_status_does_not_chase_a_green_pipeline(cli, tmp_path):
             '{"id":2,"name":"b","status":"success"},'
             '{"id":3,"name":"c","status":"failed","failure_reason":"stuck_or_timeout_failure"},'
             '{"id":4,"name":"d","status":"failed","failure_reason":"script_failure"}]',
+            "[]",
             (
                 forge.FailedJob("a", "failed", "runner_system_failure"),
                 forge.FailedJob("c", "failed", "stuck_or_timeout_failure"),
                 forge.FailedJob("d", "failed", "script_failure"),
             ),
+            False,
+        ),
+        # A downstream pipeline that failed fails its bridge, which the jobs list
+        # leaves out: code red, whatever the jobs say.
+        (GLAB_PIPELINE_FAILED, "[]", _BRIDGE_FAILED, (_DOWNSTREAM,), False),
+        # Bridges that cannot be read, and no job to go by: not infra either.
+        (GLAB_PIPELINE_FAILED, "[]", FAIL, forge.glab._UNREADABLE_JOBS, False),
+        # A green bridge changes nothing about a failed job.
+        (
+            GLAB_PIPELINE_FAILED,
+            '[{"id":1,"name":"test","status":"failed","failure_reason":"script_failure"}]',
+            '[{"id":9,"name":"deploy","status":"success"}]',
+            (forge.FailedJob("test", "failed", "script_failure"),),
+            False,
+        ),
+        # A failed job and a failed bridge are both listed, the bridge last.
+        (
+            GLAB_PIPELINE_FAILED,
+            '[{"id":1,"name":"test","status":"failed","failure_reason":"script_failure"}]',
+            _BRIDGE_FAILED,
+            (forge.FailedJob("test", "failed", "script_failure"), _DOWNSTREAM),
             False,
         ),
     ],
@@ -546,17 +575,21 @@ async def test_glab_ci_status_does_not_chase_a_green_pipeline(cli, tmp_path):
         "detail-unreadable",
         "jobs-unreadable",
         "a-third-failed-job-counts",
+        "failed-bridge",
+        "bridges-unreadable-no-jobs",
+        "green-bridge-failed-job",
+        "failed-job-and-failed-bridge",
     ],
 )
 async def test_glab_ci_status_reads_the_failed_jobs(
-    cli, tmp_path, pipeline, jobs, failed_jobs, infra
+    cli, tmp_path, pipeline, jobs, bridges, failed_jobs, infra
 ):
     cli.stub(
         "glab",
         routes={
             **glab_mr(GLAB_MR_VIEW),
             PIPELINES: GLAB_CI_FAILED,
-            **glab_pipeline(pipeline, jobs),
+            **glab_pipeline(pipeline, jobs, bridges=bridges),
         },
     )
     cli.stub("git", routes={"symbolic-ref --short": "kraft/abc"}, default="")
@@ -703,6 +736,7 @@ async def test_glab_ci_status_pages_through_the_jobs_to_a_failure_on_page_two(cl
         f"{PIPELINES}/2826926700 -X GET -i",
         f"{jobs} -X GET -i -F per_page=100 -F page=1",
         f"{jobs} -X GET -i -F per_page=100 -F page=2",
+        f"{PIPELINES}/2826926700/bridges -X GET -i -F per_page=100 -F page=1",
         "api projects/:id/jobs/101/trace -X GET -i",
     ]
 
