@@ -268,3 +268,38 @@ def test_writer_dir_ignores_writable(run_dirs):
     thread = dataclasses.replace(session, writable=item_paths.thread_out(run_dirs, WID, 4))
 
     assert item_paths.writer_dir(thread) == session.folder / "out" / "outputs"
+
+
+@pytest.mark.parametrize(
+    ("size", "cap", "trimmed"),
+    [(10, 1000, False), (5000, 1000, True)],
+    ids=["within-the-cap", "over-the-cap"],
+)
+def test_trim_oversized_drops_only_a_folder_over_the_cap(run_dirs, size, cap, trimmed):
+    session, out = launched(run_dirs)
+    write(out, "a.txt", "x" * size)
+
+    assert outputs.trim_oversized(session, cap) is trimmed
+
+    assert out.exists() is not trimmed
+
+
+def test_trim_oversized_counts_entries_too(run_dirs):
+    session, out = launched(run_dirs)
+    for i in range(outputs.MAX_ENTRIES + 1):
+        write(out, f"f{i}", "x")
+
+    assert outputs.trim_oversized(session, 1 << 20) is True
+    assert not out.exists()
+
+
+def test_refuse_deletes_the_folder_and_logs_why_only_for_a_writer(run_dirs):
+    session, out = launched(run_dirs)
+    write(out, "a.txt", "x")
+
+    assert outputs.refuse(session, "kraft: outputs: because") == "kraft: outputs: because"
+
+    assert not out.exists()
+    assert "because" in session.log.read_text()
+    other = own_files(run_dirs, "s2", WID)
+    assert outputs.refuse(other, "kraft: outputs: because") is None

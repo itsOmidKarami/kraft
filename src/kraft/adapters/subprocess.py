@@ -120,20 +120,36 @@ _CAPTURED = (
 
 
 async def capture_outputs(
-    db, run_dirs, work_item_id: str, session_id: str, files: item_paths.SessionFiles, status: str
+    db,
+    run_dirs,
+    work_item_id: str,
+    session_id: str,
+    files: item_paths.SessionFiles,
+    status: str,
+    *,
+    refused: bool = False,
 ) -> str:
     """`status`, after a session that declared `outputs` ended with it: the
     declared files and variables are checked and kept (`kraft.outputs`), and
     a capture that fails -- or a session whose processes outlived it, which may
-    still be writing the folder -- turns the status into `failed`, the reason
-    in the session's log. A status that is not `_CAPTURED` keeps its folder
+    still be writing the folder, or one a machine returned nothing of because
+    it was over the limit (`refused`) -- turns the status into `failed`, the
+    reason in the session's log. A status that is not `_CAPTURED` keeps its folder
     untouched, and a session that declared nothing is left alone. The one door
     both `run_task` and `reattach` end a session through."""
     if status not in _CAPTURED or run_dirs is None:
         return status
     if await asyncio.to_thread(outputs.read_decl, files) is None:
         return status
-    if await _outlived(db, work_item_id, session_id):
+    if refused:
+        # The machine dropped the folder, which was over the limit it was told.
+        problem = await asyncio.to_thread(
+            outputs.refuse,
+            files,
+            "kraft: outputs: the output folder is over the size or entry limit, so none of it "
+            "was kept (storage.outputs.max_size)",
+        )
+    elif await _outlived(db, work_item_id, session_id):
         problem = await asyncio.to_thread(
             outputs.refuse,
             files,
@@ -1323,15 +1339,19 @@ async def _run_task(
             for d in rw_dirs:
                 d.mkdir(parents=True, exist_ok=True)
             if runner is not None:
+                declared_outputs = outputs.read_decl(files)
                 try:
                     entries = _remote_files.entries(
                         results=await db.write(
                             lambda c: store.result_files(c, run_dirs, work_item_id)
                         ),
+                        # A file at a time: the machine mounts files, so a snapshot folder
+                        # a reader names stands for the files in it (no link followed).
                         ro=[
-                            p
+                            q
                             for p in (files.instruction, files.review, *map(Path, ro_paths))
                             if p.exists()
+                            for q in _remote_files.regular_files(p)
                         ],
                         rw_dirs=rw_dirs,
                         rw_files=[Path(p) for p in rw_files],
@@ -1359,6 +1379,10 @@ async def _run_task(
                         idle_s=idle_s,
                         **sandbox_job,
                         codex_hook=codex_hook,
+                        # A writer: the folder it writes is made on the machine, and the
+                        # machine holds it to the cap this session launched under.
+                        outputs_dir=str(item_paths.writer_dir(files)) if declared_outputs else None,
+                        outputs_max_bytes=declared_outputs.max_bytes if declared_outputs else None,
                     )
                     run = await _remote_runs.current().launch(
                         spec, claim, entries=entries, folder=files.folder
@@ -1748,7 +1772,15 @@ async def _run_task(
     if oom is not None:
         status = await record_oom_kill(db, work_item_id, session_id, log_path, oom, status)
     # Before the status is recorded, so a capture that fails fails the writer.
-    status = await capture_outputs(db, run_dirs, work_item_id, session_id, files, status)
+    status = await capture_outputs(
+        db,
+        run_dirs,
+        work_item_id,
+        session_id,
+        files,
+        status,
+        refused=run is not None and run.outputs_refused,
+    )
     fields = read_result_fields(
         result_path, summary=item_paths.recorded_summary(run_dirs, work_item_id, files)
     )

@@ -62,6 +62,10 @@ class JobSpec:
     # `{harness, hook, exe, at}`: the machine's own codex trusts Kraft's hook, and the flags it
     # gives go into `argv` at `at`. Sent only to a machine with the `codex_hook` cap.
     codex_hook: dict | None = None
+    # `storage.outputs.max_size` as the session launched under it: the machine drops a writer's
+    # output folder over it (or over the entry limit) before packing. A machine that predates the
+    # field ignores it, and the server's own capture check fails the writer instead.
+    outputs_max_bytes: int | None = None
 
     @property
     def key(self) -> str:

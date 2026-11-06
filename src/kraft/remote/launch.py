@@ -387,6 +387,8 @@ def build(
     withheld: list[str] | None = None,
     setup_sandbox: dict | None = None,
     codex_hook: dict | None = None,
+    outputs_dir: str | None = None,
+    outputs_max_bytes: int | None = None,
 ) -> JobSpec:
     done = subprocess.run(
         ["git", "-C", str(cwd), "rev-parse", "--verify", f"refs/heads/{branch}"],
@@ -415,7 +417,9 @@ def build(
         identity=dict(identity),
         server_run_dir=str(run_dirs.base),
         server_worktree=str(cwd),
-        dirs=[str(e.path) for e in rw if e.path.is_dir()],
+        # A writer's output folder is made on the machine too: it is empty, and so is not in any
+        # archive, and it is no entry of its own (`out/` holds it, and is walked once).
+        dirs=[str(e.path) for e in rw if e.path.is_dir()] + ([outputs_dir] if outputs_dir else []),
         rw=[str(e.path) for e in rw],
         # Enforced on the machine as well: while the server is asleep nothing else would.
         deadline_s=None if time_cap is None else max(0.0, time_cap.at - caps.monotonic()),
@@ -429,4 +433,5 @@ def build(
         setup_sandbox=setup_sandbox,
         ro=[str(e.path) for e in entries if not e.rw],
         codex_hook=codex_hook,
+        outputs_max_bytes=outputs_max_bytes,
     )

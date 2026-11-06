@@ -180,6 +180,23 @@ def capture(run_dirs, wid: str, files: SessionFiles) -> str | None:
     return problem
 
 
+def drop(files: SessionFiles) -> None:
+    """Delete the session's output folder, with no link followed."""
+    _drop_writer_dir(files)
+
+
+def trim_oversized(files: SessionFiles, max_bytes: int) -> bool:
+    """On a machine that ran the session: delete the output folder when it is
+    over `max_bytes` or `MAX_ENTRIES`, so it is not sent back at all. True
+    when it was. The same two checks a capture makes, here before the folder
+    is packed, so an oversized writer fails with the outputs message instead of
+    the transfer's refusal of everything the step returned."""
+    if _check_folder(files, Decl("", (), (), max_bytes)) is None:
+        return False
+    _drop_writer_dir(files)
+    return True
+
+
 def refuse(files: SessionFiles, why: str) -> str | None:
     """Keep nothing of a session that declared outputs, for `why` (a message
     holding no string the worker chose): its folder is deleted and the reason

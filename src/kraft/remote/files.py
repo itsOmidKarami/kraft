@@ -65,6 +65,13 @@ def _walk(root: Path) -> Iterator[Path]:
                 yield p
 
 
+def regular_files(root: Path) -> list[Path]:
+    """The regular files at or under `root`, no link followed: what a folder
+    stands for when only files travel (`entries`' read-only side, where the
+    machine mounts a file at a time)."""
+    return list(_walk(root))
+
+
 def _name(p: Path) -> str:
     return str(p).lstrip("/")
 

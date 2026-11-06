@@ -19,7 +19,7 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from kraft import item_paths, paths
+from kraft import item_paths, outputs, paths
 from kraft.paths import RunDirs
 from kraft.remote import blobs, files, lfs, machine_config, protocol
 from kraft.remote.channels import Channels
@@ -235,6 +235,13 @@ class Machine:
         """What to list in the hello: `protocol.CAPS` and the limit as it is now."""
         return protocol.machine_caps(self._limit(), lfs=lfs.available())
 
+    def _session_files(self, spec: JobSpec) -> item_paths.SessionFiles:
+        """The job's session folder on this machine (`PathMap` takes the server's run folder to
+        this machine's), for the output folder's checks."""
+        return item_paths.session_files(
+            RunDirs(self._area / "run"), spec.work_item_id, spec.session_id
+        )
+
     def holds(self, key: str) -> bool:
         """Is `key` (`<work item>/<session>`) one of this machine's jobs?"""
         return key in self._jobs
@@ -340,7 +347,10 @@ class Machine:
             if (job := self._jobs.get(frame["id"])) is not None and job.runner is not None:
                 job.runner.signal(frame["sig"])
         elif kind == "delivered":
-            self._jobs.pop(frame["id"], None)
+            job = self._jobs.pop(frame["id"], None)
+            if job is not None:
+                # What the writer left in its output folder is the server's now (or was refused).
+                await asyncio.to_thread(outputs.drop, self._session_files(job.spec))
         elif kind == "api_result":
             self._api_sent.pop(frame["rid"], None)
             if (fut := self._api.pop(frame["rid"], None)) is not None and not fut.done():
@@ -586,6 +596,9 @@ class Machine:
             else {}
         )
         entries = [files.Entry(Path(p), True) for p in spec.rw]
+        refused = spec.outputs_max_bytes is not None and await asyncio.to_thread(
+            outputs.trim_oversized, self._session_files(spec), spec.outputs_max_bytes
+        )
         changed = await asyncio.to_thread(
             files.changed, entries, mapper, pushed, folder / "out.tgz"
         )
@@ -604,6 +617,7 @@ class Machine:
             "pushed": changed,
             "capped": out.capped,
             "oom": out.oom,
+            "outputs_refused": refused,
         }
         job.state = "finished"
         await self._hand_in(job)
