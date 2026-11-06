@@ -42,3 +42,14 @@ def test_a_direct_store_mounts_the_real_gitdir_with_only_its_branchs_files_writa
         (common / "logs" / "refs" / "heads" / "kraft" / "fix-x", False),
     }
     assert all(m.src == m.dst for m in ms)
+
+
+def test_a_snapshot_folder_a_reader_names_is_mounted_read_only_at_its_own_path(tmp_path):
+    """A reader's `ro_paths` hold the snapshot folders of its writers, not files:
+    each is bound read-only where it is, so `$KRAFT_READS_DIR/<writer>` is there."""
+    snapshot = tmp_path / "run" / "items" / "w1" / "outputs" / "build.test.run_tests"
+    snapshot.mkdir(parents=True)
+
+    ms = mounts.session_mounts(tmp_path / "wt", None, ro_paths=[str(snapshot)])
+
+    assert [(m.src, m.dst, m.ro) for m in ms[1:]] == [(snapshot, snapshot, True)]
