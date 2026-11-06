@@ -209,11 +209,15 @@ def test_reads_refused_on(task):
     assert tm.Chain.model_validate(_chain(node(tasks=[{**task, "reads": []}])))
 
 
-@pytest.mark.parametrize("make", [sub, agent], ids=["subprocess", "agent"])
-def test_reads_must_be_qualified_on_the_kinds_that_take_it(make):
-    assert tm.Chain.model_validate(_chain(node(tasks=[make(reads=["s.t"])])))
+@pytest.mark.parametrize(
+    ("make", "model"),
+    [(sub, tm.SubprocessTask), (agent, tm.AgentTask)],
+    ids=["subprocess", "agent"],
+)
+def test_reads_must_be_qualified_on_the_kinds_that_take_it(make, model):
+    assert model.model_validate(make(reads=["s.t"])).reads == ["s.t"]
     with pytest.raises(ValidationError, match="never a bare task id"):
-        tm.Chain.model_validate(_chain(node(tasks=[make(reads=["t"])])))
+        model.model_validate(make(reads=["t"]))
 
 
 def test_dumped_defaults_round_trip(tmp_path):
@@ -234,3 +238,176 @@ def test_dumped_defaults_round_trip(tmp_path):
     raw = chain.to_json()
     assert '"reads":[]' in raw and '"outputs":null' in raw
     assert tm.MaterializedChain.from_json(raw).to_json() == raw
+
+
+W = sub("w", outputs=OUT)
+
+
+def _writer_node(id: str = "build", **kw) -> dict:
+    """`build`: step `a` writes (`a.w`), step `b` is where a reader may sit."""
+    return node(
+        id,
+        steps=[{"id": "a", "tasks": [W]}, {"id": "b", "tasks": [sub("r", reads=["a.w"])]}],
+        **kw,
+    )
+
+
+def _two_steps(reader_step: dict, writer_at: int, **kw) -> dict:
+    """A node whose step 1 and step 2 each hold one task; the writer is in `writer_at`."""
+    steps = [
+        {"id": "s1", "tasks": [sub("t1", **({"outputs": OUT} if writer_at == 1 else {}))]},
+        {"id": "s2", "tasks": [sub("t2", **({"outputs": OUT} if writer_at == 2 else {}))]},
+    ]
+    steps[reader_step["at"] - 1].update({k: v for k, v in reader_step.items() if k != "at"})
+    return node("n", steps=steps, **kw)
+
+
+def _reading(task_id: str, *entries: str) -> dict:
+    return plan(sub(task_id, reads=list(entries)))
+
+
+@pytest.mark.parametrize(
+    ("chain", "refused"),
+    [
+        (
+            _chain(node("n", steps=[{"id": "s", "tasks": [sub("r", reads=["a.w"])]}])),
+            "n.s.r: reads 'a.w', which names no task",
+        ),
+        (
+            _chain(
+                node(
+                    "n",
+                    steps=[
+                        {"id": "a", "tasks": [sub("w")]},
+                        {"id": "b", "tasks": [sub("r", reads=["a.w"])]},
+                    ],
+                )
+            ),
+            "n.b.r: reads 'a.w', which declares no outputs",
+        ),
+        (
+            _chain(
+                node("early", tasks=[sub("r", reads=["late.main.w"])]),
+                node("late", tasks=[W]),
+            ),
+            "early.main.r: reads 'late.main.w', which does not run before it",
+        ),
+        (
+            _chain(
+                node(
+                    "n",
+                    steps=[
+                        {"id": "a", "tasks": [sub("r", reads=["b.w"])]},
+                        {"id": "b", "tasks": [W]},
+                    ],
+                )
+            ),
+            "n.a.r: reads 'b.w', which does not run before it",
+        ),
+        (
+            _chain(node("n", steps=[{"id": "a", "tasks": [W, sub("r", reads=["a.w"])]}])),
+            "n.a.r: reads 'a.w', which does not run before it",
+        ),
+        (
+            _chain(_two_steps({"at": 1, "on_failure": _reading("h", "s2.t2")}, writer_at=2)),
+            "n.s1.on_failure.main.h: reads 's2.t2', which does not run before it",
+        ),
+        (
+            _chain(
+                node("w", tasks=[W]),
+                node(
+                    "n",
+                    tasks=[sub()],
+                    on_base_changed={
+                        "restart_from": "n",
+                        "on_conflict": _reading("h", "w.main.w"),
+                    },
+                ),
+            ),
+            "n.on_base_changed.on_conflict.main.h: reads 'w.main.w', "
+            "but a task here cannot read step outputs",
+        ),
+        (
+            _chain(
+                node("w", tasks=[W]),
+                node(
+                    "m",
+                    tasks=[{"id": "g", "kind": "forge", "target": "mr.merge"}],
+                    on_merge_rejected={"restart_from": "w", "repair": _reading("h", "w.main.w")},
+                ),
+            ),
+            "m.on_merge_rejected.repair.main.h: reads 'w.main.w', "
+            "but a task here cannot read step outputs",
+        ),
+        (
+            _chain(
+                node("w", tasks=[W]),
+                {"id": "g", "kind": "gate", "auto_review": agent("rev", reads=["w.main.w"])},
+            ),
+            "g.auto_review: reads 'w.main.w', but a task here cannot read step outputs",
+        ),
+    ],
+    ids=[
+        "missing-writer",
+        "writer-declares-nothing",
+        "later-node",
+        "later-step",
+        "same-step-sibling",
+        "step-on-failure-of-earlier-step",
+        "on-conflict",
+        "merge-rejected-repair",
+        "auto-review",
+    ],
+)
+def test_reads_ordering_refuses(chain, refused):
+    with pytest.raises(ValidationError) as refusal:
+        tm.Chain.model_validate(chain)
+    assert refused in str(refusal.value)
+
+
+@pytest.mark.parametrize(
+    "chain",
+    [
+        _chain(node("w", tasks=[W]), node("n", tasks=[sub("r", reads=["w.main.w"])])),
+        _chain(_writer_node()),
+        _chain(_writer_node(on_failure=_reading("h", "a.w"))),
+        _chain(_writer_node(fix_loop=_reading("h", "a.w"))),
+        _chain(_writer_node(fix_loop={**plan(sub("f")), "judge": sub("j", reads=["a.w"])})),
+        _chain(_writer_node(escalation=sub("esc", reads=["a.w"]))),
+        _chain(_two_steps({"at": 2, "on_failure": _reading("h", "s2.t2")}, writer_at=2)),
+        _chain(
+            _two_steps({"at": 2, "on_failure": _reading("h", "s1.t1")}, writer_at=1),
+        ),
+        _chain(
+            node(
+                "n",
+                steps=[
+                    {"id": "a", "tasks": [W]},
+                    {"id": "b", "tasks": [sub("r", on_failure=_reading("h", "a.w"))]},
+                ],
+            )
+        ),
+    ],
+    ids=[
+        "earlier-node",
+        "earlier-step",
+        "node-on-failure",
+        "fix-loop-repair",
+        "judge",
+        "escalation",
+        "step-on-failure-of-its-own-step",
+        "step-on-failure-of-an-earlier-writer",
+        "task-on-failure",
+    ],
+)
+def test_reads_ordering_accepts(chain):
+    assert tm.Chain.model_validate(chain)
+
+
+def test_a_library_node_used_under_two_ids_reads_by_step_and_task():
+    twin = {"steps": [{"id": "a", "tasks": [W]}, {"id": "b", "tasks": [sub("r", reads=["a.w"])]}]}
+    chain = tm.Chain.model_validate(_chain(node("one", **twin), node("two", **twin)))
+    paths = {
+        t.path: t.task.reads for n in tm.ResolvedChain.from_chain(chain).nodes for t in n.tasks()
+    }
+    assert paths["one.b.r"] == paths["two.b.r"] == ["a.w"]

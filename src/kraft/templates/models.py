@@ -1407,6 +1407,70 @@ class Chain(BaseModel):
                     )
         return self
 
+    @model_validator(mode="after")
+    def _reads_name_earlier_writers(self) -> Self:
+        """Every `reads` entry names a task that declares `outputs` and sits
+        before the reader. "Before" is an earlier node, or an earlier step of
+        the reader's own node (never a sibling in its step, which runs
+        concurrently). A handler slot of the writer's node reads by where it
+        runs: a node's `on_failure`, fix loop, judge and escalation may read
+        any of its steps, and a step's or task's `on_failure` the steps up to
+        and including its own step. A conflict handler, a merge-rejection
+        repair and a gate's reviewer read nothing. A handler may run before
+        its writer did, and then gets nothing, as after a skip."""
+        resolved = ResolvedChain.from_chain(self)
+        # task path -> (node position, step position, whether it declares outputs)
+        writers: dict[str, tuple[int, int, bool]] = {}
+        for i, node in enumerate(resolved.nodes):
+            for j, step in enumerate(node.steps):
+                for task in step.tasks:
+                    writers[task.path] = (i, j, getattr(task.task, "outputs", None) is not None)
+
+        def check(reader: ResolvedTask, node_at: int, last_step: int | None) -> None:
+            """`last_step`: the latest step of the reader's own node it may read
+            from; `None` where it may read no step outputs at all."""
+            node = resolved.nodes[node_at]
+            for entry, path in zip(
+                reader.task.reads, resolve_reads(node.id, reader.task.reads), strict=True
+            ):
+                where = f"{reader.path}: reads {entry!r}"
+                if last_step is None:
+                    raise ValueError(f"{where}, but a task here cannot read step outputs")
+                if path not in writers:
+                    raise ValueError(f"{where}, which names no task in a node's own steps")
+                at_node, at_step, declares = writers[path]
+                if not declares:
+                    raise ValueError(f"{where}, which declares no outputs")
+                if at_node > node_at or (at_node == node_at and at_step > last_step):
+                    raise ValueError(f"{where}, which does not run before it")
+
+        for i, node in enumerate(resolved.nodes):
+            last = len(node.steps) - 1
+            for j, step in enumerate(node.steps):
+                for task in step.tasks:
+                    # A sibling in the same step runs concurrently: step j-1 at most.
+                    check(task, i, j - 1)
+                    for plan in task.on_failure:
+                        for handler in plan.tasks:
+                            check(handler, i, j)
+                for plan in step.on_failure:
+                    for handler in plan.tasks:
+                        check(handler, i, j)
+            for group in (node.on_failure, node.fix_loop):
+                for plan in group:
+                    for handler in plan.tasks:
+                        check(handler, i, last)
+            for dedicated in (node.judge, node.escalation):
+                if dedicated is not None:
+                    check(dedicated, i, last)
+            for group in (node.on_conflict, node.on_merge_rejected):
+                for plan in group:
+                    for handler in plan.tasks:
+                        check(handler, i, None)
+            if node.auto_review is not None:
+                check(node.auto_review, i, None)
+        return self
+
 
 def _dedicated(
     path: str, task: AnyTask | None, scopes: Scopes, runner: str | None = None
