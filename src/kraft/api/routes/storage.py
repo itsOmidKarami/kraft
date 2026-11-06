@@ -82,7 +82,7 @@ def _preview_one(st, wid: str, row, size: int, members: list[Path]) -> dict:
 @api_router.post("/storage/preview")
 async def preview_storage_cleanup(body: StoragePreview, request: Request):
     """What archiving these items would do, without doing it: per item the
-    size of its worktree, the uncommitted files that would be lost, the
+    size of its worktree and step outputs, the uncommitted files that would be lost, the
     commits only its branch holds and whether the branch stays; and in total
     the bytes freed and the usage and state they would leave. An id that is
     unknown, not completed or abandoned, or already archived is answered with
@@ -114,7 +114,13 @@ async def preview_storage_cleanup(body: StoragePreview, request: Request):
         lambda: [
             {**_preview_one(st, wid, None, 0, []), "refusal": refused[wid]}
             if wid in refused
-            else _preview_one(st, wid, rows[wid], used.items.get(wid, 0), members.get(wid, []))
+            else _preview_one(
+                st,
+                wid,
+                rows[wid],
+                used.items.get(wid, 0) + used.outputs.get(wid, 0),
+                members.get(wid, []),
+            )
             for wid in ids
         ]
     )

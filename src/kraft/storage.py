@@ -45,6 +45,7 @@ CATEGORIES = (
     "worktrees",
     "sandboxes",
     "documents",
+    "outputs",
     "logs",
     "results",
     "databases",
@@ -52,17 +53,20 @@ CATEGORIES = (
     "other",
 )
 #: The categories the quota and limit govern.
-GOVERNED = ("worktrees", "sandboxes", "documents")
+GOVERNED = ("worktrees", "sandboxes", "documents", "outputs")
 #: Folders whose children are named by work item id.
 _PER_ITEM = ("worktrees", "sandbox-home")
 #: What of an item's own folder, `items/<id>/<name>`, counts where
 #: (`kraft.item_paths`). `docs/` is the worker's to write at any size, so it
 #: is governed, as is each session's `out/` (below); `history/` and `filed/`
 #: are Kraft's copies, capped in size, and `sessions/` Kraft's own files.
-#: Only the sandbox home is also the item's in `items`: archiving removes
-#: it, and keeps the rest.
+#: `outputs/` holds the snapshots of step outputs (`kraft.outputs`): a task
+#: wrote them, and Kraft capped them (`storage.outputs.max_size`), so they are
+#: governed, and archiving removes them. Only the sandbox home is also the
+#: item's in `items`: archiving removes it, and keeps the rest.
 _IN_ITEM = {
     "sandbox-home": "sandboxes",
+    "outputs": "outputs",
     "docs": "documents",
     "history": "attachments",
     "filed": "attachments",
@@ -85,6 +89,10 @@ class Usage:
     #: Bytes per work item id of its `documents` (its `docs/` and sessions'
     #: `out/`): governed, and kept by archiving, so apart from `items`.
     documents: dict[str, int] = field(default_factory=dict)
+    #: Bytes per work item id of its step-output snapshots (`outputs/`):
+    #: governed, and freed by archiving, so apart from `items` (which the start
+    #: queue's estimate averages: a worktree's size, not a snapshot's).
+    outputs: dict[str, int] = field(default_factory=dict)
 
 
 def archivable(used: Usage) -> int:
@@ -194,6 +202,7 @@ def measure(base: Path, stop: threading.Event | None = None) -> Usage:
     seen: set[tuple[int, int]] = set()
     items: dict[str, int] = {}
     documents: dict[str, int] = {}
+    outputs: dict[str, int] = {}
     categories = dict.fromkeys(CATEGORIES, 0)
     for top in _children(base):
         category = _CATEGORY.get(top.name) or ("databases" if ".db" in top.name else "other")
@@ -209,6 +218,8 @@ def measure(base: Path, stop: threading.Event | None = None) -> Usage:
                         items[item.name] = items.get(item.name, 0) + size
                     elif kind == "documents" and size:
                         documents[item.name] = documents.get(item.name, 0) + size
+                    elif kind == "outputs" and size:
+                        outputs[item.name] = outputs.get(item.name, 0) + size
         elif top.name in _PER_ITEM:
             for child in _children(Path(top.path)):
                 size = _bytes(child.path, seen, stop)
@@ -217,7 +228,7 @@ def measure(base: Path, stop: threading.Event | None = None) -> Usage:
         else:
             categories[category] += _bytes(top.path, seen, stop)
     governed = sum(categories[c] for c in GOVERNED)
-    return Usage(_now(), governed, items, categories, documents)
+    return Usage(_now(), governed, items, categories, documents, outputs)
 
 
 def usage(st) -> Usage | None:
@@ -281,12 +292,17 @@ def figures(st) -> dict:
     return {"used_bytes": archivable(usage(st)), "limit_bytes": st.policy.storage_limit_bytes}
 
 
-def forget(st, wid: str) -> None:
+def forget(st, wid: str, *, outputs: bool = True) -> None:
     """Take an archived or abandoned item's worktree and sandbox home
     (`items`) off the cache, so the change is seen without a walk: off
-    `worktrees` first, then `sandboxes`, and off `governed`. Its `documents`
-    stay: archiving keeps them (`forget_documents` is the abandon's). The
-    next walk reconciles."""
+    `worktrees` first, then `sandboxes`, and off `governed`. Its step outputs
+    go too, before the early return below, which an in-place item (no
+    worktree to count) reaches; `refresh` passes `outputs=False`, since a
+    folder missing there says nothing of an item still running. Its
+    `documents` stay: archiving keeps them (`forget_documents` is the
+    abandon's). The next walk reconciles."""
+    if outputs:
+        forget_outputs(st, wid)
     used = usage(st)
     if used is None or wid not in used.items:
         return
@@ -333,6 +349,23 @@ def charge(app, wid: str) -> None:
     )
 
 
+def forget_outputs(st, wid: str) -> None:
+    """Take an item's step outputs off the cache, off `governed` too: archiving
+    deletes the folder, and so does abandoning. The next walk reconciles."""
+    used = usage(st)
+    if used is None or wid not in used.outputs:
+        return
+    size = used.outputs[wid]
+    categories = dict(used.categories)
+    categories["outputs"] = max(0, categories.get("outputs", 0) - size)
+    st.storage_usage = dataclasses.replace(
+        used,
+        governed=max(0, used.governed - size),
+        categories=categories,
+        outputs={k: v for k, v in used.outputs.items() if k != wid},
+    )
+
+
 def forget_documents(st, wid: str) -> None:
     """Take an abandoned item's `documents` off the cache, off `governed`
     too: abandoning removes its folder. The next walk reconciles."""
@@ -369,11 +402,24 @@ async def refresh(app) -> Usage:
     for wid in list(st.storage_usage.items):
         left = (st.run_dirs.base / "worktrees" / wid, *item_paths.sandbox_homes(st.run_dirs, wid))
         if not any(os.path.lexists(p) for p in left):
-            forget(st, wid)
+            forget(st, wid, outputs=False)
     # Its documents too, once it was abandoned: archiving keeps its folder.
     for wid in list(st.storage_usage.documents):
         if not os.path.lexists(item_paths.item_dir(st.run_dirs, wid)):
             forget_documents(st, wid)
+    # Its step outputs, once it was archived (which deletes them) or abandoned:
+    # by the database, not by a probe, since an in-place item has no worktree
+    # to find and its outputs stay until it is archived.
+    if st.storage_usage.outputs:
+        archived = st.db.read(
+            lambda c: {
+                r["id"]: r["archived_at"]
+                for r in c.execute("SELECT id, archived_at FROM work_items")
+            }
+        )
+        for wid in list(st.storage_usage.outputs):
+            if wid not in archived or archived[wid]:
+                forget_outputs(st, wid)
     return st.storage_usage
 
 
@@ -522,7 +568,7 @@ def report(policy, used: Usage, rows: dict) -> dict:
     """`GET /storage`'s answer: the cached measurement joined to the work item
     `rows` (by id). An id with a row is an item, largest first; an id without
     one is an orphan, which the page lists read-only."""
-    measured = dict.fromkeys([*used.items, *used.documents])
+    measured = dict.fromkeys([*used.items, *used.documents, *used.outputs])
     items = [
         {
             "id": wid,
@@ -531,6 +577,7 @@ def report(policy, used: Usage, rows: dict) -> dict:
             "archived": bool(row["archived_at"]),
             "bytes": used.items.get(wid, 0),
             "documents_bytes": used.documents.get(wid, 0),
+            "outputs_bytes": used.outputs.get(wid, 0),
             "updated_at": row["updated_at"],
             "reclaimable": reclaimable(row) and wid in used.items,
         }
@@ -538,19 +585,26 @@ def report(policy, used: Usage, rows: dict) -> dict:
         # An in-place item's folder is the person's checkout: not listed.
         if (row := rows.get(wid)) is not None and not row["in_place"]
     ]
-    items.sort(key=lambda item: -(item["bytes"] + item["documents_bytes"]))
+    items.sort(key=lambda item: -(item["bytes"] + item["documents_bytes"] + item["outputs_bytes"]))
     return {
         "measured_at": used.measured_at,
         "state": state_of(policy, used),
         "used_bytes": used.governed,
         "quota_bytes": policy.storage_quota_bytes if policy else None,
         "limit_bytes": policy.storage_limit_bytes if policy else None,
-        "reclaimable_bytes": sum(item["bytes"] for item in items if item["reclaimable"]),
+        "reclaimable_bytes": sum(
+            item["bytes"] + item["outputs_bytes"] for item in items if item["reclaimable"]
+        ),
         "categories": used.categories,
         "items": items,
         "orphans": sorted(
             (
-                {"name": name, "bytes": used.items.get(name, 0) + used.documents.get(name, 0)}
+                {
+                    "name": name,
+                    "bytes": used.items.get(name, 0)
+                    + used.documents.get(name, 0)
+                    + used.outputs.get(name, 0),
+                }
                 for name in measured
                 if name not in rows
             ),

@@ -590,6 +590,7 @@ async def abandon_work_item(wid: str, request: Request, body: AbandonWorkItem | 
     # the event loop.
     await asyncio.to_thread(_remove_item_files, st.run_dirs, wid)
     storage.forget_documents(st, wid)
+    storage.forget_outputs(st, wid)
     return {"id": wid, "status": "abandoned", **removed}
 
 
@@ -653,6 +654,11 @@ async def _archive_one(app, row, by: str, *, reason: str | None = None) -> dict:
         else:  # an in-place checkout's HEAD is the person's, not the item's
             extra |= await asyncio.to_thread(_rescue_detached_head, repo, worktree, wid)
         await st.db.write(lambda c: store.archive_work_item(c, wid, by, reason=reason, **extra))
+        # Archiving keeps an item's logs, results and documents, but not its step outputs: a
+        # task wrote them for a reader that will not run again. Ahead of the early returns
+        # below, so an in-place item's and one whose worktree stayed are freed too.
+        await asyncio.to_thread(item_paths.remove_tree, item_paths.outputs_dir(st.run_dirs, wid))
+        storage.forget_outputs(st, wid)
         if in_place:
             return {"worktree_removed": False, "in_place": True, **dropped, **extra}
         for where, count in kept.items():

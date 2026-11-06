@@ -501,6 +501,7 @@
      "documents": "_",
      "logs": "_",
      "other": "_",
+     "outputs": "_",
      "results": "_",
      "sandboxes": "_",
      "worktrees": "_"
@@ -511,6 +512,7 @@
       "bytes": "_",
       "documents_bytes": "_",
       "id": "_",
+      "outputs_bytes": "_",
       "reclaimable": "_",
       "status": "_",
       "title": "_",

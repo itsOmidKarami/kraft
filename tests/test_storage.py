@@ -750,6 +750,7 @@ def test_report_joins_the_measurement_to_the_work_items():
         "archived": False,
         "bytes": 30,
         "documents_bytes": 4,
+        "outputs_bytes": 0,
         "updated_at": "2026-01-01T00:00:00+00:00",
         "reclaimable": True,
     }

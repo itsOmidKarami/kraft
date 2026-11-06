@@ -143,11 +143,15 @@ async def test_archiving_takes_the_items_bytes_off_the_storage_cache(tmp_path, r
     """A clean-up must release held starts without waiting for the next walk."""
     app = stub_app(**_state(tmp_path, archive_after_days=30))
     await seed_completed_item(app, repo, updated_at=days_ago(31))
-    app.state.storage_usage = storage.Usage("t", 120, {"w1": 40, "other": 80}, {})
+    app.state.storage_usage = storage.Usage(
+        "t", 130, {"w1": 40, "other": 80}, {"outputs": 10}, {}, {"w1": 10}
+    )
 
     assert await archive.tick(app) == ["w1"]
 
-    assert (app.state.storage_usage.governed, app.state.storage_usage.items) == (80, {"other": 80})
+    used = app.state.storage_usage
+    assert (used.governed, used.items, used.outputs) == (80, {"other": 80}, {})
+    assert used.categories["outputs"] == 0, "its step outputs too"
 
 
 async def test_an_item_is_archived_once_when_two_callers_race(tmp_path, repo, stub_app):

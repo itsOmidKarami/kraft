@@ -174,3 +174,28 @@ def test_preview_takes_the_start_of_an_id_and_names_an_ambiguous_one(client, rep
 
 def test_preview_needs_at_least_one_id(client):
     assert client.post("/api/storage/preview", json={"ids": []}).status_code == 422
+
+
+def test_preview_counts_a_worktree_items_outputs_as_freed(client, repo):
+    done = _paused(client, repo)
+    _set_status(done, "completed")
+    client.app.state.storage_usage = storage.Usage(_AT, 1000, {done: 400}, {}, {}, {done: 150})
+
+    got = client.post("/api/storage/preview", json={"ids": [done]}).json()
+
+    assert [(i["id"], i["bytes"]) for i in got["items"]] == [(done, 550)]
+    assert (got["freed_bytes"], got["used_after_bytes"]) == (550, 450)
+
+
+@pytest.mark.parametrize("in_place", [False, True], ids=["worktree", "in-place"])
+def test_abandoning_takes_the_items_outputs_off_the_cache(client, repo, in_place):
+    wid = _paused(client, repo, in_place=in_place)
+    client.app.state.storage_usage = storage.Usage(
+        _AT, 100, {}, {"outputs": 60}, {}, {wid: 60, "other": 0}
+    )
+
+    r = client.post(f"/api/work-items/{wid}/abandon", json={"reason": "no"})
+
+    assert r.status_code == 200, r.text
+    used = client.app.state.storage_usage
+    assert (used.governed, used.categories["outputs"], wid in used.outputs) == (40, 0, False)

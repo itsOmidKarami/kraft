@@ -10,6 +10,7 @@ import pytest
 from support.api import _paused, _poll_events, _post_default, _set_status
 from support.harness import git, write
 
+from kraft import storage
 from kraft.adapters.forge.git import PUSHED_REFS
 from kraft.api.routes import lifecycle
 from kraft.config import git_read
@@ -59,14 +60,45 @@ def test_archiving_keeps_the_item_s_folder_but_its_sandbox_home(client, repo, ho
     _poll_events(client, wid, "gate_requested")
     _set_status(wid, "completed")
     run = Path(os.environ["KRAFT_RUN_DIR"])
-    parts = ("docs/spec.md", "history/spec.1.md", "filed/spec.md", "sessions/s1/session.log")
+    parts = (
+        "docs/spec.md",
+        "history/spec.1.md",
+        "filed/spec.md",
+        "sessions/s1/session.log",
+        "sessions/s1/out/result.json",
+    )
     kept = [write(run / "items" / wid, p, "x") for p in parts]
     cache = write(run, f"{home.format(wid=wid)}/.cache/x", "x")
+    outputs = write(run / "items" / wid, "outputs/x/f", "x")
 
     assert client.post(f"/api/work-items/{wid}/archive").status_code == 200
 
     assert [p.read_text() for p in kept] == ["x"] * len(kept)
     assert not cache.parent.parent.exists()
+    assert not outputs.parent.parent.exists(), "step outputs are the one exception"
+
+
+@pytest.mark.parametrize("where", ["worktree", "in-place", "worktree-kept"])
+def test_archive_deletes_outputs(client, repo, monkeypatch, where):
+    """The one thing of an item's own folder archiving frees besides its
+    sandbox home, wherever archiving stops early: an in-place item has no
+    worktree, and a worktree that could not be rescued is left whole."""
+    if where == "worktree-kept":
+        monkeypatch.setattr(
+            lifecycle, "_rescue_detached_head", lambda *a: {"worktree_kept": "rescue failed: test"}
+        )
+    wid = _paused(client, repo, in_place=where == "in-place")
+    _set_status(wid, "completed")
+    run = Path(os.environ["KRAFT_RUN_DIR"])
+    outputs = write(run / "items" / wid, "outputs/build.main.t/variables.env", "K=1\n")
+    result = write(run / "items" / wid, "sessions/s1/out/result.json", "{}")
+    client.app.state.storage_usage = storage.Usage("t", 50, {}, {"outputs": 50}, {}, {wid: 50})
+
+    assert client.post(f"/api/work-items/{wid}/archive").status_code == 200
+
+    assert not (run / "items" / wid / "outputs").exists() and not outputs.exists()
+    assert result.read_text() == "{}"
+    assert client.app.state.storage_usage.outputs == {}, "off the figure at once"
 
 
 @pytest.mark.parametrize(
