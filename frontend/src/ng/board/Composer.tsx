@@ -20,7 +20,7 @@ import { useReason } from "../ui/Reason";
 import { ADD_TITLE, CHOOSE_REPO } from "../ui/reasons";
 import { tip, hint } from "../ui/Tooltip";
 import { BRIEF_HINT } from "./sharedWords";
-import { firstMatch, useRepoFiles } from "./repoFiles";
+import { attachPick, useRepoFiles } from "./repoFiles";
 import { LinkButton, linkButtonClass } from "../ui/LinkButton";
 import { Badge } from "../ui/Badge";
 import { chipClass } from "../ui/Chip";
@@ -79,8 +79,6 @@ function loadComposerDraft(): Draft {
   return blank;
 }
 const forgetComposerDraft = () => { try { sessionStorage.removeItem(COMPOSER_KEY); } catch { /* nothing kept */ } };
-
-const looksLikePath = (s: string) => /[/.]/.test(s) && !/\s/.test(s.trim());
 
 /** The composer at the top of the board (Decisions §7b, AreaBoard 37–62):
  *  title, a line of brief, repo, chain, an optional spec or plan, and a tick
@@ -340,10 +338,8 @@ export function Attach({ kind, repo, path, onPath }: { kind: Kind; repo: string;
               // The list took Enter if it had a pick; this is one it left.
               if (e.key !== "Enter" || !q.trim()) return;
               e.preventDefault();
-              // A pasted path is what the person means; otherwise the first suggestion.
-              const first = firstMatch(files, q);
-              if (looksLikePath(q)) pick(q.trim());
-              else if (first) pick(first);
+              const path = attachPick(files, q);
+              if (path) pick(path);
             }}
           />
           {/* Said before a path outside is refused, with the way on (R10a-02). */}

@@ -27,3 +27,17 @@ export const firstMatch = (choices: Choice[], typed: string): string | undefined
   const q = typed.trim().toLowerCase();
   return choices.find((c) => c.value.toLowerCase().includes(q))?.value;
 };
+
+/** A pasted repo-relative path rather than a search. */
+const looksLikePath = (s: string) => /[/.]/.test(s) && !/\s/.test(s.trim());
+
+/** What Enter attaches for `typed`: the file it names exactly, else the first
+ *  suggestion (a partial path like `specs/new` is a search, and intake refuses
+ *  it as a path), and only then the text itself when it looks like a path to a
+ *  file the list does not hold. */
+export const attachPick = (choices: Choice[], typed: string): string | undefined => {
+  const q = typed.trim();
+  if (!q) return undefined;
+  const exact = choices.find((c) => c.value === q)?.value;
+  return exact ?? firstMatch(choices, q) ?? (looksLikePath(q) ? q : undefined);
+};

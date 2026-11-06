@@ -131,6 +131,15 @@ describe("spec and plan (G.1)", () => {
     expect(calls.some((c) => c.path === "/search")).toBe(false);
   });
 
+  it("attaches the file a partial path names, not the partial path", async () => {
+    mount({ "GET /repos/files": [200, { files: [{ path: ".engineering/specs/cache.md", mtime: 2 }], truncated: false }] });
+    await userEvent.click(await screen.findByRole("button", { name: "+ spec" }));
+    await userEvent.type(await screen.findByRole("combobox", { name: "Attach a spec" }), "specs/cache");
+    await userEvent.click(screen.getByRole("button", { name: "Attach" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByRole("button", { name: "Remove the spec" })).toHaveTextContent(".engineering/specs/cache.md");
+  });
+
   it("says so, in the sheet, when nothing typed names a file", async () => {
     mount({ "GET /repos/files": [200, { files: [{ path: "docs/old.md", mtime: 1 }], truncated: false }] });
     await userEvent.click(await screen.findByRole("button", { name: "+ spec" }));

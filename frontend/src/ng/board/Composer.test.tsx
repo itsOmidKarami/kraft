@@ -301,6 +301,13 @@ describe("Composer", () => {
     fireEvent.change(box(), { target: { value: "new" } });
     fireEvent.keyDown(box(), { key: "Enter" });
     expect(screen.getByTitle(".engineering/specs/new.md")).toBeInTheDocument();
+    // A partial path is a search, not the path: intake would refuse it as typed.
+    fireEvent.click(screen.getByRole("button", { name: "Remove the spec" }));
+    fireEvent.click(screen.getByRole("button", { name: "+ spec" }));
+    await settle();
+    fireEvent.change(box(), { target: { value: "specs/new" } });
+    fireEvent.keyDown(box(), { key: "Enter" });
+    expect(screen.getByTitle(".engineering/specs/new.md")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "+ plan" }));
     await settle();
     fireEvent.change(screen.getByRole("combobox", { name: /Attach a plan/ }), { target: { value: "docs/plans/x.md" } });

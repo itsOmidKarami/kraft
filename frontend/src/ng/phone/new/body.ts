@@ -32,6 +32,3 @@ export function saveDraft(d: NewDraft | null) {
     /* no storage: the draft is simply not kept */
   }
 }
-
-/** A pasted repo-relative path rather than a search. */
-export const looksLikePath = (s: string) => /[/.]/.test(s) && !/\s/.test(s.trim());

@@ -4,7 +4,7 @@ import * as api from "../../../api";
 import { repoName } from "../../../format";
 import { useStore } from "../../../store";
 import type { Repo, TemplateSummary } from "../../../types";
-import { firstMatch, useRepoFiles } from "../../board/repoFiles";
+import { attachPick, useRepoFiles } from "../../board/repoFiles";
 import { FILED_PAUSED, KEEP_EDITING } from "../../board/newWords";
 import { chainOptionText, chainsForRepo, defaultChainNote } from "../../library/types";
 import { detailOf, jsonBody, request } from "../../http";
@@ -16,7 +16,7 @@ import { ConfirmSheet, EditSheet, useSheet } from "../nav/Sheet";
 import { ComposerHeader } from "../nav/ScreenHeader";
 import { useBack } from "../nav/trail";
 import { ActionBar } from "../ui/Rows";
-import { createBody, loadDraft, looksLikePath, saveDraft, type AttachKind, type NewDraft } from "./body";
+import { createBody, loadDraft, saveDraft, type AttachKind, type NewDraft } from "./body";
 import "./new.css";
 import { BRIEF_HINT, DISCARD_THIS_DRAFT } from "../../board/sharedWords";
 
@@ -69,10 +69,9 @@ export function NewItem() {
     navigate("/", { replace: true });
   };
 
-  // A pasted path is what the person means; otherwise the first suggestion.
   const attach = (q: string) => {
-    const path = looksLikePath(q) ? q.trim() : firstMatch(files, q);
-    if (!q.trim() || !path) return setError("Pick a file from the list, or paste a repo-relative path.");
+    const path = attachPick(files, q);
+    if (!path) return setError("Pick a file from the list, or paste a repo-relative path.");
     setError(null);
     set({ [kind]: path });
     sheet.close();
