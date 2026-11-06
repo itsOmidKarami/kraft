@@ -96,8 +96,10 @@ export interface StorageItem {
   archived: boolean;
   /** Its worktree and sandbox home: what archiving frees. */
   bytes: number;
-  /** Its documents and session output: governed, kept by archiving, removed by abandoning. */
+  /** Its documents and session summaries: governed, kept by archiving, removed by abandoning. */
   documents_bytes: number;
+  /** What the tasks of its chain left for later tasks to read: governed, and removed by archiving. */
+  outputs_bytes: number;
   updated_at: string;
   /** Completed or abandoned, and not archived: what a clean-up may take. */
   reclaimable: boolean;
@@ -145,7 +147,7 @@ export interface StorageUsage {
   quota_bytes: number | null;
   limit_bytes: number | null;
   reclaimable_bytes: number;
-  /** worktrees, sandboxes, documents, logs, results, databases, attachments, other. */
+  /** worktrees, sandboxes, documents, outputs, logs, results, databases, attachments, other. */
   categories: Record<string, number>;
   /** Largest first. */
   items: StorageItem[];

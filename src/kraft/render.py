@@ -701,6 +701,8 @@ def storage_block(payload: dict) -> str:
             "size": human_size(item["bytes"]),
             # Kept by archiving, removed by abandoning: apart from `size`.
             "documents": human_size(docs) if (docs := item.get("documents_bytes")) else "",
+            # What its tasks left for later tasks: archiving frees it, so apart from `documents`.
+            "outputs": human_size(out) if (out := item.get("outputs_bytes")) else "",
             "age": relative_time(item["updated_at"]),
             "reclaimable": "yes" if item["reclaimable"] else "",
             "title": item["title"],
@@ -712,6 +714,7 @@ def storage_block(payload: dict) -> str:
             "status": "orphan",
             "size": human_size(orphan["bytes"]),
             "documents": "",
+            "outputs": "",
             "age": "",
             "reclaimable": "",
             "title": "no work item",
@@ -729,6 +732,7 @@ def storage_block(payload: dict) -> str:
                     ("STATUS", "status"),
                     ("SIZE", "size"),
                     ("DOCUMENTS", "documents"),
+                    ("OUTPUTS", "outputs"),
                     ("AGE", "age"),
                     ("RECLAIMABLE", "reclaimable"),
                     ("TITLE", "title"),

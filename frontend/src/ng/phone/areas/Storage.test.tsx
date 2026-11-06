@@ -9,7 +9,7 @@ const GB = 1024 ** 3;
 const usage = (over: Record<string, unknown> = {}) => ({
   used_bytes: 12 * GB, quota_bytes: 8 * GB, limit_bytes: 10 * GB, state: "held", measured_at: "2026-10-01T10:00:00Z", reclaimable_bytes: 3 * GB,
   categories: { worktrees: 12 * GB, logs: GB / 2 },
-  items: [{ id: "w1", title: "Old", status: "done", archived: false, bytes: 3 * GB, documents_bytes: 0, reclaimable: true, updated_at: "2026-09-01T10:00:00Z" }],
+  items: [{ id: "w1", title: "Old", status: "done", archived: false, bytes: 3 * GB, documents_bytes: 0, outputs_bytes: 0, reclaimable: true, updated_at: "2026-09-01T10:00:00Z" }],
   orphans: [],
   ...over,
 });

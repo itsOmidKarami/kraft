@@ -1,11 +1,12 @@
 import { humanSize } from "../../sizes";
 import type { StorageUsage } from "../../types";
 
-/** The server's eight categories, in the order Storage lists them, on both layouts. */
+/** The server's nine categories, in the order Storage lists them, on both layouts. */
 export const CATEGORIES: [key: string, label: string][] = [
   ["worktrees", "Worktrees"],
   ["sandboxes", "Sandbox stores and homes"],
-  ["documents", "Item documents and session output"],
+  ["documents", "Item documents and session summaries"],
+  ["outputs", "Step outputs"],
   ["logs", "Logs"],
   ["results", "Results"],
   ["databases", "Databases and backups"],
@@ -33,8 +34,8 @@ export const CLEAN_SELECTED = "Clean up selected";
 export const CLEANABLE = "can be cleaned up";
 export const cleanAll = (count: number, bytes: number) => `Clean up all (${count}, ${humanSize(bytes)})`;
 
-/** What `used_bytes` measures: the three categories the quota and limit govern, not the worktrees alone. */
-export const COUNTED = "worktrees, sandboxes and documents";
+/** What `used_bytes` measures: the categories the quota and limit govern, not the worktrees alone. */
+export const COUNTED = "worktrees, sandboxes, documents and step outputs";
 
 /** The key figure, said once above the bar: what is counted, against the limit when there is one. */
 /** The same words wherever the total meets the limit: the Storage figure, the queued toast, the queued card. */

@@ -48,7 +48,7 @@ describe("Settings › Storage, usage", () => {
     stubFetch({ "GET /storage": [200, storageUsage({ state: null, quota_bytes: null, limit_bytes: null })] });
     mount();
     expect(await screen.findByText(/No limit set/)).toBeInTheDocument();
-    expect(screen.getByText("12 GB counted: worktrees, sandboxes and documents")).toHaveClass("set-st-figure");
+    expect(screen.getByText("12 GB counted: worktrees, sandboxes, documents and step outputs")).toHaveClass("set-st-figure");
     expect(screen.queryByRole("img")).toBeNull();
     expect(screen.getByRole("link", { name: /Set one in Policy › Housekeeping/ })).toHaveAttribute("href", "/settings/policy/housekeeping");
   });
@@ -57,7 +57,7 @@ describe("Settings › Storage, usage", () => {
     stubFetch({ "GET /storage": [200, storageUsage()] });
     mount();
     const totals = (await screen.findByText("Sandbox stores and homes")).closest("dl") as HTMLElement;
-    expect([...totals.querySelectorAll("dt")].map((d) => d.textContent)).toEqual(["Worktrees", "Sandbox stores and homes", "Item documents and session output", "Logs", "Results", "Databases and backups", "Attachments", "Everything else"]);
+    expect([...totals.querySelectorAll("dt")].map((d) => d.textContent)).toEqual(["Worktrees", "Sandbox stores and homes", "Item documents and session summaries", "Step outputs", "Logs", "Results", "Databases and backups", "Attachments", "Everything else"]);
     expect(within(totals).getByText("Worktrees").nextElementSibling).toHaveTextContent("11 GB");
     expect(within(totals).getByText("Logs").nextElementSibling).toHaveTextContent("200 MB");
     expect(screen.getByText("measured 2m ago")).toBeInTheDocument();
@@ -113,9 +113,11 @@ describe("Settings › Storage worktrees", () => {
     await screen.findByRole("table");
     expect(rows().map((r) => within(r).getAllByRole("cell")[1].textContent)).toEqual(["Rate limiter", "Cache embeddings", "Old spike", "7f3a"]);
     const [live, finished] = rows();
-    expect(within(live).getAllByRole("cell").map((c) => c.textContent)).toEqual(["", "Rate limiter", "active", "6 GB", "", "1d ago"]);
+    expect(within(live).getAllByRole("cell").map((c) => c.textContent)).toEqual(["", "Rate limiter", "active", "6 GB", "", "", "1d ago"]);
     // An item's documents, kept by archiving, are named apart from what archiving frees.
     expect(within(finished).getAllByRole("cell")[4]).toHaveTextContent("512 MB");
+    // Its step outputs are archiving's to free, so apart from the documents.
+    expect(within(finished).getAllByRole("cell")[5]).toHaveTextContent("64 MB");
     expect(within(finished).getByText(/completed/)).toHaveTextContent(/completed.*can be cleaned up/);
     expect(screen.getByRole("link", { name: "Rate limiter" })).toHaveAttribute("href", "/work-items/w3");
   });

@@ -142,6 +142,7 @@ export function StoragePage() {
                     <th scope="col">Status</th>
                     <th scope="col" className="is-num">Size</th>
                     <th scope="col" className="is-num" title="Kept by archiving; removed by abandoning the item">Documents</th>
+                    <th scope="col" className="is-num" title="What its tasks left for later tasks to read; removed by archiving the item">Step outputs</th>
                     <th scope="col">Updated</th>
                   </tr>
                 </thead>
@@ -153,6 +154,7 @@ export function StoragePage() {
                       <td>{i.archived ? "archived" : i.status.replace(/_/g, " ")}{i.reclaimable && <> <Badge>{CLEANABLE}</Badge></>}</td>
                       <td className="is-num">{humanSize(i.bytes)}</td>
                       <td className="is-num">{i.documents_bytes ? humanSize(i.documents_bytes) : ""}</td>
+                      <td className="is-num">{i.outputs_bytes ? humanSize(i.outputs_bytes) : ""}</td>
                       <td>{ago(i.updated_at)}</td>
                     </tr>
                   ))}
@@ -162,6 +164,7 @@ export function StoragePage() {
                       <td className="set-mono">{o.name}</td>
                       <td>no work item</td>
                       <td className="is-num">{humanSize(o.bytes)}</td>
+                      <td />
                       <td />
                       <td />
                     </tr>

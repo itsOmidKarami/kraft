@@ -923,11 +923,11 @@ const GB = 1024 ** 3;
 function storageFor(items: any[]) {
   const rows = items.map((i, k) => {
     const ended = i.status === "completed" || i.status === "abandoned";
-    return { id: i.id, title: i.title, status: i.status, archived: !!i.archived_at, bytes: i.archived_at ? 0 : ((k * 7) % 5 + 1) * 0.4 * GB, documents_bytes: 3 * 1024 ** 2, updated_at: i.updated_at, reclaimable: ended && !i.archived_at };
+    return { id: i.id, title: i.title, status: i.status, archived: !!i.archived_at, bytes: i.archived_at ? 0 : ((k * 7) % 5 + 1) * 0.4 * GB, documents_bytes: 3 * 1024 ** 2, outputs_bytes: ended && !i.archived_at ? 5 * 1024 ** 2 : 0, updated_at: i.updated_at, reclaimable: ended && !i.archived_at };
   }).sort((a, b) => b.bytes - a.bytes);
   const worktrees = rows.reduce((n, r) => n + r.bytes, 0);
-  const categories = { worktrees, sandboxes: 0, documents: rows.length * 3 * 1024 ** 2, logs: 180 * 1024 ** 2, results: 12 * 1024 ** 2, databases: 40 * 1024 ** 2, attachments: 0, other: 0 };
+  const categories = { worktrees, sandboxes: 0, documents: rows.length * 3 * 1024 ** 2, outputs: rows.reduce((n, r) => n + r.outputs_bytes, 0), logs: 180 * 1024 ** 2, results: 12 * 1024 ** 2, databases: 40 * 1024 ** 2, attachments: 0, other: 0 };
   const used = Object.values(categories).reduce((n, b) => n + b, 0);
   return { measured_at: new Date(Date.now() - 120_000).toISOString(), state: "ok", used_bytes: used, quota_bytes: 40 * GB, limit_bytes: 50 * GB,
-    reclaimable_bytes: rows.filter((r) => r.reclaimable).reduce((n, r) => n + r.bytes, 0), categories, items: rows, orphans: [] };
+    reclaimable_bytes: rows.filter((r) => r.reclaimable).reduce((n, r) => n + r.bytes + r.outputs_bytes, 0), categories, items: rows, orphans: [] };
 }
