@@ -1886,6 +1886,9 @@ async def _walk_node_once(
                 # asked is addressed to a human, and no repair task can answer
                 # it (Kraft-rv6i).
                 repaired = True
+                # What was measured, before `failed` becomes the repair's own
+                # tasks: a doubted repair of a red pipeline is still the pipeline's.
+                red_pipeline = _red_pipeline_only(failed)
                 verdict, failed, excs = await recover_node(
                     db,
                     run_dirs,
@@ -1908,6 +1911,7 @@ async def _walk_node_once(
                     return _Stuck(
                         _doubted_repair_reason(db, work_item_id, node, failed),
                         kind=StopKind.STUCK,
+                        escalatable=not red_pipeline,
                     )
                 # The same ladder as the measurement: a repair that could not
                 # start, or a re-measure that hit a sentinel, is not "task
@@ -2419,7 +2423,11 @@ async def _walk_node_once(
                 )
             )
             if verdict == "stop_needs_human":
-                return _Stuck(f"judge: {reasoning}", kind=StopKind.STUCK)
+                return _Stuck(
+                    f"judge: {reasoning}",
+                    kind=StopKind.STUCK,
+                    escalatable=not _red_pipeline_only(failed),
+                )
             # "as if there were no eligible findings" (spec) -- a task that
             # failed outright (blind or not: a red pipeline reports findings
             # *and* fails) would still be in the loop once its eligible

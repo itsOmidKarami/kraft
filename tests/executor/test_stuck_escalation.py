@@ -440,6 +440,85 @@ async def test_red_pipeline_is_not_stuck(item_on, monkeypatch, scripted, node):
     assert it.events("work_item_needs_human")[-1]["payload"]["kind"] == "failed"
 
 
+def _stop_on_a_red_pipeline(node, *, judged=False, doubted=False, unchanged=False):
+    async def arrange(it, script, monkeypatch, tmp_path):
+        if doubted:
+            await _doubted(it, script, monkeypatch, tmp_path)
+        if unchanged:
+            script.unchanged = {"fix"}
+        if judged:
+            script.real.add("fix")  # the judge is due only once a fix session exists
+
+            async def verdict(*a, **kw):
+                return "stop_needs_human", "not converging"
+
+            monkeypatch.setattr(dispatch, "judge_verdict", verdict)
+
+    return node, arrange
+
+
+@pytest.mark.parametrize(
+    "node, arrange, cause",
+    [
+        pytest.param(
+            *_stop_on_a_red_pipeline(
+                _pipeline_node(on_failure={"tasks": [_sub("repair")]}), doubted=True
+            ),
+            "finished with concerns",
+            id="doubted-repair",
+        ),
+        pytest.param(
+            *_stop_on_a_red_pipeline(
+                _pipeline_node(
+                    fix_loop={"tasks": [_editing_fix()], "max_attempts": 5, "judge": _sub("judge")}
+                ),
+                judged=True,
+            ),
+            "judge: not converging",
+            id="judge-stop",
+        ),
+        pytest.param(
+            *_stop_on_a_red_pipeline(
+                _pipeline_node(fix_loop={"tasks": [_editing_fix()], "max_attempts": 9})
+            ),
+            "unchanged across",
+            id="repeat-fingerprint",
+        ),
+        pytest.param(
+            *_stop_on_a_red_pipeline(
+                _pipeline_node(fix_loop={"tasks": [_sub("fix")], "max_attempts": 9}),
+                unchanged=True,
+            ),
+            "changed nothing",
+            id="fix-changed-nothing",
+        ),
+    ],
+)
+async def test_every_stuck_stop_on_a_red_pipeline_goes_to_a_person(
+    item_on, script, monkeypatch, tmp_path, node, arrange, cause
+):
+    """The stuck stops a fix loop or a repair can end on, with a `ci.pipeline`
+    as the failed task: none is escalatable, so neither the node's
+    `escalation` nor `auto_escalate_stuck` answers it."""
+    monkeypatch.setattr(
+        forge.run, "resolve", lambda name: forge.FakeForge(pipeline_statuses={"7": [_RED]})
+    )
+    script.real.add("ci")
+    it = await item_on([node])
+    await arrange(it, script, monkeypatch, tmp_path)
+
+    assert (
+        await executor.run_once(
+            it.database, it.run_dirs, work_item_id=it.id, policy=_policy_(), launch=_ON_A_FORGE
+        )
+        == "needs_human"
+    )
+
+    assert cause in _reason(it), _reason(it)
+    assert not it.events("stuck_escalation_started")
+    assert not gates.stuck_stop(it.database.read(lambda c: events.read_after(c, 0, it.id)))
+
+
 async def test_red_pipeline_runs_on_failure(item_on, monkeypatch):
     monkeypatch.setattr(
         forge.run, "resolve", lambda name: forge.FakeForge(pipeline_statuses={"7": [_RED]})

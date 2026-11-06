@@ -20,10 +20,11 @@ def forge(target: str = CI, **kw) -> dict:
     [
         pytest.param(forge(pipeline="12345"), id="digits"),
         pytest.param(forge(pipeline="0"), id="zero"),
+        pytest.param(forge(pipeline=12345), id="unquoted-yaml-integer"),
     ],
 )
 def test_ci_pipeline_accepts_a_literal_id(task):
-    assert tm.ForgeTask.model_validate(task).pipeline == task["pipeline"]
+    assert tm.ForgeTask.model_validate(task).pipeline == str(task["pipeline"])
 
 
 @pytest.mark.parametrize(
@@ -36,6 +37,7 @@ def test_ci_pipeline_accepts_a_literal_id(task):
         pytest.param(forge(pipeline="12a"), "digits only", id="letters"),
         pytest.param(forge(pipeline="12\n"), "digits only", id="trailing-newline"),
         pytest.param(forge(pipeline=""), "digits only", id="empty"),
+        pytest.param(forge(pipeline=-5), "digits only", id="negative-integer"),
         pytest.param(forge(pipeline="12345", scope="each_repository"), "scope", id="fan-out"),
     ],
 )
@@ -103,9 +105,3 @@ def test_ci_pipeline_reads_its_id_from_a_writers_variable(pipeline):
 def test_ci_pipeline_variable_refusals(pipeline, kw, match):
     with pytest.raises(ValidationError, match=match):
         tm.Chain.model_validate(_chain_with(pipeline, **kw))
-
-
-def test_ci_pipeline_takes_reads_and_mr_ci_does_not():
-    assert tm.ForgeTask.model_validate(forge(pipeline="1", reads=["s.t"])).reads == ["s.t"]
-    assert "reads" not in tm.ForgeTask.model_validate(forge(pipeline="1")).unread()
-    assert "reads" in tm.ForgeTask.model_validate(forge("mr.ci")).unread()

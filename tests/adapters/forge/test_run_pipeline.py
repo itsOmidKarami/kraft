@@ -23,6 +23,7 @@ RED = (forge.FailedJob("test", "failed", "script_failure"),)
 RUNNER = (forge.FailedJob("test", "failed", "runner_system_failure"),)
 NOT_FOUND = forge.ForgeError("404 Not Found: pipelines/123", status=404, reason="not_found")
 OUTAGE = forge.ForgeError("glab: dial tcp: connection refused")
+UNREACHABLE = forge.ForgeError("connect timed out", reason="unreachable")
 
 
 def pipe(state: str = "success", **kw) -> forge.CIStatus:
@@ -126,8 +127,11 @@ async def test_pipeline_wait_not_found_tells_which_id_to_give_and_never_quotes_i
     assert "404 Not Found" in log, "the forge's own words stay"
 
 
-async def test_pipeline_wait_keeps_waiting_through_an_outage_then_settles(run_forge):
-    fake = fake_of(OUTAGE, pipe())
+@pytest.mark.parametrize(
+    "outage", [OUTAGE, UNREACHABLE], ids=["cli-outage", "transport-unreachable"]
+)
+async def test_pipeline_wait_keeps_waiting_through_an_outage_then_settles(run_forge, outage):
+    fake = fake_of(outage, pipe())
 
     first = await look(run_forge, fake, "s1")
     second = await look(run_forge, fake, "s2")

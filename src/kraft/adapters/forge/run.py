@@ -2616,7 +2616,7 @@ async def run_task(
                 log += root_log
             # `merge_watch` reads the item's own base whichever target it
             # was handed (above); every other handler targets this one's.
-            member = role == "submodule" and handler not in ("merge_watch", "pipeline_wait")
+            member = role == "submodule" and handler != "merge_watch"
             if settled is None:
                 one_log, one_status, one_findings, one_note = await _run_one(
                     member_forges.get(mounts_by_row.get(row_id), live_forge),

@@ -43,6 +43,7 @@ from pydantic import (
     StringConstraints,
     ValidationError,
     ValidationInfo,
+    field_validator,
     model_validator,
 )
 
@@ -762,6 +763,13 @@ class ForgeTask(TaskBase):
     #: `ci.pipeline` only, and required there: the id of the one pipeline it
     #: waits for (a GitLab pipeline `id`, a GitHub Actions run id), as digits.
     pipeline: StrictStr | None = None
+
+    @field_validator("pipeline", mode="before")
+    @classmethod
+    def _unquoted_pipeline_id(cls, value: object) -> object:
+        """`pipeline: 12345`, unquoted, is how an author writes an id: YAML
+        reads an integer, which is the digits it means."""
+        return str(value) if isinstance(value, int) and not isinstance(value, bool) else value
 
     def takes_reads(self) -> bool:
         return self.target is ForgeAction.CI_PIPELINE

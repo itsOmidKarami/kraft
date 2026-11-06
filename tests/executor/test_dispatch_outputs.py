@@ -10,6 +10,7 @@ import pytest
 from support.harness import entry_of, git, v1_node, v1_task
 
 from kraft import executor, item_paths, outputs
+from kraft.adapters import forge
 from kraft.adapters import subprocess as _subprocess
 from kraft.executor import dispatch, prompts
 
@@ -367,3 +368,34 @@ async def test_declared_variables_are_the_chains_current_declaration(item_on):
         "r.main.rd": (),
         "gone.main.x": (),
     }
+
+
+@pytest.mark.parametrize(
+    ("target", "fields", "reads_chain"),
+    [
+        pytest.param("ci.pipeline", {"pipeline": "7"}, True, id="ci.pipeline"),
+        pytest.param("mr.ci", {}, False, id="mr.ci"),
+    ],
+)
+async def test_only_a_ci_pipeline_dispatch_reads_the_chains_declarations(
+    item_on, monkeypatch, target, fields, reads_chain
+):
+    """Every forge dispatch (each `mr.ci` poll) would otherwise re-validate the
+    item's whole chain to hand a handler variables it never reads."""
+    monkeypatch.setattr(forge.run, "resolve", lambda name: forge.FakeForge())
+    read = []
+    real = dispatch.declared_variables
+    monkeypatch.setattr(dispatch, "declared_variables", lambda *a: read.append(a) or real(*a))
+    task = {"id": "ci", "kind": "forge", "target": target, **fields}
+    it = await item_on([{"id": "w", "kind": "exec", "tasks": [task]}])
+
+    await executor.run_once(
+        it.database,
+        it.run_dirs,
+        work_item_id=it.id,
+        launch=executor.LaunchContext(
+            repo_entry=entry_of({"setup_command": "", "forge": "github"})
+        ),
+    )
+
+    assert bool(read) is reads_chain

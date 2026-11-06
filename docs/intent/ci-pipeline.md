@@ -103,7 +103,7 @@ origin: src/kraft/adapters/forge/run.py §_observed
 ## REQ ci-pipeline-keeps-waiting-through-an-outage
 
 WHEN the forge cannot be reached while a `ci.pipeline` task looks, the system SHALL keep waiting.
-enforced-by: tests/adapters/forge/test_run_pipeline.py::test_pipeline_wait_keeps_waiting_through_an_outage_then_settles
+enforced-by: tests/adapters/forge/test_run_pipeline.py::test_pipeline_wait_keeps_waiting_through_an_outage_then_settles[cli-outage], tests/adapters/forge/test_run_pipeline.py::test_pipeline_wait_keeps_waiting_through_an_outage_then_settles[transport-unreachable]
 origin: src/kraft/adapters/forge/run.py §_pipeline_wait
 
 ## REQ ci-pipeline-lets-an-auth-or-rate-limit-error-stop-as-usual
@@ -144,7 +144,7 @@ origin: src/kraft/adapters/forge/glab.py §_failure_detail
 
 IF a `ci.pipeline` task fails, THEN the system SHALL stop the item for a person without running
 the node's `escalation` or `auto_escalate_stuck`.
-enforced-by: tests/executor/test_stuck_escalation.py::test_red_pipeline_is_not_stuck[no-on-failure], tests/executor/test_stuck_escalation.py::test_red_pipeline_is_not_stuck[fix-loop-cap-spent], tests/executor/test_stuck_escalation.py::test_red_pipeline_is_not_stuck[auth-failure], tests/executor/test_stuck_escalation.py::test_red_pipeline_runs_on_failure
+enforced-by: tests/executor/test_stuck_escalation.py::test_red_pipeline_is_not_stuck[no-on-failure], tests/executor/test_stuck_escalation.py::test_red_pipeline_is_not_stuck[fix-loop-cap-spent], tests/executor/test_stuck_escalation.py::test_red_pipeline_is_not_stuck[auth-failure], tests/executor/test_stuck_escalation.py::test_every_stuck_stop_on_a_red_pipeline_goes_to_a_person[doubted-repair], tests/executor/test_stuck_escalation.py::test_every_stuck_stop_on_a_red_pipeline_goes_to_a_person[judge-stop], tests/executor/test_stuck_escalation.py::test_every_stuck_stop_on_a_red_pipeline_goes_to_a_person[repeat-fingerprint], tests/executor/test_stuck_escalation.py::test_every_stuck_stop_on_a_red_pipeline_goes_to_a_person[fix-changed-nothing], tests/executor/test_stuck_escalation.py::test_red_pipeline_runs_on_failure
 origin: src/kraft/executor/walk.py §_red_pipeline_only
 
 ## REQ ci-log-text-is-framed-as-data-for-a-fix-agent
