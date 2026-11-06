@@ -269,6 +269,9 @@ when `NEW` does not collect.
   `plugins/kraft/skills` runs the tests that read those. It runs on your
   logical CPUs plus two workers, as `just test` does; `KRAFT_TEST_WORKERS`
   sets another count (for a Kraft worker, in the repo's `repos.yaml` `env:`).
+  Those lists come from tracing readers; `just check-targeted-maps` checks
+  them by experiment, running the full suite before and after such a change
+  and failing on a new failure in a test the plan did not name.
 - `just test <paths>` fails when nothing ran: a path that collects nothing,
   and a run testmon (or `-k`/`-m`) deselected to `0 selected`. Pass
   `--no-testmon` to run the paths regardless.

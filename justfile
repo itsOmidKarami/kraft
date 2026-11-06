@@ -604,6 +604,15 @@ ci-checks:
 test-targeted: ci-checks
     uv run python dev/targeted_tests.py run
 
+# Check by experiment that test-targeted names every test a change can break:
+# in a throwaway worktree, the full suite before and after a change its lists
+# cover (`config`: a comment above every line of every config file). A failure
+# only the change causes, in a test the plan did not name, exits 1. Two full
+# runs, about 40 minutes on four CPUs; not run by CI.
+[doc("Check test-targeted's lists by experiment: the full suite before and after a change they cover")]
+check-targeted-maps tree="config" *args:
+    uv run python dev/check_targeted_maps.py {{tree}} {{args}}
+
 # Preview the docs site with live reload at http://localhost:3000/kraft/
 docs:
     cd docsite && [ -d node_modules ] || npm ci
