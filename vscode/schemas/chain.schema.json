@@ -122,6 +122,17 @@
           ],
           "default": null
         },
+        "outputs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutputsDecl"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "policy": {
           "anyOf": [
             {
@@ -163,6 +174,13 @@
           "minLength": 1,
           "title": "Prompt",
           "type": "string"
+        },
+        "reads": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reads",
+          "type": "array"
         },
         "scope": {
           "$ref": "#/$defs/TaskScope",
@@ -319,6 +337,13 @@
             }
           ],
           "default": null
+        },
+        "reads": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reads",
+          "type": "array"
         },
         "ref": {
           "$ref": "#/$defs/BuiltinAction"
@@ -779,6 +804,13 @@
           ],
           "default": null
         },
+        "reads": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reads",
+          "type": "array"
+        },
         "reviewers": {
           "anyOf": [
             {
@@ -1006,6 +1038,28 @@
         }
       },
       "title": "NetworkPhase",
+      "type": "object"
+    },
+    "OutputsDecl": {
+      "additionalProperties": false,
+      "description": "What a task leaves behind for a later task's `reads`: files named inside\n`$KRAFT_OUTPUT_DIR`, and keys of its `variables.env`. Kraft checks and\nsnapshots them when the task ends (`kraft.outputs`).",
+      "properties": {
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "variables": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Variables",
+          "type": "array"
+        }
+      },
+      "title": "OutputsDecl",
       "type": "object"
     },
     "PollingPolicy": {
@@ -1492,6 +1546,17 @@
           ],
           "default": null
         },
+        "outputs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutputsDecl"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "policy": {
           "anyOf": [
             {
@@ -1502,6 +1567,13 @@
             }
           ],
           "default": null
+        },
+        "reads": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reads",
+          "type": "array"
         },
         "scope": {
           "$ref": "#/$defs/TaskScope",

@@ -164,7 +164,7 @@ AGENT_ONLY = {
 @pytest.mark.parametrize(
     ("task", "own"),
     [
-        ('kind: subprocess, command: "true"', {"command"}),
+        ('kind: subprocess, command: "true"', {"command", "outputs", "reads"}),
         ("kind: builtin, ref: kraft.mr_rebase", {"ref", "execution", "suite"}),
         ("kind: forge, target: mr.sync", {"target", "wait", "reviewers"}),
     ],

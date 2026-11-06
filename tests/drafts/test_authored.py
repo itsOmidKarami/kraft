@@ -22,6 +22,7 @@ from kraft.templates.models import (
     ForgeTask,
     GateNode,
     MergeRejectionPolicy,
+    OutputsDecl,
     RecoveryPlan,
     Step,
     SubprocessTask,
@@ -128,6 +129,7 @@ CANONICAL = [
     (FixLoop, authored.SHAPE_KEYS),
     (BaseChangePolicy, authored.NESTED_KEYS["on_base_changed"]),
     (MergeRejectionPolicy, authored.NESTED_KEYS["on_merge_rejected"]),
+    (OutputsDecl, authored.NESTED_KEYS["outputs"]),
     *((task, authored.TASK_KEYS) for task in (AgentTask, BuiltinTask, SubprocessTask, ForgeTask)),
 ]
 

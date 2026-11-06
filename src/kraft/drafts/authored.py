@@ -36,8 +36,8 @@ NODE_KEYS = (
 )  # fmt: skip
 TASK_KEYS = (
     "id", "kind", "extends", "icon", "harness", "ref", "command", "target", "prompt", "skill",
-    "produces", "profile", "model", "effort", "inputs", "fallback", "steering", "scope",
-    "execution", "suite", "wait", "reviewers", "policy", "skippable", "on_failure",
+    "produces", "profile", "model", "effort", "inputs", "fallback", "outputs", "reads", "steering",
+    "scope", "execution", "suite", "wait", "reviewers", "policy", "skippable", "on_failure",
 )  # fmt: skip
 STEP_KEYS = (
     "id", "extends", "runner", "icon", "tasks", "on_failure", "policy", "skippable", "read_only",
@@ -50,6 +50,7 @@ NESTED_KEYS = {
     "on_merge_rejected": ("restart_from", "repair"),
     "wait": ("grace_period", "polling"),
     "polling": ("initial_interval", "max_interval"),
+    "outputs": ("files", "variables"),
 }
 
 #: Top-level collections written with a blank line between entries, as the
