@@ -252,6 +252,8 @@ class PolicyInput(BaseModel):
     #: Still read, so an upgraded file keeps firing; `doctor` names the move.
     triggers: list[TriggerInput] = Field(default_factory=list)
     max_concurrent: PositiveInt = 3
+    max_slices: PositiveInt = 6
+    max_concurrent_slices: PositiveInt | None = None
     archive: ArchiveInput | None = None
     storage: StorageInput | None = None
     attribution: AttributionInput | None = None
@@ -387,6 +389,11 @@ class Policy:
     #: the only door onto a running item, so the cap belongs where every door
     #: (`resume`, `retry`) can read the same number.
     max_concurrent: int = 3
+    #: The most slices a plan's `## Slices` section may split into; more means
+    #: the item is not sliced. `max_concurrent_slices` caps how many of one
+    #: parent's children run at once (None: only `max_concurrent` limits them).
+    max_slices: int = 6
+    max_concurrent_slices: int | None = None
     #: Whether a `needs_human` stop for a reason other than a pending gate
     #: auto-dispatches an escalation turn (Kraft-lpdd). Independent of
     #: `auto_escalate` (gate review) -- different mechanism, different trigger,
@@ -477,6 +484,8 @@ class Policy:
             rate_limit_retries=parsed.rate_limit_retries,
             triggers=_triggers(name, parsed.triggers),
             max_concurrent=parsed.max_concurrent,
+            max_slices=parsed.max_slices,
+            max_concurrent_slices=parsed.max_concurrent_slices,
             auto_escalate_stuck=parsed.auto_escalate_stuck,
             auto_escalate_stuck_cap=parsed.auto_escalate_stuck_cap,
             auto_escalate_delay_s=parsed.auto_escalate_delay_s,

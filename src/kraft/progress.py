@@ -57,6 +57,21 @@ _COMMIT_TASK = re.compile(r"\btask\s+(\d+(?:\s*[+,&]\s*\d+)*)", re.IGNORECASE)
 _FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 
 
+def unfenced_lines(text: str) -> list[str]:
+    """`text` split into lines, with every line of (and the fences around) a
+    fenced ```/~~~ code block blanked. Keeps the line count, so an index into
+    the result is an index into the text's own lines."""
+    in_fence = False
+    lines = []
+    for line in text.split("\n"):
+        if _FENCE.match(line):
+            in_fence = not in_fence
+            lines.append("")
+        else:
+            lines.append("" if in_fence else line)
+    return lines
+
+
 def parse_tasks(text: str) -> list[tuple[str, bool]]:
     """The `(title, done)` pairs of a plan's `## Task N` / `### Task N`
     headings, in order. `done` is True iff the title ends with the exact
@@ -67,15 +82,7 @@ def parse_tasks(text: str) -> list[tuple[str, bool]]:
     that quotes a `## Task N` heading in an example or test fixture (Kraft-szad)
     would otherwise count as a real one.
     """
-    in_fence = False
-    lines = []
-    for line in text.split("\n"):
-        if _FENCE.match(line):
-            in_fence = not in_fence
-            lines.append("")
-        else:
-            lines.append("" if in_fence else line)
-    titles = [m[1].strip() for m in _TASK_HEADING.finditer("\n".join(lines))]
+    titles = [m[1].strip() for m in _TASK_HEADING.finditer("\n".join(unfenced_lines(text)))]
     result = []
     for title in titles:
         done = title.endswith("[DONE]")

@@ -604,6 +604,25 @@
       "title": "Max Concurrent",
       "type": "integer"
     },
+    "max_concurrent_slices": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Concurrent Slices"
+    },
+    "max_slices": {
+      "default": 6,
+      "exclusiveMinimum": 0,
+      "title": "Max Slices",
+      "type": "integer"
+    },
     "maxima": {
       "$ref": "#/$defs/PolicyMaximaInput"
     },

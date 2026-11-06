@@ -42,6 +42,12 @@ findings:
 # files its item paused, so it takes none until a person starts it.
 max_concurrent: 3
 
+# Slicing. A plan whose `## Slices` section names more slices than max_slices is
+# not sliced. max_concurrent_slices caps how many of one sliced item's children
+# run at once; delete it for no limit beyond max_concurrent.
+max_slices: 6
+# max_concurrent_slices: 2
+
 # Spend caps, in dollars. This file turns both on; delete a key to turn that
 # cap off (a missing key is no cap). A cap refuses to START the next agent
 # task; it cannot interrupt one that is already running, because the agent
