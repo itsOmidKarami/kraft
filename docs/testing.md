@@ -266,7 +266,9 @@ when `NEW` does not collect.
   whose change is whole-line comments and blank lines not at its end, with
   equal data at both ends, runs the tests that read that text; and an
   edit (not an add or delete) to `src/kraft/console/kraft.tcss` or
-  `plugins/kraft/skills` runs the tests that read those.
+  `plugins/kraft/skills` runs the tests that read those. It runs on your
+  logical CPUs plus two workers, as `just test` does; `KRAFT_TEST_WORKERS`
+  sets another count (for a Kraft worker, in the repo's `repos.yaml` `env:`).
 - `just test <paths>` fails when nothing ran: a path that collects nothing,
   and a run testmon (or `-k`/`-m`) deselected to `0 selected`. Pass
   `--no-testmon` to run the paths regardless.

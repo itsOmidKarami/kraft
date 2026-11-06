@@ -72,7 +72,7 @@ def tt():
     ],
 )
 def test_the_plan_runs_the_full_suite_only_for_a_change_testmon_cannot_see(tt, changed, full):
-    plan = tt.plan(changed)
+    plan = tt.plan(changed, n="5")
     if full:
         [step] = plan.steps
         # Still recorded, or the next selection grows and never shrinks (Kraft-4t45n.5).
@@ -82,7 +82,7 @@ def test_the_plan_runs_the_full_suite_only_for_a_change_testmon_cannot_see(tt, c
             "-m",
             "not e2e",
             "-n",
-            "logical",
+            "5",
             "--testmon",
             "--testmon-noselect",
         ]
@@ -101,7 +101,7 @@ def test_the_plan_runs_the_full_suite_only_for_a_change_testmon_cannot_see(tt, c
     assert ("tests/addons/test_kraft_sdlc_collection.py" in generated.argv) == collection
     assert "--no-testmon" in generated.argv and generated.env == {}
     assert "--testmon-forceselect" in selected.argv and "--testmon" in selected.argv
-    assert selected.argv[selected.argv.index("-n") + 1] == "logical"
+    assert selected.argv[selected.argv.index("-n") + 1] == "5"
     assert selected.env == {"COVERAGE_CORE": "ctrace"}
 
 
@@ -307,7 +307,7 @@ def test_the_base_is_krafts_else_the_merge_base(tt, tmp_path, env, expected):
     assert tt.read_base(env, repo) == (first if expected == "merge-base" else expected)
 
 
-def test_run_judges_against_the_base_kraft_hands_it(tt, tmp_path, monkeypatch, capsys):
+def test_run_judges_against_the_base_and_workers_kraft_hands_it(tt, tmp_path, monkeypatch, capsys):
     repo = make_repo(tmp_path)
     write(repo, _POLICY, "a: 1\n")
     base = commit_all(repo, "base")
@@ -315,7 +315,38 @@ def test_run_judges_against_the_base_kraft_hands_it(tt, tmp_path, monkeypatch, c
     listing = write(tmp_path, "changed-files", f"{_POLICY}\n")
     monkeypatch.setenv("KRAFT_CHANGED_FILES", str(listing))
     monkeypatch.setenv("KRAFT_TEST_BASE", base)
+    monkeypatch.setenv("KRAFT_TEST_WORKERS", "7")
     monkeypatch.chdir(repo)
 
     assert tt.main(["run", "--dry-run"]) == 0
-    assert capsys.readouterr().out.startswith("test-targeted: testmon selection")
+    out = capsys.readouterr().out
+    assert out.startswith("test-targeted: testmon selection")
+    # Both runs, the mapped tests' and testmon's, on the machine's count.
+    assert re.findall(r"-n (\S+)", out) == ["7", "7"]
+
+
+@pytest.mark.parametrize(
+    ("given", "cpus", "expected"),
+    [
+        (None, 4, "6"),
+        ("3", 4, "3"),
+        (" 12 ", 4, "12"),
+        ("0", 4, "6"),
+        ("auto", 4, "6"),
+        (None, None, "logical"),
+    ],
+    ids=[
+        "cpus-plus-two-as-just-test",
+        "the-machines-own-count",
+        "padded-count",
+        "zero-is-not-a-count",
+        "a-word-is-not-a-count",
+        "cpus-unknown",
+    ],
+)
+def test_the_worker_count_is_the_machines_else_cpus_plus_two(
+    tt, monkeypatch, given, cpus, expected
+):
+    monkeypatch.setattr(tt.os, "cpu_count", lambda: cpus)
+    env = {} if given is None else {"KRAFT_TEST_WORKERS": given}
+    assert tt.workers(env) == expected

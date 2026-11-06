@@ -143,23 +143,36 @@ class Step:
     env: dict[str, str] = field(default_factory=dict)
 
 
-#: The whole suite, still recorded: a full run that records nothing leaves the
-#: next selection larger, and the record never recovers (Kraft-4t45n.5).
-#: `--testmon-noselect` runs everything; `-m` would force it anyway.
-_FULL = Step(
-    [
-        sys.executable,
-        "-m",
-        "pytest",
-        "-m",
-        "not e2e",
-        "-n",
-        "logical",
-        "--testmon",
-        "--testmon-noselect",
-    ],
-    {"COVERAGE_CORE": "ctrace"},
-)
+def workers(env: Mapping[str, str]) -> str:
+    """xdist's `-n`: `$KRAFT_TEST_WORKERS` when it is a positive count (a
+    machine's own, set in its repos.yaml `env:`), else the logical CPUs plus
+    two, as `just test` runs: the suite's tests wait on timers, sockets and
+    child processes, and the extra workers fill those waits (#1273)."""
+    given = env.get("KRAFT_TEST_WORKERS", "").strip()
+    if given.isdigit() and int(given) > 0:
+        return given
+    cpus = os.cpu_count()
+    return str(cpus + 2) if cpus else "logical"
+
+
+def _full(n: str) -> Step:
+    """The whole suite, still recorded: a full run that records nothing leaves
+    the next selection larger, and the record never recovers (Kraft-4t45n.5).
+    `--testmon-noselect` runs everything; `-m` would force it anyway."""
+    return Step(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-m",
+            "not e2e",
+            "-n",
+            n,
+            "--testmon",
+            "--testmon-noselect",
+        ],
+        {"COVERAGE_CORE": "ctrace"},
+    )
 
 
 @dataclass(frozen=True)
@@ -293,9 +306,11 @@ def read_changed(env: Mapping[str, str], cwd: Path) -> list[str] | None:
     return sorted({line for line in (tracked + untracked).splitlines() if line})
 
 
-def plan(changed: list[str] | None, base: str | None = None, cwd: Path = Path()) -> Plan:
+def plan(
+    changed: list[str] | None, base: str | None = None, cwd: Path = Path(), n: str = "logical"
+) -> Plan:
     if changed is None:
-        return Plan("no changed-file list and no merge base with origin/main", [_FULL])
+        return Plan("no changed-file list and no merge base with origin/main", [_full(n)])
     blind, known = [], []
     for path in (p for p in changed if is_blind(p)):
         mapped = _tests_for(path, EDIT_TESTS)
@@ -307,7 +322,7 @@ def plan(changed: list[str] | None, base: str | None = None, cwd: Path = Path())
             blind.append(path)
     if blind:
         more = f" (and {len(blind) - 5} more)" if len(blind) > 5 else ""
-        return Plan(f"testmon cannot see a change to {', '.join(blind[:5])}{more}", [_FULL])
+        return Plan(f"testmon cannot see a change to {', '.join(blind[:5])}{more}", [_full(n)])
     tests = (
         GENERATED_TESTS
         + (INTENT_TESTS if any(is_intent(path) for path in changed) else ())
@@ -315,7 +330,7 @@ def plan(changed: list[str] | None, base: str | None = None, cwd: Path = Path())
     )
     known = [test for test in dict.fromkeys(known) if test not in tests]
     # Mapped tests can be whole directories: xdist, and the full run's marker.
-    spread = ["-m", "not e2e", "-n", "logical"] if known else []
+    spread = ["-m", "not e2e", "-n", n] if known else []
     return Plan(
         None,
         [
@@ -331,7 +346,7 @@ def plan(changed: list[str] | None, base: str | None = None, cwd: Path = Path())
                     "-m",
                     "not e2e",
                     "-n",
-                    "logical",
+                    n,
                     "--testmon",
                     "--testmon-forceselect",
                 ],
@@ -351,7 +366,7 @@ def main(argv: Sequence[str]) -> int:
         print(__doc__, file=sys.stderr)
         return 2
     changed = read_changed(os.environ, Path.cwd())
-    chosen = plan(changed, read_base(os.environ, Path.cwd()), Path.cwd())
+    chosen = plan(changed, read_base(os.environ, Path.cwd()), Path.cwd(), workers(os.environ))
     if chosen.reason:
         print(f"test-targeted: full suite -- {chosen.reason}", flush=True)
     else:
