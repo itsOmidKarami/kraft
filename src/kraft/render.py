@@ -23,10 +23,11 @@ from kraft.vocab.total import total
 RESET = "\033[0m"
 DIM = "\033[2m"
 
-#: Every escape `paint` can introduce. Column widths are measured with these
-#: removed: a painted cell is ~9 bytes wider than it draws, and measuring the
-#: painted string shears every column to its right (spec F §2.1).
-_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+#: Every CSI escape: `paint`'s colours, and the erase-line and colour codes a CI
+#: trace or an agent writes. Column widths are measured with these removed: a
+#: painted cell is ~9 bytes wider than it draws, and measuring the painted
+#: string shears every column to its right (spec F §2.1).
+_ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 #: Status -> ANSI colour. Anything unlisted renders unpainted.
 STATUS_COLORS = total(
@@ -66,6 +67,15 @@ def paint(text: str, code: str, stream: TextIO | None = None) -> str:
 
 def strip_ansi(text: str) -> str:
     return _ANSI.sub("", text)
+
+
+def terminal_lines(text: str) -> list[str]:
+    """`text`, a terminal's output such as a CI job log, as the lines it left
+    showing. A `\r` rewrites its line (a progress bar, GitLab's section
+    markers), so only what follows the last one stays, and that is cut before
+    the colour codes go, or `\r\x1b[0K\n` would read as a plain line ending."""
+    lines = text.replace("\r\n", "\n").removesuffix("\n").split("\n")
+    return [strip_ansi(ln.rstrip("\r").rsplit("\r", 1)[-1]) for ln in lines]
 
 
 def visible_width(text: str) -> int:

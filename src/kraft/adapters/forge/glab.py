@@ -9,6 +9,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
+from kraft import render
 from kraft.adapters.forge import git
 from kraft.adapters.forge import mr as mr_ops
 from kraft.adapters.forge.models import (
@@ -657,7 +658,7 @@ class GlabCli(mr_ops.CliWaits):
                 )
             except ForgeError:
                 continue
-            detail += tuple(f"  {line}" for line in resp.text.strip().splitlines()[-15:])
+            detail += tuple(f"  {line}" for line in render.terminal_lines(resp.text.strip())[-15:])
         # Any failed job past the first two still counts for classification,
         # even though its trace is not fetched.
         failed_jobs += [

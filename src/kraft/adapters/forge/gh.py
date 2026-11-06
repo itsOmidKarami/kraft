@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote as urlquote
 
+from kraft import render
 from kraft.adapters.forge import git
 from kraft.adapters.forge import github_queries as gq
 from kraft.adapters.forge import mr as mr_ops
@@ -1062,7 +1063,7 @@ class GhCli(mr_ops.CliWaits):
             except ForgeError:
                 continue
             log = gq.failed_step_log(row, whole.text)
-            detail += tuple(f"  {line}" for line in log.strip().splitlines()[-15:])
+            detail += tuple(f"  {line}" for line in render.terminal_lines(log.strip())[-15:])
         return detail, failed_jobs
 
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None:

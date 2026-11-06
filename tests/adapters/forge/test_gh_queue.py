@@ -469,13 +469,26 @@ async def test_merge_queue_hands_over_the_failed_jobs_with_two_log_tails_of_fift
     assert not any("line 15" in line for line in failure.jobs)
 
 
-async def test_merge_queue_cuts_a_job_log_to_its_failed_step_as_gh_does(cli, tmp_path):
+@pytest.mark.parametrize(
+    "log",
+    [
+        pytest.param(api_outputs.SAD_JOB_LOG, id="plain"),
+        # A step that forces colour: the tail is plain text all the same.
+        pytest.param(
+            api_outputs.SAD_JOB_LOG.replace("log line", "\x1b[32;1mlog line").replace(
+                "\n", "\x1b[0m\n"
+            ),
+            id="coloured",
+        ),
+    ],
+)
+async def test_merge_queue_cuts_a_job_log_to_its_failed_step_as_gh_does(cli, tmp_path, log):
     """The log tail and the `jobs` text are what `gh run view --log-failed`
     printed for gh's own sad job (view_test.go:2726-2730)."""
     routes = _queue_routes(
         _graphql(removal="Required status checks failed"),
         [_merge_group_run()],
-        **{_JOBS: json.dumps({"jobs": [api_outputs.SAD_JOB]}), _LOGS: api_outputs.SAD_JOB_LOG},
+        **{_JOBS: json.dumps({"jobs": [api_outputs.SAD_JOB]}), _LOGS: log},
     )
     cli.stub("gh", routes=routes, default=FAIL)
 

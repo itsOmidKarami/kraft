@@ -7,19 +7,16 @@ Host workers call these unscoped, like every loopback route."""
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import HTTPException, Query, Request
 
 from kraft import builtins as builtins_mod
-from kraft import inplace, store
+from kraft import inplace, render, store
 from kraft.adapters import forge as forge_mod
 from kraft.adapters.forge import Forge, ForgeError
 from kraft.api import api_router, deps
-
-_ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 
 def _mapped(exc: ForgeError) -> HTTPException:
@@ -124,11 +121,7 @@ async def forge_job_log(
         raise HTTPException(404, f"job {jid} is not in pipeline {pid}")
     text = await _read(forge.job_log(repo=checkout, job_id=jid))
     # shortcut: the whole log is fetched, then cut; fine until a forge offers a ranged read.
-    # A `\r` rewrites its line on a terminal (a progress bar, GitLab's section
-    # markers): keep what was left showing, not every overwritten fragment. Before
-    # the colour codes go, or `\r\x1b[0K\n` would read as a plain line ending.
-    lines_in = text.replace("\r\n", "\n").removesuffix("\n").split("\n")
-    all_lines = [_ANSI.sub("", ln.rstrip("\r").rsplit("\r", 1)[-1]) for ln in lines_in]
+    all_lines = render.terminal_lines(text)
     return {"log": "\n".join(all_lines[-lines:]), "truncated": len(all_lines) > lines}
 
 

@@ -439,16 +439,29 @@ async def test_glab_ci_status_moves_off_a_pinned_pipeline_that_was_canceled(cli,
     assert (status.state, status.pipeline_ref) == ("success", "2826926699")
 
 
-async def test_glab_ci_status_names_the_failed_job_and_why(cli, tmp_path):
+@pytest.mark.parametrize(
+    "trace",
+    [
+        pytest.param(GLAB_CI_TRACE, id="plain"),
+        # What GitLab writes: section markers rewritten by `\r\x1b[0K`, coloured lines.
+        pytest.param(
+            "section_start:1:step_script\r\x1b[0K\x1b[0K\x1b[36;1mExecuting step\x1b[0;m\n"
+            + GLAB_CI_TRACE.replace("ERROR", "\x1b[31;1mERROR").replace("\n", "\x1b[0;m\n"),
+            id="coloured",
+        ),
+    ],
+)
+async def test_glab_ci_status_names_the_failed_job_and_why(cli, tmp_path, trace):
     """Kraft-xh0q. 'pipeline 2826926700: failed' tells a reader nothing they can
     act on. The failed job's name and its trace tail say the blocker is a
-    missing label rather than the code."""
+    missing label rather than the code. The tail is plain text: it reaches the
+    UI, a fix-loop prompt and a bead, none of them a terminal."""
     cli.stub(
         "glab",
         routes={
             **glab_mr(GLAB_MR_VIEW),
             PIPELINES: GLAB_CI_FAILED,
-            **glab_pipeline(),
+            **glab_pipeline(trace=trace),
         },
     )
     cli.stub("git", routes={"symbolic-ref --short": "kraft/abc"}, default="")
@@ -460,6 +473,8 @@ async def test_glab_ci_status_names_the_failed_job_and_why(cli, tmp_path):
     assert "release-impact" in joined
     assert "no release:: label" in joined, "the trace tail never reached the caller"
     assert "lint-and-test" not in joined, "a passing job is not a diagnosis"
+    assert "\x1b" not in joined and "\r" not in joined
+    assert "  ERROR: Job failed: exit code 1" in status.jobs
     assert [c for c in cli.calls("glab") if "/jobs" in c or "/pipelines/" in c] == [
         f"{PIPELINES}/2826926700 -X GET -i",
         f"{PIPELINES}/2826926700/jobs -X GET -i -F per_page=100 -F page=1",
