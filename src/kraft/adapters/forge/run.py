@@ -1027,7 +1027,7 @@ async def _pipeline_wait(
         read = await forge.pipeline_status(repo=repo, pipeline_id=pipeline)
     except ForgeError as exc:
         if exc.reason == "not_found":
-            words = str(exc).replace(pipeline, "that id")
+            words = re.sub(rf"(?<!\d){pipeline}(?!\d)", "that id", str(exc))
             return (
                 f"{hook_point}: {words}\n{_PIPELINE_ID_HINT}\n",
                 "config_error",

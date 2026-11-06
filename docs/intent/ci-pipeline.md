@@ -7,9 +7,21 @@ retries no job, and a pipeline it will not judge stops the item for a person.
 
 ## REQ ci-pipeline-takes-a-pipeline-id
 
-IF a `ci.pipeline` task has no `pipeline`, or one that is neither digits nor `$NAME`, or a
-fan-out scope, or another forge target has a `pipeline`, THEN the system SHALL refuse the chain.
-enforced-by: tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_refusals[missing], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_refusals[other-target], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_refusals[letters], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_refusals[trailing-newline], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_refusals[fan-out], tests/templates/test_ci_pipeline_task.py::test_a_bad_value_is_never_echoed
+IF a `ci.pipeline` task has no `pipeline`, or one that is neither digits nor `$NAME`, THEN the
+system SHALL refuse the chain, with a message that does not contain the value.
+enforced-by: tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_refusals[missing], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_refusals[letters], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_refusals[trailing-newline], tests/templates/test_ci_pipeline_task.py::test_a_bad_value_is_never_echoed
+origin: src/kraft/templates/models.py §ForgeTask
+
+## REQ ci-pipeline-is-for-ci-pipeline-alone
+
+IF a forge target other than `ci.pipeline` has a `pipeline`, THEN the system SHALL refuse the chain.
+enforced-by: tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_refusals[other-target]
+origin: src/kraft/templates/models.py §ForgeTask
+
+## REQ ci-pipeline-waits-for-one-pipeline
+
+IF a `ci.pipeline` task runs once per repository, THEN the system SHALL refuse the chain.
+enforced-by: tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_refusals[fan-out]
 origin: src/kraft/templates/models.py §ForgeTask
 
 ## REQ ci-pipeline-id-comes-from-a-declared-variable
@@ -56,10 +68,15 @@ origin: src/kraft/adapters/forge/run.py §_pipeline_wait
 
 ## REQ ci-pipeline-green-is-the-pipelines-own-success
 
-WHEN the forge reports a pipeline successful and not empty, the system SHALL finish the task, and
-WHEN it reports one still running or waiting on a manual job or approval, the system SHALL keep
-waiting and name what it waits on.
-enforced-by: tests/adapters/forge/test_run_pipeline.py::test_pipeline_wait[success], tests/adapters/forge/test_run_pipeline.py::test_pipeline_wait[running], tests/adapters/forge/test_run_pipeline.py::test_pipeline_wait_blocked_on_a_manual_job_waits_and_says_which, tests/adapters/forge/test_glab_reads.py::test_pipeline_status_glab[success], tests/adapters/forge/test_glab_reads.py::test_pipeline_status_glab[success-with-allow-failure-job], tests/adapters/forge/test_glab_reads.py::test_pipeline_status_glab[manual], tests/adapters/forge/test_gh_reads.py::test_pipeline_status_gh[success], tests/adapters/forge/test_gh_reads.py::test_pipeline_status_gh[waiting]
+WHEN the forge reports a pipeline successful and not empty, the system SHALL finish the task.
+enforced-by: tests/adapters/forge/test_run_pipeline.py::test_pipeline_wait[success], tests/adapters/forge/test_glab_reads.py::test_pipeline_status_glab[success], tests/adapters/forge/test_glab_reads.py::test_pipeline_status_glab[success-with-allow-failure-job], tests/adapters/forge/test_gh_reads.py::test_pipeline_status_gh[success]
+origin: src/kraft/adapters/forge/glab.py §pipeline_status
+
+## REQ ci-pipeline-waits-on-a-person-and-says-so
+
+WHEN a pipeline is running, or waits on a manual job or an approval, the system SHALL keep waiting
+and name what it waits on.
+enforced-by: tests/adapters/forge/test_run_pipeline.py::test_pipeline_wait[running], tests/adapters/forge/test_run_pipeline.py::test_pipeline_wait_blocked_on_a_manual_job_waits_and_says_which, tests/adapters/forge/test_glab_reads.py::test_pipeline_status_glab[manual], tests/adapters/forge/test_gh_reads.py::test_pipeline_status_gh[waiting]
 origin: src/kraft/adapters/forge/glab.py §pipeline_status
 
 ## REQ ci-pipeline-red-fails-the-task-with-findings
@@ -105,9 +122,15 @@ origin: src/kraft/adapters/forge/run.py §run_task
 
 ## REQ ci-pipeline-reads-a-github-run-by-its-latest-attempt-in-this-repository
 
-WHEN a GitHub run is read by id, the system SHALL report its latest attempt, and SHALL refuse a
-run of a fork as not found.
-enforced-by: tests/adapters/forge/test_gh_reads.py::test_pipeline_status_gh_follows_the_latest_attempt_and_names_it, tests/adapters/forge/test_gh_reads.py::test_pipeline_status_gh_refuses_a_forks_run_as_not_found, tests/adapters/forge/test_gh_reads.py::test_pipeline_status_gh_404_is_not_found
+WHEN a GitHub run is read by id, the system SHALL report its latest attempt.
+enforced-by: tests/adapters/forge/test_gh_reads.py::test_pipeline_status_gh_follows_the_latest_attempt_and_names_it
+origin: src/kraft/adapters/forge/gh.py §pipeline_status
+
+## REQ ci-pipeline-refuses-a-forks-run
+
+IF a GitHub run read by id is a fork's, or the forge has none by that id, THEN the system SHALL
+report it as not found.
+enforced-by: tests/adapters/forge/test_gh_reads.py::test_pipeline_status_gh_refuses_a_forks_run_as_not_found, tests/adapters/forge/test_gh_reads.py::test_pipeline_status_gh_404_is_not_found
 origin: src/kraft/adapters/forge/gh.py §pipeline_status
 
 ## REQ a-failed-gitlab-bridge-is-code-red
@@ -134,9 +157,16 @@ origin: src/kraft/executor/round_prompts.py §format_findings
 ## REQ a-ci-pipeline-node-is-not-a-merge-request-node
 
 A node whose only forge tasks are `ci.pipeline` SHALL NOT stop the item when its merge request is
-closed, and SHALL be skippable by a chain revision.
-enforced-by: tests/test_mr_poller.py::test_tick_skips_a_non_mr_node_without_calling_find_mr[ci-pipeline-only-node-is-not-mr], tests/templates/test_revision.py::test_a_revision_may_skip_a_ci_pipeline_node_and_its_writer, tests/templates/test_revision.py::test_skipping_a_writer_whose_reader_stays_names_the_reads_it_breaks
+closed.
+enforced-by: tests/test_mr_poller.py::test_tick_skips_a_non_mr_node_without_calling_find_mr[ci-pipeline-only-node-is-not-mr]
 origin: src/kraft/mr_poller.py §_is_mr_node
+
+## REQ a-ci-pipeline-node-may-be-skipped-by-a-revision
+
+A chain revision SHALL be allowed to skip a node whose only forge tasks are `ci.pipeline`, and IF
+it skips a writer whose reader stays, THEN the system SHALL refuse it, naming the reader's `reads`.
+enforced-by: tests/templates/test_revision.py::test_a_revision_may_skip_a_ci_pipeline_node_and_its_writer, tests/templates/test_revision.py::test_skipping_a_writer_whose_reader_stays_names_the_reads_it_breaks
+origin: src/kraft/templates/revision.py §_lands
 
 ## REQ a-ci-pipeline-does-not-publish-the-branch
 

@@ -683,7 +683,9 @@ class _Stuck:
     nothing (Kraft-6rph9) -- the six places this is constructed. Automatic
     escalation answers these and nothing else: the node's declared escalation
     reads this value, and the generic `gates.auto_escalate_stuck` reads the
-    `stuck` mark `_stop_stuck` records from it. Every other stop (config,
+    `stuck` mark `_stop_stuck` records from it. One exception: when every
+    failed task is a `ci.pipeline` wait, the stop is `escalatable=False`, goes
+    straight to a person and is not marked stuck. Every other stop (config,
     budget, infra, a reviewer error, a wait timeout, a rate limit, a question)
     goes straight to a human under its own cause."""
 
@@ -2449,6 +2451,10 @@ async def _walk_node_once(
             raised = [*excs, *fix_excs]
             if raised:
                 reason += f" ({', '.join(repr(e) for e in raised)})"
+            if _red_pipeline_only(failed):
+                # Another cycle would read the same pipeline: raising the cap is
+                # no way forward, so this is a plain failure for a person.
+                return _Stuck(reason, kind=StopKind.FAILED, escalatable=False)
             measured = [t.path for step in node.steps for t in step.tasks]
             await db.write(
                 lambda c, measured=measured: store.mark_sessions_capped_out(
@@ -2462,7 +2468,6 @@ async def _walk_node_once(
                 limit=_fix_loop_limit(
                     override_row, node.id, cap, attempts_ran_out=count > cap.attempts
                 ),
-                escalatable=not _red_pipeline_only(failed),
             )
 
         if prints and fix_ran:

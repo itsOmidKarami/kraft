@@ -437,6 +437,7 @@ async def test_red_pipeline_is_not_stuck(item_on, monkeypatch, scripted, node):
 
     assert not it.events("stuck_escalation_started")
     assert not gates.stuck_stop(it.database.read(lambda c: events.read_after(c, 0, it.id)))
+    assert it.events("work_item_needs_human")[-1]["payload"]["kind"] == "failed"
 
 
 async def test_red_pipeline_runs_on_failure(item_on, monkeypatch):

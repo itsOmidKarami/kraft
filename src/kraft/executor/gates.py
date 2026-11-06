@@ -921,8 +921,8 @@ _AUTO_ESCALATE_MESSAGE = (
 
 def stuck_stop(evts) -> bool:
     """Whether the item's newest `work_item_needs_human` stop is in the stuck
-    set (`walk._Stuck`, Ruling 176) -- the only stops `auto_escalate_stuck`
-    answers."""
+    set (`walk._Stuck`, Ruling 176; a failed `ci.pipeline` is not in it) -- the
+    only stops `auto_escalate_stuck` answers."""
     for e in reversed(evts):
         if e["type"] == WorkItemEvent.NEEDS_HUMAN:
             return e["payload"].get("stuck") is True
