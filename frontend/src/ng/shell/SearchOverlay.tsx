@@ -10,6 +10,7 @@ import { groupOf } from "../board/model";
 import { termsOf } from "../item/DocViewer";
 import { gateName, reasonTail } from "../board/rowText";
 import { headerState, neverStarted } from "../item/status";
+import { gateReviewUrl } from "../review/url";
 import { Kbd } from "../ui/Kbd";
 import { chipClass } from "../ui/Chip";
 import { NoMatch } from "../ui/NoMatch";
@@ -76,7 +77,8 @@ const itemRow = (i: WorkItem, section: "needs" | "items", go: (to: string) => vo
         icon: Diamond,
         tag: headerState(i).badge,
         note: `reviews ${i.title}`,
-        open: () => go(`/work-items/${encodeURIComponent(i.id)}/review`),
+        // The gate's review, its document open, as the board's Review opens it.
+        open: () => go(gateReviewUrl(i.id, i.pending_gate!)),
       }
     : {
         id: `${section}:${i.id}`,

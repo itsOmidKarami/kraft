@@ -204,6 +204,8 @@ describe("SearchOverlay", () => {
     };
     await user.click(within(screen.getByRole("listbox")).getByTitle("Gated work")); // "work" is marked inside the title
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/wi_gate/review");
+    // The gate's document open over the diff, as the board's Review opens it.
+    expect(screen.getByTestId("search")).toHaveTextContent(/^\?gate=human_review&doc=1$/);
     expect(screen.queryByRole("dialog")).toBeNull();
 
     await user.keyboard("{Meta>}k{/Meta}");
