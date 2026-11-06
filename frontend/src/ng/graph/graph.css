@@ -42,6 +42,7 @@
 .glyph-att.is-stopped { border-color: var(--bad); color: var(--bad); }
 .glyph-corner { position: absolute; width: 16px; height: 16px; box-sizing: border-box; border-radius: 50%; background: var(--surface); display: flex; align-items: center; justify-content: center; }
 .glyph-esc { border: 1px solid var(--warn); color: var(--warn); }
+.glyph-subagents { border: 1px solid var(--text-muted); color: var(--text); font: 700 var(--fs-label)/14px ui-monospace, Menlo, monospace; }
 .glyph-paused { position: absolute; bottom: -5px; right: -5px; width: 15px; height: 15px; box-sizing: border-box; border-radius: 50%; background: var(--surface); border: 1px solid var(--text-muted); font: 700 var(--fs-label)/13px ui-monospace, Menlo, monospace; text-align: center; color: var(--text); }
 .glyph-running { position: absolute; bottom: -3px; right: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); border: 2px solid var(--bg); }
 

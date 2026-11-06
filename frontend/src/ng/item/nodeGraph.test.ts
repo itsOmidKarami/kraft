@@ -33,6 +33,18 @@ describe("nodeGraph", () => {
     expect(g.onFailure).toBeUndefined();
   });
 
+  it("puts a running session's sub-agent count on its box, and none on an earlier round's", () => {
+    const item = detail({ worker_sessions: [
+      s("verification.review.code_review", { id: "old", round: 0, model: "sonnet" }),
+      s("verification.review.code_review", { id: "new", round: 1, status: "running", model: "sonnet", wall_ms: null }),
+    ] });
+    const box = (g: ReturnType<typeof nodeGraph>) => g.steps[1].tasks[0].subagents;
+    expect(box(nodeGraph(item, node, NOW, undefined, undefined, { new: 2 }))).toBe(2);
+    expect(box(nodeGraph(item, node, NOW, undefined, 1, { new: 2 }))).toBeUndefined();
+    expect(box(nodeGraph(item, node, NOW, undefined, undefined, { new: 0 }))).toBeUndefined();
+    expect(box(nodeGraph(item, node, NOW))).toBeUndefined();
+  });
+
   it("draws the on-failure handler's tasks once it ran in the pass shown, and not in a pass it did not", () => {
     const ran = s("verification.on_failure.repair.repair_pass", { round: -1 });
     const first = [s("verification.checks.lint", { status: "failed", pass: 1 }), { ...ran, pass: 1 }];

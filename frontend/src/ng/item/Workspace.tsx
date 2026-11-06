@@ -26,6 +26,7 @@ import { pushes, placeUrl, readPlace, selPath, type Place } from "./url";
 import { useDocuments } from "./useDocuments";
 import { useEvents } from "./useEvents";
 import { runVersion, type ItemDetail } from "./useItem";
+import { useRunningSubagents } from "./useSubagents";
 import { chainName } from "./chainName";
 import { materialized, producerOf } from "./chainValues";
 import { isTextField } from "../keys";
@@ -64,6 +65,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   const nodes = item.chain_definition.nodes ?? [];
   const place = readPlace(nodeParam, search, nodes);
   const applied = useApplied(item.id, version, place.tab === "config");
+  const subagents = useRunningSubagents(item);
   const { pane: pane_, setPane } = usePaneMemory();
   const [frame, canvasW] = useWidth();
   const size = useResizable(PAGE, canvasW);
@@ -199,6 +201,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
     else dispatch({ type: "escape" });
   };
   escape.current = back;
+  const runningCounts = Object.fromEntries(Object.entries(subagents).map(([id, l]) => [id, l.filter((a) => a.status === "running").length]));
   const pane = paneContent({
     item: shown, version, events, now, policy, graph: graph.nodes, sel, level: state.level, tab, reload, pick, editBudget, setEditBudget, docs, round, scope: place.scope,
     focus: (node) => dispatch({ type: "focus", node }),
@@ -206,6 +209,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
     setAttempt: (attempt) => go({ ...place, attempt }),
     agent: place.agent,
     setAgent: (agent) => go({ ...place, agent }),
+    subagents,
     openAgent: (agent) => go({ ...place, tab: "log", agent }),
     onDoc: (d: WorkItemDocument) => go({ ...place, doc: d.document_id, q: undefined }),
     onArtifact: () => setArtifact(true),
@@ -213,7 +217,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
     canEdit: draft?.editable,
     applied,
   });
-  const plain = viewing && nodeGraph(shown, viewing, now, events, place.round);
+  const plain = viewing && nodeGraph(shown, viewing, now, events, place.round, runningCounts);
   const inside = plain && draft ? { ...plain, steps: markSteps(plain.steps, viewing.id, marks) } : plain;
   const nodeSel = (x: NodeSel): Sel => (x.task ? { kind: "task", node: viewing!.id, step: x.step, task: x.task } : { kind: "step", node: viewing!.id, step: x.step });
 

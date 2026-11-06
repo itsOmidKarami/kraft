@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { NodeGlyph } from "./NodeGlyph";
+import { accessibleName } from "./types";
 
 const pill = (c: HTMLElement) => c.querySelector(".glyph-att");
 
@@ -18,6 +19,26 @@ describe("NodeGlyph", () => {
   it("carries no badges on the small strip size", () => {
     const { container } = render(<NodeGlyph size="sm" attempt={2} esc prob running />);
     expect(container.querySelector(".glyph-att, .glyph-esc, .glyph-prob, .glyph-running")).toBeNull();
+  });
+
+  it.each([
+    ["two running", "md", 2, "2"],
+    ["one running", "lg", 1, "1"],
+    ["none", "md", 0, null],
+    ["not given", "md", undefined, null],
+    ["a box too small for badges", "sm", 2, null],
+  ] as const)("draws the running sub-agents as a count badge on the box (%s)", (_n, size, subagents, text) => {
+    const badge = render(<NodeGlyph size={size} subagents={subagents} />).container.querySelector(".glyph-subagents");
+    if (text === null) expect(badge).toBeNull();
+    else expect(badge).toHaveTextContent(text);
+  });
+
+  it.each([
+    [2, "implement, task, running, 2 sub-agents running"],
+    [1, "implement, task, running, 1 sub-agent running"],
+    [0, "implement, task, running"],
+  ])("names %s running sub-agents on the button", (subagents, name) => {
+    expect(accessibleName({ id: "implement", state: "current", running: true, subagents }, "task")).toBe(name);
   });
 
   it("shows paused instead of running, and the problem badge only without a pill", () => {

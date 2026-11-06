@@ -21,6 +21,7 @@ import { bodyOffers, budgetRaise, headerState, MAIN_LABEL, neverStarted, offersR
 import { placeUrl, stopPlace } from "../item/url";
 import { useEvents } from "../item/useEvents";
 import { useItem, type ItemDetail } from "../item/useItem";
+import { useRunningSubagents } from "../item/useSubagents";
 import { Popover } from "../ui/Popover";
 import { groupOf } from "./model";
 import { capitalise, gateName, reasonTail } from "./rowText";
@@ -108,6 +109,7 @@ function Overview({ item, version, reload, onRaise, onMore }: { item: ItemDetail
   const [error, setError] = useState<string | null>(null);
   const duplicate = useDuplicate(item.id, setError);
   const events = useEvents(item.id, version);
+  const subagents = useRunningSubagents(item);
   const openNode = (node: string) => navigate(placeUrl(item.id, stopPlace(item.stop, node, item.chain_definition.nodes)));
   return (
     <div className="peek-overview">
@@ -119,7 +121,7 @@ function Overview({ item, version, reload, onRaise, onMore }: { item: ItemDetail
         <QuestionCard item={item} compact={false} reload={reload} onOpenThread={() => item.stop?.node && navigate(placeUrl(item.id, { node: item.stop.node, sel: { kind: "node", node: item.stop.node }, tab: "thread" }))} />
         {error && <p className="item-error" role="alert">{error}</p>}
       </div>
-      <ChainOverview item={item} events={events} now={Date.now()} onSelect={openNode} onMore={onMore} where />
+      <ChainOverview item={item} events={events} now={Date.now()} onSelect={openNode} onMore={onMore} where subagents={subagents} onTask={(sel) => navigate(placeUrl(item.id, { node: sel.kind === "chain" ? undefined : sel.node, sel, tab: "overview" }))} />
       {cancelling && <CancelCard id={item.id} anchor={anchor} onClose={() => setCancelling(false)} onDone={() => { setCancelling(false); reload(); }} />}
       {escalating && <EscalateCard id={item.id} anchor={anchor} threads={item.escalation_threads} onClose={() => setEscalating(false)} onDone={() => { setEscalating(false); reload(); }} />}
     </div>

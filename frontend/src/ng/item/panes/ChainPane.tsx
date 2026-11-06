@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type Ref } from "react";
 import { dollars, DOLLARS_HINT, dollarsText, repoName, tokenText, tokenTip, usd } from "../../../format";
-import type { KraftEvent, Policy, WorkItemDocument } from "../../../types";
+import type { KraftEvent, Policy, Subagent, WorkItemDocument } from "../../../types";
+import type { Sel } from "../../graph/usePaneSelection";
 import { Button } from "../../ui/Button";
 import { showToast } from "../../ui/Toast";
 import { act } from "../actions";
@@ -12,6 +13,7 @@ import { age, recent as recentLines } from "../events";
 import type { ItemDetail } from "../useItem";
 import { chainName, chainTitle } from "../chainName";
 import { approvalLine } from "../oneOff";
+import { pathSel } from "../url";
 import { DocViewer } from "../DocViewer";
 import { gateName, nameOf } from "../../board/rowText";
 import { budgetRaise, neverStarted, spentLine } from "../status";
@@ -38,8 +40,13 @@ const RECENT = 5;
 /** The chain pane's Overview (Decisions §5 Chain pane): status, progress,
  *  current (a link), spend, the documents attached at intake (each opens when
  *  the caller can open it) and Recent, whose lines select their node. */
-export function ChainOverview({ item, events, now, onSelect, docs, onDoc, onMore, where }: { item: ItemDetail; events: KraftEvent[]; now: number; onSelect: (node: string) => void; docs?: WorkItemDocument[]; onDoc?: (d: WorkItemDocument) => void; onMore?: () => void; where?: boolean }) {
+export function ChainOverview({ item, events, now, onSelect, docs, onDoc, onMore, where, subagents, onTask }: { item: ItemDetail; events: KraftEvent[]; now: number; onSelect: (node: string) => void; docs?: WorkItemDocument[]; onDoc?: (d: WorkItemDocument) => void; onMore?: () => void; where?: boolean; subagents?: Record<string, Subagent[]>; onTask?: (sel: Sel) => void }) {
   const sum = item.summary;
+  // What runs now, over every running session of the item: the fact row sums them and opens the first one's task.
+  const going = item.worker_sessions.flatMap((s) => (subagents?.[s.id] ?? []).filter((a) => a.status === "running").map((a) => ({ s, a })));
+  const first = going[0]?.s;
+  const firstSel = first && (pathSel(first.hook_point, item.chain_definition.nodes) ?? { kind: "node" as const, node: first.node_id });
+  const goingWords = `${going.length} running · ${going.map(({ a }) => a.description).join(", ")}`;
   const cap = item.budget_cap;
   // The last few lines of the story (WI-2); the rest behind a link: the caller's (the peek's Activity) or in place.
   const [all, setAll] = useState(false);
@@ -54,6 +61,7 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc, onMore
         <div><dt>status</dt><dd>{statusLine(item)}</dd></div>
         {sum && <div><dt>progress</dt><dd>{sum.nodes_done} of {sum.nodes_total} nodes · {sum.gates_passed} {sum.gates_passed === 1 ? "gate" : "gates"} passed</dd></div>}
         {live && item.current_node_id && <div><dt>current</dt><dd><LinkButton strong onClick={() => onSelect(item.current_node_id!)}>{nameOf(item.chain_definition.nodes, item.current_node_id)}</LinkButton></dd></div>}
+        {going.length > 0 && <div><dt>sub-agents</dt><dd>{onTask && firstSel ? <LinkButton strong onClick={() => onTask(firstSel)}>{goingWords}</LinkButton> : goingWords}</dd></div>}
         {!!item.attachments?.length && (
           <div>
             <dt title="attached at intake">attached</dt>

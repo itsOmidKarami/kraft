@@ -15,7 +15,7 @@ type Props = Omit<GraphItem, "id" | "label" | "meta" | "metaTone"> & { kind?: Gl
 
 /** One glyph for every node and task, on every canvas and strip. Decoration:
  *  the button around it carries the accessible name. */
-export function NodeGlyph({ kind = "exec", size = "md", state = "plain", sel, prob, mark, capped, skipped, attempt, attemptStopped, esc, running, paused, icon, taskKind }: Props) {
+export function NodeGlyph({ kind = "exec", size = "md", state = "plain", sel, prob, mark, capped, skipped, attempt, attemptStopped, esc, running, paused, subagents, icon, taskKind }: Props) {
   const Z = SIZES[size];
   const gate = kind === "gate";
   // Badges only on boxes big enough to carry them (the prototype's `big`).
@@ -36,6 +36,7 @@ export function NodeGlyph({ kind = "exec", size = "md", state = "plain", sel, pr
       )}
       {badges && prob && !pill && <span className="glyph-prob" style={{ top: off, right: off }}>!</span>}
       {pill && <span className={`glyph-att${attemptStopped ? " is-stopped" : ""}`} style={{ right: gate ? off : -11 }}>×{attempt}</span>}
+      {badges && !!subagents && <span className="glyph-corner glyph-subagents" style={{ top: off, left: off }}>{subagents}</span>}
       {badges && esc && <span className="glyph-corner glyph-esc" style={{ bottom: off, left: off }}><Siren size={9} /></span>}
       {badges && paused && <span className="glyph-paused">‖</span>}
       {badges && running && !paused && <span className="glyph-running" />}

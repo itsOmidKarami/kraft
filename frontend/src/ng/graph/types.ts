@@ -21,6 +21,8 @@ export type GraphItem = {
   esc?: boolean;
   running?: boolean;
   paused?: boolean;
+  /** How many of its sub-agents run now (Claude Code): drawn as a count on a running task's box; zero or absent draws nothing. */
+  subagents?: number;
   meta?: string;
   metaTone?: "red" | "amber" | "green";
   /** An edit to it is on its way to the server (W10 brief Decided 3). */
@@ -41,7 +43,8 @@ const STATE_WORD: Record<GlyphState, string> = { plain: "", done: "done", curren
 export function accessibleName(item: GraphItem & { wait?: string; sub?: string }, kind: string): string {
   const idle = item.state === "current" && !item.running;
   const word = (idle && (item.wait ?? item.sub ?? item.meta)) || (item.meta === "skipped" && "skipped") || STATE_WORD[item.state ?? "plain"];
-  return [item.id, kind, word, item.attempt && item.attempt >= 2 ? `attempt ${item.attempt}` : "", item.custom ? "custom" : ""].filter(Boolean).join(", ");
+  const agents = item.subagents ? `${item.subagents} sub-agent${item.subagents === 1 ? "" : "s"} running` : "";
+  return [item.id, kind, word, agents, item.attempt && item.attempt >= 2 ? `attempt ${item.attempt}` : "", item.custom ? "custom" : ""].filter(Boolean).join(", ");
 }
 
 /** Ids break after underscores, so `approve_spec` wraps in a 138px column. */

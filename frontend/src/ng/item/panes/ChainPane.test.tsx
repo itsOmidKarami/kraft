@@ -35,6 +35,31 @@ describe("ChainOverview: a one-off chain's approval", () => {
   });
 });
 
+describe("ChainOverview: running sub-agents", () => {
+  const session = (id: string, hook_point: string) => ({ id, node_id: hook_point.split(".")[0], hook_point, status: "running", attempt: 1, round: 0, thread: 1, harness: "claude", model: "sonnet" }) as never;
+  const item = detail({ worker_sessions: [session("s1", "verification.review.code_review"), session("s2", "verification.checks.lint")] });
+  const agent = (description: string, status = "running") => ({ id: description, description, status }) as never;
+  const subagents = { s1: [agent("Explore codebase"), agent("Review diff"), agent("Old one", "completed")], s2: [agent("Lint")] };
+
+  it("sums the running sub-agents of every running session in one row, and opens the first one's task", async () => {
+    const onTask = vi.fn();
+    render(<ChainOverview item={item} events={[]} now={NOW} onSelect={() => {}} subagents={subagents} onTask={onTask} />);
+    const row = screen.getByText("sub-agents").closest("div")!;
+    expect(row).toHaveTextContent("sub-agents3 running · Explore codebase, Review diff, Lint");
+    await userEvent.click(within(row).getByRole("button"));
+    expect(onTask).toHaveBeenCalledWith({ kind: "task", node: "verification", step: "review", task: "code_review" });
+  });
+
+  it.each<{ id: string; subagents?: Record<string, never[]> }>([
+    { id: "none passed" },
+    { id: "an empty map", subagents: {} },
+    { id: "only finished ones", subagents: { s1: [agent("Old one", "completed"), agent("Cut", "cut_off")] as never[] } },
+  ])("has no row for $id", ({ subagents }) => {
+    render(<ChainOverview item={item} events={[]} now={NOW} onSelect={() => {}} subagents={subagents} />);
+    expect(screen.queryByText("sub-agents")).toBeNull();
+  });
+});
+
 describe("ChainOverview", () => {
   it("lists recent events newest first; a line about a node selects it", async () => {
     const onSelect = vi.fn();

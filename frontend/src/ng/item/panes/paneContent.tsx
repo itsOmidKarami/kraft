@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { elapsed, elapsedBetween, shortId } from "../../../format";
-import type { KraftEvent, Policy, WorkItemDocument } from "../../../types";
+import type { KraftEvent, Policy, Subagent, WorkItemDocument } from "../../../types";
 import type { ChainNode as GraphNode } from "../../graph/layout";
 import type { Sel } from "../../graph/usePaneSelection";
 import type { TaskKind } from "../../icons";
@@ -52,6 +52,8 @@ export type PaneArgs = {
   /** The sub-agent the task's log is filtered to (an id, or "main"); undefined shows every line. */
   agent?: string;
   setAgent: (agent: string | undefined) => void;
+  /** The sub-agents of the item's running sessions, by session id (`useRunningSubagents`). */
+  subagents: Record<string, Subagent[]>;
   /** Open the task's Log tab filtered to one sub-agent. */
   openAgent: (agent: string) => void;
   docs: WorkItemDocument[];
@@ -99,7 +101,7 @@ export function paneContent(a: PaneArgs): PaneContent {
           <DraftNotes />
           {a.tab === "config"
             ? <ChainConfig item={item} policy={a.policy} reload={a.reload} editBudget={a.editBudget} onEditBudget={a.setEditBudget} applied={a.applied} />
-            : <ChainOverview item={item} events={a.events} now={a.now} onSelect={(node) => a.pick({ kind: "node", node })} docs={a.docs} onDoc={a.onDoc} />}
+            : <ChainOverview item={item} events={a.events} now={a.now} onSelect={(node) => a.pick({ kind: "node", node })} docs={a.docs} onDoc={a.onDoc} subagents={a.subagents} onTask={a.pick} />}
         </>
       ),
     };
