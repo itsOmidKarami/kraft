@@ -11,10 +11,10 @@ export function targetedWords(result: Result): "" | "targeted " | "partly target
   return n === result.scopes.length ? "targeted " : "partly targeted ";
 }
 
-/** "✓ 3 scopes", or "✗ 1 of 3 scopes" with each red scope linked to its session's log, opened in a tab as text without
- *  its colour codes. A pass says how many of its
- *  scopes ran targeted: "✓ 3 scopes (targeted)", "(1 targeted)". The desktop's gate pane and the
- *  phone's gate node page both read it. `linkClass` is the screen's own link style. */
+/** "✓ 3 scopes", or "✗ 1 of 3 scopes" with each red scope linked to its session's log, opened in a tab as text
+ *  without its colour codes. A pass says how many of its scopes ran targeted: "✓ 3 scopes (targeted)",
+ *  "(1 targeted)". The desktop's gate pane and the phone's gate node page both read it. `linkClass` is the
+ *  screen's own link style. */
 export function TestsLine({ workItemId, result, linkClass = linkButtonClass({ mono: true }) }: { workItemId: string; result: Result; linkClass?: string }) {
   const n = result.scopes.length;
   if (result.passed) {

@@ -10,7 +10,7 @@ const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
  *  not actually a summary. Treat that case the same as no summary at all: an
  *  agent/tool line's raw text is JSON and must not render as
  *  `{"type":"tool_progress",...}` -- fall back to just its `type`. Plain
- *  stdout/sys lines are never JSON, so they pass through untouched. Whatever
+ *  stdout/sys lines are never JSON, so they pass through as they are. Whatever
  *  it returns has its ANSI escapes removed; the stored log keeps them. */
 export function logLineText(l: LogLine): string {
   return rawLineText(l).replace(ANSI, "");

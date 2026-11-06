@@ -251,10 +251,11 @@ def test_work_item_documents_carry_the_run_their_session_came_from(client, repo)
 def test_log_jsonl_and_plain_text_are_both_served(client, repo, tmp_path):
     wid = _completed_item(client, repo)
     sid = client.get(f"/api/work-items/{wid}").json()["worker_sessions"][0]["id"]
-    with sqlite3.connect(tmp_path / "run" / "orchestrator.db") as conn:
-        (log_path,) = conn.execute(
-            "SELECT log_path FROM worker_sessions WHERE id = ?", (sid,)
-        ).fetchone()
+    conn = sqlite3.connect(tmp_path / "run" / "orchestrator.db")
+    (log_path,) = conn.execute(
+        "SELECT log_path FROM worker_sessions WHERE id = ?", (sid,)
+    ).fetchone()
+    conn.close()
     with Path(log_path).open("a") as fh:
         fh.write("\x1b[32m3 passed\x1b[0m\n")
 
