@@ -4,6 +4,8 @@ import { FileText } from "../../icons";
 import { Menu, type MenuItem } from "../../ui/Menu";
 import { isSessionDoc, lookWord, NO_DOCUMENTS, progressWords, sessionLook, statusWords, subTasks } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
+import { useSessionSubagents } from "../useSubagents";
+import { SubagentSection } from "./Subagents";
 import { LinkButton } from "../../ui/LinkButton";
 
 /** The attempt every tab shows, as a menu in the pane's subtitle (Decisions §6 Attempts): a pill
@@ -76,7 +78,9 @@ function SubTasks({ tasks, docs, onDoc }: { tasks: NonNullable<TaskProgress["tas
 /** Overview: what ran and its result, with the documents this attempt wrote (Decisions §6 Documents).
  *  On the plan task, `progress` is the plan's sub-tasks, whichever attempt is shown: it describes
  *  the plan, not a session; `running` is whether the task's newest session runs. */
-export function TaskOverview({ path, s, docs, onDoc, progress, running }: { path: string; s: WorkerSession; docs: WorkItemDocument[]; onDoc: (d: WorkItemDocument) => void; progress?: TaskProgress | null; running?: boolean }) {
+export function TaskOverview({ path, s, docs, onDoc, progress, running, onAgent }: { path: string; s: WorkerSession; docs: WorkItemDocument[]; onDoc: (d: WorkItemDocument) => void; progress?: TaskProgress | null; running?: boolean; onAgent?: (agent: string) => void }) {
+  // Only an agent session can have sub-agents: a test command's names no harness and no model.
+  const subagents = useSessionSubagents(s.work_item_id, s.id, s.status === "running", s.harness != null || s.model != null);
   const mine = docs.filter((d) => isSessionDoc(d, s) || (d.hook_point === path && d.attempt === s.attempt));
   return (
     <>
@@ -91,6 +95,7 @@ export function TaskOverview({ path, s, docs, onDoc, progress, running }: { path
         {fact("ran", s.wall_ms != null ? elapsed(s.wall_ms) : null)}
       </dl>
       {progress?.tasks?.length ? <SubTasks tasks={progress.tasks} docs={docs} onDoc={onDoc} /> : null}
+      <SubagentSection workItemId={s.work_item_id} sessionId={s.id} list={subagents} onOpen={(agent) => onAgent?.(agent)} />
       <h3 className="ip-h">Result</h3>
       <dl className="item-facts ip-facts">
         {fact("tokens", s.tokens_in != null ? <span data-tip={tokenTip(s)}>{tokenText(s)}</span> : null)}

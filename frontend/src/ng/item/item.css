@@ -264,3 +264,12 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 .ip-row { padding-block: calc(8px + var(--row-pad-add)); }
 .ip-subtask { padding-block: calc(4px + var(--row-pad-add)); }
 .ip-recent { gap: calc(4px + var(--row-pad-add)); }
+
+/* A task's sub-agents (Overview): a row each, what it last did or said, its prompt behind a disclosure. */
+.ip-subagent-count { margin: 0 0 8px; }
+.ip-subagent { list-style: none; }
+.ip-subagent-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ip-subagent-said { margin: 4px 0 0 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ip-subagent-prompt { margin: 4px 0 0 10px; font-size: var(--fs-meta); color: var(--text-sub); }
+.ip-subagent-prompt summary { cursor: pointer; }
+.ip-prompt { margin: 4px 0 0; padding: 8px; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: var(--fs-meta); }

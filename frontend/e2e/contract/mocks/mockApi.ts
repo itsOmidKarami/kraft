@@ -1,6 +1,6 @@
 import { NG_CHAINS, NG_EXTENDING_CHAIN, NG_REPOS, NG_WORKSPACES, ngDryRun } from "./ngBoard";
 import { inTreeOrder, tree } from "../../../src/ng/review/model";
-import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchFor, WORKERS_FIXTURE, type Scenario } from "./fixtures";
+import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchFor, subagentList, WORKERS_FIXTURE, type Scenario } from "./fixtures";
 import { makeAreas } from "./areasMock";
 import { ngThreads } from "./ngItems";
 import { harnessesServer, PROVIDER_STATUS } from "./ngHarnesses";
@@ -647,6 +647,16 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       return json({ id: m[1], status: "active", node_id: "implement", loop: "verify_fix_loop", steer: null, path: "/tmp", editor: "code" });
     }
 
+    /* a session's sub-agents: the list, and one with its whole prompt and answer */
+    if ((m = p.match(/^\/work-items\/([^/]+)\/sessions\/([^/]+)\/subagents(?:\/([^/]+))?$/))) {
+      const bundle = S.bundles[m[1]];
+      const status = bundle?.sessions.find((s) => s.id === m![2])?.status ?? "done";
+      const list = subagentList(bundle?.logs[m[2]] ?? [], status);
+      if (!m[3]) return json({ session_id: m[2], status, subagents: list });
+      const one = list.find((a) => a.id === m![3]);
+      return one ? json({ ...one, prompt: `Look through the repository for ${one.description.toLowerCase()} and report what you find.`, answer: one.summary }) : json({ detail: "no such sub-agent in this session's log" }, 404);
+    }
+
     /* logs: jsonl, plain text, SSE tail */
     if ((m = p.match(/^\/work-items\/([^/]+)\/sessions\/([^/]+)\/log$/))) {
       const sid = m[2];
@@ -657,7 +667,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
         const body = lines.slice(-5).map((l) => `data: ${JSON.stringify(l)}\n\n`).join("") + "event: end\ndata: {}\n\n";
         return { status: 200, contentType: "text/event-stream", body };
       }
-      if (q.get("format") === "jsonl") return json({ session_id: sid, status, lines, next_line: lines.length });
+      if (q.get("format") === "jsonl") return json({ session_id: sid, status, lines, next_line: lines.length, subagents: subagentList(lines, status) });
       return { status: 200, contentType: "text/plain", body: lines.map((l) => l.text).join("\n") };
     }
 

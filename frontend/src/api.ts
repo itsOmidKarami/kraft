@@ -139,6 +139,14 @@ export const getAnalytics = (params: { range: string; repo?: string; template?: 
 export const logUrl = (workItemId: string, sessionId: string) =>
   `/work-items/${encodeURIComponent(workItemId)}/sessions/${encodeURIComponent(sessionId)}/log`;
 
+/** A session's sub-agents, worked out from its log. */
+export const subagentsUrl = (workItemId: string, sessionId: string) =>
+  `/work-items/${encodeURIComponent(workItemId)}/sessions/${encodeURIComponent(sessionId)}/subagents`;
+
+/** One sub-agent of a session, with its whole prompt and answer. */
+export const subagentUrl = (workItemId: string, sessionId: string, agentId: string) =>
+  `${subagentsUrl(workItemId, sessionId)}/${encodeURIComponent(agentId)}`;
+
 /** SSE tail; the server closes the stream when the session stops running. */
 export const logStreamUrl = (workItemId: string, sessionId: string) =>
   `${apiUrl(logUrl(workItemId, sessionId))}?format=jsonl&follow=1`;

@@ -146,6 +146,25 @@ describe("Log", () => {
       expect(screen.getByRole("link", { name: "Download the whole log" })).toBeInTheDocument();
     });
 
+    it("lists the response's sub-agents, with a dot for how each went, even one with no loaded rows", async () => {
+      const subagents = [
+        { id: "a1", description: "Explore codebase", type: "Explore", status: "completed", tokens: 31_000, duration_ms: 42_000 },
+        { id: "a9", description: "Lint everything", type: "general-purpose", status: "cut_off" },
+      ];
+      stubFetch({ "GET /work-items/w1/sessions/s1/log": [200, { session_id: "s1", status: "done", lines: agentLines, subagents }] } as never);
+      const onAgent = vi.fn();
+      render(<Controlled onAgent={onAgent} />);
+      await screen.findByText(/main says hi/);
+      await userEvent.click(screen.getByRole("button", { name: "agent: All" }));
+      const rows = screen.getAllByRole("menuitemradio");
+      expect(rows.map((r) => r.textContent)).toEqual(["✓All", "Main", "Explore codebaseExplore · 31k tokens · 42s", "Lint everythinggeneral-purpose"]);
+      expect(rows[2].querySelector(".ip-pill-dot")).toHaveClass("is-ok");
+      expect(rows[3].querySelector(".ip-pill-dot")).toHaveClass("is-bad");
+      await userEvent.click(rows[3]);
+      expect(onAgent).toHaveBeenCalledWith("a9");
+      expect(await screen.findByText(new RegExp(AGENT_LINES_EARLIER))).toBeInTheDocument();
+    });
+
     it("copies what is shown, prefix and all", async () => {
       serve(agentLines);
       const writeText = vi.fn();

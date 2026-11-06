@@ -592,6 +592,29 @@ export interface LogLine {
   agent_status?: string;
 }
 
+/** One Claude Code sub-agent of a session, worked out from its log
+ *  (GET /work-items/{wid}/sessions/{sid}/subagents, and the `subagents` of the jsonl log answer). */
+export interface Subagent {
+  id: string;
+  tool_use_id?: string | null;
+  description: string;
+  type?: string | null;
+  depth?: number | null;
+  /** `cut_off`: still running when its session ended */
+  status: "running" | "completed" | "failed" | "killed" | "cut_off";
+  started_at?: string | null;
+  ended_at?: string | null;
+  tokens?: number | null;
+  tool_uses?: number | null;
+  duration_ms?: number | null;
+  last_tool?: string | null;
+  /** its answer's first 500 characters */
+  summary?: string | null;
+}
+
+/** One sub-agent with what the list leaves out (GET .../subagents/{agent}). */
+export type SubagentDetail = Subagent & { prompt: string | null; answer: string | null };
+
 export interface GateAttempt {
   n: number;
   sha: string;

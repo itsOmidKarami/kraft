@@ -197,7 +197,7 @@ export function logLines(sessionId: string, n: number, long: boolean): any[] {
     if (long && i % 37 === 0) text = "x".repeat(600) + " " + "https://gitlab.example.com/acme-corporation/platform-engineering/payment-reconciliation-service/-/merge_requests/1842/diffs?commit_id=" + hex(i) + " " + "y".repeat(1200);
     // Some agent and tool rows are a sub-agent's: tagged, and prefixed as the server's `logs.summary` writes them.
     const sub = (src === "agent" || src === "tool") && (i % 8 === 2 || i % 8 === 3) ? { agent: "fa0001", agent_label: "Explore codebase", agent_type: "Explore" }
-      : src === "agent" && i % 8 === 6 ? { agent: "fa0002", agent_label: "Review diff", agent_type: "general-purpose" } : null;
+      : src === "agent" && i % 8 === 6 ? { agent: "fa0002", agent_label: "Review diff", agent_type: "general-purpose", agent_status: "completed" } : null;
     const summary = src === "tool" ? "Edit frontend/src/views/work_item/Inspector/Changes.tsx" : undefined;
     out.push({
       n: i, t: t(i / 10), src, text,
@@ -205,6 +205,22 @@ export function logLines(sessionId: string, n: number, long: boolean): any[] {
     });
   }
   return out;
+}
+
+/** The sub-agents `lines` name, as the server's `/subagents` route lists them: the first runs while its session does. */
+export function subagentList(lines: any[], status: string): any[] {
+  const seen = new Map<string, any>();
+  for (const l of lines) {
+    if (!l.agent || seen.has(l.agent)) continue;
+    const n = seen.size;
+    const running = status === "running" && n === 0;
+    seen.set(l.agent, {
+      id: l.agent, tool_use_id: `toolu_${l.agent}`, description: l.agent_label, type: l.agent_type ?? null, depth: 1, status: running ? "running" : "completed",
+      started_at: "2026-11-02T23:38:52.555Z", ended_at: running ? null : "2026-11-02T23:39:34.269Z", tokens: 31_000 + n * 7_000, tool_uses: 4 + n, duration_ms: 42_000,
+      last_tool: "Grep", summary: running ? null : "Found the grouping code in Changes.tsx.",
+    });
+  }
+  return [...seen.values()];
 }
 
 function buildItem(state: DisplayState, seed: number, variant: Variant): ItemBundle {

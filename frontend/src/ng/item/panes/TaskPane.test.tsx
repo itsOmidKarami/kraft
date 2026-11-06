@@ -92,6 +92,47 @@ describe("task pane", () => {
     expect(within(pane("code_review")).queryByRole("button", { name: /Another item's notes/ })).toBeNull();
   });
 
+  describe("a task's sub-agents", () => {
+    const agent = (id: string, over: Record<string, unknown> = {}) => ({ id, description: `Agent ${id}`, type: "Explore", status: "completed", tokens: 31_000, tool_uses: 4, duration_ms: 42_000, last_tool: "Grep", summary: "Found it.\nMore.", ...over });
+    const list = [agent("a1", { description: "Explore codebase", status: "running", summary: null }), agent("a2", { status: "running", summary: null, last_tool: null }), agent("a3"), agent("a4"), agent("a5"), agent("a6", { status: "cut_off", summary: null })];
+    const base = "/work-items/w1/sessions/verification.review.code_review-2";
+    const url = "/work-items/w1/nodes/verification?sel=verification.review.code_review";
+
+    it("counts them and lists a row each: what a running one last used, the first line of a finished one's answer", async () => {
+      mount(url, item, [], { [`GET ${base}/subagents`]: [200, { session_id: "x", status: "failed", subagents: list }] });
+      const panel = screen.getByRole("tabpanel");
+      expect(await within(panel).findByRole("heading", { name: "Sub-agents" })).toBeInTheDocument();
+      expect(within(panel).getByText("2 running · 3 finished · 1 cut off")).toBeInTheDocument();
+      const rows = within(within(panel).getByRole("list", { name: "Sub-agents" })).getAllByRole("listitem");
+      expect(rows).toHaveLength(6);
+      expect(rows[0]).toHaveTextContent("Explore codebaseExplore · running · 31k tokens · 4 tool uses · 42srunning Grep");
+      expect(rows[2]).toHaveTextContent("Agent a3Explore · done · 31k tokens · 4 tool uses · 42sFound it.");
+      expect(rows[2]).not.toHaveTextContent("More.");
+      expect(rows[5]).toHaveTextContent("Agent a6Explore · cut off");
+    });
+
+    it("opens the task's log filtered to the sub-agent", async () => {
+      mount(url, item, [], { [`GET ${base}/subagents`]: [200, { session_id: "x", status: "failed", subagents: list }] });
+      await userEvent.click(await screen.findByRole("button", { name: "Explore codebase — open its log" }));
+      expect(screen.getByTestId("where").textContent).toBe(`${url}&tab=log&agent=a1`);
+    });
+
+    it("fetches the whole prompt when it is opened, not before", async () => {
+      const prompt = "p".repeat(3000);
+      mount(url, item, [], { [`GET ${base}/subagents`]: [200, { session_id: "x", status: "failed", subagents: [agent("a3")] }], [`GET ${base}/subagents/a3`]: [200, { ...agent("a3"), prompt, answer: "Found it." }] });
+      await screen.findByText("Agent a3");
+      expect(screen.queryByText(prompt)).toBeNull();
+      await userEvent.click(screen.getByText("Prompt"));
+      expect(await screen.findByText(prompt)).toBeInTheDocument();
+    });
+
+    it("has no section when the session ran none", async () => {
+      mount(url);
+      await screen.findByText("harness");
+      expect(screen.queryByRole("heading", { name: "Sub-agents" })).toBeNull();
+    });
+  });
+
   // The work brief's session note only says where the brief is: Output opens the brief itself.
   describe("a task that produces a document", () => {
     const frozen = JSON.stringify({ chain: { nodes: [{ id: "work_brief", kind: "exec", steps: [{ id: "main", tasks: [{ id: "author", kind: "agent", produces: "work_brief" }] }] }] } });

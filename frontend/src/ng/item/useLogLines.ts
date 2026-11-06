@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { LogLine } from "../../types";
+import type { LogLine, Subagent } from "../../types";
 import { logUrl } from "../../api";
 import { request } from "../http";
 import { NO_LOG_YET, LOG_UNREADABLE } from "./sharedWords";
@@ -7,22 +7,24 @@ import { NO_LOG_YET, LOG_UNREADABLE } from "./sharedWords";
 export const POLL_MS = 3000;
 
 /** A session's log lines, read again every few seconds while it runs: the Log pane's and the failed card's tail.
- *  `lines` is null until the first read lands; `error` says why a read did not. */
-export function useLogLines(workItemId: string, sessionId: string, running: boolean): { lines: LogLine[] | null; error: string | null } {
+ *  `lines` is null until the first read lands; `error` says why a read did not. `subagents` is the list the same
+ *  answer carries, null until then. */
+export function useLogLines(workItemId: string, sessionId: string, running: boolean): { lines: LogLine[] | null; error: string | null; subagents: Subagent[] | null } {
   const [lines, setLines] = useState<LogLine[] | null>(null);
+  const [subagents, setSubagents] = useState<Subagent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
     const read = () =>
-      request<{ lines: LogLine[] }>(`${logUrl(workItemId, sessionId)}?format=jsonl`).then((r) => {
+      request<{ lines: LogLine[]; subagents?: Subagent[] }>(`${logUrl(workItemId, sessionId)}?format=jsonl`).then((r) => {
         if (!live) return;
         // A pending attempt has no log yet: once it runs, a read that succeeds clears the note.
-        if (r.status === 200) { setLines(r.body.lines); setError(null); }
+        if (r.status === 200) { setLines(r.body.lines); setSubagents(r.body.subagents ?? null); setError(null); }
         else setError(r.status === 404 ? NO_LOG_YET : LOG_UNREADABLE);
       });
     read();
     const t = running ? setInterval(read, POLL_MS) : undefined;
     return () => { live = false; if (t) clearInterval(t); };
   }, [workItemId, sessionId, running]);
-  return { lines, error };
+  return { lines, error, subagents };
 }

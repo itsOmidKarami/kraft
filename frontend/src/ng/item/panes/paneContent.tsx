@@ -52,6 +52,8 @@ export type PaneArgs = {
   /** The sub-agent the task's log is filtered to (an id, or "main"); undefined shows every line. */
   agent?: string;
   setAgent: (agent: string | undefined) => void;
+  /** Open the task's Log tab filtered to one sub-agent. */
+  openAgent: (agent: string) => void;
   docs: WorkItemDocument[];
   onDoc: (d: WorkItemDocument) => void;
   /** Open the pending gate's document (GET /artifact). */
@@ -330,7 +332,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
       <>
         {/* The changed-test-scope task says how its round went, and what its canvas frame means, above the usual facts. */}
         {view && <ScopeOverview view={view} />}
-        <TaskOverview path={path} s={at} docs={a.docs} onDoc={a.onDoc} progress={progress} running={sessionLook(sessions.at(-1), a.now).running} />
+        <TaskOverview path={path} s={at} docs={a.docs} onDoc={a.onDoc} progress={progress} running={sessionLook(sessions.at(-1), a.now).running} onAgent={a.openAgent} />
       </>
     ),
     input: <TaskInput item={item} s={at} current={current} />,
