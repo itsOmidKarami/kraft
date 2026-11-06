@@ -334,7 +334,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
       <>
         {/* The changed-test-scope task says how its round went, and what its canvas frame means, above the usual facts. */}
         {view && <ScopeOverview view={view} />}
-        <TaskOverview path={path} s={at} docs={a.docs} onDoc={a.onDoc} progress={progress} running={sessionLook(sessions.at(-1), a.now).running} onAgent={a.openAgent} />
+        <TaskOverview path={path} s={at} docs={a.docs} onDoc={a.onDoc} progress={progress} running={sessionLook(sessions.at(-1), a.now).running} onAgent={a.openAgent} known={a.subagents[at.id]} />
       </>
     ),
     input: <TaskInput item={item} s={at} current={current} />,

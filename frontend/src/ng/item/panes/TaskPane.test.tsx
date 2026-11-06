@@ -1,12 +1,13 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChainNode, SessionStatus, TaskProgress, WorkerSession } from "../../../types";
 import { detail, stubFetch, V1 } from "../testkit";
+import { POLL_MS } from "../useLogLines";
 import { usePaneMemory, Workspace } from "../Workspace";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 beforeEach(() => usePaneMemory.setState({ pane: { open: true, userCollapsed: false } }));
 
 const sess = (hook_point: string, attempt: number, over: Partial<WorkerSession> = {}) =>
@@ -14,17 +15,18 @@ const sess = (hook_point: string, attempt: number, over: Partial<WorkerSession> 
 const item = detail({ worker_sessions: [sess("verification.review.code_review", 1), sess("verification.review.code_review", 2, { status: "failed", harness: "codex" }), sess("escalation", 1, { node_id: "verification", status: "needs_context" })] });
 function Where() { const l = useLocation(); return <output data-testid="where">{l.pathname + l.search}</output>; }
 const mount = (path: string, it = item, events: unknown[] = [], routes: Parameters<typeof stubFetch>[0] = {}) => {
-  stubFetch({ ...routes, "GET /work-items/w1/events": [200, events], "GET /work-items/w1/documents": [200, { work_item_id: "w1", documents: [
+  const calls = stubFetch({ ...routes, "GET /work-items/w1/events": [200, events], "GET /work-items/w1/documents": [200, { work_item_id: "w1", documents: [
     { document_id: "d1", title: "Review notes", path: "a.md", kind: "reviews", worker_session_id: "verification.review.code_review-1", hook_point: "verification.review.code_review", attempt: 1 },
     { document_id: "d2", title: "Other", path: "b.md", kind: "plans", worker_session_id: "x", hook_point: "plan.write.plan", attempt: 1 },
     // Another item's session with the same id, linked here by its summary's front matter.
     { document_id: "d3", title: "Another item's notes", path: "items/w2/sessions/s/out/summary.md", kind: "sessions", worker_session_id: "verification.review.code_review-1", session_work_item_id: "w2", hook_point: "escalation", attempt: 1 },
   ] }] });
-  return render(
+  const view = render(
     <MemoryRouter initialEntries={[path]}>
       <Routes><Route path="/work-items/:id/nodes/:node" element={<><Workspace item={it} version="1" reload={() => {}} /><Where /></>} /></Routes>
     </MemoryRouter>,
   );
+  return Object.assign(view, { calls });
 };
 const pane = (name: string) => screen.getByRole("complementary", { name: `${name} pane` });
 /** Open the subtitle's attempt menu (its pill reads `pill`) and pick the row whose label starts `row`. */
@@ -105,16 +107,28 @@ describe("task pane", () => {
       expect(within(panel).getByText("2 running · 3 finished · 1 cut off")).toBeInTheDocument();
       const rows = within(within(panel).getByRole("list", { name: "Sub-agents" })).getAllByRole("listitem");
       expect(rows).toHaveLength(6);
-      expect(rows[0]).toHaveTextContent("Explore codebaseExplore · running · 31k tokens · 4 tool uses · 42srunning Grep");
-      expect(rows[2]).toHaveTextContent("Agent a3Explore · done · 31k tokens · 4 tool uses · 42sFound it.");
+      expect(rows[0]).toHaveTextContent("Explore codebaseExplore · running · 31k tokens · 4 tool uses · 42s — open its logrunning Grep");
+      expect(rows[2]).toHaveTextContent("Agent a3Explore · done · 31k tokens · 4 tool uses · 42s — open its logFound it.");
       expect(rows[2]).not.toHaveTextContent("More.");
       expect(rows[5]).toHaveTextContent("Agent a6Explore · cut off");
     });
 
     it("opens the task's log filtered to the sub-agent", async () => {
       mount(url, item, [], { [`GET ${base}/subagents`]: [200, { session_id: "x", status: "failed", subagents: list }] });
-      await userEvent.click(await screen.findByRole("button", { name: "Explore codebase — open its log" }));
+      await userEvent.click(await screen.findByRole("button", { name: /Explore codebase.*running.*open its log/ }));
       expect(screen.getByTestId("where").textContent).toBe(`${url}&tab=log&agent=a1`);
+    });
+
+    it("reads a running session's list once, in the Workspace's poll: the Overview does not read it again", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const live = detail({ worker_sessions: [sess("verification.review.code_review", 1, { status: "running", harness: "claude" })] });
+      const { calls } = mount(url, live, [], { [`GET ${base.replace("-2", "-1")}/subagents`]: [200, { session_id: "x", status: "running", subagents: list }] });
+      expect(await screen.findByText("2 running · 3 finished · 1 cut off")).toBeInTheDocument();
+      // Past the first reads (the map's, and the Overview's before it lands) each interval adds the map's one request.
+      const reads = () => calls.filter((c) => c.path.endsWith("/subagents")).length;
+      const before = reads();
+      await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS * 2); });
+      expect(reads() - before).toBe(2);
     });
 
     it("fetches the whole prompt when it is opened, not before", async () => {

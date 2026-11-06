@@ -711,6 +711,8 @@ describe("the task screen (E)", () => {
       expect(await screen.findByText("1 running · 1 finished · 1 cut off")).toBeInTheDocument();
       const rows = screen.getAllByRole("button", { name: /open its log/ });
       expect(rows[0]).toHaveTextContent("Agent a1Explore · running · 31k tokens · 4 tool uses · 42s");
+      // The visible text names the row, so a screen reader hears the status and the tokens, then where it goes.
+      expect(screen.getByRole("button", { name: /Agent a1.*running.*31k tokens.*open its log/ })).toBeInTheDocument();
       expect(screen.getByText("running Grep")).toBeInTheDocument();
       expect(screen.getByText("Found it.")).toBeInTheDocument();
       expect(screen.queryByText(/More\./)).toBeNull();
@@ -718,11 +720,17 @@ describe("the task screen (E)", () => {
 
     it("opens the Log tab filtered to the sub-agent that was tapped", async () => {
       mount(item("running"), TASK, { ...routes, "GET /work-items/w1/sessions/s1/log": [200, { lines: [{ n: 1, t: null, src: "agent", text: "x", summary: "↳ Agent a2: done", agent: "a2", agent_label: "Agent a2" }, { n: 2, t: null, src: "agent", text: "x", summary: "main says hi" }], subagents: list }] });
-      await userEvent.click(await screen.findByRole("button", { name: "Agent a2 — open its log" }));
+      await userEvent.click(await screen.findByRole("button", { name: /^Agent a2.*open its log$/ }));
       expect(where()).toContain("tab=log");
       expect(where()).toContain("agent=a2");
       expect(await screen.findByRole("button", { name: "agent: Agent a2 ▾" })).toBeInTheDocument();
       expect(screen.queryByText(/main says hi/)).toBeNull();
+    });
+
+    it("does not read /subagents on the Log tab: the log's own read carries them", async () => {
+      const calls = mount(item("running"), `${TASK}&tab=log`, routes);
+      await screen.findByText(/loaded review_package/);
+      expect(calls.filter((c) => c.path.endsWith("/subagents"))).toEqual([]);
     });
 
     it("fetches the whole prompt when it is opened", async () => {

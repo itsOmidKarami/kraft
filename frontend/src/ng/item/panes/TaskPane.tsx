@@ -1,5 +1,5 @@
 import { elapsed, tokenText, tokenTip, usd } from "../../../format";
-import type { TaskProgress, WorkerSession, WorkItemDocument } from "../../../types";
+import type { Subagent, TaskProgress, WorkerSession, WorkItemDocument } from "../../../types";
 import { FileText } from "../../icons";
 import { Menu, type MenuItem } from "../../ui/Menu";
 import { isSessionDoc, lookWord, NO_DOCUMENTS, progressWords, sessionLook, statusWords, subTasks } from "../nodeGraph";
@@ -78,9 +78,11 @@ function SubTasks({ tasks, docs, onDoc }: { tasks: NonNullable<TaskProgress["tas
 /** Overview: what ran and its result, with the documents this attempt wrote (Decisions §6 Documents).
  *  On the plan task, `progress` is the plan's sub-tasks, whichever attempt is shown: it describes
  *  the plan, not a session; `running` is whether the task's newest session runs. */
-export function TaskOverview({ path, s, docs, onDoc, progress, running, onAgent }: { path: string; s: WorkerSession; docs: WorkItemDocument[]; onDoc: (d: WorkItemDocument) => void; progress?: TaskProgress | null; running?: boolean; onAgent?: (agent: string) => void }) {
+export function TaskOverview({ path, s, docs, onDoc, progress, running, onAgent, known }: { path: string; s: WorkerSession; docs: WorkItemDocument[]; onDoc: (d: WorkItemDocument) => void; progress?: TaskProgress | null; running?: boolean; onAgent?: (agent: string) => void; known?: Subagent[] }) {
   // Only an agent session can have sub-agents: a test command's names no harness and no model.
-  const subagents = useSessionSubagents(s.work_item_id, s.id, s.status === "running", s.harness != null || s.model != null);
+  // `known` is the Workspace's own poll of this running session: read again here only when it has none.
+  const polled = useSessionSubagents(s.work_item_id, s.id, s.status === "running", !known && (s.harness != null || s.model != null));
+  const subagents = known ?? polled;
   const mine = docs.filter((d) => isSessionDoc(d, s) || (d.hook_point === path && d.attempt === s.attempt));
   return (
     <>
