@@ -76,6 +76,8 @@ FOLLOW_ITEM = "item"
 #: unset (Kraft-4in7z): it has to be able to rebase the branch and push it.
 DEFAULT_ESCALATION_GRANTS = ("git-commit", "git-rebase", "git-push")
 DEFAULT_AUTO_ESCALATE_STUCK_CAP = 3
+#: `storage.outputs.max_size` when policy.yaml sets none: 64M.
+DEFAULT_OUTPUTS_MAX_BYTES = 64 << 20
 
 
 @model(frozen=True, config=ConfigDict(extra="forbid"))
@@ -201,10 +203,36 @@ class StorageWorktreesInput(BaseModel):
         return self
 
 
+class StorageOutputsInput(BaseModel):
+    """`storage.outputs`: what a task's step outputs may total. `max_size`
+    bounds what Kraft keeps of one writer, not the disk a running task can
+    fill, and is refused above what one remote transfer carries."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_size: str | None = None
+
+    @field_validator("max_size", mode="before")
+    @classmethod
+    def _is_a_size(cls, value):
+        if value is None:
+            return None
+        # Imported here: `kraft.remote` reads this module's policy types.
+        from kraft.remote.files import MAX_BYTES
+
+        if size_bytes(value) > MAX_BYTES:
+            raise ValueError(
+                f"storage.outputs.max_size {value} is above the {MAX_BYTES >> 20}M "
+                "a remote machine can return"
+            )
+        return str(value).strip()
+
+
 class StorageInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     worktrees: StorageWorktreesInput | None = None
+    outputs: StorageOutputsInput | None = None
 
 
 class PolicyInput(BaseModel):
@@ -346,6 +374,9 @@ class Policy:
     #: `storage.worktrees.quota` in bytes, or 80% of the limit. Set whenever
     #: the limit is.
     storage_quota_bytes: int | None = None
+    #: `storage.outputs.max_size` in bytes: the most a writer's step outputs
+    #: may total before the capture fails it (`kraft.outputs`).
+    outputs_max_bytes: int = DEFAULT_OUTPUTS_MAX_BYTES
     #: `storage.worktrees.auto_cleanup.min_age` in seconds. None is off: the
     #: limit then archives nothing and a person cleans up.
     storage_auto_cleanup_min_age_s: int | None = None
@@ -428,6 +459,7 @@ class Policy:
             else limit * 8 // 10
         )
         cleanup = worktrees.auto_cleanup if worktrees else None
+        outputs = parsed.storage.outputs if parsed.storage else None
         return cls(
             loops=parsed.loops,
             default=parsed.default,
@@ -436,6 +468,11 @@ class Policy:
             archive_after_days=parsed.archive.after_days if parsed.archive else None,
             storage_limit_bytes=limit,
             storage_quota_bytes=quota,
+            outputs_max_bytes=(
+                size_bytes(outputs.max_size)
+                if outputs and outputs.max_size
+                else DEFAULT_OUTPUTS_MAX_BYTES
+            ),
             storage_auto_cleanup_min_age_s=age_seconds(cleanup.min_age) if cleanup else None,
             rate_limit_retries=parsed.rate_limit_retries,
             triggers=_triggers(name, parsed.triggers),

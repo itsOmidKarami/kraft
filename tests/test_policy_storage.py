@@ -10,8 +10,9 @@ from kraft import policy
 _BASE = {"default": {"attempts": 3, "wall_clock_s": 3600}}
 
 
-def _policy(worktrees: dict | None) -> policy.Policy:
-    data = _BASE if worktrees is None else {**_BASE, "storage": {"worktrees": worktrees}}
+def _policy(worktrees: dict | None, **storage) -> policy.Policy:
+    section = {} if worktrees is None else {"worktrees": worktrees}
+    data = _BASE if not (section or storage) else {**_BASE, "storage": {**section, **storage}}
     return policy.Policy.from_input(policy.PolicyInput.model_validate(data), source="policy.yaml")
 
 
@@ -111,3 +112,27 @@ def test_storage_worktrees_refuses(worktrees, message):
 def test_age_seconds_refuses_anything_but_hours_and_days_and_names_the_fix(text):
     with pytest.raises(ValueError, match="24h"):
         policy.age_seconds(text)
+
+
+@pytest.mark.parametrize(
+    ("storage", "expected"),
+    [
+        ({}, 64 << 20),
+        ({"outputs": {}}, 64 << 20),
+        ({"outputs": {"max_size": "10M"}}, 10 << 20),
+        ({"outputs": {"max_size": "256M"}}, 256 << 20),
+    ],
+    ids=["default", "empty-block", "ten-megabytes", "the-remote-limit-itself"],
+)
+def test_outputs_max_size(storage, expected):
+    assert _policy(None, **storage).outputs_max_bytes == expected
+
+
+@pytest.mark.parametrize(
+    ("max_size", "message"),
+    [("300M", "above the 256M"), ("1G", "above the 256M"), (64, "10G"), ("0M", "10G")],
+    ids=["above-the-remote-limit", "gigabyte", "bare-int", "zero"],
+)
+def test_outputs_max_size_refuses(max_size, message):
+    with pytest.raises(ValidationError, match=message):
+        policy.PolicyInput.model_validate({**_BASE, "storage": {"outputs": {"max_size": max_size}}})

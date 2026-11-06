@@ -374,6 +374,17 @@
     "StorageInput": {
       "additionalProperties": false,
       "properties": {
+        "outputs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StorageOutputsInput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "worktrees": {
           "anyOf": [
             {
@@ -387,6 +398,26 @@
         }
       },
       "title": "StorageInput",
+      "type": "object"
+    },
+    "StorageOutputsInput": {
+      "additionalProperties": false,
+      "description": "`storage.outputs`: what a task's step outputs may total. `max_size`\nbounds what Kraft keeps of one writer, not the disk a running task can\nfill, and is refused above what one remote transfer carries.",
+      "properties": {
+        "max_size": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Size"
+        }
+      },
+      "title": "StorageOutputsInput",
       "type": "object"
     },
     "StorageWorktreesInput": {

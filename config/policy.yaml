@@ -104,6 +104,14 @@ archive:
 #     auto_cleanup:
 #       min_age: 24h
 
+# Step outputs: what one task leaves for a later task's `reads`. `max_size` is
+# the most Kraft keeps of one task's outputs (default 64M, at most 256M, what
+# one remote machine returns). It bounds what is kept, not what a running task
+# can write, so it does not stop a task filling its disk.
+# storage:
+#   outputs:
+#     max_size: 64M
+
 # Schedules (a work item filed from a cron) are `intake.yaml`'s `schedules:`,
 # with the rest of what files work by itself. A `triggers:` list here is
 # still read; `kraft admin doctor` names the move.

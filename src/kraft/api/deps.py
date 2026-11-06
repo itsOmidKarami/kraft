@@ -37,6 +37,7 @@ from kraft.addons import drift
 from kraft.addons import load as addons_load
 from kraft.config import RepoEntry
 from kraft.policy import (
+    DEFAULT_OUTPUTS_MAX_BYTES,
     InstancePolicy,
     InstancePolicyInput,
     Policy,
@@ -1353,6 +1354,9 @@ def launch(st, repo: str) -> executor.LaunchContext:
     .../artifact` does for a person."""
     steering = library_steering(st) or {}
     digest = functools.partial(revision.artifact_digest, library=getattr(st, "library", None))
+    outputs_max_bytes = getattr(
+        getattr(st, "policy", None), "outputs_max_bytes", DEFAULT_OUTPUTS_MAX_BYTES
+    )
     try:
         repos = config_mod.load_repos(repos_path(st))
     except config_mod.ConfigError as exc:
@@ -1366,6 +1370,7 @@ def launch(st, repo: str) -> executor.LaunchContext:
             library_steering=steering,
             chain_revision_digest=digest,
             forges=functools.partial(forges_now, st),
+            outputs_max_bytes=outputs_max_bytes,
         )
     entry = _connected(repos, repo)
     repo_id = entry.id if entry is not None else None
@@ -1377,4 +1382,5 @@ def launch(st, repo: str) -> executor.LaunchContext:
         chain_revision_digest=functools.partial(digest, repo_id=repo_id),
         item_repo_id=repo_id,
         forges=functools.partial(forges_now, st),
+        outputs_max_bytes=outputs_max_bytes,
     )

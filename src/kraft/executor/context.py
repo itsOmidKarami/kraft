@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from kraft.caps import TIME_CAPPED
+from kraft.policy import DEFAULT_OUTPUTS_MAX_BYTES
 from kraft.vocab import ADVANCING
 
 if TYPE_CHECKING:
@@ -221,6 +222,10 @@ class LaunchContext:
     #: library its launches may read (`addons.load.for_item`). Kept for a
     #: fanned-out member's run too. None: no id, so no repo library.
     item_repo_id: str | None = None
+    #: `storage.outputs.max_size` at launch: what a writer's step outputs may
+    #: total (`kraft.outputs`). Recorded with the session, so a capture after a
+    #: restart uses the number the session launched under.
+    outputs_max_bytes: int = DEFAULT_OUTPUTS_MAX_BYTES
 
 
 class Steer:
