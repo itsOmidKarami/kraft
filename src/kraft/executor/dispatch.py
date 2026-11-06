@@ -7,6 +7,7 @@ import json
 import logging
 import shlex
 import sqlite3
+import stat
 import traceback
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
@@ -73,6 +74,7 @@ from kraft.templates.models import (
     SubprocessTask,
     TaskScope,
     TestSuite,
+    resolve_reads,
 )
 from kraft.vocab import (
     ADVANCING,
@@ -1782,6 +1784,8 @@ async def _dispatch_task_in(
                 db, run_dirs, common, f"{task.path}: cannot parse command {t.command!r}: {exc}\n"
             )
         env = dict(TEST_ENV)
+        reads_ro, reads_env = _reads_mounts(run_dirs, work_item_row, node.id, t)
+        env |= reads_env
         if t.outputs is not None:
             files = item_paths.session_files(run_dirs, work_item_row["id"], common["session_id"])
             env["KRAFT_OUTPUT_DIR"] = str(outputs.declare(files, _output_decl(t, task, launch)))
@@ -1793,6 +1797,7 @@ async def _dispatch_task_in(
                 cwd=worktree,
                 repo_entry=launch.repo_entry if launch else None,
                 env=env,
+                ro_paths=reads_ro,
                 sandbox=sandbox,
                 checkout=checkout,
                 time_cap=time_cap,
@@ -2425,6 +2430,16 @@ async def _launch_agent(
     # PR rules are.
     extra_env: dict[str, str] = {}
     notes = ""
+    extra_ro, reads_env = _reads_mounts(run_dirs, work_item_row, node.id, t)
+    extra_env |= reads_env
+    if reads_env:
+        # Only a writer that left a snapshot is named: there is nothing of the others.
+        present = [
+            writer
+            for writer in resolve_reads(node.id, t.reads)
+            if str(item_paths.snapshot_dir(run_dirs, work_item_row["id"], writer)) in extra_ro
+        ]
+        notes += prompts.reads_note(present, declared_variables(work_item_row, present))
     if t.outputs is not None:
         decl = _output_decl(t, task, launch)
         files = item_paths.session_files(run_dirs, work_item_row["id"], common["session_id"])
@@ -2468,6 +2483,7 @@ async def _launch_agent(
             + (prompts.AGENT_RESUMED_NOTE if resumed is not None else instruction)
             + notes,
             extra_env=extra_env,
+            extra_ro=extra_ro,
             resume_session_id=resumed[1] if resumed is not None else None,
             repo_path=work_item_row["repo"],
             cwd=worktree,
@@ -2486,6 +2502,38 @@ async def _launch_agent(
         # into the same refusal.
         return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n"), True
     return status, False
+
+
+def declared_variables(row, writers: Sequence[str]) -> dict[str, tuple[str, ...]]:
+    """The variables each of `writers` (task paths) declares in the item's
+    chain as frozen now, `()` for one that declares none or is not there. The
+    current declaration, not whatever an older snapshot's file still holds."""
+    chain = store.materialized_chain_of(row)
+    declared = {
+        task.path: tuple(task.task.outputs.variables)
+        for node in (chain.chain.nodes if chain is not None else ())
+        for task in node.tasks()
+        if getattr(task.task, "outputs", None) is not None
+    }
+    return {writer: declared.get(writer, ()) for writer in writers}
+
+
+def _reads_mounts(run_dirs, row, node_id: str, task) -> tuple[tuple[str, ...], dict[str, str]]:
+    """What a reader is handed: the snapshot folders of the writers its
+    `reads` names that have one (mounted read-only, and no other writer's),
+    and `KRAFT_READS_DIR` -- set whenever `reads` is not empty, so a reader of
+    a writer that left nothing finds an empty place rather than an unset
+    variable. A task with no `reads` gets neither."""
+    reads = getattr(task, "reads", None)
+    if not reads:
+        return (), {}
+    mounts = []
+    for writer in resolve_reads(node_id, reads):
+        folder = item_paths.snapshot_dir(run_dirs, row["id"], writer)
+        with contextlib.suppress(OSError):
+            if stat.S_ISDIR(folder.lstat().st_mode):
+                mounts.append(str(folder))
+    return tuple(mounts), {"KRAFT_READS_DIR": str(item_paths.outputs_dir(run_dirs, row["id"]))}
 
 
 def _output_decl(t: AgentTask | SubprocessTask, task, launch) -> outputs.Decl:
@@ -2628,6 +2676,11 @@ async def measure_node(
         )
         if reused is not None:
             return reused["status"]
+        if getattr(task.task, "outputs", None) is not None:
+            # A new run supersedes the last one's outputs: a reader sees
+            # nothing stale. Not for a reused or preserved session above, which
+            # still stands.
+            await asyncio.to_thread(outputs.clear, run_dirs, work_item_id, task.path)
         return await dispatch_node(
             db,
             run_dirs,

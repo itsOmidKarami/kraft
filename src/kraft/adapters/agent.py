@@ -1159,6 +1159,9 @@ async def _run_agent_task(
     #: More of the worker's environment, set by the dispatch that knows it:
     #: `KRAFT_OUTPUT_DIR` and `KRAFT_READS_DIR` (`kraft.outputs`).
     extra_env: Mapping[str, str] | None = None,
+    #: More host paths a sandboxed launch mounts read-only: the snapshots a
+    #: reader names (`kraft.outputs`).
+    extra_ro: tuple[str, ...] = (),
 ) -> str:
     runner = None if runner == "local" else runner
     # An update holds the moment: no session starts until the server restarts.
@@ -1616,7 +1619,7 @@ async def _run_agent_task(
         takes_checkout=takes_checkout,
         tips=tips,
         model=model,
-        ro_paths=(*rules_files, *remote_ro),
+        ro_paths=(*rules_files, *remote_ro, *extra_ro),
         before_launch=before_launch if borrows or in_copy or on_session or after_checkout else None,
         runner=runner,
         codex_hook=codex_hook,

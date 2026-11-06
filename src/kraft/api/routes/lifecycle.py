@@ -21,6 +21,7 @@ from kraft import (
     inplace,
     item_paths,
     node_runs,
+    outputs,
     reviewed_head,
     start_queue,
     storage,
@@ -2458,6 +2459,7 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
             )
             for s in sessions:
                 _terminate(s["pid"], started=s["pid_start_time"])
+            await _clear_outputs(st, wid, row, node_id)
 
             try:
                 deps.spawn(
@@ -2481,6 +2483,17 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
             except deps.AlreadyRunning:
                 raise HTTPException(409, "a walk is already running for this work item") from None
             return deps.work_item_answer(st, wid)
+
+
+async def _clear_outputs(st, wid: str, row, node_id: str, under: str | None = None) -> None:
+    """A skip supersedes the step outputs of the writers it skips (`under` a
+    path, else the whole node), a running writer included: a later reader sees
+    nothing of them."""
+    chain = store.materialized_chain_of(row)
+    if chain is None:
+        return
+    for writer in outputs.writers_in(chain, node_id, under):
+        await asyncio.to_thread(outputs.clear, st.run_dirs, wid, writer)
 
 
 def _skip_node_id(st, wid: str, row) -> str | None:
@@ -2528,6 +2541,7 @@ async def _skip_within_node(st, request: Request, wid: str, row, target: ChainPa
         )
         for s in sessions:
             _terminate(s["pid"], started=s["pid_start_time"])
+        await _clear_outputs(st, wid, row, target.node.id, target.path)
         return deps.work_item_answer(st, wid)
     async with stops.claimed_or_stopped(
         st.db,
@@ -2546,6 +2560,7 @@ async def _skip_within_node(st, request: Request, wid: str, row, target: ChainPa
                 409, "work item status changed; try again"
             )
         await st.db.write(lambda c: store.skip_scope(c, wid, target.path, note))
+        await _clear_outputs(st, wid, row, target.node.id, target.path)
         try:
             deps.spawn(
                 request.app,

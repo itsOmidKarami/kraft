@@ -342,6 +342,22 @@ def clear(run_dirs, wid: str, writer: str) -> None:
     item_paths.remove_tree(item_paths.snapshot_dir(run_dirs, wid, writer))
 
 
+def writers_in(chain, node_id: str, under: str | None = None) -> list[str]:
+    """The paths of the tasks of node `node_id`'s own steps that declare
+    outputs, of those at or below the path `under` when it is given: what a
+    skip of that node, step or task supersedes. `chain` is a
+    `MaterializedChain`."""
+    return [
+        task.path
+        for node in chain.chain.nodes
+        if node.id == node_id
+        for step in node.steps
+        for task in step.tasks
+        if getattr(task.task, "outputs", None) is not None
+        and (under is None or task.path == under or task.path.startswith(f"{under}."))
+    ]
+
+
 def lookup_variable(
     run_dirs,
     wid: str,
