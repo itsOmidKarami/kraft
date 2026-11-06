@@ -311,6 +311,8 @@ def test_no_secret_on_argv(scene, monkeypatch):
     assert not [a for a in argv for v in secrets.values() if v in a]
     keep = argv[argv.index("--keep") + 1].split(",")
     assert {"MY_TOKEN", "ANTHROPIC_API_KEY", *FORWARDED_ENV} <= set(keep)
+    # What a step output's writer and reader are told (`kraft.outputs`).
+    assert {"KRAFT_OUTPUT_DIR", "KRAFT_READS_DIR"} <= set(keep)
 
 
 # --- OsBackend ----------------------------------------------------------------------------

@@ -17,7 +17,7 @@ from kraft import builtins as _builtins
 from kraft import caps as _caps
 from kraft import carried as _carried
 from kraft import config as _config
-from kraft import events, ids, inplace, item_paths, node_runs, store
+from kraft import events, ids, inplace, item_paths, node_runs, outputs, store
 from kraft import findings as _findings
 from kraft import harness as _harness
 from kraft import overrides as _overrides
@@ -1781,6 +1781,10 @@ async def _dispatch_task_in(
             return await config_error_session(
                 db, run_dirs, common, f"{task.path}: cannot parse command {t.command!r}: {exc}\n"
             )
+        env = dict(TEST_ENV)
+        if t.outputs is not None:
+            files = item_paths.session_files(run_dirs, work_item_row["id"], common["session_id"])
+            env["KRAFT_OUTPUT_DIR"] = str(outputs.declare(files, _output_decl(t, task, launch)))
         return await checked(
             await _subprocess.run_task(
                 db,
@@ -1788,7 +1792,7 @@ async def _dispatch_task_in(
                 cmd=cmd,
                 cwd=worktree,
                 repo_entry=launch.repo_entry if launch else None,
-                env=TEST_ENV,
+                env=env,
                 sandbox=sandbox,
                 checkout=checkout,
                 time_cap=time_cap,
@@ -2415,6 +2419,21 @@ async def _launch_agent(
         feedback = prompts.bot_feedback(
             db, run_dirs, work_item_row["id"], node, common["round"], common["session_id"]
         )
+    # Step outputs: this candidate's own session gets its own output folder, and
+    # is told about it after whatever instruction it runs (`AGENT_RESUMED_NOTE`
+    # included, and an override that replaced the task's own), the way the repo's
+    # PR rules are.
+    extra_env: dict[str, str] = {}
+    notes = ""
+    if t.outputs is not None:
+        decl = _output_decl(t, task, launch)
+        files = item_paths.session_files(run_dirs, work_item_row["id"], common["session_id"])
+        extra_env["KRAFT_OUTPUT_DIR"] = str(outputs.declare(files, decl))
+        if resumed is not None:
+            outputs.carry_over(
+                item_paths.session_files(run_dirs, work_item_row["id"], resumed[0]), files, decl
+            )
+        notes += prompts.outputs_note(decl)
     try:
         status = await _agent.run_agent_task(
             db,
@@ -2446,7 +2465,9 @@ async def _launch_agent(
                 if note
                 else ""
             )
-            + (prompts.AGENT_RESUMED_NOTE if resumed is not None else instruction),
+            + (prompts.AGENT_RESUMED_NOTE if resumed is not None else instruction)
+            + notes,
+            extra_env=extra_env,
             resume_session_id=resumed[1] if resumed is not None else None,
             repo_path=work_item_row["repo"],
             cwd=worktree,
@@ -2465,6 +2486,16 @@ async def _launch_agent(
         # into the same refusal.
         return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n"), True
     return status, False
+
+
+def _output_decl(t: AgentTask | SubprocessTask, task, launch) -> outputs.Decl:
+    """What `t` declared as outputs, with the size cap the launch carries."""
+    return outputs.Decl(
+        writer=task.path,
+        files=tuple(t.outputs.files),
+        variables=tuple(t.outputs.variables),
+        max_bytes=launch.outputs_max_bytes if launch else _policy.DEFAULT_OUTPUTS_MAX_BYTES,
+    )
 
 
 def _resumable_session(db, work_item_id: str, node, task, harness) -> tuple[str, str] | None:

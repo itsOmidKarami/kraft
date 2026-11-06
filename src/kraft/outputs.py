@@ -46,6 +46,8 @@ MAX_VALUE_BYTES = 4096
 #: `variables.env` itself is read to no more than this: fifty values of
 #: `MAX_VALUE_BYTES` plus their keys, with room for repeats and comments.
 _MAX_ENV_BYTES = 1 << 20
+#: How deep `carry_over` follows a worker's folders.
+_MAX_DEPTH = 16
 #: Any control character but a tab.
 _CONTROL = re.compile(rb"[\x00-\x08\x0a-\x1f\x7f]")
 
@@ -93,6 +95,62 @@ def read_decl(files: SessionFiles) -> Decl | None:
         )
     except (OSError, ValueError, KeyError, TypeError):
         return None
+
+
+def carry_over(old: SessionFiles, new: SessionFiles, decl: Decl) -> None:
+    """Give the resumed session `new` a copy of what the paused session `old`
+    had written to its output folder, as `copy_in` copies a worker's file:
+    no link followed, nothing that is not a regular file with one link, and
+    no more than the entry and size limits a capture holds it to."""
+    try:
+        top = open_dir_no_symlinks(old.folder, ["out", "outputs"])
+    except OSError:
+        return
+    try:
+        names = _regular_files(top)
+    finally:
+        os.close(top)
+    target = item_paths.writer_dir(new)
+    for name in names:
+        item_paths.copy_in(
+            old.folder,
+            f"out/outputs/{name}",
+            target,
+            name,
+            max_bytes=decl.max_bytes,
+            single_link=True,
+        )
+
+
+def _regular_files(top: int, prefix: str = "", budget: list[int] | None = None) -> list[str]:
+    """The regular files below the folder `top`, as relative names, walking
+    no link and stopping after `MAX_ENTRIES` entries seen."""
+    budget = budget if budget is not None else [MAX_ENTRIES]
+    found: list[str] = []
+    try:
+        with os.scandir(top) as entries:
+            listed = [e.name for e in entries]
+    except OSError:
+        return found
+    for name in listed:
+        if budget[0] <= 0:
+            break
+        budget[0] -= 1
+        try:
+            info = os.stat(name, dir_fd=top, follow_symlinks=False)
+        except OSError:
+            continue
+        if stat.S_ISREG(info.st_mode):
+            found.append(f"{prefix}{name}")
+        elif stat.S_ISDIR(info.st_mode) and prefix.count("/") < _MAX_DEPTH:
+            child = tree_walk.open_child(top, name)
+            if child is None:
+                continue
+            try:
+                found += _regular_files(child, f"{prefix}{name}/", budget)
+            finally:
+                os.close(child)
+    return found
 
 
 def log_line(decl: Decl, kept: int, missing: int) -> str:

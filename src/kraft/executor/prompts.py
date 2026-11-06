@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from kraft import findings as _findings
-from kraft import item_paths
+from kraft import item_paths, outputs
 from kraft import progress as _progress
 from kraft import store as _store
 from kraft.config import RepoEntry, git_read
@@ -698,3 +698,25 @@ def pr_rules_note(worktree: Path, work_item_row) -> str:
     committed = set((listed or "").splitlines())
     path = next((p for p in PR_RULES_PATHS if p in committed), None)
     return _PR_RULES_NOTE.format(path=path) if path else ""
+
+
+def outputs_note(decl: outputs.Decl) -> str:
+    """Tell a writer where to put what later tasks read, and which names Kraft
+    keeps (`$KRAFT_OUTPUT_DIR`). Only the names the chain declared appear."""
+    kept = []
+    if decl.files:
+        kept.append(f"files, written into that folder: {', '.join(decl.files)}")
+    if decl.variables:
+        kept.append(
+            "variables, written as `KEY=value` lines in `$KRAFT_OUTPUT_DIR/variables.env`, one "
+            "per line, with no quotes and no `export`, each value under "
+            f"{outputs.MAX_VALUE_BYTES} bytes with no control character: "
+            f"{', '.join(decl.variables)}"
+        )
+    return (
+        "\n\nLater tasks of this chain read what you leave behind. Write it into "
+        "`$KRAFT_OUTPUT_DIR`, a folder only this task writes. Kraft keeps only these names: "
+        + "; ".join(kept)
+        + ". Anything else there is deleted when you finish. If a declared variable is missing "
+        "or a value is not allowed, this task fails."
+    )
