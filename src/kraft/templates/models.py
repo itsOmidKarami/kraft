@@ -231,9 +231,9 @@ _BUILTIN_SUMMARIES = {
 
 
 class ForgeAction(StrEnum):
-    """The merge-request lifecycle points a `kind: forge` task may target
-    (docs/templates-v1-design.md library.yaml; `external-wait-covers-merge-
-    request-lifecycle`)."""
+    """The points a `kind: forge` task may target: the merge-request lifecycle,
+    and a wait for one CI pipeline by id (docs/templates-v1-design.md
+    library.yaml; `external-wait-covers-merge-request-lifecycle`)."""
 
     MR_OPEN_DRAFT = "mr.open_draft"
     MR_SYNC = "mr.sync"
@@ -243,6 +243,7 @@ class ForgeAction(StrEnum):
     MR_EXTERNAL_APPROVAL = "mr.external_approval"
     MR_MERGE = "mr.merge"
     MR_POST_MERGE_CI = "mr.post_merge_ci"
+    CI_PIPELINE = "ci.pipeline"
 
     @property
     def waits(self) -> bool:
@@ -267,6 +268,7 @@ _FORGE_SUMMARIES = {
     ForgeAction.MR_EXTERNAL_APPROVAL: "Wait for a person to approve the merge request",
     ForgeAction.MR_MERGE: "Merge, then wait until the merge lands",
     ForgeAction.MR_POST_MERGE_CI: "Wait for CI on the base branch after the merge",
+    ForgeAction.CI_PIPELINE: "Wait for one CI pipeline, by id",
 }
 
 _WAIT_TARGETS = frozenset(
@@ -276,6 +278,7 @@ _WAIT_TARGETS = frozenset(
         ForgeAction.MR_EXTERNAL_APPROVAL,
         ForgeAction.MR_MERGE,
         ForgeAction.MR_POST_MERGE_CI,
+        ForgeAction.CI_PIPELINE,
     }
 )
 
@@ -736,6 +739,35 @@ class ForgeTask(TaskBase):
     #: (`automated-review-implementation-is-not-template-configuration`).
     #: `[]` expects none.
     reviewers: list[AutomatedReview] | None = None
+    #: `ci.pipeline` only, and required there: the id of the one pipeline it
+    #: waits for (a GitLab pipeline `id`, a GitHub Actions run id), as digits.
+    pipeline: StrictStr | None = None
+
+    def unread(self) -> frozenset[str]:
+        extra = frozenset() if self.target is ForgeAction.CI_PIPELINE else frozenset({"pipeline"})
+        return super().unread() | extra
+
+    @model_validator(mode="after")
+    def _pipeline_only_on_ci_pipeline(self) -> Self:
+        if self.target is not ForgeAction.CI_PIPELINE:
+            if self.pipeline is not None:
+                raise ValueError(
+                    f"pipeline: only a {ForgeAction.CI_PIPELINE.value} task waits for a "
+                    f"pipeline, not {self.target.value}"
+                )
+            return self
+        if self.pipeline is None:
+            raise ValueError(
+                f"pipeline: a {ForgeAction.CI_PIPELINE.value} task needs its pipeline id"
+            )
+        if not re.fullmatch(r"[0-9]+", self.pipeline):
+            raise ValueError("pipeline: must be a pipeline id, digits only")
+        if self.scope is not TaskScope.ONCE:
+            raise ValueError(
+                f"scope: a {ForgeAction.CI_PIPELINE.value} task waits for one pipeline "
+                "and cannot run once per repository"
+            )
+        return self
 
     @model_validator(mode="after")
     def _reviewers_only_on_the_review(self) -> Self:

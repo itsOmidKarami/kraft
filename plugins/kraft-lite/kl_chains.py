@@ -758,6 +758,8 @@ class _Validator:
             raise self.fail(
                 path, f"unknown builtin ref {task.get('ref')!r}; known: {list(BUILTIN_REFS)}"
             )
+        if kind == "forge" and task.get("target") == "ci.pipeline":
+            raise self.fail(path, f"a ci.pipeline task {UNSUPPORTED}")
         if kind == "forge" and task.get("target") not in FORGE_TARGETS:
             raise self.fail(
                 path, f"unknown forge target {task.get('target')!r}; known: {list(FORGE_TARGETS)}"

@@ -738,7 +738,7 @@
       "type": "object"
     },
     "ForgeAction": {
-      "description": "The merge-request lifecycle points a `kind: forge` task may target\n(docs/templates-v1-design.md library.yaml; `external-wait-covers-merge-\nrequest-lifecycle`).",
+      "description": "The points a `kind: forge` task may target: the merge-request lifecycle,\nand a wait for one CI pipeline by id (docs/templates-v1-design.md\nlibrary.yaml; `external-wait-covers-merge-request-lifecycle`).",
       "enum": [
         "mr.open_draft",
         "mr.sync",
@@ -747,7 +747,8 @@
         "mr.mark_ready",
         "mr.external_approval",
         "mr.merge",
-        "mr.post_merge_ci"
+        "mr.post_merge_ci",
+        "ci.pipeline"
       ],
       "title": "ForgeAction",
       "type": "string"
@@ -792,6 +793,18 @@
             }
           ],
           "default": null
+        },
+        "pipeline": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pipeline"
         },
         "policy": {
           "anyOf": [

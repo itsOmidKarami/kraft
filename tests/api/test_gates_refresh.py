@@ -134,3 +134,26 @@ def test_an_in_place_refresh_reads_the_items_branch_not_the_persons_head(client,
     assert verified["reported_head"] == new_base
     assert verified["worktree_head"] != new_base
     git(repo, "merge-base", "--is-ancestor", verified["worktree_head"], branch)
+
+
+@pytest.mark.parametrize(
+    ("target", "before_any_push"),
+    [("ci.pipeline", True), ("mr.sync", False)],
+)
+def test_a_gate_after_a_pipeline_wait_is_still_before_any_push(target, before_any_push):
+    """`ci.pipeline` only waits: it publishes nothing, so a gate after it is
+    as unpublished as one after no forge task at all."""
+    from support.harness import v1_resolved
+
+    from kraft.api.routes import gates as gates_route
+
+    task = {"id": "f", "kind": "forge", "target": target}
+    if target == "ci.pipeline":
+        task["pipeline"] = "123"
+    chain = v1_resolved(
+        [
+            {"id": "wait", "kind": "exec", "tasks": [task]},
+            {"id": "review", "kind": "gate"},
+        ]
+    )
+    assert gates_route._before_any_push(chain.nodes, "review") is before_any_push

@@ -23,7 +23,8 @@ def builtin(ref: str) -> tm.BuiltinTask:
 
 
 def forge(target: str) -> tm.ForgeTask:
-    return tm.ForgeTask.model_validate({"id": "t", "kind": "forge", "target": target})
+    needs = {"pipeline": "1"} if target == "ci.pipeline" else {}
+    return tm.ForgeTask.model_validate({"id": "t", "kind": "forge", "target": target, **needs})
 
 
 def agent(inputs: list[str]) -> tm.AgentTask:

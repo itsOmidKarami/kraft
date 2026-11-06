@@ -18,7 +18,7 @@ from kraft.api.routes.lifecycle import (
 from kraft.config import git_read
 from kraft.executor import stops
 from kraft.templates import revision
-from kraft.templates.models import ForgeTask, GateNode
+from kraft.templates.models import ForgeAction, ForgeTask, GateNode
 from kraft.vocab import ChainEvent, GateEvent, StopKind
 
 
@@ -230,10 +230,14 @@ _STOPPED_AFTER_APPROVAL = (
 def _before_any_push(nodes, gate: str) -> bool:
     """Whether nothing of the item can have been pushed when `gate` is
     approved: no node up to and including it has a forge task, the only
-    tasks that publish the branch. A gate after the merge request opened
+    tasks that publish the branch (`ci.pipeline` publishes nothing: it only
+    waits for a pipeline). A gate after the merge request opened
     (the final review) is not: its branch is somewhere a reviewer reads it."""
     for node in nodes[: executor.gate_node_index(nodes, gate) + 1]:
-        if any(isinstance(t.task, ForgeTask) for t in node.tasks()):
+        if any(
+            isinstance(t.task, ForgeTask) and t.task.target is not ForgeAction.CI_PIPELINE
+            for t in node.tasks()
+        ):
             return False
     return True
 

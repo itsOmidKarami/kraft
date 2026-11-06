@@ -495,6 +495,11 @@ def _rejecting(rejected: str, before: str = "", tasks: str = MERGE_TASK, extra: 
             id="task_reads",
         ),
         pytest.param(
+            {"c": _task_chain("{id: t, kind: forge, target: ci.pipeline, pipeline: '123'}")},
+            "a.main.t: a ci.pipeline task is not supported by Kraft Lite",
+            id="ci_pipeline",
+        ),
+        pytest.param(
             {
                 "c": "nodes:\n  - {id: a, kind: exec, tasks: [{id: t, extends: worker}], "
                 "on_base_changed: {restart_from: a, "

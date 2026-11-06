@@ -218,9 +218,13 @@ def test_outputs_accepted_on_a_node_task_of_both_kinds():
     "task",
     [
         {"id": "b", "kind": "builtin", "ref": "kraft.mr_rebase"},
-        *({"id": "f", "kind": "forge", "target": a.value} for a in tm.ForgeAction),
+        *(
+            {"id": "f", "kind": "forge", "target": a.value}
+            for a in tm.ForgeAction
+            if a is not tm.ForgeAction.CI_PIPELINE
+        ),
     ],
-    ids=["builtin", *(a.value for a in tm.ForgeAction)],
+    ids=["builtin", *(a.value for a in tm.ForgeAction if a is not tm.ForgeAction.CI_PIPELINE)],
 )
 def test_reads_refused_on(task):
     with pytest.raises(ValidationError, match="only an agent or subprocess task reads outputs"):

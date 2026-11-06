@@ -66,6 +66,7 @@ V1_HANDLERS: dict[str, str] = {
     "mr.external_approval": "external_approval",
     "mr.merge": "merge",
     "mr.post_merge_ci": "merge_watch",
+    "ci.pipeline": "pipeline_wait",
 }
 
 #: The handlers that are external waits (`ForgeAction.waits`): each makes one
@@ -77,6 +78,7 @@ _WAITS: dict[str, tuple[str, str]] = {
     "external_approval": ("mr.external_approval", "external_approval"),
     "merge": ("mr.merge", "merge"),
     "merge_watch": ("mr.post_merge_ci", "post_merge_ci"),
+    "pipeline_wait": ("ci.pipeline", "pipeline"),
 }
 
 #: `_run_one`'s statuses for a pending observation, each naming what is still

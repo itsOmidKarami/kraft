@@ -28,6 +28,7 @@ const META: Record<string, FieldMeta> = {
   // A mapping of two lists, not a list: no row edits it, so the lock says YAML, not Overview.
   outputs: { label: "outputs", kind: "list", elsewhere: "Edit outputs.files and outputs.variables in YAML", where: "YAML" },
   reads: { label: "reads", kind: "list" },
+  pipeline: { label: "pipeline", kind: "text" },
   steering: { label: "steering", kind: "list", choices: "steering" },
   scope: { label: "runs", kind: "enum", options: ["once", "each_repository"] },
   execution: { label: "order", kind: "enum", options: ["sequential", "parallel"] },
