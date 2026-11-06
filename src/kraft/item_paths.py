@@ -8,6 +8,11 @@ Everything an item produces, except its worktree, is written under
     filed/<kind>[-tag].md     intake's attachment copies: Kraft's, never mounted
     sessions/<sid>/           one session's files: Kraft's, never mounted
         out/                  the two files the worker writes, and all it is granted
+        out/outputs/          what a task declaring `outputs` writes (`$KRAFT_OUTPUT_DIR`)
+        outputs.json          the declaration and size cap it was launched under: Kraft's
+    outputs/<writer path>/    the checked snapshot of a writer's declared outputs, which a
+                              later task's `reads` mounts read-only: Kraft's, never mounted
+                              writable
     sandbox-home/             the item's sandboxes' `HOME`
     test-scopes/<node>.<hook>.changed-files
                               the paths a targeted test command is told changed:
@@ -89,6 +94,17 @@ def docs_dir(run_dirs, wid: str) -> Path:
     """The item's documents, and what its worker may write them into
     (`$KRAFT_DOCS_DIR`)."""
     return item_dir(run_dirs, wid) / "docs"
+
+
+def outputs_dir(run_dirs, wid: str) -> Path:
+    """The item's step-output snapshots, one folder per writer task path
+    (`$KRAFT_READS_DIR`). Kraft's: never mounted writable."""
+    return item_dir(run_dirs, wid) / "outputs"
+
+
+def snapshot_dir(run_dirs, wid: str, writer: str) -> Path:
+    """The snapshot of what the task at path `writer` declared as outputs."""
+    return outputs_dir(run_dirs, wid) / _component(writer, "writer task path")
 
 
 def history_dir(run_dirs, wid: str) -> Path:
@@ -284,6 +300,13 @@ def session_files(run_dirs, wid: str, sid: str) -> SessionFiles:
     )
 
 
+def writer_dir(files: SessionFiles) -> Path:
+    """`$KRAFT_OUTPUT_DIR` for the session whose files these are: inside the
+    session's own `out/`, never `files.writable`, which an escalation thread
+    shares between its turns."""
+    return files.folder / "out" / "outputs"
+
+
 def is_legacy_log(log_path: str | os.PathLike[str]) -> bool:
     """Whether a session's log is from before the upgrade: anything not in a
     session folder (`.../items/<id>/sessions/<sid>/session.log`). Decided by
@@ -427,6 +450,17 @@ def remove_tree(path: str | os.PathLike[str]) -> None:
         top = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0))
     except OSError:
         return
+    try:
+        remove_in(top, name)
+    finally:
+        os.close(top)
+
+
+def remove_in(top: int, name: str) -> None:
+    """`remove_tree` for the folder `name` in the folder `top`, a descriptor
+    the caller opened (and closes): for a caller whose `top` is itself below
+    a folder a worker could swap for a link, and so must be opened with no
+    link followed rather than named by a path."""
 
     def leave(dir_fd: int, entry: str) -> None:
         # `top` is Kraft's and stays: a retry there keeps its own bits.
@@ -442,8 +476,6 @@ def remove_tree(path: str | os.PathLike[str]) -> None:
         )
     except OSError:
         pass
-    finally:
-        os.close(top)
 
 
 def _remove_entry_at(dir_fd: int, name: str, st: os.stat_result, *, at_top: bool) -> bool:
@@ -550,14 +582,15 @@ def _is_real_dir(path: str | os.PathLike[str]) -> bool:
         return False
 
 
-def _copy_fd(src: int, dest_base: Path, dest_name: str) -> None:
-    """Copy the open regular file `src` to a new file `dest_base/dest_name`,
-    its folders made as needed. Every folder below `dest_base` is opened
-    without following a link (`open_dir_no_symlinks`), and the file itself
-    with `O_CREAT | O_EXCL | O_NOFOLLOW` relative to its folder: a name
-    already there, a planted symlink included, raises `FileExistsError` and
-    is left as it is. A copy that fails partway is removed, through the same
-    folder handle, so no half version is left behind."""
+def _copy_fd(src: int, dest_base: Path, dest_name: str, limit: int | None = None) -> None:
+    """Copy the open regular file `src` (at most `limit` bytes of it, when
+    given) to a new file `dest_base/dest_name`, its folders made as needed.
+    Every folder below `dest_base` is opened without following a link
+    (`open_dir_no_symlinks`), and the file itself with
+    `O_CREAT | O_EXCL | O_NOFOLLOW` relative to its folder: a name already
+    there, a planted symlink included, raises `FileExistsError` and is left
+    as it is. A copy that fails partway is removed, through the same folder
+    handle, so no half version is left behind."""
     parts = PurePosixPath(dest_name).parts
     if not parts:
         raise OSError(errno.EINVAL, f"refusing destination {dest_name!r}")
@@ -569,8 +602,11 @@ def _copy_fd(src: int, dest_base: Path, dest_name: str) -> None:
         )
         try:
             with os.fdopen(out, "wb") as w, os.fdopen(os.dup(src), "rb") as r:
-                while chunk := r.read(65536):
+                left = limit
+                while chunk := r.read(65536 if left is None else min(65536, left)):
                     w.write(chunk)
+                    if left is not None:
+                        left -= len(chunk)
         except BaseException:
             with contextlib.suppress(OSError):
                 os.unlink(leaf, dir_fd=dir_fd)
@@ -579,26 +615,39 @@ def _copy_fd(src: int, dest_base: Path, dest_name: str) -> None:
         os.close(dir_fd)
 
 
-def copy_in(source_base: Path, source_name: str, dest_base: Path, dest_name: str) -> bool:
+def copy_in(
+    source_base: Path,
+    source_name: str,
+    dest_base: Path,
+    dest_name: str,
+    *,
+    max_bytes: int | None = None,
+    single_link: bool = False,
+) -> bool:
     """Copy a file a worker could have written to a new name: the source read
     with no symlink followed at any component below `source_base`
     (`open_no_symlinks`, which takes only a regular file), the destination
     created as `_copy_fd` does. False, leaving the destination as it was,
     when the source is not a regular file reached that way, is larger than
-    `DOC_MAX_BYTES` (a worker's file is not copied at any size), the
-    destination name is taken (a name a worker planted, or an earlier copy),
-    a folder on the way to it is a link, or the write fails."""
+    `max_bytes` (`DOC_MAX_BYTES` unless the caller sets one: a worker's file
+    is not copied at any size), has another hard link when `single_link` is
+    set, the destination name is taken (a name a worker planted, or an
+    earlier copy), a folder on the way to it is a link, or the write fails.
+    No more is copied than the size the descriptor reported at open, so a
+    file the worker keeps growing cannot outrun the limit."""
+    limit = DOC_MAX_BYTES if max_bytes is None else max_bytes
     try:
         src = open_no_symlinks(source_base, source_name)
     except (OSError, ValueError, IndexError):
         return False
     try:
-        if os.fstat(src).st_size > DOC_MAX_BYTES:
-            logger.warning(
-                "not copying %s: larger than %d bytes", source_base / source_name, DOC_MAX_BYTES
-            )
+        info = os.fstat(src)
+        if info.st_size > limit:
+            logger.warning("not copying %s: larger than %d bytes", source_base / source_name, limit)
             return False
-        _copy_fd(src, dest_base, dest_name)
+        if single_link and info.st_nlink != 1:
+            return False
+        _copy_fd(src, dest_base, dest_name, info.st_size)
     except (OSError, ValueError):
         return False
     finally:

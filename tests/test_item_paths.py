@@ -669,3 +669,43 @@ def test_a_deep_tree_is_removed_within_a_low_open_file_limit(run_dirs):
 
     assert not os.path.lexists(item)
     assert PAST_PATH_MAX <= opens < 10 * PAST_PATH_MAX
+
+
+def test_copy_in_takes_a_limit_the_caller_sets(run_dirs):
+    """A caller that names its own limit is not held to a document's 1 MB."""
+    write(item_paths.session_files(run_dirs, "w1", "s1").writable, "big.bin", "x" * 2_000_000)
+    args = (run_dirs.base, "items/w1/sessions/s1/out/big.bin", run_dirs.base)
+
+    assert item_paths.copy_in(*args, "items/w1/copy-small") is False
+    assert item_paths.copy_in(*args, "items/w1/copy-big", max_bytes=3_000_000) is True
+    assert (run_dirs.base / "items/w1/copy-big").stat().st_size == 2_000_000
+
+
+def test_copy_in_can_refuse_a_file_with_another_hard_link(run_dirs):
+    out = item_paths.session_files(run_dirs, "w1", "s1").writable
+    write(out, "one.txt", "data")
+    os.link(out / "one.txt", out / "two.txt")
+    args = (run_dirs.base, "items/w1/sessions/s1/out/two.txt", run_dirs.base)
+
+    assert item_paths.copy_in(*args, "items/w1/loose", single_link=False) is True
+    assert item_paths.copy_in(*args, "items/w1/strict", single_link=True) is False
+    assert not (run_dirs.base / "items/w1/strict").exists()
+
+
+def test_a_file_that_grows_after_it_was_measured_is_copied_only_to_its_measured_size(
+    run_dirs, monkeypatch
+):
+    out = item_paths.session_files(run_dirs, "w1", "s1").writable
+    source = write(out, "grown.txt", "0123")
+    copy_fd = item_paths._copy_fd
+
+    def grow_then_copy(*args, **kwargs):
+        with source.open("a") as handle:  # the worker, between the measure and the copy
+            handle.write("456789")
+        return copy_fd(*args, **kwargs)
+
+    monkeypatch.setattr(item_paths, "_copy_fd", grow_then_copy)
+    args = (run_dirs.base, "items/w1/sessions/s1/out/grown.txt", run_dirs.base)
+
+    assert item_paths.copy_in(*args, "items/w1/copy.txt") is True
+    assert (run_dirs.base / "items/w1/copy.txt").read_text() == "0123"
