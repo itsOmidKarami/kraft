@@ -35,13 +35,14 @@ describe("nodeGraph", () => {
 
   const running = (hook_point: string, id: string, over: Partial<WorkerSession> = {}) => s(hook_point, { id, status: "running", model: "sonnet", wall_ms: null, ...over });
   const review = (id: string, over: Partial<WorkerSession> = {}) => running("verification.review.code_review", id, over);
-  it.each([
+  type Drawn = { id: string; sessions: WorkerSession[]; counts?: Record<string, number>; boxes: (number | undefined)[]; picked?: number };
+  it.each<Drawn>([
     { id: "a running session's count on its box", sessions: [review("new", { round: 1 })], counts: { new: 2 }, boxes: [undefined, undefined, 2] },
     { id: "none on the box of an earlier round shown", sessions: [s("verification.review.code_review", { id: "old", round: 0 }), review("new", { round: 1 })], counts: { new: 2 }, picked: 1, boxes: [undefined, undefined, undefined] },
     { id: "none for a count of zero", sessions: [review("new")], counts: { new: 0 }, boxes: [undefined, undefined, undefined] },
     { id: "none without counts", sessions: [review("new")], counts: undefined, boxes: [undefined, undefined, undefined] },
     { id: "each of two parallel tasks its own count, not their sum", sessions: [running("verification.checks.lint", "lint"), running("verification.checks.typecheck", "tc")], counts: { lint: 1, tc: 3 }, boxes: [1, 3, undefined] },
-  ])("draws $id", ({ sessions, counts, boxes, picked }: { sessions: WorkerSession[]; counts?: Record<string, number>; boxes: (number | undefined)[]; picked?: number }) => {
+  ])("draws $id", ({ sessions, counts, boxes, picked }) => {
     const g = nodeGraph(detail({ worker_sessions: sessions }), node, NOW, undefined, picked, counts);
     expect(g.steps.flatMap((st) => st.tasks).map((t) => t.subagents)).toEqual(boxes);
   });

@@ -50,7 +50,7 @@ describe("useSessionSubagents", () => {
 
 describe("polling", () => {
   const session = { id: "s1", status: "running", harness: "claude" } as never;
-  it.each([
+  it.each<{ id: string; use: () => unknown }>([
     { id: "one session's list", use: () => useSessionSubagents("w1", "s1", true) },
     { id: "the running sessions' lists", use: () => useRunningSubagents(detail({ worker_sessions: [session] })) },
   ])("reads $id again only while the page is visible", async ({ use }) => {
