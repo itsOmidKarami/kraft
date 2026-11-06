@@ -123,7 +123,7 @@ def plain_lines(path: Path) -> Iterator[str]:
     removed, read as it streams. The file itself is not touched."""
     with path.open("rb") as fh:
         for line in fh:
-            yield _ANSI.sub("", line.decode("utf-8", errors="replace"))
+            yield render.strip_ansi(line.decode("utf-8", errors="replace"))
 
 
 def label(text: str) -> str:
