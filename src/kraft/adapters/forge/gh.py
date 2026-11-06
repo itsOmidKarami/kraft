@@ -423,9 +423,11 @@ class GhCli(mr_ops.CliWaits):
         if meta.reviewers:
             people = [r for r in meta.reviewers if "/" not in r]
             teams = [r.split("/", 1)[1] for r in meta.reviewers if "/" in r]
-            # The pull request is already open: a refused request (the author
-            # as reviewer, a user who is not a collaborator, a missing team)
-            # costs the reviewers only, as `MRMeta` promises of every field.
+            # The pull request is already open: the forge refusing these
+            # reviewers (422 the author or a non-collaborator, 404 a missing
+            # team) costs the reviewers only, as `MRMeta` promises of every
+            # field. Anything else (rate limit, credentials, outage) keeps the
+            # wait or stop `run.py` gives it.
             try:
                 await self._send(
                     repo,
@@ -437,7 +439,14 @@ class GhCli(mr_ops.CliWaits):
                     },
                 )
             except ForgeError as exc:
-                logger.warning("pull request %s: reviewers not requested: %s", number, exc)
+                if exc.status not in (404, 422):
+                    raise
+                logger.warning(
+                    "reviewers not requested for pull request %s (%s): %s",
+                    number,
+                    ", ".join(meta.reviewers),
+                    exc,
+                )
         return MR(number=number, url=url)
 
     async def mark_ready(self, *, repo: Path, branch: str, mr: MR) -> None:

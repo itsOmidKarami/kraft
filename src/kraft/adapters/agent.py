@@ -218,7 +218,7 @@ _MR_META_KEYS = (
     "repo's merged MRs already follow>\n"
     "labels: [<labels that already exist in this project, or an empty list>]\n"
     "assignees: [<a username the repo names, or an empty list>]\n"
-    "reviewers: [<usernames CODEOWNERS names for these paths, or an empty list>]\n"
+    "reviewers: [<usernames the repo's own rules ask for on this change, or an empty list>]\n"
 )
 
 #: Every launch's list of its item's documents (`documents_note`).

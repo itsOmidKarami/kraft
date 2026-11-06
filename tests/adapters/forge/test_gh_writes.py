@@ -6,6 +6,7 @@ every field are pinned."""
 from __future__ import annotations
 
 import json
+import logging
 
 import pytest
 
@@ -110,16 +111,40 @@ async def test_gh_open_mr_creates_a_draft_then_adds_the_metadata(cli, tmp_path, 
         pytest.param(Api(404, '{"message": "Not Found"}'), id="a-team-that-does-not-exist"),
     ],
 )
-async def test_gh_open_mr_keeps_the_pull_request_when_reviewers_are_refused(cli, tmp_path, answer):
-    """Reviewers are asked for after the pull request exists; the forge refusing
-    them costs the reviewers only, never the node that opened it."""
+async def test_gh_open_mr_keeps_the_pull_request_when_reviewers_are_refused(
+    cli, tmp_path, caplog, answer
+):
+    """#1294. Reviewers are asked for after the pull request exists; the forge
+    refusing them costs the reviewers only, never the node that opened it, and
+    the log names who was not asked."""
     _stub(cli, **{"api*requested_reviewers*": answer})
     cli.stub("git", "")
 
-    mr = await _open(tmp_path, meta=MRMeta(labels=("bug",), reviewers=("ada",)))
+    with caplog.at_level(logging.WARNING, logger="kraft.adapters.forge.gh"):
+        mr = await _open(tmp_path, meta=MRMeta(labels=("bug",), reviewers=("ada",)))
 
     assert (mr.number, mr.url) == (7, URL)
     assert f"api {_PULLS}/7/requested_reviewers -X POST -i -f reviewers[]=ada" in _rest(cli)
+    assert "reviewers not requested for pull request 7" in caplog.text
+    assert "ada" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        pytest.param(Api(429, '{"message": "rate limited"}'), id="a-rate-limit"),
+        pytest.param(Api(401, '{"message": "Bad credentials"}'), id="bad-credentials"),
+        pytest.param(Api(500, '{"message": "boom"}'), id="an-outage"),
+    ],
+)
+async def test_gh_open_mr_still_stops_on_what_is_not_a_reviewer_refusal(cli, tmp_path, answer):
+    """Only the forge refusing the reviewers is tolerated: a rate limit, bad
+    credentials or an outage keep the wait or stop `run.py` gives them."""
+    _stub(cli, **{"api*requested_reviewers*": answer})
+    cli.stub("git", "")
+
+    with pytest.raises(forge.ForgeError):
+        await _open(tmp_path, meta=MRMeta(reviewers=("ada",)))
 
 
 async def test_gh_open_mr_targets_the_base_it_is_given(cli, tmp_path):

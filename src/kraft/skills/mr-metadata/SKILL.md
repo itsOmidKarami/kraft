@@ -57,7 +57,7 @@ describes the change that was planned, not the one that was made.
 - Do not invent a reviewer or a label. Empty is correct unless the repo names
   one, and a label that does not already exist in this project is a failed
   API call, not a new label. `CODEOWNERS` is not a reviewer list: the forge
-  asks code owners itself, and refuses to ask a merge request's own author.
+  handles code owners itself, and a forge can refuse to ask a merge request's own author.
 - A label or description section the project's rules require is not optional:
   every label goes in `labels` and every section in the description, or the
   merge request fails CI before anyone reads it.
