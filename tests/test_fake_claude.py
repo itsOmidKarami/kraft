@@ -115,7 +115,8 @@ def test_a_fake_takes_no_field_from_a_method(tmp_path, fake, context, written):
     doc = tmp_path / "docs" / "plan.md"
     command = ["sh", str(FAKE)] if fake == "sh" else [sys.executable, str(FAKE_AGENT)]
     done = subprocess.run(
-        [*command, "--append-system-prompt", context.format(doc=doc), "-p", "t"],
+        # A work item, which fake-claude.sh needs before it writes a document.
+        [*command, "--append-system-prompt", "Work item: w\n" + context.format(doc=doc), "-p", "t"],
         cwd=tmp_path,
         env={
             **os.environ,
