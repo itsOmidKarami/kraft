@@ -1852,6 +1852,7 @@ async def _dispatch_task_in(
                 for other in node.tasks()
             ),
             grace=t.grace,
+            pipeline=t.pipeline,
             **common,
         )
 

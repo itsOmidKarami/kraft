@@ -306,24 +306,43 @@ async def test_a_wait_timeout_and_a_loop_cap_are_reported_apart(walk, item_on, w
 
 
 @pytest.mark.parametrize(
-    "target, fake_kw",
+    "target, fake_kw, node_kw",
     [
-        ("mr.ci", {"ci_states": ["pending", "success"]}),
-        ("mr.automated_review", {"review_results": ["pending", "clean"]}),
-        ("mr.external_approval", {"approval_states": ["pending", "approved"]}),
-        ("mr.merge", {"merge_delay": 1}),
-        ("mr.post_merge_ci", {"branch_ci_states": ["pending", "success"], "merged": [1]}),
+        ("mr.ci", {"ci_states": ["pending", "success"]}, {}),
+        ("mr.automated_review", {"review_results": ["pending", "clean"]}, {}),
+        ("mr.external_approval", {"approval_states": ["pending", "approved"]}, {}),
+        ("mr.merge", {"merge_delay": 1}, {}),
+        ("mr.post_merge_ci", {"branch_ci_states": ["pending", "success"], "merged": [1]}, {}),
+        (
+            "ci.pipeline",
+            {
+                "pipeline_statuses": {
+                    "123": [
+                        forge.CIStatus(state="pending", url="u"),
+                        forge.CIStatus(state="success", url="u"),
+                    ]
+                }
+            },
+            {"pipeline": "123"},
+        ),
     ],
-    ids=["ci", "automated-review", "external-approval", "merge-completion", "post-merge-ci"],
+    ids=[
+        "ci",
+        "automated-review",
+        "external-approval",
+        "merge-completion",
+        "post-merge-ci",
+        "pipeline",
+    ],
 )
 async def test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler(
-    walk, item_on, scheduler, target, fake_kw
+    walk, item_on, scheduler, target, fake_kw, node_kw
 ):
-    """`external-wait-covers-merge-request-lifecycle`: each of the five kinds
+    """`external-wait-covers-merge-request-lifecycle`: each of the six kinds
     parks on its first pending observation, and the same `waits.tick` wakes
     it and walks it on. None of them sleeps in-process (Kraft-7jja)."""
     fake = forge.FakeForge(**fake_kw)
-    it = await item_on([forge_node("open", "mr.open_draft"), forge_node("wait", target)])
+    it = await item_on([forge_node("open", "mr.open_draft"), forge_node("wait", target, **node_kw)])
 
     assert await walk(fake, it) == "waiting"
     app = scheduler(fake)

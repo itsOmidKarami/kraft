@@ -36,6 +36,7 @@ from kraft.adapters.forge.models import (
     HeadMoved,
     MRRef,
     QueueRead,
+    failure_cause,
 )
 from kraft.automated_review import Reviewers
 from kraft.config import ConfigError, load_repos
@@ -951,6 +952,111 @@ class WaitNote:
     now: datetime
 
 
+_PIPELINE_ID = re.compile(r"[0-9]+")
+#: What the forge's own 404 does not say: which id a person must have meant.
+_PIPELINE_ID_HINT = (
+    "the id must be a pipeline id (GitLab: not the iid) or an Actions run id "
+    "(GitHub: not the run number) in this repository"
+)
+
+
+def _cause_first(cause: str, log: str) -> str:
+    """`log` under `cause` as its first line: the stop's task cause is the
+    first non-empty line (`walk._task_cause`)."""
+    return f"{cause}\n{log}"
+
+
+async def _pipeline_stop(db, work_item_id: str, node_id: str, cause: str) -> str:
+    """Stop for a person on a pipeline Kraft will not retry or judge: the reason
+    `stops.stop_for_infra` shows is the newest of these events."""
+    await db.write(
+        lambda c: events.append(
+            c, work_item_id, ForgeEvent.CI_INFRA_EXHAUSTED, {"node_id": node_id, "reason": cause}
+        )
+    )
+    return "infra_stop"
+
+
+async def _pipeline_wait(
+    forge: Forge,
+    db,
+    *,
+    repo: Path,
+    orig_repo: Path,
+    work_item_id: str,
+    node_id: str,
+    hook_point: str,
+    pipeline: str | None,
+) -> tuple[str, str, list[dict] | None, WaitNote | None]:
+    """One look at the one pipeline `ci.pipeline` names (`pipeline_wait`). Only
+    reads: it never retries a job (the id is a worker's to choose, and a retry
+    is a write with the server's token), never pushes, never looks for a merge
+    request, and ignores `ci_checks` (the author named a pipeline)."""
+    if pipeline is None or not _PIPELINE_ID.fullmatch(pipeline):
+        return (
+            f"{hook_point}: the pipeline id must be digits only; nothing was read\n",
+            "config_error",
+            None,
+            None,
+        )
+    try:
+        read = await forge.pipeline_status(repo=repo, pipeline_id=pipeline)
+    except ForgeError as exc:
+        if exc.reason == "not_found":
+            words = str(exc).replace(pipeline, "that id")
+            return (
+                f"{hook_point}: {words}\n{_PIPELINE_ID_HINT}\n",
+                "config_error",
+                None,
+                None,
+            )
+        if exc.reason == "unreachable" or (
+            exc.reason is None and failure_cause(str(exc)) == "forge_unreachable"
+        ):
+            return (
+                f"{hook_point}: the forge could not be reached ({exc}); still waiting\n",
+                ("waiting"),
+                None,
+                None,
+            )
+        raise
+    log, status = await ci.render_ci(read, forge=forge, repo=orig_repo, branch="", head_sha=None)
+    if read.nothing_ran:
+        cause = f"pipeline {pipeline} ran nothing (skipped, neutral, stale or no jobs): not green"
+        return (
+            _cause_first(cause, log),
+            await _pipeline_stop(db, work_item_id, node_id, cause),
+            None,
+            None,
+        )
+    if read.blocked_on:
+        return (
+            _cause_first(f"pipeline {pipeline} is waiting on {read.blocked_on}", log),
+            "waiting",
+            None,
+            WaitNote(None, {"blocked_on": read.blocked_on}, False, waits.now()),
+        )
+    if status == "abandoned":
+        cause = log.rstrip().splitlines()[-1]
+        await _stop_for_abandoned_run(db, work_item_id, node_id, log)
+        return _cause_first(cause, log), "infra_stop", None, None
+    if status == "infra":
+        reasons = sorted({j.failure_reason or "no reason given" for j in read.failed_jobs})
+        cause = (
+            f"pipeline {pipeline} failed on the forge's own infrastructure: "
+            f"{', '.join(reasons) or 'no failed job'}"
+        )
+        return (
+            _cause_first(cause, log),
+            await _pipeline_stop(db, work_item_id, node_id, cause),
+            None,
+            None,
+        )
+    if status == "failed" and read.failed_jobs:
+        return log, status, _job_findings(read, log, hook_point), None
+    return log, status, None, None
+
+
 async def _collect_review(
     forge: Forge,
     db,
@@ -1180,6 +1286,8 @@ async def _run_one(
     bounds: WaitBounds = DEFAULT_WAIT,
     session_id: str = "",
     round: int = 0,
+    #: `pipeline_wait`'s pipeline id (`ForgeTask.pipeline`).
+    pipeline: str | None = None,
 ) -> tuple[str, str, list[dict] | None, WaitNote | None]:
     """One forge handler against one repo. Extracted from `run_task` so the
     multi-repo loop there can call it once per `work_item_repos` row; a
@@ -1407,6 +1515,17 @@ async def _run_one(
                     status = "waiting"
             if status == "failed" and ci_status.failed_jobs:
                 findings = _job_findings(ci_status, log, hook_point)
+        case "pipeline_wait":
+            log, status, findings, note = await _pipeline_wait(
+                forge,
+                db,
+                repo=repo,
+                orig_repo=orig_repo,
+                work_item_id=work_item_id,
+                node_id=node_id,
+                hook_point=hook_point,
+                pipeline=pipeline,
+            )
         case "automated_review" if collect:
             log, status, note = await _collect_review(
                 forge,
@@ -2201,6 +2320,8 @@ async def run_task(
     reads_feedback: bool = False,
     #: The review wait's grace period (`ForgeTask.grace`).
     grace: timedelta = DEFAULT_GRACE,
+    #: `ci.pipeline`'s pipeline id (`ForgeTask.pipeline`).
+    pipeline: str | None = None,
 ) -> str:
     """One forge node -- against every repo `work_item_repos` names for this
     item, deepest submodule first, root last (design 3a), or just `repo` when
@@ -2307,7 +2428,7 @@ async def run_task(
                     untouched.add(r["id"])
         targets = [t for t in targets if t[0] not in untouched]
 
-    if handler == "merge_watch" and targets:
+    if (handler == "merge_watch" and targets) or (handler == "pipeline_wait" and multi):
         # `merge_watch` reads the item's base branch in `orig_repo`, and finds
         # the merge commit it watches through `repo`'s merge request
         # (Kraft-h6wi2). One pass, not one per target: a multi-repo item would
@@ -2319,8 +2440,11 @@ async def run_task(
         # starts from the base's tip. After the `multi` block above on
         # purpose: that block still needs the root row to resolve
         # `root_has_changes`.
+        # `pipeline_wait` takes the root from the rows, not from `targets`: with
+        # every target filtered out above a false `done` would skip the read.
         root = next((r for r in rows if r["role"] == "root"), None)
-        targets = [(root["id"], Path(root["repo_path"]), "root") if root else targets[0]]
+        if root or targets:
+            targets = [(root["id"], Path(root["repo_path"]), "root") if root else targets[0]]
 
     if handler == "open_mr" and multi and not targets:
         # Every selected repository untouched: the workspace form of
@@ -2467,7 +2591,7 @@ async def run_task(
                 log += root_log
             # `merge_watch` reads the item's own base whichever target it
             # was handed (above); every other handler targets this one's.
-            member = role == "submodule" and handler != "merge_watch"
+            member = role == "submodule" and handler not in ("merge_watch", "pipeline_wait")
             if settled is None:
                 one_log, one_status, one_findings, one_note = await _run_one(
                     member_forges.get(mounts_by_row.get(row_id), live_forge),
@@ -2504,6 +2628,7 @@ async def run_task(
                     bounds=wait or DEFAULT_WAIT,
                     session_id=session_id,
                     round=round,
+                    pipeline=pipeline,
                 )
                 if multi and handler == "automated_review" and one_note is not None:
                     memories[str(target_repo)] = one_note.extra["memory"]
@@ -2513,7 +2638,7 @@ async def run_task(
                 one_log, one_status, one_findings = "", settled, None
             # A review's findings are this item's, whichever repository they
             # name (their paths start at its mount); CI's stay single-repo.
-            if not multi or handler == "automated_review":
+            if not multi or handler in ("automated_review", "pipeline_wait"):
                 findings = one_findings
             log += (f"[{target_repo.name}] " if multi else "") + one_log
             if row_id is not None:
