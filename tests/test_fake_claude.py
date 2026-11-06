@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 import pytest
+from support import fake_agent
 
 from kraft import skill
 
@@ -101,6 +102,7 @@ def test_a_marker_in_a_skills_method_steers_nothing(tmp_path, shell, prompt, con
     assert done.returncode == exit_code, done.stderr
 
 
+@pytest.mark.parametrize("fake", ["sh", "python"])
 @pytest.mark.parametrize(
     ("context", "written"),
     [
@@ -109,22 +111,16 @@ def test_a_marker_in_a_skills_method_steers_nothing(tmp_path, shell, prompt, con
     ],
     ids=["named-only-in-a-method", "named-by-the-contract"],
 )
-def test_the_python_fake_takes_no_field_from_a_method(tmp_path, context, written):
+def test_a_fake_takes_no_field_from_a_method(tmp_path, fake, context, written):
     doc = tmp_path / "docs" / "plan.md"
+    command = ["sh", str(FAKE)] if fake == "sh" else [sys.executable, str(FAKE_AGENT)]
     done = subprocess.run(
-        [
-            sys.executable,
-            str(FAKE_AGENT),
-            "--append-system-prompt",
-            context.format(doc=doc),
-            "-p",
-            "t",
-        ],
+        [*command, "--append-system-prompt", context.format(doc=doc), "-p", "t"],
         cwd=tmp_path,
         env={
             **os.environ,
             "KRAFT_FAKE_AGENT": "noop",
-            "KRAFT_RESULT_PATH": str(tmp_path / "result.json"),
+            "KRAFT_RESULT_PATH": str(tmp_path / "r.json"),
         },
         capture_output=True,
         text=True,
@@ -132,3 +128,25 @@ def test_the_python_fake_takes_no_field_from_a_method(tmp_path, context, written
     )
     assert done.returncode == 0, done.stderr
     assert doc.exists() == written
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["fake", "-c", "developer_instructions=Node: n" + _method("Hook point: h"), "-p", "t"],
+        ["fake", "-p", "Node: n" + _method("Hook point: h") + "\n\nt"],
+        ["fake", "--append-system-prompt", "Node: n" + _method("Hook point: h"), "-p", "t"],
+    ],
+    ids=["codex-developer-instructions", "the-prompt-channel", "claude-system-prompt"],
+)
+def test_the_python_fake_reads_no_field_from_a_method_on_any_channel(argv):
+    assert fake_agent._ctx_fields(argv) == {"Node": "n"}
+
+
+@pytest.mark.parametrize(
+    ("instruction", "target"),
+    [("t\nreplayed onto abc123\n", "abc123"), ("t" + _method("replayed onto abc123"), None)],
+    ids=["in-the-instruction", "only-in-a-method"],
+)
+def test_the_rebase_target_is_never_read_from_a_method(instruction, target):
+    assert fake_agent._rebase_target(["fake", "-p", instruction]) == target

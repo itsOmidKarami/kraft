@@ -56,6 +56,13 @@ def _context(argv: list[str]) -> str:
     return _steering(argv[-1]) if argv else ""
 
 
+def _rebase_target(argv: list[str]) -> str | None:
+    """The sha a rebase resolver is asked to replay onto, from its `-p`."""
+    instr = next((argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-p"), "")
+    found = re.search(r"replayed onto (\S+)", _steering(instr))
+    return found.group(1) if found else None
+
+
 def _ctx_fields(argv: list[str]) -> dict[str, str]:
     ctx = _context(argv)
     fields = {}
@@ -196,15 +203,10 @@ def main() -> int:
         # the fake re-runs the rebase itself, resolves by taking "theirs",
         # and completes it -- the sha it targets is read back out of its own
         # `-p` instruction, the same way `_record_prompt` already does.
-        instr = ""
-        for i, a in enumerate(sys.argv):
-            if a == "-p" and i + 1 < len(sys.argv):
-                instr = sys.argv[i + 1]
-                break
-        target = re.search(r"replayed onto (\S+)", _steering(instr))
+        target = _rebase_target(sys.argv)
         if target:
             env = {**os.environ, "GIT_EDITOR": "true"}
-            subprocess.run(["git", "rebase", target.group(1)], env=env)
+            subprocess.run(["git", "rebase", target], env=env)
             subprocess.run(["git", "add", "-A"], env=env)
             subprocess.run(["git", "rebase", "--continue"], env=env)
     if os.environ.get("KRAFT_FAKE_AGENT_SHELL"):

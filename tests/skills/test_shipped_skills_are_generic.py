@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from kraft import skill
+
 ROOT = Path(__file__).resolve().parents[2]
 SHIPPED = sorted(
     [
@@ -50,3 +52,14 @@ def test_a_worker_skill_never_calls_a_forge_cli(path):
     """A worker holds no forge login: it reads the forge through `kraft view`."""
     call = re.search(r"`(?:gh|glab) (?:pr|mr|run|ci|label|api|issue)\b", path.read_text())
     assert call is None, f"{path.parent.name} calls {call.group(0)!r}"
+
+
+@pytest.mark.parametrize("path", _SKILLS, ids=lambda p: p.parent.name)
+def test_a_worker_skill_never_frames_a_method_of_its_own(path):
+    """The fake agents skip a launch's method, from `skill.HEADING` to the last
+    sentence of `skill.UNAVAILABLE`, and read their markers from the rest. A
+    skill quoting either would end that skip early, and its remaining text
+    would steer every test that walks a chain."""
+    text = path.read_text()
+    last = skill.UNAVAILABLE.rsplit(". ", 1)[-1]
+    assert skill.HEADING not in text and last not in text

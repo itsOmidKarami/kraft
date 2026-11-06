@@ -44,7 +44,8 @@ fi
 # chain. Drop each method section -- kraft.skill.HEADING through the last
 # sentence of kraft.skill.UNAVAILABLE, wherever a harness put it -- before
 # anything below looks. The logs above keep the full arguments.
-# Plain sh, not bash: a test runs this script with `sh`, dash on Debian and Ubuntu.
+# This block keeps to plain sh: a test runs the script with `sh`, which is dash
+# on Debian and Ubuntu.
 nl='
 '
 method_start="${nl}${nl}## Method${nl}${nl}"
