@@ -485,6 +485,16 @@ def _rejecting(rejected: str, before: str = "", tasks: str = MERGE_TASK, extra: 
             id="task_on_failure",
         ),
         pytest.param(
+            {"c": _task_chain("{id: t, extends: worker, outputs: {files: [x.xml]}}")},
+            "a.main.t.outputs: a task's outputs is not supported by Kraft Lite",
+            id="task_outputs",
+        ),
+        pytest.param(
+            {"c": _task_chain("{id: t, extends: worker, reads: [s.w]}")},
+            "a.main.t.reads: a task's reads is not supported by Kraft Lite",
+            id="task_reads",
+        ),
+        pytest.param(
             {
                 "c": "nodes:\n  - {id: a, kind: exec, tasks: [{id: t, extends: worker}], "
                 "on_base_changed: {restart_from: a, "

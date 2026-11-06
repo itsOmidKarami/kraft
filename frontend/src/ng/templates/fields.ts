@@ -25,6 +25,11 @@ const META: Record<string, FieldMeta> = {
   inputs: { label: "inputs", kind: "list", choices: "inputs" },
   // A list of entry mappings, not of names: its own rows on the Overview edit it.
   fallback: { label: "fallback", kind: "list", elsewhere: "Edit the fallback list on the Overview tab, or a model or effort in it in YAML" },
+  // A mapping of two lists, not a list: the editor writes each list on its own key, and the row reads outputs.files / outputs.variables.
+  outputs: { label: "outputs", kind: "list", elsewhere: "Edit outputs.files and outputs.variables in YAML" },
+  "outputs.files": { label: "output files", kind: "list" },
+  "outputs.variables": { label: "output variables", kind: "list" },
+  reads: { label: "reads", kind: "list" },
   steering: { label: "steering", kind: "list", choices: "steering" },
   scope: { label: "runs", kind: "enum", options: ["once", "each_repository"] },
   execution: { label: "order", kind: "enum", options: ["sequential", "parallel"] },

@@ -780,6 +780,9 @@ class _Validator:
                 raise self.fail(path, f"selects no steering profile {name!r}")
         if task.get("on_failure") is not None:
             raise self.fail(f"{path}.on_failure", f"a task's own on_failure {UNSUPPORTED}")
+        for key in ("outputs", "reads"):
+            if task.get(key):
+                raise self.fail(f"{path}.{key}", f"a task's {key} {UNSUPPORTED}")
 
 
 def _unique(fail, path: str, what: str, items: list) -> None:
