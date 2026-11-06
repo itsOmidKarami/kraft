@@ -74,6 +74,8 @@ def terminal_lines(text: str) -> list[str]:
     showing. A `\r` rewrites its line (a progress bar, GitLab's section
     markers), so only what follows the last one stays, and that is cut before
     the colour codes go, or `\r\x1b[0K\n` would read as a plain line ending."""
+    if not text:
+        return []
     lines = text.replace("\r\n", "\n").removesuffix("\n").split("\n")
     return [strip_ansi(ln.rstrip("\r").rsplit("\r", 1)[-1]) for ln in lines]
 

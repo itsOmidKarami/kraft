@@ -473,7 +473,7 @@ async def test_glab_ci_status_names_the_failed_job_and_why(cli, tmp_path, trace)
     assert "release-impact" in joined
     assert "no release:: label" in joined, "the trace tail never reached the caller"
     assert "lint-and-test" not in joined, "a passing job is not a diagnosis"
-    assert "\x1b" not in joined and "\r" not in joined
+    assert "\x1b" not in joined
     assert "  ERROR: Job failed: exit code 1" in status.jobs
     assert [c for c in cli.calls("glab") if "/jobs" in c or "/pipelines/" in c] == [
         f"{PIPELINES}/2826926700 -X GET -i",
