@@ -1,5 +1,8 @@
 import type { KraftEvent, LogLine, WorkerSession } from "./types";
 
+// Every CSI escape, as `logs.py` matches them: pytest's `\x1b[32m` would otherwise show as `[32m`.
+const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+
 /** A log line's one-line text. `summary` is a server-rendered stream-json
  *  line; but the server's own summariser (logs.py summary()) falls back to
  *  the raw line for any object shape it does not recognise (e.g.
@@ -7,8 +10,13 @@ import type { KraftEvent, LogLine, WorkerSession } from "./types";
  *  not actually a summary. Treat that case the same as no summary at all: an
  *  agent/tool line's raw text is JSON and must not render as
  *  `{"type":"tool_progress",...}` -- fall back to just its `type`. Plain
- *  stdout/sys lines are never JSON, so they pass through untouched. */
+ *  stdout/sys lines are never JSON, so they pass through as they are. Whatever
+ *  it returns has its ANSI escapes removed; the stored log keeps them. */
 export function logLineText(l: LogLine): string {
+  return rawLineText(l).replace(ANSI, "");
+}
+
+function rawLineText(l: LogLine): string {
   if (l.summary && l.summary !== l.text) return l.summary;
   if (l.src === "agent" || l.src === "tool") {
     try {

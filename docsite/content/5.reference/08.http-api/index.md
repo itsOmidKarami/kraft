@@ -131,7 +131,7 @@ under its item:
 
 | Route | What it does |
 |---|---|
-| `GET /api/work-items/{id}/sessions/{session}/log` | The session's log: plain text, or `?format=jsonl` for lines, with `&follow=1` to stream them until the session stops. |
+| `GET /api/work-items/{id}/sessions/{session}/log` | The session's log: plain text, `?format=text` for the same without colour codes, or `?format=jsonl` for lines, with `&follow=1` to stream them until the session stops. |
 | `POST /api/work-items/{id}/sessions/{session}/permission` | A worker's [permission](/reference/permissions) ask. |
 | `POST /api/work-items/{id}/sessions/{session}/permission-hook` | A sandboxed worker's permission hook. |
 

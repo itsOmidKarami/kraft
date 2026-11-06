@@ -97,8 +97,9 @@ async def _tail(st, wid: str, sid: str, path: Path, *, poll_s: float = 0.4):
 async def get_log(
     wid: str, sid: str, request: Request, format: str | None = None, follow: bool = False
 ):
-    """Plain text by default (the modal's copy button); `format=jsonl` for the
-    filterable, followable view.
+    """Plain text by default (the modal's copy button); `format=text` for the
+    same text without its ANSI escapes, as a browser tab shows it; `format=jsonl`
+    for the filterable, followable view.
 
     The jsonl views are bounded (`logs.MAX_LOG_BYTES`, with a marker row when
     they had to be); plain text is the whole file, streamed from disk, which is
@@ -135,6 +136,8 @@ async def _log(st, row, format: str | None, follow: bool):
         }
     if not path.exists():
         raise HTTPException(404, "log not found")
+    if format == "text":
+        return StreamingResponse(logs_mod.plain_lines(path), media_type="text/plain")
     return FileResponse(path, media_type="text/plain")
 
 

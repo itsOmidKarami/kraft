@@ -248,9 +248,16 @@ def test_work_item_documents_carry_the_run_their_session_came_from(client, repo)
         assert isinstance(d["attempt"], int) and isinstance(d["round"], int)
 
 
-def test_log_jsonl_and_plain_text_are_both_served(client, repo):
+def test_log_jsonl_and_plain_text_are_both_served(client, repo, tmp_path):
     wid = _completed_item(client, repo)
     sid = client.get(f"/api/work-items/{wid}").json()["worker_sessions"][0]["id"]
+    conn = sqlite3.connect(tmp_path / "run" / "orchestrator.db")
+    (log_path,) = conn.execute(
+        "SELECT log_path FROM worker_sessions WHERE id = ?", (sid,)
+    ).fetchone()
+    conn.close()
+    with Path(log_path).open("a") as fh:
+        fh.write("\x1b[32m3 passed\x1b[0m\n")
 
     body = client.get(f"/api/worker-sessions/{sid}/log?format=jsonl").json()
     assert body["session_id"] == sid
@@ -259,6 +266,13 @@ def test_log_jsonl_and_plain_text_are_both_served(client, repo):
 
     plain = client.get(f"/api/worker-sessions/{sid}/log")
     assert plain.headers["content-type"].startswith("text/plain")
+    assert "\x1b[32m3 passed\x1b[0m\n" in plain.text, "the file as written"
+
+    # What a gate's test-scope link opens in a tab: the same lines, colour codes gone.
+    text = client.get(f"/api/work-items/{wid}/sessions/{sid}/log?format=text")
+    assert text.headers["content-type"].startswith("text/plain")
+    assert text.text == plain.text.replace("\x1b[32m", "").replace("\x1b[0m", "")
+    assert "\x1b" not in text.text
 
     assert client.get("/api/worker-sessions/nope/log?format=jsonl").status_code == 404
 

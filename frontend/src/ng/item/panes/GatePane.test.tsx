@@ -165,7 +165,7 @@ describe("GateBody", () => {
     render(<GateBody item={{ ...pending, test_result }} version="1" gate={gate} events={[]} />);
     if (line === null) return expect(screen.queryByText("tests")).toBeNull();
     expect(screen.getByText("tests").nextElementSibling).toHaveTextContent(line);
-    if (line.startsWith("✗")) expect(screen.getByRole("link", { name: "cmd2" })).toHaveAttribute("href", "/api/work-items/w1/sessions/sess2/log");
+    if (line.startsWith("✗")) expect(screen.getByRole("link", { name: "cmd2" })).toHaveAttribute("href", "/api/work-items/w1/sessions/sess2/log?format=text");
     else expect(screen.queryByRole("link", { name: /\*\*/ })).toBeNull();
   });
 
