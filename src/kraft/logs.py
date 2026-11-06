@@ -118,6 +118,14 @@ _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 _RUNNING = "Running "
 
 
+def plain_lines(path: Path) -> Iterator[str]:
+    """The log as text a browser tab can show: each line with its ANSI escapes
+    removed, read as it streams. The file itself is not touched."""
+    with path.open("rb") as fh:
+        for line in fh:
+            yield _ANSI.sub("", line.decode("utf-8", errors="replace"))
+
+
 def label(text: str) -> str:
     """`text` as a one-line label: whitespace runs folded, escape sequences and
     control characters dropped, cut to `LABEL_MAX`."""

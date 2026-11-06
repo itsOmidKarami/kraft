@@ -368,7 +368,7 @@ describe("the node screen (D)", () => {
   // R15b-01: the desktop's gate pane shows the last test run on the gate; so does the phone's page, each red scope linked to its log.
   it.each([
     ["green", { passed: true, scopes: [{ command: "just test", scope: "**", passed: true, exit_code: 0, session_id: "s1" }] }, "✓ 1 scope", null],
-    ["red", { passed: false, scopes: [{ command: "just test", scope: "web/**", passed: false, exit_code: 1, session_id: "s2" }, { command: "just lint", scope: "api/**", passed: true, exit_code: 0, session_id: "s3" }] }, "✗ 1 of 2 scopes · just test", "/api/work-items/w1/sessions/s2/log"],
+    ["red", { passed: false, scopes: [{ command: "just test", scope: "web/**", passed: false, exit_code: 1, session_id: "s2" }, { command: "just lint", scope: "api/**", passed: true, exit_code: 0, session_id: "s3" }] }, "✗ 1 of 2 scopes · just test", "/api/work-items/w1/sessions/s2/log?format=text"],
   ])("a gate shows its %s tests row", async (_name, test_result, text, log) => {
     mount(item("needs_you", stop("gate", { node: "plan_approval" }), { current_node_id: "plan_approval", pending_gate: "plan_approval", worker_sessions: [], test_result }), "/work-items/w1/nodes/plan_approval");
     const row = (await screen.findByText("tests")).closest("div")!;
