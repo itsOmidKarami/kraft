@@ -43,3 +43,8 @@ origin: src/kraft/store/sessions.py §_warn_unpriced, src/kraft/doctor.py §_cos
 WHEN any session folded into a usage rollup is still running on an estimated cost, the system SHALL mark that rollup's total `cost_estimated`, distinct from `cost_complete`, so a reader can render the figure as an estimate rather than a settled total.
 enforced-by: tests/test_usage.py::test_rollup_marks_the_total_estimated_when_a_running_session_has_a_guess
 origin: src/kraft/store/budget.py §usage_rollup (Kraft-wz83s)
+
+## REQ subagent-tracking-leaves-usage-unchanged
+WHEN a session's log carries sub-agent lines, the system SHALL read its usage and cost exactly as it reads them without sub-agent tracking.
+enforced-by: tests/test_usage.py::test_a_log_with_several_result_envelopes_counts_every_invocation[sub-agent-progress-lines]
+origin: src/kraft/usage.py §read_envelope

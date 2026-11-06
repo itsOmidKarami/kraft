@@ -133,13 +133,14 @@ origin: src/kraft/adapters/agent.py §SAFETY_RULES (removed, Kraft-c82sp) -- Kra
 
 ## REQ a-turn-left-with-a-running-background-job-fails
 
-IF an agent task's turn ends with a background job still running, THEN the
-system SHALL fail the session when it exits, naming each job in the session
+IF an agent task's turn ends with a background job still running (a
+`local_agent` task, a sub-agent, is not a background job; see subagents.md),
+THEN the system SHALL fail the session when it exits, naming each job in the session
 log and in a `background_jobs_abandoned` event, and SHALL NOT wait for a
 missing result file to say so. A `needs_context` stop SHALL keep its status
 and question, with the jobs still named. Every agent launch SHALL be told this
 rule, and that the full test suite is the verification node's to run.
-enforced-by: tests/adapters/test_background_jobs.py::test_the_claude_reader_names_the_jobs_still_running_when_the_turn_ended[incident], tests/adapters/test_background_jobs.py::test_the_claude_reader_names_the_jobs_still_running_when_the_turn_ended[run-in-background], tests/adapters/test_background_jobs.py::test_the_claude_reader_names_the_jobs_still_running_when_the_turn_ended[waited-on], tests/adapters/test_background_jobs.py::test_a_turn_left_with_a_running_job_fails_naming_it[claims-done], tests/adapters/test_background_jobs.py::test_a_turn_left_with_a_running_job_fails_naming_it[no-result-file], tests/adapters/test_background_jobs.py::test_a_question_keeps_its_stop_and_still_names_the_job, tests/adapters/test_background_jobs.py::test_a_clean_turn_is_left_alone[nothing-left-running], tests/adapters/test_background_jobs.py::test_a_session_adopted_after_a_restart_is_held_to_the_same_rule, tests/adapters/test_background_jobs.py::test_every_agent_launch_is_told_the_rule_and_where_the_full_suite_runs
+enforced-by: tests/adapters/test_background_jobs.py::test_the_claude_reader_names_the_jobs_still_running_when_the_turn_ended[incident], tests/adapters/test_background_jobs.py::test_the_claude_reader_names_the_jobs_still_running_when_the_turn_ended[run-in-background], tests/adapters/test_background_jobs.py::test_the_claude_reader_names_the_jobs_still_running_when_the_turn_ended[waited-on], tests/adapters/test_background_jobs.py::test_the_claude_reader_names_the_jobs_still_running_when_the_turn_ended[subagent-is-not-a-job], tests/adapters/test_background_jobs.py::test_the_claude_reader_names_the_jobs_still_running_when_the_turn_ended[background-agent-call], tests/adapters/test_background_jobs.py::test_the_claude_reader_names_the_jobs_still_running_when_the_turn_ended[task-named-call], tests/adapters/test_background_jobs.py::test_a_turn_left_with_a_running_job_fails_naming_it[claims-done], tests/adapters/test_background_jobs.py::test_a_turn_left_with_a_running_job_fails_naming_it[no-result-file], tests/adapters/test_background_jobs.py::test_a_question_keeps_its_stop_and_still_names_the_job, tests/adapters/test_background_jobs.py::test_a_clean_turn_is_left_alone[nothing-left-running], tests/adapters/test_background_jobs.py::test_a_session_adopted_after_a_restart_is_held_to_the_same_rule, tests/adapters/test_background_jobs.py::test_every_agent_launch_is_told_the_rule_and_where_the_full_suite_runs
 origin: src/kraft/adapters/subprocess.py §fail_abandoned_jobs -- Kraft-xvugd, Kraft-nxqft: a worker backgrounded a full-suite run and ended its turn, 68 minutes and $9.46, and the prose rule in agent._CTX had not held
 
 ## REQ the-shipped-implementer-runs-under-a-time-cap

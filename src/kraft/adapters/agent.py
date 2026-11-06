@@ -82,7 +82,9 @@ _CTX = (
     "This session ends the moment your turn ends: nothing runs after you stop "
     "responding, and a turn that ends with a background job still running fails, "
     "naming the job. Run every command to completion in the foreground before you "
-    "report status (the Monitor tool is disabled for the same reason).{edits}"
+    "report status (the Monitor tool is disabled for the same reason). "
+    "Sub-agents are not background jobs: wait for each sub-agent's answer before "
+    "you report status.{edits}"
 )
 
 #: `_CTX`'s `{edits}`, for every launch but a read-only one (`context_sections`'

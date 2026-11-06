@@ -669,6 +669,8 @@ def _unfinished_jobs_claude(log_path: Path) -> list[str]:
     job ends with its `task_notification`. Read as of the last `result` line,
     the turn's end: the CLI kills what is left on its way out, which the log
     reports after that line, and that kill is not the agent waiting on it.
+    A sub-agent (a `local_agent` task, or an `Agent` or `Task` call) is not a
+    job: `subagents.Fold` reads it.
     """
     try:
         lines = log_path.read_text().splitlines()
@@ -690,11 +692,15 @@ def _unfinished_jobs_claude(log_path: Path) -> list[str]:
         elif kind == "assistant" and isinstance(obj.get("message"), dict):
             for block in obj["message"].get("content") or ():
                 args = block.get("input") if isinstance(block, dict) else None
+                if isinstance(block, dict) and block.get("name") in ("Agent", "Task"):
+                    continue  # a sub-agent is no background job, however it was started
                 if isinstance(args, dict) and args.get("run_in_background") is True:
                     running[block.get("id")] = str(args.get("command") or block.get("name"))
         elif kind != "system":
             continue
         elif sub == "task_started":
+            if obj.get("task_type") == "local_agent":
+                continue
             job = (obj.get("tool_use_id"), str(obj.get("description")))
             started[obj.get("task_id")] = job
             if obj.get("is_backgrounded") is True:

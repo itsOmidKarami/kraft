@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 import psutil
 
-from kraft import caps, events, ids, item_paths, logs, outputs, proc_identity, store
+from kraft import caps, events, ids, item_paths, logs, outputs, proc_identity, store, subagents
 from kraft import harness as _harness
 from kraft import usage as _usage
 from kraft.paths import private
@@ -108,6 +108,40 @@ async def fail_abandoned_jobs(
 
     await db.write(_record)
     return status if status == "needs_context" else "failed"
+
+
+def _cut_off_labels(log_path: Path) -> list[str]:
+    fold = subagents.Fold()
+    try:
+        with open(log_path, errors="replace") as fh:
+            for obj in _usage._json_lines(fh):
+                fold.feed(obj)
+    except OSError:
+        return []
+    cut = set(fold.cut_off())
+    return [e["description"] for e in fold.entries(ended=True) if e["id"] in cut]
+
+
+async def note_cut_off_subagents(log_path: Path, reader: str | None) -> list[str]:
+    """Name, in one log line, each Claude Code sub-agent still running when the
+    session ended, and return their labels. A sub-agent cut off is not a failed
+    session -- the CLI waits for them on its own, so it means a hang or a kill,
+    and the steps after this one still check the work -- but a person reading
+    the log should see it. Writes no status and no event.
+
+    `[]`, and nothing written, for any other reader. Called once the session's
+    final status is settled, never for a paused or rate-limited one.
+    """
+    if reader != store.sessions.CLAUDE_READER:
+        return []
+    labels = await asyncio.to_thread(_cut_off_labels, log_path)
+    if labels:
+        who = "1 sub-agent was" if len(labels) == 1 else f"{len(labels)} sub-agents were"
+        said = "it" if len(labels) == 1 else "they"
+        note = f"kraft: note: {who} cut off before {said} reported back: {'; '.join(labels)}"
+        with open(log_path, "a") as fh:
+            fh.write(f"\n{note}\n")
+    return labels
 
 
 #: The statuses whose declared outputs are kept: a task that ran to its end,
@@ -1720,6 +1754,7 @@ async def _run_task(
 
         with open(log_path, "a") as fh:
             fh.write(f"\nkraft: stopped: {hit.reason}\n")
+        await note_cut_off_subagents(log_path, reader)
         await db.write(_capped)
         return caps.TIME_CAPPED
     returncode = proc.returncode
@@ -1783,6 +1818,8 @@ async def _run_task(
         files,
         status,
     )
+    if rate_limit is None and status != "unknown":
+        await note_cut_off_subagents(log_path, reader)
     fields = read_result_fields(
         result_path, summary=item_paths.recorded_summary(run_dirs, work_item_id, files)
     )

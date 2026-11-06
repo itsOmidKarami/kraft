@@ -26,6 +26,7 @@ from kraft.adapters.subprocess import (
     capture_outputs,
     close_egress,
     fail_abandoned_jobs,
+    note_cut_off_subagents,
     read_result_fields,
     record_oom_kill,
 )
@@ -263,6 +264,12 @@ async def _exit_from_file(
         # session launched under (`kraft.outputs.read_decl`), never today's.
         files = item_paths.session_files(run_dirs, work_item_id, session_id)
         status = await capture_outputs(db, run_dirs, work_item_id, session_id, files, status)
+    paused = (
+        await db.write(lambda c: store.session_status(c, session_id, work_item_id=work_item_id))
+        == SessionStatus.PAUSED
+    )
+    if not paused:
+        await note_cut_off_subagents(log_path, reader)
     await db.write(
         lambda c: store.session_exited(
             c,
@@ -697,6 +704,7 @@ async def _stop_at_cap(db, row, pid: int, hit) -> None:
     container -- and stop its item for a human under the cap's reason."""
     await _kill_group(pid, _KILL_GRACE_S)
     session_id = row["id"]
+    await note_cut_off_subagents(Path(row["log_path"]), _reader_of(row))
 
     def _capped(c):
         store.session_exited(c, session_id, "capped_out", work_item_id=row["work_item_id"])
