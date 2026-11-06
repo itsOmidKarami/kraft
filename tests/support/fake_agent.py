@@ -31,6 +31,14 @@ import re
 import subprocess
 import sys
 
+#: A skill's method section, as `kraft.skill` frames it: the same text for
+#: every work item, so no field or marker this fake steers by is read from it.
+_METHOD = re.compile(r"\n\n## Method\n\n.*?Do not improvise a method of your own\.", re.S)
+
+
+def _steering(text: str) -> str:
+    return _METHOD.sub("", text)
+
 
 def _context(argv: list[str]) -> str:
     """The injected context, from either declared channel (see
@@ -39,13 +47,13 @@ def _context(argv: list[str]) -> str:
     """
     for i, a in enumerate(argv):
         if a == "--append-system-prompt" and i + 1 < len(argv):
-            return argv[i + 1]
+            return _steering(argv[i + 1])
         if a == "-c" and i + 1 < len(argv):
             key, sep, value = argv[i + 1].partition("=")
             if sep and key == "developer_instructions":
-                return value
+                return _steering(value)
     # channel: prompt -- the contract is prepended to the instruction itself.
-    return argv[-1] if argv else ""
+    return _steering(argv[-1]) if argv else ""
 
 
 def _ctx_fields(argv: list[str]) -> dict[str, str]:
@@ -193,7 +201,7 @@ def main() -> int:
             if a == "-p" and i + 1 < len(sys.argv):
                 instr = sys.argv[i + 1]
                 break
-        target = re.search(r"replayed onto (\S+)", instr)
+        target = re.search(r"replayed onto (\S+)", _steering(instr))
         if target:
             env = {**os.environ, "GIT_EDITOR": "true"}
             subprocess.run(["git", "rebase", target.group(1)], env=env)

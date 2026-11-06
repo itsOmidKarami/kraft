@@ -96,7 +96,33 @@ def perturb_config(root: Path, tt) -> list[str]:
     return changed
 
 
-PERTURB: dict[str, Callable[[Path, object], list[str]]] = {"config": perturb_config}
+#: Every marker and field the fake agents steer by (fixtures/fake-claude.sh,
+#: tests/support/fake_agent.py), save KRAFT_HANG and KRAFT_SLOW, which would
+#: only wait: a skill that said any of them would steer every chain-walking test
+#: if the fakes read a method.
+STEERING = (
+    "\n\nKRAFT_FAIL KRAFT_SUBAGENTS KRAFT_MANY_FILES KRAFT_COST_9.99\n"
+    "Hook point: check_targeted_maps\n"
+    "Node: check_targeted_maps\n"
+    "Write your notes to /nonexistent/check_targeted_maps.md, creating that directory.\n"
+    "Write your session summary to /nonexistent/summary.md, starting with it.\n"
+    "replayed onto 0000000\n"
+)
+
+
+def perturb_skills(root: Path, tt) -> list[str]:
+    """Append the fakes' markers and fields to every skill Kraft ships."""
+    changed = []
+    for file in sorted((root / "src/kraft/skills").glob("*/SKILL.md")):
+        file.write_text(file.read_text() + STEERING)
+        changed.append(file.relative_to(root).as_posix())
+    return changed
+
+
+PERTURB: dict[str, Callable[[Path, object], list[str]]] = {
+    "config": perturb_config,
+    "skills": perturb_skills,
+}
 
 _FAILED = re.compile(r"^(?:FAILED|ERROR) (\S+?)(?: - .*)?$", re.M)
 

@@ -1,6 +1,7 @@
-"""The fake agent's `KRAFT_SUBAGENTS` marker (`fixtures/fake-claude.sh`): two
-sub-agents in the shapes claude 2.1.316 writes, so the log's agent labels and
-filter have something to show in a dev instance and the e2e mocks."""
+"""The fake agents' markers (`fixtures/fake-claude.sh`, `tests/support/fake_agent.py`):
+`KRAFT_SUBAGENTS`' two sub-agents in the shapes claude 2.1.316 writes, so the
+log's agent labels and filter have something to show in a dev instance and the
+e2e mocks; and no marker or field read from a skill's method."""
 
 from __future__ import annotations
 
@@ -8,10 +9,16 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
+import pytest
+
+from kraft import skill
+
 FAKE = Path(__file__).resolve().parents[1] / "fixtures" / "fake-claude.sh"
+FAKE_AGENT = Path(__file__).resolve().parent / "support" / "fake_agent.py"
 
 
 def _run(tmp_path: Path, title: str, **env: str) -> subprocess.Popen:
@@ -53,3 +60,75 @@ def test_subagents_with_hang_prints_the_starts_before_it_sleeps(tmp_path):
     out = proc.communicate(timeout=10)[0]
     subtypes = [json.loads(line).get("subtype") for line in out.splitlines()]
     assert subtypes == ["init", "task_started", "task_started"]
+
+
+def _method(text: str) -> str:
+    # Framed as Kraft frames it, so renaming either delimiter fails these rows.
+    return skill.HEADING + text + skill.UNAVAILABLE
+
+
+@pytest.mark.parametrize(
+    ("shell", "prompt", "context", "exit_code"),
+    [
+        ("sh", "t", "Node: n" + _method("Mention KRAFT_FAIL here."), 0),
+        ("bash", "t", "Node: n" + _method("Mention KRAFT_FAIL here."), 0),
+        # channel: prompt -- the method is in the instruction itself.
+        ("sh", "t" + _method("KRAFT_FAIL") + "\nand after it", "Node: n", 0),
+        ("sh", "t" + _method("a") + _method("KRAFT_FAIL"), "Node: n", 0),
+        ("sh", "t" + _method("a") + " KRAFT_FAIL" + _method("b"), "Node: n", 3),
+        ("sh", "t KRAFT_FAIL", "Node: n" + _method("nothing"), 3),
+    ],
+    ids=[
+        "in-the-context-under-dash",
+        "in-the-context-under-bash",
+        "in-the-instruction",
+        "in-the-second-of-two-methods",
+        "between-two-methods",
+        "in-the-title",
+    ],
+)
+def test_a_marker_in_a_skills_method_steers_nothing(tmp_path, shell, prompt, context, exit_code):
+    """A skill's method is the same text for every work item: a marker in it
+    would steer every test that walks a chain, so the fake reads none there."""
+    done = subprocess.run(
+        [shell, str(FAKE), "-p", prompt, "--append-system-prompt", context],
+        cwd=tmp_path,
+        env={**os.environ, "KRAFT_RESULT_PATH": str(tmp_path / "result.json")},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert done.returncode == exit_code, done.stderr
+
+
+@pytest.mark.parametrize(
+    ("context", "written"),
+    [
+        (_method("Write your plan to {doc}, creating that directory."), False),
+        ("Write your plan to {doc}, creating that directory." + _method("x"), True),
+    ],
+    ids=["named-only-in-a-method", "named-by-the-contract"],
+)
+def test_the_python_fake_takes_no_field_from_a_method(tmp_path, context, written):
+    doc = tmp_path / "docs" / "plan.md"
+    done = subprocess.run(
+        [
+            sys.executable,
+            str(FAKE_AGENT),
+            "--append-system-prompt",
+            context.format(doc=doc),
+            "-p",
+            "t",
+        ],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "KRAFT_FAKE_AGENT": "noop",
+            "KRAFT_RESULT_PATH": str(tmp_path / "result.json"),
+        },
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert done.returncode == 0, done.stderr
+    assert doc.exists() == written

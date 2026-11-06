@@ -265,8 +265,9 @@ when `NEW` does not collect.
   under `config/` (or `src/kraft/detectors.yaml`, `src/kraft/prices.json`)
   whose change is whole-line comments and blank lines not at its end, with
   equal data at both ends, runs the tests that read that text; and an
-  edit (not an add or delete) to `src/kraft/console/kraft.tcss` or
-  `plugins/kraft/skills` runs the tests that read those. It runs on your
+  edit (not an add or delete) to `src/kraft/console/kraft.tcss`,
+  `plugins/kraft/skills` or `src/kraft/skills` runs the tests that read those
+  (the fake agents skip a skill's method, so its text steers no other test). It runs on your
   logical CPUs plus two workers, as `just test` does; `KRAFT_TEST_WORKERS`
   sets another count (for a Kraft worker, in the repo's `repos.yaml` `env:`).
   Those lists come from tracing readers; `just check-targeted-maps` checks

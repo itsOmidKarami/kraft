@@ -198,6 +198,7 @@ def test_read_changed_without_origin_main_is_unknown_not_head(tt, tmp_path):
 _TCSS = "src/kraft/console/kraft.tcss"
 _POLICY = "config/policy.yaml"
 _SKILL = "plugins/kraft/skills/board/SKILL.md"
+_METHOD = "src/kraft/skills/plan/SKILL.md"
 
 
 @pytest.mark.parametrize(
@@ -224,6 +225,8 @@ _SKILL = "plugins/kraft/skills/board/SKILL.md"
         (_TCSS, "Screen {}\n", None, None),
         (_SKILL, "---\nname: board\n---\n", "---\nname: board\n---\nMore.\n", "edit"),
         (_SKILL, None, "---\nname: board\n---\n", None),
+        (_METHOD, "---\nname: plan\n---\n", "---\nname: plan\n---\nMore.\n", "edit"),
+        (_METHOD, None, "---\nname: plan\n---\n", None),
     ],
     ids=[
         "comment-added-to-config-yaml",
@@ -243,6 +246,8 @@ _SKILL = "plugins/kraft/skills/board/SKILL.md"
         "mapped-file-deleted",
         "plugin-skill-edited",
         "plugin-skill-added",
+        "kraft-skill-edited",
+        "kraft-skill-added",
     ],
 )
 def test_a_blind_change_with_known_readers_adds_them_instead_of_the_full_suite(

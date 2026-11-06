@@ -70,15 +70,27 @@ EDIT_TESTS: tuple[tuple[str, tuple[str, ...]], ...] = (
     # The console's stylesheet: read only when the Textual app starts.
     ("src/kraft/console/kraft.tcss", ("tests/console", "tests/test_theme_contrast.py")),
     # The plugin's skills: copied by `kraft admin init`, and read for their
-    # frontmatter, wording and leaks. Not `src/kraft/skills`: that text goes
-    # into every agent launch, and the fake agents scan it for the markers
-    # that steer them, so an edit can change any test that walks a chain.
+    # frontmatter, wording and leaks.
     (
         "plugins/kraft/skills",
         (
             "tests/test_init.py",
             "tests/skills/test_shipped_skills_are_generic.py",
             "tests/test_plugin_docs_surface.py",
+        ),
+    ),
+    # Kraft's own skills: read for their wording and examples, and as the
+    # method of every agent launch. That reaches nearly every test that walks a
+    # chain, but only the fake agents read it there, and they skip a method
+    # (tests/test_fake_claude.py), so these are the tests that read its text.
+    (
+        "src/kraft/skills",
+        (
+            "tests/skills",
+            "tests/test_skill.py",
+            "tests/adapters/test_agent.py",
+            "tests/addons/test_pins.py",
+            "tests/templates/test_library.py",
         ),
     ),
 )

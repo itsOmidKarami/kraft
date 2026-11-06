@@ -38,6 +38,33 @@ if [ -n "${KRAFT_FAKE_CLAUDE_ARGV_LOG:-}" ]; then
   printf '\000\n' >> "$KRAFT_FAKE_CLAUDE_ARGV_LOG"
 fi
 
+# From here on the arguments are read for the markers and fields that steer
+# this script, and a skill's method is no source of either: it is the same text
+# for every work item, so a marker in it would steer every test that walks a
+# chain. Drop each method section -- kraft.skill.HEADING through the last
+# sentence of kraft.skill.UNAVAILABLE, wherever a harness put it -- before
+# anything below looks. The logs above keep the full arguments.
+# Plain sh, not bash: a test runs this script with `sh`, dash on Debian and Ubuntu.
+nl='
+'
+method_start="${nl}${nl}## Method${nl}${nl}"
+method_end='Do not improvise a method of your own.'
+count=$#
+while [ "$count" -gt 0 ]; do
+  arg=$1
+  shift
+  while :; do
+    case "$arg" in
+      *"$method_start"*"$method_end"*)
+        rest=${arg#*"$method_start"}
+        arg=${arg%%"$method_start"*}${rest#*"$method_end"} ;;
+      *) break ;;
+    esac
+  done
+  set -- "$@" "$arg"
+  count=$((count - 1))
+done
+
 # KRAFT_SUBAGENTS in the title: the run spawns two Claude Code sub-agents, one
 # that completes and one that fails (shapes as claude 2.1.316 writes them), so
 # the log's agent filter and labels have something to show.
