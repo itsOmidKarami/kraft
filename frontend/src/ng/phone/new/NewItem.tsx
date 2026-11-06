@@ -3,7 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import * as api from "../../../api";
 import { repoName } from "../../../format";
 import { useStore } from "../../../store";
-import type { Repo, SearchResult, TemplateSummary } from "../../../types";
+import type { Repo, TemplateSummary } from "../../../types";
+import { firstMatch, useRepoFiles } from "../../board/repoFiles";
 import { FILED_PAUSED, KEEP_EDITING } from "../../board/newWords";
 import { chainOptionText, chainsForRepo, defaultChainNote } from "../../library/types";
 import { detailOf, jsonBody, request } from "../../http";
@@ -11,7 +12,7 @@ import { Button } from "../../ui/Button";
 import { useReason } from "../../ui/Reason";
 import { ADD_TITLE } from "../../ui/reasons";
 import { showToast } from "../../ui/Toast";
-import { ChoiceSheet, ConfirmSheet, EditSheet, useSheet } from "../nav/Sheet";
+import { ConfirmSheet, EditSheet, useSheet } from "../nav/Sheet";
 import { ComposerHeader } from "../nav/ScreenHeader";
 import { useBack } from "../nav/trail";
 import { ActionBar } from "../ui/Rows";
@@ -30,7 +31,6 @@ export function NewItem() {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [chains, setChains] = useState<TemplateSummary[]>([]);
   const [kind, setKind] = useState<AttachKind>("spec");
-  const [hits, setHits] = useState<SearchResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Spoken from the start, drawn once the title has been visited and left empty.
@@ -38,6 +38,7 @@ export function NewItem() {
   const chainHint = useId();
   const why = useReason(d.title.trim() ? null : ADD_TITLE);
   const set = (p: Partial<NewDraft>) => setD((x) => ({ ...x, ...p }));
+  const files = useRepoFiles(d.repo, sheet.is("attach"));
   const dirty = !!(d.title.trim() || d.brief.trim());
 
   useEffect(() => saveDraft(d), [d]);
@@ -68,20 +69,13 @@ export function NewItem() {
     navigate("/", { replace: true });
   };
 
-  const attach = async (q: string) => {
+  // A pasted path is what the person means; otherwise the first suggestion.
+  const attach = (q: string) => {
+    const path = looksLikePath(q) ? q.trim() : firstMatch(files, q);
+    if (!q.trim() || !path) return setError("Pick a file from the list, or paste a repo-relative path.");
     setError(null);
-    if (looksLikePath(q)) {
-      set({ [kind]: q.trim() });
-      return sheet.close();
-    }
-    try {
-      const r = await api.search({ q: q.trim(), repo: d.repo, kind, source_kind: "artifact", limit: 5 });
-      if (!r.results.length) return setError(`No ${kind} found. Paste a repo-relative path instead.`);
-      setHits(r.results);
-      sheet.swap("attach-pick");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "The search failed.");
-    }
+    set({ [kind]: path });
+    sheet.close();
   };
 
   const chip = (k: AttachKind) =>
@@ -126,15 +120,7 @@ export function NewItem() {
         <ConfirmSheet title={DISCARD_THIS_DRAFT} text="The title and brief you typed will be lost." cancel={KEEP_EDITING} confirm={{ label: "Discard", danger: true, run: () => { saveDraft(null); sheet.goTo("/"); } }} onClose={sheet.close} />
       )}
       {sheet.is("attach") && (
-        <EditSheet title={`Attach a ${kind}`} text={`Search this repo's ${kind}s, or paste a repo-relative path. The file must be inside the repo: it is committed on the item's branch.`} placeholder={`search ${kind}s, or paste a path`} submitLabel="Find" error={error} onSubmit={(q) => (q.trim() ? attach(q) : setError("Type a search or paste a path."))} onClose={sheet.close} />
-      )}
-      {sheet.is("attach-pick") && (
-        <ChoiceSheet
-          title={`Attach a ${kind}`}
-          options={hits.map((h) => ({ value: h.path, label: h.title, hint: h.path }))}
-          onPick={(p) => { set({ [kind]: p }); sheet.close(); }}
-          onClose={sheet.close}
-        />
+        <EditSheet title={`Attach a ${kind}`} text="Type to find a file, or paste a repo-relative path. The file must be inside the repo: it is committed on the item's branch." placeholder="type a path, or paste one" listed={{ choices: files, noun: "file" }} submitLabel="Attach" error={error} onSubmit={attach} onClose={sheet.close} />
       )}
     </>
   );

@@ -16,7 +16,7 @@ function Where() {
   return <output aria-label="where">{l.pathname}</output>;
 }
 function mount(answers: Record<string, [number, unknown]> = {}) {
-  const calls = stubFetch({ "GET /repos": [200, REPOS], "GET /templates/chains": [200, CHAINS], "GET /work-items": [200, { items: [], cursor: 0 }], ...answers });
+  const calls = stubFetch({ "GET /repos": [200, REPOS], "GET /templates/chains": [200, CHAINS], "GET /work-items": [200, { items: [], cursor: 0 }], "GET /repos/files": [200, { files: [], truncated: false }], ...answers });
   render(
     <MemoryRouter initialEntries={["/work-items/new"]}>
       <Routes>
@@ -109,13 +109,15 @@ describe("spec and plan (G.1)", () => {
     expect(screen.getByRole("dialog", { name: "Attach a spec" })).toHaveTextContent("The file must be inside the repo: it is committed on the item's branch.");
   });
 
-  it("attaches a found document through two sheets, and removes it again", async () => {
-    mount({ "GET /search": [200, { query: "cache", mode: "hybrid", results: [{ id: "d1", repo: "/r", source_kind: "artifact", kind: "spec", title: "Spec · cache", path: ".engineering/specs/cache.md", snippet: "", score: 1, links: [] }] }] });
+  it("attaches a suggested document from one sheet, and removes it again", async () => {
+    const calls = mount({ "GET /repos/files": [200, { files: [{ path: ".engineering/specs/cache.md", mtime: 2 }, { path: "docs/old.md", mtime: 1 }], truncated: false }] });
     await userEvent.click(await screen.findByRole("button", { name: "+ spec" }));
-    await userEvent.type(screen.getByRole("textbox", { name: "Attach a spec" }), "cache{Enter}");
-    await userEvent.click(await screen.findByRole("button", { name: /Spec · cache/ }));
+    await userEvent.click(await screen.findByRole("option", { name: ".engineering/specs/cache.md" }));
+    await userEvent.click(screen.getByRole("button", { name: "Attach" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.getByRole("button", { name: "Remove the spec" })).toHaveTextContent(".engineering/specs/cache.md");
+    expect(calls.find((c) => c.path === "/repos/files")?.url).toContain("path=%2Fcode%2Fkraft-plugins");
+    expect(calls.some((c) => c.path === "/search")).toBe(false);
     await userEvent.click(screen.getByRole("button", { name: "Remove the spec" }));
     expect(screen.getByRole("button", { name: "+ spec" })).toBeInTheDocument();
   });
@@ -123,17 +125,18 @@ describe("spec and plan (G.1)", () => {
   it("takes a pasted path without searching", async () => {
     const calls = mount();
     await userEvent.click(await screen.findByRole("button", { name: "+ plan" }));
-    await userEvent.type(screen.getByRole("textbox", { name: "Attach a plan" }), ".engineering/plans/x.md{Enter}");
+    await userEvent.type(screen.getByRole("combobox", { name: "Attach a plan" }), ".engineering/plans/x.md{Enter}");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.getByRole("button", { name: "Remove the plan" })).toHaveTextContent(".engineering/plans/x.md");
     expect(calls.some((c) => c.path === "/search")).toBe(false);
   });
 
-  it("says so, in the sheet, when nothing is found", async () => {
-    mount({ "GET /search": [200, { query: "zzz", mode: "hybrid", results: [] }] });
+  it("says so, in the sheet, when nothing typed names a file", async () => {
+    mount({ "GET /repos/files": [200, { files: [{ path: "docs/old.md", mtime: 1 }], truncated: false }] });
     await userEvent.click(await screen.findByRole("button", { name: "+ spec" }));
-    await userEvent.type(screen.getByRole("textbox", { name: "Attach a spec" }), "zzz{Enter}");
-    expect(await screen.findByRole("alert")).toHaveTextContent("No spec found. Paste a repo-relative path instead.");
+    await userEvent.type(screen.getByRole("combobox", { name: "Attach a spec" }), "zzz");
+    await userEvent.click(screen.getByRole("button", { name: "Attach" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Pick a file from the list, or paste a repo-relative path.");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });

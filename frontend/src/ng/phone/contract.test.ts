@@ -106,6 +106,7 @@ const ALLOWED = [
   "offline", // the offline state and its words: one banner text, both layouts
   "item/sharedWords", // wording both layouts show, one source
   "board/sharedWords", // wording both layouts show, one source
+  "board/repoFiles", // the attach picker's file list and its first-match rule, one source with the desktop
   "settings/sharedWords", // wording both layouts show, one source
   "library/sharedWords", // wording both layouts show, one source
   "shell/sharedWords", // wording both layouts show, one source
