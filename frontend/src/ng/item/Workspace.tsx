@@ -26,6 +26,7 @@ import { pushes, placeUrl, readPlace, selPath, type Place } from "./url";
 import { useDocuments } from "./useDocuments";
 import { useEvents } from "./useEvents";
 import { runVersion, type ItemDetail } from "./useItem";
+import { runningCounts } from "./subagents";
 import { useRunningSubagents } from "./useSubagents";
 import { chainName } from "./chainName";
 import { materialized, producerOf } from "./chainValues";
@@ -201,7 +202,6 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
     else dispatch({ type: "escape" });
   };
   escape.current = back;
-  const runningCounts = Object.fromEntries(Object.entries(subagents).map(([id, l]) => [id, l.filter((a) => a.status === "running").length]));
   const pane = paneContent({
     item: shown, version, events, now, policy, graph: graph.nodes, sel, level: state.level, tab, reload, pick, editBudget, setEditBudget, docs, round, scope: place.scope,
     focus: (node) => dispatch({ type: "focus", node }),
@@ -217,7 +217,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
     canEdit: draft?.editable,
     applied,
   });
-  const plain = viewing && nodeGraph(shown, viewing, now, events, place.round, runningCounts);
+  const plain = viewing && nodeGraph(shown, viewing, now, events, place.round, runningCounts(subagents));
   const inside = plain && draft ? { ...plain, steps: markSteps(plain.steps, viewing.id, marks) } : plain;
   const nodeSel = (x: NodeSel): Sel => (x.task ? { kind: "task", node: viewing!.id, step: x.step, task: x.task } : { kind: "step", node: viewing!.id, step: x.step });
 

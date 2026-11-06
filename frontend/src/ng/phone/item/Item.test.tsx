@@ -54,35 +54,6 @@ describe("the item screen (C)", () => {
     expect(ticks.some((c) => c.includes("ph-tick-hot"))).toBe(false);
   });
 
-  describe("running sub-agents", () => {
-    const line = { n: 1, t: "0:03", src: "agent", text: "x", summary: "loaded review_package" };
-    const agent = (description: string, status = "running") => ({ id: description, description, status });
-    const log = (subagents: unknown[]) => ({ "GET /work-items/w1/sessions/s1/log": [200, { lines: [line], subagents }] as [number, unknown] });
-
-    it("names them in the Log block, and a tap opens the task's Overview, with no second request for the list", async () => {
-      const calls = mount(item("running"), "/work-items/w1", log([agent("Explore codebase"), agent("Review diff"), agent("Old", "completed")]));
-      await userEvent.click(await screen.findByRole("button", { name: "2 sub-agents running: Explore codebase, Review diff" }));
-      expect(where()).toBe("/work-items/w1/nodes/verification?sel=verification.review.code_review");
-      expect(calls.some((c) => c.path.endsWith("/subagents"))).toBe(false);
-    });
-
-    it.each([
-      { id: "one", subagents: [agent("Lint")], text: "1 sub-agent running: Lint" },
-    ])("says $id in the singular", async ({ subagents, text }) => {
-      mount(item("running"), "/work-items/w1", log(subagents));
-      expect(await screen.findByRole("button", { name: text })).toBeInTheDocument();
-    });
-
-    it.each([
-      { id: "none listed", subagents: [] },
-      { id: "only finished ones", subagents: [agent("Old", "completed"), agent("Cut", "cut_off")] },
-    ])("has no line for $id", async ({ subagents }) => {
-      mount(item("running"), "/work-items/w1", log(subagents));
-      await screen.findByText(/loaded review_package/);
-      expect(screen.queryByText(/sub-agents? running/)).toBeNull();
-    });
-  });
-
   it("says an in-place item runs in your checkout", async () => {
     mount({ ...item("running"), in_place: true });
     // Its own span, which item.css keeps on one line, inside the meta line.

@@ -8,7 +8,7 @@ import { logTextUrl } from "../../../api";
 import { POLL_MS, useLogLines } from "../useLogLines";
 import { LinkButton } from "../../ui/LinkButton";
 import { Menu, type MenuItem } from "../../ui/Menu";
-import { agentEntries, type AgentEntry } from "../subagents";
+import { agentEntries, statusTone, type AgentEntry } from "../subagents";
 
 const SOURCES = ["sys", "stdout", "agent", "tool"] as const;
 export { POLL_MS };
@@ -85,7 +85,7 @@ function AgentMenu({ agents, agent, onAgent }: { agents: AgentEntry[]; agent?: s
     ...named.map((a): MenuItem => ({
       label: a.name,
       hint: a.hint ?? a.type,
-      icon: <span className={`ip-pill-dot ${a.status === "running" ? "is-live" : a.status === "completed" ? "is-ok" : "is-bad"}`} />,
+      icon: <span className={`ip-pill-dot ${statusTone(a.status)}`} />,
       checked: a.id === agent,
       onSelect: pick(a.id),
     })),

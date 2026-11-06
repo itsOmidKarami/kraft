@@ -3,14 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubFetch } from "./testkit";
 import { POLL_MS } from "./useLogLines";
 import { detail } from "./testkit";
-import { subagentCount } from "./subagents";
-import { useRunningSubagents, useSessionSubagents } from "./useSubagents";
+import { runningCounts, subagentCount } from "./subagents";
+import { useRunningSubagents, useSessionSubagents, useSubagentDetail } from "./useSubagents";
 
 const running = { id: "a1", description: "Explore", status: "running" };
 const answer = (list: unknown[]) => ({ "GET /work-items/w1/sessions/s1/subagents": [200, { session_id: "s1", status: "running", subagents: list }] }) as never;
 
 beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
-afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+const visibility = (state: "visible" | "hidden") => Object.defineProperty(document, "visibilityState", { value: state, configurable: true });
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); visibility("visible"); });
 
 describe("useSessionSubagents", () => {
   it("reads again every few seconds while the session runs", async () => {
@@ -29,12 +30,61 @@ describe("useSessionSubagents", () => {
     expect(calls.length).toBe(1);
   });
 
+  it("shows nothing of the old session once the session changes, even when the new read fails", async () => {
+    const answers = answer([running]);
+    stubFetch(answers);
+    const { result, rerender } = renderHook(({ id }) => useSessionSubagents("w1", id, false), { initialProps: { id: "s1" } });
+    await vi.waitFor(() => expect(result.current).toEqual([running]));
+    rerender({ id: "s2" });
+    await vi.waitFor(() => expect(result.current).toBeNull());
+  });
+
   it("reads nothing for a session that is no agent's", async () => {
     const calls = stubFetch(answer([running]));
     const { result } = renderHook(() => useSessionSubagents("w1", "s1", true, false));
     await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS * 2); });
     expect(calls.length).toBe(0);
     expect(result.current).toBeNull();
+  });
+});
+
+describe("polling", () => {
+  const session = { id: "s1", status: "running", harness: "claude" } as never;
+  it.each([
+    { id: "one session's list", use: () => useSessionSubagents("w1", "s1", true) },
+    { id: "the running sessions' lists", use: () => useRunningSubagents(detail({ worker_sessions: [session] })) },
+  ])("reads $id again only while the page is visible", async ({ use }) => {
+    const calls = stubFetch(answer([running]));
+    visibility("hidden");
+    renderHook(use);
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS * 3); });
+    expect(calls.length).toBe(1);
+    visibility("visible");
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+    expect(calls.length).toBe(2);
+  });
+});
+
+describe("runningCounts", () => {
+  it("counts only what runs, per session", () => {
+    const of = (...status: string[]) => status.map((s, i) => ({ id: String(i), description: "d", status: s })) as never;
+    expect(runningCounts({ s1: of("running", "completed", "running"), s2: of("cut_off", "failed") })).toEqual({ s1: 2, s2: 0 });
+  });
+});
+
+describe("useSubagentDetail", () => {
+  it("reads once opened, and again on a retry only after it failed", async () => {
+    const path = "GET /work-items/w1/sessions/s1/subagents/a1";
+    const answers: Record<string, [number, unknown]> = { [path]: [500, {}] };
+    const calls = stubFetch(answers);
+    const { result } = renderHook(() => useSubagentDetail("w1", "s1", "a1"));
+    act(() => result.current.load());
+    await vi.waitFor(() => expect(result.current.detail).toBe("failed"));
+    answers[path] = [200, { ...running, prompt: "p", answer: null }];
+    act(() => result.current.load());
+    await vi.waitFor(() => expect(result.current.detail).toMatchObject({ prompt: "p" }));
+    act(() => result.current.load());
+    expect(calls.length).toBe(2);
   });
 });
 

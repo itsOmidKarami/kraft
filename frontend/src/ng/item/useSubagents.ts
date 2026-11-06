@@ -13,6 +13,7 @@ const read = (workItemId: string, sessionId: string) =>
 export function useSessionSubagents(workItemId: string, sessionId: string, running: boolean, enabled = true): Subagent[] | null {
   const [list, setList] = useState<Subagent[] | null>(null);
   useEffect(() => {
+    setList(null);
     if (!enabled) return;
     let live = true;
     const load = () => read(workItemId, sessionId).then((l) => { if (live && l) setList(l); });
@@ -46,7 +47,7 @@ export function useRunningSubagents(item: ItemDetail): Record<string, Subagent[]
 export function useSubagentDetail(workItemId: string, sessionId: string, agent: string): { detail: SubagentDetail | "failed" | null; load: () => void } {
   const [detail, setDetail] = useState<SubagentDetail | "failed" | null>(null);
   const load = () => {
-    if (detail) return;
+    if (detail && detail !== "failed") return;
     void request<SubagentDetail>(subagentUrl(workItemId, sessionId, agent)).then((r) => setDetail(r.status === 200 ? r.body : "failed"));
   };
   return { detail, load };

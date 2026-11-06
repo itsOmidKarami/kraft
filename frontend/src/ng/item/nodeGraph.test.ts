@@ -33,18 +33,18 @@ describe("nodeGraph", () => {
     expect(g.onFailure).toBeUndefined();
   });
 
-  it("puts a running session's sub-agent count on its box, and none on an earlier round's", () => {
-    const item = detail({ worker_sessions: [
-      s("verification.review.code_review", { id: "old", round: 0, model: "sonnet" }),
-      s("verification.review.code_review", { id: "new", round: 1, status: "running", model: "sonnet", wall_ms: null }),
-    ] });
-    const box = (g: ReturnType<typeof nodeGraph>) => g.steps[1].tasks[0].subagents;
-    expect(box(nodeGraph(item, node, NOW, undefined, undefined, { new: 2 }))).toBe(2);
-    expect(box(nodeGraph(item, node, NOW, undefined, 1, { new: 2 }))).toBeUndefined();
-    expect(box(nodeGraph(item, node, NOW, undefined, undefined, { new: 0 }))).toBeUndefined();
-    expect(box(nodeGraph(item, node, NOW))).toBeUndefined();
+  const running = (hook_point: string, id: string, over: Partial<WorkerSession> = {}) => s(hook_point, { id, status: "running", model: "sonnet", wall_ms: null, ...over });
+  const review = (id: string, over: Partial<WorkerSession> = {}) => running("verification.review.code_review", id, over);
+  it.each([
+    { id: "a running session's count on its box", sessions: [review("new", { round: 1 })], counts: { new: 2 }, boxes: [undefined, undefined, 2] },
+    { id: "none on the box of an earlier round shown", sessions: [s("verification.review.code_review", { id: "old", round: 0 }), review("new", { round: 1 })], counts: { new: 2 }, picked: 1, boxes: [undefined, undefined, undefined] },
+    { id: "none for a count of zero", sessions: [review("new")], counts: { new: 0 }, boxes: [undefined, undefined, undefined] },
+    { id: "none without counts", sessions: [review("new")], counts: undefined, boxes: [undefined, undefined, undefined] },
+    { id: "each of two parallel tasks its own count, not their sum", sessions: [running("verification.checks.lint", "lint"), running("verification.checks.typecheck", "tc")], counts: { lint: 1, tc: 3 }, boxes: [1, 3, undefined] },
+  ])("draws $id", ({ sessions, counts, boxes, picked }: { sessions: WorkerSession[]; counts?: Record<string, number>; boxes: (number | undefined)[]; picked?: number }) => {
+    const g = nodeGraph(detail({ worker_sessions: sessions }), node, NOW, undefined, picked, counts);
+    expect(g.steps.flatMap((st) => st.tasks).map((t) => t.subagents)).toEqual(boxes);
   });
-
   it("draws the on-failure handler's tasks once it ran in the pass shown, and not in a pass it did not", () => {
     const ran = s("verification.on_failure.repair.repair_pass", { round: -1 });
     const first = [s("verification.checks.lint", { status: "failed", pass: 1 }), { ...ran, pass: 1 }];

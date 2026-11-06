@@ -14,6 +14,10 @@ export function subagentCount(list: Subagent[]): { running: number; finished: nu
   return { running, finished: list.length - running - cutOff, cutOff };
 }
 
+/** How many of each session's sub-agents run, by session id: the count a task's box on the graph shows. */
+export const runningCounts = (bySession: Record<string, Subagent[]>): Record<string, number> =>
+  Object.fromEntries(Object.entries(bySession).map(([id, l]) => [id, subagentCount(l).running]));
+
 /** "2 running · 3 finished · 1 cut off", leaving out what is zero. */
 export function countLine(list: Subagent[]): string {
   const c = subagentCount(list);
@@ -21,7 +25,7 @@ export function countLine(list: Subagent[]): string {
 }
 
 /** The dot a sub-agent's status draws (the pill dots of the attempt menu). */
-export const statusTone = (status: Subagent["status"]) => (status === "running" ? "is-live" : status === "completed" ? "is-ok" : "is-bad");
+export const statusTone = (status: string) => (status === "running" ? "is-live" : status === "completed" ? "is-ok" : "is-bad");
 
 /** One line of what a sub-agent used: type, status, tokens, tool uses, time. */
 export const subagentMeta = (a: Subagent) => [
