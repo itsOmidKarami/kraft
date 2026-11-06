@@ -1155,6 +1155,10 @@
    "shape": {
     "lines": [
      {
+      "agent": "_",
+      "agent_label": "_",
+      "agent_status": "_",
+      "agent_type": "_",
       "n": "_",
       "src": "_",
       "summary": "_",
@@ -1164,7 +1168,75 @@
     ],
     "next_line": "_",
     "session_id": "_",
-    "status": "_"
+    "status": "_",
+    "subagents": [
+     {
+      "depth": "_",
+      "description": "_",
+      "duration_ms": "_",
+      "ended_at": "_",
+      "id": "_",
+      "last_tool": "_",
+      "started_at": "_",
+      "status": "_",
+      "summary": "_",
+      "tokens": "_",
+      "tool_use_id": "_",
+      "tool_uses": "_",
+      "type": "_"
+     }
+    ]
+   }
+  },
+  "GET /api/work-items/{wid}/sessions/{sid}/subagents": {
+   "params": {
+    "wid": "$ITEM",
+    "sid": "$SESSION"
+   },
+   "shape": {
+    "session_id": "_",
+    "status": "_",
+    "subagents": [
+     {
+      "depth": "_",
+      "description": "_",
+      "duration_ms": "_",
+      "ended_at": "_",
+      "id": "_",
+      "last_tool": "_",
+      "started_at": "_",
+      "status": "_",
+      "summary": "_",
+      "tokens": "_",
+      "tool_use_id": "_",
+      "tool_uses": "_",
+      "type": "_"
+     }
+    ]
+   }
+  },
+  "GET /api/work-items/{wid}/sessions/{sid}/subagents/{agent_id}": {
+   "params": {
+    "wid": "$ITEM",
+    "sid": "$SESSION",
+    "agent_id": "$AGENT"
+   },
+   "shape": {
+    "answer": "_",
+    "depth": "_",
+    "description": "_",
+    "duration_ms": "_",
+    "ended_at": "_",
+    "id": "_",
+    "last_tool": "_",
+    "prompt": "_",
+    "started_at": "_",
+    "status": "_",
+    "summary": "_",
+    "tokens": "_",
+    "tool_use_id": "_",
+    "tool_uses": "_",
+    "type": "_"
    }
   },
   "GET /api/work-items/{wid}/threads": {

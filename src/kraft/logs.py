@@ -340,11 +340,14 @@ _CHUNK = 64 * 1024
 
 def _row(
     n: int, line: str, times: dict[int, str], agents: dict[str, tuple[str, str | None]]
-) -> dict:
+) -> tuple[dict, dict | None, dict]:
+    """`(row, obj, fields)`: the row, the object the line decoded to (None if it
+    did not) and its `agent_fields`, so a caller that folds the lines decodes
+    none of them twice."""
     obj = _decode(line)
     src, t = _classify_obj(obj)
     fields = agent_fields(obj, agents)
-    return {
+    row = {
         "n": n,
         "t": t or times.get(n),
         "src": src,
@@ -352,6 +355,7 @@ def _row(
         "summary": summary(obj, line, fields),
         **fields,
     }
+    return row, obj, fields
 
 
 def _marker(lines: int, nbytes: int) -> dict:
@@ -391,6 +395,11 @@ class Tail:
         self._times_offset = 0
         self._times: dict[int, str] = {}
         self._agents: dict[str, tuple[str, str | None]] = {}  # sub-agent id -> (label, type)
+        from kraft.subagents import Fold  # it imports this module
+
+        # shortcut: the list covers the log's last 2 MB; store it when long sessions lose
+        # early sub-agents from it.
+        self._fold = Fold()
 
     @property
     def next_line(self) -> int:
@@ -409,9 +418,21 @@ class Tail:
             return []
         first = self._n - len(lines)
         self._read_times(first)
-        rows += [_row(first + i, line, self._times, self._agents) for i, line in enumerate(lines)]
+        for i, line in enumerate(lines):
+            row, obj, fields = _row(first + i, line, self._times, self._agents)
+            self._fold.feed(obj, fields)
+            rows.append(row)
         self._times = {n: t for n, t in self._times.items() if n >= self._n}
         return rows
+
+    def subagents(self, *, ended: bool) -> list[dict]:
+        """The sub-agents the rows read so far show, first seen first. `ended`:
+        the session is no longer running, so one still going is `cut_off`."""
+        return self._fold.entries(ended=ended)
+
+    def subagent(self, agent_id: str, *, ended: bool) -> dict | None:
+        """One of them with its whole `prompt` and `answer`, or None."""
+        return self._fold.entry(agent_id, ended=ended)
 
     def _open_window(self, fh) -> list[dict]:
         """Skip to the last `MAX_LOG_BYTES`, counting the lines skipped."""

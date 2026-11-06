@@ -131,7 +131,9 @@ under its item:
 
 | Route | What it does |
 |---|---|
-| `GET /api/work-items/{id}/sessions/{session}/log` | The session's log: plain text, `?format=text` for the same without colour codes, or `?format=jsonl` for lines, with `&follow=1` to stream them until the session stops. |
+| `GET /api/work-items/{id}/sessions/{session}/log` | The session's log: plain text, `?format=text` for the same without colour codes, or `?format=jsonl` for lines, with `&follow=1` to stream them until the session stops. The jsonl answer, not the stream, also carries a `subagents` list. _Added in next_ |
+| `GET /api/work-items/{id}/sessions/{session}/subagents` | The Claude Code sub-agents the session's log shows, each with its status, tokens, tool uses, time, last tool and the start of its answer; one still running when its session ended reads `cut_off`. _Added in next_ |
+| `GET /api/work-items/{id}/sessions/{session}/subagents/{agent}` | One sub-agent, with its whole prompt and answer. _Added in next_ |
 | `POST /api/work-items/{id}/sessions/{session}/permission` | A worker's [permission](/reference/permissions) ask. |
 | `POST /api/work-items/{id}/sessions/{session}/permission-hook` | A sandboxed worker's permission hook. |
 

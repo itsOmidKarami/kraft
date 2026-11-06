@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
 from kraft import logs
 from kraft.api.routes import sessions
@@ -300,3 +301,61 @@ _ALL = (None, "main", "af2a65", "other")
 )
 def test_in_agent(row, kept_by):
     assert {a for a in _ALL if logs.in_agent(row, a)} == set(kept_by)
+
+
+def _session_at(monkeypatch, log, status: str) -> SimpleNamespace:
+    monkeypatch.setattr(
+        sessions,
+        "_session_row",
+        lambda st, wid, sid: {
+            "work_item_id": wid,
+            "id": sid,
+            "status": status,
+            "log_path": str(log),
+        },
+    )
+    return SimpleNamespace(app=SimpleNamespace(state=None))
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [pytest.param("running", "running", id="running"), pytest.param("done", "cut_off", id="done")],
+)
+def test_the_backlog_payload_lists_subagents(tmp_path, monkeypatch, status, expected):
+    log = tmp_path / "s.log"
+    log.write_bytes(_jsonl(_SUB_STARTED, _SUB_MESSAGE))
+    request = _session_at(monkeypatch, log, status)
+
+    body = asyncio.run(sessions.get_log("w", "s", request, format="jsonl"))
+
+    assert [(a["id"], a["status"]) for a in body["subagents"]] == [("af2a65", expected)]
+
+
+def test_the_follow_stream_carries_no_subagents(tmp_path, monkeypatch):
+    log = tmp_path / "s.log"
+    log.write_bytes(_jsonl(_SUB_STARTED, _SUB_MESSAGE))
+    _session_at(monkeypatch, log, "done")
+
+    async def drain():
+        return [f async for f in sessions._tail(None, "w", "s", log, poll_s=0)]
+
+    data = [json.loads(f[6:]) for f in asyncio.run(drain()) if f.startswith("data: {")]
+    assert data and not any("subagents" in frame for frame in data)
+
+
+def test_the_subagents_routes(tmp_path, monkeypatch):
+    prompt = "p" * 3000
+    log = tmp_path / "s.log"
+    log.write_bytes(_jsonl({**_SUB_STARTED, "prompt": prompt}, _SUB_MESSAGE, _SUB_DONE))
+    request = _session_at(monkeypatch, log, "done")
+
+    listed = asyncio.run(sessions.get_subagents("w", "s", request))
+    one = asyncio.run(sessions.get_subagent("w", "s", "af2a65", request))
+
+    backlog = asyncio.run(sessions.get_log("w", "s", request, format="jsonl"))
+    assert listed == {"session_id": "s", "status": "done", "subagents": backlog["subagents"]}
+    assert "prompt" not in listed["subagents"][0]
+    assert (one["prompt"], one["answer"], one["status"]) == (prompt, "bin", "completed")
+    with pytest.raises(HTTPException) as err:
+        asyncio.run(sessions.get_subagent("w", "s", "nope", request))
+    assert err.value.status_code == 404

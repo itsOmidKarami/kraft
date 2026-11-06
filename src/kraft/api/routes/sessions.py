@@ -114,6 +114,38 @@ async def get_log_flat(sid: str, request: Request, format: str | None = None, fo
     return await _log(request.app.state, _flat_session_row(request.app.state, sid), format, follow)
 
 
+@api_router.get("/work-items/{wid}/sessions/{sid}/subagents")
+async def get_subagents(wid: str, sid: str, request: Request):
+    """The Claude Code sub-agents a session's log shows, first seen first: each
+    one's description, type, status, tokens, tool uses, time, last tool and the
+    first 500 characters of its answer. Worked out from the last
+    `logs.MAX_LOG_BYTES` of the log on each call, so a long session can lose its
+    earliest sub-agents. One still running when its session ended is `cut_off`.
+    Empty for a session with none, and for any harness but Claude Code."""
+    row = _session_row(request.app.state, wid, sid)
+    tail = logs_mod.Tail(Path(row["log_path"]))
+    await asyncio.to_thread(tail.read, final=True)
+    return {
+        "session_id": sid,
+        "status": row["status"],
+        "subagents": tail.subagents(ended=row["status"] not in LIVE),
+    }
+
+
+@api_router.get("/work-items/{wid}/sessions/{sid}/subagents/{agent_id}")
+async def get_subagent(wid: str, sid: str, agent_id: str, request: Request):
+    """One sub-agent of a session, as in the list, with its whole `prompt`
+    (`null` when the part of the log read does not hold it) and its whole
+    `answer` (`null` until it has reported back)."""
+    row = _session_row(request.app.state, wid, sid)
+    tail = logs_mod.Tail(Path(row["log_path"]))
+    await asyncio.to_thread(tail.read, final=True)
+    found = tail.subagent(agent_id, ended=row["status"] not in LIVE)
+    if found is None:
+        raise HTTPException(404, "no such sub-agent in this session's log")
+    return found
+
+
 async def _log(st, row, format: str | None, follow: bool):
     wid, sid = row["work_item_id"], row["id"]
     path = Path(row["log_path"])
@@ -133,6 +165,7 @@ async def _log(st, row, format: str | None, follow: bool):
             "status": row["status"],
             "lines": lines,
             "next_line": tail.next_line,
+            "subagents": tail.subagents(ended=row["status"] not in LIVE),
         }
     if not path.exists():
         raise HTTPException(404, "log not found")

@@ -37,6 +37,10 @@ def _sessions(tmp_path):
         ("GET", f"/api/work-items/{W2}/sessions/def456/log", 404, None),
         ("GET", f"/api/work-items/{W1[:4]}/sessions/def456/log", 200, W1),
         ("GET", f"/api/work-items/{W1}/sessions/def4/log", 404, None),
+        ("GET", f"/api/work-items/{W2}/sessions/abc123/subagents", 200, W2),
+        ("GET", f"/api/work-items/{W2}/sessions/def456/subagents", 404, None),
+        ("GET", f"/api/work-items/{W1}/sessions/abc123/subagents/af2a65", 404, None),
+        ("GET", f"/api/work-items/{W2}/sessions/def456/subagents/af2a65", 404, None),
         ("POST", f"/api/work-items/{W2}/sessions/abc123/permission", 200, W2),
         ("POST", f"/api/work-items/{W1}/sessions/abc123/permission-hook", 200, W1),
         ("GET", "/api/worker-sessions/def456/log", 200, W1),
@@ -52,6 +56,10 @@ def _sessions(tmp_path):
         "nested-wrong-item",
         "nested-item-by-its-start",
         "nested-session-never-by-its-start",
+        "nested-subagents",
+        "nested-subagents-wrong-item",
+        "nested-subagent-unknown",
+        "nested-subagent-wrong-item",
         "nested-permission",
         "nested-permission-hook",
         "flat-unique",
@@ -74,6 +82,8 @@ def test_a_session_route_names_one_session(client, tmp_path, method, path, statu
     assert r.status_code == status, r.text
     if path.endswith("/log") and owner:
         assert f"hello from {owner}" in r.text
+    elif path.endswith("/subagents") and owner:
+        assert r.json()["session_id"] == "abc123"
     elif owner:
         [event] = permissions.events_of(client, "permission_decision", wid=owner)
         assert event["session_id"] == path.split("/")[-2]

@@ -112,6 +112,12 @@ PROBES: dict[str, dict[str, str]] = {
         "sid": "$SESSION",
         "format": "jsonl",
     },
+    "GET /api/work-items/{wid}/sessions/{sid}/subagents": {"wid": "$ITEM", "sid": "$SESSION"},
+    "GET /api/work-items/{wid}/sessions/{sid}/subagents/{agent_id}": {
+        "wid": "$ITEM",
+        "sid": "$SESSION",
+        "agent_id": "$AGENT",
+    },
     "GET /api/work-items/{wid}/one-off": {"wid": "$ONE_OFF"},
     "GET /api/work-items/{wid}/threads": {"wid": "$ITEM"},
     "GET /api/workers": {},
@@ -165,6 +171,58 @@ def _url(route: str, ids: dict[str, str]) -> str:
     return f"{path}?{urlencode(query)}" if query else path
 
 
+def _seed_subagent(client, wid: str, sid: str) -> str:
+    """Append one finished sub-agent (the lines claude 2.1.316 writes for it) to the
+    session's log, so neither sub-agent route answers empty or 404, and return its id."""
+    agent, tool = "af2a65", "toolu_01EX"
+    lines = [
+        {
+            "type": "system",
+            "subtype": "task_started",
+            "task_id": agent,
+            "tool_use_id": tool,
+            "task_type": "local_agent",
+            "description": "List root directory entries",
+            "subagent_type": "general-purpose",
+            "spawn_depth": 1,
+            "prompt": "Run `ls /` and report the first entry",
+        },
+        {
+            "type": "assistant",
+            "parent_tool_use_id": tool,
+            "agent_id": agent,
+            "task_description": "List root directory entries",
+            "timestamp": "2026-11-02T23:38:52.555Z",
+            "message": {"content": [{"type": "text", "text": "bin"}]},
+        },
+        {
+            "type": "system",
+            "subtype": "task_updated",
+            "task_id": agent,
+            "patch": {"status": "completed", "end_time": 1793662734269},
+        },
+        {
+            "type": "system",
+            "subtype": "task_notification",
+            "task_id": agent,
+            "tool_use_id": tool,
+            "status": "completed",
+            "summary": "bin",
+            "usage": {"total_tokens": 31902, "tool_uses": 1, "duration_ms": 4992},
+        },
+    ]
+    log = client.portal.call(
+        lambda: client.app.state.db.read(
+            lambda c: c.execute(
+                "SELECT log_path FROM worker_sessions WHERE work_item_id = ? AND id = ?", (wid, sid)
+            ).fetchone()["log_path"]
+        )
+    )
+    with open(log, "a") as fh:
+        fh.write("".join(json.dumps(line) + "\n" for line in lines))
+    return agent
+
+
 def collect(client, wid: str, filed: str, one_off: str) -> dict[str, dict]:
     """Each probed route's parameters and answer, `{"params", "shape"}`, the item `wid`
     standing in for `$ITEM`, `filed` for `$FILED` and `one_off` for `$ONE_OFF`."""
@@ -180,6 +238,7 @@ def collect(client, wid: str, filed: str, one_off: str) -> dict[str, dict]:
         "$FILED": filed,
         "$ONE_OFF": one_off,
         "$SESSION": item["worker_sessions"][0]["id"],
+        "$AGENT": _seed_subagent(client, wid, item["worker_sessions"][0]["id"]),
         "$DOC": docs[0]["document_id"],
         "$REPO": item["repo"],
     }
