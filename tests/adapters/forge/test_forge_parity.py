@@ -110,6 +110,11 @@ ROWS: dict[str, Row] = {
         lambda f, r: f.branch_ci_status(repo=r, branch="main", head_sha=HEAD),
         {outputs.PIPELINES: outputs.GLAB_CI_SUCCESS},
     ),
+    "pipeline_status": Row(
+        "pipeline_status",
+        lambda f, r: f.pipeline_status(repo=r, pipeline_id="2826926700"),
+        outputs.glab_pipeline('{"id":2826926700,"status":"success","sha":"abc"}', "[]"),
+    ),
     "merge-17.11": Row("merge", _merge, {**_MERGE_OK, **_version("17.11.0")}),
     "merge-17.10-old-flag": Row("merge", _merge, {**_MERGE_OK, **_version("17.10.4")}),
     "merge-train": Row(

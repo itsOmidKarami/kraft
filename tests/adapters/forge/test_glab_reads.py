@@ -14,10 +14,12 @@ from kraft.adapters import forge
 from .nodes import Api
 from .outputs import (
     GLAB_BRANCH_PIPELINES,
+    GLAB_JOBS_FAILED,
     GLAB_MERGED_LIST,
     GLAB_MR_DETAILS,
     GLAB_MR_PIPELINES,
     GLAB_PIPELINE_JOBS,
+    glab_pipeline,
 )
 
 MRS = "api projects/:id/merge_requests"
@@ -251,3 +253,114 @@ async def test_glab_pipelines_names_the_train_pipeline(cli, tmp_path):
     got = await forge.GlabCli().pipelines(repo=tmp_path, branch="kraft/abc", base="main")
 
     assert [p.kind for p in got] == ["branch"]
+
+
+_PID = 2826926700
+
+
+def _pipe(status: str, **extra) -> str:
+    return json.dumps(
+        {
+            "id": _PID,
+            "status": status,
+            "ref": "main",
+            "sha": "abcdef0123",
+            "created_at": "2026-11-05T10:00:00Z",
+            "web_url": "u",
+            **extra,
+        }
+    )
+
+
+_OK_JOBS = '[{"id":1,"name":"build","status":"success"}]'
+_ALLOW_FAILURE_JOBS = (
+    '[{"id":1,"name":"build","status":"success"},'
+    '{"id":2,"name":"lint","status":"failed","allow_failure":true}]'
+)
+
+
+@pytest.mark.parametrize(
+    "pipeline, jobs, manual, want",
+    [
+        pytest.param(_pipe("success"), _OK_JOBS, "[]", {"state": "success"}, id="success"),
+        pytest.param(
+            _pipe("success"),
+            _ALLOW_FAILURE_JOBS,
+            "[]",
+            {"state": "success", "failed_jobs": ()},
+            id="success-with-allow-failure-job",
+        ),
+        *(
+            pytest.param(_pipe(s), _OK_JOBS, "[]", {"state": "pending"}, id=s)
+            for s in (
+                "running",
+                "pending",
+                "created",
+                "preparing",
+                "scheduled",
+                "waiting_for_resource",
+                "canceling",
+            )
+        ),
+        pytest.param(
+            _pipe("manual"),
+            _OK_JOBS,
+            '[{"id":9,"name":"deploy-prod","status":"manual"}]',
+            {"state": "pending", "blocked_on": "deploy-prod"},
+            id="manual",
+        ),
+        pytest.param(
+            _pipe("failed"),
+            GLAB_JOBS_FAILED,
+            "[]",
+            {"state": "failed", "nothing_ran": False, "failed_names": ("release-impact",)},
+            id="failed-with-jobs",
+        ),
+        pytest.param(
+            _pipe("failed"),
+            "[]",
+            "[]",
+            {"state": "failed", "nothing_ran": True},
+            id="failed-no-jobs",
+        ),
+        pytest.param(
+            _pipe("skipped"),
+            '[{"id":1,"name":"build","status":"skipped"}]',
+            "[]",
+            {"state": "failed", "nothing_ran": True},
+            id="skipped",
+        ),
+        pytest.param(
+            _pipe("canceled", updated_at="2026-11-05T10:05:00Z"),
+            _OK_JOBS,
+            "[]",
+            {"state": "pending", "cancelled_at": "2026-11-05T10:05:00Z"},
+            id="canceled",
+        ),
+    ],
+)
+async def test_pipeline_status_glab(cli, tmp_path, pipeline, jobs, manual, want):
+    cli.stub("glab", routes=glab_pipeline(pipeline, jobs, manual=manual), default="[]")
+
+    status = await forge.GlabCli().pipeline_status(repo=tmp_path, pipeline_id=str(_PID))
+
+    got = {
+        k: tuple(j.name for j in status.failed_jobs) if k == "failed_names" else getattr(status, k)
+        for k in want
+    }
+    assert got == want
+    assert status.mergeable is None
+    assert status.jobs[0] == f"pipeline {_PID} on main at abcdef0, created 2026-11-05T10:00:00Z"
+    assert not any("pipelines?" in c or "/retry" in c for c in cli.calls("glab"))
+
+
+async def test_pipeline_status_glab_not_found_is_the_forges_own_error(cli, tmp_path):
+    cli.stub(
+        "glab",
+        routes={f"api projects/:id/pipelines/{_PID}": Api(404, '{"message":"404 Not found"}')},
+    )
+
+    with pytest.raises(forge.ForgeError) as caught:
+        await forge.GlabCli().pipeline_status(repo=tmp_path, pipeline_id=str(_PID))
+
+    assert caught.value.reason == "not_found"

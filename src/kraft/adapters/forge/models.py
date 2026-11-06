@@ -335,6 +335,13 @@ class CIStatus:
     #: a branch whose CI does not run on a push (Kraft-rbjo3, both backends'
     #: `branch_ci_status`).
     no_checks: bool = False
+    #: The pipeline settled without running anything: skipped, neutral, stale,
+    #: or zero jobs (`pipeline_status`). Not `no_checks`, which is "nothing is
+    #: registered *yet*". Never green.
+    nothing_ran: bool = False
+    #: The name of a manual job or approval a pending pipeline waits on a
+    #: person for (`pipeline_status`). "" when it waits on nothing of the sort.
+    blocked_on: str = ""
 
 
 @dataclass(frozen=True)

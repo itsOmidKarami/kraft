@@ -134,14 +134,19 @@ PIPELINES = "api projects/:id/pipelines"
 
 
 def glab_pipeline(
-    pipeline: str = GLAB_PIPELINE_FAILED, jobs: str = GLAB_JOBS_FAILED, trace: str = GLAB_CI_TRACE
+    pipeline: str = GLAB_PIPELINE_FAILED,
+    jobs: str = GLAB_JOBS_FAILED,
+    trace: str = GLAB_CI_TRACE,
+    manual: str = "[]",
 ) -> dict:
-    """Stub routes for reading one pipeline by id: the pipeline, its jobs, and
-    each job's trace. `FAIL` as the pipeline or the jobs fails that call."""
+    """Stub routes for reading one pipeline by id: the pipeline, its manual
+    jobs (`scope[]=manual`), its jobs, and each job's trace. `FAIL` as the
+    pipeline or the jobs fails that call."""
     pid = json.loads(pipeline)["id"] if pipeline is not FAIL else 2826926700
     routes = {f"{PIPELINES}/{pid}": pipeline}
     if pipeline is FAIL:
         return routes
+    routes[f"api*pipelines/{pid}/jobs*manual*"] = manual
     routes[f"{PIPELINES}/{pid}/jobs"] = jobs
     if jobs is FAIL:
         return routes
