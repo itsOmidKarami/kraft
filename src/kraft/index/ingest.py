@@ -209,6 +209,12 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def is_inside(repo: Path, rel: str) -> bool:
+    """Whether `repo / rel` resolves to that very path: no symlink at it or on
+    the way to it (`os.path.realpath` would differ), so it stays inside `repo`."""
+    return os.path.realpath(repo / rel) == os.path.join(os.path.realpath(repo), rel)
+
+
 def read_inside(repo: Path, rel: str) -> str | None:
     """The text of `rel` under `repo`, or None for anything but a regular
     file at that very path inside it.
@@ -223,7 +229,7 @@ def read_inside(repo: Path, rel: str) -> str | None:
     write a summary of any size."""
     path = repo / rel
     try:
-        if os.path.realpath(path) != os.path.join(os.path.realpath(repo), rel):
+        if not is_inside(repo, rel):
             return None
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError:
@@ -240,6 +246,39 @@ def read_inside(repo: Path, rel: str) -> str | None:
     # Decoded as the text-mode read before it did: the locale's encoding,
     # universal newlines.
     return io.TextIOWrapper(io.BytesIO(data)).read()
+
+
+#: Gitignored folders an attach picker still lists, where specs and plans are
+#: kept out of git.
+_UNTRACKED_SPEC_HOMES = (".engineering/", "docs/superpowers/")
+
+
+def repo_markdown(repo: Path, cap: int = 5000) -> tuple[list[dict], bool]:
+    """The `.md` files an attach picker may offer from `repo`, newest first, as
+    `({"path": <repo-relative>, "mtime": float}, ...)` and whether `cap` cut the list.
+
+    Tracked and untracked-not-ignored files at any depth, plus ignored ones in
+    the spec homes only. Only a regular file at its very path inside the repo
+    is kept (`is_inside`): git lists a symlink as a path of its own."""
+    found: dict[str, None] = {}
+    for args in (
+        ("-co", "--exclude-standard", "--", "*.md"),
+        ("-oi", "--exclude-standard", "--", *_UNTRACKED_SPEC_HOMES),
+    ):
+        listed = _git(repo, "ls-files", "-z", *args)
+        if listed.returncode != 0:
+            return [], False
+        found.update((n, None) for n in listed.stdout.split("\0") if n.endswith(".md"))
+    files = []
+    for rel in found:
+        try:
+            st = os.lstat(repo / rel)
+        except OSError:
+            continue
+        if stat.S_ISREG(st.st_mode) and is_inside(repo, rel):
+            files.append({"path": rel, "mtime": st.st_mtime})
+    files.sort(key=lambda f: f["mtime"], reverse=True)
+    return files[:cap], len(files) > cap
 
 
 def _timestamps(repo: Path, rel: str) -> tuple[str | None, str | None]:

@@ -448,6 +448,20 @@
     "workspaces": {}
    }
   },
+  "GET /api/repos/files": {
+   "params": {
+    "path": "$REPO"
+   },
+   "shape": {
+    "files": [
+     {
+      "mtime": "_",
+      "path": "_"
+     }
+    ],
+    "truncated": "_"
+   }
+  },
   "GET /api/search": {
    "params": {
     "q": "fake-claude session"

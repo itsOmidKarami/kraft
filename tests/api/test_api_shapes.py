@@ -80,6 +80,7 @@ PROBES: dict[str, dict[str, str]] = {
     "GET /api/notify": {},
     "GET /api/policy": {},
     "GET /api/repos": {},
+    "GET /api/repos/files": {"path": "$REPO"},
     "GET /api/search": {"q": "fake-claude session"},
     "GET /api/sessions": {},
     "GET /api/storage": {},

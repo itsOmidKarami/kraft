@@ -26,6 +26,7 @@ from kraft.addons import update as addon_update
 from kraft.addons.config import RepoLibrariesLock
 from kraft.api import api_router, deps
 from kraft.api.routes import gates
+from kraft.index import ingest
 from kraft.store import open_counts_by_repo
 
 logger = logging.getLogger(__name__)
@@ -438,6 +439,18 @@ async def _check_library(st, path: str) -> tuple[list[dict], dict, repo_library.
 async def repo_library_review(request: Request, path: str):
     _repos, entry, found = await _check_library(request.app.state, path)
     return _library_view(entry, found)
+
+
+@api_router.get("/repos/files")
+async def repo_files(request: Request, path: str):
+    """The markdown files in a connected repo that a spec or plan may be
+    attached from, newest first: tracked or not, and including an ignored spec
+    kept out of git. Only a regular file inside the repo is listed."""
+    _repos, entry = _editable_repos(request.app.state, path)
+    if entry is None:
+        raise HTTPException(404, f"{path} is not connected")
+    files, truncated = await asyncio.to_thread(ingest.repo_markdown, Path(entry["path"]))
+    return {"files": files, "truncated": truncated}
 
 
 @api_router.post("/repos/library")
