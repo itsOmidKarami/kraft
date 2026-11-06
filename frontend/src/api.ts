@@ -174,6 +174,10 @@ export const search = (params: {
   return req<SearchResponse>(`/search?${qs}`);
 };
 
+/** The markdown files a spec or plan may be attached from, newest first. */
+export const repoFiles = (path: string) =>
+  req<{ files: { path: string; mtime: number }[]; truncated: boolean }>(`/repos/files?${new URLSearchParams({ path })}`);
+
 export const getWorkItemDocuments = (id: string) =>
   req<{ work_item_id: string; documents: WorkItemDocument[] }>(
     `/work-items/${encodeURIComponent(id)}/documents`,

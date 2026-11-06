@@ -682,6 +682,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     /* settings */
     const st = S.settings;
     const policy = () => (opts.areas ? { ...st.policy, max_concurrent: 5, active_count: areas.activeCount() } : st.policy);
+    if (p === "/repos/files") return json({ files: [{ path: ".engineering/specs/ws.md", mtime: 1 }], truncated: false });
     if (p === "/repos") {
       // `suggested`: the checkout the server runs in, when it is not connected; none here.
       if (method === "GET") return json(opts.ngBoard && opts.ngBoard !== "empty" ? { repos: NG_REPOS, workspaces: NG_WORKSPACES, suggested: null } : { repos: st.repos });

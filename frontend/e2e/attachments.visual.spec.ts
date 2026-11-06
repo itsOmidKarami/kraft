@@ -1,5 +1,5 @@
-// Intake from existing documents, against the real index: the composer's
-// type-to-search picker, the chain it trims, and the item that results.
+// Intake from existing documents, against the repo's real files: the composer's
+// type-to-suggest picker, the chain it trims, and the item that results.
 // Each step waits on the thing it screenshots, not on a sleep.
 import { createdId, expect, openComposer, test } from "./fixtures";
 
@@ -8,13 +8,13 @@ test("intake from an existing spec and plan, end to end", async ({ page }) => {
   await expect(composer.getByText("19 of 19 nodes run · 5 gates")).toBeVisible();
 
   for (const [kind, query, path] of [
-    ["spec", "transport", ".engineering/specs/ws.md"],
-    ["plan", "board", ".engineering/plans/ui.md"],
+    ["spec", "specs/ws", ".engineering/specs/ws.md"],
+    ["plan", "plans/ui", ".engineering/plans/ui.md"],
   ] as const) {
     await composer.getByRole("button", { name: `+ ${kind}` }).click();
     const picker = page.getByRole("dialog", { name: `Attach a ${kind}` });
-    await picker.getByRole("textbox").pressSequentially(query);
-    await picker.getByRole("button", { name: path }).click();
+    await picker.getByRole("combobox").pressSequentially(query);
+    await picker.getByRole("option", { name: path }).click();
     await expect(composer.getByText(`${kind} · ${path}`)).toBeVisible();
   }
   // The nodes whose gates the documents stand in for leave the chain.

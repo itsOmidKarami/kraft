@@ -264,45 +264,82 @@ describe("Composer", () => {
     expect(screen.getByRole("button", { name: "Create paused" })).toBeDisabled();
   });
 
-  it("says before a pick that the file must be inside the repo, and where to copy one (R10a-02)", async () => {
+  it("says before a pick that the file must be inside the repo (R10a-02)", async () => {
+    vi.spyOn(api, "repoFiles").mockResolvedValue({ files: [], truncated: false });
     mount();
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "+ plan" }));
-    expect(screen.getByRole("dialog", { name: "Attach a plan" })).toHaveTextContent("The file must be inside the repo: it is committed on the item's branch. Copy one from elsewhere into the repo first, for example to .engineering/plans/.");
+    expect(screen.getByRole("dialog", { name: "Attach a plan" })).toHaveTextContent("The file must be inside the repo: it is committed on the item's branch.");
+    expect(screen.getByRole("dialog", { name: "Attach a plan" })).not.toHaveTextContent("Copy one from elsewhere");
   });
 
-  it("attaches a spec found by search (the shipped composer's call), or a pasted path", async () => {
-    const search = vi.spyOn(api, "search").mockResolvedValue({ query: "", mode: "hybrid", results: [{ id: "d1", path: "docs/specs/cache.md" } as never] });
-    const { calls } = mount();
+  it("suggests the repo's markdown when the picker opens, and attaches a pick", async () => {
+    const files = vi.spyOn(api, "repoFiles").mockResolvedValue({ files: [{ path: ".engineering/specs/new.md", mtime: 2 }, { path: "docs/old.md", mtime: 1 }], truncated: false });
+    mount();
+    await settle();
+    expect(files).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "+ spec" }));
+    await settle();
+    expect(files).toHaveBeenCalledWith("/code/kraft-plugins");
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([".engineering/specs/new.md", "docs/old.md"]);
+    fireEvent.change(screen.getByRole("combobox", { name: /Attach a spec/ }), { target: { value: "old" } });
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["docs/old.md"]);
+    fireEvent.click(screen.getByRole("option", { name: "docs/old.md" }));
+    expect(screen.getByTitle("docs/old.md")).toHaveTextContent("spec · docs/old.md");
+  });
+
+  it("Enter takes a typed path, else the first suggestion, and does nothing on an empty box", async () => {
+    vi.spyOn(api, "repoFiles").mockResolvedValue({ files: [{ path: ".engineering/specs/new.md", mtime: 2 }, { path: "docs/old.md", mtime: 1 }], truncated: false });
+    mount();
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "+ spec" }));
-    fireEvent.change(screen.getByRole("textbox", { name: /Search specs/ }), { target: { value: "cache" } });
     await settle();
-    expect(search).toHaveBeenLastCalledWith({ q: "cache", repo: "/code/kraft-plugins", kind: "specs", source_kind: "artifact", limit: 5 });
-    fireEvent.click(screen.getByRole("button", { name: "docs/specs/cache.md" }));
-    expect(screen.getByTitle("docs/specs/cache.md")).toHaveTextContent("spec · docs/specs/cache.md");
+    const box = () => screen.getByRole("combobox", { name: /Attach a spec/ });
+    fireEvent.keyDown(box(), { key: "Enter" });
+    expect(screen.getByRole("dialog", { name: "Attach a spec" })).toBeInTheDocument();
+    expect(screen.queryByTitle(/\.md/)).not.toBeInTheDocument();
+    fireEvent.change(box(), { target: { value: "new" } });
+    fireEvent.keyDown(box(), { key: "Enter" });
+    expect(screen.getByTitle(".engineering/specs/new.md")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "+ plan" }));
-    fireEvent.change(screen.getByRole("textbox", { name: /Search plans/ }), { target: { value: "docs/plans/x.md" } });
-    // A hit is there, but a pasted path is what the person means.
     await settle();
-    fireEvent.keyDown(screen.getByRole("textbox", { name: /Search plans/ }), { key: "Enter" });
-    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "t" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create paused" }));
+    fireEvent.change(screen.getByRole("combobox", { name: /Attach a plan/ }), { target: { value: "docs/plans/x.md" } });
+    fireEvent.keyDown(screen.getByRole("combobox", { name: /Attach a plan/ }), { key: "Enter" });
+    expect(screen.getByTitle("docs/plans/x.md")).toBeInTheDocument();
+  });
+
+  it("still takes a pasted path when the file list fails", async () => {
+    vi.spyOn(api, "repoFiles").mockRejectedValue(new Error("down"));
+    mount();
     await settle();
-    expect((creates(calls).at(-1)?.body as { attachments: unknown }).attachments).toEqual([{ kind: "spec", path: "docs/specs/cache.md" }, { kind: "plan", path: "docs/plans/x.md" }]);
+    fireEvent.click(screen.getByRole("button", { name: "+ spec" }));
+    await settle();
+    fireEvent.change(screen.getByRole("combobox", { name: /Attach a spec/ }), { target: { value: "docs/specs/a.md" } });
+    fireEvent.keyDown(screen.getByRole("combobox", { name: /Attach a spec/ }), { key: "Enter" });
+    expect(screen.getByTitle("docs/specs/a.md")).toBeInTheDocument();
+  });
+
+  it("asks for no files before a repo is chosen", async () => {
+    const files = vi.spyOn(api, "repoFiles").mockResolvedValue({ files: [], truncated: false });
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] as never });
+    mount();
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "+ spec" }));
+    await settle();
+    expect(files).not.toHaveBeenCalledWith("");
   });
 
   it("hands title, brief, repo, chain and both attachments to the draft page with More options", async () => {
-    vi.spyOn(api, "search").mockResolvedValue({ query: "", mode: "hybrid", results: [] });
+    vi.spyOn(api, "repoFiles").mockResolvedValue({ files: [], truncated: false });
     const { onClose } = mount();
     await settle();
     fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Cache it" } });
     fireEvent.change(screen.getByRole("textbox", { name: "Brief" }), { target: { value: "By hash." } });
     for (const [k, p] of [["spec", "docs/specs/a.md"], ["plan", "docs/plans/a.md"]]) {
       fireEvent.click(screen.getByRole("button", { name: `+ ${k}` }));
-      fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`Search ${k}s`) }), { target: { value: p } });
+      fireEvent.change(screen.getByRole("combobox", { name: new RegExp(`Attach a ${k}`) }), { target: { value: p } });
       await settle();
-      fireEvent.keyDown(screen.getByRole("textbox", { name: new RegExp(`Search ${k}s`) }), { key: "Enter" });
+      fireEvent.keyDown(screen.getByRole("combobox", { name: new RegExp(`Attach a ${k}`) }), { key: "Enter" });
     }
     fireEvent.click(screen.getByRole("button", { name: "More options ⤢" }));
     expect(onClose).toHaveBeenCalled();

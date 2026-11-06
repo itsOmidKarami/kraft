@@ -1,14 +1,15 @@
-import { useEffect, useRef, useState, type InputHTMLAttributes } from "react";
+import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import * as api from "../../api";
 import { repoName } from "../../format";
 import { countedAgainst } from "../settings/storageWords";
 import { useStore } from "../../store";
-import type { ChainNode, Repo, SearchResult, TemplateSummary } from "../../types";
+import type { ChainNode, Repo, TemplateSummary } from "../../types";
 import { chainOptionText, chainsForRepo, defaultChainNote } from "../library/types";
 import { NodeGlyph } from "../graph/NodeGlyph";
 import { detailOf, jsonBody, request } from "../http";
 import { useFocusSoon } from "../item/useFocusSoon";
+import { Combobox } from "../ui/Combobox";
 import { Menu } from "../ui/Menu";
 import { Popover } from "../ui/Popover";
 import { showToast } from "../ui/Toast";
@@ -19,6 +20,7 @@ import { useReason } from "../ui/Reason";
 import { ADD_TITLE, CHOOSE_REPO } from "../ui/reasons";
 import { tip, hint } from "../ui/Tooltip";
 import { BRIEF_HINT } from "./sharedWords";
+import { firstMatch, useRepoFiles } from "./repoFiles";
 import { LinkButton, linkButtonClass } from "../ui/LinkButton";
 import { Badge } from "../ui/Badge";
 import { chipClass } from "../ui/Chip";
@@ -301,23 +303,13 @@ export function CreateSplit({ disabled, describedBy, onCreate }: { disabled: boo
   );
 }
 
-/** A spec or plan slot: type to search the repo's documents (GET /search,
- *  the shipped composer's call), or paste a repo-relative path. A list
- *  before typing has no API source (Kraft-sob3o). */
+/** A spec or plan slot: the repo's markdown files, suggested as you type
+ *  (GET /repos/files), or a pasted repo-relative path. */
 export function Attach({ kind, repo, path, onPath }: { kind: Kind; repo: string; path: string; onPath: (p: string) => void }) {
   const anchor = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
-  const [hits, setHits] = useState<SearchResult[]>([]);
-  useEffect(() => {
-    if (!q.trim()) return setHits([]);
-    const t = setTimeout(() => {
-      // The index files documents under the plural (`specs`, `plans`), as the
-      // shipped composer's docKind did; `spec` matches nothing.
-      api.search({ q: q.trim(), repo, kind: `${kind}s`, source_kind: "artifact", limit: 5 }).then((r) => setHits(r.results), () => setHits([]));
-    }, 200);
-    return () => clearTimeout(t);
-  }, [q, repo, kind]);
+  const files = useRepoFiles(repo, open);
   const pick = (p: string) => {
     onPath(p);
     setOpen(false);
@@ -335,24 +327,27 @@ export function Attach({ kind, repo, path, onPath }: { kind: Kind; repo: string;
       <button ref={anchor} type="button" className="composer-add" aria-expanded={open} onClick={() => setOpen((o) => !o)}>+ {kind}</button>
       <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} role="dialog" label={`Attach a ${kind}`}>
         <div className="composer-attach">
-          <SearchBox
-            aria-label={`Search ${kind}s, or paste a repo-relative path`}
-            placeholder={`search ${kind}s, or paste a path`}
+          <AttachBox
+            aria-label={`Attach a ${kind}: type a path`}
+            placeholder={`type a path, or paste one`}
+            choices={files}
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={setQ}
+            onPick={pick}
+            noun="file"
+            listLabel="Files"
             onKeyDown={(e) => {
-              if (e.key !== "Enter") return;
+              // The list took Enter if it had a pick; this is one it left.
+              if (e.key !== "Enter" || !q.trim()) return;
               e.preventDefault();
-              // A pasted path is what the person means; otherwise the first hit.
+              // A pasted path is what the person means; otherwise the first suggestion.
+              const first = firstMatch(files, q);
               if (looksLikePath(q)) pick(q.trim());
-              else if (hits[0]?.path) pick(hits[0].path);
+              else if (first) pick(first);
             }}
           />
-          {hits.filter((h) => h.path).map((h) => (
-            <button key={h.id} type="button" className="menu-item composer-mono" onClick={() => pick(h.path!)}>{h.path}</button>
-          ))}
           {/* Said before a path outside is refused, with the way on (R10a-02). */}
-          <p className="composer-attach-note">The file must be inside the repo: it is committed on the item's branch. Copy one from elsewhere into the repo first, for example to <code>.engineering/{kind}s/</code>.</p>
+          <p className="composer-attach-note">The file must be inside the repo: it is committed on the item's branch.</p>
         </div>
       </Popover>
     </>
@@ -360,7 +355,7 @@ export function Attach({ kind, repo, path, onPath }: { kind: Kind; repo: string;
 }
 
 /** The attach box: focused a frame after the popover has placed itself (a hidden element takes no focus). */
-function SearchBox(props: InputHTMLAttributes<HTMLInputElement>) {
+function AttachBox(props: ComponentProps<typeof Combobox>) {
   const ref = useFocusSoon<HTMLInputElement>();
-  return <input ref={ref} {...props} />;
+  return <Combobox ref={ref} {...props} />;
 }
