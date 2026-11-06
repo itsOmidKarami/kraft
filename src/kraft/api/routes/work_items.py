@@ -30,6 +30,7 @@ from kraft.overrides import (
 )
 from kraft.policy import PolicyError, PolicyMaximaInput
 from kraft.remote import placement
+from kraft.slices import SliceRefusal, parse_slices
 from kraft.templates import one_off
 from kraft.templates.environment import RootPointerPolicy
 from kraft.templates.models import ExecNode, GateNode, MaterializedChain, ResolvedChain
@@ -202,8 +203,12 @@ def _attachment_roots(repo: str, cwd: str | None) -> list[Path]:
     return [root] if top == root else [root, top]
 
 
+def _max_slices(st) -> int:
+    return st.policy.max_slices if st.policy else policy_mod.Policy.max_slices
+
+
 def _validated_attachments(
-    repo: str, attachments: list[Attachment], cwd: str | None = None
+    repo: str, attachments: list[Attachment], max_slices: int, cwd: str | None = None
 ) -> list[dict]:
     """Trust boundary: `path` comes from a browser or a local agent and is used
     to read a file and to write into a worktree. Resolve under a candidate root
@@ -213,6 +218,10 @@ def _validated_attachments(
     repository, for a caller the perimeter middleware has already established is
     local and same-site. A path is taken at the first root it both stays inside
     and exists under.
+
+    A plan that has a `## Slices` section must have a usable one: a refused
+    section is a 422 here, where the person can still fix the file, rather
+    than a plan that quietly runs unsliced.
     """
     kinds = [a.kind for a in attachments]
     if len(set(kinds)) != len(kinds):
@@ -230,6 +239,12 @@ def _validated_attachments(
             # input, and ensure_worktree copies it into the worktree.
             if not target.is_file():
                 continue
+            if a.kind == "plan":
+                refusal = parse_slices(
+                    target.read_text(encoding="utf-8", errors="replace"), max_slices=max_slices
+                )
+                if isinstance(refusal, SliceRefusal):
+                    raise HTTPException(422, f"plan: ## Slices: {refusal.reason}")
             entry = {"kind": a.kind, "path": str(target.relative_to(root))}
             if root != roots[0]:
                 # The copy reads `repo / path` by default and this file is not
@@ -447,7 +462,7 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
     _check_text("description", body.description)
     if not Path(body.repo).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
-    attachments = _validated_attachments(body.repo, body.attachments, body.cwd)
+    attachments = _validated_attachments(body.repo, body.attachments, _max_slices(st), body.cwd)
     attachment_kinds = frozenset(a["kind"] for a in attachments)
     node_ids = {n.id for n in chain.nodes}
     unknown_skip = set(body.skip_nodes) - node_ids
@@ -1361,7 +1376,7 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
                 "it was filed with, so its attachments are fixed for its life",
             )
         wanted = [Attachment(kind=k, path=p) for k, p in body.attachments.items() if p]
-        added = _validated_attachments(row["repo"], wanted, body.cwd)
+        added = _validated_attachments(row["repo"], wanted, _max_slices(st), body.cwd)
         kinds = (kinds - body.attachments.keys()) | {a["kind"] for a in added}
 
     if body.one_off_chain is not None and row["current_node_id"] is not None:

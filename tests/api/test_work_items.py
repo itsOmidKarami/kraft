@@ -555,6 +555,16 @@ def _twice(repo, tmp_path):
     return [".engineering/plans/p.md"] * 2
 
 
+def _refused_slices(repo, tmp_path):
+    plan = repo / ".engineering" / "plans" / "p.md"
+    plan.parent.mkdir(parents=True)
+    plan.write_text(
+        "## Slices\n\n- **Slice 1: A.** Tasks 1-2.\n- **Slice 2: B.** Tasks 2-3.\n\n"
+        + "".join(f"### Task {n}: t\n\n" for n in (1, 2, 3))
+    )
+    return [".engineering/plans/p.md"]
+
+
 @pytest.mark.parametrize(
     ("paths", "detail"),
     [
@@ -563,8 +573,16 @@ def _twice(repo, tmp_path):
         (_symlink_out, "escapes"),
         (lambda repo, tmp_path: [".engineering/plans/nope.md"], None),
         (_twice, None),
+        (_refused_slices, "two slices"),
     ],
-    ids=["traversing", "absolute", "a-symlink-that-escapes", "missing", "a-duplicate-kind"],
+    ids=[
+        "traversing",
+        "absolute",
+        "a-symlink-that-escapes",
+        "missing",
+        "a-duplicate-kind",
+        "refused-slices-section",
+    ],
 )
 def test_intake_rejects_an_attachment(client, repo, tmp_path, paths, detail):
     attachments = [{"kind": "plan", "path": path} for path in paths(repo, tmp_path)]
