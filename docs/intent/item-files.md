@@ -140,7 +140,14 @@ origin: src/kraft/worker/backends/docker.py §release -- both places, since an o
 WHEN a work item is archived, the system SHALL keep its `docs/`, `history/`,
 `filed/` and `sessions/`.
 enforced-by: tests/api/test_archive.py::test_archiving_keeps_the_item_s_folder_but_its_sandbox_home[new-home], tests/api/test_archive.py::test_archiving_keeps_the_item_s_folder_but_its_sandbox_home[old-home]
-origin: src/kraft/api/routes/lifecycle.py §_forget_sandbox -- archiving removes the worktree and the sandbox home only, so an archived item's documents and session files stay readable where they were written.
+origin: src/kraft/api/routes/lifecycle.py §_forget_sandbox -- archiving removes the worktree, the sandbox home and the step outputs only (`archiving-removes-the-items-step-outputs`), so an archived item's documents and session files, a session's `out/result.json` included, stay readable where they were written.
+
+## REQ archiving-removes-the-items-step-outputs
+
+WHEN a work item is archived, the system SHALL remove its `outputs/` folder,
+whether or not the item has a worktree and whether or not the worktree stays.
+enforced-by: tests/api/test_archive.py::test_archive_deletes_outputs[worktree], tests/api/test_archive.py::test_archive_deletes_outputs[in-place], tests/api/test_archive.py::test_archive_deletes_outputs[worktree-kept], tests/api/test_archive.py::test_archiving_keeps_the_item_s_folder_but_its_sandbox_home[new-home], tests/api/test_archive.py::test_archiving_keeps_the_item_s_folder_but_its_sandbox_home[old-home]
+origin: src/kraft/api/routes/lifecycle.py §_archive_one -- a task wrote them for a reader that will not run again; deleted ahead of the early returns for an in-place item and for a worktree that could not be rescued, so no archive leaves them behind.
 
 ## REQ abandoning-removes-the-items-folder
 

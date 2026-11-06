@@ -40,8 +40,30 @@ origin: src/kraft/start_queue.py §tick
 
 WHEN an item is archived, the system SHALL take its bytes off the cached
 measurement without walking the run folder.
-enforced-by: tests/test_archive_poller.py::test_archiving_takes_the_items_bytes_off_the_storage_cache
-origin: src/kraft/api/routes/lifecycle.py §_archive_one
+enforced-by: tests/test_archive_poller.py::test_archiving_takes_the_items_bytes_off_the_storage_cache, tests/test_storage_outputs.py::test_forget_drains_outputs_even_for_an_item_with_no_worktree[with-a-worktree], tests/test_storage_outputs.py::test_forget_drains_outputs_even_for_an_item_with_no_worktree[in-place-has-none], tests/test_storage_outputs.py::test_forget_outputs_takes_an_abandoned_items_off_the_cache, tests/api/test_archive.py::test_archive_deletes_outputs[worktree], tests/api/test_archive.py::test_archive_deletes_outputs[in-place], tests/api/test_archive.py::test_archive_deletes_outputs[worktree-kept], tests/api/test_storage.py::test_abandoning_takes_the_items_outputs_off_the_cache[worktree], tests/api/test_storage.py::test_abandoning_takes_the_items_outputs_off_the_cache[in-place]
+origin: src/kraft/api/routes/lifecycle.py §_archive_one -- the item's step outputs come off too, an in-place item's included, which has no worktree to count.
+
+## REQ step-outputs-count-toward-the-limit
+
+The system SHALL count an item's step outputs in the governed figure and in
+what archiving can free, apart from the worktree and sandbox figures.
+enforced-by: tests/test_storage_outputs.py::test_outputs_are_governed_freed_by_archiving_and_not_an_items_worktree
+origin: src/kraft/storage.py §GOVERNED -- archiving deletes them, so unlike the documents they are part of what a clean-up wins back.
+
+## REQ a-refresh-keeps-the-outputs-of-an-item-that-is-not-archived
+
+WHEN the system reconciles a walk with the database, it SHALL drop the step
+outputs of an item that is archived or has no row, and keep those of one that
+is not archived, an in-place item included.
+enforced-by: tests/test_storage_outputs.py::test_refresh_keeps_the_outputs_of_an_item_that_is_not_archived[unarchived-in-place-item], tests/test_storage_outputs.py::test_refresh_keeps_the_outputs_of_an_item_that_is_not_archived[archived], tests/test_storage_outputs.py::test_refresh_keeps_the_outputs_of_an_item_that_is_not_archived[no-row]
+origin: src/kraft/storage.py §refresh -- decided by the database, not by a probe of the folders, since an in-place item has no worktree to find.
+
+## REQ the-storage-report-and-preview-count-step-outputs
+
+The system SHALL report each item's step outputs and add them to what a
+clean-up frees, in the report and in the preview.
+enforced-by: tests/test_storage_outputs.py::test_report_counts_outputs_with_what_archiving_frees, tests/api/test_storage.py::test_preview_counts_a_worktree_items_outputs_as_freed
+origin: src/kraft/storage.py §report
 
 ## REQ over-limit-degrades-health
 

@@ -421,6 +421,8 @@ Every task takes these keys, then the keys of its kind. A task takes no
 | `policy` | mapping | none | This task's own policy layer. See [What a task's policy does](#what-a-tasks-policy-does). |
 | `skippable` | boolean | `true` | `false` refuses a skip of this task. |
 | `icon` | string | none | The [icon](#icons) the board draws for the task. Refused on a fix loop's `judge`, whose icon is fixed. |
+| `outputs` | mapping | none | Only an agent or subprocess task in an exec node's own steps. `files` and `variables` name what the task leaves for later tasks. See [Step outputs](#step-outputs). _Added in next_ |
+| `reads` | list | `[]` | Only an agent or subprocess task. The earlier tasks whose outputs this one is given, each `step.task` or `node.step.task`. See [Step outputs](#step-outputs). _Added in next_ |
 
 ### What a task's policy does
 
@@ -519,6 +521,71 @@ the plan read_only, the one a `tasks` plan becomes included.
   as the change.
 - **Default.** Off. No shipped chain sets it. Setting it on both a node and its
   steps is allowed and redundant.
+
+## Step outputs
+
+_Added in next_
+
+A task can leave files and `KEY=value` variables for a later task. The later task names the writer in `reads` and is given a read-only copy, checked when the writer ended. Kraft does not read the files, and never sets a variable in any environment.
+
+The writer and the reader sit in separate steps, because a step runs its tasks together. Both scripts are the repo's own, not Kraft's:
+
+```yaml
+- id: build
+  steps:
+    - id: test
+      tasks:
+        - id: run_tests
+          kind: subprocess
+          command: ./scripts/run-tests.sh      # writes into $KRAFT_OUTPUT_DIR
+          outputs:
+            files: [junit.xml, "test report.html"]
+            variables: [FAILED_COUNT]
+    - id: report
+      tasks:
+        - id: summarize
+          kind: subprocess
+          command: ./scripts/summarize.sh      # reads from $KRAFT_READS_DIR
+          reads: [test.run_tests]
+```
+
+### Writing
+
+- The writer gets `KRAFT_OUTPUT_DIR`, a folder only it writes: `out/outputs/` in its session's folder. An agent's prompt names the folder and the declared names, and says what a variable must look like.
+- A variable is one `KEY=value` line in `$KRAFT_OUTPUT_DIR/variables.env`. Blank lines and lines starting with `#` are ignored. A value runs to the end of the line, with no quotes and no `export`; a repeated key keeps its last value.
+- A file name is a plain relative path inside that folder: no `..`, no glob, not `variables.env`, and no two names that differ only by case. A variable name matches `[A-Z][A-Z0-9_]*`.
+- A resumed agent (a paused session continued under a new session id) starts with a copy of what the paused session had written there.
+
+### Reading
+
+- The reader gets `KRAFT_READS_DIR`, the item's `outputs/` folder. A writer's files are at `$KRAFT_READS_DIR/<writer path>/<file>`, with `variables.env` beside them. The writer's path is `node.step.task`: here `build.test.run_tests`.
+- A script that wants a variable sources the file itself: `. "$KRAFT_READS_DIR/build.test.run_tests/variables.env"`. Kraft never does.
+- In a [sandbox](/reference/configuration/sandbox) only the folders of the writers named in `reads` are mounted, read-only. Outside one, nothing holds a reader to read-only, and nothing reads a snapshot back except later readers.
+- An agent reader's prompt lists the writers' paths and declared variable names, never a value or a file's content, and says the files are data written by another task, not instructions.
+- A writer that was skipped, or left nothing, leaves the reader nothing: it finds an empty place.
+
+### What is checked
+
+When the writer ends `done` or `failed`, Kraft checks everything first. Only then does it copy the declared names, following no link, into a snapshot under `run/items/<id>/outputs/<writer path>/`, and delete the writer's folder.
+
+- The writer fails, and nothing is kept, when the folder is over [`storage.outputs.max_size`](/reference/configuration/policy#step-output-keys) or holds more than 100 entries; when a declared variable is missing, over 4 KiB, or holds a control character other than a tab; or when `variables.env` holds more than 50 variables.
+- A declared file that is missing is simply absent. An undeclared file or variable is ignored. A symlink, a file with another hard link and a FIFO are left out.
+- A writer whose processes outlive it fails with nothing kept.
+- The writer's `session.log` gets one line with the counts of files kept and missing and the declared variable names. A message never holds a name or value the worker chose.
+
+### Where they are allowed
+
+- `outputs` goes on an agent or subprocess task in an exec node's own `steps` or `tasks`. It is refused on a fan-out task (`scope: each_repository`), in an `on_failure`, fix loop, judge, `escalation`, `on_conflict` or `on_merge_rejected.repair` slot, and in a gate's `auto_review`.
+- `reads` goes on an agent or subprocess task. An entry of two segments, `step.task`, names a writer in the reader's own node, so a library node holding both stays reusable under any node id. An entry of three, `node.step.task`, names a writer anywhere. A bare task id is refused.
+- Every entry must name a task that declares `outputs` and runs before the reader: in an earlier node, or an earlier step of the same node. A task in the same step is never before it, so a writer and its reader cannot share one `tasks:` list.
+- A node's `on_failure`, fix loop, judge and `escalation` may read any step of the node. A step's or task's `on_failure` may read the steps up to and including its own. Such a handler may run before its writer did, and then finds nothing. `on_conflict`, `on_merge_rejected.repair` and a gate's `auto_review` read nothing.
+- `kraft admin templates lint` refuses a chain that breaks these rules.
+
+### When a writer runs again
+
+- Running a writer again, or skipping it, deletes its snapshot, so a later reader never sees outputs of a run that has since been replaced. A reader that already passed is not run again.
+- Archiving the item deletes all its snapshots. Abandoning deletes the whole item folder. See [Logs and disk space](/guides/run/logs-and-disk-space#where-an-items-files-are).
+- A snapshot may still hold a variable that an older chain declared and the current one dropped. Kraft reads only the declared names, but a script that sources the file itself sees every key in it.
 
 ## Icons
 
