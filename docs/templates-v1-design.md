@@ -392,8 +392,10 @@ tasks:
     kind: agent
     harness: claude
     prompt: >-
-      Write the merge request's title, labels, reviewers and description,
-      following this repository's own rules for them.
+      Write the merge request's title, labels and description, following
+      this repository's own rules for them. Leave reviewers empty: the
+      forge handles code owners, and Kraft opens the merge request as an
+      account CODEOWNERS may name.
     produces: mr_meta
     skill: kraft:mr-metadata
     inputs: [pr_rules]

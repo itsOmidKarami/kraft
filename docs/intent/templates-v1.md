@@ -1767,8 +1767,8 @@ origin: src/kraft/skills/work-brief/SKILL.md
 
 ## REQ default-chain-describes-the-merge-request-before-opening-it
 
-The default chain SHALL write the merge request's title, labels, reviewers and
-description in an execution node before the one that opens the draft, and SHALL
+The default chain SHALL write the merge request's title, labels and description
+in an execution node before the one that opens the draft, and SHALL
 open the draft with them.
 enforced-by: tests/api/test_default_chain_walk.py::test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci, tests/templates/test_library.py::test_resolution_types_every_task_in_the_design_chain
 origin: config/chains/default.yaml -- The V1 library had no task producing `mr_meta` (the legacy `on.mr.describe` hook went with the old registry), so every draft opened with the work item's title and no labels, and a repo whose CI requires a label failed its first pipeline. `describe_merge_request` is its own node because a node wholly produces one kind or declares none, and `open` produces nothing.
