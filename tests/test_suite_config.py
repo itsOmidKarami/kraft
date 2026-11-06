@@ -8,6 +8,7 @@ import errno
 import os
 import socket
 import subprocess
+import sys
 import tomllib
 import zlib
 from pathlib import Path
@@ -182,13 +183,18 @@ def test_the_kraft_port_every_test_starts_with_is_held_and_answers_nothing():
     """`_isolated_kraft_home` pins KRAFT_PORT to a number no daemon is on. It is
     held for the whole test, so a listener another xdist worker starts cannot
     take it (CI once answered a "no server" check with another test's relay),
-    and it never listens, so a call to it is refused."""
+    and it never listens, so a call to it gets no answer: refused on Linux,
+    dropped until it times out on macOS 27."""
     port = int(os.environ["KRAFT_PORT"])
     with socket.socket() as taker, pytest.raises(OSError) as raised:
         taker.bind(("127.0.0.1", port))
     assert raised.value.errno == errno.EADDRINUSE
+    unanswered = {errno.ECONNREFUSED}
+    if sys.platform == "darwin":
+        unanswered |= {errno.ETIMEDOUT, errno.EAGAIN}
     with socket.socket() as caller:
-        assert caller.connect_ex(("127.0.0.1", port)) == errno.ECONNREFUSED
+        caller.settimeout(1)
+        assert caller.connect_ex(("127.0.0.1", port)) in unanswered
 
 
 def _child_spawns(monkeypatch) -> list[list[str]]:
