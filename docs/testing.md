@@ -259,8 +259,14 @@ when `NEW` does not collect.
   `src/kraft/_bundled` is built from `config/` and `plugins/kraft/skills`,
   which are watched in its place. Environment variables are the same blind
   spot and are not watched. `just test-targeted`, which verification runs,
-  runs the full suite for all of these except `docs/intent/`: it runs
-  `tests/test_intent_origins.py` and the intent check instead.
+  runs the full suite for these, with three exceptions that add named tests
+  instead (`dev/targeted_tests.py` lists them): `docs/intent/` runs
+  `tests/test_intent_origins.py` and the intent check; a YAML or JSON file
+  under `config/` (or `src/kraft/detectors.yaml`, `src/kraft/prices.json`)
+  whose change is whole-line comments and blank lines not at its end, with
+  equal data at both ends, runs the tests that read that text; and an
+  edit (not an add or delete) to `src/kraft/console/kraft.tcss` or
+  `plugins/kraft/skills` runs the tests that read those.
 - `just test <paths>` fails when nothing ran: a path that collects nothing,
   and a run testmon (or `-k`/`-m`) deselected to `0 selected`. Pass
   `--no-testmon` to run the paths regardless.

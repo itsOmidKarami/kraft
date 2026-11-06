@@ -193,3 +193,129 @@ def test_read_changed_without_origin_main_is_unknown_not_head(tt, tmp_path):
     repo = make_repo(tmp_path)
     write(repo, "x.txt", "uncommitted")
     assert tt.read_changed({}, repo) is None
+
+
+_TCSS = "src/kraft/console/kraft.tcss"
+_POLICY = "config/policy.yaml"
+_SKILL = "plugins/kraft/skills/board/SKILL.md"
+
+
+@pytest.mark.parametrize(
+    ("path", "then", "now", "adds"),
+    [
+        (_POLICY, "a: 1\n", "# what a is\na: 1\n\n# more\n", "comment"),
+        (_POLICY, "a: 1\n", "a: 2\n", None),
+        (_POLICY, "a: 1\n", "a: 1\n\n", None),
+        (_POLICY, b"a: 1\n# \xff\n", "a: 1\n", None),
+        # Equal data, but a test that `replace`s "a: [1, 2]" would miss it.
+        (_POLICY, "a: [1, 2]\n", "a:\n- 1\n- 2\n", None),
+        # A `#` line inside a block scalar is text, not a comment.
+        (_POLICY, "a: |\n  x\n", "a: |\n  x\n  # y\n", None),
+        ("config/.kraft/addon.json", '{"a": 1}\n', '# c\n{"a": 1}\n', None),
+        (_POLICY, "a: [\n", "# c\na: [\n", None),
+        # Comments alone, so only the add or delete itself makes it blind.
+        (_POLICY, None, "# new\n", None),
+        (_POLICY, "# gone", None, None),
+        # Read as text by the fixture nearly every test uses.
+        ("src/kraft/harnesses/claude.yaml", "a: 1\n", "# c\na: 1\n", None),
+        ("src/kraft/prices.json", '{\n"a": 1}\n', '{\n\n"a": 1}\n', ()),
+        (_TCSS, "Screen {}\n", "Screen { color: red; }\n", "edit"),
+        (_TCSS, None, "Screen {}\n", None),
+        (_TCSS, "Screen {}\n", None, None),
+        (_SKILL, "---\nname: board\n---\n", "---\nname: board\n---\nMore.\n", "edit"),
+        (_SKILL, None, "---\nname: board\n---\n", None),
+    ],
+    ids=[
+        "comment-added-to-config-yaml",
+        "value-changed",
+        "trailing-blank-line-at-eof",
+        "not-utf-8-at-the-base",
+        "reformatted-to-equal-data",
+        "hash-line-inside-block-scalar",
+        "unparseable-at-one-end",
+        "unparseable-at-both-ends",
+        "file-added",
+        "file-deleted",
+        "comment-in-a-tree-read-as-text",
+        "blank-line-in-json-outside-config",
+        "mapped-file-edited",
+        "mapped-file-added",
+        "mapped-file-deleted",
+        "plugin-skill-edited",
+        "plugin-skill-added",
+    ],
+)
+def test_a_blind_change_with_known_readers_adds_them_instead_of_the_full_suite(
+    tt, tmp_path, path, then, now, adds
+):
+    repo = make_repo(tmp_path)
+    if isinstance(then, bytes):
+        (repo / path).parent.mkdir(parents=True, exist_ok=True)
+        (repo / path).write_bytes(then)
+    elif then is not None:
+        write(repo, path, then)
+    base = commit_all(repo, "base")
+    if now is None:
+        (repo / path).unlink()
+    else:
+        write(repo, path, now)
+
+    plan = tt.plan([path], base, repo)
+
+    if adds is None:
+        assert [step.argv[-1] for step in plan.steps] == ["--testmon-noselect"]
+        assert path in plan.reason
+        return
+    assert plan.reason is None
+    if adds == "comment":
+        expected = dict(tt.COMMENT_TESTS)["config"]
+        # Readers that print or `replace` the raw text, found only in review.
+        assert {"tests/cli/test_admin.py", "tests/api/test_skip.py"} <= set(expected)
+    elif adds == "edit":
+        expected = next(t for prefix, t in tt.EDIT_TESTS if path.startswith(prefix))
+    else:
+        expected = adds
+    named = plan.steps[0].argv
+    start = 3 + len(tt.GENERATED_TESTS)
+    assert named[start : named.index("--no-testmon")] == list(expected)
+    assert (named[-4:] == ["-m", "not e2e", "-n", "logical"]) == bool(expected)
+
+
+def test_no_base_or_no_yaml_parser_leaves_a_comment_only_change_blind(tt, tmp_path, monkeypatch):
+    repo = make_repo(tmp_path)
+    write(repo, _POLICY, "a: 1\n")
+    base = commit_all(repo, "base")
+    write(repo, _POLICY, "# c\na: 1\n")
+    assert tt.plan([_POLICY], base, repo).reason is None
+
+    assert _POLICY in tt.plan([_POLICY], None, repo).reason
+    monkeypatch.setitem(sys.modules, "yaml", None)  # `import yaml` raises ImportError
+    assert _POLICY in tt.plan([_POLICY], base, repo).reason
+
+
+@pytest.mark.parametrize(
+    ("env", "expected"),
+    [({"KRAFT_TEST_BASE": "abc123"}, "abc123"), ({}, "merge-base")],
+    ids=["kraft-hands-the-base", "else-origin-mains-merge-base"],
+)
+def test_the_base_is_krafts_else_the_merge_base(tt, tmp_path, env, expected):
+    repo = make_repo(tmp_path)
+    first = commit_all(repo, "first")
+    git(repo, "update-ref", "refs/remotes/origin/main", first)
+    write(repo, "x.txt", "later")
+    commit_all(repo, "later")
+    assert tt.read_base(env, repo) == (first if expected == "merge-base" else expected)
+
+
+def test_run_judges_against_the_base_kraft_hands_it(tt, tmp_path, monkeypatch, capsys):
+    repo = make_repo(tmp_path)
+    write(repo, _POLICY, "a: 1\n")
+    base = commit_all(repo, "base")
+    write(repo, _POLICY, "# c\na: 1\n")
+    listing = write(tmp_path, "changed-files", f"{_POLICY}\n")
+    monkeypatch.setenv("KRAFT_CHANGED_FILES", str(listing))
+    monkeypatch.setenv("KRAFT_TEST_BASE", base)
+    monkeypatch.chdir(repo)
+
+    assert tt.main(["run", "--dry-run"]) == 0
+    assert capsys.readouterr().out.startswith("test-targeted: testmon selection")
