@@ -213,3 +213,61 @@ async def test_fake_forge_reads_what_it_holds():
     with pytest.raises(forge.ForgeError) as err:
         await f.job_log(repo="/r", job_id="nope")
     assert err.value.reason == "not_found"
+
+
+def _status(state: forge.CIState, **kw) -> forge.CIStatus:
+    return forge.CIStatus(state=state, url="u", **kw)
+
+
+@pytest.mark.parametrize(
+    "script, reads, want",
+    [
+        pytest.param(
+            [_status("pending"), _status("success")],
+            2,
+            ["pending", "success"],
+            id="scripted-sequence",
+        ),
+        pytest.param(
+            [_status("pending"), _status("success")],
+            3,
+            ["pending", "success", "success"],
+            id="repeats-last",
+        ),
+        pytest.param(
+            [forge.ForgeError("down"), _status("success")],
+            2,
+            ["error: down", "success"],
+            id="raises-scripted-error",
+        ),
+    ],
+)
+async def test_fake_pipeline_status(script, reads, want):
+    f = forge.FakeForge(pipeline_statuses={"7": script})
+    got = []
+    for _ in range(reads):
+        try:
+            got.append((await f.pipeline_status(repo="/r", pipeline_id="7")).state)
+        except forge.ForgeError as exc:
+            got.append(f"error: {exc}")
+
+    assert got == want
+    assert f.pipeline_status_ids == ["7"] * reads
+    assert f.pipeline_ids_requested == [], "ci_status keeps its own record"
+
+
+async def test_fake_pipeline_status_unknown_is_not_found():
+    f = forge.FakeForge(pipeline_statuses={"7": [_status("success")]})
+
+    with pytest.raises(forge.ForgeError) as err:
+        await f.pipeline_status(repo="/r", pipeline_id="8")
+
+    assert err.value.reason == "not_found"
+
+
+async def test_fake_forge_counts_find_mr_calls():
+    f = forge.FakeForge()
+    await f.find_mr(repo="/r", branch="b")
+    await f.find_mr(repo="/r", branch="b")
+
+    assert f.find_mr_calls == 2

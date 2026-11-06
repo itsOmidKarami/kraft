@@ -548,6 +548,16 @@ class FakeForge:
     #: ("" for an unpinned call), so a test can see it threaded through
     #: without a real GitLab (Kraft-ivh1).
     pipeline_ids_requested: list[str] = field(default_factory=list)
+    #: What `pipeline_status` answers, per pipeline id: each call takes the
+    #: next entry and the last repeats. A `ForgeError` entry is raised. (Not
+    #: `pipelines`: that is the read method below.)
+    pipeline_statuses: dict[str, list[CIStatus | ForgeError]] = field(default_factory=dict)
+    #: Every id `pipeline_status` was asked for, in call order. Apart from
+    #: `pipeline_ids_requested`, which belongs to `ci_status`.
+    pipeline_status_ids: list[str] = field(default_factory=list)
+    #: How many times `find_mr` was called, for a test to prove a read never
+    #: went looking for a merge request.
+    find_mr_calls: int = 0
     #: Parallel to `ci_states`: the pipeline id each successive `ci_status`
     #: call reports back (Kraft-ivh1). Defaults to "" -- a test that never
     #: sets this exercises no pinning, same as `ci_shas`' default. Task 4
@@ -752,6 +762,16 @@ class FakeForge:
             no_checks=self.ci_no_checks,
         )
 
+    async def pipeline_status(self, *, repo: Path, pipeline_id: str) -> CIStatus:
+        self.pipeline_status_ids.append(pipeline_id)
+        script = self.pipeline_statuses.get(pipeline_id)
+        if not script:
+            raise ForgeError(f"no pipeline {pipeline_id}", status=404, reason="not_found")
+        answer = self._next(script)
+        if isinstance(answer, ForgeError):
+            raise answer
+        return answer
+
     async def branch_ci_status(
         self, *, repo: Path, branch: str, head_sha: str = "", pipeline_id: str = ""
     ) -> CIStatus:
@@ -879,6 +899,7 @@ class FakeForge:
         return recorded is None or recorded == str(repo)
 
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None:
+        self.find_mr_calls += 1
         numbers = [n for n, b in self.opened.items() if b == branch and self._matches(n, repo)]
         if not numbers:
             return None
