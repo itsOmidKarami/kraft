@@ -69,7 +69,7 @@ export function TaskScreen({ item, version, events, docs, place, node: nodeId, n
   const judged = (item.judge_stop_note ?? []).filter((j) => j.node_id === nodeId);
   // The plan's sub-tasks sit on the one task that works through it, as the desktop's pane has them.
   const plan = !esc && !loop && planTaskPath(materialized(item)) === path ? item.progress : null;
-  const subagents = useSessionSubagents(item.id, at?.id ?? "", at?.status === "running", !!at && (at.harness != null || at.model != null));
+  const subagents = useSessionSubagents(item.id, at?.id ?? "", at?.status === "running", !!at && tab === "overview" && (at.harness != null || at.model != null));
   const summary = at?.session_summary_ref ? docs.find((d) => d.path === at.session_summary_ref) : undefined;
 
   return (
@@ -155,10 +155,11 @@ export function TaskScreen({ item, version, events, docs, place, node: nodeId, n
                       const said = subagentSaid(a);
                       return (
                         <div key={a.id} className="ph-subagent">
-                          <button type="button" className="ph-row ph-task-row" aria-label={`${a.description} — open its log`} onClick={() => setPlace({ tab: "log", agent: a.id })}>
+                          <button type="button" className="ph-row ph-task-row" onClick={() => setPlace({ tab: "log", agent: a.id })}>
                             <span className="ph-row-text">
                               <span className="ph-row-label">{a.description}</span>
                               <span className="ph-row-hint">{subagentMeta(a)}</span>
+                              <span className="ph-visually-hidden"> — open its log</span>
                             </span>
                             <ChevronRight size={16} className="ph-chev" aria-hidden="true" />
                           </button>

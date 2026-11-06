@@ -28,10 +28,11 @@ export function SubagentSection({ workItemId, sessionId, list, onOpen }: { workI
           const said = subagentSaid(a);
           return (
             <li key={a.id} className="ip-subagent">
-              <button type="button" className="ip-row" onClick={() => onOpen(a.id)} aria-label={`${a.description} — open its log`}>
+              <button type="button" className="ip-row" onClick={() => onOpen(a.id)}>
                 <span className={`ip-pill-dot ${statusTone(a.status)}`} aria-hidden />
                 <span className="ip-subagent-name">{a.description}</span>
                 <span className="ip-row-meta">{subagentMeta(a)}</span>
+                <span className="item-visually-hidden"> — open its log</span>
               </button>
               {said && <p className="item-muted ip-subagent-said">{said}</p>}
               <Prompt workItemId={workItemId} sessionId={sessionId} agent={a.id} />
