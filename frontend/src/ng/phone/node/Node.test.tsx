@@ -701,6 +701,46 @@ describe("the task screen (E)", () => {
     expect(screen.getByText("No lines to show. Clear the filter, or the task has not started.")).toBeInTheDocument();
   });
 
+  describe("a task's sub-agents on its Overview", () => {
+    const agent = (id: string, over: Record<string, unknown> = {}) => ({ id, description: `Agent ${id}`, type: "Explore", status: "completed", tokens: 31_000, tool_uses: 4, duration_ms: 42_000, last_tool: "Grep", summary: "Found it.\nMore.", ...over });
+    const list = [agent("a1", { status: "running", summary: null }), agent("a2"), agent("a3", { status: "cut_off", summary: null })];
+    const routes = { "GET /work-items/w1/sessions/s1/subagents": [200, { session_id: "s1", status: "running", subagents: list }] as [number, unknown] };
+
+    it("counts them and lists a row each: what a running one last used, the first line of a finished one's answer", async () => {
+      mount(item("running"), TASK, routes);
+      expect(await screen.findByText("1 running · 1 finished · 1 cut off")).toBeInTheDocument();
+      const rows = screen.getAllByRole("button", { name: /open its log/ });
+      expect(rows[0]).toHaveTextContent("Agent a1Explore · running · 31k tokens · 4 tool uses · 42s");
+      expect(screen.getByText("running Grep")).toBeInTheDocument();
+      expect(screen.getByText("Found it.")).toBeInTheDocument();
+      expect(screen.queryByText(/More\./)).toBeNull();
+    });
+
+    it("opens the Log tab filtered to the sub-agent that was tapped", async () => {
+      mount(item("running"), TASK, { ...routes, "GET /work-items/w1/sessions/s1/log": [200, { lines: [{ n: 1, t: null, src: "agent", text: "x", summary: "↳ Agent a2: done", agent: "a2", agent_label: "Agent a2" }, { n: 2, t: null, src: "agent", text: "x", summary: "main says hi" }], subagents: list }] });
+      await userEvent.click(await screen.findByRole("button", { name: "Agent a2 — open its log" }));
+      expect(where()).toContain("tab=log");
+      expect(where()).toContain("agent=a2");
+      expect(await screen.findByRole("button", { name: "agent: Agent a2 ▾" })).toBeInTheDocument();
+      expect(screen.queryByText(/main says hi/)).toBeNull();
+    });
+
+    it("fetches the whole prompt when it is opened", async () => {
+      const prompt = "p".repeat(3000);
+      mount(item("running"), TASK, { ...routes, "GET /work-items/w1/sessions/s1/subagents/a2": [200, { ...agent("a2"), prompt, answer: "Found it." }] });
+      await screen.findByText("Agent a2");
+      expect(screen.queryByText(prompt)).toBeNull();
+      await userEvent.click(screen.getAllByText("Prompt")[1]);
+      expect(await screen.findByText(prompt)).toBeInTheDocument();
+    });
+
+    it("has no section when the task ran none", async () => {
+      mount(item("running"), TASK);
+      await screen.findByText("Result");
+      expect(screen.queryByText("Sub-agents")).toBeNull();
+    });
+  });
+
   it("picks one sub-agent from a sheet", async () => {
     const sub = { src: "agent", agent_label: "Explore codebase", agent_type: "Explore" };
     const lines = [

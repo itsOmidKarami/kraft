@@ -3,7 +3,7 @@ import { nameOf } from "../../board/rowText";
 import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { agentsIn, ago, elapsed, inAgent, lineCount, tokenText, usd } from "../../../format";
+import { ago, elapsed, inAgent, lineCount, tokenText, usd } from "../../../format";
 import type { WorkerSession } from "../../../types";
 import { escalationsIn, ESCALATION, FIX_LOOP, isSessionDoc, inHandler, JUDGE, lookWord, loopIdle, loopIdleSentence, loopRounds, NO_DOCUMENTS, progressWords, subTasks, NOT_RUN_IN_ROUND, messagesThrough, passWords, roundShown, sessionLook, sessionsOf, statusWords } from "../../item/nodeGraph";
 import { stepsOf, taskName } from "../../item/paths";
@@ -11,6 +11,8 @@ import { materialized, planTaskPath } from "../../item/chainValues";
 import { isScopeTask, roundWords, scopeLead, scopesView } from "../../item/scopeView";
 import { placeUrl, selPath, type Place } from "../../item/url";
 import { useEventLog } from "../../item/useEvents";
+import { agentEntries, countLine, PROMPT_NOT_SHOWN, subagentMeta, subagentSaid } from "../../item/subagents";
+import { useSessionSubagents, useSubagentDetail } from "../../item/useSubagents";
 import { LogLines } from "../log/LogLines";
 import { useLog } from "../log/useLog";
 import { ScreenHeader } from "../nav/ScreenHeader";
@@ -67,6 +69,7 @@ export function TaskScreen({ item, version, events, docs, place, node: nodeId, n
   const judged = (item.judge_stop_note ?? []).filter((j) => j.node_id === nodeId);
   // The plan's sub-tasks sit on the one task that works through it, as the desktop's pane has them.
   const plan = !esc && !loop && planTaskPath(materialized(item)) === path ? item.progress : null;
+  const subagents = useSessionSubagents(item.id, at?.id ?? "", at?.status === "running", !!at && (at.harness != null || at.model != null));
   const summary = at?.session_summary_ref ? docs.find((d) => d.path === at.session_summary_ref) : undefined;
 
   return (
@@ -144,6 +147,29 @@ export function TaskScreen({ item, version, events, docs, place, node: nodeId, n
                   </ol>
                 </Block>
               ) : null}
+              {subagents?.length ? (
+                <Block title="Sub-agents">
+                  <p className="ph-note">{countLine(subagents)}</p>
+                  <div className="ph-list">
+                    {subagents.map((a) => {
+                      const said = subagentSaid(a);
+                      return (
+                        <div key={a.id} className="ph-subagent">
+                          <button type="button" className="ph-row ph-task-row" aria-label={`${a.description} — open its log`} onClick={() => setPlace({ tab: "log", agent: a.id })}>
+                            <span className="ph-row-text">
+                              <span className="ph-row-label">{a.description}</span>
+                              <span className="ph-row-hint">{subagentMeta(a)}</span>
+                            </span>
+                            <ChevronRight size={16} className="ph-chev" aria-hidden="true" />
+                          </button>
+                          {said && <p className="ph-note ph-subagent-said">{said}</p>}
+                          <Prompt workItemId={item.id} sessionId={at.id} agent={a.id} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </Block>
+              ) : null}
               <Block title="Result">
                 <Facts rows={[
                   ...(at.tokens_in != null ? ([["tokens", tokenText(at)]] as [string, React.ReactNode][]) : []),
@@ -177,7 +203,7 @@ export function TaskScreen({ item, version, events, docs, place, node: nodeId, n
             </Block>
           )
         )}
-        {tab === "log" && <TaskLog workItemId={item.id} session={at} />}
+        {tab === "log" && <TaskLog workItemId={item.id} session={at} agent={place.agent} />}
         {tab === "config" && (
           <Facts rows={[
             ["path", <span key="p" className="ph-mono">{path}</span>],
@@ -192,13 +218,27 @@ export function TaskScreen({ item, version, events, docs, place, node: nodeId, n
   );
 }
 
-export function TaskLog({ workItemId, session }: { workItemId: string; session?: WorkerSession }) {
+/** A sub-agent's prompt behind a disclosure, fetched whole when it is opened. */
+function Prompt({ workItemId, sessionId, agent }: { workItemId: string; sessionId: string; agent: string }) {
+  const { detail, load } = useSubagentDetail(workItemId, sessionId, agent);
+  return (
+    <details className="ph-subagent-prompt" onToggle={(e) => { if (e.currentTarget.open) load(); }}>
+      <summary>Prompt</summary>
+      {detail === null ? <p className="ph-note">Reading…</p>
+        : detail === "failed" ? <p className="ph-note">Could not read this sub-agent's prompt.</p>
+        : detail.prompt ? <pre className="ph-prompt">{detail.prompt}</pre>
+        : <p className="ph-note">{PROMPT_NOT_SHOWN}</p>}
+    </details>
+  );
+}
+
+export function TaskLog({ workItemId, session, agent: start }: { workItemId: string; session?: WorkerSession; /** The sub-agent the log opens filtered to. */ agent?: string }) {
   const [src, setSrc] = useState<(typeof SOURCES)[number]>("all");
   const running = session?.status === "running" || session?.status === "pending";
-  const { lines, error } = useLog(workItemId, session?.id ?? null, !!running);
-  const [agent, setAgent] = useState<string>();
+  const { lines, error, subagents } = useLog(workItemId, session?.id ?? null, !!running);
+  const [agent, setAgent] = useState<string | undefined>(start);
   const sheet = useSheet();
-  const agents = agentsIn(lines ?? []);
+  const agents = agentEntries(subagents, lines ?? []);
   const shown = (lines ?? []).filter((l) => (src === "all" || l.src === src) && inAgent(l, agent));
   // Two sub-agents given the same description are told apart by id.
   const name = (a: (typeof agents)[number]) => (agents.filter((b) => b.label === a.label).length > 1 ? `${a.label} (${a.id})` : a.label);
@@ -219,7 +259,7 @@ export function TaskLog({ workItemId, session }: { workItemId: string; session?:
         <ChoiceSheet
           title="Show lines from"
           value={agent ?? "all"}
-          options={[{ value: "all", label: "All" }, { value: "main", label: "Main" }, ...agents.map((a) => ({ value: a.id, label: name(a), hint: a.type }))]}
+          options={[{ value: "all", label: "All" }, { value: "main", label: "Main" }, ...agents.map((a) => ({ value: a.id, label: name(a), hint: a.hint ?? a.type }))]}
           onPick={(v) => { setAgent(v === "all" ? undefined : v); sheet.close(); }}
           onClose={sheet.close}
         />

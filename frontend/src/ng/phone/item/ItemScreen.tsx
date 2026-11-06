@@ -61,7 +61,8 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
   const ended = status === "done" || status === "cancelled" || status === "archived";
   const session = currentSession(item);
   const live = session?.status === "running" || session?.status === "pending";
-  const { lines } = useLog(item.id, session && !ended ? session.id : null, live);
+  const { lines, subagents } = useLog(item.id, session && !ended ? session.id : null, live);
+  const running = (subagents ?? []).filter((a) => a.status === "running");
   // Nothing to compare before a start, or once the worktree is gone (archived: R12b-11); the server answers 409 or 404.
   const compare = useCompare(item.id, "base", "latest", false, item.head_sha, neverStarted(item) || item.worktree_exists === false);
   const files = compare.state === "ready" ? (compare.data.files ?? []) : [];
@@ -177,6 +178,12 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
               navigate(placeUrl(item.id, { node: session.node_id, sel: sel ?? { kind: "node", node: session.node_id }, tab: "log" }));
             }}>Show all</button>}
           >
+            {running.length > 0 && (
+              <button type="button" className="ph-linkbtn ph-log-subagents" onClick={() => {
+                const sel = pathSel(session.hook_point, item.chain_definition.nodes);
+                navigate(placeUrl(item.id, { node: session.node_id, sel: sel ?? { kind: "node", node: session.node_id } }));
+              }}>{running.length} sub-agent{running.length === 1 ? "" : "s"} running: {running.map((a) => a.description).join(", ")}</button>
+            )}
             <p className="ph-log-path">{session.hook_point.split(".").join(" › ")}</p>
             <LogLines lines={lines.slice(-5)} empty="" />
           </Block>

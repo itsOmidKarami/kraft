@@ -55,3 +55,4 @@
 .ph-oneoff-part { display: flex; flex-direction: column; gap: 2px; }
 /* No box of its own: the sheet scrolls, so a long prompt reads by touch and by keyboard alike. */
 .ph-oneoff-part .ph-start-lines { margin: 4px 0 0; }
+.ph-log-subagents { display: block; margin: 0 0 6px; text-align: left; }

@@ -31,6 +31,8 @@ const ALLOWED = [
   "item/oneOff", // the custom parts, the digest an approval names and the added-node check line: a pure model, as the desktop review reads it
   "item/chainValues", // the frozen chain and the caps it resolves to: a node's attempts, wall clock and YAML, read as the desktop reads them
   "item/nodeGraph",
+  "item/subagents", // the sub-agent list's words and counts, one definition for both layouts
+  "item/useSubagents", // a session's sub-agents and one's prompt, read as the desktop reads them
   "item/scopeView", // isScopeTask and scopesView: a changed-test-scope task's scopes in a round, as the desktop's frame reads them
   "item/graph",
   "item/cause", // failedFix, the forge login words and the work-kept line: a failed card says one thing on both layouts (R15b-01)

@@ -38,3 +38,9 @@
 .ph-subtask.ph-is-current .ph-subtask-title { color: var(--text); }
 /* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
 .ph-subtask { padding-block: calc(6px + var(--row-pad-add)); }
+
+/* A task's sub-agents (Overview): a row each, what it last did or said, its prompt behind a disclosure. */
+.ph-subagent-said { margin: 4px 0 0 12px; }
+.ph-subagent-prompt { margin: 4px 0 0 12px; font-size: var(--fs-meta); color: var(--text-muted); }
+.ph-subagent-prompt summary { cursor: pointer; }
+.ph-prompt { margin: 4px 0 0; padding: 8px; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 6px; font-size: var(--fs-meta); color: var(--text); }

@@ -1,16 +1,9 @@
 import { useEffect, useState } from "react";
-import { subagentsUrl } from "../../api";
-import type { Subagent } from "../../types";
+import { subagentsUrl, subagentUrl } from "../../api";
+import type { Subagent, SubagentDetail } from "../../types";
 import { request } from "../http";
 import type { ItemDetail } from "./useItem";
 import { POLL_MS } from "./useLogLines";
-
-/** What a list of sub-agents comes to, for the Overview's count line and the fact row. */
-export function subagentCount(list: Subagent[]): { running: number; finished: number; cutOff: number } {
-  const running = list.filter((a) => a.status === "running").length;
-  const cutOff = list.filter((a) => a.status === "cut_off").length;
-  return { running, finished: list.length - running - cutOff, cutOff };
-}
 
 const read = (workItemId: string, sessionId: string) =>
   request<{ subagents: Subagent[] }>(subagentsUrl(workItemId, sessionId)).then((r) => (r.status === 200 ? r.body.subagents : null));
@@ -47,4 +40,14 @@ export function useRunningSubagents(item: ItemDetail): Record<string, Subagent[]
     return () => { live = false; clearInterval(t); };
   }, [item.id, key]);
   return Object.fromEntries(ids.flatMap((id) => (found[id] ? [[id, found[id]]] : [])));
+}
+
+/** One sub-agent with its whole prompt, read when `load` is called (a disclosure opening) and not before. */
+export function useSubagentDetail(workItemId: string, sessionId: string, agent: string): { detail: SubagentDetail | "failed" | null; load: () => void } {
+  const [detail, setDetail] = useState<SubagentDetail | "failed" | null>(null);
+  const load = () => {
+    if (detail) return;
+    void request<SubagentDetail>(subagentUrl(workItemId, sessionId, agent)).then((r) => setDetail(r.status === 200 ? r.body : "failed"));
+  };
+  return { detail, load };
 }

@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { agentsIn, clock, elapsed, inAgent, lineCount, logLineText, tokens } from "../../../format";
-import type { LogLine, Subagent } from "../../../types";
+import { clock, inAgent, lineCount, logLineText } from "../../../format";
+import type { LogLine } from "../../../types";
 import { useModal } from "../../../useModal";
 import { Maximize2 } from "../../icons";
 import { logTextUrl } from "../../../api";
 import { POLL_MS, useLogLines } from "../useLogLines";
 import { LinkButton } from "../../ui/LinkButton";
 import { Menu, type MenuItem } from "../../ui/Menu";
+import { agentEntries, type AgentEntry } from "../subagents";
 
 const SOURCES = ["sys", "stdout", "agent", "tool"] as const;
 export { POLL_MS };
@@ -25,7 +26,7 @@ export function Log({ workItemId, sessionId, running, title, crumb, agent, onAge
   const [full, setFull] = useState(false);
 
   const cut = lines?.find((l) => l.truncated);
-  const agents = subagents?.length ? subagents.map(menuEntry) : agentsIn(lines ?? []);
+  const agents = agentEntries(subagents, lines ?? []);
   const shown = (lines ?? []).filter((l) => !l.truncated && !off.has(l.src) && inAgent(l, agent));
   const missing = !!agent && agent !== "main" && !!lines && !lines.some((l) => l.agent === agent);
   const body = (big: boolean) => <LogBody lines={shown} follow={follow} onFollow={setFollow} big={big} />;
@@ -70,17 +71,6 @@ export function Log({ workItemId, sessionId, running, title, crumb, agent, onAge
     </div>
   );
 }
-
-type AgentEntry = ReturnType<typeof agentsIn>[number] & { hint?: string };
-
-/** A sub-agent of the answer's list as a menu entry: its tokens and time beside its type. */
-const menuEntry = (a: Subagent): AgentEntry => ({
-  id: a.id,
-  label: a.description,
-  type: a.type ?? undefined,
-  status: a.status,
-  hint: [a.type, a.tokens != null ? `${tokens(a.tokens)} tokens` : null, a.duration_ms != null ? elapsed(a.duration_ms) : null].filter(Boolean).join(" · ") || undefined,
-});
 
 /** Which sub-agent's lines the log shows, as a pill and a menu in the pattern of the attempt menu: All, Main, then
  *  each sub-agent with a status dot and its type. A menu, not chips, because it holds many long descriptions. */

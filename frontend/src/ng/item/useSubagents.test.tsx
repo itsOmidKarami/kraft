@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubFetch } from "./testkit";
 import { POLL_MS } from "./useLogLines";
 import { detail } from "./testkit";
-import { subagentCount, useRunningSubagents, useSessionSubagents } from "./useSubagents";
+import { subagentCount } from "./subagents";
+import { useRunningSubagents, useSessionSubagents } from "./useSubagents";
 
 const running = { id: "a1", description: "Explore", status: "running" };
 const answer = (list: unknown[]) => ({ "GET /work-items/w1/sessions/s1/subagents": [200, { session_id: "s1", status: "running", subagents: list }] }) as never;

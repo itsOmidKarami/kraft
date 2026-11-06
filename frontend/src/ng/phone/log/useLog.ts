@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { LogLine } from "../../../types";
+import type { LogLine, Subagent } from "../../../types";
 import { logUrl } from "../../../api";
 import { request } from "../../http";
 import { NO_LOG_YET, LOG_UNREADABLE } from "../../item/sharedWords";
@@ -7,20 +7,22 @@ import { NO_LOG_YET, LOG_UNREADABLE } from "../../item/sharedWords";
 export const LOG_POLL_MS = 3000;
 
 /** A worker session's log (`GET /work-items/{wid}/sessions/{sid}/log?format=jsonl`), read
- *  again every few seconds while the session runs. The same read as the desktop
+ *  again every few seconds while the session runs; `subagents` is the list the same answer carries. The same read as the desktop
  *  Log pane, which keeps its own inside the pane. */
 export function useLog(workItemId: string, sessionId: string | null, running: boolean) {
   const [lines, setLines] = useState<LogLine[] | null>(null);
+  const [subagents, setSubagents] = useState<Subagent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     setLines(null);
+    setSubagents(null);
     setError(null);
     if (!sessionId) return;
     let live = true;
     const read = () =>
-      request<{ lines: LogLine[] }>(`${logUrl(workItemId, sessionId)}?format=jsonl`).then((r) => {
+      request<{ lines: LogLine[]; subagents?: Subagent[] }>(`${logUrl(workItemId, sessionId)}?format=jsonl`).then((r) => {
         if (!live) return;
-        if (r.status === 200) { setLines(r.body.lines.filter((l) => !l.truncated)); setError(null); }
+        if (r.status === 200) { setLines(r.body.lines.filter((l) => !l.truncated)); setSubagents(r.body.subagents ?? null); setError(null); }
         else setError(r.status === 404 ? NO_LOG_YET : LOG_UNREADABLE);
       });
     void read();
@@ -30,5 +32,5 @@ export function useLog(workItemId: string, sessionId: string | null, running: bo
       if (t) clearInterval(t);
     };
   }, [workItemId, sessionId, running]);
-  return { lines, error };
+  return { lines, error, subagents };
 }
