@@ -180,6 +180,17 @@ def capture(run_dirs, wid: str, files: SessionFiles) -> str | None:
     return problem
 
 
+def refuse(files: SessionFiles, why: str) -> str | None:
+    """Keep nothing of a session that declared outputs, for `why` (a message
+    holding no string the worker chose): its folder is deleted and the reason
+    logged. None, touching nothing, for a session that declared none."""
+    if read_decl(files) is None:
+        return None
+    _drop_writer_dir(files)
+    _append(files.log, why)
+    return why
+
+
 def _capture(
     run_dirs, wid: str, files: SessionFiles, decl: Decl
 ) -> tuple[str | None, tuple[int, int]]:

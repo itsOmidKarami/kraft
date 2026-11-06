@@ -12,7 +12,7 @@ from pathlib import Path
 
 import psutil
 
-from kraft import caps, events, gate_review, ids, inplace, item_paths, store
+from kraft import caps, events, gate_review, ids, inplace, item_paths, outputs, store
 from kraft import harness as _harness
 from kraft import policy as _policy
 from kraft import usage as _usage
@@ -23,6 +23,7 @@ from kraft.adapters.subprocess import (
     _progress_usage,
     _resolve_exit_file,
     _resolve_result_file,
+    capture_outputs,
     close_egress,
     fail_abandoned_jobs,
     read_result_fields,
@@ -237,6 +238,7 @@ async def _exit_from_file(
     summary: str | None = None,
     *,
     work_item_id: str,
+    run_dirs=None,
 ) -> None:
     """Record a session exit from what it left on disk, carrying every field
     `adapters.subprocess.run_task` carries — `concerns` and `question` reach the
@@ -255,6 +257,12 @@ async def _exit_from_file(
     status = await fail_abandoned_jobs(
         db, session_id, log_path, status, reader, work_item_id=work_item_id
     )
+    if run_dirs is not None:
+        # A writer that ended across a restart: its outputs are kept (or its
+        # failure recorded) as `run_task` would have, from the cap and names the
+        # session launched under (`kraft.outputs.read_decl`), never today's.
+        files = item_paths.session_files(run_dirs, work_item_id, session_id)
+        status = await capture_outputs(db, run_dirs, work_item_id, session_id, files, status)
     await db.write(
         lambda c: store.session_exited(
             c,
@@ -645,6 +653,13 @@ async def _adopt(
     )
     if oom is not None:
         status = await record_oom_kill(db, row["work_item_id"], session_id, log_path, oom, status)
+    if run_dirs is not None and outputs.read_decl(
+        item_paths.session_files(run_dirs, work_item_id, session_id)
+    ):
+        # A writer's outputs are kept only if nothing of it survived, which the sandbox's
+        # close finds out (`sandbox_session_outlived`) and `_guarded_adopt` would do after
+        # this exit is recorded. Closing again there is safe.
+        await _close_sandbox(row["sandbox"], work_item_id, session_id)
     await _exit_from_file(
         db,
         session_id,
@@ -654,6 +669,7 @@ async def _adopt(
         reader,
         _asked_summary(db, run_dirs, row),
         work_item_id=work_item_id,
+        run_dirs=run_dirs,
     )
     if row["hook_point"] == ESCALATION_HOOK and run_dirs is not None:
         # Checked before the retry it may have asked for is consumed.
@@ -1115,6 +1131,7 @@ async def reattach(
                 _reader_of(r),
                 _asked_summary(db, run_dirs, r),
                 work_item_id=r["work_item_id"],
+                run_dirs=run_dirs,
             )
             summary.resolved_from_file.append(ids.session_ref(r["work_item_id"], sid))
             await _sweep_after(db, run_dirs, r, launch_factory)

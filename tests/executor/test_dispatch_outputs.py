@@ -114,7 +114,8 @@ def paused_session(monkeypatch):
     monkeypatch.setattr(dispatch, "_resumable_session", lambda *a, **k: ("old", "prov"))
 
 
-async def test_outputs_note_survives_resume(item_on, fake_agent, paused_session):
+async def test_outputs_note_survives_resume(item_on, fake_agent, paused_session, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_SHELL", WRITE.format(seen="/dev/null"))
     it = await item_on(writer("agent", "/dev/null"))
 
     assert await run(it) == "completed"

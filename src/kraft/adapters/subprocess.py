@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 import psutil
 
-from kraft import caps, events, ids, item_paths, logs, proc_identity, store
+from kraft import caps, events, ids, item_paths, logs, outputs, proc_identity, store
 from kraft import harness as _harness
 from kraft import usage as _usage
 from kraft.paths import private
@@ -108,6 +108,56 @@ async def fail_abandoned_jobs(
 
     await db.write(_record)
     return status if status == "needs_context" else "failed"
+
+
+#: The statuses whose declared outputs are kept: a task that ran to its end,
+#: whichever way it went. Not a pause, a cap, a cancel or a process Kraft lost.
+_CAPTURED = (
+    SessionStatus.DONE,
+    SessionStatus.DONE_WITH_CONCERNS,
+    SessionStatus.FAILED,
+)
+
+
+async def capture_outputs(
+    db, run_dirs, work_item_id: str, session_id: str, files: item_paths.SessionFiles, status: str
+) -> str:
+    """`status`, after a session that declared `outputs` ended with it: the
+    declared files and variables are checked and kept (`kraft.outputs`), and
+    a capture that fails -- or a session whose processes outlived it, which may
+    still be writing the folder -- turns the status into `failed`, the reason
+    in the session's log. A status that is not `_CAPTURED` keeps its folder
+    untouched, and a session that declared nothing is left alone. The one door
+    both `run_task` and `reattach` end a session through."""
+    if status not in _CAPTURED or run_dirs is None:
+        return status
+    if await asyncio.to_thread(outputs.read_decl, files) is None:
+        return status
+    if await _outlived(db, work_item_id, session_id):
+        problem = await asyncio.to_thread(
+            outputs.refuse,
+            files,
+            "kraft: outputs: processes the task started outlived it, so nothing was kept",
+        )
+    else:
+        problem = await asyncio.to_thread(outputs.capture, run_dirs, work_item_id, files)
+    return "failed" if problem else status
+
+
+async def _outlived(db, work_item_id: str, session_id: str) -> bool:
+    """Whether the sandbox recorded that processes of this session survived
+    the sweep that ends it (`sandbox_session_outlived`), written when the
+    sandbox is closed, which comes before a session's status is resolved. An
+    unsandboxed session's group was killed by `_kill_group`, which confirms
+    there is none."""
+    name = ids.qualified(work_item_id, session_id)
+    rows = await db.write(
+        lambda c: c.execute(
+            "SELECT payload FROM events WHERE work_item_id = ? AND type = ?",
+            (work_item_id, SandboxEvent.SESSION_OUTLIVED),
+        ).fetchall()
+    )
+    return any(json.loads(r["payload"]).get("session") == name for r in rows)
 
 
 def _worker_files(files: item_paths.SessionFiles) -> tuple[Path, ...]:
@@ -1697,6 +1747,8 @@ async def _run_task(
         return "paused"
     if oom is not None:
         status = await record_oom_kill(db, work_item_id, session_id, log_path, oom, status)
+    # Before the status is recorded, so a capture that fails fails the writer.
+    status = await capture_outputs(db, run_dirs, work_item_id, session_id, files, status)
     fields = read_result_fields(
         result_path, summary=item_paths.recorded_summary(run_dirs, work_item_id, files)
     )
