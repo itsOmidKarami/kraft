@@ -2,7 +2,14 @@
 against the real CLI (claude 2.1.316; headless `stream-json` run that spawns
 one `general-purpose` sub-agent). The unit tests in `tests/test_logs.py` are
 built from that run's lines; this is what notices when a CLI release changes
-them."""
+them.
+
+Re-run on claude 2.1.319, it passes, with two things the 2.1.316 run did not
+show. A prompt that says to wait gets a foreground sub-agent
+(`is_backgrounded: false`); Kraft reads both kinds the same. And a sub-agent
+has no Agent tool of its own (asked to start one, it says so and does the work
+itself; `subagent_stats.spawned_by_subagents` is 0), so a nested sub-agent
+cannot happen in a headless run and there is no depth-2 case to pin."""
 
 from __future__ import annotations
 
