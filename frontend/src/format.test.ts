@@ -189,6 +189,7 @@ describe("logLineText", () => {
     ["falls back to the parsed type when the summary is just the raw line", { text: raw, summary: raw }, "tool_progress"],
     ["falls back to the parsed type with no summary at all", { text: '{"type":"tool_progress"}' }, "tool_progress"],
     ["passes plain stdout/sys text through untouched", { src: "stdout", text: "collected 12 items" }, "collected 12 items"],
+    ["drops ANSI colour codes from plain output", { src: "stdout", text: "\x1b[32m3 passed\x1b[0m, \x1b[33;1m1 warning\x1b[0m\x1b[K" }, "3 passed, 1 warning"],
   ])("%s", (_, over, want) => {
     expect(logLineText(logLine(over))).toBe(want);
   });
