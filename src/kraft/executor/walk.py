@@ -48,6 +48,7 @@ from kraft.templates.models import (
     BuiltinAction,
     BuiltinTask,
     ExecNode,
+    ForgeAction,
     ForgeTask,
     GateNode,
     MaterializedChain,
@@ -122,6 +123,27 @@ def rebases_itself(row, node_id: str | None) -> bool:
 #: here stopped every red test in a fix-loop node with "reinstall and restart"
 #: instead of repairing it.
 _IN_PROCESS_KINDS = (ForgeTask,)
+
+
+def _ci_sources(node: ResolvedNode) -> frozenset[str]:
+    """The task paths whose findings are text from a CI job's log."""
+    return frozenset(
+        t.path
+        for t in node.tasks()
+        if isinstance(t.task, ForgeTask)
+        and t.task.target
+        in (ForgeAction.MR_CI, ForgeAction.MR_POST_MERGE_CI, ForgeAction.CI_PIPELINE)
+    )
+
+
+def _red_pipeline_only(failed: list) -> bool:
+    """Whether every failed task is a `ci.pipeline` wait. A pipeline that ran
+    red, or that could not be read for auth, is a person's to look at, not an
+    agent's: the merge request has usually merged by then, and nothing here is
+    stuck for an escalation to unstick."""
+    return bool(failed) and all(
+        isinstance(t.task, ForgeTask) and t.task.target is ForgeAction.CI_PIPELINE for t in failed
+    )
 
 
 def _in_process(task: ResolvedTask) -> bool:
@@ -676,6 +698,10 @@ class _Stuck:
     limit: dict | None = None
     #: `store.mark_needs_human`'s `facts`: a red test's command and scope.
     facts: dict | None = None
+    #: False for a stop that goes straight to a person: neither the node's
+    #: `escalation` nor `gates.auto_escalate_stuck` answers it, and it is not
+    #: marked `stuck`. A red `ci.pipeline`, which no agent can fix.
+    escalatable: bool = True
 
 
 #: The round a stuck escalation's session is written under. Distinct from every
@@ -702,7 +728,7 @@ async def _stop_stuck(db, work_item_id: str, node: ResolvedNode, stuck: _Stuck, 
             stuck.capped,
             kind=stuck.kind,
             bundle=stuck.bundle,
-            stuck=True,
+            stuck=stuck.escalatable,
             suggested=stuck.suggested,
             limit=stuck.limit,
             facts=stuck.facts,
@@ -741,7 +767,7 @@ async def _escalate_stuck(
     before its stop.
     """
     task = node.escalation
-    if task is None:
+    if task is None or not stuck.escalatable:
         return await _stop_stuck(db, work_item_id, node, stuck)
     cap = policy.auto_escalate_stuck_cap if policy else _policy.DEFAULT_AUTO_ESCALATE_STUCK_CAP
     key = _escalation_key(node)
@@ -1941,7 +1967,12 @@ async def _walk_node_once(
                     **(_scope_facts(scopes) or {}),
                     **(_forge_cause(db, work_item_id, node, failed)[0] or {}),
                 }
-                return _Stuck(reason, kind=StopKind.FAILED, facts=facts or None)
+                return _Stuck(
+                    reason,
+                    kind=StopKind.FAILED,
+                    facts=facts or None,
+                    escalatable=not _red_pipeline_only(failed),
+                )
         await node_runs.completed(
             db, Path(worktree) if worktree else None, work_item_id, node.id, run_dirs=run_dirs
         )
@@ -2431,6 +2462,7 @@ async def _walk_node_once(
                 limit=_fix_loop_limit(
                     override_row, node.id, cap, attempts_ran_out=count > cap.attempts
                 ),
+                escalatable=not _red_pipeline_only(failed),
             )
 
         if prints and fix_ran:
@@ -2467,6 +2499,7 @@ async def _walk_node_once(
                     reason,
                     kind=StopKind.STUCK,
                     bundle=await _diagnosis_bundle(db, work_item_id, node, worktree, launch),
+                    escalatable=not _red_pipeline_only(failed),
                 )
 
         payload = {
@@ -2489,7 +2522,7 @@ async def _walk_node_once(
         if eligible:
             repeats = set(previous_prints or [])
             instruction += prompts.FIX_FINDINGS.format(
-                findings=prompts.format_findings(eligible, repeats)
+                findings=prompts.format_findings(eligible, repeats, from_ci=_ci_sources(node))
             )
             # The tag is unconditional -- "this finding was in the last
             # measurement" is true either way -- but the note claims an earlier
@@ -2601,6 +2634,7 @@ async def _walk_node_once(
             return _Stuck(
                 _changed_nothing_reason(db, work_item_id, node, count, fix),
                 kind=StopKind.STUCK,
+                escalatable=not _red_pipeline_only(failed),
             )
         round = count
         _first_iteration = False

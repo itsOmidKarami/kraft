@@ -14,6 +14,7 @@ from support.harness import entry_of, v1_node
 
 from kraft import events, executor, rate_limit_retry, store
 from kraft import policy as _policy
+from kraft.adapters import forge
 from kraft.executor import dispatch, gates
 
 NO_SETUP = entry_of({"setup_command": ""})
@@ -385,3 +386,67 @@ async def test_a_stop_outside_the_stuck_set_goes_straight_to_a_human(
     assert "esc" not in script.calls
     assert await _generic(it, monkeypatch) == []
     assert not it.events("work_item_auto_escalate_skipped")
+
+
+# -- a red `ci.pipeline` is a person's, never stuck ---------------------------
+
+_RED = forge.CIStatus(
+    state="failed",
+    url="u",
+    jobs=("pipeline 7",),
+    failed_jobs=(forge.FailedJob("test", "failed", "script_failure"),),
+)
+_AUTH = forge.ForgeError("denied (HTTP 401)", status=401, reason="auth")
+_ON_A_FORGE = executor.LaunchContext(repo_entry=entry_of({"setup_command": "", "forge": "github"}))
+
+
+def _pipeline_node(**fields):
+    """A one-task node waiting on pipeline 7, with a declared escalation."""
+    task = {"id": "ci", "kind": "forge", "target": "ci.pipeline", "pipeline": "7"}
+    return {"id": "build", "kind": "exec", "tasks": [task], "escalation": _sub("esc"), **fields}
+
+
+@pytest.mark.parametrize(
+    "scripted, node",
+    [
+        pytest.param([_RED], _pipeline_node(), id="no-on-failure"),
+        pytest.param(
+            [_RED],
+            _pipeline_node(fix_loop={"tasks": [_editing_fix()], "max_attempts": 1}),
+            id="fix-loop-cap-spent",
+        ),
+        pytest.param([_AUTH], _pipeline_node(), id="auth-failure"),
+    ],
+)
+async def test_red_pipeline_is_not_stuck(item_on, monkeypatch, scripted, node):
+    """A red pipeline (or one the forge would not let Kraft read) stops for a
+    person as a plain failure: neither the node's `escalation` nor the generic
+    `auto_escalate_stuck` sends an agent onto a merge request that has usually
+    merged by now."""
+    monkeypatch.setattr(
+        forge.run, "resolve", lambda name: forge.FakeForge(pipeline_statuses={"7": scripted})
+    )
+    it = await item_on([node])
+
+    assert (
+        await executor.run_once(
+            it.database, it.run_dirs, work_item_id=it.id, policy=_policy_(), launch=_ON_A_FORGE
+        )
+        == "needs_human"
+    )
+
+    assert not it.events("stuck_escalation_started")
+    assert not gates.stuck_stop(it.database.read(lambda c: events.read_after(c, 0, it.id)))
+
+
+async def test_red_pipeline_runs_on_failure(item_on, monkeypatch):
+    monkeypatch.setattr(
+        forge.run, "resolve", lambda name: forge.FakeForge(pipeline_statuses={"7": [_RED]})
+    )
+    it = await item_on([_pipeline_node(on_failure={"tasks": [_sub("repair")]})])
+
+    await executor.run_once(
+        it.database, it.run_dirs, work_item_id=it.id, policy=_policy_(), launch=_ON_A_FORGE
+    )
+
+    assert [s["hook_point"] for s in it.sessions("build") if s["hook_point"].endswith("repair")]
