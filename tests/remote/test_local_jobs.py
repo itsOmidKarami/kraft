@@ -119,6 +119,14 @@ def test_spawn_refused(tmp_path, cwd_is, missing):
     assert jobs.running() == []
 
 
+def _gone(process):
+    """Dead or a zombie; the process can vanish between the two psutil calls."""
+    try:
+        return not process.is_running() or process.status() == psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return True
+
+
 async def test_stop_kills_what_the_session_backgrounded_even_when_it_ignores_sigterm(tmp_path):
     jobs = LocalJobs(tmp_path)
     log = tmp_path / "l"
@@ -134,7 +142,7 @@ async def test_stop_kills_what_the_session_backgrounded_even_when_it_ignores_sig
         assert await jobs.stop("w/s", grace=0.3) is True
         # macOS answers `killpg` for a process still tearing down as if it were gone, so under
         # load the member can be seen briefly after the stop returns.
-        assert _wait(lambda: not member.is_running() or member.status() == psutil.STATUS_ZOMBIE)
+        assert _wait(lambda: _gone(member))
         assert jobs.running() == []
     finally:
         with contextlib.suppress(OSError):
