@@ -141,6 +141,26 @@ def test_combine_clamps_current_off_a_done_marked_task():
     assert p.title == "a"
 
 
+@pytest.mark.parametrize(
+    ("tasks", "reported", "committed", "current"),
+    [
+        pytest.param(
+            [("a", True), ("b", True), ("c", False)], 0, 0, 3, id="leading-done-steps-forward"
+        ),
+        pytest.param(
+            [("a", True), ("b", False), ("c", True), ("d", False)],
+            0,
+            2,
+            4,
+            id="done-in-the-middle-steps-forward",
+        ),
+        pytest.param([("a", False)] * 6 + [("g", True)] * 4, 0, 6, 6, id="trailing-done-unchanged"),
+    ],
+)
+def test_combine_steps_over_done_tasks(tasks, reported, committed, current):
+    assert progress.combine(tasks, reported=reported, committed=committed).current == current
+
+
 def test_combine_marks_a_done_task_done_regardless_of_position():
     tasks = [("a", False), ("b", True), ("c", False)]
     p = progress.combine(tasks, reported=1, committed=0)

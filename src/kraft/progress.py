@@ -106,13 +106,16 @@ def committed_task(subjects: list[str]) -> int:
 def combine(tasks: list[tuple[str, bool]], reported: int, committed: int) -> ProgressReport | None:
     """A report means "starting task K"; a commit naming K means K is done, so
     the one after it is current -- unless that lands on a task the plan
-    itself marks `[DONE]` (already merged outside this work item), in which
-    case `current` walks back to the last task that isn't. Capped at the
-    last task."""
+    itself marks `[DONE]` (already merged outside this work item, or built
+    by another slice), in which case `current` steps forward to the first
+    task that isn't, and when none is left ahead, back to the last one that
+    isn't. Capped at the last task."""
     if not tasks:
         return None
     total = len(tasks)
     current = min(total, max(reported, committed + 1))
+    while current < total and tasks[current - 1][1]:
+        current += 1
     while current > 1 and tasks[current - 1][1]:
         current -= 1
     return ProgressReport(
