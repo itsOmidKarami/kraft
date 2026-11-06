@@ -422,7 +422,7 @@ Every task takes these keys, then the keys of its kind. A task takes no
 | `skippable` | boolean | `true` | `false` refuses a skip of this task. |
 | `icon` | string | none | The [icon](#icons) the board draws for the task. Refused on a fix loop's `judge`, whose icon is fixed. |
 | `outputs` | mapping | none | Only an agent or subprocess task in an exec node's own steps. `files` and `variables` name what the task leaves for later tasks. See [Step outputs](#step-outputs). _Added in next_ |
-| `reads` | list | `[]` | Only an agent or subprocess task. The earlier tasks whose outputs this one is given, each `step.task` or `node.step.task`. See [Step outputs](#step-outputs). _Added in next_ |
+| `reads` | list | `[]` | Only an agent, subprocess or `ci.pipeline` task. The earlier tasks whose outputs this one is given, each `step.task` or `node.step.task`. See [Step outputs](#step-outputs). _Added in next_ |
 
 ### What a task's policy does
 
@@ -466,14 +466,16 @@ Every task takes these keys, then the keys of its kind. A task takes no
 
 ### Forge task keys
 
-`kind: forge` is a merge-request action on GitHub or GitLab, resolved from the
-`forge` in the repo's `repos.yaml` entry.
+`kind: forge` is an action on GitHub or GitLab, resolved from the `forge` in the
+repo's `repos.yaml` entry: a merge-request step, or `ci.pipeline`, a wait for one
+CI pipeline by id.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `target` | string | required | `mr.open_draft`, `mr.sync`, `mr.ci`, `mr.automated_review`, `mr.mark_ready`, `mr.external_approval`, `mr.merge` or `mr.post_merge_ci`. |
+| `target` | string | required | `mr.open_draft`, `mr.sync`, `mr.ci`, `mr.automated_review`, `mr.mark_ready`, `mr.external_approval`, `mr.merge` or `mr.post_merge_ci`. `ci.pipeline` waits for one pipeline by id. _Added in next_ |
 | `wait` | mapping | none | For a target that waits: `polling`, with an `initial_interval` and a `max_interval`. Set the timeout with the task's `policy`. |
 | `wait.grace_period` | duration | `60s` | Only on `mr.automated_review`: how long a review bot must stay quiet after its last activity on the head to count as finished. Refused on any other target. _Added in 2.4_ |
+| `pipeline` | string | required on `ci.pipeline` | Only on `ci.pipeline`: the pipeline's id as digits, or `$NAME` (or `${NAME}`) for a variable a task in `reads` left. See [Waiting for a pipeline by id](#waiting-for-a-pipeline-by-id). _Added in next_ |
 | `reviewers` | list | unset | Only on `mr.automated_review`: the reviewers it waits for, each `{bot: LOGIN}` or `{check: NAME}`. The item's `reviewers` override and the repo's `automated_review` come first. `[]` names none. _Added in 2.4_ |
 
 `mr.post_merge_ci` watches the CI of the commit the item merged, however many merges land on the base branch after it. A run cancelled for a newer push moves the watch onto the base's tip, which holds that merge, and records `post_merge_ci_moved`.
@@ -494,6 +496,77 @@ A review wait that names its bots and waits for them to settle:
 ```
 
 The shipped chain follows it with a triage step. See [Waiting for several reviewers](/reference/configuration/repos#waiting-for-several-reviewers).
+
+## Waiting for a pipeline by id
+
+_Added in next_
+
+A `ci.pipeline` task waits for one CI pipeline, named by its id, and nothing else.
+It is not tied to the item's branch or merge request, so it can follow a pipeline
+that something else started, such as one a merge triggered.
+
+The id is a GitLab pipeline `id` (not the `iid`) or a GitHub Actions run id (not the
+`run_number`). Give it as digits, or as `$NAME` for a variable an earlier task left
+with [`outputs`](#step-outputs) and this task names in `reads`.
+
+```yaml
+- id: release
+  steps:
+    - id: find
+      tasks:
+        - id: find_pipeline
+          kind: subprocess
+          command: ./scripts/find-pipeline.sh    # your own script, not Kraft's
+          outputs:
+            variables: [PIPELINE_ID]
+    - id: wait
+      tasks:
+        - id: wait_pipeline
+          kind: forge
+          target: ci.pipeline
+          reads: [find.find_pipeline]
+          pipeline: $PIPELINE_ID
+```
+
+The task looks up `$NAME` again at every check, so a writer that ran again while the
+wait was parked is followed to its new id, and the old wait ends as `superseded`. An
+unset variable, a value that is not digits, or an id the repository does not hold stops
+the item for you with a message that never quotes the value. On GitHub a run that a
+person re-runs keeps its id: the task follows the newest attempt.
+
+| What the forge reports | What the task does |
+|---|---|
+| Success | Done. |
+| Created, pending, running, queued or waiting for a runner | Keeps waiting. |
+| A manual job (GitLab) or an environment approval (GitHub) holds it | Keeps waiting until the time cap, and says which job or approval in the log and the wait's events. |
+| Failed jobs, or a failed downstream pipeline | The task fails, with the failed jobs as findings. |
+| Failed with no failed job, or a GitHub startup failure | Stops the item for you, naming it. |
+| Skipped, neutral or stale, or ran no job | Stops the item for you. A pipeline that ran nothing is not green. |
+| Cancelled, and no new run followed within five minutes | Stops the item for you. |
+| The time cap | Stops the item as a timed-out wait. |
+| The forge cannot be reached | Keeps waiting. |
+| The forge refuses the token, or answers a rate limit | Stops as any forge task does. |
+
+- **It never retries a job.** The id may come from a worker, and a retry is a write
+  made with the server's token. A pipeline that failed on the forge's own infrastructure
+  stops the item for you instead.
+- **A red pipeline is not stuck.** The node's `on_failure` handles it when it has one.
+  Otherwise the item stops for you as a plain failure, and neither the node's
+  `escalation` nor `auto_escalate_stuck` sends an agent onto it, because the merge request
+  has usually merged by then. No fix loop starts unless the node declares one.
+- **Green is the pipeline's own status.** A downstream pipeline counts only through
+  `strategy: depend` in the GitLab trigger job: a failed bridge is red code, not
+  infrastructure. `mr.ci` reads it the same way now.
+- **[`ci_checks: false`](/reference/configuration/repos#ci_checks) does not affect it.**
+  You named the pipeline.
+- **A run from a fork** is a configuration error, as is a pipeline of another project.
+- It cannot be `scope: each_repository`. In a workspace item it reads the root
+  repository only; a pipeline in a member's project answers not found.
+- A node whose only forge tasks are `ci.pipeline` is not a merge-request node, so
+  a merge request closed on the forge does not stop it. A chain revision may skip such
+  a node, which it may not do for the other forge tasks. A revision that skips a writer
+  whose reader stays is refused, with the reader's `reads` named.
+- The kraft-lite plugin refuses `ci.pipeline`.
 
 ## read_only
 
@@ -577,7 +650,7 @@ When the writer ends `done` or `failed`, Kraft checks everything first. Only the
 ### Where they are allowed
 
 - `outputs` goes on an agent or subprocess task in an exec node's own `steps` or `tasks`. It is refused on a fan-out task (`scope: each_repository`), in an `on_failure`, fix loop, judge, `escalation`, `on_conflict` or `on_merge_rejected.repair` slot, and in a gate's `auto_review`.
-- `reads` goes on an agent or subprocess task. An entry of two segments, `step.task`, names a writer in the reader's own node, so a library node holding both stays reusable under any node id. An entry of three, `node.step.task`, names a writer anywhere. A bare task id, or an entry of more than three segments, is refused.
+- `reads` goes on an agent, subprocess or [`ci.pipeline`](#waiting-for-a-pipeline-by-id) task, and on no other forge task. An entry of two segments, `step.task`, names a writer in the reader's own node, so a library node holding both stays reusable under any node id. An entry of three, `node.step.task`, names a writer anywhere. A bare task id, or an entry of more than three segments, is refused.
 - Every entry must name a task that declares `outputs` and runs before the reader: in an earlier node, or an earlier step of the same node. A task in the same step is never before it, so a writer and its reader cannot share one `tasks:` list.
 - A node's `on_failure`, fix loop, judge and `escalation` may read any step of the node. A step's or task's `on_failure` may read the steps up to and including its own. Such a handler may run before its writer did, and then finds nothing. `on_conflict`, `on_merge_rejected.repair` and a gate's `auto_review` read nothing.
 - `kraft admin templates lint` refuses a chain that breaks these rules.

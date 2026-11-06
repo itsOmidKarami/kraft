@@ -9,12 +9,12 @@ from support.harness import v1_chain, v1_node, v1_task
 from kraft import events, mr_poller, store
 
 
-def _chain(repo, *, mr_node_id: str = "merge"):
+def _chain(repo, *, mr_node_id: str = "merge", verify=None):
     """A two-node chain: a plain exec node (`verify`) and one MR node whose
     one task is `kind: forge`, `target: mr.merge` -- `_is_mr_node` must find
-    it by that task, not by this node's id."""
+    it by that task, not by this node's id. `verify` is the other node's task."""
     mr = v1_node(mr_node_id, tasks=[v1_task("go", kind="forge", target="mr.merge")])
-    return v1_chain([v1_node("verify", tasks=[v1_task("run")]), mr], repo=repo)
+    return v1_chain([v1_node("verify", tasks=[verify or v1_task("run")]), mr], repo=repo)
 
 
 def _patch_forge(monkeypatch, fake):
@@ -87,14 +87,24 @@ async def test_tick_leaves_a_merged_or_open_mr_untouched(
     assert it.row()["stop_kind"] == "failed"
 
 
+@pytest.mark.parametrize(
+    "verify",
+    [
+        None,
+        # By then the merge request has usually merged: waiting on a pipeline by
+        # id is not taking it, so its being closed is no reason to stop.
+        v1_task("wait", kind="forge", target="ci.pipeline", pipeline="123"),
+    ],
+    ids=["plain-node", "ci-pipeline-only-node-is-not-mr"],
+)
 async def test_tick_skips_a_non_mr_node_without_calling_find_mr(
-    item_on, stub_app, repo, tmp_path, monkeypatch
+    item_on, stub_app, repo, tmp_path, monkeypatch, verify
 ):
     from kraft.adapters import forge as forge_mod
 
     fake = forge_mod.FakeForge()
     _patch_forge(monkeypatch, fake)
-    it = await item_on(_chain(repo), "verify")  # not the MR node
+    it = await item_on(_chain(repo, verify=verify), "verify")  # not the MR node
     await _opened_mr(it, fake)
     await it.database.write(
         lambda c: store.mark_waiting(c, it.id, "verify", "2000-01-01T00:00:00+00:00")

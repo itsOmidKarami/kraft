@@ -18,7 +18,7 @@ import logging
 
 from kraft import store
 from kraft.adapters import forge as forge_mod
-from kraft.templates.models import ForgeTask
+from kraft.templates.models import ForgeAction, ForgeTask
 from kraft.vocab import MR_WATCHED, StopKind
 from kraft.vocab.sql import in_list
 
@@ -33,12 +33,17 @@ REASON = "the merge request was closed on the forge without merging"
 
 def _is_mr_node(node) -> bool:
     """Whether `node` (a `ResolvedNode`) takes the item's merge request: it
-    runs at least one `kind: forge` task. Every `ForgeAction` target is a
-    point on the merge-request lifecycle (`mr.open_draft` .. `mr.post_merge_
-    ci`, `adapters.forge.run.V1_HANDLERS`), so this does not need to name
-    `open_mr`/`mr_checks`/`merge` by their chain-authored node ids -- a
-    custom chain's own names would not match those anyway."""
-    return any(isinstance(t.task, ForgeTask) for t in node.tasks())
+    runs at least one `kind: forge` task. Every `ForgeAction` target but
+    `ci.pipeline` is a point on the merge-request lifecycle (`mr.open_draft`
+    .. `mr.post_merge_ci`, `adapters.forge.run.V1_HANDLERS`), so this does not
+    need to name `open_mr`/`mr_checks`/`merge` by their chain-authored node ids
+    -- a custom chain's own names would not match those anyway. A node whose
+    only forge tasks wait on a pipeline by id takes no merge request: by then
+    it has usually merged, and its being closed is no reason to stop."""
+    return any(
+        isinstance(t.task, ForgeTask) and t.task.target is not ForgeAction.CI_PIPELINE
+        for t in node.tasks()
+    )
 
 
 async def tick(app) -> list[str]:

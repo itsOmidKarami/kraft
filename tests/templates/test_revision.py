@@ -430,6 +430,14 @@ def test_skipping_a_writer_whose_reader_stays_names_the_reads_it_breaks():
         _revise(chain, skip=[_skip("emit")])
 
 
+def test_a_revision_may_skip_a_ci_pipeline_node_and_its_writer():
+    """A wait for a pipeline by id lands nothing, so it is not held like a
+    merge-request task."""
+    chain = _chain(extra=_EMIT_AND_WAIT)
+
+    assert _revise(chain, skip=[_skip("emit"), _skip("wait_ci")]) is not chain
+
+
 def test_an_override_stays_within_the_administrator_maxima():
     chain = _chain(max_attempts=3)
     with pytest.raises(revision.RevisionError, match="max_attempts"):

@@ -41,6 +41,7 @@ from kraft.templates.models import (
     PATH_SEPARATOR,
     Chain,
     ExecNode,
+    ForgeAction,
     ForgeTask,
     GateNode,
     MaterializedChain,
@@ -376,7 +377,8 @@ _MR_META = "mr_meta"
 def _lands(node: ResolvedNode) -> bool:
     """Whether `node` does part of the work of landing the change (Kraft-eh5as):
     any forge task -- open, sync, ready, merge, or a wait on CI, review or
-    approval -- or the description the merge request opens with. Keyed on what
+    approval, but not a wait for a pipeline by id (`ci.pipeline`), which lands
+    nothing -- or the description the merge request opens with. Keyed on what
     the node runs, never its id, so a custom chain's own names are held too.
     Every step container counts, recovery included (Kraft-8cu5r): unlike
     `ResolvedNode.produces`, which names what a node is for, this asks whether
@@ -384,7 +386,8 @@ def _lands(node: ResolvedNode) -> bool:
     request only when it fails still does that work.
     A skip would let an item "complete" with nothing landed."""
     return any(
-        isinstance(t.task, ForgeTask) or getattr(t.task, "produces", None) == _MR_META
+        (isinstance(t.task, ForgeTask) and t.task.target is not ForgeAction.CI_PIPELINE)
+        or getattr(t.task, "produces", None) == _MR_META
         for step in node.steps_in()
         for t in step.tasks
     )
