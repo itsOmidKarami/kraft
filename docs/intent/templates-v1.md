@@ -1327,8 +1327,9 @@ enforced-by: tests/executor/test_base_change.py::test_a_moved_base_restarts_the_
 ## REQ base-change-restart-target-is-backward
 
 The system SHALL reject an `on_base_changed.restart_from` target that is
-missing, is not an execution node, or is later than the declaring node.
-enforced-by: tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[missing], tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[gate], tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[later], tests/templates/test_failure_controls.py::test_a_backward_restart_target_is_accepted[earlier], tests/templates/test_failure_controls.py::test_a_backward_restart_target_is_accepted[itself]
+missing, is neither an execution node nor a slice group, names a node inside
+a group's body, or is later than the declaring node.
+enforced-by: tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[missing], tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[gate], tests/templates/test_failure_controls.py::test_a_restart_target_must_be_this_or_an_earlier_execution_node[later], tests/templates/test_failure_controls.py::test_a_backward_restart_target_is_accepted[earlier], tests/templates/test_failure_controls.py::test_a_backward_restart_target_is_accepted[itself], tests/templates/test_failure_controls.py::test_a_group_is_an_accepted_restart_or_reject_target[on-base-changed], tests/templates/test_failure_controls.py::test_a_restart_target_cannot_name_a_node_inside_a_group[on-base-changed]
 
 ## REQ a-merging-node-restarts-a-base-change-before-the-final-gate
 
@@ -2502,3 +2503,19 @@ commit unseen -- the drop on the re-measure after the node's `on_failure`
 included.
 enforced-by: tests/executor/test_merge_rejection.py::test_a_drop_nothing_may_repair_stops_promptly_for_a_person[no-policy], tests/executor/test_merge_rejection.py::test_a_drop_nothing_may_repair_stops_promptly_for_a_person[on-failure-is-no-drop-s-repair], tests/executor/test_merge_rejection.py::test_a_drop_on_a_re_measure_stops_promptly_for_a_person[after-on-failure], tests/executor/test_merge_rejection.py::test_a_drop_on_a_re_measure_stops_promptly_for_a_person[after-on-failure-in-a-fix-loop]
 origin: src/kraft/executor/dispatch.py §measure_node
+
+## REQ group-is-made-only-by-chain-revision
+
+The system SHALL refuse a `group` node in a chain file, and SHALL accept one only
+when it reads a stored snapshot or applies a chain revision; a group's body SHALL
+hold no forge task, no `on_merge_rejected` and no `on_base_changed`.
+enforced-by: tests/templates/test_models.py::test_a_chain_file_cannot_declare_a_group, tests/templates/test_models.py::test_a_stored_chain_may_hold_a_group, tests/templates/test_models.py::test_a_group_body_refuses[forge-task], tests/templates/test_models.py::test_a_group_body_refuses[on-merge-rejected], tests/templates/test_models.py::test_a_group_body_refuses[on-base-changed], tests/templates/test_models.py::test_a_group_body_refuses[group-caps]
+origin: src/kraft/templates/models.py §GroupNode
+
+## REQ reads-do-not-cross-a-group
+
+IF a task's `reads` entry names a task on the other side of a group's boundary,
+THEN the system SHALL refuse the chain, and SHALL accept a `reads` entry between
+two nodes of one group's body.
+enforced-by: tests/templates/test_models.py::test_reads_may_not_cross_a_group_boundary[into-the-body], tests/templates/test_models.py::test_reads_may_not_cross_a_group_boundary[out-of-the-body], tests/templates/test_models.py::test_reads_between_body_nodes_are_accepted
+origin: src/kraft/templates/models.py §_reads_name_earlier_writers

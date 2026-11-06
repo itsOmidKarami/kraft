@@ -24,6 +24,7 @@ from kraft.templates.models import (
     PATH_SEPARATOR,
     ExecNode,
     GateNode,
+    GroupNode,
     MaterializedChain,
     ResolvedNode,
     ResolvedStep,
@@ -74,24 +75,35 @@ class ChainPath:
         segments = path.split(PATH_SEPARATOR)
         nodes = chain.chain.nodes
         index = next((i for i, n in enumerate(nodes) if n.id == segments[0]), None)
-        if index is None or len(segments) > 3:
+        if index is None or len(segments) > 4:
             raise PathError(
                 f"{path!r} is not a node, node.step or node.step.task path of this chain"
             )
         node = nodes[index]
-        if len(segments) == 1:
+        rest = segments[1:]
+        if isinstance(node.node, GroupNode) and rest:
+            # `group.node[.step[.task]]`: the body node is the node the rest addresses.
+            inner = next((b for b in node.body if b.node.id == rest[0]), None)
+            if inner is None:
+                raise PathError(f"{path!r}: group {node.id!r} has no node {rest[0]!r}")
+            node, rest = inner, rest[1:]
+        elif len(segments) > 3:
+            raise PathError(
+                f"{path!r} is not a node, node.step or node.step.task path of this chain"
+            )
+        if not rest:
             return cls(path=path, node_index=index, node=node)
-        if isinstance(node.node, GateNode):
-            raise PathError(f"{path!r}: {node.id!r} is a gate, which has no steps")
-        s_index = next((i for i, s in enumerate(node.steps) if s.id == segments[1]), None)
+        if isinstance(node.node, GateNode | GroupNode):
+            raise PathError(f"{path!r}: {node.id!r} is a gate or group, which has no steps")
+        s_index = next((i for i, s in enumerate(node.steps) if s.id == rest[0]), None)
         if s_index is None:
-            raise PathError(f"{path!r}: node {node.id!r} has no step {segments[1]!r}")
+            raise PathError(f"{path!r}: node {node.id!r} has no step {rest[0]!r}")
         step = node.steps[s_index]
-        if len(segments) == 2:
+        if len(rest) == 1:
             return cls(path=path, node_index=index, node=node, step_index=s_index, step=step)
-        task = next((t for t in step.tasks if t.task.id == segments[2]), None)
+        task = next((t for t in step.tasks if t.task.id == rest[1]), None)
         if task is None:
-            raise PathError(f"{path!r}: step {step.path!r} has no task {segments[2]!r}")
+            raise PathError(f"{path!r}: step {step.path!r} has no task {rest[1]!r}")
         return cls(path=path, node_index=index, node=node, step_index=s_index, step=step, task=task)
 
     @property

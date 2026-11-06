@@ -1013,6 +1013,56 @@
       "title": "GateNode",
       "type": "object"
     },
+    "GroupNode": {
+      "additionalProperties": false,
+      "description": "A slice group: an ordered list of execution nodes, the *body*, that a\nparent item hands to child work items, one per slice of its plan, and takes\nback at the join (`executor.slices`). Seen from the chain it is one node.\n\nOnly chain revision makes one (`templates.slicing`): a chain file or an\nextending chain's `add` that declares one is refused, because a group means\nnothing until a plan has been split. It is read back from a stored snapshot\nor a revision, which validate under the frozen context.\n\n`unforked` is what the parent runs itself when it does not fork the group\n(no fork was decided, or a rejection comes back to the group after the\njoin). `on_conflict` is the handler that gets a join conflict first; without\none a conflict stops for a person.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "group",
+          "title": "Kind",
+          "type": "string"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/ExecNode"
+          },
+          "minItems": 1,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "on_conflict": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecoveryPlan"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "skippable": {
+          "default": false,
+          "title": "Skippable",
+          "type": "boolean"
+        },
+        "unforked": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Unforked",
+          "type": "array"
+        }
+      },
+      "title": "GroupNode",
+      "type": "object"
+    },
     "MergeRejectionPolicy": {
       "additionalProperties": false,
       "description": "`on_merge_rejected`: what an execution node does when the forge drops\nthe merge request it asked to merge from a merge train or merge queue.\n\n`repair` is a recovery-shaped handler that fixes the branch against the\ntarget as it is now; then the chain restarts at `restart_from`, which\nmust name an *earlier* execution node (checked by `Chain`, which alone can\nsee the order): the repaired head goes back through the merge request's\nown checks before it is offered to the forge again. Only a node with an\n`mr.merge` task can have a merge rejected, which `Chain` checks too, on\nthe expanded node.",

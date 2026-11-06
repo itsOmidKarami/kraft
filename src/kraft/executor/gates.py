@@ -21,7 +21,7 @@ from kraft.executor import stops
 from kraft.executor.context import LaunchContext, OnApprove
 from kraft.store import _now as _now
 from kraft.templates import revision
-from kraft.templates.models import ExecNode, GateNode, ResolvedNode
+from kraft.templates.models import ExecNode, GateNode, GroupNode, ResolvedNode
 from kraft.vocab import (
     GATE_CLOSED,
     RUN_BOUNDARY,
@@ -125,7 +125,12 @@ def preceding_exec_node(nodes: Sequence[ResolvedNode], gate_index: int) -> int |
     same gate, a ping-pong bounded only by the reject loop's cap (Ruling 54).
     """
     return next(
-        (i for i in range(gate_index - 1, -1, -1) if isinstance(nodes[i].node, ExecNode)), None
+        (
+            i
+            for i in range(gate_index - 1, -1, -1)
+            if isinstance(nodes[i].node, ExecNode | GroupNode)
+        ),
+        None,
     )
 
 

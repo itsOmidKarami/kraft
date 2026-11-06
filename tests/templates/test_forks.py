@@ -125,3 +125,39 @@ def test_a_task_retry_preserves_its_step_siblings_and_nothing_wider(chain):
 
     assert preserved("build.compile.lint") == {"build.compile.cc"}
     assert preserved("build.compile") == preserved("build") == preserved(None) == frozenset()
+
+
+def test_a_path_reaches_into_a_group_body():
+    sliced = v1_chain(
+        """
+- id: slices
+  kind: group
+  nodes:
+    - id: implementation
+      kind: exec
+      tasks: [{id: build, kind: subprocess, command: "true"}]
+    - id: verification
+      kind: exec
+      steps:
+        - id: tests
+          tasks: [{id: test_changed_scopes, kind: subprocess, command: "true"}]
+""",
+        repo="/r",
+        frozen=True,
+    )
+
+    group = ChainPath.parse(sliced, "slices")
+    node = ChainPath.parse(sliced, "slices.verification")
+    step = ChainPath.parse(sliced, "slices.verification.tests")
+    task = ChainPath.parse(sliced, "slices.verification.tests.test_changed_scopes")
+
+    assert (group.scope, node.scope, step.scope, task.scope) == (
+        ControlScope.NODE,
+        ControlScope.NODE,
+        ControlScope.STEP,
+        ControlScope.TASK,
+    )
+    assert task.node_index == 0
+    assert task.task.path == "slices.verification.tests.test_changed_scopes"
+    with pytest.raises(PathError, match="no node 'nope'"):
+        ChainPath.parse(sliced, "slices.nope")

@@ -54,7 +54,7 @@ async def retry(
     )
     node = target.node if target is not None else walk.chain_of(row).chain.nodes[0]
     is_gate = isinstance(node.node, GateNode)
-    key = None if is_gate or node.node.fix_loop is None else walk._loop_key(node)
+    key = None if is_gate or getattr(node.node, "fix_loop", None) is None else walk._loop_key(node)
 
     def _record(c):
         before = store.cap_counts(c, work_item_id)

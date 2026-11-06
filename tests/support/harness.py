@@ -483,22 +483,37 @@ def e2e_templates_dir(tmp_path: Path) -> Path:
 
 
 def v1_resolved(
-    nodes: list[dict] | str, *, chain_id: str = "t", steering: dict[str, str] | None = None
+    nodes: list[dict] | str,
+    *,
+    chain_id: str = "t",
+    steering: dict[str, str] | None = None,
+    frozen: bool = False,
 ):
     """A `ResolvedChain` over `nodes` (authored V1 node mappings, or the same
     list as YAML text) -- what `executor.intake` takes, and what `v1_chain`
     materializes. `steering` is the profile text a library would have resolved
-    (`ResolvedChain.steering`)."""
+    (`ResolvedChain.steering`). `frozen`: read it as a stored snapshot is, which
+    is the only way a `group` node validates (chain revision makes one)."""
+    from kraft.policy import FROZEN
     from kraft.templates.models import Chain, ResolvedChain
 
     if isinstance(nodes, str):
         nodes = yaml.safe_load(nodes)
     return ResolvedChain.from_chain(
-        Chain.model_validate({"id": chain_id, "nodes": nodes}), steering=steering
+        Chain.model_validate({"id": chain_id, "nodes": nodes}, context=FROZEN if frozen else None),
+        steering=steering,
     )
 
 
-def v1_chain(nodes, *, repo, chain_id: str = "t", steering: dict | None = None, target=None):
+def v1_chain(
+    nodes,
+    *,
+    repo,
+    chain_id: str = "t",
+    steering: dict | None = None,
+    target=None,
+    frozen: bool = False,
+):
     """A `MaterializedChain` bound to `target`, else to one repository, `repo`.
 
     `nodes` is authored V1 node mappings, the same list as YAML text, or an
@@ -513,7 +528,7 @@ def v1_chain(nodes, *, repo, chain_id: str = "t", steering: dict | None = None, 
     resolved = (
         nodes
         if isinstance(nodes, ResolvedChain)
-        else v1_resolved(nodes, chain_id=chain_id, steering=steering)
+        else v1_resolved(nodes, chain_id=chain_id, steering=steering, frozen=frozen)
     )
     return resolved.materialize(
         target=target or WorkItemTarget.for_repository("target"),

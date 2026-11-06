@@ -40,6 +40,7 @@ from kraft.templates.models import (
     PATH_SEPARATOR,
     ExecNode,
     GateNode,
+    GroupNode,
     RecoveryPlan,
     ResolvedChain,
     TaskBase,
@@ -642,6 +643,10 @@ def _sources(
         if isinstance(n, GateNode):
             if n.auto_review is not None:
                 task(n.auto_review, join(n.id, AUTO_REVIEW_SEGMENT))
+            continue
+        if isinstance(n, GroupNode):
+            # Made by chain revision; a draft addresses it as one node and never
+            # reaches into its body.
             continue
         shape(n, n.id)
         for key in ("on_failure", "fix_loop"):

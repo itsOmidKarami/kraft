@@ -949,7 +949,11 @@ def review_reachable(row) -> bool:
         reached = reached or n.id == start_id
         if reached and (
             isinstance(n.node, GateNode)
-            or any(isinstance(t.task, AgentTask) for s in n.steps for t in s.tasks)
+            or any(
+                isinstance(t.task, AgentTask)
+                for s in (*n.steps, *(s for b in n.body for s in b.steps))
+                for t in s.tasks
+            )
         ):
             return True
     return not reached
@@ -1787,7 +1791,7 @@ async def _retry(wid: str, body: Retry, request: Request):
     node = target.node if target is not None else chain.chain.nodes[0]
     node_id = node.id
     is_gate = isinstance(node.node, GateNode)
-    key = None if is_gate or node.node.fix_loop is None else walk._loop_key(node)
+    key = None if is_gate or getattr(node.node, "fix_loop", None) is None else walk._loop_key(node)
     gate_key = gates.reject_loop_key(node.id) if is_gate else None
     # The caller as this item's session, bare, as every event records one:
     # `<wid>/<sid>` names it only when `wid` is this item, and a bare id is
@@ -2124,7 +2128,7 @@ def _stopped_step(st, wid: str, chain, row) -> str | None:
     node = chain.chain.nodes[store.node_index(row, row["current_node_id"])]
     if isinstance(node.node, GateNode) or row["current_step"] >= len(node.steps):
         return None
-    if node.node.fix_loop is not None and st.db.read(
+    if getattr(node.node, "fix_loop", None) is not None and st.db.read(
         lambda c: store.read_counter(c, wid, walk._loop_key(node))
     ):
         return None

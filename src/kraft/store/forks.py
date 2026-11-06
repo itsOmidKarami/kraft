@@ -56,7 +56,7 @@ def fork_run(
     reader of the row runs what the fork froze.
     """
     from kraft.templates.forks import RunFork
-    from kraft.templates.models import ExecNode
+    from kraft.templates.models import ExecNode, GroupNode
 
     item = conn.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     (after_seq,) = conn.execute(
@@ -84,7 +84,7 @@ def fork_run(
     nodes = fork.chain.chain.nodes
     reopened = []
     for i, node in enumerate(nodes[start:], start):
-        if isinstance(node.node, ExecNode):
+        if isinstance(node.node, ExecNode | GroupNode):
             if by_person:
                 # `walk._loop_key`'s format; the store must not import the executor.
                 key = f"{node.id}.fix_loop" if node.fix_loop else None

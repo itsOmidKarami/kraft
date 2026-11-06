@@ -13,6 +13,7 @@ from support.harness import v1_chain
 
 from kraft.templates import models as tm
 from kraft.templates.library import TemplateLibrary
+from kraft.templates.models import STORED_SNAPSHOT
 
 
 def sub(id: str = "t", **kw) -> dict:
@@ -483,3 +484,51 @@ def test_a_fix_loop_is_an_execution_node_control_naming_its_fixing_tasks():
         tm.GateNode.model_validate({"id": "g", "kind": "gate", "fix_loop": plan(sub("fix"))})
     with pytest.raises(ValidationError, match="exactly one of 'tasks' or 'steps'"):
         tm.FixLoop.model_validate({"judge": sub("judge")})
+
+
+def _grouped(**node) -> dict:
+    """early -> slices (a group) -> gate -> rebase, which declares `node`."""
+    return {
+        "id": "c",
+        "nodes": [
+            {
+                "id": "slices",
+                "kind": "group",
+                "nodes": [exec_node("implementation", tasks=[sub()])],
+            },
+            {"id": "gate", "kind": "gate", **node.pop("gate", {})},
+            exec_node("rebase", tasks=[sub(), merge()], **node),
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    ("node", "read"),
+    [
+        pytest.param(
+            {"on_base_changed": {"restart_from": "slices"}},
+            lambda c: c.nodes[2].on_base_changed.restart_from,
+            id="on-base-changed",
+        ),
+        pytest.param(
+            {"gate": {"reject_to": "slices"}},
+            lambda c: c.nodes[1].reject_to,
+            id="gate-reject-to",
+        ),
+    ],
+)
+def test_a_group_is_an_accepted_restart_or_reject_target(node, read):
+    chain = tm.Chain.model_validate(_grouped(**node), context=STORED_SNAPSHOT)
+    assert read(chain) == "slices"
+
+
+@pytest.mark.parametrize(
+    "node",
+    [
+        pytest.param({"on_base_changed": {"restart_from": "implementation"}}, id="on-base-changed"),
+        pytest.param({"gate": {"reject_to": "implementation"}}, id="gate-reject-to"),
+    ],
+)
+def test_a_restart_target_cannot_name_a_node_inside_a_group(node):
+    with pytest.raises(ValidationError, match="implementation"):
+        tm.Chain.model_validate(_grouped(**node), context=STORED_SNAPSHOT)

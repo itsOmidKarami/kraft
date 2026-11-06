@@ -203,6 +203,8 @@ class TaskKind(StrEnum):
 class NodeKind(StrEnum):
     EXEC = "exec"
     GATE = "gate"
+    #: Made only by chain revision (`templates.slicing`), never written in a chain file.
+    GROUP = "group"
 
 
 class BuiltinAction(StrEnum):
@@ -615,7 +617,10 @@ def _plain_relative(name: str) -> None:
 def resolve_reads(node_id: str, reads: Sequence[str]) -> tuple[str, ...]:
     """The writer task paths `reads` names, read from the node `node_id`: a
     two-segment entry (`step.task`) is that node's own, a three-segment one
-    (`node.step.task`) is kept as written. Anything else is refused."""
+    (`node.step.task`) is kept as written. Anything else is refused. Read from
+    a group's body node (`group.node`), a three-segment entry names a sibling
+    body node, so it is kept under the group."""
+    group = node_id.rpartition(PATH_SEPARATOR)[0]
     out = []
     for entry in reads:
         parts = entry.split(PATH_SEPARATOR)
@@ -624,7 +629,10 @@ def resolve_reads(node_id: str, reads: Sequence[str]) -> tuple[str, ...]:
                 f"reads: {entry!r} must be step.task or node.step.task, never a bare task id "
                 "or more than three segments"
             )
-        out.append(f"{node_id}{PATH_SEPARATOR}{entry}" if len(parts) == 2 else entry)
+        if len(parts) == 2:
+            out.append(f"{node_id}{PATH_SEPARATOR}{entry}")
+        else:
+            out.append(f"{group}{PATH_SEPARATOR}{entry}" if group else entry)
     return tuple(out)
 
 
@@ -1310,7 +1318,67 @@ class GateNode(BaseModel):
         return self
 
 
-AnyNode = Annotated[ExecNode | GateNode, Field(discriminator="kind")]
+class GroupNode(BaseModel):
+    """A slice group: an ordered list of execution nodes, the *body*, that a
+    parent item hands to child work items, one per slice of its plan, and takes
+    back at the join (`executor.slices`). Seen from the chain it is one node.
+
+    Only chain revision makes one (`templates.slicing`): a chain file or an
+    extending chain's `add` that declares one is refused, because a group means
+    nothing until a plan has been split. It is read back from a stored snapshot
+    or a revision, which validate under the frozen context.
+
+    `unforked` is what the parent runs itself when it does not fork the group
+    (no fork was decided, or a rejection comes back to the group after the
+    join). `on_conflict` is the handler that gets a join conflict first; without
+    one a conflict stops for a person."""
+
+    model_config = _CONFIG
+
+    id: Identifier
+    kind: Literal[NodeKind.GROUP]
+    nodes: list[ExecNode] = Field(min_length=1)
+    #: Ids of body nodes. Empty means every body node.
+    unforked: list[Identifier] = Field(default_factory=list)
+    on_conflict: RecoveryPlan | None = None
+    #: A group is not skipped as a whole: its children are, one by one.
+    skippable: StrictBool = False
+
+    @model_validator(mode="after")
+    def _made_by_revision(self, info: ValidationInfo) -> Self:
+        if not (info.context or {}).get("frozen"):
+            raise ValueError(
+                f"node {self.id!r}: a group is made only by chain revision, never written "
+                "in a chain file"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _body_is_plain(self) -> Self:
+        ids = [n.id for n in self.nodes]
+        _unique(f"node in group {self.id!r}", ids)
+        for node in self.nodes:
+            where = f"group {self.id!r}, node {node.id!r}"
+            if node.on_merge_rejected is not None:
+                raise ValueError(f"{where}: a slice body cannot declare on_merge_rejected")
+            if node.on_base_changed is not None:
+                raise ValueError(f"{where}: a slice body cannot declare on_base_changed")
+            if any(isinstance(t, ForgeTask) for t in node.own_tasks()):
+                raise ValueError(f"{where}: a slice body cannot hold a forge task")
+        unknown = [u for u in self.unforked if u not in ids]
+        if unknown:
+            raise ValueError(
+                f"group {self.id!r}: unforked names {unknown}, which are not in its body"
+            )
+        return self
+
+    def unforked_ids(self) -> list[str]:
+        """The body nodes the parent runs itself, in body order."""
+        wanted = set(self.unforked)
+        return [n.id for n in self.nodes if not wanted or n.id in wanted]
+
+
+AnyNode = Annotated[ExecNode | GateNode | GroupNode, Field(discriminator="kind")]
 
 
 def merge_rejection_limit(position: int, final: int | None) -> int:
@@ -1355,7 +1423,9 @@ class Chain(BaseModel):
 
         def backward_exec(target: str, limit: int) -> bool:
             at = index.get(target)
-            return at is not None and isinstance(self.nodes[at], ExecNode) and at <= limit
+            return (
+                at is not None and isinstance(self.nodes[at], ExecNode | GroupNode) and at <= limit
+            )
 
         # The first final gate: a merge-rejection rewind must pass it again.
         final = next(
@@ -1370,6 +1440,8 @@ class Chain(BaseModel):
                         f"node {node.id!r}: reject_to {node.reject_to!r} must name an earlier "
                         f"execution node in {where}"
                     )
+                continue
+            if isinstance(node, GroupNode):
                 continue
             if node.on_base_changed is not None:
                 # This node itself is allowed: restarting the node whose work
@@ -1486,70 +1558,80 @@ class Chain(BaseModel):
         repair and a gate's reviewer read nothing. A handler may run before
         its writer did, and then gets nothing, as after a skip."""
         resolved = ResolvedChain.from_chain(self)
-        # task path -> (node position, step position, the variables it declares,
-        # or None when it declares no outputs)
-        writers: dict[str, tuple[int, int, tuple[str, ...] | None]] = {}
-        for i, node in enumerate(resolved.nodes):
-            for j, step in enumerate(node.steps):
-                for task in step.tasks:
-                    outputs = getattr(task.task, "outputs", None)
-                    writers[task.path] = (
-                        i,
-                        j,
-                        None if outputs is None else tuple(outputs.variables),
+
+        def check_scope(nodes: tuple[ResolvedNode, ...]) -> None:
+            # task path -> (node position, step position, the variables it declares,
+            # or None when it declares no outputs)
+            writers: dict[str, tuple[int, int, tuple[str, ...] | None]] = {}
+            for i, node in enumerate(nodes):
+                for j, step in enumerate(node.steps):
+                    for task in step.tasks:
+                        outputs = getattr(task.task, "outputs", None)
+                        writers[task.path] = (
+                            i,
+                            j,
+                            None if outputs is None else tuple(outputs.variables),
+                        )
+
+            def check(reader: ResolvedTask, node_at: int, last_step: int | None) -> None:
+                """`last_step`: the latest step of the reader's own node it may read
+                from; `None` where it may read no step outputs at all."""
+                node = nodes[node_at]
+                for entry, path in zip(
+                    reader.task.reads, resolve_reads(node.id, reader.task.reads), strict=True
+                ):
+                    where = f"{reader.path}: reads {entry!r}"
+                    if last_step is None:
+                        raise ValueError(f"{where}, but a task here cannot read step outputs")
+                    if path not in writers:
+                        raise ValueError(f"{where}, which names no task in a node's own steps")
+                    at_node, at_step, declared = writers[path]
+                    if declared is None:
+                        raise ValueError(f"{where}, which declares no outputs")
+                    if at_node > node_at or (at_node == node_at and at_step > last_step):
+                        raise ValueError(f"{where}, which does not run before it")
+                name = pipeline_variable(getattr(reader.task, "pipeline", None))
+                if name is not None and not any(
+                    name in (writers.get(path, (0, 0, None))[2] or ())
+                    for path in resolve_reads(node.id, reader.task.reads)
+                ):
+                    raise ValueError(
+                        f"{reader.path}: pipeline reads ${name}, "
+                        "which no task in its reads declares"
                     )
 
-        def check(reader: ResolvedTask, node_at: int, last_step: int | None) -> None:
-            """`last_step`: the latest step of the reader's own node it may read
-            from; `None` where it may read no step outputs at all."""
-            node = resolved.nodes[node_at]
-            for entry, path in zip(
-                reader.task.reads, resolve_reads(node.id, reader.task.reads), strict=True
-            ):
-                where = f"{reader.path}: reads {entry!r}"
-                if last_step is None:
-                    raise ValueError(f"{where}, but a task here cannot read step outputs")
-                if path not in writers:
-                    raise ValueError(f"{where}, which names no task in a node's own steps")
-                at_node, at_step, declared = writers[path]
-                if declared is None:
-                    raise ValueError(f"{where}, which declares no outputs")
-                if at_node > node_at or (at_node == node_at and at_step > last_step):
-                    raise ValueError(f"{where}, which does not run before it")
-            name = pipeline_variable(getattr(reader.task, "pipeline", None))
-            if name is not None and not any(
-                name in (writers.get(path, (0, 0, None))[2] or ())
-                for path in resolve_reads(node.id, reader.task.reads)
-            ):
-                raise ValueError(
-                    f"{reader.path}: pipeline reads ${name}, which no task in its reads declares"
-                )
-
-        for i, node in enumerate(resolved.nodes):
-            last = len(node.steps) - 1
-            for j, step in enumerate(node.steps):
-                for task in step.tasks:
-                    # A sibling in the same step runs concurrently: step j-1 at most.
-                    check(task, i, j - 1)
-                    for plan in task.on_failure:
+            for i, node in enumerate(nodes):
+                last = len(node.steps) - 1
+                for j, step in enumerate(node.steps):
+                    for task in step.tasks:
+                        # A sibling in the same step runs concurrently: step j-1 at most.
+                        check(task, i, j - 1)
+                        for plan in task.on_failure:
+                            for handler in plan.tasks:
+                                check(handler, i, j)
+                    for plan in step.on_failure:
                         for handler in plan.tasks:
                             check(handler, i, j)
-                for plan in step.on_failure:
-                    for handler in plan.tasks:
-                        check(handler, i, j)
-            for group in (node.on_failure, node.fix_loop):
-                for plan in group:
-                    for handler in plan.tasks:
-                        check(handler, i, last)
-            for dedicated in (node.judge, node.escalation):
-                if dedicated is not None:
-                    check(dedicated, i, last)
-            for group in (node.on_conflict, node.on_merge_rejected):
-                for plan in group:
-                    for handler in plan.tasks:
-                        check(handler, i, None)
-            if node.auto_review is not None:
-                check(node.auto_review, i, None)
+                for group in (node.on_failure, node.fix_loop):
+                    for plan in group:
+                        for handler in plan.tasks:
+                            check(handler, i, last)
+                for dedicated in (node.judge, node.escalation):
+                    if dedicated is not None:
+                        check(dedicated, i, last)
+                for group in (node.on_conflict, node.on_merge_rejected):
+                    for plan in group:
+                        for handler in plan.tasks:
+                            check(handler, i, None)
+                if node.auto_review is not None:
+                    check(node.auto_review, i, None)
+
+        # A group's body is a scope of its own: a `reads` entry may not cross its
+        # boundary either way, since each child (and an unforked run) sees only
+        # the body.
+        scopes = [resolved.nodes, *(n.body for n in resolved.nodes if n.body)]
+        for scope in scopes:
+            check_scope(scope)
         return self
 
 
@@ -1628,7 +1710,7 @@ class ResolvedNode:
     `main` step a `tasks` shorthand became, so the runtime sees one shape."""
 
     id: str
-    node: ExecNode | GateNode
+    node: ExecNode | GateNode | GroupNode
     steps: tuple[ResolvedStep, ...] = ()
     on_failure: tuple[ResolvedStep, ...] = ()
     fix_loop: tuple[ResolvedStep, ...] = ()
@@ -1648,6 +1730,9 @@ class ResolvedNode:
     scopes: Scopes = ()
     #: The node's own placement, else its chain's (`None`: unset).
     runner: str | None = None
+    #: A group's resolved body: each node at `<group>.<node>`, so its tasks sit
+    #: at `group.node.step.task`. Empty for any other node.
+    body: tuple[ResolvedNode, ...] = ()
 
     #: A gate is a node, for its caps' level too (Ruling 211).
     level: ClassVar[str] = "nodes"
@@ -1659,10 +1744,12 @@ class ResolvedNode:
     @property
     def own(self) -> TaskPolicyOverride | None:
         """The override this node sets itself."""
-        return self.node.policy
+        return getattr(self.node, "policy", None)
 
     def steps_in(self) -> Iterator[ResolvedStep]:
         """Every step this node runs, handlers' steps included."""
+        for inner in self.body:
+            yield from inner.steps_in()
         for group in (
             self.steps,
             self.on_failure,
@@ -1681,6 +1768,10 @@ class ResolvedNode:
         for dedicated in (self.judge, self.escalation, self.auto_review):
             if dedicated is not None:
                 yield dedicated
+        for inner in self.body:
+            for dedicated in (inner.judge, inner.escalation):
+                if dedicated is not None:
+                    yield dedicated
 
     @property
     def covered_by(self) -> str | None:
@@ -1710,6 +1801,60 @@ class ResolvedNode:
         return frozenset(
             getattr(t.task, "produces", None) for step in self.steps for t in step.tasks
         )
+
+
+def _resolve_exec(node: ExecNode, node_id: str, node_runner: str | None) -> ResolvedNode:
+    """One execution node at `node_id`, the id its paths start from: the node's
+    own, or `<group>.<node>` inside a group's body."""
+    node_scopes = _own(node.policy)
+    loop = node.fix_loop
+    return ResolvedNode(
+        id=node_id,
+        node=node,
+        steps=node.resolve_steps(node_id, node_scopes, node_runner),
+        on_failure=_handler_steps(node.on_failure, node_id, node_scopes, node_runner),
+        fix_loop=(
+            loop.resolve_steps(f"{node_id}{PATH_SEPARATOR}fix_loop", node_scopes, node_runner)
+            if loop is not None
+            else ()
+        ),
+        judge=_dedicated(
+            f"{node_id}{PATH_SEPARATOR}fix_loop{PATH_SEPARATOR}{JUDGE_SEGMENT}",
+            loop.judge if loop is not None else None,
+            node_scopes,
+            node_runner,
+        ),
+        escalation=(
+            _dedicated(
+                f"{node_id}{PATH_SEPARATOR}escalation{PATH_SEPARATOR}{node.escalation.id}",
+                node.escalation,
+                node_scopes,
+                node_runner,
+            )
+            if node.escalation is not None
+            else None
+        ),
+        on_conflict=(
+            node.on_base_changed.on_conflict.resolve_steps(
+                f"{node_id}{PATH_SEPARATOR}on_base_changed{PATH_SEPARATOR}on_conflict",
+                node_scopes,
+                node_runner,
+            )
+            if node.on_base_changed is not None and node.on_base_changed.on_conflict is not None
+            else ()
+        ),
+        on_merge_rejected=(
+            node.on_merge_rejected.repair.resolve_steps(
+                f"{node_id}{PATH_SEPARATOR}on_merge_rejected{PATH_SEPARATOR}repair",
+                node_scopes,
+                node_runner,
+            )
+            if node.on_merge_rejected is not None
+            else ()
+        ),
+        scopes=node_scopes,
+        runner=node_runner,
+    )
 
 
 def _redundant_given(node: ResolvedNode, kinds: frozenset[str]) -> bool:
@@ -1759,8 +1904,8 @@ class ResolvedChain:
             # Every handler and control task sits in its node's scope (or its
             # gate's): `node_scopes` is what each of them inherits before its
             # own step's or task's override.
-            node_scopes = _own(node.policy)
-            node_runner = node.runner or chain.runner
+            node_scopes = _own(getattr(node, "policy", None))
+            node_runner = getattr(node, "runner", None) or chain.runner
 
             if isinstance(node, GateNode):
                 nodes.append(
@@ -1778,59 +1923,31 @@ class ResolvedChain:
                     )
                 )
                 continue
-            loop = node.fix_loop
-            nodes.append(
-                ResolvedNode(
-                    id=node.id,
-                    node=node,
-                    steps=node.resolve_steps(node.id, node_scopes, node_runner),
-                    on_failure=_handler_steps(node.on_failure, node.id, node_scopes, node_runner),
-                    fix_loop=(
-                        loop.resolve_steps(
-                            f"{node.id}{PATH_SEPARATOR}fix_loop", node_scopes, node_runner
-                        )
-                        if loop is not None
-                        else ()
-                    ),
-                    judge=_dedicated(
-                        f"{node.id}{PATH_SEPARATOR}fix_loop{PATH_SEPARATOR}{JUDGE_SEGMENT}",
-                        loop.judge if loop is not None else None,
-                        node_scopes,
-                        node_runner,
-                    ),
-                    escalation=(
-                        _dedicated(
-                            f"{node.id}{PATH_SEPARATOR}escalation{PATH_SEPARATOR}{node.escalation.id}",
-                            node.escalation,
-                            node_scopes,
-                            node_runner,
-                        )
-                        if node.escalation is not None
-                        else None
-                    ),
-                    on_conflict=(
-                        node.on_base_changed.on_conflict.resolve_steps(
-                            f"{node.id}{PATH_SEPARATOR}on_base_changed{PATH_SEPARATOR}on_conflict",
-                            node_scopes,
-                            node_runner,
-                        )
-                        if node.on_base_changed is not None
-                        and node.on_base_changed.on_conflict is not None
-                        else ()
-                    ),
-                    on_merge_rejected=(
-                        node.on_merge_rejected.repair.resolve_steps(
-                            f"{node.id}{PATH_SEPARATOR}on_merge_rejected{PATH_SEPARATOR}repair",
-                            node_scopes,
-                            node_runner,
-                        )
-                        if node.on_merge_rejected is not None
-                        else ()
-                    ),
-                    scopes=node_scopes,
-                    runner=node_runner,
+            if isinstance(node, GroupNode):
+                nodes.append(
+                    ResolvedNode(
+                        id=node.id,
+                        node=node,
+                        on_conflict=(
+                            node.on_conflict.resolve_steps(
+                                f"{node.id}{PATH_SEPARATOR}on_conflict", (), node_runner
+                            )
+                            if node.on_conflict is not None
+                            else ()
+                        ),
+                        runner=node_runner,
+                        body=tuple(
+                            _resolve_exec(
+                                inner,
+                                f"{node.id}{PATH_SEPARATOR}{inner.id}",
+                                inner.runner or node_runner,
+                            )
+                            for inner in node.nodes
+                        ),
+                    )
                 )
-            )
+                continue
+            nodes.append(_resolve_exec(node, node.id, node_runner))
         return cls(chain=chain, nodes=tuple(nodes), steering=steering, addons=addons)
 
     def materialize(
@@ -2170,7 +2287,7 @@ class ResolvedChain:
             """The nearest kept execution node before the dropped `target`."""
             at = next(i for i, n in enumerate(nodes) if n.id == target)
             earlier = (n for n in reversed(nodes[:at]) if n.id not in dropped)
-            return next((n.id for n in earlier if isinstance(n, ExecNode)), None)
+            return next((n.id for n in earlier if isinstance(n, ExecNode | GroupNode)), None)
 
         def repointed(node: AnyNode) -> AnyNode:
             if isinstance(node, GateNode):
@@ -2179,6 +2296,8 @@ class ResolvedChain:
                     if node.reject_to in dropped
                     else node
                 )
+            if isinstance(node, GroupNode):
+                return node
             update = {}
             for name in ("on_base_changed", "on_merge_rejected"):
                 policy = getattr(node, name)
