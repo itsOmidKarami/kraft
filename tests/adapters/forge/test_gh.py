@@ -312,8 +312,12 @@ def _run(name: str, conclusion: str, created: str) -> dict:
             "failed",
             "",
         ),
+        # The shared state block is what `pipeline_status` reads too: a neutral
+        # conclusion settles well, a stale one is no verdict.
+        ((_run("test", "neutral", "2026-09-19T05:51:00Z"),), "success", ""),
+        ((_run("test", "stale", "2026-09-19T05:51:00Z"),), "pending", ""),
     ],
-    ids=["only-cancelled", "successor-green", "successor-red"],
+    ids=["only-cancelled", "successor-green", "successor-red", "neutral-settles", "stale-waits"],
 )
 async def test_gh_branch_ci_status_judges_the_latest_run_never_a_cancelled_one(
     cli, tmp_path, rows, state, cancelled_at

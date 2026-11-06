@@ -22,6 +22,7 @@ from .api_outputs import (
     runs,
     workflow_run,
 )
+from .nodes import Api
 from .nodes import rest_calls as _rest
 
 _OPEN = find_result(listed())
@@ -275,3 +276,110 @@ async def test_gh_mr_details_says_merged_when_the_pull_has_merged_at(cli, tmp_pa
     cli.stub("gh", routes={FIND: _OPEN, f"api*{_PULLS}/7*": json.dumps(pull)})
     got = await forge.GhCli().mr_details(repo=tmp_path, branch="kraft/abc")
     assert got is not None and got.state == "merged"
+
+
+_RUN = "api repos/{owner}/{repo}/actions/runs/99"
+_RUN_JOBS = "api repos/{owner}/{repo}/actions/runs/99/jobs*"
+
+
+def _run99(**fields) -> str:
+    return json.dumps(
+        workflow_run(99, **{"path": ".github/workflows/ci.yml", "run_attempt": 1, **fields})
+    )
+
+
+_RED_JOBS = json.dumps({"jobs": [job(7, "test", "failure")]})
+_NO_JOBS = json.dumps({"jobs": []})
+
+
+@pytest.mark.parametrize(
+    "run, jobs, want",
+    [
+        pytest.param(_run99(conclusion="success"), _NO_JOBS, {"state": "success"}, id="success"),
+        pytest.param(
+            _run99(status="queued", conclusion=None), _NO_JOBS, {"state": "pending"}, id="queued"
+        ),
+        pytest.param(
+            _run99(status="in_progress", conclusion=None),
+            _NO_JOBS,
+            {"state": "pending"},
+            id="in_progress",
+        ),
+        pytest.param(
+            _run99(status="waiting", conclusion=None),
+            _NO_JOBS,
+            {"state": "pending", "blocked_on": "environment approval"},
+            id="waiting",
+        ),
+        pytest.param(
+            _run99(conclusion="failure"),
+            _RED_JOBS,
+            {"state": "failed", "failed": ("test:script_failure",), "nothing_ran": False},
+            id="failure-with-jobs",
+        ),
+        pytest.param(
+            _run99(conclusion="startup_failure"),
+            _NO_JOBS,
+            {"state": "failed", "failed": (".github/workflows/ci.yml:runner_system_failure",)},
+            id="startup_failure-no-jobs",
+        ),
+        *(
+            pytest.param(
+                _run99(conclusion=c),
+                _NO_JOBS,
+                {"state": "failed", "nothing_ran": True, "failed": ()},
+                id=c,
+            )
+            for c in ("skipped", "neutral", "stale")
+        ),
+        pytest.param(
+            _run99(conclusion="cancelled", updated_at="2026-09-19T06:00:00Z"),
+            _NO_JOBS,
+            {"state": "pending", "cancelled_at": "2026-09-19T06:00:00Z"},
+            id="cancelled",
+        ),
+    ],
+)
+async def test_pipeline_status_gh(cli, tmp_path, run, jobs, want):
+    cli.stub("gh", routes={_RUN_JOBS: jobs, _RUN: run}, default="{}")
+
+    status = await forge.GhCli().pipeline_status(repo=tmp_path, pipeline_id="99")
+
+    got = {
+        k: tuple(f"{j.name}:{j.failure_reason}" for j in status.failed_jobs)
+        if k == "failed"
+        else getattr(status, k)
+        for k in want
+    }
+    assert got == want
+    assert status.mergeable is None
+    assert status.sha == "deadbeef"
+
+
+async def test_pipeline_status_gh_follows_the_latest_attempt_and_names_it(cli, tmp_path):
+    """A person re-running the workflow keeps the run id and bumps the attempt:
+    the read is the id's, so it is the newest attempt, and the log says which."""
+    cli.stub("gh", routes={_RUN: _run99(conclusion="success", run_attempt=2)})
+
+    status = await forge.GhCli().pipeline_status(repo=tmp_path, pipeline_id="99")
+
+    assert status.jobs[0] == "run 99 attempt 2 on main at deadbee, created 2026-09-19T05:51:00Z"
+
+
+async def test_pipeline_status_gh_refuses_a_forks_run_as_not_found(cli, tmp_path):
+    cli.stub("gh", routes={_RUN: _run99(head_repository={"id": 2})})
+
+    with pytest.raises(forge.ForgeError) as caught:
+        await forge.GhCli().pipeline_status(repo=tmp_path, pipeline_id="99")
+
+    assert caught.value.reason == "not_found"
+    assert "fork" in str(caught.value)
+
+
+async def test_pipeline_status_gh_404_is_not_found(cli, tmp_path):
+    cli.stub("gh", routes={_RUN: Api(404, '{"message":"Not Found"}')})
+
+    with pytest.raises(forge.ForgeError) as caught:
+        await forge.GhCli().pipeline_status(repo=tmp_path, pipeline_id="99")
+
+    assert caught.value.reason == "not_found"

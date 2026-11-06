@@ -56,6 +56,9 @@ _GH_FAILURE_REASON = {
 #: person cancelled with no successor is `ci.render_ci`'s "abandoned".
 _GH_RED = frozenset(_GH_FAILURE_REASON)
 _GH_SETTLED_OK = frozenset({"SUCCESS", "NEUTRAL", "SKIPPED"})
+#: A completed run that did nothing: green must never be said of it
+#: (`pipeline_status`).
+_GH_NOTHING_RAN = frozenset({"SKIPPED", "NEUTRAL", "STALE"})
 
 
 def _bot_feedback(
@@ -307,6 +310,23 @@ def _red_jobs(rows: list[dict], *, url: str) -> tuple[FailedJob, ...]:
         for r in rows
         if str(r.get("conclusion") or "").upper() in _GH_RED
     )
+
+
+def _runs_state(runs: list[dict]) -> tuple[CIState, tuple[str, ...]]:
+    """One state for workflow runs, and a line per run: pending until every run
+    has completed, then red if any is, green if all settled well, and pending
+    for a cancel or a conclusion that is neither (`_GH_RED`, `_GH_SETTLED_OK`)."""
+    jobs = tuple(
+        f"{r.get('name')}: {r.get('conclusion') or r.get('status') or 'PENDING'}" for r in runs
+    )
+    if any(str(r.get("status") or "") != "completed" for r in runs):
+        return "pending", jobs
+    conclusions = [str(r.get("conclusion") or "").upper() for r in runs]
+    if any(c in _GH_RED for c in conclusions):
+        return "failed", jobs
+    if all(c in _GH_SETTLED_OK for c in conclusions):
+        return "success", jobs
+    return "pending", jobs
 
 
 def _latest_by_name(rows: list[dict], *, name: str, started: str) -> list[dict]:
@@ -735,20 +755,7 @@ class GhCli(mr_ops.CliWaits):
                 jobs=(f"no run for {head_sha[:7]} yet",),
                 no_checks=not await self._reports_elsewhere(repo, head_sha),
             )
-        jobs = tuple(
-            f"{r.get('name')}: {r.get('conclusion') or r.get('status') or 'PENDING'}"
-            for r in current
-        )
-        if any(str(r.get("status") or "") != "completed" for r in current):
-            state: CIState = "pending"
-        else:
-            conclusions = [str(r.get("conclusion") or "").upper() for r in current]
-            if any(c in _GH_RED for c in conclusions):
-                state = "failed"
-            elif all(c in _GH_SETTLED_OK for c in conclusions):
-                state = "success"
-            else:
-                state = "pending"
+        state, jobs = _runs_state(current)
         failed_jobs = _red_jobs(current, url="url")
         return CIStatus(
             state=state,
@@ -1043,6 +1050,54 @@ class GhCli(mr_ops.CliWaits):
             url=url,
             jobs=(f"run {run_id}: {conclusion}", *jobs),
             failed_jobs=failed_jobs,
+        )
+
+    async def pipeline_status(self, *, repo: Path, pipeline_id: str) -> CIStatus:
+        """One Actions run, read by its id (never the `run_number`): the latest
+        attempt, since a re-run keeps the id. A run of a fork is refused as
+        `not_found`; one that ran nothing says so in `nothing_ran`; one parked
+        for an environment approval says so in `blocked_on`."""
+        data = await self._api(repo, f"repos/{{owner}}/{{repo}}/actions/runs/{pipeline_id}")
+        if not isinstance(data, dict):
+            raise ForgeError(f"GET actions/runs/{pipeline_id}: answered without a run")
+        if not _this_repos(data):
+            raise ForgeError(
+                f"run {pipeline_id} is a fork's run, not one of this repository's",
+                status=404,
+                reason="not_found",
+            )
+        (row,) = gq.run_rows({"workflow_runs": [data]})
+        state, lines = _runs_state([row])
+        conclusion = str(row.get("conclusion") or "").upper()
+        nothing_ran = str(row.get("status") or "") == "completed" and conclusion in _GH_NOTHING_RAN
+        if nothing_ran:
+            state = "failed"
+        failed_jobs: tuple[FailedJob, ...] = ()
+        if state == "failed" and not nothing_ran:
+            detail, failed_jobs = await self._run_failure(repo, str(row.get("databaseId") or ""))
+            lines += detail
+            if conclusion == "STARTUP_FAILURE" and not failed_jobs:
+                failed_jobs = (
+                    FailedJob(
+                        str(row.get("path") or row.get("name") or "(workflow)"),
+                        "failed",
+                        _GH_FAILURE_REASON["STARTUP_FAILURE"],
+                    ),
+                )
+        head = (
+            f"run {row.get('databaseId')} attempt {row.get('run_attempt') or 1} on "
+            f"{row.get('headBranch', '')} at {str(row.get('headSha') or '')[:7]}, "
+            f"created {row.get('createdAt', '')}"
+        )
+        return CIStatus(
+            state=state,
+            url=str(row.get("url", "")),
+            jobs=(head, *lines),
+            sha=str(row.get("headSha") or ""),
+            failed_jobs=failed_jobs,
+            cancelled_at=_cancelled_at([row], at="updatedAt"),
+            nothing_ran=nothing_ran,
+            blocked_on="environment approval" if row.get("status") == "waiting" else "",
         )
 
     async def _run_failure(

@@ -160,6 +160,15 @@ ROWS: dict[str, Row] = {
             )
         },
     ),
+    "github-pipeline_status": Row(
+        "pipeline_status",
+        _call("pipeline_status", pipeline_id="99"),
+        {
+            "api repos/{owner}/{repo}/actions/runs/99": json.dumps(
+                workflow_run(99, conclusion="success")
+            )
+        },
+    ),
     "github-merge-off-queue": Row(
         "merge", _merge, {_MERGE_READ: merge_state("CLEAN"), _MUTATION: MERGED}
     ),

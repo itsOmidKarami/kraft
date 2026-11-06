@@ -446,6 +446,13 @@ class Forge(Protocol):
     async def branch_ci_status(
         self, *, repo: Path, branch: str, head_sha: str, pipeline_id: str = ""
     ) -> CIStatus: ...
+    async def pipeline_status(self, *, repo: Path, pipeline_id: str) -> CIStatus:
+        """One CI pipeline (a GitLab pipeline `id`, a GitHub Actions run id),
+        read directly: no merge request, no ref, no fallback to another
+        pipeline. A pipeline the repository does not hold is a `ForgeError`
+        with reason `not_found`."""
+        ...
+
     async def merge(self, *, repo: Path, branch: str, mr: MR, head: str) -> None:
         """Ask the forge to merge `mr`, and only at `head`, the full sha it may
         merge: the forge refuses (`HeadMoved`) any other, now or whenever it
