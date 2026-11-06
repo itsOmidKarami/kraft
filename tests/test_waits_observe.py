@@ -80,3 +80,45 @@ async def test_the_instant_the_caller_decided_at_is_the_one_the_deadline_is_test
     past: datetime = wait_clock.now + timedelta(seconds=301)
 
     assert await database.write(lambda c: _look(c, now=past)) == "timed_out"
+
+
+async def test_a_wait_about_another_pipeline_supersedes_the_open_one(database, repo, wait_clock):
+    """`ci.pipeline`'s writer re-ran while the wait was parked and left another
+    id: the open wait ends `superseded` and a new one starts with its own clock.
+    (Normal flows end an open wait on a restart, so the changed id is fabricated
+    between two looks.)"""
+    await _item(database, repo)
+    await database.write(lambda c: _look(c, started_extra={"pipeline": "1"}))
+    wait_clock.advance(60)
+    await database.write(lambda c: _look(c, started_extra={"pipeline": "2"}))
+
+    seen = [
+        e["payload"]
+        for e in database.read(lambda c: events.read_after(c, 0, "w1"))
+        if e["type"].startswith("external_wait_")
+    ]
+    assert [(p.get("pipeline"), p.get("outcome") or p.get("state")) for p in seen] == [
+        ("1", None),
+        (None, "pending"),
+        (None, "superseded"),
+        ("2", None),
+        (None, "pending"),
+    ]
+    assert seen[3]["started_at"] == wait_clock.at(60), "the new wait counts from its own start"
+
+
+async def test_a_look_about_the_same_pipeline_keeps_its_wait(database, repo, wait_clock):
+    await _item(database, repo)
+    await database.write(lambda c: _look(c, started_extra={"pipeline": "1"}))
+    await database.write(lambda c: _look(c, started_extra={"pipeline": "1"}))
+
+    kinds = [
+        e["type"]
+        for e in database.read(lambda c: events.read_after(c, 0, "w1"))
+        if e["type"].startswith("external_wait_")
+    ]
+    assert kinds == [
+        "external_wait_started",
+        "external_wait_observed",
+        "external_wait_observed",
+    ]

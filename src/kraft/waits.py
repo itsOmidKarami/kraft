@@ -10,7 +10,9 @@ which keeps the wait's record as events:
   observation.
 * `external_wait_observed` -- one per observation: what was seen, and for a
   pending one the next observation time.
-* `external_wait_ended` -- the outcome: `settled`, `timed_out` or `error`.
+* `external_wait_ended` -- the outcome: `settled`, `timed_out`, `error`, or
+  `superseded` (the wait was for another thing than the one now asked about:
+  `ci.pipeline`'s writer re-ran and left another id).
 * `external_wait_rebounded` -- the wait's bounds changed while it was open:
   its item's policy override was changed (Kraft-ab1bh). The new timeout
   counts from the wait's own start, and binds from the observation that
@@ -36,6 +38,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
@@ -145,6 +148,7 @@ def observe(
     now: datetime | None = None,
     next_at: datetime | None = None,
     extra: dict | None = None,
+    started_extra: Mapping[str, object] | None = None,
 ) -> Literal["pending", "settled", "timed_out", "error"]:
     """Record one observation of `task`'s wait, in the caller's transaction,
     and say what it amounts to. `state` is what the forge saw: `pending`,
@@ -163,10 +167,31 @@ def observe(
     here and its decision agree (it reads the clock itself when not given);
     `next_at` is the next observation the caller wants, kept ahead of the
     backoff but never past the deadline; `extra` is merged into the observation
-    and so comes back in `OpenWait.last`."""
+    and so comes back in `OpenWait.last`. `started_extra` is what the wait is
+    *about*, kept in its start: an open wait that was started about something
+    else (`ci.pipeline` re-resolving another id) ends `superseded` and a new one
+    starts, with its own clock."""
     now = now or datetime.fromisoformat(_now())
     ids = {"task": task, "node_id": node_id}
     wait = open_wait(conn, work_item_id, task)
+    if (
+        wait is not None
+        and started_extra
+        and any(wait.started.get(k) != v for k, v in started_extra.items())
+    ):
+        events.append(
+            conn,
+            work_item_id,
+            ForgeEvent.EXTERNAL_WAIT_ENDED,
+            {
+                **ids,
+                "outcome": "superseded",
+                "result": "superseded",
+                "observations": wait.observations,
+                "session_id": session_id,
+            },
+        )
+        wait = None
     if wait is None:
         started = {
             **ids,
@@ -176,6 +201,7 @@ def observe(
             "max_interval_s": bounds.max_interval.total_seconds(),
             "started_at": now.isoformat(),
             "deadline": (now + bounds.timeout).isoformat(),
+            **(started_extra or {}),
         }
         events.append(conn, work_item_id, ForgeEvent.EXTERNAL_WAIT_STARTED, started)
         wait = OpenWait(started, None)

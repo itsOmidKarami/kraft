@@ -1853,6 +1853,8 @@ async def _dispatch_task_in(
             ),
             grace=t.grace,
             pipeline=t.pipeline,
+            reads=resolve_reads(node.id, t.reads),
+            declared=declared_variables(work_item_row, resolve_reads(node.id, t.reads)),
             **common,
         )
 

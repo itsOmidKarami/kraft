@@ -227,7 +227,9 @@ def test_outputs_accepted_on_a_node_task_of_both_kinds():
     ids=["builtin", *(a.value for a in tm.ForgeAction if a is not tm.ForgeAction.CI_PIPELINE)],
 )
 def test_reads_refused_on(task):
-    with pytest.raises(ValidationError, match="only an agent or subprocess task reads outputs"):
+    with pytest.raises(
+        ValidationError, match="only an agent, subprocess or ci.pipeline task reads outputs"
+    ):
         tm.Chain.model_validate(_chain(node(tasks=[{**task, "reads": ["s.t"]}])))
     assert tm.Chain.model_validate(_chain(node(tasks=[{**task, "reads": []}])))
 

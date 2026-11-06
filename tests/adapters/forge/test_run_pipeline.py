@@ -12,7 +12,10 @@ from unittest.mock import AsyncMock
 import pytest
 from support.harness import own_files
 
+from kraft import item_paths
 from kraft.adapters import forge
+
+from .nodes import forge_node
 
 HOOK = "wait.main.wait"
 PID = "123"
@@ -265,3 +268,130 @@ async def test_pipeline_wait_workspace_keeps_findings(
     assert status == "failed"
     payload = json.loads(own_files(run_dirs, "s1").result.read_text())
     assert len(payload["findings"]) == 1
+
+
+# --- the id read from a step output ---------------------------------------------
+
+A, B = "n.find.a", "n.find.b"
+VAR = ("PIPELINE_ID",)
+
+
+def _snapshot(run_dirs, writer: str, env: str) -> None:
+    folder = item_paths.snapshot_dir(run_dirs, "w1", writer)
+    folder.mkdir(parents=True)
+    (folder / "variables.env").write_text(env)
+
+
+@pytest.mark.parametrize(
+    "snapshots, declared, status, read, says, lacks",
+    [
+        pytest.param({A: "PIPELINE_ID=123\n"}, {A: VAR}, "done", ["123"], "", "", id="set"),
+        pytest.param(
+            {A: "PIPELINE_ID=999\n", B: "PIPELINE_ID=123\n"},
+            {A: VAR, B: VAR},
+            "done",
+            ["123"],
+            "",
+            "",
+            id="later-writer-wins",
+        ),
+        pytest.param(
+            {},
+            {A: VAR, B: VAR},
+            "config_error",
+            [],
+            f"$PIPELINE_ID is not set: none of {A}, {B}",
+            "",
+            id="unset",
+        ),
+        pytest.param(
+            {A: "PIPELINE_ID=123\n"},
+            {A: ()},
+            "config_error",
+            [],
+            "$PIPELINE_ID is not set",
+            "123",
+            id="undeclared-in-current-chain",
+        ),
+        pytest.param(
+            {A: "PIPELINE_ID=abc-secret\n"},
+            {A: VAR},
+            "config_error",
+            [],
+            "digits only",
+            "abc-secret",
+            id="value-not-digits",
+        ),
+    ],
+)
+async def test_pipeline_from_variable(
+    run_forge, run_dirs, snapshots, declared, status, read, says, lacks
+):
+    for writer, env in snapshots.items():
+        _snapshot(run_dirs, writer, env)
+    fake = fake_of(pipe())
+
+    got = await look(run_forge, fake, pipeline="$PIPELINE_ID", reads=(A, B), declared=declared)
+
+    assert got == (status, status)
+    assert fake.pipeline_status_ids == read
+    assert says in run_forge.log("s1")
+    assert not lacks or lacks not in run_forge.log("s1")
+
+
+async def test_a_variable_that_goes_unset_closes_the_parked_wait(run_forge, run_dirs):
+    """The writer was skipped while the wait was parked: a configuration stop,
+    and the wait's row is settled, not left open."""
+    _snapshot(run_dirs, A, "PIPELINE_ID=123\n")
+    fake = fake_of(pipe("pending"))
+    args = {"pipeline": "$PIPELINE_ID", "reads": (A,), "declared": {A: VAR}}
+    assert (await look(run_forge, fake, "s1", **args))[0] == "waiting"
+    item_paths.snapshot_dir(run_dirs, "w1", A).joinpath("variables.env").unlink()
+
+    assert (await look(run_forge, fake, "s2", **args))[0] == "config_error"
+
+    assert [e["outcome"] for e in run_forge.events("external_wait_ended")] == ["settled"]
+
+
+async def test_a_walk_hands_the_writers_variable_to_the_wait(
+    item_on, database, run_dirs, monkeypatch
+):
+    """Through dispatch: a subprocess task leaves PIPELINE_ID, the next node's
+    `ci.pipeline` reads it by naming the writer, and the forge is asked for it."""
+    import shlex
+    import sys
+
+    from support.harness import entry_of
+
+    from kraft import executor
+
+    write = shlex.quote(
+        "open(__import__('os').environ['KRAFT_OUTPUT_DIR'] + '/variables.env', 'w')"
+        ".write('PIPELINE_ID=123\\n')"
+    )
+    emit = {
+        "id": "emit",
+        "kind": "exec",
+        "tasks": [
+            {
+                "id": "emit",
+                "kind": "subprocess",
+                "command": f"{shlex.quote(sys.executable)} -c {write}",
+                "outputs": {"variables": ["PIPELINE_ID"]},
+            }
+        ],
+    }
+    wait = forge_node("wait", "ci.pipeline", pipeline="$PIPELINE_ID", reads=["emit.main.emit"])
+    it = await item_on([emit, wait])
+    fake = fake_of(pipe())
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+
+    status = await executor.run(
+        database,
+        run_dirs,
+        work_item_id=it.id,
+        launch=executor.LaunchContext(entry_of({"setup_command": "", "forge": "github"})),
+    )
+
+    assert status == "completed"
+    assert fake.pipeline_status_ids == ["123"]

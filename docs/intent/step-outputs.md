@@ -32,7 +32,8 @@ origin: src/kraft/templates/models.py §_refuse_outputs
 
 ## REQ reads-are-refused-on-a-task-that-takes-none
 
-IF a builtin task or a forge task declares `reads`, THEN the system SHALL refuse the chain.
+IF a builtin task or a forge task other than `ci.pipeline` declares `reads`, THEN the
+system SHALL refuse the chain.
 enforced-by: tests/templates/test_step_outputs.py::test_reads_refused_on[builtin], tests/templates/test_step_outputs.py::test_reads_refused_on[mr.open_draft], tests/templates/test_step_outputs.py::test_reads_refused_on[mr.sync], tests/templates/test_step_outputs.py::test_reads_refused_on[mr.ci], tests/templates/test_step_outputs.py::test_reads_refused_on[mr.automated_review], tests/templates/test_step_outputs.py::test_reads_refused_on[mr.mark_ready], tests/templates/test_step_outputs.py::test_reads_refused_on[mr.external_approval], tests/templates/test_step_outputs.py::test_reads_refused_on[mr.merge], tests/templates/test_step_outputs.py::test_reads_refused_on[mr.post_merge_ci]
 origin: src/kraft/templates/models.py §TaskBase
 

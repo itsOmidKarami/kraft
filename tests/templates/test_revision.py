@@ -186,15 +186,16 @@ def _run(id: str, **kw) -> dict:
     }
 
 
-def _chain(**maxima):
+def _chain(*, extra=(), **maxima):
     """plan -> revision_approval (the revision's gate) -> build -> brief ->
-    review (gate) -> feedback -> final (chain_finalized) -> land."""
+    [extra ->] review (gate) -> feedback -> final (chain_finalized) -> land."""
     build = v1_task("run", kind="agent", prompt="build it")
     nodes = [
         _run("plan"),
         v1_node(GATE, "gate", artifact="chain_revision"),
         v1_node("build", tasks=[build], policy={"time_cap_minutes": 60}),
         _run("brief"),
+        *extra,
         v1_node("review", "gate", artifact="work_brief", reject_to="build"),
         _run("feedback", on_base_changed={"restart_from": "feedback"}),
         _run("pinned", skippable=False),
@@ -393,6 +394,40 @@ def test_a_revision_can_never_skip_or_change_a_gate(change):
 def test_a_change_set_that_would_not_validate_is_refused(change, match):
     with pytest.raises(revision.RevisionError, match=match):
         _revise(_chain(), **change)
+
+
+#: A writer and, after it, a `ci.pipeline` that reads the id it leaves.
+_EMIT_AND_WAIT = (
+    _run(
+        "emit",
+        tasks=[
+            {
+                "id": "run",
+                "kind": "subprocess",
+                "command": "true",
+                "outputs": {"variables": ["PIPELINE_ID"]},
+            }
+        ],
+    ),
+    _run(
+        "wait_ci",
+        tasks=[
+            {
+                "id": "run",
+                "kind": "forge",
+                "target": "ci.pipeline",
+                "pipeline": "$PIPELINE_ID",
+                "reads": ["emit.main.run"],
+            }
+        ],
+    ),
+)
+
+
+def test_skipping_a_writer_whose_reader_stays_names_the_reads_it_breaks():
+    chain = _chain(extra=_EMIT_AND_WAIT)
+    with pytest.raises(revision.RevisionError, match="wait_ci.main.run: reads 'emit.main.run'"):
+        _revise(chain, skip=[_skip("emit")])
 
 
 def test_an_override_stays_within_the_administrator_maxima():

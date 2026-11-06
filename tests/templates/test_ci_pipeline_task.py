@@ -6,6 +6,8 @@ from pydantic import ValidationError
 
 from kraft.templates import models as tm
 
+from .test_step_outputs import node, sub
+
 CI = tm.ForgeAction.CI_PIPELINE.value
 
 
@@ -62,3 +64,48 @@ def test_pipeline_row_is_shown_only_on_ci_pipeline(target, kw, hidden):
 
 def test_ci_pipeline_waits():
     assert tm.ForgeAction.CI_PIPELINE.waits
+
+
+def _chain_with(pipeline: str, *, writes=("PIPELINE_ID",), reads=("find.t",)) -> dict:
+    """A writer step then a `ci.pipeline` step reading it."""
+    return {
+        "id": "c",
+        "nodes": [
+            node(
+                steps=[
+                    {"id": "find", "tasks": [sub(outputs={"variables": list(writes)})]},
+                    {
+                        "id": "wait",
+                        "tasks": [forge(pipeline=pipeline, reads=list(reads))],
+                    },
+                ]
+            )
+        ],
+    }
+
+
+@pytest.mark.parametrize("pipeline", ["$PIPELINE_ID", "${PIPELINE_ID}"])
+def test_ci_pipeline_reads_its_id_from_a_writers_variable(pipeline):
+    assert tm.Chain.model_validate(_chain_with(pipeline))
+
+
+@pytest.mark.parametrize(
+    ("pipeline", "kw", "match"),
+    [
+        pytest.param("$NOPE", {}, "no task in its reads declares", id="no-writer-declares-it"),
+        pytest.param("$PIPELINE_ID", {"reads": ()}, "no task in its reads", id="no-reads"),
+        pytest.param("${X", {}, "digits only", id="unclosed-brace"),
+        pytest.param("$X}", {}, "digits only", id="stray-brace"),
+        pytest.param("x$A", {}, "digits only", id="text-around-it"),
+        pytest.param("$lower", {}, "digits only", id="lowercase"),
+    ],
+)
+def test_ci_pipeline_variable_refusals(pipeline, kw, match):
+    with pytest.raises(ValidationError, match=match):
+        tm.Chain.model_validate(_chain_with(pipeline, **kw))
+
+
+def test_ci_pipeline_takes_reads_and_mr_ci_does_not():
+    assert tm.ForgeTask.model_validate(forge(pipeline="1", reads=["s.t"])).reads == ["s.t"]
+    assert "reads" not in tm.ForgeTask.model_validate(forge(pipeline="1")).unread()
+    assert "reads" in tm.ForgeTask.model_validate(forge("mr.ci")).unread()

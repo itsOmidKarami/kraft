@@ -489,9 +489,15 @@ class TaskBase(BaseModel):
     #: runs before this task (`_reads_name_earlier_writers`).
     reads: list[StrictStr] = Field(default_factory=list)
 
-    #: Whether this kind delivers `reads` to the task. Builtin and forge tasks
-    #: refuse a non-empty list, so the Config tab hides the key there.
+    #: Whether this kind delivers `reads` to the task. Builtin tasks and forge
+    #: tasks but `ci.pipeline` refuse a non-empty list, so the Config tab hides
+    #: the key there (`takes_reads`).
     TAKES_READS: ClassVar[bool] = False
+
+    def takes_reads(self) -> bool:
+        """Whether this task delivers `reads`: its kind's `TAKES_READS`, which
+        a forge task narrows by its target."""
+        return self.TAKES_READS
 
     #: What only an agent launch reads, as `sources` names it (a policy cap as
     #: `policy.<cap>`). Steering is text for an agent's prompt, and the
@@ -520,7 +526,7 @@ class TaskBase(BaseModel):
         agent_only = (
             self.AGENT_ONLY & {"steering"} if self.on_failure is not None else self.AGENT_ONLY
         )
-        return agent_only if self.TAKES_READS else agent_only | {"reads"}
+        return agent_only if self.takes_reads() else agent_only | {"reads"}
 
     def for_recovery(self) -> frozenset[str]:
         """The caps this task does not read but its `on_failure` recovery runs
@@ -541,8 +547,11 @@ class TaskBase(BaseModel):
     @model_validator(mode="after")
     def _reads_are_qualified(self) -> Self:
         resolve_reads("_", self.reads)
-        if self.reads and not self.TAKES_READS:
-            raise ValueError("reads: only an agent or subprocess task reads outputs")
+        if self.reads and not self.takes_reads():
+            raise ValueError(
+                f"reads: only an agent, subprocess or {ForgeAction.CI_PIPELINE.value} task "
+                "reads outputs"
+            )
         return self
 
 
@@ -729,6 +738,17 @@ class SubprocessTask(TaskBase):
         return self
 
 
+#: `ForgeTask.pipeline` taken from a step output: `$NAME` or `${NAME}`, and
+#: nothing around it.
+PIPELINE_VAR = re.compile(r"\$(?:\{([A-Z][A-Z0-9_]*)\}|([A-Z][A-Z0-9_]*))")
+
+
+def pipeline_variable(value: str | None) -> str | None:
+    """The variable name a `pipeline` value reads, or None for a literal id."""
+    match = PIPELINE_VAR.fullmatch(value or "")
+    return (match[1] or match[2]) if match else None
+
+
 class ForgeTask(TaskBase):
     kind: Literal[TaskKind.FORGE]
     target: Annotated[ForgeAction, _LOOSE]
@@ -742,6 +762,9 @@ class ForgeTask(TaskBase):
     #: `ci.pipeline` only, and required there: the id of the one pipeline it
     #: waits for (a GitLab pipeline `id`, a GitHub Actions run id), as digits.
     pipeline: StrictStr | None = None
+
+    def takes_reads(self) -> bool:
+        return self.target is ForgeAction.CI_PIPELINE
 
     def unread(self) -> frozenset[str]:
         extra = frozenset() if self.target is ForgeAction.CI_PIPELINE else frozenset({"pipeline"})
@@ -760,8 +783,8 @@ class ForgeTask(TaskBase):
             raise ValueError(
                 f"pipeline: a {ForgeAction.CI_PIPELINE.value} task needs its pipeline id"
             )
-        if not re.fullmatch(r"[0-9]+", self.pipeline):
-            raise ValueError("pipeline: must be a pipeline id, digits only")
+        if not (re.fullmatch(r"[0-9]+", self.pipeline) or pipeline_variable(self.pipeline)):
+            raise ValueError("pipeline: must be a pipeline id (digits only) or a $NAME")
         if self.scope is not TaskScope.ONCE:
             raise ValueError(
                 f"scope: a {ForgeAction.CI_PIPELINE.value} task waits for one pipeline "
@@ -1455,12 +1478,18 @@ class Chain(BaseModel):
         repair and a gate's reviewer read nothing. A handler may run before
         its writer did, and then gets nothing, as after a skip."""
         resolved = ResolvedChain.from_chain(self)
-        # task path -> (node position, step position, whether it declares outputs)
-        writers: dict[str, tuple[int, int, bool]] = {}
+        # task path -> (node position, step position, the variables it declares,
+        # or None when it declares no outputs)
+        writers: dict[str, tuple[int, int, tuple[str, ...] | None]] = {}
         for i, node in enumerate(resolved.nodes):
             for j, step in enumerate(node.steps):
                 for task in step.tasks:
-                    writers[task.path] = (i, j, getattr(task.task, "outputs", None) is not None)
+                    outputs = getattr(task.task, "outputs", None)
+                    writers[task.path] = (
+                        i,
+                        j,
+                        None if outputs is None else tuple(outputs.variables),
+                    )
 
         def check(reader: ResolvedTask, node_at: int, last_step: int | None) -> None:
             """`last_step`: the latest step of the reader's own node it may read
@@ -1474,11 +1503,19 @@ class Chain(BaseModel):
                     raise ValueError(f"{where}, but a task here cannot read step outputs")
                 if path not in writers:
                     raise ValueError(f"{where}, which names no task in a node's own steps")
-                at_node, at_step, declares = writers[path]
-                if not declares:
+                at_node, at_step, declared = writers[path]
+                if declared is None:
                     raise ValueError(f"{where}, which declares no outputs")
                 if at_node > node_at or (at_node == node_at and at_step > last_step):
                     raise ValueError(f"{where}, which does not run before it")
+            name = pipeline_variable(getattr(reader.task, "pipeline", None))
+            if name is not None and not any(
+                name in (writers.get(path, (0, 0, None))[2] or ())
+                for path in resolve_reads(node.id, reader.task.reads)
+            ):
+                raise ValueError(
+                    f"{reader.path}: pipeline reads ${name}, which no task in its reads declares"
+                )
 
         for i, node in enumerate(resolved.nodes):
             last = len(node.steps) - 1
