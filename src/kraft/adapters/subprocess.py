@@ -126,14 +126,13 @@ async def capture_outputs(
     session_id: str,
     files: item_paths.SessionFiles,
     status: str,
-    *,
-    refused: bool = False,
 ) -> str:
     """`status`, after a session that declared `outputs` ended with it: the
     declared files and variables are checked and kept (`kraft.outputs`), and
     a capture that fails -- or a session whose processes outlived it, which may
     still be writing the folder, or one a machine returned nothing of because
-    it was over the limit (`refused`) -- turns the status into `failed`, the
+    it was over the limit (`outputs.was_refused`, recorded beside the session
+    so a restart keeps it) -- turns the status into `failed`, the
     reason in the session's log. A status that is not `_CAPTURED` keeps its folder
     untouched, and a session that declared nothing is left alone. The one door
     both `run_task` and `reattach` end a session through."""
@@ -141,10 +140,12 @@ async def capture_outputs(
         return status
     if await asyncio.to_thread(outputs.read_decl, files) is None:
         return status
-    if refused:
+    if await asyncio.to_thread(outputs.was_refused, files):
         # The machine dropped the folder, which was over the limit it was told.
         problem = await asyncio.to_thread(
             outputs.refuse,
+            run_dirs,
+            work_item_id,
             files,
             "kraft: outputs: the output folder is over the size or entry limit, so none of it "
             "was kept (storage.outputs.max_size)",
@@ -152,6 +153,8 @@ async def capture_outputs(
     elif await _outlived(db, work_item_id, session_id):
         problem = await asyncio.to_thread(
             outputs.refuse,
+            run_dirs,
+            work_item_id,
             files,
             "kraft: outputs: processes the task started outlived it, so nothing was kept",
         )
@@ -1779,7 +1782,6 @@ async def _run_task(
         session_id,
         files,
         status,
-        refused=run is not None and run.outputs_refused,
     )
     fields = read_result_fields(
         result_path, summary=item_paths.recorded_summary(run_dirs, work_item_id, files)

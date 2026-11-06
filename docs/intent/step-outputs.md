@@ -14,14 +14,14 @@ origin: src/kraft/templates/models.py §OutputsDecl
 
 ## REQ an-output-file-is-a-plain-relative-name
 
-IF a declared output file is empty, absolute, climbs out of the output folder, holds a glob, is `variables.env` or differs from another only by case, THEN the system SHALL refuse the chain.
-enforced-by: tests/templates/test_step_outputs.py::test_outputs_decl_refuses[parent], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[absolute], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[empty-name], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[glob], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[variables-file], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[case-twins], tests/templates/test_step_outputs.py::test_outputs_decl_accepts[plain], tests/templates/test_step_outputs.py::test_outputs_decl_accepts[space]
+IF a declared output file is empty, absolute, climbs out of the output folder, has an empty or `.` segment, a backslash, a control character or a glob, is `variables.env` in any case, differs from another only by case, or is a folder of another, THEN the system SHALL refuse the chain.
+enforced-by: tests/templates/test_step_outputs.py::test_outputs_decl_refuses[parent], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[absolute], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[empty-name], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[glob], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[variables-file], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[case-twins], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[dot], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[empty-segment], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[backslash], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[control-character], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[variables-file-by-another-case], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[file-and-its-own-folder], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[folder-and-a-file-by-another-case], tests/templates/test_step_outputs.py::test_outputs_decl_accepts[plain], tests/templates/test_step_outputs.py::test_outputs_decl_accepts[space]
 origin: src/kraft/templates/models.py §OutputsDecl
 
 ## REQ an-output-variable-is-upper-snake-case
 
-IF a declared output variable does not match `[A-Z][A-Z0-9_]*`, THEN the system SHALL refuse the chain.
-enforced-by: tests/templates/test_step_outputs.py::test_outputs_decl_refuses[lowercase-variable], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[digit-first-variable], tests/templates/test_step_outputs.py::test_outputs_decl_accepts[variable]
+IF a declared output variable does not match `[A-Z][A-Z0-9_]*` as a whole, or is declared twice, THEN the system SHALL refuse the chain.
+enforced-by: tests/templates/test_step_outputs.py::test_outputs_decl_refuses[lowercase-variable], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[digit-first-variable], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[variable-with-trailing-newline], tests/templates/test_step_outputs.py::test_outputs_decl_refuses[repeated-variable], tests/templates/test_step_outputs.py::test_outputs_decl_accepts[variable]
 origin: src/kraft/templates/models.py §OutputsDecl
 
 ## REQ outputs-are-refused-where-the-task-runs-more-than-once-or-under-a-handler
@@ -38,20 +38,20 @@ origin: src/kraft/templates/models.py §TaskBase
 
 ## REQ a-read-is-not-a-bare-task-id
 
-IF a `reads` entry has fewer than two segments or an empty one, THEN the system SHALL refuse the chain.
-enforced-by: tests/templates/test_step_outputs.py::test_resolve_reads[bare-id], tests/templates/test_step_outputs.py::test_resolve_reads[empty-segment], tests/templates/test_step_outputs.py::test_resolve_reads[empty], tests/templates/test_step_outputs.py::test_reads_must_be_qualified_on_the_kinds_that_take_it[subprocess], tests/templates/test_step_outputs.py::test_reads_must_be_qualified_on_the_kinds_that_take_it[agent]
+IF a `reads` entry has fewer than two segments, more than three or an empty one, THEN the system SHALL refuse the chain.
+enforced-by: tests/templates/test_step_outputs.py::test_resolve_reads[bare-id], tests/templates/test_step_outputs.py::test_resolve_reads[empty-segment], tests/templates/test_step_outputs.py::test_resolve_reads[empty], tests/templates/test_step_outputs.py::test_resolve_reads[four-segments], tests/templates/test_step_outputs.py::test_reads_must_be_qualified_on_the_kinds_that_take_it[subprocess], tests/templates/test_step_outputs.py::test_reads_must_be_qualified_on_the_kinds_that_take_it[agent]
 origin: src/kraft/templates/models.py §resolve_reads
 
 ## REQ a-two-segment-read-names-a-writer-in-the-readers-own-node
 
-WHEN a `reads` entry has two segments, the system SHALL read it as a task of the reader's own node, and with three or more as the path written.
+WHEN a `reads` entry has two segments, the system SHALL read it as a task of the reader's own node, and with three as the path written.
 enforced-by: tests/templates/test_step_outputs.py::test_resolve_reads[own-node], tests/templates/test_step_outputs.py::test_resolve_reads[other-node], tests/templates/test_step_outputs.py::test_resolve_reads[both], tests/templates/test_step_outputs.py::test_a_library_node_used_under_two_ids_reads_by_step_and_task
 origin: src/kraft/templates/models.py §resolve_reads
 
 ## REQ a-read-names-an-earlier-task-that-declares-outputs
 
 IF a `reads` entry names a task that is missing, declares no `outputs`, or is not in an earlier node or an earlier step of the reader's node, THEN the system SHALL refuse the chain.
-enforced-by: tests/templates/test_step_outputs.py::test_reads_ordering_refuses[missing-writer], tests/templates/test_step_outputs.py::test_reads_ordering_refuses[writer-declares-nothing], tests/templates/test_step_outputs.py::test_reads_ordering_refuses[later-node], tests/templates/test_step_outputs.py::test_reads_ordering_refuses[later-step], tests/templates/test_step_outputs.py::test_reads_ordering_refuses[same-step-sibling], tests/templates/test_step_outputs.py::test_reads_ordering_accepts[earlier-node], tests/templates/test_step_outputs.py::test_reads_ordering_accepts[earlier-step]
+enforced-by: tests/templates/test_step_outputs.py::test_reads_ordering_refuses[missing-writer], tests/templates/test_step_outputs.py::test_reads_ordering_refuses[writer-declares-nothing], tests/templates/test_step_outputs.py::test_reads_ordering_refuses[later-node], tests/templates/test_step_outputs.py::test_reads_ordering_refuses[later-step], tests/templates/test_step_outputs.py::test_reads_ordering_refuses[same-step-sibling], tests/templates/test_step_outputs.py::test_reads_ordering_refuses[fan-out-task], tests/templates/test_step_outputs.py::test_reads_ordering_refuses[handler-slot-task], tests/templates/test_step_outputs.py::test_reads_ordering_accepts[earlier-node], tests/templates/test_step_outputs.py::test_reads_ordering_accepts[earlier-step]
 origin: src/kraft/templates/models.py §_reads_name_earlier_writers
 
 ## REQ a-handler-reads-the-steps-before-where-it-runs
@@ -93,7 +93,7 @@ origin: src/kraft/item_paths.py §writer_dir
 ## REQ a-writer-is-told-its-folder-and-the-names-to-keep
 
 WHEN the system launches an agent writer, it SHALL append a note naming `$KRAFT_OUTPUT_DIR` and the declared names to its prompt.
-enforced-by: tests/executor/test_dispatch_outputs.py::test_writer_launch[agent], tests/executor/test_prompts.py::test_outputs_note_names_the_folder_and_the_declared_names[files], tests/executor/test_prompts.py::test_outputs_note_names_the_folder_and_the_declared_names[variables], tests/executor/test_prompts.py::test_outputs_note_names_the_folder_and_the_declared_names[both]
+enforced-by: tests/executor/test_dispatch_outputs.py::test_writer_launch[agent]
 origin: src/kraft/executor/prompts.py §outputs_note
 
 ## REQ each-fallback-candidate-gets-its-own-output-folder
@@ -104,8 +104,8 @@ origin: src/kraft/executor/dispatch.py §_launch_agent
 
 ## REQ a-resumed-writer-starts-with-the-paused-sessions-outputs
 
-WHEN a paused agent resumes under a new session, the system SHALL copy the paused session's output folder into the new one, following no link, and keep the note in its prompt.
-enforced-by: tests/executor/test_dispatch_outputs.py::test_resumed_agent_keeps_outputs, tests/executor/test_dispatch_outputs.py::test_outputs_note_survives_resume
+WHEN a paused agent resumes under a new session, the system SHALL copy the paused session's output folder into the new one on a thread, following no link and holding the whole copy to the size cap, and keep the note in its prompt.
+enforced-by: tests/executor/test_dispatch_outputs.py::test_resumed_agent_keeps_outputs, tests/executor/test_dispatch_outputs.py::test_outputs_note_survives_resume, tests/executor/test_dispatch_outputs.py::test_the_output_folder_is_made_and_carried_off_the_event_loop[agent], tests/executor/test_dispatch_outputs.py::test_the_output_folder_is_made_and_carried_off_the_event_loop[subprocess], tests/test_outputs.py::test_carry_over_holds_the_whole_folder_to_the_cap
 origin: src/kraft/outputs.py §carry_over
 
 ## REQ a-reader-gets-only-its-writers-snapshots
@@ -141,7 +141,7 @@ origin: src/kraft/adapters/subprocess.py §capture_outputs
 ## REQ a-session-that-did-not-run-to-its-end-is-not-captured
 
 WHEN a session ends paused, capped out, cancelled or unknown, the system SHALL leave its output folder untouched.
-enforced-by: tests/adapters/test_subprocess_outputs.py::test_no_capture[paused], tests/adapters/test_subprocess_outputs.py::test_no_capture[capped_out], tests/adapters/test_subprocess_outputs.py::test_no_capture[cancelled], tests/adapters/test_subprocess_outputs.py::test_a_status_that_is_not_a_finished_run_keeps_its_folder[unknown], tests/adapters/test_subprocess_outputs.py::test_a_status_that_is_not_a_finished_run_keeps_its_folder[paused], tests/adapters/test_subprocess_outputs.py::test_a_status_that_is_not_a_finished_run_keeps_its_folder[needs_context], tests/adapters/test_subprocess_outputs.py::test_a_status_that_is_not_a_finished_run_keeps_its_folder[rate_limited], tests/adapters/test_subprocess_outputs.py::test_a_writer_that_declared_nothing_is_left_alone, tests/test_outputs.py::test_capture_without_sidecar_is_none
+enforced-by: tests/adapters/test_subprocess_outputs.py::test_a_status_that_is_not_a_finished_run_keeps_its_folder[unknown], tests/adapters/test_subprocess_outputs.py::test_a_status_that_is_not_a_finished_run_keeps_its_folder[paused], tests/adapters/test_subprocess_outputs.py::test_a_status_that_is_not_a_finished_run_keeps_its_folder[needs_context], tests/adapters/test_subprocess_outputs.py::test_a_status_that_is_not_a_finished_run_keeps_its_folder[rate_limited], tests/test_outputs.py::test_capture_without_sidecar_is_none
 origin: src/kraft/adapters/subprocess.py §capture_outputs
 
 ## REQ a-capture-checks-everything-before-it-copies
@@ -164,8 +164,8 @@ origin: src/kraft/outputs.py §parse_variables
 
 ## REQ a-capture-replaces-the-previous-snapshot-and-deletes-the-writers-folder
 
-WHEN a capture ends, the system SHALL replace the writer's previous snapshot with the new one and delete the writer's output folder, whether it passed or failed.
-enforced-by: tests/test_outputs.py::test_capture_replaces_previous_snapshot, tests/test_outputs.py::test_capture_deletes_writer_dir[passed], tests/test_outputs.py::test_capture_deletes_writer_dir[failed], tests/test_outputs.py::test_capture_follows_no_link_to_the_output_folder
+WHEN a capture ends, the system SHALL replace the writer's previous snapshot with the new one, or with none when the capture failed, and delete the writer's output folder.
+enforced-by: tests/test_outputs.py::test_capture_replaces_previous_snapshot, tests/test_outputs.py::test_a_failed_capture_leaves_no_snapshot_of_an_earlier_run[check-fails], tests/test_outputs.py::test_a_failed_capture_leaves_no_snapshot_of_an_earlier_run[walk-raises], tests/test_outputs.py::test_a_failed_capture_leaves_no_snapshot_of_an_earlier_run[snapshot-stays], tests/test_outputs.py::test_refuse_leaves_no_snapshot_of_an_earlier_run, tests/test_outputs.py::test_capture_follows_no_link_to_the_output_folder
 origin: src/kraft/outputs.py §capture
 
 ## REQ a-copy-takes-no-more-than-the-file-measured
@@ -195,8 +195,20 @@ origin: src/kraft/adapters/subprocess.py §_outlived
 ## REQ a-capture-after-a-restart-uses-the-cap-the-session-launched-under
 
 WHEN a writer ends across a restart, the system SHALL capture it under the names and size cap recorded when it launched.
-enforced-by: tests/worker/test_reattach_outputs.py::test_capture_across_restart[launched-with-room], tests/worker/test_reattach_outputs.py::test_capture_across_restart[launched-with-less-than-it-wrote], tests/worker/test_reattach_outputs.py::test_a_session_that_declared_nothing_exits_as_before
+enforced-by: tests/worker/test_reattach_outputs.py::test_capture_across_restart[launched-with-room], tests/worker/test_reattach_outputs.py::test_capture_across_restart[launched-with-less-than-it-wrote]
 origin: src/kraft/worker/reattach.py §_exit_from_file
+
+## REQ a-capture-is-made-once-per-session
+
+WHEN a session that was captured before is captured again, the system SHALL return what the first capture concluded and leave the snapshot as it is.
+enforced-by: tests/test_outputs.py::test_a_session_captured_twice_keeps_what_the_first_capture_concluded[kept], tests/test_outputs.py::test_a_session_captured_twice_keeps_what_the_first_capture_concluded[failed], tests/worker/test_reattach_outputs.py::test_a_capture_made_before_the_crash_is_not_made_again
+origin: src/kraft/outputs.py §capture
+
+## REQ a-machines-refusal-outlives-the-server
+
+WHEN a machine reports that it dropped a writer's outputs for their size, the system SHALL record that beside the session, so a writer that ends after a restart still fails.
+enforced-by: tests/remote/test_machine_outputs.py::test_machine_refuses_oversize_outputs_before_packing, tests/worker/test_reattach_outputs.py::test_a_machines_refusal_survives_the_restart
+origin: src/kraft/remote/runs.py §_deliver
 
 ## REQ outputs-max-size-defaults-to-64m-and-stops-at-the-transfer-limit
 
@@ -207,7 +219,7 @@ origin: src/kraft/policy.py §StorageOutputsInput
 ## REQ a-launch-carries-the-outputs-limit
 
 WHEN the system builds a launch context, it SHALL carry the policy's `storage.outputs.max_size`.
-enforced-by: tests/api/test_deps_outputs.py::test_launch_carries_the_outputs_limit[the-policy-s-limit], tests/api/test_deps_outputs.py::test_launch_carries_the_outputs_limit[no-policy-loaded], tests/executor/test_dispatch_outputs.py::test_writer_launch[agent], tests/executor/test_dispatch_outputs.py::test_writer_launch[subprocess]
+enforced-by: tests/api/test_deps_outputs.py::test_launch_carries_the_outputs_limit, tests/executor/test_dispatch_outputs.py::test_writer_launch[agent], tests/executor/test_dispatch_outputs.py::test_writer_launch[subprocess]
 origin: src/kraft/api/deps.py §launch
 
 ## REQ a-remote-writer-has-an-output-folder-and-its-cap
@@ -219,7 +231,7 @@ origin: src/kraft/remote/launch.py §build
 ## REQ a-machine-drops-an-oversized-output-folder-before-packing
 
 IF a writer's output folder on a machine is over the cap or the entry limit, THEN the machine SHALL not send it back, and the system SHALL fail the writer with the outputs message.
-enforced-by: tests/remote/test_machine_outputs.py::test_machine_refuses_oversize_outputs_before_packing, tests/remote/test_machine_outputs.py::test_outputs_refused_fails_writer
+enforced-by: tests/remote/test_machine_outputs.py::test_machine_refuses_oversize_outputs_before_packing
 origin: src/kraft/remote/machine.py §_finish
 
 ## REQ the-server-checks-the-cap-again-for-an-older-machine

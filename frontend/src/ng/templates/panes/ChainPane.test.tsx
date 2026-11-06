@@ -489,6 +489,15 @@ describe("an agent task's fallback list", () => {
     expect(within(rowOf("fallback")).queryByRole("button", { name: "Edit fallback" })).toBeNull();
     expect(within(rowOf("fallback")).getByText("on Overview")).toBeInTheDocument();
   });
+
+  it("on the Config tab, sends the outputs mapping to YAML, not to a pane that does not edit it", async () => {
+    const sources = structuredClone(DEFAULT_VIEW.result.sources);
+    sources[TASK] = { ...sources[TASK], outputs: { value: { files: ["junit.xml"] }, source: "chain" } };
+    mount(TASK, { sources });
+    await configTab();
+    expect(within(rowOf("outputs")).getByText("YAML")).toBeInTheDocument();
+    expect(within(rowOf("outputs")).queryByText("on Overview")).toBeNull();
+  });
 });
 
 describe("an extending chain", () => {

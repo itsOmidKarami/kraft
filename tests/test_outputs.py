@@ -4,6 +4,7 @@ a worker's choice of name or value reach."""
 from __future__ import annotations
 
 import dataclasses
+import errno
 import os
 
 import pytest
@@ -184,14 +185,50 @@ def test_capture_replaces_previous_snapshot(run_dirs):
     assert (snapshot(run_dirs) / "a.txt").read_text() == "new"
 
 
-@pytest.mark.parametrize("fails", [False, True], ids=["passed", "failed"])
-def test_capture_deletes_writer_dir(run_dirs, fails):
-    session, out = launched(run_dirs, variables=["PIPELINE_ID"] if fails else [])
-    write(out, "a.txt", "x")
+@pytest.mark.parametrize("fails", [False, True], ids=["kept", "failed"])
+def test_a_session_captured_twice_keeps_what_the_first_capture_concluded(run_dirs, fails):
+    """The crash fell between dropping the folder and recording the session: the
+    second capture finds no folder, and is not a capture of nothing."""
+    session, out = launched(run_dirs)
+    if fails:
+        sparse(out / "big", 2 << 20)
+    else:
+        write(out, "a.txt", "good")
+    first = outputs.capture(run_dirs, WID, session)
+    assert (first is not None) is fails
 
-    assert (outputs.capture(run_dirs, WID, session) is not None) is fails
+    assert outputs.capture(run_dirs, WID, session) == first
 
-    assert not out.exists()
+    assert snapshot(run_dirs).exists() is not fails
+    if not fails:
+        assert (snapshot(run_dirs) / "a.txt").read_text() == "good"
+
+
+@pytest.mark.parametrize("how", ["check-fails", "walk-raises", "snapshot-stays"])
+def test_a_failed_capture_leaves_no_snapshot_of_an_earlier_run(run_dirs, monkeypatch, how):
+    first, out = launched(run_dirs, sid="s1")
+    write(out, "a.txt", "old")
+    assert outputs.capture(run_dirs, WID, first) is None
+    second, out = launched(run_dirs, sid="s2")
+    write(out, "a.txt", "new")
+    if how == "walk-raises":
+
+        def walk(*_a):
+            raise OSError(errno.EMFILE, "too many open files")
+
+        monkeypatch.setattr(outputs, "_check_folder", walk)
+    else:
+        sparse(out / "big", 2 << 20)
+    if how == "snapshot-stays":
+        monkeypatch.setattr(item_paths, "remove_tree", lambda _path: None)
+
+    message = outputs.capture(run_dirs, WID, second)
+
+    assert message is not None
+    if how != "check-fails":
+        assert message == "kraft: outputs: could not store the declared outputs"
+    if how != "snapshot-stays":
+        assert not snapshot(run_dirs).exists()
 
 
 def test_capture_follows_no_link_to_the_output_folder(run_dirs, tmp_path):
@@ -251,14 +288,16 @@ def test_lookup_variable_reads_the_current_declaration_not_the_old_snapshot(run_
     assert outputs.lookup_variable(run_dirs, WID, ["n.s.a"], "OLD", {"n.s.a": ["NEW"]}) is None
 
 
-def test_clear_removes_the_snapshot(run_dirs):
-    session, out = launched(run_dirs)
-    write(out, "a.txt", "x")
-    assert outputs.capture(run_dirs, WID, session) is None
+def test_carry_over_holds_the_whole_folder_to_the_cap(run_dirs):
+    old, out = launched(run_dirs, sid="s1")
+    for name in "abc":
+        write(out, name, "x" * 400)
+    new, _ = launched(run_dirs, sid="s2", cap=1000)
 
-    outputs.clear(run_dirs, WID, "n.s.t")
+    outputs.carry_over(old, new, outputs.Decl("n.s.t", (), (), 1000))
 
-    assert not snapshot(run_dirs).exists()
+    carried = sorted(p.name for p in item_paths.writer_dir(new).iterdir())
+    assert len(carried) == 2, "the third would take it past 1000 bytes"
 
 
 def test_writer_dir_ignores_writable(run_dirs):
@@ -297,9 +336,22 @@ def test_refuse_deletes_the_folder_and_logs_why_only_for_a_writer(run_dirs):
     session, out = launched(run_dirs)
     write(out, "a.txt", "x")
 
-    assert outputs.refuse(session, "kraft: outputs: because") == "kraft: outputs: because"
+    assert outputs.refuse(run_dirs, WID, session, "kraft: outputs: because") == (
+        "kraft: outputs: because"
+    )
 
     assert not out.exists()
     assert "because" in session.log.read_text()
     other = own_files(run_dirs, "s2", WID)
-    assert outputs.refuse(other, "kraft: outputs: because") is None
+    assert outputs.refuse(run_dirs, WID, other, "kraft: outputs: because") is None
+
+
+def test_refuse_leaves_no_snapshot_of_an_earlier_run(run_dirs):
+    first, out = launched(run_dirs, sid="s1")
+    write(out, "a.txt", "old")
+    assert outputs.capture(run_dirs, WID, first) is None
+    second, _ = launched(run_dirs, sid="s2")
+
+    outputs.refuse(run_dirs, WID, second, "kraft: outputs: because")
+
+    assert not snapshot(run_dirs).exists()

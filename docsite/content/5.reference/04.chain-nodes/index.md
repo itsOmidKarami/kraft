@@ -553,8 +553,8 @@ The writer and the reader sit in separate steps, because a step runs its tasks t
 
 - The writer gets `KRAFT_OUTPUT_DIR`, a folder only it writes: `out/outputs/` in its session's folder. An agent's prompt names the folder and the declared names, and says what a variable must look like.
 - A variable is one `KEY=value` line in `$KRAFT_OUTPUT_DIR/variables.env`. Blank lines and lines starting with `#` are ignored. A value runs to the end of the line, with no quotes and no `export`; a repeated key keeps its last value.
-- A file name is a plain relative path inside that folder: no `..`, no glob, not `variables.env`, and no two names that differ only by case. A variable name matches `[A-Z][A-Z0-9_]*`.
-- A resumed agent (a paused session continued under a new session id) starts with a copy of what the paused session had written there.
+- A file name is a plain relative path inside that folder: no `..`, no glob, not `variables.env` in any case, no two names that differ only by case, and no name that is a folder of another. A variable name matches `[A-Z][A-Z0-9_]*`.
+- A resumed agent (a paused session continued under a new session id) starts with a copy of what the paused session had written there, up to the same size limit.
 
 ### Reading
 
@@ -570,13 +570,14 @@ When the writer ends `done` or `failed`, Kraft checks everything first. Only the
 
 - The writer fails, and nothing is kept, when the folder is over [`storage.outputs.max_size`](/reference/configuration/policy#step-output-keys) or holds more than 100 entries; when a declared variable is missing, over 4 KiB, or holds a control character other than a tab; or when `variables.env` holds more than 50 variables.
 - A declared file that is missing is simply absent. An undeclared file or variable is ignored. A symlink, a file with another hard link and a FIFO are left out.
-- A writer whose processes outlive it fails with nothing kept.
+- A writer whose processes outlive it fails with nothing kept. So does a remote writer whose machine dropped its folder for being over the limit, even if the server restarts before the writer is recorded.
+- A failed check also removes the writer's snapshot from an earlier run, so a reader never sees it.
 - The writer's `session.log` gets one line with the counts of files kept and missing and the declared variable names. A message never holds a name or value the worker chose.
 
 ### Where they are allowed
 
 - `outputs` goes on an agent or subprocess task in an exec node's own `steps` or `tasks`. It is refused on a fan-out task (`scope: each_repository`), in an `on_failure`, fix loop, judge, `escalation`, `on_conflict` or `on_merge_rejected.repair` slot, and in a gate's `auto_review`.
-- `reads` goes on an agent or subprocess task. An entry of two segments, `step.task`, names a writer in the reader's own node, so a library node holding both stays reusable under any node id. An entry of three, `node.step.task`, names a writer anywhere. A bare task id is refused.
+- `reads` goes on an agent or subprocess task. An entry of two segments, `step.task`, names a writer in the reader's own node, so a library node holding both stays reusable under any node id. An entry of three, `node.step.task`, names a writer anywhere. A bare task id, or an entry of more than three segments, is refused.
 - Every entry must name a task that declares `outputs` and runs before the reader: in an earlier node, or an earlier step of the same node. A task in the same step is never before it, so a writer and its reader cannot share one `tasks:` list.
 - A node's `on_failure`, fix loop, judge and `escalation` may read any step of the node. A step's or task's `on_failure` may read the steps up to and including its own. Such a handler may run before its writer did, and then finds nothing. `on_conflict`, `on_merge_rejected.repair` and a gate's `auto_review` read nothing.
 - `kraft admin templates lint` refuses a chain that breaks these rules.

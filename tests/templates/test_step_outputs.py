@@ -40,6 +40,15 @@ OUT = {"files": ["junit.xml"]}
         {"files": ["A.xml", "a.xml"]},
         {"variables": ["lower"]},
         {"variables": ["1X"]},
+        {"files": ["."]},
+        {"files": ["a//b"]},
+        {"files": ["a\\b"]},
+        {"files": ["a\x01b"]},
+        {"files": ["Variables.env"]},
+        {"files": ["a", "a/b"]},
+        {"files": ["A/b", "a"]},
+        {"variables": ["ID\n"]},
+        {"variables": ["ID", "ID"]},
     ],
     ids=[
         "empty",
@@ -52,6 +61,15 @@ OUT = {"files": ["junit.xml"]}
         "case-twins",
         "lowercase-variable",
         "digit-first-variable",
+        "dot",
+        "empty-segment",
+        "backslash",
+        "control-character",
+        "variables-file-by-another-case",
+        "file-and-its-own-folder",
+        "folder-and-a-file-by-another-case",
+        "variable-with-trailing-newline",
+        "repeated-variable",
     ],
 )
 def test_outputs_decl_refuses(declared):
@@ -81,8 +99,9 @@ def test_outputs_decl_accepts(declared):
         (["t"], ValueError),
         (["s..t"], ValueError),
         ([""], ValueError),
+        (["m.s.t.u"], ValueError),
     ],
-    ids=["own-node", "other-node", "both", "bare-id", "empty-segment", "empty"],
+    ids=["own-node", "other-node", "both", "bare-id", "empty-segment", "empty", "four-segments"],
 )
 def test_resolve_reads(reads, want):
     if want is ValueError:
@@ -309,6 +328,20 @@ def _reading(task_id: str, *entries: str) -> dict:
             "n.a.r: reads 'a.w', which does not run before it",
         ),
         (
+            _chain(
+                node("w", tasks=[sub("w", scope="each_repository")]),
+                node("n", tasks=[sub("r", reads=["w.main.w"])]),
+            ),
+            "n.main.r: reads 'w.main.w', which declares no outputs",
+        ),
+        (
+            _chain(
+                node("w", tasks=[W], on_failure=plan(sub("h", outputs=None))),
+                node("n", tasks=[sub("r", reads=["w.on_failure.main.h"])]),
+            ),
+            "more than three segments",
+        ),
+        (
             _chain(_two_steps({"at": 1, "on_failure": _reading("h", "s2.t2")}, writer_at=2)),
             "n.s1.on_failure.main.h: reads 's2.t2', which does not run before it",
         ),
@@ -353,6 +386,8 @@ def _reading(task_id: str, *entries: str) -> dict:
         "later-node",
         "later-step",
         "same-step-sibling",
+        "fan-out-task",
+        "handler-slot-task",
         "step-on-failure-of-earlier-step",
         "on-conflict",
         "merge-rejected-repair",

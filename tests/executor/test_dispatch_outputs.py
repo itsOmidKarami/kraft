@@ -4,6 +4,8 @@ recorded beside it (`kraft.outputs`)."""
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from support.harness import entry_of, git, v1_node, v1_task
 
@@ -142,6 +144,32 @@ async def test_resumed_agent_keeps_outputs(
     await run(it)
 
     assert seen.read_text().split() == ["from", "the", "paused", "run", "a.txt"]
+
+
+@pytest.mark.parametrize("kind", ["agent", "subprocess"])
+async def test_the_output_folder_is_made_and_carried_off_the_event_loop(
+    item_on, fake_agent, paused_session, monkeypatch, tmp_path, kind
+):
+    """A big folder left by a paused run is copied on a thread: the server keeps serving."""
+    on_loop = {}
+    for name in ("declare", "carry_over"):
+        real = getattr(outputs, name)
+
+        def spy(*a, _real=real, _name=name, **k):
+            try:
+                asyncio.get_running_loop()
+                on_loop[_name] = True
+            except RuntimeError:
+                on_loop[_name] = False
+            return _real(*a, **k)
+
+        monkeypatch.setattr(outputs, name, spy)
+    monkeypatch.setenv("KRAFT_FAKE_AGENT_SHELL", WRITE.format(seen="/dev/null"))
+    it = await item_on(writer(kind, tmp_path / "seen.txt"))
+
+    await run(it)
+
+    assert on_loop == {"declare": False, **({"carry_over": False} if kind == "agent" else {})}
 
 
 # -- readers ---------------------------------------------------------------------

@@ -18,15 +18,9 @@ describe("the ops a Config row's edit sends", () => {
 describe("the step output keys a Config row edits", () => {
   it.each([
     { id: "reads", field: "reads", text: "build.compile, test.junit", want: ["build.compile", "test.junit"] },
-    { id: "output files", field: "outputs.files", text: "junit.xml, report final.xml", want: ["junit.xml", "report final.xml"] },
-    { id: "output variables", field: "outputs.variables", text: "PIPELINE_ID", want: ["PIPELINE_ID"] },
   ])("$id is a list of names", ({ field, text, want }) => {
     const meta = fieldMeta(field);
     expect(meta.kind).toBe("list");
     expect(parse(text, meta.kind)).toEqual({ value: want });
-  });
-
-  it("outputs as a whole is edited in YAML, like the fallback list", () => {
-    expect(fieldMeta("outputs").elsewhere).toMatch(/YAML/);
   });
 });

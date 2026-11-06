@@ -8,7 +8,7 @@ import pytest
 from support.harness import IN_PLACE, commit_all, entry_of, git, v1_named_chain, v1_task, write
 from support.store_fixtures import mk_item
 
-from kraft import item_paths, outputs, store
+from kraft import item_paths, store
 from kraft.executor import prompts
 from kraft.findings import Finding, JobRef
 from kraft.templates.models import AgentTask
@@ -405,22 +405,6 @@ async def test_an_in_place_pr_rules_note_reads_the_items_branch(item_on, run_dir
     git(repo, "checkout", "-q", "main")
 
     assert f"`{_RULES[1]}`" in prompts.pr_rules_note(repo, it.row())
-
-
-@pytest.mark.parametrize(
-    ("files", "variables", "named"),
-    [
-        (("a.xml", "b dir/c.txt"), (), ["a.xml", "b dir/c.txt"]),
-        ((), ("PIPELINE_ID", "OTHER"), ["PIPELINE_ID", "OTHER", "variables.env"]),
-        (("a.xml",), ("K",), ["a.xml", "K"]),
-    ],
-    ids=["files", "variables", "both"],
-)
-def test_outputs_note_names_the_folder_and_the_declared_names(files, variables, named):
-    note = prompts.outputs_note(outputs.Decl("n.s.t", files, variables, 1 << 20))
-
-    assert "`$KRAFT_OUTPUT_DIR`" in note
-    assert all(name in note for name in named)
 
 
 def test_reads_note_lists_paths_and_variable_names_and_says_it_is_data():

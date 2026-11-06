@@ -8,7 +8,7 @@ export type FieldKind = "bool" | "enum" | "int" | "minutes" | "number" | "durati
 /** `restart`: this and the earlier exec nodes, for `on_base_changed.restart_from` (Decisions §9 Node settings);
  *  `rejectRestart`: the earlier exec nodes, before the final gate when it comes first, for `on_merge_rejected.restart_from`. */
 /** `labels`: a closed set's values in words, where the raw value would not say what it does. */
-export type FieldMeta = { label: string; kind: FieldKind; options?: string[] | "harness" | "effort" | "profile" | "restart" | "rejectRestart"; labels?: Record<string, string>; choices?: ChoiceSource; suggest?: "model"; elsewhere?: string };
+export type FieldMeta = { label: string; kind: FieldKind; options?: string[] | "harness" | "effort" | "profile" | "restart" | "rejectRestart"; labels?: Record<string, string>; choices?: ChoiceSource; suggest?: "model"; elsewhere?: string; where?: string };
 /** Where a typed field's closed set comes from: the draft's `choices` (`ref`,
  *  `target`, `inputs`, `grants`), the library's steering profiles, the
  *  harnesses, the documents a gate can ask about, or the nodes before it. */
@@ -25,10 +25,8 @@ const META: Record<string, FieldMeta> = {
   inputs: { label: "inputs", kind: "list", choices: "inputs" },
   // A list of entry mappings, not of names: its own rows on the Overview edit it.
   fallback: { label: "fallback", kind: "list", elsewhere: "Edit the fallback list on the Overview tab, or a model or effort in it in YAML" },
-  // A mapping of two lists, not a list: the editor writes each list on its own key, and the row reads outputs.files / outputs.variables.
-  outputs: { label: "outputs", kind: "list", elsewhere: "Edit outputs.files and outputs.variables in YAML" },
-  "outputs.files": { label: "output files", kind: "list" },
-  "outputs.variables": { label: "output variables", kind: "list" },
+  // A mapping of two lists, not a list: no row edits it, so the lock says YAML, not Overview.
+  outputs: { label: "outputs", kind: "list", elsewhere: "Edit outputs.files and outputs.variables in YAML", where: "YAML" },
   reads: { label: "reads", kind: "list" },
   steering: { label: "steering", kind: "list", choices: "steering" },
   scope: { label: "runs", kind: "enum", options: ["once", "each_repository"] },

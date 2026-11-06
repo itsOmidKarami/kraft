@@ -1788,7 +1788,8 @@ async def _dispatch_task_in(
         env |= reads_env
         if t.outputs is not None:
             files = item_paths.session_files(run_dirs, work_item_row["id"], common["session_id"])
-            env["KRAFT_OUTPUT_DIR"] = str(outputs.declare(files, _output_decl(t, task, launch)))
+            folder = await asyncio.to_thread(outputs.declare, files, _output_decl(t, task, launch))
+            env["KRAFT_OUTPUT_DIR"] = str(folder)
         return await checked(
             await _subprocess.run_task(
                 db,
@@ -2443,10 +2444,14 @@ async def _launch_agent(
     if t.outputs is not None:
         decl = _output_decl(t, task, launch)
         files = item_paths.session_files(run_dirs, work_item_row["id"], common["session_id"])
-        extra_env["KRAFT_OUTPUT_DIR"] = str(outputs.declare(files, decl))
+        folder = await asyncio.to_thread(outputs.declare, files, decl)
+        extra_env["KRAFT_OUTPUT_DIR"] = str(folder)
         if resumed is not None:
-            outputs.carry_over(
-                item_paths.session_files(run_dirs, work_item_row["id"], resumed[0]), files, decl
+            await asyncio.to_thread(
+                outputs.carry_over,
+                item_paths.session_files(run_dirs, work_item_row["id"], resumed[0]),
+                files,
+                decl,
             )
         notes += prompts.outputs_note(decl)
     try:

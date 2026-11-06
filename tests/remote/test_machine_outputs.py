@@ -72,14 +72,8 @@ async def test_jobspec_carries_cap_and_outputs_dir(rig):
 async def test_machine_refuses_oversize_outputs_before_packing(rig):
     status, files, run = await run_writer(rig, size=5000, cap=1000)
 
-    assert run.outputs_refused is True
+    assert outputs.was_refused(files), "recorded beside the session, for a restart"
     assert not (item_paths.writer_dir(files) / "big").exists(), "never sent back"
-    assert status == "failed"
-
-
-async def test_outputs_refused_fails_writer(rig):
-    status, files, run = await run_writer(rig, size=5000, cap=1000)
-
     assert status == "failed"
     assert "over the size or entry limit" in files.log.read_text()
     assert not snapshot(rig).exists()
@@ -93,7 +87,7 @@ async def test_server_rechecks_cap_from_old_machine(rig, monkeypatch):
 
     status, files, run = await run_writer(rig, size=5 << 20, cap=1 << 20)
 
-    assert run.outputs_refused is False
+    assert not outputs.was_refused(files)
     assert status == "failed"
     assert "limit" in files.log.read_text()
     assert not snapshot(rig).exists()

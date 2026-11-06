@@ -38,6 +38,11 @@ logger = logging.getLogger(__name__)
 
 VARIABLES_FILE = "variables.env"
 SIDECAR = "outputs.json"
+#: Beside `SIDECAR`: what `capture` concluded, so a session captured twice (a
+#: crash between dropping its folder and recording its exit) keeps the first.
+CAPTURED = "outputs.captured"
+#: Beside `SIDECAR`: a machine returned none of the writer's outputs, over the limit.
+REFUSED = "outputs.refused"
 #: The most entries (files, folders, links) a writer's folder may hold.
 MAX_ENTRIES = 100
 #: The most distinct keys its `variables.env` may hold.
@@ -60,6 +65,9 @@ class Decl:
     files: tuple[str, ...]
     variables: tuple[str, ...]
     max_bytes: int
+
+
+_COULD_NOT_STORE = "kraft: outputs: could not store the declared outputs"
 
 
 def declare(files: SessionFiles, decl: Decl) -> Path:
@@ -101,7 +109,7 @@ def carry_over(old: SessionFiles, new: SessionFiles, decl: Decl) -> None:
     """Give the resumed session `new` a copy of what the paused session `old`
     had written to its output folder, as `copy_in` copies a worker's file:
     no link followed, nothing that is not a regular file with one link, and
-    no more than the entry and size limits a capture holds it to."""
+    no more than the entry and total size limits a capture holds it to."""
     try:
         top = open_dir_no_symlinks(old.folder, ["out", "outputs"])
     except OSError:
@@ -111,15 +119,19 @@ def carry_over(old: SessionFiles, new: SessionFiles, decl: Decl) -> None:
     finally:
         os.close(top)
     target = item_paths.writer_dir(new)
+    left = decl.max_bytes  # the whole folder, as a capture holds it, not each file
     for name in names:
-        item_paths.copy_in(
+        if left <= 0:
+            break
+        if item_paths.copy_in(
             old.folder,
             f"out/outputs/{name}",
             target,
             name,
-            max_bytes=decl.max_bytes,
+            max_bytes=left,
             single_link=True,
-        )
+        ):
+            left -= (target / name).stat().st_size
 
 
 def _regular_files(top: int, prefix: str = "", budget: list[int] | None = None) -> list[str]:
@@ -167,17 +179,55 @@ def capture(run_dirs, wid: str, files: SessionFiles) -> str | None:
     message, holding no string the worker chose, saying why the writer must
     fail; there is then no snapshot and no temporary folder. Either way the
     worker's folder is deleted. The outcome is also appended to the session's
-    log."""
+    log. A session captured before returns what that capture concluded, and
+    touches no snapshot."""
     decl = read_decl(files)
     if decl is None:
         return None
+    done = _read_captured(files)
+    if done is not None:
+        _drop_writer_dir(files)
+        return done or None
     try:
         problem, counts = _capture(run_dirs, wid, files, decl)
-    finally:
-        _drop_writer_dir(files)
-    line = problem or log_line(decl, *counts)
-    _append(files.log, line)
+    except Exception as exc:
+        logger.warning("could not capture the outputs of a writer of %s: %s", wid, exc)
+        problem, counts = _COULD_NOT_STORE, (0, 0)
+    if problem is not None and not clear(run_dirs, wid, decl.writer):
+        problem = _COULD_NOT_STORE
+    _write_captured(files, problem)
+    _drop_writer_dir(files)
+    _append(files.log, problem or log_line(decl, *counts))
     return problem
+
+
+def _read_captured(files: SessionFiles) -> str | None:
+    """What an earlier capture of this session concluded: its problem, `""`
+    for none, or None when it has not been captured."""
+    try:
+        return str(json.loads((files.folder / CAPTURED).read_text())["problem"] or "")
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _write_captured(files: SessionFiles, problem: str | None) -> None:
+    try:
+        (files.folder / CAPTURED).write_text(json.dumps({"problem": problem}))
+    except OSError as exc:
+        logger.warning("could not record a capture in %s: %s", files.folder, exc)
+
+
+def mark_refused(files: SessionFiles) -> None:
+    """Record, beside the session, that a machine dropped its outputs for being
+    over the limit, so the refusal outlives the server process that heard it."""
+    try:
+        (files.folder / REFUSED).write_text("")
+    except OSError as exc:
+        logger.warning("could not record a refusal in %s: %s", files.folder, exc)
+
+
+def was_refused(files: SessionFiles) -> bool:
+    return (files.folder / REFUSED).exists()
 
 
 def drop(files: SessionFiles) -> None:
@@ -197,15 +247,18 @@ def trim_oversized(files: SessionFiles, max_bytes: int) -> bool:
     return True
 
 
-def refuse(files: SessionFiles, why: str) -> str | None:
+def refuse(run_dirs, wid: str, files: SessionFiles, why: str) -> str | None:
     """Keep nothing of a session that declared outputs, for `why` (a message
-    holding no string the worker chose): its folder is deleted and the reason
-    logged. None, touching nothing, for a session that declared none."""
-    if read_decl(files) is None:
+    holding no string the worker chose): its folder and any earlier snapshot of
+    the writer are deleted and the reason logged. None, touching nothing, for a
+    session that declared none."""
+    decl = read_decl(files)
+    if decl is None:
         return None
     _drop_writer_dir(files)
-    _append(files.log, why)
-    return why
+    problem = why if clear(run_dirs, wid, decl.writer) else _COULD_NOT_STORE
+    _append(files.log, problem)
+    return problem
 
 
 def _capture(
@@ -244,7 +297,7 @@ def _capture(
     except OSError as exc:
         logger.warning("could not store the outputs of a writer of %s: %s", wid, exc)
         item_paths.remove_tree(temp)
-        return "kraft: outputs: could not store the declared outputs", (0, 0)
+        return _COULD_NOT_STORE, (0, 0)
     return None, (kept, len(decl.files) - kept)
 
 
@@ -364,10 +417,13 @@ def _append(log: Path, line: str) -> None:
         logger.warning("could not log a capture to %s: %s", log, exc)
 
 
-def clear(run_dirs, wid: str, writer: str) -> None:
+def clear(run_dirs, wid: str, writer: str) -> bool:
     """Delete the writer's snapshot, so a later reader sees nothing of a run
-    that has since re-run or been skipped."""
-    item_paths.remove_tree(item_paths.snapshot_dir(run_dirs, wid, writer))
+    that has since re-run, been skipped or failed. False when it is still
+    there: `remove_tree` swallows errors, so the removal is checked."""
+    snapshot = item_paths.snapshot_dir(run_dirs, wid, writer)
+    item_paths.remove_tree(snapshot)
+    return not os.path.lexists(snapshot)
 
 
 def writers_in(chain, node_id: str, under: str | None = None) -> list[str]:

@@ -14,7 +14,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from kraft import events, ids, item_paths, store
+from kraft import events, ids, item_paths, outputs, store
 from kraft.remote import blobs, bundle, files, lfs, protocol
 from kraft.remote.hub import Claim
 from kraft.remote.jobs import JobSpec
@@ -83,7 +83,6 @@ class Run:
     oom: dict | None = (
         None  # `{"memory", "confirmed"}`: its sandbox killed it under its memory limit
     )
-    outputs_refused: bool = False  # the machine dropped the writer's outputs: over the limit
     abandoned: bool = False  # given up on: whatever the machine hands in later is thrown away
 
 
@@ -319,7 +318,13 @@ class Runs:
         spec, code = run.spec, int(frame.get("code", 1))
         run.capped = frame.get("capped")
         run.oom = frame.get("oom")
-        run.outputs_refused = bool(frame.get("outputs_refused"))
+        if frame.get("outputs_refused"):
+            # The machine dropped the writer's outputs, over the limit: kept beside the
+            # session, so a restart before the session is recorded still fails the writer.
+            await asyncio.to_thread(
+                outputs.mark_refused,
+                item_paths.session_files(self._run_dirs, spec.work_item_id, spec.session_id),
+            )
         lock = self._locks.setdefault(spec.work_item_id, asyncio.Lock())
         async with lock:
             try:

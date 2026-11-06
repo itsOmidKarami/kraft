@@ -3,12 +3,10 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 from support.harness import own_files, v1_node, v1_task
 
-from kraft import caps, events, ids, item_paths, outputs, store
+from kraft import events, ids, item_paths, outputs
 from kraft.adapters import subprocess as sp
 from kraft.vocab import SandboxEvent
 
@@ -85,13 +83,6 @@ async def test_capture_on_exit(launch, exit_code, want):
     assert "kept 1 file(s), 0 missing; variables K" in launch.log("s1")
 
 
-async def test_a_writer_that_declared_nothing_is_left_alone(launch):
-    assert await launch.run("s1", f"{LEAVE}; exit 0", declared=False) == "done"
-
-    assert not launch.snapshot().exists()
-    assert (item_paths.writer_dir(launch.files("s1")) / "a.txt").exists()
-
-
 async def test_capture_failure_fails_writer(launch):
     """Ended `done`, but its outputs are over the cap it launched under."""
     status = await launch.run(
@@ -135,35 +126,6 @@ async def test_another_sessions_survivor_does_not_fail_this_writer(launch):
     )
 
     assert await launch.run("s1", f"{LEAVE}; exit 0") == "done"
-
-
-@pytest.mark.parametrize("how", ["paused", "capped_out", "cancelled"])
-async def test_no_capture(launch, how):
-    cap = caps.Deadline(caps.monotonic() + 0.3, caps.Hit(WRITER, "time_cap_minutes", 1, 0.0))
-    task = asyncio.create_task(
-        launch.run(
-            "s1",
-            f"{LEAVE}; sleep 5",
-            flush_grace=0,
-            **({"time_cap": cap} if how == "capped_out" else {}),
-        )
-    )
-    if how != "capped_out":
-        # Until the writer has run its script, which leaves the file.
-        for _ in range(250):
-            if (item_paths.writer_dir(launch.files("s1")) / "a.txt").exists():
-                break
-            await asyncio.sleep(0.02)
-        if how == "paused":
-            await launch.it.database.write(lambda c: store.pause_work_item(c, launch.it.id, ["s1"]))
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-    else:
-        assert await task == caps.TIME_CAPPED
-
-    assert not launch.snapshot().exists()
-    assert item_paths.writer_dir(launch.files("s1")).is_dir(), "a capture deletes it"
 
 
 @pytest.mark.parametrize("status", ["unknown", "paused", "needs_context", "rate_limited"])

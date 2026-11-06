@@ -545,7 +545,7 @@ class TaskBase(BaseModel):
 
 #: `outputs.files` names a plain relative path; `variables.env` is Kraft's own.
 VARIABLES_FILE = "variables.env"
-_VARIABLE_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
+_VARIABLE_NAME = re.compile(r"[A-Z][A-Z0-9_]*")
 _GLOB = re.compile(r"[*?\[\]{}]")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
@@ -567,13 +567,16 @@ class OutputsDecl(BaseModel):
         seen: set[str] = set()
         for name in self.files:
             _plain_relative(name)
-            if name == VARIABLES_FILE:
+            if name.casefold() == VARIABLES_FILE:
                 raise ValueError(f"outputs.files: {VARIABLES_FILE} is Kraft's; declare variables")
             if name.casefold() in seen:
                 raise ValueError(f"outputs.files: {name!r} repeats a name, or differs only by case")
             seen.add(name.casefold())
+        for name in self.files:
+            if any(other.casefold().startswith(f"{name.casefold()}/") for other in self.files):
+                raise ValueError(f"outputs.files: {name!r} is a file and also a folder of another")
         for key in self.variables:
-            if not _VARIABLE_NAME.match(key):
+            if not _VARIABLE_NAME.fullmatch(key):
                 raise ValueError(f"outputs.variables: {key!r} must match [A-Z][A-Z0-9_]*")
         if len(set(self.variables)) != len(self.variables):
             raise ValueError("outputs.variables: a name is declared twice")
@@ -598,14 +601,15 @@ def _plain_relative(name: str) -> None:
 
 def resolve_reads(node_id: str, reads: Sequence[str]) -> tuple[str, ...]:
     """The writer task paths `reads` names, read from the node `node_id`: a
-    two-segment entry (`step.task`) is that node's own, a longer one
+    two-segment entry (`step.task`) is that node's own, a three-segment one
     (`node.step.task`) is kept as written. Anything else is refused."""
     out = []
     for entry in reads:
         parts = entry.split(PATH_SEPARATOR)
-        if len(parts) < 2 or not all(parts):
+        if not 2 <= len(parts) <= 3 or not all(parts):
             raise ValueError(
-                f"reads: {entry!r} must be step.task or node.step.task, never a bare task id"
+                f"reads: {entry!r} must be step.task or node.step.task, never a bare task id "
+                "or more than three segments"
             )
         out.append(f"{node_id}{PATH_SEPARATOR}{entry}" if len(parts) == 2 else entry)
     return tuple(out)
