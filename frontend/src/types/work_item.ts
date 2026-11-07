@@ -3,11 +3,15 @@ import type { DisplayStatus, EventType, ItemAction, SessionStatus, StopKind, Wor
 
 export interface ChainNode {
   id: string;
-  /** `exec` or `gate` on a Template Schema V1 chain, absent on a legacy one.
+  /** `exec`, `gate` or `group` on a Template Schema V1 chain, absent on a legacy one.
    *  A V1 gate *is* a node of its own rather than a `gate_after` string on the
    *  node in front of it, so this is how the two are told apart -- never by
    *  faking `gate_after` onto the gate node. */
-  kind?: "exec" | "gate";
+  kind?: "exec" | "gate" | "group";
+  /** On a `group` (slices), its body: exec nodes with bare ids, whose path is `<group>.<node>`. */
+  nodes?: ChainNode[];
+  /** On a `group`, the body node ids the parent runs itself when it does not fork. */
+  unforked?: string[];
   /** On a V1 node, the attachment kind that drops it at intake -- the gate
    *  deciding that document and the node that would write it
    *  (`ResolvedNode.covered_by`, Kraft-ene04). Absent on a legacy node. */
@@ -226,6 +230,28 @@ export interface OneOffSummary {
   approval: { by: string; door: string; at: string; digest: string; review_digest?: string } | null;
 }
 
+/** A parent's children by state, for the current generation (`GET /work-items`); null on an ordinary item. */
+export interface SliceSummary {
+  done: number;
+  needs_you: number;
+  paused: number;
+  running: number;
+  queued: number;
+  dropped: number;
+  total: number;
+}
+
+/** One child of a parent, in slice order (`GET /work-items/{id}` on a parent). */
+export interface SliceChild {
+  id: string;
+  title: string;
+  slice_key: number;
+  status: string;
+  display_status: string;
+  current_node_id: string | null;
+  cost_usd: number | null;
+}
+
 export interface WorkItem {
   id: string;
   title: string;
@@ -278,6 +304,13 @@ export interface WorkItem {
   /** Repo-relative path to the document the pending gate is a decision about,
    *  or null when the agent wrote nothing for a human to review. */
   gate_artifact?: string | null;
+  /** A parent's children by state; null when it has none. */
+  slices?: SliceSummary | null;
+  /** Only on a parent's detail: its children, slice order. */
+  children?: SliceChild[];
+  /** Only on a child's detail: the parent it belongs to and its slice. */
+  parent_id?: string | null;
+  slice_key?: number | null;
   // client-derived, not from the list endpoint:
   rejectNote?: string | null;
   fixCycle?: number;

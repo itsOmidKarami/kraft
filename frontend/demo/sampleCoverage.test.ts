@@ -7,6 +7,7 @@ import { DISPLAY_STATUSES, STOP_KINDS, type StopKind } from "../src/types/vocab.
 /** Stop kinds no sample item stops on, each with why. Only shrinks: a kind listed here that gets sampled fails below. */
 const UNSAMPLED_STOPS: Partial<Record<StopKind, string>> = {
   config: "a broken chain or repo config stops an item before a visitor could care; the failed sample shows the failure card it shares",
+  slices: "a parent waiting on its slices needs child items the demo's board does not carry; the page words it from the slices summary, which StateCard.test.tsx covers",
   infra: "the machine itself failing (disk, git, the harness binary) is rare; the failed sample shows the failure card it shares",
 };
 

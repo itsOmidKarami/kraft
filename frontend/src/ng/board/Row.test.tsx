@@ -156,4 +156,31 @@ describe("Row", () => {
     expect(container.querySelector(".board-meta-age")).toHaveTextContent("1h ago");
     expect(container.querySelector(".board-meta-id")).toHaveTextContent("kraft-cb59");
   });
+
+  it("a parent row shows its slices and expands to its children", () => {
+    const slices = { done: 3, needs_you: 1, paused: 1, running: 1, queued: 0, dropped: 0, total: 6 };
+    const children = [
+      { id: "c1", title: "Cache reads", slice_key: 1, status: "completed", display_status: "done", current_node_id: null, cost_usd: 0.4 },
+      { id: "c2", title: "Cache writes", slice_key: 2, status: "needs_human", display_status: "needs_you", current_node_id: "verification", cost_usd: null },
+    ];
+    // The board list carries the summary only: no way to expand.
+    cleanup();
+    mount("running", { slices });
+    expect(document.querySelector(".board-meta-slices")).toHaveTextContent("slices: 3 done, 1 needs you, 1 paused, 1 running");
+    expect(screen.queryByRole("button", { name: "Show slices" })).toBeNull();
+    cleanup();
+    // With its children loaded, the row opens to them.
+    mount("running", { slices, children });
+    const toggle = screen.getByRole("button", { name: "Show slices" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Cache reads")).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const list = screen.getByRole("list", { name: "Slices of Design the cache" });
+    expect([...list.querySelectorAll("li")].map((li) => li.textContent)).toEqual(["1Cache readsdone", "2Cache writesneeds you · verification"]);
+    // An ordinary item shows no slices.
+    cleanup();
+    mount("running");
+    expect(document.querySelector(".board-meta-slices")).toBeNull();
+  });
 });

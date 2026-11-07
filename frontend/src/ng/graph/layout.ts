@@ -4,8 +4,12 @@ import type { GraphItem } from "./types";
 export const L = { BOX: 54, GATE: 26, COLE: 138, COLG: 96, CY: 96, PAD: 86, H: 250 } as const;
 
 export type ChainNode = GraphItem & {
-  kind: "exec" | "gate";
+  kind: "exec" | "gate" | "group";
   sub?: string;
+  /** On a `group` (slices): its body nodes, in order, each named by its path (`slices.implementation`). */
+  body?: ChainNode[];
+  /** On a `group`: how far its children are, in words ("2 of 3 slices done"); part of its accessible name. */
+  summary?: string;
   subTone?: "amber" | "muted";
   /** What a node the run stands on waits for, in words ("waiting on CI"), for a pane or a row; the canvas does not draw it. */
   wait?: string;

@@ -58,7 +58,7 @@ export interface ResolvedView {
   chain: Authored;
   task_paths: string[];
   steering: Record<string, unknown>;
-  nodes: { id: string; kind: "exec" | "gate"; icon: string | null }[];
+  nodes: { id: string; kind: "exec" | "gate" | "group"; icon: string | null }[];
   /** Per gate, the document kinds the exec nodes before it produce. */
   documents: Record<string, string[]>;
   /** For a chain that extends another, where each node came from; null otherwise. */
@@ -93,7 +93,7 @@ export interface Extending {
   parent: string;
   nodes: Authored[] | null;
   origins: Record<string, Origin>;
-  removed: { id: string; kind: "exec" | "gate"; after: string | null }[];
+  removed: { id: string; kind: "exec" | "gate" | "group"; after: string | null }[];
 }
 
 /** A builtin task's `ref`, a forge task's `target` (`waits`: it runs as an

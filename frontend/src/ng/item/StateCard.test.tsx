@@ -396,6 +396,13 @@ describe("StateCard", () => {
     expect(within(card).queryByRole("button", { name: /Retry/ })).toBeNull();
   });
 
+  it("slices: a parent says its children are the work, with their count, and offers no Retry", () => {
+    show({ display_status: "waiting", status: "waiting", stop: stop("slices"), slices: { done: 2, needs_you: 1, paused: 0, running: 0, queued: 0, dropped: 0, total: 3 } });
+    const card = screen.getByRole("region", { name: "Waiting for slices" });
+    expect(card).toHaveTextContent("slices2 done, 1 needs you");
+    expect(within(card).queryByRole("button", { name: /Retry/ })).toBeNull();
+  });
+
   it("conflict: the files the handler left and cleared, review and send back", async () => {
     const { h } = show({ display_status: "needs_you", stop: stop("conflict", { facts: { unresolved: ["search/cache.py", "search/reindex.py"], resolved: ["search/config.py"] } }) });
     const card = screen.getByRole("region", { name: "Rebase needs you" });

@@ -1,4 +1,4 @@
-import type { KeyboardEvent, MouseEvent } from "react";
+import { useState, type KeyboardEvent, type MouseEvent } from "react";
 import { ago, repoName, shortId } from "../../format";
 import type { WorkItem } from "../../types";
 import { NodeGlyph } from "../graph/NodeGlyph";
@@ -6,7 +6,7 @@ import { breakPaths } from "../ui/breakable";
 import { useSingleClick } from "../ui/singleClick";
 import { CUE_ICON } from "./cue";
 import { chainLabel, chainOf, groupOf } from "./model";
-import { actionVariant, admittedRowAction, glyphOf, reasonTail, stopCueOf, ticksOf, type RowAction } from "./rowText";
+import { actionVariant, admittedRowAction, glyphOf, nodeWords, reasonTail, slicesLine, stopCueOf, ticksOf, type RowAction } from "./rowText";
 import { IN_YOUR_CHECKOUT } from "./sharedWords";
 import { Ticks } from "./Ticks";
 
@@ -52,6 +52,10 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
   // five alike in a row read the same to a screen reader without it (R8b-11).
   const titleId = `board-title-${item.id}`;
   const single = useSingleClick();
+  // A parent's slices: the summary on the row, and, where the detail has loaded its children, a list of them.
+  const slices = slicesLine(item);
+  const children = item.children ?? [];
+  const [open, setOpen] = useState(false);
   const click = (e: MouseEvent) => (e.metaKey || e.ctrlKey ? onOpen(item.id) : single(e, () => onSelect(item.id)));
   const key = (e: KeyboardEvent) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -75,6 +79,7 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
           </span>
           {!hideRepo && <><span className="board-sep" aria-hidden>·</span><span className="board-meta-repo" title={item.repo}>{repoName(item.repo)}</span></>}
           {item.in_place && <><span className={`board-sep${saysCheckout ? " is-said" : ""}`} aria-hidden>·</span><span className={`board-meta-inplace${saysCheckout ? " is-said" : ""}`} title={item.repo}>{IN_YOUR_CHECKOUT}</span></>}
+          {slices && <><span className="board-sep" aria-hidden>·</span><span className="board-meta-slices" title={slices}>{slices}</span></>}
           <span className="board-sep" aria-hidden>·</span>
           <span className="board-meta-id">{id}</span>
           {!hideChain && <><span className="board-sep" aria-hidden>·</span><span className="board-meta-chain">{chainLabel(chainOf(item))}</span></>}
@@ -92,6 +97,22 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
           </button>
         )}
       </span>
+      {children.length > 0 && (
+        <button type="button" className="board-slices-toggle" aria-expanded={open} aria-controls={`board-children-${item.id}`} aria-describedby={titleId} tabIndex={off} onClick={() => setOpen(!open)}>
+          {open ? "Hide slices" : "Show slices"}
+        </button>
+      )}
+      {open && children.length > 0 && (
+        <ul className="board-children" id={`board-children-${item.id}`} aria-label={`Slices of ${item.title}`}>
+          {children.map((c) => (
+            <li key={c.id} className="board-child" data-row={c.id}>
+              <span className="board-child-key">{c.slice_key}</span>
+              <span className="board-child-title" title={c.title}>{c.title}</span>
+              <span className="board-child-status">{c.display_status.replace(/_/g, " ")}{c.current_node_id ? ` · ${nodeWords(c.current_node_id)}` : ""}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       {error && <p className="board-row-error" role="alert">{error}</p>}
     </div>
   );

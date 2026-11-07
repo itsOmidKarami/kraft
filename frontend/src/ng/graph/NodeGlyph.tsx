@@ -31,7 +31,7 @@ export function NodeGlyph({ kind = "exec", size = "md", state = "plain", sel, pr
         </span>
       ) : (
         <span className={cls} style={{ borderRadius: Z.r }}>
-          {kind === "slot" ? <span style={{ fontSize: Z.icon - 1 }}>+</span> : <NodeIcon name={icon} kind={taskKind} size={Z.icon} />}
+          {kind === "slot" ? <span style={{ fontSize: Z.icon - 1 }}>+</span> : <NodeIcon name={icon ?? (kind === "group" ? "layers" : undefined)} kind={taskKind} size={Z.icon} />}
         </span>
       )}
       {badges && prob && !pill && <span className="glyph-prob" style={{ top: off, right: off }}>!</span>}

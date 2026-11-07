@@ -1,5 +1,5 @@
 import { until } from "../../format";
-import type { ChainNode, ItemAction, TaskProgress, WorkItem } from "../../types";
+import type { ChainNode, ItemAction, SliceSummary, TaskProgress, WorkItem } from "../../types";
 import type { GlyphKind, GlyphState } from "../graph/types";
 import { admits } from "../item/status";
 import { gateOf, groupOf, stopOf } from "./model";
@@ -32,6 +32,19 @@ export const nameOf = (nodes: Named[] | undefined, id: string) => displayName(no
 
 /** `nameOf` for an id known to be a gate (`pending_gate`), whether or not the chain lists it as one. */
 export const gateName = (nodes: Named[] | undefined, id: string) => displayName({ ...(nodes?.find((n) => n.id === id) ?? { id }), kind: "gate" });
+
+const SLICE_PARTS: [keyof SliceSummary, string][] = [["done", "done"], ["needs_you", "needs you"], ["paused", "paused"], ["running", "running"], ["queued", "queued"], ["dropped", "dropped"]];
+
+/** A parent's children by state, in words: `slices: 3 done, 1 needs you, 1 running`. Empty for an item with none. */
+export function slicesLine(i: Pick<WorkItem, "slices">): string {
+  const s = i.slices;
+  if (!s || !s.total) return "";
+  const parts = SLICE_PARTS.filter(([k]) => s[k] > 0).map(([k, w]) => `${s[k]} ${w}`);
+  return `slices: ${parts.join(", ") || `${s.total} in all`}`;
+}
+
+/** The note a group's accessible name carries: `2 of 3 slices done`. */
+export const slicesDone = (s: SliceSummary | null | undefined): string => (s && s.total ? `${s.done} of ${s.total} slices done` : "");
 
 export const capitalise = (s: string) => s.replace(/^./, (c) => c.toUpperCase());
 
@@ -198,11 +211,14 @@ export function admittedRowAction(i: Row & Pick<WorkItem, "actions">): RowAction
   return a;
 }
 
+/** A current node id is a node's own, or a path inside a group (`slices.implementation` is in `slices`). */
+const inNode = (id: string, current: string | null | undefined) => !!current && (id === current || current.startsWith(`${id}.`));
+
 /** The row's NodeGlyph: the current node's kind and icon, its state from the status. */
 export function glyphOf(i: Row): { kind: GlyphKind; icon?: string; state: GlyphState } {
   const nodes: ChainNode[] = i.chain_definition?.nodes ?? [];
-  const n = nodes.find((x) => x.id === i.current_node_id) ?? nodes[nodes.length - 1];
-  const kind: GlyphKind = n?.kind === "gate" ? "gate" : "exec";
+  const n = nodes.find((x) => inNode(x.id, i.current_node_id)) ?? nodes[nodes.length - 1];
+  const kind: GlyphKind = n?.kind === "gate" ? "gate" : n?.kind === "group" ? "group" : "exec";
   const dropped = i.display_status === "cancelled" || (i.display_status === "archived" && i.status === "abandoned");
   const finished = i.display_status === "done" || (i.display_status === "archived" && !dropped);
   const icon = dropped ? "ban" : finished ? "check" : n && (n.steps?.length ?? 0) > 1 ? "layers" : undefined;
@@ -237,7 +253,7 @@ export type ChainMark = { node: string; gate: boolean; state: "done" | "current"
 export function chainMarks(i: Row): ChainMark[] {
   const nodes = i.chain_definition?.nodes ?? [];
   const ended = i.display_status === "done" || i.display_status === "cancelled" || i.display_status === "archived";
-  const at = nodes.findIndex((n) => n.id === i.current_node_id);
+  const at = nodes.findIndex((n) => inNode(n.id, i.current_node_id));
   const hot = (groupOf(i) === "needs" && i.display_status !== "paused") || i.display_status === "escalated";
   return nodes.map((n, k) => ({
     node: n.id,

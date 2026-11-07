@@ -33,7 +33,7 @@ const sizeOf = (c: TemplateSummary) => `${c.extends ? `extends ${c.extends} · `
 /** On an extending chain, where a node comes from, in the canvas's words; an inherited one unchanged has no mark. */
 const ORIGIN = { added: "added here", overridden: "overridden here" } as const;
 
-const nodeSub = (n: ChainNode) => (n.kind === "gate" ? `gate · reject to ${n.reject_to ?? "the nearest node before it"}` : `exec · ${(n.steps ?? n.tasks.map((t) => [t])).length} ${((n.steps ?? n.tasks.map((t) => [t])).length === 1) ? "step" : "steps"}${n.fix_loop ? " · fix loop" : ""}`);
+const nodeSub = (n: ChainNode) => (n.kind === "group" ? `group · ${n.nodes?.length ?? 0} nodes` : n.kind === "gate" ? `gate · reject to ${n.reject_to ?? "the nearest node before it"}` : `exec · ${(n.steps ?? (n.tasks ?? []).map((t) => [t])).length} ${((n.steps ?? (n.tasks ?? []).map((t) => [t])).length === 1) ? "step" : "steps"}${n.fix_loop ? " · fix loop" : ""}`);
 
 /** `/templates/chains`: the chains (W17 brief L.1). */
 export function ChainsList() {

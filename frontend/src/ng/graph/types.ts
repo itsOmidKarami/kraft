@@ -3,7 +3,7 @@
 export type TaskKind = "agent" | "builtin" | "subprocess" | "forge";
 
 export type GlyphState = "plain" | "done" | "current" | "todo" | "failed" | "esc" | "ghost" | "amber" | "paused";
-export type GlyphKind = "exec" | "gate" | "slot";
+export type GlyphKind = "exec" | "gate" | "group" | "slot";
 
 /** What a canvas draws for one node or task. Pages map API data onto this. */
 export type GraphItem = {
@@ -52,3 +52,11 @@ export const breakable = (s: string) => s.replace(/_/g, "_​");
 
 /** A reviewer chip's tone as a badge's: one mapping for every view of a reviewer's outcome. */
 export const CHIP_TONE = { green: "ok", red: "bad", amber: "warn" } as const;
+
+/** A chain node's accessible name: `accessibleName` with the word for its kind, and for a group (slices) how far its
+ *  children are in place of its own state (`slices, group, 2 of 3 slices done`). */
+export function chainNodeName(n: GraphItem & { kind: GlyphKind; wait?: string; sub?: string; summary?: string }, id: string = n.id): string {
+  const kind = n.kind === "gate" ? "gate" : n.kind === "group" ? "group" : "node";
+  if (n.kind !== "group" || !n.summary) return accessibleName({ ...n, id }, kind);
+  return `${accessibleName({ ...n, id, state: "plain" }, kind)}, ${n.summary}`;
+}

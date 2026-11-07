@@ -1,4 +1,4 @@
-import { nameOf } from "../board/rowText";
+import { nameOf, slicesDone } from "../board/rowText";
 import { elapsed, elapsedBetween } from "../../format";
 import type { ChainNode as ApiNode, KraftEvent, WorkerSession } from "../../types";
 import type { ChainArc, ChainNode } from "../graph/layout";
@@ -53,7 +53,7 @@ export function chainGraph(item: ItemDetail, events: KraftEvent[], now = Date.no
   const byNode = new Map((item.usage?.by_node ?? []).map((r) => [r.node, r]));
   const frozen = materialized(item);
 
-  const nodes = api.map((n, i): ChainNode => {
+  const drawn = (n: ApiNode, i: number): ChainNode => {
     const ss = item.worker_sessions.filter((s) => s.node_id === n.id);
     const work = ss.filter((s) => !isEscalation(s));
     const attempt = timesRun(item, work);
@@ -74,8 +74,21 @@ export function chainGraph(item: ItemDetail, events: KraftEvent[], now = Date.no
     const step = item.summary?.step;
     const sub = [step ? `${step.index}/${step.count}` : "", started ? elapsedBetween(started, null, now) : ""].filter(Boolean).join(" · ");
     // A waiting item's node runs nothing: it waits on CI, a machine or the provider, and says so where words are shown (R11b-04).
-    const wait = status === "waiting" ? (stop?.kind === "rate_limit" ? "waiting · rate limit" : stop?.kind === "wait" ? waitTitle(stop.reason).replace(/^W/, "w") : "waiting") : undefined;
+    const wait = status === "waiting" ? (stop?.kind === "rate_limit" ? "waiting · rate limit" : stop?.kind === "wait" ? waitTitle(stop.reason).replace(/^W/, "w") : stop?.kind === "slices" ? "waiting for slices" : "waiting") : undefined;
     return { ...out, state: "current", running: status === "running" || status === "escalated", sub: sub || undefined, subTone: "amber", ...(wait && { wait }) };
+  };
+  // A group (slices) is one node whose body the strip opens: each body node by its path, in the group's state until the
+  // run stands inside it (`current_node_id` is `group.node`), the ones before it done and the ones after not started.
+  const nodes = api.map((n, i): ChainNode => {
+    const d = drawn(n, i);
+    if (kindOf(n) !== "group") return d;
+    const inner = n.nodes ?? [];
+    const at = inner.findIndex((b) => item.current_node_id === `${n.id}.${b.id}` || item.current_node_id?.startsWith(`${n.id}.${b.id}.`));
+    const body = inner.map((b, j): ChainNode => {
+      const state = d.state === "done" || d.state === "todo" ? d.state : at < 0 ? "plain" : j < at ? "done" : j === at ? d.state : "todo";
+      return { id: `${n.id}.${b.id}`, kind: "exec", state, ...(j === at && { running: d.running, paused: d.paused, needs: d.needs }) };
+    });
+    return { ...d, body, summary: slicesDone(item.slices) || undefined };
   });
 
   const loops: ChainArc[] = api.flatMap((n, i) => {

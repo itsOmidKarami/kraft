@@ -6,7 +6,7 @@ import type { FitRule } from "./camera";
 import { arcShapes, L, layout, SEAM, seamX, type ChainArc, type ChainNode, type Seam } from "./layout";
 import { Minimap } from "./Minimap";
 import { NodeGlyph } from "./NodeGlyph";
-import { accessibleName, breakable } from "./types";
+import { breakable, chainNodeName } from "./types";
 import { useCamera } from "./useCamera";
 import { useRoving } from "./useRoving";
 import { ZoomControls } from "./ZoomControls";
@@ -204,7 +204,7 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams: chainSeams
         {lay.items.map(({ node: n, w, cx }) => {
           const key = nodeKey(n.id);
           const bold = n.id === selected || n.state === "current";
-          const nodeName = accessibleName(names ? { ...n, id: label(n) } : n, n.kind === "gate" ? "gate" : "node");
+          const nodeName = chainNodeName(n, names ? label(n) : n.id);
           // The meta under the name ("security_scan overridden here", a problem word) describes the node, unless its name already says it.
           const metaId = readMeta && n.meta && !nodeName.split(", ").includes(n.meta) ? `${ids}-meta-${n.id}` : undefined;
           return (

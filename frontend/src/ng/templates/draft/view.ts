@@ -6,7 +6,7 @@ import type { Authored, Change, NodeInheritance, Origin, Problem, Result, Scope 
 export type Step = Authored & { id: string; tasks: Task[] };
 export type Task = Authored & { id: string };
 export type Container = Authored & { steps?: Step[] };
-export type NodeA = Container & { id: string; kind?: "exec" | "gate"; extends?: string };
+export type NodeA = Container & { id: string; kind?: "exec" | "gate" | "group"; extends?: string };
 
 export const chainFile = (key: string) => `chains/${key}.yaml`;
 export const LIBRARY_FILE = "library.yaml";
@@ -86,8 +86,8 @@ export function resolvedNode(r: Result, id: string): NodeA | null {
 export const nodeGlyph = (r: Result, id: string) => stepsGlyph(resolvedNode(r, id)?.steps ?? []);
 
 /** A node's kind: written, else what the resolved chain says, else exec. */
-export function kindOf(r: Result, n: NodeA): "exec" | "gate" {
-  if (n.kind === "exec" || n.kind === "gate") return n.kind;
+export function kindOf(r: Result, n: NodeA): "exec" | "gate" | "group" {
+  if (n.kind === "exec" || n.kind === "gate" || n.kind === "group") return n.kind;
   return r.resolved?.nodes.find((x) => x.id === n.id)?.kind ?? "exec";
 }
 

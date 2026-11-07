@@ -141,7 +141,7 @@ export function paneContent(a: PaneArgs): PaneContent {
     title: node.id,
     // A node the run stands on but that isn't running says why: "needs you", "paused", "stopped at the cap",
     // "waiting on CI" (R11b-04: those last two read "running").
-    sub: `${node.kind === "gate" ? "gate" : "exec"} node · ${earlier || currentWords(drawn, live)}${live && started ? ` ${elapsedBetween(started, null, a.now)}` : ""}`,
+    sub: `${node.kind === "gate" ? "gate" : node.kind === "group" ? "group" : "exec"} node · ${earlier || currentWords(drawn, live)}${live && started ? ` ${elapsedBetween(started, null, a.now)}` : ""}`,
     tabs: OVERVIEW_CONFIG,
     body: (
       <>

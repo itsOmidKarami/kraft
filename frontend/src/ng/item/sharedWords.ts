@@ -12,6 +12,9 @@ export const REVIEW_THE_CONFLICTS = "Review the conflicts";
 export const BUDGET_RAN_OUT = "The budget ran out";
 export const LOG_UNREADABLE = "The log could not be read.";
 export const WAITING_ON_THE_PROVIDER = "Waiting on the provider";
+/** A parent waiting for its children (the `slices` stop). */
+export const WAITING_FOR_SLICES = "Waiting for slices";
+export const SLICES_WAIT_TEXT = "The slices run as their own items. This one carries on when they are done, so nothing needs doing here.";
 /** A `wait` stop's title. Only a step waiting for its machine or slot gives its wait a reason (`waiting for gpu-box (full)`); CI and review waits give none. */
 export const waitTitle = (reason: string | null | undefined) => (reason ? "Waiting for a machine" : "Waiting on CI");
 export const DRAFT_HOLDS_CHANGES = "This item's draft holds changes Start does not apply. Apply them now, or start without them and they stay in the draft.";

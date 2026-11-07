@@ -9,7 +9,7 @@ import type { ChainNode, DiffFile, KraftEvent, WorkerSession } from "../../types
 import { Ban, ChevronDown, ChevronRight, CircleCheck, CircleHelp, Clock, Pause, X } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
-import { CHECKOUT_FREES, IN_USE_BY, nameOf, WAITING_FOR_CHECKOUT } from "../board/rowText";
+import { CHECKOUT_FREES, IN_USE_BY, nameOf, slicesLine, WAITING_FOR_CHECKOUT } from "../board/rowText";
 import { admits, neverStarted, RELEASED, spentLine, strandedOneOff } from "./status";
 import { actionPath, taskName } from "./paths";
 import { pathSel, placeUrl } from "./url";
@@ -18,7 +18,7 @@ import { totals } from "./Top";
 import { BROKEN_BASE_TEXT, brokenBase, forgeHint, failedFix, failureFacts, headline, hintText, keptLine } from "./cause";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
-import { CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, WAITING_ON_THE_PROVIDER, waitTitle, ABANDONED, ABANDONED_TEXT, NO_REASON_GIVEN } from "./sharedWords";
+import { CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, WAITING_ON_THE_PROVIDER, WAITING_FOR_SLICES, SLICES_WAIT_TEXT, waitTitle, ABANDONED, ABANDONED_TEXT, NO_REASON_GIVEN } from "./sharedWords";
 import { LinkButton, linkButtonClass } from "../ui/LinkButton";
 import { Select } from "../ui/Select";
 
@@ -181,6 +181,12 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
       actions: [],
     };
   }
+  if (status === "waiting" && stop?.kind === "slices")
+    return {
+      tone: "info", glyph: <Clock size={14} aria-hidden />, title: WAITING_FOR_SLICES, where, node: stop.node, text: SLICES_WAIT_TEXT,
+      facts: item.slices ? [["slices", slicesLine(item).replace(/^slices: /, "")]] : [],
+      actions: [],
+    };
   if (status === "waiting" && stop?.kind === "wait")
     return {
       tone: "info", glyph: <Clock size={14} aria-hidden />, title: waitTitle(stop.reason), where, node: stop.node, text: stop.reason ?? undefined,

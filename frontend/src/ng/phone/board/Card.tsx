@@ -2,7 +2,7 @@ import { ago, repoName, shortId } from "../../../format";
 import type { WorkItem } from "../../../types";
 import { chainLabel, chainOf, groupOf } from "../../board/model";
 import { CUE_ICON } from "../../board/cue";
-import { reasonTail, stopCueOf, ticksOf } from "../../board/rowText";
+import { reasonTail, slicesLine, stopCueOf, ticksOf } from "../../board/rowText";
 import { IN_YOUR_CHECKOUT } from "../../board/sharedWords";
 import { NodeGlyph } from "../../graph/NodeGlyph";
 import { Button } from "../../ui/Button";
@@ -45,6 +45,7 @@ export function Card({ item, now, offline, busy, error, onOpen, onButton }: Card
           {Cue && <Cue size={12} aria-hidden className="ph-card-cue" />}
           {breakPaths(reasonTail(item, now))}
         </span>
+        {slicesLine(item) && <span className="ph-card-slices">{slicesLine(item)}</span>}
       </button>
       {buttons.length > 0 && (
         <div className="ph-card-actions">

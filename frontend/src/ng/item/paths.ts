@@ -12,7 +12,7 @@ export interface Step {
  *  and the item then retries and skips only at node level (lifecycle's path
  *  grammar does not know its tasks). */
 export function stepsOf(node: ChainNode): { steps: Step[]; legacy: boolean } {
-  const groups = node.steps ?? node.tasks.map((t) => [t]);
+  const groups = node.steps ?? (node.tasks ?? []).map((t) => [t]);
   const legacy = groups.flat().some((t) => t.split(".").length !== 3);
   return {
     legacy,
