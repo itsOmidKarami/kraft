@@ -509,6 +509,10 @@ Toggle.-on > .toggle--button {
     width: 1fr;
 }
 
+.new-field > TextArea {
+    padding: 0;
+}
+
 #new-said {
     margin-top: 1;
 }

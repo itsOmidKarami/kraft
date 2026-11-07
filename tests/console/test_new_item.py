@@ -230,9 +230,10 @@ def test_the_form_fits_80x24(board, monkeypatch):
             for b in ("go", "no")
         ]
         rows = [row.size.height for row in form.query(".new-field")]
-        return inside, app.focused.id, form.query_one(TextArea).size.height, rows
+        ta = form.query_one(TextArea)
+        return inside, app.focused.id, ta.size.height, rows, ta.content_offset.x
 
-    assert console.run(scenario) == ([True, True], "new-title", 3, [1, 3, 1, 1, 1, 1, 1])
+    assert console.run(scenario) == ([True, True], "new-title", 3, [1, 3, 1, 1, 1, 1, 1], 0)
 
 
 def test_nothing_clips_at_the_minimum_size(board, monkeypatch):
