@@ -17,7 +17,10 @@ less what the change set skips):
   runs on the combined code under its own id;
 * the group's `unforked` is the implementing node;
 * every `reject_to` / `restart_from` naming the implementing node names the
-  group.
+  group;
+* the group's `on_conflict` is the library task `resolve_join_conflict` when
+  the library has one (`join_conflict_handler`); without it a join conflict
+  stops for a person.
 
 Chain revision runs again after a rewind to the plan or earlier, over a chain
 that already holds the group. `unapply` takes the group out first (the body
@@ -44,11 +47,14 @@ from kraft.templates.models import (
     GroupNode,
     MaterializedChain,
     NodeKind,
+    RecoveryPlan,
     ResolvedChain,
     ResolvedNode,
 )
 
 GROUP_ID = "slices"
+#: The library task the join hands a conflict to before it asks a person.
+JOIN_HANDLER = "resolve_join_conflict"
 #: `slicing_for`'s answer for a plan with no `## Slices` section: nothing to say.
 NO_SECTION = "the plan declares no ## Slices section"
 
@@ -177,11 +183,43 @@ def split_of(plan_text: str | None, max_slices: int) -> SliceSplit | SliceRefusa
     return None if plan_text is None else parse_slices(plan_text, max_slices=max_slices)
 
 
-def apply(nodes: list, change: SliceChange) -> list:
+def join_conflict_handler(library, pinned) -> tuple[RecoveryPlan | None, ResolvedChain | None]:
+    """The group's `on_conflict`, `resolve_join_conflict` resolved out of
+    `library` (its own, else the built-in add-on's), and the chain it was
+    resolved in, for the steering and add-ons it reads; `(None, None)` when
+    the library has none. Raises `TemplateLibraryError`."""
+    from pathlib import Path
+
+    from kraft.addons import builtin
+    from kraft.templates.library import Namespace
+
+    if library is None:
+        return None, None
+    name = next(
+        (
+            n
+            for n in (JOIN_HANDLER, f"{builtin.NAMESPACE}:{JOIN_HANDLER}")
+            if library.component(Namespace.TASKS, n) is not None
+        ),
+        None,
+    )
+    if name is None:
+        return None, None
+    task = {"id": "resolve", "extends": name}
+    candidate, id = library.with_chain(
+        Path(f"{JOIN_HANDLER}.yaml"),
+        {"id": JOIN_HANDLER, "nodes": [{"id": GROUP_ID, "kind": "exec", "tasks": [task]}]},
+    )
+    resolved = candidate.resolve_chain(id, strict_pins=True, pinned=pinned)
+    return RecoveryPlan(tasks=resolved.nodes[0].node.tasks), resolved
+
+
+def apply(nodes: list, change: SliceChange, on_conflict: RecoveryPlan | None = None) -> list:
     """`nodes` (authored nodes of the revised chain) with `change` applied: the
-    body wrapped in a group, a copy of every non-implementing body node after
-    it, and the targets that named the implementing node naming the group.
-    Raises `ValueError` when the body is no longer there, whole and in order."""
+    body wrapped in a group with `on_conflict` as its join conflict handler, a
+    copy of every non-implementing body node after it, and the targets that
+    named the implementing node naming the group. Raises `ValueError` when the
+    body is no longer there, whole and in order."""
     ids = [n.id for n in nodes]
     if any(i not in ids for i in change.body):
         raise ValueError("the slice body names a node the revised chain no longer has")
@@ -197,6 +235,7 @@ def apply(nodes: list, change: SliceChange) -> list:
             "kind": NodeKind.GROUP,
             "nodes": body,
             "unforked": change.unforked,
+            "on_conflict": on_conflict,
         },
         context=FROZEN,
     )
