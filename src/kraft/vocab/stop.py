@@ -24,6 +24,8 @@ class StopKind(StrEnum):
     WAIT = "wait"
     RATE_LIMIT = "rate_limit"
     CHECKOUT = "checkout"
+    #: A parent waiting for the child items of its slice group to end.
+    SLICES = "slices"
 
 
 @dataclass(frozen=True)
@@ -55,6 +57,7 @@ STOP_TRAITS = total(
         StopKind.WAIT: StopTraits("waiting"),
         StopKind.RATE_LIMIT: StopTraits("rate_limited"),
         StopKind.CHECKOUT: StopTraits(_NH),
+        StopKind.SLICES: StopTraits("waiting"),
     },
     name="STOP_TRAITS",
 )

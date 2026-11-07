@@ -26,7 +26,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 59
+SCHEMA_VERSION = 60
 
 _SCHEMA_TEMPLATE = """
 CREATE TABLE work_items (
@@ -145,9 +145,24 @@ CREATE TABLE work_items (
   one_off_pending  INTEGER NOT NULL DEFAULT 0,
   -- {mount: {account, backend}} the item started with, NULL until pinned
   forge_pins       TEXT,
+  -- slice groups (`kraft.store.slices`): a child work item names its parent, the
+  -- fork generation and its slice key. docs_commit is the commit its replay starts
+  -- after, pinned_head the commit its review saw when it completed
+  parent_id        TEXT,
+  slice_generation INTEGER,
+  slice_key        INTEGER,
+  docs_commit      TEXT,
+  pinned_head      TEXT,
+  -- a parent's group state (JSON, `store.slices.GroupState`), NULL otherwise
+  group_state      TEXT,
+  -- 1 while a child is paused by its parent's pause (resume wakes only these)
+  paused_by_parent INTEGER NOT NULL DEFAULT 0,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
+
+CREATE UNIQUE INDEX idx_work_items_slice
+  ON work_items(parent_id, slice_generation, slice_key) WHERE parent_id IS NOT NULL;
 
 CREATE TABLE events (
   seq          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1443,6 +1458,18 @@ SELECT rowid, id, work_item_id, node_id, hook_point, pid, pid_start_time, log_pa
     ],
     # The forge account and backend an item started with, by mount: JSON, NULL = none pinned.
     58: ["ALTER TABLE work_items ADD COLUMN forge_pins TEXT"],
+    # Slice groups: children of a forked plan, and the parent's group state.
+    59: [
+        "ALTER TABLE work_items ADD COLUMN parent_id TEXT",
+        "ALTER TABLE work_items ADD COLUMN slice_generation INTEGER",
+        "ALTER TABLE work_items ADD COLUMN slice_key INTEGER",
+        "ALTER TABLE work_items ADD COLUMN docs_commit TEXT",
+        "ALTER TABLE work_items ADD COLUMN pinned_head TEXT",
+        "ALTER TABLE work_items ADD COLUMN group_state TEXT",
+        "ALTER TABLE work_items ADD COLUMN paused_by_parent INTEGER NOT NULL DEFAULT 0",
+        "CREATE UNIQUE INDEX idx_work_items_slice "
+        "ON work_items(parent_id, slice_generation, slice_key) WHERE parent_id IS NOT NULL",
+    ],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins

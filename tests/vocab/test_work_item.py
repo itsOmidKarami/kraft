@@ -92,9 +92,9 @@ def test_row_invariants(status):
     assert (t.display is None) == (status is S.NEEDS_HUMAN)
 
 
-def test_only_wait_and_rate_limit_belong_to_other_statuses():
+def test_only_waits_and_rate_limit_belong_to_other_statuses():
     other = {k for k, t in STOP_TRAITS.items() if t.status != S.NEEDS_HUMAN.value}
-    assert other == {StopKind.WAIT, StopKind.RATE_LIMIT}
+    assert other == {StopKind.WAIT, StopKind.RATE_LIMIT, StopKind.SLICES}
 
 
 def test_every_display_status_is_reachable_from_the_table_or_the_stop_rules():

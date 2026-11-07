@@ -1,7 +1,7 @@
 from kraft.vocab import FAILURE_KINDS, STOP_TRAITS, StopKind
 
 
-def test_the_kinds_are_todays_thirteen():
+def test_the_kinds_are_todays_fourteen():
     assert [k.value for k in StopKind] == [
         "gate",
         "question",
@@ -16,6 +16,7 @@ def test_the_kinds_are_todays_thirteen():
         "wait",
         "rate_limit",
         "checkout",
+        "slices",
     ]
 
 

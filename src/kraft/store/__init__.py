@@ -12,4 +12,5 @@ from kraft.store.passes import *  # noqa: F403
 from kraft.store.repos import *  # noqa: F403
 from kraft.store.review import *  # noqa: F403
 from kraft.store.sessions import *  # noqa: F403
+from kraft.store.slices import *  # noqa: F403
 from kraft.store.work_items import *  # noqa: F403
