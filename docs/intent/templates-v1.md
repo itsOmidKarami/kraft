@@ -2531,3 +2531,22 @@ usable section SHALL leave the change set as the agent wrote it.
 enforced-by: tests/templates/test_slicing.py::test_the_body_stops_before_a_node_a_gate_shows, tests/templates/test_slicing.py::test_the_default_chain_slices_implementation_and_verification, tests/templates/test_slicing.py::test_it_does_not_slice_and_says_why[no-section], tests/templates/test_slicing.py::test_an_agent_cannot_declare_a_slice, tests/executor/test_chain_revision.py::test_a_plan_with_slices_makes_the_revision_gate_ask, tests/executor/test_chain_revision.py::test_a_plan_without_slices_still_advances_without_a_human, tests/api/test_chain_revision_gate.py::test_an_agent_reviewed_sliced_revision_applies_without_a_stale_error
 origin: src/kraft/templates/slicing.py
 
+## REQ the-join-never-trusts-a-child
+
+IF a completed child's range holds a commit that already names a `cherry picked
+from` line, a merge commit, a head that does not descend from the fork commit, a
+moved `.lfsconfig`, or a branch that has moved since it completed, THEN the system
+SHALL stop the parent for a person, naming the child, before it replays any
+of that child's commits.
+enforced-by: tests/executor/test_join.py::test_a_child_commit_with_a_forged_cherry_pick_line_is_refused, tests/executor/test_join.py::test_a_child_head_not_descending_from_the_fork_is_refused, tests/executor/test_join.py::test_a_merge_commit_in_a_child_is_refused, tests/executor/test_join.py::test_a_child_branch_moved_after_completion_is_refused, tests/executor/test_join.py::test_a_moved_lfsconfig_in_a_child_stops_the_join
+origin: src/kraft/executor/join.py
+
+## REQ the-join-resumes-without-losing-resolved-work
+
+WHEN the join resumes at a slice whose pick was running, the system SHALL put the
+parent back at the commit before that slice without trusting the worktree's git
+folder, and WHEN it resumes at a slice handed off to a person, the system SHALL
+NOT reset the branch and SHALL go on only when every commit of the slice is there.
+enforced-by: tests/executor/test_join.py::test_a_crash_while_picking_puts_the_parent_back_and_picks_again, tests/executor/test_join.py::test_put_back_does_not_follow_a_planted_sequencer_symlink, tests/executor/test_join.py::test_a_conflict_hands_off_and_never_resets_on_retry, tests/executor/test_join.py::test_a_handed_off_slice_that_is_still_missing_stops_again
+origin: src/kraft/executor/join.py
+
