@@ -665,7 +665,6 @@ async def family_tick(db, policy=None, *, cancel=None) -> list[str]:
     together (Kraft-ib2sn), so this one runs on a clock. Pauses the children. The
     parent's own `budget_usd` / `token_budget` and the policy's work-item cap are
     the family's, summed over the parent and every child."""
-    from kraft.executor import stops  # deferred: executor imports this module
     from kraft.policy import NO_BUDGET
 
     rows = db.read(
@@ -675,27 +674,48 @@ async def family_tick(db, policy=None, *, cancel=None) -> list[str]:
     )
     stopped = []
     for row in rows:
-        if not store.group_unjoined(row):
-            continue
         budget = store.effective_budget(row, policy.budget if policy else NO_BUDGET)
-        breach = stops.budget_breach(db, row["id"], budget, row=row, path="")
-        if breach is None:
-            continue
-        await db.write(
-            lambda c, r=row, b=breach: store.mark_needs_human(
-                c,
-                r["id"],
-                r["current_node_id"],
-                stops.budget_reason(b),
-                None,
-                b.model_dump(),
-                kind=StopKind.BUDGET,
-                limit=stops.budget_limit(b),
-            )
-        )
-        await _pause_slices(db, row, "family budget", cancel)
-        stopped.append(row["id"])
+        if await stop_family_for_budget(db, row, budget, cancel=cancel):
+            stopped.append(row["id"])
     return stopped
+
+
+async def stop_family_for_budget(db, row, budget, *, cancel=None) -> bool:
+    """Stop the parent `row` and pause its slices if its family has spent past
+    its cap. `family_tick` calls this on its clock, and a slice whose own launch
+    was refused on that cap calls it at once (`executor.walk`), so the family
+    stops once, with one message, instead of each slice stopping at its own
+    next launch. Whether the parent was stopped here: not when it is no longer
+    waiting on its slices (another slice's refusal, or a person, got there
+    first; that stop paused the slices already)."""
+    from kraft.executor import stops  # deferred: executor imports this module
+
+    if not store.group_unjoined(row):
+        return False
+    breach = stops.budget_breach(db, row["id"], budget, row=row, path="")
+    if breach is None:
+        return False
+
+    def mark(c) -> bool:
+        now = c.execute("SELECT status FROM work_items WHERE id = ?", (row["id"],)).fetchone()
+        if now is None or now["status"] != WorkItemStatus.WAITING:
+            return False
+        store.mark_needs_human(
+            c,
+            row["id"],
+            row["current_node_id"],
+            stops.budget_reason(breach),
+            None,
+            breach.model_dump(),
+            kind=StopKind.BUDGET,
+            limit=stops.budget_limit(breach),
+        )
+        return True
+
+    if not await db.write(mark):
+        return False
+    await _pause_slices(db, row, "family budget", cancel)
+    return True
 
 
 def stop_if_still_parked(conn, seen, hit: Hit) -> bool:

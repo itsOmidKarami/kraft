@@ -590,3 +590,57 @@ def test_raise_budget_on_a_slice_names_its_parent(client, repo):
 
     assert r.status_code == 409, r.text
     assert parent in r.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("path", "parent_status", "cascades"),
+    [("", "waiting", True), ("build.run", "waiting", False), ("", "needs_human", False)],
+    ids=[
+        "family-cap-stops-the-family",
+        "a-scoped-cap-stops-only-the-slice",
+        "parent-already-stopped",
+    ],
+)
+async def test_a_slice_refused_on_the_family_cap_stops_its_family_at_once(
+    item_on, repo, path, parent_status, cascades
+):
+    """Not at the cap poller's next tick: the parent stops and the other slices
+    pause in the same pass, so each sibling does not stop, and page, on its own
+    at its next launch. Only the item-wide cap the family shares cascades, and a
+    parent already stopped is not stopped twice."""
+    from kraft.executor import walk
+    from kraft.executor.context import BUDGET
+
+    parent = await item_on(_chain(), policy_override={"budget_usd": 2})
+    c1 = await item_on(_chain(), wid="c1", policy_override={"budget_usd": 2})
+    c2 = await item_on(_chain(), wid="c2", policy_override={"budget_usd": 2})
+    state = store.GroupState(group="slices", phase="forked", generation=1)
+    await parent.database.write(
+        lambda c: (
+            c.execute(
+                "UPDATE work_items SET status = ?, stop_kind = 'slices', "
+                "current_node_id = 'build', group_state = ? WHERE id = ?",
+                (parent_status, state.to_json(), parent.id),
+            ),
+            c.execute(
+                "UPDATE work_items SET parent_id = ?, slice_generation = 1, "
+                "slice_key = CAST(substr(id, 2) AS INTEGER) WHERE id IN ('c1', 'c2')",
+                (parent.id,),
+            ),
+        )
+    )
+    await _spent(c1, TASK, usd=2.0)
+    refused = UsdBreach(scope="usd", path=path, spent_usd=2.0, cap_usd=2.0, unknown_launches=0)
+    await c1.database.write(
+        lambda c: events.append(
+            c, "c1", "scope_budget_reached", {**refused.model_dump(), "task": TASK}
+        )
+    )
+
+    await walk._sentinel_stop(
+        c1.database, "c1", c1.chain.chain.nodes[0], BUDGET, [], _policy.NO_BUDGET
+    )
+
+    assert c1.row()["status"] == "needs_human"
+    assert len(parent.events("work_item_needs_human")) == int(cascades)
+    assert (c2.row()["status"] == "paused") is cascades
