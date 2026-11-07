@@ -576,6 +576,7 @@ def test_the_shipped_library_selects_profiles_and_launches_as_before(monkeypatch
         "repair_mr_feedback",
         "repair_mr_checks",
         "repair_merge_queue_failure",
+        "resolve_join_conflict",
         "strict_judge",
         "triage_review_feedback",
     }

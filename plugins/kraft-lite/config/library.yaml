@@ -117,6 +117,20 @@ tasks:
     skill: kraft:merge-queue-repair
     inputs: [pr_rules]
 
+  # The conflict handler of a slice group's join (`executor.join`): a slice's
+  # commits conflict with what the slices before it put on this branch. Chain
+  # revision attaches it to the group; without it a person is asked. The note
+  # it is sent with names the slice, its range, the files and the exact steps.
+  resolve_join_conflict:
+    kind: agent
+    harness: claude
+    profile: strong
+    prompt: >-
+      Replay the slice the note names onto this branch with the exact git
+      steps it gives, resolving each conflict so both slices' work survives.
+      Never drop the -x line, never skip a commit, never abort. If you cannot
+      resolve it, stop and say why: a person takes it from there.
+
   strict_judge:
     kind: agent
     harness: claude
