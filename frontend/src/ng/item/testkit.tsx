@@ -16,6 +16,19 @@ export const V1: ChainNode[] = [
   { id: "merge_request", kind: "exec", gate_after: null, tasks: ["merge_request.open.open_draft"], steps: [["merge_request.open.open_draft"]] },
 ];
 
+/** A sliced chain: `V1`'s plan and its gate, then a slice group whose body nodes carry their paths as ids (the server's
+ *  `node_view`), a gate with no `reject_to` after it, and the merge request. */
+const body = (id: string): ChainNode => ({ id: `slices.${id}`, kind: "exec", gate_after: null, tasks: [`slices.${id}.run.work`], steps: [[`slices.${id}.run.work`]] });
+export const SLICED: ChainNode[] = [
+  V1[0], V1[1],
+  { id: "slices", kind: "group", gate_after: null, tasks: [], nodes: [body("implementation"), body("verification")], unforked: ["implementation", "verification"] },
+  { id: "local_review", kind: "gate", gate_after: null, tasks: [], steps: [], reject_to: null },
+  V1[3],
+];
+/** An item on `SLICED`, standing at `current` (a group path by default: the parent runs its own body, unforked). */
+export const sliced = (current: string | null = "slices.verification", over: Partial<ItemDetail> = {}) =>
+  detail({ chain_definition: { template_id: "default", nodes: SLICED }, current_node_id: current, ...over });
+
 /** `V1` as intake freezes it (`materialized_chain`), for an item that has not
  *  started: the chain's own values its Config rows read. */
 export const FROZEN = JSON.stringify({

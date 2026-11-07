@@ -4,6 +4,7 @@ import type { ChainNode as ApiNode, KraftEvent, NodePass, SessionStatus, TaskPro
 import type { HandlerRow, NodeStep } from "../graph/nodeLayout";
 import type { GlyphState, GraphItem } from "../graph/types";
 import { attemptsAt, handlerPaths, loopPaths, materialized, nodeAt, stepsOfNode, taskKindAt } from "./chainValues";
+import { within } from "./cursor";
 import { stepsOf, taskName } from "./paths";
 import { isScopeTask, scopeLead, scopesView } from "./scopeView";
 import type { ItemDetail } from "./useItem";
@@ -61,10 +62,11 @@ export function asOfPass(item: ItemDetail, node: string, pass?: number): ItemDet
   if (!pass || pass >= passesOf(item, node).length) return item;
   return { ...item, earlier_pass: { node, pass }, worker_sessions: item.worker_sessions.filter((s) => s.node_id !== node || (s.pass ?? 1) <= pass) };
 }
-/** Whether the run stands on `node`, in the pass of it the item shows: it has left an earlier pass. */
-export const standsOn = (item: ItemDetail, node: string) => item.current_node_id === node && item.earlier_pass?.node !== node;
-/** The item's stop, when it is on `node` in the pass of it the item shows. */
-export const stopOn = (item: ItemDetail, node: string) => (item.stop?.node === node && item.earlier_pass?.node !== node ? item.stop : undefined);
+/** Whether the run stands on `node`, in the pass of it the item shows: it has left an earlier pass. A group holds the
+ *  run while it stands on one of its body nodes (`slices.implementation`). */
+export const standsOn = (item: ItemDetail, node: string) => within(node, item.current_node_id) && item.earlier_pass?.node !== node;
+/** The item's stop, when it is on `node` (or inside it, a group) in the pass of it the item shows. */
+export const stopOn = (item: ItemDetail, node: string) => (within(node, item.stop?.node) && item.earlier_pass?.node !== node ? item.stop : undefined);
 
 /** A task path's sessions in the node's current pass, attempt order (the attempt switcher's list). */
 export function sessionsOf(item: ItemDetail, path: string): WorkerSession[] {

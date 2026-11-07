@@ -107,6 +107,7 @@ const ALLOWED = [
   "board/cue", // the stop-kind icon of a Needs you reason, drawn the same on the card and the row
   "offline", // the offline state and its words: one banner text, both layouts
   "item/sharedWords", // wording both layouts show, one source
+  "item/cursor", // which node a current id stands on, inside a slice group too: one rule on both layouts
   "board/sharedWords", // wording both layouts show, one source
   "board/repoFiles", // the attach picker's file list and its first-match rule, one source with the desktop
   "settings/sharedWords", // wording both layouts show, one source

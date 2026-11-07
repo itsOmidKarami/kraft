@@ -7,6 +7,7 @@ import { usd } from "../../../format";
 import type { CancelPreview } from "../../../types";
 import { act, cancelPreview, type Done } from "../../item/actions";
 import { rejectTarget } from "../../item/graph";
+import { standingNode } from "../../item/cursor";
 import { retryBody } from "../../item/paths";
 import type { ItemDetail } from "../../item/useItem";
 import { Button } from "../../ui/Button";
@@ -36,7 +37,7 @@ const nodeName = (item: ItemDetail) => { const id = nodeOf(item); return id ? na
 export async function steer(item: ItemDetail, text: string): Promise<Done & { paused?: boolean }> {
   const door = steerDoor(item);
   if (door === "retry") {
-    const node = item.chain_definition.nodes.find((n) => n.id === nodeOf(item));
+    const node = standingNode(item.chain_definition.nodes, nodeOf(item));
     return act.retry(item.id, { ...retryBody(node, item.stop), steer: text });
   }
   if (door === "pause") {

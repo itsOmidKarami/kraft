@@ -3,7 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DraftNotes } from "./DraftNotes";
 import { add, answer, mountDraft, ov, sent } from "./testkit";
-import { V1 } from "../testkit";
+import { SLICED, V1 } from "../testkit";
+import type { ItemDetail } from "../useItem";
 
 afterEach(() => vi.unstubAllGlobals());
 const withScan = [...V1.slice(0, 3), { id: "scan", kind: "exec" as const, gate_after: null, tasks: ["scan.run.run"], steps: [["scan.run.run"]] }, V1[3]];
@@ -15,10 +16,14 @@ describe("DraftNotes", () => {
     expect(screen.queryByRole("group")).toBeNull();
   });
 
-  it("offers Move after <current> and Remove on an added node the run has passed", async () => {
-    mountDraft(<DraftNotes />, { "GET /work-items/w1/draft": answer([add("scan", "plan", true)]) });
+  it.each([
+    ["on a node", {}, "verification"],
+    // Inside a group the run stands at `slices.verification`: the node goes after the group.
+    ["inside a group", { chain_definition: { template_id: "d", nodes: SLICED }, current_node_id: "slices.verification" }, "slices"],
+  ] as [string, Partial<ItemDetail>, string][])("offers Move after <current> and Remove on an added node the run has passed, %s", async (_, item, current) => {
+    mountDraft(<DraftNotes />, { "GET /work-items/w1/draft": answer([add("scan", "plan", true)]) }, { item });
     expect(await screen.findByText("The run has passed this point.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Move after verification" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: `Move after ${current}` })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument();
   });
 

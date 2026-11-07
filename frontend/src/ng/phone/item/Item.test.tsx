@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DisplayStatus, WorkItemStop } from "../../../types";
-import { acceptWrites, detail, stubFetch, type Call } from "../../item/testkit";
+import { acceptWrites, detail, SLICED, stubFetch, type Call } from "../../item/testkit";
 import { Toaster } from "../nav/Toaster";
 import { Item } from "./Item";
 
@@ -592,10 +592,14 @@ describe("pair actions that call straight through", () => {
     await userEvent.click(await screen.findByRole("button", { name: label }));
     await waitFor(() => expect(posts(calls)).toEqual([call]));
   });
-  it("Retry sends the failed node's path", async () => {
-    const calls = mount(item("failed", stop("failed", { task: "verification.review.code_review" })));
+  it.each([
+    ["on a node", item("failed", stop("failed", { task: "verification.review.code_review" })), "verification.review.code_review"],
+    // Inside a group the stop is on a body node: the retry names its task's whole path, not the group.
+    ["inside a group", item("failed", stop("failed", { node: "slices.verification", task: "slices.verification.run.work" }), { chain_definition: { template_id: "d", nodes: SLICED }, current_node_id: "slices.verification" }), "slices.verification.run.work"],
+  ])("Retry sends the failed node's path, %s", async (_n, it, path) => {
+    const calls = mount(it);
     await userEvent.click(await screen.findByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(lastPost(calls)?.body).toEqual({ path: expect.stringContaining("verification") }));
+    await waitFor(() => expect(lastPost(calls)?.body).toEqual({ path }));
   });
   it("a gate stop goes to the review, and Request changes… to its composer", async () => {
     mount(item("needs_you", stop("gate", { node: "plan_approval" }), { pending_gate: "plan_approval", current_node_id: "plan_approval" }));

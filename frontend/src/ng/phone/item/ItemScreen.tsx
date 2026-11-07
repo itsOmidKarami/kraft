@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { DOLLARS_HINT, dollars, dollarsText, elapsedBetween, plural, shortId } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
 import { hintText } from "../../item/cause";
+import { cursorOf } from "../../item/cursor";
 import { retryBody } from "../../item/paths";
 import { act, draftToStart } from "../../item/actions";
 import { lines as draftLines } from "../../item/draft/view";
@@ -69,7 +70,9 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
   const card = cardOf(item, events, files.length);
   const adds = files.reduce((n, f) => n + f.insertions, 0);
   const dels = files.reduce((n, f) => n + f.deletions, 0);
-  const node = item.chain_definition.nodes.find((n) => n.id === (item.stop?.node ?? item.current_node_id));
+  // Retry starts from the node the item stands on, a body node inside a group; the sheets name its top-level node.
+  const at = cursorOf(item.chain_definition.nodes, item.stop?.node ?? item.current_node_id);
+  const node = at ? (at.inner ?? at.node) : undefined;
   const text = item.description?.trim() ?? "";
   const longBrief = text.length > 140 || text.includes("\n");
   const gate = item.pending_gate ?? item.stop?.node ?? "";
@@ -190,7 +193,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
         )}
       </div>
       {(bar.secondary || bar.primary) && <ActionBar>{button(bar.secondary, false)}{button(bar.primary, true)}</ActionBar>}
-      <ItemSheets item={item} node={node?.id ?? null} sheet={sheet} reload={reload} startLines={startLines} tapped={tapped} onReading={setReading} />
+      <ItemSheets item={item} node={at?.node.id ?? null} sheet={sheet} reload={reload} startLines={startLines} tapped={tapped} onReading={setReading} />
     </>
   );
 }

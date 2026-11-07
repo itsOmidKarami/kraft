@@ -4,6 +4,7 @@ import type { ChainNode as ApiNode, KraftEvent, WorkerSession } from "../../type
 import type { ChainArc, ChainNode } from "../graph/layout";
 import { escalationsIn, isEscalation, passOf } from "./nodeGraph";
 import { materialized, nodeTaskKind } from "./chainValues";
+import { cursorOf, within } from "./cursor";
 import { isScopeTask } from "./scopeView";
 import { waitTitle } from "./sharedWords";
 import type { ItemDetail } from "./useItem";
@@ -24,12 +25,13 @@ function timesRun(item: ItemDetail, work: WorkerSession[]): number {
   }));
 }
 
-/** The node a gate rejects to: its own `reject_to`, else the nearest earlier exec node (R23). */
+/** The node a gate rejects to: its own `reject_to`, else the nearest earlier exec node or group (R23; the server's
+ *  `preceding_exec_node`). */
 export function rejectTarget(nodes: ApiNode[], gate: string): string | null {
   const i = nodes.findIndex((n) => n.id === gate);
   if (i < 0) return null;
   if (nodes[i].reject_to) return nodes[i].reject_to!;
-  for (let j = i - 1; j >= 0; j--) if (kindOf(nodes[j]) === "exec") return nodes[j].id;
+  for (let j = i - 1; j >= 0; j--) if (kindOf(nodes[j]) !== "gate") return nodes[j].id;
   return null;
 }
 
@@ -46,7 +48,8 @@ export function chainGraph(item: ItemDetail, events: KraftEvent[], now = Date.no
   const api = item.chain_definition.nodes ?? [];
   const status = item.display_status;
   const finished = status === "done" || status === "archived";
-  const cur = finished ? api.length : api.findIndex((n) => n.id === item.current_node_id);
+  const at = cursorOf(api, item.current_node_id);
+  const cur = finished ? api.length : (at?.index ?? -1);
   const stop = item.stop;
   const capped = stop && (stop.kind === "cap" || stop.kind === "budget") ? stop.node : null;
   const deciders = gateDeciders(events);
@@ -54,7 +57,8 @@ export function chainGraph(item: ItemDetail, events: KraftEvent[], now = Date.no
   const frozen = materialized(item);
 
   const drawn = (n: ApiNode, i: number): ChainNode => {
-    const ss = item.worker_sessions.filter((s) => s.node_id === n.id);
+    // A group's sessions are its body nodes' (`slices.implementation`).
+    const ss = item.worker_sessions.filter((s) => within(n.id, s.node_id));
     const work = ss.filter((s) => !isEscalation(s));
     const attempt = timesRun(item, work);
     const out: ChainNode = { id: n.id, kind: kindOf(n), icon: (n.steps?.length ?? 0) > 1 ? "layers" : undefined, taskKind: nodeTaskKind(frozen, n.id), esc: escalationsIn(item, n.id).length > 0 && capped !== n.id, attempt: attempt || undefined };
@@ -79,14 +83,14 @@ export function chainGraph(item: ItemDetail, events: KraftEvent[], now = Date.no
   };
   // A group (slices) is one node whose body the strip opens: each body node by its path, in the group's state until the
   // run stands inside it (`current_node_id` is `group.node`), the ones before it done and the ones after not started.
+  // A body node's id is already its path (`slices.implementation`).
   const nodes = api.map((n, i): ChainNode => {
     const d = drawn(n, i);
     if (kindOf(n) !== "group") return d;
-    const inner = n.nodes ?? [];
-    const at = inner.findIndex((b) => item.current_node_id === `${n.id}.${b.id}` || item.current_node_id?.startsWith(`${n.id}.${b.id}.`));
-    const body = inner.map((b, j): ChainNode => {
-      const state = d.state === "done" || d.state === "todo" ? d.state : at < 0 ? "plain" : j < at ? "done" : j === at ? d.state : "todo";
-      return { id: `${n.id}.${b.id}`, kind: "exec", state, ...(j === at && { running: d.running, paused: d.paused, needs: d.needs }) };
+    const j0 = i === cur ? (at?.innerIndex ?? -1) : -1;
+    const body = (n.nodes ?? []).map((b, j): ChainNode => {
+      const state = d.state === "done" || d.state === "todo" ? d.state : j0 < 0 ? "plain" : j < j0 ? "done" : j === j0 ? d.state : "todo";
+      return { id: b.id, kind: "exec", state, ...(j === j0 && { running: d.running, paused: d.paused, needs: d.needs }) };
     });
     return { ...d, body, summary: slicesDone(item.slices) || undefined };
   });
@@ -101,7 +105,9 @@ export function chainGraph(item: ItemDetail, events: KraftEvent[], now = Date.no
     nodes,
     arcs: (selected) => {
       const gate = selected && api.find((n) => n.id === selected && kindOf(n) === "gate");
-      const to = gate ? rejectTarget(api, gate.id) : null;
+      // A target inside a group (`slices.implementation`) bounces to the group the strip draws.
+      const target = gate ? rejectTarget(api, gate.id) : null;
+      const to = target ? (cursorOf(api, target)?.node.id ?? target) : null;
       return [...loops, ...rebases, ...(gate && to ? [{ kind: "reject" as const, from: gate.id, to }] : [])];
     },
   };

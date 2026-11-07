@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { SLICED } from "../testkit";
 import { NODES, item } from "./fixtures";
 import type { MarkedOp, Op } from "./types";
 import { addNode, count, editable, issues, issuesAt, lines, moveAfter, opsAt, overrideOf, removeAt, seams, setField, stripPassed } from "./view";
@@ -99,5 +100,9 @@ describe("editable and seams", () => {
     expect(at("build")).toEqual([2, 3, 4]);
     expect(at("ship")).toEqual([4]);
     expect(at(null)).toEqual([1, 2, 3, 4]);
+  });
+  it("reads a run inside a group (`slices.verification`) as standing on the group", () => {
+    expect(SLICED.map((n) => editable(item("slices.verification"), SLICED, n.id))).toEqual([false, false, false, true, true]);
+    expect(seams(item("slices.implementation"), SLICED).map((s) => s.at)).toEqual([3, 4, 5]);
   });
 });

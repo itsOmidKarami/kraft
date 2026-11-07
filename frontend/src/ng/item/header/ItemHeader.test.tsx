@@ -6,7 +6,7 @@ import { item } from "../../../testFixtures";
 import { ItemDraftProvider } from "../draft/context";
 import { ReviewDialog } from "../draft/ReviewDialog";
 import { answer, ov } from "../draft/testkit";
-import { acceptWrites, detail, inShell, stubFetch } from "../testkit";
+import { acceptWrites, detail, inShell, SLICED, stubFetch } from "../testkit";
 import { ItemHeader } from "./ItemHeader";
 
 /** The writes these pages send; any other write is refused. */
@@ -390,10 +390,13 @@ describe("ItemHeader", () => {
     ["stuck", /Retry/, { write: { method: "POST", path: "/work-items/w1/retry", body: { path: "verification" } } }],
     // R12b-01: a stuck fix loop stops on its judge, a task no retry path names: 422 until it retried the node.
     ["stuck", /Retry/, { task: "verification.fix_loop.judge", write: { method: "POST", path: "/work-items/w1/retry", body: { path: "verification" } } }],
-  ] as const)("a needs-you %s stop's main button is %s, and it acts", async (kind, name, want: { handler?: keyof Handlers; arg?: string; write?: object; task?: string }) => {
+    // Inside a group the stop is on a body node (`slices.verification`): the retry names its task's whole path.
+    ["stuck", /Retry/, { node: "slices.verification", task: "slices.verification.run.work", write: { method: "POST", path: "/work-items/w1/retry", body: { path: "slices.verification.run.work" } } }],
+  ] as const)("a needs-you %s stop's main button is %s, and it acts", async (kind, name, want: { handler?: keyof Handlers; arg?: string; write?: object; task?: string; node?: string }) => {
     const calls = stubFetch(WRITES);
     const handlers = { onRaise: vi.fn(), onGate: vi.fn(), onAnswer: vi.fn() };
-    show({ display_status: "needs_you", status: "needs_human", stop: { kind, node: "verification", task: want.task ?? null, resume_at: null, reason: null, ...(kind === "cap" && { limit: { path: "", key: "time_cap_minutes", value: 60, maximum: null } }) } }, handlers);
+    const node = want.node ?? "verification";
+    show({ display_status: "needs_you", status: "needs_human", ...(want.node && { chain_definition: { template_id: "d", nodes: SLICED }, current_node_id: node }), stop: { kind, node, task: want.task ?? null, resume_at: null, reason: null, ...(kind === "cap" && { limit: { path: "", key: "time_cap_minutes", value: 60, maximum: null } }) } }, handlers);
     expect(screen.queryByRole("button", { name: /Pause/ })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name }));
     if (want.handler) {

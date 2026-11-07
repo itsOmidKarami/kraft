@@ -1,4 +1,5 @@
 import { Button } from "../../ui/Button";
+import { cursorOf } from "../cursor";
 import { useDraft } from "./context";
 import { lines, moveAfter, removeAt, removeNode } from "./view";
 
@@ -15,7 +16,8 @@ export function DraftNotes({ node }: { node?: string }) {
   if (!d || d.draft.status !== "ready") return null;
   const issues = d.issues.filter((i) => !node || i.node === node);
   const added = node ? d.ops.findIndex((o) => o.op === "add_node" && o.node.id === node && !o.passed) : -1;
-  const current = d.raw.current_node_id;
+  // A run inside a group stands at `group.node`: an added node moves after the group.
+  const current = cursorOf(d.raw.chain_definition.nodes, d.raw.current_node_id)?.node.id ?? d.raw.current_node_id;
   const send = (fn: Parameters<typeof d.draft.edit>[0], at: string) => void d.draft.edit(fn, at);
   return (
     <>

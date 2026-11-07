@@ -4,7 +4,8 @@ import type { ReactElement } from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { KraftEvent } from "../../../types";
-import { acceptWrites, detail, holdFetch, stubFetch, V1 } from "../testkit";
+import { acceptWrites, detail, holdFetch, SLICED, stubFetch, V1 } from "../testkit";
+import type { ItemDetail } from "../useItem";
 import { GateBody, GateFooter } from "./GatePane";
 
 /** The writes these pages send; any other write is refused. */
@@ -147,9 +148,11 @@ describe("GateBody", () => {
     ["skipped", [skip("plan_approval")], "skipped"],
     ["skipped, then decided on a retry", [skip("plan_approval"), approved("human")], "passed · you"],
     ["another gate's skip", [skip("final_review")], "not reached"],
-  ])("a gate that is %s", (_n, events, status) => {
+    // A run inside a later group stands at `slices.<node>`: the gate before it is behind it.
+    ["behind a run inside a group", [], "passed", { display_status: "running", chain_definition: { template_id: "d", nodes: SLICED }, current_node_id: "slices.implementation" }],
+  ] as [string, KraftEvent[], string, Partial<ItemDetail>?][])("a gate that is %s", (_n, events, status, over) => {
     stubFetch();
-    render(<GateBody item={detail({ display_status: "done", current_node_id: null })} version="1" gate={gate} events={events} />);
+    render(<GateBody item={detail({ display_status: "done", current_node_id: null, ...over })} version="1" gate={gate} events={events} />);
     expect(screen.getByText("status").nextElementSibling).toHaveTextContent(status);
   });
 

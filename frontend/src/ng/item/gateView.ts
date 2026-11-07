@@ -8,6 +8,7 @@ import { AUTO_REVIEW, sessionLook, sessionsOf } from "./nodeGraph";
 import { gateSkipped } from "./events";
 import { gateDecision } from "./panes/GatePane";
 import { ENDED, gateMessage, materialized, nodeAt } from "./chainValues";
+import { cursorOf } from "./cursor";
 import { taskName } from "./paths";
 import { OUTCOME, reviewOutcome } from "./reviewOutcome";
 import type { ItemDetail } from "./useItem";
@@ -32,8 +33,8 @@ export function gateView(item: ItemDetail, gate: ChainNode, events: KraftEvent[]
   const frozen = materialized(item);
   const own = frozen ? nodeAt(frozen, gate.id) : undefined;
   const path = own?.auto_review ? `${gate.id}.auto_review` : gate.tasks[0];
-  const ids = item.chain_definition.nodes.map((n) => n.id);
-  const ahead = !pending && !decided && !ENDED.has(item.display_status ?? "") && ids.indexOf(item.current_node_id ?? "") < ids.indexOf(gate.id);
+  const nodes = item.chain_definition.nodes;
+  const ahead = !pending && !decided && !ENDED.has(item.display_status ?? "") && (cursorOf(nodes, item.current_node_id)?.index ?? -1) < nodes.findIndex((n) => n.id === gate.id);
   const last = path ? sessionsOf(item, path).at(-1) : undefined;
   const outcome = reviewOutcome(events, gate.id);
   const to = rejectTarget(item.chain_definition.nodes, gate.id);

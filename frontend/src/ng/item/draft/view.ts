@@ -1,6 +1,7 @@
 import type { ChainNode } from "../../../types";
 import type { Seam } from "../../graph/layout";
 import { fieldMeta, show } from "../../templates/fields";
+import { cursorOf } from "../cursor";
 import type { DraftView, MarkedOp, Op, OverrideOp } from "./types";
 
 /** Ended by the server's own word for it (`display_status`): the chain does not run again. */
@@ -80,12 +81,12 @@ export const issuesAt = (view: Pick<DraftView, "ops" | "problems">, node: string
 
 const idx = (nodes: ChainNode[], id: string | null) => (id == null ? -1 : nodes.findIndex((n) => n.id === id));
 
-/** The index of the node the run stands on: -1 before it starts, null when it is past the chain or the item ended. */
+/** The index of the node the run stands on (a group's, inside one): -1 before it starts, null when it is past the
+ *  chain or the item ended. */
 function standing(item: ItemLike, nodes: ChainNode[]): number | null {
   if (ENDED.has(item.display_status ?? "")) return null;
   if (item.current_node_id == null) return -1;
-  const i = idx(nodes, item.current_node_id);
-  return i < 0 ? null : i;
+  return cursorOf(nodes, item.current_node_id)?.index ?? null;
 }
 
 /** Whether an override may be started on `nodeId` (Decided 4): only nodes after the one the run stands on. */

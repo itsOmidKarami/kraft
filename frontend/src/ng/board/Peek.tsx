@@ -14,6 +14,7 @@ import { EscalateCard, PauseConfirm } from "../item/header/Dialogs";
 import { useDuplicate } from "../item/header/ItemHeader";
 import { totals, useDiffFiles, useOpenThreads } from "../item/Top";
 import { ChainConfig, ChainOverview } from "../item/panes/ChainPane";
+import { standingNode } from "../item/cursor";
 import { retryBody } from "../item/paths";
 import { openLimitEditor } from "../item/RaiseLimit";
 import { ComesAfterCard, PausedCard, StateCard } from "../item/StateCard";
@@ -202,7 +203,7 @@ function Footer({ cards, item, reload, offline, onOpen, onRaise, onAnswer }: { c
     else reload();
     return r.ok;
   };
-  const node = item.chain_definition.nodes.find((n) => n.id === (item.stop?.node ?? item.current_node_id));
+  const node = standingNode(item.chain_definition.nodes, item.stop?.node ?? item.current_node_id);
   const navigate = useNavigate();
   const startHere = async () => {
     setBusy(true);

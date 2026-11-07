@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DisplayStatus, StopKind, WorkItem } from "../../types";
-import { detail } from "../item/testkit";
+import { detail, sliced } from "../item/testkit";
 import { admittedRowAction, displayName, gateName, gateWords, glyphOf, nameOf, reasonTail, rowAction, ticksOf } from "./rowText";
 
 const NOW = Date.parse("2026-09-13T10:00:00Z");
@@ -122,6 +122,8 @@ describe("glyphOf and ticksOf", () => {
     expect(glyphOf(row("paused")).state).toBe("paused");
     expect(glyphOf(row("blocked", { current_node_id: null })).state).toBe("todo");
     expect(glyphOf(row("blocked")).state).toBe("current");
+    // A parent inside its group stands at `slices.verification`: its glyph is the group's.
+    expect(glyphOf(sliced())).toMatchObject({ kind: "group", state: "current" });
   });
 
   it("fills ticks up to the current node, the current one hot when the item waits on a person, all once ended, the whole chain still drawn", () => {
@@ -134,6 +136,7 @@ describe("glyphOf and ticksOf", () => {
     expect(states(row("paused", { current_node_id: null }))).toBe("tttt");
     expect(states(row("paused"))).toBe("ddct");
     expect(ticksOf(row("running")).map((t) => t.gate)).toEqual([false, true, false, false]);
+    expect(states(sliced())).toBe("ddctt");
   });
 });
 

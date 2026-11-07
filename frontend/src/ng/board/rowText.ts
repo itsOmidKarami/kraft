@@ -1,6 +1,7 @@
 import { until } from "../../format";
 import type { ChainNode, ItemAction, SliceSummary, TaskProgress, WorkItem } from "../../types";
 import type { GlyphKind, GlyphState } from "../graph/types";
+import { within } from "../item/cursor";
 import { admits } from "../item/status";
 import { gateOf, groupOf, stopOf } from "./model";
 
@@ -211,13 +212,10 @@ export function admittedRowAction(i: Row & Pick<WorkItem, "actions">): RowAction
   return a;
 }
 
-/** A current node id is a node's own, or a path inside a group (`slices.implementation` is in `slices`). */
-const inNode = (id: string, current: string | null | undefined) => !!current && (id === current || current.startsWith(`${id}.`));
-
 /** The row's NodeGlyph: the current node's kind and icon, its state from the status. */
 export function glyphOf(i: Row): { kind: GlyphKind; icon?: string; state: GlyphState } {
   const nodes: ChainNode[] = i.chain_definition?.nodes ?? [];
-  const n = nodes.find((x) => inNode(x.id, i.current_node_id)) ?? nodes[nodes.length - 1];
+  const n = nodes.find((x) => within(x.id, i.current_node_id)) ?? nodes[nodes.length - 1];
   const kind: GlyphKind = n?.kind === "gate" ? "gate" : n?.kind === "group" ? "group" : "exec";
   const dropped = i.display_status === "cancelled" || (i.display_status === "archived" && i.status === "abandoned");
   const finished = i.display_status === "done" || (i.display_status === "archived" && !dropped);
@@ -253,7 +251,7 @@ export type ChainMark = { node: string; gate: boolean; state: "done" | "current"
 export function chainMarks(i: Row): ChainMark[] {
   const nodes = i.chain_definition?.nodes ?? [];
   const ended = i.display_status === "done" || i.display_status === "cancelled" || i.display_status === "archived";
-  const at = nodes.findIndex((n) => inNode(n.id, i.current_node_id));
+  const at = nodes.findIndex((n) => within(n.id, i.current_node_id));
   const hot = (groupOf(i) === "needs" && i.display_status !== "paused") || i.display_status === "escalated";
   return nodes.map((n, k) => ({
     node: n.id,

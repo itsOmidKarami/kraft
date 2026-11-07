@@ -10,6 +10,7 @@ import { showToast } from "../../ui/Toast";
 import { act } from "../actions";
 import { useDraft } from "../draft/context";
 import { DraftState, ReviewButton } from "../draft/DraftBar";
+import { standingNode } from "../cursor";
 import { retryBody } from "../paths";
 import { archivable, bodyOffers, headerState, menuDoors, neverStarted, type PanelItem } from "../status";
 import type { ItemDetail } from "../useItem";
@@ -98,7 +99,7 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
   };
 
   const draft = useDraft();
-  const node = item.chain_definition.nodes.find((n) => n.id === (item.stop?.node ?? item.current_node_id));
+  const node = standingNode(item.chain_definition.nodes, item.stop?.node ?? item.current_node_id);
   // Start is a resume from node zero: a never-started item has no current node.
   const startRun = () => void run(act.resume(item.id));
   // An item with a one-off chain reads it first, however the page last saw it (a draft applied since may have changed it):

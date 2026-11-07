@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { KraftEvent, WorkerSession } from "../../types";
 import { accessibleName } from "../graph/types";
 import { chainGraph, rejectTarget } from "./graph";
-import { detail, FROZEN, SCOPE_PATH, scopeChain, V1 } from "./testkit";
+import { detail, FROZEN, SCOPE_PATH, scopeChain, SLICED, sliced, V1 } from "./testkit";
 
 const NOW = Date.parse("2026-09-13T10:10:00Z");
 const sess = (node_id: string, over: Partial<WorkerSession> = {}) => ({ id: `${node_id}${over.attempt ?? 1}${over.hook_point ?? ""}`, node_id, hook_point: `${node_id}.x.y`, status: "done", attempt: 1, round: 0, created_at: over.started_at ?? "2026-09-13T09:00:00Z", started_at: "2026-09-13T09:00:00Z", ...over }) as WorkerSession;
@@ -84,6 +84,19 @@ describe("chainGraph", () => {
     expect(chainGraph(detail({ worker_sessions: [{ ...esc, pass: 1 }, later] }), [], NOW).nodes[2].esc).toBe(false);
   });
 
+  // A parent inside its group stands at `slices.<node>`: the nodes before the group done, the group current, its body
+  // progressing to the node it is on.
+  it.each([
+    ["on the group's first body node", "slices.implementation", ["current", "todo"]],
+    ["on a later body node", "slices.verification", ["done", "current"]],
+    ["on a body node's task", "slices.verification.run.work", ["done", "current"]],
+  ])("draws a sliced item %s", (_, current, inner) => {
+    const { nodes } = chainGraph(sliced(current), [], NOW);
+    expect(nodes.map((n) => [n.id, n.state])).toEqual([["plan", "done"], ["plan_approval", "done"], ["slices", "current"], ["local_review", "todo"], ["merge_request", "todo"]]);
+    expect(nodes[2].body?.map((b) => [b.id, b.state])).toEqual([["slices.implementation", inner[0]], ["slices.verification", inner[1]]]);
+    expect(nodes[2].body?.[inner.indexOf("current")]).toMatchObject({ running: true });
+  });
+
   it("finishes every node of a done item", () => {
     expect(chainGraph(detail({ display_status: "done", current_node_id: null }), [], NOW).nodes.every((n) => n.state === "done")).toBe(true);
   });
@@ -108,5 +121,13 @@ describe("rejectTarget", () => {
     const bare = V1.map((n) => (n.id === "plan_approval" ? { ...n, reject_to: null } : n));
     expect(rejectTarget(bare, "plan_approval")).toBe("plan");
     expect(rejectTarget([{ id: "g", kind: "gate", gate_after: null, tasks: [] }], "g")).toBeNull();
+  });
+
+  it("finds a group before a gate, as the server's preceding_exec_node does, and the arc bounces to the group", () => {
+    expect(rejectTarget(SLICED, "local_review")).toBe("slices");
+    expect(chainGraph(sliced("local_review"), [], NOW).arcs("local_review")).toContainEqual({ kind: "reject", from: "local_review", to: "slices" });
+    // A reject_to naming a body node draws to the group that holds it.
+    const named = SLICED.map((n) => (n.id === "local_review" ? { ...n, reject_to: "slices.implementation" } : n));
+    expect(chainGraph(sliced("local_review", { chain_definition: { template_id: "d", nodes: named } }), [], NOW).arcs("local_review")).toContainEqual({ kind: "reject", from: "local_review", to: "slices" });
   });
 });

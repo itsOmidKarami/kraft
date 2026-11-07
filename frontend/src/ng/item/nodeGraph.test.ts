@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { ChainNode, SessionStatus, WorkerSession } from "../../types";
 import { SESSION_STATUSES } from "../../types/vocab.generated";
 import type { KraftEvent } from "../../types";
-import { asOfPass, footerState, lookWord, loopIdle, loopRounds, nodeGraph, passesOf, passOf, passShown, passWhy, roundShown, sessionLook } from "./nodeGraph";
+import { asOfPass, footerState, standsOn, stopOn, lookWord, loopIdle, loopRounds, nodeGraph, passesOf, passOf, passShown, passWhy, roundShown, sessionLook } from "./nodeGraph";
 import { notStarted } from "./chainValues";
-import { detail, FROZEN, LOOPED, SCOPE_PATH, scopeRun, scoped } from "./testkit";
+import { detail, FROZEN, LOOPED, SCOPE_PATH, scopeRun, scoped, sliced } from "./testkit";
 
 const NOW = Date.parse("2026-09-13T10:10:00Z");
 const node: ChainNode = {
@@ -229,6 +229,20 @@ describe("loopIdle", () => {
     ["judge", 1, { latest: 1, total: 3 }, [], "skipped · the first repair runs without the judge"],
   ] as const)("%s of round %s in %j: %s", (loop, round, rounds, events, want) => {
     expect(loopIdle(node, loop, round, rounds, [...events])).toBe(want);
+  });
+});
+
+// A parent inside its group stands, and stops, at `slices.<node>`: the group's own pane holds the run and the stop.
+describe("standsOn and stopOn", () => {
+  const stopped = sliced("slices.verification", { display_status: "failed", stop: { kind: "failed", node: "slices.verification", resume_at: null, reason: null } });
+  it.each([
+    ["the group", "slices", true],
+    ["the body node it is on", "slices.verification", true],
+    ["another body node", "slices.implementation", false],
+    ["a node before the group", "plan", false],
+  ])("%s", (_, node, on) => {
+    expect(standsOn(stopped, node)).toBe(on);
+    expect(!!stopOn(stopped, node)).toBe(on);
   });
 });
 

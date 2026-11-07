@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ChainNode, KraftEvent, WorkerSession } from "../../types";
 import { gateView } from "./gateView";
-import { detail, V1 } from "./testkit";
+import { detail, SLICED, V1 } from "./testkit";
 
 const reviewed: ChainNode = { id: "final_review", kind: "gate", gate_after: null, tasks: ["final_review.review.auto_review"], steps: [["final_review.review.auto_review"]], reject_to: null };
 const nodes = [...V1, reviewed];
@@ -45,6 +45,9 @@ describe("gateView", () => {
     const running = gateView(detail({ materialized_chain: frozen, current_node_id: "plan_approval", worker_sessions: [s] }), V1[1], [], 0, { kind: "chain" }, on);
     expect(running.reviewer).toMatchObject({ id: "auto_review", state: "current" });
     expect(running.reviewer?.chip).toBeUndefined();
+    // A run inside a later group (`slices.verification`) is past the gate: its reviewer is not still to come.
+    const past = gateView(detail({ materialized_chain: frozen, chain_definition: { template_id: "d", nodes: SLICED }, current_node_id: "slices.verification" }), V1[1], [], 0, { kind: "chain" }, on);
+    expect(past.reviewer?.chip).toBeUndefined();
   });
 
   it("an ended item whose gate was skipped has no current node: the reviewer does not claim to run first when reached", () => {
