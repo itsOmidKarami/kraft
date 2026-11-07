@@ -7,10 +7,11 @@ from __future__ import annotations
 from functools import partial
 
 import pytest
+from support.api import _budget_stopped_item, _paused, _status_of
 from support.api import _orchestrator_db as _db
-from support.api import _paused, _status_of
 
 from kraft import store
+from kraft.api import deps
 from kraft.executor import slices
 
 
@@ -75,12 +76,21 @@ def test_an_unjoined_parent_refuses_a_retry_from_an_earlier_node(client, repo, b
     assert "unjoined" in r.json()["detail"]
 
 
-def test_pause_and_resume_cascade_to_the_children_the_parent_paused(client, repo):
+def test_pause_and_resume_cascade_to_the_children_the_parent_paused(client, repo, monkeypatch):
     parent, kids = _family(client, repo, parent_status="active", children=("running", "paused"))
     with _db() as c, c:
         c.execute("UPDATE work_items SET stop_kind = NULL WHERE id = ?", (parent,))
+    cancelled = []
+
+    async def cancel(app, wid, timeout=None):
+        cancelled.append(wid)
+
+    monkeypatch.setattr(deps, "cancel", cancel)
 
     assert client.post(f"/api/work-items/{parent}/pause").status_code == 200
+
+    # The running child's walk task is ended, as the pause door ends an item's.
+    assert cancelled == [kids[0], parent]
 
     assert [_status_of(client, k) for k in kids] == ["paused", "paused"]
     with _db() as c:
@@ -117,6 +127,30 @@ def test_cancel_keeps_the_childrens_worktrees(client, repo):
     assert [_status_of(client, k) for k in kids] == ["abandoned", "abandoned"]
     events = client.get(f"/api/work-items/{kids[0]}/events").json()
     assert "work_item_cancelled" in [e["type"] for e in events]
+
+
+def test_archiving_a_parent_already_archived_alone_archives_its_slices_too(client, repo):
+    """The auto-archive poller archives the parent on its own age: its slices,
+    left behind with their worktrees, go the next time anything archives it."""
+    parent, kids = _family(
+        client, repo, parent_status="abandoned", children=("abandoned", "abandoned")
+    )
+    with _db() as c, c:
+        c.execute(
+            "UPDATE work_items SET archived_at = '2026-01-01T00:00:00+00:00', "
+            "archived_by = 'auto' WHERE id = ?",
+            (parent,),
+        )
+
+    r = client.post(f"/api/work-items/{parent}/archive")
+
+    assert r.status_code == 200, r.text
+    with _db() as c:
+        archived = [
+            c.execute("SELECT archived_at FROM work_items WHERE id=?", (k,)).fetchone()[0]
+            for k in kids
+        ]
+    assert all(archived)
 
 
 def test_a_child_cannot_be_archived_alone(client, repo):
@@ -196,3 +230,61 @@ def test_a_draft_may_not_move_an_unjoined_parent_back(client, repo, path, status
     assert r.status_code == status, r.text
     if status == 409:
         assert "slices have not ended" in r.json()["detail"]
+
+
+def _stopped_child(kid, budget):
+    """`kid` stopped for `budget`, the way the walk records a spend-cap stop."""
+    with _db() as c, c:
+        c.execute("UPDATE work_items SET current_node_id = 'implementation' WHERE id = ?", (kid,))
+        store.mark_needs_human(c, kid, "implementation", "stopped", None, budget, kind="budget")
+
+
+def test_raising_the_parents_cap_reaches_and_retries_the_slices_it_stopped(
+    monkeypatch, client, repo
+):
+    """The slices hold a frozen copy of the parent's cap: the raise writes it to
+    them, and the retry queues the ones the family cap stopped, not the ones
+    stopped for anything else."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
+    cap = {"scope": "usd", "path": "", "spent_usd": 0.07, "cap_usd": 0.05, "unknown_launches": 0}
+    parent = _budget_stopped_item(client, repo, cap, policy={"budget_usd": 0.05})
+    kids = [_paused(client, repo, chain_template="default") for _ in range(3)]
+    state = store.GroupState(group="slices", phase="forked", generation=1)
+    with _db() as c, c:
+        c.execute("UPDATE work_items SET group_state = ? WHERE id = ?", (state.to_json(), parent))
+        for key, kid in enumerate(kids, 1):
+            c.execute(
+                "UPDATE work_items SET parent_id = ?, slice_generation = 1, slice_key = ? "
+                "WHERE id = ?",
+                (parent, key, kid),
+            )
+    _stopped_child(kids[0], cap)
+    _stopped_child(kids[1], {**cap, "path": "implementation"})
+    with _db() as c, c:
+        c.execute("UPDATE work_items SET status = 'needs_human' WHERE id = ?", (kids[2],))
+
+    r = client.post(f"/api/work-items/{parent}/budget/raise", json={"budget_usd": 1.0})
+
+    assert r.status_code == 200, r.text
+    overrides = [client.get(f"/api/work-items/{k}").json()["policy_override"] for k in kids]
+    assert overrides == [{"budget_usd": 1.0}] * 3
+    assert _status_of(client, kids[0]) in ("queued", "active")
+    assert [_status_of(client, k) for k in kids[1:]] == ["needs_human", "needs_human"]
+
+
+@pytest.mark.parametrize(
+    ("verb", "status"),
+    [("resume", "paused"), ("retry", "needs_human")],
+)
+def test_a_parent_refusal_leaves_the_slices_asleep(client, repo, monkeypatch, verb, status):
+    """Its own refusals come before the cascade: a 409 never leaves a slice woken."""
+    parent, kids = _family(client, repo, parent_status=status, children=("paused", "paused"))
+    with _db() as c, c:
+        c.execute("UPDATE work_items SET paused_by_parent = 1 WHERE id IN (?, ?)", kids)
+    monkeypatch.setattr(deps, "task_is_live", lambda app, wid: wid == parent)
+
+    r = client.post(f"/api/work-items/{parent}/{verb}", json={})
+
+    assert r.status_code == 409, r.text
+    assert "already running" in r.json()["detail"]
+    assert [_status_of(client, k) for k in kids] == ["paused", "paused"]

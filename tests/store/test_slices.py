@@ -3,6 +3,7 @@ state a parent keeps, and a parent waiting for its children."""
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import sqlite3
 from types import SimpleNamespace
@@ -92,7 +93,13 @@ async def test_children_are_filed_together_or_not_at_all(database, chain):
 
     def fork_both(c):
         state = GroupState(group="slices", generation=1)
-        store.file_children(c, "p1", state, [_child(chain, 1), _child(chain, 2)])
+        inherited = dataclasses.replace(
+            _child(chain, 2),
+            agent_overrides='{"implementation": {"model": "opus"}}',
+            submodules=["libs/x"],
+            root_merge_policy="together",
+        )
+        store.file_children(c, "p1", state, [_child(chain, 1), inherited])
 
     await database.write(fork_both)
 
@@ -104,6 +111,12 @@ async def test_children_are_filed_together_or_not_at_all(database, chain):
     state = database.read(lambda c: store.group_state(c, "p1"))
     assert (state.phase, state.children) == ("forked", ["c1", "c2"])
     assert json.loads(children[0]["attachments"])[0]["kind"] == "plan"
+    # The parent's harness overrides and cross-repo paths come with the slice, frozen.
+    assert (children[1]["agent_overrides"], children[1]["root_merge_policy"]) == (
+        '{"implementation": {"model": "opus"}}',
+        "together",
+    )
+    assert json.loads(children[1]["submodules"]) == ["libs/x"]
 
 
 async def test_a_parent_waiting_on_slices_is_never_due(database, chain):

@@ -31,6 +31,7 @@ __all__ = [
     "group_unjoined",
     "is_child",
     "mark_waiting_on_slices",
+    "never_queued",
     "running_siblings",
     "pin_head",
     "set_docs_commit",
@@ -95,6 +96,11 @@ class ChildRow:
     #: The parent's own cap, so the family shares one (`budget_spend` sums it).
     budget_set: bool = False
     budget_usd: float | None = None
+    #: Inherited, frozen: the harness and node overrides the parent holds now, and
+    #: the cross-repo paths it was filed with (`submodules`, `root_merge_policy`).
+    agent_overrides: str | None = None
+    submodules: list[str] | None = None
+    root_merge_policy: str | None = None
 
 
 def is_child(row) -> bool:
@@ -148,10 +154,12 @@ def file_children(
             node_overrides=child.node_overrides,
             policy_override=child.policy_override,
             materialized_chain=child.materialized_chain,
+            submodules=child.submodules,
+            root_merge_policy=child.root_merge_policy,
         )
         conn.execute(
             "UPDATE work_items SET parent_id = ?, slice_generation = ?, slice_key = ?, "
-            "base_ref = ?, budget_set = ?, budget_usd = ? WHERE id = ?",
+            "base_ref = ?, budget_set = ?, budget_usd = ?, agent_overrides = ? WHERE id = ?",
             (
                 parent_id,
                 state.generation,
@@ -159,6 +167,7 @@ def file_children(
                 child.base_ref,
                 1 if child.budget_set else 0,
                 child.budget_usd,
+                child.agent_overrides,
                 child.id,
             ),
         )
@@ -174,11 +183,16 @@ def file_children(
 
 
 def children_of(
-    conn: sqlite3.Connection, parent_id: str, generation: int | None = None
+    conn: sqlite3.Connection,
+    parent_id: str,
+    generation: int | None = None,
+    *,
+    every_generation: bool = False,
 ) -> list[dict]:
     """A parent's children in slice order. `generation` None: the current one
-    in the parent's group state; every generation when the parent has none."""
-    if generation is None:
+    in the parent's group state; every generation when the parent has none, or
+    when `every_generation` asks (archive and restore move them all)."""
+    if generation is None and not every_generation:
         state = group_state(conn, parent_id)
         generation = state.generation if state is not None else None
     sql = "SELECT * FROM work_items WHERE parent_id = ?"
@@ -188,6 +202,19 @@ def children_of(
         params = (parent_id, generation)
     rows = conn.execute(sql + " ORDER BY slice_generation, slice_key", params).fetchall()
     return [dict(r) for r in rows]
+
+
+def never_queued(conn: sqlite3.Connection, wid: str) -> bool:
+    """Whether the start queue has never held `wid`: a child the fork filed
+    `paused` and a crash kept from queueing, as against one a person paused after
+    it queued and before it started."""
+    return (
+        conn.execute(
+            "SELECT 1 FROM events WHERE work_item_id = ? AND type = ? LIMIT 1",
+            (wid, WorkItemEvent.QUEUED),
+        ).fetchone()
+        is None
+    )
 
 
 def family_ids(conn: sqlite3.Connection, wid: str) -> list[str]:

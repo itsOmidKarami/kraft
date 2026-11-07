@@ -96,6 +96,12 @@ def _children(it):
 
 async def test_a_group_with_two_slices_files_two_children_and_waits(item_on, planned):
     it = await _item(item_on, planned)
+    overrides = json.dumps({"implementation": {"model": "opus"}})
+    await it.database.write(
+        lambda c: c.execute(
+            "UPDATE work_items SET agent_overrides = ? WHERE id = ?", (overrides, it.id)
+        )
+    )
 
     assert await _walk(it) == "waiting"
 
@@ -108,6 +114,7 @@ async def test_a_group_with_two_slices_files_two_children_and_waits(item_on, pla
     for child in children:
         assert {a["kind"] for a in json.loads(child["attachments"])} == {"spec", "plan"}
         assert child["title"].startswith("t · slice ")
+        assert child["agent_overrides"] == overrides  # inherited, frozen
         chain = json.loads(child["materialized_chain"])
         assert [n["id"] for n in chain["chain"]["nodes"]] == ["implementation", "verification"]
     state = it.database.read(lambda c: store.group_state(c, it.id))
@@ -115,9 +122,18 @@ async def test_a_group_with_two_slices_files_two_children_and_waits(item_on, pla
     assert [e["type"] for e in it.events() if e["type"] == "slices_forked"] == ["slices_forked"]
 
 
-async def test_a_crash_between_filing_and_queueing_queues_the_children_on_re_entry(
-    item_on, planned
+@pytest.mark.parametrize(
+    ("crashed", "status"),
+    [
+        pytest.param(True, "queued", id="never-queued"),
+        pytest.param(False, "paused", id="paused-by-a-person-after-it-queued"),
+    ],
+)
+async def test_re_entry_queues_only_the_children_the_fork_filed_paused(
+    item_on, planned, crashed, status
 ):
+    """A crash between filing and queueing leaves children paused that were never
+    queued; one a person paused before it started was, and stays paused."""
     it = await _item(item_on, planned)
     await _walk(it)
     before = [c["id"] for c in _children(it)]
@@ -126,13 +142,15 @@ async def test_a_crash_between_filing_and_queueing_queues_the_children_on_re_ent
         c.execute(
             "UPDATE work_items SET status='paused', queued_request=NULL WHERE parent_id=?", (it.id,)
         )
+        if crashed:
+            c.execute("DELETE FROM events WHERE type='work_item_queued'")
         c.execute("UPDATE work_items SET status='active' WHERE id=?", (it.id,))
 
     await it.database.write(crash)
     assert await _walk(it) == "waiting"
 
     assert [c["id"] for c in _children(it)] == before
-    assert [c["status"] for c in _children(it)] == ["queued", "queued"]
+    assert [c["status"] for c in _children(it)] == [status, status]
 
 
 async def test_re_entering_a_forked_group_files_no_children_again(item_on, planned):
@@ -317,6 +335,30 @@ async def test_a_prelude_that_passed_is_not_built_again_when_the_fork_is_retried
     ran = [e["payload"]["node_id"] for e in it.events("node_completed")]
     assert ran == ["slices.implementation", "slices.verification"]
     assert len(_children(it)) == 2
+
+
+async def test_a_prelude_stopped_in_its_second_node_resumes_there(item_on, planned):
+    """The groundwork's tests failed: the retry runs them again, not the
+    implementation that passed before them."""
+    write(planned, "plan.md", PLAN.replace("Task 3.", "Task 3.\n").replace("Tasks 1-2.", "Task 1."))
+    commit_all(planned, "plan with groundwork")
+    it = await _item(
+        item_on,
+        planned,
+        _nodes(_body("implementation"), _body("verification", "test -f ../flag")),
+    )
+    assert await _walk(it) == "needs_human"
+    (it.worktree.parent / "flag").write_text("ok")
+    await it.database.write(
+        lambda c: c.execute("UPDATE work_items SET status='active' WHERE id=?", (it.id,))
+    )
+
+    assert await _walk(it) == "waiting"
+
+    ran = [e["payload"]["node_id"] for e in it.events("node_completed")]
+    assert ran == ["slices.implementation", "slices.verification"]
+    launched = [e["payload"].get("node_id") for e in it.events("worker_session_created")]
+    assert launched == ["slices.implementation", "slices.verification", "slices.verification"]
 
 
 def test_a_group_counts_as_the_execution_node_before_a_gate():

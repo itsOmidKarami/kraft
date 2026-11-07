@@ -75,6 +75,8 @@ async def _walk_group(
     does -- `ok`, or the status the walk stops with -- and `waiting` when it
     parked the parent to wait for its children."""
     state = db.read(lambda c: store.group_state(c, work_item_id)) or GroupState(group=node.id)
+    # Where the walk found the item: inside the group's body, if it stopped in one.
+    stopped_in = row["current_node_id"]
     await db.write(lambda c: store.enter_node(c, work_item_id, node.id))
     if state.phase == "joining":
         return await _join(db, run_dirs, work_item_id, node, row, worktree, state, launch=launch)
@@ -92,8 +94,9 @@ async def _walk_group(
                 start_step, split,
             )  # fmt: skip
         return await _prelude_then_fork(
-            db, run_dirs, work_item_id, node, row, worktree, state, split, policy, steer, launch
-        )
+            db, run_dirs, work_item_id, node, row, worktree, state, split, policy, steer, launch,
+            resume_at=(stopped_in, start_step),
+        )  # fmt: skip
     decided = _decide(db, run_dirs, row, worktree, policy, work_item_id, node, state)
     if not isinstance(decided, SliceSplit):
         return await _not_forked(
@@ -199,9 +202,17 @@ async def _walk_body(
 
 
 async def _prelude_then_fork(
-    db, run_dirs, work_item_id, node, row, worktree, state, split, policy, steer, launch
-) -> str:
+    db, run_dirs, work_item_id, node, row, worktree, state, split, policy, steer, launch,
+    resume_at: tuple[str | None, int] = (None, 0),
+) -> str:  # fmt: skip
     if split.prelude and not state.prelude_done:
+        body, step = list(node.body), 0
+        if state.phase == "prelude":
+            # Resuming: at the node the prelude stopped in, not the first one.
+            stopped_in, start_step = resume_at
+            at = next((i for i, b in enumerate(body) if b.id == stopped_in), None)
+            if at is not None:
+                body, step = body[at:], start_step
         if state.phase != "prelude":
             state.phase = "prelude"
             await db.write(lambda c: store.set_group_state(c, work_item_id, state))
@@ -213,7 +224,7 @@ async def _prelude_then_fork(
             db,
             run_dirs,
             work_item_id,
-            list(node.body),
+            body,
             worktree,
             policy,
             Steer(
@@ -221,6 +232,7 @@ async def _prelude_then_fork(
                 source=steer.source if steer is not None and carried else "seeded",
             ),
             launch,
+            step,
         )
         if result != DONE:
             return result
@@ -304,6 +316,9 @@ async def _fork(db, run_dirs, work_item_id, node, row, worktree, state, split, l
                 auto_gate=bool(row["auto_gate"]),
                 budget_set=bool(row["budget_set"]),
                 budget_usd=row["budget_usd"],
+                agent_overrides=row["agent_overrides"],
+                submodules=json.loads(row["submodules"] or "null") or None,
+                root_merge_policy=row["root_merge_policy"],
             )
         )
     forked = dataclasses.replace(
@@ -318,7 +333,13 @@ async def _forked(db, run_dirs, work_item_id, node, row, worktree, state, *, lau
     park the parent again."""
     children = db.read(lambda c: store.children_of(c, work_item_id, state.generation))
     for child in children:
-        if child["status"] == WorkItemStatus.PAUSED and child["current_node_id"] is None:
+        if (
+            child["status"] == WorkItemStatus.PAUSED
+            and child["current_node_id"] is None
+            and db.read(lambda c, cid=child["id"]: store.never_queued(c, cid))
+        ):
+            # Filed paused by the fork and never queued (a crash between): a child a
+            # person paused before it started has been queued, and stays paused.
             await db.write(
                 lambda c, cid=child["id"]: store.queue_work_item(
                     c,
@@ -427,11 +448,13 @@ def unended_children(db, parent_id: str) -> list[dict]:
     ]
 
 
-async def pause_family(db, parent_id: str, *, by: str) -> list[str]:
+async def pause_family(db, parent_id: str, *, by: str, cancel=None) -> list[str]:
     """Pause every child that admits pause (running, waiting, queued, rate
     limited); children already stopped or paused stay as they are. Records which
     the cascade paused, so `resume_family` wakes only those. `by` is a person, or
-    the cap that fired, and rides each child's event."""
+    the cap that fired, and rides each child's event. `cancel(child_id)` ends the
+    child's live walk task, as the pause door does for an item (the route has the
+    app; the cap poller hands one in); without it only the sessions stop."""
     from kraft.api.routes.lifecycle import _terminate  # deferred: kraft.api imports this module
     from kraft.vocab import Verb, admitting
 
@@ -453,6 +476,8 @@ async def pause_family(db, parent_id: str, *, by: str) -> list[str]:
             )
             for s in sessions:
                 _terminate(s["pid"], started=s["pid_start_time"])
+            if cancel is not None:
+                await cancel(cid)
         await db.write(
             lambda c, cid=cid: (
                 c.execute("UPDATE work_items SET paused_by_parent = 1 WHERE id = ?", (cid,)),
@@ -463,14 +488,48 @@ async def pause_family(db, parent_id: str, *, by: str) -> list[str]:
     return paused
 
 
+def stopped_by_family_cap(db, child: dict) -> bool:
+    """Whether `child` stopped on the item-wide spend cap its parent's family
+    shares (its own launch check refused: `caps.budget_breach`, path `""`)."""
+    if child["status"] != WorkItemStatus.NEEDS_HUMAN or child["stop_kind"] != StopKind.BUDGET:
+        return False
+    found = db.read(
+        lambda c: c.execute(
+            "SELECT payload FROM events WHERE work_item_id = ? AND type = ? "
+            "ORDER BY seq DESC LIMIT 1",
+            (child["id"], WorkItemEvent.NEEDS_HUMAN),
+        ).fetchone()
+    )
+    budget = (json.loads(found["payload"]) if found else {}).get("budget") or {}
+    return budget.get("scope") == "work_item" or (
+        budget.get("scope") == "usd" and budget.get("path") == ""
+    )
+
+
 async def resume_family(db, parent_id: str) -> list[str]:
     """Queue every child the cascade paused (`paused_by_parent`), through the
-    start queue like any start. A child a person paused is left alone."""
+    start queue like any start, and retry every child the family cap stopped
+    (the cap the parent just raised, or retried under). A child a person paused,
+    or stopped for any other reason, is left alone."""
     woken: list[str] = []
     for child in unended_children(db, parent_id):
+        cid = child["id"]
+        if stopped_by_family_cap(db, child):
+            queued = await db.write(
+                lambda c, cid=cid: store.queue_work_item(
+                    c,
+                    cid,
+                    verb="retry",
+                    body={},
+                    headers={},
+                    from_statuses=[WorkItemStatus.NEEDS_HUMAN],
+                )
+            )
+            if queued:
+                woken.append(cid)
+            continue
         if child["status"] != WorkItemStatus.PAUSED or not child["paused_by_parent"]:
             continue
-        cid = child["id"]
         await db.write(
             lambda c, cid=cid: c.execute(
                 "UPDATE work_items SET paused_by_parent = 0 WHERE id = ?", (cid,)

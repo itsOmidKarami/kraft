@@ -613,11 +613,13 @@ def time_capped_sessions(conn, work_item_ids) -> set[tuple[str, str]]:
 _GATE_SETTLED = (*GATE_CLOSED, LimitEvent.TIME_CAP_REACHED)
 
 
-async def tick(db, *, now: str | None = None) -> list[str]:
+async def tick(db, *, now: str | None = None, cancel=None) -> list[str]:
     """Stop, for a human, every parked item whose cap ran out while nothing
     of it ran: waiting on an external condition, rate limited, or at a gate
     -- a gate's own `timeout` included. Once per park: a gate stays pending
-    and answerable, so one stop per request. Returns the items stopped."""
+    and answerable, so one stop per request. Returns the items stopped. `cancel`
+    ends a walk task by item id (`deps.cancel` of the app the poller serves):
+    the slices of a parent it stops are paused with theirs ended."""
     marks = ", ".join("?" * len(_GATE_SETTLED))
     rows = db.read(
         lambda c: c.execute(
@@ -644,20 +646,20 @@ async def tick(db, *, now: str | None = None) -> list[str]:
 
         if await db.write(lambda c, r=row, h=hit: stop_if_still_parked(c, r, h)):
             stopped.append(row["id"])
-            await _pause_slices(db, row, "time cap")
+            await _pause_slices(db, row, "time cap", cancel)
     return stopped
 
 
-async def _pause_slices(db, row, by: str) -> None:
+async def _pause_slices(db, row, by: str, cancel=None) -> None:
     """A parent stopped while its slices are unjoined stops its children with it;
     its retry wakes them again (`executor.slices.pause_family`)."""
     if store.group_unjoined(row):
         from kraft.executor import slices  # deferred: executor imports this module
 
-        await slices.pause_family(db, row["id"], by=by)
+        await slices.pause_family(db, row["id"], by=by, cancel=cancel)
 
 
-async def family_tick(db, policy=None) -> list[str]:
+async def family_tick(db, policy=None, *, cancel=None) -> list[str]:
     """Stop, for a person, every parent waiting on its slices whose family has
     spent past its cap: a launch-time check cannot see spend that started
     together (Kraft-ib2sn), so this one runs on a clock. Pauses the children. The
@@ -691,7 +693,7 @@ async def family_tick(db, policy=None) -> list[str]:
                 limit=stops.budget_limit(b),
             )
         )
-        await _pause_slices(db, row, "family budget")
+        await _pause_slices(db, row, "family budget", cancel)
         stopped.append(row["id"])
     return stopped
 
@@ -725,13 +727,24 @@ def stop_if_still_parked(conn, seen, hit: Hit) -> bool:
     return True
 
 
+def _walk_canceller(app):
+    """`deps.cancel` for `app`, as the pause door bounds it."""
+    from kraft.api import deps  # deferred: kraft.api imports this module
+
+    async def cancel(wid: str) -> None:
+        await deps.cancel(app, wid, timeout=deps.CANCEL_TIMEOUT)
+
+    return cancel
+
+
 async def poller(app) -> None:
     """`tick` on a fixed interval until cancelled."""
     while True:
         await asyncio.sleep(_INTERVAL_S)
         try:
-            await tick(app.state.db)
-            await family_tick(app.state.db, app.state.policy)
+            cancel = _walk_canceller(app)
+            await tick(app.state.db, cancel=cancel)
+            await family_tick(app.state.db, app.state.policy, cancel=cancel)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 -- a bad tick must not end the poller

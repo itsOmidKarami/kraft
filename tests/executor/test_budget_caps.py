@@ -554,11 +554,18 @@ async def test_the_family_check_stops_a_waiting_parent_and_pauses_its_children(i
     )
     await _spent(child, TASK, usd=2.5)
 
-    stopped = await caps.family_tick(parent.database)
+    cancelled = []
+
+    async def cancel(wid):
+        cancelled.append(wid)
+
+    stopped = await caps.family_tick(parent.database, cancel=cancel)
 
     assert stopped == [parent.id]
     assert (parent.row()["status"], parent.row()["stop_kind"]) == ("needs_human", "budget")
     assert child.row()["status"] == "paused"
+    # Its walk task goes with its sessions: nothing is left walking a paused child.
+    assert cancelled == ["c1"]
 
 
 def test_raise_budget_on_a_slice_names_its_parent(client, repo):

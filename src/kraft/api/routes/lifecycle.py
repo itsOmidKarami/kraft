@@ -749,12 +749,17 @@ async def archive_work_item(wid: str, request: Request):
         raise HTTPException(409, "only a completed or abandoned item can be archived")
     refuse_alone(row, "archived")
     if row["archived_at"]:
-        return {"id": wid, "archived_by": row["archived_by"], "worktree_removed": False}
-    result = await _archive_one(request.app, row, "you")
-    for child in st.db.read(lambda c: store.children_of(c, wid)):
+        # Archived alone (the auto-archive poller's) before its slices were:
+        # they still go with it.
+        result = {"worktree_removed": False}
+        by = row["archived_by"]
+    else:
+        result = await _archive_one(request.app, row, "you")
+        by = "you"
+    for child in st.db.read(lambda c: store.children_of(c, wid, every_generation=True)):
         if not child["archived_at"] and child["status"] in admitting(Verb.ARCHIVE):
             await _archive_one(request.app, child, "you")
-    return {"id": wid, "archived_by": "you", **result}
+    return {"id": wid, "archived_by": by, **result}
 
 
 # UI v2 · 03.
@@ -767,7 +772,7 @@ async def restore_work_item(wid: str, request: Request):
         raise HTTPException(409, "work item is not archived")
     refuse_alone(row, "restored")
     await st.db.write(lambda c: store.restore_work_item(c, wid))
-    for child in st.db.read(lambda c: store.children_of(c, wid)):
+    for child in st.db.read(lambda c: store.children_of(c, wid, every_generation=True)):
         if child["archived_at"]:
             await st.db.write(lambda c, cid=child["id"]: store.restore_work_item(c, cid))
     return {"id": wid, "status": row["status"]}
@@ -886,7 +891,9 @@ async def pause_work_item(wid: str, request: Request):
     for s in sessions:
         _terminate(s["pid"], started=s["pid_start_time"])
     if store.group_unjoined(row):
-        await slices_mod.pause_family(st.db, wid, by=_decided_by_caller(request))
+        await slices_mod.pause_family(
+            st.db, wid, by=_decided_by_caller(request), cancel=_family_cancel(request.app)
+        )
     # Bounded (Kraft-c5ui): pause spawns nothing, so it would rather return
     # late than block the whole request on a git/forge call the old task
     # happens to be parked in -- the sessions above are already SIGTERM'd
@@ -1381,9 +1388,6 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     # `walk.chain_of` and `claimed_or_stopped` would stop it `needs_human`.
     chain_or_409(row)
     refuse_unapproved_one_off(row)
-    if store.group_unjoined(row):
-        # The slices its pause stopped wake with it.
-        await slices_mod.resume_family(st.db, wid)
     running = escalate.escalation_running(st.db, wid)
     if running is not None:
         raise HTTPException(409, f"an escalation turn ({running}) is already running")
@@ -1439,6 +1443,10 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         # and catching spawn's own refusal only after those writes would
         # strand the item claimed 'active' with no walk behind it.
         raise HTTPException(409, "a walk is already running for this work item")
+    if store.group_unjoined(row):
+        # After every refusal of its own, so a 409 never leaves its slices woken:
+        # the ones its pause stopped wake with it.
+        await slices_mod.resume_family(st.db, wid)
     # Bracketed from *before* the claim to the hand-off (the claim-then-return
     # class). A claim makes this item read `active`, which means "a walk is
     # behind this"; any exit from here that neither spawns one nor leaves a
@@ -1859,8 +1867,6 @@ async def _retry(wid: str, body: Retry, request: Request):
                 refuse_all_dropped()
         elif behind:
             refuse_unjoined(st, row, "a retry from an earlier node")
-        # Its slices wake with it: the ones its pause or its cap stopped.
-        await slices_mod.resume_family(st.db, wid)
     override = _retry_override(chain, target, body)
     # After the bounds, so a structural field is still the 422 it is for anyone.
     beyond = sorted(set(body.task_config or {}) - AGENT_TASK_FIELDS)
@@ -2014,6 +2020,10 @@ async def _retry(wid: str, body: Retry, request: Request):
         # writes would strand the item claimed 'active' with the cap already
         # cleared and no walk behind it.
         raise HTTPException(409, "a walk is already running for this work item")
+    if store.group_unjoined(row):
+        # After every refusal of its own, so a 409 never leaves its slices woken:
+        # the ones its pause or its cap stopped wake with it.
+        await slices_mod.resume_family(st.db, wid)
     # Bracketed from *before* the claim to the hand-off (the claim-then-return
     # class). A claim makes this item read `active`, which means "a walk is
     # behind this"; any exit from here that neither spawns one nor leaves a
@@ -2347,11 +2357,23 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
             f"the item has already spent {_usd(spent)}; a cap of {_usd(body.budget_usd)} "
             "would stop it again at once: raise it above that, or to none",
         )
-    write = (
-        _raise_policy_budget(wid, body.budget_usd)
-        if item_wide
-        else (lambda c: store.raise_budget(c, wid, body.budget_usd))
-    )
+
+    def raise_one(cid: str):
+        return (
+            _raise_policy_budget(cid, body.budget_usd)
+            if item_wide
+            else (lambda c: store.raise_budget(c, cid, body.budget_usd))
+        )
+
+    # The family shares the parent's cap: its slices carry a frozen copy of it, so
+    # the new one reaches each (and the retry wakes the ones it stopped).
+    shared = [c["id"] for c in slices_mod.unended_children(st.db, wid)]
+
+    def write(c):
+        raise_one(wid)(c)
+        for cid in shared:
+            raise_one(cid)(c)
+
     _refuse_a_retry_that_cannot_start(request, wid, row)
     await st.db.write(write)
     try:
@@ -2803,12 +2825,24 @@ async def reopen_mr(wid: str, request: Request):
     return await _retry(wid, Retry(), request)
 
 
+def _family_cancel(app):
+    """What `pause_family` ends a child's walk task with: the pause door's own
+    bounded `deps.cancel`."""
+
+    async def cancel(wid: str) -> None:
+        await deps.cancel(app, wid, timeout=deps.CANCEL_TIMEOUT)
+
+    return cancel
+
+
 async def _end_family(request: Request, row, action: str, reason: str) -> None:
     """Abandon or cancel every child of the parent's current generation that has
     not ended: running ones are paused first (abandon refuses an active item),
     then each goes through its own door. The parent follows."""
     st = request.app.state
-    await slices_mod.pause_family(st.db, row["id"], by=_decided_by_caller(request))
+    await slices_mod.pause_family(
+        st.db, row["id"], by=_decided_by_caller(request), cancel=_family_cancel(request.app)
+    )
     for child in slices_mod.unended_children(st.db, row["id"]):
         if action == "abandon":
             await abandon_work_item(child["id"], request, AbandonWorkItem(reason=reason))

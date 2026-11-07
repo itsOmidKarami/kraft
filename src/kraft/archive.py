@@ -41,11 +41,7 @@ async def tick(app) -> list[str]:
                 (cutoff,),
             ).fetchall()
         )
-    # A slice's child keeps its worktree until its parent has joined it, however
-    # long it has been finished; after the join it archives at once.
-    joined = st.db.read(_joined_children)
     due = [r for r in due if r["parent_id"] is None]
-    due += [r for r in joined if r["id"] not in {d["id"] for d in due}]
     archived = []
     for row in due:
         # One row's failure must not skip every later due row until the next
@@ -56,11 +52,22 @@ async def tick(app) -> list[str]:
             logger.exception("auto-archive %s failed", row["id"])
             continue
         archived.append(row["id"])
+    # A slice's child keeps its worktree until its parent has joined it, however
+    # long it has been finished; after the join, or once its parent is archived
+    # (an abandoned or cancelled one, which never joins), it archives at once.
+    for row in st.db.read(_archivable_children):
+        try:
+            await _archive_one(app, row, "auto")
+        except Exception:  # noqa: BLE001
+            logger.exception("auto-archive %s failed", row["id"])
+            continue
+        archived.append(row["id"])
     return archived
 
 
-def _joined_children(conn) -> list:
-    """Finished children whose parent's group is `joined`."""
+def _archivable_children(conn) -> list:
+    """Finished children whose parent's group is `joined`, or whose parent is
+    archived: a child is archived with its parent, never alone before the join."""
     from kraft import store
 
     rows = conn.execute(
@@ -69,12 +76,16 @@ def _joined_children(conn) -> list:
     ).fetchall()
     out = []
     for row in rows:
+        parent = conn.execute(
+            "SELECT archived_at FROM work_items WHERE id = ?", (row["parent_id"],)
+        ).fetchone()
         state = store.group_state(conn, row["parent_id"])
-        if (
+        joined = (
             state is not None
             and state.phase == "joined"
             and state.generation >= (row["slice_generation"] or 0)
-        ):
+        )
+        if joined or (parent is not None and parent["archived_at"]):
             out.append(row)
     return out
 
