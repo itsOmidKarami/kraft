@@ -109,7 +109,7 @@ describe("task pane", () => {
       expect(within(panel).getByRole("heading", { name: "Did not finish 1" })).toBeInTheDocument();
       const running = within(within(panel).getByRole("list", { name: "Running sub-agents" })).getAllByRole("listitem");
       expect(running).toHaveLength(2);
-      expect(running[0]).toHaveTextContent("Explore codebase42sExplore31k tokens4 tool uses — open its logrunning Grep");
+      expect(running[0]).toHaveTextContent("Explore codebase42sExplore31k tokens4 tool uses — open itrunning Grep");
       const unfinished = within(within(panel).getByRole("list", { name: "Sub-agents that did not finish" })).getAllByRole("listitem");
       expect(unfinished).toHaveLength(1);
       expect(unfinished[0]).toHaveTextContent("Agent a6cut off42sExplore31k tokens4 tool uses");
@@ -132,10 +132,30 @@ describe("task pane", () => {
       expect(finished).toBeVisible();
     });
 
-    it("opens the task's log filtered to the sub-agent", async () => {
-      mount(url, item, [], { [`GET ${base}/subagents`]: [200, { session_id: "x", status: "failed", subagents: list }] });
-      await userEvent.click(await screen.findByRole("button", { name: /Explore codebase.*open its log/ }));
-      expect(screen.getByTestId("where").textContent).toBe(`${url}&tab=log&agent=a1`);
+    it("opens a sub-agent a level under the task: its own head and Overview; the task's crumb and Esc step back", async () => {
+      mount(url, item, [], { [`GET ${base}/subagents`]: [200, { session_id: "x", status: "failed", subagents: list }], [`GET ${base}/subagents/a3`]: [200, { ...agent("a3"), prompt: "Find the loader." }] });
+      await userEvent.click(await screen.findByRole("button", { name: /Agent a3.*open it/ }));
+      expect(screen.getByTestId("where").textContent).toBe(`${url}&agent=a3`);
+      const p = pane("Agent a3");
+      expect(within(p).getByText("sub-agent · Explore · done · 42s")).toBeInTheDocument();
+      expect(await within(p).findByText("Find the loader.")).toBeInTheDocument();
+      expect(within(p).getByText("Found it. More.", { normalizer: (t) => t.replace(/\s+/g, " ").trim() })).toBeInTheDocument();
+      await userEvent.click(within(p).getByRole("button", { name: "code_review" }));
+      expect(screen.getByTestId("where").textContent).toBe(url);
+      await userEvent.click(await screen.findByRole("button", { name: /Agent a3.*open it/ }));
+      expect(screen.getByTestId("where").textContent).toBe(`${url}&agent=a3`);
+      await userEvent.keyboard("{Escape}");
+      expect(screen.getByTestId("where").textContent).toBe(url);
+      // One step back, to the task: the pane stays open on it.
+      expect(pane("code_review")).toBeVisible();
+    });
+
+    it.each([
+      { id: "the log's filter to the task's own lines", agent: "main" },
+      { id: "an id the list does not hold", agent: "gone" },
+    ])("keeps the task's pane for $id", async ({ agent: id }) => {
+      mount(`${url}&tab=log&agent=${id}`, item, [], { [`GET ${base}/subagents`]: [200, { session_id: "x", status: "failed", subagents: list }], [`GET ${base}/log`]: [200, { lines: [] }] });
+      expect(await screen.findByRole("complementary", { name: "code_review pane" })).toBeInTheDocument();
     });
 
     it("reads a running session's list once, in the Workspace's poll: the Overview does not read it again", async () => {

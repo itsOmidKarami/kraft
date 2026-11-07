@@ -7,6 +7,9 @@ import { fitCam } from "./camera";
 import { nodeLayout } from "./nodeLayout";
 import type { Rounds } from "../item/nodeGraph";
 import type { NodeStep } from "./nodeLayout";
+import type { Subagent } from "../../types";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const steps: NodeStep[] = [
   { id: "checks", tasks: [{ id: "lint", taskKind: "subprocess", state: "done" }, { id: "types", taskKind: "subprocess", state: "done" }, { id: "unit", taskKind: "builtin", state: "done" }] },
@@ -90,6 +93,45 @@ describe("NodeGraph", () => {
     await user.dblClick(btn("fix, step"));
     expect(cb.onSelect).toHaveBeenCalledWith({ step: "fix" });
     expect(cb.onExpand).toHaveBeenLastCalledWith({ step: "fix" });
+  });
+
+  describe("sub-agents", () => {
+    const agents = [{ id: "a1", description: "Map the loader", status: "running" }, { id: "a2", description: "Check the flags", status: "failed" }] as Subagent[];
+    const withAgents: NodeStep[] = steps.map((st) => (st.id === "review" ? { ...st, tasks: [{ ...st.tasks[0], agents, subagents: 1, unfinished: 1 }] } : st));
+    const marks = () => screen.getByRole("group", { name: "code_review, sub-agents" });
+
+    it("keeps a task's marks out of sight at rest, and out while it or one of its sub-agents is selected", () => {
+      const { rerender } = render(<NodeGraph name="v" steps={withAgents} />);
+      expect(marks()).not.toHaveClass("is-held");
+      // Hover and focus bring them out in CSS (jsdom has neither): the rule sits beside the box's own.
+      expect(readFileSync(resolve(__dirname, "graph.css"), "utf8")).toContain(".graph-node:is(:hover, :focus-visible) + .sub-marks, .sub-marks:is(:hover, :focus-within, .is-held) { opacity: 1; visibility: visible;");
+      rerender(<NodeGraph name="v" steps={withAgents} selected={{ step: "review", task: "code_review" }} />);
+      expect(marks()).toHaveClass("is-held");
+      rerender(<NodeGraph name="v" steps={withAgents} selected={{ step: "review", task: "code_review", agent: "a2" }} />);
+      expect(marks()).toHaveClass("is-held");
+      expect(btn("Check the flags, sub-agent, failed")).toHaveAttribute("aria-pressed", "true");
+      expect(btn(/^code_review/)).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("moves ↓ from the task into its marks, ←/→ along them, ↑ back, ↓ on past them; Enter or a click picks one", async () => {
+      const user = userEvent.setup();
+      const onAgent = vi.fn();
+      render(<NodeGraph name="v" steps={withAgents} selected={{ step: "review", task: "code_review" }} onAgent={onAgent} />);
+      await user.tab();
+      await user.keyboard("{ArrowDown}");
+      expect(btn("Map the loader, sub-agent, running")).toHaveFocus();
+      await user.keyboard("{ArrowRight}{ArrowRight}");
+      expect(btn("Check the flags, sub-agent, failed")).toHaveFocus();
+      await user.keyboard("{Enter}");
+      expect(onAgent).toHaveBeenLastCalledWith({ step: "review", task: "code_review", agent: "a2" });
+      await user.keyboard("{ArrowUp}");
+      expect(btn(/^code_review/)).toHaveFocus();
+      await user.keyboard("{ArrowDown}{ArrowDown}");
+      // Past the marks, ↓ goes where it went from the task: a lone task stays put.
+      expect(btn(/^code_review/)).toHaveFocus();
+      await user.click(btn("Map the loader, sub-agent, running"));
+      expect(onAgent).toHaveBeenLastCalledWith({ step: "review", task: "code_review", agent: "a1" });
+    });
   });
 
   it("fits the node with 56px kept clear at the foot, for the zoom and round controls", () => {

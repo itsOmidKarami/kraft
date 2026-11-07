@@ -26,8 +26,7 @@ import { pushes, placeUrl, readPlace, selPath, type Place } from "./url";
 import { useDocuments } from "./useDocuments";
 import { useEvents } from "./useEvents";
 import { runVersion, type ItemDetail } from "./useItem";
-import { runningCounts } from "./subagents";
-import { useRunningSubagents } from "./useSubagents";
+import { useSubagentLists } from "./useSubagents";
 import { chainName } from "./chainName";
 import { materialized, producerOf } from "./chainValues";
 import { isTextField } from "../keys";
@@ -66,7 +65,8 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   const nodes = item.chain_definition.nodes ?? [];
   const place = readPlace(nodeParam, search, nodes);
   const applied = useApplied(item.id, version, place.tab === "config");
-  const subagents = useRunningSubagents(item);
+  // The sub-agents of the node view's sessions and the selection's: running ones polled, finished ones read once.
+  const subagents = useSubagentLists(item, [place.node, place.sel.kind === "chain" ? undefined : place.sel.node]);
   const { pane: pane_, setPane } = usePaneMemory();
   const [frame, canvasW] = useWidth();
   const size = useResizable(PAGE, canvasW);
@@ -197,7 +197,8 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   const back = () => {
     const { place: p, shut: s } = live.current;
     const at = scopeAt(p);
-    if (p.scope) go({ ...p, scope: undefined });
+    if (p.agent) go({ ...p, agent: undefined });
+    else if (p.scope) go({ ...p, scope: undefined });
     else if (at && s !== at.path) setShut(at.path);
     else dispatch({ type: "escape" });
   };
@@ -210,15 +211,17 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
     agent: place.agent,
     setAgent: (agent) => go({ ...place, agent }),
     subagents,
-    openAgent: (agent) => go({ ...place, tab: "log", agent }),
+    openAgent: (agent) => go({ ...place, tab: undefined, agent }),
     onDoc: (d: WorkItemDocument) => go({ ...place, doc: d.document_id, q: undefined }),
     onArtifact: () => setArtifact(true),
     onProduced: (kind, path) => setProduced({ kind, path }),
     canEdit: draft?.editable,
     applied,
   });
-  const plain = viewing && nodeGraph(shown, viewing, now, events, place.round, runningCounts(subagents));
+  const plain = viewing && nodeGraph(shown, viewing, now, events, place.round, subagents);
   const inside = plain && draft ? { ...plain, steps: markSteps(plain.steps, viewing.id, marks) } : plain;
+  // The sub-agent picked, when its task's box draws it among its marks: a stale id, or "main", marks none.
+  const agentOn = (step: string, task: string) => (place.agent && inside?.steps.find((st) => st.id === step)?.tasks.find((t) => t.id === task)?.agents?.some((x) => x.id === place.agent) ? place.agent : undefined);
   const nodeSel = (x: NodeSel): Sel => (x.task ? { kind: "task", node: viewing!.id, step: x.step, task: x.task } : { kind: "step", node: viewing!.id, step: x.step });
 
   return (
@@ -244,11 +247,12 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
             onPass={(n) => go({ ...place, pass: n, round: undefined })}
             onFailure={inside.onFailure}
             reserve={reserve}
-            selected={sel.kind === "task" || sel.kind === "step" ? { step: sel.step, task: sel.kind === "task" ? sel.task : undefined } : undefined}
+            selected={sel.kind === "task" || sel.kind === "step" ? { step: sel.step, task: sel.kind === "task" ? sel.task : undefined, agent: sel.kind === "task" ? agentOn(sel.step, sel.task) : undefined } : undefined}
             expand={expand}
             onScope={(key) => { setShut(null); dispatch({ type: "pick", sel: place.sel }, { scope: key, attempt: undefined }); }}
             onCollapse={() => { setShut(herePath); if (place.scope) go({ ...place, scope: undefined }); }}
             onSelect={(x) => pick(nodeSel(x))}
+            onAgent={(x) => { setShut(null); dispatch({ type: "pick", sel: nodeSel(x) }, { agent: x.agent, tab: undefined, attempt: undefined }); }}
             onOpen={(x) => { setShut(null); dispatch({ type: "expand", sel: nodeSel(x) }); }}
             onExpand={(x) => { setShut(null); dispatch({ type: "expand", sel: nodeSel(x) }); }}
             onEscape={back}

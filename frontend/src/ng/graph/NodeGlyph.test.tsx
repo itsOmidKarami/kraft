@@ -22,23 +22,28 @@ describe("NodeGlyph", () => {
   });
 
   it.each([
-    ["two running", "md", 2, "2"],
-    ["one running", "lg", 1, "1"],
-    ["none", "md", 0, null],
-    ["not given", "md", undefined, null],
-    ["a box too small for badges", "sm", 2, null],
-  ] as const)("draws the running sub-agents as a count badge on the box (%s)", (_n, size, subagents, text) => {
-    const badge = render(<NodeGlyph size={size} subagents={subagents} />).container.querySelector(".glyph-subagents");
-    if (text === null) expect(badge).toBeNull();
-    else expect(badge).toHaveTextContent(text);
+    ["two running", "md", 2, undefined, "2", false],
+    ["one running", "lg", 1, undefined, "1", false],
+    ["none", "md", 0, undefined, null, false],
+    ["not given", "md", undefined, undefined, null, false],
+    ["a box too small for badges", "sm", 2, 1, null, false],
+    ["two running and one that did not finish", "md", 2, 1, "2", true],
+    ["one that did not finish and none running", "md", undefined, 1, "", true],
+  ] as const)("draws the sub-agents as a count badge on the box, with a cross for one that did not finish (%s)", (_n, size, subagents, unfinished, text, cross) => {
+    const badge = render(<NodeGlyph size={size} subagents={subagents} unfinished={unfinished} />).container.querySelector(".glyph-subagents");
+    if (text === null) return expect(badge).toBeNull();
+    expect(badge).toHaveTextContent(text);
+    expect(!!badge!.querySelector(".glyph-subagents-x")).toBe(cross);
   });
 
   it.each([
-    [2, "implement, task, running, 2 sub-agents running"],
-    [1, "implement, task, running, 1 sub-agent running"],
-    [0, "implement, task, running"],
-  ])("names %s running sub-agents on the button", (subagents, name) => {
-    expect(accessibleName({ id: "implement", state: "current", running: true, subagents }, "task")).toBe(name);
+    [2, 0, "implement, task, running, 2 sub-agents running"],
+    [1, 0, "implement, task, running, 1 sub-agent running"],
+    [0, 0, "implement, task, running"],
+    [1, 2, "implement, task, running, 1 sub-agent running, 2 sub-agents did not finish"],
+    [0, 1, "implement, task, running, 1 sub-agent did not finish"],
+  ])("names %s running and %s unfinished sub-agents on the button", (subagents, unfinished, name) => {
+    expect(accessibleName({ id: "implement", state: "current", running: true, subagents, unfinished }, "task")).toBe(name);
   });
 
   it("shows paused instead of running, and the problem badge only without a pill", () => {

@@ -44,7 +44,7 @@ export function SubagentSection({ workItemId, sessionId, list, onOpen }: { workI
               {a.tool_uses != null && <span>{a.tool_uses} tool use{a.tool_uses === 1 ? "" : "s"}</span>}
             </span>
           </span>
-          <span className="item-visually-hidden"> — open its log</span>
+          <span className="item-visually-hidden"> — open it</span>
         </button>
         {said && <p className="ip-subagent-said">{said}</p>}
         <Prompt workItemId={workItemId} sessionId={sessionId} agent={a.id} />

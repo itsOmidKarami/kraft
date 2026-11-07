@@ -300,3 +300,5 @@ summary.ip-subagent-head:focus-visible { outline: 2px solid var(--focus); outlin
 .ip-subagent-prompt summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .ip-subagent-row .ip-prompt { background: var(--bg); }
 .ip-prompt { margin: 4px 0 0; padding: 8px; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: var(--fs-meta); }
+/* A sub-agent's own view: its answer in full (the first 500 characters the server keeps). */
+.ip-subagent-answer { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-meta); line-height: 1.55; color: var(--text); }

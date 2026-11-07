@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { subagentsUrl, subagentUrl } from "../../api";
 import type { Subagent, SubagentDetail } from "../../types";
 import { request } from "../http";
@@ -41,6 +41,27 @@ export function useRunningSubagents(item: ItemDetail): Record<string, Subagent[]
     return () => { live = false; clearInterval(t); };
   }, [item.id, key]);
   return Object.fromEntries(ids.flatMap((id) => (found[id] ? [[id, found[id]]] : [])));
+}
+
+/** The sub-agents the item page draws, by session id: the running agent sessions' as `useRunningSubagents` reads them,
+ *  and each finished agent session of `nodes` read once and kept, never every session of the item. A session that
+ *  stops keeps its last list until its own read lands, so its marks do not blink out as it finishes. */
+export function useSubagentLists(item: ItemDetail, nodes: (string | undefined)[]): Record<string, Subagent[]> {
+  const live = useRunningSubagents(item);
+  const last = useRef<Record<string, Subagent[]>>({});
+  Object.assign(last.current, live);
+  const [done, setDone] = useState<Record<string, Subagent[]>>({});
+  const asked = useRef(new Set<string>());
+  const key = item.worker_sessions.filter((s) => nodes.includes(s.node_id) && s.harness != null && s.status !== "running" && s.status !== "pending").map((s) => s.id).join("\n");
+  useEffect(() => {
+    for (const id of key ? key.split("\n") : []) {
+      if (asked.current.has(id)) continue;
+      asked.current.add(id);
+      // A read that fails is asked again the next time the page changes, not left out for good.
+      void read(item.id, id).then((l) => (l ? setDone((d) => ({ ...d, [id]: l })) : asked.current.delete(id)));
+    }
+  }, [item.id, key]);
+  return { ...last.current, ...done, ...live };
 }
 
 /** One sub-agent with its whole prompt, read when `load` is called (a disclosure opening) and not before. */

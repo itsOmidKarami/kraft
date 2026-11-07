@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ChainNode, SessionStatus, WorkerSession } from "../../types";
+import type { ChainNode, SessionStatus, Subagent, WorkerSession } from "../../types";
 import { SESSION_STATUSES } from "../../types/vocab.generated";
 import type { KraftEvent } from "../../types";
 import { asOfPass, footerState, standsOn, stopOn, lookWord, loopIdle, loopRounds, nodeGraph, passesOf, passOf, passShown, passWhy, roundShown, sessionLook } from "./nodeGraph";
@@ -35,16 +35,19 @@ describe("nodeGraph", () => {
 
   const running = (hook_point: string, id: string, over: Partial<WorkerSession> = {}) => s(hook_point, { id, status: "running", model: "sonnet", wall_ms: null, ...over });
   const review = (id: string, over: Partial<WorkerSession> = {}) => running("verification.review.code_review", id, over);
-  type Drawn = { id: string; sessions: WorkerSession[]; counts?: Record<string, number>; boxes: (number | undefined)[]; picked?: number };
+  const of = (...st: Subagent["status"][]) => st.map((status, i) => ({ id: `a${i}`, description: `agent ${i}`, status }));
+  // Each box: [running, did not finish], from its own session's list.
+  type Drawn = { id: string; sessions: WorkerSession[]; lists?: Record<string, Subagent[]>; boxes: [number?, number?][]; picked?: number };
   it.each<Drawn>([
-    { id: "a running session's count on its box", sessions: [review("new", { round: 1 })], counts: { new: 2 }, boxes: [undefined, undefined, 2] },
-    { id: "none on the box of an earlier round shown", sessions: [s("verification.review.code_review", { id: "old", round: 0 }), review("new", { round: 1 })], counts: { new: 2 }, picked: 1, boxes: [undefined, undefined, undefined] },
-    { id: "none for a count of zero", sessions: [review("new")], counts: { new: 0 }, boxes: [undefined, undefined, undefined] },
-    { id: "none without counts", sessions: [review("new")], counts: undefined, boxes: [undefined, undefined, undefined] },
-    { id: "each of two parallel tasks its own count, not their sum", sessions: [running("verification.checks.lint", "lint"), running("verification.checks.typecheck", "tc")], counts: { lint: 1, tc: 3 }, boxes: [1, 3, undefined] },
-  ])("draws $id", ({ sessions, counts, boxes, picked }) => {
-    const g = nodeGraph(detail({ worker_sessions: sessions }), node, NOW, undefined, picked, counts);
-    expect(g.steps.flatMap((st) => st.tasks).map((t) => t.subagents)).toEqual(boxes);
+    { id: "a running session's count on its box", sessions: [review("new", { round: 1 })], lists: { new: of("running", "running") }, boxes: [[], [], [2, undefined]] },
+    { id: "none on the box of an earlier round shown", sessions: [s("verification.review.code_review", { id: "old", round: 0 }), review("new", { round: 1 })], lists: { new: of("running", "running") }, picked: 1, boxes: [[], [], []] },
+    { id: "none for a list of none running or failed", sessions: [review("new")], lists: { new: of("completed") }, boxes: [[], [], []] },
+    { id: "none without lists", sessions: [review("new")], lists: undefined, boxes: [[], [], []] },
+    { id: "each of two parallel tasks its own count, not their sum", sessions: [running("verification.checks.lint", "lint"), running("verification.checks.typecheck", "tc")], lists: { lint: of("running"), tc: of("running", "running", "running") }, boxes: [[1, undefined], [3, undefined], []] },
+    { id: "a cross for each that did not finish, on a finished task with none running", sessions: [s("verification.review.code_review", { id: "done" })], lists: { done: of("completed", "failed", "cut_off", "killed") }, boxes: [[], [], [undefined, 3]] },
+  ])("draws $id", ({ sessions, lists, boxes, picked }) => {
+    const g = nodeGraph(detail({ worker_sessions: sessions }), node, NOW, undefined, picked, lists);
+    expect(g.steps.flatMap((st) => st.tasks).map((t) => (t.subagents || t.unfinished ? [t.subagents, t.unfinished] : []))).toEqual(boxes);
   });
   it("draws the on-failure handler's tasks once it ran in the pass shown, and not in a pass it did not", () => {
     const ran = s("verification.on_failure.repair.repair_pass", { round: -1 });
