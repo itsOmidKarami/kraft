@@ -265,6 +265,9 @@ _RESTARTED = (
     WorkItemEvent.RETRIED,
     ChainEvent.BASE_CHANGE_RESTART,
     ChainEvent.MERGE_REJECTION_RESTART,
+    # The join's conflict handler, cut short and run again from the same commit
+    # at round 0: its earlier `done` session must not stand in for the new turn.
+    WorkItemEvent.JOIN_HANDLER_RESUMED,
 )
 
 
@@ -360,9 +363,10 @@ def reusable_session(
     row a later `done` one supersedes) does not share this (round, head_sha)
     at all and is unaffected.
 
-    Also excluded: a session from before a `/retry` (`work_item_retried`) or
-    a base-change or merge-rejection restart (`base_change_restart`,
-    `merge_rejection_restart`). Each starts a new pass that
+    Also excluded: a session from before a `/retry` (`work_item_retried`), a
+    base-change or merge-rejection restart (`base_change_restart`,
+    `merge_rejection_restart`) or the join re-entering a conflict handler that
+    was cut short (`join_handler_resumed`). Each starts a new pass that
     restarts the round numbers -- a retry deletes the loop counter a round is
     seeded from, a restart clears every counter in its span -- so a new pass
     measures, repairs and recovers at the very rounds the old one used, and a

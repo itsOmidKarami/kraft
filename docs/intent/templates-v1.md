@@ -2600,7 +2600,7 @@ SHALL leave the parent put back at that commit too; and IF the handler left the
 parent where it cannot be put back, THEN the stop SHALL name that commit to reset
 to. With no handler a join conflict SHALL stop for a
 person.
-enforced-by: tests/executor/test_join.py::test_the_conflict_handler_resolves_and_the_join_goes_on, tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-fails], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-fails-having-picked-it-all], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-says-ok-having-done-nothing], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-says-ok-mid-pick], tests/executor/test_join.py::test_a_handler_that_pauses_mid_pick_leaves_the_parent_put_back, tests/executor/test_join.py::test_a_handler_that_leaves_another_operation_names_where_to_reset, tests/executor/test_join.py::test_a_conflict_hands_off_and_never_resets_on_retry
+enforced-by: tests/executor/test_join.py::test_the_conflict_handler_resolves_and_the_join_goes_on, tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-fails], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-fails-having-picked-it-all], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-says-ok-having-done-nothing], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-says-ok-mid-pick], tests/executor/test_join.py::test_a_handler_cut_short_gets_a_fresh_turn_on_resume[a-stop-it-answers], tests/executor/test_join.py::test_a_handler_that_leaves_another_operation_names_where_to_reset[at-its-verdict], tests/executor/test_join.py::test_a_conflict_hands_off_and_never_resets_on_retry
 origin: src/kraft/executor/join.py §_conflict -- the applied-check is bookkeeping, not a security boundary: verification and the human gates after the join judge the code, and the handler gets nothing an `on_failure` handler lacks (`dispatch.run_recovery`).
 
 ## REQ the-join-clears-what-its-conflict-handler-left-untracked
@@ -2615,6 +2615,21 @@ the slice's join notes and in any stop; tracked changes the handler left SHALL N
 be discarded and SHALL keep the slice not joined.
 enforced-by: tests/executor/test_join.py::test_a_handler_that_resolves_but_leaves_files_untracked_joins[untracked], tests/executor/test_join.py::test_a_handler_that_resolves_but_leaves_files_untracked_joins[ignored-stays], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-says-ok-leaving-a-tracked-edit], tests/executor/test_join.py::test_every_agent_task_is_swept_but_the_joins_conflict_handler[a-task], tests/executor/test_join.py::test_every_agent_task_is_swept_but_the_joins_conflict_handler[a-recovery], tests/executor/test_join.py::test_every_agent_task_is_swept_but_the_joins_conflict_handler[a-rebase-conflict], tests/executor/test_join.py::test_every_agent_task_is_swept_but_the_joins_conflict_handler[the-joins]
 origin: src/kraft/executor/join.py §_clear_leftovers -- a sweep commit carries no `cherry picked from` line, so the applied-check would throw away a correct resolution over a stray `.orig`; an uncommitted tracked edit may be part of the resolution, so a person decides.
+
+## REQ a-conflict-handler-cut-short-gets-a-fresh-turn
+
+WHEN a pause, a stop or a restart ends the group's conflict handler before it gives
+a verdict, the system SHALL keep the slice as the handler's, not a person's; WHEN
+the join then resumes, it SHALL remove what the handler left untracked and not
+ignored, SHALL join the slice without running the handler again if the
+applied-check finds it whole, and otherwise SHALL put the parent back where the
+join stopped and pick the slice again, so the handler gets a fresh turn in a new
+session, never one from before; a parent it cannot put back SHALL stop for a
+person naming the commit to reset to. Each resume SHALL be recorded in a
+`join_handler_resumed` event naming its outcome. Once the handler has given a
+verdict, the slice SHALL be a person's.
+enforced-by: tests/executor/test_join.py::test_a_handler_cut_short_gets_a_fresh_turn_on_resume[a-pause-cancels-the-walk], tests/executor/test_join.py::test_a_handler_cut_short_gets_a_fresh_turn_on_resume[a-stop-it-answers], tests/executor/test_join.py::test_a_restart_mid_handler_reruns_it_unless_its_work_is_whole[mid-pick], tests/executor/test_join.py::test_a_restart_mid_handler_reruns_it_unless_its_work_is_whole[after-it-finished], tests/executor/test_join.py::test_a_handler_that_leaves_another_operation_names_where_to_reset[on-its-resume], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-fails], tests/store/test_sessions_reuse.py::test_reusable_session_excludes_a_session_from_before_a_restart[join_handler_resumed]
+origin: src/kraft/executor/join.py §_replay_one -- a pause cancels the walk mid-handler, as a crash kills it, so the handler's turn was lost and the slice stopped for a person; the fresh turn runs at the same commit and round, so its earlier session is kept from standing in for it (`store.reusable_session`).
 
 ## REQ chain-revision-again-slices-the-plan-as-it-then-stands
 

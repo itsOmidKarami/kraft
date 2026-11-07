@@ -43,6 +43,7 @@ class WorkItemEvent(StrEnum):
     SLICES_JOINED = "slices_joined"
     SLICE_DROPPED = "slice_dropped"
     JOIN_LEFTOVERS_REMOVED = "join_leftovers_removed"
+    JOIN_HANDLER_RESUMED = "join_handler_resumed"
     SLICE_PAUSED = "slice_paused"
 
 
@@ -83,6 +84,7 @@ WORK_ITEM_EVENT_TRAITS = total(
         WorkItemEvent.SLICES_JOINED: _PLAIN,
         WorkItemEvent.SLICE_DROPPED: _PLAIN,
         WorkItemEvent.JOIN_LEFTOVERS_REMOVED: _PLAIN,
+        WorkItemEvent.JOIN_HANDLER_RESUMED: _PLAIN,
         WorkItemEvent.SLICE_PAUSED: _PLAIN,
     },
     name="WORK_ITEM_EVENT_TRAITS",

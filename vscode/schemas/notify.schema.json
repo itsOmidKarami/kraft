@@ -66,6 +66,7 @@
           "gate_rejected",
           "gate_reopened",
           "gate_requested",
+          "join_handler_resumed",
           "join_leftovers_removed",
           "judge_verdict",
           "launch_fallback",

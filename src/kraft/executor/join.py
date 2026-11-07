@@ -30,6 +30,13 @@ slice is joined only if the applied-check finds it whole, else the parent is put
 back again and a person is asked. Tracked changes it left are never discarded:
 they mean the slice is not joined.
 
+While the handler runs the slice is `handling`; its verdict makes it
+`handed_off`, a person's from then on. A pause cancels the walk mid-handler and
+a crash kills it, both leaving `handling` and whatever the handler left. The
+join re-entering a `handling` slice clears the leftovers and joins the slice if
+the applied-check finds it whole; otherwise it puts the parent back and picks
+the slice again, so the handler gets a fresh turn (`join_handler_resumed`).
+
 The applied-check is bookkeeping, not a security boundary: what the code *does*
 is judged by `verification` and the human gates after the join.
 """
@@ -363,6 +370,20 @@ async def _replay_one(
             )
             return "needs_human"
         return await _mark_joined(db, wid, key, worktree)
+    if state.slice_phase == "handling" and state.joined_through < key and state.recorded.get(key):
+        # Its conflict handler was cut short (a pause, a restart), its session ended since.
+        at = state.at_commit or fork
+        await _clear_leftovers(db, row, child, worktree)
+        if _not_joined(worktree, branch, at, state.recorded[key]) is None:
+            await _handler_resumed(db, wid, child, "joined")
+            return await _mark_joined(db, wid, key, worktree)
+        try:
+            put_back(worktree, branch, at)
+        except (UnsafeWorktree, ForgeError) as exc:
+            why = _left_unputbackable(exc, at, branch, _steps(child, docs, head, branch))
+            await _stop(db, wid, node, why, StopKind.CHECKOUT)
+            return "needs_human"
+        await _handler_resumed(db, wid, child, "rerun")
     if state.slice_phase == "picking" and state.at_commit:
         # Kraft's own pick was running when the server went down.
         try:
@@ -376,7 +397,8 @@ async def _replay_one(
         await _stop(db, wid, node, str(exc), StopKind.CHECKOUT)
         return "needs_human"
     start = git_read(worktree, "rev-parse", "HEAD") or fork
-    at = state.at_commit if state.slice_phase == "picking" and state.at_commit else start
+    resumed = state.slice_phase in ("picking", "handling") and state.at_commit
+    at = state.at_commit if resumed else start
     await db.write(lambda c: _picking(c, wid, key, at, range_))
     if range_:
         try:
@@ -466,12 +488,7 @@ async def _conflict(
         await _stop(db, wid, node, f"could not put the parent back: {exc}", StopKind.CHECKOUT)
         return "needs_human"
 
-    def hand_off(c):
-        s = store.group_state(c, wid)
-        s.slice_phase = "handed_off"
-        store.set_group_state(c, wid, s)
-
-    await db.write(hand_off)
+    await db.write(lambda c: _set_phase(c, wid, "handling" if node.on_conflict else "handed_off"))
     where = f" in {', '.join(files)}" if files else ""
     what = f"slice {key} ({child['id']}) conflicts with what is already joined{where}. "
     steps = _steps(child, docs, head, branch)
@@ -479,24 +496,22 @@ async def _conflict(
         note = what + steps + _LEAVE_NOTHING
         stopped, ok = await _handle(db, run_dirs, row, node, worktree, note, launch, policy)
         wrong, removed = None, []
+        if stopped is None:  # a verdict: a person's turn from here, never the handler's again
+            await db.write(lambda c: _set_phase(c, wid, "handed_off"))
         if stopped is None and ok:
             removed = await _clear_leftovers(db, row, child, worktree)
             if (wrong := _not_joined(worktree, branch, at, range_)) is None:
                 return await _mark_joined(db, wid, key, worktree)
         elif stopped is None:
             wrong = "it reported a failure"
-        # Whatever it left, a person (or a resume after a pause) starts from
-        # where the join stopped: the handed-off check never resets.
+        # Whatever it left, a person (or the handler's next turn after a stop)
+        # starts from where the join stopped: the handed-off check never resets.
         try:
             put_back(worktree, branch, at)
         except (UnsafeWorktree, ForgeError) as exc:
-            # The handler left something else in progress, its picks maybe on the branch.
-            why = (
-                f"the conflict handler left the parent where it cannot be put back: {exc}. "
-                f"Clear that, then `git reset --hard {at[:12]}` on {branch}, where the join "
-                "stopped, before the steps below. " + steps
+            await _stop(
+                db, wid, node, _left_unputbackable(exc, at, branch, steps), StopKind.CHECKOUT
             )
-            await _stop(db, wid, node, why, StopKind.CHECKOUT)
             return "needs_human"
         if stopped is not None:
             return stopped
@@ -505,6 +520,27 @@ async def _conflict(
         detail = f"the conflict handler did not join it: {wrong}; {detail}"
     await _stop(db, wid, node, what + steps + f" ({detail[:300]})", StopKind.CONFLICT)
     return "needs_human"
+
+
+def _set_phase(conn, wid: str, phase) -> None:
+    state = store.group_state(conn, wid)
+    state.slice_phase = phase
+    store.set_group_state(conn, wid, state)
+
+
+def _left_unputbackable(exc: Exception, at: str, branch: str, steps: str) -> str:
+    """The stop for a handler that left something else in progress, its picks
+    maybe on the branch."""
+    return (
+        f"the conflict handler left the parent where it cannot be put back: {exc}. "
+        f"Clear that, then `git reset --hard {at[:12]}` on {branch}, where the join "
+        "stopped, before the steps below. " + steps
+    )
+
+
+async def _handler_resumed(db, wid: str, child: dict, outcome: str) -> None:
+    payload = {"child": child["id"], "slice_key": child["slice_key"], "outcome": outcome}
+    await db.write(lambda c: events.append(c, wid, WorkItemEvent.JOIN_HANDLER_RESUMED, payload))
 
 
 _LEAVE_NOTHING = (

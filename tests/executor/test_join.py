@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 from pathlib import Path
@@ -292,14 +293,17 @@ HANDLED = SimpleNamespace(id="slices", on_conflict=("resolve_join_conflict",))
 def _handler(monkeypatch, family, act, verdict):
     """Fake the handler: it does `act` in the parent's worktree and answers
     `verdict`, after the straggler sweep every agent task gets, at the handler
-    task's own path. Returns the notes it was sent."""
+    task's own path. Returns the notes it was sent; `family.phases` gets the
+    slice phase each turn ran under."""
     from kraft.executor import dispatch
 
     notes = []
+    family.phases = []
 
     async def run_recovery(db, run_dirs, wid, node, row, worktree, *, handler, note, **kw):
         assert (wid, Path(worktree), handler) == ("p1", family.worktree, HANDLED.on_conflict)
         notes.append(note)
+        family.phases.append(family.group_state().slice_phase)
         await act(family)
         await dispatch.sweep_stragglers(
             db,
@@ -458,7 +462,11 @@ async def test_a_conflict_the_handler_does_not_join_stops_for_a_person(
     assert named == (act is _resolve_but_edit_tracked)
     assert "`git cherry-pick -x --allow-empty --keep-redundant-commits" in reason
     state = family.group_state()
-    assert (state.slice_phase, state.joined_through) == ("handed_off", 1)
+    assert (family.phases, state.slice_phase, state.joined_through) == (
+        ["handling"],
+        "handed_off",
+        1,
+    )
     # put back where the join stopped, as a person would have found it with no handler
     assert family.subjects() == ["Task 1.0: work"]
     assert git(family.worktree, "status", "--porcelain") == ""
@@ -466,24 +474,103 @@ async def test_a_conflict_the_handler_does_not_join_stops_for_a_person(
     assert not (gitdir / "CHERRY_PICK_HEAD").exists()
 
 
-async def test_a_handler_that_pauses_mid_pick_leaves_the_parent_put_back(family, monkeypatch):
-    """A pause (or a rate limit, a cap) ends the handler's turn: the walk stops
-    as it says, with the parent back where the join stopped, not mid-pick."""
+async def _cancelled_mid_pick(family):
+    """What a pause does mid-handler: it kills the session and cancels the walk,
+    so the join never resumes and the worktree stays as the handler left it."""
+    await _start_the_pick(family)
+    write(family.worktree, "shared.py.orig", "<<<<<<<\n")
+    raise asyncio.CancelledError
+
+
+def _resumed(family):
+    return family.database.read(
+        lambda c: [
+            e["payload"]["outcome"]
+            for e in events.read_after(c, 0, "p1")
+            if e["type"] == WorkItemEvent.JOIN_HANDLER_RESUMED
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    "act",
+    [
+        pytest.param(_cancelled_mid_pick, id="a-pause-cancels-the-walk"),
+        pytest.param(_start_the_pick, id="a-stop-it-answers"),
+    ],
+)
+async def test_a_handler_cut_short_gets_a_fresh_turn_on_resume(family, monkeypatch, act):
+    """A pause (or a rate limit, a cap) ends the handler's turn but gives no
+    verdict: the slice stays `handling`, and the resume puts the parent back,
+    picks the slice again and hands the conflict to the handler afresh."""
     await _conflicting(family)
-    _handler(monkeypatch, family, _start_the_pick, "paused")
+    _handler(monkeypatch, family, act, "paused")
 
-    assert await family.join(HANDLED) == "paused"
+    if act is _cancelled_mid_pick:
+        with pytest.raises(asyncio.CancelledError):
+            await family.join(HANDLED)
+    else:
+        assert await family.join(HANDLED) == "paused"
+        assert family.subjects() == ["Task 1.0: work"], "put back where the join stopped"
+        assert git(family.worktree, "status", "--porcelain") == ""
 
-    assert family.group_state().slice_phase == "handed_off"
-    assert family.subjects() == ["Task 1.0: work"]
-    assert git(family.worktree, "status", "--porcelain") == ""
+    assert family.group_state().slice_phase == "handling"
+    notes = _handler(monkeypatch, family, _resolve_by_hand, "ok")
+
+    assert await family.join(HANDLED) == "ok"
+
+    assert (len(notes), family.phases) == (1, ["handling"])
+    assert family.subjects() == ["Task 2.0: work", "Task 1.0: work"]
+    assert family.row()["status"] != "needs_human"
+    assert _resumed(family) == ["rerun"]
+    assert not (family.worktree / "shared.py.orig").exists()
+
+
+async def _crashed_in_the_handler(family, act):
+    """The server died while the handler had slice 2: slice 1 joined, the slice
+    `handling`, the worktree as `act` and a stray `.orig` left it."""
+    await _conflicting(family)
+    one, two = family.children[1], family.children[2]
+    git(family.worktree, "cherry-pick", "-x", f"{one['docs']}..{one['head']}")
+    at = git(family.worktree, "rev-parse", "HEAD")
+    recorded = git(family.repo, "rev-list", "--reverse", f"{two['docs']}..{two['head']}").split()
+    await family.state(
+        joined_through=1, at_commit=at, slice_phase="handling", recorded={2: recorded}
+    )
+    await act(family)
+    write(family.worktree, "shared.py.orig", "<<<<<<<\n")
+
+
+@pytest.mark.parametrize(
+    ("act", "runs", "outcome"),
+    [
+        pytest.param(_start_the_pick, 1, "rerun", id="mid-pick"),
+        pytest.param(_resolve_by_hand, 0, "joined", id="after-it-finished"),
+    ],
+)
+async def test_a_restart_mid_handler_reruns_it_unless_its_work_is_whole(
+    family, monkeypatch, act, runs, outcome
+):
+    await _crashed_in_the_handler(family, act)
+    notes = _handler(monkeypatch, family, _resolve_by_hand, "ok")
+
+    assert await family.join(HANDLED) == "ok"
+
+    assert (len(notes), _resumed(family)) == (runs, [outcome])
+    assert family.subjects() == ["Task 2.0: work", "Task 1.0: work"]
+    assert not (family.worktree / "shared.py.orig").exists()
     gitdir = Path(git(family.worktree, "rev-parse", "--absolute-git-dir"))
     assert not (gitdir / "CHERRY_PICK_HEAD").exists()
+    assert family.group_state().phase == "joined"
 
 
-async def test_a_handler_that_leaves_another_operation_names_where_to_reset(family, monkeypatch):
+@pytest.mark.parametrize("cut_short", [False, True], ids=["at-its-verdict", "on-its-resume"])
+async def test_a_handler_that_leaves_another_operation_names_where_to_reset(
+    family, monkeypatch, cut_short
+):
     """`put_back` clears only a cherry-pick: anything else the handler left stops
-    the parent with the commit to reset to, since a retry never resets."""
+    the parent with the commit to reset to, since a retry never resets. So too
+    when the join finds it on resuming a handler a pause or a restart cut short."""
     await _conflicting(family)
     seen = {}
 
@@ -492,10 +579,17 @@ async def test_a_handler_that_leaves_another_operation_names_where_to_reset(fami
         await _start_the_pick(family)
         gitdir = Path(git(family.worktree, "rev-parse", "--absolute-git-dir"))
         (gitdir / "MERGE_HEAD").write_text(at + "\n")
+        if cut_short:
+            raise asyncio.CancelledError
 
-    _handler(monkeypatch, family, merge_left, "failed")
+    notes = _handler(monkeypatch, family, merge_left, "failed")
+    if cut_short:
+        with pytest.raises(asyncio.CancelledError):
+            await family.join(HANDLED)
 
     assert await family.join(HANDLED) == "needs_human"
+
+    assert len(notes) == 1
 
     assert family.stop() == ("needs_human", "checkout")
     reason = family.reason()

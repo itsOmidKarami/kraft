@@ -41,7 +41,8 @@ __all__ = [
 ]
 
 Phase = Literal["deciding", "prelude", "forked", "joining", "joined"]
-SlicePhase = Literal["idle", "picking", "handed_off"]
+#: `handling`: the group's conflict handler has the slice; `handed_off`: a person has it.
+SlicePhase = Literal["idle", "picking", "handling", "handed_off"]
 
 
 @dataclass

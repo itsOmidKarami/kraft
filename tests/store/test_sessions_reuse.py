@@ -11,7 +11,13 @@ from .test_sessions import _exit, _reusable, _session
 
 
 @pytest.mark.parametrize(
-    "restart", ["work_item_retried", "base_change_restart", "merge_rejection_restart"]
+    "restart",
+    [
+        "work_item_retried",
+        "base_change_restart",
+        "merge_rejection_restart",
+        "join_handler_resumed",
+    ],
 )
 async def test_reusable_session_excludes_a_session_from_before_a_restart(database, restart):
     """A retry or a span restart starts a new pass at the rounds the old one
