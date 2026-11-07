@@ -401,6 +401,14 @@ describe("StateCard", () => {
     const card = screen.getByRole("region", { name: "Waiting for slices" });
     expect(card).toHaveTextContent("slices2 done, 1 needs you");
     expect(within(card).queryByRole("button", { name: /Retry/ })).toBeNull();
+    // A slice that needs the person is not "nothing needs doing".
+    expect(card).toHaveTextContent("one needs you");
+    expect(card).not.toHaveTextContent("nothing needs doing");
+  });
+
+  it("slices: a parent whose slices all run says nothing needs doing", () => {
+    show({ display_status: "waiting", status: "waiting", stop: stop("slices"), slices: { done: 2, needs_you: 0, paused: 0, running: 1, queued: 0, dropped: 0, total: 3 } });
+    expect(screen.getByRole("region", { name: "Waiting for slices" })).toHaveTextContent("nothing needs doing here");
   });
 
   it("conflict: the files the handler left and cleared, review and send back", async () => {

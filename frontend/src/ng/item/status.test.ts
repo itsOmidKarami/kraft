@@ -212,6 +212,7 @@ const takes = (door: Door, state: string) => door === "navigate" || LIFECYCLE.do
 const S = (kind: StopKind, more: Partial<WorkItemStop> = {}): WorkItemStop => ({ kind, node: "verification", task: "verification.review.code_review", resume_at: null, reason: "r", ...more });
 const session = (status: string, hook_point = "verification.review.code_review") => [{ id: "s1", node_id: "verification", hook_point, status, attempt: 1, round: 0, created_at: "t", started_at: "t" }] as never;
 const GATE = { display_status: "needs_you", status: "needs_human", stop: S("gate", { node: "plan_approval" }), pending_gate: "plan_approval", current_node_id: "plan_approval" } as const;
+const SLICES = { done: 1, needs_you: 0, paused: 0, running: 1, queued: 0, dropped: 0, total: 2 };
 /** Every display status and stop kind the server sends, each with its state in the table. */
 const CASES: [string, Partial<ItemDetail>, string][] = [
   ["running", { display_status: "running", status: "active", worker_sessions: session("running") }, "running"],
@@ -236,6 +237,10 @@ const CASES: [string, Partial<ItemDetail>, string][] = [
   ["escalated", { display_status: "escalated", status: "needs_human", stop: S("stuck"), worker_sessions: session("failed") }, "escalated"],
   ["failed", { display_status: "failed", status: "needs_human", stop: S("failed"), worker_sessions: session("failed") }, "failed"],
   ["infra", { display_status: "failed", status: "needs_human", stop: S("infra"), worker_sessions: session("failed") }, "infra"],
+  // A parent at a group whose slices have not ended: the three states the table adds for it.
+  ["slices, waiting", { display_status: "waiting", status: "waiting", stop: S("slices"), slices: SLICES }, "slices_waiting"],
+  ["slices, paused", { display_status: "paused", status: "paused", slices: SLICES, worker_sessions: session("paused") }, "slices_paused"],
+  ["slices, needs you", { display_status: "needs_you", status: "needs_human", stop: S("failed"), slices: SLICES, worker_sessions: session("failed") }, "slices_needs_human"],
   ["done", { display_status: "done", status: "completed", worker_sessions: session("done") }, "completed"],
   ["cancelled", { display_status: "cancelled", status: "abandoned", worker_sessions: session("cancelled") }, "abandoned"],
   ["archived", { display_status: "archived", status: "completed", worker_sessions: session("done") }, "archived"],

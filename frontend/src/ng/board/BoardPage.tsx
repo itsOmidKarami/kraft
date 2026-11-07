@@ -30,7 +30,7 @@ import { useBulk } from "./bulk";
 import { usePeekFocus } from "./peekFocus";
 import "./board.css";
 import { autoArchiveNote } from "../ui/archivedWords";
-import { countIn } from "./counts";
+import { countIn, isBoardRow } from "./counts";
 import { holdsText, isTextField, mod, openShortcutHelp, useShortcutRows, type ShortcutRow } from "../keys";
 import { Skeleton } from "./Skeleton";
 import { LinkButton } from "../ui/LinkButton";
@@ -108,7 +108,7 @@ export function BoardPage() {
   const bodyRef = useCallback((el: HTMLDivElement | null) => { body(el); bodyEl.current = el; }, [body]);
   const size = useResizable("board", bodyW);
   const itemsById = useStore((s) => s.workItems);
-  const items = useMemo(() => Object.values(itemsById).filter((i) => i.display_status !== "archived"), [itemsById]);
+  const items = useMemo(() => Object.values(itemsById).filter((i) => i.display_status !== "archived" && isBoardRow(i)), [itemsById]);
   const { load, offline } = useListLoad();
   // R10c-01: an older server still running after an update gets a banner, not only the footer line.
   const health = useHealth();

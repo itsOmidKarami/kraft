@@ -120,15 +120,19 @@ export const resumable = (item: Pick<WorkItem, "display_status" | "current_node_
  *  loop or a live escalation is never paused. */
 export const pausable = (item: Pick<WorkItem, "display_status"> & Doors) => admits(item, "pause", item.display_status === "running" || item.display_status === "waiting");
 
+/** A parent whose slices have not all ended: its slice group is unjoined, and the server refuses Skip and Mark complete
+ *  there, whatever the parent's status (`open_doors`' `group_unjoined`). The UI's own reading, for a server that sends no `actions`. */
+export const slicesUnjoined = (item: Partial<Pick<WorkItem, "slices">>) => !!item.slices && item.slices.done + item.slices.dropped < item.slices.total;
+
 /** Whether `/skip` would take this item: it refuses a rate-limited one (Kraft
  *  relaunches it at its `retry_at`; pause it first, which `/pause` takes, then
  *  Skip or Resume), and one whose escalation turn is running (R11b-01). */
-export const skippable = (item: Pick<WorkItem, "status" | "stop"> & Partial<Pick<WorkItem, "display_status">> & Doors) => admits(item, "skip", skipsNow(item));
+export const skippable = (item: Pick<WorkItem, "status" | "stop"> & Partial<Pick<WorkItem, "display_status" | "slices">> & Doors) => admits(item, "skip", skipsNow(item));
 
 /** `skippable`'s own reading of the item, without the server's `actions`: their `skip` is the node's (whether the node
  *  the item stands on may be skipped), and a task's or a step's skip is decided by that task or step instead. */
-export const skipsNow = (item: Pick<WorkItem, "status" | "stop"> & Partial<Pick<WorkItem, "display_status">>) =>
-  item.status !== "rate_limited" && item.stop?.kind !== "rate_limit" && item.display_status !== "escalated";
+export const skipsNow = (item: Pick<WorkItem, "status" | "stop"> & Partial<Pick<WorkItem, "display_status" | "slices">>) =>
+  !slicesUnjoined(item) && item.status !== "rate_limited" && item.stop?.kind !== "rate_limit" && item.display_status !== "escalated";
 
 /** Whether `/escalate` would take this item: a stopped one (failed or needs
  *  you) or a paused one that has started, and not while an escalation turn
@@ -182,7 +186,7 @@ function mainAdmitted(item: Pick<WorkItem, "stop"> & Doors, main: Main): boolean
  *  (`budgetRaise`) has Retry instead. A never-started item (`neverStarted`) has
  *  Start, and nothing to escalate or mark complete. Pause only where `/pause`
  *  takes it (`pausable`); an escalated item has Retry, which outranks its turn. */
-export function headerState(item: Pick<WorkItem, "display_status" | "stop" | "current_node_id"> & Partial<Pick<WorkItem, "one_off">> & Omit<EscalateFields, "display_status" | "current_node_id">): HeaderState {
+export function headerState(item: Pick<WorkItem, "display_status" | "stop" | "current_node_id"> & Partial<Pick<WorkItem, "one_off" | "slices">> & Omit<EscalateFields, "display_status" | "current_node_id">): HeaderState {
   const status = item.display_status ?? "running";
   const first = (ways: Main[]) => ways.find((m) => mainAdmitted(item, m)) ?? null;
   if (neverStarted(item)) return { badge: "NOT STARTED", tone: "muted", main: first(["start"]), panel: admits(item, "cancel", true) ? ["cancel"] : [] };
@@ -200,7 +204,8 @@ export function headerState(item: Pick<WorkItem, "display_status" | "stop" | "cu
     : status === "cancelled" ? ["archive"]
     : FULL.filter((p) =>
       p === "escalate" ? escalatable({ ...item, display_status: status })
-      : p === "complete" || p === "cancel" ? admits(item, p, true)
+      : p === "complete" ? admits(item, p, !slicesUnjoined(item))
+      : p === "cancel" ? admits(item, p, true)
       // Archive stays in the panel as a disabled hint until `archivable`.
       : true);
   return { badge: status.replace("_", " ").toUpperCase(), tone: TONE[status], main, panel };

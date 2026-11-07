@@ -136,6 +136,10 @@ describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
     expect(cardOf(mk("failed", stop("failed", { reason: "exit 1", task: "verification.review.code_review", attempt: 2 })))).toMatchObject({ tone: "bad", title: "Failed", text: "exit 1", where: "verification › review › code_review · attempt 2" });
     expect(cardOf(mk("waiting", stop("rate_limit", { facts: { harness: "claude", fallback_allowed: ["codex"] } })))?.text).toMatch(/claude hit its rate limit/);
     expect(cardOf(mk("waiting", stop("wait")))).toMatchObject({ title: "Waiting on CI", text: undefined });
+    // A parent waiting on its slices: nothing to do here, unless a slice needs the person.
+    const slices = { done: 1, needs_you: 0, paused: 0, running: 1, queued: 0, dropped: 0, total: 2 };
+    expect(cardOf(mk("waiting", stop("slices"), { status: "waiting", slices }))?.text).toMatch(/nothing needs doing/);
+    expect(cardOf(mk("needs_you", stop("slices"), { status: "waiting", slices: { ...slices, needs_you: 1 } }))?.text).toMatch(/one needs you/);
     expect(cardOf(mk("waiting", stop("wait", { reason: "waiting for gpu-box (full)" })))).toMatchObject({ title: "Waiting for a machine", text: "waiting for gpu-box (full)" });
     expect(cardOf(mk("needs_you", stop("conflict", { facts: { unresolved: ["a.py"], resolved: ["b.py"] } })))?.facts).toEqual([["unresolved", "a.py"], ["resolved", "b.py"]]);
     expect(cardOf(mk("blocked", null, { dependencies: [{ id: "a1", title: "Schema first", status: "needs_human", met: false }, { id: "b2", title: "Old cleanup", status: "completed", met: true }] })))

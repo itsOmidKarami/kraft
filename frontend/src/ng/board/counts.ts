@@ -13,9 +13,13 @@ export function countIn(items: Iterable<Pick<WorkItem, "display_status" | "curre
   return n;
 }
 
+/** A slice's child is not a board row: its parent's row opens into it. The store can hold one (a live `work_item_created`
+ *  hydrates it, and its own page reads it), so every list and count of the board's rows leaves it out. */
+export const isBoardRow = (i: Pick<WorkItem, "parent_id">) => !i.parent_id;
+
 /** `countIn` over every item the board knows; `except` leaves one out (the item page's own). */
 export function useGroupCount(g: GroupKey, except?: string): number {
-  return useStore((s) => countIn(Object.values(s.workItems).filter((i) => i.id !== except), g));
+  return useStore((s) => countIn(Object.values(s.workItems).filter((i) => i.id !== except && isBoardRow(i)), g));
 }
 
 /** Stored statuses that end an item (generated from the server's `ENDED`). */

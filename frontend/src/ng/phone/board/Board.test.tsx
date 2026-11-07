@@ -242,6 +242,19 @@ describe("the phone board (B)", () => {
     expect(where()).toContain("/work-items/r1");
   });
 
+  it("lists a parent's slices on its card, opens each as its own item, and keeps a slice off the board as a card", async () => {
+    const children = [
+      { id: "c1", title: "Cache reads", slice_key: 1, status: "needs_human", display_status: "needs_you" as const, current_node_id: "verification", cost_usd: 0.4 },
+    ];
+    // A live `work_item_created` can leave the child itself in the store: it is no card of its own.
+    put(item("p1", "running", { children, slices: { done: 0, needs_you: 1, paused: 0, running: 0, queued: 0, dropped: 0, total: 1 } }), item("c1", "needs_you", { parent_id: "p1", slice_key: 1 }));
+    mount();
+    const slices = await screen.findByRole("list", { name: "Slices of Item p1" });
+    expect(screen.queryByText("Item c1")).toBeNull();
+    await userEvent.click(within(slices).getByRole("button", { name: /Cache reads/ }));
+    expect(where()).toContain("/work-items/c1");
+  });
+
   it("caps Done at show_done with a Show all row", async () => {
     put(item("d1", "done"), item("d2", "done"), item("d3", "done"));
     mount();

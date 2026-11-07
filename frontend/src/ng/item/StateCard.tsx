@@ -18,7 +18,7 @@ import { totals } from "./Top";
 import { BROKEN_BASE_TEXT, brokenBase, forgeHint, failedFix, failureFacts, headline, hintText, keptLine } from "./cause";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
-import { CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, WAITING_ON_THE_PROVIDER, WAITING_FOR_SLICES, SLICES_WAIT_TEXT, waitTitle, ABANDONED, ABANDONED_TEXT, NO_REASON_GIVEN } from "./sharedWords";
+import { CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, WAITING_ON_THE_PROVIDER, WAITING_FOR_SLICES, slicesWaitText, waitTitle, ABANDONED, ABANDONED_TEXT, NO_REASON_GIVEN } from "./sharedWords";
 import { LinkButton, linkButtonClass } from "../ui/LinkButton";
 import { Select } from "../ui/Select";
 
@@ -183,7 +183,7 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
   }
   if (status === "waiting" && stop?.kind === "slices")
     return {
-      tone: "info", glyph: <Clock size={14} aria-hidden />, title: WAITING_FOR_SLICES, where, node: stop.node, text: SLICES_WAIT_TEXT,
+      tone: "info", glyph: <Clock size={14} aria-hidden />, title: WAITING_FOR_SLICES, where, node: stop.node, text: slicesWaitText(item.slices?.needs_you),
       facts: item.slices ? [["slices", slicesLine(item).replace(/^slices: /, "")]] : [],
       actions: [],
     };

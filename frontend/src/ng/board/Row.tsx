@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent, type MouseEvent } from "react";
-import { ago, repoName, shortId } from "../../format";
+import { ago, repoName, shortId, usd } from "../../format";
 import type { WorkItem } from "../../types";
 import { NodeGlyph } from "../graph/NodeGlyph";
 import { breakPaths } from "../ui/breakable";
@@ -107,8 +107,9 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
           {children.map((c) => (
             <li key={c.id} className="board-child" data-row={c.id}>
               <span className="board-child-key">{c.slice_key}</span>
-              <span className="board-child-title" title={c.title}>{c.title}</span>
+              <button type="button" className="board-child-title" title={c.title} tabIndex={off} onClick={() => onOpen(c.id)}>{c.title}</button>
               <span className="board-child-status">{c.display_status.replace(/_/g, " ")}{c.current_node_id ? ` · ${nodeWords(c.current_node_id)}` : ""}</span>
+              {c.cost_usd != null && c.cost_usd > 0 && <span className="board-child-cost">{usd(c.cost_usd)}</span>}
             </li>
           ))}
         </ul>

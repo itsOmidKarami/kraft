@@ -163,21 +163,24 @@ describe("Row", () => {
       { id: "c1", title: "Cache reads", slice_key: 1, status: "completed", display_status: "done", current_node_id: null, cost_usd: 0.4 },
       { id: "c2", title: "Cache writes", slice_key: 2, status: "needs_human", display_status: "needs_you", current_node_id: "verification", cost_usd: null },
     ];
-    // The board list carries the summary only: no way to expand.
+    // The summary alone, with no children loaded: nothing to expand.
     cleanup();
     mount("running", { slices });
     expect(document.querySelector(".board-meta-slices")).toHaveTextContent("slices: 3 done, 1 needs you, 1 paused, 1 running");
     expect(screen.queryByRole("button", { name: "Show slices" })).toBeNull();
     cleanup();
     // With its children loaded, the row opens to them.
-    mount("running", { slices, children });
+    const { onOpen } = mount("running", { slices, children });
     const toggle = screen.getByRole("button", { name: "Show slices" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("Cache reads")).toBeNull();
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     const list = screen.getByRole("list", { name: "Slices of Design the cache" });
-    expect([...list.querySelectorAll("li")].map((li) => li.textContent)).toEqual(["1Cache readsdone", "2Cache writesneeds you · verification"]);
+    expect([...list.querySelectorAll("li")].map((li) => li.textContent)).toEqual(["1Cache readsdone$0.400", "2Cache writesneeds you · verification"]);
+    // Each slice opens as the item it is, with its own logs.
+    fireEvent.click(screen.getByRole("button", { name: "Cache writes" }));
+    expect(onOpen).toHaveBeenLastCalledWith("c2");
     // An ordinary item shows no slices.
     cleanup();
     mount("running");

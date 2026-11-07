@@ -10,6 +10,7 @@ import type { WorkItem } from "../../../types";
 import { act } from "../../item/actions";
 import { chainKeys, chainLabel, chainOf, groupOf, groupsOf, matches, type GroupKey } from "../../board/model";
 import { ALL_GATES, ALL_STOPS, gateChip, nodeWords, stopChip, stopFilterOptions, stopWords } from "../../board/rowText";
+import { isBoardRow } from "../../board/counts";
 import { useBoardPrefs } from "../../board/prefs";
 import { ChoiceSheet, useSheet } from "../nav/Sheet";
 import { RootHeader } from "../nav/ScreenHeader";
@@ -51,7 +52,7 @@ export function Board() {
   const health = useHealth();
   const drift = useKraftDefault(health);
   const byId = useStore((s) => s.workItems);
-  const items = useMemo(() => Object.values(byId).filter((i) => i.display_status !== "archived"), [byId]);
+  const items = useMemo(() => Object.values(byId).filter((i) => i.display_status !== "archived" && isBoardRow(i)), [byId]);
   const [showAll, setShowAll] = useState(false);
   const [noRepos, setNoRepos] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -141,7 +142,7 @@ export function Board() {
           <section key={g.key} className="ph-group" aria-label={g.label}>
             <h2 className={`ph-group-head${g.key === "needs" ? " ph-is-hot" : ""}`}>{g.label}<span>{g.total}</span></h2>
             {g.rows.map((i) => (
-              <Card key={i.id} item={i} now={now} offline={offline} busy={busy === i.id} error={errors[i.id]} onOpen={() => navigate(itemPath(i.id))} onButton={(b) => onButton(i, b)} />
+              <Card key={i.id} item={i} now={now} offline={offline} busy={busy === i.id} error={errors[i.id]} onOpen={() => navigate(itemPath(i.id))} onOpenChild={(id) => navigate(itemPath(id))} onButton={(b) => onButton(i, b)} />
             ))}
             {g.done && g.rows.length < g.total && (
               <button type="button" className="ph-more-row" onClick={() => setShowAll(true)}>Show all {g.total}</button>

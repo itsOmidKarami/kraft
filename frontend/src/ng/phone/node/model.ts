@@ -4,7 +4,7 @@ import { nameOf } from "../../board/rowText";
 import { rejectTarget } from "../../item/graph";
 import { gateSkipped } from "../../item/events";
 import type { ItemDetail } from "../../item/useItem";
-import { admits, retryable, skippable } from "../../item/status";
+import { admits, retryable, skippable, slicesUnjoined } from "../../item/status";
 import { attemptsAt, capAt, materialized } from "../../item/chainValues";
 import { passOf } from "../../item/nodeGraph";
 import { taskName } from "../../item/paths";
@@ -52,8 +52,10 @@ function nodeTable(item: ItemDetail, node: ApiNode, graph: ChainNode): { seconda
   // An escalation turn runs: /pause and /skip refuse it, and a human's Retry outranks the turn (R11b-01).
   if (status === "escalated") return { secondary: null, primary: a("retry-node", "Retry node") };
   if (status === "running" || status === "waiting") return skippable(item) ? { secondary: a("pause", "Pause"), primary: a("skip", "Skip node") } : { secondary: null, primary: a("pause", "Pause") };
-  if (status === "paused") return { secondary: a("skip", "Skip node"), primary: a("resume", "Resume") };
-  return { secondary: a("skip", "Skip node"), primary: a("retry-node", "Retry node") };
+  // A parent whose slices have not ended is skipped past neither node nor group.
+  const skip = slicesUnjoined(item) ? null : a("skip", "Skip node");
+  if (status === "paused") return { secondary: skip, primary: a("resume", "Resume") };
+  return { secondary: skip, primary: a("retry-node", "Retry node") };
 }
 
 export interface PathRow {

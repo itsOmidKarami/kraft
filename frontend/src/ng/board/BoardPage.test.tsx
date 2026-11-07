@@ -153,6 +153,14 @@ describe("BoardPage", () => {
     expect(screen.getByText("No work items yet.")).toBeInTheDocument();
   });
 
+  it("leaves a slice's child out of the rows: its parent's row opens into it", async () => {
+    // A live `work_item_created` hydrates the child into the store before any reload.
+    put(item("p1", "running"), item("c1", "needs_you", { parent_id: "p1", slice_key: 1 }));
+    board();
+    expect(await screen.findByText("Item p1")).toBeInTheDocument();
+    expect(screen.queryByText("Item c1")).toBeNull();
+  });
+
   it("files the store's items in the four groups and caps Done at show_done, with show all", async () => {
     put(item("n1", "needs_you"), item("r1", "running"), item("p1", "paused", { current_node_id: null }), ...["d1", "d2", "d3"].map((d) => item(d, "done")));
     board();
