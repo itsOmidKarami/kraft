@@ -1,454 +1,483 @@
 {
-  "_doc": "Which lifecycle door takes which item state, and which answers it 409. tests/api/test_lifecycle_doors.py::test_a_door_takes_only_the_states_this_table_lists drives every door against every state on the real routes; frontend/src/ng/item/status.test.ts reads the same table, so no surface may offer a door the table refuses. A state's fields are how the backend test builds it.",
-  "states": {
-    "running": {
-      "status": "active",
-      "node": "implementation"
-    },
-    "waiting_ci": {
-      "status": "waiting",
-      "node": "implementation"
-    },
-    "rate_limited": {
-      "status": "rate_limited",
-      "node": "implementation"
-    },
-    "paused": {
-      "status": "paused",
-      "node": "implementation"
-    },
-    "paused_walk_live": {
-      "status": "paused",
-      "node": "implementation",
-      "walk": true
-    },
-    "paused_agent": {
-      "status": "paused",
-      "node": "implementation",
-      "paused_agent": true
-    },
-    "paused_after_abandoned": {
-      "status": "paused",
-      "node": "implementation",
-      "depends_on": "abandoned"
-    },
-    "not_started": {
-      "status": "paused",
-      "node": null
-    },
-    "gate": {
-      "status": "needs_human",
-      "node": "spec_approval",
-      "gate": "spec_approval"
-    },
-    "gate_under_review": {
-      "status": "needs_human",
-      "node": "spec_approval",
-      "gate": "spec_approval",
-      "walk": true
-    },
-    "gate_with_escalation": {
-      "status": "needs_human",
-      "node": "spec_approval",
-      "gate": "spec_approval",
-      "escalation": true
-    },
-    "gate_must_fix": {
-      "status": "needs_human",
-      "node": "spec_approval",
-      "gate": "spec_approval",
-      "must_fix": true
-    },
-    "question": {
-      "status": "needs_human",
-      "node": "implementation",
-      "stop": "question",
-      "reason": "needs_context: Keep the header?"
-    },
-    "stuck": {
-      "status": "needs_human",
-      "node": "implementation",
-      "stop": "stuck",
-      "reason": "stuck: 1 finding(s) unchanged across cycle 1",
-      "mr": true
-    },
-    "cap": {
-      "status": "needs_human",
-      "node": "implementation",
-      "stop": "cap",
-      "reason": "running time hit its cap"
-    },
-    "conflict": {
-      "status": "needs_human",
-      "node": "implementation",
-      "stop": "conflict",
-      "reason": "rebase conflict"
-    },
-    "failed": {
-      "status": "needs_human",
-      "node": "implementation",
-      "stop": "failed",
-      "reason": "the forge refused"
-    },
-    "infra": {
-      "status": "needs_human",
-      "node": "implementation",
-      "stop": "infra",
-      "reason": "a session was lost"
-    },
-    "failed_after_abandoned": {
-      "status": "needs_human",
-      "node": "implementation",
-      "stop": "failed",
-      "reason": "the forge refused",
-      "depends_on": "abandoned"
-    },
-    "budget_item_cap": {
-      "status": "needs_human",
-      "node": "implementation",
-      "stop": "budget",
-      "reason": "budget cap reached",
-      "budget": {
-        "scope": "work_item",
-        "spent_usd": 0.07,
-        "cap_usd": 0.05,
-        "unknown_launches": 0
-      }
-    },
-    "budget_daily": {
-      "status": "needs_human",
-      "node": "implementation",
-      "stop": "budget",
-      "reason": "daily cap reached",
-      "budget": {
-        "scope": "daily",
-        "spent_usd": 50,
-        "cap_usd": 50,
-        "unknown_launches": 0
-      }
-    },
-    "mr_closed": {
-      "status": "needs_human",
-      "node": "implementation",
-      "stop": "mr_closed",
-      "reason": "merge request closed",
-      "mr": true
-    },
-    "mr_closed_no_ref": {
-      "status": "needs_human",
-      "node": "implementation",
-      "stop": "mr_closed",
-      "reason": "merge request closed"
-    },
-    "escalated": {
-      "status": "needs_human",
-      "node": "implementation",
-      "stop": "stuck",
-      "reason": "stuck: 1 finding(s) unchanged across cycle 1",
-      "escalation": true
-    },
-    "completed": {
-      "status": "completed",
-      "node": "implementation"
-    },
-    "abandoned": {
-      "status": "abandoned",
-      "node": "implementation"
-    },
-    "archived": {
-      "status": "completed",
-      "node": "implementation",
-      "archived": true
-    },
-    "queued": {
-      "status": "queued",
-      "node": "implementation",
-      "queued_from": "paused"
-    },
-    "queued_at_gate": {
-      "status": "queued",
-      "node": "spec_approval",
-      "gate": "spec_approval",
-      "queued_from": "needs_human"
-    },
-    "blocked": {
-      "status": "blocked",
-      "node": null,
-      "queued_from": "paused",
-      "depends_on": true
-    }
+ "_doc": "Which lifecycle door takes which item state, and which answers it 409. tests/api/test_lifecycle_doors.py::test_a_door_takes_only_the_states_this_table_lists drives every door against every state on the real routes; frontend/src/ng/item/status.test.ts reads the same table, so no surface may offer a door the table refuses. A state's fields are how the backend test builds it.",
+ "states": {
+  "running": {
+   "status": "active",
+   "node": "implementation"
   },
-  "doors": {
-    "pause": {
-      "path": "pause",
-      "body": {},
-      "takes": [
-        "running",
-        "waiting_ci",
-        "rate_limited",
-        "queued",
-        "queued_at_gate",
-        "blocked"
-      ]
-    },
-    "resume": {
-      "path": "resume",
-      "body": {},
-      "takes": [
-        "paused",
-        "paused_agent",
-        "not_started",
-        "question"
-      ]
-    },
-    "retry": {
-      "path": "retry",
-      "body": {},
-      "takes": [
-        "gate",
-        "gate_with_escalation",
-        "gate_must_fix",
-        "question",
-        "stuck",
-        "cap",
-        "conflict",
-        "failed",
-        "infra",
-        "budget_item_cap",
-        "budget_daily",
-        "mr_closed",
-        "mr_closed_no_ref",
-        "escalated"
-      ]
-    },
-    "skip": {
-      "path": "skip",
-      "body": {},
-      "takes": [
-        "running",
-        "waiting_ci",
-        "paused",
-        "paused_agent",
-        "paused_after_abandoned",
-        "gate",
-        "gate_must_fix",
-        "question",
-        "stuck",
-        "cap",
-        "conflict",
-        "failed",
-        "infra",
-        "failed_after_abandoned",
-        "budget_item_cap",
-        "budget_daily",
-        "mr_closed",
-        "mr_closed_no_ref"
-      ]
-    },
-    "escalate": {
-      "path": "escalate",
-      "body": {
-        "message": "help"
-      },
-      "takes": [
-        "paused",
-        "paused_agent",
-        "paused_after_abandoned",
-        "gate",
-        "gate_must_fix",
-        "question",
-        "stuck",
-        "cap",
-        "conflict",
-        "failed",
-        "infra",
-        "failed_after_abandoned",
-        "mr_closed",
-        "mr_closed_no_ref"
-      ]
-    },
-    "budget_raise": {
-      "path": "budget/raise",
-      "body": {
-        "budget_usd": 5
-      },
-      "takes": [
-        "budget_item_cap"
-      ]
-    },
-    "reopen_mr": {
-      "path": "reopen-mr",
-      "body": {},
-      "takes": [
-        "mr_closed"
-      ]
-    },
-    "cancel": {
-      "path": "cancel",
-      "body": {
-        "reason": "r"
-      },
-      "takes": [
-        "running",
-        "waiting_ci",
-        "rate_limited",
-        "paused",
-        "paused_walk_live",
-        "paused_agent",
-        "paused_after_abandoned",
-        "not_started",
-        "gate",
-        "gate_under_review",
-        "gate_with_escalation",
-        "gate_must_fix",
-        "question",
-        "stuck",
-        "cap",
-        "conflict",
-        "failed",
-        "infra",
-        "failed_after_abandoned",
-        "budget_item_cap",
-        "budget_daily",
-        "mr_closed",
-        "mr_closed_no_ref",
-        "escalated",
-        "queued",
-        "queued_at_gate",
-        "blocked"
-      ]
-    },
-    "complete": {
-      "path": "complete",
-      "body": {
-        "reason": "r"
-      },
-      "takes": [
-        "running",
-        "waiting_ci",
-        "rate_limited",
-        "paused",
-        "paused_walk_live",
-        "paused_agent",
-        "paused_after_abandoned",
-        "not_started",
-        "gate",
-        "gate_under_review",
-        "gate_with_escalation",
-        "gate_must_fix",
-        "question",
-        "stuck",
-        "cap",
-        "conflict",
-        "failed",
-        "infra",
-        "failed_after_abandoned",
-        "budget_item_cap",
-        "budget_daily",
-        "mr_closed",
-        "mr_closed_no_ref",
-        "escalated",
-        "queued",
-        "queued_at_gate",
-        "blocked"
-      ]
-    },
-    "archive": {
-      "path": "archive",
-      "body": {},
-      "takes": [
-        "completed",
-        "abandoned",
-        "archived"
-      ]
-    },
-    "restore": {
-      "path": "restore",
-      "body": {},
-      "takes": [
-        "archived"
-      ]
-    },
-    "approve": {
-      "path": "gates/spec_approval/approve",
-      "body": {},
-      "takes": [
-        "gate",
-        "gate_under_review",
-        "gate_with_escalation"
-      ]
-    },
-    "reject": {
-      "path": "gates/spec_approval/reject",
-      "body": {
-        "note": "r"
-      },
-      "takes": [
-        "gate",
-        "gate_under_review",
-        "gate_with_escalation",
-        "gate_must_fix"
-      ]
-    },
-    "steer": {
-      "path": "steer",
-      "body": {
-        "text": "go left"
-      },
-      "takes": [
-        "paused_agent",
-        "not_started",
-        "question"
-      ]
-    },
-    "abandon": {
-      "path": "abandon",
-      "body": {
-        "reason": "r"
-      },
-      "takes": [
-        "waiting_ci",
-        "rate_limited",
-        "paused",
-        "paused_walk_live",
-        "paused_agent",
-        "paused_after_abandoned",
-        "not_started",
-        "gate",
-        "gate_under_review",
-        "gate_with_escalation",
-        "gate_must_fix",
-        "question",
-        "stuck",
-        "cap",
-        "conflict",
-        "failed",
-        "infra",
-        "failed_after_abandoned",
-        "budget_item_cap",
-        "budget_daily",
-        "mr_closed",
-        "mr_closed_no_ref",
-        "escalated",
-        "completed",
-        "abandoned",
-        "archived",
-        "queued",
-        "queued_at_gate",
-        "blocked"
-      ]
-    },
-    "unblock": {
-      "path": "unblock",
-      "body": {},
-      "takes": [
-        "paused",
-        "paused_walk_live",
-        "paused_agent",
-        "paused_after_abandoned",
-        "not_started",
-        "blocked"
-      ]
-    }
+  "waiting_ci": {
+   "status": "waiting",
+   "node": "implementation"
+  },
+  "rate_limited": {
+   "status": "rate_limited",
+   "node": "implementation"
+  },
+  "paused": {
+   "status": "paused",
+   "node": "implementation"
+  },
+  "paused_walk_live": {
+   "status": "paused",
+   "node": "implementation",
+   "walk": true
+  },
+  "paused_agent": {
+   "status": "paused",
+   "node": "implementation",
+   "paused_agent": true
+  },
+  "paused_after_abandoned": {
+   "status": "paused",
+   "node": "implementation",
+   "depends_on": "abandoned"
+  },
+  "not_started": {
+   "status": "paused",
+   "node": null
+  },
+  "gate": {
+   "status": "needs_human",
+   "node": "spec_approval",
+   "gate": "spec_approval"
+  },
+  "gate_under_review": {
+   "status": "needs_human",
+   "node": "spec_approval",
+   "gate": "spec_approval",
+   "walk": true
+  },
+  "gate_with_escalation": {
+   "status": "needs_human",
+   "node": "spec_approval",
+   "gate": "spec_approval",
+   "escalation": true
+  },
+  "gate_must_fix": {
+   "status": "needs_human",
+   "node": "spec_approval",
+   "gate": "spec_approval",
+   "must_fix": true
+  },
+  "question": {
+   "status": "needs_human",
+   "node": "implementation",
+   "stop": "question",
+   "reason": "needs_context: Keep the header?"
+  },
+  "stuck": {
+   "status": "needs_human",
+   "node": "implementation",
+   "stop": "stuck",
+   "reason": "stuck: 1 finding(s) unchanged across cycle 1",
+   "mr": true
+  },
+  "cap": {
+   "status": "needs_human",
+   "node": "implementation",
+   "stop": "cap",
+   "reason": "running time hit its cap"
+  },
+  "conflict": {
+   "status": "needs_human",
+   "node": "implementation",
+   "stop": "conflict",
+   "reason": "rebase conflict"
+  },
+  "failed": {
+   "status": "needs_human",
+   "node": "implementation",
+   "stop": "failed",
+   "reason": "the forge refused"
+  },
+  "infra": {
+   "status": "needs_human",
+   "node": "implementation",
+   "stop": "infra",
+   "reason": "a session was lost"
+  },
+  "failed_after_abandoned": {
+   "status": "needs_human",
+   "node": "implementation",
+   "stop": "failed",
+   "reason": "the forge refused",
+   "depends_on": "abandoned"
+  },
+  "budget_item_cap": {
+   "status": "needs_human",
+   "node": "implementation",
+   "stop": "budget",
+   "reason": "budget cap reached",
+   "budget": {
+    "scope": "work_item",
+    "spent_usd": 0.07,
+    "cap_usd": 0.05,
+    "unknown_launches": 0
+   }
+  },
+  "budget_daily": {
+   "status": "needs_human",
+   "node": "implementation",
+   "stop": "budget",
+   "reason": "daily cap reached",
+   "budget": {
+    "scope": "daily",
+    "spent_usd": 50,
+    "cap_usd": 50,
+    "unknown_launches": 0
+   }
+  },
+  "mr_closed": {
+   "status": "needs_human",
+   "node": "implementation",
+   "stop": "mr_closed",
+   "reason": "merge request closed",
+   "mr": true
+  },
+  "mr_closed_no_ref": {
+   "status": "needs_human",
+   "node": "implementation",
+   "stop": "mr_closed",
+   "reason": "merge request closed"
+  },
+  "escalated": {
+   "status": "needs_human",
+   "node": "implementation",
+   "stop": "stuck",
+   "reason": "stuck: 1 finding(s) unchanged across cycle 1",
+   "escalation": true
+  },
+  "completed": {
+   "status": "completed",
+   "node": "implementation"
+  },
+  "abandoned": {
+   "status": "abandoned",
+   "node": "implementation"
+  },
+  "archived": {
+   "status": "completed",
+   "node": "implementation",
+   "archived": true
+  },
+  "queued": {
+   "status": "queued",
+   "node": "implementation",
+   "queued_from": "paused"
+  },
+  "queued_at_gate": {
+   "status": "queued",
+   "node": "spec_approval",
+   "gate": "spec_approval",
+   "queued_from": "needs_human"
+  },
+  "blocked": {
+   "status": "blocked",
+   "node": null,
+   "queued_from": "paused",
+   "depends_on": true
+  },
+  "slices_waiting": {
+   "status": "waiting",
+   "node": "implementation",
+   "slices": "waiting"
+  },
+  "slices_paused": {
+   "status": "paused",
+   "node": "implementation",
+   "slices": "unjoined"
+  },
+  "slices_needs_human": {
+   "status": "needs_human",
+   "node": "implementation",
+   "slices": "unjoined",
+   "stop": "failed",
+   "reason": "x"
   }
+ },
+ "doors": {
+  "pause": {
+   "path": "pause",
+   "body": {},
+   "takes": [
+    "running",
+    "waiting_ci",
+    "rate_limited",
+    "queued",
+    "queued_at_gate",
+    "blocked",
+    "slices_waiting"
+   ]
+  },
+  "resume": {
+   "path": "resume",
+   "body": {},
+   "takes": [
+    "paused",
+    "paused_agent",
+    "not_started",
+    "question",
+    "slices_paused"
+   ]
+  },
+  "retry": {
+   "path": "retry",
+   "body": {},
+   "takes": [
+    "gate",
+    "gate_with_escalation",
+    "gate_must_fix",
+    "question",
+    "stuck",
+    "cap",
+    "conflict",
+    "failed",
+    "infra",
+    "budget_item_cap",
+    "budget_daily",
+    "mr_closed",
+    "mr_closed_no_ref",
+    "escalated",
+    "slices_needs_human"
+   ]
+  },
+  "skip": {
+   "path": "skip",
+   "body": {},
+   "takes": [
+    "running",
+    "waiting_ci",
+    "paused",
+    "paused_agent",
+    "paused_after_abandoned",
+    "gate",
+    "gate_must_fix",
+    "question",
+    "stuck",
+    "cap",
+    "conflict",
+    "failed",
+    "infra",
+    "failed_after_abandoned",
+    "budget_item_cap",
+    "budget_daily",
+    "mr_closed",
+    "mr_closed_no_ref"
+   ]
+  },
+  "escalate": {
+   "path": "escalate",
+   "body": {
+    "message": "help"
+   },
+   "takes": [
+    "paused",
+    "paused_agent",
+    "paused_after_abandoned",
+    "gate",
+    "gate_must_fix",
+    "question",
+    "stuck",
+    "cap",
+    "conflict",
+    "failed",
+    "infra",
+    "failed_after_abandoned",
+    "mr_closed",
+    "mr_closed_no_ref",
+    "slices_paused",
+    "slices_needs_human"
+   ]
+  },
+  "budget_raise": {
+   "path": "budget/raise",
+   "body": {
+    "budget_usd": 5
+   },
+   "takes": [
+    "budget_item_cap"
+   ]
+  },
+  "reopen_mr": {
+   "path": "reopen-mr",
+   "body": {},
+   "takes": [
+    "mr_closed"
+   ]
+  },
+  "cancel": {
+   "path": "cancel",
+   "body": {
+    "reason": "r"
+   },
+   "takes": [
+    "running",
+    "waiting_ci",
+    "rate_limited",
+    "paused",
+    "paused_walk_live",
+    "paused_agent",
+    "paused_after_abandoned",
+    "not_started",
+    "gate",
+    "gate_under_review",
+    "gate_with_escalation",
+    "gate_must_fix",
+    "question",
+    "stuck",
+    "cap",
+    "conflict",
+    "failed",
+    "infra",
+    "failed_after_abandoned",
+    "budget_item_cap",
+    "budget_daily",
+    "mr_closed",
+    "mr_closed_no_ref",
+    "escalated",
+    "queued",
+    "queued_at_gate",
+    "blocked",
+    "slices_waiting",
+    "slices_paused",
+    "slices_needs_human"
+   ]
+  },
+  "complete": {
+   "path": "complete",
+   "body": {
+    "reason": "r"
+   },
+   "takes": [
+    "running",
+    "waiting_ci",
+    "rate_limited",
+    "paused",
+    "paused_walk_live",
+    "paused_agent",
+    "paused_after_abandoned",
+    "not_started",
+    "gate",
+    "gate_under_review",
+    "gate_with_escalation",
+    "gate_must_fix",
+    "question",
+    "stuck",
+    "cap",
+    "conflict",
+    "failed",
+    "infra",
+    "failed_after_abandoned",
+    "budget_item_cap",
+    "budget_daily",
+    "mr_closed",
+    "mr_closed_no_ref",
+    "escalated",
+    "queued",
+    "queued_at_gate",
+    "blocked"
+   ]
+  },
+  "archive": {
+   "path": "archive",
+   "body": {},
+   "takes": [
+    "completed",
+    "abandoned",
+    "archived"
+   ]
+  },
+  "restore": {
+   "path": "restore",
+   "body": {},
+   "takes": [
+    "archived"
+   ]
+  },
+  "approve": {
+   "path": "gates/spec_approval/approve",
+   "body": {},
+   "takes": [
+    "gate",
+    "gate_under_review",
+    "gate_with_escalation"
+   ]
+  },
+  "reject": {
+   "path": "gates/spec_approval/reject",
+   "body": {
+    "note": "r"
+   },
+   "takes": [
+    "gate",
+    "gate_under_review",
+    "gate_with_escalation",
+    "gate_must_fix"
+   ]
+  },
+  "steer": {
+   "path": "steer",
+   "body": {
+    "text": "go left"
+   },
+   "takes": [
+    "paused_agent",
+    "not_started",
+    "question"
+   ]
+  },
+  "abandon": {
+   "path": "abandon",
+   "body": {
+    "reason": "r"
+   },
+   "takes": [
+    "waiting_ci",
+    "rate_limited",
+    "paused",
+    "paused_walk_live",
+    "paused_agent",
+    "paused_after_abandoned",
+    "not_started",
+    "gate",
+    "gate_under_review",
+    "gate_with_escalation",
+    "gate_must_fix",
+    "question",
+    "stuck",
+    "cap",
+    "conflict",
+    "failed",
+    "infra",
+    "failed_after_abandoned",
+    "budget_item_cap",
+    "budget_daily",
+    "mr_closed",
+    "mr_closed_no_ref",
+    "escalated",
+    "completed",
+    "abandoned",
+    "archived",
+    "queued",
+    "queued_at_gate",
+    "blocked",
+    "slices_paused",
+    "slices_needs_human",
+    "slices_waiting"
+   ]
+  },
+  "unblock": {
+   "path": "unblock",
+   "body": {},
+   "takes": [
+    "paused",
+    "paused_walk_live",
+    "paused_agent",
+    "paused_after_abandoned",
+    "not_started",
+    "blocked",
+    "slices_paused"
+   ]
+  }
+ }
 }

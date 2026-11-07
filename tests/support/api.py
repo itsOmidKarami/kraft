@@ -532,6 +532,7 @@ def _in_state(client, repo, state: dict, **body) -> str:
 
     wid = _paused(client, repo, chain_template="default", **body)
     dep = _paused(client, repo, chain_template="default") if state.get("depends_on") else None
+    kid = _paused(client, repo, chain_template="default") if state.get("slices") else None
     with closing(sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")) as c, c:
         c.execute(
             "UPDATE work_items SET status = ?, current_node_id = ? WHERE id = ?",
@@ -563,6 +564,22 @@ def _in_state(client, repo, state: dict, **body) -> str:
             c.execute("UPDATE work_items SET depends_on = ? WHERE id = ?", (json.dumps([dep]), wid))
             if state["depends_on"] == "abandoned":
                 c.execute("UPDATE work_items SET status = 'abandoned' WHERE id = ?", (dep,))
+        if state.get("slices"):
+            # A parent at a forked group, with one child that has not ended.
+            c.execute(
+                "UPDATE work_items SET parent_id = ?, slice_generation = 1, slice_key = 1 "
+                "WHERE id = ?",
+                (wid, kid),
+            )
+            c.execute(
+                "UPDATE work_items SET group_state = ?, stop_kind = COALESCE(stop_kind, ?) "
+                "WHERE id = ?",
+                (
+                    store.GroupState(group="slices", phase="forked", generation=1).to_json(),
+                    "slices" if state["status"] == "waiting" else None,
+                    wid,
+                ),
+            )
         if state.get("must_fix"):
             store.create_thread(
                 c, wid=wid, gate=state["gate"], anchor_sha="x", body="b", label=ThreadLabel.MUST_FIX

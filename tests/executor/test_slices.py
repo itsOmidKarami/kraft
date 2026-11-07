@@ -293,3 +293,27 @@ async def test_the_work_brief_names_what_each_slice_skipped(item_on, repo):
 
     assert "slice 2: skipped verification" in note
     assert prompts.slice_skips_note(other, it.row(), it.database) == ""
+
+
+async def test_a_prelude_that_passed_is_not_built_again_when_the_fork_is_retried(item_on, planned):
+    """The fork refused (storage), then went on after a retry: the prelude's body
+    ran once, not once per entry."""
+    write(planned, "plan.md", PLAN.replace("Task 3.", "Task 3.\n").replace("Tasks 1-2.", "Task 1."))
+    commit_all(planned, "plan with groundwork")
+    it = await _item(item_on, planned)
+    refusing = LaunchContext(
+        repo_entry=entry_of({"setup_command": ""}), slice_room=lambda n: "no room"
+    )
+    assert (
+        await executor.run_once(it.database, it.run_dirs, work_item_id=it.id, launch=refusing)
+        == "needs_human"
+    )
+    await it.database.write(
+        lambda c: c.execute("UPDATE work_items SET status='active' WHERE id=?", (it.id,))
+    )
+
+    assert await _walk(it) == "waiting"
+
+    ran = [e["payload"]["node_id"] for e in it.events("node_completed")]
+    assert ran == ["slices.implementation", "slices.verification"]
+    assert len(_children(it)) == 2

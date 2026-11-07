@@ -57,6 +57,9 @@ class GroupState:
     #: The commit the join had reached before the slice it is on ("X").
     at_commit: str | None = None
     slice_phase: SlicePhase = "idle"
+    #: The prelude's body has run and passed: a re-entry (a storage refusal at the
+    #: fork, a restart) goes straight to the fork instead of building it again.
+    prelude_done: bool = False
     #: Slice key -> the ordered child commits recorded before picking it.
     recorded: dict[int, list[str]] = field(default_factory=dict)
     #: Slice key -> what that slice skipped, completed by hand or dropped.

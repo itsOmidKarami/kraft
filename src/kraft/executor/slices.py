@@ -201,7 +201,7 @@ async def _walk_body(
 async def _prelude_then_fork(
     db, run_dirs, work_item_id, node, row, worktree, state, split, policy, steer, launch
 ) -> str:
-    if split.prelude:
+    if split.prelude and not state.prelude_done:
         if state.phase != "prelude":
             state.phase = "prelude"
             await db.write(lambda c: store.set_group_state(c, work_item_id, state))
@@ -224,6 +224,8 @@ async def _prelude_then_fork(
         )
         if result != DONE:
             return result
+        state.prelude_done = True
+        await db.write(lambda c: store.set_group_state(c, work_item_id, state))
     return await _fork(db, run_dirs, work_item_id, node, row, worktree, state, split, launch)
 
 

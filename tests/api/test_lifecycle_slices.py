@@ -157,3 +157,16 @@ def test_a_retry_with_every_slice_dropped_names_the_way_on(client, repo):
     assert r.status_code == 409, r.text
     assert "abandon" in r.json()["detail"]
     assert "plan" in r.json()["detail"]
+
+
+def test_a_draft_moving_an_unjoined_parent_back_is_refused(client, repo):
+    parent, _ = _family(client, repo, parent_status="paused")
+    client.put(
+        f"/api/work-items/{parent}/draft",
+        json={"ops": [{"op": "skip", "path": "work_brief.main.author"}]},
+    )
+
+    r = client.post(f"/api/work-items/{parent}/draft/apply")
+
+    assert r.status_code == 409, r.text
+    assert "slices" in r.json()["detail"]
