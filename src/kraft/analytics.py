@@ -18,6 +18,19 @@ Two derivations are worth stating outright, because neither is a stored fact:
   chain's terminal node, and it can itself sit in `"waiting"` on the target
   branch's own pipeline -- time this figure did not count before, when
   `merge` was the last node.
+* **A sliced item counts once** (`kraft.store.slices`). Its children are no
+  items of their own here, as on the board: only rows with no `parent_id` are
+  counted, filtered and bucketed, and a child's repo and chain are read through
+  its parent. A child's work is rolled into its parent by one rule per kind:
+  - summed into the parent, because each is work or a stop that happened:
+    cost, tokens, session wall time, caps, per-node and per-repo rows, rounds
+    and repairs (`work_items_run` and repairs per item count the parent once),
+    merges, human wait, gate waits, rejected gates, stop reasons and unplanned
+    touches.
+  - the parent's own span, because it is a clock the children run inside:
+    lead time and open MR to green CI. Waiting on you divides the family's
+    summed waits by that span and stops at 100%, since parallel children can
+    wait on a person at the same time.
 """
 
 from __future__ import annotations
@@ -107,7 +120,7 @@ def _completed_count_between(
     """Completed items in `[start, end)`, same repo/template filter as the caller's
     main window. A dedicated query, not a slice of `items`: the caller's `items` list
     is bounded to the *current* window and this one looks one window further back."""
-    where = ["status = 'completed'", "created_at < ?"]
+    where = ["status = 'completed'", "created_at < ?", "parent_id IS NULL"]
     args: list[object] = [end]
     if start:
         where.append("created_at >= ?")
@@ -304,7 +317,8 @@ def compute(
     template: str | None = None,
     now: datetime | None = None,
 ) -> dict:
-    where = ["1 = 1"]
+    # A slice's child is no item of its own: its work is rolled into its parent below.
+    where = ["parent_id IS NULL"]
     args: list[object] = []
     since = cutoff(range_, now)
     days = RANGES.get(range_)
@@ -325,6 +339,22 @@ def compute(
         args,
     ).fetchall()
     ids = [r["id"] for r in items]
+    # Every child of these parents, every generation, in one query; `owner` maps
+    # each id, parent or child, to the item it counts under.
+    children = (
+        conn.execute(
+            f"SELECT id, parent_id, chain_definition, materialized_chain FROM work_items "
+            f"WHERE parent_id IN ({','.join('?' * len(ids))})",
+            ids,
+        ).fetchall()
+        if ids
+        else []
+    )
+    owner = {i: i for i in ids} | {c["id"]: c["parent_id"] for c in children}
+    family: dict[str, list[str]] = {i: [i] for i in ids}
+    for c in children:
+        family[c["parent_id"]].append(c["id"])
+    all_ids = list(owner)
 
     totals = {
         "work_items": len(items),
@@ -405,22 +435,23 @@ def compute(
     totals["completed"] = len(completed_items)
 
     # ── sessions: tokens, cost, wall time, rounds, caps ──────────────────────
-    holes = ",".join("?" * len(ids))
+    holes = ",".join("?" * len(all_ids))
     sessions = conn.execute(
         f"SELECT id, work_item_id, node_id, round, {', '.join(KINDS)}, cost_usd, "
         f"cost_estimated, wall_ms, status, started_at, created_at, exited_at "
         f"FROM worker_sessions WHERE work_item_id IN ({holes})",
-        ids,
+        all_ids,
     ).fetchall()
     repo_of = {r["id"]: r["repo"] for r in items}
+    repo_of |= {c: repo_of[p] for c, p in owner.items()}
     # A wait that ran out also exits `capped_out`; it is counted on its own,
     # never as a fix loop's cap (Kraft-uwbc8).
-    timed_out = wait_timed_out_sessions(conn, ids)
+    timed_out = wait_timed_out_sessions(conn, all_ids)
     # So is a time cap's stop (Ruling 194).
-    time_capped = _caps.time_capped_sessions(conn, ids)
+    time_capped = _caps.time_capped_sessions(conn, all_ids)
     # A fix loop's round is one that did work: a forge wait on CI or review runs
     # a session in its round too, and is no round of its own.
-    waits = wait_sessions(conn, ids)
+    waits = wait_sessions(conn, all_ids)
     node_rounds: dict[str, set[tuple[str, int]]] = {}
     worked_rounds: dict[str, set[tuple[str, int]]] = {}
     item_node_rounds: dict[str, set[tuple[str, int]]] = {}
@@ -474,7 +505,9 @@ def compute(
         node_rounds.setdefault(s["node_id"], set()).add((s["work_item_id"], s["round"] or 0))
         if session not in waits:
             worked_rounds.setdefault(s["node_id"], set()).add((s["work_item_id"], s["round"] or 0))
-        item_node_rounds.setdefault(s["work_item_id"], set()).add((s["node_id"], s["round"] or 0))
+        item_node_rounds.setdefault(owner[s["work_item_id"]], set()).add(
+            (s["node_id"], s["round"] or 0)
+        )
 
         for k in KINDS:
             totals[k] += s[k] or 0
@@ -492,11 +525,12 @@ def compute(
 
     for node_id, seen in node_rounds.items():
         by_node[node_id]["rounds"] = len(seen)
-    roles = {r["id"]: _node_roles(r) for r in items}
+    # A child's node roles are its own chain's: its chain is the group's body.
+    roles = {r["id"]: _node_roles(r) for r in [*items, *children]}
     # A repair is a round from 1 up that ran a worker session in a fix-loop node:
     # the first pass (0) and the repair pass (`_REPAIR_ROUND`, below 0) are none.
     repairs = Counter(
-        wid
+        owner[wid]
         for node_id, seen in worked_rounds.items()
         for wid, rnd in seen
         if node_id in roles[wid][1] and rnd >= 1
@@ -505,7 +539,7 @@ def compute(
         totals["fix_cycles"] = round(sum(repairs.values()) / len(repairs), 1)
     totals["fix_cycles_capped"] = len(
         {
-            wid
+            owner[wid]
             for node_id, wids in node_capped_items.items()
             for wid in wids
             if node_id in roles[wid][1]
@@ -532,7 +566,7 @@ def compute(
     events = conn.execute(
         f"SELECT work_item_id, type, payload, created_at FROM events "
         f"WHERE work_item_id IN ({holes}) ORDER BY seq",
-        ids,
+        all_ids,
     ).fetchall()
     per_item: dict[str, list[sqlite3.Row]] = {}
     for e in events:
@@ -581,12 +615,14 @@ def compute(
         totals["median_lead_ms"] = int(statistics.median(lead_times_ms))
 
     completed_ids = {r["id"] for r in completed_items}
-    completed_human_wait_ms = sum(_human_wait_ms(per_item.get(cid, [])) for cid in completed_ids)
+    # Each item's events are walked on their own: a child's stop is unblocked in its own stream.
+    completed_family = [i for cid in completed_ids for i in family[cid]]
+    completed_human_wait_ms = sum(_human_wait_ms(per_item.get(i, [])) for i in completed_family)
     total_lead_ms = sum(lead_times_ms)
     if total_lead_ms:
-        totals["human_wait_pct"] = round(100 * completed_human_wait_ms / total_lead_ms)
+        totals["human_wait_pct"] = min(100, round(100 * completed_human_wait_ms / total_lead_ms))
 
-    total_unplanned = sum(_unplanned_touches(per_item.get(cid, [])) for cid in completed_ids)
+    total_unplanned = sum(_unplanned_touches(per_item.get(i, [])) for i in completed_family)
     if completed_items:
         totals["unplanned_touches_per_item"] = round(total_unplanned / len(completed_items), 2)
 
