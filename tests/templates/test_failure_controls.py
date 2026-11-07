@@ -9,6 +9,7 @@ import json
 import pytest
 import yaml
 from pydantic import ValidationError
+from support.chain_builders import exec_node, sub
 from support.harness import v1_chain
 
 from kraft.templates import models as tm
@@ -16,16 +17,8 @@ from kraft.templates.library import TemplateLibrary
 from kraft.templates.models import STORED_SNAPSHOT
 
 
-def sub(id: str = "t", **kw) -> dict:
-    return {"id": id, "kind": "subprocess", "command": "true", **kw}
-
-
 def plan(*tasks) -> dict:
     return {"tasks": list(tasks)}
-
-
-def exec_node(id: str = "build", **kw) -> dict:
-    return {"id": id, "kind": "exec", **kw}
 
 
 def merge(id: str = "merge") -> dict:
@@ -487,7 +480,7 @@ def test_a_fix_loop_is_an_execution_node_control_naming_its_fixing_tasks():
 
 
 def _grouped(**node) -> dict:
-    """early -> slices (a group) -> gate -> rebase, which declares `node`."""
+    """slices (a group) -> gate -> rebase, one of which declares `node`."""
     return {
         "id": "c",
         "nodes": [

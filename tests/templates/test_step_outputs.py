@@ -3,13 +3,10 @@
 
 import pytest
 from pydantic import ValidationError
+from support.chain_builders import sub
 from support.harness import v1_chain
 
 from kraft.templates import models as tm
-
-
-def sub(id: str = "t", **kw) -> dict:
-    return {"id": id, "kind": "subprocess", "command": "make report", **kw}
 
 
 def agent(id: str = "t", **kw) -> dict:

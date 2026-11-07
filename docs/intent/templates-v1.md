@@ -2509,7 +2509,7 @@ origin: src/kraft/executor/dispatch.py §measure_node
 The system SHALL refuse a `group` node in a chain file, and SHALL accept one only
 when it reads a stored snapshot or applies a chain revision; a group's body SHALL
 hold no forge task, no `on_merge_rejected` and no `on_base_changed`.
-enforced-by: tests/templates/test_groups.py::test_a_chain_file_cannot_declare_a_group, tests/templates/test_groups.py::test_a_stored_chain_may_hold_a_group, tests/templates/test_groups.py::test_a_group_body_refuses[forge-task], tests/templates/test_groups.py::test_a_group_body_refuses[on-merge-rejected], tests/templates/test_groups.py::test_a_group_body_refuses[on-base-changed], tests/templates/test_groups.py::test_a_group_body_refuses[group-caps]
+enforced-by: tests/templates/test_groups.py::test_a_chain_file_cannot_declare_a_group, tests/templates/test_groups.py::test_a_stored_chain_may_hold_a_group, tests/templates/test_groups.py::test_a_group_body_refuses[forge-task], tests/templates/test_groups.py::test_a_group_body_refuses[on-merge-rejected], tests/templates/test_groups.py::test_a_group_body_refuses[on-base-changed]
 origin: src/kraft/templates/models.py §GroupNode
 
 ## REQ reads-do-not-cross-a-group
@@ -2528,7 +2528,7 @@ chain revision's change set itself, wrapping the implementing node and the
 execution nodes right after it in a group, so that the revision gate asks a person;
 a `slice` entry in the agent's own change set SHALL be refused, and a plan with no
 usable section SHALL leave the change set as the agent wrote it.
-enforced-by: tests/templates/test_slicing.py::test_the_body_stops_before_a_node_a_gate_shows, tests/templates/test_slicing.py::test_the_default_chain_slices_implementation_and_verification, tests/templates/test_slicing.py::test_it_does_not_slice_and_says_why[no-section], tests/templates/test_slicing.py::test_an_agent_cannot_declare_a_slice, tests/executor/test_chain_revision.py::test_a_plan_with_slices_makes_the_revision_gate_ask, tests/executor/test_chain_revision.py::test_a_plan_without_slices_still_advances_without_a_human, tests/api/test_chain_revision_gate.py::test_an_agent_reviewed_sliced_revision_applies_without_a_stale_error
+enforced-by: tests/templates/test_slicing.py::test_the_body_stops_before_a_node_a_gate_shows, tests/templates/test_slicing.py::test_the_default_chain_slices_implementation_and_verification, tests/templates/test_slicing.py::test_it_does_not_slice_and_says_why[no-section], tests/templates/test_slicing.py::test_an_agent_cannot_declare_a_slice[slice], tests/templates/test_slicing.py::test_an_agent_cannot_declare_a_slice[unslice], tests/executor/test_chain_revision.py::test_a_plan_with_slices_makes_the_revision_gate_ask, tests/executor/test_chain_revision.py::test_a_plan_without_slices_still_advances_without_a_human, tests/api/test_chain_revision_gate.py::test_an_agent_reviewed_sliced_revision_applies_without_a_stale_error
 origin: src/kraft/templates/slicing.py
 
 ## REQ the-join-never-trusts-a-child
@@ -2568,3 +2568,55 @@ docs commit it recorded the first time.
 enforced-by: tests/test_builtins_children.py::test_a_child_worktree_made_again_keeps_its_first_docs_commit
 origin: src/kraft/builtins.py
 
+## REQ a-group-has-no-caps-or-conflict-handler-of-its-own
+
+The system SHALL refuse a `policy` or an `on_conflict` on a `group` node, and SHALL
+leave `group` out of the chain-file schemas an editor checks: a slice carries the
+caps it inherited, and a join conflict stops for a person.
+enforced-by: tests/templates/test_groups.py::test_a_group_body_refuses[group-caps], tests/templates/test_groups.py::test_a_group_body_refuses[join-conflict-handler], tests/test_config_schemas.py::test_the_chain_schema_takes_an_extending_chain[group]
+origin: src/kraft/templates/models.py §GroupNode
+
+## REQ chain-revision-again-slices-the-plan-as-it-then-stands
+
+WHEN chain revision runs again over a chain that already holds a slice group, after
+a rewind to the plan or earlier, the system SHALL take the group out first and
+rebuild it from the plan as it then stands, or leave it out saying why, and SHALL
+reset the group's state to deciding with its generation kept, so that the next
+entry slices the next generation.
+enforced-by: tests/templates/test_slicing.py::test_revision_again_takes_the_group_out_and_decides_afresh[rebuilt], tests/templates/test_slicing.py::test_revision_again_takes_the_group_out_and_decides_afresh[left-out], tests/executor/test_chain_revision.py::test_approving_a_sliced_revision_gives_the_run_chain_a_group[rebuilt], tests/executor/test_chain_revision.py::test_approving_a_sliced_revision_gives_the_run_chain_a_group[left-out]
+origin: src/kraft/templates/slicing.py
+
+## REQ a-rewind-to-the-plan-is-the-way-on-from-dropped-slices
+
+IF a parent's slices are unjoined, THEN the system SHALL refuse a retry from an
+earlier node, `skip`, `complete`, and a draft acting at or behind the group; and IF
+every slice was dropped, THEN it SHALL refuse a retry alone and take a retry that
+rewinds to the plan or earlier, `retry --restart` included.
+enforced-by: tests/api/test_lifecycle_slices.py::test_an_unjoined_parent_refuses_a_retry_from_an_earlier_node[path-plan], tests/api/test_lifecycle_slices.py::test_an_unjoined_parent_refuses_a_retry_from_an_earlier_node[restart], tests/api/test_lifecycle_slices.py::test_a_retry_with_every_slice_dropped_wants_a_rewind[retry-alone], tests/api/test_lifecycle_slices.py::test_a_retry_with_every_slice_dropped_wants_a_rewind[at-the-group], tests/api/test_lifecycle_slices.py::test_a_retry_with_every_slice_dropped_wants_a_rewind[rewind-to-the-plan], tests/api/test_lifecycle_slices.py::test_a_retry_with_every_slice_dropped_wants_a_rewind[restart], tests/api/test_lifecycle_slices.py::test_a_draft_may_not_move_an_unjoined_parent_back[at-the-group], tests/api/test_lifecycle_slices.py::test_a_draft_may_not_move_an_unjoined_parent_back[after-the-group]
+origin: src/kraft/api/routes/lifecycle.py §_retry
+
+## REQ the-parents-cap-is-the-familys
+
+WHEN a parent's spend cap is raised, the system SHALL write the new cap to each of
+its unended slices and retry the slices the family cap stopped, and SHALL leave a
+slice stopped for any other reason as it was; a pause of the family, a parent's
+cap firing or the family check SHALL end the walk task of each slice it pauses.
+enforced-by: tests/api/test_lifecycle_slices.py::test_raising_the_parents_cap_reaches_and_retries_the_slices_it_stopped, tests/api/test_lifecycle_slices.py::test_pause_and_resume_cascade_to_the_children_the_parent_paused, tests/executor/test_budget_caps.py::test_the_family_check_stops_a_waiting_parent_and_pauses_its_children
+origin: src/kraft/executor/slices.py §resume_family
+
+## REQ a-parents-refusal-wakes-no-slice
+
+IF a parent's resume or retry is refused, THEN the system SHALL leave its slices
+asleep, and SHALL queue on re-entry only the slices the fork filed paused and never
+queued.
+enforced-by: tests/api/test_lifecycle_slices.py::test_a_parent_refusal_leaves_the_slices_asleep[resume-paused], tests/api/test_lifecycle_slices.py::test_a_parent_refusal_leaves_the_slices_asleep[retry-needs_human], tests/executor/test_slices.py::test_re_entry_queues_only_the_children_the_fork_filed_paused[never-queued], tests/executor/test_slices.py::test_re_entry_queues_only_the_children_the_fork_filed_paused[paused-by-a-person-after-it-queued], tests/executor/test_slices.py::test_a_prelude_stopped_in_its_second_node_resumes_there
+origin: src/kraft/api/routes/lifecycle.py §resume_work_item
+
+## REQ a-slice-archives-and-inherits-with-its-parent
+
+WHEN a parent is archived, by a person or by the poller, or its slices' parent is
+already archived, the system SHALL archive the slices of every generation with it;
+and a slice SHALL be filed with the parent's harness overrides, cross-repo paths
+and merge policy.
+enforced-by: tests/test_archive_poller.py::test_a_slices_child_is_archived_only_after_its_parent_joined[with-an-archived-parent], tests/api/test_lifecycle_slices.py::test_archiving_a_parent_already_archived_alone_archives_its_slices_too, tests/store/test_slices.py::test_children_are_filed_together_or_not_at_all, tests/executor/test_slices.py::test_a_group_with_two_slices_files_two_children_and_waits
+origin: src/kraft/archive.py

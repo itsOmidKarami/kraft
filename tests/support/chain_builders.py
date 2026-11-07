@@ -52,6 +52,16 @@ def v1_node(id: str = "build", kind: str = "exec", *, tasks=None, **fields) -> d
     return {**node, **fields}
 
 
+def sub(id: str = "t", **fields) -> dict:
+    """A bare `subprocess` task mapping (`true` unless `fields` say otherwise)."""
+    return {"id": id, "kind": "subprocess", "command": "true", **fields}
+
+
+def exec_node(id: str = "build", **fields) -> dict:
+    """A bare `exec` node mapping: the caller gives its `tasks=` or `steps=`."""
+    return {"id": id, "kind": "exec", **fields}
+
+
 def v1_fix_loop_node(node_id: str, measure: dict, *, judge: bool = True) -> dict:
     """The legacy `verify_fix_loop` shape as one V1 node: `measure` is the
     node's task, the fix loop's one task is an agent on the `fake` harness

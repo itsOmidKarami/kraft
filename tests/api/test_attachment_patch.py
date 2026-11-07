@@ -76,13 +76,22 @@ def test_a_revised_spec_replaces_the_snapshot_and_keeps_the_plan(client, repo):
     assert changed == [{"from": ["plan", "spec"], "to": ["plan", "spec"]}]
 
 
-def test_set_attachments_refuses_a_plan_with_a_refused_slices_section(client, repo):
-    wid = _file(client, repo)
+@pytest.mark.parametrize("door", ["intake", "set-attachments"])
+def test_a_plan_with_a_refused_slices_section_is_refused(client, repo, door):
     bad = _doc(
         repo,
         "plans/bad.md",
         "## Slices\n\n- **Slice 1: A.** Task 1.\n- **Slice 2: B.** Task 1.\n\n### Task 1: t\n",
     )
+    if door == "intake":
+        r = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "attachments": [{"kind": "plan", "path": bad}]},
+        )
+        assert r.status_code == 422, r.text
+        assert "two slices" in r.text
+        return
+    wid = _file(client, repo)
 
     r = client.patch(f"/api/work-items/{wid}", json={"attachments": {"plan": bad}})
 

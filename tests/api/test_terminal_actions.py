@@ -6,7 +6,8 @@ chain (`manual-completion-is-an-explicit-work-item-terminal-action`,
 from __future__ import annotations
 
 import pytest
-from support.api import _force_node, _set_status
+from support.api import _force_node, _orchestrator_db, _set_status
+from support.harness import git
 
 #: verb -> (status it ends in, the audit event it records)
 ENDS = {
@@ -235,3 +236,22 @@ def test_an_ended_item_cannot_be_reconfigured(client, repo, verb, body):
         before["chain_template"],
         before["node_overrides"],
     )
+
+
+def test_completing_a_slices_child_by_hand_pins_its_head_for_the_join(client, repo):
+    wid = _stopped(client, repo)
+    worktree = client.app.state.run_dirs.worktrees / wid
+    git(repo, "worktree", "add", "-b", f"kraft/{wid}", str(worktree))
+    with _orchestrator_db() as c, c:
+        c.execute(
+            "UPDATE work_items SET parent_id = 'p1', slice_generation = 1, slice_key = 1 "
+            "WHERE id = ?",
+            (wid,),
+        )
+
+    r = client.post(f"/api/work-items/{wid}/complete", json={"reason": "done by hand"})
+
+    assert r.status_code == 200, r.text
+    with _orchestrator_db() as c:
+        pinned = c.execute("SELECT pinned_head FROM work_items WHERE id = ?", (wid,)).fetchone()[0]
+    assert pinned == git(worktree, "rev-parse", "HEAD")

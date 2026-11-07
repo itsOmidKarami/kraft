@@ -3,6 +3,7 @@ and the canonical execution paths a resolved chain assigns."""
 
 import pytest
 from pydantic import ValidationError
+from support.chain_builders import exec_node
 
 from kraft import harness as harness_mod
 from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError
@@ -16,10 +17,6 @@ from kraft.templates.environment import (
 
 def agent(id: str = "author", **kw) -> dict:
     return {"id": id, "kind": "agent", "harness": "codex", "prompt": "do it", **kw}
-
-
-def exec_node(id: str = "spec", **kw) -> dict:
-    return {"id": id, "kind": "exec", **kw}
 
 
 # ── task kinds are discriminated (task-kinds-are-discriminated) ──

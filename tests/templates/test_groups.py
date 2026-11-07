@@ -3,10 +3,10 @@ one, a stored chain may hold one, and its body and reads are checked."""
 
 import pytest
 from pydantic import ValidationError
+from support.chain_builders import exec_node, sub
 
 from kraft.templates import models as tm
 from kraft.templates.models import STORED_SNAPSHOT
-from templates.test_failure_controls import exec_node, sub
 
 
 def group_node(*body: dict, **kw) -> dict:

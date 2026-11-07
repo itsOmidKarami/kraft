@@ -22,9 +22,12 @@ def _no_claim_leaks_between_tests():
     when_free.release_claim()
 
 
-async def _set_status(database, wid, status):
+async def _set_status(database, wid, status, stop_kind=None):
     await database.write(
-        lambda c: c.execute("UPDATE work_items SET status = ? WHERE id = ?", (status, wid))
+        lambda c: c.execute(
+            "UPDATE work_items SET status = ?, stop_kind = ? WHERE id = ?",
+            (status, stop_kind, wid),
+        )
     )
 
 
@@ -34,6 +37,8 @@ async def _set_status(database, wid, status):
         pytest.param(None, None, True, id="nothing"),
         pytest.param("active", None, False, id="active"),
         pytest.param("waiting", None, False, id="waiting"),
+        # A parent waiting on its slices holds nothing: its running children are the busy ones.
+        pytest.param("waiting/slices", None, True, id="a-parent-waiting-on-its-slices"),
         pytest.param("queued", None, False, id="queued"),
         pytest.param("rate_limited", None, False, id="rate_limited"),
         pytest.param("needs_human", None, True, id="needs_human-at-gate"),
@@ -48,7 +53,8 @@ async def test_free_means_nothing_going_on(item_on, database, run_dirs, status, 
 
     if status is not None:
         it = await item_on(v1_named_chain(run_dirs.base / "t"), "implementation")
-        await _set_status(database, it.id, status)
+        status, _, stop_kind = status.partition("/")
+        await _set_status(database, it.id, status, stop_kind or None)
         if session:
             await it.session("s1", "implementation.main.implement", running=(1, 1.0))
     assert when_free.is_free(database) is free
