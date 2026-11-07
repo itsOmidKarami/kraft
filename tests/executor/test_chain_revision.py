@@ -342,6 +342,8 @@ async def test_approving_a_sliced_revision_gives_the_run_chain_a_group(item_on, 
 
     assert [n.id for n in nodes] == ["revise", GATE, "slices", "brief"]
     assert [n.id for n in nodes[2].body] == ["slices.build", "slices.brief"]
+    state = it.database.read(lambda c: store.group_state(c, it.id))
+    assert (state.group, state.phase, state.generation) == ("slices", "deciding", 0)
 
 
 async def test_a_plan_without_slices_still_advances_without_a_human(item_on, tmp_path):

@@ -184,10 +184,20 @@ async def _revise(st, row, gate: str, *, viewer: bool, seen: str | None) -> str 
         "diff": revision.diff(chain.chain, revised.chain),
     }
     seen = (row["materialized_chain"], row["run_chain"])
+
+    def apply(c):
+        store.revise_chain(c, row["id"], revised.to_json(), payload, seen=seen)
+        if changes.slice is not None:
+            # A revision that adds a group starts it over: the next entry decides
+            # again, and forks the next generation (`executor.slices`).
+            prior = store.group_state(c, row["id"])
+            generation = prior.generation if prior is not None else 0
+            store.set_group_state(
+                c, row["id"], store.GroupState(group=changes.slice.group, generation=generation)
+            )
+
     try:
-        await st.db.write(
-            lambda c: store.revise_chain(c, row["id"], revised.to_json(), payload, seen=seen)
-        )
+        await st.db.write(apply)
     except ValueError as exc:
         return f"{gate}: {exc}"
     return None
