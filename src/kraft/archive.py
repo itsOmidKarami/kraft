@@ -66,8 +66,9 @@ async def tick(app) -> list[str]:
 
 
 def _archivable_children(conn) -> list:
-    """Finished children whose parent's group is `joined`, or whose parent is
-    archived: a child is archived with its parent, never alone before the join."""
+    """Finished children of a generation the parent's group has left behind
+    (joined, or started over), or whose parent is archived: a child is archived with
+    its parent, never alone before the join."""
     from kraft import store
 
     rows = conn.execute(
@@ -80,12 +81,14 @@ def _archivable_children(conn) -> list:
             "SELECT archived_at FROM work_items WHERE id = ?", (row["parent_id"],)
         ).fetchone()
         state = store.group_state(conn, row["parent_id"])
-        joined = (
-            state is not None
-            and state.phase == "joined"
-            and state.generation >= (row["slice_generation"] or 0)
+        # A generation is finished once the parent is past its join, or has started
+        # over: a rewind to the plan puts the group back to `deciding` (or `prelude`),
+        # with the old generation's children left behind, dropped or joined.
+        finished = state is not None and not (
+            state.phase in ("forked", "joining")
+            and state.generation <= (row["slice_generation"] or 0)
         )
-        if joined or (parent is not None and parent["archived_at"]):
+        if finished or (parent is not None and parent["archived_at"]):
             out.append(row)
     return out
 

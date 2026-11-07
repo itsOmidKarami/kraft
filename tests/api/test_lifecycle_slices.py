@@ -4,6 +4,7 @@ children."""
 
 from __future__ import annotations
 
+import dataclasses
 from functools import partial
 
 import pytest
@@ -215,6 +216,34 @@ def test_a_retry_with_every_slice_dropped_wants_a_rewind(client, repo, body, ref
 
 
 @pytest.mark.parametrize(
+    ("verb", "body", "at"),
+    [
+        pytest.param("retry", {}, "plan", id="retry-alone"),
+        pytest.param("retry", {"restart": True}, "spec", id="restart-at-the-first-node"),
+        pytest.param("skip", {}, "plan", id="skip"),
+    ],
+)
+def test_a_parent_being_replanned_has_every_door_but_the_groups(client, repo, verb, body, at):
+    """A rewind to the plan leaves the group's old phase on the row until chain
+    revision resets it. If the plan then stops for a person, abandon is not the
+    only way out: the cursor is behind the group, so nothing is unjoined."""
+    parent, kids = _family(
+        client, repo, parent_status="needs_human", children=("abandoned", "abandoned")
+    )
+    with _db() as c, c:
+        state = store.GroupState(group="implementation", phase="joining", generation=1)
+        c.execute(
+            "UPDATE work_items SET group_state = ?, current_node_id = ? WHERE id = ?",
+            (state.to_json(), at, parent),
+        )
+
+    r = client.post(f"/api/work-items/{parent}/{verb}", json=body)
+
+    assert r.status_code == 200, r.text
+    assert _status_of(client, parent) != "needs_human"
+
+
+@pytest.mark.parametrize(
     ("path", "status"),
     [
         pytest.param("implementation.main.implement", 409, id="at-the-group"),
@@ -255,7 +284,7 @@ def test_raising_the_parents_cap_reaches_and_retries_the_slices_it_stopped(
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
     cap = {"scope": scope, "path": "", "spent_usd": 0.07, "cap_usd": 0.05, "unknown_launches": 0}
     parent = _budget_stopped_item(client, repo, cap, **({"policy": policy} if policy else {}))
-    kids = [_paused(client, repo, chain_template="default") for _ in range(3)]
+    kids = [_paused(client, repo, chain_template="default") for _ in range(4)]
     state = store.GroupState(group="slices", phase="forked", generation=1)
     with _db() as c, c:
         c.execute("UPDATE work_items SET group_state = ? WHERE id = ?", (state.to_json(), parent))
@@ -269,14 +298,21 @@ def test_raising_the_parents_cap_reaches_and_retries_the_slices_it_stopped(
     _stopped_child(kids[1], {**cap, "scope": "tokens", "path": "implementation"})
     with _db() as c, c:
         c.execute("UPDATE work_items SET status = 'needs_human' WHERE id = ?", (kids[2],))
+    # The family's token budget is as much the parent's as its dollar cap.
+    _stopped_child(kids[3], {"scope": "tokens", "path": "", "spent_tokens": 9, "cap_tokens": 5})
 
     r = client.post(f"/api/work-items/{parent}/budget/raise", json={"budget_usd": 1.0})
 
     assert r.status_code == 200, r.text
     caps = [client.get(f"/api/work-items/{k}").json()["budget_cap"]["cap_usd"] for k in kids]
-    assert caps == [1.0] * 3
-    assert _status_of(client, kids[0]) in ("queued", "active")
-    assert [_status_of(client, k) for k in kids[1:]] == ["needs_human", "needs_human"]
+    assert caps == [1.0] * 4
+    assert [_status_of(client, k) in ("queued", "active") for k in kids] == [
+        True,
+        False,
+        False,
+        True,
+    ]
+    assert [_status_of(client, k) for k in kids[1:3]] == ["needs_human", "needs_human"]
 
 
 @pytest.mark.parametrize(
@@ -294,6 +330,27 @@ def test_a_parent_refusal_leaves_the_slices_asleep(client, repo, monkeypatch, ve
 
     assert r.status_code == 409, r.text
     assert "already running" in r.json()["detail"]
+    assert [_status_of(client, k) for k in kids] == ["paused", "paused"]
+
+
+@pytest.mark.parametrize(
+    ("verb", "status"),
+    [("resume", "paused"), ("retry", "needs_human")],
+)
+def test_a_parent_that_only_queues_leaves_the_slices_asleep(client, repo, verb, status):
+    """The cascade follows the parent's own claim: a full board queues the parent
+    without waking anything, and the start that makes the request again wakes them."""
+    client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
+    parent, kids = _family(client, repo, parent_status=status, children=("paused", "paused"))
+    busy = _paused(client, repo, chain_template="default")
+    with _db() as c, c:
+        c.execute("UPDATE work_items SET paused_by_parent = 1 WHERE id IN (?, ?)", kids)
+        c.execute("UPDATE work_items SET status = 'active' WHERE id = ?", (busy,))
+
+    r = client.post(f"/api/work-items/{parent}/{verb}", json={})
+
+    assert r.status_code == 200, r.text
+    assert _status_of(client, parent) == "queued"
     assert [_status_of(client, k) for k in kids] == ["paused", "paused"]
 
 

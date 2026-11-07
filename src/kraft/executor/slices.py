@@ -489,8 +489,9 @@ async def pause_family(db, parent_id: str, *, by: str, cancel=None) -> list[str]
 
 
 def stopped_by_family_cap(db, child: dict) -> bool:
-    """Whether `child` stopped on the item-wide spend cap its parent's family
-    shares (its own launch check refused: `caps.budget_breach`, path `""`)."""
+    """Whether `child` stopped on an item-wide spend cap its parent's family
+    shares: dollars or tokens (its own launch check refused: `caps.budget_breach`,
+    path `""`), or the instance's per-item dollar cap."""
     if child["status"] != WorkItemStatus.NEEDS_HUMAN or child["stop_kind"] != StopKind.BUDGET:
         return False
     found = db.read(
@@ -502,7 +503,7 @@ def stopped_by_family_cap(db, child: dict) -> bool:
     )
     budget = (json.loads(found["payload"]) if found else {}).get("budget") or {}
     return budget.get("scope") == "work_item" or (
-        budget.get("scope") == "usd" and budget.get("path") == ""
+        budget.get("scope") in ("usd", "tokens") and budget.get("path") == ""
     )
 
 

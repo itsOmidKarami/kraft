@@ -89,20 +89,6 @@ def group_after(chain: MaterializedChain, at: str | None) -> str | None:
     return next((n.id for n in _remaining(chain, at, set()) if isinstance(n.node, GroupNode)), None)
 
 
-def rebuilt_from(chain: MaterializedChain) -> int | None:
-    """The index of the node that writes the chain revision ahead of `chain`'s
-    group: a rewind to it or earlier runs chain revision again, which rebuilds
-    the group (or leaves it out). None when the chain holds no group, or no
-    revision ahead of it."""
-    from kraft.templates.revision import CHAIN_REVISION  # it imports this module
-
-    nodes = chain.chain.nodes
-    at = next((i for i, n in enumerate(nodes) if isinstance(n.node, GroupNode)), None)
-    if at is None:
-        return None
-    return next((i for i in range(at - 1, -1, -1) if CHAIN_REVISION in nodes[i].produces()), None)
-
-
 def slicing_for(
     chain: MaterializedChain,
     plan_text: str | None,

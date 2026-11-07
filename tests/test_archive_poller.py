@@ -215,6 +215,10 @@ async def _child_of_a_group(app, repo, phase: str, parent_archived: bool = False
         pytest.param("forked", False, False, id="before-the-join"),
         pytest.param("joining", False, False, id="while-joining"),
         pytest.param("joined", False, True, id="after-the-join"),
+        # A rewind to the plan starts the group over: this generation's children,
+        # dropped or joined, are finished whether or not a new fork follows.
+        pytest.param("deciding", False, True, id="after-a-rebuild-that-left-the-group-out"),
+        pytest.param("prelude", False, True, id="while-a-new-generation-prepares"),
         # An abandoned or cancelled parent never joins: its slices go with it.
         pytest.param("forked", True, True, id="with-an-archived-parent"),
     ],

@@ -243,6 +243,20 @@ def test_revision_again_takes_the_group_out_and_decides_afresh(plan, ids, reject
     assert ("Not sliced" in changes.rationale) is (reject_to == "build")
 
 
+def test_the_revising_task_is_not_shown_a_chain_whose_group_cannot_come_out(monkeypatch):
+    chain = _chain()
+    once = slicing.with_slicing(_changes(), chain, slicing.SlicingInput(PLAN, 6), at=GATE)
+    sliced = revision.revise(chain, once, at=GATE, library=LIBRARY)
+
+    def refuse(chain, group):
+        raise ValueError("the group cannot come out")
+
+    monkeypatch.setattr(slicing, "unsliced", refuse)
+
+    with pytest.raises(ValueError, match="cannot come out"):
+        revision.context_note(sliced, "plan")
+
+
 def test_an_item_filed_with_a_plan_keeps_the_revision_gate_that_approves_its_split(templates_dir):
     """`--plan` trims `plan` and `plan_approval`, never `chain_revision`, so every
     split is approved somewhere."""

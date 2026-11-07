@@ -1443,10 +1443,6 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         # and catching spawn's own refusal only after those writes would
         # strand the item claimed 'active' with no walk behind it.
         raise HTTPException(409, "a walk is already running for this work item")
-    if store.group_unjoined(row):
-        # After every refusal of its own, so a 409 never leaves its slices woken:
-        # the ones its pause stopped wake with it.
-        await slices_mod.resume_family(st.db, wid)
     # Bracketed from *before* the claim to the hand-off (the claim-then-return
     # class). A claim makes this item read `active`, which means "a walk is
     # behind this"; any exit from here that neither spawns one nor leaves a
@@ -1484,6 +1480,10 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             if st.db.read(store.active_count) >= limit:
                 return await queued_answer(request, wid, "resume", body, from_statuses)
             raise HTTPException(409, "work item is not paused")
+        if store.group_unjoined(row):
+            # Only once the parent's own claim has held, so a 409 never leaves its
+            # slices woken: the ones its pause stopped wake with it.
+            await slices_mod.resume_family(st.db, wid)
         # The claim moves before this awaited rebase deliberately (Kraft-11e0):
         # the up-to-60s network call now happens on an item already marked
         # `active`, and no second caller can pass the claim while it runs.
@@ -2020,10 +2020,6 @@ async def _retry(wid: str, body: Retry, request: Request):
         # writes would strand the item claimed 'active' with the cap already
         # cleared and no walk behind it.
         raise HTTPException(409, "a walk is already running for this work item")
-    if store.group_unjoined(row):
-        # After every refusal of its own, so a 409 never leaves its slices woken:
-        # the ones its pause or its cap stopped wake with it.
-        await slices_mod.resume_family(st.db, wid)
     # Bracketed from *before* the claim to the hand-off (the claim-then-return
     # class). A claim makes this item read `active`, which means "a walk is
     # behind this"; any exit from here that neither spawns one nor leaves a
@@ -2063,6 +2059,10 @@ async def _retry(wid: str, body: Retry, request: Request):
             if st.db.read(store.active_count) >= limit:
                 return await queued_answer(request, wid, "retry", asked, admitting(Verb.RETRY))
             raise HTTPException(409, "work item is not stopped")
+        if store.group_unjoined(row):
+            # Only once the parent's own claim has held, so a 409 never leaves its
+            # slices woken: the ones its pause or its cap stopped wake with it.
+            await slices_mod.resume_family(st.db, wid)
         # Not item_folder: an in-place item is never sandboxed, and
         # `refresh_base` rebases it through `inplace.rebase`.
         worktree = st.run_dirs.worktrees / wid

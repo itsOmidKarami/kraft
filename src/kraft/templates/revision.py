@@ -680,11 +680,8 @@ def context_note(chain: MaterializedChain | None, node_id: str) -> str:
     if (group := slicing_mod.group_after(chain, node_id)) is not None:
         # Running again after a rewind to the plan: the change set applies to
         # the chain with the group taken out (`ChangeSet.unslice`), so that is
-        # the chain shown.
-        try:
-            chain = slicing_mod.unsliced(chain, group)
-        except ValueError:
-            pass
+        # the chain shown. A group that cannot come out raises, as `revise` does.
+        chain = slicing_mod.unsliced(chain, group)
     nodes = chain.chain.nodes
     here = next((i for i, n in enumerate(nodes) if n.id == node_id), 0)
     gate = next(

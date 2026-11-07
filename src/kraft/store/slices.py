@@ -24,6 +24,7 @@ from kraft.vocab.sql import in_list
 __all__ = [
     "ChildRow",
     "GroupState",
+    "behind_group",
     "children_of",
     "family_ids",
     "file_children",
@@ -114,12 +115,33 @@ def is_child(row) -> bool:
 
 
 def group_unjoined(row) -> bool:
-    """Whether `row` is a parent whose slice group has forked and not joined."""
+    """Whether `row` is a parent whose slice group has forked and not joined, and
+    whose cursor stands at or past the group. A rewind behind the group (a retry
+    from the plan, once every slice was dropped) leaves the old phase on the row
+    until chain revision resets it, but nothing is unjoined there: the parent is
+    being re-planned and every door but the group's own is open."""
     try:
         text = row["group_state"]
     except (IndexError, KeyError):
         return False
-    return bool(text) and GroupState.from_json(text).phase in ("forked", "joining")
+    if not text:
+        return False
+    state = GroupState.from_json(text)
+    return state.phase in ("forked", "joining") and not behind_group(row, state)
+
+
+def behind_group(row, state: GroupState) -> bool:
+    """Whether `row`'s cursor stands before the node of `state.group`. False when
+    either is unknown (a narrow row, a chain with no such node): unknown reads as
+    at the group, the stricter answer."""
+    from kraft.store.chain import node_index  # deferred: chain imports the store package
+
+    try:
+        here = node_index(row, row["current_node_id"])
+        group = node_index(row, state.group)
+    except (IndexError, KeyError):
+        return False
+    return here is not None and group is not None and here < group
 
 
 def group_state(conn: sqlite3.Connection, wid: str) -> GroupState | None:
