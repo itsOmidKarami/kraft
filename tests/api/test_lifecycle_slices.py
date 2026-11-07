@@ -142,3 +142,18 @@ def test_a_worker_cannot_act_on_its_own_family(client, repo, acts_on):
     )
 
     assert r.status_code == 403, r.text
+
+
+def test_a_retry_with_every_slice_dropped_names_the_way_on(client, repo):
+    parent, kids = _family(
+        client, repo, parent_status="needs_human", children=("abandoned", "abandoned")
+    )
+    with _db() as c, c:
+        state = store.GroupState(group="slices", phase="joining", generation=1)
+        c.execute("UPDATE work_items SET group_state = ? WHERE id = ?", (state.to_json(), parent))
+
+    r = client.post(f"/api/work-items/{parent}/retry", json={})
+
+    assert r.status_code == 409, r.text
+    assert "abandon" in r.json()["detail"]
+    assert "plan" in r.json()["detail"]
