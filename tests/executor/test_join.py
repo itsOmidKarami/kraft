@@ -322,6 +322,7 @@ async def test_the_conflict_handler_resolves_and_the_join_goes_on(family, monkey
     assert "slice 2 (c2)" in note and "in shared.py" in note
     assert f"--keep-redundant-commits {child['docs'][:12]}..{child['head'][:12]}" in note
     assert "Never `git commit -m`" in note and "never `--skip`" in note
+    assert "Leave no untracked or uncommitted file behind" in note
 
 
 async def _start_the_pick(family):
@@ -380,6 +381,28 @@ async def test_a_handler_that_pauses_mid_pick_leaves_the_parent_put_back(family,
     assert git(family.worktree, "status", "--porcelain") == ""
     gitdir = Path(git(family.worktree, "rev-parse", "--absolute-git-dir"))
     assert not (gitdir / "CHERRY_PICK_HEAD").exists()
+
+
+async def test_a_handler_that_leaves_another_operation_names_where_to_reset(family, monkeypatch):
+    """`put_back` clears only a cherry-pick: anything else the handler left stops
+    the parent with the commit to reset to, since a retry never resets."""
+    await _conflicting(family)
+    seen = {}
+
+    async def merge_left(family):
+        at = seen["at"] = git(family.worktree, "rev-parse", "HEAD")  # where the join stopped
+        await _start_the_pick(family)
+        gitdir = Path(git(family.worktree, "rev-parse", "--absolute-git-dir"))
+        (gitdir / "MERGE_HEAD").write_text(at + "\n")
+
+    _handler(monkeypatch, family, merge_left, "failed")
+
+    assert await family.join(HANDLED) == "needs_human"
+
+    assert family.stop() == ("needs_human", "checkout")
+    reason = family.reason()
+    assert f"`git reset --hard {seen['at'][:12]}` on {family.branch}" in reason
+    assert "`git cherry-pick -x --allow-empty --keep-redundant-commits" in reason
 
 
 async def test_a_handed_off_slice_that_is_still_missing_stops_again(family):

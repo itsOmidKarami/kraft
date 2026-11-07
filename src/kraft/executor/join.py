@@ -472,7 +472,8 @@ async def _conflict(
     what = f"slice {key} ({child['id']}) conflicts with what is already joined{where}. "
     steps = _steps(child, docs, head, branch)
     if node.on_conflict:
-        stopped, ok = await _handle(db, run_dirs, row, node, worktree, what + steps, launch, policy)
+        note = what + steps + _LEAVE_NOTHING
+        stopped, ok = await _handle(db, run_dirs, row, node, worktree, note, launch, policy)
         wrong = None
         if stopped is None:
             wrong = _not_joined(worktree, branch, at, range_) if ok else "it reported a failure"
@@ -483,13 +484,27 @@ async def _conflict(
         try:
             put_back(worktree, branch, at)
         except (UnsafeWorktree, ForgeError) as exc:
-            await _stop(db, wid, node, f"could not put the parent back: {exc}", StopKind.CHECKOUT)
+            # The handler left something else in progress, its picks maybe on the branch.
+            why = (
+                f"the conflict handler left the parent where it cannot be put back: {exc}. "
+                f"Clear that, then `git reset --hard {at[:12]}` on {branch}, where the join "
+                "stopped, before the steps below. " + steps
+            )
+            await _stop(db, wid, node, why, StopKind.CHECKOUT)
             return "needs_human"
         if stopped is not None:
             return stopped
         detail = f"the conflict handler did not join it: {wrong}; {detail}"
     await _stop(db, wid, node, what + steps + f" ({detail[:300]})", StopKind.CONFLICT)
     return "needs_human"
+
+
+#: Kraft commits whatever an agent leaves uncommitted, and the applied-check
+#: counts that commit as one the slice does not hold.
+_LEAVE_NOTHING = (
+    " Leave no untracked or uncommitted file behind (a `.orig`, a scratch file): Kraft "
+    "commits anything left over, and an extra commit means the slice is not joined."
+)
 
 
 async def _handle(

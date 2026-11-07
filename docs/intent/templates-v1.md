@@ -2596,9 +2596,11 @@ would be given; it SHALL record the slice joined and go on only when the handler
 answered `ok` and the applied-check finds every commit of the slice on a settled
 worktree, and otherwise SHALL put the parent back at that commit again and stop for
 a person with the same steps; a handler stopped by a pause, a rate limit or a cap
-SHALL leave the parent put back at that commit too. With no handler a join conflict SHALL stop for a
+SHALL leave the parent put back at that commit too; and IF the handler left the
+parent where it cannot be put back, THEN the stop SHALL name that commit to reset
+to. With no handler a join conflict SHALL stop for a
 person.
-enforced-by: tests/executor/test_join.py::test_the_conflict_handler_resolves_and_the_join_goes_on, tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-fails], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-fails-having-picked-it-all], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-says-ok-having-done-nothing], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-says-ok-mid-pick], tests/executor/test_join.py::test_a_handler_that_pauses_mid_pick_leaves_the_parent_put_back, tests/executor/test_join.py::test_a_conflict_hands_off_and_never_resets_on_retry
+enforced-by: tests/executor/test_join.py::test_the_conflict_handler_resolves_and_the_join_goes_on, tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-fails], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-fails-having-picked-it-all], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-says-ok-having-done-nothing], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-says-ok-mid-pick], tests/executor/test_join.py::test_a_handler_that_pauses_mid_pick_leaves_the_parent_put_back, tests/executor/test_join.py::test_a_handler_that_leaves_another_operation_names_where_to_reset, tests/executor/test_join.py::test_a_conflict_hands_off_and_never_resets_on_retry
 origin: src/kraft/executor/join.py §_conflict -- the applied-check is bookkeeping, not a security boundary: verification and the human gates after the join judge the code, and the handler gets nothing an `on_failure` handler lacks (`dispatch.run_recovery`).
 
 ## REQ chain-revision-again-slices-the-plan-as-it-then-stands
