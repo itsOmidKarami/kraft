@@ -36,6 +36,8 @@ a crash kills it, both leaving `handling` and whatever the handler left. The
 join re-entering a `handling` slice clears the leftovers and joins the slice if
 the applied-check finds it whole; otherwise it puts the parent back and picks
 the slice again, so the handler gets a fresh turn (`join_handler_resumed`).
+It gets one such turn (`_FRESH_TURNS`): cut short again, the slice is
+`handed_off` and the parent stops for a person.
 
 The applied-check is bookkeeping, not a security boundary: what the code *does*
 is judged by `verification` and the human gates after the join.
@@ -377,11 +379,25 @@ async def _replay_one(
         if _not_joined(worktree, branch, at, state.recorded[key]) is None:
             await _handler_resumed(db, wid, child, "joined")
             return await _mark_joined(db, wid, key, worktree)
+        steps = _steps(child, docs, head, branch)
         try:
             put_back(worktree, branch, at)
         except (UnsafeWorktree, ForgeError) as exc:
-            why = _left_unputbackable(exc, at, branch, _steps(child, docs, head, branch))
-            await _stop(db, wid, node, why, StopKind.CHECKOUT)
+            await _stop(
+                db, wid, node, _left_unputbackable(exc, at, branch, steps), StopKind.CHECKOUT
+            )
+            return "needs_human"
+        if db.read(lambda c: _reruns(c, wid, child)) >= _FRESH_TURNS:
+            await db.write(lambda c: _set_phase(c, wid, "handed_off"))
+            await _handler_resumed(db, wid, child, "handed_off")
+            await _stop(
+                db,
+                wid,
+                node,
+                f"slice {key} ({child['id']}): its conflict handler was cut short twice, "
+                "so the slice is yours now. " + steps,
+                StopKind.CONFLICT,
+            )
             return "needs_human"
         await _handler_resumed(db, wid, child, "rerun")
     if state.slice_phase == "picking" and state.at_commit:
@@ -535,6 +551,20 @@ def _left_unputbackable(exc: Exception, at: str, branch: str, steps: str) -> str
         f"the conflict handler left the parent where it cannot be put back: {exc}. "
         f"Clear that, then `git reset --hard {at[:12]}` on {branch}, where the join "
         "stopped, before the steps below. " + steps
+    )
+
+
+#: Fresh turns a conflict handler gets after being cut short: a handler cut
+#: short again is likely to be again, and each turn costs a full agent run.
+_FRESH_TURNS = 1
+
+
+def _reruns(conn, wid: str, child: dict) -> int:
+    return sum(
+        e["type"] == WorkItemEvent.JOIN_HANDLER_RESUMED
+        and e["payload"].get("child") == child["id"]
+        and e["payload"].get("outcome") == "rerun"
+        for e in events.read_after(conn, 0, wid)
     )
 
 

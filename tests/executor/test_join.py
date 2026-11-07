@@ -541,27 +541,58 @@ async def _crashed_in_the_handler(family, act):
     write(family.worktree, "shared.py.orig", "<<<<<<<\n")
 
 
+_BOTH = ["Task 2.0: work", "Task 1.0: work"]
+
+
 @pytest.mark.parametrize(
-    ("act", "runs", "outcome"),
+    ("act", "earlier", "runs", "outcomes", "subjects"),
     [
-        pytest.param(_start_the_pick, 1, "rerun", id="mid-pick"),
-        pytest.param(_resolve_by_hand, 0, "joined", id="after-it-finished"),
+        pytest.param(_start_the_pick, [], 1, ["rerun"], _BOTH, id="mid-pick"),
+        pytest.param(_resolve_by_hand, [], 0, ["joined"], _BOTH, id="after-it-finished"),
+        pytest.param(
+            _resolve_by_hand, ["c2"], 0, ["rerun", "joined"], _BOTH, id="whole-beats-the-cap"
+        ),
+        pytest.param(
+            _start_the_pick, ["c1"], 1, ["rerun", "rerun"], _BOTH, id="another-childs-rerun"
+        ),
+        pytest.param(
+            _start_the_pick,
+            ["c2"],
+            0,
+            ["rerun", "handed_off"],
+            ["Task 1.0: work"],
+            id="cut-short-twice-hands-off",
+        ),
     ],
 )
 async def test_a_restart_mid_handler_reruns_it_unless_its_work_is_whole(
-    family, monkeypatch, act, runs, outcome
+    family, monkeypatch, act, earlier, runs, outcomes, subjects
 ):
+    """`earlier`: children whose handler already had its one fresh turn."""
     await _crashed_in_the_handler(family, act)
+    for wid in earlier:
+        payload = {"child": wid, "slice_key": int(wid[1:]), "outcome": "rerun"}
+        await family.database.write(
+            lambda c, p=payload: events.append(c, "p1", WorkItemEvent.JOIN_HANDLER_RESUMED, p)
+        )
     notes = _handler(monkeypatch, family, _resolve_by_hand, "ok")
+    handed_off = outcomes[-1] == "handed_off"
 
-    assert await family.join(HANDLED) == "ok"
+    assert await family.join(HANDLED) == ("needs_human" if handed_off else "ok")
 
-    assert (len(notes), _resumed(family)) == (runs, [outcome])
-    assert family.subjects() == ["Task 2.0: work", "Task 1.0: work"]
+    assert (len(notes), _resumed(family)) == (runs, outcomes)
+    assert family.subjects() == subjects
     assert not (family.worktree / "shared.py.orig").exists()
     gitdir = Path(git(family.worktree, "rev-parse", "--absolute-git-dir"))
     assert not (gitdir / "CHERRY_PICK_HEAD").exists()
-    assert family.group_state().phase == "joined"
+    state = family.group_state()
+    if handed_off:
+        assert (state.slice_phase, state.joined_through) == ("handed_off", 1)
+        assert family.stop() == ("needs_human", "conflict")
+        assert "cut short twice" in family.reason()
+        assert "`git cherry-pick -x --allow-empty --keep-redundant-commits" in family.reason()
+    else:
+        assert state.phase == "joined"
 
 
 @pytest.mark.parametrize("cut_short", [False, True], ids=["at-its-verdict", "on-its-resume"])
