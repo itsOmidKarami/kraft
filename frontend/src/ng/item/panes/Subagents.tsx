@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Subagent } from "../../../types";
 import { elapsed, tokens } from "../../../format";
 import { PROMPT_NOT_SHOWN, STATUS_WORDS, statusTone, subagentSaid } from "../subagents";
@@ -20,6 +21,8 @@ function Prompt({ workItemId, sessionId, agent }: { workItemId: string; sessionI
 /** A task's sub-agents (Overview), by state: Running, Did not finish, and Finished folded away until it is opened
  *  (open at once when it is all there is). A row opens the task's log filtered to it. */
 export function SubagentSection({ workItemId, sessionId, list, onOpen }: { workItemId: string; sessionId: string; list: Subagent[] | null; onOpen: (agent: string) => void }) {
+  // Once Finished has been open or shut, it stays that way: a new sub-agent arriving does not fold it under the reader.
+  const [finishedOpen, setFinishedOpen] = useState<boolean | null>(null);
   if (!list?.length) return null;
   const running = list.filter((a) => a.status === "running");
   const unfinished = list.filter((a) => a.status !== "running" && a.status !== "completed");
@@ -67,7 +70,7 @@ export function SubagentSection({ workItemId, sessionId, list, onOpen }: { workI
           </div>
         )}
         {finished.length > 0 && (
-          <details className="ip-subagent-fold" open={!running.length && !unfinished.length}>
+          <details className="ip-subagent-fold" open={finishedOpen ?? (!running.length && !unfinished.length)} onToggle={(e) => setFinishedOpen(e.currentTarget.open)}>
             <summary className="ip-subagent-head"><span className="ip-pill-dot is-ok" aria-hidden />Finished <span className="ip-subagent-n">{finished.length}</span></summary>
             <ul className="ip-subagent-list" aria-label="Finished sub-agents">{finished.map((a) => row(a, false))}</ul>
           </details>

@@ -2,10 +2,11 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChainNode, SessionStatus, TaskProgress, WorkerSession } from "../../../types";
+import type { ChainNode, SessionStatus, Subagent, TaskProgress, WorkerSession } from "../../../types";
 import { detail, stubFetch, V1 } from "../testkit";
 import { POLL_MS } from "../useLogLines";
 import { usePaneMemory, Workspace } from "../Workspace";
+import { SubagentSection } from "./Subagents";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 beforeEach(() => usePaneMemory.setState({ pane: { open: true, userCollapsed: false } }));
@@ -121,9 +122,14 @@ describe("task pane", () => {
       expect(within(finished).getAllByRole("listitem")[0]).not.toHaveTextContent("More.");
     });
 
-    it("opens Finished at once when it is all there is", async () => {
-      mount(url, item, [], { [`GET ${base}/subagents`]: [200, { session_id: "x", status: "failed", subagents: [agent("a3")] }] });
-      expect(await screen.findByRole("list", { name: "Finished sub-agents" })).toBeVisible();
+    it("opens Finished at once when it is all there is, and keeps it open when a running one arrives", async () => {
+      const section = (l: unknown[]) => <SubagentSection workItemId="w1" sessionId="s" list={l as Subagent[]} onOpen={() => {}} />;
+      const { rerender } = render(section([agent("a3")]));
+      const finished = screen.getByRole("list", { name: "Finished sub-agents" });
+      await waitFor(() => expect(finished).toBeVisible());
+      rerender(section([agent("a1", { status: "running" }), agent("a3")]));
+      await act(async () => {});
+      expect(finished).toBeVisible();
     });
 
     it("opens the task's log filtered to the sub-agent", async () => {
