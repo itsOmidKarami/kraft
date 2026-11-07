@@ -557,21 +557,22 @@ async def apply_item_draft(wid: str, request: Request):
         draft = store.get_item(c, wid)
         if draft is None:
             return 404, {"detail": "this work item has no draft"}
-        if items.group_unjoined(row):
-            # A skip or a revised chain moves the cursor, and the cursor does not
-            # move behind or past a group whose slices are still running.
-            return 409, {
-                "detail": "this item's slices have not ended; apply the draft after they are "
-                "joined, or drop the slices first"
-            }
         chain = _chain(row)
         evaluated = item.evaluate(
             chain, row["current_node_id"], draft["ops"], library, deps.item_repo_id(st, row)
         )
         if evaluated.passed:
+            # A parent at a group whose slices are running stands at the group:
+            # an op at or behind it would move the cursor back, which the slices
+            # forbid until they are joined.
+            unjoined = (
+                "; its slices have not ended, so nothing at or behind the group can change"
+                if items.group_unjoined(row)
+                else ""
+            )
             return 409, {
                 "detail": "the item has moved past some of this draft's ops; remove them or "
-                "move them after the current node",
+                f"move them after the current node{unjoined}",
                 "passed": evaluated.passed,
             }
         if evaluated.problems:

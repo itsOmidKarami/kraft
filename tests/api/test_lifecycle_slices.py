@@ -180,14 +180,19 @@ def test_a_retry_with_every_slice_dropped_wants_a_rewind(client, repo, body, ref
         assert _status_of(client, parent) != "needs_human"
 
 
-def test_a_draft_moving_an_unjoined_parent_back_is_refused(client, repo):
+@pytest.mark.parametrize(
+    ("path", "status"),
+    [
+        pytest.param("implementation.main.implement", 409, id="at-the-group"),
+        pytest.param("work_brief.main.author", 200, id="after-the-group"),
+    ],
+)
+def test_a_draft_may_not_move_an_unjoined_parent_back(client, repo, path, status):
     parent, _ = _family(client, repo, parent_status="paused")
-    client.put(
-        f"/api/work-items/{parent}/draft",
-        json={"ops": [{"op": "skip", "path": "work_brief.main.author"}]},
-    )
+    client.put(f"/api/work-items/{parent}/draft", json={"ops": [{"op": "skip", "path": path}]})
 
     r = client.post(f"/api/work-items/{parent}/draft/apply")
 
-    assert r.status_code == 409, r.text
-    assert "slices" in r.json()["detail"]
+    assert r.status_code == status, r.text
+    if status == 409:
+        assert "slices have not ended" in r.json()["detail"]
