@@ -24,11 +24,23 @@ _LIST_COLUMNS = [
 ]
 
 
+def _slices_text(s: dict) -> str:
+    """`3 done, 1 needs you, 1 paused`: the counts of a parent's slices that are not zero."""
+    names = {"needs_you": "needs you"}
+    parts = [
+        f"{s[k]} {names.get(k, k)}"
+        for k in ("done", "needs_you", "paused", "running", "queued", "dropped")
+        if s.get(k)
+    ]
+    return f"{', '.join(parts)} of {s['total']}"
+
+
 def _render_list(items: list[dict]) -> str:
     painted = [
         {
             **item,
-            "status": render.paint(item["status"], render.STATUS_COLORS.get(item["status"], "")),
+            "status": render.paint(item["status"], render.STATUS_COLORS.get(item["status"], ""))
+            + (f" (slices: {_slices_text(item['slices'])})" if item.get("slices") else ""),
             "current_node_id": (
                 f"{item['current_node_id']} {p['current']}/{p['total']}"
                 if (p := item.get("progress"))
@@ -139,7 +151,20 @@ def _render_show(item: dict, full: dict | None = None) -> str:
             at += 1
         if (hint := _raise_hint(full)) and not item.get("suggested_action"):
             pairs.insert(at, ("next", hint))
+        if full.get("children"):
+            pairs.append(("slices", _slices_text(full["slices"])))
+            pairs.append(("children", "\n".join(_child_line(k) for k in full["children"])))
+        elif full.get("parent_id"):
+            pairs.append(("slice_of", f"{full['parent_id']} (slice {full['slice_key']})"))
     return render.kv(pairs)
+
+
+def _child_line(child: dict) -> str:
+    """One slice of a parent: `1  <id>  completed  implementation  $0.42  title`."""
+    cost = f"${child['cost_usd']:.2f}" if child.get("cost_usd") else "-"
+    node = child.get("current_node_id") or "-"
+    title = render.plain_text(str(child["title"]))
+    return f"{child['slice_key']}  {child['id']}  {child['status']}  {node}  {cost}  {title}"
 
 
 def _one_off_line(one_off: dict) -> str:

@@ -408,3 +408,44 @@ def test_show_keeps_the_raise_hint_after_the_stop_with_a_one_off_chain(monkeypat
     keys = [line.split()[0] for line in capsys.readouterr().out.splitlines() if line.strip()]
     assert keys.index("stop_reason") < keys.index("stop_kind") < keys.index("next")
     assert keys.index("status") < keys.index("chain")
+
+
+def test_show_lists_a_parents_slices(monkeypatch, capsys):
+    from kraft.client import transport
+
+    async def get(path, **_):
+        return {
+            "id": "p1",
+            "status": "waiting",
+            "title": "the parent",
+            "chain_definition": {"nodes": []},
+            "slices": {"done": 1, "needs_you": 1, "paused": 0, "running": 0, "queued": 0,
+                       "dropped": 0, "total": 2},
+            "children": [
+                {"id": "c1", "title": "p · slice 1: A", "slice_key": 1, "status": "completed",
+                 "current_node_id": "verification", "cost_usd": 0.42},
+                {"id": "c2", "title": "p · slice 2: B", "slice_key": 2, "status": "needs_human",
+                 "current_node_id": "implementation", "cost_usd": None},
+            ],
+        }  # fmt: skip
+
+    monkeypatch.setattr(transport, "_get", get)
+
+    cli.main(["view", "show", "p1"])
+
+    out = capsys.readouterr().out
+    assert "1 done, 1 needs you of 2" in out
+    assert "1  c1  completed  verification  $0.42  p · slice 1: A" in out
+    assert "2  c2  needs_human  implementation  -  p · slice 2: B" in out
+
+
+def test_list_marks_a_parent_with_its_slices():
+    out = view._render_list(
+        [
+            {"id": "p1", "status": "waiting", "pending_gate": None, "current_node_id": "slices",
+             "title": "t", "slices": {"done": 2, "needs_you": 0, "paused": 0, "running": 1,
+                                       "queued": 0, "dropped": 0, "total": 3}},
+        ]
+    )  # fmt: skip
+
+    assert "slices: 2 done, 1 running of 3" in out

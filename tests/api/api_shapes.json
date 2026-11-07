@@ -410,6 +410,7 @@
     "forge_cli_timeout_s": "_",
     "loops": {},
     "max_concurrent": "_",
+    "max_slices": "_",
     "rate_limit_retries": "_"
    }
   },
@@ -697,6 +698,7 @@
       "queued": "_",
       "repo": "_",
       "retry_at": "_",
+      "slices": "_",
       "status": "_",
       "step": "_",
       "stop": "_",
@@ -748,6 +750,7 @@
      "template_id": "_"
     },
     "chain_template": "_",
+    "children": "_",
     "ci_pipeline_ref": "_",
     "concerns": [],
     "created_at": "_",
@@ -758,6 +761,7 @@
     "depends_on": "_",
     "description": "_",
     "display_status": "_",
+    "docs_commit": "_",
     "effective_chain": {
      "nodes": [
       "_"
@@ -776,6 +780,7 @@
      "then": []
     },
     "gate_artifact": "_",
+    "group_state": "_",
     "head_sha": "_",
     "id": "_",
     "implements_beads": "_",
@@ -789,9 +794,12 @@
     "node_overrides_count": "_",
     "node_passes": {},
     "one_off": "_",
+    "parent_id": "_",
+    "paused_by_parent": "_",
     "pending_gate": "_",
     "pending_rewind": "_",
     "pending_steer_context": "_",
+    "pinned_head": "_",
     "policy_override": "_",
     "progress": "_",
     "queued": "_",
@@ -810,6 +818,9 @@
     },
     "scope_runs": [],
     "skipped_paths": [],
+    "slice_generation": "_",
+    "slice_key": "_",
+    "slices": "_",
     "started_at": "_",
     "status": "_",
     "steerable": "_",
