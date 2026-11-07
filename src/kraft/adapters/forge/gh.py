@@ -1182,15 +1182,17 @@ class GhCli(mr_ops.CliWaits):
 
     async def pipelines(self, *, repo: Path, branch: str, base: str) -> tuple[Pipeline, ...]:
         runs = "repos/{owner}/{repo}/actions/runs"
-        # `branch=` matches a fork's branch of the same name too: its run is a fork's CI.
+        # `branch=` matches a fork's branch of the same name too: its run is a fork's CI,
+        # and a busy fork can fill a page, so fetch wide and keep 20 after the filter.
+        # shortcut: 100 fork runs newer than ours still hide them; page if that happens.
         found = [
             ("branch", r)
-            for r in (await self._api(repo, runs, fields={"branch": branch, "per_page": 20})).get(
+            for r in (await self._api(repo, runs, fields={"branch": branch, "per_page": 100})).get(
                 "workflow_runs"
             )
             or []
             if _this_repos(r)
-        ]
+        ][:20]
         if ref := await self.find_mr(repo=repo, branch=branch):
             prefix = _QUEUE_BRANCH.format(base=base, number=ref.number)
             group = await self._api(repo, runs, fields={"event": "merge_group", "per_page": 100})

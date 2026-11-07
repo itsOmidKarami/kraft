@@ -29,7 +29,7 @@ _OPEN = find_result(listed())
 _RUNS = "repos/{owner}/{repo}/actions/runs"
 _PULLS = "repos/{owner}/{repo}/pulls"
 _LABELS = "repos/{owner}/{repo}/labels"
-_BRANCH_RUNS = f"api {_RUNS} -X GET -i -f branch=kraft/abc -F per_page=20"
+_BRANCH_RUNS = f"api {_RUNS} -X GET -i -f branch=kraft/abc -F per_page=100"
 _GROUP_RUNS = f"api {_RUNS} -X GET -i -f event=merge_group -F per_page=100"
 _QUEUE = "gh-readonly-queue/main/pr-7-aaa"
 
@@ -262,6 +262,19 @@ async def test_gh_pipelines_lists_branch_runs_before_an_mr_exists(cli, tmp_path)
     cli.stub("gh", routes={FIND: find_result(), "api*branch=kraft/abc*": runs(workflow_run(1))})
     got = await forge.GhCli().pipelines(repo=tmp_path, branch="kraft/abc", base="main")
     assert [p.id for p in got] == ["1"]
+    assert _rest(cli) == [_BRANCH_RUNS]
+
+
+async def test_gh_pipelines_keeps_twenty_of_this_repos_runs_past_a_forks(cli, tmp_path):
+    # A fork's PR on a branch of the same name fills the newest runs; this repo's come after.
+    fork = [workflow_run(100 + n, head_branch="kraft/abc", **_FORK) for n in range(20)]
+    own = [
+        workflow_run(n, head_branch="kraft/abc", created_at=f"2026-09-19T05:{n:02d}:00Z")
+        for n in range(24, -1, -1)  # newest first, as GitHub lists them
+    ]
+    cli.stub("gh", routes={FIND: find_result(), "api*branch=kraft/abc*": runs(*fork, *own)})
+    got = await forge.GhCli().pipelines(repo=tmp_path, branch="kraft/abc", base="main")
+    assert [p.id for p in got] == [str(n) for n in range(24, 4, -1)]
     assert _rest(cli) == [_BRANCH_RUNS]
 
 
