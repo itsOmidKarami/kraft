@@ -21,6 +21,12 @@ Host git here trusts nothing a child's agent wrote:
   deletes the operation files itself, with `lstat`, and moves the branch by
   name (`put_back`). It never runs `cherry-pick --abort`.
 
+A conflict puts the parent back and hands the slice off. The group's
+`on_conflict` handler (the library's `resolve_join_conflict`), when it has one,
+then gets a turn in the parent's worktree, run as any recovery handler is
+(`dispatch.run_recovery`); the slice is joined only if the applied-check then
+finds it whole, else the parent is put back again and a person is asked.
+
 The applied-check is bookkeeping, not a security boundary: what the code *does*
 is judged by `verification` and the human gates after the join.
 """
@@ -193,7 +199,14 @@ def _steps(child: dict, docs: str, head: str, branch: str) -> str:
 
 
 async def join(
-    db, run_dirs, row, worktree: Path, node: ResolvedNode, *, launch: LaunchContext | None = None
+    db,
+    run_dirs,
+    row,
+    worktree: Path,
+    node: ResolvedNode,
+    *,
+    launch: LaunchContext | None = None,
+    policy=None,
 ) -> str:
     """Replay every completed child of the group's current generation, in slice
     order, resuming from the stored per-slice state. Answers `ok`, or `needs_human`
@@ -232,7 +245,9 @@ async def join(
             done.append(key)
             continue
         state = db.read(lambda c: store.group_state(c, wid))
-        stopped = await _replay_one(db, run_dirs, row, worktree, node, state, child, branch, launch)
+        stopped = await _replay_one(
+            db, run_dirs, row, worktree, node, state, child, branch, launch, policy
+        )
         if stopped is not None:
             return stopped
         await db.write(lambda c, ch=child: _record_notes(c, wid, ch))
@@ -314,7 +329,7 @@ async def _stop(db, wid: str, node: ResolvedNode, why: str, kind: StopKind) -> N
 
 
 async def _replay_one(
-    db, run_dirs, row, worktree, node, state, child: dict, branch: str, launch
+    db, run_dirs, row, worktree, node, state, child: dict, branch: str, launch, policy=None
 ) -> str | None:
     """Replay one completed child. None when it is joined, else the status the
     parent stopped with."""
@@ -332,12 +347,7 @@ async def _replay_one(
         return "needs_human"
     if state.slice_phase == "handed_off" and state.joined_through < key and state.recorded.get(key):
         # Never resets: a person or a handler may have resolved it.
-        at = state.at_commit or fork
-        wrong = _unsettled(worktree, branch, at)
-        if wrong is None:
-            left = missing(worktree, at, state.recorded[key])
-            if left:
-                wrong = f"{len(left)} commit(s) missing ({', '.join(c[:12] for c in left)})"
+        wrong = _not_joined(worktree, branch, state.at_commit or fork, state.recorded[key])
         if wrong is not None:
             await _stop(
                 db,
@@ -369,8 +379,9 @@ async def _replay_one(
             await run_git(worktree, [*_GIT, *_PICK, f"{docs}..{head}"])
         except ForgeError as exc:
             return await _conflict(
-                db, wid, node, worktree, branch, at, child, docs, head, str(exc), state
-            )
+                db, run_dirs, row, node, worktree, branch, at, child, range_, str(exc), launch,
+                policy,
+            )  # fmt: skip
     left = missing(worktree, at, range_)
     if left or git_read(worktree, "status", "--porcelain", "--untracked-files=no"):
         await _stop(
@@ -382,6 +393,15 @@ async def _replay_one(
         )
         return "needs_human"
     return await _mark_joined(db, wid, key, worktree)
+
+
+def _not_joined(worktree: Path, branch: str, at: str, recorded: list[str]) -> str | None:
+    """Why a handed-off slice is not in the parent yet, or None: the applied-
+    check, on a worktree settled enough to read. Reads only; never resets."""
+    wrong = _unsettled(worktree, branch, at)
+    if wrong is None and (left := missing(worktree, at, recorded)):
+        wrong = f"{len(left)} commit(s) missing ({', '.join(c[:12] for c in left)})"
+    return wrong
 
 
 def _unsettled(worktree: Path, branch: str, at: str) -> str | None:
@@ -427,8 +447,14 @@ def _picking(conn, wid: str, key: int, at: str, range_: list[str]) -> None:
     store.set_group_state(conn, wid, state)
 
 
-async def _conflict(db, wid, node, worktree, branch, at, child, docs, head, detail, state) -> str:
-    key = child["slice_key"]
+async def _conflict(
+    db, run_dirs, row, node, worktree, branch, at, child, range_, detail, launch, policy
+) -> str | None:
+    """Put the parent back at `at` and hand the slice off; then the group's
+    conflict handler, if it has one, gets a turn. None when it joined the
+    slice, else the status the parent stopped with."""
+    wid, key = row["id"], child["slice_key"]
+    docs, head = child["docs_commit"], child["pinned_head"]
     files = (git_read(worktree, "diff", "--name-only", "--diff-filter=U") or "").split()
     try:
         put_back(worktree, branch, at)
@@ -443,16 +469,73 @@ async def _conflict(db, wid, node, worktree, branch, at, child, docs, head, deta
 
     await db.write(hand_off)
     where = f" in {', '.join(files)}" if files else ""
-    await _stop(
-        db,
-        wid,
-        node,
-        f"slice {key} ({child['id']}) conflicts with what is already joined{where}. "
-        + _steps(child, docs, head, branch)
-        + f" ({detail[:300]})",
-        StopKind.CONFLICT,
-    )
+    what = f"slice {key} ({child['id']}) conflicts with what is already joined{where}. "
+    steps = _steps(child, docs, head, branch)
+    if node.on_conflict:
+        note = what + steps + _LEAVE_NOTHING
+        stopped, ok = await _handle(db, run_dirs, row, node, worktree, note, launch, policy)
+        wrong = None
+        if stopped is None:
+            wrong = _not_joined(worktree, branch, at, range_) if ok else "it reported a failure"
+            if wrong is None:
+                return await _mark_joined(db, wid, key, worktree)
+        # Whatever it left, a person (or a resume after a pause) starts from
+        # where the join stopped: the handed-off check never resets.
+        try:
+            put_back(worktree, branch, at)
+        except (UnsafeWorktree, ForgeError) as exc:
+            # The handler left something else in progress, its picks maybe on the branch.
+            why = (
+                f"the conflict handler left the parent where it cannot be put back: {exc}. "
+                f"Clear that, then `git reset --hard {at[:12]}` on {branch}, where the join "
+                "stopped, before the steps below. " + steps
+            )
+            await _stop(db, wid, node, why, StopKind.CHECKOUT)
+            return "needs_human"
+        if stopped is not None:
+            return stopped
+        detail = f"the conflict handler did not join it: {wrong}; {detail}"
+    await _stop(db, wid, node, what + steps + f" ({detail[:300]})", StopKind.CONFLICT)
     return "needs_human"
+
+
+#: Kraft commits whatever an agent leaves uncommitted, and the applied-check
+#: counts that commit as one the slice does not hold.
+_LEAVE_NOTHING = (
+    " Leave no untracked or uncommitted file behind (a `.orig`, a scratch file): Kraft "
+    "commits anything left over, and an extra commit means the slice is not joined."
+)
+
+
+async def _handle(
+    db, run_dirs, row, node, worktree, note, launch, policy
+) -> tuple[str | None, bool]:
+    """Run the group's conflict handler as any recovery handler runs, with
+    nothing more than an `on_failure` handler gets: the stop a pause, a rate
+    limit or the like named (or None), and whether it answered `ok`."""
+    from kraft import policy as _policy
+    from kraft.executor import dispatch, walk
+
+    budget = store.effective_budget(row, policy.budget if policy else _policy.NO_BUDGET)
+    verdict, failed, _excs = await dispatch.run_recovery(
+        db,
+        run_dirs,
+        row["id"],
+        node,
+        row,
+        worktree,
+        handler=node.on_conflict,
+        scope="conflict",
+        failed=[],
+        note=note,
+        steer=None,
+        launch=launch,
+        budget=budget,
+        measured_round=0,
+        round=0,
+    )
+    stop = await walk._sentinel_stop(db, row["id"], node, verdict, failed, budget)
+    return stop, verdict == "ok"
 
 
 async def _mark_joined(db, wid: str, key: int, worktree: Path) -> None:

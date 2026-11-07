@@ -2568,13 +2568,40 @@ docs commit it recorded the first time.
 enforced-by: tests/test_builtins_children.py::test_a_child_worktree_made_again_keeps_its_first_docs_commit
 origin: src/kraft/builtins.py
 
-## REQ a-group-has-no-caps-or-conflict-handler-of-its-own
+## REQ a-group-has-no-caps-and-its-conflict-handler-writes
 
-The system SHALL refuse a `policy` or an `on_conflict` on a `group` node, and SHALL
-leave `group` out of the chain-file schemas an editor checks: a slice carries the
-caps it inherited, and a join conflict stops for a person.
-enforced-by: tests/templates/test_groups.py::test_a_group_body_refuses[group-caps], tests/templates/test_groups.py::test_a_group_body_refuses[join-conflict-handler], tests/test_config_schemas.py::test_the_chain_schema_takes_an_extending_chain[group]
+The system SHALL refuse a `policy` on a `group` node and a `read_only` or
+runner-placed `on_conflict` on one, and SHALL leave `group` out of the chain-file
+schemas an editor checks: a slice carries the caps it inherited, and the join's
+conflict handler writes by design, placed where the group is.
+enforced-by: tests/templates/test_groups.py::test_a_group_body_refuses[group-caps], tests/templates/test_groups.py::test_a_group_body_refuses[read-only-join-conflict-handler], tests/templates/test_groups.py::test_a_group_body_refuses[runner-placed-join-conflict-handler], tests/templates/test_groups.py::test_a_stored_chain_may_hold_a_group, tests/test_config_schemas.py::test_the_chain_schema_takes_an_extending_chain[group]
 origin: src/kraft/templates/models.py §GroupNode
+
+## REQ chain-revision-gives-the-group-the-librarys-join-conflict-handler
+
+WHEN chain revision wraps a slice group and the library has a task
+`resolve_join_conflict`, its own or else the built-in add-on's, the system SHALL
+make that task the group's `on_conflict`, at `<group>.on_conflict`; with no such
+task the group SHALL have none.
+enforced-by: tests/templates/test_slicing.py::test_the_group_takes_the_librarys_join_conflict_handler[none-in-the-library], tests/templates/test_slicing.py::test_the_group_takes_the_librarys_join_conflict_handler[its-own], tests/templates/test_slicing.py::test_the_group_takes_the_librarys_join_conflict_handler[the-built-in-add-ons], tests/templates/test_slicing.py::test_the_group_takes_the_librarys_join_conflict_handler[its-own-before-the-built-in]
+origin: src/kraft/templates/slicing.py §join_conflict_handler
+
+## REQ a-join-conflict-goes-to-the-groups-handler-before-a-person
+
+WHEN a slice conflicts at the join and the group has an `on_conflict` handler, the
+system SHALL first put the parent back at the last joined commit and hand the slice
+off, then run the handler as a recovery handler in the parent's worktree with a
+note naming the slice, its range, the conflicting files and the steps a person
+would be given; it SHALL record the slice joined and go on only when the handler
+answered `ok` and the applied-check finds every commit of the slice on a settled
+worktree, and otherwise SHALL put the parent back at that commit again and stop for
+a person with the same steps; a handler stopped by a pause, a rate limit or a cap
+SHALL leave the parent put back at that commit too; and IF the handler left the
+parent where it cannot be put back, THEN the stop SHALL name that commit to reset
+to. With no handler a join conflict SHALL stop for a
+person.
+enforced-by: tests/executor/test_join.py::test_the_conflict_handler_resolves_and_the_join_goes_on, tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-fails], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-fails-having-picked-it-all], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-says-ok-having-done-nothing], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-says-ok-mid-pick], tests/executor/test_join.py::test_a_handler_that_pauses_mid_pick_leaves_the_parent_put_back, tests/executor/test_join.py::test_a_handler_that_leaves_another_operation_names_where_to_reset, tests/executor/test_join.py::test_a_conflict_hands_off_and_never_resets_on_retry
+origin: src/kraft/executor/join.py §_conflict -- the applied-check is bookkeeping, not a security boundary: verification and the human gates after the join judge the code, and the handler gets nothing an `on_failure` handler lacks (`dispatch.run_recovery`).
 
 ## REQ chain-revision-again-slices-the-plan-as-it-then-stands
 

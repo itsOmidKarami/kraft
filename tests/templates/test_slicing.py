@@ -91,6 +91,56 @@ def test_revise_wraps_the_body_and_repeats_the_rest_after_the_group():
     assert nodes[6].on_base_changed.restart_from == "check"
 
 
+def _own_library(tmp_path, monkeypatch):
+    task = {"kind": "agent", "harness": "claude", "prompt": "resolve it"}
+    return TemplateLibrary.from_mappings(
+        {"tasks": {"resolve_join_conflict": task}}, (), library_path=Path("library.yaml")
+    )
+
+
+def _seeded_home(tmp_path, monkeypatch):
+    """An empty local library: the entry comes from the built-in add-on."""
+    from kraft.addons import load
+
+    live = tmp_path / "config"
+    (live / "chains").mkdir(parents=True)
+    (live / "library.yaml").write_text("{}\n")
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(live))
+    return TemplateLibrary.from_yaml_dir(live, addons=load.installed(live))
+
+
+def _home_with_its_own(tmp_path, monkeypatch):
+    """Both the local library and the built-in add-on have one: the local wins."""
+    library = _seeded_home(tmp_path, monkeypatch)
+    task = {"kind": "agent", "harness": "claude", "prompt": "resolve it"}
+    return library.with_library({"tasks": {"resolve_join_conflict": task}}, Path("library.yaml"))
+
+
+@pytest.mark.parametrize(
+    ("library", "prompt"),
+    [
+        pytest.param(lambda *_: LIBRARY, None, id="none-in-the-library"),
+        pytest.param(_own_library, "resolve it", id="its-own"),
+        pytest.param(_seeded_home, "Replay the slice", id="the-built-in-add-ons"),
+        pytest.param(_home_with_its_own, "resolve it", id="its-own-before-the-built-in"),
+    ],
+)
+def test_the_group_takes_the_librarys_join_conflict_handler(tmp_path, monkeypatch, library, prompt):
+    chain = _chain()
+    changes = slicing.with_slicing(_changes(), chain, slicing.SlicingInput(PLAN, 6), at=GATE)
+
+    revised = revision.revise(chain, changes, at=GATE, library=library(tmp_path, monkeypatch))
+
+    group = revised.chain.nodes[2]
+    if prompt is None:
+        assert group.node.on_conflict is None and group.on_conflict == ()
+        return
+    [step] = group.on_conflict
+    [task] = step.tasks
+    assert task.path.startswith("slices.on_conflict.")
+    assert task.task.kind == "agent" and task.task.prompt.startswith(prompt)
+
+
 def test_the_default_chain_slices_implementation_and_verification(templates_dir):
     from support.harness import v1_named_chain
 

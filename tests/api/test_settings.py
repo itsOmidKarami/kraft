@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import functools
+import json
 import os
 import sqlite3
 from pathlib import Path
@@ -666,3 +667,120 @@ def test_put_update_settings_does_not_overwrite_a_file_it_cannot_read(client, te
     assert client.put("/api/update/settings", json={"auto_update": True}).status_code == 422
     assert client.get("/api/update/settings").status_code == 422
     assert (templates_dir / "update.yaml").read_text() == "allowed_hours: ['1-6']\n"
+
+
+# ── notify ──
+
+_NOTIFY_DEFAULTS = config.Notify().model_dump()
+
+
+def test_get_notify_defaults_before_the_file_exists(client):
+    body = client.get("/api/notify").json()
+    assert body == {
+        "enabled": False,
+        "url_set": False,
+        "base_url": None,
+        "events": ["gate_requested", "work_item_needs_human"],
+        "last_test": None,
+    }
+
+
+def test_get_notify_never_returns_the_url(client):
+    client.put("/api/notify", json={"enabled": True, "url": "https://hook.invalid/t0ken"})
+    body = client.get("/api/notify").json()
+    assert body["url_set"] is True
+    assert "t0ken" not in json.dumps(body)
+    assert "url" not in body
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "saved"),
+    [
+        (
+            {"enabled": True, "url": "https://hook.invalid/t0ken"},
+            {"events": ["gate_requested"]},
+            {
+                **_NOTIFY_DEFAULTS,
+                "enabled": True,
+                "url": "https://hook.invalid/t0ken",
+                "events": ["gate_requested"],
+            },
+        ),
+        (
+            {"url": "https://hook.invalid/t0ken"},
+            {"url": ""},
+            _NOTIFY_DEFAULTS,
+        ),
+        (
+            {"enabled": True, "url": "https://hook.invalid/t0ken"},
+            {"url": ""},
+            _NOTIFY_DEFAULTS,
+        ),
+    ],
+    ids=["omitted-url-is-kept", "empty-url-clears", "empty-url-clears-and-disables"],
+)
+def test_put_merges_its_body_over_the_stored_file(client, first, second, saved):
+    """A field the body omits keeps its stored value: editing the event list
+    must not require re-entering a token the UI is never allowed to show back.
+    `url: ""` is the explicit clear, and the only UI path to revoke a leaked
+    token ("Clear URL" sends `{url: ""}` alone). If that 422'd because
+    `enabled` is still true, an operator could never get rid of a live token
+    through the UI -- clearing the URL implies turning the feature off, not
+    failing the invariant that a config cannot be enabled with nowhere to
+    send."""
+    assert client.put("/api/notify", json=first).status_code == 200
+
+    res = client.put("/api/notify", json=second)
+
+    assert res.status_code == 200
+    assert res.json() == {
+        "enabled": saved["enabled"],
+        "url_set": saved["url"] is not None,
+        "base_url": saved["base_url"],
+        "events": saved["events"],
+        "last_test": None,
+    }
+    templates_dir = Path(client.app.state.templates_dir)
+    assert config.Notify.load(templates_dir / "notify.yaml").model_dump() == saved
+
+
+@pytest.mark.parametrize(
+    ("body", "detail"),
+    [
+        ({"url": "file:///etc/passwd"}, "url must be an http or https URL"),
+        ({"base_url": "file:///etc/passwd"}, "base_url must be an http or https URL"),
+        ({"url": "http://[x"}, "url must be an http or https URL"),
+        ({"enabled": True}, "set a webhook URL before enabling notifications"),
+        (
+            {"events": ["gate_requsted"]},
+            "notify.yaml: events: unknown event type 'gate_requsted'; see the Events reference "
+            "for the names",
+        ),
+    ],
+    ids=[
+        "non-http-url",
+        "non-http-base-url",
+        "unparseable-url",
+        "enabling-without-a-url",
+        "unknown-event",
+    ],
+)
+def test_put_refuses_a_bad_setting_and_writes_nothing(client, body, detail):
+    """A rejected PUT must not leave a half-applied config on disk -- for
+    `enabling-without-a-url`, `enabled` must not get written even though it was
+    the only field the request set."""
+    res = client.put("/api/notify", json=body)
+
+    assert res.status_code == 422
+    assert res.json() == {"detail": detail}
+    templates_dir = Path(client.app.state.templates_dir)
+    assert config.Notify.load(templates_dir / "notify.yaml") == config.Notify()
+
+
+def test_put_reloads_the_running_notifier(client):
+    client.put("/api/notify", json={"enabled": True, "url": "https://hook.invalid/t0ken"})
+    assert client.app.state.notifier.config["enabled"] is True
+    # Task 2's `config` property carries `url_set`, not `url` — its first real
+    # caller is this route, so pin the shape here.
+    assert "url" not in client.app.state.notifier.config
+    assert client.app.state.notifier.config["url_set"] is True

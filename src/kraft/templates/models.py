@@ -1330,7 +1330,9 @@ class GroupNode(BaseModel):
 
     `unforked` is what the parent runs itself when it does not fork the group
     (no fork was decided, or a rejection comes back to the group after the
-    join). A join conflict stops for a person: version 1 has no handler for one."""
+    join). `on_conflict` is the join's conflict handler, the library's
+    `resolve_join_conflict` that chain revision attaches when the library has
+    one; without it a join conflict stops for a person."""
 
     model_config = _CONFIG
 
@@ -1341,6 +1343,12 @@ class GroupNode(BaseModel):
     unforked: list[Identifier] = Field(default_factory=list)
     #: A group is not skipped as a whole: its children are, one by one.
     skippable: StrictBool = False
+    on_conflict: RecoveryPlan | None = None
+
+    @model_validator(mode="after")
+    def _conflict_handler_writes(self) -> Self:
+        _refuse_read_only("on_conflict", self.on_conflict)
+        return self
 
     @model_validator(mode="after")
     def _made_by_revision(self, info: ValidationInfo) -> Self:
@@ -1719,7 +1727,8 @@ class ResolvedNode:
     #: becomes a path segment; a gate has no steps, so nothing else can occupy
     #: that path.
     auto_review: ResolvedTask | None = None
-    #: `on_base_changed.on_conflict`, at `<node>.on_base_changed.on_conflict`.
+    #: `on_base_changed.on_conflict`, at `<node>.on_base_changed.on_conflict`;
+    #: a group's join conflict handler, at `<group>.on_conflict`.
     on_conflict: tuple[ResolvedStep, ...] = ()
     #: `on_merge_rejected.repair`, at `<node>.on_merge_rejected.repair`.
     on_merge_rejected: tuple[ResolvedStep, ...] = ()
@@ -1927,6 +1936,13 @@ class ResolvedChain:
                         id=node.id,
                         node=node,
                         runner=node_runner,
+                        on_conflict=(
+                            node.on_conflict.resolve_steps(
+                                f"{node.id}{PATH_SEPARATOR}on_conflict", (), node_runner
+                            )
+                            if node.on_conflict is not None
+                            else ()
+                        ),
                         body=tuple(
                             _resolve_exec(
                                 inner,

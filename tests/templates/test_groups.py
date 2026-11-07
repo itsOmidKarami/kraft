@@ -31,6 +31,7 @@ def test_a_stored_chain_may_hold_a_group():
                 group_node(
                     exec_node("implementation", tasks=[sub("build")]),
                     exec_node("verification", tasks=[sub("check")]),
+                    on_conflict={"tasks": [sub("resolve")]},
                 ),
             ],
         },
@@ -42,6 +43,7 @@ def test_a_stored_chain_may_hold_a_group():
     assert set(resolved.task_paths) == {
         "slices.implementation.main.build",
         "slices.verification.main.check",
+        "slices.on_conflict.main.resolve",
     }
 
 
@@ -82,9 +84,15 @@ def test_a_stored_chain_may_hold_a_group():
         ),
         pytest.param(
             exec_node("implementation", tasks=[sub()]),
-            {"on_conflict": {"tasks": [sub()]}},
-            "on_conflict",
-            id="join-conflict-handler",
+            {"on_conflict": {"tasks": [sub()], "read_only": True}},
+            "on_conflict cannot be read_only",
+            id="read-only-join-conflict-handler",
+        ),
+        pytest.param(
+            exec_node("implementation", tasks=[sub()]),
+            {"on_conflict": {"steps": [{"id": "s", "tasks": [sub()], "runner": "local"}]}},
+            "sets runner",
+            id="runner-placed-join-conflict-handler",
         ),
     ],
 )

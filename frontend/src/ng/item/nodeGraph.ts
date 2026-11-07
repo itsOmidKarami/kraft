@@ -1,12 +1,13 @@
 import { allDone, gateName } from "../board/rowText";
 import { elapsed, elapsedBetween } from "../../format";
-import type { ChainNode as ApiNode, KraftEvent, NodePass, SessionStatus, TaskProgress, WorkerSession, WorkItemDocument } from "../../types";
+import type { ChainNode as ApiNode, KraftEvent, NodePass, SessionStatus, Subagent, TaskProgress, WorkerSession, WorkItemDocument } from "../../types";
 import type { HandlerRow, NodeStep } from "../graph/nodeLayout";
 import type { GlyphState, GraphItem } from "../graph/types";
 import { attemptsAt, handlerPaths, loopPaths, materialized, nodeAt, stepsOfNode, taskKindAt } from "./chainValues";
 import { within } from "./cursor";
 import { stepsOf, taskName } from "./paths";
 import { isScopeTask, scopeLead, scopesView } from "./scopeView";
+import { byState } from "./subagents";
 import type { ItemDetail } from "./useItem";
 
 export const ESCALATION = "escalation";
@@ -176,7 +177,7 @@ export const verdictOf = (events: KraftEvent[] | undefined, node: string, cycle:
  *  task with its state in the round shown (a fix-loop node's own round: every
  *  task, its repair and its judge follow it), the escalation side branch, the
  *  fix-loop arc once a round ran, and each on_failure handler's tasks once it ran (the node's, a step's, a task's). */
-export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now(), events?: KraftEvent[], picked?: number, subagents?: Record<string, number>) {
+export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now(), events?: KraftEvent[], picked?: number, subagents?: Record<string, Subagent[]>) {
   const { steps } = stepsOf(node);
   const frozen = materialized(item);
   const rounds = loopRounds(item, node);
@@ -191,8 +192,10 @@ export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now(), eve
       const last = (isScopeTask(item, path) && scopeLead(scopesView(item, path, shown ?? 1, now))) || newest;
       // The scopes of a changed-test-scope task are sessions of it too, but not attempts: no count on its box.
       // Counts are by session: an earlier round's box, or an earlier attempt's, has none while a newer run is the one going.
-      const running = (last && subagents?.[last.id]) || undefined;
-      return { id: taskName(path), taskKind: taskKindAt(frozen, path) ?? (ss.some((s) => s.model) ? "agent" : undefined), attempt: shown || isScopeTask(item, path) ? undefined : last?.attempt, ...(running && { subagents: running }), ...(!last && skippedAt(item, path) ? SKIPPED : sessionLook(last, now)) };
+      const list = (last && subagents?.[last.id]) || undefined;
+      const agents = list?.length ? byState(list) : undefined;
+      const marks = agents && { agents: list, subagents: agents.running.length || undefined, unfinished: agents.unfinished.length || undefined };
+      return { id: taskName(path), taskKind: taskKindAt(frozen, path) ?? (ss.some((s) => s.model) ? "agent" : undefined), attempt: shown || isScopeTask(item, path) ? undefined : last?.attempt, ...marks, ...(!last && skippedAt(item, path) ? SKIPPED : sessionLook(last, now)) };
     }),
   }));
   const lastEsc = escalationsIn(item, node.id).at(-1);

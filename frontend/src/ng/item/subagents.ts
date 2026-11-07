@@ -7,17 +7,6 @@ export const PROMPT_NOT_SHOWN = "This sub-agent's prompt is before the part of t
 /** The words for a sub-agent's status. */
 export const STATUS_WORDS: Record<Subagent["status"], string> = { running: "running", completed: "done", failed: "failed", killed: "stopped", cut_off: "cut off" };
 
-/** What a list of sub-agents comes to: the running count is the one a task's box on the graph shows. */
-export function subagentCount(list: Subagent[]): { running: number; finished: number; cutOff: number } {
-  const running = list.filter((a) => a.status === "running").length;
-  const cutOff = list.filter((a) => a.status === "cut_off").length;
-  return { running, finished: list.length - running - cutOff, cutOff };
-}
-
-/** How many of each session's sub-agents run, by session id: the count a task's box on the graph shows. */
-export const runningCounts = (bySession: Record<string, Subagent[]>): Record<string, number> =>
-  Object.fromEntries(Object.entries(bySession).map(([id, l]) => [id, subagentCount(l).running]));
-
 /** A task's sub-agents by state, as its Overview groups them: running, did not finish (failed, stopped or cut off),
  *  finished. */
 export function byState(list: Subagent[]): { running: Subagent[]; unfinished: Subagent[]; finished: Subagent[] } {

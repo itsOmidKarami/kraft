@@ -703,6 +703,7 @@ creates one.
 |---|---|---|
 | `nodes` | list of exec nodes | The body, run by each child item in its own worktree. It holds no gate, no forge task, no `on_merge_rejected` and no `on_base_changed`. |
 | `unforked` | list of node ids | The body nodes the item runs itself when it does not split, and when a rejection comes back to the group. Every body node when empty. |
+| `on_conflict` | recovery plan | What the join hands a conflict to before it asks you, at `<group>.on_conflict`. Chain revision sets it to the library task `resolve_join_conflict`, your own or else `kraft-default`'s; without one, a conflict stops for you. |
 
 A rejection or restart may name a group as its target. It may not name a node inside one. A
 `reads` entry may not cross a group's boundary in either direction.

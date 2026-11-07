@@ -43,6 +43,11 @@
 .glyph-corner { position: absolute; width: 16px; height: 16px; box-sizing: border-box; border-radius: 50%; background: var(--surface); display: flex; align-items: center; justify-content: center; }
 .glyph-esc { border: 1px solid var(--warn); color: var(--warn); }
 .glyph-subagents { border: 1px solid var(--text-muted); color: var(--text); font: 700 var(--fs-label)/14px ui-monospace, Menlo, monospace; }
+/* One did not finish: the count grows a red cross (a pill), or the badge is the cross alone when none runs. */
+.glyph-subagents-x { display: flex; align-items: center; justify-content: center; width: 12px; height: 12px; border-radius: 50%; background: var(--bad); color: var(--bg); }
+.glyph-subagents.has-bad { width: auto; gap: 2px; padding: 0 1px 0 4px; border-radius: 8px; }
+.glyph-subagents.is-bad { border-color: var(--bad); background: var(--bad); }
+.glyph-subagents.is-bad > .glyph-subagents-x { width: auto; height: auto; }
 .glyph-paused { position: absolute; bottom: -5px; right: -5px; width: 15px; height: 15px; box-sizing: border-box; border-radius: 50%; background: var(--surface); border: 1px solid var(--text-muted); font: 700 var(--fs-label)/13px ui-monospace, Menlo, monospace; text-align: center; color: var(--text); }
 .glyph-running { position: absolute; bottom: -3px; right: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); border: 2px solid var(--bg); }
 
@@ -384,3 +389,17 @@
 .canvas-fade.is-right { right: 0; background: linear-gradient(to left, var(--bg), transparent); }
 /* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
 .round-row { padding-block: calc(6px + var(--row-pad-add)); }
+
+/* A task's sub-agents: a row of marks under its box, out while the box is hovered, focused or selected, or one of
+ * them is. A dot runs, a tick finished, a cross did not: shape and colour both say it. */
+.sub-marks { position: absolute; z-index: 3; display: flex; gap: 1px; padding: 3px 3px 2px; border-radius: 0 0 12px 12px; background: var(--bg); transform: translateX(-50%); opacity: 0; visibility: hidden; transition: opacity .14s ease, visibility 0s linear .14s; }
+.graph-node:is(:hover, :focus-visible) + .sub-marks, .sub-marks:is(:hover, :focus-within, .is-held) { opacity: 1; visibility: visible; transition: opacity .14s ease; }
+.sub-mark { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+.sub-mark:hover { background: var(--surface-2); }
+.sub-mark:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
+.sub-mark-dot { display: flex; align-items: center; justify-content: center; width: 13px; height: 13px; border-radius: 50%; background: var(--text-faint); color: var(--bg); }
+.sub-mark.is-live .sub-mark-dot { background: var(--warn); }
+.sub-mark.is-ok .sub-mark-dot { background: var(--ok); }
+.sub-mark.is-bad .sub-mark-dot { background: var(--bad); }
+.sub-mark.is-sel .sub-mark-dot { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--selection); }
+.canvas-world.is-glide .sub-marks { transition: left .42s cubic-bezier(.2,.8,.2,1), top .42s cubic-bezier(.2,.8,.2,1), opacity .14s ease, visibility 0s linear .14s; }

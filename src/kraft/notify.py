@@ -195,10 +195,27 @@ class Notifier:
         # item for the life of the process
         cutoff = now - self._coalesce_seconds
         self._last_sent = {k: v for k, v in self._last_sent.items() if v > cutoff}
-        if ev["work_item_id"] in self._last_sent:
+        # A slice child shares its parent's window, so one family event (the
+        # family cost cap stopping every child) pages once, not once per child.
+        key = self._parent_id(ev["work_item_id"]) or ev["work_item_id"]
+        if key in self._last_sent:
             return False
-        self._last_sent[ev["work_item_id"]] = now
+        self._last_sent[key] = now
         return True
+
+    def _parent_id(self, work_item_id: str) -> str | None:
+        # A failed read must not abort the drain pass: the cursor is already past
+        # this event, so raising would drop it with no `notification_failed`.
+        try:
+            row = self._db.read(
+                lambda c: c.execute(
+                    "SELECT parent_id FROM work_items WHERE id = ?", (work_item_id,)
+                ).fetchone()
+            )
+        except Exception:
+            logger.exception("could not read the parent of %s; coalescing alone", work_item_id)
+            return None
+        return row["parent_id"] if row is not None else None
 
     def _dispatch(self, ev: dict) -> None:
         """Fire and forget. A slow or hanging endpoint must not stall the commit
@@ -215,16 +232,25 @@ class Notifier:
     def _body(self, ev: dict) -> dict:
         row = self._db.read(
             lambda c: c.execute(
-                "SELECT title FROM work_items WHERE id = ?", (ev["work_item_id"],)
+                "SELECT w.title, w.parent_id, p.title AS parent_title FROM work_items w "
+                "LEFT JOIN work_items p ON p.id = w.parent_id WHERE w.id = ?",
+                (ev["work_item_id"],),
             ).fetchone()
         )
-        return {
+        body = {
             "work_item_id": ev["work_item_id"],
             "title": row["title"] if row is not None else None,
             "type": ev["type"],
             "gate": ev["payload"].get("gate"),
             "url": f"{self._base_url()}/work-items/{ev['work_item_id']}",
         }
+        # A slice child's message stands for its whole family (siblings in the
+        # same window were folded into it), so it names where to look.
+        if row is not None and row["parent_id"]:
+            body["parent_work_item_id"] = row["parent_id"]
+            body["parent_title"] = row["parent_title"]
+            body["parent_url"] = f"{self._base_url()}/work-items/{row['parent_id']}"
+        return body
 
     async def _send(self, ev: dict) -> None:
         url = self._config.get("url")

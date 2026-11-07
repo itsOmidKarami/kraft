@@ -385,7 +385,7 @@ def revise(
         except RetryOverrideError as exc:
             raise RevisionError(f"override {path}: {exc}") from exc
     if changes.slice is not None:
-        revised = _sliced(revised, changes.slice)
+        revised = _sliced(revised, changes.slice, _pinned(library, chain, repo_id))
     try:
         for base in (revised.policy, *revised.repository_policies.values()):
             revised.chain.check_scopes(base, revised.item_policy)
@@ -411,12 +411,23 @@ def revise(
     return revised
 
 
-def _sliced(chain: MaterializedChain, change: SliceChange) -> MaterializedChain:
+def _sliced(
+    chain: MaterializedChain, change: SliceChange, library: TemplateLibrary | None
+) -> MaterializedChain:
     """`chain` with the slicing `change` applied, validated whole as a revision
-    is: by `Chain`'s rules under the frozen context."""
+    is: by `Chain`'s rules under the frozen context. The group's join conflict
+    handler comes out of `library`, pinning what it reads as an added node does."""
     authored = chain.chain.chain
+    steering, addons = chain.chain.steering, chain.chain.addons
     try:
-        nodes = slicing_mod.apply(list(authored.nodes), change)
+        handler, read = slicing_mod.join_conflict_handler(library, addons or {})
+    except TemplateLibraryError as exc:
+        raise RevisionError(f"slice: {slicing_mod.JOIN_HANDLER}: {exc}") from exc
+    if read is not None:
+        steering = {**(read.steering or {}), **(steering or {})} or None
+        addons = {**(read.addons or {}), **(addons or {})} or None
+    try:
+        nodes = slicing_mod.apply(list(authored.nodes), change, handler)
         checked = Chain.model_validate_json(
             authored.model_copy(update={"nodes": nodes}).model_dump_json(), context=FROZEN
         )
@@ -425,9 +436,7 @@ def _sliced(chain: MaterializedChain, change: SliceChange) -> MaterializedChain:
         raise RevisionError(f"slice: {reason}") from exc
     return replace(
         chain,
-        chain=ResolvedChain.from_chain(
-            checked, steering=chain.chain.steering, addons=chain.chain.addons
-        ),
+        chain=ResolvedChain.from_chain(checked, steering=steering, addons=addons),
     )
 
 

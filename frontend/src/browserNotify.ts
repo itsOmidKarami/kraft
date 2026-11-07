@@ -63,7 +63,8 @@ export function notificationText(event: { label: string }, title: string): { tit
   return { title, body: event.label };
 }
 
-export function maybeNotify(ev: KraftEvent, title: string): void {
+/** `family` is a slice's parent: alerts tagged with it replace one another, so one family event is one alert. */
+export function maybeNotify(ev: KraftEvent, title: string, family?: string | null): void {
   if (!isEnabled()) return;
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
   if (!document.hidden) return;
@@ -73,7 +74,7 @@ export function maybeNotify(ev: KraftEvent, title: string): void {
   const text = notificationText(event, title);
   let n: Notification;
   try {
-    n = new Notification(text.title, { body: text.body, tag: ev.work_item_id, icon: withBase("/icon.svg") });
+    n = new Notification(text.title, { body: text.body, tag: family ?? ev.work_item_id, icon: withBase("/icon.svg") });
   } catch {
     // Some browsers expose Notification but refuse its constructor.
     return;

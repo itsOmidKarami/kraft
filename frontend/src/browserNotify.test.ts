@@ -123,6 +123,15 @@ describe("maybeNotify", () => {
     expect(n.options.icon).toBe("/icon.svg");
   });
 
+  it.each([
+    [undefined, "w42"],
+    ["p1", "p1"],
+  ])("tags a slice's alert with its parent, so its family's alerts replace one another (%s)", (family, tag) => {
+    setEnabled(true);
+    maybeNotify(ev("work_item_needs_human", { work_item_id: "w42" }), "My Item", family);
+    expect(FakeNotification.instances[0].options.tag).toBe(tag);
+  });
+
   it("names the icon under the base the app is served at (the docs demo's)", () => {
     vi.stubEnv("BASE_URL", "/next/demo/");
     setEnabled(true);

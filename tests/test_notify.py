@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import asyncio
 import errno
+import itertools
 import json
 import os
 import stat
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -122,13 +124,13 @@ def test_a_saved_notify_yaml_holds_only_the_known_keys(tmp_path):
     assert set(yaml.safe_load(path.read_text())) == set(config.Notify.model_fields)
 
 
-async def _seed_item(database, wid="w1", title="Ship the thing"):
+async def _seed_item(database, wid="w1", title="Ship the thing", parent_id=None):
     await database.write(
         lambda c: c.execute(
             "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
-            "status, created_at, updated_at) VALUES (?, ?, '/r', 'quick-task', '{}', "
-            "'active', 'now', 'now')",
-            (wid, title),
+            "status, created_at, updated_at, parent_id) VALUES (?, ?, '/r', 'quick-task', "
+            "'{}', 'active', 'now', 'now', ?)",
+            (wid, title, parent_id),
         )
     )
 
@@ -171,11 +173,12 @@ async def _drain(database, n: notify.Notifier) -> None:
 
 
 @pytest.mark.parametrize(
-    ("event_type", "payload", "base_url", "expected"),
+    ("event_type", "payload", "base_url", "parent", "expected"),
     [
         (
             "gate_requested",
             {"gate": "spec_approval"},
+            None,
             None,
             {
                 "type": "gate_requested",
@@ -187,6 +190,7 @@ async def _drain(database, n: notify.Notifier) -> None:
             "work_item_needs_human",
             {"node_id": "build", "reason": "capped"},
             None,
+            None,
             {
                 "type": "work_item_needs_human",
                 "gate": None,
@@ -197,22 +201,46 @@ async def _drain(database, n: notify.Notifier) -> None:
             "gate_requested",
             {"gate": "spec_approval"},
             "https://kraft.tail1234.ts.net/",
+            None,
             {
                 "type": "gate_requested",
                 "gate": "spec_approval",
                 "url": "https://kraft.tail1234.ts.net/work-items/w1",
             },
         ),
+        (
+            "work_item_needs_human",
+            {"reason": "family_budget"},
+            None,
+            "p1",
+            {
+                "type": "work_item_needs_human",
+                "gate": None,
+                "url": "http://127.0.0.1:8765/work-items/w1",
+                "parent_work_item_id": "p1",
+                "parent_title": "The whole plan",
+                "parent_url": "http://127.0.0.1:8765/work-items/p1",
+            },
+        ),
     ],
-    ids=["gate-requested", "needs-human-has-no-gate", "base-url-beats-the-bind-fallback"],
+    ids=[
+        "gate-requested",
+        "needs-human-has-no-gate",
+        "base-url-beats-the-bind-fallback",
+        "slice-child-names-its-parent",
+    ],
 )
 async def test_a_stop_sends_one_message_that_links_to_the_item(
-    tmp_path, database, event_type, payload, base_url, expected
+    tmp_path, database, event_type, payload, base_url, parent, expected
 ):
     """The two stop types each send once, to the configured URL, with a link a
     phone can open: `base_url` from the config when there is one, else the
-    address Kraft is bound to."""
-    await _seed_item(database)
+    address Kraft is bound to. A slice child's message also names its parent,
+    since it stands for every sibling folded into its window; a lone item's
+    body carries no parent keys at all."""
+    if parent:
+        await _seed_item(database, parent, "The whole plan")
+    await _seed_item(database, parent_id=parent)
     sends: list = []
     n = _notifier(tmp_path, database, sends, base_url=base_url)
     await n.start()
@@ -272,14 +300,18 @@ async def test_fires_on_nothing_else_across_every_emitted_type(tmp_path, databas
     assert sends == []
 
 
+_FAMILY_STOP = {"reason": "family_budget"}
+
+
 @pytest.mark.parametrize(
-    ("stops", "sent_to"),
+    ("stops", "gap", "sent_to"),
     [
         (
             [
                 ("w1", "gate_requested", {"gate": "plan_approval"}),
                 ("w1", "work_item_needs_human", {"reason": "exhausted"}),
             ],
+            0,
             ["w1"],
         ),
         (
@@ -287,19 +319,58 @@ async def test_fires_on_nothing_else_across_every_emitted_type(tmp_path, databas
                 ("w1", "gate_requested", {"gate": "spec_approval"}),
                 ("w2", "gate_requested", {"gate": "spec_approval"}),
             ],
+            0,
             ["w1", "w2"],
         ),
+        (
+            [(c, "work_item_needs_human", _FAMILY_STOP) for c in ("c1", "c2", "c3")],
+            0,
+            ["c1"],
+        ),
+        (
+            [
+                ("p1", "work_item_needs_human", _FAMILY_STOP),
+                ("c1", "work_item_needs_human", _FAMILY_STOP),
+            ],
+            0,
+            ["p1"],
+        ),
+        (
+            [
+                ("c1", "work_item_needs_human", _FAMILY_STOP),
+                ("c2", "gate_requested", {"gate": "code_review"}),
+            ],
+            notify.COALESCE_SECONDS + 1,
+            ["c1", "c2"],
+        ),
     ],
-    ids=["one-item-two-stops", "two-items"],
+    ids=[
+        "one-item-two-stops",
+        "two-items",
+        "slice-children-stopping-together-fold-into-one",
+        "parent-and-child-share-one-window",
+        "family-stops-outside-the-window-each-send",
+    ],
 )
-async def test_stops_in_one_window_coalesce_per_item(tmp_path, database, stops, sent_to):
+async def test_stops_in_one_window_coalesce_per_item(
+    tmp_path, database, monkeypatch, stops, gap, sent_to
+):
     """`POST /gates/{gate}/reject` writes `reject_gate` then, on an exhausted
     reject loop, `mark_needs_human` in the same second, on an item that was
     just notified about. One window, one message -- per item: a different item
-    stopping in the same window is news of its own."""
+    stopping in the same window is news of its own. A slice family is one
+    item here: the family cost cap stopping n children pages once, not n
+    times, while a sibling stopping later, past the window, still pages."""
 
     await _seed_item(database, "w1")
     await _seed_item(database, "w2", "Other thing")
+    await _seed_item(database, "p1", "The whole plan")
+    for child in ("c1", "c2", "c3"):
+        await _seed_item(database, child, f"Slice {child}", parent_id="p1")
+    # Each stop that passes the type filter reads the clock once: `gap` apart.
+    # Swap the module's `time`, not `time.monotonic` itself: asyncio's loop reads that.
+    clock = itertools.count(1000.0, gap or 0.0)
+    monkeypatch.setattr(notify, "time", SimpleNamespace(monotonic=lambda: next(clock)))
     sends: list = []
     n = _notifier(tmp_path, database, sends)
     await n.start()
@@ -476,118 +547,6 @@ async def test_a_hanging_endpoint_does_not_block_the_drain_pass(tmp_path, databa
         assert n._inflight  # and the POST really is still in flight
     finally:
         await n.stop()
-
-
-def test_get_notify_defaults_before_the_file_exists(client):
-    body = client.get("/api/notify").json()
-    assert body == {
-        "enabled": False,
-        "url_set": False,
-        "base_url": None,
-        "events": ["gate_requested", "work_item_needs_human"],
-        "last_test": None,
-    }
-
-
-def test_get_notify_never_returns_the_url(client):
-    client.put("/api/notify", json={"enabled": True, "url": "https://hook.invalid/t0ken"})
-    body = client.get("/api/notify").json()
-    assert body["url_set"] is True
-    assert "t0ken" not in json.dumps(body)
-    assert "url" not in body
-
-
-@pytest.mark.parametrize(
-    ("first", "second", "saved"),
-    [
-        (
-            {"enabled": True, "url": "https://hook.invalid/t0ken"},
-            {"events": ["gate_requested"]},
-            {
-                **DEFAULTS,
-                "enabled": True,
-                "url": "https://hook.invalid/t0ken",
-                "events": ["gate_requested"],
-            },
-        ),
-        (
-            {"url": "https://hook.invalid/t0ken"},
-            {"url": ""},
-            DEFAULTS,
-        ),
-        (
-            {"enabled": True, "url": "https://hook.invalid/t0ken"},
-            {"url": ""},
-            DEFAULTS,
-        ),
-    ],
-    ids=["omitted-url-is-kept", "empty-url-clears", "empty-url-clears-and-disables"],
-)
-def test_put_merges_its_body_over_the_stored_file(client, first, second, saved):
-    """A field the body omits keeps its stored value: editing the event list
-    must not require re-entering a token the UI is never allowed to show back.
-    `url: ""` is the explicit clear, and the only UI path to revoke a leaked
-    token ("Clear URL" sends `{url: ""}` alone). If that 422'd because
-    `enabled` is still true, an operator could never get rid of a live token
-    through the UI -- clearing the URL implies turning the feature off, not
-    failing the invariant that a config cannot be enabled with nowhere to
-    send."""
-    assert client.put("/api/notify", json=first).status_code == 200
-
-    res = client.put("/api/notify", json=second)
-
-    assert res.status_code == 200
-    assert res.json() == {
-        "enabled": saved["enabled"],
-        "url_set": saved["url"] is not None,
-        "base_url": saved["base_url"],
-        "events": saved["events"],
-        "last_test": None,
-    }
-    templates_dir = Path(client.app.state.templates_dir)
-    assert config.Notify.load(templates_dir / "notify.yaml").model_dump() == saved
-
-
-@pytest.mark.parametrize(
-    ("body", "detail"),
-    [
-        ({"url": "file:///etc/passwd"}, "url must be an http or https URL"),
-        ({"base_url": "file:///etc/passwd"}, "base_url must be an http or https URL"),
-        ({"url": "http://[x"}, "url must be an http or https URL"),
-        ({"enabled": True}, "set a webhook URL before enabling notifications"),
-        (
-            {"events": ["gate_requsted"]},
-            "notify.yaml: events: unknown event type 'gate_requsted'; see the Events reference "
-            "for the names",
-        ),
-    ],
-    ids=[
-        "non-http-url",
-        "non-http-base-url",
-        "unparseable-url",
-        "enabling-without-a-url",
-        "unknown-event",
-    ],
-)
-def test_put_refuses_a_bad_setting_and_writes_nothing(client, body, detail):
-    """A rejected PUT must not leave a half-applied config on disk -- for
-    `enabling-without-a-url`, `enabled` must not get written even though it was
-    the only field the request set."""
-    res = client.put("/api/notify", json=body)
-
-    assert res.status_code == 422
-    assert res.json() == {"detail": detail}
-    templates_dir = Path(client.app.state.templates_dir)
-    assert config.Notify.load(templates_dir / "notify.yaml") == config.Notify()
-
-
-def test_put_reloads_the_running_notifier(client):
-    client.put("/api/notify", json={"enabled": True, "url": "https://hook.invalid/t0ken"})
-    assert client.app.state.notifier.config["enabled"] is True
-    # Task 2's `config` property carries `url_set`, not `url` — its first real
-    # caller is this route, so pin the shape here.
-    assert "url" not in client.app.state.notifier.config
-    assert client.app.state.notifier.config["url_set"] is True
 
 
 def test_the_notifier_is_on_the_commit_fan_out(client, tmp_path):

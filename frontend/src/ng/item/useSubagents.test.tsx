@@ -3,8 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubFetch } from "./testkit";
 import { POLL_MS } from "./useLogLines";
 import { detail } from "./testkit";
-import { runningCounts, subagentCount } from "./subagents";
-import { useRunningSubagents, useSessionSubagents, useSubagentDetail } from "./useSubagents";
+import { useRunningSubagents, useSessionSubagents, useSubagentDetail, useSubagentLists } from "./useSubagents";
 
 const running = { id: "a1", description: "Explore", status: "running" };
 const answer = (list: unknown[]) => ({ "GET /work-items/w1/sessions/s1/subagents": [200, { session_id: "s1", status: "running", subagents: list }] }) as never;
@@ -65,13 +64,6 @@ describe("polling", () => {
   });
 });
 
-describe("runningCounts", () => {
-  it("counts only what runs, per session", () => {
-    const of = (...status: string[]) => status.map((s, i) => ({ id: String(i), description: "d", status: s })) as never;
-    expect(runningCounts({ s1: of("running", "completed", "running"), s2: of("cut_off", "failed") })).toEqual({ s1: 2, s2: 0 });
-  });
-});
-
 describe("useSubagentDetail", () => {
   it("reads once opened, and again on a retry only after it failed", async () => {
     const path = "GET /work-items/w1/sessions/s1/subagents/a1";
@@ -85,13 +77,6 @@ describe("useSubagentDetail", () => {
     await vi.waitFor(() => expect(result.current.detail).toMatchObject({ prompt: "p" }));
     act(() => result.current.load());
     expect(calls.length).toBe(2);
-  });
-});
-
-describe("subagentCount", () => {
-  it("separates what runs, what finished and what was cut off", () => {
-    const of = (...status: string[]) => status.map((s, i) => ({ id: String(i), description: "d", status: s })) as never;
-    expect(subagentCount(of("running", "completed", "failed", "killed", "cut_off"))).toEqual({ running: 1, finished: 3, cutOff: 1 });
   });
 });
 
@@ -115,6 +100,39 @@ describe("useRunningSubagents", () => {
     const { result, rerender } = renderHook(() => useRunningSubagents(item));
     await vi.waitFor(() => expect(Object.keys(result.current)).toEqual(["s1"]));
     item = detail({ worker_sessions: [session("s1", { status: "done" })] });
+    rerender();
+    expect(result.current).toEqual({});
+  });
+});
+
+describe("useSubagentLists", () => {
+  const session = (id: string, over: Record<string, unknown> = {}) => ({ id, node_id: "n", status: "running", harness: "claude", ...over }) as never;
+  const done = { ...running, status: "completed" };
+  const route = (id: string, list: unknown[]) => [`GET /work-items/w1/sessions/${id}/subagents`, [200, { session_id: id, status: "done", subagents: list }]] as const;
+
+  it("reads each finished agent session of the nodes shown once, and keeps a stopped one's list until its own read lands", async () => {
+    const answers = Object.fromEntries([route("s1", [running]), route("d1", [done]), route("o1", [done])]) as Record<string, [number, unknown]>;
+    const calls = stubFetch(answers as never);
+    let item = detail({ worker_sessions: [session("s1"), session("d1", { status: "done" }), session("o1", { node_id: "other", status: "done" }), session("t1", { status: "done", harness: null })] });
+    const { result, rerender } = renderHook(() => useSubagentLists(item, ["n"]));
+    await vi.waitFor(() => expect(Object.keys(result.current).sort()).toEqual(["d1", "s1"]));
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS * 2); });
+    answers[route("s1", [])[0]] = route("s1", [done])[1] as never;
+    item = detail({ worker_sessions: [session("s1", { status: "done" }), session("d1", { status: "done" })] });
+    rerender();
+    expect(result.current.s1).toEqual([running]);
+    await vi.waitFor(() => expect(result.current.s1).toEqual([done]));
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS * 2); });
+    const reads = (id: string) => calls.filter((c) => c.path === `/work-items/w1/sessions/${id}/subagents`).length;
+    expect([reads("d1"), reads("o1"), reads("t1")]).toEqual([1, 0, 0]);
+  });
+
+  it("drops a session of a node not shown once it stops, as the running poll does", async () => {
+    stubFetch(Object.fromEntries([route("x1", [running])]) as never);
+    let item = detail({ worker_sessions: [session("x1", { node_id: "other" })] });
+    const { result, rerender } = renderHook(() => useSubagentLists(item, ["n"]));
+    await vi.waitFor(() => expect(Object.keys(result.current)).toEqual(["x1"]));
+    item = detail({ worker_sessions: [session("x1", { node_id: "other", status: "done" })] });
     rerender();
     expect(result.current).toEqual({});
   });

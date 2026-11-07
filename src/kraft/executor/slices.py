@@ -79,9 +79,13 @@ async def _walk_group(
     stopped_in = row["current_node_id"]
     await db.write(lambda c: store.enter_node(c, work_item_id, node.id))
     if state.phase == "joining":
-        return await _join(db, run_dirs, work_item_id, node, row, worktree, state, launch=launch)
+        return await _join(
+            db, run_dirs, work_item_id, node, row, worktree, state, launch=launch, policy=policy
+        )
     if state.phase == "forked":
-        return await _forked(db, run_dirs, work_item_id, node, row, worktree, state, launch=launch)
+        return await _forked(
+            db, run_dirs, work_item_id, node, row, worktree, state, launch=launch, policy=policy
+        )
     if state.phase == "joined":
         return await _unforked(
             db, run_dirs, work_item_id, node, worktree, policy, steer, launch, start_step
@@ -328,7 +332,9 @@ async def _fork(db, run_dirs, work_item_id, node, row, worktree, state, split, l
     return await _forked(db, run_dirs, work_item_id, node, row, worktree, forked, launch=launch)
 
 
-async def _forked(db, run_dirs, work_item_id, node, row, worktree, state, *, launch) -> str:
+async def _forked(
+    db, run_dirs, work_item_id, node, row, worktree, state, *, launch, policy=None
+) -> str:
     """Queue any child never started, then join if every child has ended, else
     park the parent again."""
     children = db.read(lambda c: store.children_of(c, work_item_id, state.generation))
@@ -353,15 +359,19 @@ async def _forked(db, run_dirs, work_item_id, node, row, worktree, state, *, lau
     if children_ended(db, work_item_id, state):
         state.phase = "joining"
         await db.write(lambda c: store.set_group_state(c, work_item_id, state))
-        return await _join(db, run_dirs, work_item_id, node, row, worktree, state, launch=launch)
+        return await _join(
+            db, run_dirs, work_item_id, node, row, worktree, state, launch=launch, policy=policy
+        )
     await db.write(lambda c: store.mark_waiting_on_slices(c, work_item_id, node.id))
     return WAITING
 
 
-async def _join(db, run_dirs, work_item_id, node, row, worktree, state, *, launch) -> str:
+async def _join(
+    db, run_dirs, work_item_id, node, row, worktree, state, *, launch, policy=None
+) -> str:
     from kraft.executor import join
 
-    return await join.join(db, run_dirs, row, Path(worktree), node, launch=launch)
+    return await join.join(db, run_dirs, row, Path(worktree), node, launch=launch, policy=policy)
 
 
 async def release_ready_parents(app) -> list[str]:

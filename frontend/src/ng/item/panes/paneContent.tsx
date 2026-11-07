@@ -19,6 +19,7 @@ import { Log } from "./Log";
 import { PathFooter } from "./PathFooter";
 import { AttemptMenu, TaskConfig, TaskInput, TaskOutput, TaskOverview } from "./TaskPane";
 import { Thread } from "./Thread";
+import { subagentPane } from "./SubagentPane";
 import { chainName } from "../chainName";
 import { loopStepPaths, materialized, notStarted, planTaskPath, taskAt, taskKindAt } from "../chainValues";
 import { NodeOverrideRows } from "./ItemOverrides";
@@ -52,9 +53,9 @@ export type PaneArgs = {
   /** The sub-agent the task's log is filtered to (an id, or "main"); undefined shows every line. */
   agent?: string;
   setAgent: (agent: string | undefined) => void;
-  /** The sub-agents of the item's running sessions, by session id (`useRunningSubagents`). */
+  /** The sub-agents of the sessions the page shows, by session id (`useSubagentLists`). */
   subagents: Record<string, Subagent[]>;
-  /** Open the task's Log tab filtered to one sub-agent. */
+  /** Open one of the task's sub-agents, a level under the task. */
   openAgent: (agent: string) => void;
   docs: WorkItemDocument[];
   onDoc: (d: WorkItemDocument) => void;
@@ -319,6 +320,10 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
       footer: here ? <PathFooter item={item} path={path} what="task" state={item.display_status === "paused" ? "paused" : "running"} reload={a.reload} only="skip" /> : undefined,
     };
   }
+  // One of its sub-agents, picked from its marks, its Overview or its log's menu, is a level under it. "main" is the
+  // log's filter to the task's own lines, and an id the list does not hold (yet) keeps the task's pane.
+  const agent = a.agent ? a.subagents[at.id]?.find((x) => x.id === a.agent) : undefined;
+  if (agent) return subagentPane({ workItemId: item.id, s: at, a: agent, task: head.title, crumbs, tab: a.tab, setAgent: a.setAgent, running: look.running === true });
   const current = standsOn(item, node.id);
   // Picking the newest attempt drops the pin, so the pane follows the next one that starts;
   // an older attempt stays put while newer ones arrive, and the menu's count shows them.

@@ -15,7 +15,7 @@ from kraft import events, store
 from kraft.executor import join
 from kraft.vocab import WorkItemEvent
 
-NODE = SimpleNamespace(id="slices")
+NODE = SimpleNamespace(id="slices", on_conflict=())
 
 
 class Family:
@@ -79,8 +79,8 @@ class Family:
             lambda c: c.execute("SELECT * FROM work_items WHERE id='p1'").fetchone()
         )
 
-    async def join(self):
-        return await join.join(self.database, self.run_dirs, self.row(), self.worktree, NODE)
+    async def join(self, node=NODE):
+        return await join.join(self.database, self.run_dirs, self.row(), self.worktree, node)
 
     def group_state(self):
         return self.database.read(lambda c: store.group_state(c, "p1"))
@@ -282,6 +282,127 @@ async def test_a_conflict_hands_off_and_never_resets_on_retry(family):
     assert (family.worktree / "shared.py").read_text() == "merged\n"
     assert len(family.subjects()) == 2
     assert family.group_state().phase == "joined"
+
+
+#: A group whose library had `resolve_join_conflict`; the handler itself is faked
+#: at `dispatch.run_recovery`, the seam every recovery handler runs through.
+HANDLED = SimpleNamespace(id="slices", on_conflict=("resolve_join_conflict",))
+
+
+def _handler(monkeypatch, family, act, verdict):
+    """Fake the handler: it does `act` in the parent's worktree and answers
+    `verdict`. Returns the notes it was sent."""
+    from kraft.executor import dispatch
+
+    notes = []
+
+    async def run_recovery(db, run_dirs, wid, node, row, worktree, *, handler, note, **kw):
+        assert (wid, Path(worktree), handler) == ("p1", family.worktree, HANDLED.on_conflict)
+        notes.append(note)
+        await act(family)
+        return verdict, [], []
+
+    monkeypatch.setattr(dispatch, "run_recovery", run_recovery)
+    return notes
+
+
+async def test_the_conflict_handler_resolves_and_the_join_goes_on(family, monkeypatch):
+    await _conflicting(family)
+    await family.child(3, {"other.py": "three\n"})
+    notes = _handler(monkeypatch, family, _resolve_by_hand, "ok")
+
+    assert await family.join(HANDLED) == "ok"
+
+    assert (family.worktree / "shared.py").read_text() == "merged\n"
+    assert family.subjects() == ["Task 3.0: work", "Task 2.0: work", "Task 1.0: work"]
+    state = family.group_state()
+    assert (state.phase, state.joined_through) == ("joined", 3)
+    [note] = notes
+    child = family.children[2]
+    assert "slice 2 (c2)" in note and "in shared.py" in note
+    assert f"--keep-redundant-commits {child['docs'][:12]}..{child['head'][:12]}" in note
+    assert "Never `git commit -m`" in note and "never `--skip`" in note
+    assert "Leave no untracked or uncommitted file behind" in note
+
+
+async def _start_the_pick(family):
+    child = family.children[2]
+    subprocess.run(
+        ["git", "cherry-pick", "-x", f"{child['docs']}..{child['head']}"],
+        cwd=family.worktree,
+        capture_output=True,
+    )
+
+
+async def _nothing(family):
+    pass
+
+
+@pytest.mark.parametrize(
+    ("act", "verdict"),
+    [
+        pytest.param(_start_the_pick, "failed", id="it-fails"),
+        pytest.param(_resolve_by_hand, "failed", id="it-fails-having-picked-it-all"),
+        pytest.param(_nothing, "ok", id="it-says-ok-having-done-nothing"),
+        pytest.param(_start_the_pick, "ok", id="it-says-ok-mid-pick"),
+    ],
+)
+async def test_a_conflict_the_handler_does_not_join_stops_for_a_person(
+    family, monkeypatch, act, verdict
+):
+    await _conflicting(family)
+    _handler(monkeypatch, family, act, verdict)
+
+    assert await family.join(HANDLED) == "needs_human"
+
+    assert family.stop() == ("needs_human", "conflict")
+    reason = family.reason()
+    assert "conflict handler did not join it" in reason
+    assert "`git cherry-pick -x --allow-empty --keep-redundant-commits" in reason
+    state = family.group_state()
+    assert (state.slice_phase, state.joined_through) == ("handed_off", 1)
+    # put back where the join stopped, as a person would have found it with no handler
+    assert family.subjects() == ["Task 1.0: work"]
+    assert git(family.worktree, "status", "--porcelain") == ""
+    gitdir = Path(git(family.worktree, "rev-parse", "--absolute-git-dir"))
+    assert not (gitdir / "CHERRY_PICK_HEAD").exists()
+
+
+async def test_a_handler_that_pauses_mid_pick_leaves_the_parent_put_back(family, monkeypatch):
+    """A pause (or a rate limit, a cap) ends the handler's turn: the walk stops
+    as it says, with the parent back where the join stopped, not mid-pick."""
+    await _conflicting(family)
+    _handler(monkeypatch, family, _start_the_pick, "paused")
+
+    assert await family.join(HANDLED) == "paused"
+
+    assert family.group_state().slice_phase == "handed_off"
+    assert family.subjects() == ["Task 1.0: work"]
+    assert git(family.worktree, "status", "--porcelain") == ""
+    gitdir = Path(git(family.worktree, "rev-parse", "--absolute-git-dir"))
+    assert not (gitdir / "CHERRY_PICK_HEAD").exists()
+
+
+async def test_a_handler_that_leaves_another_operation_names_where_to_reset(family, monkeypatch):
+    """`put_back` clears only a cherry-pick: anything else the handler left stops
+    the parent with the commit to reset to, since a retry never resets."""
+    await _conflicting(family)
+    seen = {}
+
+    async def merge_left(family):
+        at = seen["at"] = git(family.worktree, "rev-parse", "HEAD")  # where the join stopped
+        await _start_the_pick(family)
+        gitdir = Path(git(family.worktree, "rev-parse", "--absolute-git-dir"))
+        (gitdir / "MERGE_HEAD").write_text(at + "\n")
+
+    _handler(monkeypatch, family, merge_left, "failed")
+
+    assert await family.join(HANDLED) == "needs_human"
+
+    assert family.stop() == ("needs_human", "checkout")
+    reason = family.reason()
+    assert f"`git reset --hard {seen['at'][:12]}` on {family.branch}" in reason
+    assert "`git cherry-pick -x --allow-empty --keep-redundant-commits" in reason
 
 
 async def test_a_handed_off_slice_that_is_still_missing_stops_again(family):
