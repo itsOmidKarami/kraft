@@ -239,15 +239,22 @@ def _stopped_child(kid, budget):
         store.mark_needs_human(c, kid, "implementation", "stopped", None, budget, kind="budget")
 
 
+@pytest.mark.parametrize(
+    ("scope", "policy"),
+    [
+        pytest.param("usd", {"budget_usd": 0.05}, id="the-policy-cap"),
+        pytest.param("work_item", None, id="the-items-own-cap"),
+    ],
+)
 def test_raising_the_parents_cap_reaches_and_retries_the_slices_it_stopped(
-    monkeypatch, client, repo
+    monkeypatch, client, repo, scope, policy
 ):
-    """The slices hold a frozen copy of the parent's cap: the raise writes it to
-    them, and the retry queues the ones the family cap stopped, not the ones
-    stopped for anything else."""
+    """The slices hold a copy of the parent's cap: the raise reaches it, and the
+    retry queues the ones the family cap stopped, not the ones stopped for
+    anything else."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
-    cap = {"scope": "usd", "path": "", "spent_usd": 0.07, "cap_usd": 0.05, "unknown_launches": 0}
-    parent = _budget_stopped_item(client, repo, cap, policy={"budget_usd": 0.05})
+    cap = {"scope": scope, "path": "", "spent_usd": 0.07, "cap_usd": 0.05, "unknown_launches": 0}
+    parent = _budget_stopped_item(client, repo, cap, **({"policy": policy} if policy else {}))
     kids = [_paused(client, repo, chain_template="default") for _ in range(3)]
     state = store.GroupState(group="slices", phase="forked", generation=1)
     with _db() as c, c:
@@ -259,15 +266,15 @@ def test_raising_the_parents_cap_reaches_and_retries_the_slices_it_stopped(
                 (parent, key, kid),
             )
     _stopped_child(kids[0], cap)
-    _stopped_child(kids[1], {**cap, "path": "implementation"})
+    _stopped_child(kids[1], {**cap, "scope": "tokens", "path": "implementation"})
     with _db() as c, c:
         c.execute("UPDATE work_items SET status = 'needs_human' WHERE id = ?", (kids[2],))
 
     r = client.post(f"/api/work-items/{parent}/budget/raise", json={"budget_usd": 1.0})
 
     assert r.status_code == 200, r.text
-    overrides = [client.get(f"/api/work-items/{k}").json()["policy_override"] for k in kids]
-    assert overrides == [{"budget_usd": 1.0}] * 3
+    caps = [client.get(f"/api/work-items/{k}").json()["budget_cap"]["cap_usd"] for k in kids]
+    assert caps == [1.0] * 3
     assert _status_of(client, kids[0]) in ("queued", "active")
     assert [_status_of(client, k) for k in kids[1:]] == ["needs_human", "needs_human"]
 
@@ -288,3 +295,22 @@ def test_a_parent_refusal_leaves_the_slices_asleep(client, repo, monkeypatch, ve
     assert r.status_code == 409, r.text
     assert "already running" in r.json()["detail"]
     assert [_status_of(client, k) for k in kids] == ["paused", "paused"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param({"budget_usd": 7.0}, id="the-items-own-cap"),
+        pytest.param({"policy": {"budget_usd": 7.0}}, id="the-policy-cap"),
+    ],
+)
+def test_a_cap_set_on_the_parent_is_the_cap_its_slices_check(client, repo, body):
+    """However a person sets the parent's cap, a slice's next launch reads that
+    cap, not the copy it was filed with."""
+    parent, kids = _family(client, repo, parent_status="paused", children=("paused", "paused"))
+
+    r = client.patch(f"/api/work-items/{parent}", json=body)
+
+    assert r.status_code == 200, r.text
+    caps = [client.get(f"/api/work-items/{k}").json()["budget_cap"]["cap_usd"] for k in kids]
+    assert caps == [7.0, 7.0]

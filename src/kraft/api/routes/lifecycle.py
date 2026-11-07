@@ -2358,22 +2358,13 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
             "would stop it again at once: raise it above that, or to none",
         )
 
-    def raise_one(cid: str):
-        return (
-            _raise_policy_budget(cid, body.budget_usd)
-            if item_wide
-            else (lambda c: store.raise_budget(c, cid, body.budget_usd))
-        )
-
-    # The family shares the parent's cap: its slices carry a frozen copy of it, so
-    # the new one reaches each (and the retry wakes the ones it stopped).
-    shared = [c["id"] for c in slices_mod.unended_children(st.db, wid)]
-
-    def write(c):
-        raise_one(wid)(c)
-        for cid in shared:
-            raise_one(cid)(c)
-
+    # The slices share the parent's cap (`store.share_cap`, in the same write), and
+    # the retry wakes the ones it stopped.
+    write = (
+        _raise_policy_budget(wid, body.budget_usd)
+        if item_wide
+        else (lambda c: store.raise_budget(c, wid, body.budget_usd))
+    )
     _refuse_a_retry_that_cannot_start(request, wid, row)
     await st.db.write(write)
     try:

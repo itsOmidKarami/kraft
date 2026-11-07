@@ -8,7 +8,7 @@ from kraft import caps as _caps
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import session_wall_ms, wait_timed_out_sessions
-from kraft.store.slices import family_ids
+from kraft.store.slices import family_ids, share_cap
 from kraft.usage import KINDS, spent
 from kraft.vocab import LimitEvent
 
@@ -220,6 +220,7 @@ def set_budget(conn: sqlite3.Connection, work_item_id: str, budget_usd: float | 
         (budget_usd, _now(), work_item_id),
     )
     events.append(conn, work_item_id, LimitEvent.BUDGET_CHANGED, {"budget_usd": budget_usd})
+    share_cap(conn, work_item_id)  # a parent's slices share its cap
 
 
 def raise_budget(conn: sqlite3.Connection, work_item_id: str, budget_usd: float | None) -> None:
@@ -233,3 +234,4 @@ def raise_budget(conn: sqlite3.Connection, work_item_id: str, budget_usd: float 
         (budget_usd, _now(), work_item_id),
     )
     events.append(conn, work_item_id, LimitEvent.BUDGET_RAISED, {"budget_usd": budget_usd})
+    share_cap(conn, work_item_id)  # a parent's slices share its cap

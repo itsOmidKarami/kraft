@@ -602,6 +602,9 @@ def set_policy_override(conn: sqlite3.Connection, work_item_id: str, override) -
     events.append(
         conn, work_item_id, SettingsEvent.POLICY_OVERRIDE_CHANGED, {"policy": stored or {}}
     )
+    from kraft.store.slices import share_cap  # deferred: it imports this package
+
+    share_cap(conn, work_item_id)  # a parent's slices share its caps
 
 
 def chain_node_ids(row) -> tuple[str, ...]:

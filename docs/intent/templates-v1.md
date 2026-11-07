@@ -2597,11 +2597,11 @@ origin: src/kraft/api/routes/lifecycle.py §_retry
 
 ## REQ the-parents-cap-is-the-familys
 
-WHEN a parent's spend cap is raised, the system SHALL write the new cap to each of
+WHEN a parent's spend cap is set or raised, the system SHALL write the new cap to each of
 its unended slices and retry the slices the family cap stopped, and SHALL leave a
 slice stopped for any other reason as it was; a pause of the family, a parent's
 cap firing or the family check SHALL end the walk task of each slice it pauses.
-enforced-by: tests/api/test_lifecycle_slices.py::test_raising_the_parents_cap_reaches_and_retries_the_slices_it_stopped, tests/api/test_lifecycle_slices.py::test_pause_and_resume_cascade_to_the_children_the_parent_paused, tests/executor/test_budget_caps.py::test_the_family_check_stops_a_waiting_parent_and_pauses_its_children
+enforced-by: tests/api/test_lifecycle_slices.py::test_raising_the_parents_cap_reaches_and_retries_the_slices_it_stopped[the-policy-cap], tests/api/test_lifecycle_slices.py::test_raising_the_parents_cap_reaches_and_retries_the_slices_it_stopped[the-items-own-cap], tests/api/test_lifecycle_slices.py::test_a_cap_set_on_the_parent_is_the_cap_its_slices_check[the-items-own-cap], tests/api/test_lifecycle_slices.py::test_a_cap_set_on_the_parent_is_the_cap_its_slices_check[the-policy-cap], tests/api/test_lifecycle_slices.py::test_pause_and_resume_cascade_to_the_children_the_parent_paused, tests/executor/test_budget_caps.py::test_the_family_check_stops_a_waiting_parent_and_pauses_its_children
 origin: src/kraft/executor/slices.py §resume_family
 
 ## REQ a-parents-refusal-wakes-no-slice

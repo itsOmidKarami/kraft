@@ -18,7 +18,7 @@ from kraft import events
 from kraft.store import _now as _now
 from kraft.store._common import write_status
 from kraft.store.work_items import create_work_item
-from kraft.vocab import HOLDS_SLOT, WorkItemEvent, WorkItemStatus
+from kraft.vocab import ENDED, HOLDS_SLOT, WorkItemEvent, WorkItemStatus
 from kraft.vocab.sql import in_list
 
 __all__ = [
@@ -36,6 +36,7 @@ __all__ = [
     "pin_head",
     "set_docs_commit",
     "set_group_state",
+    "share_cap",
 ]
 
 Phase = Literal["deciding", "prelude", "forked", "joining", "joined"]
@@ -202,6 +203,39 @@ def children_of(
         params = (parent_id, generation)
     rows = conn.execute(sql + " ORDER BY slice_generation, slice_key", params).fetchall()
     return [dict(r) for r in rows]
+
+
+def share_cap(conn: sqlite3.Connection, parent_id: str) -> None:
+    """Write the parent's spend caps (its own `budget_usd`, and the dollar and
+    token caps of its policy override) to every child that has not ended, so a
+    slice's launch check reads the cap the family shares, however a person set
+    it. A child keeps the rest of its own override."""
+    from kraft.policy import BUDGET_FIELDS
+
+    parent = conn.execute(
+        "SELECT budget_set, budget_usd, policy_override FROM work_items WHERE id = ?", (parent_id,)
+    ).fetchone()
+    if parent is None:
+        return
+    stored = json.loads(parent["policy_override"] or "null") or {}
+    shared = {k: stored[k] for k in BUDGET_FIELDS if k in stored}
+    for child in conn.execute(
+        "SELECT id, policy_override FROM work_items WHERE parent_id = ? "
+        f"AND status NOT IN ({in_list(ENDED)})",
+        (parent_id,),
+    ).fetchall():
+        own = json.loads(child["policy_override"] or "null") or {}
+        merged = {**{k: v for k, v in own.items() if k not in BUDGET_FIELDS}, **shared}
+        conn.execute(
+            "UPDATE work_items SET budget_set = ?, budget_usd = ?, policy_override = ? "
+            "WHERE id = ?",
+            (
+                parent["budget_set"],
+                parent["budget_usd"],
+                json.dumps(merged) if merged else None,
+                child["id"],
+            ),
+        )
 
 
 def never_queued(conn: sqlite3.Connection, wid: str) -> bool:
