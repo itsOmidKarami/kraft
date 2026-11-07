@@ -20,7 +20,7 @@ from kraft.store import _now as _now
 from kraft.templates.models import DEFAULT_WAIT, ResolvedNode, ResolvedTask
 from kraft.usage import cap_usd as _cap_usd
 from kraft.usage import usd as _usd
-from kraft.vocab import HOLDS_SLOT, ForgeEvent, LimitEvent, StopKind
+from kraft.vocab import HOLDS_SLOT, ForgeEvent, LimitEvent, StopKind, WorkItemStatus
 from kraft.vocab.events import RemoteEvent
 from kraft.worker import sandbox as _sandbox
 
@@ -205,8 +205,14 @@ async def stop_for_budget(db, work_item_id: str, node: ResolvedNode, budget: _po
     )
     reason = budget_reason(breach)
     dump = breach.model_dump()
-    await db.write(
-        lambda c: store.mark_needs_human(
+
+    def mark(c) -> bool:
+        # A sibling's family stop paused this slice mid-node, without ending its
+        # walk: it stays paused, and pages nobody, rather than stopping later.
+        now = c.execute("SELECT status FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+        if now is not None and now["status"] == WorkItemStatus.PAUSED:
+            return False
+        store.mark_needs_human(
             c,
             work_item_id,
             node.id,
@@ -216,8 +222,33 @@ async def stop_for_budget(db, work_item_id: str, node: ResolvedNode, budget: _po
             kind=StopKind.BUDGET,
             limit=budget_limit(breach),
         )
-    )
+        return True
+
+    if not await db.write(mark):
+        return "paused"
+    await _stop_family_on_its_cap(db, work_item_id, budget)
     return "needs_human"
+
+
+async def _stop_family_on_its_cap(db, work_item_id: str, budget: _policy.Budget) -> None:
+    """A slice refused on the cap its family shares stops the family now, not at
+    the cap poller's next tick: the parent stops and its other slices pause, so
+    no sibling stops on its own at its next launch. `budget` is the parent's
+    too: `store.share_cap` gives every slice its parent's caps. No `cancel`: a
+    paused sibling's agent is killed, and its walk ends at its next node or at
+    its next refused launch (above)."""
+    from kraft.executor import slices  # deferred: slices imports the walk
+
+    row = db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    )
+    if row is None or not row["parent_id"] or not slices.stopped_by_family_cap(db, row):
+        return
+    parent = db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (row["parent_id"],)).fetchone()
+    )
+    if parent is not None:
+        await _caps.stop_family_for_budget(db, parent, store.effective_budget(parent, budget))
 
 
 def latest_rate_limit(db, work_item_id: str) -> dict | None:

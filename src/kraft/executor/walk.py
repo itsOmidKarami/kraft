@@ -649,9 +649,7 @@ async def _sentinel_stop(
     if verdict == LANDED_UNREVIEWED:
         return await _stop_landed_unreviewed(db, work_item_id, node)
     if verdict == BUDGET:
-        stop = await stops.stop_for_budget(db, work_item_id, node, budget)
-        await _stop_family_on_its_cap(db, work_item_id, budget)
-        return stop
+        return await stops.stop_for_budget(db, work_item_id, node, budget)
     if verdict == REPAIR_DOUBTED:
         reason = _doubted_repair_reason(db, work_item_id, node, failed)
         # `stuck`, not `failed`: nothing failed, the repair doubts itself and a
@@ -661,27 +659,6 @@ async def _sentinel_stop(
         )
         return "needs_human"
     return None
-
-
-async def _stop_family_on_its_cap(db, work_item_id: str, budget: _policy.Budget) -> None:
-    """A slice refused on the cap its family shares stops the family now, not at
-    the cap poller's next tick: the parent stops and its other slices pause, so
-    no sibling stops on its own at its next launch. `budget` is the parent's
-    too: `store.share_cap` gives every slice its parent's caps. No `cancel`: a
-    paused sibling's agent is killed and its walk ends at its next node."""
-    from kraft import caps
-    from kraft.executor import slices
-
-    row = db.read(
-        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
-    )
-    if row is None or not row["parent_id"] or not slices.stopped_by_family_cap(db, row):
-        return
-    parent = db.read(
-        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (row["parent_id"],)).fetchone()
-    )
-    if parent is not None:
-        await caps.stop_family_for_budget(db, parent, store.effective_budget(parent, budget))
 
 
 def _doubted_repair_reason(db, work_item_id: str, node: ResolvedNode, doubted) -> str:

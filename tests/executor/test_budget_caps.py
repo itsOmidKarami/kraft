@@ -593,24 +593,29 @@ def test_raise_budget_on_a_slice_names_its_parent(client, repo):
 
 
 @pytest.mark.parametrize(
-    ("path", "parent_status", "cascades"),
-    [("", "waiting", True), ("build.run", "waiting", False), ("", "needs_human", False)],
+    ("path", "parent_status", "c1_status", "c1_ends", "cascades"),
+    [
+        ("", "waiting", "active", "needs_human", True),
+        ("build.run", "waiting", "active", "needs_human", False),
+        ("", "needs_human", "active", "needs_human", False),
+        ("", "needs_human", "paused", "paused", False),
+    ],
     ids=[
         "family-cap-stops-the-family",
         "a-scoped-cap-stops-only-the-slice",
         "parent-already-stopped",
+        "a-sibling-paused-mid-node-stays-paused",
     ],
 )
 async def test_a_slice_refused_on_the_family_cap_stops_its_family_at_once(
-    item_on, repo, path, parent_status, cascades
+    item_on, repo, path, parent_status, c1_status, c1_ends, cascades
 ):
     """Not at the cap poller's next tick: the parent stops and the other slices
     pause in the same pass, so each sibling does not stop, and page, on its own
     at its next launch. Only the item-wide cap the family shares cascades, and a
-    parent already stopped is not stopped twice."""
-    from kraft.executor import walk
-    from kraft.executor.context import BUDGET
-
+    parent already stopped is not stopped twice. A sibling that family stop
+    paused mid-node, with its walk still running, is refused at its next launch
+    and stays paused: no late stop of its own."""
     parent = await item_on(_chain(), policy_override={"budget_usd": 2})
     c1 = await item_on(_chain(), wid="c1", policy_override={"budget_usd": 2})
     c2 = await item_on(_chain(), wid="c2", policy_override={"budget_usd": 2})
@@ -627,6 +632,7 @@ async def test_a_slice_refused_on_the_family_cap_stops_its_family_at_once(
                 "slice_key = CAST(substr(id, 2) AS INTEGER) WHERE id IN ('c1', 'c2')",
                 (parent.id,),
             ),
+            c.execute("UPDATE work_items SET status = ? WHERE id = 'c1'", (c1_status,)),
         )
     )
     await _spent(c1, TASK, usd=2.0)
@@ -637,10 +643,11 @@ async def test_a_slice_refused_on_the_family_cap_stops_its_family_at_once(
         )
     )
 
-    await walk._sentinel_stop(
-        c1.database, "c1", c1.chain.chain.nodes[0], BUDGET, [], _policy.NO_BUDGET
+    verdict = await stops.stop_for_budget(
+        c1.database, "c1", c1.chain.chain.nodes[0], _policy.NO_BUDGET
     )
 
-    assert c1.row()["status"] == "needs_human"
+    assert verdict == c1.row()["status"] == c1_ends
+    assert len(c1.events("work_item_needs_human")) == int(c1_ends == "needs_human")
     assert len(parent.events("work_item_needs_human")) == int(cascades)
     assert (c2.row()["status"] == "paused") is cascades
