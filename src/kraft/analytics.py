@@ -23,10 +23,12 @@ Two derivations are worth stating outright, because neither is a stored fact:
   counted, filtered and bucketed, and a child's repo and chain are read through
   its parent. A child's work is rolled into its parent by one rule per kind:
   - summed into the parent, because each is work or a stop that happened:
-    cost, tokens, session wall time, caps, per-node and per-repo rows, rounds
-    and repairs (`work_items_run` and repairs per item count the parent once),
-    merges, human wait, gate waits, rejected gates, stop reasons and unplanned
-    touches.
+    cost, tokens, session wall time, caps, per-node and per-repo rows, repairs
+    (`work_items_run` and repairs per item count the parent once), merges, human
+    wait, gate waits, rejected gates, stop reasons and unplanned touches. A family
+    spend cap stops the parent and each child its launch check refused, so one cap
+    can read as several `budget` stops and touches. Rounds take the deepest single
+    node's loop across the family, as for one item.
   - the parent's own span, because it is a clock the children run inside:
     lead time and open MR to green CI. Waiting on you divides the family's
     summed waits by that span and stops at 100%, since parallel children can
@@ -339,7 +341,7 @@ def compute(
         args,
     ).fetchall()
     ids = [r["id"] for r in items]
-    # Every child of these parents, every generation, in one query; `owner` maps
+    # Every child of these parents, of every `slice_generation`, in one query; `owner` maps
     # each id, parent or child, to the item it counts under.
     children = (
         conn.execute(

@@ -33,6 +33,10 @@ def test_a_sliced_item_counts_once_with_its_childrens_work(tmp_path, filters, n)
     for wid, rounds in (("p", [0]), ("p-c1", [0, 1]), ("p-c2", [0, 1, 2])):  # three repairs
         for rnd in rounds:
             _session(conn, f"{wid}-{rnd}", wid, "verify", round=rnd, u=Usage(1, 1, 0.2))
+    # each child hits its fix loop's cap; a time cap stops one more of c1's
+    for sid, wid in (("cap", "p-c1"), ("cap", "p-c2"), ("time", "p-c1")):
+        _session(conn, sid, wid, "verify", status="capped_out")
+    _event(conn, "p-c1", "time_cap_reached", {"session_id": "time"}, _at(0.95))
     _event(conn, "p", "node_started", {"node_id": "verify"}, _at(1))
     _event(conn, "p-c1", "work_item_needs_human", {"reason": "x", "capped": {}}, _at(0.9))
     _event(conn, "p-c1", "work_item_retried", {}, _at(0.8))
@@ -41,6 +45,7 @@ def test_a_sliced_item_counts_once_with_its_childrens_work(tmp_path, filters, n)
     conn.close()
     keys = ("work_items", "work_items_run", "completed", "completed_prev", "cost_usd")
     keys += ("fix_cycles", "human_wait_ms", "median_lead_ms", "human_wait_pct")
+    keys += ("capped_out", "time_capped", "fix_cycles_capped")
     assert {k: a["totals"][k] for k in (*keys, "unplanned_touches_per_item")} == {
         **dict.fromkeys(keys[:4], n),
         "cost_usd": pytest.approx(1.2 * n),
@@ -49,6 +54,25 @@ def test_a_sliced_item_counts_once_with_its_childrens_work(tmp_path, filters, n)
         "median_lead_ms": round(0.5 * 86_400_000) * n,  # the parent's own span
         "human_wait_pct": 20 * n,
         "unplanned_touches_per_item": 1.0 * n,
+        "capped_out": 2 * n,
+        "time_capped": n,
+        "fix_cycles_capped": n,  # one item, though both its children hit the cap
     }
     assert [r["repo"] for r in a["by_repo"]] == ["/a"] * n
     assert a["stop_reasons"] == [{"label": "cap breach", "n": 1}] * n
+
+
+def test_slices_waiting_at_once_read_as_all_of_the_lead_time_not_more(tmp_path):
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    _item(conn, "p", status="completed", created=_at(1))
+    _event(conn, "p", "node_started", {"node_id": "verify"}, _at(1))
+    for c in ("c1", "c2"):  # both wait 0.4d of the parent's 0.5d lead, side by side
+        _item(conn, c, created=_at(1))
+        conn.execute("UPDATE work_items SET parent_id = 'p' WHERE id = ?", (c,))
+        _event(conn, c, "work_item_needs_human", {"reason": "x"}, _at(0.9))
+        _event(conn, c, "work_item_retried", {}, _at(0.5))
+    _event(conn, "p", "work_item_completed", {}, _at(0.5))
+    t = analytics.compute(conn, range_="7d", now=NOW)["totals"]
+    conn.close()
+    assert t["human_wait_pct"] == 100
