@@ -204,11 +204,17 @@ class Notifier:
         return True
 
     def _parent_id(self, work_item_id: str) -> str | None:
-        row = self._db.read(
-            lambda c: c.execute(
-                "SELECT parent_id FROM work_items WHERE id = ?", (work_item_id,)
-            ).fetchone()
-        )
+        # A failed read must not abort the drain pass: the cursor is already past
+        # this event, so raising would drop it with no `notification_failed`.
+        try:
+            row = self._db.read(
+                lambda c: c.execute(
+                    "SELECT parent_id FROM work_items WHERE id = ?", (work_item_id,)
+                ).fetchone()
+            )
+        except Exception:
+            logger.exception("could not read the parent of %s; coalescing alone", work_item_id)
+            return None
         return row["parent_id"] if row is not None else None
 
     def _dispatch(self, ev: dict) -> None:
