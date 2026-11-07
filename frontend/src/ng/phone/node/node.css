@@ -57,6 +57,7 @@ summary.ph-subagent-head:focus-visible { outline: 2px solid var(--focus); outlin
 .ph-subagent-list { margin: 0; padding: 0; list-style: none; }
 .ph-subagent + .ph-subagent { border-top: 1px solid var(--line); }
 .ph-subagent-said { margin: 0; padding: 0 14px 4px; overflow-wrap: anywhere; }
-.ph-subagent-prompt { margin: 0; padding: 0 14px 8px; font-size: var(--fs-meta); color: var(--text-muted); }
-.ph-subagent-prompt summary { width: fit-content; padding: 6px 0; cursor: pointer; }
+.ph-subagent-prompt { margin: 0; padding: 0 14px 2px; font-size: var(--fs-meta); color: var(--text-muted); }
+/* A thumb's worth of target (44px), in padding so the summary keeps its own marker. */
+.ph-subagent-prompt summary { width: fit-content; min-height: 44px; box-sizing: border-box; padding: 12px 0; line-height: 20px; cursor: pointer; }
 .ph-prompt { margin: 4px 0 0; padding: 8px; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 6px; font-size: var(--fs-meta); color: var(--text); }
