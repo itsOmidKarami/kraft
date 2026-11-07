@@ -18,7 +18,8 @@ from kraft import events
 from kraft.store import _now as _now
 from kraft.store._common import write_status
 from kraft.store.work_items import create_work_item
-from kraft.vocab import WorkItemEvent, WorkItemStatus
+from kraft.vocab import HOLDS_SLOT, WorkItemEvent, WorkItemStatus
+from kraft.vocab.sql import in_list
 
 __all__ = [
     "ChildRow",
@@ -29,6 +30,7 @@ __all__ = [
     "group_state",
     "is_child",
     "mark_waiting_on_slices",
+    "running_siblings",
     "pin_head",
     "set_docs_commit",
     "set_group_state",
@@ -179,6 +181,21 @@ def family_ids(conn: sqlite3.Connection, wid: str) -> list[str]:
         )
     ]
     return ids if wid in ids else [wid]
+
+
+def running_siblings(conn: sqlite3.Connection, wid: str) -> int:
+    """How many of `wid`'s siblings (same parent and generation) run right now.
+    0 for an item that is no child's."""
+    row = conn.execute(
+        "SELECT parent_id, slice_generation FROM work_items WHERE id = ?", (wid,)
+    ).fetchone()
+    if row is None or row[0] is None:
+        return 0
+    return conn.execute(
+        f"SELECT COUNT(*) FROM work_items WHERE parent_id = ? AND slice_generation = ? "
+        f"AND id != ? AND status IN ({in_list(HOLDS_SLOT)})",
+        (row[0], row[1], wid),
+    ).fetchone()[0]
 
 
 def mark_waiting_on_slices(conn: sqlite3.Connection, wid: str, node_id: str) -> None:

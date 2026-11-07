@@ -21,7 +21,7 @@ from pathlib import Path
 from kraft import events, ids, store
 from kraft import policy as _policy
 from kraft.config import git_read
-from kraft.executor import entry
+from kraft.executor import entry, stops
 from kraft.executor.context import WAITING, LaunchContext, Steer
 from kraft.progress import read_attached
 from kraft.slices import SliceRefusal, SliceSplit, parse_slices, prelude_note
@@ -328,3 +328,69 @@ async def _join(db, run_dirs, work_item_id, node, row, worktree, state, *, launc
     from kraft.executor import join
 
     return await join.join(db, run_dirs, row, Path(worktree), node, launch=launch)
+
+
+async def release_ready_parents(app) -> list[str]:
+    """Claim, with a capacity check, every parent waiting on slices whose current
+    generation's children have all ended, and re-enter it to join. Run at the
+    start of each start-queue pass, before the queued items: a parent finishing
+    its own work comes first. Never through `waits.tick`, which moves `waiting`
+    to `active` without checking `max_concurrent`. No claim (every slot busy):
+    the parent stays waiting and the next pass tries again."""
+    from kraft import executor
+    from kraft.api import deps
+
+    st = app.state
+    limit = st.policy.max_concurrent if st.policy else 1
+    ready = [
+        r
+        for r in st.db.read(
+            lambda c: c.execute(
+                "SELECT * FROM work_items WHERE status = 'waiting' AND stop_kind = 'slices'"
+            ).fetchall()
+        )
+        if _ready(st.db, r)
+    ]
+    released: list[str] = []
+    for row in ready:
+        wid = row["id"]
+        async with stops.claimed_or_stopped(
+            st.db,
+            wid,
+            row["current_node_id"],
+            reason="the start queue claimed this item to join its slices but could not start",
+            handed_off=lambda wid=wid: deps.task_is_live(app, wid),
+        ):
+            claimed = await st.db.write(
+                lambda c, wid=wid: store.claim_for_run(
+                    c, wid, from_statuses=[WorkItemStatus.WAITING], limit=limit
+                )
+            )
+            if not claimed:
+                continue
+            try:
+                deps.spawn(
+                    app,
+                    wid,
+                    deps.guard(
+                        st.db,
+                        wid,
+                        executor.run(
+                            st.db,
+                            st.run_dirs,
+                            work_item_id=wid,
+                            bd_cwd=deps.bd_cwd(),
+                            policy=st.policy,
+                            launch=deps.launch(st, row["repo"]),
+                        ),
+                    ),
+                )
+            except deps.AlreadyRunning:
+                continue
+            released.append(wid)
+    return released
+
+
+def _ready(db, row) -> bool:
+    state = db.read(lambda c: store.group_state(c, row["id"]))
+    return state is not None and state.phase == "forked" and children_ended(db, row["id"], state)

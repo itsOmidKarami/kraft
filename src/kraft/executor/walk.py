@@ -3442,6 +3442,12 @@ async def run_once(
     # taking `carried` -- e.g. every remaining node was builtin/subprocess
     # only. Report it the same as every other exit (Kraft-s7c04.50).
     await _report_if_undelivered(db, work_item_id, carried)
+    if store.is_child(row):
+        # What the join replays: the commit the child's review saw, not whatever
+        # its branch is later moved to.
+        head = _config.git_read(Path(worktree), "rev-parse", "HEAD")
+        if head:
+            await db.write(lambda c: store.pin_head(c, work_item_id, head))
     await db.write(lambda c: store.mark_completed(c, work_item_id))
     await entry.close_beads(db, row, bd_cwd, run_dirs)
     return "completed"

@@ -2724,6 +2724,12 @@ async def _end_work_item(request: Request, wid: str, action: str, reason: str):
         raise HTTPException(409, f"work item is already {row['status']}")
     sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
     ids = [s["id"] for s in sessions]
+    if action == "complete" and store.is_child(row):
+        # Completed by hand, a child still has its head pinned: the join replays
+        # exactly this, as it does for one the walk completed.
+        head = git_read(inplace.item_folder(st.run_dirs, row), "rev-parse", "HEAD")
+        if head:
+            await st.db.write(lambda c: store.pin_head(c, wid, head))
     await st.db.write(lambda c: store.end_work_item(c, wid, action, reason, session_ids=ids))
     for s in sessions:
         _terminate(s["pid"], started=s["pid_start_time"])

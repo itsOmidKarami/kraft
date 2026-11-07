@@ -31,16 +31,21 @@ async def tick(app) -> list[str]:
 
     st = app.state
     after_days = st.policy.archive_after_days if st.policy is not None else None
-    if not after_days:
-        return []
-    cutoff = (datetime.fromisoformat(_now()) - timedelta(days=after_days)).isoformat()
-    due = st.db.read(
-        lambda c: c.execute(
-            f"SELECT * FROM work_items WHERE status IN ({in_list(admitting(Verb.ARCHIVE))}) "
-            "AND archived_at IS NULL AND updated_at <= ?",
-            (cutoff,),
-        ).fetchall()
-    )
+    due = []
+    if after_days:
+        cutoff = (datetime.fromisoformat(_now()) - timedelta(days=after_days)).isoformat()
+        due = st.db.read(
+            lambda c: c.execute(
+                f"SELECT * FROM work_items WHERE status IN ({in_list(admitting(Verb.ARCHIVE))}) "
+                "AND archived_at IS NULL AND updated_at <= ?",
+                (cutoff,),
+            ).fetchall()
+        )
+    # A slice's child keeps its worktree until its parent has joined it, however
+    # long it has been finished; after the join it archives at once.
+    joined = st.db.read(_joined_children)
+    due = [r for r in due if r["parent_id"] is None]
+    due += [r for r in joined if r["id"] not in {d["id"] for d in due}]
     archived = []
     for row in due:
         # One row's failure must not skip every later due row until the next
@@ -52,6 +57,26 @@ async def tick(app) -> list[str]:
             continue
         archived.append(row["id"])
     return archived
+
+
+def _joined_children(conn) -> list:
+    """Finished children whose parent's group is `joined`."""
+    from kraft import store
+
+    rows = conn.execute(
+        f"SELECT * FROM work_items WHERE parent_id IS NOT NULL AND archived_at IS NULL "
+        f"AND status IN ({in_list(admitting(Verb.ARCHIVE))})"
+    ).fetchall()
+    out = []
+    for row in rows:
+        state = store.group_state(conn, row["parent_id"])
+        if (
+            state is not None
+            and state.phase == "joined"
+            and state.generation >= (row["slice_generation"] or 0)
+        ):
+            out.append(row)
+    return out
 
 
 def wake(st) -> None:

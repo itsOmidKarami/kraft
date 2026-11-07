@@ -53,7 +53,8 @@ def busy_counts(db) -> tuple[int, int]:
     """(items going on, sessions running), in one read."""
     row = db.read(
         lambda c: c.execute(
-            f"SELECT (SELECT COUNT(*) FROM work_items WHERE status IN ({in_list(BUSY)})), "
+            f"SELECT (SELECT COUNT(*) FROM work_items WHERE status IN ({in_list(BUSY)}) "
+            "AND stop_kind IS NOT 'slices'), "
             f"(SELECT COUNT(*) FROM worker_sessions WHERE status = ?)",
             (SessionStatus.RUNNING,),
         ).fetchone()

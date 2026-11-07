@@ -232,3 +232,27 @@ async def test_tick_leaves_an_item_untouched_on_a_forge_error(
         assert app.state.mr_poll_errors == {it.id: "gh: rate limited"}
         assert len(logged()) == 1
         assert it.row()["status"] == "waiting"
+
+
+async def test_tick_leaves_a_parent_waiting_on_its_slices_alone(
+    item_on, stub_app, repo, tmp_path, monkeypatch
+):
+    """A parent at a group waits on its children, not on a merge request."""
+    from kraft.adapters import forge as forge_mod
+
+    fake = forge_mod.FakeForge()
+    _patch_forge(monkeypatch, fake)
+    it = await item_on(_chain(repo), "merge")
+    await _opened_mr(it, fake)
+    await it.database.write(
+        lambda c: c.execute(
+            "UPDATE work_items SET status = 'waiting', stop_kind = 'slices' WHERE id = ?",
+            (it.id,),
+        )
+    )
+    calls = []
+    monkeypatch.setattr(fake, "find_mr", lambda **kw: calls.append(kw))
+    app = _app(stub_app, it.database, it.run_dirs, tmp_path)
+
+    assert await mr_poller.tick(app) == []
+    assert calls == []

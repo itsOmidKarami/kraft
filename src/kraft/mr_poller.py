@@ -53,7 +53,8 @@ async def tick(app) -> list[str]:
     rows = st.db.read(
         lambda c: c.execute(
             f"SELECT * FROM work_items WHERE status IN ({in_list(MR_WATCHED)}) "
-            f"AND archived_at IS NULL AND stop_kind IS NOT '{StopKind.MR_CLOSED}'"
+            f"AND archived_at IS NULL AND stop_kind IS NOT '{StopKind.MR_CLOSED}' "
+            f"AND stop_kind IS NOT '{StopKind.SLICES}'"
         ).fetchall()
     )
     stopped: list[str] = []

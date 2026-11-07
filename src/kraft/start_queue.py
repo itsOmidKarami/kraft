@@ -83,8 +83,14 @@ async def tick(app) -> list[str]:
     # it, and is started in this same pass when a slot is free.
     await st.db.write(store.release_blocked)
     started: list[str] = []
+    # A parent whose slices have all ended joins them before anything new starts.
+    from kraft.executor import slices
+
+    await slices.release_ready_parents(app)
     for wid in st.db.read(store.queued_ids):
         if st.db.read(store.active_count) >= limit and not _slotless(st, wid):
+            continue
+        if _held_by_siblings(st, wid):
             continue
         if storage.holds(st, wid):
             # Keeps its place, and is not asked again each tick (its door would
@@ -96,6 +102,15 @@ async def tick(app) -> list[str]:
         if await _start_one(app, wid):
             started.append(wid)
     return started
+
+
+def _held_by_siblings(st, wid: str) -> bool:
+    """Whether `wid` is a slice's child and its parent already has
+    `max_concurrent_slices` children running."""
+    cap = getattr(st.policy, "max_concurrent_slices", None) if st.policy else None
+    if cap is None:
+        return False
+    return st.db.read(lambda c: store.running_siblings(c, wid)) >= cap
 
 
 #: Verbs that start an agent beside the walk, never a walk: they take no slot.

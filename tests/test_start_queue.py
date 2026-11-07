@@ -3,6 +3,7 @@
 import asyncio
 import dataclasses
 import json
+import os
 from functools import partial
 from pathlib import Path
 
@@ -586,3 +587,74 @@ def test_a_replay_beside_a_walk_already_running_is_not_waited_on(
         if e["type"] == "work_item_dequeued"
     ]
     assert dequeued == ([why] if why else [])
+
+
+def _family(client, repo, *, children: tuple[str, ...], parent_status="waiting"):
+    """A parent at a forked group and a child per status in `children`, written
+    straight into the database: the transient states a real fork passes through."""
+    import sqlite3
+    from contextlib import closing
+
+    from kraft import store
+
+    parent = _paused(client, repo, chain_template="default")
+    kids = [_paused(client, repo, chain_template="default") for _ in children]
+    state = store.GroupState(group="slices", phase="forked", generation=1)
+    with closing(sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")) as c, c:
+        c.execute(
+            "UPDATE work_items SET status = ?, stop_kind = 'slices', group_state = ? WHERE id = ?",
+            (parent_status, state.to_json(), parent),
+        )
+        for key, (kid, status) in enumerate(zip(kids, children, strict=True), 1):
+            c.execute(
+                "UPDATE work_items SET parent_id = ?, slice_generation = 1, slice_key = ?, "
+                "status = ? WHERE id = ?",
+                (parent, key, status, kid),
+            )
+    return parent, kids
+
+
+def _release(client) -> list[str]:
+    from kraft.executor import slices
+
+    return client.portal.call(partial(slices.release_ready_parents, client.app))
+
+
+def test_a_ready_parent_waits_for_a_free_slot(client, repo, board):
+    """Every child has ended, but every slot is busy: the parent stays waiting,
+    holding no slot, and takes one only when one frees."""
+    parent, _ = _family(client, repo, children=("completed", "abandoned"))
+
+    assert _release(client) == []
+    assert _status_of(client, parent) == "waiting"
+
+    _set_status(board, "paused")
+    assert _release(client) == [parent]
+    assert _status_of(client, parent) != "waiting"
+
+
+def test_a_parent_with_a_child_still_running_is_not_released(client, repo):
+    parent, _ = _family(client, repo, children=("completed", "needs_human"))
+
+    assert _release(client) == []
+    assert _status_of(client, parent) == "waiting"
+
+
+@pytest.mark.parametrize(
+    ("cap", "siblings", "held"),
+    [
+        pytest.param(1, ("active", "queued"), True, id="cap-reached"),
+        pytest.param(2, ("active", "queued"), False, id="cap-not-reached"),
+        pytest.param(None, ("active", "queued"), False, id="no-cap"),
+        pytest.param(1, ("needs_human", "queued"), False, id="a-stopped-sibling-runs-nothing"),
+    ],
+)
+def test_max_concurrent_slices_holds_back_a_childs_start(client, repo, cap, siblings, held):
+    _, kids = _family(client, repo, children=siblings)
+    client.app.state.policy = dataclasses.replace(
+        client.app.state.policy, max_concurrent_slices=cap
+    )
+
+    assert (
+        client.portal.call(lambda: start_queue._held_by_siblings(client.app.state, kids[1])) is held
+    )

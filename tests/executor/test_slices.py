@@ -246,3 +246,21 @@ async def test_a_fork_over_the_storage_limit_files_no_children(item_on, planned)
     assert it.database.read(lambda c: store.group_state(c, it.id)) is None or (
         it.database.read(lambda c: store.group_state(c, it.id)).phase != "forked"
     )
+
+
+async def test_a_completed_child_pins_its_head(item_on, repo):
+    it = await item_on([_body("implementation")])
+    fork = git(repo, "rev-parse", "HEAD")
+
+    def child(c):
+        c.execute(
+            "UPDATE work_items SET parent_id = 'p1', slice_generation = 1, slice_key = 1, "
+            "base_ref = ? WHERE id = ?",
+            (fork, it.id),
+        )
+
+    await it.database.write(child)
+
+    assert await _walk(it) == "completed"
+
+    assert it.row()["pinned_head"] == git(it.worktree, "rev-parse", "HEAD")
