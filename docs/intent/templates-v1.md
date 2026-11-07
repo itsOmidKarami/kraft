@@ -2591,8 +2591,10 @@ origin: src/kraft/templates/slicing.py
 IF a parent's slices are unjoined, THEN the system SHALL refuse a retry from an
 earlier node, `skip`, `complete`, and a draft acting at or behind the group; and IF
 every slice was dropped, THEN it SHALL refuse a retry alone and take a retry that
-rewinds to the plan or earlier, `retry --restart` included.
-enforced-by: tests/api/test_lifecycle_slices.py::test_an_unjoined_parent_refuses_a_retry_from_an_earlier_node[path-plan], tests/api/test_lifecycle_slices.py::test_an_unjoined_parent_refuses_a_retry_from_an_earlier_node[restart], tests/api/test_lifecycle_slices.py::test_a_retry_with_every_slice_dropped_wants_a_rewind[retry-alone], tests/api/test_lifecycle_slices.py::test_a_retry_with_every_slice_dropped_wants_a_rewind[at-the-group], tests/api/test_lifecycle_slices.py::test_a_retry_with_every_slice_dropped_wants_a_rewind[rewind-to-the-plan], tests/api/test_lifecycle_slices.py::test_a_retry_with_every_slice_dropped_wants_a_rewind[restart], tests/api/test_lifecycle_slices.py::test_a_draft_may_not_move_an_unjoined_parent_back[at-the-group], tests/api/test_lifecycle_slices.py::test_a_draft_may_not_move_an_unjoined_parent_back[after-the-group]
+rewinds to the plan or earlier, `retry --restart` included. Once it has rewound, the
+parent is being re-planned: while its cursor stands behind the group, nothing is
+unjoined and every door but the group's is open.
+enforced-by: tests/api/test_lifecycle_slices.py::test_a_parent_being_replanned_has_every_door_but_the_groups[retry-alone], tests/api/test_lifecycle_slices.py::test_a_parent_being_replanned_has_every_door_but_the_groups[restart-at-the-first-node], tests/api/test_lifecycle_slices.py::test_a_parent_being_replanned_has_every_door_but_the_groups[skip], tests/api/test_lifecycle_slices.py::test_an_unjoined_parent_refuses_a_retry_from_an_earlier_node[path-plan], tests/api/test_lifecycle_slices.py::test_an_unjoined_parent_refuses_a_retry_from_an_earlier_node[restart], tests/api/test_lifecycle_slices.py::test_a_retry_with_every_slice_dropped_wants_a_rewind[retry-alone], tests/api/test_lifecycle_slices.py::test_a_retry_with_every_slice_dropped_wants_a_rewind[at-the-group], tests/api/test_lifecycle_slices.py::test_a_retry_with_every_slice_dropped_wants_a_rewind[rewind-to-the-plan], tests/api/test_lifecycle_slices.py::test_a_retry_with_every_slice_dropped_wants_a_rewind[restart], tests/api/test_lifecycle_slices.py::test_a_draft_may_not_move_an_unjoined_parent_back[at-the-group], tests/api/test_lifecycle_slices.py::test_a_draft_may_not_move_an_unjoined_parent_back[after-the-group]
 origin: src/kraft/api/routes/lifecycle.py §_retry
 
 ## REQ the-parents-cap-is-the-familys
@@ -2608,8 +2610,8 @@ origin: src/kraft/executor/slices.py §resume_family
 
 IF a parent's resume or retry is refused, THEN the system SHALL leave its slices
 asleep, and SHALL queue on re-entry only the slices the fork filed paused and never
-queued.
-enforced-by: tests/api/test_lifecycle_slices.py::test_a_parent_refusal_leaves_the_slices_asleep[resume-paused], tests/api/test_lifecycle_slices.py::test_a_parent_refusal_leaves_the_slices_asleep[retry-needs_human], tests/executor/test_slices.py::test_re_entry_queues_only_the_children_the_fork_filed_paused[never-queued], tests/executor/test_slices.py::test_re_entry_queues_only_the_children_the_fork_filed_paused[paused-by-a-person-after-it-queued], tests/executor/test_slices.py::test_a_prelude_stopped_in_its_second_node_resumes_there
+queued, and only once the parent's own claim has held.
+enforced-by: tests/api/test_lifecycle_slices.py::test_a_parent_that_only_queues_leaves_the_slices_asleep[resume-paused], tests/api/test_lifecycle_slices.py::test_a_parent_that_only_queues_leaves_the_slices_asleep[retry-needs_human], tests/api/test_lifecycle_slices.py::test_a_parent_refusal_leaves_the_slices_asleep[resume-paused], tests/api/test_lifecycle_slices.py::test_a_parent_refusal_leaves_the_slices_asleep[retry-needs_human], tests/executor/test_slices.py::test_re_entry_queues_only_the_children_the_fork_filed_paused[never-queued], tests/executor/test_slices.py::test_re_entry_queues_only_the_children_the_fork_filed_paused[paused-by-a-person-after-it-queued], tests/executor/test_slices.py::test_a_prelude_stopped_in_its_second_node_resumes_there
 origin: src/kraft/api/routes/lifecycle.py §resume_work_item
 
 ## REQ a-slice-archives-and-inherits-with-its-parent

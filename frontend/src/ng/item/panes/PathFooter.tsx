@@ -5,6 +5,7 @@ import { act } from "../actions";
 import type { FooterState } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
 import { holdsText, isEscape, sendOnModEnter } from "../../keys";
+import { within } from "../cursor";
 import { admits, pausable, retryable, skippable, skipsNow } from "../status";
 
 const ENDED = new Set(["done", "cancelled", "archived"]);
@@ -22,7 +23,7 @@ export type FooterAct = "pause" | "resume" | "skip" | "retry";
  *  stopped on, so that node's pane (`path`) leaves it out. */
 export function footerActs(item: ItemDetail, shown: FooterState, what: "node" | "step" | "task" = "node", path = ""): FooterAct[] {
   // The failed card already offers Retry for the node it stopped on: the pane of that node does not say it twice.
-  const cardRetries = item.display_status === "failed" && !!item.stop?.node && path.split(".")[0] === item.stop.node && admits(item, "retry", true);
+  const cardRetries = item.display_status === "failed" && !!item.stop?.node && within(item.stop.node, path) && admits(item, "retry", true);
   const state = ENDED.has(item.display_status ?? "") ? null : shown;
   const skips = what === "node" ? skippable(item) : skipsNow(item);
   return [

@@ -7,7 +7,7 @@ import type { EventType } from "../../../types/vocab.generated";
 import { resetHarnessOptions } from "../../templates/panes/useHarnessOptions";
 import { ItemDraftProvider } from "../draft/context";
 import { answer, ov } from "../draft/testkit";
-import { acceptWrites, detail, fresh, stubFetch } from "../testkit";
+import { acceptWrites, detail, fresh, sliced, stubFetch } from "../testkit";
 import * as toast from "../../ui/Toast";
 import { ChainConfig, ChainOverview, STILL_STOPPED } from "./ChainPane";
 
@@ -94,6 +94,12 @@ describe("ChainOverview", () => {
     unmount();
     render(<ChainOverview item={detail({ status: "paused", display_status: "paused", current_node_id: "verification" })} events={[]} now={NOW} onSelect={() => {}} />);
     expect(screen.getByText("status").nextElementSibling).toHaveTextContent(/^paused/);
+  });
+
+  it("names the body node a run inside a slice group stands at, in the status and as current", () => {
+    render(<ChainOverview item={sliced("slices.verification", { status: "active", display_status: "running" })} events={[]} now={NOW} onSelect={() => {}} />);
+    expect(screen.getByText("status").nextElementSibling).toHaveTextContent(/running · verification$/);
+    expect(screen.getByText("current").nextElementSibling).toHaveTextContent(/^verification$/);
   });
 
   it("names an in-place item's checkout in words a tap can read, and a worktree item's not at all", () => {

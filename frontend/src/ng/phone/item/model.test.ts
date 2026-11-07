@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DisplayStatus, WorkItemStop } from "../../../types";
 import type { EventType } from "../../../types/vocab.generated";
 import { chainGraph } from "../../item/graph";
-import { detail } from "../../item/testkit";
+import { detail, sliced } from "../../item/testkit";
 import { BROKEN_BASE_TEXT, FORGE_LOGIN_HINT, FORGE_ACCOUNT_SSO_HINT, FORGE_SSO_HINT, FORGE_TOKEN_HINTS } from "../../item/cause";
 import { cardOf, kebabOf, nodeSub, pairOf } from "./model";
 
@@ -117,6 +117,9 @@ describe("cardOf: a node reads as its name, not its id", () => {
     ["question", mk("needs_you", stop("question", { node }), { needs_context_question: "Allow it?" }), "asked by the agent · on merge request"],
     ["paused", mk("paused", null, { current_node_id: node }), "at merge request"],
     ["escalated", mk("escalated", null, { current_node_id: node }), "at merge request"],
+    // A run inside a slice group stands at a body node (`slices.verification`): named by it.
+    ["paused in a slice group", sliced("slices.verification", { display_status: "paused", stop: null }), "at verification"],
+    ["escalated in a slice group", sliced("slices.verification", { display_status: "escalated", stop: null }), "at verification"],
   ])("on the %s card", (_, item, where) => {
     expect(cardOf(item)?.where).toContain(where);
   });

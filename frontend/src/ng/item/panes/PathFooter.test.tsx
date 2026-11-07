@@ -56,8 +56,13 @@ describe("PathFooter", () => {
   });
 
   // The failed card carries the Retry for the node it stopped on; another node's pane still has its own.
-  it.each([["the node the item stopped on", "verification.r.code_review", false], ["another node", "implementation.w.code", true]])("a failed item's pane for %s (%s) shows Retry: %s", (_n, path, shown) => {
-    render(<PathFooter item={detail({ display_status: "failed", stop: { kind: "failed", node: "verification", resume_at: null, reason: "x" } })} path={path} what="task" state="stopped" reload={() => {}} />);
+  it.each([
+    ["the node the item stopped on", "verification", "verification.r.code_review", false],
+    ["another node", "verification", "implementation.w.code", true],
+    ["the group's body node the item stopped on", "slices.verification", "slices.verification.run.work", false],
+    ["another body node of the group", "slices.verification", "slices.implementation.run.work", true],
+  ])("a failed item's pane for %s (%s) shows Retry: %s", (_n, node, path, shown) => {
+    render(<PathFooter item={detail({ display_status: "failed", stop: { kind: "failed", node, resume_at: null, reason: "x" } })} path={path} what="task" state="stopped" reload={() => {}} />);
     expect(!!screen.queryByRole("button", { name: "Retry" })).toBe(shown);
   });
 

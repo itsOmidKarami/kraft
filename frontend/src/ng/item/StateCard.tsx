@@ -12,6 +12,7 @@ import { act } from "./actions";
 import { CHECKOUT_FREES, IN_USE_BY, nameOf, slicesLine, WAITING_FOR_CHECKOUT } from "../board/rowText";
 import { admits, neverStarted, RELEASED, spentLine, strandedOneOff } from "./status";
 import { actionPath, taskName } from "./paths";
+import { standingNode } from "./cursor";
 import { pathSel, placeUrl } from "./url";
 import { useLogLines } from "./useLogLines";
 import { totals } from "./Top";
@@ -136,7 +137,7 @@ function failedActions(item: ItemDetail, retry: ReturnType<typeof retryFrom>, h:
 function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: string) => void; files: DiffFile[] | null; onRepos: () => void; onReview: (nodes?: string) => void; logUrl: string }, events: KraftEvent[], run: Run): Card | null {
   const stop = item.stop;
   const facts = (stop?.facts ?? {}) as Record<string, unknown>;
-  const node = item.chain_definition.nodes.find((n) => n.id === stop?.node);
+  const node = standingNode(item.chain_definition.nodes, stop?.node);
   const spent: [string, ReactNode] | null = item.budget_cap ? ["spent", spentLine(item)] : null;
   const where = stop ? [pathOf(stop.task) || (stop.node && nameOf(item.chain_definition.nodes, stop.node)), stop.attempt ? `attempt ${stop.attempt}` : ""].filter(Boolean).join(" · ") : undefined;
   const status = item.display_status;
@@ -181,7 +182,8 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
       actions: [],
     };
   }
-  if (status === "waiting" && stop?.kind === "slices")
+  // `item.status`, not the display status: a slice that needs the person puts the parent under Needs you.
+  if (item.status === "waiting" && stop?.kind === "slices")
     return {
       tone: "info", glyph: <Clock size={14} aria-hidden />, title: WAITING_FOR_SLICES, where, node: stop.node, text: slicesWaitText(item.slices?.needs_you),
       facts: item.slices ? [["slices", slicesLine(item).replace(/^slices: /, "")]] : [],
