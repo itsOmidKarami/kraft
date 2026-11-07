@@ -504,6 +504,9 @@ def _board_with_a_parent():
 def test_list_shows_a_parents_children_under_it(monkeypatch, capsys, status, rows, listed):
     from kraft.client import transport
 
+    # a wide terminal so the slice row's last column is not cut to an ellipsis
+    monkeypatch.setenv("COLUMNS", "300")
+
     async def get(path, **_):
         return {"items": _board_with_a_parent(), "cursor": 0}
 
