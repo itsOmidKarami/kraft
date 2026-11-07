@@ -145,10 +145,10 @@ describe("NodeGraph", () => {
       expect(btn(/^code_review/)).toHaveFocus();
     });
 
-    it("draws no marks on an earlier round's faded box, and ↓ from it goes on as from any task", async () => {
+    it("draws no marks on an earlier round's faded box, keeps the Tab stop on the box for its picked sub-agent, and ↓ goes on as from any task", async () => {
       const user = userEvent.setup();
       const faded = withAgents.map((st) => (st.id === "review" ? { ...st, tasks: [{ ...st.tasks[0], faded: true }] } : st));
-      render(<NodeGraph name="v" steps={faded} selected={{ step: "review", task: "code_review" }} />);
+      render(<NodeGraph name="v" steps={faded} selected={{ step: "review", task: "code_review", agent: "a2" }} />);
       expect(screen.queryByRole("group", { name: "code_review, sub-agents" })).toBeNull();
       await user.tab();
       await user.keyboard("{ArrowDown}");

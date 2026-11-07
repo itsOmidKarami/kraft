@@ -138,8 +138,8 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
   // it keeps clear of the zoom and round controls at the foot.
   const camera = useCamera({ canvas: "node", world: { W: lay.W, H: lay.H }, opening: "fit", reserve, clearBottom: 56 });
   // Each task's sub-agent marks, in the order drawn: ↓ from the task reaches them, ←/→ moves along them.
-  // An earlier round's faded box, or a task open as a frame, draws none.
-  const markRows = new Map(steps.flatMap((st) => st.tasks.filter((t) => t.agents?.length && !t.faded && !(shown && shown.step === st.id && shown.task === t.id)).map((t) => [taskKey(st.id, t.id), t.agents!.map((a) => markKey(st.id, t.id, a.id))] as const)));
+  // An earlier round's faded box draws none.
+  const markRows = new Map(steps.flatMap((st) => st.tasks.filter((t) => t.agents?.length && !t.faded).map((t) => [taskKey(st.id, t.id), t.agents!.map((a) => markKey(st.id, t.id, a.id))] as const)));
   // A picked sub-agent is the Tab stop while its mark is drawn; else its task is.
   const selMark = selected?.agent && selected.task && markRows.get(taskKey(selected.step, selected.task))?.includes(markKey(selected.step, selected.task, selected.agent)) ? markKey(selected.step, selected.task, selected.agent!) : undefined;
   const selKey = selected && (selected.scope && selected.task ? chipKey(selected.step, selected.task, selected.scope) : selMark ?? (selected.task ? taskKey(selected.step, selected.task) : labelKey(selected.step)));
