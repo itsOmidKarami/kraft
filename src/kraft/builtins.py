@@ -801,14 +801,18 @@ async def ensure_worktree(
     # guarantees a crashed-and-retried run never re-pins to a moved HEAD.
     row = db.read(
         lambda c: c.execute(
-            "SELECT base_ref, branch, id, materialized_chain, submodules "
+            "SELECT base_ref, branch, id, materialized_chain, submodules, parent_id "
             "FROM work_items WHERE id = ?",
             (work_item_id,),
         ).fetchone()
     )
     head = None
     base = await base_branch(db, work_item_id, Path(repo))
-    if row is not None and row["base_ref"] is None:
+    if row is not None and row["parent_id"] is not None and row["base_ref"]:
+        # A slice's child starts from the parent's fork commit, never the repo's
+        # HEAD or the base's tip: its base never moves (`slice groups`).
+        head = row["base_ref"]
+    elif row is not None and row["base_ref"] is None:
         head = await upstream_head(Path(repo), base)
         if head:
             await db.write(lambda c: store.set_base_ref(c, work_item_id, head))
@@ -845,6 +849,12 @@ async def ensure_worktree(
     await asyncio.to_thread(
         _copy_attachments, Path(repo), worktree, attachments or [], work_item_id, base
     )
+    if row is not None and row["parent_id"] is not None:
+        # The commit the join's replay starts after: the attach commit, or the
+        # fork commit itself when nothing was copied.
+        docs = await asyncio.to_thread(git_read, worktree, "rev-parse", "HEAD")
+        if docs:
+            await db.write(lambda c: store.set_docs_commit(c, work_item_id, docs))
     # Before the sync, not after: uv chooses an interpreter when it runs, so a
     # pin that lands later is a pin that changed nothing (Kraft-gxcmy).
     _, refused = await asyncio.to_thread(_carry_local_files, Path(repo), worktree, local_files)
