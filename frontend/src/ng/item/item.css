@@ -265,11 +265,37 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 .ip-subtask { padding-block: calc(4px + var(--row-pad-add)); }
 .ip-recent { gap: calc(4px + var(--row-pad-add)); }
 
-/* A task's sub-agents (Overview): a row each, what it last did or said, its prompt behind a disclosure. */
-.ip-subagent-count { margin: 0 0 8px; }
-.ip-subagent { list-style: none; }
-.ip-subagent-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ip-subagent-said { margin: 4px 0 0 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ip-subagent-prompt { margin: 4px 0 0 10px; font-size: var(--fs-meta); color: var(--text-sub); }
-.ip-subagent-prompt summary { cursor: pointer; }
+/* A task's sub-agents (Overview), by state: a list each for Running and Did not finish, Finished folded. A row is its
+ * name and time, what it used, what it last did or said, and its prompt behind a disclosure. */
+.ip-subagents { margin-top: 16px; }
+.ip-subagents > .ip-h { margin-top: 0; }
+.ip-subagent-groups { display: flex; flex-direction: column; gap: 14px; }
+.ip-subagent-head { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: var(--fs-label); font-weight: 500; color: var(--text-sub); }
+.ip-subagent-n { font-weight: 400; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+summary.ip-subagent-head { width: fit-content; margin: 0; padding: 2px 0; list-style: none; cursor: pointer; }
+summary.ip-subagent-head::-webkit-details-marker { display: none; }
+summary.ip-subagent-head::before { content: ""; flex: none; width: 5px; height: 5px; margin: 0 2px 0 1px; border-right: 1.5px solid var(--text-muted); border-bottom: 1.5px solid var(--text-muted); transform: rotate(-45deg); }
+.ip-subagent-fold[open] > summary.ip-subagent-head { margin-bottom: 6px; }
+.ip-subagent-fold[open] > summary.ip-subagent-head::before { transform: rotate(45deg); }
+summary.ip-subagent-head:hover { color: var(--text); }
+summary.ip-subagent-head:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+.ip-subagent-list { margin: 0; padding: 0; list-style: none; overflow: clip; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); }
+.ip-subagent-row + .ip-subagent-row { border-top: 1px solid var(--line); }
+.ip-subagent-open { display: grid; grid-template-columns: 7px minmax(0, 1fr) auto; column-gap: 10px; row-gap: 2px; align-items: baseline; width: 100%; box-sizing: border-box; padding: calc(8px + var(--row-pad-add)) 10px 4px; border: 0; background: none; color: var(--text); font: inherit; font-size: var(--fs-meta); text-align: left; cursor: pointer; }
+.ip-subagent-open:hover { background: color-mix(in oklab, var(--text) 4%, transparent); }
+.ip-subagent-open:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.ip-subagent-open > .ip-pill-dot { align-self: start; margin-top: 7px; }
+/* Two lines of name, then an ellipsis: the whole of it is the title. */
+.ip-subagent-name { grid-column: 2; min-width: 0; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-weight: 500; line-height: 1.4; }
+.ip-subagent-end { grid-column: 3; display: flex; gap: 8px; font-size: var(--fs-label); font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-muted); }
+.ip-subagent-st.is-bad { color: var(--bad); }
+.ip-subagent-meta { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 0 12px; font-size: var(--fs-label); font-variant-numeric: tabular-nums; color: var(--text-muted); }
+/* The counts wrap as one unit: beside the type when they fit, under it when they do not. */
+.ip-subagent-stats { display: flex; gap: 12px; white-space: nowrap; }
+.ip-subagent-said { margin: 0; padding: 0 10px 4px 27px; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: var(--fs-label); line-height: 1.4; color: var(--text-sub); }
+.ip-subagent-prompt { margin: 0; padding: 0 10px 6px 27px; font-size: var(--fs-label); color: var(--text-muted); }
+.ip-subagent-prompt summary { width: fit-content; padding: 2px 0; cursor: pointer; }
+.ip-subagent-prompt summary:hover { color: var(--text); }
+.ip-subagent-prompt summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.ip-subagent-row .ip-prompt { background: var(--bg); }
 .ip-prompt { margin: 4px 0 0; padding: 8px; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: var(--fs-meta); }

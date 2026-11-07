@@ -100,22 +100,35 @@ describe("task pane", () => {
     const base = "/work-items/w1/sessions/verification.review.code_review-2";
     const url = "/work-items/w1/nodes/verification?sel=verification.review.code_review";
 
-    it("counts them and lists a row each: what a running one last used, the first line of a finished one's answer", async () => {
+    it("groups them by state: Running and Did not finish listed, Finished folded until it is opened", async () => {
       mount(url, item, [], { [`GET ${base}/subagents`]: [200, { session_id: "x", status: "failed", subagents: list }] });
       const panel = screen.getByRole("tabpanel");
       expect(await within(panel).findByRole("heading", { name: "Sub-agents" })).toBeInTheDocument();
-      expect(within(panel).getByText("2 running · 3 finished · 1 cut off")).toBeInTheDocument();
-      const rows = within(within(panel).getByRole("list", { name: "Sub-agents" })).getAllByRole("listitem");
-      expect(rows).toHaveLength(6);
-      expect(rows[0]).toHaveTextContent("Explore codebaseExplore · running · 31k tokens · 4 tool uses · 42s — open its logrunning Grep");
-      expect(rows[2]).toHaveTextContent("Agent a3Explore · done · 31k tokens · 4 tool uses · 42s — open its logFound it.");
-      expect(rows[2]).not.toHaveTextContent("More.");
-      expect(rows[5]).toHaveTextContent("Agent a6Explore · cut off");
+      expect(within(panel).getByRole("heading", { name: "Running 2" })).toBeInTheDocument();
+      expect(within(panel).getByRole("heading", { name: "Did not finish 1" })).toBeInTheDocument();
+      const running = within(within(panel).getByRole("list", { name: "Running sub-agents" })).getAllByRole("listitem");
+      expect(running).toHaveLength(2);
+      expect(running[0]).toHaveTextContent("Explore codebase42sExplore31k tokens4 tool uses — open its logrunning Grep");
+      const unfinished = within(within(panel).getByRole("list", { name: "Sub-agents that did not finish" })).getAllByRole("listitem");
+      expect(unfinished).toHaveLength(1);
+      expect(unfinished[0]).toHaveTextContent("Agent a6cut off42sExplore31k tokens4 tool uses");
+      const finished = within(panel).getByRole("list", { name: "Finished sub-agents" });
+      expect(finished).not.toBeVisible();
+      await userEvent.click(within(panel).getByText("Finished"));
+      expect(finished).toBeVisible();
+      // What a finished one answered is its first line only.
+      expect(within(finished).getAllByRole("listitem")[0]).toHaveTextContent("Found it.");
+      expect(within(finished).getAllByRole("listitem")[0]).not.toHaveTextContent("More.");
+    });
+
+    it("opens Finished at once when it is all there is", async () => {
+      mount(url, item, [], { [`GET ${base}/subagents`]: [200, { session_id: "x", status: "failed", subagents: [agent("a3")] }] });
+      expect(await screen.findByRole("list", { name: "Finished sub-agents" })).toBeVisible();
     });
 
     it("opens the task's log filtered to the sub-agent", async () => {
       mount(url, item, [], { [`GET ${base}/subagents`]: [200, { session_id: "x", status: "failed", subagents: list }] });
-      await userEvent.click(await screen.findByRole("button", { name: /Explore codebase.*running.*open its log/ }));
+      await userEvent.click(await screen.findByRole("button", { name: /Explore codebase.*open its log/ }));
       expect(screen.getByTestId("where").textContent).toBe(`${url}&tab=log&agent=a1`);
     });
 
@@ -123,7 +136,7 @@ describe("task pane", () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
       const live = detail({ worker_sessions: [sess("verification.review.code_review", 1, { status: "running", harness: "claude" })] });
       const { calls } = mount(url, live, [], { [`GET ${base.replace("-2", "-1")}/subagents`]: [200, { session_id: "x", status: "running", subagents: list }] });
-      expect(await screen.findByText("2 running · 3 finished · 1 cut off")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Running 2" })).toBeInTheDocument();
       // Past the first reads (the map's, and the Overview's before it lands) each interval adds the map's one request.
       const reads = () => calls.filter((c) => c.path.endsWith("/subagents")).length;
       const before = reads();

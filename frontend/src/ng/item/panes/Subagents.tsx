@@ -1,5 +1,6 @@
 import type { Subagent } from "../../../types";
-import { countLine, PROMPT_NOT_SHOWN, statusTone, subagentMeta, subagentSaid } from "../subagents";
+import { elapsed, tokens } from "../../../format";
+import { PROMPT_NOT_SHOWN, STATUS_WORDS, statusTone, subagentSaid } from "../subagents";
 import { useSubagentDetail } from "../useSubagents";
 
 /** The prompt behind a disclosure, fetched whole when it is opened: the list carries none. */
@@ -16,30 +17,62 @@ function Prompt({ workItemId, sessionId, agent }: { workItemId: string; sessionI
   );
 }
 
-/** A task's sub-agents (Overview): a count line, then a row each. The row opens the task's log filtered to it. */
+/** A task's sub-agents (Overview), by state: Running, Did not finish, and Finished folded away until it is opened
+ *  (open at once when it is all there is). A row opens the task's log filtered to it. */
 export function SubagentSection({ workItemId, sessionId, list, onOpen }: { workItemId: string; sessionId: string; list: Subagent[] | null; onOpen: (agent: string) => void }) {
   if (!list?.length) return null;
+  const running = list.filter((a) => a.status === "running");
+  const unfinished = list.filter((a) => a.status !== "running" && a.status !== "completed");
+  const finished = list.filter((a) => a.status === "completed");
+  // A group says what its rows are, so only the unfinished ones carry their own status word.
+  const row = (a: Subagent, withStatus: boolean) => {
+    const said = subagentSaid(a);
+    return (
+      <li key={a.id} className="ip-subagent-row">
+        <button type="button" className="ip-subagent-open" onClick={() => onOpen(a.id)}>
+          <span className={`ip-pill-dot ${statusTone(a.status)}`} aria-hidden />
+          <span className="ip-subagent-name" title={a.description}>{a.description}</span>
+          <span className="ip-subagent-end">
+            {withStatus && <span className={`ip-subagent-st ${statusTone(a.status)}`}>{STATUS_WORDS[a.status]}</span>}
+            {a.duration_ms != null && <span>{elapsed(a.duration_ms)}</span>}
+          </span>
+          <span className="ip-subagent-meta">
+            {a.type && <span className="is-mono">{a.type}</span>}
+            <span className="ip-subagent-stats">
+              {a.tokens != null && <span>{tokens(a.tokens)} tokens</span>}
+              {a.tool_uses != null && <span>{a.tool_uses} tool use{a.tool_uses === 1 ? "" : "s"}</span>}
+            </span>
+          </span>
+          <span className="item-visually-hidden"> — open its log</span>
+        </button>
+        {said && <p className="ip-subagent-said">{said}</p>}
+        <Prompt workItemId={workItemId} sessionId={sessionId} agent={a.id} />
+      </li>
+    );
+  };
   return (
-    <>
+    <section className="ip-subagents">
       <h3 className="ip-h">Sub-agents</h3>
-      <p className="item-muted ip-subagent-count">{countLine(list)}</p>
-      <ul className="ip-list" aria-label="Sub-agents">
-        {list.map((a) => {
-          const said = subagentSaid(a);
-          return (
-            <li key={a.id} className="ip-subagent">
-              <button type="button" className="ip-row" onClick={() => onOpen(a.id)}>
-                <span className={`ip-pill-dot ${statusTone(a.status)}`} aria-hidden />
-                <span className="ip-subagent-name">{a.description}</span>
-                <span className="ip-row-meta">{subagentMeta(a)}</span>
-                <span className="item-visually-hidden"> — open its log</span>
-              </button>
-              {said && <p className="item-muted ip-subagent-said">{said}</p>}
-              <Prompt workItemId={workItemId} sessionId={sessionId} agent={a.id} />
-            </li>
-          );
-        })}
-      </ul>
-    </>
+      <div className="ip-subagent-groups">
+        {running.length > 0 && (
+          <div>
+            <h4 className="ip-subagent-head"><span className="ip-pill-dot is-live" aria-hidden />Running <span className="ip-subagent-n">{running.length}</span></h4>
+            <ul className="ip-subagent-list" aria-label="Running sub-agents">{running.map((a) => row(a, false))}</ul>
+          </div>
+        )}
+        {unfinished.length > 0 && (
+          <div>
+            <h4 className="ip-subagent-head"><span className="ip-pill-dot is-bad" aria-hidden />Did not finish <span className="ip-subagent-n">{unfinished.length}</span></h4>
+            <ul className="ip-subagent-list" aria-label="Sub-agents that did not finish">{unfinished.map((a) => row(a, true))}</ul>
+          </div>
+        )}
+        {finished.length > 0 && (
+          <details className="ip-subagent-fold" open={!running.length && !unfinished.length}>
+            <summary className="ip-subagent-head"><span className="ip-pill-dot is-ok" aria-hidden />Finished <span className="ip-subagent-n">{finished.length}</span></summary>
+            <ul className="ip-subagent-list" aria-label="Finished sub-agents">{finished.map((a) => row(a, false))}</ul>
+          </details>
+        )}
+      </div>
+    </section>
   );
 }
