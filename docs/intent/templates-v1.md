@@ -2509,7 +2509,7 @@ origin: src/kraft/executor/dispatch.py §measure_node
 The system SHALL refuse a `group` node in a chain file, and SHALL accept one only
 when it reads a stored snapshot or applies a chain revision; a group's body SHALL
 hold no forge task, no `on_merge_rejected` and no `on_base_changed`.
-enforced-by: tests/templates/test_models.py::test_a_chain_file_cannot_declare_a_group, tests/templates/test_models.py::test_a_stored_chain_may_hold_a_group, tests/templates/test_models.py::test_a_group_body_refuses[forge-task], tests/templates/test_models.py::test_a_group_body_refuses[on-merge-rejected], tests/templates/test_models.py::test_a_group_body_refuses[on-base-changed], tests/templates/test_models.py::test_a_group_body_refuses[group-caps]
+enforced-by: tests/templates/test_groups.py::test_a_chain_file_cannot_declare_a_group, tests/templates/test_groups.py::test_a_stored_chain_may_hold_a_group, tests/templates/test_groups.py::test_a_group_body_refuses[forge-task], tests/templates/test_groups.py::test_a_group_body_refuses[on-merge-rejected], tests/templates/test_groups.py::test_a_group_body_refuses[on-base-changed], tests/templates/test_groups.py::test_a_group_body_refuses[group-caps]
 origin: src/kraft/templates/models.py §GroupNode
 
 ## REQ reads-do-not-cross-a-group
@@ -2517,7 +2517,7 @@ origin: src/kraft/templates/models.py §GroupNode
 IF a task's `reads` entry names a task on the other side of a group's boundary,
 THEN the system SHALL refuse the chain, and SHALL accept a `reads` entry between
 two nodes of one group's body.
-enforced-by: tests/templates/test_models.py::test_reads_may_not_cross_a_group_boundary[into-the-body], tests/templates/test_models.py::test_reads_may_not_cross_a_group_boundary[out-of-the-body], tests/templates/test_models.py::test_reads_between_body_nodes_are_accepted
+enforced-by: tests/templates/test_groups.py::test_reads_may_not_cross_a_group_boundary[into-the-body], tests/templates/test_groups.py::test_reads_may_not_cross_a_group_boundary[out-of-the-body], tests/templates/test_groups.py::test_reads_between_body_nodes_are_accepted
 origin: src/kraft/templates/models.py §_reads_name_earlier_writers
 
 ## REQ chain-revision-slices-a-plan-that-declares-slices

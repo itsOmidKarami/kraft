@@ -10,6 +10,7 @@ import os
 
 import pytest
 from pydantic import ValidationError
+from support.frozen import v1_frozen
 from support.harness import write
 
 from kraft import item_paths, progress
@@ -421,9 +422,7 @@ async def test_for_detail_follows_the_implementing_node_past_its_run(
 
 
 def test_the_implementing_node_is_found_inside_a_group():
-    from support.harness import v1_resolved
-
-    chain = v1_resolved(
+    chain = v1_frozen(
         [
             {
                 "id": "slices",
@@ -438,8 +437,7 @@ def test_the_implementing_node_is_found_inside_a_group():
                     }
                 ],
             }
-        ],
-        frozen=True,
+        ]
     )
 
     assert progress.implementing_nodes(chain) == ["slices.implementation"]

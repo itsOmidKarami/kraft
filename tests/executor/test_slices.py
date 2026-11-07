@@ -6,10 +6,12 @@ from __future__ import annotations
 import json
 
 import pytest
+from support.frozen import v1_frozen
 from support.harness import commit_all, entry_of, git, write
 from support.workspace import workspace_target
 
 from kraft import executor, store
+from kraft.executor import gates as gates_module
 from kraft.executor import slices
 from kraft.executor.context import LaunchContext
 from kraft.templates.environment import WorkItemTarget
@@ -74,9 +76,7 @@ async def _item(item_on, planned, nodes=None, plan_path="plan.md", **kw):
 
 
 def v1_chain_nodes(nodes, **kw):
-    from support.harness import v1_chain
-
-    return v1_chain(nodes, repo="/r", frozen=True, **kw)
+    return v1_frozen(nodes, repo="/r", **kw)
 
 
 def _walk(it, **kw):
@@ -317,3 +317,25 @@ async def test_a_prelude_that_passed_is_not_built_again_when_the_fork_is_retried
     ran = [e["payload"]["node_id"] for e in it.events("node_completed")]
     assert ran == ["slices.implementation", "slices.verification"]
     assert len(_children(it)) == 2
+
+
+def test_a_group_counts_as_the_execution_node_before_a_gate():
+    """A rejection with no named target re-enters at the node that produced what
+    the gate is about; for a sliced chain that node is the group."""
+    nodes = v1_frozen(
+        [
+            {
+                "id": "slices",
+                "kind": "group",
+                "nodes": [
+                    {
+                        "id": "implementation",
+                        "kind": "exec",
+                        "tasks": [{"id": "build", "kind": "subprocess", "command": "true"}],
+                    }
+                ],
+            },
+            {"id": "review", "kind": "gate"},
+        ]
+    ).nodes
+    assert gates_module.preceding_exec_node(nodes, 1) == 0

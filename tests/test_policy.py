@@ -74,8 +74,6 @@ _BASE = "default: { attempts: 1, wall_clock_s: 1 }\n"
         pytest.param(_BASE + "rate_limit_retries: 0\n", id="rate-limit-retries-below-1"),
         pytest.param(_BASE + "archive: { after_days: -1 }\n", id="archive-after-days-negative"),
         pytest.param(_BASE + "max_concurrent: 0\n", id="max-concurrent-below-1"),
-        pytest.param(_BASE + "max_slices: 0\n", id="max-slices-zero"),
-        pytest.param(_BASE + "max_concurrent_slices: 0\n", id="max-concurrent-slices-zero"),
         pytest.param(_BASE + "auto_escalate_stuck: maybe\n", id="auto-escalate-stuck-not-bool"),
         pytest.param(_BASE + "auto_escalate_stuck_cap: 0\n", id="auto-escalate-stuck-cap-below-1"),
         pytest.param(_BASE + "auto_escalate_delay_s: -1\n", id="auto-escalate-delay-negative"),
@@ -303,12 +301,6 @@ def test_cron_due_matches_star_and_lists():
         pytest.param("", "archive_after_days", None, id="archive-after-days-default"),
         pytest.param("max_concurrent: 7\n", "max_concurrent", 7, id="max-concurrent"),
         pytest.param("", "max_concurrent", 3, id="max-concurrent-default"),
-        pytest.param("max_slices: 4\n", "max_slices", 4, id="max-slices"),
-        pytest.param("", "max_slices", 6, id="max-slices-default"),
-        pytest.param(
-            "max_concurrent_slices: 2\n", "max_concurrent_slices", 2, id="max-concurrent-slices"
-        ),
-        pytest.param("", "max_concurrent_slices", None, id="max-concurrent-slices-default"),
         pytest.param(
             "auto_escalate_stuck: false\n", "auto_escalate_stuck", False, id="auto-escalate-stuck"
         ),

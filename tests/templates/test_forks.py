@@ -4,6 +4,7 @@ does to a fork's copy of the chain."""
 from __future__ import annotations
 
 import pytest
+from support.frozen import v1_frozen
 from support.harness import v1_chain
 
 from kraft.templates.forks import ChainPath, ControlScope, PathError, RunFork
@@ -128,7 +129,7 @@ def test_a_task_retry_preserves_its_step_siblings_and_nothing_wider(chain):
 
 
 def test_a_path_reaches_into_a_group_body():
-    sliced = v1_chain(
+    sliced = v1_frozen(
         """
 - id: slices
   kind: group
@@ -143,7 +144,6 @@ def test_a_path_reaches_into_a_group_body():
           tasks: [{id: test_changed_scopes, kind: subprocess, command: "true"}]
 """,
         repo="/r",
-        frozen=True,
     )
 
     group = ChainPath.parse(sliced, "slices")

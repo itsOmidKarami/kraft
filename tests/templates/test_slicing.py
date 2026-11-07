@@ -13,6 +13,7 @@ from kraft.templates import revision, slicing
 from kraft.templates.environment import WorkItemTarget
 from kraft.templates.library import TemplateLibrary
 from kraft.templates.models import Chain, GroupNode, ResolvedChain
+from templates.test_revision import _run
 
 GATE = "revision_approval"
 
@@ -27,15 +28,6 @@ PLAN = """## Slices
 """
 
 LIBRARY = TemplateLibrary.from_mappings({}, (), library_path=Path("library.yaml"))
-
-
-def _run(id: str, **kw) -> dict:
-    return {
-        "id": id,
-        "kind": "exec",
-        "tasks": [{"id": "run", "kind": "subprocess", "command": "true"}],
-        **kw,
-    }
 
 
 def _nodes(*, build: dict | None = None, brief: dict | None = None) -> list[dict]:

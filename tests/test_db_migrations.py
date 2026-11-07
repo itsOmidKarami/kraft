@@ -279,21 +279,8 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
     if version < 59:
         drop_lines = (*drop_lines, "forge_pins", "-- {mount: {account, backend}}")
     if version < 60:
-        drop_lines = (
-            *drop_lines,
-            "slice groups (",
-            "fork generation and its slice key",
-            "after, pinned_head the commit",
-            "parent_id        TEXT",
-            "slice_generation INTEGER",
-            "slice_key        INTEGER",
-            "docs_commit      TEXT",
-            "pinned_head      TEXT",
-            "a parent's group state",
-            "group_state      TEXT",
-            "1 while a child is paused",
-            "paused_by_parent INTEGER",
-        )
+        drop_lines = (*drop_lines, "slice", "parent_id", "docs_commit", "pinned_head")
+        drop_lines = (*drop_lines, "group_state", "paused_by_parent", "while a child")
         skip_stmts = (*skip_stmts, "idx_work_items_slice")
     if version < 56:
         old = "                    'waiting', 'conflict', 'infra', 'infra_stop')),"

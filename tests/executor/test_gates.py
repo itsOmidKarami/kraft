@@ -878,20 +878,3 @@ async def test_gate_review_that_cannot_locate_its_gate_stops_rather_than_leaving
     assert it.status() == "needs_human", (
         "the gate was cleared and the item left claimed 'active' with no walk behind it"
     )
-
-
-def test_a_group_counts_as_the_execution_node_before_a_gate():
-    """A rejection with no named target re-enters at the node that produced what
-    the gate is about; for a sliced chain that node is the group."""
-    nodes = v1_resolved(
-        [
-            {
-                "id": "slices",
-                "kind": "group",
-                "nodes": [_exec("implementation", "build")],
-            },
-            {"id": "review", "kind": "gate"},
-        ],
-        frozen=True,
-    ).nodes
-    assert gates_module.preceding_exec_node(nodes, 1) == 0
