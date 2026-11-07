@@ -187,13 +187,15 @@ async def _revise(st, row, gate: str, *, viewer: bool, seen: str | None) -> str 
 
     def apply(c):
         store.revise_chain(c, row["id"], revised.to_json(), payload, seen=seen)
-        if changes.slice is not None:
-            # A revision that adds a group starts it over: the next entry decides
-            # again, and forks the next generation (`executor.slices`).
+        if changes.slice is not None or changes.unslice is not None:
+            # A revision that adds a group, or takes one out, starts it over: the
+            # next entry decides again and forks the next generation
+            # (`executor.slices`); a group left out leaves nothing unjoined.
             prior = store.group_state(c, row["id"])
             generation = prior.generation if prior is not None else 0
+            group = changes.slice.group if changes.slice is not None else changes.unslice
             store.set_group_state(
-                c, row["id"], store.GroupState(group=changes.slice.group, generation=generation)
+                c, row["id"], store.GroupState(group=group, generation=generation)
             )
 
     try:

@@ -2534,11 +2534,12 @@ origin: src/kraft/templates/slicing.py
 ## REQ the-join-never-trusts-a-child
 
 IF a completed child's range holds a commit that already names a `cherry picked
-from` line, a merge commit, a head that does not descend from the fork commit, a
-moved `.lfsconfig`, or a branch that has moved since it completed, THEN the system
+from` line, a merge commit, a head that does not descend from the fork commit or
+from its docs commit, a moved `.lfsconfig`, or a branch that has moved since it
+completed, THEN the system
 SHALL stop the parent for a person, naming the child, before it replays any
 of that child's commits.
-enforced-by: tests/executor/test_join.py::test_a_child_commit_with_a_forged_cherry_pick_line_is_refused, tests/executor/test_join.py::test_a_child_head_not_descending_from_the_fork_is_refused, tests/executor/test_join.py::test_a_merge_commit_in_a_child_is_refused, tests/executor/test_join.py::test_a_child_branch_moved_after_completion_is_refused, tests/executor/test_join.py::test_a_moved_lfsconfig_in_a_child_stops_the_join
+enforced-by: tests/executor/test_join.py::test_a_child_commit_with_a_forged_cherry_pick_line_is_refused, tests/executor/test_join.py::test_a_child_head_not_descending_from_the_fork_is_refused, tests/executor/test_join.py::test_a_merge_commit_in_a_child_is_refused, tests/executor/test_join.py::test_a_child_branch_moved_after_completion_is_refused, tests/executor/test_join.py::test_a_moved_lfsconfig_in_a_child_stops_the_join, tests/executor/test_join.py::test_a_child_branch_reset_past_its_docs_commit_is_refused
 origin: src/kraft/executor/join.py
 
 ## REQ the-join-resumes-without-losing-resolved-work
@@ -2546,7 +2547,24 @@ origin: src/kraft/executor/join.py
 WHEN the join resumes at a slice whose pick was running, the system SHALL put the
 parent back at the commit before that slice without trusting the worktree's git
 folder, and WHEN it resumes at a slice handed off to a person, the system SHALL
-NOT reset the branch and SHALL go on only when every commit of the slice is there.
-enforced-by: tests/executor/test_join.py::test_a_crash_while_picking_puts_the_parent_back_and_picks_again, tests/executor/test_join.py::test_put_back_does_not_follow_a_planted_sequencer_symlink, tests/executor/test_join.py::test_a_conflict_hands_off_and_never_resets_on_retry, tests/executor/test_join.py::test_a_handed_off_slice_that_is_still_missing_stops_again
+NOT reset the branch and SHALL go on only when no git operation is in progress,
+HEAD is on the parent's branch, the tree is clean and every commit of the slice is
+there.
+enforced-by: tests/executor/test_join.py::test_a_crash_while_picking_puts_the_parent_back_and_picks_again, tests/executor/test_join.py::test_put_back_does_not_follow_a_planted_sequencer_symlink, tests/executor/test_join.py::test_a_conflict_hands_off_and_never_resets_on_retry, tests/executor/test_join.py::test_a_handed_off_slice_that_is_still_missing_stops_again, tests/executor/test_join.py::test_a_handed_off_slice_resolved_but_unsettled_stops_without_a_reset[dirty-tree], tests/executor/test_join.py::test_a_handed_off_slice_resolved_but_unsettled_stops_without_a_reset[operation-in-progress], tests/executor/test_join.py::test_a_handed_off_slice_resolved_but_unsettled_stops_without_a_reset[head-off-the-branch]
 origin: src/kraft/executor/join.py
+
+## REQ a-child-completed-before-it-started-joins-as-nothing
+
+WHEN a person completed a child before it had a worktree, so that it has no docs
+commit and no pinned head, the join SHALL record that slice joined with nothing
+replayed and say so in what the slice skipped, rather than stop on it.
+enforced-by: tests/executor/test_join.py::test_a_child_completed_by_hand_before_it_started_has_nothing_to_replay
+origin: src/kraft/executor/join.py
+
+## REQ a-childs-docs-commit-is-recorded-once
+
+WHEN a child's worktree is made again over its branch, the system SHALL keep the
+docs commit it recorded the first time.
+enforced-by: tests/test_builtins_children.py::test_a_child_worktree_made_again_keeps_its_first_docs_commit
+origin: src/kraft/builtins.py
 

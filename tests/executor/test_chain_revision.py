@@ -334,16 +334,49 @@ async def test_a_plan_with_slices_makes_the_revision_gate_ask(item_on, tmp_path)
     assert it.events("chain_revision_unchanged") == []
 
 
-async def test_approving_a_sliced_revision_gives_the_run_chain_a_group(item_on, tmp_path):
+async def _revised_again(it, plan: str) -> None:
+    """After a fork of generation 1 joined, a rewind to the plan: the plan as it
+    now stands, and the revision gate asking again."""
+    from kraft import events
+    from kraft.vocab import GateEvent
+
+    (it.worktree / "plan.md").write_text(plan)
+    joined = store.GroupState(group="slices", phase="joined", generation=1)
+
+    def rewind(c):
+        store.set_group_state(c, it.id, joined)
+        events.append(c, it.id, GateEvent.REQUESTED, {"gate": GATE})
+
+    await it.database.write(rewind)
+
+
+@pytest.mark.parametrize(
+    ("again", "chain", "body", "generation"),
+    [
+        pytest.param(None, ["revise", GATE, "slices", "brief"], ["build", "brief"], 0, id="first"),
+        # A rewind to the plan rebuilds the group from the plan as it stands,
+        # and its next entry forks generation 2.
+        pytest.param(
+            SLICED_PLAN, ["revise", GATE, "slices", "brief"], ["build", "brief"], 1, id="rebuilt"
+        ),
+        pytest.param("### Task 1: a\n", ["revise", GATE, "build", "brief"], [], 1, id="left-out"),
+    ],
+)
+async def test_approving_a_sliced_revision_gives_the_run_chain_a_group(
+    item_on, tmp_path, again, chain, body, generation
+):
     it = await _sliced_item(item_on, tmp_path, {"rationale": "the chain fits the plan"})
     await _walk(it)
-
     nodes = await _approve(it)
+    if again is not None:
+        await _revised_again(it, again)
+        nodes = await _approve(it)
 
-    assert [n.id for n in nodes] == ["revise", GATE, "slices", "brief"]
-    assert [n.id for n in nodes[2].body] == ["slices.build", "slices.brief"]
+    assert [n.id for n in nodes] == chain
+    assert [n.id for n in nodes[2].body] == [f"slices.{n}" for n in body]
     state = it.database.read(lambda c: store.group_state(c, it.id))
-    assert (state.group, state.phase, state.generation) == ("slices", "deciding", 0)
+    assert (state.group, state.phase, state.generation) == ("slices", "deciding", generation)
+    assert not store.group_unjoined(it.row())
 
 
 async def test_a_plan_without_slices_still_advances_without_a_human(item_on, tmp_path):

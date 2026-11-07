@@ -57,12 +57,19 @@ def test_an_unjoined_parent_refuses(client, repo, status, verb, path, body):
     assert _status_of(client, parent) == status
 
 
-def test_an_unjoined_parent_refuses_a_retry_from_an_earlier_node(client, repo):
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param({"path": "plan"}, id="path-plan"),
+        pytest.param({"restart": True}, id="restart"),
+    ],
+)
+def test_an_unjoined_parent_refuses_a_retry_from_an_earlier_node(client, repo, body):
     parent, kids = _family(client, repo, parent_status="needs_human")
     with _db() as c, c:
         c.execute("UPDATE work_items SET current_node_id = 'verification' WHERE id = ?", (parent,))
 
-    r = client.post(f"/api/work-items/{parent}/retry", json={"path": "plan"})
+    r = client.post(f"/api/work-items/{parent}/retry", json=body)
 
     assert r.status_code == 409, r.text
     assert "unjoined" in r.json()["detail"]
@@ -144,7 +151,17 @@ def test_a_worker_cannot_act_on_its_own_family(client, repo, acts_on):
     assert r.status_code == 403, r.text
 
 
-def test_a_retry_with_every_slice_dropped_names_the_way_on(client, repo):
+@pytest.mark.parametrize(
+    ("body", "refused"),
+    [
+        pytest.param({}, True, id="retry-alone"),
+        pytest.param({"path": "implementation"}, True, id="at-the-group"),
+        pytest.param({"path": "plan"}, False, id="rewind-to-the-plan"),
+        pytest.param({"restart": True}, False, id="restart"),
+    ],
+)
+def test_a_retry_with_every_slice_dropped_wants_a_rewind(client, repo, body, refused):
+    """Nothing to replay: the way on is the plan or earlier, or abandon."""
     parent, kids = _family(
         client, repo, parent_status="needs_human", children=("abandoned", "abandoned")
     )
@@ -152,11 +169,15 @@ def test_a_retry_with_every_slice_dropped_names_the_way_on(client, repo):
         state = store.GroupState(group="slices", phase="joining", generation=1)
         c.execute("UPDATE work_items SET group_state = ? WHERE id = ?", (state.to_json(), parent))
 
-    r = client.post(f"/api/work-items/{parent}/retry", json={})
+    r = client.post(f"/api/work-items/{parent}/retry", json=body)
 
-    assert r.status_code == 409, r.text
-    assert "abandon" in r.json()["detail"]
-    assert "plan" in r.json()["detail"]
+    if refused:
+        assert r.status_code == 409, r.text
+        assert "abandon" in r.json()["detail"]
+        assert "plan" in r.json()["detail"]
+    else:
+        assert r.status_code == 200, r.text
+        assert _status_of(client, parent) != "needs_human"
 
 
 def test_a_draft_moving_an_unjoined_parent_back_is_refused(client, repo):

@@ -18,11 +18,17 @@ less what the change set skips):
 * the group's `unforked` is the implementing node;
 * every `reject_to` / `restart_from` naming the implementing node names the
   group.
+
+Chain revision runs again after a rewind to the plan or earlier, over a chain
+that already holds the group. `unapply` takes the group out first (the body
+back in its place, the copies gone, the targets naming the implementing node
+again), and the slicing is worked out afresh from the plan as it then stands:
+the group is rebuilt, or left out with the reason in the rationale.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
@@ -31,12 +37,14 @@ from kraft.policy import FROZEN
 from kraft.slices import SliceRefusal, SliceSplit, parse_slices
 from kraft.templates.environment import Identifier
 from kraft.templates.models import (
+    Chain,
     ExecNode,
     ForgeTask,
     GateNode,
     GroupNode,
     MaterializedChain,
     NodeKind,
+    ResolvedChain,
     ResolvedNode,
 )
 
@@ -76,6 +84,25 @@ def _holds_forge(node: ResolvedNode) -> bool:
     return any(isinstance(t.task, ForgeTask) for t in node.tasks())
 
 
+def group_after(chain: MaterializedChain, at: str | None) -> str | None:
+    """The id of the slice group still ahead of `at` in `chain`, or None."""
+    return next((n.id for n in _remaining(chain, at, set()) if isinstance(n.node, GroupNode)), None)
+
+
+def rebuilt_from(chain: MaterializedChain) -> int | None:
+    """The index of the node that writes the chain revision ahead of `chain`'s
+    group: a rewind to it or earlier runs chain revision again, which rebuilds
+    the group (or leaves it out). None when the chain holds no group, or no
+    revision ahead of it."""
+    from kraft.templates.revision import CHAIN_REVISION  # it imports this module
+
+    nodes = chain.chain.nodes
+    at = next((i for i, n in enumerate(nodes) if isinstance(n.node, GroupNode)), None)
+    if at is None:
+        return None
+    return next((i for i in range(at - 1, -1, -1) if CHAIN_REVISION in nodes[i].produces()), None)
+
+
 def slicing_for(
     chain: MaterializedChain,
     plan_text: str | None,
@@ -99,6 +126,7 @@ def slicing_for(
     skipped = {s.node for s in changes.skip}
     remaining = _remaining(chain, at, skipped)
     if any(isinstance(n.node, GroupNode) for n in remaining):
+        # `with_slicing` takes a group ahead out before it gets here.
         return "the chain already holds a slice group"
     implementing = progress.implementing_nodes(chain.chain)
     left = [n for n in remaining if n.id in implementing and isinstance(n.node, ExecNode)]
@@ -138,11 +166,22 @@ def with_slicing(changes, chain: MaterializedChain, slicing: SlicingInput, *, at
     """`changes` with Kraft's slicing entry added, or the reason a present
     `## Slices` section was not used appended to its rationale. The same call at
     every place a change set is parsed, so a gate's page, an agent's review and
-    the approval all see one set."""
+    the approval all see one set.
+
+    A chain that already holds a group ahead of `at` (revision running again
+    after a rewind to the plan) has it taken out first (`unslice`), and the
+    slicing is worked out on the chain without it: rebuilt from the plan as it
+    stands now, or left out with the reason."""
+    if (group := group_after(chain, at)) is not None:
+        changes = changes.model_copy(update={"unslice": group})
+        try:
+            chain = unsliced(chain, group)
+        except ValueError:
+            return changes  # `revise` takes it out the same way, and says why it cannot
     result = slicing_for(chain, slicing.plan_text, changes, max_slices=slicing.max_slices, at=at)
     if isinstance(result, SliceChange):
         return changes.model_copy(update={"slice": result})
-    if result == NO_SECTION:
+    if result == NO_SECTION and group is None:
         return changes
     return changes.model_copy(update={"rationale": f"{changes.rationale}\n\nNot sliced: {result}."})
 
@@ -179,6 +218,43 @@ def apply(nodes: list, change: SliceChange) -> list:
     renamed = {i: change.group for i in change.unforked}
     out = [*nodes[:at], group, *copies, *nodes[at + len(body) :]]
     return [_repointed(n, renamed) for n in out]
+
+
+def unapply(nodes: list, group_id: str) -> list:
+    """`nodes` with the group `group_id` taken out, `apply` undone: its body
+    back in its place, the copies after it gone (each body node but the
+    implementing one is the copy, which is what any later change reached), and
+    the targets naming the group naming the implementing node again. Raises
+    `ValueError` when `nodes` holds no such group."""
+    at = next(
+        (i for i, n in enumerate(nodes) if isinstance(n, GroupNode) and n.id == group_id), None
+    )
+    if at is None:
+        raise ValueError(f"the chain holds no slice group {group_id!r}")
+    group = nodes[at]
+    unforked = group.unforked_ids()
+    copies = {n.id: n for n in nodes[at + 1 :] if n.id in {b.id for b in group.nodes}}
+    body = [n if n.id in unforked else copies.get(n.id, n) for n in group.nodes]
+    out = [*nodes[:at], *body, *(n for n in nodes[at + 1 :] if n.id not in copies)]
+    return [_repointed(n, {group_id: unforked[0]}) for n in out]
+
+
+def unsliced(chain: MaterializedChain, group_id: str) -> MaterializedChain:
+    """`chain` with its group `group_id` taken out (`unapply`), validated whole
+    under the frozen context as a revision is. Its pre-trim copy (`untrimmed`)
+    is left as it is: `revision.revise` gives that copy the same change set.
+    Raises `ValueError`."""
+    authored = chain.chain.chain
+    nodes = unapply(list(authored.nodes), group_id)
+    checked = Chain.model_validate_json(
+        authored.model_copy(update={"nodes": nodes}).model_dump_json(), context=FROZEN
+    )
+    return replace(
+        chain,
+        chain=ResolvedChain.from_chain(
+            checked, steering=chain.chain.steering, addons=chain.chain.addons
+        ),
+    )
 
 
 def _repointed(node, renamed: dict[str, str]):

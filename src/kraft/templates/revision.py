@@ -174,10 +174,14 @@ class ChangeSet(BaseModel):
     #: Kraft adds it (`with_slicing`) from a plan's `## Slices` section; an
     #: artifact that carries one is refused at `parse`.
     slice: SliceChange | None = None
+    #: The id of a slice group the chain already holds, taken out before
+    #: anything else applies: revision running again after a rewind to the
+    #: plan rebuilds the group (`slice`) or leaves it out. Kraft's too.
+    unslice: Identifier | None = None
 
     @property
     def empty(self) -> bool:
-        return not (self.skip or self.add or self.overrides or self.slice)
+        return not (self.skip or self.add or self.overrides or self.slice or self.unslice)
 
 
 #: The whole body after the front matter: one ```json fence, only whitespace
@@ -212,11 +216,12 @@ def parse(text: str) -> ChangeSet:
         changes = ChangeSet.model_validate(data)
     except ValidationError as exc:
         raise RevisionError(f"the change set is not valid: {first_error(exc)}") from exc
-    if changes.slice is not None:
-        raise RevisionError(
-            "the change set may not declare slice: Kraft slices a plan that has a "
-            "## Slices section, and the agent never shapes it"
-        )
+    for key in ("slice", "unslice"):
+        if getattr(changes, key) is not None:
+            raise RevisionError(
+                f"the change set may not declare {key}: Kraft slices a plan that has a "
+                "## Slices section, and the agent never shapes it"
+            )
     return changes
 
 
@@ -286,6 +291,19 @@ def revise(
     if at is not None and at not in ids:
         raise RevisionError(f"this chain has no node {at!r}")
     frozen = set(ids[: ids.index(at) + 1]) if at is not None else set()
+    if changes.unslice is not None:
+        # First, so every other change reads the chain the way its author was
+        # shown it (`context_note`): without the group.
+        if changes.unslice in frozen:
+            raise RevisionError(
+                f"unslice: {changes.unslice!r} is at or before {at!r} and has already run"
+            )
+        try:
+            chain = slicing_mod.unsliced(chain, changes.unslice)
+        except ValueError as exc:
+            reason = first_error(exc) if isinstance(exc, ValidationError) else str(exc)
+            raise RevisionError(f"unslice: {reason}") from exc
+        ids = [n.id for n in chain.chain.nodes]
 
     def open_node(nodes: tuple[ResolvedNode, ...], id: str, what: str) -> ResolvedNode:
         node = next((n for n in nodes if n.id == id), None)
@@ -578,6 +596,11 @@ def render(
         f"on `{path}` -- {o.evidence}"
         for path, o in changes.overrides.items()
     ]
+    if changes.unslice is not None:
+        lines.append(
+            f"- take out the slice group `{changes.unslice}` the chain holds now, its nodes back "
+            "in their place; the plan as it stands decides the slices again"
+        )
     if changes.slice is not None:
         s = changes.slice
         lines.append(
@@ -654,6 +677,14 @@ def context_note(chain: MaterializedChain | None, node_id: str) -> str:
     first revision gate after `node_id`, the node it runs in."""
     if chain is None:
         return ""
+    if (group := slicing_mod.group_after(chain, node_id)) is not None:
+        # Running again after a rewind to the plan: the change set applies to
+        # the chain with the group taken out (`ChangeSet.unslice`), so that is
+        # the chain shown.
+        try:
+            chain = slicing_mod.unsliced(chain, group)
+        except ValueError:
+            pass
     nodes = chain.chain.nodes
     here = next((i for i, n in enumerate(nodes) if n.id == node_id), 0)
     gate = next(

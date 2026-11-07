@@ -69,10 +69,31 @@ def authored(schema: dict) -> dict:
                 walk(value)
 
     walk(out)
+    _without_groups(out)
     for name, definition in out.get("$defs", {}).items():
         if name in EXTENDABLE:
             definition.setdefault("properties", {})["extends"] = EXTENDS
     return out
+
+
+def _without_groups(schema: dict) -> None:
+    """A slice group is made only by chain revision, never written in a chain
+    file, so the schema of one must not offer it."""
+    schema.get("$defs", {}).pop("GroupNode", None)
+    ref = _ref("GroupNode")
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            for key in ("anyOf", "oneOf"):
+                if isinstance(node.get(key), list):
+                    node[key] = [m for m in node[key] if m != ref]
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(schema)
 
 
 def _ref(name: str) -> dict:

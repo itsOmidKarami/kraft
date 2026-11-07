@@ -1330,8 +1330,7 @@ class GroupNode(BaseModel):
 
     `unforked` is what the parent runs itself when it does not fork the group
     (no fork was decided, or a rejection comes back to the group after the
-    join). `on_conflict` is the handler that gets a join conflict first; without
-    one a conflict stops for a person."""
+    join). A join conflict stops for a person: version 1 has no handler for one."""
 
     model_config = _CONFIG
 
@@ -1340,7 +1339,6 @@ class GroupNode(BaseModel):
     nodes: list[ExecNode] = Field(min_length=1)
     #: Ids of body nodes. Empty means every body node.
     unforked: list[Identifier] = Field(default_factory=list)
-    on_conflict: RecoveryPlan | None = None
     #: A group is not skipped as a whole: its children are, one by one.
     skippable: StrictBool = False
 
@@ -1928,13 +1926,6 @@ class ResolvedChain:
                     ResolvedNode(
                         id=node.id,
                         node=node,
-                        on_conflict=(
-                            node.on_conflict.resolve_steps(
-                                f"{node.id}{PATH_SEPARATOR}on_conflict", (), node_runner
-                            )
-                            if node.on_conflict is not None
-                            else ()
-                        ),
                         runner=node_runner,
                         body=tuple(
                             _resolve_exec(

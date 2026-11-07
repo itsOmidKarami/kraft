@@ -80,6 +80,12 @@ def test_a_stored_chain_may_hold_a_group():
             "policy",
             id="group-caps",
         ),
+        pytest.param(
+            exec_node("implementation", tasks=[sub()]),
+            {"on_conflict": {"tasks": [sub()]}},
+            "on_conflict",
+            id="join-conflict-handler",
+        ),
     ],
 )
 def test_a_group_body_refuses(body, group, says):

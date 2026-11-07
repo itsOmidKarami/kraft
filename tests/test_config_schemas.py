@@ -141,8 +141,10 @@ def test_a_field_named_required_survives_the_authored_transform():
         ),
         ({"id": "team", "extends": "default", "nodes": [{"id": "n", "kind": "gate"}]}, False),
         ({"id": "team", "remove": ["x"], "nodes": [{"id": "n", "kind": "gate"}]}, False),
+        # Only chain revision makes a group; a chain file the editor checks may not hold one.
+        ({"id": "team", "nodes": [{"id": "g", "kind": "group", "nodes": [{"id": "n"}]}]}, False),
     ],
-    ids=["extending", "extends-and-nodes", "edits-without-extends"],
+    ids=["extending", "extends-and-nodes", "edits-without-extends", "group"],
 )
 def test_the_chain_schema_takes_an_extending_chain(chain, valid):
     errors = list(validator("chain.schema.json").iter_errors(chain))

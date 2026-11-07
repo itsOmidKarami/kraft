@@ -172,18 +172,23 @@ def refuse_unjoined(st, row, what: str) -> None:
     )
 
 
-def refuse_all_dropped(st, row) -> None:
-    """A join with nothing to replay stops for a person; retrying changes nothing."""
+def all_dropped(st, row) -> bool:
+    """True when the join has begun and every slice of the generation was dropped:
+    it stopped for a person, and has nothing to replay however often it is retried."""
     state = st.db.read(lambda c: store.group_state(c, row["id"]))
     if state is None or state.phase != "joining":
-        return
+        return False
     children = st.db.read(lambda c: store.children_of(c, row["id"], state.generation))
-    if children and not any(c["status"] == WorkItemStatus.COMPLETED for c in children):
-        raise HTTPException(
-            409,
-            "every slice was dropped, so a retry has nothing to join: send the plan back "
-            "with a retry from the plan node, which builds the slices again, or abandon this item",
-        )
+    return bool(children) and not any(c["status"] == WorkItemStatus.COMPLETED for c in children)
+
+
+def refuse_all_dropped() -> None:
+    """A join with nothing to replay stops for a person; retrying changes nothing."""
+    raise HTTPException(
+        409,
+        "every slice was dropped, so a retry has nothing to join: send the plan back "
+        "with a retry from the plan node, which builds the slices again, or abandon this item",
+    )
 
 
 def refuse_alone(row, what: str) -> None:
@@ -1844,10 +1849,15 @@ async def _retry(wid: str, body: Retry, request: Request):
         body = body.model_copy(update={"path": _stopped_step(st, wid, chain, row)})
     target = _retry_target(chain, row, body)
     if store.group_unjoined(row):
-        refuse_all_dropped(st, row)
-        if target is not None and target.node_index < store.node_index(
+        # `retry --restart` has no target: it rewinds to the first node.
+        behind = (0 if target is None else target.node_index) < store.node_index(
             row, row["current_node_id"], default=0
-        ):
+        )
+        if all_dropped(st, row):
+            # The way on is a rewind to the plan or earlier, which slices again.
+            if not behind:
+                refuse_all_dropped()
+        elif behind:
             refuse_unjoined(st, row, "a retry from an earlier node")
         # Its slices wake with it: the ones its pause or its cap stopped.
         await slices_mod.resume_family(st.db, wid)

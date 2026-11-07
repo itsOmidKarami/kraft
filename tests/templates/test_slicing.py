@@ -190,13 +190,57 @@ def test_with_slicing_says_why_a_present_section_was_not_used():
     assert "Not sliced" in changes.rationale
 
 
-def test_an_agent_cannot_declare_a_slice():
-    text = (
-        '---\nwork_item_ids: [w1]\n---\n```json\n{"rationale": "r", "slice": '
-        '{"body": ["build"], "unforked": ["build"], "slices": 2}}\n```\n'
-    )
-    with pytest.raises(revision.RevisionError, match="may not declare slice"):
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        pytest.param(
+            "slice", '{"body": ["build"], "unforked": ["build"], "slices": 2}', id="slice"
+        ),
+        pytest.param("unslice", '"slices"', id="unslice"),
+    ],
+)
+def test_an_agent_cannot_declare_a_slice(key, value):
+    text = f'---\nwork_item_ids: [w1]\n---\n```json\n{{"rationale": "r", "{key}": {value}}}\n```\n'
+    with pytest.raises(revision.RevisionError, match=f"may not declare {key}"):
         revision.parse(text)
+
+
+@pytest.mark.parametrize(
+    ("plan", "ids", "reject_to"),
+    [
+        pytest.param(
+            PLAN,
+            ["plan", GATE, "slices", "check", "brief", "review", "feedback", "land"],
+            "slices",
+            id="rebuilt",
+        ),
+        pytest.param(
+            "### Task 1: a\n",
+            ["plan", GATE, "build", "check", "brief", "review", "feedback", "land"],
+            "build",
+            id="left-out",
+        ),
+    ],
+)
+def test_revision_again_takes_the_group_out_and_decides_afresh(plan, ids, reject_to):
+    """Chain revision running again after a rewind to the plan, over a chain
+    that already holds the group: it comes out (body in place, copies gone,
+    targets back), and the plan as it stands now rebuilds it or leaves it out."""
+    chain = _chain()
+    once = slicing.with_slicing(_changes(), chain, slicing.SlicingInput(PLAN, 6), at=GATE)
+    sliced = revision.revise(chain, once, at=GATE, library=LIBRARY)
+
+    changes = slicing.with_slicing(_changes(), sliced, slicing.SlicingInput(plan, 6), at=GATE)
+    revised = revision.revise(sliced, changes, at=GATE, library=LIBRARY)
+
+    assert changes.unslice == "slices"
+    assert not changes.empty  # the gate asks a person either way
+    nodes = revised.chain.chain.nodes
+    assert [n.id for n in nodes] == ids
+    by_id = {n.id: n for n in nodes}
+    assert by_id["review"].reject_to == reject_to
+    assert by_id["feedback"].on_base_changed.restart_from == "check"
+    assert ("Not sliced" in changes.rationale) is (reject_to == "build")
 
 
 def test_an_item_filed_with_a_plan_keeps_the_revision_gate_that_approves_its_split(templates_dir):
