@@ -137,12 +137,20 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
   // The camera frames the world it is moving to, in the same 420ms (`is-glide`), so the zoom does not snap after the move;
   // it keeps clear of the zoom and round controls at the foot.
   const camera = useCamera({ canvas: "node", world: { W: lay.W, H: lay.H }, opening: "fit", reserve, clearBottom: 56 });
-  const selKey = selected && (selected.scope && selected.task ? chipKey(selected.step, selected.task, selected.scope) : selected.agent && selected.task ? markKey(selected.step, selected.task, selected.agent) : selected.task ? taskKey(selected.step, selected.task) : labelKey(selected.step));
   // Each task's sub-agent marks, in the order drawn: ↓ from the task reaches them, ←/→ moves along them.
-  const markRows = new Map(steps.flatMap((st) => st.tasks.filter((t) => t.agents?.length).map((t) => [taskKey(st.id, t.id), t.agents!.map((a) => markKey(st.id, t.id, a.id))] as const)));
+  // An earlier round's faded box, or a task open as a frame, draws none.
+  const markRows = new Map(steps.flatMap((st) => st.tasks.filter((t) => t.agents?.length && !t.faded && !(shown && shown.step === st.id && shown.task === t.id)).map((t) => [taskKey(st.id, t.id), t.agents!.map((a) => markKey(st.id, t.id, a.id))] as const)));
+  // A picked sub-agent is the Tab stop while its mark is drawn; else its task is.
+  const selMark = selected?.agent && selected.task && markRows.get(taskKey(selected.step, selected.task))?.includes(markKey(selected.step, selected.task, selected.agent)) ? markKey(selected.step, selected.task, selected.agent!) : undefined;
+  const selKey = selected && (selected.scope && selected.task ? chipKey(selected.step, selected.task, selected.scope) : selMark ?? (selected.task ? taskKey(selected.step, selected.task) : labelKey(selected.step)));
   const firstStep = steps[0];
   const single = useSingleClick();
   const roving = useRoving(selKey, firstStep && (firstStep.tasks[0] ? taskKey(firstStep.id, firstStep.tasks[0].id) : labelKey(firstStep.id)));
+  // Left on a row of marks that hides again (its task not selected), the Tab stop goes back to the task: a hidden
+  // mark can take no focus, and Tab would skip the canvas.
+  const marksOut = (k: string) => { const { step, task } = parse(k); return selected?.step === step && selected?.task === task; };
+  const stop = roving.active?.startsWith("m:") && !marksOut(roving.active) ? taskKey(parse(roving.active).step, parse(roving.active).task!) : roving.active;
+  const tabStop = (k: string) => (k === stop ? 0 : -1);
 
   // An open task's box hides behind its frame, and the frame goes again: the focus follows each, not left on what left.
   const inside = useRef(false);
@@ -286,7 +294,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
       <button
         ref={away === undefined ? roving.ref(key) : undefined}
         type="button"
-        tabIndex={away === undefined ? roving.tabIndex(key) : -1}
+        tabIndex={away === undefined ? tabStop(key) : -1}
         // A fix loop's or an on_failure handler's task is selected under a path but named by the task.
         aria-label={accessibleName(s.step === "fix_loop" || kind.startsWith("on-failure") ? { ...t, id: t.label ?? t.id } : t, kind)}
         aria-pressed={sel}
@@ -302,7 +310,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
         {t.meta && <span className={`graph-meta tone-${t.metaTone ?? "muted"}`}>{t.meta}</span>}
       </button>
     );
-    if (!t.agents?.length || away !== undefined || t.faded || !markRows.has(key)) return <Fragment key={key}>{button}</Fragment>;
+    if (!t.agents?.length || !markRows.has(key)) return <Fragment key={key}>{button}</Fragment>;
     // Its sub-agents, under its box while it is hovered, focused or selected (or one of them is). The row starts where
     // the box's label ends, measured, so the pointer never leaves a hover on its way down from the box.
     return (
@@ -313,7 +321,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
           {t.agents.map((a) => {
             const mk = markKey(s.step, t.id, a.id), on = mine && selected?.agent === a.id, tone = statusTone(a.status);
             return (
-              <button key={mk} ref={roving.ref(mk)} type="button" tabIndex={roving.tabIndex(mk)} className={`sub-mark ${tone}${on ? " is-sel" : ""}`} aria-pressed={on}
+              <button key={mk} ref={roving.ref(mk)} type="button" tabIndex={tabStop(mk)} className={`sub-mark ${tone}${on ? " is-sel" : ""}`} aria-pressed={on}
                 {...tip(`${a.description}, sub-agent, ${STATUS_WORDS[a.status]}`, `${a.description} · ${subagentMeta(a)}`)}
                 onFocus={() => roving.go(mk)} onClick={() => onAgent?.({ ...s, agent: a.id })}>
                 <span className="sub-mark-dot" aria-hidden="true">{tone === "is-ok" ? <Check size={9} strokeWidth={3.5} /> : tone === "is-bad" ? <X size={9} strokeWidth={3.5} /> : null}</span>
@@ -368,7 +376,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
               key={key}
               ref={roving.ref(key)}
               type="button"
-              tabIndex={roving.tabIndex(key)}
+              tabIndex={tabStop(key)}
               // A lone step draws no label (a blank one): its id names it, and the tooltip says it.
               {...(st.label?.trim() === "" ? tip(`${st.id}, step`) : { "aria-label": `${st.label ?? st.id}, step` })}
               aria-pressed={sel}
@@ -402,7 +410,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
           return (
             <div role="group" aria-label={`${col.step}, tasks in parallel`} className={`scope-frame loop-frame${loopPhase.content ? " is-on" : ""}${!loopOpen && !loopPhase.layout ? " is-out" : ""}`} style={{ left: f.x, top: f.y, width: f.w, height: f.h }}>
               <div className="scope-head" style={{ width: LOOP_FRAME.w }}>
-                <button ref={head ? roving.ref(key) : undefined} type="button" tabIndex={head ? roving.tabIndex(key) : -1} className="scope-task loop-step" aria-expanded aria-pressed={isSel({ step: "fix_loop", task: col.step })} aria-label={accessibleName({ id: col.step!, state: look.state, running: look.running, wait: look.wait }, `fix-loop step of ${col.tasks.length} parallel tasks`)} onFocus={() => { roving.go(key); if (!quiet.current) camera.reveal({ x0: f.x, x1: f.x + f.w, y0: f.y, y1: f.y + f.h }); }} onClick={() => pickLoop(col.step!)}>{col.step}</button>
+                <button ref={head ? roving.ref(key) : undefined} type="button" tabIndex={head ? tabStop(key) : -1} className="scope-task loop-step" aria-expanded aria-pressed={isSel({ step: "fix_loop", task: col.step })} aria-label={accessibleName({ id: col.step!, state: look.state, running: look.running, wait: look.wait }, `fix-loop step of ${col.tasks.length} parallel tasks`)} onFocus={() => { roving.go(key); if (!quiet.current) camera.reveal({ x0: f.x, x1: f.x + f.w, y0: f.y, y1: f.y + f.h }); }} onClick={() => pickLoop(col.step!)}>{col.step}</button>
                 <span className="scope-sub">in parallel</span>
                 {/* Out of the Tab order, as the scope frame's: Esc closes it from the keys. */}
                 <button type="button" tabIndex={-1} className="scope-close" {...tip("Close")} onClick={shutLoop}>✕</button>
@@ -421,7 +429,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
               key={key}
               ref={roving.ref(key)}
               type="button"
-              tabIndex={roving.tabIndex(key)}
+              tabIndex={tabStop(key)}
               aria-expanded={false}
               aria-pressed={sel}
               aria-label={accessibleName({ id: col.step!, state: look.state, running: look.running, wait: look.wait }, `fix-loop step of ${n} parallel tasks`)}
@@ -449,7 +457,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
             out={!expand && !phase.layout}
             selectedScope={expand?.scope}
             taskKey={taskKey(shown.step, shown.task)}
-            rove={{ ref: roving.ref, tabIndex: roving.tabIndex, go: roving.go, onFocus: (key) => { roving.go(key); if (quiet.current) return; const f = wide.cols[open.step].open!; camera.reveal({ x0: f.x, x1: f.x + f.w, y0: f.y, y1: f.y + f.h }); } }}
+            rove={{ ref: roving.ref, tabIndex: tabStop, go: roving.go, onFocus: (key) => { roving.go(key); if (quiet.current) return; const f = wide.cols[open.step].open!; camera.reveal({ x0: f.x, x1: f.x + f.w, y0: f.y, y1: f.y + f.h }); } }}
             onTask={() => onSelect?.({ step: shown.step, task: shown.task })}
             onScope={(key) => onScope?.(key)}
             onClose={() => onCollapse?.()}

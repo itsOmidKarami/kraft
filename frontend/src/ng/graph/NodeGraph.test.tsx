@@ -132,6 +132,29 @@ describe("NodeGraph", () => {
       await user.click(btn("Map the loader, sub-agent, running"));
       expect(onAgent).toHaveBeenLastCalledWith({ step: "review", task: "code_review", agent: "a1" });
     });
+
+    it("hands the Tab stop back to the task when its marks hide again", async () => {
+      const user = userEvent.setup();
+      render(<NodeGraph name="v" steps={withAgents} selected={{ step: "checks", task: "types" }} />);
+      await user.tab();
+      await user.keyboard("{ArrowRight}{ArrowDown}");
+      expect(btn("Map the loader, sub-agent, running")).toHaveFocus();
+      await user.tab();
+      expect(btn("Zoom out")).toHaveFocus();
+      await user.tab({ shift: true });
+      expect(btn(/^code_review/)).toHaveFocus();
+    });
+
+    it("draws no marks on an earlier round's faded box, and ↓ from it goes on as from any task", async () => {
+      const user = userEvent.setup();
+      const faded = withAgents.map((st) => (st.id === "review" ? { ...st, tasks: [{ ...st.tasks[0], faded: true }] } : st));
+      render(<NodeGraph name="v" steps={faded} selected={{ step: "review", task: "code_review" }} />);
+      expect(screen.queryByRole("group", { name: "code_review, sub-agents" })).toBeNull();
+      await user.tab();
+      await user.keyboard("{ArrowDown}");
+      expect(btn(/^code_review/)).toHaveFocus();
+      expect(btn(/^code_review/)).toHaveAttribute("tabindex", "0");
+    });
   });
 
   it("fits the node with 56px kept clear at the foot, for the zoom and round controls", () => {

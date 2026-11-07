@@ -402,4 +402,4 @@
 .sub-mark.is-ok .sub-mark-dot { background: var(--ok); }
 .sub-mark.is-bad .sub-mark-dot { background: var(--bad); }
 .sub-mark.is-sel .sub-mark-dot { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--selection); }
-.canvas-world.is-glide .sub-marks { transition: left .42s cubic-bezier(.2,.8,.2,1), top .42s cubic-bezier(.2,.8,.2,1); }
+.canvas-world.is-glide .sub-marks { transition: left .42s cubic-bezier(.2,.8,.2,1), top .42s cubic-bezier(.2,.8,.2,1), opacity .14s ease, visibility 0s linear .14s; }

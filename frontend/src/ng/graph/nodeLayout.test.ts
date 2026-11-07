@@ -15,6 +15,11 @@ describe("node layout", () => {
     expect(lay.cols[1].ys).toEqual([110, 202]);
     expect(lay.cols[2].ys).toEqual([156]);
   });
+  it("keeps room under a task with sub-agents for their marks, above the task below it and not under the last", () => {
+    const agents = [{ id: "x", description: "x", status: "running" as const }];
+    const { ys } = nodeLayout([{ id: "a", tasks: [{ id: "a0", agents }, { id: "a1" }, { id: "a2", agents }] }]).cols[0];
+    expect([ys[1] - ys[0], ys[2] - ys[1]]).toEqual([92 + 28, 92]);
+  });
   it("spaces steps COL + GAP apart from startX + 68", () => {
     expect(nodeLayout([step("a", 1), step("b", 1)]).cx).toEqual([14 + 68 + 52, 14 + 68 + 52 + 154]);
   });

@@ -2,6 +2,8 @@ import type { GraphItem } from "./types";
 
 /** Node canvas geometry, from NodeGraph.dc.html `static G`: parallel tasks are rows 92px apart. */
 export const G = { BOX: 44, COL: 104, GAP: 50, ROW: 92, TOP: 42, startX: 14 } as const;
+/** The height of a task's row of sub-agent marks under its label. */
+const MARKS = 28;
 
 export type NodeStep = {
   id: string;
@@ -86,7 +88,8 @@ export function nodeLayout(steps: NodeStep[], o: { side?: boolean; loop?: boolea
   // The open task's column is the frame and 12px, and the frame sits at its centre.
   const colW = (k: number) => (ex && ex.step === k ? ex.w + 12 : G.COL);
   // A row is a ROW tall; the expanded one as tall as its frame and the normal 48px between boxes above and below it.
-  const rowH = (k: number, j: number) => (ex && ex.step === k && ex.row === j ? Math.max(G.ROW, ex.h + (G.ROW - G.BOX)) : G.ROW);
+  // A task with sub-agents above another keeps room for its row of marks (`.sub-marks`) clear of the box below.
+  const rowH = (k: number, j: number) => (ex && ex.step === k && ex.row === j ? Math.max(G.ROW, ex.h + (G.ROW - G.BOX)) : G.ROW + (steps[k].tasks[j]?.agents?.length && j < rowsOf(steps[k]) - 1 ? MARKS : 0));
   const block = (k: number) => Array.from({ length: rowsOf(steps[k]) }, (_, j) => rowH(k, j)).reduce((t, h) => t + h, 0);
   const maxB = Math.max(G.ROW, ...steps.map((_, k) => block(k)));
   let TY = G.TOP + G.BOX / 2 + (maxB - G.ROW) / 2;
@@ -95,10 +98,11 @@ export function nodeLayout(steps: NodeStep[], o: { side?: boolean; loop?: boolea
   const rows = (k: number) => {
     let y = TY - block(k) / 2;
     return Array.from({ length: rowsOf(steps[k]) }, (_, j) => {
-      const h = rowH(k, j);
-      const c = y + h / 2;
+      const h = rowH(k, j), open = ex && ex.step === k && ex.row === j;
+      // A box sits at the top of its row's room: the marks' room is under it.
+      const c = y + (open ? h / 2 : G.ROW / 2);
       y += h;
-      return { y: c, half: ex && ex.step === k && ex.row === j ? ex.h / 2 : G.BOX / 2 };
+      return { y: c, half: open ? ex.h / 2 : G.BOX / 2 };
     });
   };
   let edge = G.startX + 68;

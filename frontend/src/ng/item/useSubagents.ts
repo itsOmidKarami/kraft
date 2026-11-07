@@ -57,7 +57,7 @@ export function useSubagentLists(item: ItemDetail, nodes: (string | undefined)[]
     for (const id of key ? key.split("\n") : []) {
       if (asked.current.has(id)) continue;
       asked.current.add(id);
-      // A read that fails is asked again the next time the page changes, not left out for good.
+      // A read that fails is asked again once the sessions shown change, not left out for good.
       void read(item.id, id).then((l) => (l ? setDone((d) => ({ ...d, [id]: l })) : asked.current.delete(id)));
     }
   }, [item.id, key]);
