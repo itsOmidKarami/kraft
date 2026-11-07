@@ -51,6 +51,7 @@ export function subagentPane({ workItemId, s, a, task, crumbs, tab, setAgent, ru
     tabs: [{ value: "overview", label: "Overview" }, { value: "log", label: "Log" }],
     body: on === "log"
       ? <Log key={s.id} workItemId={workItemId} sessionId={s.id} running={running} title={a.description} crumb={above.map((c) => c.label).join(" › ")} agent={a.id} onAgent={setAgent} />
-      : <SubagentOverview workItemId={workItemId} s={s} a={a} />,
+      // Keyed by the sub-agent: another one picked reads its own prompt, not the last one's.
+      : <SubagentOverview key={a.id} workItemId={workItemId} s={s} a={a} />,
   };
 }

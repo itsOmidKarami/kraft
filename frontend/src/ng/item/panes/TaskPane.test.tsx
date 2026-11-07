@@ -133,14 +133,17 @@ describe("task pane", () => {
     });
 
     it("opens a sub-agent a level under the task: its own head and Overview; the task's crumb and Esc step back", async () => {
-      mount(url, item, [], { [`GET ${base}/subagents`]: [200, { session_id: "x", status: "failed", subagents: list }], [`GET ${base}/subagents/a3`]: [200, { ...agent("a3"), prompt: "Find the loader." }] });
+      mount(url, item, [], { [`GET ${base}/subagents`]: [200, { session_id: "x", status: "failed", subagents: list }], [`GET ${base}/subagents/a3`]: [200, { ...agent("a3"), prompt: "Find the loader." }], [`GET ${base}/subagents/a4`]: [200, { ...agent("a4"), prompt: "Check the flags." }] });
       await userEvent.click(await screen.findByRole("button", { name: /Agent a3.*open it/ }));
       expect(screen.getByTestId("where").textContent).toBe(`${url}&agent=a3`);
       const p = pane("Agent a3");
       expect(within(p).getByText("sub-agent · Explore · done · 42s")).toBeInTheDocument();
       expect(await within(p).findByText("Find the loader.")).toBeInTheDocument();
       expect(within(p).getByText("Found it. More.", { normalizer: (t) => t.replace(/\s+/g, " ").trim() })).toBeInTheDocument();
-      await userEvent.click(within(p).getByRole("button", { name: "code_review" }));
+      // Another sub-agent picked straight from its mark on the canvas reads its own prompt.
+      await userEvent.click(screen.getByRole("button", { name: "Agent a4, sub-agent, done" }));
+      expect(await within(pane("Agent a4")).findByText("Check the flags.")).toBeInTheDocument();
+      await userEvent.click(within(pane("Agent a4")).getByRole("button", { name: "code_review" }));
       expect(screen.getByTestId("where").textContent).toBe(url);
       await userEvent.click(await screen.findByRole("button", { name: /Agent a3.*open it/ }));
       expect(screen.getByTestId("where").textContent).toBe(`${url}&agent=a3`);

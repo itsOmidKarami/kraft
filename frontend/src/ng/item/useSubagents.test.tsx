@@ -126,4 +126,14 @@ describe("useSubagentLists", () => {
     const reads = (id: string) => calls.filter((c) => c.path === `/work-items/w1/sessions/${id}/subagents`).length;
     expect([reads("d1"), reads("o1"), reads("t1")]).toEqual([1, 0, 0]);
   });
+
+  it("drops a session of a node not shown once it stops, as the running poll does", async () => {
+    stubFetch(Object.fromEntries([route("x1", [running])]) as never);
+    let item = detail({ worker_sessions: [session("x1", { node_id: "other" })] });
+    const { result, rerender } = renderHook(() => useSubagentLists(item, ["n"]));
+    await vi.waitFor(() => expect(Object.keys(result.current)).toEqual(["x1"]));
+    item = detail({ worker_sessions: [session("x1", { node_id: "other", status: "done" })] });
+    rerender();
+    expect(result.current).toEqual({});
+  });
 });
