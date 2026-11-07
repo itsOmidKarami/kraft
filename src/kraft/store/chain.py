@@ -654,7 +654,10 @@ def node_index(row, node_id, *, default=None):
     a node).
     """
     ids = chain_node_ids(row)
-    return ids.index(node_id) if node_id in ids else default
+    if node_id in ids:
+        return ids.index(node_id)
+    # A group's body node (`group.node`) stands at the group.
+    return next((i for i, n in enumerate(ids) if node_id and node_id.startswith(f"{n}.")), default)
 
 
 def gate_node_index(row, gate: str, *, default=None):

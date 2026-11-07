@@ -1378,6 +1378,7 @@ def launch(st, repo: str) -> executor.LaunchContext:
             forges=functools.partial(forges_now, st),
             outputs_max_bytes=outputs_max_bytes,
             max_slices=max_slices,
+            slice_room=functools.partial(storage.room_for, st),
         )
     entry = _connected(repos, repo)
     repo_id = entry.id if entry is not None else None
@@ -1391,4 +1392,5 @@ def launch(st, repo: str) -> executor.LaunchContext:
         forges=functools.partial(forges_now, st),
         outputs_max_bytes=outputs_max_bytes,
         max_slices=max_slices,
+        slice_room=functools.partial(storage.room_for, st),
     )

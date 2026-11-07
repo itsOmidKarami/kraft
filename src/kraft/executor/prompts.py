@@ -579,12 +579,22 @@ def progress_note(
     if db is not None and _progress.rework_run(db, work_item_row):
         # Kraft-hj2q9: a run a rejection bounced back follows the note, not the plan.
         return ""
+    child = _SLICE_CHILD_NOTE if _store.is_child(work_item_row) else ""
     # In place, the plan on the item's branch: an escalation's or a reply's
     # prompt is built before the take, while the checkout may be the person's.
     in_place = _store.is_in_place(work_item_row)
     tasks = _progress.tasks_for(work_item_row, Path(worktree), run_dirs, in_place=in_place)
     note = _PROGRESS_NOTE if _callback.reachable(sandbox) else _PROGRESS_NOTE_NO_CHANNEL
-    return note.format(total=len(tasks)) if tasks else ""
+    return note.format(total=len(tasks)) + child if tasks else ""
+
+
+#: A slice's child builds its own tasks only (`slices_docs`: the plan it reads
+#: has every other task tagged `[DONE]`).
+_SLICE_CHILD_NOTE = (
+    "\n\nThis is one slice of a larger plan. Build only the tasks not tagged `[DONE]`: "
+    "the others are done, or are being built by other slices beside you in their own "
+    "worktrees. Do not build them, and do not touch the files they own."
+)
 
 
 #: The item's unanswered review threads, framed by role: a working agent

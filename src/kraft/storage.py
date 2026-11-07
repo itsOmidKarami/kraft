@@ -253,6 +253,24 @@ def state_of(policy, used: Usage | None) -> str | None:
     return "ok"
 
 
+def room_for(st, worktrees: int) -> str | None:
+    """Why `worktrees` new ones do not fit under the storage limit, or None. A
+    fork decides from the last measurement, so it estimates each new worktree as
+    the average item's (`start_queue` does the same for one)."""
+    used = usage(st)
+    limit = getattr(st.policy, "storage_limit_bytes", None) if st.policy else None
+    if limit is None or used is None:
+        return None
+    each = sum(used.items.values()) // len(used.items) if used.items else 0
+    if archivable(used) + worktrees * each > limit:
+        return (
+            f"{worktrees} new worktrees would take the stored worktrees past the storage "
+            f"limit of {limit} bytes; archive finished items, or raise storage.worktrees.limit, "
+            "then retry"
+        )
+    return None
+
+
 def health(st) -> dict | None:
     """`/health`'s `storage`; None without a limit or before the first walk."""
     used = usage(st)

@@ -27,6 +27,7 @@ __all__ = [
     "family_ids",
     "file_children",
     "group_state",
+    "is_child",
     "mark_waiting_on_slices",
     "pin_head",
     "set_docs_commit",
@@ -85,6 +86,15 @@ class ChildRow:
     node_overrides: dict | None = None
     policy_override: dict | None = None
     auto_gate: bool = False
+
+
+def is_child(row) -> bool:
+    """Whether `row` is a slice's child item. A row read with a column list that
+    leaves `parent_id` out is no child's."""
+    try:
+        return row["parent_id"] is not None
+    except (IndexError, KeyError):
+        return False
 
 
 def group_state(conn: sqlite3.Connection, wid: str) -> GroupState | None:

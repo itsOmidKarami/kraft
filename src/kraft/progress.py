@@ -202,15 +202,17 @@ def active_implementation_node(row) -> str | None:
     return None
 
 
-def read_plan(run_dirs, row, worktree: Path, *, in_place: bool = False) -> str | None:
-    """The attached plan's text if there is one, else the plan node's
+def read_attached(
+    run_dirs, row, worktree: Path, kind: str, *, in_place: bool = False
+) -> str | None:
+    """The attached `kind`'s text if there is one, else the `kind` node's
     document's (`item_paths.document`, the new place first). Never through a
     link, and never blocking on a FIFO: a worker can plant either in its
     worktree or its item's `docs/`. `in_place`: the checkout may be on another
     branch, or hold the person's copy, so the plan is the one committed on the
     item's branch, else the copy filed at intake (`Indexer._read_attachment`)."""
     attachments = json.loads(row["attachments"] or "[]")
-    plan = next((a for a in attachments if a.get("kind") == "plan"), None)
+    plan = next((a for a in attachments if a.get("kind") == kind), None)
     rel = plan["path"] if plan else None
     if rel is not None and in_place:
         text = git_read(
@@ -224,13 +226,18 @@ def read_plan(run_dirs, row, worktree: Path, *, in_place: bool = False) -> str |
         read, _reason = read_worktree_file(Path(worktree), rel, item_paths.DOC_MAX_BYTES)
         text = read.text if read is not None else None
     else:
-        name = item_paths.document(run_dirs, row["id"], "plan", worktree=worktree)
+        name = item_paths.document(run_dirs, row["id"], kind, worktree=worktree)
         text = (
             item_paths.read_document(run_dirs, row["id"], name, worktree=worktree)
             if name is not None
             else None
         )
     return text
+
+
+def read_plan(run_dirs, row, worktree: Path, *, in_place: bool = False) -> str | None:
+    """`read_attached` for the plan."""
+    return read_attached(run_dirs, row, worktree, "plan", in_place=in_place)
 
 
 def read_tasks(run_dirs, row, worktree: Path, *, in_place: bool = False) -> list[tuple[str, bool]]:

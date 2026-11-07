@@ -14,10 +14,10 @@ from kraft import (
     item_paths,
     node_runs,
     reviewed_head,
-    slices,
     store,
 )
 from kraft import policy as _policy
+from kraft import slices as _slices
 from kraft.executor import stops
 from kraft.executor.context import LaunchContext, OnApprove
 from kraft.store import _now as _now
@@ -356,7 +356,7 @@ async def maybe_gate(
             why = revision.unchanged(
                 *item_paths.locate(run_dirs, work_item_id, rel),
                 chain=chain,
-                slicing=slices.slicing_input(run_dirs, row, max_slices),
+                slicing=_slices.slicing_input(run_dirs, row, max_slices),
                 at=node.id,
             )
         if why is not None:
@@ -408,7 +408,7 @@ def _chain_revision_seen(
     if result is None:
         return None
     return launch.chain_revision_digest(
-        chain, gate, result.text, slicing=slices.slicing_input(run_dirs, row, launch.max_slices)
+        chain, gate, result.text, slicing=_slices.slicing_input(run_dirs, row, launch.max_slices)
     )
 
 

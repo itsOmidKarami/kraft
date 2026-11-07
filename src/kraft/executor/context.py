@@ -221,6 +221,9 @@ class LaunchContext:
     #: `max_slices` at launch: how many slices a plan may declare and still be
     #: sliced (`slices.slicing_input`).
     max_slices: int = 6
+    #: `storage.room_for` bound to the live state: why this many new worktrees
+    #: do not fit, or None. A fork asks before it files any child.
+    slice_room: Callable[[int], str | None] | None = None
     #: The id of the item's own repository (a workspace's root): the one repo
     #: library its launches may read (`addons.load.for_item`). Kept for a
     #: fanned-out member's run too. None: no id, so no repo library.

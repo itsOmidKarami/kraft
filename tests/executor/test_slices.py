@@ -1,0 +1,248 @@
+"""Walking a slice group: deciding, the prelude, the fork into child items, and
+re-entering a group by its stored phase."""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+from support.harness import commit_all, entry_of, git, write
+from support.workspace import workspace_target
+
+from kraft import executor, store
+from kraft.executor import slices
+from kraft.executor.context import LaunchContext
+from kraft.templates.environment import WorkItemTarget
+
+NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}))
+
+PLAN = """# Plan
+
+## Slices
+
+- **Slice 1: Parser.** Tasks 1-2.
+- **Slice 2: CLI.** Task 3.
+
+### Task 1: a
+
+### Task 2: b
+
+### Task 3: c
+"""
+
+
+def _body(id: str, command: str = "true") -> dict:
+    return {
+        "id": id,
+        "kind": "exec",
+        "tasks": [{"id": "run", "kind": "subprocess", "command": command}],
+    }
+
+
+def _nodes(*body: dict, unforked=None) -> list[dict]:
+    body = body or (_body("implementation"), _body("verification"))
+    return [
+        {
+            "id": "slices",
+            "kind": "group",
+            "nodes": list(body),
+            "unforked": unforked or [body[0]["id"]],
+        },
+        _body("after"),
+    ]
+
+
+@pytest.fixture
+def planned(repo):
+    """`repo` with a committed spec and a plan that declares two slices."""
+    write(repo, "spec.md", "# spec\n")
+    write(repo, "plan.md", PLAN)
+    commit_all(repo, "docs")
+    return repo
+
+
+async def _item(item_on, planned, nodes=None, plan_path="plan.md", **kw):
+    return await item_on(
+        v1_chain_nodes(nodes or _nodes()),
+        repo=planned,
+        attachments=[
+            {"kind": "spec", "path": "spec.md"},
+            {"kind": "plan", "path": plan_path},
+        ],
+        **kw,
+    )
+
+
+def v1_chain_nodes(nodes, **kw):
+    from support.harness import v1_chain
+
+    return v1_chain(nodes, repo="/r", frozen=True, **kw)
+
+
+def _walk(it, **kw):
+    return executor.run_once(
+        it.database,
+        it.run_dirs,
+        work_item_id=it.id,
+        launch=NO_SETUP,
+        policy=kw.pop("policy", None),
+        **kw,
+    )
+
+
+def _children(it):
+    return it.database.read(lambda c: store.children_of(c, it.id))
+
+
+async def test_a_group_with_two_slices_files_two_children_and_waits(item_on, planned):
+    it = await _item(item_on, planned)
+
+    assert await _walk(it) == "waiting"
+
+    row = it.row()
+    assert (row["status"], row["stop_kind"]) == ("waiting", "slices")
+    children = _children(it)
+    assert [(c["slice_key"], c["status"]) for c in children] == [(1, "queued"), (2, "queued")]
+    fork = git(it.worktree, "rev-parse", "HEAD")
+    assert {c["base_ref"] for c in children} == {fork}
+    for child in children:
+        assert {a["kind"] for a in json.loads(child["attachments"])} == {"spec", "plan"}
+        assert child["title"].startswith("t · slice ")
+        chain = json.loads(child["materialized_chain"])
+        assert [n["id"] for n in chain["chain"]["nodes"]] == ["implementation", "verification"]
+    state = it.database.read(lambda c: store.group_state(c, it.id))
+    assert (state.phase, state.generation, state.fork_commit) == ("forked", 1, fork)
+    assert [e["type"] for e in it.events() if e["type"] == "slices_forked"] == ["slices_forked"]
+
+
+async def test_a_crash_between_filing_and_queueing_queues_the_children_on_re_entry(
+    item_on, planned
+):
+    it = await _item(item_on, planned)
+    await _walk(it)
+    before = [c["id"] for c in _children(it)]
+
+    def crash(c):
+        c.execute(
+            "UPDATE work_items SET status='paused', queued_request=NULL WHERE parent_id=?", (it.id,)
+        )
+        c.execute("UPDATE work_items SET status='active' WHERE id=?", (it.id,))
+
+    await it.database.write(crash)
+    assert await _walk(it) == "waiting"
+
+    assert [c["id"] for c in _children(it)] == before
+    assert [c["status"] for c in _children(it)] == ["queued", "queued"]
+
+
+async def test_re_entering_a_forked_group_files_no_children_again(item_on, planned):
+    it = await _item(item_on, planned)
+    await _walk(it)
+    await it.database.write(
+        lambda c: c.execute("UPDATE work_items SET status='active' WHERE id=?", (it.id,))
+    )
+
+    assert await _walk(it) == "waiting"
+
+    assert len(_children(it)) == 2
+    assert len([e for e in it.events() if e["type"] == "slices_forked"]) == 1
+
+
+async def test_a_prelude_runs_in_the_parent_before_the_fork(item_on, planned):
+    write(planned, "plan.md", PLAN.replace("Task 3.", "Task 3.\n").replace("Tasks 1-2.", "Task 1."))
+    commit_all(planned, "plan with groundwork")
+    it = await _item(item_on, planned)
+
+    assert await _walk(it) == "waiting"
+
+    ran = [e["payload"]["node_id"] for e in it.events("node_completed")]
+    assert ran == ["slices.implementation", "slices.verification"]
+    forked_at = next(e["seq"] for e in it.events() if e["type"] == "slices_forked")
+    assert all(e["seq"] < forked_at for e in it.events("node_completed"))
+    assert len(_children(it)) == 2
+
+
+@pytest.mark.parametrize(
+    ("target", "says"),
+    [
+        pytest.param(
+            lambda: workspace_target({"a": "libs/a", "b": "libs/b"}),
+            "workspace",
+            id="workspace-item",
+        ),
+        pytest.param(
+            lambda: WorkItemTarget.for_repository("target", in_place=True),
+            "in-place",
+            id="in-place-item",
+        ),
+    ],
+)
+async def test_an_item_that_cannot_be_sliced_runs_the_group_unforked(
+    item_on, planned, target, says
+):
+    """Never forked, and the reason is an event. Decided before any worktree is
+    touched, so the decision is read straight off the row."""
+    it = await item_on(
+        v1_chain_nodes(_nodes(), target=target()),
+        repo=planned,
+        attachments=[{"kind": "plan", "path": "plan.md"}],
+        worktree=True,
+    )
+    row = it.row()
+    node = it.chain.chain.nodes[0]
+
+    decided = slices._decide(it.database, it.run_dirs, row, it.worktree, None, it.id, node, None)
+
+    assert isinstance(decided, str)
+    assert says in decided
+
+
+async def test_a_group_runs_unforked_when_the_plan_has_no_split(item_on, planned):
+    write(planned, "plan.md", "### Task 1: a\n")
+    commit_all(planned, "plain plan")
+    it = await _item(item_on, planned)
+
+    assert await _walk(it) == "completed"
+
+    [event] = it.events("slices_not_forked")
+    assert "no ## Slices" in event["payload"]["reason"]
+    assert [e["payload"]["node_id"] for e in it.events("node_completed")] == [
+        "slices.implementation",
+        "after",
+    ]
+    assert it.database.read(lambda c: store.group_state(c, it.id)).phase == "joined"
+
+
+async def test_a_rejection_after_the_join_runs_unforked_in_the_parent(item_on, planned):
+    it = await _item(item_on, planned)
+
+    def joined(c):
+        store.set_group_state(
+            c, it.id, store.GroupState(group="slices", phase="joined", generation=1)
+        )
+
+    await it.database.write(joined)
+
+    assert await _walk(it) == "completed"
+
+    assert _children(it) == []
+    assert [e["payload"]["node_id"] for e in it.events("node_completed")] == [
+        "slices.implementation",
+        "after",
+    ]
+
+
+async def test_a_fork_over_the_storage_limit_files_no_children(item_on, planned):
+    it = await _item(item_on, planned)
+    launch = LaunchContext(
+        repo_entry=entry_of({"setup_command": ""}),
+        slice_room=lambda n: f"{n} new worktrees would not fit",
+    )
+
+    status = await executor.run_once(it.database, it.run_dirs, work_item_id=it.id, launch=launch)
+
+    assert status == "needs_human"
+    assert _children(it) == []
+    assert it.database.read(lambda c: store.group_state(c, it.id)) is None or (
+        it.database.read(lambda c: store.group_state(c, it.id)).phase != "forked"
+    )
