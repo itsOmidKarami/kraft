@@ -690,12 +690,30 @@ icon in its place.
 [Library and chains](/reference/configuration/library-and-chains) lists the
 library's sections and has examples of each.
 
+## Group node
+
+_Added in next_
+
+A `group` node holds the execution nodes that a plan's slices share, its body. Only chain
+revision makes one. A chain file that declares a group is refused, and so is an extending
+chain's `add`. You see one in an item's revised chain and in the chain editor, which never
+creates one.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `nodes` | list of exec nodes | The body, run by each child item in its own worktree. It holds no gate, no forge task, no `on_merge_rejected` and no `on_base_changed`. |
+| `unforked` | list of node ids | The body nodes the item runs itself when it does not split, and when a rejection comes back to the group. Every body node when empty. |
+
+A rejection or restart may name a group as its target. It may not name a node inside one. A
+`reads` entry may not cross a group's boundary in either direction.
+
 ## Canonical paths
 
 Every task, step, and node has a canonical path, for example
 `spec.main.author`, `verification.review.code_review`, or
 `merge_request_feedback.fix_loop.judge`. Events, sessions,
-`kraft item retry --path`, and `kraft item skip --path` address work by it.
+`kraft item retry --path`, and `kraft item skip --path` address work by it. A node in a
+[group](#group-node) has the group's id first: `slices.verification.review.code_review`.
 
 ## In this section
 

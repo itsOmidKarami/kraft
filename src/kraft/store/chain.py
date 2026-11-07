@@ -737,9 +737,14 @@ def node_view(node) -> dict:
     # the fix loop, the judge and a gate's reviewer -- which the Config tab
     # would then render as though they were ordinary work.
     steps = [[task.path for task in step.tasks] for step in node.steps]
+    group = node.node if node.body else None
     return {
         "id": node.id,
         "kind": node.node.kind.value,
+        # A slice group's body, as nodes of their own (`group.node` ids): the SPA
+        # draws the group as one glyph that opens to these.
+        "nodes": [node_view(inner) for inner in node.body] if group is not None else None,
+        "unforked": group.unforked_ids() if group is not None else None,
         # Canonical task paths, which is what a V1 node has instead of a list of
         # hook-point names. Empty on a gate, which declares no execution shape.
         "tasks": [path for group in steps for path in group],

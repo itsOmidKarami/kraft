@@ -25,6 +25,13 @@ Change the chain only when you can point at a specific line in the spec or plan
 that the current chain handles badly. "This could plausibly benefit from more
 review" is not such a line. If you cannot name the evidence, leave it alone.
 
+## Slicing is not yours
+
+When the plan has a valid `## Slices` section, Kraft adds the slicing entry to the change set
+itself, by fixed rules, and the person at the gate sees it beside your changes. Never write a
+`slice` key: a change set that has one is refused. You may still propose your own skips, adds
+and overrides beside it. Do not skip or move the implementing node to make room for a split.
+
 ## What you get
 
 - The approved **spec** and **plan**.

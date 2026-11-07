@@ -68,6 +68,27 @@ If your instructions name an intent tree, the plan contains a task that applies
 the spec's requirement changes to the tree and writes the tests they are pinned
 to, each test seen to fail for the stated reason before the code makes it pass.
 
+## Slicing a large plan
+
+When the plan is large and parts of it do not depend on each other, end it with a `## Slices`
+section, one bullet per slice. Kraft builds the slices in parallel, each by its own agent in its
+own worktree, then joins them:
+
+```
+## Slices
+
+- **Slice 1: Parser.** Tasks 1-3.
+- **Slice 2: CLI verb.** Tasks 4, 6.
+```
+
+Keys run 1, 2, 3... and every slice has a title. Tasks are the numbers of your `### Task N:`
+headings; a range takes `-`. Slices must be **independent**: each starts from the same commit
+and sees none of another's work, so a slice may not use a helper another slice creates. Put
+shared groundwork (a helper two slices would both write, a schema both need) in tasks outside
+every slice; Kraft builds those first and tests them before any slice starts. Never write that
+one slice "comes after" another: that is refused. Use at most six slices, and at least two.
+When the plan is small or its tasks build on each other, write no section at all.
+
 ## Check your own plan before you finish
 
 Walk the spec section by section and point at the task that implements each

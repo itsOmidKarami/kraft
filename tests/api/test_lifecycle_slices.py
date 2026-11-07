@@ -4,21 +4,14 @@ children."""
 
 from __future__ import annotations
 
-import os
-import sqlite3
-from contextlib import closing
 from functools import partial
-from pathlib import Path
 
 import pytest
+from support.api import _orchestrator_db as _db
 from support.api import _paused, _status_of
 
 from kraft import store
 from kraft.executor import slices
-
-
-def _db():
-    return closing(sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"))
 
 
 def _family(client, repo, *, parent_status="waiting", children=("running", "running")):

@@ -42,7 +42,8 @@ def test_its_no_change_example_is_the_empty_change_set_kraft_accepts(text):
 def test_its_full_example_uses_exactly_the_keys_kraft_reads(text):
     full = json.loads(_examples(text)[0])
 
-    assert set(full) == set(revision.ChangeSet.model_fields)
+    # `slice` is Kraft's own entry; the agent never writes it.
+    assert set(full) == set(revision.ChangeSet.model_fields) - {"slice"}
     assert set(full["skip"][0]) == set(revision.Skip.model_fields)
     assert set(full["add"][0]) == set(revision.Add.model_fields)
 

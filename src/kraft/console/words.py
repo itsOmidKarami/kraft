@@ -237,7 +237,17 @@ def chain_marks(row: dict) -> list[dict]:
     on (`hot` when it needs you), or still to run; gates marked."""
     nodes = (row.get("chain_definition") or {}).get("nodes") or []
     ended = row.get("display_status") in ("done", "cancelled", "archived")
-    at = next((k for k, n in enumerate(nodes) if n.get("id") == row.get("current_node_id")), -1)
+    current = row.get("current_node_id") or ""
+    # Inside a group's body the item stands at the group (`group.node`).
+    at = next(
+        (
+            k
+            for k, n in enumerate(nodes)
+            if n.get("id") == current
+            or (n.get("kind") == "group" and current.startswith(f"{n['id']}."))
+        ),
+        -1,
+    )
     # A paused item waits on nobody: it stands on its node, not hot.
     status = row.get("display_status")
     hot = (group_of(row) == "needs" and status != "paused") or status == "escalated"

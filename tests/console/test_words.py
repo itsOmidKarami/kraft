@@ -63,3 +63,25 @@ def test_an_events_age_reads_as_on_the_web():
 def test_a_duration_reads_as_on_the_web():
     durations = CASES["elapsed"]
     assert [words.elapsed(s) for s, _ in durations] == [want for _, want in durations]
+
+
+def test_chain_marks_find_the_current_node_inside_a_group():
+    row = {
+        "current_node_id": "slices.implementation",
+        "display_status": "running",
+        "chain_definition": {
+            "nodes": [
+                {"id": "plan", "kind": "exec"},
+                {"id": "slices", "kind": "group"},
+                {"id": "review", "kind": "gate"},
+            ]
+        },
+    }
+
+    marks = words.chain_marks(row)
+
+    assert [(m["node"], m["state"]) for m in marks] == [
+        ("plan", "done"),
+        ("slices", "current"),
+        ("review", "todo"),
+    ]
