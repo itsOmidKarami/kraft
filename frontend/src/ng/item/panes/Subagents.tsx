@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Subagent } from "../../../types";
 import { elapsed, tokens } from "../../../format";
-import { PROMPT_NOT_SHOWN, STATUS_WORDS, statusTone, subagentSaid } from "../subagents";
+import { byState, PROMPT_NOT_SHOWN, STATUS_WORDS, statusTone, subagentSaid } from "../subagents";
 import { useSubagentDetail } from "../useSubagents";
 
 /** The prompt behind a disclosure, fetched whole when it is opened: the list carries none. */
@@ -24,9 +24,7 @@ export function SubagentSection({ workItemId, sessionId, list, onOpen }: { workI
   // Once Finished has been open or shut, it stays that way: a new sub-agent arriving does not fold it under the reader.
   const [finishedOpen, setFinishedOpen] = useState<boolean | null>(null);
   if (!list?.length) return null;
-  const running = list.filter((a) => a.status === "running");
-  const unfinished = list.filter((a) => a.status !== "running" && a.status !== "completed");
-  const finished = list.filter((a) => a.status === "completed");
+  const { running, unfinished, finished } = byState(list);
   // A group says what its rows are, so only the unfinished ones carry their own status word.
   const row = (a: Subagent, withStatus: boolean) => {
     const said = subagentSaid(a);

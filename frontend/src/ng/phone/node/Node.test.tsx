@@ -706,16 +706,26 @@ describe("the task screen (E)", () => {
     const list = [agent("a1", { status: "running", summary: null }), agent("a2"), agent("a3", { status: "cut_off", summary: null })];
     const routes = { "GET /work-items/w1/sessions/s1/subagents": [200, { session_id: "s1", status: "running", subagents: list }] as [number, unknown] };
 
-    it("counts them and lists a row each: what a running one last used, the first line of a finished one's answer", async () => {
+    it("groups them by state as the desktop does: Running and Did not finish listed, Finished folded until it is opened", async () => {
       mount(item("running"), TASK, routes);
-      expect(await screen.findByText("1 running · 1 finished · 1 cut off")).toBeInTheDocument();
-      const rows = screen.getAllByRole("button", { name: /open its log/ });
-      expect(rows[0]).toHaveTextContent("Agent a1Explore · running · 31k tokens · 4 tool uses · 42s");
-      // The visible text names the row, so a screen reader hears the status and the tokens, then where it goes.
-      expect(screen.getByRole("button", { name: /Agent a1.*running.*31k tokens.*open its log/ })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Running 1" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Did not finish 1" })).toBeInTheDocument();
+      // A group says what its rows are: only a row that did not finish carries its status word.
+      expect(within(screen.getByRole("list", { name: "Running sub-agents" })).getByRole("button")).toHaveTextContent("Agent a1Explore · 31k tokens · 4 tool uses · 42s");
       expect(screen.getByText("running Grep")).toBeInTheDocument();
-      expect(screen.getByText("Found it.")).toBeInTheDocument();
+      // The visible text names the row, so a screen reader hears the status and the tokens, then where it goes.
+      expect(screen.getByRole("button", { name: /Agent a3.*cut off.*31k tokens.*open its log/ })).toBeInTheDocument();
+      const finished = screen.getByRole("list", { name: "Finished sub-agents" });
+      expect(finished).not.toBeVisible();
+      await userEvent.click(screen.getByText("Finished"));
+      expect(finished).toBeVisible();
+      expect(within(finished).getByText("Found it.")).toBeInTheDocument();
       expect(screen.queryByText(/More\./)).toBeNull();
+    });
+
+    it("opens Finished at once when it is all there is", async () => {
+      mount(item("running"), TASK, { "GET /work-items/w1/sessions/s1/subagents": [200, { session_id: "s1", status: "running", subagents: [agent("a2")] }] });
+      expect(await screen.findByRole("list", { name: "Finished sub-agents" })).toBeVisible();
     });
 
     it("opens the Log tab filtered to the sub-agent that was tapped", async () => {
@@ -738,7 +748,8 @@ describe("the task screen (E)", () => {
       mount(item("running"), TASK, { ...routes, "GET /work-items/w1/sessions/s1/subagents/a2": [200, { ...agent("a2"), prompt, answer: "Found it." }] });
       await screen.findByText("Agent a2");
       expect(screen.queryByText(prompt)).toBeNull();
-      await userEvent.click(screen.getAllByText("Prompt")[1]);
+      await userEvent.click(screen.getByText("Finished"));
+      await userEvent.click(within(screen.getByRole("list", { name: "Finished sub-agents" })).getByText("Prompt"));
       expect(await screen.findByText(prompt)).toBeInTheDocument();
     });
 

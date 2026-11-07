@@ -4,14 +4,14 @@ import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ago, elapsed, inAgent, lineCount, tokenText, usd } from "../../../format";
-import type { WorkerSession } from "../../../types";
+import type { Subagent, WorkerSession } from "../../../types";
 import { escalationsIn, ESCALATION, FIX_LOOP, isSessionDoc, inHandler, JUDGE, lookWord, loopIdle, loopIdleSentence, loopRounds, NO_DOCUMENTS, progressWords, subTasks, NOT_RUN_IN_ROUND, messagesThrough, passWords, roundShown, sessionLook, sessionsOf, statusWords } from "../../item/nodeGraph";
 import { stepsOf, taskName } from "../../item/paths";
 import { materialized, planTaskPath } from "../../item/chainValues";
 import { isScopeTask, roundWords, scopeLead, scopesView } from "../../item/scopeView";
 import { placeUrl, selPath, type Place } from "../../item/url";
 import { useEventLog } from "../../item/useEvents";
-import { agentEntries, countLine, PROMPT_NOT_SHOWN, subagentMeta, subagentSaid } from "../../item/subagents";
+import { agentEntries, byState, PROMPT_NOT_SHOWN, subagentMeta, subagentSaid } from "../../item/subagents";
 import { useSessionSubagents, useSubagentDetail } from "../../item/useSubagents";
 import { LogLines } from "../log/LogLines";
 import { useLog } from "../log/useLog";
@@ -147,30 +147,7 @@ export function TaskScreen({ item, version, events, docs, place, node: nodeId, n
                   </ol>
                 </Block>
               ) : null}
-              {subagents?.length ? (
-                <Block title="Sub-agents">
-                  <p className="ph-note">{countLine(subagents)}</p>
-                  <div className="ph-list">
-                    {subagents.map((a) => {
-                      const said = subagentSaid(a);
-                      return (
-                        <div key={a.id} className="ph-subagent">
-                          <button type="button" className="ph-row ph-task-row" onClick={() => setPlace({ tab: "log", agent: a.id })}>
-                            <span className="ph-row-text">
-                              <span className="ph-row-label">{a.description}</span>
-                              <span className="ph-row-hint">{subagentMeta(a)}</span>
-                              <span className="ph-visually-hidden"> — open its log</span>
-                            </span>
-                            <ChevronRight size={16} className="ph-chev" aria-hidden="true" />
-                          </button>
-                          {said && <p className="ph-note ph-subagent-said">{said}</p>}
-                          <Prompt workItemId={item.id} sessionId={at.id} agent={a.id} />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </Block>
-              ) : null}
+              {subagents?.length ? <Subagents key={at.id} workItemId={item.id} sessionId={at.id} list={subagents} onOpen={(agent) => setPlace({ tab: "log", agent })} /> : null}
               <Block title="Result">
                 <Facts rows={[
                   ...(at.tokens_in != null ? ([["tokens", tokenText(at)]] as [string, React.ReactNode][]) : []),
@@ -230,6 +207,58 @@ function Prompt({ workItemId, sessionId, agent }: { workItemId: string; sessionI
         : detail.prompt ? <pre className="ph-prompt">{detail.prompt}</pre>
         : <p className="ph-note">{PROMPT_NOT_SHOWN}</p>}
     </details>
+  );
+}
+
+/** A task's sub-agents, by state as the desktop's Overview has them: Running, Did not finish, and Finished folded
+ *  until it is opened (open at once when it is all there is). A row opens the Log filtered to it. */
+function Subagents({ workItemId, sessionId, list, onOpen }: { workItemId: string; sessionId: string; list: Subagent[]; onOpen: (agent: string) => void }) {
+  // Once Finished has been open or shut, it stays that way: a new sub-agent arriving does not fold it under the reader.
+  const [finishedOpen, setFinishedOpen] = useState<boolean | null>(null);
+  const { running, unfinished, finished } = byState(list);
+  // A group says what its rows are, so only the unfinished ones carry their own status word.
+  const rows = (group: Subagent[], label: string, withStatus: boolean) => (
+    <ul className="ph-list ph-subagent-list" aria-label={label}>
+      {group.map((a) => {
+        const said = subagentSaid(a);
+        return (
+          <li key={a.id} className="ph-subagent">
+            <button type="button" className="ph-row ph-task-row" onClick={() => onOpen(a.id)}>
+              <span className="ph-row-text">
+                <span className="ph-row-label">{a.description}</span>
+                <span className="ph-row-hint">{subagentMeta(a, withStatus)}</span>
+                <span className="ph-visually-hidden"> — open its log</span>
+              </span>
+              <ChevronRight size={16} className="ph-chev" aria-hidden="true" />
+            </button>
+            {said && <p className="ph-note ph-subagent-said">{said}</p>}
+            <Prompt workItemId={workItemId} sessionId={sessionId} agent={a.id} />
+          </li>
+        );
+      })}
+    </ul>
+  );
+  return (
+    <Block title="Sub-agents">
+      {running.length > 0 && (
+        <div className="ph-subagent-group">
+          <h3 className="ph-subagent-head"><span className="ph-subagent-dot ph-is-live" aria-hidden />Running <span className="ph-subagent-n">{running.length}</span></h3>
+          {rows(running, "Running sub-agents", false)}
+        </div>
+      )}
+      {unfinished.length > 0 && (
+        <div className="ph-subagent-group">
+          <h3 className="ph-subagent-head"><span className="ph-subagent-dot ph-is-bad" aria-hidden />Did not finish <span className="ph-subagent-n">{unfinished.length}</span></h3>
+          {rows(unfinished, "Sub-agents that did not finish", true)}
+        </div>
+      )}
+      {finished.length > 0 && (
+        <details className="ph-subagent-group ph-subagent-fold" open={finishedOpen ?? (!running.length && !unfinished.length)} onToggle={(e) => setFinishedOpen(e.currentTarget.open)}>
+          <summary className="ph-subagent-head"><span className="ph-subagent-dot ph-is-ok" aria-hidden />Finished <span className="ph-subagent-n">{finished.length}</span></summary>
+          {rows(finished, "Finished sub-agents", false)}
+        </details>
+      )}
+    </Block>
   );
 }
 

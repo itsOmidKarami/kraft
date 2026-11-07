@@ -45,8 +45,9 @@ describe("ChainOverview: running sub-agents", () => {
     const onTask = vi.fn();
     render(<ChainOverview item={item} events={[]} now={NOW} onSelect={() => {}} subagents={subagents} onTask={onTask} />);
     const row = screen.getByText("sub-agents").closest("div")!;
-    expect(row).toHaveTextContent("sub-agents3 running · Explore codebase, Review diff, Lint");
-    await userEvent.click(within(row).getByRole("button"));
+    expect(row).toHaveTextContent("sub-agents3 runningExplore codebase, Review diff, Lint");
+    // The count is the link, not the names: many running ones never make one long link.
+    await userEvent.click(within(row).getByRole("button", { name: "3 running" }));
     expect(onTask).toHaveBeenCalledWith({ kind: "task", node: "verification", step: "review", task: "code_review" });
   });
 

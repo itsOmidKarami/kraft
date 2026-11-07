@@ -39,8 +39,24 @@
 /* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
 .ph-subtask { padding-block: calc(6px + var(--row-pad-add)); }
 
-/* A task's sub-agents (Overview): a row each, what it last did or said, its prompt behind a disclosure. */
-.ph-subagent-said { margin: 4px 0 0 12px; }
-.ph-subagent-prompt { margin: 4px 0 0 12px; font-size: var(--fs-meta); color: var(--text-muted); }
-.ph-subagent-prompt summary { cursor: pointer; }
+/* A task's sub-agents (Overview), by state: a list each for Running and Did not finish, Finished folded. A row is
+ * its name and what it used, what it last did or said, and its prompt behind a disclosure. */
+.ph-subagent-group + .ph-subagent-group { margin-top: 14px; }
+.ph-subagent-head { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; padding: 0 2px; font-size: var(--fs-meta); font-weight: 500; color: var(--text-sub); }
+.ph-subagent-n { font-weight: 400; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+.ph-subagent-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+.ph-subagent-dot.ph-is-bad { background: var(--bad); }
+.ph-subagent-dot.ph-is-ok { background: var(--ok); }
+/* A thumb's worth of target for the fold, its chevron turning as it opens. */
+summary.ph-subagent-head { min-height: 44px; margin: 0; list-style: none; cursor: pointer; }
+summary.ph-subagent-head::-webkit-details-marker { display: none; }
+summary.ph-subagent-head::before { content: ""; flex: none; width: 6px; height: 6px; margin: 0 2px 0 1px; border-right: 1.5px solid var(--text-muted); border-bottom: 1.5px solid var(--text-muted); transform: rotate(-45deg); }
+.ph-subagent-fold[open] > summary.ph-subagent-head { margin-bottom: 6px; }
+.ph-subagent-fold[open] > summary.ph-subagent-head::before { transform: rotate(45deg); }
+summary.ph-subagent-head:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+.ph-subagent-list { margin: 0; padding: 0; list-style: none; }
+.ph-subagent + .ph-subagent { border-top: 1px solid var(--line); }
+.ph-subagent-said { margin: 0; padding: 0 14px 4px; overflow-wrap: anywhere; }
+.ph-subagent-prompt { margin: 0; padding: 0 14px 8px; font-size: var(--fs-meta); color: var(--text-muted); }
+.ph-subagent-prompt summary { width: fit-content; padding: 6px 0; cursor: pointer; }
 .ph-prompt { margin: 4px 0 0; padding: 8px; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 6px; font-size: var(--fs-meta); color: var(--text); }
