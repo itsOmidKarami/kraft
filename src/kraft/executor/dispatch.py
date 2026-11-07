@@ -62,6 +62,7 @@ from kraft.remote import runs as _remote_runs
 from kraft.store import _now as _now
 from kraft.templates import revision
 from kraft.templates.models import (
+    PATH_SEPARATOR,
     AgentInput,
     AgentTask,
     BuiltinAction,
@@ -2201,6 +2202,12 @@ async def sweep_stragglers(
         return await inplace.check_task(
             db, run_dirs, work_item_row, Path(worktree), node_id, task_path
         )
+    # Nor after a group's join conflict handler (`<group>.on_conflict`, never a
+    # node's `on_base_changed.on_conflict`): a commit of its leftovers would be
+    # one the applied-check cannot match, so the join clears them itself
+    # (`join._clear_leftovers`) and names them.
+    if task_path.startswith(f"{node_id}{PATH_SEPARATOR}on_conflict{PATH_SEPARATOR}"):
+        return None
     #
     # Never at the cost of the run itself: an index lock a co-task holds, a
     # submodule that `add -A` finds nothing to stage in -- either of those

@@ -291,7 +291,8 @@ HANDLED = SimpleNamespace(id="slices", on_conflict=("resolve_join_conflict",))
 
 def _handler(monkeypatch, family, act, verdict):
     """Fake the handler: it does `act` in the parent's worktree and answers
-    `verdict`. Returns the notes it was sent."""
+    `verdict`, after the straggler sweep every agent task gets, at the handler
+    task's own path. Returns the notes it was sent."""
     from kraft.executor import dispatch
 
     notes = []
@@ -300,6 +301,16 @@ def _handler(monkeypatch, family, act, verdict):
         assert (wid, Path(worktree), handler) == ("p1", family.worktree, HANDLED.on_conflict)
         notes.append(note)
         await act(family)
+        await dispatch.sweep_stragglers(
+            db,
+            row,
+            worktree,
+            node_id="slices",
+            task_path="slices.on_conflict.main.resolve_join_conflict",
+            launch=None,
+            sandboxed=False,
+            run_dirs=run_dirs,
+        )
         return verdict, [], []
 
     monkeypatch.setattr(dispatch, "run_recovery", run_recovery)
@@ -322,7 +333,83 @@ async def test_the_conflict_handler_resolves_and_the_join_goes_on(family, monkey
     assert "slice 2 (c2)" in note and "in shared.py" in note
     assert f"--keep-redundant-commits {child['docs'][:12]}..{child['head'][:12]}" in note
     assert "Never `git commit -m`" in note and "never `--skip`" in note
-    assert "Leave no untracked or uncommitted file behind" in note
+    assert "Commit only through `git cherry-pick --continue`" in note
+    assert "no untracked file" in note
+
+
+def _ignore_logs(family):
+    exclude = Path(git(family.repo, "rev-parse", "--absolute-git-dir"), "info", "exclude")
+    exclude.parent.mkdir(exist_ok=True)
+    exclude.write_text("*.log\n")
+
+
+@pytest.mark.parametrize(
+    ("leave", "removed", "kept"),
+    [
+        pytest.param({"shared.py.orig": "<<<<<<<\n"}, ["shared.py.orig"], [], id="untracked"),
+        pytest.param({"handler.log": "notes\n"}, [], ["handler.log"], id="ignored-stays"),
+    ],
+)
+async def test_a_handler_that_resolves_but_leaves_files_untracked_joins(
+    family, monkeypatch, leave, removed, kept
+):
+    """No sweep commits what the handler left (that commit would fail the
+    applied-check): the join removes what is untracked and not ignored, names
+    it, and joins the slice."""
+    await _conflicting(family)
+    _ignore_logs(family)
+
+    async def resolve_and_leave(family):
+        await _resolve_by_hand(family)
+        for name, text in leave.items():
+            write(family.worktree, name, text)
+
+    _handler(monkeypatch, family, resolve_and_leave, "ok")
+
+    assert await family.join(HANDLED) == "ok"
+
+    assert family.subjects() == ["Task 2.0: work", "Task 1.0: work"], "a wip commit was swept"
+    assert [n for n in leave if (family.worktree / n).exists()] == kept
+    found = family.database.read(
+        lambda c: [
+            e["payload"]
+            for e in events.read_after(c, 0, "p1")
+            if e["type"] == WorkItemEvent.JOIN_LEFTOVERS_REMOVED
+        ]
+    )
+    assert found == ([{"child": "c2", "slice_key": 2, "paths": removed}] if removed else [])
+    notes = family.group_state().skipped.get(2, [])
+    assert all(any(p in n for n in notes) for p in removed) and (bool(notes) == bool(removed))
+
+
+@pytest.mark.parametrize(
+    ("task_path", "swept"),
+    [
+        pytest.param("slices.main.implement", True, id="a-task"),
+        pytest.param("slices.main.implement.on_failure.main.fix", True, id="a-recovery"),
+        pytest.param("slices.on_base_changed.on_conflict.main.fix", True, id="a-rebase-conflict"),
+        pytest.param("slices.on_conflict.main.resolve_join_conflict", False, id="the-joins"),
+    ],
+)
+async def test_every_agent_task_is_swept_but_the_joins_conflict_handler(family, task_path, swept):
+    """What the join's handler leaves, the join clears and names itself: a
+    sweep commit carries no `cherry picked from` line for the applied-check."""
+    from kraft.executor import dispatch
+
+    write(family.worktree, "left.txt", "left behind\n")
+
+    await dispatch.sweep_stragglers(
+        family.database,
+        family.row(),
+        family.worktree,
+        node_id="slices",
+        task_path=task_path,
+        launch=None,
+        sandboxed=False,
+        run_dirs=family.run_dirs,
+    )
+
+    assert (git(family.worktree, "rev-parse", "HEAD") != family.plan_head) == swept
 
 
 async def _start_the_pick(family):
@@ -338,6 +425,14 @@ async def _nothing(family):
     pass
 
 
+async def _resolve_but_edit_tracked(family):
+    """A resolution whose last edit was never committed: maybe part of it, so
+    never discarded to get the slice joined."""
+    await _resolve_by_hand(family)
+    write(family.worktree, "shared.py", "merged, and then some\n")
+    write(family.worktree, "shared.py.orig", "<<<<<<<\n")
+
+
 @pytest.mark.parametrize(
     ("act", "verdict"),
     [
@@ -345,6 +440,7 @@ async def _nothing(family):
         pytest.param(_resolve_by_hand, "failed", id="it-fails-having-picked-it-all"),
         pytest.param(_nothing, "ok", id="it-says-ok-having-done-nothing"),
         pytest.param(_start_the_pick, "ok", id="it-says-ok-mid-pick"),
+        pytest.param(_resolve_but_edit_tracked, "ok", id="it-says-ok-leaving-a-tracked-edit"),
     ],
 )
 async def test_a_conflict_the_handler_does_not_join_stops_for_a_person(
@@ -358,6 +454,8 @@ async def test_a_conflict_the_handler_does_not_join_stops_for_a_person(
     assert family.stop() == ("needs_human", "conflict")
     reason = family.reason()
     assert "conflict handler did not join it" in reason
+    named = "it left shared.py.orig, which the join removed" in reason
+    assert named == (act is _resolve_but_edit_tracked)
     assert "`git cherry-pick -x --allow-empty --keep-redundant-commits" in reason
     state = family.group_state()
     assert (state.slice_phase, state.joined_through) == ("handed_off", 1)

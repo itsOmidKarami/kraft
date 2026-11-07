@@ -42,6 +42,7 @@ class WorkItemEvent(StrEnum):
     SLICES_FORKED = "slices_forked"
     SLICES_JOINED = "slices_joined"
     SLICE_DROPPED = "slice_dropped"
+    JOIN_LEFTOVERS_REMOVED = "join_leftovers_removed"
     SLICE_PAUSED = "slice_paused"
 
 
@@ -81,6 +82,7 @@ WORK_ITEM_EVENT_TRAITS = total(
         WorkItemEvent.SLICES_FORKED: _PLAIN,
         WorkItemEvent.SLICES_JOINED: _PLAIN,
         WorkItemEvent.SLICE_DROPPED: _PLAIN,
+        WorkItemEvent.JOIN_LEFTOVERS_REMOVED: _PLAIN,
         WorkItemEvent.SLICE_PAUSED: _PLAIN,
     },
     name="WORK_ITEM_EVENT_TRAITS",

@@ -2603,6 +2603,19 @@ person.
 enforced-by: tests/executor/test_join.py::test_the_conflict_handler_resolves_and_the_join_goes_on, tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-fails], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-fails-having-picked-it-all], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-says-ok-having-done-nothing], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-says-ok-mid-pick], tests/executor/test_join.py::test_a_handler_that_pauses_mid_pick_leaves_the_parent_put_back, tests/executor/test_join.py::test_a_handler_that_leaves_another_operation_names_where_to_reset, tests/executor/test_join.py::test_a_conflict_hands_off_and_never_resets_on_retry
 origin: src/kraft/executor/join.py §_conflict -- the applied-check is bookkeeping, not a security boundary: verification and the human gates after the join judge the code, and the handler gets nothing an `on_failure` handler lacks (`dispatch.run_recovery`).
 
+## REQ the-join-clears-what-its-conflict-handler-left-untracked
+
+WHEN the group's conflict handler ends, the system SHALL NOT sweep what it left
+uncommitted into a commit, while every other agent task, recovery handler and
+rebase conflict handler keeps that sweep; WHEN the handler answered `ok`, the join
+SHALL first remove from the parent's worktree what git neither tracks nor ignores,
+keeping ignored files, nested repositories, Kraft's own notes and what the setup
+installed, and SHALL name the removed paths in a `join_leftovers_removed` event, in
+the slice's join notes and in any stop; tracked changes the handler left SHALL NOT
+be discarded and SHALL keep the slice not joined.
+enforced-by: tests/executor/test_join.py::test_a_handler_that_resolves_but_leaves_files_untracked_joins[untracked], tests/executor/test_join.py::test_a_handler_that_resolves_but_leaves_files_untracked_joins[ignored-stays], tests/executor/test_join.py::test_a_conflict_the_handler_does_not_join_stops_for_a_person[it-says-ok-leaving-a-tracked-edit], tests/executor/test_join.py::test_every_agent_task_is_swept_but_the_joins_conflict_handler[a-task], tests/executor/test_join.py::test_every_agent_task_is_swept_but_the_joins_conflict_handler[a-recovery], tests/executor/test_join.py::test_every_agent_task_is_swept_but_the_joins_conflict_handler[a-rebase-conflict], tests/executor/test_join.py::test_every_agent_task_is_swept_but_the_joins_conflict_handler[the-joins]
+origin: src/kraft/executor/join.py §_clear_leftovers -- a sweep commit carries no `cherry picked from` line, so the applied-check would throw away a correct resolution over a stray `.orig`; an uncommitted tracked edit may be part of the resolution, so a person decides.
+
 ## REQ chain-revision-again-slices-the-plan-as-it-then-stands
 
 WHEN chain revision runs again over a chain that already holds a slice group, after

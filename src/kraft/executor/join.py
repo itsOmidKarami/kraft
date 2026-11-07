@@ -24,8 +24,11 @@ Host git here trusts nothing a child's agent wrote:
 A conflict puts the parent back and hands the slice off. The group's
 `on_conflict` handler (the library's `resolve_join_conflict`), when it has one,
 then gets a turn in the parent's worktree, run as any recovery handler is
-(`dispatch.run_recovery`); the slice is joined only if the applied-check then
-finds it whole, else the parent is put back again and a person is asked.
+(`dispatch.run_recovery`), with no leftover sweep after it: the join itself
+removes what it left untracked and not ignored (`_clear_leftovers`), then the
+slice is joined only if the applied-check finds it whole, else the parent is put
+back again and a person is asked. Tracked changes it left are never discarded:
+they mean the slice is not joined.
 
 The applied-check is bookkeeping, not a security boundary: what the code *does*
 is judged by `verification` and the human gates after the join.
@@ -43,7 +46,7 @@ from pathlib import Path
 from kraft import events, store
 from kraft.adapters.forge import git
 from kraft.adapters.forge.git import ForgeError, UnsafeWorktree, run_git
-from kraft.config import git_read
+from kraft.config import base_ignore_args, git_read
 from kraft.executor import stops
 from kraft.executor.context import LaunchContext
 from kraft.store.slices import GroupState
@@ -284,7 +287,8 @@ def _record_notes(conn, wid: str, child: dict) -> None:
     if not notes:
         return
     state = store.group_state(conn, wid)
-    state.skipped[child["slice_key"]] = list(dict.fromkeys(notes))
+    key = child["slice_key"]
+    state.skipped[key] = list(dict.fromkeys([*state.skipped.get(key, []), *notes]))
     store.set_group_state(conn, wid, state)
 
 
@@ -474,11 +478,13 @@ async def _conflict(
     if node.on_conflict:
         note = what + steps + _LEAVE_NOTHING
         stopped, ok = await _handle(db, run_dirs, row, node, worktree, note, launch, policy)
-        wrong = None
-        if stopped is None:
-            wrong = _not_joined(worktree, branch, at, range_) if ok else "it reported a failure"
-            if wrong is None:
+        wrong, removed = None, []
+        if stopped is None and ok:
+            removed = await _clear_leftovers(db, row, child, worktree)
+            if (wrong := _not_joined(worktree, branch, at, range_)) is None:
                 return await _mark_joined(db, wid, key, worktree)
+        elif stopped is None:
+            wrong = "it reported a failure"
         # Whatever it left, a person (or a resume after a pause) starts from
         # where the join stopped: the handed-off check never resets.
         try:
@@ -494,17 +500,60 @@ async def _conflict(
             return "needs_human"
         if stopped is not None:
             return stopped
+        if removed:
+            wrong += f" (it left {', '.join(removed)}, which the join removed)"
         detail = f"the conflict handler did not join it: {wrong}; {detail}"
     await _stop(db, wid, node, what + steps + f" ({detail[:300]})", StopKind.CONFLICT)
     return "needs_human"
 
 
-#: Kraft commits whatever an agent leaves uncommitted, and the applied-check
-#: counts that commit as one the slice does not hold.
 _LEAVE_NOTHING = (
-    " Leave no untracked or uncommitted file behind (a `.orig`, a scratch file): Kraft "
-    "commits anything left over, and an extra commit means the slice is not joined."
+    " Commit only through `git cherry-pick --continue` (or `git commit --allow-empty "
+    "--no-edit` for an empty resolution), and leave nothing else behind: no uncommitted "
+    "change and no untracked file (a `.orig`, a scratch file)."
 )
+
+
+async def _clear_leftovers(db, row, child: dict, worktree: Path) -> list[str]:
+    """Remove what the conflict handler left in the parent's worktree untracked
+    and not ignored, and name it in an event and the slice's join notes. `git
+    clean -fd`: never `-x` (ignored files stay) and never `-ff` (a nested
+    repository stays); a symlink goes as the link. What the straggler sweep
+    would have left out stays too (`work_product_pathspec`: Kraft's own notes,
+    what the setup installed). Tracked changes are not touched: `_unsettled`
+    reports them."""
+    from kraft import builtins
+
+    wid = row["id"]
+    try:
+        base = await builtins.base_branch(db, wid, Path(row["repo"]))
+        spec = await git.work_product_pathspec(worktree, base)
+        with base_ignore_args(worktree, base) as ignore:
+            clean = [*_GIT, *ignore, "-c", "core.quotePath=false", "clean", "-fd", "--", *spec]
+            out = await run_git(worktree, clean)
+    except RuntimeError:  # ForgeError included
+        # Nothing sweeps them into a commit now, so the applied-check can still pass.
+        logger.warning("could not clear the conflict handler's leftovers", exc_info=True)
+        return []
+    paths = [line[len("Removing ") :] for line in out.splitlines() if line.startswith("Removing ")]
+    if not paths:
+        return []
+    key = child["slice_key"]
+
+    def record(c):
+        events.append(
+            c,
+            wid,
+            WorkItemEvent.JOIN_LEFTOVERS_REMOVED,
+            {"child": child["id"], "slice_key": key, "paths": paths},
+        )
+        state = store.group_state(c, wid)
+        note = f"its conflict handler left {', '.join(paths)}, which the join removed"
+        state.skipped[key] = [*state.skipped.get(key, []), note]
+        store.set_group_state(c, wid, state)
+
+    await db.write(record)
+    return paths
 
 
 async def _handle(
