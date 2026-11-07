@@ -96,11 +96,20 @@ def trim_work_items(items: list[dict], status: str | None = None) -> list[dict]:
     than a second definition of what a work item is.
     """
     keep = ("id", "title", "repo", "status", "current_node_id", "pending_gate")
-    return [
-        {**{k: item[k] for k in keep}, "progress": item.get("progress")}
-        for item in items
-        if status is None or item["status"] == status
-    ]
+    trimmed = []
+    for item in items:
+        row = {**{k: item[k] for k in keep}, "progress": item.get("progress")}
+        children = item.get("children") or []
+        if status is not None and item["status"] != status:
+            # A slice is not a board row, so a filter finds it through its
+            # parent: the parent is listed with just the children that match.
+            children = [k for k in children if k["status"] == status]
+            if not children:
+                continue
+        if children:
+            row |= {"slices": item["slices"], "children": children}
+        trimmed.append(row)
+    return trimmed
 
 
 def _next_node_id(item: dict) -> str | None:

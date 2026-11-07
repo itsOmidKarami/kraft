@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from kraft import cli
+from kraft import cli, render
 from kraft.cli import view
 from kraft.vocab import WorkItemStatus
 
@@ -439,13 +439,85 @@ def test_show_lists_a_parents_slices(monkeypatch, capsys):
     assert "2  c2  needs_human  implementation  -  p · slice 2: B" in out
 
 
-def test_list_marks_a_parent_with_its_slices():
-    out = view._render_list(
-        [
-            {"id": "p1", "status": "waiting", "pending_gate": None, "current_node_id": "slices",
-             "title": "t", "slices": {"done": 2, "needs_you": 0, "paused": 0, "running": 1,
-                                       "queued": 0, "dropped": 0, "total": 3}},
-        ]
-    )  # fmt: skip
+def _board_with_a_parent():
+    kids = [
+        {
+            "id": "c1",
+            "title": "p · slice 1: A",
+            "slice_key": 1,
+            "status": "completed",
+            "current_node_id": "verification",
+            "cost_usd": 0.42,
+        },
+        {
+            "id": "c2",
+            "title": "p · slice 2: B",
+            "slice_key": 2,
+            "status": "needs_human",
+            "current_node_id": "implementation",
+            "cost_usd": 0.0,
+        },
+    ]
+    slices = {
+        "done": 1,
+        "needs_you": 1,
+        "paused": 0,
+        "running": 0,
+        "queued": 0,
+        "dropped": 0,
+        "total": 2,
+    }
+    row = {"repo": "r", "pending_gate": None, "children": None, "slices": None}
+    return [
+        {**row, "id": "p1", "status": "waiting", "current_node_id": "slices", "title": "t",
+         "children": kids, "slices": slices},
+        {**row, "id": "w2", "status": "paused", "current_node_id": None, "title": "other"},
+    ]  # fmt: skip
 
-    assert "slices: 2 done, 1 running of 3" in out
+
+@pytest.mark.parametrize(
+    ("status", "rows", "listed"),
+    [
+        pytest.param(
+            None,
+            [(False, "p1", "waiting"), (True, "c1", "completed"), (True, "c2", "needs_human"),
+             (False, "w2", "paused")],
+            [("p1", ["c1", "c2"]), ("w2", [])],
+            id="every-child-under-its-parent",
+        ),
+        # A slice is not a board row: a filter finds it through its parent.
+        pytest.param(
+            "needs_human",
+            [(False, "p1", "waiting"), (True, "c2", "needs_human")],
+            [("p1", ["c2"])],
+            id="a-filter-finds-a-child",
+        ),
+        pytest.param(
+            "waiting",
+            [(False, "p1", "waiting"), (True, "c1", "completed"), (True, "c2", "needs_human")],
+            [("p1", ["c1", "c2"])],
+            id="a-matching-parent-keeps-every-child",
+        ),
+        pytest.param("paused", [(False, "w2", "paused")], [("w2", [])], id="no-child-matches"),
+    ],
+)  # fmt: skip
+def test_list_shows_a_parents_children_under_it(monkeypatch, capsys, status, rows, listed):
+    from kraft.client import transport
+
+    async def get(path, **_):
+        return {"items": _board_with_a_parent(), "cursor": 0}
+
+    monkeypatch.setattr(transport, "_get", get)
+    flag = ["--status", status] if status else []
+
+    cli.main(["view", "list", "--all", *flag])
+    out = render.strip_ansi(capsys.readouterr().out)
+    cli.main(["view", "list", "--all", "--json", *flag])
+    payload = json.loads(capsys.readouterr().out)
+
+    lines = out.splitlines()[1:]
+    assert [(line.startswith("  "), *line.split()[:2]) for line in lines] == rows
+    if status is None:
+        assert "slices: 1 done, 1 needs you of 2" in lines[0]
+        assert lines[1].split()[2:] == ["-", "verification", "$0.42", "p", "·", "slice", "1:", "A"]
+    assert [(i["id"], [k["id"] for k in i.get("children", [])]) for i in payload] == listed

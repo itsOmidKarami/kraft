@@ -180,7 +180,11 @@ def _current_stop(st, wid: str) -> dict | None:
 
 
 def display_status(
-    row, stop_kind: str | None, escalated: bool, pending_gate: str | None
+    row,
+    stop_kind: str | None,
+    escalated: bool,
+    pending_gate: str | None,
+    slices: dict | None = None,
 ) -> DisplayStatus:
     """The design vocabulary's status badge (Kraft Design Decisions §1, §14):
     exactly one of `archived`, `done`, `cancelled`, `paused`, `running`,
@@ -196,9 +200,15 @@ def display_status(
     or cannot run for them (Item States requirement 1). A `stuck` stop still
     counts as `needs_you` until its escalation turn actually starts, at which
     point `escalated` takes over.
+
+    `slices` is the parent's `slices_summary`: a slice that needs a person
+    puts its parent under Needs you, whatever the parent's own status. The
+    list and the detail both pass it, so they show the same badge.
     """
     if row["archived_at"] is not None:
         return DisplayStatus.ARCHIVED
+    if slices and slices["needs_you"]:
+        return DisplayStatus.NEEDS_YOU
     shown = TRAITS[WorkItemStatus(row["status"])].display
     if shown is not None:
         return shown
@@ -448,10 +458,19 @@ async def list_work_items(request: Request):
             },
         }
         # A slice's children are not board rows: each parent row opens into them,
-        # so their statuses ride the parent's as a summary.
-        doors["children"] = c.execute(
-            "SELECT parent_id, slice_generation, status FROM work_items WHERE parent_id IS NOT NULL"
+        # so they ride the parent's row, with their statuses as a summary. Only
+        # the listed parents' children of their current generation (as
+        # `store.children_of` picks them), and their cost in one more query.
+        kids = c.execute(
+            "SELECT k.* FROM work_items k JOIN work_items p ON p.id = k.parent_id "
+            "WHERE (? OR p.status != ?) AND (p.archived_at IS NOT NULL) = ? "
+            "AND (p.group_state IS NULL "
+            "OR k.slice_generation = json_extract(p.group_state, '$.generation')) "
+            "ORDER BY k.parent_id, k.slice_generation, k.slice_key",
+            (include_abandoned, WorkItemStatus.ABANDONED, archived),
         ).fetchall()
+        doors["children"] = [dict(k) for k in kids]
+        doors["child_views"] = _child_views(c, doors["children"])
         return (
             rows,
             cursor,
@@ -491,8 +510,10 @@ async def list_work_items(request: Request):
     root_mr_by_item = {r["work_item_id"]: r["mr_ref"] for r in root_rows}
     task_by_item = {t["work_item_id"]: t["hook_point"] for t in task_rows}  # latest wins
     kids_by_parent: dict[str, list] = {}
-    for kid in doors["children"]:
+    views_by_parent: dict[str, list] = {}
+    for kid, view in zip(doors["children"], doors["child_views"], strict=True):
         kids_by_parent.setdefault(kid["parent_id"], []).append(kid)
+        views_by_parent.setdefault(kid["parent_id"], []).append(view)
 
     def _list_escalated(wid: str) -> bool:
         boundary, last = boundary_by_item.get(wid), escalation_by_item.get(wid)
@@ -542,17 +563,20 @@ async def list_work_items(request: Request):
             ),
             _list_escalated(r["id"]),
             pending.get(r["id"]),
+            summary,
         )
-        if summary and summary["needs_you"] and shown != DisplayStatus.ARCHIVED:
-            # A slice that needs a person puts its parent under Needs you.
-            shown = DisplayStatus.NEEDS_YOU
         return {
             "id": r["id"],
             "title": r["title"],
             "description": r["description"],
             "repo": r["repo"],
             "status": r["status"],
+            # As the detail has them: a parent's children of its current
+            # generation, None for any other item. A list row is never a child.
+            "children": views_by_parent.get(r["id"]) if summary else None,
             "slices": summary,
+            "parent_id": r["parent_id"],
+            "slice_key": r["slice_key"],
             "chain_template": r["chain_template"],
             "one_off": store.one_off_view(r),
             # `store.chain_view`, not the raw column: a V1 row's
@@ -605,18 +629,32 @@ _SLICE_COUNT = {
 }
 
 
-def _child_view(st, child: dict) -> dict:
-    spent = st.db.read(lambda c: store.usage_rollup(c, child["id"]))["total"]["cost_usd"]
-    return {
-        "id": child["id"],
-        "title": child["title"],
-        "slice_key": child["slice_key"],
-        "status": child["status"],
-        "display_status": TRAITS[WorkItemStatus(child["status"])].display
-        or DisplayStatus.NEEDS_YOU,
-        "current_node_id": child["current_node_id"],
-        "cost_usd": spent,
-    }
+def _child_views(c, children: list[dict]) -> list[dict]:
+    """Each child as its parent's list row and detail show it, with its cost:
+    `usage_rollup`'s total, summed for every child in one query."""
+    ids = [k["id"] for k in children]
+    if not ids:
+        return []
+    spent = dict(
+        c.execute(
+            "SELECT work_item_id, COALESCE(SUM(cost_usd), 0.0) FROM worker_sessions "
+            f"WHERE work_item_id IN ({','.join('?' * len(ids))}) GROUP BY work_item_id",
+            ids,
+        ).fetchall()
+    )
+    return [
+        {
+            "id": k["id"],
+            "title": k["title"],
+            "slice_key": k["slice_key"],
+            "status": k["status"],
+            "display_status": TRAITS[WorkItemStatus(k["status"])].display
+            or DisplayStatus.NEEDS_YOU,
+            "current_node_id": k["current_node_id"],
+            "cost_usd": spent.get(k["id"], 0.0),
+        }
+        for k in children
+    ]
 
 
 def slices_summary(row, children: list) -> dict | None:
@@ -1426,12 +1464,13 @@ async def get_work_item(wid: str, request: Request):
         and bool(st.db.read(lambda c: store.open_must_fix(c, wid))),
     )
     children = st.db.read(lambda c: store.children_of(c, wid))
+    slices = slices_summary(row, children)
     return {
         # The override columns decoded, as every action and gate echo has them.
         **payload,
         # A parent lists the children of its current generation; a child names its parent.
-        "children": [_child_view(st, k) for k in children] if children else None,
-        "slices": slices_summary(row, children),
+        "children": st.db.read(lambda c: _child_views(c, children)) if children else None,
+        "slices": slices,
         "parent_id": row["parent_id"],
         "slice_key": row["slice_key"],
         "chain_definition": chain,
@@ -1566,6 +1605,7 @@ async def get_work_item(wid: str, request: Request):
             _stop_kind(row["stop_kind"], row["status"], pending, stop_payload),
             escalated,
             pending,
+            slices,
         ),
         "stop": _stop(st, row, sessions, pending, stop_payload),
         "test_result": _test_result(st, row),
