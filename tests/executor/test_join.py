@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,8 +11,9 @@ import pytest
 from support import worktree as wtree
 from support.harness import git, write
 
-from kraft import store
+from kraft import events, store
 from kraft.executor import join
+from kraft.vocab import WorkItemEvent
 
 NODE = SimpleNamespace(id="slices")
 
@@ -52,7 +54,7 @@ class Family:
             for name, text in files.items():
                 write(path, name, text)
             git(path, "add", "-A")
-            git(path, "commit", "-qm", f"Task {key}.{i}: work")
+            git(path, "commit", "-q", "--allow-empty", "-m", f"Task {key}.{i}: work")
         head = git(path, "rev-parse", "HEAD")
 
         def link(c):
@@ -87,6 +89,21 @@ class Family:
         row = self.row()
         return row["status"], row["stop_kind"]
 
+    def reason(self) -> str:
+        """The reason the parent's latest stop gave a person."""
+        found = self.database.read(
+            lambda c: c.execute(
+                "SELECT payload FROM events WHERE work_item_id='p1' "
+                "AND type='work_item_needs_human' ORDER BY seq DESC"
+            ).fetchone()
+        )
+        return json.loads(found["payload"])["reason"]
+
+    async def pin(self, key: int, head: str):
+        await self.database.write(
+            lambda c: c.execute("UPDATE work_items SET pinned_head=? WHERE id=?", (head, f"c{key}"))
+        )
+
     def subjects(self):
         return git(self.worktree, "log", "--format=%s", f"{self.plan_head}..HEAD").splitlines()
 
@@ -113,9 +130,16 @@ async def test_two_slices_replay_in_slice_order_without_the_docs_commits(family)
     assert family.group_state().phase == "joined"
 
 
-async def test_a_commit_two_slices_both_made_is_kept_empty(family):
+@pytest.mark.parametrize(
+    "second",
+    [
+        pytest.param({"shared.py": "x\n"}, id="emptied-by-the-replay"),
+        pytest.param({}, id="empty-in-the-child"),
+    ],
+)
+async def test_a_commit_two_slices_both_made_is_kept_empty(family, second):
     await family.child(1, {"shared.py": "x\n"})
-    await family.child(2, {"shared.py": "x\n"})
+    await family.child(2, second)
     await family.state()
 
     assert await family.join() == "ok"
@@ -131,9 +155,7 @@ async def test_a_child_commit_with_a_forged_cherry_pick_line_is_refused(family):
     git(path, "add", "-A")
     git(path, "commit", "-qm", "sneaky\n\n(cherry picked from commit " + "a" * 40 + ")")
     head = git(path, "rev-parse", "HEAD")
-    await family.database.write(
-        lambda c: c.execute("UPDATE work_items SET pinned_head=? WHERE id='c1'", (head,))
-    )
+    await family.pin(1, head)
     await family.state()
 
     assert await family.join() == "needs_human"
@@ -147,13 +169,31 @@ async def test_a_child_head_not_descending_from_the_fork_is_refused(family):
         ["git", "mktree"], input="", cwd=family.repo, capture_output=True, text=True, check=True
     ).stdout.strip()
     stranger = git(family.repo, "commit-tree", empty, "-m", "unrelated")
-    await family.database.write(
-        lambda c: c.execute("UPDATE work_items SET pinned_head=? WHERE id='c1'", (stranger,))
-    )
+    # The branch moves with the pin, so the moved-branch check passes.
+    git(family.repo, "update-ref", "refs/heads/" + family.children[1]["branch"], stranger)
+    await family.pin(1, stranger)
     await family.state()
 
     assert await family.join() == "needs_human"
     assert family.subjects() == []
+    assert "c1" in family.reason() and "fork" not in family.reason()
+
+
+async def test_a_child_branch_reset_past_its_docs_commit_is_refused(family):
+    """Squashed onto the fork commit, the child's head no longer holds its docs
+    commit, and `docs..head` would replay its slice plan into the parent."""
+    await family.child(1, {"a.py": "a\n"})
+    path = family.children[1]["path"]
+    git(path, "reset", "-q", "--soft", family.fork)
+    git(path, "commit", "-qm", "Task 1: squashed")
+    await family.pin(1, git(path, "rev-parse", "HEAD"))
+    await family.state()
+
+    assert await family.join() == "needs_human"
+
+    assert family.subjects() == []
+    assert "c1" in family.reason() and "reset or squashed" in family.reason()
+    assert not (family.worktree / ".engineering" / "slices").exists()
 
 
 async def test_a_merge_commit_in_a_child_is_refused(family):
@@ -166,9 +206,7 @@ async def test_a_merge_commit_in_a_child_is_refused(family):
     git(path, "checkout", "-q", family.children[1]["branch"])
     git(path, "merge", "-q", "--no-ff", "-m", "merge side", "side")
     head = git(path, "rev-parse", "HEAD")
-    await family.database.write(
-        lambda c: c.execute("UPDATE work_items SET pinned_head=? WHERE id='c1'", (head,))
-    )
+    await family.pin(1, head)
     await family.state()
 
     assert await family.join() == "needs_human"
@@ -202,25 +240,15 @@ async def _conflicting(family):
     await family.state()
 
 
-async def test_a_conflict_hands_off_and_never_resets_on_retry(family):
-    await _conflicting(family)
-
-    assert await family.join() == "needs_human"
-
-    assert family.stop() == ("needs_human", "conflict")
-    state = family.group_state()
-    assert (state.slice_phase, state.joined_through) == ("handed_off", 1)
-    # put back at slice 1's end, clean
-    assert family.subjects() == ["Task 1.0: work"]
-    assert git(family.worktree, "status", "--porcelain") == ""
-
-    # A person resolves it by hand, with the steps the stop gave.
+async def _resolve_by_hand(family):
+    """A person resolves slice 2 with the steps the stop gave, then retries."""
     child = family.children[2]
     subprocess.run(
         [
             "git",
             "cherry-pick",
             "-x",
+            "--allow-empty",
             "--keep-redundant-commits",
             f"{child['docs']}..{child['head']}",
         ],
@@ -233,6 +261,21 @@ async def test_a_conflict_hands_off_and_never_resets_on_retry(family):
     await family.database.write(
         lambda c: c.execute("UPDATE work_items SET status='active' WHERE id='p1'")
     )
+
+
+async def test_a_conflict_hands_off_and_never_resets_on_retry(family):
+    await _conflicting(family)
+
+    assert await family.join() == "needs_human"
+
+    assert family.stop() == ("needs_human", "conflict")
+    state = family.group_state()
+    assert (state.slice_phase, state.joined_through) == ("handed_off", 1)
+    # put back at slice 1's end, clean
+    assert family.subjects() == ["Task 1.0: work"]
+    assert git(family.worktree, "status", "--porcelain") == ""
+
+    await _resolve_by_hand(family)
 
     assert await family.join() == "ok"
 
@@ -252,6 +295,70 @@ async def test_a_handed_off_slice_that_is_still_missing_stops_again(family):
 
     assert family.stop() == ("needs_human", "conflict")
     assert family.subjects() == ["Task 1.0: work"]
+
+
+def _dirty(family):
+    write(family.worktree, "shared.py", "half done\n")
+    return lambda: (family.worktree / "shared.py").read_text() == "half done\n"
+
+
+def _operation(family):
+    planted = Path(git(family.worktree, "rev-parse", "--absolute-git-dir")) / "CHERRY_PICK_HEAD"
+    planted.write_text(family.children[2]["head"] + "\n")
+    return planted.exists
+
+
+def _off_branch(family):
+    git(family.worktree, "checkout", "-q", "--detach")
+    return lambda: git(family.worktree, "rev-parse", "--abbrev-ref", "HEAD") == "HEAD"
+
+
+@pytest.mark.parametrize(
+    "leave",
+    [
+        pytest.param(_dirty, id="dirty-tree"),
+        pytest.param(_operation, id="operation-in-progress"),
+        pytest.param(_off_branch, id="head-off-the-branch"),
+    ],
+)
+async def test_a_handed_off_slice_resolved_but_unsettled_stops_without_a_reset(family, leave):
+    """Every commit is there, but the worktree is not one the applied-check can
+    trust: the parent stops again and leaves it exactly as the person left it."""
+    await _conflicting(family)
+    await family.join()
+    await _resolve_by_hand(family)
+    head = git(family.worktree, "rev-parse", "HEAD")
+    still_there = leave(family)
+
+    assert await family.join() == "needs_human"
+
+    assert family.stop() == ("needs_human", "conflict")
+    assert "slice 2 (c2)" in family.reason()
+    assert family.group_state().slice_phase == "handed_off"
+    assert git(family.worktree, "rev-parse", "HEAD") == head
+    assert still_there()
+
+
+async def test_a_child_completed_by_hand_before_it_started_has_nothing_to_replay(family):
+    await family.child(1, {"a.py": "a\n"})
+    await wtree.make_item(family.database, family.repo, wid="c2", title="slice 2")
+
+    def by_hand(c):
+        c.execute(
+            "UPDATE work_items SET parent_id='p1', slice_generation=1, slice_key=2, "
+            "status='completed' WHERE id='c2'"
+        )
+        events.append(c, "c2", WorkItemEvent.MANUALLY_COMPLETED, {"reason": "not needed"})
+
+    await family.database.write(by_hand)
+    await family.state()
+
+    assert await family.join() == "ok"
+
+    assert family.subjects() == ["Task 1.0: work"]
+    state = family.group_state()
+    assert state.phase == "joined"
+    assert state.skipped[2] == ["completed by hand before it started: nothing replayed"]
 
 
 async def test_a_crash_while_picking_puts_the_parent_back_and_picks_again(family):

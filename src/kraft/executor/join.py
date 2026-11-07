@@ -2,18 +2,21 @@
 
 Runs in the parent's worktree, holding a slot, once every child of the current
 generation has ended. Each completed child's pinned range (`docs commit..pinned
-head`) is replayed with `git cherry-pick -x --keep-redundant-commits`, slice by
-slice in slice order. Linear replay, not merge commits: the plain `git rebase`
-that `refresh_worktree_base` and `mr_rebase` run later flattens a merge commit
-and would bring a resolved conflict back where nothing handles it.
+head`) is replayed with `git cherry-pick -x --allow-empty
+--keep-redundant-commits`, slice by slice in slice order. Linear replay, not
+merge commits: the plain `git rebase` that `refresh_worktree_base` and
+`mr_rebase` run later flattens a merge commit and would bring a resolved
+conflict back where nothing handles it.
 
 Host git here trusts nothing a child's agent wrote:
 
 * the range is the child's pinned head, not its branch as it stands now;
 * a child commit that already holds a `(cherry picked from commit ...)` line is
   refused before any pick, since the applied-check reads those lines;
-* a merge commit, a head that does not descend from the fork commit and a moved
-  `.lfsconfig` or planted repository each stop the join naming the child;
+* a merge commit, a head that does not descend from the fork commit or from the
+  child's docs commit (a branch reset or squashed would replay its slice plan)
+  and a moved `.lfsconfig` or planted repository each stop the join naming the
+  child;
 * a resume never trusts the worktree's git folder, which a worker can write: it
   deletes the operation files itself, with `lstat`, and moves the branch by
   name (`put_back`). It never runs `cherry-pick --abort`.
@@ -50,7 +53,9 @@ DONE = "ok"
 #: Every git the join runs: no rerere, whatever the config says.
 _GIT = ["git", "-c", "rerere.enabled=false"]
 _PICKED = re.compile(r"\(cherry picked from commit ([0-9a-f]{7,64})\)")
-_PICK = ["cherry-pick", "-x", "--keep-redundant-commits"]
+#: `--allow-empty` for a commit the child made empty, `--keep-redundant-commits`
+#: for one the replay empties (a change an earlier slice made too).
+_PICK = ["cherry-pick", "-x", "--allow-empty", "--keep-redundant-commits"]
 
 
 class JoinRefused(RuntimeError):
@@ -60,10 +65,10 @@ class JoinRefused(RuntimeError):
 
 def recorded_range(repo: Path, docs_commit: str, pinned_head: str, fork_commit: str) -> list[str]:
     """The child's commits `docs_commit..pinned_head`, oldest first. Raises
-    `JoinRefused` for a head that does not descend from the fork commit, a merge
-    commit in the range, and a commit message that already holds a `cherry
-    picked from commit` line. (The moved-branch check needs the child's row:
-    `_check_child`.)"""
+    `JoinRefused` for a head that does not descend from the fork commit or from
+    the docs commit, a merge commit in the range, and a commit message that
+    already holds a `cherry picked from commit` line. (The moved-branch check
+    needs the child's row: `_check_child`.)"""
     if (
         git_read(
             repo, "merge-base", "--is-ancestor", fork_commit, pinned_head, expected_failure=True
@@ -73,9 +78,23 @@ def recorded_range(repo: Path, docs_commit: str, pinned_head: str, fork_commit: 
     ):
         raise JoinRefused(f"its head {pinned_head[:12]} is not a commit this repository has")
     if not _is_ancestor(repo, fork_commit, pinned_head):
-        raise JoinRefused(f"its head {pinned_head[:12]} does not descend from the fork commit")
+        raise JoinRefused(
+            f"its head {pinned_head[:12]} does not descend from {fork_commit[:12]}, the "
+            "commit the slices were cut from"
+        )
     if not _is_ancestor(repo, fork_commit, docs_commit):
-        raise JoinRefused(f"its docs commit {docs_commit[:12]} does not descend from the fork")
+        raise JoinRefused(
+            f"the commit that attached its slice documents ({docs_commit[:12]}) does not "
+            f"descend from {fork_commit[:12]}, the commit the slices were cut from"
+        )
+    if not _is_ancestor(repo, docs_commit, pinned_head):
+        # A branch reset or squashed past its first commit: the range would
+        # replay the slice's own spec and plan into the parent.
+        raise JoinRefused(
+            f"its head {pinned_head[:12]} does not descend from the commit that attached "
+            f"its slice documents ({docs_commit[:12]}): its branch was reset or squashed, "
+            "so the replay would carry those documents into this item"
+        )
     span = f"{docs_commit}..{pinned_head}"
     merges = git_read(repo, "rev-list", "--merges", span) or ""
     if merges.strip():
@@ -92,10 +111,7 @@ def recorded_range(repo: Path, docs_commit: str, pinned_head: str, fork_commit: 
 
 
 def _is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
-    return (
-        subprocess_ok(repo, ["merge-base", "--is-ancestor", ancestor, descendant]) is not None
-        and subprocess_ok(repo, ["merge-base", "--is-ancestor", ancestor, descendant]) == 0
-    )
+    return subprocess_ok(repo, ["merge-base", "--is-ancestor", ancestor, descendant]) == 0
 
 
 def subprocess_ok(repo: Path, args: list[str]) -> int | None:
@@ -167,7 +183,8 @@ def _remove(path: Path) -> None:
 def _steps(child: dict, docs: str, head: str, branch: str) -> str:
     return (
         f"Replay slice {child['slice_key']} by hand in the parent's worktree: "
-        f"`git cherry-pick -x --keep-redundant-commits {docs[:12]}..{head[:12]}`, resolve the "
+        f"`git cherry-pick -x --allow-empty --keep-redundant-commits {docs[:12]}..{head[:12]}`, "
+        "resolve the "
         "conflicts, then `git cherry-pick --continue` (or `git commit --allow-empty "
         "--no-edit` when the resolution leaves nothing). Never `git commit -m` (it drops the "
         "-x line) and never `--skip`. Then retry this item; it checks every commit is there "
@@ -207,6 +224,11 @@ async def join(
                     await db.write(lambda c, ch=child: _record_dropped(c, wid, ch))
             continue
         if key <= state.joined_through:
+            done.append(key)
+            continue
+        if db.read(lambda c, ch=child: _completed_before_it_started(c, ch)):
+            await db.write(lambda c, ch=child: _record_unstarted(c, wid, ch))
+            await _mark_joined(db, wid, key, worktree)
             done.append(key)
             continue
         state = db.read(lambda c: store.group_state(c, wid))
@@ -251,6 +273,24 @@ def _record_notes(conn, wid: str, child: dict) -> None:
     store.set_group_state(conn, wid, state)
 
 
+def _completed_before_it_started(conn, child: dict) -> bool:
+    """A child a person completed before it had a worktree: no docs commit and
+    no head were ever recorded, so it has nothing to replay. Both missing on a
+    child the walk completed is a broken pin, which `_check_child` refuses."""
+    if child["docs_commit"] or child["pinned_head"]:
+        return False
+    return any(
+        e["type"] == WorkItemEvent.MANUALLY_COMPLETED
+        for e in events.read_after(conn, 0, child["id"])
+    )
+
+
+def _record_unstarted(conn, wid: str, child: dict) -> None:
+    state = store.group_state(conn, wid)
+    state.skipped[child["slice_key"]] = ["completed by hand before it started: nothing replayed"]
+    store.set_group_state(conn, wid, state)
+
+
 def _record_dropped(conn, wid: str, child: dict) -> None:
     state = store.group_state(conn, wid)
     state.skipped.setdefault(child["slice_key"], [])
@@ -292,14 +332,18 @@ async def _replay_one(
         return "needs_human"
     if state.slice_phase == "handed_off" and state.joined_through < key and state.recorded.get(key):
         # Never resets: a person or a handler may have resolved it.
-        left = missing(worktree, state.at_commit or fork, state.recorded[key])
-        if left:
+        at = state.at_commit or fork
+        wrong = _unsettled(worktree, branch, at)
+        if wrong is None:
+            left = missing(worktree, at, state.recorded[key])
+            if left:
+                wrong = f"{len(left)} commit(s) missing ({', '.join(c[:12] for c in left)})"
+        if wrong is not None:
             await _stop(
                 db,
                 wid,
                 node,
-                f"slice {key} ({child['id']}) is not in the parent yet: "
-                f"{len(left)} commit(s) missing ({', '.join(c[:12] for c in left)}). "
+                f"slice {key} ({child['id']}) is not in the parent yet: {wrong}. "
                 + _steps(child, docs, head, branch),
                 StopKind.CONFLICT,
             )
@@ -338,6 +382,28 @@ async def _replay_one(
         )
         return "needs_human"
     return await _mark_joined(db, wid, key, worktree)
+
+
+def _unsettled(worktree: Path, branch: str, at: str) -> str | None:
+    """Why a handed-off slice's worktree is not one the applied-check can read,
+    or None: something still in progress, HEAD off the parent's branch, a dirty
+    tree, or a HEAD that does not descend from `at`. Reads only; never resets."""
+    try:
+        git.assert_no_operation(worktree)
+    except UnsafeWorktree:
+        return (
+            "a git operation is still in progress in its worktree; finish the cherry-pick "
+            "(`git cherry-pick --continue`) or clear it"
+        )
+    try:
+        git.assert_on_branch(worktree, branch)
+    except UnsafeWorktree as exc:
+        return str(exc)
+    if git_read(worktree, "status", "--porcelain", "--untracked-files=no"):
+        return "its worktree has uncommitted changes; commit them as the steps below say"
+    if not _is_ancestor(worktree, at, "HEAD"):
+        return f"its HEAD does not descend from {at[:12]}, where the join had reached"
+    return None
 
 
 def _check_child(repo: Path, run_dirs, child: dict, launch, docs, head, fork) -> None:

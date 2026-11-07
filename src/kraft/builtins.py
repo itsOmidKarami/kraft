@@ -801,8 +801,8 @@ async def ensure_worktree(
     # guarantees a crashed-and-retried run never re-pins to a moved HEAD.
     row = db.read(
         lambda c: c.execute(
-            "SELECT base_ref, branch, id, materialized_chain, submodules, parent_id "
-            "FROM work_items WHERE id = ?",
+            "SELECT base_ref, branch, id, materialized_chain, submodules, parent_id, "
+            "docs_commit FROM work_items WHERE id = ?",
             (work_item_id,),
         ).fetchone()
     )
@@ -849,9 +849,10 @@ async def ensure_worktree(
     await asyncio.to_thread(
         _copy_attachments, Path(repo), worktree, attachments or [], work_item_id, base
     )
-    if row is not None and row["parent_id"] is not None:
+    if row is not None and row["parent_id"] is not None and row["docs_commit"] is None:
         # The commit the join's replay starts after: the attach commit, or the
-        # fork commit itself when nothing was copied.
+        # fork commit itself when nothing was copied. Recorded once: a worktree
+        # made again over the child's branch has its work commits at HEAD.
         docs = await asyncio.to_thread(git_read, worktree, "rev-parse", "HEAD")
         if docs:
             await db.write(lambda c: store.set_docs_commit(c, work_item_id, docs))

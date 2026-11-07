@@ -1,5 +1,7 @@
 """A slice's child worktree: cut at its fork commit, with its slice plan in one commit."""
 
+import json
+
 from support import worktree as wtree
 from support.harness import commit_all, git, write
 
@@ -29,13 +31,19 @@ async def _child(database, run_dirs, repo, fork, key=2):
         )
 
     await database.write(link)
-    return await kraft_builtins.ensure_worktree(
+    return await _child_worktree(database, run_dirs, repo)
+
+
+def _child_worktree(database, run_dirs, repo):
+    """`c1`'s worktree, made with the attachments it was filed with."""
+    row = database.read(lambda c: c.execute("SELECT * FROM work_items WHERE id='c1'").fetchone())
+    return kraft_builtins.ensure_worktree(
         database,
         run_dirs,
         repo=str(repo),
         work_item_id="c1",
         repo_entry=wtree.NO_SETUP,
-        attachments=attachments,
+        attachments=json.loads(row["attachments"]),
     )
 
 
@@ -89,3 +97,22 @@ async def test_a_child_with_nothing_to_copy_records_the_fork_commit_as_its_docs_
         lambda c: c.execute("SELECT docs_commit FROM work_items WHERE id='c1'").fetchone()
     )
     assert row["docs_commit"] == fork
+
+
+async def test_a_child_worktree_made_again_keeps_its_first_docs_commit(database, run_dirs, repo):
+    """A worktree removed and made again checks the child's branch out with its
+    work at HEAD: that is not the commit the replay starts after."""
+    fork = git(repo, "rev-parse", "HEAD")
+    worktree = await _child(database, run_dirs, repo, fork)
+    docs = git(worktree, "rev-parse", "HEAD")
+    write(worktree, "work.py", "work\n")
+    commit_all(worktree, "Task 2: work")
+    git(repo, "worktree", "remove", "--force", str(worktree))
+
+    again = await _child_worktree(database, run_dirs, repo)
+
+    assert git(again, "rev-parse", "HEAD") != docs
+    row = database.read(
+        lambda c: c.execute("SELECT docs_commit FROM work_items WHERE id='c1'").fetchone()
+    )
+    assert row["docs_commit"] == docs
