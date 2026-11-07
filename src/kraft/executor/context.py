@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from kraft.caps import TIME_CAPPED
 from kraft.policy import DEFAULT_OUTPUTS_MAX_BYTES
@@ -217,7 +217,10 @@ class LaunchContext:
     #: to capture a digest of what it is about to dispatch its reviewer onto,
     #: right before it does, so the reviewer's own approval can be bound to
     #: exactly that, not to whatever a person separately rendered.
-    chain_revision_digest: Callable[[Any, str, str], str | None] | None = None
+    chain_revision_digest: Callable[..., str | None] | None = None
+    #: `max_slices` at launch: how many slices a plan may declare and still be
+    #: sliced (`slices.slicing_input`).
+    max_slices: int = 6
     #: The id of the item's own repository (a workspace's root): the one repo
     #: library its launches may read (`addons.load.for_item`). Kept for a
     #: fanned-out member's run too. None: no id, so no repo library.

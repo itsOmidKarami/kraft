@@ -101,9 +101,10 @@ async def _approve(it):
 async def test_an_unchanged_revision_advances_without_a_human(item_on, tmp_path):
     it = await item_on(_chain(tmp_path, {"rationale": "the chain fits the plan"}))
 
-    assert await _walk(it) == "completed"
+    await _walk(it)  # on to the agent `build`, which this test does not run
 
     assert it.events("gate_requested") == []
+    assert [e["payload"]["gate"] for e in it.events("chain_revision_unchanged")] == [GATE]
     [unchanged] = it.events("chain_revision_unchanged")
     assert unchanged["payload"] == {"gate": GATE, "rationale": "the chain fits the plan"}
     assert [e["payload"] for e in it.events("gate_approved")] == [{"gate": GATE, "by": "kraft"}]
@@ -295,3 +296,60 @@ async def test_a_malformed_revision_is_never_read_as_no_change(item_on, tmp_path
 
     assert [e["payload"]["gate"] for e in it.events("gate_requested")] == [GATE]
     assert it.events("chain_revision_unchanged") == []
+
+
+SLICED_PLAN = """## Slices
+
+- **Slice 1: A.** Task 1.
+- **Slice 2: B.** Task 2.
+
+### Task 1: a
+### Task 2: b
+"""
+
+
+def _sliceable(tmp_path: Path, change: dict) -> list[dict]:
+    """`_chain` with a `build` the rules take as the implementing node."""
+    nodes = _chain(tmp_path, change)
+    nodes[2] = v1_node("build", tasks=[v1_task("run", kind="agent", prompt="build it")])
+    return nodes
+
+
+async def _sliced_item(item_on, tmp_path, change, plan=SLICED_PLAN):
+    it = await item_on(
+        _sliceable(tmp_path, change),
+        attachments=[{"kind": "plan", "path": "plan.md"}],
+        worktree=True,
+    )
+    (it.worktree / "plan.md").write_text(plan)
+    return it
+
+
+async def test_a_plan_with_slices_makes_the_revision_gate_ask(item_on, tmp_path):
+    it = await _sliced_item(item_on, tmp_path, {"rationale": "the chain fits the plan"})
+
+    assert await _walk(it) == "awaiting_gate"
+
+    assert [e["payload"]["gate"] for e in it.events("gate_requested")] == [GATE]
+    assert it.events("chain_revision_unchanged") == []
+
+
+async def test_approving_a_sliced_revision_gives_the_run_chain_a_group(item_on, tmp_path):
+    it = await _sliced_item(item_on, tmp_path, {"rationale": "the chain fits the plan"})
+    await _walk(it)
+
+    nodes = await _approve(it)
+
+    assert [n.id for n in nodes] == ["revise", GATE, "slices", "brief"]
+    assert [n.id for n in nodes[2].body] == ["slices.build", "slices.brief"]
+
+
+async def test_a_plan_without_slices_still_advances_without_a_human(item_on, tmp_path):
+    it = await _sliced_item(
+        item_on, tmp_path, {"rationale": "the chain fits the plan"}, plan="### Task 1: a\n"
+    )
+
+    await _walk(it)  # on to the agent `build`, which this test does not run
+
+    assert it.events("gate_requested") == []
+    assert [e["payload"]["gate"] for e in it.events("chain_revision_unchanged")] == [GATE]

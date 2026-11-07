@@ -191,6 +191,10 @@ def _authored(chain: dict, path: str) -> tuple[str, dict]:
     first, *rest = path.split(PATH_SEPARATOR)
     obj = next(n for n in chain["nodes"] if n["id"] == first)
     kind = "gate" if obj["kind"] == "gate" else "node"
+    if obj["kind"] == "group" and rest:
+        # `group.node[...]`: the body node is the node the rest addresses.
+        obj = next(n for n in obj["nodes"] if n["id"] == rest[0])
+        rest = rest[1:]
     segments = iter(rest)
     for segment in segments:
         if kind == "gate":  # `auto_review`, the one slot a gate has

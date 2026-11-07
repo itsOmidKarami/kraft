@@ -7,6 +7,7 @@ from kraft.slices import (
     Slice,
     SliceRefusal,
     SliceSplit,
+    describe,
     parse_slices,
     plan_for_slice,
     prelude_note,
@@ -130,3 +131,19 @@ def test_the_prelude_note_names_only_the_prelude_tasks():
     note = prelude_note(SliceSplit(slices=(), prelude=(2, 6)))
     assert "2, 6" in note
     assert "3" not in note
+
+
+@pytest.mark.parametrize(
+    ("plan", "says"),
+    [
+        pytest.param(_plan(), "Slice 2: CLI verb -- tasks 4, 6", id="split"),
+        pytest.param(_plan(_SECTION.replace("Tasks 4, 6.", "Task 4.")), "task 6", id="prelude"),
+        pytest.param(_plan(_SECTION.replace("Task 5.", "Task 4.")), "Not used", id="refused"),
+    ],
+)
+def test_describe_says_how_the_plan_gate_reads_the_split(plan, says):
+    assert says in describe(plan, max_slices=6)
+
+
+def test_describe_is_silent_about_a_plan_with_no_section():
+    assert describe(_plan(""), max_slices=6) is None

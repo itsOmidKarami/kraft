@@ -2519,3 +2519,15 @@ THEN the system SHALL refuse the chain, and SHALL accept a `reads` entry between
 two nodes of one group's body.
 enforced-by: tests/templates/test_models.py::test_reads_may_not_cross_a_group_boundary[into-the-body], tests/templates/test_models.py::test_reads_may_not_cross_a_group_boundary[out-of-the-body], tests/templates/test_models.py::test_reads_between_body_nodes_are_accepted
 origin: src/kraft/templates/models.py §_reads_name_earlier_writers
+
+## REQ chain-revision-slices-a-plan-that-declares-slices
+
+WHEN the approved plan has a valid `## Slices` section and the item is neither a
+workspace item nor an in-place item, the system SHALL add a `slice` entry to the
+chain revision's change set itself, wrapping the implementing node and the
+execution nodes right after it in a group, so that the revision gate asks a person;
+a `slice` entry in the agent's own change set SHALL be refused, and a plan with no
+usable section SHALL leave the change set as the agent wrote it.
+enforced-by: tests/templates/test_slicing.py::test_the_body_stops_before_a_node_a_gate_shows, tests/templates/test_slicing.py::test_the_default_chain_slices_implementation_and_verification, tests/templates/test_slicing.py::test_it_does_not_slice_and_says_why[no-section], tests/templates/test_slicing.py::test_an_agent_cannot_declare_a_slice, tests/executor/test_chain_revision.py::test_a_plan_with_slices_makes_the_revision_gate_ask, tests/executor/test_chain_revision.py::test_a_plan_without_slices_still_advances_without_a_human, tests/api/test_chain_revision_gate.py::test_an_agent_reviewed_sliced_revision_applies_without_a_stale_error
+origin: src/kraft/templates/slicing.py
+

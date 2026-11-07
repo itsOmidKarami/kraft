@@ -3265,7 +3265,7 @@ async def run_once(
             step, preserve = 0, frozenset()
             continue
 
-        if await gates.maybe_gate(db, work_item_id, nodes, i, run_dirs):
+        if await gates.maybe_gate(db, work_item_id, nodes, i, run_dirs, policy):
             await _report_if_undelivered(db, work_item_id, carried)
             # Nothing unanswered is a must-fix at this point, unless the
             # reject cap stopped the bounce above -- either way, the reply

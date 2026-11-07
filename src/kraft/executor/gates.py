@@ -14,6 +14,7 @@ from kraft import (
     item_paths,
     node_runs,
     reviewed_head,
+    slices,
     store,
 )
 from kraft import policy as _policy
@@ -312,7 +313,12 @@ def gate_cleared(db, work_item_id: str, nodes: Sequence[ResolvedNode], index: in
 
 
 async def maybe_gate(
-    db, work_item_id: str, nodes: Sequence[ResolvedNode], index: int, run_dirs=None
+    db,
+    work_item_id: str,
+    nodes: Sequence[ResolvedNode],
+    index: int,
+    run_dirs=None,
+    policy: _policy.Policy | None = None,
 ) -> bool:
     """Whether the walk stops here because `nodes[index]` is an unanswered gate
     (`gate-node-opens-and-halts-execution`).
@@ -338,11 +344,21 @@ async def maybe_gate(
     await db.write(lambda c: store.enter_node(c, work_item_id, node.id))
     if node.node.artifact == revision.CHAIN_REVISION and run_dirs is not None:
         rel = item_paths.document(run_dirs, work_item_id, revision.CHAIN_REVISION)
-        why = (
-            revision.unchanged(*item_paths.locate(run_dirs, work_item_id, rel))
-            if rel is not None
-            else None
-        )
+        why = None
+        if rel is not None:
+            row = db.read(
+                lambda c: c.execute(
+                    "SELECT * FROM work_items WHERE id = ?", (work_item_id,)
+                ).fetchone()
+            )
+            chain = store.materialized_chain_of(row)
+            max_slices = policy.max_slices if policy is not None else 6
+            why = revision.unchanged(
+                *item_paths.locate(run_dirs, work_item_id, rel),
+                chain=chain,
+                slicing=slices.slicing_input(run_dirs, row, max_slices),
+                at=node.id,
+            )
         if why is not None:
             await db.write(lambda c: store.pass_unchanged_revision(c, work_item_id, node.id, why))
             return False
@@ -391,7 +407,9 @@ def _chain_revision_seen(
     )
     if result is None:
         return None
-    return launch.chain_revision_digest(chain, gate, result.text)
+    return launch.chain_revision_digest(
+        chain, gate, result.text, slicing=slices.slicing_input(run_dirs, row, launch.max_slices)
+    )
 
 
 async def review_gates(

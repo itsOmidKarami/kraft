@@ -4,6 +4,8 @@ person was shown, or nothing."""
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -63,6 +65,16 @@ def _revising(tdir: Path) -> None:
     }
     (tdir / "chains" / "revising.yaml").write_text(yaml.safe_dump(chain))
     _library(tdir, "echo safe")
+    # The same line with an agent `build` and a change set that changes nothing:
+    # only a plan's slices make its gate ask.
+    quiet = tdir / "quiet.md"
+    quiet.write_text('---\nwork_item_ids: [x]\n---\n```json\n{"rationale": "fits"}\n```\n')
+    chain["id"] = "slicing"
+    chain["nodes"][0]["tasks"][0]["command"] = write.replace(str(source), str(quiet))
+    chain["nodes"][2]["tasks"] = [
+        {"id": "run", "kind": "agent", "harness": "claude", "prompt": "b"}
+    ]
+    (tdir / "chains" / "slicing.yaml").write_text(yaml.safe_dump(chain))
 
 
 pytestmark = pytest.mark.api_client(edit_templates=_revising)
@@ -178,3 +190,50 @@ def test_a_review_approval_without_a_digest_or_with_a_stale_one_is_refused(
     assert old.status_code == 409
     assert "changed since you viewed it; review it again" in old.json()["detail"]
     _unrevised(client, wid)
+
+
+def test_an_agent_reviewed_sliced_revision_applies_without_a_stale_error(client, repo):
+    """The digest an agent's review captured (`revision.artifact_digest`) and the
+    one the approval computes (`_revise`) parse the artifact the same way, slicing
+    entry included, so a sliced revision does not fail as stale."""
+    (repo / "plan.md").write_text(
+        "## Slices\n\n- **Slice 1: A.** Task 1.\n- **Slice 2: B.** Task 2.\n\n"
+        "### Task 1: a\n\n### Task 2: b\n"
+    )
+    wid = client.post(
+        "/api/work-items",
+        json={
+            "autostart": True,
+            "title": "slice me",
+            "repo": str(repo),
+            "chain_template": "slicing",
+            "attachments": [{"kind": "plan", "path": "plan.md"}],
+        },
+    ).json()["id"]
+    _await_gate(client, wid, "revision_approval")
+    shown = client.get(f"/api/work-items/{wid}/artifact").json()
+    assert "slice" in shown["content"]
+
+    from kraft import executor, slices
+    from kraft.templates import revision
+
+    st = client.app.state
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+    conn.close()
+    captured = revision.artifact_digest(
+        executor.chain_of(row),
+        "revision_approval",
+        (
+            st.run_dirs.worktrees / wid / ".engineering" / "chain_revisions" / f"{wid}.md"
+        ).read_text(),
+        library=st.library,
+        slicing=slices.slicing_input(st.run_dirs, row, 6),
+    )
+    assert captured == shown["digest"]
+
+    r = _approve(client, wid, shown["digest"])
+
+    assert r.status_code == 200, r.text
+    assert "slices" in _chain_ids(client, wid)

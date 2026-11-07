@@ -202,8 +202,8 @@ def active_implementation_node(row) -> str | None:
     return None
 
 
-def read_tasks(run_dirs, row, worktree: Path, *, in_place: bool = False) -> list[tuple[str, bool]]:
-    """The attached plan's tasks if there is one, else the plan node's
+def read_plan(run_dirs, row, worktree: Path, *, in_place: bool = False) -> str | None:
+    """The attached plan's text if there is one, else the plan node's
     document's (`item_paths.document`, the new place first). Never through a
     link, and never blocking on a FIFO: a worker can plant either in its
     worktree or its item's `docs/`. `in_place`: the checkout may be on another
@@ -230,6 +230,12 @@ def read_tasks(run_dirs, row, worktree: Path, *, in_place: bool = False) -> list
             if name is not None
             else None
         )
+    return text
+
+
+def read_tasks(run_dirs, row, worktree: Path, *, in_place: bool = False) -> list[tuple[str, bool]]:
+    """The tasks of `read_plan`'s text."""
+    text = read_plan(run_dirs, row, worktree, in_place=in_place)
     return parse_tasks(text) if text is not None else []
 
 

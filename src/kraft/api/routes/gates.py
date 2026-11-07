@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import HTTPException, Request
 from pydantic import BaseModel
 
-from kraft import events, executor, inplace, reviewed_head, store, when_free
+from kraft import events, executor, inplace, reviewed_head, slices, store, when_free
 from kraft.api import api_router, deps
 from kraft.api.routes import artifacts, board
 from kraft.api.routes.lifecycle import (
@@ -17,7 +17,7 @@ from kraft.api.routes.lifecycle import (
 )
 from kraft.config import git_read
 from kraft.executor import stops
-from kraft.templates import revision
+from kraft.templates import revision, slicing
 from kraft.templates.models import ForgeAction, ForgeTask, GateNode
 from kraft.vocab import ChainEvent, GateEvent, StopKind
 
@@ -137,7 +137,12 @@ async def _revise(st, row, gate: str, *, viewer: bool, seen: str | None) -> str 
         return f"{gate}: the chain revision could not be read"
     chain = executor.chain_of(row)
     try:
-        changes = revision.parse(read[0])
+        changes = slicing.with_slicing(
+            revision.parse(read[0]),
+            chain,
+            slices.slicing_input(st.run_dirs, row, deps.max_slices(st)),
+            at=gate,
+        )
         revised = revision.revise(
             chain,
             changes,

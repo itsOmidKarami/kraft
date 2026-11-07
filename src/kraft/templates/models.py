@@ -2574,6 +2574,9 @@ class MaterializedChain:
         for node in self.chain.nodes:
             if node.id == path:
                 return self.policy_for(node)
+            for inner in node.body:
+                if inner.id == path:
+                    return self.policy_for(inner)
             for scope in (*node.steps_in(), *node.tasks()):
                 if scope.path == path:
                     return self.policy_for(scope)

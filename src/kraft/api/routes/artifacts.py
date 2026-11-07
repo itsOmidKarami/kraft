@@ -6,7 +6,7 @@ import logging
 from fastapi import HTTPException, Query, Request
 
 from kraft import config as config_mod
-from kraft import events, inplace, item_paths, review, reviewed_head, store
+from kraft import events, inplace, item_paths, review, reviewed_head, slices, store
 from kraft.api import api_router, deps, perimeter
 from kraft.api.routes import board
 from kraft.api.routes.search import OpenDocument, _launch_editor
@@ -419,11 +419,26 @@ async def get_work_item_artifact(wid: str, request: Request):
     ):
         # A change set is JSON for Kraft to apply; the person deciding reads
         # it rendered, with the diff it makes and anything that stops it.
-        body, revised = revision.render(text, chain, gate, st.library, deps.item_repo_id(st, row))
+        body, revised = revision.render(
+            text,
+            chain,
+            gate,
+            st.library,
+            deps.item_repo_id(st, row),
+            slices.slicing_input(st.run_dirs, row, deps.max_slices(st)),
+        )
         # What an approval must still apply (Kraft-ze1yj).
         if revised is not None and revised is not chain:
             shown = revision.digest(revised)
             await st.db.write(lambda c: store.show_revision(c, wid, gate, shown))
+    elif chain is not None and any(
+        n.id == gate and n.node.artifact == "plan" for n in chain.chain.nodes
+    ):
+        # The plan gate shows the split Kraft reads from its `## Slices` section,
+        # or why it will not slice, so a bad section is fixed before approval.
+        described = slices.describe(text, max_slices=deps.max_slices(st))
+        if described is not None:
+            body = f"{ingest_mod.split_front_matter(text)[1].rstrip()}\n\n---\n\n{described}"
     head = reviewed_head.review_head(st.db, row, gate, inplace.item_folder(st.run_dirs, row))
     return {
         **_worktree_document(st, wid, rel, text, truncated, body),
@@ -528,7 +543,8 @@ async def get_produced_artifact(wid: str, kind: str, request: Request):
             gate = next(gates, None)
             if gate is not None:
                 repo_id = deps.item_repo_id(st, row)
-                body = revision.render(result.text, chain, gate, st.library, repo_id)[0]
+                slicing = slices.slicing_input(st.run_dirs, row, deps.max_slices(st))
+                body = revision.render(result.text, chain, gate, st.library, repo_id, slicing)[0]
         shown = _worktree_document(st, wid, rel, result.text, result.truncated, body)
         return {"kind": kind, **shown}
     if reason != "absent":

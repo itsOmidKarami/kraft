@@ -122,6 +122,47 @@ def parse_slices(plan_text: str, *, max_slices: int) -> SliceSplit | SliceRefusa
     )
 
 
+def describe(plan_text: str, *, max_slices: int) -> str | None:
+    """What the plan gate adds under a plan: the split Kraft read from its
+    `## Slices` section, or why it will not slice. None for a plan with no
+    section, which runs as one item."""
+    split = parse_slices(plan_text, max_slices=max_slices)
+    if split is None:
+        return None
+    if isinstance(split, SliceRefusal):
+        return (
+            "## Slices, as Kraft reads them\n\n"
+            f"**Not used:** {split.reason}. The item will not be sliced; fix the section "
+            "and reject this plan to slice it.\n"
+        )
+    lines = ["## Slices, as Kraft reads them", ""]
+    lines += [
+        f"- Slice {s.key}: {s.title} -- task{'s' if len(s.tasks) > 1 else ''} "
+        f"{', '.join(str(n) for n in s.tasks)}"
+        for s in split.slices
+    ]
+    if split.prelude:
+        lines += [
+            "",
+            "Built first in the parent, before the slices start: task"
+            f"{'s' if len(split.prelude) > 1 else ''} {', '.join(str(n) for n in split.prelude)}.",
+        ]
+    return "\n".join(lines) + "\n"
+
+
+def slicing_input(run_dirs, row, max_slices: int):
+    """What chain revision needs of `row`'s plan to decide whether to slice it
+    (`templates.slicing.SlicingInput`): the plan's text as the item reads it."""
+    from kraft import inplace, store
+    from kraft.progress import read_plan
+    from kraft.templates.slicing import SlicingInput
+
+    chain = store.materialized_chain_of(row)
+    in_place = chain is not None and chain.target.in_place
+    folder = inplace.item_folder(run_dirs, row)
+    return SlicingInput(read_plan(run_dirs, row, folder, in_place=in_place), max_slices)
+
+
 def plan_for_slice(plan_text: str, keep: frozenset[int]) -> str:
     """The plan one slice's child reads: every task not in `keep` tagged
     `[DONE]` (already built, or built by another slice), and the `## Slices`

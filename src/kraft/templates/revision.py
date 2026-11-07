@@ -35,6 +35,7 @@ from pydantic import (
 )
 
 from kraft.policy import FROZEN, PolicyError
+from kraft.templates import slicing as slicing_mod
 from kraft.templates.environment import Identifier, QualifiedIdentifier
 from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 from kraft.templates.models import (
@@ -50,6 +51,7 @@ from kraft.templates.models import (
     first_error,
 )
 from kraft.templates.retry import RetryOverrideError, validate_retry_override
+from kraft.templates.slicing import SliceChange, SlicingInput
 
 #: The artifact kind a `revise_chain` task produces and a revision gate shows.
 CHAIN_REVISION = "chain_revision"
@@ -168,10 +170,14 @@ class ChangeSet(BaseModel):
     add: list[Add] = Field(default_factory=list)
     #: Keyed by canonical path (`node` or `node.step.task`).
     overrides: dict[str, Override] = Field(default_factory=dict)
+    #: Slicing the implementation span into child items (`templates.slicing`).
+    #: Kraft adds it (`with_slicing`) from a plan's `## Slices` section; an
+    #: artifact that carries one is refused at `parse`.
+    slice: SliceChange | None = None
 
     @property
     def empty(self) -> bool:
-        return not (self.skip or self.add or self.overrides)
+        return not (self.skip or self.add or self.overrides or self.slice)
 
 
 #: The whole body after the front matter: one ```json fence, only whitespace
@@ -203,16 +209,30 @@ def parse(text: str) -> ChangeSet:
     except (ValueError, RecursionError) as exc:  # a worker can nest past the parser
         raise RevisionError(f"the change set is not JSON: {exc}") from exc
     try:
-        return ChangeSet.model_validate(data)
+        changes = ChangeSet.model_validate(data)
     except ValidationError as exc:
         raise RevisionError(f"the change set is not valid: {first_error(exc)}") from exc
+    if changes.slice is not None:
+        raise RevisionError(
+            "the change set may not declare slice: Kraft slices a plan that has a "
+            "## Slices section, and the agent never shapes it"
+        )
+    return changes
 
 
-def unchanged(worktree: Path, rel: str) -> str | None:
+def unchanged(
+    worktree: Path,
+    rel: str,
+    *,
+    chain: MaterializedChain | None = None,
+    slicing: SlicingInput | None = None,
+    at: str | None = None,
+) -> str | None:
     """The rationale of the change set at `rel` in `worktree` when it proposes
     no change, or None: no file, one that does not read, or one proposing a
     change -- each of which a person at the gate has to see. Read the way the
-    gate's own artifact is (`read_worktree_file`: contained, no symlink)."""
+    gate's own artifact is (`read_worktree_file`: contained, no symlink). With
+    `slicing`, a plan that slices makes the set non-empty, so the gate asks."""
     from kraft.worker.worktree_read import read_worktree_file
 
     read, _ = read_worktree_file(worktree, rel, _MAX_BYTES)
@@ -222,6 +242,8 @@ def unchanged(worktree: Path, rel: str) -> str | None:
         changes = parse(read.text)
     except RevisionError:
         return None
+    if slicing is not None and chain is not None:
+        changes = slicing_mod.with_slicing(changes, chain, slicing, at=at)
     return changes.rationale if changes.empty else None
 
 
@@ -344,6 +366,8 @@ def revise(
             ).chain
         except RetryOverrideError as exc:
             raise RevisionError(f"override {path}: {exc}") from exc
+    if changes.slice is not None:
+        revised = _sliced(revised, changes.slice)
     try:
         for base in (revised.policy, *revised.repository_policies.values()):
             revised.chain.check_scopes(base, revised.item_policy)
@@ -367,6 +391,26 @@ def revise(
             untrimmed=revise(whole, changes, at=at, library=library, repo_id=repo_id).chain.chain,
         )
     return revised
+
+
+def _sliced(chain: MaterializedChain, change: SliceChange) -> MaterializedChain:
+    """`chain` with the slicing `change` applied, validated whole as a revision
+    is: by `Chain`'s rules under the frozen context."""
+    authored = chain.chain.chain
+    try:
+        nodes = slicing_mod.apply(list(authored.nodes), change)
+        checked = Chain.model_validate_json(
+            authored.model_copy(update={"nodes": nodes}).model_dump_json(), context=FROZEN
+        )
+    except ValueError as exc:  # a ValidationError is one
+        reason = first_error(exc) if isinstance(exc, ValidationError) else str(exc)
+        raise RevisionError(f"slice: {reason}") from exc
+    return replace(
+        chain,
+        chain=ResolvedChain.from_chain(
+            checked, steering=chain.chain.steering, addons=chain.chain.addons
+        ),
+    )
 
 
 #: The artifact a merge request's title, body and labels come from
@@ -458,7 +502,8 @@ def _fields(node: ResolvedNode) -> dict[str, dict]:
             return {prefix: value}
         return {k: v for key, sub in value.items() for k, v in flat(sub, f"{prefix}.{key}").items()}
 
-    policy = node.node.policy.model_dump(mode="json", exclude_none=True) if node.node.policy else {}
+    own = node.own
+    policy = own.model_dump(mode="json", exclude_none=True) if own else {}
     found = flat({"policy": policy}, node.id) if policy else {}
     for task in node.tasks():
         found |= flat(task.task.model_dump(mode="json", exclude_none=True), task.path)
@@ -509,6 +554,7 @@ def render(
     gate: str,
     library: TemplateLibrary | None,
     repo_id: str | None = None,
+    slicing: SlicingInput | None = None,
 ) -> tuple[str, MaterializedChain | None]:
     """The gate's document for a person, and the revised chain it shows (None
     when it shows none): the rationale, each change with its evidence, every
@@ -519,6 +565,8 @@ def render(
         changes = parse(text)
     except RevisionError as exc:
         return f"# Chain revision\n\n## Cannot be read\n\n**{exc}**\n\n{_REJECT}\n", None
+    if slicing is not None:
+        changes = slicing_mod.with_slicing(changes, chain, slicing, at=gate)
     lines = ["# Chain revision", "", changes.rationale, "", "## Changes", ""]
     lines += [f"- skip `{s.node}` -- {s.evidence}" for s in changes.skip]
     lines += [
@@ -530,6 +578,14 @@ def render(
         f"on `{path}` -- {o.evidence}"
         for path, o in changes.overrides.items()
     ]
+    if changes.slice is not None:
+        s = changes.slice
+        lines.append(
+            f"- slice `{', '.join(s.body)}` into {s.slices} child items, one per slice of the "
+            f"plan's ## Slices section; the group is `{s.group}`, and "
+            f"`{', '.join(n for n in s.body if n not in s.unforked)}` runs again on the "
+            "combined code after it"
+        )
     if changes.empty:
         lines.append("None: the chain stays as it is.")
     try:
@@ -562,6 +618,7 @@ def artifact_digest(
     *,
     library: TemplateLibrary | None = None,
     repo_id: str | None = None,
+    slicing: SlicingInput | None = None,
 ) -> str | None:
     """What `gate`'s chain-revision artifact currently resolves to, or None
     when it cannot be parsed or applied, or resolves to no change -- an
@@ -576,6 +633,8 @@ def artifact_digest(
     """
     try:
         changes = parse(text)
+        if slicing is not None:
+            changes = slicing_mod.with_slicing(changes, chain, slicing, at=gate)
         revised = revise(chain, changes, at=gate, library=library, repo_id=repo_id)
     except RevisionError:
         return None
