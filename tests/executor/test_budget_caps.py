@@ -505,3 +505,81 @@ def test_a_huge_cap_is_named_never_a_crash():
     Decimal's default 28 to print, and the stop must still say it."""
     breach = UsdBreach(scope="usd", path="", spent_usd=0.5, cap_usd=1e30, unknown_launches=1)
     assert "cap $1000000000000000019884624838656.00" in stops.budget_reason(breach)
+
+
+async def test_a_familys_spend_counts_against_the_parents_cap(item_on, repo):
+    """A sliced item's cap is shared by its parent and every child: the second
+    child's launch is refused once together they pass it."""
+    parent = await item_on(_chain(), policy_override={"budget_usd": 2})
+    for wid in ("c1", "c2"):
+        child = await item_on(_chain(), wid=wid, policy_override={"budget_usd": 2})
+        await child.database.write(
+            lambda c, wid=wid: c.execute(
+                "UPDATE work_items SET parent_id = ?, slice_generation = 1, slice_key = ? "
+                "WHERE id = ?",
+                (parent.id, int(wid[1:]), wid),
+            )
+        )
+    c1 = parent.__class__(parent.database, parent.run_dirs, "c1", parent.chain, repo)
+    c2 = parent.__class__(parent.database, parent.run_dirs, "c2", parent.chain, repo)
+    await _spent(c1, TASK, usd=1.5)
+    assert _breach(c2) is None
+
+    await _spent(parent, TASK, usd=0.5)
+
+    breach = _breach(c2)
+    assert (breach.scope, breach.spent_usd) == ("usd", 2.0)
+    assert _breach(parent).spent_usd == 2.0
+
+
+async def test_the_family_check_stops_a_waiting_parent_and_pauses_its_children(item_on, repo):
+    from kraft import caps
+
+    parent = await item_on(_chain(), policy_override={"budget_usd": 2})
+    child = await item_on(_chain(), wid="c1", policy_override={"budget_usd": 2})
+    state = store.GroupState(group="slices", phase="forked", generation=1)
+    await parent.database.write(
+        lambda c: (
+            c.execute(
+                "UPDATE work_items SET status = 'waiting', stop_kind = 'slices', "
+                "current_node_id = 'build', group_state = ? WHERE id = ?",
+                (state.to_json(), parent.id),
+            ),
+            c.execute(
+                "UPDATE work_items SET parent_id = ?, slice_generation = 1, slice_key = 1 "
+                "WHERE id = 'c1'",
+                (parent.id,),
+            ),
+        )
+    )
+    await _spent(child, TASK, usd=2.5)
+
+    stopped = await caps.family_tick(parent.database)
+
+    assert stopped == [parent.id]
+    assert (parent.row()["status"], parent.row()["stop_kind"]) == ("needs_human", "budget")
+    assert child.row()["status"] == "paused"
+
+
+def test_raise_budget_on_a_slice_names_its_parent(client, repo):
+    from support.api import _paused
+
+    parent = _paused(client, repo, chain_template="default")
+    child = _paused(client, repo, chain_template="default")
+    import os
+    import sqlite3
+    from pathlib import Path
+
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    conn.execute(
+        "UPDATE work_items SET parent_id = ?, slice_generation = 1, slice_key = 1, "
+        "status = 'needs_human' WHERE id = ?",
+        (parent, child),
+    )
+    conn.commit()
+    conn.close()
+
+    r = client.post(f"/api/work-items/{child}/budget/raise", json={"budget_usd": 50})
+
+    assert r.status_code == 409, r.text
+    assert parent in r.json()["detail"]

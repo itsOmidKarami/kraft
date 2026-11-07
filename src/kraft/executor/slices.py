@@ -291,6 +291,8 @@ async def _fork(db, run_dirs, work_item_id, node, row, worktree, state, split, l
                 node_overrides=overrides,
                 policy_override=json.loads(row["policy_override"] or "null") or None,
                 auto_gate=bool(row["auto_gate"]),
+                budget_set=bool(row["budget_set"]),
+                budget_usd=row["budget_usd"],
             )
         )
     forked = dataclasses.replace(
@@ -394,3 +396,85 @@ async def release_ready_parents(app) -> list[str]:
 def _ready(db, row) -> bool:
     state = db.read(lambda c: store.group_state(c, row["id"]))
     return state is not None and state.phase == "forked" and children_ended(db, row["id"], state)
+
+
+# ── the family cascades ──────────────────────────────────────────────────────
+# Outside the API routes, so the time-cap poller (`caps.tick`, which holds only a
+# database) can run them too. Abandon and cancel are the routes' own: removing a
+# worktree is theirs.
+
+
+def unended_children(db, parent_id: str) -> list[dict]:
+    """The children of the parent's current generation that have not ended."""
+    state = db.read(lambda c: store.group_state(c, parent_id))
+    if state is None:
+        return []
+    return [
+        c
+        for c in db.read(lambda c: store.children_of(c, parent_id, state.generation))
+        if c["status"] not in ENDED
+    ]
+
+
+async def pause_family(db, parent_id: str, *, by: str) -> list[str]:
+    """Pause every child that admits pause (running, waiting, queued, rate
+    limited); children already stopped or paused stay as they are. Records which
+    the cascade paused, so `resume_family` wakes only those. `by` is a person, or
+    the cap that fired, and rides each child's event."""
+    from kraft.api.routes.lifecycle import _terminate  # deferred: kraft.api imports this module
+    from kraft.vocab import Verb, admitting
+
+    paused: list[str] = []
+    for child in unended_children(db, parent_id):
+        cid, status = child["id"], child["status"]
+        if status not in admitting(Verb.PAUSE):
+            continue
+        if status in (WorkItemStatus.QUEUED, WorkItemStatus.BLOCKED):
+            done = await db.write(lambda c, cid=cid: store.dequeue_work_item(c, cid, why="paused"))
+            if not done:
+                continue
+        else:
+            sessions = db.read(lambda c, cid=cid: store.running_sessions_for_node(c, cid))
+            await db.write(
+                lambda c, cid=cid, ids=[s["id"] for s in sessions]: store.pause_work_item(
+                    c, cid, ids
+                )
+            )
+            for s in sessions:
+                _terminate(s["pid"], started=s["pid_start_time"])
+        await db.write(
+            lambda c, cid=cid: (
+                c.execute("UPDATE work_items SET paused_by_parent = 1 WHERE id = ?", (cid,)),
+                events.append(c, cid, WorkItemEvent.SLICE_PAUSED, {"by": by, "parent": parent_id}),
+            )
+        )
+        paused.append(cid)
+    return paused
+
+
+async def resume_family(db, parent_id: str) -> list[str]:
+    """Queue every child the cascade paused (`paused_by_parent`), through the
+    start queue like any start. A child a person paused is left alone."""
+    woken: list[str] = []
+    for child in unended_children(db, parent_id):
+        if child["status"] != WorkItemStatus.PAUSED or not child["paused_by_parent"]:
+            continue
+        cid = child["id"]
+        await db.write(
+            lambda c, cid=cid: c.execute(
+                "UPDATE work_items SET paused_by_parent = 0 WHERE id = ?", (cid,)
+            )
+        )
+        queued = await db.write(
+            lambda c, cid=cid: store.queue_work_item(
+                c,
+                cid,
+                verb="start",
+                body={},
+                headers={},
+                from_statuses=[WorkItemStatus.PAUSED],
+            )
+        )
+        if queued:
+            woken.append(cid)
+    return woken

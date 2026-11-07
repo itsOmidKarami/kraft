@@ -118,6 +118,7 @@
           "session_reattached",
           "session_unknown",
           "slice_dropped",
+          "slice_paused",
           "slices_forked",
           "slices_joined",
           "slices_not_forked",

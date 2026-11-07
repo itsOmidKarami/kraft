@@ -385,8 +385,9 @@ def forbid_self_action(st, request, wid: str, *, escalation_may: bool = True) ->
     worker's retry of its own item while its escalation's self-retry passes,
     since the channel does not tell the two apart (Kraft-9efnk.14).
     """
+    family = st.db.read(lambda c: store.family_ids(c, wid))
     for session in caller_sessions(st, request):
-        if session["work_item_id"] == wid and (
+        if session["work_item_id"] in family and (
             not escalation_may or session["hook_point"] != executor.ESCALATION_HOOK
         ):
             raise HTTPException(

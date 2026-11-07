@@ -305,7 +305,12 @@ def item_actions(
         status,
         archived=row["archived_at"] is not None,
         started=row["current_node_id"] is not None,
-        on_chain=chain is not None and row["current_node_id"] in {n.id for n in chain.chain.nodes},
+        on_chain=chain is not None
+        and row["current_node_id"] is not None
+        and any(
+            row["current_node_id"] == n.id or row["current_node_id"].startswith(f"{n.id}.")
+            for n in chain.chain.nodes
+        ),
         skippable=chain is not None
         and status in admitting(Verb.SKIP)
         and next_skippable_node(row, pending_gate, chain) is not None,
@@ -321,6 +326,7 @@ def item_actions(
         dead_dependency=dead_dependency,
         must_fix_open=must_fix_open,
         chainless=asks and chain is None,
+        group_unjoined=store.group_unjoined(row),
     )
     return [str(a) for a in open_doors(facts)]
 

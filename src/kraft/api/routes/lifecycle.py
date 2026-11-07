@@ -36,6 +36,7 @@ from kraft.api.routes import board, search
 from kraft.api.routes.search import OpenDocument
 from kraft.config import git_read
 from kraft.executor import gates, stops, walk
+from kraft.executor import slices as slices_mod
 from kraft.policy import NO_CAP, PolicyError
 from kraft.remote import runs as remote_runs
 from kraft.templates.forks import ChainPath, PathError, override_record
@@ -148,6 +149,51 @@ class CancelWorkItem(EndWorkItem):
 class Escalate(BaseModel):
     message: str
     new_thread: bool = False
+
+
+def _decided_by_caller(request: Request) -> str:
+    from kraft.api.routes.gates import _decided_by  # local: it imports this module
+
+    return _decided_by(request)
+
+
+def refuse_unjoined(st, row, what: str) -> None:
+    """409 while `row` is a parent whose slice group has forked and not joined,
+    naming the children not ended: `what` is the door that would move past the
+    group (a skip, a complete, a rewind behind it)."""
+    if not store.group_unjoined(row):
+        return
+    ids = [c["id"] for c in slices_mod.unended_children(st.db, row["id"])]
+    left = f"; its slices {', '.join(ids)} have not ended" if ids else ""
+    raise HTTPException(
+        409,
+        f"{what} is refused while this item's slices are unjoined{left}. End or drop each "
+        "slice first (or abandon this item), then the join runs on its own",
+    )
+
+
+def refuse_all_dropped(st, row) -> None:
+    """A join with nothing to replay stops for a person; retrying changes nothing."""
+    state = st.db.read(lambda c: store.group_state(c, row["id"]))
+    if state is None or state.phase != "joining":
+        return
+    children = st.db.read(lambda c: store.children_of(c, row["id"], state.generation))
+    if children and not any(c["status"] == WorkItemStatus.COMPLETED for c in children):
+        raise HTTPException(
+            409,
+            "every slice was dropped, so a retry has nothing to join: send the plan back "
+            "with a retry from the plan node, which builds the slices again, or abandon this item",
+        )
+
+
+def refuse_alone(row, what: str) -> None:
+    """A slice's child is archived and restored with its parent, never alone."""
+    if store.is_child(row):
+        raise HTTPException(
+            409,
+            f"this item is a slice of {row['parent_id']}: it is {what} with its parent, "
+            "not on its own",
+        )
 
 
 def refuse_unapproved_one_off(row) -> None:
@@ -552,6 +598,8 @@ async def abandon_work_item(wid: str, request: Request, body: AbandonWorkItem | 
     reason = (body.reason if body else "").strip() or None
     if row["status"] not in admitting(Verb.ABANDON):
         raise HTTPException(409, "work item is active; pause it before abandoning")
+    if store.group_unjoined(row):
+        await _end_family(request, row, "abandon", reason or "the parent was abandoned")
     # An already-abandoned item is a cancelled one (cancel stores `abandoned`
     # and keeps everything) or a second call: either way it is reclaimed
     # again, without a second `work_item_abandoned`. A second call finds
@@ -694,9 +742,13 @@ async def archive_work_item(wid: str, request: Request):
     row = deps._work_item_row(st, wid)
     if row["status"] not in admitting(Verb.ARCHIVE):
         raise HTTPException(409, "only a completed or abandoned item can be archived")
+    refuse_alone(row, "archived")
     if row["archived_at"]:
         return {"id": wid, "archived_by": row["archived_by"], "worktree_removed": False}
     result = await _archive_one(request.app, row, "you")
+    for child in st.db.read(lambda c: store.children_of(c, wid)):
+        if not child["archived_at"] and child["status"] in admitting(Verb.ARCHIVE):
+            await _archive_one(request.app, child, "you")
     return {"id": wid, "archived_by": "you", **result}
 
 
@@ -708,7 +760,11 @@ async def restore_work_item(wid: str, request: Request):
     row = deps._work_item_row(st, wid)
     if not row["archived_at"]:
         raise HTTPException(409, "work item is not archived")
+    refuse_alone(row, "restored")
     await st.db.write(lambda c: store.restore_work_item(c, wid))
+    for child in st.db.read(lambda c: store.children_of(c, wid)):
+        if child["archived_at"]:
+            await st.db.write(lambda c, cid=child["id"]: store.restore_work_item(c, cid))
     return {"id": wid, "status": row["status"]}
 
 
@@ -824,6 +880,8 @@ async def pause_work_item(wid: str, request: Request):
     await st.db.write(lambda c: store.pause_work_item(c, wid, ids))
     for s in sessions:
         _terminate(s["pid"], started=s["pid_start_time"])
+    if store.group_unjoined(row):
+        await slices_mod.pause_family(st.db, wid, by=_decided_by_caller(request))
     # Bounded (Kraft-c5ui): pause spawns nothing, so it would rather return
     # late than block the whole request on a git/forge call the old task
     # happens to be parked in -- the sessions above are already SIGTERM'd
@@ -1318,6 +1376,9 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     # `walk.chain_of` and `claimed_or_stopped` would stop it `needs_human`.
     chain_or_409(row)
     refuse_unapproved_one_off(row)
+    if store.group_unjoined(row):
+        # The slices its pause stopped wake with it.
+        await slices_mod.resume_family(st.db, wid)
     running = escalate.escalation_running(st.db, wid)
     if running is not None:
         raise HTTPException(409, f"an escalation turn ({running}) is already running")
@@ -1558,8 +1619,14 @@ async def refresh_base(
     request forever. Answers 409 when the item was paused or ended meanwhile -- a stop
     that landed between the claim and here is not a reason to rebase. An
     in-place item goes through `inplace.rebase`, which waits a stop out
-    rather than kill git in the person's checkout."""
+    rather than kill git in the person's checkout.
+
+    None, and nothing rebased, for a slice's child and for a parent whose group
+    is unjoined: their base never moves, since the fork commit is what the
+    children are cut from and the join replays onto."""
     st = request.app.state
+    if store.is_child(row) or store.group_unjoined(row):
+        return None
     repo = Path(row["repo"])
     base = await builtins_mod.base_branch(st.db, wid, repo)
     hit = st.db.read(lambda c: caps.for_turn(c, row, node_id)) if node_id else None
@@ -1755,7 +1822,7 @@ async def _retry(wid: str, body: Retry, request: Request):
         # Ahead of the node check: an item held before it ever started has none.
         raise HTTPException(409, held)
     refuse_unapproved_one_off(row)
-    if row["current_node_id"] not in store.chain_node_ids(row):
+    if store.node_index(row, row["current_node_id"]) is None:
         raise HTTPException(409, "work item has no current node to retry")
     if row["status"] not in admitting(Verb.RETRY):
         # Cheap precondition, ahead of the steer and slot checks: claim_for_run
@@ -1776,6 +1843,14 @@ async def _retry(wid: str, body: Retry, request: Request):
     if body.path is None and not body.restart:
         body = body.model_copy(update={"path": _stopped_step(st, wid, chain, row)})
     target = _retry_target(chain, row, body)
+    if store.group_unjoined(row):
+        refuse_all_dropped(st, row)
+        if target is not None and target.node_index < store.node_index(
+            row, row["current_node_id"], default=0
+        ):
+            refuse_unjoined(st, row, "a retry from an earlier node")
+        # Its slices wake with it: the ones its pause or its cap stopped.
+        await slices_mod.resume_family(st.db, wid)
     override = _retry_override(chain, target, body)
     # After the bounds, so a structural field is still the 422 it is for anyone.
     beyond = sorted(set(body.task_config or {}) - AGENT_TASK_FIELDS)
@@ -2233,6 +2308,13 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
     st = request.app.state
     deps.forbid_self_action(st, request, wid, escalation_may=False)
     row = deps._live_work_item_row(st, wid)
+    if store.is_child(row):
+        raise HTTPException(
+            409,
+            f"this slice shares its parent's cap: raise it on {row['parent_id']} "
+            f"(`kraft item raise-budget {row['parent_id']} --usd N`), which wakes the slices "
+            "it stopped",
+        )
     if row["status"] not in admitting(Verb.RAISE_BUDGET):
         raise HTTPException(409, held_refusal(row) or "work item is not stopped")
     stop = (board._current_stop(st, wid) or {}).get("budget") or {}
@@ -2334,6 +2416,7 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
     when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
+    refuse_unjoined(st, deps._work_item_row(st, wid), "skip")
     # /skip has no live task to gate a race the way spawn does for every other
     # door: paused/needs_human have none yet, and claim_for_run's to_status
     # ("active") is also one of skip's own from_statuses, so two concurrent
@@ -2710,6 +2793,19 @@ async def reopen_mr(wid: str, request: Request):
     return await _retry(wid, Retry(), request)
 
 
+async def _end_family(request: Request, row, action: str, reason: str) -> None:
+    """Abandon or cancel every child of the parent's current generation that has
+    not ended: running ones are paused first (abandon refuses an active item),
+    then each goes through its own door. The parent follows."""
+    st = request.app.state
+    await slices_mod.pause_family(st.db, row["id"], by=_decided_by_caller(request))
+    for child in slices_mod.unended_children(st.db, row["id"]):
+        if action == "abandon":
+            await abandon_work_item(child["id"], request, AbandonWorkItem(reason=reason))
+        else:
+            await _end_work_item(request, child["id"], "cancel", reason)
+
+
 async def _end_work_item(request: Request, wid: str, action: str, reason: str):
     """The terminal actions' one door: a work-item action only, it needs a
     reason, stops whatever runs -- sessions, an escalation turn, the walk --
@@ -2722,8 +2818,18 @@ async def _end_work_item(request: Request, wid: str, action: str, reason: str):
         raise HTTPException(422, "reason: a terminal action needs a reason")
     if row["status"] in ENDED:
         raise HTTPException(409, f"work item is already {row['status']}")
+    if action == "cancel" and store.group_unjoined(row):
+        await _end_family(request, row, "cancel", reason)
     sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
     ids = [s["id"] for s in sessions]
+    if action == "complete":
+        refuse_unjoined(st, row, "complete")
+        if store.is_child(row) and deps.caller_sessions(st, request):
+            raise HTTPException(
+                403,
+                f"a worker session cannot complete a slice ({wid}) by hand: "
+                "the join replays it untested, which is a person's call",
+            )
     if action == "complete" and store.is_child(row):
         # Completed by hand, a child still has its head pinned: the join replays
         # exactly this, as it does for one the walk completed.

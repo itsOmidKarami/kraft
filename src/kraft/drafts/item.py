@@ -147,6 +147,8 @@ def evaluate(
     is the item's repository, whose repo library an added node may read."""
     parsed = OPS.validate_python(ops)
     ids = [n.id for n in chain.chain.nodes]
+    # Inside a group's body the item stands at the group.
+    current = next((i for i in ids if current and current.startswith(f"{i}.")), current)
     at = current if current in ids else None
     marked, problems, skips = [], [], []
     for i, (raw, op) in enumerate(zip(ops, parsed, strict=True)):

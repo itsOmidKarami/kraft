@@ -498,3 +498,50 @@ async def test_a_gate_past_its_timeout_stops_naming_the_gate_and_stays_answerabl
     assert [e["type"] for e in it.events() if e["type"] == LimitEvent.TIME_CAP_REACHED] == [
         LimitEvent.TIME_CAP_REACHED
     ]
+
+
+async def _family(item_on, status: str):
+    """A parent waiting at a forked group, and one running child."""
+    parent = await item_on(_chain(command="true"), "build")
+    child = await item_on(_chain(command="true"), "build", wid="c1")
+    state = store.GroupState(group="slices", phase="forked", generation=1)
+    await parent.database.write(
+        lambda c: (
+            c.execute(
+                "UPDATE work_items SET status = ?, stop_kind = 'slices', group_state = ? "
+                "WHERE id = ?",
+                (status, state.to_json(), parent.id),
+            ),
+            c.execute(
+                "UPDATE work_items SET parent_id = ?, slice_generation = 1, slice_key = 1 "
+                "WHERE id = 'c1'",
+                (parent.id,),
+            ),
+        )
+    )
+    return parent, child
+
+
+async def test_a_time_cap_on_a_waiting_parent_pauses_its_children(item_on):
+    """Time caps keep running while a parent waits for its slices; when one
+    fires the parent stops for a person and its children are paused with it."""
+    parent, child = await _family(item_on, "waiting")
+    await parent.database.write(
+        lambda c: (
+            c.execute(
+                "UPDATE work_items SET policy_override = ? WHERE id = ?",
+                (json.dumps({"total_time_cap_minutes": 1}), parent.id),
+            ),
+            c.execute(
+                "UPDATE events SET created_at = ? WHERE work_item_id = ?",
+                (T0.isoformat(), parent.id),
+            ),
+        )
+    )
+
+    stopped = await caps.tick(parent.database, now=(T0 + timedelta(minutes=2)).isoformat())
+
+    assert stopped == [parent.id]
+    assert parent.row()["status"] == "needs_human"
+    assert child.row()["status"] == "paused"
+    assert child.row()["paused_by_parent"] == 1

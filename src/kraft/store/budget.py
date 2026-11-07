@@ -8,6 +8,7 @@ from kraft import caps as _caps
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import session_wall_ms, wait_timed_out_sessions
+from kraft.store.slices import family_ids
 from kraft.usage import KINDS, spent
 from kraft.vocab import LimitEvent
 
@@ -138,6 +139,23 @@ def local_midnight_utc(now: datetime | None = None) -> str:
     return now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC).isoformat()
 
 
+def family_spend(conn: sqlite3.Connection, parent_id: str) -> tuple[float, int]:
+    """`(dollars, tokens)` spent by `parent_id` and every one of its children, over
+    their `worker_sessions`. A session that reported no cost adds none to the
+    dollars (unknown spend is the launch check's concern), and every token kind
+    counts toward the tokens."""
+    family = family_ids(conn, parent_id)
+    rows = conn.execute(
+        f"SELECT {', '.join(KINDS)}, cost_usd, status FROM worker_sessions "
+        f"WHERE work_item_id IN ({', '.join('?' * len(family))})",
+        family,
+    ).fetchall()
+    return (
+        float(sum(r["cost_usd"] or 0.0 for r in rows)),
+        sum(spent(r) for r in rows),
+    )
+
+
 def budget_spend(
     conn: sqlite3.Connection, work_item_id: str, *, since: str | None = None
 ) -> tuple[float, float]:
@@ -149,9 +167,11 @@ def budget_spend(
     has no cost — contributes zero, so this is a floor on in-flight spend by
     construction.
     """
+    family = family_ids(conn, work_item_id)
     item = conn.execute(
-        "SELECT COALESCE(SUM(cost_usd), 0.0) FROM worker_sessions WHERE work_item_id = ?",
-        (work_item_id,),
+        "SELECT COALESCE(SUM(cost_usd), 0.0) FROM worker_sessions "
+        f"WHERE work_item_id IN ({', '.join('?' * len(family))})",
+        family,
     ).fetchone()[0]
     if since is None:
         daily = conn.execute("SELECT COALESCE(SUM(cost_usd), 0.0) FROM worker_sessions").fetchone()[

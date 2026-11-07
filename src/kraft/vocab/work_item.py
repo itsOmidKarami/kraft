@@ -226,6 +226,9 @@ class DoorFacts:
     #: It has no materialized chain (a row the legacy loader filed): nothing
     #: walks it, and nothing reads a note left on it (`lifecycle.chain_or_409`).
     chainless: bool = False
+    #: A parent whose slice group has forked and not yet joined: its children
+    #: are not all ended, whatever status it reads.
+    group_unjoined: bool = False
 
 
 def open_doors(f: DoorFacts) -> tuple[ItemAction, ...]:
@@ -274,6 +277,7 @@ def open_doors(f: DoorFacts) -> tuple[ItemAction, ...]:
         # skip_work_item: a skippable node, no escalation turn, and no walk
         # but a running item's own.
         ItemAction.SKIP: a(V.SKIP)
+        and not f.group_unjoined
         and f.skippable
         and not f.escalation_live
         and not (f.walk_live and s not in RUNNING),
@@ -285,7 +289,7 @@ def open_doors(f: DoorFacts) -> tuple[ItemAction, ...]:
         and not f.escalation_live
         and not f.walk_live,
         # _end_work_item.
-        ItemAction.COMPLETE: s not in ENDED,
+        ItemAction.COMPLETE: s not in ENDED and not f.group_unjoined,
         ItemAction.CANCEL: s not in ENDED,
         # restore_work_item.
         ItemAction.RESTORE: f.archived,

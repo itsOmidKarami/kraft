@@ -28,6 +28,7 @@ __all__ = [
     "family_ids",
     "file_children",
     "group_state",
+    "group_unjoined",
     "is_child",
     "mark_waiting_on_slices",
     "running_siblings",
@@ -88,6 +89,9 @@ class ChildRow:
     node_overrides: dict | None = None
     policy_override: dict | None = None
     auto_gate: bool = False
+    #: The parent's own cap, so the family shares one (`budget_spend` sums it).
+    budget_set: bool = False
+    budget_usd: float | None = None
 
 
 def is_child(row) -> bool:
@@ -97,6 +101,15 @@ def is_child(row) -> bool:
         return row["parent_id"] is not None
     except (IndexError, KeyError):
         return False
+
+
+def group_unjoined(row) -> bool:
+    """Whether `row` is a parent whose slice group has forked and not joined."""
+    try:
+        text = row["group_state"]
+    except (IndexError, KeyError):
+        return False
+    return bool(text) and GroupState.from_json(text).phase in ("forked", "joining")
 
 
 def group_state(conn: sqlite3.Connection, wid: str) -> GroupState | None:
@@ -135,8 +148,16 @@ def file_children(
         )
         conn.execute(
             "UPDATE work_items SET parent_id = ?, slice_generation = ?, slice_key = ?, "
-            "base_ref = ? WHERE id = ?",
-            (parent_id, state.generation, child.slice_key, child.base_ref, child.id),
+            "base_ref = ?, budget_set = ?, budget_usd = ? WHERE id = ?",
+            (
+                parent_id,
+                state.generation,
+                child.slice_key,
+                child.base_ref,
+                1 if child.budget_set else 0,
+                child.budget_usd,
+                child.id,
+            ),
         )
     state.phase = "forked"
     state.children = [c.id for c in children]
