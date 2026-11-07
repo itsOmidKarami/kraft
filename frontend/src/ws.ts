@@ -26,7 +26,8 @@ export function connectEvents(opts: { onLive?: (frame: { type: string; payload: 
       // A live frame (`/ws/events?live=1` only) is not an event row: no seq to resume from.
       if (ev.frame === "live") return opts.onLive?.(ev);
       useStore.getState().applyEvent(ev);
-      maybeNotify(ev, useStore.getState().workItems[ev.work_item_id]?.title ?? "Kraft");
+      const item = useStore.getState().workItems[ev.work_item_id];
+      maybeNotify(ev, item?.title ?? "Kraft", item?.parent_id);
     };
     const retry = () => {
       // A broken socket fires 'error' then 'close'; detach both so only the
