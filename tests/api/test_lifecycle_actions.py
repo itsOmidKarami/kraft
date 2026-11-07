@@ -11,7 +11,7 @@ from contextlib import closing
 from pathlib import Path
 
 import pytest
-from support.api import _cancel_task, _in_state, _spawn_never_returning
+from support.api import _cancel_task, _in_state, _spawn_never_returning, _statements
 
 from kraft.api.routes import board
 from kraft.vocab import ItemAction
@@ -55,21 +55,6 @@ def test_actions_are_the_doors_this_table_lists(client, repo, state):
     assert listed["actions"] == want
     if row.get("walk"):
         client.portal.call(lambda: _cancel_task(client.app, wid))
-
-
-def _statements(client) -> int:
-    """How many SQL statements one `GET /work-items` runs."""
-    ran: list[str] = []
-
-    def count(c):
-        c.set_trace_callback(ran.append)
-        return c.execute("SELECT 1").fetchone()
-
-    # The reader belongs to the server's loop thread.
-    client.portal.call(lambda: client.app.state.db.read(count))
-    client.get("/api/work-items")
-    client.portal.call(lambda: client.app.state.db.read(lambda c: c.set_trace_callback(None)))
-    return len(ran)
 
 
 def test_the_list_reads_no_per_item_facts(client, repo, monkeypatch):

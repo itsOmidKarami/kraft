@@ -539,9 +539,18 @@ async def test_a_time_cap_on_a_waiting_parent_pauses_its_children(item_on):
         )
     )
 
-    stopped = await caps.tick(parent.database, now=(T0 + timedelta(minutes=2)).isoformat())
+    cancelled = []
+
+    async def cancel(wid):
+        cancelled.append(wid)
+
+    stopped = await caps.tick(
+        parent.database, now=(T0 + timedelta(minutes=2)).isoformat(), cancel=cancel
+    )
 
     assert stopped == [parent.id]
     assert parent.row()["status"] == "needs_human"
     assert child.row()["status"] == "paused"
     assert child.row()["paused_by_parent"] == 1
+    # Its walk task goes with its sessions: nothing is left walking a paused child.
+    assert cancelled == ["c1"]

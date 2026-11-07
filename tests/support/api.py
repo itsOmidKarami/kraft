@@ -411,6 +411,21 @@ def _orchestrator_db():
     return closing(sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"))
 
 
+def _statements(client) -> int:
+    """How many SQL statements one `GET /work-items` runs."""
+    ran: list[str] = []
+
+    def count(c):
+        c.set_trace_callback(ran.append)
+        return c.execute("SELECT 1").fetchone()
+
+    # The reader belongs to the server's loop thread.
+    client.portal.call(lambda: client.app.state.db.read(count))
+    client.get("/api/work-items")
+    client.portal.call(lambda: client.app.state.db.read(lambda c: c.set_trace_callback(None)))
+    return len(ran)
+
+
 def _queue_tick(client) -> list[str]:
     """One pass of the start queue (`kraft.start_queue.tick`); the ids it started."""
     from functools import partial

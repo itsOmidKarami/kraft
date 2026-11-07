@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from support.api import _orchestrator_db, _paused, _seed_session
+from support.api import _orchestrator_db, _paused, _seed_session, _statements
 
-from api.test_lifecycle_actions import _statements
 from kraft import store
 
 

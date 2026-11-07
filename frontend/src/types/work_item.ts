@@ -306,8 +306,9 @@ export interface WorkItem {
   gate_artifact?: string | null;
   /** A parent's children by state; null when it has none. */
   slices?: SliceSummary | null;
-  /** Only on a parent's detail: its children, slice order. */
-  children?: SliceChild[];
+  /** A parent's children, slice order, on its detail and on its list row; null
+   *  for an item with none. */
+  children?: SliceChild[] | null;
   /** Only on a child's detail: the parent it belongs to and its slice. */
   parent_id?: string | null;
   slice_key?: number | null;

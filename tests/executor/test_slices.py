@@ -94,12 +94,18 @@ def _children(it):
     return it.database.read(lambda c: store.children_of(c, it.id))
 
 
-async def test_a_group_with_two_slices_files_two_children_and_waits(item_on, planned):
+async def test_a_group_with_two_slices_files_two_children_and_waits(item_on, planned, monkeypatch):
+    async def no_members(*args, **kwargs):  # the fixture repo holds no submodule to check out
+        return None
+
+    monkeypatch.setattr("kraft.builtins._setup_submodules", no_members)
     it = await _item(item_on, planned)
     overrides = json.dumps({"implementation": {"model": "opus"}})
     await it.database.write(
         lambda c: c.execute(
-            "UPDATE work_items SET agent_overrides = ? WHERE id = ?", (overrides, it.id)
+            "UPDATE work_items SET agent_overrides = ?, submodules = ?, root_merge_policy = ? "
+            "WHERE id = ?",
+            (overrides, json.dumps(["libs/a"]), "bump", it.id),
         )
     )
 
@@ -115,6 +121,9 @@ async def test_a_group_with_two_slices_files_two_children_and_waits(item_on, pla
         assert {a["kind"] for a in json.loads(child["attachments"])} == {"spec", "plan"}
         assert child["title"].startswith("t · slice ")
         assert child["agent_overrides"] == overrides  # inherited, frozen
+        # The cross-repo paths it was filed with, carried to the child as they stand.
+        assert json.loads(child["submodules"]) == ["libs/a"]
+        assert child["root_merge_policy"] == "bump"
         chain = json.loads(child["materialized_chain"])
         assert [n["id"] for n in chain["chain"]["nodes"]] == ["implementation", "verification"]
     state = it.database.read(lambda c: store.group_state(c, it.id))

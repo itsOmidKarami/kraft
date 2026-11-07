@@ -76,28 +76,40 @@ def test_a_revised_spec_replaces_the_snapshot_and_keeps_the_plan(client, repo):
     assert changed == [{"from": ["plan", "spec"], "to": ["plan", "spec"]}]
 
 
-@pytest.mark.parametrize("door", ["intake", "set-attachments"])
+def _refused_at_intake(client, repo, bad):
+    """The response to filing with `bad`, and what the refusal left behind."""
+    r = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "attachments": [{"kind": "plan", "path": bad}]},
+    )
+    return r, client.get("/api/work-items").json()["items"]
+
+
+def _refused_at_set_attachments(client, repo, bad):
+    wid = _file(client, repo)
+    r = client.patch(f"/api/work-items/{wid}", json={"attachments": {"plan": bad}})
+    return r, _item(client, wid)["attachments"]
+
+
+@pytest.mark.parametrize(
+    "door",
+    [
+        pytest.param(_refused_at_intake, id="intake"),
+        pytest.param(_refused_at_set_attachments, id="set-attachments"),
+    ],
+)
 def test_a_plan_with_a_refused_slices_section_is_refused(client, repo, door):
     bad = _doc(
         repo,
         "plans/bad.md",
         "## Slices\n\n- **Slice 1: A.** Task 1.\n- **Slice 2: B.** Task 1.\n\n### Task 1: t\n",
     )
-    if door == "intake":
-        r = client.post(
-            "/api/work-items",
-            json={"title": "t", "repo": str(repo), "attachments": [{"kind": "plan", "path": bad}]},
-        )
-        assert r.status_code == 422, r.text
-        assert "two slices" in r.text
-        return
-    wid = _file(client, repo)
 
-    r = client.patch(f"/api/work-items/{wid}", json={"attachments": {"plan": bad}})
+    r, left = door(client, repo, bad)
 
     assert r.status_code == 422, r.text
     assert "two slices" in r.text
-    assert _item(client, wid)["attachments"] == []
+    assert left == []
 
 
 def test_adding_a_spec_trims_its_gate_and_dropping_it_restores_the_gate(client, repo):

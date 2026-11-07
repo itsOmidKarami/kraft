@@ -458,9 +458,10 @@ async def list_work_items(request: Request):
             },
         }
         # A slice's children are not board rows: each parent row opens into them,
-        # so they ride the parent's row, with their statuses as a summary. Only
-        # the listed parents' children of their current generation (as
-        # `store.children_of` picks them), and their cost in one more query.
+        # so they ride the parent's row, with their statuses as a summary. The
+        # children of every parent the list's own filters (abandoned, archived)
+        # let through, not only the page's rows, of their current generation (as
+        # `store.children_of` picks them); their cost is one more query.
         kids = c.execute(
             "SELECT k.* FROM work_items k JOIN work_items p ON p.id = k.parent_id "
             "WHERE (? OR p.status != ?) AND (p.archived_at IS NOT NULL) = ? "
