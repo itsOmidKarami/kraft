@@ -473,17 +473,20 @@ async def _conflict(
     steps = _steps(child, docs, head, branch)
     if node.on_conflict:
         stopped, ok = await _handle(db, run_dirs, row, node, worktree, what + steps, launch, policy)
-        if stopped is not None:
-            return stopped
-        wrong = _not_joined(worktree, branch, at, range_) if ok else "it reported a failure"
-        if wrong is None:
-            return await _mark_joined(db, wid, key, worktree)
-        # Whatever it left, the person starts from where the join stopped.
+        wrong = None
+        if stopped is None:
+            wrong = _not_joined(worktree, branch, at, range_) if ok else "it reported a failure"
+            if wrong is None:
+                return await _mark_joined(db, wid, key, worktree)
+        # Whatever it left, a person (or a resume after a pause) starts from
+        # where the join stopped: the handed-off check never resets.
         try:
             put_back(worktree, branch, at)
         except (UnsafeWorktree, ForgeError) as exc:
             await _stop(db, wid, node, f"could not put the parent back: {exc}", StopKind.CHECKOUT)
             return "needs_human"
+        if stopped is not None:
+            return stopped
         detail = f"the conflict handler did not join it: {wrong}; {detail}"
     await _stop(db, wid, node, what + steps + f" ({detail[:300]})", StopKind.CONFLICT)
     return "needs_human"

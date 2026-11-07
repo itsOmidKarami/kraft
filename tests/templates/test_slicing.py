@@ -109,12 +109,20 @@ def _seeded_home(tmp_path, monkeypatch):
     return TemplateLibrary.from_yaml_dir(live, addons=load.installed(live))
 
 
+def _home_with_its_own(tmp_path, monkeypatch):
+    """Both the local library and the built-in add-on have one: the local wins."""
+    library = _seeded_home(tmp_path, monkeypatch)
+    task = {"kind": "agent", "harness": "claude", "prompt": "resolve it"}
+    return library.with_library({"tasks": {"resolve_join_conflict": task}}, Path("library.yaml"))
+
+
 @pytest.mark.parametrize(
     ("library", "prompt"),
     [
         pytest.param(lambda *_: LIBRARY, None, id="none-in-the-library"),
         pytest.param(_own_library, "resolve it", id="its-own"),
         pytest.param(_seeded_home, "Replay the slice", id="the-built-in-add-ons"),
+        pytest.param(_home_with_its_own, "resolve it", id="its-own-before-the-built-in"),
     ],
 )
 def test_the_group_takes_the_librarys_join_conflict_handler(tmp_path, monkeypatch, library, prompt):

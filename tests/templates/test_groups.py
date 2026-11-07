@@ -88,6 +88,12 @@ def test_a_stored_chain_may_hold_a_group():
             "on_conflict cannot be read_only",
             id="read-only-join-conflict-handler",
         ),
+        pytest.param(
+            exec_node("implementation", tasks=[sub()]),
+            {"on_conflict": {"steps": [{"id": "s", "tasks": [sub()], "runner": "local"}]}},
+            "sets runner",
+            id="runner-placed-join-conflict-handler",
+        ),
     ],
 )
 def test_a_group_body_refuses(body, group, says):

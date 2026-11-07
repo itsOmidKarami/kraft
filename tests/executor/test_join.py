@@ -367,6 +367,21 @@ async def test_a_conflict_the_handler_does_not_join_stops_for_a_person(
     assert not (gitdir / "CHERRY_PICK_HEAD").exists()
 
 
+async def test_a_handler_that_pauses_mid_pick_leaves_the_parent_put_back(family, monkeypatch):
+    """A pause (or a rate limit, a cap) ends the handler's turn: the walk stops
+    as it says, with the parent back where the join stopped, not mid-pick."""
+    await _conflicting(family)
+    _handler(monkeypatch, family, _start_the_pick, "paused")
+
+    assert await family.join(HANDLED) == "paused"
+
+    assert family.group_state().slice_phase == "handed_off"
+    assert family.subjects() == ["Task 1.0: work"]
+    assert git(family.worktree, "status", "--porcelain") == ""
+    gitdir = Path(git(family.worktree, "rev-parse", "--absolute-git-dir"))
+    assert not (gitdir / "CHERRY_PICK_HEAD").exists()
+
+
 async def test_a_handed_off_slice_that_is_still_missing_stops_again(family):
     await _conflicting(family)
     await family.join()

@@ -1348,7 +1348,6 @@ class GroupNode(BaseModel):
     @model_validator(mode="after")
     def _conflict_handler_writes(self) -> Self:
         _refuse_read_only("on_conflict", self.on_conflict)
-        _refuse_inner_runner("on_conflict", self.on_conflict)
         return self
 
     @model_validator(mode="after")
