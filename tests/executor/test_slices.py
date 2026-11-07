@@ -208,6 +208,7 @@ async def test_a_group_runs_unforked_when_the_plan_has_no_split(item_on, planned
     assert "no ## Slices" in event["payload"]["reason"]
     assert [e["payload"]["node_id"] for e in it.events("node_completed")] == [
         "slices.implementation",
+        "slices",
         "after",
     ]
     assert it.database.read(lambda c: store.group_state(c, it.id)).phase == "joined"
@@ -228,6 +229,7 @@ async def test_a_rejection_after_the_join_runs_unforked_in_the_parent(item_on, p
     assert _children(it) == []
     assert [e["payload"]["node_id"] for e in it.events("node_completed")] == [
         "slices.implementation",
+        "slices",
         "after",
     ]
 
@@ -264,3 +266,30 @@ async def test_a_completed_child_pins_its_head(item_on, repo):
     assert await _walk(it) == "completed"
 
     assert it.row()["pinned_head"] == git(it.worktree, "rev-parse", "HEAD")
+
+
+async def test_the_work_brief_names_what_each_slice_skipped(item_on, repo):
+    from kraft.executor import prompts
+    from kraft.templates.models import AgentTask
+
+    it = await item_on([_body("implementation")])
+    state = store.GroupState(
+        group="slices", phase="joined", generation=1, skipped={2: ["skipped verification"]}
+    )
+    await it.database.write(lambda c: store.set_group_state(c, it.id, state))
+    brief = AgentTask.model_validate(
+        {
+            "id": "w",
+            "kind": "agent",
+            "harness": "claude",
+            "prompt": "p",
+            "produces": "work_brief",
+            "skill": "kraft:work-brief",
+        }
+    )
+    other = brief.model_copy(update={"produces": "spec"})
+
+    note = prompts.slice_skips_note(brief, it.row(), it.database)
+
+    assert "slice 2: skipped verification" in note
+    assert prompts.slice_skips_note(other, it.row(), it.database) == ""

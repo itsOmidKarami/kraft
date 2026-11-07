@@ -49,7 +49,16 @@ def children_ended(db, parent_id: str, state: GroupState) -> bool:
     return bool(children) and all(c["status"] in ENDED for c in children)
 
 
-async def walk_group(
+async def walk_group(db, run_dirs, work_item_id, node, row, worktree, **kw) -> str:
+    """`_walk_group`, and the group itself completed once its nodes have: a
+    rejection back to it then reads as rework (`progress.is_rework`)."""
+    result = await _walk_group(db, run_dirs, work_item_id, node, row, worktree, **kw)
+    if result == DONE:
+        await db.write(lambda c: store.complete_node(c, work_item_id, node.id))
+    return result
+
+
+async def _walk_group(
     db,
     run_dirs,
     work_item_id: str,

@@ -418,3 +418,42 @@ async def test_for_detail_follows_the_implementing_node_past_its_run(
     assert [t.state for t in p.tasks] == states
     assert (p.current, p.total) == (current, 3)
     assert [t.sha for t in p.tasks] == [named, None, None]
+
+
+def test_the_implementing_node_is_found_inside_a_group():
+    from support.harness import v1_resolved
+
+    chain = v1_resolved(
+        [
+            {
+                "id": "slices",
+                "kind": "group",
+                "nodes": [
+                    {
+                        "id": "implementation",
+                        "kind": "exec",
+                        "tasks": [
+                            {"id": "run", "kind": "agent", "harness": "claude", "prompt": "p"}
+                        ],
+                    }
+                ],
+            }
+        ],
+        frozen=True,
+    )
+
+    assert progress.implementing_nodes(chain) == ["slices.implementation"]
+
+
+def test_a_rejection_back_to_a_group_is_rework():
+    """A forked parent never ran the implementing node itself: the group's own
+    completion and re-entry stand for it."""
+    evs = [
+        _ev("node_started", "slices"),
+        _ev("node_completed", "slices"),
+        _ev("node_started", "work_brief"),
+        _ev("gate_rejected"),
+        _ev("node_started", "slices"),
+        _ev("node_started", "slices.implementation"),
+    ]
+    assert progress.is_rework(evs, "slices.implementation")

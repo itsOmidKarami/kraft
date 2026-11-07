@@ -158,9 +158,11 @@ def implementing_nodes(chain) -> list[str]:
     library this is `implementation` alone."""
     from kraft.templates.models import AgentTask
 
+    # A group's body is looked into: its nodes are `group.node`.
     return [
         node.id
-        for node in chain.nodes
+        for top in chain.nodes
+        for node in (*top.body, top)
         if any(
             isinstance(t.task, AgentTask) and t.task.skill is None
             for step in node.steps
@@ -289,11 +291,14 @@ def is_rework(evs: list[dict], node_id: str) -> bool:
     plan. A rejection that re-entered at the plan node or earlier is not
     rework: the plan may have been rewritten, and this run follows it again.
     """
+    # Inside a group the node stands at the group: a forked parent never ran it,
+    # so the group's own completion and re-entry stand for it.
+    ids = {node_id, node_id.rpartition(".")[0]} - {""}
     done = max(
         (
             i
             for i, e in enumerate(evs)
-            if e["type"] == ChainEvent.NODE_COMPLETED and e["payload"].get("node_id") == node_id
+            if e["type"] == ChainEvent.NODE_COMPLETED and e["payload"].get("node_id") in ids
         ),
         default=None,
     )
@@ -312,7 +317,7 @@ def is_rework(evs: list[dict], node_id: str) -> bool:
         ),
         None,
     )
-    return first == node_id
+    return first in ids
 
 
 def rework_run(db, row) -> bool:

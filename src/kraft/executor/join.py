@@ -39,7 +39,7 @@ from kraft.executor import stops
 from kraft.executor.context import LaunchContext
 from kraft.store.slices import GroupState
 from kraft.templates.models import ResolvedNode
-from kraft.vocab import ENDED, StopKind, WorkItemEvent, WorkItemStatus
+from kraft.vocab import ENDED, ChainEvent, StopKind, WorkItemEvent, WorkItemStatus
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +213,7 @@ async def join(
         stopped = await _replay_one(db, run_dirs, row, worktree, node, state, child, branch, launch)
         if stopped is not None:
             return stopped
+        await db.write(lambda c, ch=child: _record_notes(c, wid, ch))
         done.append(key)
     state = db.read(lambda c: store.group_state(c, wid))
     await _finish(db, run_dirs, wid, state, children)
@@ -233,6 +234,21 @@ async def join(
 
 def _item(conn, wid: str):
     return conn.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+
+
+def _record_notes(conn, wid: str, child: dict) -> None:
+    """What the child skipped or had completed by hand, for the work brief."""
+    notes = []
+    for e in events.read_after(conn, 0, child["id"]):
+        if e["type"] == ChainEvent.NODE_SKIPPED:
+            notes.append(f"skipped {e['payload'].get('node_id') or e['payload'].get('path')}")
+        elif e["type"] == WorkItemEvent.MANUALLY_COMPLETED:
+            notes.append("completed by hand, untested")
+    if not notes:
+        return
+    state = store.group_state(conn, wid)
+    state.skipped[child["slice_key"]] = list(dict.fromkeys(notes))
+    store.set_group_state(conn, wid, state)
 
 
 def _record_dropped(conn, wid: str, child: dict) -> None:

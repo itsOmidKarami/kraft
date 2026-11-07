@@ -588,6 +588,28 @@ def progress_note(
     return note.format(total=len(tasks)) + child if tasks else ""
 
 
+def slice_skips_note(task: AgentTask, work_item_row, db) -> str:
+    """For the task writing the work brief: what each slice skipped, was completed
+    by hand without its tests, or dropped, so a person at the review knows which
+    code was never tested in its slice."""
+    if getattr(task, "produces", None) != "work_brief":
+        return ""
+    state = db.read(lambda c: _store.group_state(c, work_item_row["id"]))
+    if state is None or not state.skipped:
+        return ""
+    lines = [
+        f"- slice {key}: {', '.join(notes)}"
+        for key, notes in sorted(state.skipped.items())
+        if notes
+    ]
+    if not lines:
+        return ""
+    return (
+        "\n\nSome slices of this item were not fully tested before they were joined. State "
+        "this plainly in the brief, per slice:\n" + "\n".join(lines)
+    )
+
+
 #: A slice's child builds its own tasks only (`slices_docs`: the plan it reads
 #: has every other task tagged `[DONE]`).
 _SLICE_CHILD_NOTE = (

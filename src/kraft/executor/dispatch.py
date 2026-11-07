@@ -1925,6 +1925,7 @@ async def _dispatch_task_in(
             + (prompts.METHOD_NOTE if method_is_own else "")
             + prompts.scope_note(t, launch.repo_entry if launch else None)
             + prompts.progress_note(t, work_item_row, worktree, db, sandbox, run_dirs=run_dirs)
+            + prompts.slice_skips_note(t, work_item_row, db)
             + prompts.review_threads_note(t, work_item_row, db, note, sandbox)
         )
     ) + prompts.BEAD_NOTE
