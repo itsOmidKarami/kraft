@@ -315,3 +315,54 @@ describe("Api.streamLog", () => {
     expect(failures).toMatchObject([{ method: "GET", ...want }]);
   });
 });
+
+describe("Api with a session", () => {
+  it("a session sends the cookie and never a bearer", async () => {
+    const f = fakeFetch(200, { items: [], cursor: 1 });
+    const api = new Api("https://h:443", { session: "S" }, f as any);
+    await api.listItems();
+    const init = f.mock.calls[0][1] as RequestInit;
+    expect(init.headers).toMatchObject({ Cookie: "kraft_session=S" });
+    expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
+    expect(api.headers()).toEqual({ Cookie: "kraft_session=S" });
+    expect(api.remote).toBe(true);
+  });
+
+  it("a token is not remote", () => {
+    expect(new Api("http://h:1", "tok").remote).toBe(false);
+    expect(new Api("http://h:1", undefined).remote).toBe(false);
+  });
+
+  it.each([
+    ["a request", (a: Api) => a.listItems()],
+    ["the log stream", async (a: Api) => { for await (const _ of a.streamLog("W", "s", new AbortController().signal)) { /* none */ } }],
+  ])("never follows a redirect: %s", async (_id, call) => {
+    const f = fakeFetch(302, {});
+    await call(new Api("http://h:1", { session: "S" }, f as any)).catch(() => {});
+    expect((f.mock.calls[0][1] as RequestInit).redirect).toBe("manual");
+  });
+
+  it("a 401 on a session tells onSessionEnded once and still throws", async () => {
+    const api = new Api("http://h:1", { session: "S" }, fakeFetch(401, { detail: "Not signed in" }) as any);
+    const ended = vi.fn(); api.onSessionEnded = ended;
+    await expect(api.pause("W-1")).rejects.toMatchObject({ status: 401 });
+    expect(ended).toHaveBeenCalledTimes(1);
+  });
+
+  it("a 401 on a token does not call onSessionEnded", async () => {
+    const api = new Api("http://h:1", "tok", fakeFetch(401, { detail: "x" }) as any);
+    const ended = vi.fn(); api.onSessionEnded = ended;
+    await expect(api.pause("W-1")).rejects.toBeInstanceOf(ApiError);
+    expect(ended).not.toHaveBeenCalled();
+  });
+
+  it("a certificate failure says the certificate is not trusted and names NODE_EXTRA_CA_CERTS", async () => {
+    const e = Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("x"), { code: "SELF_SIGNED_CERT_IN_CHAIN" }) });
+    const api = new Api("https://h:443", { session: "S" }, (async () => { throw e; }) as any);
+    await expect(api.health()).rejects.toMatchObject({ status: 0, detail: expect.stringContaining("NODE_EXTRA_CA_CERTS") });
+  });
+
+  it("https maps to wss", () => {
+    expect(new Api("https://h:443", undefined).wsUrl(1)).toBe("wss://h:443/api/ws/events?after_seq=1");
+  });
+});

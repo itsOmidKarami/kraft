@@ -5,6 +5,7 @@ import type {
 import type { DocumentDetail, SearchResponse, WorkItemDiff } from "../../../frontend/src/types/documents";
 import type { ItemAction } from "../../../frontend/src/types/vocab.generated";
 import { parseSse } from "./logStream";
+import { tlsMessage } from "./session";
 
 export type {
   BulkResult, CommentReview, DocumentDetail, Finding, FixTarget, GatelessChanges, ItemAction, Repo, ReviewComment, ReviewOutcome, ReviewThread, Suggestion, TemplateSummary,
@@ -74,19 +75,32 @@ export const BULK_LIMIT = 200;
  *  batch of 200 could outlast the slow timeout. */
 export const ARCHIVE_BATCH = 25;
 
+/** What the extension proves itself with: the local bearer token, a signed-in session, or nothing. */
+export type Credential = string | undefined | { session: string };
+
 export class Api {
   /** Every failed call, just before it throws: the extension logs them. */
   onError?: (f: ApiFailure) => void;
+  /** Called on each 401 to a session: the server ended it (signed out, or the password changed). */
+  onSessionEnded?: () => void;
 
   constructor(
     readonly base: string,
-    private token: string | undefined,
+    private credential: Credential,
     private fetchImpl: typeof fetch = fetch,
     private timeouts: Timeouts = { fast: REQUEST_TIMEOUT, slow: SLOW_TIMEOUT },
   ) {}
 
+  /** True when a session is in use: the server is another machine's, signed in to with a password. */
+  get remote(): boolean {
+    return typeof this.credential === "object";
+  }
+
+  /** A session sends its cookie and never the bearer token. */
   headers(): Record<string, string> {
-    return this.token ? { Authorization: `Bearer ${this.token}` } : {};
+    const c = this.credential;
+    if (typeof c === "object") return { Cookie: `kraft_session=${c.session}` };
+    return c ? { Authorization: `Bearer ${c}` } : {};
   }
 
   wsUrl(afterSeq: number): string {
@@ -100,6 +114,7 @@ export class Api {
     try {
       res = await this.fetchImpl(`${this.base}/api${path}`, {
         method,
+        redirect: "manual",
         headers: { ...this.headers(), ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(timeout),
@@ -108,7 +123,7 @@ export class Api {
     } catch (e) {
       const detail = (e as Error).name === "TimeoutError"
         ? `Kraft did not answer within ${timeout / 1000}s`
-        : `Kraft is not reachable at ${this.base}: ${(e as Error).message}`;
+        : tlsMessage(e) ?? `Kraft is not reachable at ${this.base}: ${(e as Error).message}`;
       throw this.fail(method, path, 0, detail);
     }
     // A proxy's HTML 502 or a plain-text 500 is not JSON: it is still Kraft's failure, as its text.
@@ -132,10 +147,10 @@ export class Api {
     const why = (e: unknown) => (e as Error).message;
     let res: Response;
     try {
-      res = await this.fetchImpl(`${this.base}/api${path}`, { headers: this.headers(), signal });
+      res = await this.fetchImpl(`${this.base}/api${path}`, { headers: this.headers(), redirect: "manual", signal });
     } catch (e) {
       if (signal.aborted) return;
-      throw this.fail("GET", path, 0, `Kraft is not reachable at ${this.base}: ${why(e)}`);
+      throw this.fail("GET", path, 0, tlsMessage(e) ?? `Kraft is not reachable at ${this.base}: ${why(e)}`);
     }
     if (!res.ok) {
       const text = await res.text().catch(() => "");
@@ -180,6 +195,7 @@ export class Api {
 
   private fail(method: string, path: string, status: number, detail: string): ApiError {
     this.onError?.({ method, path, status, detail });
+    if (status === 401 && this.remote) this.onSessionEnded?.();
     return new ApiError(status, detail);
   }
 
