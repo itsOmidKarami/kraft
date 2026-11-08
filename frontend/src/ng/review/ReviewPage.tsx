@@ -96,14 +96,15 @@ function Review({ item, version, reload }: { item: ItemDetail; version: string; 
   };
   const folded = new Set([...collapsed, ...[...byMark].filter(viewed.isViewed)]);
   const all = compare.state === "ready" ? compare.data.files : [];
-  const files = byNodes(all, place.nodes);
+  // In the tree's order, so the diffs read top to bottom as the tree lists them.
+  const files = inTreeOrder(tree(byNodes(all, place.nodes)));
   const diffText = compare.state === "ready" ? compare.data.diff : "";
   const parsed = useMemo(() => new Map(parsePatch(diffText).map((f) => [f.path, f])), [diffText]);
   const threadList = threads.state === "ready" ? threads.data : NO_THREADS;
   const { patch, expand } = useExpanded(item.id, place.from, place.to, !diff.prefs.show_whitespace, parsed, threadList);
   const notShown = new Set(compare.state === "ready" && compare.data.truncated ? all.filter((f) => !patch.has(f.path)).map((f) => f.path) : []);
   // With no file chosen, the tree's first: what one-file mode shows.
-  const current = place.file && files.some((f) => f.path === place.file) ? place.file : inTreeOrder(tree(files))[0]?.path ?? null;
+  const current = place.file && files.some((f) => f.path === place.file) ? place.file : files[0]?.path ?? null;
   const comments = useComments({
     itemId: item.id,
     compare: compare.state === "ready" ? compare.data : null,

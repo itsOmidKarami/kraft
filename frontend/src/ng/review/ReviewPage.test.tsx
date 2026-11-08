@@ -37,6 +37,25 @@ describe("ReviewPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Compare from base" }));
     expect(search).toBe("?from=base");
   });
+
+  it("draws the diffs in the file tree's order, folders before a top-level file", async () => {
+    vi.mocked(api.getTheme).mockResolvedValue({ diff: { ...DEFAULT_PREFS, one_file_at_a_time: false }, code_scheme: { light: "auto", dark: "auto" } } as never);
+    const file = (path: string) => ({ path, insertions: 1, deletions: 0, touched_by: [], viewed: false });
+    const patch = (path: string) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1,2 @@\n x\n+y\n`;
+    // The server's path order: "CLAUDE.md" sorts before "docs/".
+    vi.spyOn(http, "request").mockImplementation(async (p) =>
+      String(p).includes("/compare")
+        ? { status: 200, body: { from: { target: "base", sha: "b" }, to: { target: "latest", sha: null }, rebased: false, files: [file("CLAUDE.md"), file("docs/a.md")], groups: [], diff: patch("CLAUDE.md") + patch("docs/a.md"), untracked: [], truncated: false, ignore_whitespace: false, diff_max_bytes: 100000 } }
+        : { status: 200, body: [] },
+    );
+    render(
+      <MemoryRouter initialEntries={["/work-items/w1/review?from=base"]}>
+        <Routes><Route path="/work-items/:id/review" element={<ReviewPage />} /></Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(document.querySelectorAll(".rv-file")).toHaveLength(2));
+    expect([...document.querySelectorAll<HTMLElement>(".rv-file")].map((f) => f.dataset.file)).toEqual(["docs/a.md", "CLAUDE.md"]);
+  });
 });
 
 describe("threads on files not drawn", () => {
