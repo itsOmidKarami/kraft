@@ -49,6 +49,7 @@
           "checkout_switched",
           "ci_infra_exhausted",
           "ci_not_configured",
+          "ci_rerun_requested",
           "ci_run_abandoned",
           "escalation_message",
           "external_wait_ended",

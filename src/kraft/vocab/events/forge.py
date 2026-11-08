@@ -25,6 +25,9 @@ class ForgeEvent(StrEnum):
     EXTERNAL_WAIT_ENDED = "external_wait_ended"
     CI_INFRA_EXHAUSTED = "ci_infra_exhausted"
     CI_RUN_ABANDONED = "ci_run_abandoned"
+    #: A fix-loop repair asked Kraft to re-run the CI jobs that failed outside
+    #: the code (`kraft item rerun-ci`), so the round counts as a change.
+    CI_RERUN_REQUESTED = "ci_rerun_requested"
     CI_NOT_CONFIGURED = "ci_not_configured"
     #: The merge commit had no CI run at all once the grace was up, so the
     #: post-merge wait passed without checking anything (Kraft-rbjo3).
@@ -65,6 +68,7 @@ FORGE_EVENT_TRAITS = total(
         ForgeEvent.EXTERNAL_WAIT_ENDED: _PLAIN,
         ForgeEvent.CI_INFRA_EXHAUSTED: _PLAIN,
         ForgeEvent.CI_RUN_ABANDONED: _PLAIN,
+        ForgeEvent.CI_RERUN_REQUESTED: _PLAIN,
         ForgeEvent.CI_NOT_CONFIGURED: _PLAIN,
         ForgeEvent.POST_MERGE_CI_ABSENT: _PLAIN,
         ForgeEvent.POST_MERGE_CI_MOVED: _PLAIN,
