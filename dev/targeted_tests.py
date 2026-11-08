@@ -69,6 +69,9 @@ BLIND: tuple[tuple[str, bool], ...] = (
 EDIT_TESTS: tuple[tuple[str, tuple[str, ...]], ...] = (
     # The console's stylesheet: read only when the Textual app starts.
     ("src/kraft/console/kraft.tcss", ("tests/console", "tests/test_theme_contrast.py")),
+    # The sandbox's `kraft` shim: only test_shim runs it. The backends mount its
+    # directory (`shim.HOST_DIR`) and never read the script.
+    ("src/kraft/worker/bin/kraft", ("tests/worker/test_shim.py",)),
     # The plugin's skills: copied by `kraft admin init`, and read for their
     # frontmatter, wording and leaks.
     (

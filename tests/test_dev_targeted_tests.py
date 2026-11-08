@@ -196,6 +196,7 @@ def test_read_changed_without_origin_main_is_unknown_not_head(tt, tmp_path):
 
 
 _TCSS = "src/kraft/console/kraft.tcss"
+_SHIM = "src/kraft/worker/bin/kraft"
 _POLICY = "config/policy.yaml"
 _SKILL = "plugins/kraft/skills/board/SKILL.md"
 _METHOD = "src/kraft/skills/plan/SKILL.md"
@@ -223,6 +224,7 @@ _METHOD = "src/kraft/skills/plan/SKILL.md"
         (_TCSS, "Screen {}\n", "Screen { color: red; }\n", "edit"),
         (_TCSS, None, "Screen {}\n", None),
         (_TCSS, "Screen {}\n", None, None),
+        (_SHIM, "#!/bin/sh\n", "#!/bin/sh\nset -u\n", ("tests/worker/test_shim.py",)),
         (_SKILL, "---\nname: board\n---\n", "---\nname: board\n---\nMore.\n", "edit"),
         (_SKILL, None, "---\nname: board\n---\n", None),
         (_METHOD, "---\nname: plan\n---\n", "---\nname: plan\n---\nMore.\n", "edit"),
@@ -244,6 +246,7 @@ _METHOD = "src/kraft/skills/plan/SKILL.md"
         "mapped-file-edited",
         "mapped-file-added",
         "mapped-file-deleted",
+        "sandbox-shim-edited",
         "plugin-skill-edited",
         "plugin-skill-added",
         "kraft-skill-edited",
