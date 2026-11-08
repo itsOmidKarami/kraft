@@ -14,7 +14,10 @@ import { registerDocs } from "./docs";
 import { registerPalette } from "./palette";
 import { registerSearch } from "./search";
 import { connectOffered, connectRefusal, fileRefusal } from "./core/fileWork";
-import { connectionFor, locations, readToken, type Locations } from "./core/connection";
+import { baseUrl, connectionFor, locations, readToken, type Locations } from "./core/connection";
+import { normalizeServerUrl } from "./core/serverUrl";
+import { SessionStore } from "./core/session";
+import { registerSignIn } from "./signIn";
 import { Store, wsSocket } from "./core/store";
 import { ThreadCache } from "./core/threadCache";
 import { hasDrafts } from "./core/threads";
@@ -53,15 +56,38 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   initLog(context);
   const loc = locations(process.env, homedir());
   const cfg = vscode.workspace.getConfiguration("kraft");
-  const { base, token } = connectionFor({
-    setting: cfg.get<string>("url"),
+  const sessions = new SessionStore(context.secrets);
+  const setting = cfg.get<string>("url");
+  const accessYaml = read(join(loc.templatesDir, "access.yaml"));
+  // Read before the connection is decided: the lookup there is synchronous.
+  const named = normalizeServerUrl(baseUrl(setting, process.env, accessYaml));
+  const sessionUrl = named.ok ? named.url : undefined;
+  const stored = sessionUrl ? await sessions.get(sessionUrl) : undefined;
+  const { base, token, session, signInOffered } = connectionFor({
+    setting,
     globalSetting: cfg.inspect<string>("url")?.globalValue,
     env: process.env,
-    accessYaml: read(join(loc.templatesDir, "access.yaml")),
+    accessYaml,
     token: readToken(loc.runDir),
-    session: () => undefined,
+    session: () => stored,
   });
-  const api = new Api(base, token);
+  const api = new Api(base, session ? { session } : token);
+  // The server ended the session (a 401 to an authenticated call): forget it once
+  // and offer to sign in again. Only that sign-in brings it back, and it reloads the window.
+  let signedOut = false;
+  let setStatusNow = () => {};
+  const sessionEnded = () => {
+    if (!session || !sessionUrl || signedOut) return;
+    signedOut = true;
+    void sessions.deleteIf(sessionUrl, session).catch((e) => log.warn(`could not forget the ended session: ${(e as Error).message}`));
+    log.warn(`the server ended the session for ${sessionUrl}`);
+    setStatusNow();
+    const again = "Sign in again";
+    void vscode.window.showWarningMessage("The server ended this session.", again).then((pick) => {
+      if (pick === again) void vscode.commands.executeCommand("kraft.signIn");
+    });
+  };
+  api.onSessionEnded = sessionEnded;
   api.onError = (f) => {
     // The store logs a failed list call itself, once per distinct failure, not on every retry.
     // The Archived group's read is not that call: its failure is logged here, and shown as a row.
@@ -73,7 +99,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
     if (f.status === 404 || f.status === 409 || f.path === "/budget/today" || (f.status === 422 && f.path.startsWith("/search?"))) log.info(line);
     else log.error(line);
   };
-  const store = new Store(api, wsSocket, (level, msg) => log[level](msg));
+  const store = new Store(api, wsSocket, (level, msg) => log[level](msg), session
+    ? { confirmSessionEnded: () => api.repos().then(() => false, (e: { status?: number }) => e?.status === 401), onSessionEnded: sessionEnded }
+    : {});
   const own = (context.extension.packageJSON as { version: string }).version;
   let trusted = vscode.workspace.isTrusted;
   let version: string | null = null;
@@ -98,10 +126,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
     connected = now;
     void vscode.commands.executeCommand("setContext", "kraft.connected", connected);
     renderText();
-    status.tooltip = statusTooltip(connected, tooltip(state()), store.lastError, today);
+    status.tooltip = statusTooltip(connected, tooltip(state()), store.lastError, today, { signedIn: signedOut, signInOffered });
     status.command = "kraft.statusMenu";
     status.show();
   };
+  setStatusNow = () => setStatus(store.connected);
   const applyReadOnly = (now = connected) => {
     void vscode.commands.executeCommand("setContext", "kraft.readOnly", refusal(state()) !== null);
     setStatus(now);
@@ -163,25 +192,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   const { reveal, inScope } = registerBoard(context, store, api, () => refusal(state()), include, scope, {
     has: (id) => hasDrafts(cache.get(id)),
     onChange: (cb) => cache.onChange(cb),
-  }, () => connectOffered(api.base, repoScope.unconnected()));
+  }, () => connectOffered(api.base, repoScope.unconnected()), () => signedOut);
   registerConnectRepo(context, api, repoScope, () => connectRefusal(state(), api.base));
   registerWorkerLog(context, store, api, inScope);
   registerDocs(context, store, api, inScope);
   registerPalette(context, inScope, reveal);
   registerSearch(context, api, reveal);
   registerOpenConfig(context, loc.templatesDir);
+  registerSignIn(context, sessions, () => refusal(state()));
   registerFileWork(context, { api, store, reveal, refusal: () => fileRefusal(state(), api.base), runDir: () => runDir, scope: scopeDeps });
   context.subscriptions.push(
     status,
     { dispose: () => store.stop() },
     vscode.commands.registerCommand("kraft.showLog", () => log.show()),
     vscode.commands.registerCommand("kraft.statusMenu", async () => {
-      const pick = await vscode.window.showQuickPick(statusMenu(store.connected), { placeHolder: "Kraft" });
+      const pick = await vscode.window.showQuickPick(statusMenu(store.connected, { remote: api.remote }), { placeHolder: "Kraft" });
       switch (pick?.choice) {
         case "log": return log.show();
         case "web": return void vscode.env.openExternal(vscode.Uri.parse(api.base));
         // Guarded in board.ts: Restricted Mode refuses it.
         case "start": return void vscode.commands.executeCommand("kraft.startDaemon");
+        case "signIn": return void vscode.commands.executeCommand("kraft.signIn");
         case "retry": return store.retryNow();
       }
     }),

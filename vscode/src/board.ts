@@ -52,6 +52,8 @@ export class Board implements vscode.TreeDataProvider<Node> {
     /** Whether "Connect this repo" applies: a folder's repo is not connected, on a loopback daemon. */
     private unconnected: () => boolean = () => false,
     private listArchived: () => Promise<WorkItem[]> = async () => [],
+    /** Whether the server ended this window's session: the down row then signs in again. */
+    private signedOut: () => boolean = () => false,
   ) {
     // Coalesced: a reconnect preloads every gate item, one answer at a time.
     drafts?.onChange(() => {
@@ -59,6 +61,8 @@ export class Board implements vscode.TreeDataProvider<Node> {
       this.draftsTimer = setTimeout(() => this.changed.fire(), 100);
     });
     store.onChange(() => this.changed.fire());
+    // The down row's wording follows the error.
+    store.onError(() => this.changed.fire());
     store.onConnection((up) => {
       this.changed.fire();
       if (up) void this.loadArchived();
@@ -147,7 +151,7 @@ export class Board implements vscode.TreeDataProvider<Node> {
 
   getTreeItem(node: Node): vscode.TreeItem {
     if (node.kind === "down") {
-      const { label, command, args } = downRow(this.store.lastError);
+      const { label, command, args } = downRow(this.store.lastError, this.signedOut());
       const t = new vscode.TreeItem(label);
       t.iconPath = new vscode.ThemeIcon("debug-disconnect");
       t.command = { command, title: label, arguments: args };
@@ -230,8 +234,9 @@ export function registerBoard(
   scope: Pick<WorkspaceScope, "onChange" | "ready" | "showAll">,
   drafts?: Drafts,
   unconnected?: () => boolean,
+  signedOut?: () => boolean,
 ) {
-  const board = new Board(store, include, scope, drafts, unconnected, async () => (await api.listArchived()).items);
+  const board = new Board(store, include, scope, drafts, unconnected, async () => (await api.listArchived()).items, signedOut);
   const view = vscode.window.createTreeView("kraft.board", { treeDataProvider: board, canSelectMany: true });
   // Every expand reads it again: the cache may be as old as the last connect.
   context.subscriptions.push(board, view.onDidExpandElement((e) => {

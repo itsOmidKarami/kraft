@@ -253,6 +253,11 @@
         "category": "Kraft"
       },
       {
+        "command": "kraft.signIn",
+        "title": "Sign in to a server…",
+        "category": "Kraft"
+      },
+      {
         "command": "kraft.openArtifact",
         "title": "Open Gate Document",
         "category": "Kraft",

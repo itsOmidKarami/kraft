@@ -52,6 +52,11 @@ it("offers Show Log in the palette and keeps the status menu out of it", () => {
   expect(pkg.contributes.menus.commandPalette).toContainEqual({ command: "kraft.statusMenu", when: "false" });
 });
 
+it("offers Sign in to a server in the palette, ungated: it is the way out of 'sign in again'", () => {
+  expect(pkg.contributes.commands).toContainEqual(expect.objectContaining({ command: "kraft.signIn", title: "Sign in to a server…", category: "Kraft" }));
+  expect(pkg.contributes.menus.commandPalette.find((m: { command: string }) => m.command === "kraft.signIn")).toBeUndefined();
+});
+
 it("explains each value of kraft.notifications", () => {
   const { enum: values, enumDescriptions } = pkg.contributes.configuration.properties["kraft.notifications"];
   expect(enumDescriptions).toHaveLength(values.length);
