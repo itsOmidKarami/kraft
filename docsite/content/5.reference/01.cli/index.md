@@ -9,7 +9,8 @@ description: Every kraft verb, grouped by what it does, and found by what you wa
 running server. Verbs live in four groups: `item` acts, `view` reads, `repo`
 manages repositories and their [worktrees](/concepts/vocabulary#worktree), and `admin` runs this machine's
 server. Typing an old flat verb (`kraft list`) prints where it moved.
-`kraft console` opens the [terminal UI](/reference/console).
+`kraft console` opens the [terminal UI](/reference/console); `kraft console --server URL` opens it
+against a Kraft on another machine.
 
 `kraft <group> <verb> --help` prints every flag for one verb. Each group page
 describes its verbs and the flags that change what they do. Wherever a
