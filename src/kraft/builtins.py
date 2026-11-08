@@ -455,6 +455,30 @@ def _submodule_name(worktree: Path, base: str | None, rel: str) -> str | None:
     return None
 
 
+def _made_by_a_killed_run(member_repo: Path, target: Path, branch: str) -> bool:
+    """Whether `target` is already a linked worktree of `member_repo` on
+    `branch`: what a run killed after making this member, before recording it,
+    leaves for the restart to take over (Kraft-g7ejp). Asked of `member_repo`,
+    never read from the member's own gitfile, which a worker writes. A
+    checkout the kill cut short shows as changes; it is refused, because Kraft
+    resets nothing it may not have made."""
+    listed = git_read(member_repo, "worktree", "list", "--porcelain") or ""
+    for block in listed.split("\n\n"):
+        fields = dict(line.partition(" ")[::2] for line in block.splitlines())
+        if (
+            Path(fields.get("worktree", "")).resolve() == target.resolve()
+            and fields.get("branch") == f"refs/heads/{branch}"
+        ):
+            if git_read(target, "status", "--porcelain", "--untracked-files=no"):
+                raise RuntimeError(
+                    f"{target} is a worktree of {member_repo} on {branch} with changes to "
+                    "tracked files, as a checkout cut short leaves it; remove that worktree "
+                    "by hand (`git worktree remove --force`), then retry"
+                )
+            return True
+    return False
+
+
 def _add_member(
     worktree: Path,
     rel: str,
@@ -515,6 +539,8 @@ def _add_member(
             "and its origin would not give it"
         )
     target = worktree / rel
+    if _sandbox.inside(worktree, rel) and _made_by_a_killed_run(member_repo, target, branch):
+        return
     if not _sandbox.inside(worktree, rel) or not target.is_dir() or any(target.iterdir()):
         raise RuntimeError(
             f"{rel} in {worktree} is not the empty directory the checkout made; "
@@ -777,7 +803,7 @@ async def ensure_worktree(
     makes a second copy onto a survived worktree a no-op rather than a
     clobber), and an existing branch — the one on the row (a rejected gate
     removes the worktree but keeps the branch) is checked out rather than
-    re-created.
+    re-created. The one exception: members a kill left unrecorded are finished.
     """
     item = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
@@ -788,6 +814,30 @@ async def ensure_worktree(
         )
     worktree = run_dirs.worktrees / work_item_id
     if worktree.is_dir():
+        # A kill after the root's checkout and before the member rows leaves a
+        # root with none; no node has run in it, so finish the members here
+        # rather than run the item as a single repository (Kraft-g7ejp). Not
+        # discarded on failure like the creating call below: nothing here
+        # proves the directory is only Kraft's.
+        row, rows = db.read(
+            lambda c: (
+                c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone(),
+                store.repos_for(c, work_item_id),
+            )
+        )
+        members = item_members(row) if row is not None else []
+        if members and not rows:
+            await _setup_submodules(
+                db,
+                Path(repo),
+                worktree,
+                store.branch_for(row),
+                work_item_id,
+                members,
+                repositories or {},
+                sandboxed=sandbox is not None,
+                base=row["base_ref"],
+            )
         return worktree
     # Read from repo_entry before `git worktree add` runs, not after: a
     # poisoned entry (malformed repos.yaml) raises ConfigError on any read, and

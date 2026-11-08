@@ -257,7 +257,11 @@ async def test_a_restart_after_a_kill_mid_member_checkout_sets_the_members_up(
     await wtree.ensure(database, run_dirs, root, repositories=repositories)
 
     repos = database.read(lambda c: store.repos_for(c, "w1"))
-    assert [r["submodule_path"] for r in repos] == [first, second, None]
+    assert [r["path"] for r in repos] == [
+        str(worktree / first),
+        str(worktree / second),
+        str(worktree),
+    ]
     for rel, repo in {"repos/pkg": sub, "repos/pkg2": pkg2}.items():
         assert _common(worktree / rel) == _common(repo)
         assert git_read(worktree / rel, "rev-parse", "--abbrev-ref", "HEAD") == wtree.branch(
@@ -265,3 +269,27 @@ async def test_a_restart_after_a_kill_mid_member_checkout_sets_the_members_up(
         )
     if dies_at != "first-member":
         assert (worktree / first / "kept.txt").read_text() == "made after the kill\n"
+
+
+async def test_a_restart_refuses_a_member_checkout_the_kill_cut_short(
+    tmp_path, database, run_dirs, monkeypatch
+):
+    """A worktree of the member left with tracked files missing is a checkout
+    that did not finish. The restart stops rather than take it, or reset it."""
+    root, sub = make_repo_with_submodule(tmp_path)
+    await _workspace_item(database, root, {"pkg": "repos/pkg"})
+
+    def killed(*args, **kw):
+        raise _Killed
+
+    with monkeypatch.context() as m:
+        m.setattr(store, "add_repo", killed)
+        with pytest.raises(_Killed):
+            await wtree.ensure(database, run_dirs, root, repositories=_members(sub))
+    member = run_dirs.worktrees / "w1" / "repos" / "pkg"
+    next(p for p in member.iterdir() if p.name != ".git").unlink()
+
+    with pytest.raises(RuntimeError, match="changes to tracked files"):
+        await wtree.ensure(database, run_dirs, root, repositories=_members(sub))
+
+    assert not database.read(lambda c: store.repos_for(c, "w1"))
