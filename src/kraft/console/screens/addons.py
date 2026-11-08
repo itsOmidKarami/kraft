@@ -248,6 +248,9 @@ class Addons(View):
         self.refresh_bindings()
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if client.is_remote():
+            # Every action runs `kraft` on this machine; only moving the cursor stays.
+            return action == "rows"
         kind, name = self.selected or ("", "")
         if action in ("enable", "uninstall"):
             return kind == "addon" and self.installed(name) is not None

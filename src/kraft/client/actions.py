@@ -854,6 +854,13 @@ async def reload_templates() -> dict:
     return await transport._act("/templates/reload")
 
 
+async def restart_server() -> dict:
+    """Restart the server the way the web UI's Apply chip does
+    (`POST /apply/restart`). The server refuses (409) one that was started from
+    a terminal rather than as a service."""
+    return await transport._act("/apply/restart")
+
+
 async def list_workers() -> dict:
     """The registered machines and whether each is connected, and why not."""
     return await transport._get("/workers")

@@ -264,3 +264,19 @@ def test_set_chain_refuses_both_or_neither(both):
     chain, text = both
     with pytest.raises(client.transport.ClientError):
         asyncio.run(client.set_chain(chain, "w1", one_off_chain=text))
+
+
+def test_restart_server_posts_apply_restart_and_shows_a_409_as_given(wired, monkeypatch):
+    from kraft import apply as apply_mod
+
+    monkeypatch.setattr(apply_mod, "managed", lambda: False)
+
+    async def scenario():
+        with pytest.raises(client.ClientError) as caught:
+            await client.restart_server()
+        return str(caught.value), caught.value.status
+
+    assert run_with_app(wired, scenario) == (
+        "kraft 409: started from a terminal: restart it there",
+        409,
+    )

@@ -428,3 +428,57 @@ def test_a_menu_left_open_acts_on_nothing_once_the_item_moved_on(board, monkeypa
         return asked
 
     assert console.run(scenario) == []
+
+
+def test_remote_archive_confirms_then_calls_the_api_not_a_child(
+    board, monkeypatch, kraft_is, remote_server
+):
+    _serve(monkeypatch, _detail(ITEM))
+    kraft_is("import sys; print('CHILD', *sys.argv[1:])")
+    sent = []
+
+    async def storage_preview(ids):
+        return {"items": [{"id": ids[0], "archivable": True, "refusal": None}]}
+
+    async def archive(ids):
+        sent.append(ids)
+        return {"results": [{"id": ids[0], "ok": True}]}
+
+    monkeypatch.setattr(client, "storage_preview", storage_preview)
+    monkeypatch.setattr(client, "archive", archive)
+    console = board([ITEM])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, ITEM["id"])
+        await _pick(console, pilot, app, "archive")
+        await console.until(pilot, lambda: isinstance(app.screen, Confirm))
+        await pilot.press("shift+tab", "enter")
+        await console.until(pilot, lambda: bool(sent))
+        await pilot.pause()
+        return sent, [line for line in console.output(app) if "CHILD" in line]
+
+    assert console.run(scenario) == ([[ITEM["id"]]], [])
+
+
+def test_remote_archive_says_why_the_server_will_not(board, monkeypatch, remote_server):
+    _serve(monkeypatch, _detail(ITEM))
+
+    async def storage_preview(ids):
+        return {"items": [{"id": ids[0], "archivable": False, "refusal": "still running"}]}
+
+    async def archive(ids):
+        raise AssertionError("archived a refused item")
+
+    monkeypatch.setattr(client, "storage_preview", storage_preview)
+    monkeypatch.setattr(client, "archive", archive)
+    console = board([ITEM])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, ITEM["id"])
+        await _pick(console, pilot, app, "archive")
+        await console.until(pilot, lambda: isinstance(app.screen, Confirm))
+        await pilot.press("shift+tab", "enter")
+        await pilot.pause()
+        return [n.message for n in app._notifications]
+
+    assert any("still running" in m for m in console.run(scenario, notifications=True))

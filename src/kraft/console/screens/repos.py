@@ -120,6 +120,8 @@ class Repos(View):
         self.refresh_bindings()
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if client.is_remote() and action in ("connect", "disconnect"):
+            return False  # both run `kraft` on this machine, against its own repos
         return self.selected is not None if action == "disconnect" else True
 
     def action_rows(self, name: str) -> None:

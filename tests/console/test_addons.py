@@ -796,3 +796,25 @@ def test_an_applied_take_reloads_the_server_and_says_when_it_could_not(
         else [],
         [None] if how == "hidden-after-apply" else [],
     )
+
+
+def test_a_remote_addons_screen_offers_no_action(board, acme, remote_server):
+    acme.install()
+    console = board([])
+
+    async def scenario(app, pilot):
+        await _shown(console, app, pilot)
+        await pilot.press("j")
+        return {label for _, label in app.screen_keys()}
+
+    assert (
+        console.run(scenario)
+        & {
+            "install",
+            "update",
+            "enable/disable",
+            "uninstall",
+            "menu",
+        }
+        == set()
+    )

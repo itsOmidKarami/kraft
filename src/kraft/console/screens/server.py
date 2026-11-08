@@ -18,7 +18,7 @@ from textual.content import Content
 from textual.widgets import Input, RichLog, Static
 
 from kraft import answers, client, render
-from kraft.console import tail, words
+from kraft.console import runner, tail, words
 from kraft.console.panels import Rule
 from kraft.console.screens import View
 
@@ -178,10 +178,19 @@ class Server(View):
         log.can_focus = False
         yield log
 
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if client.is_remote():
+            # doctor and update run `kraft` on this machine; the log is the server's disk.
+            return action not in ("doctor", "update", "filter", "scroll")
+        return True
+
     def on_mount(self) -> None:
         self.add_class("panel")
         self.border_title = "Server"
         self.query_one("#server-filter").display = False
+        if client.is_remote():  # server.log is on the server's disk; the API serves no log
+            self.query_one("#server-log").display = False
+            self.query_one("#server-rule").display = False
         # The rule says whether the log follows: whenever it scrolls, by key, wheel or write.
         self.watch(self.query_one("#server-log", RichLog), "scroll_y", self._draw_rule, init=False)
 
@@ -204,6 +213,8 @@ class Server(View):
         self._draw_rule()
         if self.app.release is None:  # the read at start failed: the feed may answer now
             self.run_worker(self._release, group="release", exclusive=True)
+        if client.is_remote():
+            return
         # After the refresh: a log just shown has no width until it is laid out,
         # and would wrap what it is given then at one cell.
         self.call_after_refresh(self.run_worker, self._follow, group="tail", exclusive=True)
@@ -300,7 +311,23 @@ class Server(View):
         self.app.notify(answers.reload_summary(result), severity=severity, markup=False)
 
     def action_restart(self) -> None:
+        if client.is_remote():
+            self.run_worker(self._restart_remote, group="act")
+            return
         self.run_worker(partial(self.app.run_asking, ["admin", "restart"]), group="act")
+
+    async def _restart_remote(self) -> None:
+        """The web UI's Apply chip: `POST /apply/restart`. A server not run as a
+        service answers 409, said as given."""
+        sentence, doing, verb = runner.ask(["admin", "restart"])
+        if not await self.app.confirm("Restart the server?", [sentence], running=doing, yes=verb):
+            return
+        try:
+            await client.restart_server()
+        except client.ClientError as exc:
+            self.app.notify_refusal(exc)
+            return
+        self.app.notify("Restarting the server.", markup=False)
 
     def action_update(self) -> None:
         # --restart, so the new version serves; the confirm lists the running items
