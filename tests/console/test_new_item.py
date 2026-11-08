@@ -340,3 +340,64 @@ def test_n_opens_the_form_from_any_view_but_never_over_a_dialog(
         return isinstance(app.screen, NewItem), app.default_screen.query_one(Prompt).value
 
     assert console.run(scenario) == (opens, typed)
+
+
+def _said(form) -> str:
+    return str(form.query_one("#new-said").render())
+
+
+REPOS = [
+    {"path": "/srv/repos/alpha", "managed": True},
+    {"path": "/srv/repos/beta", "managed": True},
+    {"path": "/srv/more/beta", "managed": True},
+]
+
+
+def test_a_remote_form_has_no_spec_or_plan_fields(board, remote_server):
+    console = board([], repo=None)
+
+    async def scenario(app, pilot):
+        form = await _opened(console, app, pilot)
+        return [bool(form.query(f"#new-{name}")) for name in ("spec", "plan", "repo", "after")]
+
+    assert console.run(scenario) == [False, False, True, True]
+
+
+@pytest.mark.parametrize(
+    ("typed", "sent_repo", "said"),
+    [
+        ("alpha", "/srv/repos/alpha", None),
+        ("/srv/repos/beta", "/srv/repos/beta", None),
+        ("gamma", None, "no repo called gamma"),
+        ("beta", None, "names 2 repos"),
+        ("", None, "needs a repo"),
+    ],
+    ids=["short-name", "server-path", "unknown", "ambiguous", "empty"],
+)
+def test_a_remote_form_files_against_a_repo_the_server_lists(
+    board, monkeypatch, remote_server, typed, sent_repo, said
+):
+    calls = _recording(monkeypatch, FILED)
+
+    async def repos():
+        return REPOS
+
+    monkeypatch.setattr(client, "repos", repos)
+    console = board([], repo=None)
+
+    async def scenario(app, pilot):
+        form = await _opened(console, app, pilot)
+        form.query_one("#new-title", Input).value = "t"
+        form.query_one("#new-repo", Input).value = typed
+        form.query_one("#new-go", Button).press()
+        if sent_repo:
+            await console.until(pilot, lambda: calls)
+            await pilot.pause()
+            return calls[0]["repo"], calls[0]["attachments"], None
+        await console.until(pilot, lambda: _said(form) not in ("", "Filing…"))
+        return None, None, _said(form)
+
+    repo, attachments, shown = console.run(scenario)
+    assert (repo, attachments) == (sent_repo, None)
+    assert said is None or said in shown
+    assert bool(calls) == (said is None)
