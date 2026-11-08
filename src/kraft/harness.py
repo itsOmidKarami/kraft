@@ -144,6 +144,9 @@ class Harness:
     config_env: str | None = None
     #: File name -> text Kraft writes into that directory before every launch.
     config_files: dict[str, str] = field(default_factory=dict)
+    #: Literal variables set on every launch of this CLI, over the repo's own
+    #: `env:` (Kraft-9ldw2: claude's background tasks off).
+    launch_env: dict[str, str] = field(default_factory=dict)
     #: The CLI's own tool name -> Kraft's (Cursor's `Shell` -> `Bash`), so a
     #: hooked call is checked against policy under the names policy uses. More
     #: than one when the CLI's tool does both (Cursor's `Write` also edits):
@@ -377,6 +380,7 @@ class Harness:
                 name: json.dumps(body, indent=2) + "\n"
                 for name, body in (config.files if config is not None else {}).items()
             },
+            launch_env=dict(parsed.launch_env),
             tool_names={
                 k: (v,) if isinstance(v, str) else tuple(v) for k, v in parsed.tool_names.items()
             },
@@ -507,6 +511,7 @@ class HarnessInput(BaseModel):
     command_resume: Prefix = []
     capabilities: dict[StrictStr, CapabilityInput] = {}
     config_dir: ConfigDirInput | None = None
+    launch_env: dict[StrictStr, StrictStr] = {}
     tool_names: dict[StrictStr, StrictStr | list[StrictStr]] = {}
     unhooked_tools: list[StrictStr] = []
     permission_hook: StrictStr | None = None

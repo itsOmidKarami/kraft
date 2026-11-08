@@ -65,6 +65,14 @@ capabilities:
   usage:            { source: envelope, reader: claude-stream-json }
   rate_limit_signal: { reader: claude-stream-json }
 
+# Kraft-9ldw2: for the same reason as the Monitor deny, no background tasks.
+# A `claude -p` stops what is still running 10 min after the last turn, so a
+# sub-agent left in the background loses its uncommitted work. This removes
+# `run_in_background` from both Bash and the Agent tool, whose sub-agents
+# otherwise run in the background by default (checked with claude 2.1.319).
+launch_env:
+  CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
+
 # The hosts this CLI reaches itself, added to a `network:` launch's runtime
 # allow list (spec §1). api.anthropic.com is the model API. statsig is named
 # by the spec but UNVERIFIED: nothing here has probed it; an e2e("claude")

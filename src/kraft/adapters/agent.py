@@ -83,8 +83,9 @@ _CTX = (
     "responding, and a turn that ends with a background job still running fails, "
     "naming the job. Run every command to completion in the foreground before you "
     "report status (the Monitor tool is disabled for the same reason). "
-    "Sub-agents are not background jobs: wait for each sub-agent's answer before "
-    "you report status.{edits}"
+    "That covers sub-agents: never start one in the background, and wait for each "
+    "sub-agent's answer before you report status. One still running when your turn "
+    "ends is stopped, and its uncommitted work is lost.{edits}"
 )
 
 #: `_CTX`'s `{edits}`, for every launch but a read-only one (`context_sections`'
@@ -1600,6 +1601,8 @@ async def _run_agent_task(
             **config_env,
             **rules_env,
             **(extra_env or {}),
+            # Last, and literal: neither a repo's `env:` nor a caller undoes it.
+            **h.launch_env,
         },
         post_resolve=_resolve_status(artifact, work_item_id, run_dirs, cwd, reader),
         round=round,

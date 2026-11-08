@@ -425,5 +425,19 @@ def test_every_agent_launch_is_told_the_rule_and_where_the_full_suite_runs(run):
     prompt = cmd[cmd.index("--append-system-prompt") + 1]
 
     assert "a turn that ends with a background job still running fails" in prompt
-    assert "Sub-agents are not background jobs" in prompt
+    assert "never start one in the background" in prompt
     assert "not the whole suite" in prompt and "verification" in prompt
+
+
+@pytest.mark.parametrize(
+    "harness, expected",
+    [("claude", "1"), ("codex", None)],
+    ids=["claude-launch-has-no-background-tasks", "other-cli-is-not-told"],
+)
+def test_a_claude_launch_cannot_start_background_tasks(run, harness, expected):
+    """The mechanical half (Kraft-9ldw2): the prompt rule failed three times,
+    and a sub-agent the Agent tool backgrounded by default was stopped 10 min
+    after the last turn with its work uncommitted. The variable removes
+    `run_in_background` from Bash and from the Agent tool alike."""
+    env = run(harness=harness, command=harness)["env"]
+    assert env.get("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS") == expected
