@@ -39,7 +39,7 @@ export const pickOf = (path: string, anchor: Anchor, head: Anchor): Pick => ({
 export const rangeOfPick = (p: Pick, ix: LineIndex): LineRange => rangeBetween(anchorOf(p), headOf(p), ix);
 
 export interface DiffViewProps {
-  /** The files to draw, in the comparison's order. */
+  /** The files to draw, in the file tree's order. */
   files: CompareFile[];
   patch: Map<string, PatchFile>;
   prefs: DiffPrefs;
