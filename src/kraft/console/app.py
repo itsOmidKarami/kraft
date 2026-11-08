@@ -141,7 +141,7 @@ def home_relative(path: str) -> str:
 def down_sentence(error: client.ClientError | None) -> str:
     """What every view says while the link is down (spec §8)."""
     if error is not None and error.kind == client.Failure.UNAUTHORIZED:
-        if (target := client.transport.remote) is not None:
+        if (target := client.transport.target()) is not None:
             return SESSION_ENDED.format(url=target.base)
         return "The server refused this machine's token (run/mcp-token)."
     if error is not None and error.kind != client.Failure.UNREACHABLE:
@@ -644,7 +644,7 @@ class KraftConsole(App):
             link is Link.DOWN
             and error is not None
             and error.kind == client.Failure.UNAUTHORIZED
-            and (target := client.transport.remote) is not None
+            and (target := client.transport.target()) is not None
         ):
             # Only the token that failed: a console that signed in again keeps its new session.
             remote.SessionStore(remote.sessions_path()).forget(target.base, target.session)

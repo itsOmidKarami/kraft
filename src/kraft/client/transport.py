@@ -28,17 +28,24 @@ if TYPE_CHECKING:
 
 #: Set by the console for `--server`; None everywhere else, so a shell `kraft`
 #: verb is never remote. The one switch behind `base_url`, `http`,
-#: `reads.stream_events` and `reads.health`.
-remote: remote_mod.Target | None = None
+#: `reads.stream_events` and `reads.health`. Underscored so `from
+#: kraft.client.transport import *` does not copy it into `kraft.client`, where a
+#: public `remote` would shadow the `kraft.client.remote` submodule; read it
+#: through `target()` / `is_remote()`.
+_target: remote_mod.Target | None = None
 
 
 def set_remote(target: remote_mod.Target | None) -> None:
-    global remote
-    remote = target
+    global _target
+    _target = target
+
+
+def target() -> remote_mod.Target | None:
+    return _target
 
 
 def is_remote() -> bool:
-    return remote is not None
+    return _target is not None
 
 
 def session_headers(target: remote_mod.Target) -> dict[str, str]:
@@ -104,7 +111,7 @@ def tls_error(exc: BaseException | None) -> ClientError | None:
 
 
 def _unreachable() -> ClientError:
-    if remote is not None:
+    if (remote := target()) is not None:
         return ClientError(f"no Kraft server at {remote.base}", kind=Failure.UNREACHABLE)
     return ClientError(
         f"no Kraft server at {base_url()} — start one with `kraft`", kind=Failure.UNREACHABLE
@@ -119,7 +126,7 @@ def base_url() -> str:
     client. A wildcard bind is rewritten to loopback — `0.0.0.0` is an address to
     listen on, never one to connect to.
     """
-    if remote is not None:
+    if (remote := target()) is not None:
         return remote.base
     templates_dir = config_dir()
     access = config.Access.load(templates_dir / "access.yaml")
@@ -132,7 +139,7 @@ def base_url() -> str:
 
 def http() -> httpx.AsyncClient:
     """A configured client. Module-level so tests can point it at the ASGI app."""
-    if remote is not None:
+    if (remote := target()) is not None:
         # The session cookie only: the mcp-token on this machine belongs to this
         # machine's server. No redirects, so the cookie never reaches another host.
         return httpx.AsyncClient(

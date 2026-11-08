@@ -433,7 +433,7 @@ async def stream_events(after_seq: int = 0) -> AsyncIterator[dict]:
     from websockets.asyncio.client import connect
     from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus
 
-    target = transport.remote
+    target = transport.target()
     base = transport.base_url()
     ws_base = (
         base.replace("https://", "wss://", 1)
@@ -601,7 +601,7 @@ async def health() -> dict:
     guards against -- loud and naming both paths, not a quiet wrong answer.
     """
     payload = await transport._get("/health")
-    if transport.remote is not None:
+    if transport.is_remote():
         # A session works only on the server that issued it: a different server
         # answers 401, the mix-up this check exists for.
         return payload

@@ -22,7 +22,7 @@ def absolute_path(path: str) -> str:
 
     A remote console sends a path on the server's disk, so it goes as given.
     """
-    if transport.remote is not None:
+    if transport.is_remote():
         return path
     return os.path.abspath(os.path.expanduser(path))
 
@@ -53,7 +53,7 @@ def resolve_context(cwd: Path | None = None) -> tuple[str | None, str]:
     A human-started session is identified by its directory instead: the executor
     lays worktrees out as `run_dirs.worktrees / work_item_id`.
     """
-    if transport.remote is not None:
+    if transport.is_remote():
         return None, "user"  # this machine's worktrees are not the server's
     wid = os.environ.get("KRAFT_WORK_ITEM_ID")
     if wid:
@@ -123,7 +123,7 @@ async def resolve_repo(cwd: Path | None = None) -> str | None:
     *managed* ancestor, not the outermost one (Kraft, review of repos.py:173,
     context.py:60).
     """
-    if transport.remote is not None:
+    if transport.is_remote():
         return None  # the cwd is on this machine, the repos are on the server's
     here = cwd or Path.cwd()
     root = config.normalized_repo_root(here)

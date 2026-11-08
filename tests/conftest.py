@@ -680,10 +680,11 @@ def app(tmp_path, monkeypatch):
 
 @pytest.fixture
 def remote_server(monkeypatch):
-    """`transport.remote` set to session `tok-1` on kraft.example, for one test."""
+    """The console's target set to session `tok-1` on kraft.example, for one test."""
     from kraft.client import remote, transport
 
-    monkeypatch.setattr(transport, "remote", remote.Target("https://kraft.example:443", "tok-1"))
+    monkeypatch.setattr(transport, "_target", None)  # monkeypatch restores it at teardown
+    transport.set_remote(remote.Target("https://kraft.example:443", "tok-1"))
 
 
 @pytest.fixture

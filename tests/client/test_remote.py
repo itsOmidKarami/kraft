@@ -6,6 +6,8 @@ import asyncio
 import json
 import os
 import stat
+import subprocess
+import sys
 
 import httpx
 import pytest
@@ -232,3 +234,11 @@ def test_sign_in_to_nothing_says_there_is_no_server_there():
 def test_the_label_names_the_client_and_the_machine(monkeypatch):
     monkeypatch.setattr("socket.gethostname", lambda: "work-laptop")
     assert remote.console_label() == "Kraft console on work-laptop"
+
+
+def test_kraft_client_remote_is_the_submodule_not_a_copied_global():
+    """`from kraft.client import remote` after the package's star-imports: a public
+    `transport.remote` global would shadow the submodule with its None."""
+    code = 'from kraft.client import remote; assert type(remote).__name__ == "module"'
+    ran = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True)
+    assert ran.returncode == 0, ran.stderr

@@ -11,9 +11,3 @@ from kraft.client.actions import *  # noqa: F403
 from kraft.client.context import *  # noqa: F403
 from kraft.client.reads import *  # noqa: F403
 from kraft.client.transport import *  # noqa: F403
-
-# `transport.remote` (the console's target) is a public module global, so the
-# star-import above copied it in as None, and `from kraft.client import remote`
-# would return that None instead of the submodule. Drop the copy: callers ask
-# `client.is_remote()` or read `transport.remote`.
-del remote  # noqa: F821

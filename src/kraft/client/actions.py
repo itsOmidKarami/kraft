@@ -128,7 +128,7 @@ def _no_repo_message(cwd: Path | None = None) -> str:
     way to reach this, and "run from a Kraft worktree" is useless advice there —
     the fix is one `kraft repo connect` away (spec A §8).
     """
-    if transport.remote is not None:
+    if transport.is_remote():
         return "no repo: name one the server has (the Repos screen lists them)"
     toplevel = config.git_read(
         cwd or Path.cwd(), "rev-parse", "--show-toplevel", expected_failure=True

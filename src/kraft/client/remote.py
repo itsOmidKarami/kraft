@@ -1,7 +1,7 @@
 """What the console (and later the VS Code extension) needs to use a Kraft on
 another machine: the URL that keys a stored session, the sessions themselves,
 and the password sign-in that makes one. A remote client authenticates with
-the session cookie only; `transport.remote` carries it (see `transport.http`)."""
+the session cookie only; `transport.target()` carries it (see `transport.http`)."""
 
 from __future__ import annotations
 
@@ -83,8 +83,9 @@ def sessions_path() -> Path:
 
 class SessionStore:
     """Normalized URL -> session token, in one private file. Every change
-    reads the file again and replaces it whole, so two consoles do not clobber
-    each other's servers."""
+    reads the file again and replaces it whole, atomically, so a reader never
+    sees half a file. There is no lock, though: two consoles writing at the same
+    moment can drop one entry, and the cost is one extra sign-in."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -116,12 +117,11 @@ class SessionStore:
 
     def _write(self, sessions: dict[str, str]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        # 0600 from the first byte: the file holds credentials.
+        # mkstemp creates the file 0600, from the first byte: it holds credentials.
         fd, temp = tempfile.mkstemp(dir=self.path.parent, prefix=".console-sessions-")
         try:
             with os.fdopen(fd, "w") as out:
                 out.write(json.dumps(sessions))
-            os.chmod(temp, 0o600)
             os.replace(temp, self.path)
         except BaseException:
             Path(temp).unlink(missing_ok=True)

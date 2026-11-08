@@ -361,7 +361,7 @@ def test_a_remote_event_stream_follows_the_scheme_and_sends_only_the_cookie(
     from kraft import auth
     from kraft.client import remote
 
-    monkeypatch.setattr(client.transport, "remote", remote.Target(base, "tok-1"))
+    monkeypatch.setattr(client.transport, "_target", remote.Target(base, "tok-1"))
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path))
     auth.ensure_mcp_token(tmp_path)
     monkeypatch.setattr(auth, "read_mcp_token", lambda *_: pytest.fail("token read"))

@@ -26,7 +26,7 @@ def test_server_flag_sets_the_remote_target_and_skips_the_instance_check(monkeyp
     monkeypatch.setattr(
         client, "health", lambda: pytest.fail("a remote server has no run_dir to compare")
     )
-    monkeypatch.setattr(client.transport, "remote", None)  # put back after the test
+    monkeypatch.setattr(client.transport, "_target", None)  # put back after the test
     opened = []
     monkeypatch.setattr(KraftConsole, "run", lambda self: opened.append(client.is_remote()))
     with pytest.raises(SystemExit) as left:
@@ -80,7 +80,7 @@ def test_the_down_sentence_names_the_server_without_its_scheme_and_a_session_tha
     monkeypatch, remote_server, is_remote, error, said
 ):
     if not is_remote:
-        monkeypatch.setattr(client.transport, "remote", None)
+        monkeypatch.setattr(client.transport, "_target", None)
     assert console_app.down_sentence(error) == said
 
 
@@ -89,7 +89,7 @@ def test_a_remote_console_never_offers_to_start_a_server_even_through_a_loopback
 ):
     from kraft.client import remote
 
-    monkeypatch.setattr(client.transport, "remote", remote.Target("http://127.0.0.1:9000", "t"))
+    monkeypatch.setattr(client.transport, "_target", remote.Target("http://127.0.0.1:9000", "t"))
     assert console_app.starts_here() is False
 
 
@@ -105,7 +105,7 @@ def test_a_session_that_ends_while_running_says_so_and_is_deleted(console, tmp_p
     store = remote.SessionStore(remote.sessions_path())
     store.put("https://kraft.example:443", "tok-1")
     monkeypatch.setattr(
-        client.transport, "remote", remote.Target("https://kraft.example:443", "tok-1")
+        client.transport, "_target", remote.Target("https://kraft.example:443", "tok-1")
     )
 
     async def board_rows(**kw):
@@ -181,3 +181,19 @@ def test_a_remote_addons_screen_offers_no_action(board, acme, remote_server):
         }
         == set()
     )
+
+
+def test_a_remote_addons_screen_reads_nothing_here_and_says_where_they_are(
+    board, acme, remote_server, monkeypatch
+):
+    from kraft.console.screens import addons
+
+    acme.install()  # this machine's add-on: the server's list must not show it
+    read: list[None] = []  # a failure raised in the read worker would not reach the test
+    monkeypatch.setattr(addons, "_listing", lambda: read.append(None) or ([], []))
+    console = board([])
+
+    async def scenario(app, pilot):
+        return await _shown(console, app, pilot)
+
+    assert (console.run(scenario), read) == ([addons.REMOTE], [])
