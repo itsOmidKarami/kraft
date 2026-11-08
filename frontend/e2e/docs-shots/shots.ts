@@ -45,7 +45,7 @@ const still = (page: Page) =>
 test.beforeEach(async ({ page }) => still(page));
 
 /** Lets every animation that ends (a selection ring, a panel sliding in) end first, so two retakes of an
- *  unchanged screen match; endless ones (a running item's pulse) and paused ones are left as they are. */
+ *  unchanged screen match; endless ones (a running item's light) are frozen by `freeze`, paused ones left as they are. */
 const settle = (page: Page) =>
   page
     .waitForFunction(
@@ -62,6 +62,19 @@ const settle = (page: Page) =>
       console.warn(`docs-shots: ${page.url()} still animating after 5s; captured as it is`);
     });
 
+/** Stops every endless animation (a running node's light, a running tick's sheen, a breathing dot) on one fixed frame,
+ *  so a running item looks the same in every retake: the light a third of the way round, the sheen mid-tick, the dot full. */
+const FRAME: Record<string, number> = { "run-trace": 0.35, "run-sheen": 0.5 };
+const freeze = (page: Page) =>
+  page.evaluate((frame) => {
+    for (const a of document.getAnimations()) {
+      const t = a.effect?.getTiming();
+      if (t?.iterations !== Infinity) continue;
+      a.pause();
+      a.currentTime = (frame[(a as CSSAnimation).animationName] ?? 0) * Number(t.duration);
+    }
+  }, FRAME);
+
 const board = async (page: Page) => {
   await page.goto("./");
   await expect(page.getByRole("heading", { name: "Board", level: 1 })).toBeVisible();
@@ -73,6 +86,7 @@ const shootMain = async (page: Page, name: string, bottom?: number) => {
   await page.mouse.move(0, 0);
   await page.waitForLoadState("networkidle");
   await settle(page);
+  await freeze(page);
   const main = (await page.locator("#ng-main").boundingBox())!;
   const view = page.viewportSize()!;
   const height = Math.min(bottom ?? view.height, view.height);
@@ -85,6 +99,7 @@ test("stops: the board's Needs you group, one row per kind of stop", async ({ pa
   await expect(group.getByText("Running time hit its 8h cap")).toBeVisible();
   await page.mouse.move(0, 0);
   await settle(page);
+  await freeze(page);
   save("stops", await group.screenshot());
 });
 
@@ -127,6 +142,7 @@ const shoot = async (page: Page, name: string) => {
   await page.mouse.move(0, 0);
   await page.waitForLoadState("networkidle");
   await settle(page);
+  await freeze(page);
   save(name, await page.screenshot()); // the viewport, not the full page
 };
 
