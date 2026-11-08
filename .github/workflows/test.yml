@@ -393,12 +393,21 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: install bd
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           case "$(uname -m)" in aarch64|arm64) BD_ARCH=arm64 ;; *) BD_ARCH=amd64 ;; esac
+          # Through the API, not github.com/<repo>/releases/download: on
+          # 2026-11-08 that link answered 504 for hours while the API served
+          # the same asset.
+          asset=$(curl -fsSL --retry 5 --retry-all-errors -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/gastownhall/beads/releases/tags/v${BD_VERSION}" |
+            jq -r --arg n "beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" '.assets[] | select(.name == $n) | .url')
+          test -n "$asset" || { echo "no beads asset for v${BD_VERSION} linux ${BD_ARCH}"; exit 1; }
           # To a file, not a pipe: a retry after a partial body would append
           # to what tar already read.
-          curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/bd.tar.gz" \
-            "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz"
+          curl -fsSL --retry 5 --retry-all-errors -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/octet-stream" -o "$RUNNER_TEMP/bd.tar.gz" "$asset"
           sudo tar -xzf "$RUNNER_TEMP/bd.tar.gz" -C /usr/local/bin bd
           git config --global user.email ci@kraft.invalid
           git config --global user.name "Kraft CI"
@@ -575,11 +584,18 @@ jobs:
           fetch-depth: 0
           filter: blob:none
       - name: install uv, bd and git config
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl python3
+          apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl jq python3
           case "$(uname -m)" in aarch64|arm64) BD_ARCH=arm64 ;; *) BD_ARCH=amd64 ;; esac
-          curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/bd.tar.gz" \
-            "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz"
+          # Through the API, as e2e-cli's install bd step says.
+          asset=$(curl -fsSL --retry 5 --retry-all-errors -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/gastownhall/beads/releases/tags/v${BD_VERSION}" |
+            jq -r --arg n "beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" '.assets[] | select(.name == $n) | .url')
+          test -n "$asset" || { echo "no beads asset for v${BD_VERSION} linux ${BD_ARCH}"; exit 1; }
+          curl -fsSL --retry 5 --retry-all-errors -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/octet-stream" -o "$RUNNER_TEMP/bd.tar.gz" "$asset"
           tar -xzf "$RUNNER_TEMP/bd.tar.gz" -C /usr/local/bin bd
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
