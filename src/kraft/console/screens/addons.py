@@ -38,6 +38,8 @@ EMPTY = Content.assemble(
 )
 #: What a collection never fetched says.
 NOT_FETCHED = "not fetched yet · m fetches it"
+#: What a remote console says instead of a list: the API serves no add-on listing.
+REMOTE = "Add-ons are on the server's machine. Use the web UI, or SSH there."
 #: The list before its first read answers.
 READING = "Reading the add-ons…"
 #: What the menu's "Add a collection" asks for.
@@ -205,8 +207,12 @@ class Addons(View):
 
     def _read(self) -> None:
         # A hidden view reads nothing: it reads again when shown.
-        if self.display:
-            self.run_worker(self._read_now, group="read", exclusive=True)
+        if not self.display:
+            return
+        if client.is_remote():  # addons.yaml and the collections here are this machine's
+            self.draw()
+            return
+        self.run_worker(self._read_now, group="read", exclusive=True)
 
     async def _read_now(self) -> None:
         # Files, and git for a fetched collection's catalogue: off the event loop.
@@ -227,7 +233,9 @@ class Addons(View):
         keep = rows.highlighted_option.id if rows.highlighted_option is not None else None
         found = options(self.collections or [], self.addons, held(self.app.health))
         # The sentence for no collection only after a read that found none.
-        if self.refused is not None:
+        if client.is_remote():
+            said = Content.styled(REMOTE, "$kraft-muted")
+        elif self.refused is not None:
             said = Content.styled(self.refused, "$error")
         elif self.collections is None:
             said = Content.styled(READING, "$kraft-muted")
@@ -248,6 +256,9 @@ class Addons(View):
         self.refresh_bindings()
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if client.is_remote():
+            # Every action runs `kraft` on this machine; only moving the cursor stays.
+            return action == "rows"
         kind, name = self.selected or ("", "")
         if action in ("enable", "uninstall"):
             return kind == "addon" and self.installed(name) is not None

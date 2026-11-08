@@ -475,7 +475,8 @@ def validate(
                         [],
                     )
                 )
-                report["problems"] += problems
+                for issue in problems:
+                    problem(Path(issue["file"]), issue["message"])
                 report["warnings"] += warnings
             report["addons"].append(
                 {

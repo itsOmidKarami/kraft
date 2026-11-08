@@ -13,13 +13,50 @@ from __future__ import annotations
 import enum
 import os
 import re
+import ssl
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 import httpx
 
 from kraft import auth, config
 from kraft.paths import config_dir, default_run_dir
+
+if TYPE_CHECKING:
+    from kraft.client import remote as remote_mod
+
+#: Set by the console for `--server`; None everywhere else, so a shell `kraft`
+#: verb is never remote. The one switch behind `base_url`, `http`,
+#: `reads.stream_events` and `reads.health`. Underscored so `from
+#: kraft.client.transport import *` does not copy it into `kraft.client`, where a
+#: public `remote` would shadow the `kraft.client.remote` submodule; read it
+#: through `target()` / `is_remote()`.
+_target: remote_mod.Target | None = None
+
+
+def set_remote(target: remote_mod.Target | None) -> None:
+    global _target
+    _target = target
+
+
+def target() -> remote_mod.Target | None:
+    return _target
+
+
+def is_remote() -> bool:
+    return _target is not None
+
+
+def session_headers(target: remote_mod.Target) -> dict[str, str]:
+    """The only credential a remote client sends, to the origin it was issued by."""
+    return {"Cookie": f"{auth.COOKIE}={target.session}"}
+
+
+TLS_SENTENCE = (
+    "the server's certificate is not trusted; set SSL_CERT_FILE to the file that holds "
+    "the certificate authority that signed it"
+)
 
 
 class Failure(enum.StrEnum):
@@ -62,7 +99,20 @@ def status_error(status: int, detail: str) -> ClientError:
     return ClientError(f"kraft {status}: {detail}", kind=kind, status=status)
 
 
+def tls_error(exc: BaseException | None) -> ClientError | None:
+    """The sentence for a certificate failure anywhere in `exc`'s cause chain."""
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, ssl.SSLCertVerificationError):
+            return ClientError(TLS_SENTENCE, kind=Failure.REFUSED)
+        exc = exc.__cause__ or exc.__context__
+    return None
+
+
 def _unreachable() -> ClientError:
+    if (remote := target()) is not None:
+        return ClientError(f"no Kraft server at {remote.base}", kind=Failure.UNREACHABLE)
     return ClientError(
         f"no Kraft server at {base_url()} — start one with `kraft`", kind=Failure.UNREACHABLE
     )
@@ -76,6 +126,8 @@ def base_url() -> str:
     client. A wildcard bind is rewritten to loopback — `0.0.0.0` is an address to
     listen on, never one to connect to.
     """
+    if (remote := target()) is not None:
+        return remote.base
     templates_dir = config_dir()
     access = config.Access.load(templates_dir / "access.yaml")
     host = os.environ.get("KRAFT_HOST") or access.bind
@@ -87,6 +139,15 @@ def base_url() -> str:
 
 def http() -> httpx.AsyncClient:
     """A configured client. Module-level so tests can point it at the ASGI app."""
+    if (remote := target()) is not None:
+        # The session cookie only: the mcp-token on this machine belongs to this
+        # machine's server. No redirects, so the cookie never reaches another host.
+        return httpx.AsyncClient(
+            base_url=remote.base,
+            headers=session_headers(remote),
+            timeout=30,
+            follow_redirects=False,
+        )
     run_dir = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())
     headers = {}
     token = auth.read_mcp_token(run_dir)
@@ -187,7 +248,7 @@ async def _send(method: str, path: str, **kwargs) -> httpx.Response:
         async with http() as session:
             return await session.request(method, _api(path), **kwargs)
     except httpx.ConnectError as exc:
-        raise _unreachable() from exc
+        raise (tls_error(exc) or _unreachable()) from exc
     except httpx.TimeoutException as exc:
         # The server may still finish what it was asked: say so, rather than
         # hand an agent a traceback, or a person a reason to ask twice.

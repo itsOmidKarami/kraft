@@ -30,6 +30,7 @@ from textual.theme import Theme
 from textual.widgets import Button, ContentSwitcher, Footer, Input, Static
 
 from kraft import answers, client, config, update
+from kraft.client import remote
 from kraft.console import moments, panels, pulse, runner, theme, words
 from kraft.console.dialogs import Confirm, Dialog, Keys
 from kraft.console.live import Link, Live
@@ -115,8 +116,20 @@ THEMES = (
 )
 
 
+#: What a remote console says to a typed command: `kraft` would run on this machine.
+TYPED_REMOTE = "Typed commands run on this machine. Use the web UI, or SSH to the server."
+
+#: What a remote console says when its session is gone (spec "Console / Start-up" 3).
+SESSION_ENDED = (
+    "The server ended this session. Quit and run `kraft console --server {url}` to sign in again."
+)
+
+
 def home_relative(path: str) -> str:
-    """`path` with the home directory written `~`, only at a path boundary."""
+    """`path` with the home directory written `~`, only at a path boundary.
+    A remote path is the server's: this machine's home means nothing there."""
+    if client.is_remote():
+        return path
     home = os.path.expanduser("~")
     if path == home:
         return "~"
@@ -128,16 +141,20 @@ def home_relative(path: str) -> str:
 def down_sentence(error: client.ClientError | None) -> str:
     """What every view says while the link is down (spec §8)."""
     if error is not None and error.kind == client.Failure.UNAUTHORIZED:
+        if (target := client.transport.target()) is not None:
+            return SESSION_ENDED.format(url=target.base)
         return "The server refused this machine's token (run/mcp-token)."
     if error is not None and error.kind != client.Failure.UNREACHABLE:
         # A server that answers, but not with the board: its own words.
         return f"The server could not show the board: {client.reason_of(str(error))}"
-    return f"No server at {client.base_url().removeprefix('http://')}."
+    return f"No server at {client.base_url().partition('://')[2]}."
 
 
 def starts_here() -> bool:
     """Whether "Start server" can start the server the console reads: only
     one on this machine (spec §7.3)."""
+    if client.is_remote():  # "remote" is how the address was given, not its host
+        return False
     return urlsplit(client.base_url()).hostname in config.LOOPBACK
 
 
@@ -212,7 +229,7 @@ class KraftConsole(App):
             on_event=self._live_event, on_health=self._live_health, on_link=self._live_link
         )
         #: The console's last quit (`moments.read_seen`); None the first time.
-        self.seen = moments.read_seen()
+        self.seen = None if client.is_remote() else moments.read_seen()
         #: Whether the board has been read once: the moments speak only after it.
         self._read_once = False
         #: The items a finished toast has named: each is named once.
@@ -302,10 +319,14 @@ class KraftConsole(App):
             for row in self.rows
             if row.get("display_status") != "archived"
         ]
-        verbs = [
-            (f"/{line}", "Type it at the prompt", partial(self.type_command, f"/{line} "))
-            for line in commands()
-        ]
+        verbs = (
+            []  # a typed command runs on this machine
+            if client.is_remote()
+            else [
+                (f"/{line}", "Type it at the prompt", partial(self.type_command, f"/{line} "))
+                for line in commands()
+            ]
+        )
         return screens + items + verbs
 
     def open_item(self, work_item_id: str) -> None:
@@ -341,6 +362,11 @@ class KraftConsole(App):
         """Run `kraft <argv>` in the output panel, opening it (spec §4.7), and
         return its exit code; None, and a toast, while another is running.
         Await it from a worker."""
+        if client.is_remote():
+            # The one place a `kraft` child starts: never one on this machine
+            # for a server on another.
+            self.notify(TYPED_REMOTE, markup=False)
+            return None
         if self.busy():
             return None
         panel = self.get_screen("output", OutputPanel)
@@ -417,7 +443,8 @@ class KraftConsole(App):
         if self.command is not None:
             await self.command.end()
         if self._read_once:  # a console that never read the board saw nothing
-            moments.write_seen(time.time(), self.rows)
+            if not client.is_remote():  # "since you left" is this machine's own
+                moments.write_seen(time.time(), self.rows)
             self.farewell = moments.leaving(self._in_scope(self.rows))
 
     async def on_event(self, event: events.Event) -> None:
@@ -477,6 +504,9 @@ class KraftConsole(App):
 
     @on(Input.Submitted, "#prompt")
     def _typed(self, event: Input.Submitted) -> None:
+        if event.value.strip(" /") and client.is_remote():
+            self.notify(TYPED_REMOTE, markup=False)
+            return
         if event.value.strip(" /"):
             # The item on screen as Enter is pressed: the view may move on before the worker runs.
             shown = self.view.work_item_id if isinstance(self.view, Item) else None
@@ -610,6 +640,14 @@ class KraftConsole(App):
     def _live_link(self, link: Link, error: client.ClientError | None) -> None:
         was_down = self.link is Link.DOWN
         self.link = link
+        if (
+            link is Link.DOWN
+            and error is not None
+            and error.kind == client.Failure.UNAUTHORIZED
+            and (target := client.transport.target()) is not None
+        ):
+            # Only the token that failed: a console that signed in again keeps its new session.
+            remote.SessionStore(remote.sessions_path()).forget(target.base, target.session)
         frame = self.default_screen
         frame.set_class(link is Link.DOWN, "-down")
         no_server = link is Link.DOWN and (
@@ -754,20 +792,28 @@ class KraftConsole(App):
         return [(name, counts[name]) for name in TABS]
 
 
-def main() -> None:
+def main(server: str | None = None) -> None:
     """`kraft console`: refuse where a terminal UI cannot work (spec §3), else
-    run. A refusal is a ValueError, which `kraft` prints as `kraft: ...`."""
+    run. A refusal is a ValueError, which `kraft` prints as `kraft: ...`.
+    `server` is `--server URL`: the Kraft on another machine to show."""
     if os.environ.get("KRAFT_WORK_ITEM_ID"):
         raise ValueError("a worker does not open the console")
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         raise ValueError("console needs a terminal to draw in — try `kraft view list` in a pipe")
-    try:
-        asyncio.run(client.health())
-    except client.ClientError as exc:
-        # Another instance on this port would be shown as this machine's; no
-        # server at all still opens, and says so.
-        if exc.kind == client.Failure.OTHER_INSTANCE:
-            raise
+    if server is not None:
+        # Before the TUI, while there is still a terminal to prompt on. A remote
+        # server has no run_dir to compare with this machine's.
+        from kraft.console import signin
+
+        client.set_remote(signin.connect(server))
+    else:
+        try:
+            asyncio.run(client.health())
+        except client.ClientError as exc:
+            # Another instance on this port would be shown as this machine's; no
+            # server at all still opens, and says so.
+            if exc.kind == client.Failure.OTHER_INSTANCE:
+                raise
     app = KraftConsole()
     app.run()
     if not app.return_code and app.farewell:

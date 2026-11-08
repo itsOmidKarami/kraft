@@ -41,6 +41,10 @@ HINTS = {
     "plan": "a file inside the repo; skips the plan node",
     "after": "item ids it comes after, space-separated",
 }
+#: Not offered in a remote console: the API takes a path the server resolves,
+#: not a file's contents, and this machine's files are not the server's.
+REMOTE_HIDDEN = ("spec", "plan")
+REMOTE_REPO_HINT = "a repo on the server, as the Repos screen lists it"
 
 
 def said(result: dict) -> tuple[str, str]:
@@ -69,13 +73,18 @@ class NewItem(Dialog[dict | None]):
         with Vertical(id="new-item"):
             yield Static("New item", id="new-item-heading")
             for name, label in FIELDS:
+                if client.is_remote() and name in REMOTE_HIDDEN:
+                    continue
                 with Horizontal(classes="new-field", id=f"new-{name}-row"):
                     yield Static(label)
+                    hint = (
+                        REMOTE_REPO_HINT if name == "repo" and client.is_remote() else HINTS[name]
+                    )
                     if name == "description":
-                        yield TextArea(compact=True, placeholder=HINTS[name], id="new-description")
+                        yield TextArea(compact=True, placeholder=hint, id="new-description")
                     else:
                         value = self.repo if name == "repo" else ""
-                        yield Input(value, placeholder=HINTS[name], compact=True, id=f"new-{name}")
+                        yield Input(value, placeholder=hint, compact=True, id=f"new-{name}")
             yield Toggle(
                 "Auto-gate: an agent reviews gates first",
                 True,
@@ -108,10 +117,13 @@ class NewItem(Dialog[dict | None]):
             self._say("A title is required.", "$error")
             self.query_one("#new-title", Input).focus()
             return
-        repo, spec, plan = (self._value(name) for name in ("repo", "spec", "plan"))
+        remote = client.is_remote()
+        repo = self._value("repo")
+        spec, plan = ("", "") if remote else (self._value("spec"), self._value("plan"))
         # Read now, before the create is awaited: what is sent is what was there.
         fields = {
-            "repo": client.absolute_path(repo) if repo else None,
+            # Remotely a path is the server's, resolved against its repo list in `_file`.
+            "repo": repo if remote else (client.absolute_path(repo) if repo else None),
             "chain": self._value("chain") or None,
             "description": self.query_one(TextArea).text.strip() or None,
             "attachments": client.attachment_paths(spec or None, plan or None),
@@ -124,6 +136,17 @@ class NewItem(Dialog[dict | None]):
         self.run_worker(partial(self._file, title, fields), group="file")
 
     async def _file(self, title: str, fields: dict) -> None:
+        if client.is_remote():
+            try:
+                fields["repo"] = await self._server_repo(fields["repo"])
+            except client.ClientError as exc:
+                self.filing = False
+                self._say(render.printable(client.reason_of(str(exc))), "$error")
+                return
+            except ValueError as exc:
+                self.filing = False
+                self._say(str(exc), "$error")
+                return
         try:
             created = await client.create_work_item(title, **fields)
         except client.ClientError as exc:
@@ -132,6 +155,20 @@ class NewItem(Dialog[dict | None]):
             self._say(render.printable(client.reason_of(str(exc))), "$error")
             return
         self._answer(created)
+
+    @staticmethod
+    async def _server_repo(typed: str) -> str:
+        """The server's own spelling of the repo `typed` names: its path, or the
+        last part of one. Raises ValueError with the sentence to show."""
+        if not typed:
+            raise ValueError("A remote item needs a repo: name one the Repos screen lists.")
+        known = [r["path"] for r in await client.repos()]
+        by_name = [p for p in known if p == typed or p.rstrip("/").rsplit("/", 1)[-1] == typed]
+        if len(by_name) == 1:
+            return by_name[0]
+        if not by_name:
+            raise ValueError(f"The server has no repo called {typed}. The Repos screen lists them.")
+        raise ValueError(f"{typed} names {len(by_name)} repos on the server; type a whole path.")
 
     def action_cancel(self) -> None:
         self._answer(None)

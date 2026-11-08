@@ -128,6 +128,8 @@ def _no_repo_message(cwd: Path | None = None) -> str:
     way to reach this, and "run from a Kraft worktree" is useless advice there —
     the fix is one `kraft repo connect` away (spec A §8).
     """
+    if transport.is_remote():
+        return "no repo: name one the server has (the Repos screen lists them)"
     toplevel = config.git_read(
         cwd or Path.cwd(), "rev-parse", "--show-toplevel", expected_failure=True
     )
@@ -850,6 +852,13 @@ async def reload_templates() -> dict:
     """Reread the template library from disk into the running server, no
     restart."""
     return await transport._act("/templates/reload")
+
+
+async def restart_server() -> dict:
+    """Restart the server the way the web UI's Apply chip does
+    (`POST /apply/restart`). The server refuses (409) one that was started from
+    a terminal rather than as a service."""
+    return await transport._act("/apply/restart")
 
 
 async def list_workers() -> dict:

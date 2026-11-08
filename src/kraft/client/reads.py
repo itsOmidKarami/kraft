@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import ssl
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -432,12 +433,21 @@ async def stream_events(after_seq: int = 0) -> AsyncIterator[dict]:
     from websockets.asyncio.client import connect
     from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus
 
-    url = transport.base_url().replace("http://", "ws://", 1) + transport._api(
-        f"/ws/events?after_seq={after_seq}"
+    target = transport.target()
+    base = transport.base_url()
+    ws_base = (
+        base.replace("https://", "wss://", 1)
+        if base.startswith("https://")
+        else base.replace("http://", "ws://", 1)
     )
-    run_dir = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())
-    token = auth.read_mcp_token(run_dir)
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    url = ws_base + transport._api(f"/ws/events?after_seq={after_seq}")
+    if target is not None:
+        # The session cookie only; this machine's mcp-token is never read.
+        headers = transport.session_headers(target)
+    else:
+        run_dir = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())
+        token = auth.read_mcp_token(run_dir)
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
         async with connect(url, additional_headers=headers) as socket:
             async for message in socket:
@@ -447,6 +457,15 @@ async def stream_events(after_seq: int = 0) -> AsyncIterator[dict]:
         # which reaches here as 403. That is a refusal, not a server gone: the
         # console must name the token, not say there is no server.
         status = exc.response.status_code
+        if target is not None and status in (401, 403):
+            # A refused handshake is 403 whether the session ended or the
+            # perimeter said no: one HTTP call tells them apart.
+            await _confirm_session()  # raises when the session ended
+            raise transport.ClientError(
+                f"kraft {status}: the server refused the event stream",
+                kind=transport.Failure.REFUSED,
+                status=status,
+            ) from exc
         if status not in (401, 403):
             raise transport._unreachable() from exc
         raise transport.ClientError(
@@ -454,6 +473,8 @@ async def stream_events(after_seq: int = 0) -> AsyncIterator[dict]:
             kind=transport.Failure.UNAUTHORIZED,
             status=status,
         ) from exc
+    except ssl.SSLCertVerificationError as exc:
+        raise (transport.tls_error(exc) or exc) from exc
     except (OSError, InvalidHandshake) as exc:
         raise transport._unreachable() from exc
     except ConnectionClosed as exc:
@@ -463,6 +484,14 @@ async def stream_events(after_seq: int = 0) -> AsyncIterator[dict]:
             f"the Kraft server at {transport.base_url()} closed the event stream",
             kind=transport.Failure.INTERRUPTED,
         ) from exc
+
+
+async def _confirm_session() -> None:
+    """One HTTP call that needs a session: 401 means it ended. Called once per
+    refused handshake, and `Live` re-enters the stream only after its backoff."""
+    response = await transport._send("GET", "/sessions")
+    if response.status_code == 401:
+        raise transport.status_error(401, transport._detail(response))
 
 
 async def threads(work_item_id: str | None = None, open_only: bool = False) -> list:
@@ -572,6 +601,10 @@ async def health() -> dict:
     guards against -- loud and naming both paths, not a quiet wrong answer.
     """
     payload = await transport._get("/health")
+    if transport.is_remote():
+        # A session works only on the server that issued it: a different server
+        # answers 401, the mix-up this check exists for.
+        return payload
     expected = str(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir()).resolve())
     actual = payload.get("run_dir")
     if actual != expected:

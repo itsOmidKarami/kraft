@@ -197,7 +197,6 @@ def _parent_in_an_added_collection(tmp_path, monkeypatch):
             (
                 # The parent's failure is its own, named by where it was read from,
                 # once, and not as a copy under the child or a deleted scratch path.
-                "<tmp>/acme-kraft/addons/release: "
                 "<tmp>/acme-kraft/addons/release/chains/ship.yaml: "
                 "n.main.t: extends no task "
                 "named 'release:nope'",
@@ -290,6 +289,26 @@ def test_validate_names_a_broken_manifest_once(tmp_path, capsys, manifest_path):
     code, out = _run(capsys, "validate", str(collection))
 
     assert code == 1 and f"error: {broken}: " in out and out.count(str(broken)) == 1, out
+
+
+def test_validate_names_a_broken_chain_once(tmp_path, capsys):
+    collection = make_collection(
+        tmp_path, {"release": {**GOOD["release"], "chains": {"ship": chain("nope")}}}
+    )
+    broken = collection / "addons/release/chains/ship.yaml"
+    assert broken.is_file()
+
+    code, out = _run(capsys, "validate", str(collection))
+
+    assert code == 1 and f"error: {broken}: " in out and out.count(str(broken)) == 1, out
+
+    code, out = _run(capsys, "validate", str(collection), "--json")
+    report = json.loads(out)
+
+    assert code == 1 and report["problems"] == [
+        {"file": str(broken), "message": "n.main.t: extends no task named 'release:nope'"}
+    ]
+    assert out.count(str(broken)) == 1, out
 
 
 def test_validate_writes_nothing_and_prints_json(tmp_path, capsys, monkeypatch):

@@ -646,3 +646,22 @@ def test_the_connect_forms_unfocused_titles_and_mark_are_secondary_text(board, m
         )
 
     assert console.run(scenario) == (True, True)
+
+
+def test_a_remote_repos_screen_offers_neither_connect_nor_disconnect(
+    board, monkeypatch, remote_server
+):
+    async def repos():
+        return REPOS
+
+    monkeypatch.setattr(client, "repos", repos)
+    console = board([])
+
+    async def scenario(app, pilot):
+        await _settled(console, app, pilot)
+        await pilot.press("4")
+        await console.until(pilot, lambda: len(_rows(app)) == len(REPOS))
+        await pilot.press("j")
+        return {label for _, label in app.screen_keys()}
+
+    assert console.run(scenario) & {"connect", "disconnect"} == set()

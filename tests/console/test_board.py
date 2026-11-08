@@ -728,3 +728,21 @@ def test_the_peek_reads_again_when_the_item_or_its_doors_changed(board, monkeypa
         return len(read)
 
     assert board([gate]).run(scenario, size=(80, 40)) == reads
+
+
+def test_a_remote_board_peek_with_no_item_shows_no_server_log(board, monkeypatch, remote_server):
+    followed = []
+
+    def follow(*args, **kwargs):
+        followed.append(1)
+        raise AssertionError("a remote console follows no log on this machine")
+
+    monkeypatch.setattr(tail, "follow", follow)
+    console = board([])
+
+    async def scenario(app, pilot):
+        await pilot.press("v")
+        await pilot.pause()
+        return followed
+
+    assert console.run(scenario) == []

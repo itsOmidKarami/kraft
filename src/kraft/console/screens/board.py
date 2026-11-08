@@ -507,6 +507,8 @@ class Board(View):
         body.clear()
         self.query_one("#peek-chain").display = False
         self.query_one("#peek-work", Working).show_item(None)
+        if row is None and client.is_remote():
+            return  # server.log is on the server's disk; the API serves no log
         if row is None:
             peek.border_title = "server.log"
             head.update(Content.styled("server.log", "$kraft-muted"))

@@ -37,7 +37,14 @@ def build_parser() -> argparse.ArgumentParser:
     for name, help_text, adder in _GROUPS:
         group = subs.add_parser(name, help=help_text)
         adder(group.add_subparsers(dest="verb", metavar="verb", required=True), common_parser)
-    subs.add_parser("console", help="open the terminal UI").set_defaults(func=_console)
+    console = subs.add_parser("console", help="open the terminal UI")
+    console.add_argument(
+        "--server",
+        metavar="URL",
+        help="use the Kraft at URL (http:// or https://) instead of this machine's; "
+        "asks for its password the first time",
+    )
+    console.set_defaults(func=_console)
     return parser
 
 
@@ -45,7 +52,7 @@ def _console(ns: argparse.Namespace) -> None:
     # Imported here, so no other verb loads Textual.
     from kraft.console import app
 
-    app.main()
+    app.main(server=ns.server)
 
 
 #: The four groups, in help order. `build_parser` walks this, so adding a group

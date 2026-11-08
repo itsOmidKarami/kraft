@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from kraft import client
@@ -107,3 +109,12 @@ def test_another_branch_resolves_to_nothing(wired, tmp_path, branch):
         return await client.context.standing_item(repo if branch else other)
 
     assert run_with_app(wired, scenario) == (None, "user")
+
+
+def test_a_remote_console_has_no_item_for_this_worktree_and_no_repo_of_its_own(
+    remote_server, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "w-local")  # even this machine's own identity
+    assert client.resolve_context(tmp_path) == (None, "user")
+    assert asyncio.run(client.resolve_repo(tmp_path)) is None
+    assert client.absolute_path("~/srv/repo") == "~/srv/repo"  # a path on the server's disk

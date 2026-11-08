@@ -327,3 +327,106 @@ async def test_active_items_are_the_active_rows_with_whether_they_run_in_place(m
         ("c", False),
         ("d", False),
     ]
+
+
+class _Socket:
+    """What `websockets.asyncio.client.connect` yields: no messages."""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        raise StopAsyncIteration
+
+
+@pytest.mark.parametrize(
+    ("base", "ws"),
+    [
+        ("https://kraft.example:443", "wss://kraft.example:443"),
+        ("http://100.64.0.7:8765", "ws://100.64.0.7:8765"),
+    ],
+    ids=["https-is-wss", "http-is-ws"],
+)
+def test_a_remote_event_stream_follows_the_scheme_and_sends_only_the_cookie(
+    monkeypatch, tmp_path, base, ws
+):
+    import websockets.asyncio.client
+
+    from kraft import auth
+    from kraft.client import remote
+
+    monkeypatch.setattr(client.transport, "_target", remote.Target(base, "tok-1"))
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path))
+    auth.ensure_mcp_token(tmp_path)
+    monkeypatch.setattr(auth, "read_mcp_token", lambda *_: pytest.fail("token read"))
+    got = {}
+
+    def connect(url, **kwargs):
+        got.update(url=url, **kwargs)
+        return _Socket()
+
+    monkeypatch.setattr(websockets.asyncio.client, "connect", connect)
+
+    async def drain():
+        return [e async for e in client.stream_events(7)]
+
+    asyncio.run(drain())
+    assert got["url"] == f"{ws}/api/ws/events?after_seq=7"
+    assert got["additional_headers"] == {"Cookie": "kraft_session=tok-1"}
+
+
+@pytest.mark.parametrize(
+    ("confirm_status", "kind"),
+    [(401, client.Failure.UNAUTHORIZED), (200, client.Failure.REFUSED)],
+    ids=["session-gone", "perimeter-refused-the-handshake"],
+)
+def test_a_refused_remote_stream_is_confirmed_with_one_http_call(
+    monkeypatch, remote_server, confirm_status, kind
+):
+    """A handshake refusal is 403 whether the session ended or the perimeter said no."""
+    import websockets.asyncio.client
+
+    calls = []
+
+    async def confirm(method, path, **kw):
+        calls.append((method, path))
+        return httpx.Response(confirm_status, json={"detail": "x"})
+
+    monkeypatch.setattr(client.transport, "_send", confirm)
+    monkeypatch.setattr(
+        websockets.asyncio.client,
+        "connect",
+        lambda url, **kw: (_ for _ in ()).throw(_handshake(403)),
+    )
+    with pytest.raises(client.ClientError) as caught:
+        asyncio.run(anext(client.stream_events()))
+    assert caught.value.kind == kind
+    assert calls == [("GET", "/sessions")]
+
+
+def test_a_remote_health_does_not_compare_run_dirs(remote_server, monkeypatch):
+    async def get(path, **kw):
+        return {"status": "ok", "run_dir": "/somewhere/else"}
+
+    monkeypatch.setattr(client.transport, "_get", get)
+    assert asyncio.run(client.health())["status"] == "ok"
+
+
+def test_a_remote_certificate_failure_on_the_stream_names_the_variable(monkeypatch, remote_server):
+    import ssl
+
+    import websockets.asyncio.client
+
+    def connect(url, **kw):
+        raise ssl.SSLCertVerificationError("self signed")
+
+    monkeypatch.setattr(websockets.asyncio.client, "connect", connect)
+    with pytest.raises(client.ClientError) as caught:
+        asyncio.run(anext(client.stream_events()))
+    assert "SSL_CERT_FILE" in str(caught.value)

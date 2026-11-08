@@ -4,6 +4,9 @@
  *  not), just enough to tell two of your own sessions apart at a glance. */
 export function parseUserAgent(ua: string | null | undefined): string {
   if (!ua) return "unknown device";
+  // Kraft's own clients (the console, the VS Code extension) name themselves;
+  // browsers send "Mozilla/" or "Opera/", never "Kraft ".
+  if (ua.startsWith("Kraft ")) return ua.slice(0, 60);
   const device = /ipad/i.test(ua)
     ? "iPad"
     : /iphone/i.test(ua)

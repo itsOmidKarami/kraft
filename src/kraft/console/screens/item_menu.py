@@ -6,8 +6,8 @@ from __future__ import annotations
 import time
 from functools import partial
 
-from kraft import answers, client
-from kraft.console import acts, words
+from kraft import answers, client, render
+from kraft.console import acts, runner, words
 from kraft.console.dialogs import Menu, Note
 from kraft.console.words import usd
 
@@ -122,8 +122,31 @@ class MenuActions:
 
     async def _archive(self, item: dict) -> None:
         """Through the CLI (spec §4.2): its preview, its refusals and its
-        result in the output panel, after the console's confirm (spec §7.8)."""
+        result in the output panel, after the console's confirm (spec §7.8).
+        A remote console has no CLI on the server's machine: it asks the same
+        question and calls the API."""
+        if client.is_remote():
+            await self._archive_remote(item)
+            return
         await self.app.run_asking(["item", "archive", item["id"], "--yes"])
+
+    async def _archive_remote(self, item: dict) -> None:
+        sentence, _doing, verb = runner.ask(["item", "archive", item["id"], "--yes"])
+        if not await self.app.confirm(f"Archive {item['id'][:8]}?", [sentence], yes=verb):
+            return
+        try:
+            # Only what the preview calls archivable is sent, as `item archive` does.
+            entry = (await client.storage_preview([item["id"]]))["items"][0]
+            if not entry["archivable"]:
+                self.app.notify(entry["refusal"], severity="error", markup=False)
+                return
+            result = await client.archive([item["id"]])
+        except client.ClientError as exc:
+            self.app.notify_refusal(exc)
+            self.app.live.reread()
+            return
+        self.app.notify(render.archive_results(result), markup=False)
+        self.app.live.reread()
 
     async def _raise_budget(self, item: dict) -> None:
         """Spec §7.2: a cap at or below what was spent is the server's 422,

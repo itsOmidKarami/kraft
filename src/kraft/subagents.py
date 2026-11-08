@@ -110,6 +110,18 @@ class Fold:
         stamp = obj.get("timestamp")
         if entry["started_at"] is None and isinstance(stamp, str):
             entry["started_at"] = stamp
+        # claude 2.1.319: the report is the sub-agent's own handback call;
+        # task_notification's summary then only points at it.
+        for block in logs._blocks(obj):
+            inp = block.get("input")
+            if block.get("type") == "tool_use" and block.get("name") == "SubagentHandback":
+                answer = inp.get("message") if isinstance(inp, dict) else None
+                if isinstance(answer, str):
+                    self._answer(entry, answer)
+
+    def _answer(self, entry: dict, answer: str) -> None:
+        self._answers[entry["id"]] = answer
+        entry["summary"] = answer[:SUMMARY_MAX]
 
     def _system(self, obj: dict, entry: dict, index: int) -> None:
         subtype = obj.get("subtype")
@@ -135,9 +147,8 @@ class Fold:
         elif subtype == "task_notification":
             self._usage(obj, entry)
             answer = obj.get("summary")
-            if isinstance(answer, str):
-                self._answers[entry["id"]] = answer
-                entry["summary"] = answer[:SUMMARY_MAX]
+            if isinstance(answer, str) and entry["id"] not in self._answers:
+                self._answer(entry, answer)
             self._finish(entry["id"], index, obj.get("status"))
 
     def _usage(self, obj: dict, entry: dict) -> None:
