@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import os
+import stat
+
 import pytest
 
 from kraft import client
@@ -90,3 +94,47 @@ def test_only_plain_http_to_a_non_loopback_host_warns(url, warns):
 
 def test_shown_drops_the_scheme_only():
     assert remote.shown("https://kraft.example:443") == "kraft.example:443"
+
+
+def test_the_store_lives_in_the_run_dir_and_is_private(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path))
+    assert remote.sessions_path() == tmp_path / "console-sessions.json"
+    store = remote.SessionStore(remote.sessions_path())
+    store.put("https://a:443", "tok-a")
+    assert stat.S_IMODE(os.stat(store.path).st_mode) == 0o600
+    assert json.loads(store.path.read_text()) == {"https://a:443": "tok-a"}
+
+
+def test_the_store_keeps_each_server_apart_and_survives_a_second_writer(tmp_path):
+    first = remote.SessionStore(tmp_path / "s.json")
+    second = remote.SessionStore(tmp_path / "s.json")  # another console
+    first.put("https://a:443", "A")
+    second.put("https://b:443", "B")
+    assert (first.get("https://a:443"), first.get("https://b:443")) == ("A", "B")
+    # no temp file is left behind by the atomic write
+    assert [p.name for p in tmp_path.iterdir()] == ["s.json"]
+
+
+@pytest.mark.parametrize(
+    ("stored", "failed", "left"),
+    [("old", "old", None), ("new", "old", "new")],
+    ids=["same-token-deleted", "re-signed-in-meanwhile-kept"],
+)
+def test_an_entry_is_forgotten_only_if_it_still_holds_the_token_that_failed(
+    tmp_path, stored, failed, left
+):
+    store = remote.SessionStore(tmp_path / "s.json")
+    store.put("https://a:443", stored)
+    store.forget("https://a:443", failed)
+    assert store.get("https://a:443") == left
+
+
+@pytest.mark.parametrize(
+    "body",
+    ["", "not json", "[1]", '{"https://a:443": 7}'],
+    ids=["empty", "garbage", "not-a-map", "token-not-a-string"],
+)
+def test_a_store_that_does_not_say_truthfully_reads_as_no_session(tmp_path, body):
+    path = tmp_path / "s.json"
+    path.write_text(body)
+    assert remote.SessionStore(path).get("https://a:443") is None

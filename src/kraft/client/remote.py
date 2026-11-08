@@ -5,11 +5,16 @@ the session cookie only; `transport.remote` carries it (see `transport.http`).""
 
 from __future__ import annotations
 
+import json
+import os
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from kraft import config
 from kraft.client import transport as transport_module
+from kraft.paths import default_run_dir
 
 
 @dataclass(frozen=True)
@@ -62,3 +67,58 @@ def is_plain_http_remote(url: str) -> bool:
     is not this machine."""
     parts = urlsplit(url)
     return parts.scheme == "http" and parts.hostname not in config.LOOPBACK
+
+
+SESSIONS_FILE = "console-sessions.json"
+
+
+def sessions_path() -> Path:
+    """The console's stored sessions, in the run directory like `console-seen.json`."""
+    return Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir()) / SESSIONS_FILE
+
+
+class SessionStore:
+    """Normalized URL -> session token, in one private file. Every change
+    reads the file again and replaces it whole, so two consoles do not clobber
+    each other's servers."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def _read(self) -> dict[str, str]:
+        try:
+            said = json.loads(self.path.read_text())
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(said, dict):
+            return {}
+        return {k: v for k, v in said.items() if isinstance(v, str)}
+
+    def get(self, url: str) -> str | None:
+        return self._read().get(url)
+
+    def put(self, url: str, token: str) -> None:
+        self._write({**self._read(), url: token})
+
+    def forget(self, url: str, token: str) -> bool:
+        """Delete `url`'s entry if it still holds `token`; a console that
+        signed in again meanwhile keeps its new session."""
+        sessions = self._read()
+        if sessions.get(url) != token:
+            return False
+        del sessions[url]
+        self._write(sessions)
+        return True
+
+    def _write(self, sessions: dict[str, str]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # 0600 from the first byte: the file holds credentials.
+        fd, temp = tempfile.mkstemp(dir=self.path.parent, prefix=".console-sessions-")
+        try:
+            with os.fdopen(fd, "w") as out:
+                out.write(json.dumps(sessions))
+            os.chmod(temp, 0o600)
+            os.replace(temp, self.path)
+        except BaseException:
+            Path(temp).unlink(missing_ok=True)
+            raise
