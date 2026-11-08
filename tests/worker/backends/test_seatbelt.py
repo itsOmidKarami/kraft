@@ -314,7 +314,7 @@ def _sandbox_argv(tmp_path: Path, argv: list[str], *, mounts=(), **kw) -> list[s
     prof.write_text(
         profile(
             mounts=list(mounts),
-            read_roots=[Path(sys.base_prefix)],
+            read_roots=[Path(sys.base_prefix), *kw.pop("read_roots", ())],
             tmpdir=tmp_path / "t",
             marker=tmp_path / "m",
             **kw,
@@ -455,13 +455,13 @@ def test_tiocsti_cannot_type_into_a_controlling_terminal(tmp_path, sandboxed):
 
 
 @pytest.mark.e2e("sandbox-exec")
-@pytest.mark.parametrize("how", ["rename", "read"])
+@pytest.mark.parametrize("how", ["rename", "read", "link"])
 def test_a_denied_credential_in_a_writable_tree_can_be_neither_renamed_nor_read(tmp_path, how):
     tree = tmp_path.resolve() / "tree"
     tree.mkdir()
     cred = tree / "credentials"
     cred.write_text("secret")
-    script = 'mv "$1" "$1.x"' if how == "rename" else 'cat "$1"'
+    script = {"rename": 'mv "$1" "$1.x"', "read": 'cat "$1"', "link": 'ln "$1" "$1.x"'}[how]
     run = _sandboxed(
         tmp_path,
         ["/bin/sh", "-c", script, "sh", str(cred)],
@@ -470,3 +470,30 @@ def test_a_denied_credential_in_a_writable_tree_can_be_neither_renamed_nor_read(
     )
     assert run.returncode != 0
     assert cred.read_text() == "secret" and not (tree / "credentials.x").exists()
+
+
+@pytest.mark.e2e("sandbox-exec")
+@pytest.mark.parametrize("source", ["unexposed", "read-only mount", "read root", "own"])
+def test_only_a_file_the_worker_may_write_can_be_hard_linked_into_its_tree(tmp_path, source):
+    """Kraft reads and commits the worktree unsandboxed, so a second link to a
+    host file there would be read as the worker's own (Kraft-vy4iv). Seatbelt
+    checks the source of link() for write as well as read."""
+    root = tmp_path.resolve()
+    tree, ro, readable = root / "tree", root / "ro", root / "readable"
+    for d in (tree, ro, readable, root / "unexposed"):
+        d.mkdir()
+    src = {
+        "unexposed": root / "unexposed" / "id_rsa",
+        "read-only mount": ro / "f",
+        "read root": readable / "f",
+        "own": tree / "f",
+    }[source]
+    src.write_text("host")
+    run = _sandboxed(
+        tmp_path,
+        ["/bin/ln", str(src), str(tree / "link")],
+        mounts=[Mount(tree, tree, False), Mount(ro, ro, True)],
+        read_roots=[readable],
+    )
+    assert (run.returncode == 0) == (source == "own"), run.stderr
+    assert (tree / "link").exists() == (source == "own")
