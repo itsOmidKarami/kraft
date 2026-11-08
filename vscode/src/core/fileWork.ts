@@ -98,8 +98,9 @@ export function repoDefaultChain(repo: Repo, chains: TemplateSummary[]): string 
 /** D23: filing reads attachments off the daemon's disk, so Kraft must run on
  *  the machine holding the window's files. A remote window whose extension
  *  host talks to a loopback daemon is that machine. */
-export function localRefusal(base: string): string | null {
-  if (isLoopback(base)) return null;
+export function localRefusal(base: string, remote = false): string | null {
+  // Signed in is remote even over a loopback forward (`ssh -L`): the daemon is not on this machine.
+  if (!remote && isLoopback(base)) return null;
   return `Filing work needs Kraft on the machine with this window's files, and kraft.url points at ${hostOf(base)}. File it from the web UI instead.`;
 }
 
@@ -113,24 +114,24 @@ function hostOf(base: string): string {
 
 /** Restricted Mode and a refused server version first, as every action
  *  says them; then the local-only rule. */
-export function fileRefusal(state: ReadOnlyState, base: string): string | null {
-  return refusal(state) ?? localRefusal(base);
+export function fileRefusal(state: ReadOnlyState, base: string, remote = false): string | null {
+  return refusal(state) ?? localRefusal(base, remote);
 }
 
 /** D31, after D23: "Connect this repo" posts this window's path, which
  *  names a folder only on a daemon that runs on this machine. Off loopback
  *  it is refused, naming the ways that work there. */
-export function connectRefusal(state: ReadOnlyState, base: string): string | null {
+export function connectRefusal(state: ReadOnlyState, base: string, remote = false): string | null {
   const no = refusal(state);
   if (no) return no;
-  if (isLoopback(base)) return null;
+  if (!remote && isLoopback(base)) return null;
   return `Connecting a repo needs Kraft on the machine with this window's files, and kraft.url points at ${hostOf(base)}. Connect it from the web UI, or with \`kraft repo connect\` on that machine.`;
 }
 
 /** Whether the board offers "Connect this repo": a folder's repo is not
  *  connected, and the daemon is on this machine (D31). */
-export function connectOffered(base: string, roots: string[]): boolean {
-  return isLoopback(base) && roots.length > 0;
+export function connectOffered(base: string, roots: string[], remote = false): boolean {
+  return !remote && isLoopback(base) && roots.length > 0;
 }
 
 /** What a connect of `path` tells the person: `err` is what the POST threw,

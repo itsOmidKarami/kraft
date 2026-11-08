@@ -30,11 +30,14 @@ describe("the board's item menu", () => {
     // Approve and Reject act on the gate document showing; a review's drafts and its diff only from their own places.
     const gateDoc = new Set(["kraft.approve", "kraft.reject"]);
     const ownPlace = new Set(["kraft.review.submit", "kraft.review.discard", "kraft.reviewChanges"]);
+    // The worktree is on the server's machine when signed in to one.
+    const machineBound = new Set(["kraft.openWorktree"]);
     const rows = new Set([...board, ...openMenu].filter((e) => e.command && e.when?.startsWith("view == kraft.board")).map((e) => e.command));
     const want = (command: string) =>
       gateDoc.has(command) ? "resourceScheme == kraft-artifact || kraft.artifactPreview"
         : ownPlace.has(command) ? "false"
-          : MUTATING.has(command) ? "kraft.connected && !kraft.readOnly" : "kraft.connected";
+          : machineBound.has(command) ? "kraft.connected && !kraft.remote"
+            : MUTATING.has(command) ? "kraft.connected && !kraft.readOnly" : "kraft.connected";
     expect([...rows].map((command) => palette.find((e) => e.command === command)))
       .toEqual([...rows].map((command) => ({ command, when: want(command) })));
   });

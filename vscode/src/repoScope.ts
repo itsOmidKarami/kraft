@@ -69,6 +69,8 @@ export function registerRepoScope(context: vscode.ExtensionContext, initialRunDi
     { dispose: () => retry && clearTimeout(retry) },
   );
   setAllRepos();
+  // Before the first recompute: a signed-in window ties no local folder to the server's repos, so it runs no git.
+  scope.setRemote(api.remote);
   void recompute();
 
   return {

@@ -92,6 +92,10 @@ describe("localRefusal", () => {
     ["http://localhost:8765", null],
     ["https://kraft.example:8765", "Filing work needs Kraft on the machine with this window's files, and kraft.url points at kraft.example. File it from the web UI instead."],
   ])("%s", (base, want) => expect(localRefusal(base)).toBe(want));
+  it("a signed-in window is remote even on a loopback forward, and names the host", () => {
+    expect(localRefusal("http://127.0.0.1:9000", true)).toContain("127.0.0.1");
+    expect(localRefusal("http://127.0.0.1:9000", false)).toBeNull();
+  });
 });
 
 describe("fileRefusal", () => {
@@ -111,6 +115,8 @@ describe("connectRefusal", () => {
       "Connecting a repo needs Kraft on the machine with this window's files, and kraft.url points at kraft.example. Connect it from the web UI, or with `kraft repo connect` on that machine."],
     ["nothing, on loopback", { trusted: true, version: null }, "http://127.0.0.1:8765", null],
   ])("%s", (_, state, base, want) => expect(connectRefusal(state, base)).toBe(want));
+  it("a signed-in window is refused even on a loopback forward", () =>
+    expect(connectRefusal({ trusted: true, version: null }, "http://127.0.0.1:9000", true)).toContain("127.0.0.1"));
 });
 
 describe("connectOffered", () => {
@@ -118,7 +124,8 @@ describe("connectOffered", () => {
     ["loopback, one unconnected root", "http://127.0.0.1:8765", ["/r"], true],
     ["a remote daemon, one unconnected root", "https://kraft.example", ["/r"], false],
     ["loopback, nothing unconnected", "http://localhost:8765", [], false],
-  ])("%s", (_, base, roots, want) => expect(connectOffered(base, roots)).toBe(want));
+    ["loopback but signed in", "http://127.0.0.1:9000", ["/r"], false, true],
+  ])("%s", (_, base, roots, want, remote = false) => expect(connectOffered(base, roots, remote)).toBe(want));
 });
 
 describe("connectOutcome", () => {

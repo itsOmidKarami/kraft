@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ALL_REPOS_KEY, folderScope, REFETCH_MS, refetchRepos, rememberedScope, repoRoot, samePath, worktreeItemId, WorkspaceScope, type ConnectedRepo, type ScopeDeps } from "../../src/core/repoScope";
 
 const TOP = "rev-parse --show-toplevel";
@@ -185,6 +185,29 @@ describe("WorkspaceScope", () => {
     const broken: ScopeDeps = { ...deps({}), git: async () => { throw new Error("spawn git ENOENT"); } };
     await scope.update(["/r", "/k/worktrees/A"], "/k", broken);
     expect([scope.ready, scope.includes({ id: "x", repo: "/r" }, none), scope.includes({ id: "A", repo: "/elsewhere" }, none)]).toEqual([true, true, true]);
+  });
+});
+
+describe("WorkspaceScope remote", () => {
+  it("includes every repo and ties no local folder to a remote repo", async () => {
+    const s = new WorkspaceScope("linux");
+    const git = { [`/home/me/proj|${TOP}`]: "/home/me/proj", [`/home/me/proj|${COMMON}`]: "/home/me/proj/.git" };
+    await s.update(["/home/me/proj"], "/run", deps(git));
+    expect(s.includes({ id: "A", repo: "/srv/other" }, () => undefined)).toBe(false);
+    expect(s.unconnected([])).toEqual(["/home/me/proj"]);
+    s.setRemote(true);
+    expect(s.includes({ id: "A", repo: "/srv/other" }, () => undefined)).toBe(true);
+    expect(s.unconnected([])).toEqual([]);
+  });
+
+  it("runs no git once remote", async () => {
+    const s = new WorkspaceScope("linux");
+    s.setRemote(true);
+    const d = deps({});
+    const run = vi.spyOn(d, "git");
+    await s.update(["/home/me/proj"], "/run", d);
+    expect(run).not.toHaveBeenCalled();
+    expect(s.ready).toBe(true);
   });
 });
 

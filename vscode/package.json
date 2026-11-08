@@ -446,17 +446,17 @@
         },
         {
           "command": "kraft.toggleAllRepos",
-          "when": "view == kraft.board && !kraft.allRepos",
+          "when": "view == kraft.board && !kraft.allRepos && !kraft.remote",
           "group": "navigation"
         },
         {
           "command": "kraft.showThisRepo",
-          "when": "view == kraft.board && kraft.allRepos",
+          "when": "view == kraft.board && kraft.allRepos && !kraft.remote",
           "group": "navigation"
         },
         {
           "command": "kraft.openConfig",
-          "when": "view == kraft.board",
+          "when": "view == kraft.board && !kraft.remote",
           "group": "navigation@9"
         }
       ],
@@ -580,7 +580,7 @@
       "kraft.openMenu": [
         {
           "command": "kraft.openWorktree",
-          "when": "view == kraft.board && viewItem =~ /\\bworktree\\b/",
+          "when": "view == kraft.board && viewItem =~ /\\bworktree\\b/ && !kraft.remote",
           "group": "open@1"
         },
         {
@@ -636,11 +636,11 @@
       "commandPalette": [
         {
           "command": "kraft.toggleAllRepos",
-          "when": "!kraft.allRepos"
+          "when": "!kraft.allRepos && !kraft.remote"
         },
         {
           "command": "kraft.showThisRepo",
-          "when": "kraft.allRepos"
+          "when": "kraft.allRepos && !kraft.remote"
         },
         {
           "command": "kraft.statusMenu",
@@ -696,7 +696,7 @@
         },
         {
           "command": "kraft.openWorktree",
-          "when": "kraft.connected"
+          "when": "kraft.connected && !kraft.remote"
         },
         {
           "command": "kraft.openInWebUi",
@@ -796,11 +796,11 @@
         },
         {
           "command": "kraft.lintLibrary",
-          "when": "isWorkspaceTrusted"
+          "when": "isWorkspaceTrusted && !kraft.remote"
         },
         {
           "command": "kraft.showResolved",
-          "when": "isWorkspaceTrusted"
+          "when": "isWorkspaceTrusted && !kraft.remote"
         },
         {
           "command": "kraft.fileWork",

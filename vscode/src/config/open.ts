@@ -11,8 +11,10 @@ const separator = (label: string): Pick => ({ label, kind: vscode.QuickPickItemK
 
 const chainDescription = async (path: string) => chainDescriptionOf(await readFile(path, "utf8").catch(() => ""));
 
-export function registerOpenConfig(context: vscode.ExtensionContext, templatesDir: string) {
+/** `remote` is the sentence to show instead of the list, when the config is on another machine. */
+export function registerOpenConfig(context: vscode.ExtensionContext, templatesDir: string, remote?: string) {
   context.subscriptions.push(vscode.commands.registerCommand("kraft.openConfig", async () => {
+    if (remote) return void vscode.window.showInformationMessage(remote);
     let names: string[];
     try {
       const chains = await readdir(join(templatesDir, "chains")).catch(() => []);

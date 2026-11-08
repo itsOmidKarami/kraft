@@ -18,6 +18,7 @@ import { baseUrl, connectionFor, locations, readToken, type Locations } from "./
 import { normalizeServerUrl } from "./core/serverUrl";
 import { SessionStore } from "./core/session";
 import { registerSignIn } from "./signIn";
+import { remoteConfig } from "./core/remote";
 import { Store, wsSocket } from "./core/store";
 import { ThreadCache } from "./core/threadCache";
 import { hasDrafts } from "./core/threads";
@@ -111,6 +112,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   // Before the board: its first render already asks the scope.
   const repoScope = registerRepoScope(context, runDir, api, store);
   const { scope } = repoScope;
+  // A session is another machine's Kraft: no local folder is tied to its repos, and the actions that read this machine are refused.
+  void vscode.commands.executeCommand("setContext", "kraft.remote", api.remote);
   const include = (i: WorkItem) => scope.includes(i, (id) => store.item(id)?.repo);
 
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
@@ -192,15 +195,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   const { reveal, inScope } = registerBoard(context, store, api, () => refusal(state()), include, scope, {
     has: (id) => hasDrafts(cache.get(id)),
     onChange: (cb) => cache.onChange(cb),
-  }, () => connectOffered(api.base, repoScope.unconnected()), () => signedOut);
-  registerConnectRepo(context, api, repoScope, () => connectRefusal(state(), api.base));
+  }, () => connectOffered(api.base, repoScope.unconnected(), api.remote), () => signedOut);
+  registerConnectRepo(context, api, repoScope, () => connectRefusal(state(), api.base, api.remote));
   registerWorkerLog(context, store, api, inScope);
   registerDocs(context, store, api, inScope);
   registerPalette(context, inScope, reveal);
   registerSearch(context, api, reveal);
-  registerOpenConfig(context, loc.templatesDir);
+  registerOpenConfig(context, loc.templatesDir, api.remote ? remoteConfig(api.base) : undefined);
   registerSignIn(context, sessions, () => refusal(state()));
-  registerFileWork(context, { api, store, reveal, refusal: () => fileRefusal(state(), api.base), runDir: () => runDir, scope: scopeDeps });
+  registerFileWork(context, { api, store, reveal, refusal: () => fileRefusal(state(), api.base, api.remote), runDir: () => runDir, scope: scopeDeps });
   context.subscriptions.push(
     status,
     { dispose: () => store.stop() },
@@ -233,11 +236,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   });
   // Config checks, schemas and the resolved chain wait for trust; no reload needed.
   let config: ReturnType<typeof registerConfigChecks> | undefined;
+  // Not when signed in: they check the config on this machine against a Kraft on another.
   const grant = whenTrusted(trusted, (l) => vscode.workspace.onDidGrantWorkspaceTrust(l), () => {
     trusted = true;
-    void registerSchemas(context, loc.templatesDir);
-    config = registerConfigChecks(context, api, loc.templatesDir, () => refusal(state()) !== null);
-    registerResolved(context, api, loc.templatesDir);
+    if (!api.remote) {
+      void registerSchemas(context, loc.templatesDir);
+      config = registerConfigChecks(context, api, loc.templatesDir, () => refusal(state()) !== null);
+      registerResolved(context, api, loc.templatesDir);
+    }
     applyReadOnly();
     if (store.connected && healthSettled) void migrate?.();
   });

@@ -106,6 +106,8 @@ export class WorkspaceScope {
   private scopes: FolderScope[] = [];
   private _ready = false;
   private _showAll = false;
+  // Signed in to another machine's Kraft: no folder here is tied to one of its repos.
+  private _remote = false;
   private gen = 0;
   private listeners = new Set<() => void>();
   // git runs once per folder: a new run_dir or connected list redoes only the cheap steps.
@@ -131,9 +133,23 @@ export class WorkspaceScope {
     this.setShowAll(!this._showAll);
   }
 
+  /** A session is in use: the board shows every repo, `unconnected` offers none,
+   *  and `update` runs no git. Set once at activation. */
+  setRemote(v: boolean): void {
+    if (v === this._remote) return;
+    this._remote = v;
+    this.fire();
+  }
+
   /** git is slow and folders change under it: the last call started wins. */
   async update(folders: string[], runDir: string, deps: ScopeDeps, connected: ConnectedRepo[] = []): Promise<void> {
     const gen = ++this.gen;
+    if (this._remote) {
+      this.scopes = [];
+      this._ready = true;
+      this.fire();
+      return;
+    }
     for (const f of this.rootCache.keys()) if (!folders.includes(f)) this.rootCache.delete(f);
     const rootOf = (f: string, d: ScopeDeps) => {
       let root = this.rootCache.get(f);
@@ -157,7 +173,7 @@ export class WorkspaceScope {
   }
 
   includes(item: Pick<WorkItem, "id" | "repo">, repoOf: (id: string) => string | undefined): boolean {
-    if (this._showAll) return true;
+    if (this._showAll || this._remote) return true;
     if (!this._ready) return false;
     const same = (p: string | undefined) => p !== undefined && samePath(item.repo, p, this.platform);
     return this.scopes.some(
@@ -172,7 +188,7 @@ export class WorkspaceScope {
    *  unread list is not an empty one, so nothing is offered before it. Before
    *  the scope is ready there are no folders, so nothing either. */
   unconnected(connected: Pick<Repo, "path" | "managed">[] | undefined): string[] {
-    if (connected === undefined) return [];
+    if (connected === undefined || this._remote) return [];
     const out: string[] = [];
     for (const s of this.scopes) {
       if (!s.git) continue;

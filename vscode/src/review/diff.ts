@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import * as vscode from "vscode";
 import { reportError } from "../actions";
 import type { Api } from "../core/api";
+import { remoteReview } from "../core/remote";
 import { commandItemId, leftUri, parseRenames, parseReviewUri, reviewFiles, rightUri } from "../core/review";
 import { nameOf } from "../core/board";
 import type { Store } from "../core/store";
@@ -67,6 +68,8 @@ export function registerDiff(context: vscode.ExtensionContext, store: Store, api
   };
 
   const open = async (id?: string) => {
+    // The diff reads `git` in the item's worktree, which a signed-in window's server keeps on its own machine.
+    if (api.remote) return void vscode.window.showInformationMessage(remoteReview(api.base));
     if (!id) return;
     try {
       const diff = await api.getDiff(id);

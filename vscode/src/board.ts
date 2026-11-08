@@ -11,6 +11,7 @@ import { mutating } from "./core/guard";
 import type { PickVerb } from "./core/picks";
 import { rowCommand } from "./core/primary";
 import { RESTRICTED } from "./core/readOnly";
+import { remoteStart, remoteWorktree } from "./core/remote";
 import { ALREADY_STARTING, alreadyRunning, INSTALL_URL, oneAtATime, startButtons, startFailure, startInvocation, type StartError } from "./core/start";
 import type { WorkspaceScope } from "./core/repoScope";
 import type { Store } from "./core/store";
@@ -305,6 +306,7 @@ export function registerBoard(
     vscode.commands.registerCommand("kraft.answer", mutating("kraft.answer", refusal, warn, act("resume", "answer"))),
     // The detail, refreshed now: the row's worktree_exists may predate a reclaim.
     vscode.commands.registerCommand("kraft.openWorktree", async (node?: { item?: WorkItem }) => {
+      if (api.remote) return void vscode.window.showInformationMessage(remoteWorktree(api.base));
       const id = (await itemOr(node, "openWorktree"))?.id;
       if (!id) return;
       try {
@@ -323,7 +325,7 @@ export function registerBoard(
     // Only Restricted Mode refuses: a version mismatch must not stop starting Kraft.
     // From home, so the workspace's venv or shims cannot pick the `kraft` binary; detached,
     // so it needs no terminal. One start at a time: a second click says so.
-    vscode.commands.registerCommand("kraft.startDaemon", mutating("kraft.startDaemon", () => (refusal() === RESTRICTED ? RESTRICTED : null), warn, () => {
+    vscode.commands.registerCommand("kraft.startDaemon", mutating("kraft.startDaemon", () => (refusal() === RESTRICTED ? RESTRICTED : api.remote ? remoteStart(api.base) : null), warn, () => {
       // kraft.path is machine-scoped, so a workspace cannot choose the binary this runs.
       const { file, args } = startInvocation(vscode.workspace.getConfiguration("kraft").get<string>("path"), homedir());
       return startOnce(() => vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Starting Kraft…" }, () => startKraft(file, args, store)));

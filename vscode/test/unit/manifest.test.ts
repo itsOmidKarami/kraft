@@ -15,19 +15,20 @@ it("declares limited support in untrusted workspaces", () =>
     restrictedConfigurations: ["kraft.url"],
   } }));
 
-it.each(["kraft.lintLibrary", "kraft.showResolved"])("hides %s from the palette until trusted", (command) =>
-  expect(pkg.contributes.menus.commandPalette).toContainEqual({ command, when: "isWorkspaceTrusted" }));
+it.each(["kraft.lintLibrary", "kraft.showResolved"])("hides %s from the palette until trusted, and when signed in to another machine", (command) =>
+  expect(pkg.contributes.menus.commandPalette).toContainEqual({ command, when: "isWorkspaceTrusted && !kraft.remote" }));
 
 it.each([
   ["explorer/context", "kraft.fileAsSpec", "resourceExtname == .md && !explorerResourceIsFolder && !kraft.readOnly"],
   ["explorer/context", "kraft.fileAsPlan", "resourceExtname == .md && !explorerResourceIsFolder && !kraft.readOnly"],
   ["editor/context", "kraft.fileSelection", "editorHasSelection && !kraft.readOnly"],
   ["view/title", "kraft.fileWork", "view == kraft.board && !kraft.readOnly"],
-  ["view/title", "kraft.toggleAllRepos", "view == kraft.board && !kraft.allRepos"],
-  ["view/title", "kraft.showThisRepo", "view == kraft.board && kraft.allRepos"],
-  ["view/title", "kraft.openConfig", "view == kraft.board"],
-  ["commandPalette", "kraft.toggleAllRepos", "!kraft.allRepos"],
-  ["commandPalette", "kraft.showThisRepo", "kraft.allRepos"],
+  ["view/title", "kraft.toggleAllRepos", "view == kraft.board && !kraft.allRepos && !kraft.remote"],
+  ["view/title", "kraft.showThisRepo", "view == kraft.board && kraft.allRepos && !kraft.remote"],
+  ["view/title", "kraft.openConfig", "view == kraft.board && !kraft.remote"],
+  ["commandPalette", "kraft.openWorktree", "kraft.connected && !kraft.remote"],
+  ["commandPalette", "kraft.toggleAllRepos", "!kraft.allRepos && !kraft.remote"],
+  ["commandPalette", "kraft.showThisRepo", "kraft.allRepos && !kraft.remote"],
   ["commandPalette", "kraft.fileWork", "!kraft.readOnly"],
   ["commandPalette", "kraft.search", "kraft.connected"],
   ["commandPalette", "kraft.approveNextGate", "kraft.connected"],
