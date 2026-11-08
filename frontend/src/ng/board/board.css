@@ -133,7 +133,7 @@
 
 /* Loading (65–70). */
 .board-skeleton { padding-top: 10px; }
-/* Static: the CSS contract allows only the breakpoint queries, so no reduced-motion guard for a pulse. */
+/* Static: a loading row does not pulse, so it never reads as a running one (running breathes, base.css). */
 .sk { display: block; height: 12px; border-radius: 4px; background: var(--surface-2); }
 .sk-head { width: 90px; height: 10px; margin: 16px 0 10px 46px; }
 .sk-row { display: grid; grid-template-columns: 18px 30px minmax(0, 1fr) 150px 132px; gap: 14px; align-items: center; padding: 8px 14px; }
