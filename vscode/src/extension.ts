@@ -63,7 +63,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   // Read before the connection is decided: the lookup there is synchronous.
   const named = normalizeServerUrl(baseUrl(setting, process.env, accessYaml));
   const sessionUrl = named.ok ? named.url : undefined;
-  const stored = sessionUrl ? await sessions.get(sessionUrl) : undefined;
+  // A failing secret store (a locked keyring) must not stop activation: no session.
+  const stored = sessionUrl
+    ? await sessions.get(sessionUrl).catch((e) => { log.warn(`could not read the stored session: ${(e as Error).message}`); return undefined; })
+    : undefined;
   const { base, token, session, signInOffered } = connectionFor({
     setting,
     globalSetting: cfg.inspect<string>("url")?.globalValue,

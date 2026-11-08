@@ -9,10 +9,11 @@ export const SIGN_IN_AGAIN = "Kraft: sign in again";
 export const SIGN_IN_OFFER = "Sign in to use a session instead.";
 
 /** The board's disconnected row: why, and the command that fixes it. With a
- *  session in use, a 401 or 403 means it ended: the row signs in again. */
+ *  session in use, only a 401 means it ended and the row signs in again; a 403
+ *  is the server's perimeter refusing (Host/Origin), which signing in cannot fix. */
 export function downRow(err: ConnError | null, signedIn = false): { label: string; command: string; args?: unknown[] } {
   if (!err || err.status === 0) return { label: NOT_RUNNING, command: "kraft.startDaemon" };
-  if (signedIn && (err.status === 401 || err.status === 403)) return { label: SIGN_IN_AGAIN, command: "kraft.signIn" };
+  if (signedIn && err.status === 401) return { label: SIGN_IN_AGAIN, command: "kraft.signIn" };
   if (err.status === 401 || err.status === 403) return { label: REFUSED_TOKEN, command: "workbench.action.openSettings", args: ["kraft.url"] };
   return { label: `Kraft error: ${err.detail} — Show log`, command: "kraft.showLog" };
 }

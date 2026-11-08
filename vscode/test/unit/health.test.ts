@@ -13,9 +13,14 @@ describe("health", () => {
 
   it.each([
     [{ status: 401, detail: "x" }, "Kraft: sign in again", "kraft.signIn"],
-    [{ status: 403, detail: "x" }, "Kraft: sign in again", "kraft.signIn"],
     [{ status: 0, detail: "x" }, "Kraft isn't running — Start", "kraft.startDaemon"],
   ])("downRow(%o) with a session", (err, label, command) => expect(downRow(err, true)).toMatchObject({ label, command }));
+
+  it("a 403 with a session is the perimeter refusing, not an ended session", () => {
+    const row = downRow({ status: 403, detail: "x" }, true);
+    expect(row.command).not.toBe("kraft.signIn");
+    expect(row.label).not.toBe("Kraft: sign in again");
+  });
 
   it("opens settings at kraft.url", () => expect(downRow({ status: 401, detail: "" }).args).toEqual(["kraft.url"]));
 

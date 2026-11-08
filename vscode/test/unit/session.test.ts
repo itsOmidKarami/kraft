@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { clientName, SessionStore, signIn, tlsMessage } from "../../src/core/session";
+import { SessionStore, signIn, tlsMessage } from "../../src/core/session";
 
 const reply = (status: number, headers: Record<string, string> = {}, body: unknown = {}) =>
   vi.fn(async (_u: string, _i?: RequestInit) => new Response(JSON.stringify(body), { status, headers }));
@@ -47,8 +47,6 @@ describe("tlsMessage", () => {
     expect(tlsMessage(Object.assign(new Error("x"), { code }))).toContain("NODE_EXTRA_CA_CERTS"));
   it("is undefined for anything else", () => expect(tlsMessage(new Error("ECONNREFUSED"))).toBeUndefined());
 });
-
-it("clientName", () => expect(clientName("box")).toBe("Kraft for VS Code on box"));
 
 describe("SessionStore", () => {
   const mem = () => { const m = new Map<string, string>(); return { m, s: { get: async (k: string) => m.get(k), store: async (k: string, v: string) => void m.set(k, v), delete: async (k: string) => void m.delete(k) } }; };

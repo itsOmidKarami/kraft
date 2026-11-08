@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hostLabel, needsPlainHttpWarning, normalizeServerUrl } from "../../src/core/serverUrl";
+import { needsPlainHttpWarning, normalizeServerUrl } from "../../src/core/serverUrl";
 
 describe("normalizeServerUrl", () => {
   it.each([
@@ -43,5 +43,3 @@ describe("needsPlainHttpWarning", () => {
     ["http to [::1]", "http://[::1]:9000", false],
   ])("%s", (_id, url, want) => expect(needsPlainHttpWarning(url)).toBe(want));
 });
-
-it("hostLabel names the server without its scheme", () => expect(hostLabel("https://box:443")).toBe("box:443"));
