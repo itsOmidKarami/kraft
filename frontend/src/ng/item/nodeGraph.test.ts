@@ -387,6 +387,10 @@ describe("sessionLook covers every session status", () => {
   it.each(["conflict", "infra", "infra_stop", "merge_rejected"] as const)("draws %s as failed", (status) => {
     expect(sessionLook(s("verification.checks.lint", { status }), 0).state).toBe("failed");
   });
+  // Kraft-30qg8.2: a waiting session runs nothing and needs no one, so it is neither running nor amber ("needs you").
+  it.each(["waiting", "rate_limited"] as const)("draws %s as a plain current box that says waiting", (status) => {
+    expect(sessionLook(s("verification.checks.lint", { status }), 0)).toEqual({ state: "current", meta: "waiting" });
+  });
   it("does not throw on a status a newer server sends", () => {
     expect(() => sessionLook(s("verification.checks.lint", { status: "brand_new" as SessionStatus }), 0)).not.toThrow();
   });

@@ -254,6 +254,10 @@ describe("nodeSub: a chain row's words", () => {
     // R11b-04: a waiting node says what it waits on, not "running".
     expect(nodeSub(graph(mk("waiting", stop("wait"))).find((n) => n.id === "verification")!).text).toMatch(/^waiting on CI/);
     expect(nodeSub(graph(mk("waiting", stop("rate_limit"))).find((n) => n.id === "verification")!).text).toMatch(/^waiting · rate limit/);
+    // Blue is running; escalated is amber, as on the board; a waiting node is neither.
+    expect(nodeSub(graph(mk("running")).find((n) => n.id === "verification")!).tone).toBe("info");
+    expect(nodeSub(graph(mk("escalated")).find((n) => n.id === "verification")!)).toMatchObject({ text: expect.stringMatching(/^escalated/), tone: "warn" });
+    expect(nodeSub(graph(mk("waiting", stop("wait"))).find((n) => n.id === "verification")!).tone).toBe("muted");
   });
 });
 

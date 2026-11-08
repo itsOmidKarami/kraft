@@ -35,7 +35,8 @@
 /* The small running mark on its own, ahead of a word: the RUNNING status badge. */
 .run-dot { display: inline-block; flex: none; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--run); animation: var(--run-breathe); vertical-align: 1px; }
 /* A running tick's light: a tick's `::after` paints it and moves it with `animation: var(--run-sheen)`. */
-:root { --run-sheen-light: linear-gradient(90deg, transparent, color-mix(in srgb, var(--bg) 65%, transparent), transparent); }
+:root { --run-sheen-light: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text) 45%, transparent), transparent); }
+:root[data-mode="light"] { --run-sheen-light: linear-gradient(90deg, transparent, color-mix(in srgb, var(--bg) 65%, transparent), transparent); }
 
 body { margin: 0; font: var(--fs-body)/1.5 var(--font-sans); background: var(--bg); color: var(--text); }
 a { color: var(--accent); }

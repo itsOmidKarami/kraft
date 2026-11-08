@@ -280,7 +280,7 @@ export function nodeSub(n: ChainNode, skipped = false): { text: string; tone: "w
       if (n.paused) return { text: "paused", tone: "muted" };
       if (n.sub === "needs you") return { text: gate ? "waiting for you" : "needs you", tone: "warn" };
       // A waiting node says what it waits on, as the badge does, not "running" (R11b-04).
-      return { text: [n.wait ?? "running", n.summary, n.sub].filter(Boolean).join(" · "), tone: n.running ? "info" : "muted" };
+      return { text: [n.wait ?? "running", n.summary, n.sub].filter(Boolean).join(" · "), tone: n.running ? "info" : n.needs ? "warn" : "muted" };
     case "plain": return { text: n.meta ?? "", tone: "muted" };
     default: return { text: gate ? "you" : "not started", tone: "muted" };
   }

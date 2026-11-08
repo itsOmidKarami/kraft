@@ -19,7 +19,6 @@
 .ph-tick { flex: 1; height: 4px; border-radius: 2px; background: var(--line); }
 .ph-tick-done { background: var(--text-muted); }
 .ph-tick-current { background: var(--text-sub); }
-.ph-tick-run { background: color-mix(in oklab, var(--ok) 75%, transparent); }
 .ph-tick-running { position: relative; overflow: hidden; background: var(--run); }
 .ph-tick-running::after { content: ""; position: absolute; inset: 0; background: var(--run-sheen-light); transform: translateX(-100%); animation: var(--run-sheen); }
 .ph-tick-hot { background: var(--warn); }

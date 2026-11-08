@@ -104,6 +104,8 @@ describe("theme.css", () => {
       at(r, "--bg", 3);
       at(r, "--surface", 4.5);
     }
+    // Running words are --info on the page itself (a board row's tail, a running node's sub line).
+    at("--info", "--bg", 4.5);
     at("--focus", "--bg", 3);
     // Tinted chips: the colour at a few percent over the ground it sits on, so the text is lighter or darker than the ground it was checked on.
     for (const g of ["--bg", "--surface", "--surface-2"]) {

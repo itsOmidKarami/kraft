@@ -32,6 +32,8 @@
 .glyph-gate .glyph-box { transform: rotate(45deg); border: 1.5px solid var(--text-muted); background: var(--surface-2); }
 .glyph-gate .glyph-box.is-done { border-color: var(--stroke); background: var(--stroke); }
 .glyph-gate .glyph-box.is-current { border-color: var(--warn); box-shadow: none; }
+/* A gate whose reviewer runs: running, not waiting on you. */
+.glyph-gate .glyph-box.is-current.is-running { border-color: color-mix(in srgb, var(--run) var(--run-edge), transparent); }
 .glyph-gate .glyph-box.is-amber { border-color: var(--warn); }
 .glyph-gate .glyph-box.is-paused { border-color: var(--text-muted); }
 .glyph-gate .glyph-box.is-todo { border: 1.5px dashed var(--stroke); background: var(--bg); }
@@ -40,6 +42,7 @@
 .glyph-gate .glyph-box.is-sel { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--selection); }
 .glyph-light { aspect-ratio: 1; border-radius: 50%; background: var(--ok); }
 .is-current > .glyph-light { background: var(--warn); }
+.is-current.is-running > .glyph-light { background: var(--run); }
 /* Badges */
 .glyph-prob { position: absolute; width: 16px; height: 16px; border-radius: 50%; background: var(--bad); color: var(--bg); font: 700 var(--fs-label)/16px system-ui, sans-serif; text-align: center; }
 .glyph-att { position: absolute; top: -8px; padding: 0 5px; height: 16px; box-sizing: border-box; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); font: 600 var(--fs-label)/14px ui-monospace, Menlo, monospace; color: var(--text-sub); white-space: nowrap; }
@@ -117,6 +120,7 @@
 .graph-node { position: absolute; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 0; padding: 0; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .graph-node:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
 .graph-node:hover .glyph-box:not(.is-sel) { border-color: var(--text-muted); }
+.graph-node:hover .glyph-box.is-current.is-running:not(.is-sel) { border-color: color-mix(in srgb, var(--run) var(--run-edge), transparent); }
 .graph-label { padding: 0 3px; border-radius: 3px; background: var(--bg); text-align: center; line-height: 1.3; font: 400 var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-sub); }
 .graph-node.is-bold .graph-label { font-weight: 600; color: var(--text); }
 .graph-node.is-todo .graph-label { color: var(--text-muted); }
@@ -383,7 +387,8 @@
 .map-glyph.is-done { border-color: var(--text-muted); background: var(--text-muted); }
 .map-glyph.is-current { border: 1.5px solid var(--text); background: var(--surface-2); }
 /* Too small to carry the border's light: a running node here breathes, as the small marks do. */
-.map-glyph.is-running { border: 1.5px solid var(--run); background: color-mix(in srgb, var(--run) 25%, var(--bg)); animation: var(--run-breathe); }
+.map-glyph.is-running { position: relative; border: 1.5px solid var(--run); background: var(--bg); }
+.map-glyph.is-running::after { content: ""; position: absolute; inset: 1px; border-radius: 1px; background: var(--run); animation: var(--run-breathe); }
 .map-glyph.is-amber { border: 1.5px solid var(--warn); background: color-mix(in srgb, var(--warn) 25%, var(--bg)); }
 .map-glyph.is-failed { border: 1.5px solid var(--bad); }
 .map-glyph.is-todo { border-style: dashed; }
@@ -404,7 +409,8 @@
 .sub-mark:hover { background: var(--surface-2); }
 .sub-mark:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
 .sub-mark-dot { display: flex; align-items: center; justify-content: center; width: 13px; height: 13px; border-radius: 50%; background: var(--text-faint); color: var(--bg); }
-.sub-mark.is-live .sub-mark-dot { background: var(--run); animation: var(--run-breathe); }
+.sub-mark.is-live .sub-mark-dot { position: relative; background: transparent; }
+.sub-mark.is-live .sub-mark-dot::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--run); animation: var(--run-breathe); }
 .sub-mark.is-ok .sub-mark-dot { background: var(--ok); }
 .sub-mark.is-bad .sub-mark-dot { background: var(--bad); }
 .sub-mark.is-sel .sub-mark-dot { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--selection); }

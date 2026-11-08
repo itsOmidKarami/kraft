@@ -124,6 +124,18 @@ describe("ng CSS", () => {
     const css = readFileSync(join(here, "theme/base.css"), "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
     const block = /@media \(prefers-reduced-motion: reduce\) {([^\n]*)}\s*(?:\n|$)/.exec(css)?.[1] ?? "";
     for (const v of ["--run-trace", "--run-sheen", "--run-breathe"]) expect(block).toMatch(new RegExp(`${v}:\\s*none`));
+    expect(block).toMatch(/--run-edge:\s*100%/);
+  });
+
+  // The one switch holds only while every running animation goes through its variable.
+  it("plays the running keyframes only through their --run-* variables", () => {
+    const bad: string[] = [];
+    for (const file of cssFiles(here)) {
+      const css = readFileSync(file, "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
+      for (const m of css.matchAll(/\banimation(?:-name)?:\s*([^;}]+)/g))
+        if (/(?<!--)\brun-(?:trace|sheen|breathe)\b/.test(m[1])) bad.push(`${relative(here, file)}: ${m[0].trim()}`);
+    }
+    expect(bad).toEqual([]);
   });
 
   // R12b-07 (fixed by #502's header): a fixed 118px wrapped "Raise cap", "Review conflicts" and "Reopen MR" and clipped them.
