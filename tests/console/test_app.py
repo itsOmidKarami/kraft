@@ -816,3 +816,81 @@ def test_nothing_that_lands_while_the_frame_comes_down_raises(board, monkeypatch
         return True
 
     assert console.run(scenario)
+
+
+@pytest.mark.parametrize(
+    ("is_remote", "error", "said"),
+    [
+        (
+            False,
+            client.ClientError("x", kind=client.Failure.UNAUTHORIZED),
+            "The server refused this machine's token (run/mcp-token).",
+        ),
+        (
+            True,
+            client.ClientError("kraft 401: x", kind=client.Failure.UNAUTHORIZED, status=401),
+            "The server ended this session. Quit and run "
+            "`kraft console --server https://kraft.example:443` to sign in again.",
+        ),
+        (
+            True,
+            client.ClientError("no", kind=client.Failure.UNREACHABLE),
+            "No server at kraft.example:443.",
+        ),
+        (
+            True,
+            client.ClientError("kraft 500: boom", kind=client.Failure.SERVER_ERROR, status=500),
+            "The server could not show the board: 500: boom",
+        ),
+    ],
+    ids=[
+        "local-token-wording-unchanged",
+        "remote-session-ended",
+        "remote-no-server-names-no-scheme",
+        "remote-server-words",
+    ],
+)
+def test_the_down_sentence_names_the_server_without_its_scheme_and_a_session_that_ended(
+    monkeypatch, remote_server, is_remote, error, said
+):
+    if not is_remote:
+        monkeypatch.setattr(client.transport, "remote", None)
+    assert console_app.down_sentence(error) == said
+
+
+def test_a_remote_console_never_offers_to_start_a_server_even_through_a_loopback_forward(
+    monkeypatch,
+):
+    from kraft.client import remote
+
+    monkeypatch.setattr(client.transport, "remote", remote.Target("http://127.0.0.1:9000", "t"))
+    assert console_app.starts_here() is False
+
+
+def test_a_remote_path_is_not_shortened_with_this_machines_home(monkeypatch, remote_server):
+    monkeypatch.setenv("HOME", "/Users/omid")
+    assert console_app.home_relative("/Users/omid/work/x") == "/Users/omid/work/x"
+
+
+def test_a_session_that_ends_while_running_says_so_and_is_deleted(console, tmp_path, monkeypatch):
+    from kraft.client import remote
+
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path))
+    store = remote.SessionStore(remote.sessions_path())
+    store.put("https://kraft.example:443", "tok-1")
+    monkeypatch.setattr(
+        client.transport, "remote", remote.Target("https://kraft.example:443", "tok-1")
+    )
+
+    async def board_rows(**kw):
+        raise client.status_error(401, "Not authenticated")
+
+    monkeypatch.setattr(client, "board_rows", board_rows)
+
+    async def scenario(app, pilot):
+        await console.until(pilot, lambda: app.link is Link.DOWN)
+        return _text(app, "#down")
+
+    said = console.run(scenario)
+    assert "ended this session" in said and "kraft console --server" in said
+    assert store.get("https://kraft.example:443") is None

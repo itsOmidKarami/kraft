@@ -30,6 +30,7 @@ from textual.theme import Theme
 from textual.widgets import Button, ContentSwitcher, Footer, Input, Static
 
 from kraft import answers, client, config, update
+from kraft.client import remote
 from kraft.console import moments, panels, pulse, runner, theme, words
 from kraft.console.dialogs import Confirm, Dialog, Keys
 from kraft.console.live import Link, Live
@@ -115,8 +116,17 @@ THEMES = (
 )
 
 
+#: What a remote console says when its session is gone (spec "Console / Start-up" 3).
+SESSION_ENDED = (
+    "The server ended this session. Quit and run `kraft console --server {url}` to sign in again."
+)
+
+
 def home_relative(path: str) -> str:
-    """`path` with the home directory written `~`, only at a path boundary."""
+    """`path` with the home directory written `~`, only at a path boundary.
+    A remote path is the server's: this machine's home means nothing there."""
+    if client.is_remote():
+        return path
     home = os.path.expanduser("~")
     if path == home:
         return "~"
@@ -128,16 +138,20 @@ def home_relative(path: str) -> str:
 def down_sentence(error: client.ClientError | None) -> str:
     """What every view says while the link is down (spec §8)."""
     if error is not None and error.kind == client.Failure.UNAUTHORIZED:
+        if (target := client.transport.remote) is not None:
+            return SESSION_ENDED.format(url=target.base)
         return "The server refused this machine's token (run/mcp-token)."
     if error is not None and error.kind != client.Failure.UNREACHABLE:
         # A server that answers, but not with the board: its own words.
         return f"The server could not show the board: {client.reason_of(str(error))}"
-    return f"No server at {client.base_url().removeprefix('http://')}."
+    return f"No server at {client.base_url().partition('://')[2]}."
 
 
 def starts_here() -> bool:
     """Whether "Start server" can start the server the console reads: only
     one on this machine (spec §7.3)."""
+    if client.is_remote():  # "remote" is how the address was given, not its host
+        return False
     return urlsplit(client.base_url()).hostname in config.LOOPBACK
 
 
@@ -212,7 +226,7 @@ class KraftConsole(App):
             on_event=self._live_event, on_health=self._live_health, on_link=self._live_link
         )
         #: The console's last quit (`moments.read_seen`); None the first time.
-        self.seen = moments.read_seen()
+        self.seen = None if client.is_remote() else moments.read_seen()
         #: Whether the board has been read once: the moments speak only after it.
         self._read_once = False
         #: The items a finished toast has named: each is named once.
@@ -417,7 +431,8 @@ class KraftConsole(App):
         if self.command is not None:
             await self.command.end()
         if self._read_once:  # a console that never read the board saw nothing
-            moments.write_seen(time.time(), self.rows)
+            if not client.is_remote():  # "since you left" is this machine's own
+                moments.write_seen(time.time(), self.rows)
             self.farewell = moments.leaving(self._in_scope(self.rows))
 
     async def on_event(self, event: events.Event) -> None:
@@ -610,6 +625,14 @@ class KraftConsole(App):
     def _live_link(self, link: Link, error: client.ClientError | None) -> None:
         was_down = self.link is Link.DOWN
         self.link = link
+        if (
+            link is Link.DOWN
+            and error is not None
+            and error.kind == client.Failure.UNAUTHORIZED
+            and (target := client.transport.remote) is not None
+        ):
+            # Only the token that failed: a console that signed in again keeps its new session.
+            remote.SessionStore(remote.sessions_path()).forget(target.base, target.session)
         frame = self.default_screen
         frame.set_class(link is Link.DOWN, "-down")
         no_server = link is Link.DOWN and (

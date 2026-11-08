@@ -302,3 +302,16 @@ def test_a_console_that_never_read_the_board_notes_nothing(console, monkeypatch)
 
     app = console.run(scenario)
     assert (app.farewell, moments.read_seen()) == (None, None)
+
+
+def test_a_remote_console_reads_no_since_you_left_line_and_writes_none(board, remote_server):
+    _seen({"seen_at": 1, "done": []})
+    before = moments.seen_path().read_text()
+    console = board([GATE])
+
+    async def scenario(app, pilot):
+        await _settled(console, app, pilot)
+        return app
+
+    app = console.run(scenario)
+    assert (app.seen, moments.seen_path().read_text()) == (None, before)
