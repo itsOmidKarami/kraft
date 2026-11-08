@@ -14,7 +14,7 @@ from support.harness import entry_of, git, v1_node
 from kraft import events, executor, store
 from kraft import policy as _policy
 from kraft.executor import prompts, walk
-from kraft.vocab import GateEvent
+from kraft.vocab import ForgeEvent, GateEvent
 
 NO_SETUP = entry_of({"setup_command": ""})
 KEY = "build.fix_loop"
@@ -276,7 +276,7 @@ async def test_a_fix_round_that_changed_nothing_stops_without_measuring_again(
 
 
 @pytest.mark.parametrize(
-    "change", ["uncommitted-edit", "thread-reply", "snapshot-refused", "mr-meta-edit"]
+    "change", ["uncommitted-edit", "thread-reply", "ci-rerun", "snapshot-refused", "mr-meta-edit"]
 )
 async def test_a_fix_round_that_changed_anything_measures_again(
     item_on, script, tmp_path, monkeypatch, change
@@ -299,6 +299,21 @@ async def test_a_fix_round_that_changed_anything_measures_again(
             )
 
         script.effects["fix"] = answered
+    if change == "ci-rerun":
+
+        async def reran(_row):
+            payload = {
+                "node_id": "build",
+                "cycle": 1,
+                "reason": "bd download 504",
+                "jobs": ["test"],
+                "reran": ["1"],
+            }
+            await it.database.write(
+                lambda c: events.append(c, it.id, ForgeEvent.CI_RERUN_REQUESTED, payload)
+            )
+
+        script.effects["fix"] = reran
     if change == "snapshot-refused":
         monkeypatch.setattr(walk._read_only, "snapshot", lambda *a, **k: None)
     if change == "mr-meta-edit":

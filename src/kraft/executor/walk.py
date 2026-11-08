@@ -8,8 +8,8 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from kraft import builtins as _builtins
+from kraft import ci_reruns, events, inplace, item_paths, node_runs, reviewed_head, store
 from kraft import config as _config
-from kraft import events, inplace, item_paths, node_runs, reviewed_head, store
 from kraft import findings as _findings
 from kraft import policy as _policy
 from kraft.adapters import beads
@@ -2479,7 +2479,13 @@ async def _walk_node_once(
                 ),
             )
 
-        if prints and fix_ran:
+        # A re-run's expected result is the same findings (a gh finding is only
+        # `job <name> failed: script_failure`), so a round that re-ran CI is not
+        # evidence of a stuck repair. The cap and the judge still bound it.
+        reran = bool(prints and fix_ran) and db.read(
+            lambda c: ci_reruns.reran_last_cycle(c, work_item_id, node.id)
+        )
+        if prints and fix_ran and not reran:
             # Whole-set equality catches "nothing at all changed". Kraft-0i6z4:
             # a single fingerprint recurring for `_FINGERPRINT_STREAK_LIMIT`
             # rounds is also stuck, even while a co-occurring finding keeps
@@ -2678,7 +2684,11 @@ def _changed_nothing(
     if forge_mod.read_mr_meta(Path(worktree), work_item_id, run_dirs) != meta:
         return False
     moved = db.read(lambda c: events.read_after(c, seq, work_item_id))
-    return not any(e["type"] == GateEvent.THREAD_UPDATED for e in moved)
+    # A CI re-run changes what the next measurement reads without touching the
+    # checkout (Kraft-zje6v), like a thread reply.
+    return not any(
+        e["type"] in (GateEvent.THREAD_UPDATED, ForgeEvent.CI_RERUN_REQUESTED) for e in moved
+    )
 
 
 def _changed_nothing_reason(db, work_item_id: str, node: ResolvedNode, count: int, fix: str) -> str:

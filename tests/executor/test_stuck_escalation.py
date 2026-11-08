@@ -16,6 +16,7 @@ from kraft import events, executor, rate_limit_retry, store
 from kraft import policy as _policy
 from kraft.adapters import forge
 from kraft.executor import dispatch, gates
+from kraft.vocab import ForgeEvent
 
 NO_SETUP = entry_of({"setup_command": ""})
 LAUNCH = executor.LaunchContext(repo_entry=NO_SETUP)
@@ -530,3 +531,45 @@ async def test_red_pipeline_runs_on_failure(item_on, monkeypatch):
     )
 
     assert [s["hook_point"] for s in it.sessions("build") if s["hook_point"].endswith("repair")]
+
+
+async def test_a_ci_rerun_round_with_the_same_findings_runs_to_the_cap(
+    item_on, script, monkeypatch
+):
+    """Kraft-zje6v. A re-run's expected result is the same finding (a gh finding
+    is only `job <name> failed: script_failure`), so a round whose only act was
+    asking for one is not "unchanged across cycle 1". The loop goes on to the
+    cap, and the stop says the failure was infrastructure."""
+    monkeypatch.setattr(
+        forge.run, "resolve", lambda name: forge.FakeForge(pipeline_statuses={"7": [_RED] * 6})
+    )
+    script.real.add("ci")
+    script.unchanged = {"fix"}
+    cycles = iter(range(1, 10))
+    it = await item_on([_pipeline_node(fix_loop={"tasks": [_sub("fix")], "max_attempts": 3})])
+
+    async def reran(_row):
+        payload = {
+            "node_id": "build",
+            "cycle": next(cycles),
+            "reason": "bd download 504",
+            "jobs": ["test"],
+            "reran": ["1"],
+        }
+        await it.database.write(
+            lambda c: events.append(c, it.id, ForgeEvent.CI_RERUN_REQUESTED, payload)
+        )
+
+    script.effects["fix"] = reran
+
+    assert (
+        await executor.run_once(
+            it.database, it.run_dirs, work_item_id=it.id, policy=_policy_(), launch=_ON_A_FORGE
+        )
+        == "needs_human"
+    )
+
+    assert "exhausted" in _reason(it), _reason(it)
+    assert "unchanged across" not in _reason(it)
+    assert "changed nothing" not in _reason(it)
+    assert len(it.events("fix_cycle_started")) == 3

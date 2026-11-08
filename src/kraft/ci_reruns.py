@@ -16,7 +16,14 @@ from kraft import events
 from kraft.templates.models import ForgeAction, ForgeTask, ResolvedNode
 from kraft.vocab import ChainEvent, ForgeEvent
 
-__all__ = ["waits_on_mr_ci", "open_fix_cycle", "reruns", "node_run_start", "node_of"]
+__all__ = [
+    "waits_on_mr_ci",
+    "open_fix_cycle",
+    "reran_last_cycle",
+    "reruns",
+    "node_run_start",
+    "node_of",
+]
 
 
 def waits_on_mr_ci(node: ResolvedNode | None) -> bool:
@@ -56,6 +63,14 @@ def open_fix_cycle(conn: sqlite3.Connection, work_item_id: str, node_id: str) ->
         ChainEvent.FIX_CYCLE_REFUNDED,
     )
     return cycle[-1] if cycle and cycle[-1]["type"] == ChainEvent.FIX_CYCLE_STARTED else None
+
+
+def reran_last_cycle(conn: sqlite3.Connection, work_item_id: str, node_id: str) -> bool:
+    """Whether the node's latest fix cycle, finished or not, re-ran CI. Read
+    from events, so a crash and resume sees what the live run saw."""
+    started = _node_events(conn, work_item_id, node_id, ChainEvent.FIX_CYCLE_STARTED)
+    after = started[-1]["seq"] if started else 0
+    return bool(reruns(conn, work_item_id, node_id, after_seq=after))
 
 
 def reruns(
