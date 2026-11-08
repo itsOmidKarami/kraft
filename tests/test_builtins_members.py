@@ -10,6 +10,7 @@ from support import worktree as wtree
 from support.harness import ALLOW_FILE, entry_of, git, make_repo, make_repo_with_submodule, v1_chain
 from support.workspace import workspace_target
 
+from kraft import builtins as kraft_builtins
 from kraft import store
 from kraft.config import git_read
 
@@ -206,3 +207,61 @@ async def test_a_member_branch_already_in_the_repository_is_reused_only_at_the_g
             await wtree.ensure(database, run_dirs, root, repositories=_members(sub))
         assert not (run_dirs.worktrees / "w1").exists()
     assert git_read(sub, "rev-parse", branch) == tip
+
+
+class _Killed(BaseException):
+    """A hard kill: not an `Exception`, so no `except` in Kraft's setup runs the discard."""
+
+
+@pytest.mark.parametrize("dies_at", ["first-member", "second-member", "rows"])
+async def test_a_restart_after_a_kill_mid_member_checkout_sets_the_members_up(
+    tmp_path, database, run_dirs, monkeypatch, dies_at
+):
+    """Kraft-g7ejp: a kill between the root's checkout and the `work_item_repos`
+    rows leaves a root worktree the next `ensure_worktree` took for finished,
+    so the item ran with no rows and the forge nodes opened a merge request for
+    the root alone. The restart finishes the members, keeps the one already
+    made, and records every repo once."""
+    root, sub = make_repo_with_submodule(tmp_path)
+    pkg2 = make_repo(tmp_path, name="pkg2")
+    git(root, *ALLOW_FILE, "submodule", "add", str(pkg2), "repos/pkg2")
+    git(root, "commit", "-qm", "a second member")
+    await _workspace_item(database, root, {"pkg": "repos/pkg", "pkg2": "repos/pkg2"})
+    repositories = {
+        "pkg": entry_of({"id": "pkg", "path": str(sub)}),
+        "pkg2": entry_of({"id": "pkg2", "path": str(pkg2)}),
+    }
+    first, second = store.merge_rank_order(["repos/pkg", "repos/pkg2"])
+    real = kraft_builtins._add_member
+    dying = {"first-member": first, "second-member": second}.get(dies_at)
+
+    def add_member(worktree, rel, *args, **kw):
+        if rel == dying:
+            raise _Killed
+        return real(worktree, rel, *args, **kw)
+
+    def add_repo(*args, **kw):
+        raise _Killed
+
+    with monkeypatch.context() as m:
+        m.setattr(kraft_builtins, "_add_member", add_member)
+        if dies_at == "rows":
+            m.setattr(store, "add_repo", add_repo)
+        with pytest.raises(_Killed):
+            await wtree.ensure(database, run_dirs, root, repositories=repositories)
+    worktree = run_dirs.worktrees / "w1"
+    assert worktree.is_dir() and not database.read(lambda c: store.repos_for(c, "w1"))
+    if dies_at != "first-member":
+        (worktree / first / "kept.txt").write_text("made after the kill\n")
+
+    await wtree.ensure(database, run_dirs, root, repositories=repositories)
+
+    repos = database.read(lambda c: store.repos_for(c, "w1"))
+    assert [r["submodule_path"] for r in repos] == [first, second, None]
+    for rel, repo in {"repos/pkg": sub, "repos/pkg2": pkg2}.items():
+        assert _common(worktree / rel) == _common(repo)
+        assert git_read(worktree / rel, "rev-parse", "--abbrev-ref", "HEAD") == wtree.branch(
+            database
+        )
+    if dies_at != "first-member":
+        assert (worktree / first / "kept.txt").read_text() == "made after the kill\n"
