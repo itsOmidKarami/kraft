@@ -40,17 +40,17 @@ origin: src/kraft/console/signin.py
 
 ## REQ remote-console-runs-nothing-on-this-machine
 WHERE the console was given `--server`, the system SHALL NOT start a `kraft` child process and SHALL refuse a typed command with one sentence.
-enforced-by: tests/console/test_app.py::test_a_remote_console_refuses_a_typed_command_and_does_nothing[runs-a-child], tests/console/test_app.py::test_a_remote_console_refuses_a_typed_command_and_does_nothing[goes-to-a-screen], tests/console/test_app.py::test_run_command_is_closed_remotely_whoever_asks
+enforced-by: tests/console/test_remote.py::test_a_remote_console_refuses_a_typed_command_and_does_nothing[runs-a-child], tests/console/test_remote.py::test_a_remote_console_refuses_a_typed_command_and_does_nothing[goes-to-a-screen], tests/console/test_remote.py::test_run_command_is_closed_remotely_whoever_asks
 origin: src/kraft/console/app.py
 
 ## REQ remote-console-never-offers-start-server
 WHERE the console was given `--server`, the system SHALL NOT offer to start a server, even for a loopback address.
-enforced-by: tests/console/test_app.py::test_a_remote_console_never_offers_to_start_a_server_even_through_a_loopback_forward
+enforced-by: tests/console/test_remote.py::test_a_remote_console_never_offers_to_start_a_server_even_through_a_loopback_forward
 origin: src/kraft/console/app.py
 
 ## REQ ended-session-is-said-and-forgotten
 WHEN a remote console's session is rejected, the system SHALL say the server ended the session and SHALL delete the stored session.
-enforced-by: tests/console/test_app.py::test_a_session_that_ends_while_running_says_so_and_is_deleted
+enforced-by: tests/console/test_remote.py::test_a_session_that_ends_while_running_says_so_and_is_deleted
 origin: src/kraft/console/app.py
 
 ## REQ web-ui-shows-kraft-client-labels-as-given
