@@ -754,20 +754,28 @@ class KraftConsole(App):
         return [(name, counts[name]) for name in TABS]
 
 
-def main() -> None:
+def main(server: str | None = None) -> None:
     """`kraft console`: refuse where a terminal UI cannot work (spec §3), else
-    run. A refusal is a ValueError, which `kraft` prints as `kraft: ...`."""
+    run. A refusal is a ValueError, which `kraft` prints as `kraft: ...`.
+    `server` is `--server URL`: the Kraft on another machine to show."""
     if os.environ.get("KRAFT_WORK_ITEM_ID"):
         raise ValueError("a worker does not open the console")
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         raise ValueError("console needs a terminal to draw in — try `kraft view list` in a pipe")
-    try:
-        asyncio.run(client.health())
-    except client.ClientError as exc:
-        # Another instance on this port would be shown as this machine's; no
-        # server at all still opens, and says so.
-        if exc.kind == client.Failure.OTHER_INSTANCE:
-            raise
+    if server is not None:
+        # Before the TUI, while there is still a terminal to prompt on. A remote
+        # server has no run_dir to compare with this machine's.
+        from kraft.console import signin
+
+        client.set_remote(signin.connect(server))
+    else:
+        try:
+            asyncio.run(client.health())
+        except client.ClientError as exc:
+            # Another instance on this port would be shown as this machine's; no
+            # server at all still opens, and says so.
+            if exc.kind == client.Failure.OTHER_INSTANCE:
+                raise
     app = KraftConsole()
     app.run()
     if not app.return_code and app.farewell:

@@ -476,6 +476,34 @@ def test_kraft_console_refuses_where_it_cannot_work(monkeypatch, capsys, env, tt
     assert bool(asked) == (health is not None)
 
 
+def test_server_flag_sets_the_remote_target_and_skips_the_instance_check(monkeypatch):
+    from kraft.client import remote
+    from kraft.console import signin
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True, raising=False)
+    monkeypatch.setattr(signin, "connect", lambda url, **kw: remote.Target("https://box:443", "t"))
+    monkeypatch.setattr(
+        client, "health", lambda: pytest.fail("a remote server has no run_dir to compare")
+    )
+    monkeypatch.setattr(client.transport, "remote", None)  # put back after the test
+    opened = []
+    monkeypatch.setattr(KraftConsole, "run", lambda self: opened.append(client.is_remote()))
+    with pytest.raises(SystemExit) as left:
+        cli.main(["console", "--server", "https://box"])
+    assert (left.value.code, opened) == (0, [True])
+
+
+def test_server_flag_is_refused_in_a_worker_before_any_prompt(monkeypatch, capsys):
+    from kraft.console import signin
+
+    monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "w1")
+    monkeypatch.setattr(signin, "connect", lambda *a, **k: pytest.fail("prompted"))
+    with pytest.raises(SystemExit):
+        cli.main(["console", "--server", "https://box"])
+    assert "a worker does not open the console" in capsys.readouterr().err
+
+
 def test_kraft_console_exits_with_the_codes_textual_ended_with(monkeypatch):
     """A crash inside the app must not read as success to the shell."""
     monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
