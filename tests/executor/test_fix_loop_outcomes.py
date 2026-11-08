@@ -349,3 +349,26 @@ async def test_a_fix_instruction_offers_the_ci_rerun_only_on_a_node_that_waits_o
     [instruction] = script.instructions["fix"]
     assert (prompts.ci_rerun_fix_note(True) in instruction) is mr_ci
     assert prompts.ci_rerun_fix_note(False) not in instruction
+
+
+async def test_an_unresolvable_sandbox_on_an_mr_ci_node_stops_as_a_config_error(
+    item_on, script, monkeypatch
+):
+    """Building the fix instruction asks the sandbox whether the repair can
+    reach the callback; a sandbox that cannot be resolved must reach
+    `dispatch_node`'s own refusal, not raise out of the walk without a cause."""
+    script.real = {"check", "fix"}
+    real_sandbox = walk.dispatch.item_sandbox
+
+    def sandbox(row, launch):
+        if ("end", "check") in script.log:
+            raise walk.dispatch.SandboxUnresolved("the Kit k@v has not been fetched")
+        return real_sandbox(row, launch)
+
+    monkeypatch.setattr(walk.dispatch, "item_sandbox", sandbox)
+    monkeypatch.setattr(walk.ci_reruns, "waits_on_mr_ci", lambda node: True)
+    it = await item_on(_node(_sub("check", ["false"]), [{"id": "repair", "tasks": [_sub("fix")]}]))
+
+    assert await _walk_node(it) == "needs_human"
+    assert it.row()["stop_kind"] == "config"
+    assert [e["payload"]["outcome"] for e in it.events("fix_cycle_refunded")] == ["config_error"]

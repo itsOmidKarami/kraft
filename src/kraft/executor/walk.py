@@ -2564,9 +2564,11 @@ async def _walk_node_once(
         instruction += prompts.repair_doubts_fix_note(repair_doubted)
         instruction += prompts.FIX_NO_CHANGE_NOTE
         if ci_reruns.waits_on_mr_ci(node):
-            instruction += prompts.ci_rerun_fix_note(
-                _callback.reachable(dispatch.item_sandbox(row, launch))
-            )
+            try:
+                reachable = _callback.reachable(dispatch.item_sandbox(row, launch))
+            except dispatch.SandboxUnresolved:
+                reachable = False  # dispatch_node refuses the launch and names why
+            instruction += prompts.ci_rerun_fix_note(reachable)
         # Every round, not just the last one (Kraft-s7c04.7). `last_measurement`
         # gives the fixer one round of memory, which is why round N+2 reverted
         # the security property round N established on e983d85c -- the loop had

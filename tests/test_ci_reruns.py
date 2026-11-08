@@ -4,7 +4,7 @@ import pytest
 from support.harness import v1_node, v1_resolved
 from support.store_fixtures import mk_item
 
-from kraft import ci_reruns, events
+from kraft import ci_reruns, events, store
 from kraft.vocab import ChainEvent, ForgeEvent, GateEvent, WorkItemEvent
 
 STARTED = ChainEvent.FIX_CYCLE_STARTED
@@ -67,6 +67,12 @@ async def test_reruns_counts_only_this_node_after_the_seq(database):
         # One fires per measurement round, so it says nothing about the run.
         pytest.param([(ChainEvent.NODE_STARTED, "n1")], None, id="node-started-is-not-a-run"),
         pytest.param([(WorkItemEvent.RETRIED, None)], 0, id="a-retry"),
+        # A rewind to an earlier node abandons the run, though this node never completed.
+        pytest.param([(ChainEvent.BASE_CHANGE_RESTART, None)], 0, id="a-base-change-restart"),
+        pytest.param(
+            [(ChainEvent.MERGE_REJECTION_RESTART, None)], 0, id="a-merge-rejection-restart"
+        ),
+        pytest.param([(ChainEvent.RUN_FORKED, None)], 0, id="a-fork"),
         pytest.param([(GateEvent.REJECTED, "g")], 0, id="a-rejection"),
         pytest.param([(ChainEvent.NODE_COMPLETED, "n1")], 0, id="the-node-completing"),
         pytest.param([(ChainEvent.NODE_COMPLETED, "n2")], None, id="another-node-completing"),
@@ -108,3 +114,26 @@ def test_waits_on_mr_ci(target, expected):
 
 def test_waits_on_mr_ci_is_false_for_a_node_that_is_not_there():
     assert ci_reruns.waits_on_mr_ci(None) is False
+
+
+@pytest.mark.parametrize(
+    ("node_id", "expected"),
+    [
+        pytest.param("build", True, id="the-mr-ci-node"),
+        pytest.param("elsewhere", None, id="an-unknown-id"),
+        pytest.param(None, None, id="no-id"),
+    ],
+)
+async def test_node_of_finds_the_node_in_an_items_materialized_chain(item_on, node_id, expected):
+    """The route's path: the item's stored chain, then `node_of`, then `waits_on_mr_ci`."""
+    task = {"id": "ci", "kind": "forge", "target": "mr.ci"}
+    it = await item_on([v1_node("build", tasks=[task])])
+
+    found = ci_reruns.node_of(store.materialized_chain_of(it.row()), node_id)
+
+    assert (found is not None) is bool(expected)
+    assert ci_reruns.waits_on_mr_ci(found) is bool(expected)
+
+
+def test_node_of_is_none_without_a_chain():
+    assert ci_reruns.node_of(None, "build") is None
