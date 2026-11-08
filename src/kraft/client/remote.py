@@ -6,13 +6,17 @@ the session cookie only; `transport.remote` carries it (see `transport.http`).""
 from __future__ import annotations
 
 import json
+import math
 import os
+import socket
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from kraft import config
+import httpx
+
+from kraft import auth, config
 from kraft.client import transport as transport_module
 from kraft.paths import default_run_dir
 
@@ -122,3 +126,79 @@ class SessionStore:
         except BaseException:
             Path(temp).unlink(missing_ok=True)
             raise
+
+
+def console_label() -> str:
+    """The session's name in the web UI's signed-in list (`frontend/src/ua.ts`
+    shows a label starting `Kraft ` as given)."""
+    return f"Kraft console on {socket.gethostname()}"
+
+
+def _cookie_value(response: httpx.Response) -> str | None:
+    for line in response.headers.get_list("set-cookie"):
+        name, _, rest = line.partition("=")
+        if name.strip() == auth.COOKIE:
+            return rest.split(";", 1)[0].strip() or None
+    return None
+
+
+async def sign_in(
+    url: str,
+    password: str,
+    label: str,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> Target:
+    """Sign in with the password and return the session. `label` is sent as
+    the User-Agent, which the server stores as the session's name. The cookie
+    is read from `Set-Cookie` by hand (the `Secure` flag is not checked), and
+    redirects are not followed, so the password goes only where it was aimed."""
+    base = normalize_url(url)
+    try:
+        async with httpx.AsyncClient(
+            base_url=base,
+            headers={"User-Agent": label},
+            timeout=30,
+            follow_redirects=False,
+            transport=transport,
+        ) as session:
+            response = await session.post(
+                "/api/login", json={"password": password, "stay_signed_in": True}
+            )
+    except httpx.ConnectError as exc:
+        raise (
+            transport_module.tls_error(exc)
+            or transport_module.ClientError(
+                f"no Kraft server at {shown(base)}", kind=transport_module.Failure.UNREACHABLE
+            )
+        ) from exc
+    except httpx.TimeoutException as exc:
+        raise transport_module.ClientError(
+            f"{shown(base)} did not answer the sign-in in time",
+            kind=transport_module.Failure.INTERRUPTED,
+        ) from exc
+    except httpx.TransportError as exc:
+        raise transport_module.ClientError(
+            f"lost the connection to {shown(base)} during sign-in",
+            kind=transport_module.Failure.INTERRUPTED,
+        ) from exc
+    if 300 <= response.status_code < 400:
+        raise _refuse(
+            f"{shown(base)} redirected the sign-in elsewhere; give the address it redirects to"
+        )
+    if response.status_code == 429:
+        wait = response.headers.get("retry-after", "")
+        minutes = f" Try again in {math.ceil(int(wait) / 60)} minutes." if wait.isdigit() else ""
+        raise _refuse(f"too many failed sign-ins from this machine.{minutes}")
+    if response.status_code >= 400:
+        raise transport_module.status_error(
+            response.status_code, transport_module._detail(response)
+        )
+    cookie = _cookie_value(response)
+    if cookie is None:
+        raise transport_module.ClientError(
+            f"{shown(base)} signed us in but sent no session cookie",
+            kind=transport_module.Failure.BAD_RESPONSE,
+            status=response.status_code,
+        )
+    return Target(base, cookie)

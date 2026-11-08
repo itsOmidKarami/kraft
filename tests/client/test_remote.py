@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import stat
 
+import httpx
 import pytest
 
 from kraft import client
@@ -138,3 +140,95 @@ def test_a_store_that_does_not_say_truthfully_reads_as_no_session(tmp_path, body
     path = tmp_path / "s.json"
     path.write_text(body)
     assert remote.SessionStore(path).get("https://a:443") is None
+
+
+def _server(handler):
+    return httpx.MockTransport(handler)
+
+
+def test_sign_in_posts_the_password_with_a_label_and_reads_the_cookie_by_hand():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(
+            url=str(request.url),
+            ua=request.headers["user-agent"],
+            body=json.loads(request.content),
+            cookie=request.headers.get("cookie"),
+        )
+        # Secure and HttpOnly on a plain-http server: a cookie jar would drop it.
+        return httpx.Response(
+            200,
+            json={"ok": True},
+            headers={
+                "set-cookie": "kraft_session=abc123; HttpOnly; Max-Age=86400; "
+                "Path=/; SameSite=lax; Secure"
+            },
+        )
+
+    target = asyncio.run(
+        remote.sign_in(
+            "http://Box:8765/", "pw", "Kraft console on laptop", transport=_server(handler)
+        )
+    )
+    assert target == remote.Target("http://box:8765", "abc123")
+    assert seen == {
+        "url": "http://box:8765/api/login",
+        "ua": "Kraft console on laptop",
+        "body": {"password": "pw", "stay_signed_in": True},
+        "cookie": None,
+    }
+
+
+@pytest.mark.parametrize(
+    ("response", "kind", "said"),
+    [
+        (
+            httpx.Response(401, json={"detail": "Wrong password."}),
+            client.Failure.UNAUTHORIZED,
+            "Wrong password.",
+        ),
+        (
+            httpx.Response(
+                429,
+                json={"detail": "Too many failed logins. Try again later."},
+                headers={"Retry-After": "540"},
+            ),
+            client.Failure.REFUSED,
+            "9 minutes",
+        ),
+        (
+            httpx.Response(302, headers={"location": "https://other.example/api/login"}),
+            client.Failure.REFUSED,
+            "redirect",
+        ),
+        (httpx.Response(200, json={"ok": True}), client.Failure.BAD_RESPONSE, "session cookie"),
+        (httpx.Response(502, text="bad gateway"), client.Failure.SERVER_ERROR, "502"),
+    ],
+    ids=["wrong-password", "rate-limited", "redirected", "no-cookie", "proxy-error"],
+)
+def test_sign_in_says_why_it_did_not_get_a_session(response, kind, said):
+    with pytest.raises(client.ClientError) as caught:
+        asyncio.run(
+            remote.sign_in(
+                "https://box",
+                "pw",
+                "Kraft console on x",
+                transport=_server(lambda request: response),
+            )
+        )
+    assert (caught.value.kind, said in str(caught.value)) == (kind, True)
+
+
+def test_sign_in_to_nothing_says_there_is_no_server_there():
+    def handler(request):
+        raise httpx.ConnectError("refused")
+
+    with pytest.raises(client.ClientError) as caught:
+        asyncio.run(remote.sign_in("https://box", "pw", "l", transport=_server(handler)))
+    assert caught.value.kind == client.Failure.UNREACHABLE and "box:443" in str(caught.value)
+
+
+def test_the_label_names_the_client_and_the_machine(monkeypatch):
+    monkeypatch.setattr("socket.gethostname", lambda: "work-laptop")
+    assert remote.console_label() == "Kraft console on work-laptop"
