@@ -189,3 +189,26 @@ def test_entry_carries_the_whole_answer_and_an_unknown_id_is_none():
 def test_summary_is_cut_at_500():
     (entry,) = _fold([STARTED, _notified(answer="a" * 700)]).entries(ended=False)
     assert entry["summary"] == "a" * SUMMARY_MAX
+
+
+HANDBACK = {
+    **MESSAGE,
+    "message": {
+        "content": [{"type": "tool_use", "name": "SubagentHandback", "input": {"message": "bin"}}]
+    },
+}
+POINTER = 'This agent\'s report was delivered to you as a message from "af2a65".'
+
+
+@pytest.mark.parametrize(
+    "lines",
+    [
+        pytest.param([STARTED, _notified(answer="bin")], id="answer-from-notification"),
+        # claude 2.1.319: the notification only points at the handback call.
+        pytest.param([STARTED, HANDBACK, _notified(answer=POINTER)], id="answer-from-handback"),
+    ],
+)
+def test_answer(lines):
+    fold = _fold(lines)
+    assert fold.entry(ID)["answer"] == "bin"
+    assert fold.entries(ended=False)[0]["summary"] == "bin"
