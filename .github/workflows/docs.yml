@@ -119,7 +119,10 @@ jobs:
       # majors included. The "Switch to" link of the banner and the version
       # menu link every page to its twin in another version, which a page new on main
       # does not have yet (VersionBanner.vue says so). The example domains
-      # the docs use (example.com and the like) lychee skips on its own.
+      # the docs use (example.com and the like) lychee skips on its own. The
+      # repo's own issues and releases pages: they always exist, and Docus puts
+      # "Report an issue" (issues/new/choose) on every page, so checking them
+      # tested only whether github.com was up, and its 504s failed every PR.
       #
       # Remapped to local files instead of fetched: the site's own URLs
       # (canonical, og:url), which the live site lacks for a page this PR
@@ -138,6 +141,7 @@ jobs:
             --fallback-extensions html
             --exclude '^file:///.*/site/'
             --include '^file:///.*/site/next(/|#|$)'
+            --exclude '^https://github\.com/itsOmidKarami/kraft/(issues|releases)(/|$)'
             --remap 'https://kraft-sdlc\.dev/ file://${{ runner.temp }}/site/'
             --remap 'https://github\.com/itsOmidKarami/kraft/(?:blob|tree|edit)/main/ file://${{ github.workspace }}/'
             '${{ runner.temp }}/site/next/**/*.html'
