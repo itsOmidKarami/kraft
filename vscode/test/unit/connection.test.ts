@@ -109,5 +109,33 @@ describe("connectionFor", () => {
     { id: "a malformed workspace url: another scheme", setting: "ftp://x", global: undefined, env: {}, yaml: undefined,
       want: { base: "ftp://x", token: undefined } },
   ])("$id", ({ setting, global, env, yaml, want }) =>
-    expect(connectionFor({ setting, globalSetting: global, env, accessYaml: yaml, token: "tok" })).toEqual(want));
+    expect(connectionFor({ setting, globalSetting: global, env, accessYaml: yaml, token: "tok", session: () => undefined })).toMatchObject(want));
+});
+
+describe("connectionFor with a session", () => {
+  const base = { globalSetting: "https://k.example", env: {}, accessYaml: undefined, token: "TOKEN" };
+  it("a stored session wins and the token is not sent, even for a user-level or loopback URL", () => {
+    for (const url of ["https://k.example", "http://127.0.0.1:9000"]) {
+      const r = connectionFor({ ...base, globalSetting: url, setting: url, session: () => "SESS" });
+      expect(r.session).toBe("SESS");
+      expect(r.token).toBeUndefined();
+    }
+  });
+  it("looks the session up by the normalized URL", () => {
+    const seen: string[] = [];
+    connectionFor({ ...base, setting: "HTTPS://K.Example/", session: (u) => (seen.push(u), undefined) });
+    expect(seen).toEqual(["https://k.example:443"]);
+  });
+  it("no session: today's rule, including the token for a user-level non-loopback url", () => {
+    const r = connectionFor({ ...base, setting: "https://k.example", session: () => undefined });
+    expect(r).toMatchObject({ token: "TOKEN", session: undefined, signInOffered: true });
+  });
+  it("no session on loopback: token, no sign-in offer", () => {
+    expect(connectionFor({ ...base, setting: "http://127.0.0.1:8765", globalSetting: undefined, session: () => undefined }))
+      .toMatchObject({ token: "TOKEN", signInOffered: false });
+  });
+  it("a workspace setting still cannot redirect a credential", () => {
+    expect(connectionFor({ ...base, setting: "https://evil.example", globalSetting: "https://k.example", session: () => undefined }))
+      .toMatchObject({ token: undefined, signInOffered: false });
+  });
 });

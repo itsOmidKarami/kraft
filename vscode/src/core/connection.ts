@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { normalizeServerUrl } from "./serverUrl";
 
 export interface Locations {
   home: string;
@@ -73,13 +74,29 @@ export interface ConnectionInput {
   env: NodeJS.ProcessEnv;
   accessYaml: string | undefined;
   token: string | undefined;
+  /** The stored session for a normalized URL; the caller has read the store already. */
+  session: (normalizedUrl: string) => string | undefined;
 }
 
-// The daemon URL and the token to send it: a workspace can point the extension
-// elsewhere, but the bearer token goes only to loopback or a machine-chosen URL.
-export function connectionFor(input: ConnectionInput): { base: string; token: string | undefined } {
+export interface Connection {
+  base: string;
+  token: string | undefined;
+  session: string | undefined;
+  /** The token is going to a URL that is not this machine and no session is stored: sign-in is the better way. */
+  signInOffered: boolean;
+}
+
+// The daemon URL and the credential to send it. A URL with a stored session gets
+// the session's cookie and never the token. Otherwise a workspace can point the
+// extension elsewhere, but the bearer token goes only to loopback or a
+// machine-chosen URL.
+export function connectionFor(input: ConnectionInput): Connection {
   const base = baseUrl(input.setting, input.env, input.accessYaml);
-  return { base, token: tokenFor(base, machineChosen(input.setting, input.globalSetting), input.token) };
+  const normalized = normalizeServerUrl(base);
+  const session = normalized.ok ? input.session(normalized.url) : undefined;
+  if (session) return { base, token: undefined, session, signInOffered: false };
+  const token = tokenFor(base, machineChosen(input.setting, input.globalSetting), input.token);
+  return { base, token, session: undefined, signInOffered: token !== undefined && !isLoopback(base) };
 }
 
 export function readToken(runDir: string): string | undefined {

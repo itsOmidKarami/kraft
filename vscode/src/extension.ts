@@ -59,6 +59,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
     env: process.env,
     accessYaml: read(join(loc.templatesDir, "access.yaml")),
     token: readToken(loc.runDir),
+    session: () => undefined,
   });
   const api = new Api(base, token);
   api.onError = (f) => {
