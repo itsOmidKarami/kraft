@@ -20,6 +20,7 @@ _OWN_ITEM = [
     ("GET", "/api/work-items/{}/threads"),
     ("GET", "/api/work-items/{}/events"),
     ("POST", "/api/work-items/{}/progress"),
+    ("POST", "/api/work-items/{}/ci-rerun"),
     ("POST", "/api/work-items/{}/retry"),
     ("GET", "/api/work-items/{}/forge/mr"),
     ("GET", "/api/work-items/{}/forge/pipelines"),

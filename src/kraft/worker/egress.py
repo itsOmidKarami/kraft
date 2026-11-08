@@ -717,6 +717,13 @@ def _progress(form, scope) -> _Call | str:
     return "POST", f"{_item(form, scope)}/progress", {"task": form["task"]}
 
 
+def _rerun_ci(form, scope) -> _Call | str:
+    reason = form.get("reason", "").strip()
+    if not reason:
+        return "rerun-ci needs --reason"
+    return "POST", f"{_item(form, scope)}/ci-rerun", {"reason": reason}
+
+
 def _retry(form, scope) -> _Call:
     steer = form.get("steer", "").strip()
     return "POST", f"{_item(form, scope)}/retry", {"steer": steer} if steer else {}
@@ -804,6 +811,7 @@ def _permission_path(caller: str, route: str) -> str:
 
 _VERBS: dict[str, Callable[[dict, callback.SessionScope], _Call | str]] = {
     "progress": _progress,
+    "rerun-ci": _rerun_ci,
     "retry": _retry,
     "reply": _reply,
     "show": _show,

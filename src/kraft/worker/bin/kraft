@@ -16,7 +16,7 @@ URL=http://kraft/w
 
 usage() {
 	echo "kraft: $1" >&2
-	echo "in a sandbox kraft has only: item progress K [ID] | item reply THREAD --body B" \
+	echo "in a sandbox kraft has only: item progress K [ID] | item rerun-ci [ID] --reason R | item reply THREAD --body B" \
 		"[--claim C] | item retry [ID] [--steer S] | view show|threads [ID]" \
 		"| view events [ID] [--after N] [--type T]" \
 		"| view mr|pipelines|labels|jobs|job-log|merged [ID] [--repo R] [--pipeline P] [--job J]" \
@@ -56,6 +56,22 @@ item_progress() {
 	done
 	[ -n "$task" ] || usage "item progress needs the task number K"
 	post progress "task=$task" "id=$id"
+}
+
+item_rerun_ci() {
+	reason= has_reason=
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--reason) [ $# -ge 2 ] || usage "--reason needs a value"; reason=$2; has_reason=1; shift ;;
+		--reason=*) reason=${1#--reason=}; has_reason=1 ;;
+		--json) ;;
+		-*) usage "unknown option: $1" ;;
+		*) positional "$1" ;;
+		esac
+		shift
+	done
+	[ -n "$has_reason" ] || usage "item rerun-ci needs --reason"
+	post rerun-ci "reason=$reason" "id=$id"
 }
 
 item_reply() {
@@ -173,6 +189,7 @@ shift 2
 case "$group $verb" in
 "item progress") item_progress "$@" ;;
 "item reply") item_reply "$@" ;;
+"item rerun-ci") item_rerun_ci "$@" ;;
 "item retry") item_retry "$@" ;;
 "view show" | "view threads" | "view events" | "view mr" | "view pipelines" | "view jobs" | "view job-log" | "view merged" | "view labels") view "$verb" "$@" ;;
 "admin permission-hook") permission_hook "$@" ;;

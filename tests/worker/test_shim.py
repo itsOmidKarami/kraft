@@ -81,6 +81,12 @@ _ODD = "a & b=c+d %20\nnext line é"
     [
         (["item", "progress", "3"], "progress", {"task": "3", "id": ""}),
         (["item", "progress", "3", "w-x", "--json"], "progress", {"task": "3", "id": "w-x"}),
+        (["item", "rerun-ci", "--reason", _ODD], "rerun-ci", {"reason": _ODD, "id": ""}),
+        (
+            ["item", "rerun-ci", "w-x", "--reason=504", "--json"],
+            "rerun-ci",
+            {"reason": "504", "id": "w-x"},
+        ),
         (
             ["item", "reply", "t1", "--claim", "fixed", "--body", _ODD],
             "reply",
@@ -113,6 +119,8 @@ _ODD = "a & b=c+d %20\nnext line é"
     ids=[
         "progress",
         "progress-id",
+        "rerun-ci",
+        "rerun-ci-id",
         "reply",
         "reply-empty",
         "retry",

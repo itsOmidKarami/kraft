@@ -105,6 +105,11 @@ async def worker_api():
     ("verb", "form", "call"),
     [
         ("progress", {"task": "3"}, ("POST", "/api/work-items/w-own/progress", {"task": "3"})),
+        (
+            "rerun-ci",
+            {"reason": " bd 504 "},
+            ("POST", "/api/work-items/w-own/ci-rerun", {"reason": "bd 504"}),
+        ),
         ("retry", {}, ("POST", "/api/work-items/w-own/retry", {})),
         ("retry", {"steer": " go "}, ("POST", "/api/work-items/w-own/retry", {"steer": "go"})),
         (
@@ -146,6 +151,7 @@ async def worker_api():
     ],
     ids=[
         "progress",
+        "rerun-ci",
         "retry",
         "retry-steered",
         "reply",
@@ -193,6 +199,16 @@ async def test_a_verb_is_its_api_call_made_as_the_channel_session(worker_api, ve
         ("mr", {"id": "w-other"}, "GET /api/work-items/w-other/forge/mr"),
         ("progress", {"task": "1", "id": "w-other"}, "POST /api/work-items/w-other/progress"),
         ("progress", {"task": "1", "id": "w-own/../w-other"}, None),
+        (
+            "rerun-ci",
+            {"reason": "x", "id": "w-other"},
+            "POST /api/work-items/w-other/ci-rerun",
+        ),
+        (
+            "rerun-ci",
+            {"reason": "x", "id": "w-own/../w-other"},
+            "POST /api/work-items/w-own/../w-other/ci-rerun",
+        ),
     ],
     ids=[
         "another-item-thread",
@@ -202,6 +218,8 @@ async def test_a_verb_is_its_api_call_made_as_the_channel_session(worker_api, ve
         "another-item-forge",
         "another-item-act",
         "traversal",
+        "another-item-rerun-ci",
+        "rerun-ci-traversal",
     ],
 )
 async def test_another_item_is_refused_and_recorded(worker_api, verb, form, route):
@@ -318,6 +336,8 @@ async def test_events_with_an_after_that_is_no_whole_number_is_a_400(worker_api,
         ("job-log", {"pipeline": "5", "job": "..%2Fx"}),
         ("show", {"id": "w-own?x=1"}),
         ("show", {"id": "w-own/forge/pipelines/x/jobs/y/log"}),
+        ("rerun-ci", {}),
+        ("rerun-ci", {"reason": "  "}),
     ],
     ids=[
         "lines-0",
@@ -333,6 +353,8 @@ async def test_events_with_an_after_that_is_no_whole_number_is_a_400(worker_api,
         "job-encoded",
         "id-with-query",
         "id-with-slash",
+        "rerun-ci-no-reason",
+        "rerun-ci-blank-reason",
     ],
 )
 async def test_a_forge_read_with_a_bad_field_is_a_400(worker_api, verb, form):

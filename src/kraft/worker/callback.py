@@ -5,7 +5,7 @@ agreed with the remote-workers epic, Kraft-5c1tm).
 
 Identity is the channel's, never a token or a header the worker sent: a
 session's unix socket, or the subject of its relay's client certificate.
-The allowlist holds a session to its own work item: its progress, retry,
+The allowlist holds a session to its own work item: its progress, CI re-run, retry,
 replies on its own threads, its own permission asks, and reads of its own
 item.
 """
@@ -70,6 +70,7 @@ ROUTES: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
         ("GET", rf"/api/work-items/{_P}/threads", "item"),
         ("GET", rf"/api/work-items/{_P}/events", "item"),
         ("POST", rf"/api/work-items/{_P}/progress", "item"),
+        ("POST", rf"/api/work-items/{_P}/ci-rerun", "item"),
         # Item-scoped forge reads: the server derives project and MR from the item.
         ("GET", rf"/api/work-items/{_P}/forge/(?:mr|pipelines|merged|labels)", "item"),
         ("GET", rf"/api/work-items/{_P}/forge/pipelines/[^/]+/jobs", "item"),
