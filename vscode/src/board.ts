@@ -237,7 +237,13 @@ export function registerBoard(
   unconnected?: () => boolean,
   signedOut?: () => boolean,
 ) {
-  const board = new Board(store, include, scope, drafts, unconnected, async () => (await api.listArchived()).items, signedOut);
+  // Signed in to another machine's Kraft the board shows every repo: say so, and offer no "show all" welcome.
+  const shown: Pick<WorkspaceScope, "onChange" | "ready" | "showAll"> = {
+    onChange: (cb) => scope.onChange(cb),
+    get ready() { return scope.ready; },
+    get showAll() { return scope.showAll || api.remote; },
+  };
+  const board = new Board(store, include, shown, drafts, unconnected, async () => (await api.listArchived()).items, signedOut);
   const view = vscode.window.createTreeView("kraft.board", { treeDataProvider: board, canSelectMany: true });
   // Every expand reads it again: the cache may be as old as the last connect.
   context.subscriptions.push(board, view.onDidExpandElement((e) => {
@@ -246,7 +252,7 @@ export function registerBoard(
   const updateBadge = () => (view.badge = board.badge());
   // The description says which repos; a stale board also says so above its rows, where a single-view sidebar shows no description.
   const updateDescription = () => {
-    const text = boardDescription(store.connected, scope.showAll, board.rows());
+    const text = boardDescription(store.connected, shown.showAll, board.rows());
     view.description = text;
     view.message = store.connected ? undefined : text;
   };

@@ -45,7 +45,7 @@ export interface KraftApi {
   locations: Locations;
   gates: { announcer: Announcer };
   review: ReturnType<typeof registerDiff> & ReturnType<typeof registerComments> & ReturnType<typeof registerReviewSubmit>;
-  // Absent until the workspace is trusted.
+  // Absent until the workspace is trusted, and when signed in to another machine.
   readonly config: ReturnType<typeof registerConfigChecks> | undefined;
 }
 
