@@ -20,7 +20,7 @@ describe("parseUserAgent", () => {
   it("falls back on nothing", () => {
     expect(parseUserAgent(null)).toBe("unknown device");
   });
-  it("shows a Kraft client's own label as given, capped at 60 characters", () => {
+  it("shows a Kraft client's own label as given and caps it at 60 characters", () => {
     expect(parseUserAgent("Kraft console on work-laptop")).toBe("Kraft console on work-laptop");
     const long = `Kraft console on ${"h".repeat(80)}`;
     expect(parseUserAgent(long)).toBe(long.slice(0, 60));
