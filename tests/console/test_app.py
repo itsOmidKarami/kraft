@@ -894,3 +894,38 @@ def test_a_session_that_ends_while_running_says_so_and_is_deleted(console, tmp_p
     said = console.run(scenario)
     assert "ended this session" in said and "kraft console --server" in said
     assert store.get("https://kraft.example:443") is None
+
+
+def test_a_remote_console_refuses_a_typed_command_and_runs_nothing(
+    console, remote_server, kraft_is
+):
+    kraft_is("import sys; print('RAN', *sys.argv[1:])")
+
+    async def scenario(app, pilot):
+        await pilot.press("slash")
+        app.query_one(Prompt).value = "/item pause a1"
+        await pilot.press("enter")
+        await pilot.pause()
+        return app.command, [n.message for n in app._notifications]
+
+    command, toasts = console.run(scenario, notifications=True)
+    assert command is None
+    assert console_app.TYPED_REMOTE in toasts
+
+
+def test_run_command_is_closed_remotely_whoever_asks(console, remote_server, kraft_is):
+    """Every child the console starts goes through run_command; a remote console
+    must never start a `kraft` on this machine."""
+    kraft_is("import sys; print('RAN', *sys.argv[1:])")
+
+    async def scenario(app, pilot):
+        return await app.run_command(["admin", "doctor"]), app.command, console.output(app)
+
+    assert console.run(scenario) == (None, None, [])
+
+
+def test_a_remote_palette_lists_no_verbs_to_type(console, remote_server):
+    async def scenario(app, pilot):
+        return [title for title, about, _ in app.places() if about == "Type it at the prompt"]
+
+    assert console.run(scenario) == []

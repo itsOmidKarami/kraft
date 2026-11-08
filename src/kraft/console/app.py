@@ -116,6 +116,9 @@ THEMES = (
 )
 
 
+#: What a remote console says to a typed command: `kraft` would run on this machine.
+TYPED_REMOTE = "Typed commands run on this machine. Use the web UI, or SSH to the server."
+
 #: What a remote console says when its session is gone (spec "Console / Start-up" 3).
 SESSION_ENDED = (
     "The server ended this session. Quit and run `kraft console --server {url}` to sign in again."
@@ -316,10 +319,14 @@ class KraftConsole(App):
             for row in self.rows
             if row.get("display_status") != "archived"
         ]
-        verbs = [
-            (f"/{line}", "Type it at the prompt", partial(self.type_command, f"/{line} "))
-            for line in commands()
-        ]
+        verbs = (
+            []  # a typed command runs on this machine
+            if client.is_remote()
+            else [
+                (f"/{line}", "Type it at the prompt", partial(self.type_command, f"/{line} "))
+                for line in commands()
+            ]
+        )
         return screens + items + verbs
 
     def open_item(self, work_item_id: str) -> None:
@@ -355,6 +362,11 @@ class KraftConsole(App):
         """Run `kraft <argv>` in the output panel, opening it (spec §4.7), and
         return its exit code; None, and a toast, while another is running.
         Await it from a worker."""
+        if client.is_remote():
+            # The one place a `kraft` child starts: never one on this machine
+            # for a server on another.
+            self.notify(TYPED_REMOTE, markup=False)
+            return None
         if self.busy():
             return None
         panel = self.get_screen("output", OutputPanel)
@@ -492,6 +504,9 @@ class KraftConsole(App):
 
     @on(Input.Submitted, "#prompt")
     def _typed(self, event: Input.Submitted) -> None:
+        if event.value.strip(" /") and client.is_remote():
+            self.notify(TYPED_REMOTE, markup=False)
+            return
         if event.value.strip(" /"):
             # The item on screen as Enter is pressed: the view may move on before the worker runs.
             shown = self.view.work_item_id if isinstance(self.view, Item) else None
