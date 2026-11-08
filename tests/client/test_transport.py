@@ -302,3 +302,83 @@ def test_update_available_asks_for_the_channel_given(sent):
     asyncio.run(client.update_available())
     asyncio.run(client.update_available("beta"))
     assert sent == ["/api/update", "/api/update?channel=beta"]
+
+
+def test_a_remote_client_sends_the_session_cookie_and_never_reads_the_token(
+    remote_server, tmp_path, monkeypatch
+):
+    """Anti-goal: the mcp-token never reaches a server given by --server."""
+    from kraft import auth
+
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path))
+    auth.ensure_mcp_token(tmp_path)  # there is a token on this machine
+
+    def forbidden(*_):
+        raise AssertionError("a remote client must not read the mcp-token")
+
+    monkeypatch.setattr(auth, "read_mcp_token", forbidden)
+    session = client.transport.http()
+    # httpx drops a scheme's default port from the URL it sends to
+    assert str(session.base_url).rstrip("/") == "https://kraft.example"
+    assert session.headers["cookie"] == "kraft_session=tok-1"
+    assert "authorization" not in session.headers
+    assert session.follow_redirects is False
+
+
+def test_a_local_client_still_sends_the_token(tmp_path, monkeypatch):
+    from kraft import auth
+
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path))
+    token = auth.ensure_mcp_token(tmp_path)
+    session = client.transport.http()
+    assert session.headers["authorization"] == f"Bearer {token}"
+    assert "cookie" not in session.headers
+
+
+def _mock_http(monkeypatch, handler):
+    real = httpx.AsyncClient
+    monkeypatch.setattr(
+        client.transport.httpx,
+        "AsyncClient",
+        lambda **kw: real(**{**kw, "transport": httpx.MockTransport(handler)}),
+    )
+
+
+def test_a_redirect_is_not_followed_so_the_cookie_stays_on_its_host(remote_server, monkeypatch):
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(302, headers={"location": "https://elsewhere.example/api/work-items"})
+
+    _mock_http(monkeypatch, handler)
+    with pytest.raises(client.ClientError) as caught:
+        asyncio.run(client.transport._get("/work-items"))
+    assert seen == ["https://kraft.example/api/work-items"]
+    assert caught.value.status == 302
+
+
+def test_a_certificate_that_is_not_trusted_names_the_variable_to_set(remote_server, monkeypatch):
+    import ssl
+
+    def handler(request):
+        raise httpx.ConnectError("tls") from ssl.SSLCertVerificationError("self signed")
+
+    _mock_http(monkeypatch, handler)
+    with pytest.raises(client.ClientError) as caught:
+        asyncio.run(client.transport._get("/work-items"))
+    assert "certificate is not trusted" in str(caught.value)
+    assert "SSL_CERT_FILE" in str(caught.value)
+    assert caught.value.kind == client.Failure.REFUSED
+
+
+def test_a_remote_server_that_is_not_there_says_so_without_advice_for_this_machine(
+    remote_server, monkeypatch
+):
+    def handler(request):
+        raise httpx.ConnectError("refused")
+
+    _mock_http(monkeypatch, handler)
+    with pytest.raises(client.ClientError) as caught:
+        asyncio.run(client.transport._get("/work-items"))
+    assert str(caught.value) == "no Kraft server at https://kraft.example:443"

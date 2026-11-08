@@ -679,6 +679,17 @@ def app(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def remote_server(monkeypatch):
+    """A console talking to `https://kraft.example:443` with session `tok-1`:
+    `transport.remote` is set for the test and put back after."""
+    from kraft.client import remote, transport
+
+    target = remote.Target("https://kraft.example:443", "tok-1")
+    monkeypatch.setattr(transport, "remote", target)
+    return target
+
+
+@pytest.fixture
 def wired(tmp_path, monkeypatch):
     """The app module, with `client.transport.http()` pointed at it over ASGI,
     hermetic under `tmp_path` (its own run dir, bd workspace and templates).
