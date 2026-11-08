@@ -183,8 +183,8 @@ function Review({ item, version, reload }: { item: ItemDetail; version: string; 
   useShortcutRows("Review", REVIEW_KEYS);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // Alt is allowed: some layouts type [ and ] with it (Alt+5 and Alt+6 on a German Mac).
-      if ((e.key !== "]" && e.key !== "[") || e.metaKey || e.ctrlKey || e.isComposing || e.defaultPrevented || isTextField(e.target) || dialogOpen()) return;
+      // Alt is allowed: some layouts type [ and ] with it (Alt+5 on a German Mac, AltGr+8, read as Ctrl+Alt, on Windows).
+      if ((e.key !== "]" && e.key !== "[") || e.metaKey || (e.ctrlKey && !e.altKey) || e.isComposing || e.defaultPrevented || isTextField(e.target) || dialogOpen()) return;
       if (e.target instanceof Element && e.target.closest('[role="menu"], .popover')) return;
       e.preventDefault();
       stepKey.current(e.key === "]" ? 1 : -1);

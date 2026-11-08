@@ -149,7 +149,6 @@
 .rv-thread, .rv-composer { display: flex; flex-direction: column; gap: 8px; max-width: 760px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font-size: var(--fs-meta); color: var(--text-sub); }
 .rv-thread + .rv-thread, .rv-thread + .rv-composer { margin-top: 8px; }
 /* A resolved thread steps back by its frame, not its text: an opacity took its 12px text under 4.5:1. */
-.rv-thread:focus { outline: none; }
 .rv-thread.is-landed { outline: 2px solid var(--focus); outline-offset: 2px; }
 .rv-thread.is-resolved { border-style: dashed; border-color: var(--line); background: transparent; }
 .rv-thread-head, .rv-composer-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--fs-label); }
