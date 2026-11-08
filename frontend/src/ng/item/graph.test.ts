@@ -51,10 +51,12 @@ describe("chainGraph", () => {
     ["paused", null, { state: "current", paused: true, sub: "paused" }, "verification, node, paused"],
     ["needs_you", { kind: "question", node: "verification" }, { state: "current", sub: "needs you", needs: true }, "verification, node, needs you"],
     ["needs_you", { kind: "stuck", node: "verification" }, { state: "current", sub: "needs you", needs: true }, "verification, node, needs you"],
-    ["waiting", { kind: "rate_limit", node: "verification" }, { state: "current", running: false, wait: "waiting · rate limit" }, "verification, node, waiting · rate limit"],
+    ["waiting", { kind: "rate_limit", node: "verification" }, { state: "current", running: false, wait: "waiting · rate limit", subTone: "muted" }, "verification, node, waiting · rate limit"],
     ["waiting", { kind: "wait", node: "verification" }, { state: "current", running: false, wait: "waiting on CI" }, "verification, node, waiting on CI"],
     ["waiting", { kind: "wait", node: "verification", reason: "waiting for gpu-box (full)" }, { state: "current", running: false, wait: "waiting for a machine" }, "verification, node, waiting for a machine"],
-    ["running", null, { state: "current", running: true }, "verification, node, running"],
+    // Blue (and its moving light) is running alone; escalated stays amber, as the board and the badge draw it.
+    ["running", null, { state: "current", running: true, subTone: "run" }, "verification, node, running"],
+    ["escalated", null, { state: "current", running: false, subTone: "amber" }, "verification, node, escalated"],
   ])("draws the current node of a %s item, and names it so", (display_status, stop, want, name) => {
     const item = detail({ display_status: display_status as never, stop: stop && ({ resume_at: null, reason: null, ...stop } as never) });
     const node = chainGraph(item, [], NOW).nodes[2];

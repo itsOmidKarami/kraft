@@ -28,7 +28,7 @@ type Props = {
 };
 
 /** A node's state as the small glyph draws it. */
-export const tone = (n: ChainNode) => (n.needs || n.state === "amber" || n.state === "esc" ? "amber" : n.state === "ghost" ? "todo" : n.state ?? "plain");
+export const tone = (n: ChainNode) => (n.needs || n.state === "amber" || n.state === "esc" ? "amber" : n.state === "ghost" ? "todo" : n.state === "current" && n.running && !n.paused ? "running" : n.state ?? "plain");
 
 /** The chain overview over a long chain's canvas: every node as a small glyph in order, with its state and no label,
  *  scaled to fit the width, and a frame on the part the canvas shows. A click or a drag on it moves the canvas there. */

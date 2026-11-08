@@ -382,6 +382,8 @@
 .strip-body { display: flex; align-items: center; margin-left: 2px; padding: 0 3px; border-radius: 8px; background: var(--surface-2); }
 .map-glyph.is-done { border-color: var(--text-muted); background: var(--text-muted); }
 .map-glyph.is-current { border: 1.5px solid var(--text); background: var(--surface-2); }
+/* Too small to carry the border's light: a running node here breathes, as the small marks do. */
+.map-glyph.is-running { border: 1.5px solid var(--run); background: color-mix(in srgb, var(--run) 25%, var(--bg)); animation: var(--run-breathe); }
 .map-glyph.is-amber { border: 1.5px solid var(--warn); background: color-mix(in srgb, var(--warn) 25%, var(--bg)); }
 .map-glyph.is-failed { border: 1.5px solid var(--bad); }
 .map-glyph.is-todo { border-style: dashed; }

@@ -119,6 +119,13 @@ describe("ng CSS", () => {
     expect([...css.matchAll(block)].some((m) => m[1].includes(sel) && /transition:\s*none/.test(m[1]))).toBe(true);
   });
 
+  // Running moves in three ways (a light on a border, a sheen on a tick, a breathing dot), all off by one switch.
+  it("stops every running animation under reduced motion, from base.css", () => {
+    const css = readFileSync(join(here, "theme/base.css"), "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const block = /@media \(prefers-reduced-motion: reduce\) {([^\n]*)}\s*(?:\n|$)/.exec(css)?.[1] ?? "";
+    for (const v of ["--run-trace", "--run-sheen", "--run-breathe"]) expect(block).toMatch(new RegExp(`${v}:\\s*none`));
+  });
+
   // R12b-07 (fixed by #502's header): a fixed 118px wrapped "Raise cap", "Review conflicts" and "Reopen MR" and clipped them.
   it("lets the item header's main button grow with its label, on one line", () => {
     const css = readFileSync(join(here, "item/item.css"), "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
