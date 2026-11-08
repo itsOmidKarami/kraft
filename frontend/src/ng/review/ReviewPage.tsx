@@ -169,6 +169,12 @@ function Review({ item, version, reload }: { item: ItemDetail; version: string; 
     setLanding(next.thread.id);
     if (next.wrapped) showToast(dir === 1 ? "Back to the first unresolved thread" : "Back to the last unresolved thread");
   };
+  // A thread not drawn in time (being edited, say) is given up on, so it is never jumped to later unasked.
+  useEffect(() => {
+    if (!landing) return;
+    const t = setTimeout(() => setLanding(null), 3000);
+    return () => clearTimeout(t);
+  }, [landing]);
   useEffect(() => {
     const el = landing && document.querySelector<HTMLElement>(`.rv-thread[data-thread="${CSS.escape(landing)}"]`);
     if (!el) return;
