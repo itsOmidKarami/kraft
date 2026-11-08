@@ -5,22 +5,28 @@ import type { ConnError } from "./store";
 export const NOT_RUNNING = "Kraft isn't running — Start";
 export const REFUSED_TOKEN = "Kraft refused the token — check kraft.url";
 export const RECONNECTING = "Kraft: reconnecting…";
+export const SIGN_IN_AGAIN = "Kraft: sign in again";
+export const SIGN_IN_OFFER = "Sign in to use a session instead.";
 
-/** The board's disconnected row: why, and the command that fixes it. */
-export function downRow(err: ConnError | null): { label: string; command: string; args?: unknown[] } {
+/** The board's disconnected row: why, and the command that fixes it. With a
+ *  session in use, a 401 or 403 means it ended: the row signs in again. */
+export function downRow(err: ConnError | null, signedIn = false): { label: string; command: string; args?: unknown[] } {
   if (!err || err.status === 0) return { label: NOT_RUNNING, command: "kraft.startDaemon" };
+  if (signedIn && (err.status === 401 || err.status === 403)) return { label: SIGN_IN_AGAIN, command: "kraft.signIn" };
   if (err.status === 401 || err.status === 403) return { label: REFUSED_TOKEN, command: "workbench.action.openSettings", args: ["kraft.url"] };
   return { label: `Kraft error: ${err.detail} — Show log`, command: "kraft.showLog" };
 }
 
-export type MenuChoice = "log" | "web" | "start" | "retry";
+export type MenuChoice = "log" | "web" | "start" | "signIn" | "retry";
 
-/** The status bar's Quick Pick; Start only while Kraft is down. */
-export function statusMenu(connected: boolean): { label: string; choice: MenuChoice }[] {
+/** The status bar's Quick Pick; Start only while Kraft is down, and never when
+ *  signed in to another machine's Kraft: it would start one here. */
+export function statusMenu(connected: boolean, opts: { remote?: boolean } = {}): { label: string; choice: MenuChoice }[] {
   return [
     { label: "Show Log", choice: "log" },
     { label: "Open Web UI", choice: "web" },
-    ...(connected ? [] : [{ label: "Start Kraft", choice: "start" as const }]),
+    ...(connected || opts.remote ? [] : [{ label: "Start Kraft", choice: "start" as const }]),
+    { label: "Sign in to a server…", choice: "signIn" },
     { label: "Retry Now", choice: "retry" },
   ];
 }
@@ -45,9 +51,15 @@ export function statusLabel(connected: boolean, needs: number): string {
  *  today's spend, either alone. Down: the down row's reason, since that row shows only
  *  while the board is empty; with no error yet (a socket that dropped after it opened),
  *  it is reconnecting. Spend is ignored while down: it may be stale. */
-export function statusTooltip(connected: boolean, readOnly: string | undefined, err: ConnError | null, today?: BudgetToday | null): string | undefined {
-  if (connected) return [readOnly, todayLine(today)].filter(Boolean).join("\n\n") || undefined;
-  return err ? downRow(err).label : RECONNECTING;
+export function statusTooltip(
+  connected: boolean,
+  readOnly: string | undefined,
+  err: ConnError | null,
+  today?: BudgetToday | null,
+  extra: { signedIn?: boolean; signInOffered?: boolean } = {},
+): string | undefined {
+  if (connected) return [readOnly, todayLine(today), extra.signInOffered ? SIGN_IN_OFFER : undefined].filter(Boolean).join("\n\n") || undefined;
+  return err ? downRow(err, extra.signedIn).label : RECONNECTING;
 }
 
 /** A gate that opens at most once per `ms`. `force` always opens it and restarts the window. */

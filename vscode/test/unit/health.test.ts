@@ -11,13 +11,29 @@ describe("health", () => {
     [{ status: -1, detail: "SyntaxError" }, "Kraft error: SyntaxError — Show log", "kraft.showLog"],
   ])("downRow(%o)", (err, label, command) => expect(downRow(err)).toMatchObject({ label, command }));
 
+  it.each([
+    [{ status: 401, detail: "x" }, "Kraft: sign in again", "kraft.signIn"],
+    [{ status: 403, detail: "x" }, "Kraft: sign in again", "kraft.signIn"],
+    [{ status: 0, detail: "x" }, "Kraft isn't running — Start", "kraft.startDaemon"],
+  ])("downRow(%o) with a session", (err, label, command) => expect(downRow(err, true)).toMatchObject({ label, command }));
+
   it("opens settings at kraft.url", () => expect(downRow({ status: 401, detail: "" }).args).toEqual(["kraft.url"]));
 
   it("offers Start only when down", () => {
-    expect(statusMenu(false).map((m) => m.label)).toEqual(["Show Log", "Open Web UI", "Start Kraft", "Retry Now"]);
-    expect(statusMenu(true).map((m) => m.label)).toEqual(["Show Log", "Open Web UI", "Retry Now"]);
-    expect(statusMenu(false).map((m) => m.choice)).toEqual(["log", "web", "start", "retry"]);
+    expect(statusMenu(false).map((m) => m.label)).toEqual(["Show Log", "Open Web UI", "Start Kraft", "Sign in to a server…", "Retry Now"]);
+    expect(statusMenu(true).map((m) => m.label)).toEqual(["Show Log", "Open Web UI", "Sign in to a server…", "Retry Now"]);
+    expect(statusMenu(false).map((m) => m.choice)).toEqual(["log", "web", "start", "signIn", "retry"]);
   });
+
+  it("offers sign-in, and no Start remotely", () => {
+    expect(statusMenu(false, { remote: true }).map((m) => m.choice)).toEqual(["log", "web", "signIn", "retry"]);
+  });
+
+  it("the tooltip offers a session to a token on a remote url", () =>
+    expect(statusTooltip(true, undefined, null, null, { signInOffered: true })).toContain("Sign in to use a session instead"));
+
+  it("the tooltip says sign in again while down with a session", () =>
+    expect(statusTooltip(false, undefined, { status: 401, detail: "x" }, null, { signedIn: true })).toBe("Kraft: sign in again"));
 
   it("onceEach says yes once per key", () => {
     const once = onceEach();

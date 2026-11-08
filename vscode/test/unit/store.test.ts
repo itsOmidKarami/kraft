@@ -14,7 +14,7 @@ function fakeSocket() {
   return { s, socket };
 }
 
-function setup() {
+function setup(options: ConstructorParameters<typeof Store>[3] = {}) {
   const sockets: ReturnType<typeof fakeSocket>[] = [];
   const urls: string[] = [];
   const api = {
@@ -31,7 +31,7 @@ function setup() {
   };
   vi.useFakeTimers();
   const log = vi.fn();
-  const store = new Store(api, factory, log);
+  const store = new Store(api, factory, log, options);
   return { api, store, sockets, urls, log };
 }
 
@@ -54,6 +54,62 @@ const delays = (log: ReturnType<typeof vi.fn>) =>
 const timers = () => vi.getTimerCount();
 
 describe("Store", () => {
+  it("a refused handshake is confirmed once; a session that ended stops the retries", async () => {
+    const confirm = vi.fn(async () => true); const ended = vi.fn();
+    const { store, sockets } = setup({ confirmSessionEnded: confirm, onSessionEnded: ended });
+    await store.start();
+    sockets[0].s.close({ status: 403, detail: "Unexpected server response: 403" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(ended).toHaveBeenCalledTimes(1);
+    expect(store.lastError).toMatchObject({ status: 401 });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sockets).toHaveLength(1); // no reconnect
+    expect(confirm).toHaveBeenCalledTimes(1); // and no loop
+  });
+
+  it("a refused handshake the confirm does not blame on the session is retried as before", async () => {
+    const confirm = vi.fn(async () => false); const ended = vi.fn();
+    const { store, sockets } = setup({ confirmSessionEnded: confirm, onSessionEnded: ended });
+    await store.start();
+    sockets[0].s.close({ status: 403, detail: "x" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(ended).not.toHaveBeenCalled();
+    expect(sockets).toHaveLength(2);
+    expect(confirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("a confirm that throws is retried as before", async () => {
+    const confirm = vi.fn(async () => { throw new Error("down"); }); const ended = vi.fn();
+    const { store, sockets } = setup({ confirmSessionEnded: confirm, onSessionEnded: ended });
+    await store.start();
+    sockets[0].s.close({ status: 401, detail: "x" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(ended).not.toHaveBeenCalled();
+    expect(sockets).toHaveLength(2);
+  });
+
+  it("a 401 on the list is proof: no confirm call", async () => {
+    const confirm = vi.fn(async () => true); const ended = vi.fn();
+    const { store, api, sockets } = setup({ confirmSessionEnded: confirm, onSessionEnded: ended });
+    api.listItems.mockRejectedValueOnce({ status: 401, detail: "Not signed in" });
+    await store.start();
+    expect(ended).toHaveBeenCalledTimes(1);
+    expect(confirm).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sockets).toHaveLength(0);
+  });
+
+  it("without a confirm (a token), a refused handshake is retried and nothing ends", async () => {
+    const ended = vi.fn();
+    const { store, sockets } = setup({ onSessionEnded: ended });
+    await store.start();
+    sockets[0].s.close({ status: 401, detail: "x" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(ended).not.toHaveBeenCalled();
+    expect(sockets).toHaveLength(2);
+  });
+
   it("loadDetail fills the detail quietly: no listener hears it, and the row is left alone", async () => {
     const { store, sockets, api } = setup();
     await store.start();

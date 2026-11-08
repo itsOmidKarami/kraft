@@ -52,6 +52,17 @@ function connError(e: unknown): ConnError {
   return { status: -1, detail: String(e) };
 }
 
+/** The server ended a session: the one error the sign-in row answers. */
+export const SESSION_ENDED: ConnError = { status: 401, detail: "The server ended this session." };
+
+export interface StoreOptions {
+  /** Whether the server has ended this session (a 401 to an authenticated call).
+   *  Run once per refused handshake, which may be the perimeter's and not Kraft's. */
+  confirmSessionEnded?: () => Promise<boolean>;
+  /** The session is over: no retry follows, since only signing in again helps. */
+  onSessionEnded?: () => void;
+}
+
 export class Store {
   private byId = new Map<string, WorkItem>();
   private details = new Map<string, WorkItemDetail>();
@@ -72,7 +83,12 @@ export class Store {
   connected = false;
   lastError: ConnError | null = null;
 
-  constructor(private api: Api, private factory: SocketFactory, private log: StoreLog = () => {}) {}
+  constructor(
+    private api: Api,
+    private factory: SocketFactory,
+    private log: StoreLog = () => {},
+    private options: StoreOptions = {},
+  ) {}
 
   items = () => [...this.byId.values()];
   item = (id: string) => this.byId.get(id);
@@ -152,6 +168,8 @@ export class Store {
     } catch (e) {
       if (gen !== this.gen || this.stopped) return;
       const err = connError(e);
+      // A 401 on an authenticated HTTP call is already proof: no second call to confirm it.
+      if (err.status === 401 && this.options.confirmSessionEnded) return this.sessionEnded();
       if (this.setError(err)) this.log("warn", `list failed: ${err.status} ${err.detail}`);
       this.setConnected(false);
       this.retry();
@@ -184,8 +202,33 @@ export class Store {
       if (!opened) this.setError(err ?? { status: 0, detail: "socket closed before open" });
       this.log("warn", opened ? "disconnected" : `disconnected: ${this.lastError?.detail}`);
       this.setConnected(false);
-      this.retry();
+      const refused = !opened && (err?.status === 401 || err?.status === 403);
+      if (refused && this.options.confirmSessionEnded) void this.confirmThenRetry(this.gen);
+      else this.retry();
     });
+  }
+
+  /** A refused handshake may be the session's or a proxy's: ask once, inside the
+   *  usual backoff. Ended: stop, since only signing in again helps. Not ended,
+   *  or the question failed: the refusal is not the session's, so retry as before. */
+  private async confirmThenRetry(gen: number): Promise<void> {
+    let ended = false;
+    try {
+      ended = await this.options.confirmSessionEnded!();
+    } catch {
+      ended = false;
+    }
+    // A retry-now, a newer connect or stop() overtook the answer.
+    if (gen !== this.gen || this.stopped) return;
+    if (ended) this.sessionEnded();
+    else this.retry();
+  }
+
+  private sessionEnded(): void {
+    this.log("warn", "the server ended this session");
+    this.setError(SESSION_ENDED);
+    this.setConnected(false);
+    this.options.onSessionEnded?.();
   }
 
   private handle(data: string): void {
