@@ -669,6 +669,17 @@ def _seed_session(client, wid, *, session_id, hook_point, node_id="verify", runn
         conn.close()
 
 
+def _fake_forge(monkeypatch, **fields):
+    """Every backend resolves to one shared FakeForge (built with `fields`), so
+    a test can read back what the route called on it."""
+    from kraft.adapters import forge as forge_mod
+
+    fake = forge_mod.FakeForge(**fields)
+    monkeypatch.setattr("kraft.adapters.forge.run.backend_for", lambda *a, **k: "fake")
+    monkeypatch.setattr("kraft.adapters.forge.run.resolve", lambda name: fake)
+    return fake
+
+
 def _on_api_account(
     client, repo, monkeypatch, wid: str, *, pinned: bool = True, forge: str = "github"
 ) -> None:

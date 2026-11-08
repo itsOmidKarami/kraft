@@ -55,6 +55,7 @@ def test_the_tools_are_registered():
         "cancel_work_item",
         "escalate_work_item",
         "set_mr_labels",
+        "rerun_failed_ci",
         "set_chain",
         "set_attachments",
         "set_agent_overrides",

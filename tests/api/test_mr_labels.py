@@ -4,18 +4,9 @@ repair task calls once it has decided which labels a red pipeline wants
 
 from __future__ import annotations
 
-from support.api import _completed_item, _on_api_account
+from support.api import _completed_item, _fake_forge, _on_api_account
 
 from kraft.adapters import forge as forge_mod
-
-
-def _fake_forge(monkeypatch):
-    """Every backend resolves to one shared FakeForge, so the test can read
-    back what `set_labels` was called with."""
-    fake = forge_mod.FakeForge()
-    monkeypatch.setattr("kraft.adapters.forge.run.backend_for", lambda *a, **k: "fake")
-    monkeypatch.setattr("kraft.adapters.forge.run.resolve", lambda name: fake)
-    return fake
 
 
 def test_set_mr_labels_applies_and_records_them(client, repo, monkeypatch):

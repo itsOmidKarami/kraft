@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from kraft import builtins as builtins_mod
 from kraft import (
     caps,
+    ci_reruns,
     escalate,
     events,
     executor,
@@ -102,6 +103,11 @@ class Progress(BaseModel):
 
 class MrLabels(BaseModel):
     labels: list[str]
+
+
+class CiRerun(BaseModel):
+    #: What the repair saw: a job that died before any check of the code ran.
+    reason: str
 
 
 class Steer(BaseModel):
@@ -3075,3 +3081,75 @@ async def set_mr_labels(wid: str, body: MrLabels, request: Request):
 
     await st.db.write(_record)
     return {"work_item_id": wid, "labels": list(labels)}
+
+
+@api_router.post("/work-items/{wid}/ci-rerun")
+async def ci_rerun(wid: str, body: CiRerun, request: Request):
+    """Re-run the CI jobs that failed outside the code.
+
+    What a `merge_request_feedback` repair calls once it has read the failed
+    job's log and found it died before any test or check of the code ran (a
+    download 504, a runner that went away). It changes nothing in the
+    checkout, so the event this records is how the fix loop knows the round was
+    not a no-op (`walk._changed_nothing`). Like `set_mr_labels`, no
+    `_forbid_self_action`: this is an item acting on its own merge request.
+
+    One re-run per fix attempt, and only inside an open one: `max_attempts`
+    bounds how often a real code failure could be re-run. This shares no state
+    with the forge-flagged self-retry (`ci_infra:<node_id>`).
+    """
+    st = request.app.state
+    reason = body.reason.strip()
+    if not reason:
+        raise HTTPException(422, "a re-run needs a reason")
+    row = deps._work_item_row(st, wid)
+    worktree = inplace.item_folder(st.run_dirs, row)
+    if not worktree.is_dir():
+        raise deps.worktree_missing(row)
+    node_id = row["current_node_id"]
+    node = ci_reruns.node_of(store.materialized_chain_of(row), node_id)
+    if not ci_reruns.waits_on_mr_ci(node):
+        raise HTTPException(
+            409,
+            f"{node_id} does not wait on merge-request CI; only its fix loop can re-run CI",
+        )
+    cycle = st.db.read(lambda c: ci_reruns.open_fix_cycle(c, wid, node_id))
+    if cycle is None:
+        raise HTTPException(409, f"no fix attempt is running on {node_id}")
+    if st.db.read(lambda c: ci_reruns.reruns(c, wid, node_id, after_seq=cycle["seq"])):
+        raise HTTPException(409, "CI was already re-run in this fix attempt")
+
+    branch = store.branch_for(row)
+    repo_entry = deps.launch(st, row["repo"]).repo_entry
+    try:
+        forge = await forge_mod.item_forge(st.db, row, repo_entry, *deps.forges_now(st))
+        head = await forge_mod.git._head_sha(worktree, branch)
+        # The pipeline `ci_poll` pinned for this head, if it did (Kraft-ivh1).
+        pinned = row["ci_pipeline_ref"] or ""
+        pipeline_id = ""
+        if ":" in pinned:
+            pinned_sha, pinned_id = pinned.split(":", 1)
+            if pinned_sha == head:
+                pipeline_id = pinned_id
+        ci = await forge.ci_status(
+            repo=worktree, mr=forge_mod.MR(number=0, url=""), branch=branch, pipeline_id=pipeline_id
+        )
+        if ci.sha and head and ci.sha != head:
+            raise HTTPException(409, "CI is not for the branch's current head")
+        if ci.state != "failed":
+            raise HTTPException(409, f"CI is {ci.state}: nothing failed to re-run")
+        reran = await forge.retry_jobs(repo=worktree, ci=ci)
+    except forge_mod.ForgeError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    if not reran:
+        raise HTTPException(409, "no failed job here can be re-run by Kraft")
+
+    payload = {
+        "node_id": node_id,
+        "cycle": cycle["payload"].get("cycle"),
+        "reason": reason,
+        "jobs": [j.name for j in ci.failed_jobs],
+        "reran": list(reran),
+    }
+    await st.db.write(lambda c: events.append(c, wid, ForgeEvent.CI_RERUN_REQUESTED, payload))
+    return {"work_item_id": wid, "reran": list(reran), "jobs": payload["jobs"]}

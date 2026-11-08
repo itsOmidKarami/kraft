@@ -569,6 +569,21 @@ async def mr_labels(labels: list[str], work_item_id: str | None = None) -> dict:
     )
 
 
+async def ci_rerun(reason: str, work_item_id: str | None = None) -> dict:
+    """Re-run the CI jobs of this item's merge request that failed outside the
+    code, from inside a fix-loop repair (Kraft-zje6v). The server refuses unless
+    a fix attempt is open and CI is red for the current head.
+
+    `resolve_work_item`, not `_forbid_self_action`, as `mr_labels` above: the
+    caller is a repair acting on its own item's merge request, not a gate
+    decision.
+    """
+    target = await context.resolve_work_item(work_item_id)
+    return await transport._act(
+        f"/work-items/{transport.segment(target)}/ci-rerun", {"reason": reason}
+    )
+
+
 async def set_chain(
     chain: str | None,
     work_item_id: str | None = None,

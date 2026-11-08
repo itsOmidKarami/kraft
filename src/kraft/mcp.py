@@ -507,6 +507,17 @@ def build() -> MCPServer:
         return await client.mr_labels(labels, work_item_id)
 
     @server.tool()
+    async def rerun_failed_ci(reason: str, work_item_id: str | None = None) -> dict:
+        """Re-run the failed CI jobs of this Kraft work item's merge request,
+        from a fix-loop repair that found they died outside the code: a
+        download, install or registry step failing with a network or 5xx error,
+        or a runner that went away. Change nothing in the checkout and pass what
+        you saw as `reason`. A failing test, lint, type check or build error is
+        never a re-run. Once per fix attempt; refused outside one, or when CI is
+        not red for the current head."""
+        return await client.ci_rerun(reason, work_item_id)
+
+    @server.tool()
     async def set_chain(
         chain: str | None = None,
         chain_yaml: str | None = None,

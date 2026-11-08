@@ -81,6 +81,7 @@ kraft item set-chain [ID] --chain C | --chain-file P  # a not-yet-started item's
 kraft item set-overrides [ID] [--model M] [--effort E] / kraft item set-node-override [ID] --node N [...]
 kraft item set-policy [ID] --policy KEY=VALUE [--clear]
 kraft item mr-label LABEL...                # label this item's merge request
+kraft item rerun-ci [ID] --reason "..."      # a fix-loop repair re-runs CI that failed outside the code
 kraft item progress K [ID]                  # a worker saying it started plan task K
 kraft item reply THREAD --body "..." [--claim fixed|answered|should_fix]  # a worker answering a review thread
 kraft view threads [ID] [--open]              # review threads, drafts marked

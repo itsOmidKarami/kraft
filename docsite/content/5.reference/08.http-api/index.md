@@ -205,6 +205,7 @@ The pages can change in any release. A script that must keep working calls the [
 | [`POST /api/work-items/{id}/reopen-mr`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidreopen-mr) | Reopens a merge request closed on the forge, then retries. |
 | [`POST /api/work-items/{id}/progress`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidprogress) | Records that a worker started a plan task. |
 | [`POST /api/work-items/{id}/mr-labels`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidmr-labels) | Labels the item's merge request. |
+| [`POST /api/work-items/{id}/ci-rerun`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidci-rerun) | Re-runs the CI jobs that failed outside the code. _Added in next_ |
 
 ### Ending
 

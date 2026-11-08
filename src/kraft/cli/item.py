@@ -389,6 +389,10 @@ def _cmd_escalate(ns: argparse.Namespace) -> None:
     )
 
 
+def _cmd_rerun_ci(ns: argparse.Namespace) -> None:
+    common.emit(asyncio.run(client.ci_rerun(ns.reason, ns.id)), common._render_action, ns.json)
+
+
 def _cmd_mr_label(ns: argparse.Namespace) -> None:
     common.emit(asyncio.run(client.mr_labels(ns.labels, ns.id)), common._render_action, ns.json)
 
@@ -796,6 +800,17 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     progress.add_argument("task", type=int, help="the N of the plan's '## Task N' heading")
     progress.add_argument("id", nargs="?")
     progress.set_defaults(func=_cmd_progress)
+
+    rerun_ci = subs.add_parser(
+        "rerun-ci",
+        parents=[common],
+        help="re-run the CI jobs that failed outside the code (a fix-loop repair)",
+    )
+    rerun_ci.add_argument("id", nargs="?")
+    rerun_ci.add_argument(
+        "--reason", required=True, help="what you saw: a job that died before any check ran"
+    )
+    rerun_ci.set_defaults(func=_cmd_rerun_ci)
 
     reply = subs.add_parser(
         "reply", parents=[common], help="answer a review thread (worker sessions only)"
