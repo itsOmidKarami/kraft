@@ -5,7 +5,7 @@ from support.harness import v1_node, v1_resolved
 from support.store_fixtures import mk_item
 
 from kraft import ci_reruns, events
-from kraft.vocab import ChainEvent, ForgeEvent
+from kraft.vocab import ChainEvent, ForgeEvent, GateEvent, WorkItemEvent
 
 STARTED = ChainEvent.FIX_CYCLE_STARTED
 FINISHED = ChainEvent.FIX_CYCLE_FINISHED
@@ -60,17 +60,30 @@ async def test_reruns_counts_only_this_node_after_the_seq(database):
     assert early < marker < late < other
 
 
-async def test_node_run_start_is_the_latest_node_started(database):
+@pytest.mark.parametrize(
+    ("specs", "start_index"),
+    [
+        pytest.param([], None, id="none"),
+        # One fires per measurement round, so it says nothing about the run.
+        pytest.param([(ChainEvent.NODE_STARTED, "n1")], None, id="node-started-is-not-a-run"),
+        pytest.param([(WorkItemEvent.RETRIED, None)], 0, id="a-retry"),
+        pytest.param([(GateEvent.REJECTED, "g")], 0, id="a-rejection"),
+        pytest.param([(ChainEvent.NODE_COMPLETED, "n1")], 0, id="the-node-completing"),
+        pytest.param([(ChainEvent.NODE_COMPLETED, "n2")], None, id="another-node-completing"),
+        pytest.param(
+            [(WorkItemEvent.RETRIED, None), (ChainEvent.NODE_COMPLETED, "n1")], 1, id="the-latest"
+        ),
+    ],
+)
+async def test_node_run_start_is_the_latest_retry_decision_or_completion(
+    database, specs, start_index
+):
     await mk_item(database)
-    assert database.read(lambda c: ci_reruns.node_run_start(c, "w1", "n1")) == 0
-    _, second, _ = await _append(
-        database,
-        (ChainEvent.NODE_STARTED, "n1"),
-        (ChainEvent.NODE_STARTED, "n1"),
-        (ChainEvent.NODE_STARTED, "n2"),
-    )
+    seqs = await _append(database, *specs)
 
-    assert database.read(lambda c: ci_reruns.node_run_start(c, "w1", "n1")) == second
+    found = database.read(lambda c: ci_reruns.node_run_start(c, "w1", "n1"))
+
+    assert found == (0 if start_index is None else seqs[start_index])
 
 
 def _forge_node(target):

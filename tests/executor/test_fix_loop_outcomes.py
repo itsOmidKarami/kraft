@@ -223,25 +223,34 @@ DOUBT = "No code changed: these failures are the host's, not the branch's."
 
 
 @pytest.mark.parametrize(
-    ("fix_status", "tail", "earlier_thread_event"),
+    ("fix_status", "tail", "earlier"),
     [
-        pytest.param("done", "The repair ended done and gave no concerns.", False, id="done"),
-        pytest.param("failed", "The repair ended failed and gave no concerns.", False, id="failed"),
+        pytest.param("done", "The repair ended done and gave no concerns.", None, id="done"),
+        pytest.param("failed", "The repair ended failed and gave no concerns.", None, id="failed"),
         pytest.param(
-            "done_with_concerns", f"The repair said: fix: {DOUBT}", False, id="with-concerns"
+            "done_with_concerns", f"The repair said: fix: {DOUBT}", None, id="with-concerns"
         ),
-        # Only a thread update appended during the repair counts: one from
-        # before it must not hide that the round changed nothing.
+        # Only an event appended during the repair counts: one from before it
+        # must not hide that the round changed nothing.
         pytest.param(
             "done",
             "The repair ended done and gave no concerns.",
-            True,
+            GateEvent.THREAD_UPDATED,
             id="after-an-earlier-thread-update",
+        ),
+        # ...and an earlier re-run is named in the stop, so a person knows the
+        # red CI was an infrastructure failure.
+        pytest.param(
+            "done",
+            "The repair ended done and gave no concerns."
+            + prompts.ci_rerun_stop_note([{"payload": {"reason": "bd 504"}}]),
+            ForgeEvent.CI_RERUN_REQUESTED,
+            id="after-an-earlier-ci-rerun",
         ),
     ],
 )
 async def test_a_fix_round_that_changed_nothing_stops_without_measuring_again(
-    item_on, script, fix_status, tail, earlier_thread_event
+    item_on, script, fix_status, tail, earlier
 ):
     """Kraft-6rph9: 3k7w4qfc's repair changed nothing and said so, and the
     whole node -- a 14-minute suite and a code review -- ran again on the
@@ -250,11 +259,9 @@ async def test_a_fix_round_that_changed_nothing_stops_without_measuring_again(
     script.plan = {"fix": [fix_status]}
     script.unchanged = {"fix"}
     it = await item_on(_node(_sub("check", ["false"]), [{"id": "repair", "tasks": [_sub("fix")]}]))
-    if earlier_thread_event:
-        payload = {"thread_id": "t0", "state": "claimed"}
-        await it.database.write(
-            lambda c: events.append(c, it.id, GateEvent.THREAD_UPDATED, payload)
-        )
+    if earlier:
+        payload = {"thread_id": "t0", "state": "claimed", "node_id": "build", "reason": "bd 504"}
+        await it.database.write(lambda c: events.append(c, it.id, earlier, payload))
     if fix_status == "done_with_concerns":
 
         async def concerned(_row):
@@ -326,3 +333,19 @@ async def test_a_fix_round_that_changed_anything_measures_again(
 
     assert await _walk_node(it) == "ok"
     assert script.calls == ["check", "fix", "check"]
+
+
+@pytest.mark.parametrize("mr_ci", [True, False], ids=["mr-ci-node", "other-node"])
+async def test_a_fix_instruction_offers_the_ci_rerun_only_on_a_node_that_waits_on_mr_ci(
+    item_on, script, monkeypatch, mr_ci
+):
+    script.real = {"check"}
+    script.unchanged = {"fix"}
+    monkeypatch.setattr(walk.ci_reruns, "waits_on_mr_ci", lambda node: mr_ci)
+    it = await item_on(_node(_sub("check", ["false"]), [{"id": "repair", "tasks": [_sub("fix")]}]))
+
+    await _walk_node(it)
+
+    [instruction] = script.instructions["fix"]
+    assert (prompts.ci_rerun_fix_note(True) in instruction) is mr_ci
+    assert prompts.ci_rerun_fix_note(False) not in instruction

@@ -62,6 +62,58 @@ FIX_NO_CHANGE_NOTE = (
     "concerns: Kraft stops for a person rather than measuring the same code again."
 )
 
+#: What a fix instruction says about a CI job that died outside the code
+#: (Kraft-zje6v): change nothing and ask Kraft to re-run it. The first clause is
+#: shared; what follows depends on whether the sandbox can reach Kraft.
+_CI_RERUN_WHEN = (
+    "\n\nIf a failed CI job died before any test or check of the code ran (a download, "
+    "install or registry step failing with a network or 5xx error, or a runner that went "
+    "away), change nothing"
+)
+_CI_RERUN_REACHABLE = (
+    ' and run `kraft item rerun-ci --reason "<what you saw>"`. Read the job\'s log first '
+    "(`kraft view job-log`): on GitHub the finding names only the job. A failing test, "
+    "assertion, lint, type check or build error is never a re-run, even if you suspect "
+    "flakiness. Re-run at most once per attempt."
+)
+_CI_RERUN_UNREACHABLE = (
+    ". This sandbox cannot reach Kraft to re-run it, so end done_with_concerns and say in "
+    "your concerns that the failure is infrastructure and CI needs a re-run."
+)
+
+
+def ci_rerun_fix_note(reachable: bool) -> str:
+    return _CI_RERUN_WHEN + (_CI_RERUN_REACHABLE if reachable else _CI_RERUN_UNREACHABLE)
+
+
+def _rerun_reasons(reruns: list[dict]) -> str:
+    return "; ".join(str(r["payload"].get("reason", "")) for r in reruns)
+
+
+def ci_rerun_judge_note(reruns: list[dict]) -> str:
+    """What the fix-loop judge is told when a round re-ran CI: a finding that
+    recurs after one is an outage, not a repair that cannot land."""
+    if not reruns:
+        return ""
+    return (
+        f"\n\nCI was re-run for an infrastructure failure in {len(reruns)} round(s): "
+        f"{_rerun_reasons(reruns)}. A finding that recurs after such a round is an outage, "
+        "not a repair that cannot land; say so in `concerns`."
+    )
+
+
+def ci_rerun_stop_note(reruns: list[dict]) -> str:
+    """Appended to a fix loop's stop reason when its attempts re-ran CI, so a
+    person knows to re-run later rather than debug."""
+    if not reruns:
+        return ""
+    last = reruns[-1]["payload"].get("reason", "")
+    return (
+        f" CI was re-run {len(reruns)} time(s) for an infrastructure failure ({last}) and is "
+        "still red: re-run CI once it clears, then retry this item."
+    )
+
+
 #: The judge's own read of why the findings are not going down, handed to the
 #: fix task it has just let through (Kraft-s7c04.5). On `continue` only -- a
 #: stop verdict dispatches no fix task at all.

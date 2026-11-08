@@ -67,6 +67,7 @@ from kraft.vocab import (
     StopKind,
     WorkItemEvent,
 )
+from kraft.worker import callback as _callback
 
 
 def chain_of(row) -> MaterializedChain:
@@ -2425,7 +2426,8 @@ async def _walk_node_once(
             )
             if verdict == "stop_needs_human":
                 return _Stuck(
-                    f"judge: {reasoning}",
+                    f"judge: {reasoning}"
+                    + prompts.ci_rerun_stop_note(dispatch.node_reruns(db, work_item_id, node)),
                     kind=StopKind.STUCK,
                     escalatable=not _red_pipeline_only(failed),
                 )
@@ -2454,6 +2456,7 @@ async def _walk_node_once(
         )
         if _policy.check(count=count, started_at=started_at, cap=cap, now=_now()) == "breached":
             reason = f"{key} exhausted after {count - 1} fix cycle(s)"
+            reason += prompts.ci_rerun_stop_note(dispatch.node_reruns(db, work_item_id, node))
             # What raised, measuring or fixing, is the only account of why when
             # a task never reported (Kraft-hr0xr) -- the loopless path already
             # says it, and the loop threw it away.
@@ -2513,6 +2516,7 @@ async def _walk_node_once(
                     else f"stuck: finding {stuck_fp} unchanged across "
                     f"{_FINGERPRINT_STREAK_LIMIT} cycles"
                 )
+                reason += prompts.ci_rerun_stop_note(dispatch.node_reruns(db, work_item_id, node))
                 # Deliberately NOT mark_sessions_capped_out: these sessions did
                 # not cap out, and only a real cap breach may claim they did.
                 return _Stuck(
@@ -2559,6 +2563,10 @@ async def _walk_node_once(
             instruction += prompts.judge_note(reasoning)
         instruction += prompts.repair_doubts_fix_note(repair_doubted)
         instruction += prompts.FIX_NO_CHANGE_NOTE
+        if ci_reruns.waits_on_mr_ci(node):
+            instruction += prompts.ci_rerun_fix_note(
+                _callback.reachable(dispatch.item_sandbox(row, launch))
+            )
         # Every round, not just the last one (Kraft-s7c04.7). `last_measurement`
         # gives the fixer one round of memory, which is why round N+2 reverted
         # the security property round N established on e983d85c -- the loop had
@@ -2703,6 +2711,7 @@ def _changed_nothing_reason(db, work_item_id: str, node: ResolvedNode, count: in
     return (
         f"stuck: fix attempt {count} in node {node.id} changed nothing, so measuring "
         f"again would see the same code. {said}"
+        + prompts.ci_rerun_stop_note(dispatch.node_reruns(db, work_item_id, node))
     )
 
 

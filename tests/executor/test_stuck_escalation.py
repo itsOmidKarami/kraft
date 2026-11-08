@@ -15,7 +15,7 @@ from support.harness import entry_of, v1_node
 from kraft import events, executor, rate_limit_retry, store
 from kraft import policy as _policy
 from kraft.adapters import forge
-from kraft.executor import dispatch, gates
+from kraft.executor import dispatch, gates, prompts
 from kraft.vocab import ForgeEvent
 
 NO_SETUP = entry_of({"setup_command": ""})
@@ -572,4 +572,55 @@ async def test_a_ci_rerun_round_with_the_same_findings_runs_to_the_cap(
     assert "exhausted" in _reason(it), _reason(it)
     assert "unchanged across" not in _reason(it)
     assert "changed nothing" not in _reason(it)
+    assert "re-run 3 time(s) for an infrastructure failure (bd download 504)" in _reason(it)
     assert len(it.events("fix_cycle_started")) == 3
+
+
+async def test_a_judge_after_a_ci_rerun_is_told_and_its_stop_says_so(item_on, script, monkeypatch):
+    """Kraft-zje6v. A setup 504 that recurs after a re-run looks like a repair
+    that cannot land. The judge is told the round re-ran CI, and the stop it
+    gives names the infrastructure failure, so a person re-runs CI instead of
+    debugging."""
+    monkeypatch.setattr(
+        forge.run, "resolve", lambda name: forge.FakeForge(pipeline_statuses={"7": [_RED] * 6})
+    )
+    script.real.add("ci")
+    script.unchanged = {"fix"}
+    node = _pipeline_node(
+        fix_loop={"tasks": [_sub("fix")], "max_attempts": 5, "judge": _sub("judge")}
+    )
+    it = await item_on([node])
+
+    fixes = iter(range(9))
+
+    async def reran(_row):
+        payload = {
+            "node_id": "build",
+            "cycle": 1,
+            "reason": "bd download 504",
+            "jobs": ["test"],
+            "reran": ["1"],
+        }
+        await it.database.write(
+            lambda c: events.append(c, it.id, ForgeEvent.CI_RERUN_REQUESTED, payload)
+        )
+        await it.session(f"s-fix{next(fixes)}", "build.fix_loop.main.fix", "done", round=1)
+
+    async def judged(_row):
+        verdict = {"status": "done", "verdict": "stop_needs_human", "concerns": "an outage"}
+        (it.run_dirs.results / "s-judge.json").write_text(json.dumps(verdict))
+        await it.session("s-judge", "build.fix_loop.judge", "done", round=1)
+
+    script.effects["fix"] = reran
+    script.effects["judge"] = judged
+
+    assert (
+        await executor.run_once(
+            it.database, it.run_dirs, work_item_id=it.id, policy=_policy_(), launch=_ON_A_FORGE
+        )
+        == "needs_human"
+    )
+
+    reruns = [{"payload": {"reason": "bd download 504"}}]
+    assert prompts.ci_rerun_judge_note(reruns) in script.instructions["judge"][0]
+    assert _reason(it) == "judge: an outage" + prompts.ci_rerun_stop_note(reruns)

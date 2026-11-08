@@ -17,8 +17,8 @@ from pathlib import Path
 from kraft import builtins as _builtins
 from kraft import caps as _caps
 from kraft import carried as _carried
+from kraft import ci_reruns, events, ids, inplace, item_paths, node_runs, outputs, store
 from kraft import config as _config
-from kraft import events, ids, inplace, item_paths, node_runs, outputs, store
 from kraft import findings as _findings
 from kraft import harness as _harness
 from kraft import overrides as _overrides
@@ -3627,6 +3627,15 @@ def unresolved_findings_steer(
     return prompts.seeded_findings_note(found)
 
 
+def node_reruns(db, work_item_id: str, node: ResolvedNode) -> list[dict]:
+    """The CI re-runs repairs asked for during `node`'s current run."""
+    return db.read(
+        lambda c: ci_reruns.reruns(
+            c, work_item_id, node.id, after_seq=ci_reruns.node_run_start(c, work_item_id, node.id)
+        )
+    )
+
+
 async def judge_verdict(
     db,
     run_dirs,
@@ -3678,6 +3687,7 @@ async def judge_verdict(
         elapsed_s=int(elapsed),
         cap_wall_clock_s=cap.wall_clock_s,
     ) + prompts.repair_doubts_judge_note(doubts or [])
+    instruction += prompts.ci_rerun_judge_note(node_reruns(db, work_item_id, node))
     status = await dispatch_node(
         db,
         run_dirs,

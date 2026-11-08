@@ -32,6 +32,9 @@ reasoning; it is not evidence about whether the code moved.
   fixed. A loop that cleared every `critical` finding and has one
   `important` finding about a stale comment left recurring is a different call
   than one still chasing a `critical` security hole.
+- **An outage is not a stuck repair.** When your task instruction says CI was
+  re-run for an infrastructure failure, a finding that recurs after that round
+  is an outage, not a repair that cannot land. Say so in `concerns`.
 - **Cost already spent vs cap remaining**, in attempts and in wall-clock: your
   task instruction gives both. A loop three cycles in with two attempts
   remaining, or most of its wall-clock gone, that is still finding new things

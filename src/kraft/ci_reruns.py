@@ -14,7 +14,7 @@ import sqlite3
 
 from kraft import events
 from kraft.templates.models import ForgeAction, ForgeTask, ResolvedNode
-from kraft.vocab import ChainEvent, ForgeEvent
+from kraft.vocab import ChainEvent, ForgeEvent, GateEvent, WorkItemEvent
 
 __all__ = [
     "waits_on_mr_ci",
@@ -85,6 +85,14 @@ def reruns(
 
 
 def node_run_start(conn: sqlite3.Connection, work_item_id: str, node_id: str) -> int:
-    """The seq of the node's latest `node_started`, or 0."""
-    started = _node_events(conn, work_item_id, node_id, ChainEvent.NODE_STARTED)
-    return started[-1]["seq"] if started else 0
+    """The seq where the node's current run began, or 0: after the latest retry
+    or gate decision, or the node's last completion. Not `node_started`, which
+    `dispatch.measure_node` fires once per measurement round, after the earlier
+    rounds' re-runs."""
+    spent = [
+        e["seq"]
+        for e in events.read_after(conn, 0, work_item_id)
+        if e["type"] in (WorkItemEvent.RETRIED, GateEvent.APPROVED, GateEvent.REJECTED)
+        or (e["type"] == ChainEvent.NODE_COMPLETED and e["node_id"] == node_id)
+    ]
+    return max(spent, default=0)
