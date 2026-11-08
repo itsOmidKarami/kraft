@@ -37,6 +37,14 @@ describe("StageGraph", () => {
     expect(btn(/^spec,/).querySelector(".graph-meta")).toHaveAttribute("title", "3m");
   });
 
+  // A running node's border already says it runs, so its line is words alone; a node that needs you keeps its amber dot.
+  it.each([["run", false], ["amber", true], ["muted", true]] as const)("draws a %s sub line with a dot: %s", (subTone, dot) => {
+    render(<StageGraph name="c" nodes={[{ id: "implement", kind: "exec", state: "current", sub: "step 2 of 3 · 4m", subTone }]} />);
+    const line = btn(/^implement/).querySelector(".graph-sub")!;
+    expect(line).toHaveTextContent("step 2 of 3 · 4m");
+    expect(line.querySelector(".graph-sub-dot") !== null).toBe(dot);
+  });
+
   it("enters on the selected node and moves with ←/→, stopping at the ends, through seams", async () => {
     const user = userEvent.setup();
     render(<StageGraph name="c" nodes={nodes} selected="approve_spec" seams={[{ at: 3 }]} />);

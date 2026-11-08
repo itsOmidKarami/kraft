@@ -142,7 +142,7 @@
 .graph-sub { display: flex; align-items: center; gap: 5px; color: var(--text-sub); }
 .graph-sub-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--warn); }
 .graph-sub-dot.tone-muted { background: var(--text-muted); }
-.graph-sub-dot.tone-run { background: var(--run); animation: var(--run-breathe); }
+.graph-sub.tone-run { color: var(--run); }
 
 /* Seams: the dashed green insert points, shown on hover and on focus as well (R6). */
 .seam { position: absolute; z-index: 2; width: 24px; height: 24px; box-sizing: border-box; margin: 0; padding: 0; border-radius: 50%; border: 1.5px dashed var(--ok); background: var(--bg); color: var(--ok); font: 600 var(--fs-meta)/21px system-ui, sans-serif; text-align: center; cursor: pointer; opacity: 0; transition: opacity .12s; }

@@ -34,7 +34,7 @@ export const CHAIN_15: ChainNode[] = [
   { id: "plan", kind: "exec", icon: "file-text", state: "done", meta: "4m" },
   { id: "approve_plan", kind: "gate", state: "done", meta: "auto" },
   { id: "implement", kind: "exec", icon: "layers", state: "done", meta: "38m", attempt: 2 },
-  { id: "verification", kind: "exec", icon: "shield-check", state: "current", sub: "2/3 · 10:42", attempt: 2, running: true },
+  { id: "verification", kind: "exec", icon: "shield-check", state: "current", sub: "step 2 of 3 · 10:42", attempt: 2, running: true },
   { id: "code_review", kind: "exec", icon: "bot", state: "todo" },
   { id: "review_gate", kind: "gate", state: "todo" },
   { id: "docs", kind: "exec", icon: "scroll-text", state: "todo" },

@@ -26,7 +26,7 @@ describe("chainGraph", () => {
       ["plan", "done", "6m"],
       ["plan_approval", "done", "you"],
       // The attempt in flight, not the node's first session.
-      ["verification", "current", "2/2 · 3m"],
+      ["verification", "current", "step 2 of 2 · 3m"],
       ["merge_request", "todo", null],
     ]);
     expect(nodes[2]).toMatchObject({ running: true, attempt: 2, kind: "exec" });

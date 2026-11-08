@@ -76,7 +76,7 @@ export function chainGraph(item: ItemDetail, events: KraftEvent[], now = Date.no
     // The attempt in flight: the latest session to start on the node.
     const started = work.map((s) => s.started_at).filter(Boolean).sort().at(-1);
     const step = item.summary?.step;
-    const sub = [step ? `${step.index}/${step.count}` : "", started ? elapsedBetween(started, null, now) : ""].filter(Boolean).join(" · ");
+    const sub = [step ? `step ${step.index} of ${step.count}` : "", started ? elapsedBetween(started, null, now) : ""].filter(Boolean).join(" · ");
     // A waiting item's node runs nothing: it waits on CI, a machine or the provider, and says so where words are shown (R11b-04).
     const wait = status === "waiting" ? (stop?.kind === "rate_limit" ? "waiting · rate limit" : stop?.kind === "wait" ? waitTitle(stop.reason).replace(/^W/, "w") : stop?.kind === "slices" ? "waiting for slices" : "waiting") : status === "escalated" ? "escalated" : status === "queued" || status === "blocked" ? status : undefined;
     // Escalated is a stop that needed a person, now with an agent helping: amber with its siren, as the board and the badge draw it.
