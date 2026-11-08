@@ -44,10 +44,10 @@ const NO_ESC = ["complete", "archive", "cancel"];
 
 describe("headerState: every display status, from the server's fields only", () => {
   it.each([
-    ["running", undefined, "RUNNING", "neutral", "pause", NO_ESC],
-    ["waiting", "rate_limit", "WAITING", "info", "pause", NO_ESC],
-    ["queued", undefined, "QUEUED", "info", "pause", NO_ESC],
-    ["blocked", undefined, "BLOCKED", "info", "pause", NO_ESC],
+    ["running", undefined, "RUNNING", "info", "pause", NO_ESC],
+    ["waiting", "rate_limit", "WAITING", "muted", "pause", NO_ESC],
+    ["queued", undefined, "QUEUED", "muted", "pause", NO_ESC],
+    ["blocked", undefined, "BLOCKED", "muted", "pause", NO_ESC],
     // R11b-01: /pause answers every stopped item 409, so a needs-you stop's main is its way on, as the phone's bar has it.
     ["needs_you", "gate", "NEEDS YOU", "warn", "gate", FULL],
     ["needs_you", "question", "NEEDS YOU", "warn", "answer", FULL],
@@ -120,8 +120,8 @@ describe("the server's actions decide which doors the header offers (F4)", () =>
   // the server lists, under the stop's own badge. A queued or blocked one-off with no node yet is not stranded.
   it.each<[string, Parameters<typeof headerState>[0], HeaderState]>([
     ["a one-off stranded before its first node: FAILED, with Start", STRANDED, { badge: "FAILED", tone: "bad", main: "start", panel: ["complete", "archive", "cancel"] }],
-    ["a one-off queued before its first node: QUEUED, with Remove from queue", { ...UNREVIEWED, display_status: "queued", stop: null, actions: serverActions("queued") }, { badge: "QUEUED", tone: "info", main: "pause", panel: NO_ESC as PanelItem[] }],
-    ["a one-off blocked before its first node: BLOCKED, with Pause", { ...UNREVIEWED, display_status: "blocked", stop: null, actions: serverActions("blocked") }, { badge: "BLOCKED", tone: "info", main: "pause", panel: NO_ESC as PanelItem[] }],
+    ["a one-off queued before its first node: QUEUED, with Remove from queue", { ...UNREVIEWED, display_status: "queued", stop: null, actions: serverActions("queued") }, { badge: "QUEUED", tone: "muted", main: "pause", panel: NO_ESC as PanelItem[] }],
+    ["a one-off blocked before its first node: BLOCKED, with Pause", { ...UNREVIEWED, display_status: "blocked", stop: null, actions: serverActions("blocked") }, { badge: "BLOCKED", tone: "muted", main: "pause", panel: NO_ESC as PanelItem[] }],
   ])("%s", (_name, item, want) => expect(headerState(item)).toEqual(want));
   it.each<[string, Partial<ItemDetail>, (string | null)[]]>([
     ["a one-off stranded before its first node: Start", STRANDED, [null, "start"]],

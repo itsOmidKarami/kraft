@@ -6,8 +6,8 @@ const STOP_ICON: Record<string, string> = { question: "message-square", cap: "ba
 const STATUS_ICON: Record<string, string> = { running: "circle-dot", waiting: "clock", queued: "clock", blocked: "clock", paused: "pause", escalated: "siren", failed: "circle-alert", done: "check", cancelled: "ban" };
 
 /** A phone row's glyph: the shape and colour state the desktop row has (a diamond at a gate), and an icon for the state in the rounded box. */
-export function stateGlyph(i: WorkItem): { kind: ReturnType<typeof glyphOf>["kind"]; icon: string | undefined; state: ReturnType<typeof glyphOf>["state"] } {
+export function stateGlyph(i: WorkItem): Omit<ReturnType<typeof glyphOf>, "icon"> & { icon: string | undefined } {
   const g = glyphOf(i);
   const icon = (i.display_status === "needs_you" ? STOP_ICON[i.stop?.kind ?? ""] : undefined) ?? STATUS_ICON[i.display_status ?? ""] ?? g.icon;
-  return { kind: g.kind, icon, state: g.state };
+  return { ...g, icon };
 }

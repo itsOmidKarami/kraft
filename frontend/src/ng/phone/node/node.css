@@ -34,7 +34,7 @@
 .ph-subtask-title { min-width: 0; overflow-wrap: anywhere; color: var(--text-sub); }
 .ph-subtask-meta { color: var(--text-muted); }
 .ph-subtask.ph-is-done .ph-subtask-title { color: var(--text-muted); }
-.ph-subtask.ph-is-current { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.ph-subtask.ph-is-current { background: color-mix(in srgb, var(--run) 8%, transparent); }
 .ph-subtask.ph-is-current .ph-subtask-title { color: var(--text); }
 /* Density: the row's own vertical padding, plus the comfortable look's extra (theme/base.css). */
 .ph-subtask { padding-block: calc(6px + var(--row-pad-add)); }
@@ -44,7 +44,8 @@
 .ph-subagent-group + .ph-subagent-group { margin-top: 14px; }
 .ph-subagent-head { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; padding: 0 2px; font-size: var(--fs-meta); font-weight: 500; color: var(--text-sub); }
 .ph-subagent-n { font-weight: 400; font-variant-numeric: tabular-nums; color: var(--text-muted); }
-.ph-subagent-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+.ph-subagent-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
+.ph-subagent-dot.ph-is-live { background: var(--run); animation: var(--run-breathe); }
 .ph-subagent-dot.ph-is-bad { background: var(--bad); }
 .ph-subagent-dot.ph-is-ok { background: var(--ok); }
 /* A thumb's worth of target for the fold, its chevron turning as it opens. */

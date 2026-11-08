@@ -21,10 +21,11 @@ export interface HeaderState {
 const FULL: PanelItem[] = ["escalate", "complete", "archive", "cancel"];
 
 const TONE: Record<DisplayStatus, Tone> = {
-  running: "neutral",
-  waiting: "info",
-  queued: "info",
-  blocked: "info",
+  // Blue is running; a waiting, queued or blocked item runs nothing, so it is muted (amber is "needs you").
+  running: "info",
+  waiting: "muted",
+  queued: "muted",
+  blocked: "muted",
   needs_you: "warn",
   escalated: "warn",
   failed: "bad",

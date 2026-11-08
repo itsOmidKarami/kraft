@@ -120,6 +120,8 @@ describe("glyphOf and ticksOf", () => {
     expect(glyphOf(row("paused", { current_node_id: null })).state).toBe("todo");
     // Amber is "needs a human": a paused item waits on nobody, so it is neutral (not amber).
     expect(glyphOf(row("paused")).state).toBe("paused");
+    // Only a running item's glyph carries the running trace: not a waiting one, though both stand on a current node.
+    expect([glyphOf(row("running")).running, glyphOf(row("waiting")).running]).toEqual([true, false]);
     expect(glyphOf(row("blocked", { current_node_id: null })).state).toBe("todo");
     expect(glyphOf(row("blocked")).state).toBe("current");
     // A parent inside its group stands at `slices.verification`: its glyph is the group's.
@@ -128,7 +130,9 @@ describe("glyphOf and ticksOf", () => {
 
   it("fills ticks up to the current node, the current one hot when the item waits on a person, all once ended, the whole chain still drawn", () => {
     const states = (i: WorkItem) => ticksOf(i).map((t) => t.state[0]).join("");
-    expect(states(row("running"))).toBe("ddct");
+    // A running item's node is `running` (blue, with a sheen); a waiting one's stays `current`: it runs nothing.
+    expect(states(row("running"))).toBe("ddrt");
+    expect(states(row("waiting"))).toBe("ddct");
     expect(states(row("needs_you", { stop: stop("cap") }))).toBe("ddht");
     expect(states(row("done"))).toBe("dddd");
     expect(states(row("archived"))).toBe("dddd");
@@ -136,7 +140,7 @@ describe("glyphOf and ticksOf", () => {
     expect(states(row("paused", { current_node_id: null }))).toBe("tttt");
     expect(states(row("paused"))).toBe("ddct");
     expect(ticksOf(row("running")).map((t) => t.gate)).toEqual([false, true, false, false]);
-    expect(states(sliced())).toBe("ddctt");
+    expect(states(sliced())).toBe("ddrtt");
   });
 });
 

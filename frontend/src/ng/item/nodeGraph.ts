@@ -103,8 +103,9 @@ const LOOK: Record<SessionStatus, (s: WorkerSession, now: number) => Look> = {
   pending: () => ({ state: "todo", meta: "pending" }),
   running: (s, now) => ({ state: "current", running: true, meta: `running · ${elapsedBetween(s.started_at, null, now)}` }),
   paused: () => ({ state: "current", paused: true, meta: "paused" }),
-  rate_limited: () => ({ state: "amber", meta: "waiting" }),
-  waiting: () => ({ state: "amber", meta: "waiting" }),
+  // Waiting runs nothing and needs no one: the plain current box, its words saying why (amber is "needs you").
+  rate_limited: () => ({ state: "current", meta: "waiting" }),
+  waiting: () => ({ state: "current", meta: "waiting" }),
   needs_context: () => ({ state: "current", meta: "needs you" }),
   failed: FAILED_LOOK, config_error: FAILED_LOOK, unknown: FAILED_LOOK,
   conflict: FAILED_LOOK, infra: FAILED_LOOK, infra_stop: FAILED_LOOK, merge_rejected: FAILED_LOOK,
@@ -291,7 +292,7 @@ function loopOf(item: ItemDetail, node: ApiNode, own: ReturnType<typeof loopPath
 }
 
 /** A round's dot and what became of it; a pass has no dot, and says what started it. */
-export type RoundRow = { n: number; tone?: "ok" | "warn" | "bad"; outcome: string };
+export type RoundRow = { n: number; tone?: "ok" | "run" | "bad"; outcome: string };
 export type Rounds = { rows: RoundRow[]; selected: number; latest: number; total?: number };
 
 /** A node's passes for its picker, with the one shown; undefined for a node the chain ran once. */
@@ -302,7 +303,7 @@ export function passList(item: ItemDetail, node: string, picked?: number): Round
 }
 
 /** One row per round that ran, oldest first: its dot and what became of it. A round the loop moved on from was
- *  sent to the fix loop (red); the newest is stopped (red) when the item stopped on the node, running (amber)
+ *  sent to the fix loop (red); the newest is stopped (red) when the item stopped on the node, running (blue)
  *  while the node is the one the run stands on, else done (green). */
 function roundList(item: ItemDetail, node: ApiNode, { first = 1, latest, total }: { first?: number; latest: number; total?: number }, selected: number): Rounds {
   const halted = !!stopOn(item, node.id);
@@ -310,7 +311,7 @@ function roundList(item: ItemDetail, node: ApiNode, { first = 1, latest, total }
     const n = first + i;
     if (n < latest) return { n, tone: "bad", outcome: "sent to the fix loop" };
     if (halted) return { n, tone: "bad", outcome: "stopped · needs you" };
-    if (standsOn(item, node.id)) return { n, tone: "warn", outcome: "running" };
+    if (standsOn(item, node.id)) return { n, tone: "run", outcome: "running" };
     return { n, tone: "ok", outcome: "done" };
   });
   return { rows, selected, latest, total };

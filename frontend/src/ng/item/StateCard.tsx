@@ -32,7 +32,7 @@ type Handlers = {
   onOpenNode: (node: string) => void;
 };
 type Action = { label: string; run: () => unknown; primary?: boolean };
-type Card = { tone: "bad" | "info" | "warn" | "muted" | "neutral"; glyph: ReactNode; title: string; where?: string; text?: string; facts: [string, ReactNode][]; actions: Action[]; node?: string | null; body?: ReactNode; note?: string };
+type Card = { tone: "bad" | "warn" | "muted" | "neutral"; glyph: ReactNode; title: string; where?: string; text?: string; facts: [string, ReactNode][]; actions: Action[]; node?: string | null; body?: ReactNode; note?: string };
 
 /** `action` where `ok`, the server admitting its door (`admits`), else nothing. */
 const when = (ok: boolean, action: Action): Action[] => (ok ? [action] : []);
@@ -174,7 +174,7 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
     if (item.rate_limit) fs.push(["retries", `${item.rate_limit.count} of ${item.rate_limit.cap} used (policy: rate-limit retries)`]);
     if (allowed.length) fs.push(["fallback", `${allowed.join(", ")} ${allowed.length === 1 ? "is" : "are"} allowed by the harness list`]);
     return {
-      tone: "info", glyph: <Clock size={14} aria-hidden />, title: WAITING_ON_THE_PROVIDER, where, node: stop.node,
+      tone: "neutral", glyph: <Clock size={14} aria-hidden />, title: WAITING_ON_THE_PROVIDER, where, node: stop.node,
       text: `${harness ?? "The agent"} hit its rate limit. Kraft retries by itself, so nothing needs doing.`,
       facts: fs,
       // No Retry now and no "use another harness" here: /retry claims only a
@@ -185,13 +185,13 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
   // `item.status`, not the display status: a slice that needs the person puts the parent under Needs you.
   if (item.status === "waiting" && stop?.kind === "slices")
     return {
-      tone: "info", glyph: <Clock size={14} aria-hidden />, title: WAITING_FOR_SLICES, where, node: stop.node, text: slicesWaitText(item.slices?.needs_you),
+      tone: "neutral", glyph: <Clock size={14} aria-hidden />, title: WAITING_FOR_SLICES, where, node: stop.node, text: slicesWaitText(item.slices?.needs_you),
       facts: item.slices ? [["slices", slicesLine(item).replace(/^slices: /, "")]] : [],
       actions: [],
     };
   if (status === "waiting" && stop?.kind === "wait")
     return {
-      tone: "info", glyph: <Clock size={14} aria-hidden />, title: waitTitle(stop.reason), where, node: stop.node, text: stop.reason ?? undefined,
+      tone: "neutral", glyph: <Clock size={14} aria-hidden />, title: waitTitle(stop.reason), where, node: stop.node, text: stop.reason ?? undefined,
       facts: stop.resume_at ? [["next check", until(stop.resume_at)]] : [],
       actions: [],
     };
@@ -246,7 +246,7 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
   if (held) {
     // The holder is a fact linking to it, as the Blocked card's items are: not run into the sentence.
     return {
-      tone: "info", glyph: <Clock size={14} aria-hidden />, title: "Queued", where: WAITING_FOR_CHECKOUT,
+      tone: "neutral", glyph: <Clock size={14} aria-hidden />, title: "Queued", where: WAITING_FOR_CHECKOUT,
       text: CHECKOUT_FREES,
       facts: held.held_by ? [[IN_USE_BY, <Link className={linkButtonClass({ inline: true })} to={`/work-items/${encodeURIComponent(held.held_by)}`}>{held.held_by_title ?? held.held_by}</Link>]] : [],
       actions: [],
@@ -255,7 +255,7 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
   if (status === "queued" && item.queued?.storage) {
     const s = item.queued.storage;
     return {
-      tone: "info", glyph: <Clock size={14} aria-hidden />, title: "Queued",
+      tone: "neutral", glyph: <Clock size={14} aria-hidden />, title: "Queued",
       text: `Waiting for space: ${countedAgainst(s.used_bytes, s.limit_bytes)}. It starts when space frees.`,
       facts: [], actions: [],
     };
@@ -349,7 +349,7 @@ export function ComesAfterCard({ item, reload }: { item: ItemDetail; reload: () 
     else setError(r.error);
   };
   return (
-    <FoldingCard id={item.id} tone={blocked ? "info" : "neutral"} glyph={<Clock size={14} aria-hidden />} title={blocked ? "Blocked" : "Comes after"} where={waits ? `waiting on ${plural(waits, "item")}` : RELEASED.where}>
+    <FoldingCard id={item.id} tone="neutral" glyph={<Clock size={14} aria-hidden />} title={blocked ? "Blocked" : "Comes after"} where={waits ? `waiting on ${plural(waits, "item")}` : RELEASED.where}>
       <p className="item-card-text">{!waits ? RELEASED.text : blocked ? "Kraft starts it when they complete." : "Started before they complete, it is blocked until they do."}</p>
       <dl className="item-facts item-card-facts">
         {deps.map((d) => (

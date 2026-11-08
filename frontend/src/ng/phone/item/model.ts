@@ -72,7 +72,7 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
   const facts = (stop?.facts ?? {}) as Record<string, unknown>;
   const where = stop ? [pathOf(stop.task) || (stop.node && nameOf(item.chain_definition.nodes, stop.node)), stop.attempt ? `attempt ${stop.attempt}` : ""].filter(Boolean).join(" · ") : undefined;
   // Waiting on its slices, shown as waiting or, when a slice needs the person, as Needs you.
-  if (stop?.kind === "slices" && item.status === "waiting") return { tone: "info", title: WAITING_FOR_SLICES, where, text: slicesWaitText(item.slices?.needs_you), facts: item.slices ? [["slices", slicesLine(item).replace(/^slices: /, "")]] : [] };
+  if (stop?.kind === "slices" && item.status === "waiting") return { tone: "muted", title: WAITING_FOR_SLICES, where, text: slicesWaitText(item.slices?.needs_you), facts: item.slices ? [["slices", slicesLine(item).replace(/^slices: /, "")]] : [] };
   switch (item.display_status) {
     case "failed": {
       if (!stop) return null;
@@ -93,9 +93,9 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
         if (stop.resume_at) fs.push(["next retry", until(stop.resume_at)]);
         if (item.rate_limit) fs.push(["retries", `${item.rate_limit.count} of ${item.rate_limit.cap} used`]);
         if (allowed.length) fs.push(["fallback", `${allowed.join(", ")} allowed`]);
-        return { tone: "info", title: WAITING_ON_THE_PROVIDER, where, text: `${str(facts.harness) ?? "The agent"} hit its rate limit. Kraft retries by itself, so nothing needs doing.`, facts: fs };
+        return { tone: "muted", title: WAITING_ON_THE_PROVIDER, where, text: `${str(facts.harness) ?? "The agent"} hit its rate limit. Kraft retries by itself, so nothing needs doing.`, facts: fs };
       }
-      if (stop?.kind === "wait") return { tone: "info", title: waitTitle(stop.reason), where, text: stop.reason ?? undefined, facts: stop.resume_at ? [["next check", until(stop.resume_at)]] : [] };
+      if (stop?.kind === "wait") return { tone: "muted", title: waitTitle(stop.reason), where, text: stop.reason ?? undefined, facts: stop.resume_at ? [["next check", until(stop.resume_at)]] : [] };
       return null;
     }
     case "needs_you": {
@@ -134,7 +134,7 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
       const deps = item.dependencies ?? [];
       const waits = deps.filter((d) => !d.met).length;
       return {
-        tone: "info", title: "Blocked", where: waits ? `waiting on ${plural(waits, "item")}` : RELEASED.where,
+        tone: "muted", title: "Blocked", where: waits ? `waiting on ${plural(waits, "item")}` : RELEASED.where,
         text: waits ? "Kraft starts it when they complete. Unblock starts it without them." : RELEASED.text,
         facts: deps.map((d) => [d.status.replace("_", " "), d.title, d.id]),
       };
@@ -143,7 +143,7 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
       // As desktop's Queued card: only the checkout wait has words of its own here, its holder a fact that opens it.
       const q = item.queued;
       if (q?.why !== "checkout") return null;
-      return { tone: "info", title: "Queued", where: WAITING_FOR_CHECKOUT, text: CHECKOUT_FREES, facts: q.held_by ? [[IN_USE_BY, q.held_by_title ?? q.held_by, q.held_by]] : [] };
+      return { tone: "muted", title: "Queued", where: WAITING_FOR_CHECKOUT, text: CHECKOUT_FREES, facts: q.held_by ? [[IN_USE_BY, q.held_by_title ?? q.held_by, q.held_by]] : [] };
     }
     case "escalated": return { tone: "warn", title: "Escalation running", where: item.current_node_id ? `at ${nameOf(item.chain_definition.nodes, item.current_node_id)}` : undefined, text: "An agent is looking at this. It resumes the run, or comes back with a question for you.", facts: [] };
     case "paused": {
@@ -280,7 +280,7 @@ export function nodeSub(n: ChainNode, skipped = false): { text: string; tone: "w
       if (n.paused) return { text: "paused", tone: "muted" };
       if (n.sub === "needs you") return { text: gate ? "waiting for you" : "needs you", tone: "warn" };
       // A waiting node says what it waits on, as the badge does, not "running" (R11b-04).
-      return { text: [n.wait ?? "running", n.summary, n.sub].filter(Boolean).join(" · "), tone: "info" };
+      return { text: [n.wait ?? "running", n.summary, n.sub].filter(Boolean).join(" · "), tone: n.running ? "info" : "muted" };
     case "plain": return { text: n.meta ?? "", tone: "muted" };
     default: return { text: gate ? "you" : "not started", tone: "muted" };
   }

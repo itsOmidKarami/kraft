@@ -176,7 +176,7 @@ describe("NodeGraph", () => {
       { id: "repair", taskKind: "agent" as const, state: "done" as const, meta: "5m" },
       { id: "judge", taskKind: "agent" as const, state: "todo" as const, meta: "skipped · first repair", faded: true },
     ] };
-    const rounds: Rounds = { selected: 2, latest: 2, total: 3, rows: [{ n: 1, tone: "bad", outcome: "sent to the fix loop" }, { n: 2, tone: "warn", outcome: "running" }] };
+    const rounds: Rounds = { selected: 2, latest: 2, total: 3, rows: [{ n: 1, tone: "bad", outcome: "sent to the fix loop" }, { n: 2, tone: "run", outcome: "running" }] };
 
     it("draws the repair and the judge on the arc as selectable tasks, with the label between them", async () => {
       const user = userEvent.setup();

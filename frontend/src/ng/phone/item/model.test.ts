@@ -146,11 +146,11 @@ describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
     expect(cardOf(mk("waiting", stop("wait", { reason: "waiting for gpu-box (full)" })))).toMatchObject({ title: "Waiting for a machine", text: "waiting for gpu-box (full)" });
     expect(cardOf(mk("needs_you", stop("conflict", { facts: { unresolved: ["a.py"], resolved: ["b.py"] } })))?.facts).toEqual([["unresolved", "a.py"], ["resolved", "b.py"]]);
     expect(cardOf(mk("blocked", null, { dependencies: [{ id: "a1", title: "Schema first", status: "needs_human", met: false }, { id: "b2", title: "Old cleanup", status: "completed", met: true }] })))
-      .toMatchObject({ tone: "info", title: "Blocked", where: "waiting on 1 item", facts: [["needs human", "Schema first", "a1"], ["completed", "Old cleanup", "b2"]] });
+      .toMatchObject({ tone: "muted", title: "Blocked", where: "waiting on 1 item", facts: [["needs human", "Schema first", "a1"], ["completed", "Old cleanup", "b2"]] });
     expect(cardOf(mk("blocked"))).toMatchObject({ where: "nothing left to wait for", text: "Kraft queues it within seconds.", facts: [] });
     // A checkout-queued item says what it waits for, as desktop's Queued card does; a slot wait has no card.
     expect(cardOf(mk("queued", null, { queued: { verb: "resume", since: "2026-09-13T09:00:00Z", why: "checkout", held_by: "w2", held_by_title: "Cache the index" } })))
-      .toEqual({ tone: "info", title: "Queued", where: "waiting for the checkout", text: "It starts when the checkout frees.", facts: [["in use by", "Cache the index", "w2"]] });
+      .toEqual({ tone: "muted", title: "Queued", where: "waiting for the checkout", text: "It starts when the checkout frees.", facts: [["in use by", "Cache the index", "w2"]] });
     expect(cardOf(mk("queued", null, { queued: { verb: "resume", since: "2026-09-13T09:00:00Z" } }))).toBeNull();
     expect(cardOf(mk("paused"))).toMatchObject({ tone: "muted", title: "Paused", where: "at verification" });
     expect(cardOf(mk("paused", null, { current_node_id: null }))).toBeNull();

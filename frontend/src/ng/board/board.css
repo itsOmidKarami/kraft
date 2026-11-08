@@ -79,6 +79,7 @@
 .board-cue { flex: none; }
 /* Amber stays "needs you"; the stop's kind is told by icon and weight, and a failure by --bad as everywhere else. */
 .board-meta-tail.is-hot { color: var(--warn); }
+.board-meta-tail.is-running { color: var(--run); }
 .board-meta-tail.is-failed { color: var(--bad); font-weight: 600; }
 .board-meta-tail.is-gate { font-weight: 600; }
 .board-sep { flex: none; }
@@ -106,6 +107,9 @@
 .tick-gate.is-current { background: var(--text-sub); border-color: var(--text-sub); }
 .tick-gate.is-hot { background: var(--warn); border-color: var(--warn); }
 .tick.is-run { background: color-mix(in oklab, var(--ok) 75%, transparent); }
+/* The node a running item stands on: blue, with a sheen sweeping along it. */
+.tick.is-running { position: relative; overflow: hidden; background: var(--run); }
+.tick.is-running::after { content: ""; position: absolute; inset: 0; background: var(--run-sheen-light); transform: translateX(-100%); animation: var(--run-sheen); }
 .tick-gate.is-run { background: color-mix(in oklab, var(--ok) 75%, transparent); border-color: transparent; }
 
 /* Narrower than this the reason tail wraps instead of ellipsizing, so "failed at implementation" survives. */

@@ -79,7 +79,8 @@ export function chainGraph(item: ItemDetail, events: KraftEvent[], now = Date.no
     const sub = [step ? `${step.index}/${step.count}` : "", started ? elapsedBetween(started, null, now) : ""].filter(Boolean).join(" · ");
     // A waiting item's node runs nothing: it waits on CI, a machine or the provider, and says so where words are shown (R11b-04).
     const wait = status === "waiting" ? (stop?.kind === "rate_limit" ? "waiting · rate limit" : stop?.kind === "wait" ? waitTitle(stop.reason).replace(/^W/, "w") : stop?.kind === "slices" ? "waiting for slices" : "waiting") : undefined;
-    return { ...out, state: "current", running: status === "running" || status === "escalated", sub: sub || undefined, subTone: "amber", ...(wait && { wait }) };
+    const running = status === "running" || status === "escalated";
+    return { ...out, state: "current", running, sub: sub || undefined, subTone: running ? "run" : "muted", ...(wait && { wait }) };
   };
   // A group (slices) is one node whose body the strip opens: each body node by its path, in the group's state until the
   // run stands inside it (`current_node_id` is `group.node`), the ones before it done and the ones after not started.

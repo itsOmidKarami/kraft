@@ -34,7 +34,7 @@ export function Card({ item, now, offline, busy, error, onOpen, onOpenChild, onB
     <article className="ph-card" data-row={item.id}>
       <button type="button" className="ph-card-main" onClick={onOpen}>
         <span className="ph-card-head">
-          <NodeGlyph kind={g.kind} size="sm" state={g.state} icon={g.icon} />
+          <NodeGlyph kind={g.kind} size="sm" state={g.state} icon={g.icon} running={g.running} />
           <span className="ph-card-text">
             <span className="ph-card-title">{item.title}</span>
             <span className="ph-card-meta">{repoName(item.repo)}{item.in_place && <> · <span className="ph-card-inplace">{IN_YOUR_CHECKOUT}</span></>} · {item.bead_id || shortId(item.id)} · {chainLabel(chainOf(item))} · {ago(item.updated_at, now)}</span>
@@ -43,7 +43,7 @@ export function Card({ item, now, offline, busy, error, onOpen, onOpenChild, onB
         <span className="ph-ticks" aria-hidden="true">
           {ticksOf(item).map((t, k) => <span key={k} className={`ph-tick ph-tick-${t.state}${t.gate ? " ph-tick-gate" : ""}`} />)}
         </span>
-        <span className={`ph-card-tail${hot && cue !== "paused" ? " ph-is-hot" : ""}${cue ? ` ph-is-${cue}` : ""}`}>
+        <span className={`ph-card-tail${hot && cue !== "paused" ? " ph-is-hot" : ""}${cue ? ` ph-is-${cue}` : ""}${g.running ? " ph-is-running" : ""}`}>
           {Cue && <Cue size={12} aria-hidden className="ph-card-cue" />}
           {breakPaths(reasonTail(item, now))}
         </span>

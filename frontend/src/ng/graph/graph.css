@@ -9,6 +9,10 @@
 .glyph-box.is-current { border: 1.5px solid var(--text-sub); background: var(--surface-2); color: var(--text); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-sub) 12%, transparent); }
 .glyph-box.is-todo { border: 1px dashed var(--stroke); color: var(--text-faint); }
 .glyph-box.is-failed { border-color: var(--bad); color: var(--bad); }
+/* Running: a light circles the border (the trace), over the border at --run-edge; it rests as a full border when nothing moves.
+   Only a current box runs: an escalated one stays amber. */
+.glyph-box.is-current.is-running { border-color: color-mix(in srgb, var(--run) var(--run-edge), transparent); color: var(--text); }
+.glyph-box.is-current.is-running::before { content: ""; position: absolute; inset: -1.5px; border-radius: inherit; padding: 1.5px; background: conic-gradient(from var(--run-a), transparent 0 55%, var(--run) 90%, transparent 100%); -webkit-mask: linear-gradient(var(--text) 0 0) content-box, linear-gradient(var(--text) 0 0); -webkit-mask-composite: xor; mask: linear-gradient(var(--text) 0 0) content-box exclude, linear-gradient(var(--text) 0 0); animation: var(--run-trace); pointer-events: none; }
 .glyph-box.is-esc { border: 1.5px solid var(--warn); background: color-mix(in srgb, var(--warn) 10%, var(--bg)); color: var(--warn); }
 .glyph-box.is-ghost { border: 1px dashed var(--stroke); color: var(--text-faint); }
 .glyph-box.is-paused { border: 1.5px solid var(--text-muted); background: var(--surface-2); color: var(--text-sub); }
@@ -49,7 +53,6 @@
 .glyph-subagents.is-bad { border-color: var(--bad); background: var(--bad); }
 .glyph-subagents.is-bad > .glyph-subagents-x { width: auto; height: auto; }
 .glyph-paused { position: absolute; bottom: -5px; right: -5px; width: 15px; height: 15px; box-sizing: border-box; border-radius: 50%; background: var(--surface); border: 1px solid var(--text-muted); font: 700 var(--fs-label)/13px ui-monospace, Menlo, monospace; text-align: center; color: var(--text); }
-.glyph-running { position: absolute; bottom: -3px; right: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); border: 2px solid var(--bg); }
 
 /* ZoomControls */
 .zoom { display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); }
@@ -79,7 +82,7 @@
 .round-caret { font-size: var(--fs-label); color: var(--text-muted); }
 .round-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
 .round-dot.is-ok { background: var(--ok); }
-.round-dot.is-warn { background: var(--warn); }
+.round-dot.is-run { background: var(--run); animation: var(--run-breathe); }
 .round-dot.is-bad { background: var(--bad); }
 .round-menu { display: flex; flex-direction: column; gap: 1px; min-width: 260px; font-size: var(--fs-label); }
 .round-menu-head { padding: 6px 8px 4px; font-size: var(--fs-label); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
@@ -93,18 +96,18 @@
 .arc path { stroke-width: 1.5; fill: none; }
 .arc path.is-dashed { stroke-dasharray: 4 3; }
 .arc.tone-idle path { stroke: var(--stroke); }
-.arc.tone-active path { stroke: var(--warn); }
+.arc.tone-active path { stroke: var(--run); }
 .arc.tone-red path, .arc.tone-reject path, .arc.tone-rewind path { stroke: var(--bad); }
 /* A merge rejection's rewind is dotted where a reject is dashed, and named on its label: the colour is the same. */
 .arc.tone-rewind path.is-dashed { stroke-dasharray: 0.5 4; stroke-linecap: round; stroke-width: 2; }
 /* An open loop step's fork off the arc: its join dots take the arc's tone, and it comes in with the frame's tasks. */
 .arc.tone-idle circle { fill: var(--stroke); }
-.arc.tone-active circle { fill: var(--warn); }
+.arc.tone-active circle { fill: var(--run); }
 .arc.tone-red circle { fill: var(--bad); }
 .arc-fork { animation: scope-in .24s ease .2s both; }
 .is-calm .arc-fork { animation: scope-in .12s linear; }
 .arc-label { position: absolute; transform: translate(-50%, -50%); padding: 0 5px; background: var(--bg); font-size: var(--fs-label); white-space: nowrap; color: var(--text-sub); pointer-events: none; }
-.arc-label.tone-active { color: var(--warn); }
+.arc-label.tone-active { color: var(--run); }
 .arc-label.tone-red, .arc-label:is(.tone-reject, .tone-rewind) { color: var(--bad); }
 .arc-label:is(.tone-reject, .tone-rewind) { font-family: ui-monospace, Menlo, monospace; }
 .mark-start { position: absolute; width: 20px; height: 20px; box-sizing: border-box; border-radius: 50%; border: 1px solid var(--stroke); color: var(--text-sub); display: flex; align-items: center; justify-content: center; font-size: var(--fs-label); background: var(--bg); }
@@ -135,6 +138,7 @@
 .graph-sub { display: flex; align-items: center; gap: 5px; color: var(--text-sub); }
 .graph-sub-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--warn); }
 .graph-sub-dot.tone-muted { background: var(--text-muted); }
+.graph-sub-dot.tone-run { background: var(--run); animation: var(--run-breathe); }
 
 /* Seams: the dashed green insert points, shown on hover and on focus as well (R6). */
 .seam { position: absolute; z-index: 2; width: 24px; height: 24px; box-sizing: border-box; margin: 0; padding: 0; border-radius: 50%; border: 1.5px dashed var(--ok); background: var(--bg); color: var(--ok); font: 600 var(--fs-meta)/21px system-ui, sans-serif; text-align: center; cursor: pointer; opacity: 0; transition: opacity .12s; }
@@ -313,14 +317,14 @@
 .scope-row.is-fork .scope-ring { margin-top: 8px; }
 .scope-ring.is-done { background: var(--ok); border-color: var(--ok); color: var(--bg); }
 .scope-ring.is-failed { border-color: var(--bad); color: var(--bad); }
-.scope-ring.is-running { border-color: var(--warn); color: var(--warn); }
+.scope-ring.is-running { border-color: var(--run); color: var(--run); }
 .scope-ring.is-unreached { border: 1.5px dashed var(--border); color: var(--text-faint); }
 .scope-repo { display: flex; flex-direction: column; gap: 2px; padding-top: 2px; min-width: 0; }
 .scope-name { font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scope-name.is-off { color: var(--text-muted); }
 .scope-note { font-size: var(--fs-label); color: var(--text-muted); white-space: nowrap; }
 .scope-note.is-failed { color: var(--bad); }
-.scope-note.is-running { color: var(--warn); }
+.scope-note.is-running { color: var(--run); }
 /* Commands run long: a row that outgrows the frame scrolls along instead of clipping its last chips (the padding keeps a picked chip's ring in view). */
 .scope-chips { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-width: 0; padding: 4px 4px 4px 0; margin: -4px 0; overflow-x: auto; scrollbar-width: thin; }
 .scope-chips.is-more { mask-image: linear-gradient(to right, var(--text) calc(100% - 24px), transparent); -webkit-mask-image: linear-gradient(to right, var(--text) calc(100% - 24px), transparent); }
@@ -330,14 +334,14 @@
 .scope-arrow { color: var(--stroke); font-size: var(--fs-label); }
 .scope-chip { display: flex; align-items: center; gap: 6px; padding: 4px 8px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: inherit; font: inherit; font-size: var(--fs-label); white-space: nowrap; cursor: pointer; transition: box-shadow .15s; }
 .scope-chip.is-failed { border-color: var(--bad); }
-.scope-chip.is-running { border: 1.5px solid var(--warn); background: color-mix(in srgb, var(--warn) 10%, var(--bg)); }
+.scope-chip.is-running { border: 1.5px solid var(--run); background: color-mix(in srgb, var(--run) 10%, var(--bg)); }
 .scope-chip.is-waiting { border-style: dashed; background: transparent; }
 .scope-chip.is-skipped { border: 1px dashed var(--line); background: transparent; opacity: .75; }
 .scope-chip.is-sel { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--text-sub); }
 .scope-dot { width: 7px; height: 7px; box-sizing: border-box; border-radius: 50%; background: var(--text-faint); }
 .scope-chip.is-done .scope-dot { background: var(--ok); }
 .scope-chip.is-failed .scope-dot { background: var(--bad); }
-.scope-chip.is-running .scope-dot { background: var(--warn); }
+.scope-chip.is-running .scope-dot { background: var(--run); animation: var(--run-breathe); }
 .scope-chip.is-skipped .scope-dot { background: transparent; border: 1px solid var(--stroke); }
 .scope-chip-name { font-family: ui-monospace, Menlo, monospace; font-weight: 400; color: var(--text); }
 .scope-chip.is-skipped .scope-chip-name, .scope-chip.is-waiting .scope-chip-name { color: var(--text-muted); }
@@ -398,7 +402,7 @@
 .sub-mark:hover { background: var(--surface-2); }
 .sub-mark:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
 .sub-mark-dot { display: flex; align-items: center; justify-content: center; width: 13px; height: 13px; border-radius: 50%; background: var(--text-faint); color: var(--bg); }
-.sub-mark.is-live .sub-mark-dot { background: var(--warn); }
+.sub-mark.is-live .sub-mark-dot { background: var(--run); animation: var(--run-breathe); }
 .sub-mark.is-ok .sub-mark-dot { background: var(--ok); }
 .sub-mark.is-bad .sub-mark-dot { background: var(--bad); }
 .sub-mark.is-sel .sub-mark-dot { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--selection); }

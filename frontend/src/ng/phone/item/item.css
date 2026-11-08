@@ -18,7 +18,6 @@
 .ph-statecard { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; }
 .ph-statecard.ph-tone-warn { border-color: var(--warn-edge); background: var(--warn-wash); }
 .ph-statecard.ph-tone-bad { border-color: color-mix(in oklab, var(--bad) 50%, transparent); background: color-mix(in oklab, var(--bad) 7%, var(--bg)); }
-.ph-statecard.ph-tone-info { border-color: color-mix(in oklab, var(--info) 50%, transparent); background: color-mix(in oklab, var(--info) 7%, var(--bg)); }
 .ph-statecard.ph-tone-ok { border-color: color-mix(in oklab, var(--ok) 50%, transparent); }
 .ph-statecard-icon { vertical-align: -2px; margin-right: 6px; }
 .ph-statecard-title { margin: 0; font-size: var(--fs-body); font-weight: 600; overflow-wrap: anywhere; }

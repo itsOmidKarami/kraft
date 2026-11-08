@@ -51,7 +51,7 @@ const localTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: 
 export const fact = (k: string, v: React.ReactNode) => (v == null || v === "" ? null : <div key={k}><dt>{k}</dt><dd>{v}</dd></div>);
 
 /** The plan's sub-tasks under the plan task's facts: a bar, then one row each with its state and commit. */
-function SubTasks({ tasks, docs, onDoc }: { tasks: NonNullable<TaskProgress["tasks"]>; docs: WorkItemDocument[]; onDoc: (d: WorkItemDocument) => void }) {
+function SubTasks({ tasks, docs, onDoc, running }: { tasks: NonNullable<TaskProgress["tasks"]>; docs: WorkItemDocument[]; onDoc: (d: WorkItemDocument) => void; running: boolean }) {
   const plan = docs.find((d) => d.attachment_kind === "plan") ?? docs.find((d) => d.kind === "plan");
   const done = tasks.filter((t) => t.state === "done").length;
   return (
@@ -61,7 +61,7 @@ function SubTasks({ tasks, docs, onDoc }: { tasks: NonNullable<TaskProgress["tas
         {plan && <LinkButton onClick={() => onDoc(plan)}>{plan.path.split("/").at(-1)} ↗</LinkButton>}
       </div>
       <div className="ip-progress-bar" aria-hidden><span style={{ width: `${(done / tasks.length) * 100}%` }} /></div>
-      <ol className="ip-subtasks" aria-label="Sub-tasks">
+      <ol className={`ip-subtasks${running ? " is-running" : ""}`} aria-label="Sub-tasks">
         {tasks.map((t) => (
           <li key={t.n} className={`ip-subtask is-${t.state}`} aria-current={t.state === "current" ? "step" : undefined}>
             <span className="ip-subtask-dot" role="img" aria-label={t.state} />
@@ -96,7 +96,7 @@ export function TaskOverview({ path, s, docs, onDoc, progress, running, onAgent,
         {fact("path", <span className="is-mono">{path}</span>)}
         {fact("ran", s.wall_ms != null ? elapsed(s.wall_ms) : null)}
       </dl>
-      {progress?.tasks?.length ? <SubTasks tasks={progress.tasks} docs={docs} onDoc={onDoc} /> : null}
+      {progress?.tasks?.length ? <SubTasks tasks={progress.tasks} docs={docs} onDoc={onDoc} running={!!running} /> : null}
       <SubagentSection workItemId={s.work_item_id} sessionId={s.id} list={subagents} onOpen={(agent) => onAgent?.(agent)} />
       <h3 className="ip-h">Result</h3>
       <dl className="item-facts ip-facts">

@@ -220,7 +220,7 @@ export function admittedRowAction(i: Row & Pick<WorkItem, "actions">): RowAction
 }
 
 /** The row's NodeGlyph: the current node's kind and icon, its state from the status. */
-export function glyphOf(i: Row): { kind: GlyphKind; icon?: string; state: GlyphState } {
+export function glyphOf(i: Row): { kind: GlyphKind; icon?: string; state: GlyphState; running: boolean } {
   const nodes: ChainNode[] = i.chain_definition?.nodes ?? [];
   const n = nodes.find((x) => within(x.id, i.current_node_id)) ?? nodes[nodes.length - 1];
   const kind: GlyphKind = n?.kind === "gate" ? "gate" : n?.kind === "group" ? "group" : "exec";
@@ -243,12 +243,12 @@ export function glyphOf(i: Row): { kind: GlyphKind; icon?: string; state: GlyphS
       }
     }
   })();
-  return { kind, icon, state };
+  return { kind, icon, state, running: i.display_status === "running" };
 }
 
 /** The tick strip: one per node, gates as diamonds (Ticks.tsx draws them).
- *  `run` is the composer's preview: a node that will run. */
-export type Tick = { gate: boolean; state: "done" | "current" | "hot" | "todo" | "run" };
+ *  `running` is the node a running item stands on; `run` is the composer's preview: a node that will run. */
+export type Tick = { gate: boolean; state: "done" | "current" | "running" | "hot" | "todo" | "run" };
 
 /** A chain's nodes as the board marks them: done, the one it stands on (`hot`
  *  when it needs you), or still to run. The tick strip draws them, and so does
@@ -268,5 +268,6 @@ export function chainMarks(i: Row): ChainMark[] {
 }
 
 export function ticksOf(i: Row): Tick[] {
-  return chainMarks(i).map(({ gate, state }) => ({ gate, state }));
+  const running = i.display_status === "running";
+  return chainMarks(i).map(({ gate, state }) => ({ gate, state: running && state === "current" ? "running" : state }));
 }

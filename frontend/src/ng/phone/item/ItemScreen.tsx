@@ -32,7 +32,7 @@ import { APPLY_AND_START, DRAFT_HOLDS_CHANGES, BUDGET_IN_DOLLARS, BUDGET_RAN_OUT
 import { Badge } from "../ui/Badge";
 import { IN_YOUR_CHECKOUT } from "../../board/sharedWords";
 
-const TAG_TONE = { running: "info", waiting: "info", queued: "info", blocked: "info", escalated: "warn", needs_you: "warn", failed: "bad", paused: "muted", done: "ok", cancelled: "muted", archived: "muted" } as const;
+const TAG_TONE = { running: "info", waiting: "muted", queued: "muted", blocked: "muted", escalated: "warn", needs_you: "warn", failed: "bad", paused: "muted", done: "ok", cancelled: "muted", archived: "muted" } as const;
 
 /** The session whose log the screen previews: the latest work session on the node the item stands on. */
 export function currentSession(item: ItemDetail): WorkerSession | null {
@@ -131,7 +131,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
       <div className="ph-content">
         <div className="ph-item-top">
           <div className="ph-item-tagline">
-            <Badge tone={TAG_TONE[status]}>{hs.badge}</Badge>
+            <Badge tone={TAG_TONE[status]}>{status === "running" && <span className="run-dot" aria-hidden />}{hs.badge}</Badge>
             <span className="ph-item-meta">{elapsedBetween(item.started_at ?? item.created_at, ended ? (item.ended_at ?? item.updated_at) : null, now)} · {item.repo.split("/").filter(Boolean).at(-1)}{item.in_place && <> · <span className="ph-item-inplace">{IN_YOUR_CHECKOUT}</span></>}</span>
           </div>
           <h1 className="ph-item-title">{item.title}</h1>

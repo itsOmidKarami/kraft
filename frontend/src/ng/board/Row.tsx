@@ -69,11 +69,11 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
   return (
     <div className={`board-row${selected ? " is-sel" : checked ? " is-checked" : ""}${offline ? " is-off" : ""}`} data-row={item.id}>
       <input type="checkbox" className="board-check" checked={checked} onChange={() => onCheck(item.id)} aria-label={`Select ${item.title}`} tabIndex={off} />
-      <NodeGlyph kind={g.kind} size="sm" state={g.state} icon={g.icon} sel={selected} />
+      <NodeGlyph kind={g.kind} size="sm" state={g.state} icon={g.icon} running={g.running} sel={selected} />
       <button type="button" className="board-row-main" tabIndex={roved ? (stop ? 0 : -1) : undefined} aria-current={selected || undefined} onClick={click} onDoubleClick={() => onOpen(item.id)} onKeyDown={key} onKeyUp={(e) => e.key === " " && e.preventDefault()}>
         <span className="board-title" id={titleId} title={item.title}>{item.title}</span>
         <span className="board-meta">
-          <span className={`board-meta-tail${hot && cue !== "paused" ? " is-hot" : ""}${cue ? ` is-${cue}` : ""}`}>
+          <span className={`board-meta-tail${hot && cue !== "paused" ? " is-hot" : ""}${cue ? ` is-${cue}` : ""}${g.running ? " is-running" : ""}`}>
             {Cue && <Cue size={12} aria-hidden className="board-cue" />}
             <span className="board-tail-text" title={tail}>{breakPaths(tail)}</span>
           </span>

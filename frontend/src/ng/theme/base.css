@@ -13,11 +13,30 @@
   /* Density: compact is the look as designed. Comfortable adds 2px to each row's vertical padding and 1px to every
      body type step, so a row rule reads `--row-pad-add` and the type tokens read their own. */
   --row-pad-add: 0px;
+  /* Running: blue, never amber (amber is "needs you"). A running node, tick or bar carries a light that travels along
+     it (trace, sheen); a small mark (a sub-agent, a plan task, a CI check) breathes. Reduced motion sets all three to
+     none below, leaving the colour and the words. */
+  --run: var(--info);
+  --run-trace: run-trace 1.8s linear infinite;
+  --run-sheen: run-sheen 1.6s ease-in-out infinite;
+  --run-breathe: run-breathe 2s ease-in-out infinite;
+  /* A running border's resting strength, under the light that circles it: full when nothing moves. */
+  --run-edge: 30%;
   /* The one column every settings page (Appearance to Auto-intake) sits in. */
   --set-page-w: 820px;
 }
 :root[data-mode="light"] { --warn-wash: color-mix(in oklab, var(--warn) 12%, var(--surface)); --warn-edge: color-mix(in oklab, var(--warn) 75%, transparent); }
 :root[data-density="comfortable"] { --row-pad-add: 2px; --fs-meta: 14px; --fs-label: 13px; --fs-body: 15px; }
+@media (prefers-reduced-motion: reduce) { :root { --run-trace: none; --run-sheen: none; --run-breathe: none; --run-edge: 100%; } }
+@property --run-a { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+@keyframes run-trace { to { --run-a: 360deg; } }
+@keyframes run-sheen { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+@keyframes run-breathe { 0%, 100% { opacity: 1; filter: drop-shadow(0 0 3px var(--run)); } 50% { opacity: .35; filter: none; } }
+/* The small running mark on its own, ahead of a word: the RUNNING status badge. */
+.run-dot { display: inline-block; flex: none; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--run); animation: var(--run-breathe); vertical-align: 1px; }
+/* A running tick's light: a tick's `::after` paints it and moves it with `animation: var(--run-sheen)`. */
+:root { --run-sheen-light: linear-gradient(90deg, transparent, color-mix(in srgb, var(--bg) 65%, transparent), transparent); }
+
 body { margin: 0; font: var(--fs-body)/1.5 var(--font-sans); background: var(--bg); color: var(--text); }
 a { color: var(--accent); }
 button, input, select, textarea { font: inherit; color: inherit; }

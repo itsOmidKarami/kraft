@@ -18,7 +18,10 @@
 .ph-ticks { display: flex; align-items: center; gap: 2px; padding-left: 40px; }
 .ph-tick { flex: 1; height: 4px; border-radius: 2px; background: var(--line); }
 .ph-tick-done { background: var(--text-muted); }
-.ph-tick-current, .ph-tick-run { background: var(--info); }
+.ph-tick-current { background: var(--text-sub); }
+.ph-tick-run { background: color-mix(in oklab, var(--ok) 75%, transparent); }
+.ph-tick-running { position: relative; overflow: hidden; background: var(--run); }
+.ph-tick-running::after { content: ""; position: absolute; inset: 0; background: var(--run-sheen-light); transform: translateX(-100%); animation: var(--run-sheen); }
 .ph-tick-hot { background: var(--warn); }
 .ph-tick-paused { background: var(--text-sub); }
 .ph-tick-gate { flex: none; width: 6px; height: 6px; border-radius: 1px; transform: rotate(45deg); }
@@ -30,6 +33,7 @@
 .ph-card-child-status { flex: none; color: var(--text-muted); }
 .ph-card-slices { padding-left: 40px; font-size: var(--fs-meta); color: var(--text-muted); overflow-wrap: anywhere; }
 .ph-card-tail.ph-is-hot { color: var(--warn); }
+.ph-card-tail.ph-is-running { color: var(--run); }
 .ph-card-tail.ph-is-failed { color: var(--bad); font-weight: 600; }
 .ph-card-cue { vertical-align: -2px; margin-right: 4px; }
 .ph-card-actions { display: flex; gap: 8px; padding-left: 40px; }

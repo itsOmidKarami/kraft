@@ -22,7 +22,7 @@ export function NodeGlyph({ kind = "exec", size = "md", state = "plain", sel, pr
   const badges = Z.box >= 40;
   const off = gate ? Math.round((Z.box - Z.gate * 1.41) / 2) - 4 : -7;
   const pill = badges && !!attempt && attempt >= 2;
-  const cls = ["glyph-box", `is-${state}`, mark && `mark-${mark}`, sel ? "is-sel" : prob && "is-prob", capped && "is-capped", skipped && "is-skipped"].filter(Boolean).join(" ");
+  const cls = ["glyph-box", `is-${state}`, running && !paused && "is-running", mark && `mark-${mark}`, sel ? "is-sel" : prob && "is-prob", capped && "is-capped", skipped && "is-skipped"].filter(Boolean).join(" ");
   return (
     <span className={`glyph glyph-${kind}`} style={{ width: Z.box, height: Z.box }} aria-hidden="true">
       {gate ? (
@@ -45,7 +45,6 @@ export function NodeGlyph({ kind = "exec", size = "md", state = "plain", sel, pr
       )}
       {badges && esc && <span className="glyph-corner glyph-esc" style={{ bottom: off, left: off }}><Siren size={9} /></span>}
       {badges && paused && <span className="glyph-paused">‖</span>}
-      {badges && running && !paused && <span className="glyph-running" />}
     </span>
   );
 }

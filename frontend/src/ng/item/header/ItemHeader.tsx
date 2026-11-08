@@ -204,7 +204,7 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
       </span>
       {/* Focusable, so the checkout's path in its tip reaches a keyboard as well as a pointer. */}
       {item.in_place && <Badge className="item-inplace" role="note" tabIndex={0} {...hint(item.worktree_path ?? item.repo)}>{IN_YOUR_CHECKOUT}</Badge>}
-      <Badge tone={hs.tone} mono>{hs.badge}</Badge>
+      <Badge tone={hs.tone} mono>{item.display_status === "running" && <span className="run-dot" aria-hidden />}{hs.badge}</Badge>
       {/* Without a main button the group anchors the cards (pause, cancel, escalate) itself. */}
       <div className="item-main-group" ref={hs.main ? undefined : group}>
         {hs.main && <MainButton main={hs.main} panel={hs.panel} archivable={archivable(item)} queued={queued} busy={busy || reading} onMain={onMain} onItem={onItem} groupRef={group} />}

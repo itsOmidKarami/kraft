@@ -31,7 +31,7 @@ export function NodeOverview({ item, node, onStep, onNode }: { item: ItemDetail;
           <ul className="ip-list">
             {steps.map((s) => {
               const last = s.tasks.map((p) => sessionsOf(item, p).at(-1));
-              const mark = s.tasks.every((p) => settled(item, p)) ? "✓" : last.some((x) => x && ["running", "pending", "paused"].includes(x.status)) ? "●" : "○";
+              const mark = s.tasks.every((p) => settled(item, p)) ? "✓" : last.some((x) => x?.status === "running") ? "●" : "○";
               return (
                 <li key={s.id}>
                   <button type="button" className="ip-row" onClick={() => onStep(s.id)}>
