@@ -896,20 +896,24 @@ def test_a_session_that_ends_while_running_says_so_and_is_deleted(console, tmp_p
     assert store.get("https://kraft.example:443") is None
 
 
-def test_a_remote_console_refuses_a_typed_command_and_runs_nothing(
-    console, remote_server, kraft_is
+@pytest.mark.parametrize(
+    "typed", ["/item pause a1", "/repo"], ids=["runs-a-child", "goes-to-a-screen"]
+)
+def test_a_remote_console_refuses_a_typed_command_and_does_nothing(
+    console, remote_server, kraft_is, typed
 ):
     kraft_is("import sys; print('RAN', *sys.argv[1:])")
 
     async def scenario(app, pilot):
+        before = app.view.id
         await pilot.press("slash")
-        app.query_one(Prompt).value = "/item pause a1"
+        app.query_one(Prompt).value = typed
         await pilot.press("enter")
         await pilot.pause()
-        return app.command, [n.message for n in app._notifications]
+        return app.command, app.view.id == before, [n.message for n in app._notifications]
 
-    command, toasts = console.run(scenario, notifications=True)
-    assert command is None
+    command, stayed, toasts = console.run(scenario, notifications=True)
+    assert (command, stayed) == (None, True)
     assert console_app.TYPED_REMOTE in toasts
 
 
