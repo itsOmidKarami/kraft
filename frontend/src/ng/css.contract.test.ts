@@ -127,6 +127,12 @@ describe("ng CSS", () => {
     expect(block).toMatch(/--run-edge:\s*100%/);
   });
 
+  // The overview's glyphs are `.minimap-node` buttons placed with position: absolute; a running one must stay there.
+  it("leaves the overview's running glyph absolutely placed", () => {
+    const css = readFileSync(join(here, "graph/graph.css"), "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(css).not.toMatch(/(?:^|\n)\.map-glyph\.is-running\s*{[^}]*position:/);
+  });
+
   // The one switch holds only while every running animation goes through its variable.
   it("plays the running keyframes only through their --run-* variables", () => {
     const bad: string[] = [];

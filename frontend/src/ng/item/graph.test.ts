@@ -67,7 +67,7 @@ describe("chainGraph", () => {
   });
 
   // The chain strip over the canvas: running breathes blue, escalated is amber with needs-you, waiting and paused are neither.
-  it.each([["running", null, "running"], ["escalated", null, "amber"], ["waiting", { kind: "wait" }, "current"], ["paused", null, "current"]])("draws a %s item's node in the chain strip as %s", (display_status, stop, want) => {
+  it.each([["running", "running", null], ["escalated", "amber", null], ["waiting", "current", { kind: "wait" }], ["paused", "current", null]])("draws a %s item's node in the chain strip as %s", (display_status, want, stop) => {
     const item = detail({ display_status: display_status as never, stop: stop && ({ node: "verification", resume_at: null, reason: null, ...stop } as never) });
     expect(tone(chainGraph(item, [], NOW).nodes[2])).toBe(want);
   });

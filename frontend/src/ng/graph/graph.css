@@ -387,7 +387,9 @@
 .map-glyph.is-done { border-color: var(--text-muted); background: var(--text-muted); }
 .map-glyph.is-current { border: 1.5px solid var(--text); background: var(--surface-2); }
 /* Too small to carry the border's light: a running node here breathes, as the small marks do. */
-.map-glyph.is-running { position: relative; border: 1.5px solid var(--run); background: var(--bg); }
+/* No `position` here: the overview's glyphs are the absolutely placed `.minimap-node` buttons; only the strip's needs one. */
+.map-glyph.is-running { border: 1.5px solid var(--run); background: var(--bg); }
+.strip-glyph .map-glyph.is-running { position: relative; }
 .map-glyph.is-running::after { content: ""; position: absolute; inset: 1px; border-radius: 1px; background: var(--run); animation: var(--run-breathe); }
 .map-glyph.is-amber { border: 1.5px solid var(--warn); background: color-mix(in srgb, var(--warn) 25%, var(--bg)); }
 .map-glyph.is-failed { border: 1.5px solid var(--bad); }
