@@ -1,7 +1,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import { plural } from "../../format";
 import type { CompareFile, CompareTarget, WorkItem } from "../../types";
-import { ChevronDown, ChevronsDownUp, ChevronsUpDown, List, PanelLeftClose, PanelLeftOpen } from "../icons";
+import { ChevronDown, ChevronUp, ChevronsDownUp, ChevronsUpDown, List, MessageSquare, PanelLeftClose, PanelLeftOpen } from "../icons";
 import { IconButton } from "../ui/IconButton";
 import { Menu } from "../ui/Menu";
 import { Popover } from "../ui/Popover";
@@ -25,6 +25,9 @@ export function Toolbar(p: {
   onExpandAll: () => void;
   prefs: DiffPrefs;
   setPrefs: (patch: Partial<DiffPrefs>) => void;
+  /** The unresolved threads, and which one the arrows are on. */
+  threads: { at: number | null; total: number };
+  onStep: (dir: 1 | -1) => void;
 }) {
   return (
     <div className="rv-toolbar" role="toolbar" aria-label="Review">
@@ -39,11 +42,28 @@ export function Toolbar(p: {
       </span>
       <NodesFilter files={p.files} chainOrder={p.item.chain_definition.nodes.map((n) => n.id)} nodes={p.place.nodes} onChange={(nodes) => p.setPlace({ nodes })} />
       <span className="rv-tools">
+        <ThreadNav {...p.threads} onStep={p.onStep} />
+        <span className="rv-tools-rule" aria-hidden />
         <IconButton label="Collapse all files" onClick={p.onCollapseAll}><ChevronsDownUp size={16} aria-hidden /></IconButton>
         <IconButton label="Expand all files" onClick={p.onExpandAll}><ChevronsUpDown size={16} aria-hidden /></IconButton>
         <DiffSettings prefs={p.prefs} set={p.setPrefs} />
       </span>
     </div>
+  );
+}
+
+/** The unresolved threads' counter and the arrows that step through them, as GitLab's do (] and [ too). */
+function ThreadNav({ at, total, onStep }: { at: number | null; total: number; onStep: (dir: 1 | -1) => void }) {
+  const text = !total ? "No unresolved threads" : at === null ? `${total} unresolved` : <><b>{at}</b> of {total} unresolved</>;
+  return (
+    <span className="rv-threadnav" role="group" aria-label="Unresolved threads">
+      <span className="rv-threadnav-count" aria-live="polite">
+        <MessageSquare size={13} aria-hidden />
+        <span>{text}</span>
+      </span>
+      <button type="button" className="rv-threadnav-btn" disabled={!total} {...tip("Previous unresolved thread", "Previous unresolved thread ([)")} onClick={() => onStep(-1)}><ChevronUp size={15} aria-hidden /></button>
+      <button type="button" className="rv-threadnav-btn" disabled={!total} {...tip("Next unresolved thread", "Next unresolved thread (])")} onClick={() => onStep(1)}><ChevronDown size={15} aria-hidden /></button>
+    </span>
   );
 }
 

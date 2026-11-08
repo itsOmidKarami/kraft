@@ -101,6 +101,33 @@ export const inTreeOrder = (d: Folder): CompareFile[] => [...d.folders.flatMap(i
 /** A thread not yet resolved: what the tree counts per file. */
 export const unresolved = (t: ReviewThread) => t.state !== "resolved";
 
+/** Threads in the order the page draws them: those on the whole change, then file by file in `paths`' order,
+ *  top to bottom (a file's own threads above its lines), then those on files not in `paths`. */
+export function inPageOrder(threads: ReviewThread[], paths: string[]): ReviewThread[] {
+  const rank = new Map(paths.map((p, i) => [p, i]));
+  const fileRank = (t: ReviewThread) => (t.file_path === null ? -1 : rank.get(t.file_path) ?? paths.length);
+  return [...threads].sort((a, b) => fileRank(a) - fileRank(b) || (a.end_line ?? 0) - (b.end_line ?? 0));
+}
+
+/** The unresolved thread the arrows go to from `at`, in `ordered` (every thread, in page order), and whether
+ *  it went round the end. From a thread since resolved, it goes on from where that thread sits. */
+export function stepThread(ordered: ReviewThread[], at: string | null, dir: 1 | -1): { thread: ReviewThread; wrapped: boolean } | null {
+  const open = ordered.filter(unresolved);
+  if (!open.length) return null;
+  const end = dir === 1 ? open[0] : open[open.length - 1];
+  const i = ordered.findIndex((t) => t.id === at);
+  if (i < 0) return { thread: end, wrapped: false };
+  for (let j = i + dir; j >= 0 && j < ordered.length; j += dir) if (unresolved(ordered[j])) return { thread: ordered[j], wrapped: false };
+  return { thread: end, wrapped: true };
+}
+
+/** How many threads are unresolved, and which of them the arrows are on (1-based), if any. */
+export function threadPosition(ordered: ReviewThread[], at: string | null): { at: number | null; total: number } {
+  const open = ordered.filter(unresolved);
+  const i = open.findIndex((t) => t.id === at);
+  return { at: i < 0 ? null : i + 1, total: open.length };
+}
+
 /** "N threads: 2 pending, 1 open, 1 claimed, 1 resolved", in the API's states (prototype `sumParts`). */
 export function threadSummary(threads: ReviewThread[]): string {
   if (!threads.length) return "No threads";

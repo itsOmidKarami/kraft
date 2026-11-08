@@ -106,7 +106,7 @@ export function Thread({ thread, oldLines, quote, onChanged, onEdit }: {
   const who = (c: ReviewComment) => (c.author === "you" ? "You" : c.author);
   const range = threadRange(thread);
   return (
-    <article className={`rv-thread${thread.state === "resolved" ? " is-resolved" : ""}`} aria-label={`Thread on ${thread.file_path ?? "the item"}`}>
+    <article className={`rv-thread${thread.state === "resolved" ? " is-resolved" : ""}`} data-thread={thread.id} tabIndex={-1} aria-label={`Thread on ${thread.file_path ?? "the item"}`}>
       <div className="rv-thread-head">
         <span className="rv-who">{first ? who(first) : "You"}</span>
         {thread.label && <Badge tone={LABEL_TONE[thread.label]} mono>{TAG[thread.label]}</Badge>}

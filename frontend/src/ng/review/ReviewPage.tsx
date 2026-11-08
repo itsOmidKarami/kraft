@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { isTextField } from "../keys";
+import { dialogOpen, isTextField, useShortcutRows, type ShortcutRow } from "../keys";
+import { showToast } from "../ui/Toast";
 import type { ReviewOutcome, ReviewThread } from "../../types";
 import { useNavigate, useParams } from "react-router-dom";
 import { Placeholder } from "../shell/Placeholder";
@@ -20,7 +21,7 @@ import { FileTree } from "./FileTree";
 import { GateReview } from "./GateReview";
 import { BottomBar, FinishDialog, useSubmit } from "./FinishReview";
 import { gateConsequence } from "./finish";
-import { byNodes, inTreeOrder, tree, unresolved } from "./model";
+import { byNodes, inPageOrder, inTreeOrder, stepThread, threadPosition, tree, unresolved } from "./model";
 import { parsePatch } from "./patch";
 import { useDiffPrefs } from "./prefs";
 import { Toolbar } from "./Toolbar";
@@ -32,6 +33,7 @@ import "./review.css";
 import { Empty } from "../ui/Empty";
 
 const NO_THREADS: ReviewThread[] = [];
+const REVIEW_KEYS: ShortcutRow[] = [{ keys: ["]", "["], does: "Next or previous unresolved thread" }];
 
 /** `/work-items/:id/review`: the changes of one item, its threads, and the
  *  review that sends them (W8, spec §6.4). */
@@ -152,6 +154,44 @@ function Review({ item, version, reload }: { item: ItemDetail; version: string; 
     setPlace({ file });
     if (overlay) setTreeOpen(false);
   };
+  // The arrows' place among the threads, and the thread to bring into view once it is drawn.
+  const ordered = inPageOrder(threadList, files.map((f) => f.path));
+  const [navAt, setNavAt] = useState<string | null>(null);
+  const [landing, setLanding] = useState<string | null>(null);
+  const step = (dir: 1 | -1) => {
+    const next = stepThread(ordered, navAt, dir);
+    if (!next) return;
+    const path = next.thread.file_path;
+    // Wherever it is drawn: its file unfolded (a Viewed mark stays), or shown, one file at a time.
+    if (path && folded.has(path)) setFold(path, false);
+    if (path && diff.prefs.one_file_at_a_time && path !== current && files.some((f) => f.path === path)) setPlace({ file: path });
+    setNavAt(next.thread.id);
+    setLanding(next.thread.id);
+    if (next.wrapped) showToast(dir === 1 ? "Back to the first unresolved thread" : "Back to the last unresolved thread");
+  };
+  useEffect(() => {
+    const el = landing && document.querySelector<HTMLElement>(`.rv-thread[data-thread="${CSS.escape(landing)}"]`);
+    if (!el) return;
+    setLanding(null);
+    el.scrollIntoView?.({ block: "center" });
+    el.focus({ preventScroll: true });
+    el.classList.add("is-landed");
+    setTimeout(() => el.classList.remove("is-landed"), 1200);
+  });
+  const stepKey = useRef(step);
+  stepKey.current = step;
+  useShortcutRows("Review", REVIEW_KEYS);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // Alt is allowed: some layouts type [ and ] with it (Alt+5 and Alt+6 on a German Mac).
+      if ((e.key !== "]" && e.key !== "[") || e.metaKey || e.ctrlKey || e.isComposing || e.defaultPrevented || isTextField(e.target) || dialogOpen()) return;
+      if (e.target instanceof Element && e.target.closest('[role="menu"], .popover')) return;
+      e.preventDefault();
+      stepKey.current(e.key === "]" ? 1 : -1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <div className={`review-page${diff.plainCode ? " is-plain-code" : ""}`} onKeyDown={(e) => {
@@ -182,6 +222,8 @@ function Review({ item, version, reload }: { item: ItemDetail; version: string; 
         onExpandAll={() => (setCollapsed(new Set()), setByMark(new Set()))}
         prefs={diff.prefs}
         setPrefs={diff.set}
+        threads={threadPosition(ordered, navAt)}
+        onStep={step}
       />
       {next && <p className="rv-next">{next}</p>}
       {head.moved && (

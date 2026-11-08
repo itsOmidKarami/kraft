@@ -23,6 +23,14 @@
 .rv-tree-toggle { border: 1px solid var(--border); }
 .rv-spacer { flex: 1 1 auto; }
 .rv-tools { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
+.rv-threadnav { display: inline-flex; align-items: stretch; height: 26px; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+.rv-threadnav-count { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px 0 9px; color: var(--text-sub); font-size: var(--fs-label); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rv-threadnav-count b { color: var(--text); font-weight: 600; }
+.rv-threadnav-btn { display: inline-grid; place-items: center; width: 28px; padding: 0; border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--text-sub); cursor: pointer; }
+.rv-threadnav-btn:not(:disabled):hover { background: var(--line); color: var(--text); }
+.rv-threadnav-btn:disabled { color: var(--text-faint); cursor: default; }
+.rv-threadnav-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.rv-tools-rule { width: 1px; height: 18px; background: var(--line); }
 .rv-checklist { display: flex; flex-direction: column; min-width: 240px; }
 .rv-check { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font-size: var(--fs-meta); text-align: left; cursor: pointer; }
 .rv-check:is(:hover, :focus-visible) { background: var(--line); }
@@ -141,6 +149,8 @@
 .rv-thread, .rv-composer { display: flex; flex-direction: column; gap: 8px; max-width: 760px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font-size: var(--fs-meta); color: var(--text-sub); }
 .rv-thread + .rv-thread, .rv-thread + .rv-composer { margin-top: 8px; }
 /* A resolved thread steps back by its frame, not its text: an opacity took its 12px text under 4.5:1. */
+.rv-thread:focus { outline: none; }
+.rv-thread.is-landed { outline: 2px solid var(--focus); outline-offset: 2px; }
 .rv-thread.is-resolved { border-style: dashed; border-color: var(--line); background: transparent; }
 .rv-thread-head, .rv-composer-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--fs-label); }
 .rv-who { color: var(--text); font-weight: 500; }

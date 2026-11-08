@@ -12,14 +12,26 @@ const place: ReviewPlace = { from: "base", to: "latest", nodes: null, file: null
 const file = (path: string, touched_by: string[]): CompareFile => ({ path, insertions: 1, deletions: 0, touched_by, viewed: false });
 const FILES = [file("a.py", ["implementation"]), file("b.py", ["implementation"]), file("c.toml", ["verification"])];
 
-const bar = (o: Partial<WorkItem> = {}, setPlace = vi.fn()) => {
-  render(<Toolbar item={item(o)} place={place} setPlace={setPlace} files={FILES} treeOpen onTree={() => {}} onCollapseAll={() => {}} onExpandAll={() => {}} prefs={DEFAULT_PREFS} setPrefs={() => {}} />);
+const bar = (o: Partial<WorkItem> = {}, setPlace = vi.fn(), threads = { at: null as number | null, total: 0 }) => {
+  render(<Toolbar item={item(o)} place={place} setPlace={setPlace} files={FILES} treeOpen onTree={() => {}} onCollapseAll={() => {}} onExpandAll={() => {}} prefs={DEFAULT_PREFS} setPrefs={() => {}} threads={threads} onStep={() => {}} />);
   return setPlace;
 };
 const options = (name: RegExp) => {
   fireEvent.click(screen.getByRole("button", { name }));
   return screen.getAllByRole("menuitemradio");
 };
+
+describe("the unresolved threads' arrows", () => {
+  it.each([
+    ["none left", { at: null, total: 0 }, "No unresolved threads", true],
+    ["before the first jump", { at: null, total: 15 }, "15 unresolved", false],
+    ["on one of them", { at: 3, total: 15 }, "3 of 15 unresolved", false],
+  ])("%s", (_, threads, text, disabled) => {
+    bar({}, vi.fn(), threads);
+    expect(screen.getByRole("group", { name: "Unresolved threads" })).toHaveTextContent(text);
+    expect(screen.getByRole("button", { name: "Next unresolved thread" })).toHaveProperty("disabled", disabled);
+  });
+});
 
 describe("compare pickers", () => {
   // GR-12: they wrap as one group, so Display is never alone on a second row.
@@ -29,7 +41,7 @@ describe("compare pickers", () => {
     expect(group).toHaveClass("rv-tools");
     expect(group).toContainElement(screen.getByRole("button", { name: "Collapse all files" }));
     expect(group).toContainElement(screen.getByRole("button", { name: "Expand all files" }));
-    expect([...group.querySelectorAll("button")].map((b) => b.getAttribute("data-tip"))).toEqual(["Collapse all files", "Expand all files", "Display"]);
+    expect([...group.querySelectorAll("button")].map((b) => b.getAttribute("data-tip"))).toEqual(["Previous unresolved thread ([)", "Next unresolved thread (])", "Collapse all files", "Expand all files", "Display"]);
     fireEvent.click(screen.getByRole("button", { name: "Display" }));
     expect(screen.getByRole("menu", { name: "Display" })).toHaveTextContent(/^Display/);
   });

@@ -1,9 +1,10 @@
-import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import { useStore } from "../../store";
 import * as http from "../http";
+import * as Toast from "../ui/Toast";
 import { DEFAULT_PREFS, useDiffPrefs } from "./prefs";
 import { ReviewPage } from "./ReviewPage";
 
@@ -466,5 +467,51 @@ describe("commenting on lines", () => {
     fireEvent.click(screen.getByRole("button", { name: "Comment on line 3" }));
     expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("");
     expect(posts()).toEqual([]);
+  });
+});
+
+describe("stepping through unresolved threads", () => {
+  const PATCH = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y\n" + "diff --git a/b.py b/b.py\n--- a/b.py\n+++ b/b.py\n@@ -1 +1 @@\n-x\n+z\n";
+  const file = (path: string) => ({ path, insertions: 1, deletions: 1, touched_by: [], viewed: false });
+  const thread = (id: string, file_path: string, state = "open") => ({ id, work_item_id: "w1", gate: null, node_id: null, file_path, side: "new", start_line: 1, end_line: 1, quote: null, anchor_sha: "h", label: null, state, resolved_at: null, created_at: "t", draft: false, comments: [{ id: `c${id}`, thread_id: id, review_id: null, author: "you", attempt: null, body: id, suggestion: null, claim: null, created_at: "t", draft: false }] });
+  const open = async (oneFile: boolean) => {
+    vi.mocked(api.getTheme).mockResolvedValue({ diff: { ...DEFAULT_PREFS, one_file_at_a_time: oneFile }, code_scheme: { light: "auto", dark: "auto" } } as never);
+    vi.spyOn(http, "request").mockImplementation(async (p, init) =>
+      String(p).includes("/compare")
+        ? { status: 200, body: { from: { target: "base", sha: "b" }, to: { target: "latest", sha: null }, rebased: false, files: [file("a.py"), file("b.py")], groups: [], diff: PATCH, untracked: [], truncated: false, ignore_whitespace: false, diff_max_bytes: 100000 } }
+        : init?.method ? { status: 200, body: {} } : { status: 200, body: String(p).endsWith("/threads") ? [thread("b1", "b.py"), thread("a0", "a.py", "resolved"), thread("a1", "a.py", "claimed")] : [] },
+    );
+    render(
+      <MemoryRouter initialEntries={["/work-items/w1/review?from=base"]}>
+        <Routes><Route path="/work-items/:id/review" element={<><ReviewPage /><Where /></>} /></Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText("2 unresolved");
+  };
+  const focused = () => document.activeElement?.getAttribute("data-thread");
+
+  it("goes to each unresolved thread in the tree's order, switching files one at a time, and round the end", async () => {
+    const toast = vi.spyOn(Toast, "showToast");
+    await open(true);
+    fireEvent.click(screen.getByRole("button", { name: "Next unresolved thread" }));
+    await waitFor(() => expect(focused()).toBe("a1"));
+    expect(screen.getByText("of 2 unresolved", { exact: false })).toHaveTextContent("1 of 2 unresolved");
+    fireEvent.click(screen.getByRole("button", { name: "Next unresolved thread" }));
+    await waitFor(() => expect(focused()).toBe("b1"));
+    expect(search).toBe("?from=base&file=b.py");
+    // ] is the arrow's key; past the last, it goes back to the first and says so.
+    fireEvent.keyDown(window, { key: "]" });
+    await waitFor(() => expect(focused()).toBe("a1"));
+    expect(toast).toHaveBeenCalledWith("Back to the first unresolved thread");
+  });
+
+  it("unfolds a file folded by its Viewed mark to show the thread, and keeps the mark", async () => {
+    await open(false);
+    const b = screen.getByRole("region", { name: "b.py" });
+    await act(async () => fireEvent.click(within(b).getByRole("checkbox", { name: "Viewed" })));
+    expect(within(b).queryByText("b1")).toBeNull();
+    fireEvent.keyDown(window, { key: "[" });
+    await waitFor(() => expect(focused()).toBe("b1"));
+    expect(within(b).getByRole("checkbox", { name: "Viewed" })).toBeChecked();
   });
 });
