@@ -601,15 +601,26 @@ async def test_glab_ci_status_reads_the_failed_jobs(
     assert forge.ci.is_infra_red(status) is infra
 
 
-async def test_glab_retry_jobs_posts_the_pipeline_retry(cli, tmp_path):
+@pytest.mark.parametrize(
+    ("ref", "reran"),
+    [
+        pytest.param("123", ("123",), id="the-pipeline"),
+        pytest.param("", (), id="no-pipeline-ref"),
+    ],
+)
+async def test_glab_retry_jobs_posts_the_pipeline_retry(cli, tmp_path, ref, reran):
     cli.stub("glab", routes={"api": "{}"})
 
-    await forge.GlabCli().retry_jobs(
-        repo=tmp_path, ci=forge.CIStatus(state="failed", url="u", pipeline_ref="123")
+    result = await forge.GlabCli().retry_jobs(
+        repo=tmp_path, ci=forge.CIStatus(state="failed", url="u", pipeline_ref=ref)
     )
 
-    argv = cli.argv("glab")
-    assert argv[:4] == ["api", "projects/:id/pipelines/123/retry", "-X", "POST"]
+    assert result == reran
+    if reran:
+        argv = cli.argv("glab")
+        assert argv[:4] == ["api", f"projects/:id/pipelines/{ref}/retry", "-X", "POST"]
+    else:
+        assert not cli.calls("glab")
 
 
 # --- the merge request's own state ---------------------------------------------------

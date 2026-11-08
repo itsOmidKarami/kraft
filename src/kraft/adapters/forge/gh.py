@@ -782,21 +782,23 @@ class GhCli(mr_ops.CliWaits):
         except (ForgeError, AttributeError):
             return True
 
-    async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None:
+    async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> tuple[str, ...]:
         """Rerun the failed jobs of every distinct Actions run behind
-        `ci`'s failed checks. Best-effort: a check with no `/actions/runs/<id>/`
-        in its `detailsUrl` (a non-Actions status check) is skipped."""
+        `ci`'s failed checks, and return those run ids (sorted). Best-effort: a
+        check with no `/actions/runs/<id>/` in its `detailsUrl` (a non-Actions
+        status check) is skipped."""
         run_ids = {
             m.group(1)
             for job in ci.failed_jobs
             if job.detail_url and (m := _RUN_ID_RE.search(job.detail_url))
         }
-        for run_id in run_ids:
+        for run_id in sorted(run_ids):
             await self._send(
                 repo,
                 f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/rerun-failed-jobs",
                 method="POST",
             )
+        return tuple(sorted(run_ids))
 
     async def rerun_after_description_change(
         self, *, repo: Path, branch: str, ci: CIStatus

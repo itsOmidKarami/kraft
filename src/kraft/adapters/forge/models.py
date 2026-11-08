@@ -472,7 +472,12 @@ class Forge(Protocol):
     ) -> None: ...
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None: ...
     async def merge_queue(self, *, repo: Path, branch: str, base: str) -> QueueRead: ...
-    async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None: ...
+    async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> tuple[str, ...]:
+        """Start the failed jobs of `ci` again. Returns what was re-run (Actions
+        run ids on GitHub, the pipeline ref on GitLab); `()` when nothing here
+        could be, so a caller can tell a no-op from a re-run."""
+        ...
+
     async def rerun_after_description_change(
         self, *, repo: Path, branch: str, ci: CIStatus
     ) -> bool:
@@ -544,6 +549,9 @@ class FakeForge:
     #: Times `retry_jobs` was called, for a test to assert the self-retry
     #: fired (Kraft-h81i) without a real forge to observe.
     retried: list[str] = field(default_factory=list)
+    #: Make `retry_jobs` re-run nothing (a check outside GitHub Actions, a
+    #: GitLab read with no pipeline ref), as the real backends do.
+    rerun_nothing: bool = False
     #: Every `pipeline_id` a caller passed to `ci_status`, in call order
     #: ("" for an unpinned call), so a test can see it threaded through
     #: without a real GitLab (Kraft-ivh1).
@@ -828,8 +836,9 @@ class FakeForge:
             for r in reviewers
         ]
 
-    async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None:
+    async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> tuple[str, ...]:
         self.retried.append(ci.url)
+        return () if self.rerun_nothing else (ci.url,)
 
     #: Whether `rerun_after_description_change` makes a new pipeline, as GitLab does.
     edit_makes_new_pipeline: bool = False

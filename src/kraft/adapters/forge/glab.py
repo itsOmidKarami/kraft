@@ -865,13 +865,15 @@ class GlabCli(mr_ops.CliWaits):
             )
         return out
 
-    async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None:
-        """Retries every failed/canceled job in the pipeline `ci` read.
+    async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> tuple[str, ...]:
+        """Retries every failed/canceled job in the pipeline `ci` read, and
+        returns that pipeline ref (`()` when `ci` has none).
         A no-op on GitLab's side if none are (docs), so calling this
         speculatively ahead of a re-poll (Kraft-h81i) is safe."""
         if not ci.pipeline_ref:
-            return
+            return ()
         await self._api(repo, f"projects/:id/pipelines/{ci.pipeline_ref}/retry", method="POST")
+        return (ci.pipeline_ref,)
 
     async def set_labels(self, *, repo: Path, branch: str, mr: MR, labels: tuple[str, ...]) -> None:
         """Label the merge request, then start a pipeline that can see it.

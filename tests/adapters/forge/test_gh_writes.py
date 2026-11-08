@@ -322,25 +322,27 @@ async def test_gh_set_labels_with_an_unknown_label_writes_nothing(cli, tmp_path)
 
 
 @pytest.mark.parametrize(
-    "url, calls",
+    "url, calls, reran",
     [
         pytest.param(
             "https://github.com/o/r/actions/runs/123456/job/9",
             ["api repos/{owner}/{repo}/actions/runs/123456/rerun-failed-jobs -X POST -i"],
+            ("123456",),
             id="the-run-behind-the-failed-check",
         ),
-        pytest.param("sweet link", [], id="a-check-outside-actions-is-skipped"),
+        pytest.param("sweet link", [], (), id="a-check-outside-actions-is-skipped"),
     ],
 )
-async def test_gh_retry_jobs_reruns_the_failed_jobs_of_the_run(cli, tmp_path, url, calls):
+async def test_gh_retry_jobs_reruns_the_failed_jobs_of_the_run(cli, tmp_path, url, calls, reran):
     cli.stub("gh", "")
     job = forge.FailedJob("build", "failed", "job_execution_timeout", url)
 
-    await forge.GhCli().retry_jobs(
+    result = await forge.GhCli().retry_jobs(
         repo=tmp_path, ci=forge.CIStatus(state="failed", url="u", failed_jobs=(job,))
     )
 
     assert _rest(cli) == calls
+    assert result == reran
 
 
 async def test_gh_rerun_after_description_change_reruns_without_a_new_pipeline(cli, tmp_path):

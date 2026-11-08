@@ -93,9 +93,13 @@ async def test_fake_forge_records_labels_and_retries():
     mr = await _opened(f)
 
     await f.set_labels(repo="/r", branch="b", mr=mr, labels=("release::patch",))
-    await f.retry_jobs(repo="/r", ci=forge.CIStatus(state="failed", url="http://x/1"))
+    ci = forge.CIStatus(state="failed", url="http://x/1")
+    reran = await f.retry_jobs(repo="/r", ci=ci)
+    nothing = forge.FakeForge(rerun_nothing=True)
+    reran_nothing = await nothing.retry_jobs(repo="/r", ci=ci)
 
     assert (f.labeled, f.retried) == (["release::patch"], ["http://x/1"])
+    assert (reran, reran_nothing, nothing.retried) == (("http://x/1",), (), ["http://x/1"])
 
 
 _DROP = forge.QueueRead(kind="train", state="dropped", cause="code", reason="pipeline failed")
