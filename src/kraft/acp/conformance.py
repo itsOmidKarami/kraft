@@ -3,10 +3,16 @@ entry declares. `analyze` is pure over the session log; `run` (below) makes the 
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import os
+import signal
+import tempfile
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 
-from kraft.acp import log, tools
+from kraft.acp import launch, log, tools
 
 #: What the probe asks the agent to do (spec §9): read a file, write a file, run a command.
 STEPS = (
@@ -163,3 +169,83 @@ def _merge(seen: dict[str, dict], call: dict) -> None:
     for key in ("name", "kind", "title", "status"):
         if call.get(key):
             known[key] = call[key]
+
+
+NOTES = "kraft conformance probe\n"
+PROMPT = (
+    "Do these five things in this order, each with your own tool, and do each even if an earlier "
+    "one is refused: 1. read the file probe-notes.txt; 2. create the file probe-out.txt "
+    "containing the word kraft-probe; 3. run the shell command `echo kraft-probe`; 4. list the "
+    "files here that match *.txt with your Glob tool; 5. search the file probe-notes.txt for "
+    "the word kraft with your Grep tool. Then say done."
+)
+
+
+async def run(
+    h, *, executable: str | None = None, model: str | None = None, timeout_s: float = 300.0
+) -> Report:
+    """One scripted session of Kraft's own client against the agent, in a scratch folder, with
+    the entry's asking switch applied (spec §9). It is not a real launch in two ways: it enforces
+    nothing (`policy` is off, so every ask is answered `allow_once` with no gate and no server, and
+    the log is judged afterwards), and the client and the agent run with this process's whole
+    environment, where a real launch's is built from an allowlist. Spends a few tokens on the
+    agent's default model (or `model`). If this coroutine is cancelled (Ctrl-C), the client's
+    process group is killed: it runs in its own session, so the terminal never signals it."""
+    with tempfile.TemporaryDirectory(prefix="kraft-acp-probe-") as scratch:
+        root = Path(scratch)
+        work = root / "work"
+        work.mkdir()
+        (work / "probe-notes.txt").write_text(NOTES)
+        spec = launch.spec_for(
+            h,
+            agent_argv=launch.agent_argv(h, executable),
+            cwd=work,
+            prompt=PROMPT,
+            context="",
+            result_path=root / "result.json",
+            model=model,
+        ).model_copy(update={"policy": False, "allowlist": False})
+        spec_path = root / "acp-launch.json"
+        spec_path.write_text(spec.model_dump_json())
+        proc = await asyncio.create_subprocess_exec(
+            *launch.client_prefix(),
+            "--spec",
+            str(spec_path),
+            cwd=work,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+            env={**os.environ, "KRAFT_RESULT_PATH": str(root / "result.json")},
+            start_new_session=True,  # the client and the agent share a group we can kill whole
+        )
+        lines: list[str] = []
+
+        async def pump() -> None:  # read as it comes, so a killed session keeps its partial log
+            async for raw in proc.stdout:
+                lines.append(raw.decode("utf-8", "replace").rstrip("\n"))
+            await proc.wait()
+
+        timed_out = False
+        try:
+            await asyncio.wait_for(pump(), timeout_s)
+        except TimeoutError:
+            timed_out = True
+        finally:
+            if (
+                proc.returncode is None
+            ):  # timed out, cancelled or interrupted: leave nothing running
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(proc.pid, signal.SIGKILL)
+                # Reap the group leader: a zombie leader keeps its group "alive" on macOS.
+                await proc.wait()
+        if timed_out:
+            # Only the timeout is a finding: the steps the agent did not get to are not mismatches.
+            seen = analyze(lines, h)
+            return replace(
+                seen,
+                problems=(f"the session did not end within {timeout_s:g}s",),
+                mismatches=(),
+                notes=(),
+                log=tuple(lines),
+            )
+        return replace(analyze(lines, h, exit_code=proc.returncode or 0), log=tuple(lines))

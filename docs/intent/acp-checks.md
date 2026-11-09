@@ -34,3 +34,8 @@ origin: src/kraft/acp/conformance.py
 WHEN the agent reports tokens or cost that the entry's `reports` does not declare, the probe SHALL note it and SHALL NOT call it a mismatch.
 enforced-by: tests/acp/test_conformance.py::test_the_probe_judges_reported_usage_by_the_entry[undeclared-cost], tests/acp/test_conformance.py::test_the_probe_judges_reported_usage_by_the_entry[undeclared-tokens]
 origin: src/kraft/acp/conformance.py
+
+## REQ acp-probe-runs-kraft-client-in-a-scratch-folder-and-enforces-nothing
+WHEN an operator runs the conformance probe, the system SHALL run Kraft's own ACP client against the agent in a scratch folder with the entry's asking switch applied, ask the agent to read a file, write a file, run a command, glob and grep, answer every ask `allow_once` without the permission gate even when the entry always denies a tool, report the agent's version, and kill the client's process group when the probe is cancelled.
+enforced-by: tests/acp/test_conformance.py::test_the_probe_runs_the_client_against_the_agent_and_judges_the_log, tests/acp/test_conformance.py::test_the_probe_sends_no_host_access_enforces_no_policy_and_sets_no_model, tests/acp/test_conformance.py::test_the_probe_enforces_nothing_even_when_the_entry_always_denies_a_tool, tests/acp/test_conformance.py::test_cancelling_the_probe_kills_the_client_and_the_agent
+origin: src/kraft/acp/conformance.py

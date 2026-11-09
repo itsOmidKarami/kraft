@@ -105,6 +105,45 @@ def agent_argv(h, command: str | None) -> list[str]:
     return [*shlex.split(command), *h.command[1:]] if command else list(h.command)
 
 
+def spec_for(
+    h,
+    *,
+    agent_argv,
+    cwd,
+    prompt,
+    context,
+    result_path,
+    resume=None,
+    model=None,
+    effort=None,
+    allowed_tools=None,
+    deny_tools=(),
+) -> LaunchSpec:
+    """The client's spec for a launch of `h` (what `command` writes, what the probe runs)."""
+    entry, asks = h.acp, h.acp.asks_everything
+    return LaunchSpec(
+        agent_argv=agent_argv,
+        cwd=str(cwd),
+        prompt=prompt,
+        context=context,
+        result_path=str(result_path),
+        resume=resume,
+        model=model,
+        effort=effort,
+        options=dict(entry.options),
+        harness_id=h.id,
+        agent_env=dict(asks.env) if asks else {},
+        asks_config=dict(asks.config) if asks else {},
+        asks_mode=asks.mode if asks else None,
+        tool_names={k: list(v) for k, v in h.tool_names.items()},
+        always_deny=list(entry.always_deny),
+        deny_tools=list(deny_tools),
+        settles_itself=list(entry.settles_itself),
+        policy=allowed_tools is not None or bool(deny_tools) or bool(entry.always_deny),
+        allowlist=allowed_tools is not None,
+    )
+
+
 def command(
     h,
     *,
@@ -123,27 +162,18 @@ def command(
     also keeps a long prompt out of argv) and return the client's command."""
     from kraft.worker.ca import write_whole
 
-    entry, asks = h.acp, h.acp.asks_everything
-    spec = LaunchSpec(
+    spec = spec_for(
+        h,
         agent_argv=agent_argv,
-        cwd=str(cwd),
+        cwd=cwd,
         prompt=prompt,
         context=context,
-        result_path=str(files.result),
+        result_path=files.result,
         resume=resume,
         model=model,
         effort=effort,
-        options=dict(entry.options),
-        harness_id=h.id,
-        agent_env=dict(asks.env) if asks else {},
-        asks_config=dict(asks.config) if asks else {},
-        asks_mode=asks.mode if asks else None,
-        tool_names={k: list(v) for k, v in h.tool_names.items()},
-        always_deny=list(entry.always_deny),
-        deny_tools=list(deny_tools),
-        settles_itself=list(entry.settles_itself),
-        policy=allowed_tools is not None or bool(deny_tools) or bool(entry.always_deny),
-        allowlist=allowed_tools is not None,
+        allowed_tools=allowed_tools,
+        deny_tools=deny_tools,
     )
     path: Path = files.instruction.with_name("acp-launch.json")
     path.parent.mkdir(parents=True, exist_ok=True)

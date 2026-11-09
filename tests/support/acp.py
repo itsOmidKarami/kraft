@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from kraft import harness
 from kraft.acp import log
 from support.server import child_env
 
@@ -129,3 +130,26 @@ def run_inprocess(
     )
     code = asyncio.run(asyncio.wait_for(client.run(), timeout))
     return code, list(log.records(out.getvalue().splitlines()))
+
+
+#: The three calls the probe's prompt asks for, as the fake agent scripts them.
+PROBE_CALLS = [
+    {"id": "c1", "kind": "read", "name": "read", "input": {"path": "probe-notes.txt"}},
+    {"id": "c2", "kind": "edit", "name": "edit", "input": {"path": "probe-out.txt"}},
+    {"id": "c3", "kind": "execute", "name": "execute", "input": {"command": "echo kraft-probe"}},
+]
+
+#: A `kind: acp` entry for the fake agent that asks on every call (`FAKE_ACP_ASK_ALL`).
+PROBE_ENTRY = {
+    "id": "fake",
+    "kind": "acp",
+    "command": agent_argv(),
+    "reports": ["tokens", "cost"],
+    "options": {"model": {"config": "model"}},
+    "asks_everything": {"env": {"FAKE_ACP_ASK_ALL": "1"}},
+    "tool_names": {"read": "Read", "edit": "Write", "execute": "Bash"},
+}
+
+
+def probe_entry(**over) -> harness.Harness:
+    return harness.Harness.from_mapping({**PROBE_ENTRY, **over}, where="test", path=None)

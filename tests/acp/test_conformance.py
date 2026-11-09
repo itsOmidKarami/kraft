@@ -1,6 +1,11 @@
 """The conformance probe's judgement of one session log (spec §9)."""
 
+import asyncio
+import json
+import os
+
 import pytest
+from support.acp import PROBE_CALLS, probe_entry
 
 from kraft import harness
 from kraft.acp import conformance, log
@@ -178,3 +183,123 @@ def test_a_client_error_event_is_a_problem_with_its_message():
     lines = [log.event("starting", agent=["x"]), log.event("error", message="login required")]
     got = conformance.analyze(lines, entry(), exit_code=1)
     assert not got.ok and "login required" in got.problems
+
+
+def probe(monkeypatch, calls=PROBE_CALLS, flags="", **kw):
+    monkeypatch.setenv("KRAFT_FAKE_ACP", flags)
+    monkeypatch.setenv("KRAFT_FAKE_ACP_CALLS", json.dumps(calls))
+    return asyncio.run(conformance.run(probe_entry(**kw.pop("entry", {})), **kw))
+
+
+def test_the_probe_runs_the_client_against_the_agent_and_judges_the_log(monkeypatch):
+    got = probe(monkeypatch)
+    assert got.ok, (got.problems, got.mismatches)
+    assert got.agent == "fake-acp-agent 0.0.0" and got.tokens_reported and got.cost_reported
+    assert all(c.asked for c in got.calls)  # the entry's asking switch reached the agent
+
+
+@pytest.mark.parametrize(
+    ("flags", "calls", "entry", "where", "text"),
+    [
+        (
+            "",
+            [*PROBE_CALLS[:2], {**PROBE_CALLS[2], "ask": False}],
+            {},
+            "mismatches",
+            "Bash ran without asking",
+        ),
+        (
+            "",
+            [*PROBE_CALLS[:2], {**PROBE_CALLS[2], "ask": False}],
+            {"settles_itself": ["Bash"]},
+            None,
+            None,
+        ),
+        ("no_cost", PROBE_CALLS, {}, "mismatches", "declares cost"),
+        ("auth", PROBE_CALLS, {}, "problems", "Authentication"),
+    ],
+    ids=["unasked-call", "unasked-but-declared", "no-cost-reported", "login-missing"],
+)
+def test_the_probe_reports_a_real_session_that_differs_from_its_entry(
+    monkeypatch, flags, calls, entry, where, text
+):
+    got = probe(monkeypatch, calls, flags, entry=entry)
+    if where is None:
+        assert got.ok
+    else:
+        assert not got.ok and any(text in m for m in getattr(got, where))
+
+
+def test_the_probe_sends_no_host_access_enforces_no_policy_and_sets_no_model(monkeypatch, tmp_path):
+    monkeypatch.setenv("KRAFT_FAKE_ACP_RECORD", str(tmp_path / "rec"))
+    probe(monkeypatch)
+    sent = [json.loads(x) for x in (tmp_path / "rec").read_text().splitlines()]
+    assert sent[0]["params"]["clientCapabilities"] == {}
+    assert not any(m.get("method") == "session/set_config_option" for m in sent)
+    prompt = next(m for m in sent if m.get("method") == "session/prompt")
+    text = prompt["params"]["prompt"][0]["text"]
+    assert all(word in text for word in ("probe-notes.txt", "Glob", "Grep"))
+
+
+def test_the_probe_enforces_nothing_even_when_the_entry_always_denies_a_tool(monkeypatch):
+    # The mutation that matters: drop `policy=False` in `run` and the client, with an `always_deny`
+    # entry, rejects Bash (reject_once, and the call that runs anyway is a policy violation).
+    got = probe(monkeypatch, entry={"always_deny": ["Bash"]})
+    assert got.ok, (got.problems, got.mismatches)
+    recs = list(log.records(got.log))
+    asks = [r for r in recs if r.get("event") == "ask"]
+    assert len(asks) == 3 and all(a["answer"] == "allow_once" for a in asks)
+    assert not [r for r in recs if r.get("event") == "policy_violation"]
+
+
+def test_a_probe_session_that_never_ends_is_one_problem_not_a_hang_or_phantom_mismatches(
+    monkeypatch,
+):
+    got = probe(monkeypatch, flags="slow", timeout_s=4)
+    assert got.problems == ("the session did not end within 4s",)
+    assert (got.mismatches, got.notes) == ((), ())  # not "no call for the read a file was seen"
+    assert got.log  # what the client had logged before it was killed
+
+
+def test_cancelling_the_probe_kills_the_client_and_the_agent(monkeypatch):
+    """Ctrl-C reaches asyncio.run as a cancellation; the client runs in its own session, so the
+    terminal's SIGINT never reaches it and `run` must kill its process group itself."""
+    started = []
+    real = asyncio.create_subprocess_exec
+
+    async def spy(*args, **kw):
+        started.append(await real(*args, **kw))
+        return started[-1]
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spy)
+    monkeypatch.setenv("KRAFT_FAKE_ACP", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_ACP_CALLS", json.dumps(PROBE_CALLS))
+
+    def alive(pid):
+        try:
+            os.killpg(pid, 0)  # a group lives while any member, the agent included, does
+        except ProcessLookupError:
+            return False
+        return True
+
+    async def main():
+        task = asyncio.ensure_future(conformance.run(probe_entry(), timeout_s=120))
+        while not started:
+            await asyncio.sleep(0.05)
+        await asyncio.sleep(2)  # the client has started the agent
+        pid = started[0].pid
+        try:
+            assert alive(pid)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            for _ in range(100):
+                if not alive(pid):
+                    return
+                await asyncio.sleep(0.1)
+            pytest.fail("the client's process group outlived the cancelled probe")
+        finally:
+            if alive(pid):
+                os.killpg(pid, 9)  # never leave the slow agent behind, even when the test fails
+
+    asyncio.run(main())
