@@ -52,7 +52,7 @@ nodes:
     reject_to: implementation
 ```
 
-Kraft refuses a key that these tables do not list when it loads the chain, and
+Kraft refuses a key that these tables don't list when it loads the chain, and
 `kraft admin templates lint` reports it. A default of `required` means the key
 has no default: the chain must set it, itself or through `extends`.
 
@@ -61,12 +61,12 @@ has no default: the chain must set it, itself or through `extends`.
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `id` | string | The file name | The chain's name. |
-| `description` | string | none | One line saying what the chain is for, shown in the chain list. Listed even for a chain that does not resolve. |
+| `description` | string | none | One line saying what the chain is for, shown in the chain list. Listed even for a chain that doesn't resolve. |
 | `nodes` | list | required, unless `extends` is given | The ordered list of nodes. At least one. A chain with `extends` holds none. |
 | `policy` | mapping | none | The chain's layer of the [policy](/reference/configuration/policy). In a chain with `extends`, it may only tighten the parent's. |
 | `extends` | string | none | The chain this one builds on: one of yours, or an add-on's `ns:id`. See [Extending a chain](/reference/configuration/library-and-chains#extending-a-chain). _Added in 2.2_ |
-| `remove` | list of strings | none | With `extends`: the parent's nodes to drop, by id. The final gate cannot be one. _Added in 2.2_ |
-| `add` | list | none | With `extends`: each entry an `after`, a parent node's id, and a `node`, a complete node to put directly after it. _Added in 2.2_ |
+| `remove` | list of strings | none | With `extends`: the parent's nodes to drop, by ID. The final gate can't be one. _Added in 2.2_ |
+| `add` | list | none | With `extends`: each entry an `after`, a parent node's ID, and a `node`, a complete node to put directly after it. _Added in 2.2_ |
 | `overrides` | mapping | none | With `extends`: canonical path to the keys to merge onto that component, such as `implementation.main.implement: { profile: deep }`. _Added in 2.2_ |
 | `runner` | string | unset | Where it runs: a machine or a [group](/reference/configuration/workers#groups) from [`workers.yaml`](/reference/configuration/workers), `any`, or `local`. See [Placing a step on a machine](/reference/configuration/library-and-chains#placing-a-step-on-a-machine). _Added in 2.4_ |
 
@@ -89,7 +89,7 @@ An exec node declares `tasks` or `steps`, never both.
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `tasks` | list | one of `tasks` and `steps` is required, unless `extends` supplies it | Shorthand for one step named `main`. Its tasks are dispatched together, and the node is measured once all have settled. |
-| `steps` | list | see `tasks` | Steps that run in order. A later step is not dispatched if an earlier one fails, and it sees what the earlier one left behind. |
+| `steps` | list | see `tasks` | Steps that run in order. A later step isn't dispatched if an earlier one fails, and it sees what the earlier one left behind. |
 | `on_failure` | mapping | none | A recovery pass: tasks or steps that run once after the node failed, before it is measured again. A task or step may carry its own `on_failure`; the nearest one to the failure wins. It may be [read_only](#read_only). |
 | `fix_loop` | mapping | none | Repair tasks or steps, an optional `judge` task, and an optional `max_attempts`. It re-runs until the node passes. See [Fix loop and judge](/reference/chain-nodes/fix-loop). |
 | `escalation` | mapping | none | An agent task dispatched when the node is [stuck](/concepts/vocabulary#stuck) after recovery and the fix loop, before you are asked. On a node with `on_merge_rejected`, see [on_merge_rejected](#on_merge_rejected). |
@@ -140,7 +140,7 @@ The web UI sends the head of the diff it showed.
 
 Right before an `mr.merge` task asks the forge to merge, or to queue the merge
 request again after a merge train's own runners failed, it reads the tip it
-would push. When that is not the approved one, it merges nothing and pushes
+would push. When that isn't the approved one, it merges nothing and pushes
 nothing, records `merge_refused_unreviewed`, and the item stops for you:
 
 - On a node with [on_merge_rejected](#on_merge_rejected), Kraft holds the item
@@ -162,7 +162,7 @@ fetches it into the item's branch when that is a fast-forward and the worktree
 is clean (never for an in-place item). The reopened final review then shows it.
 
 A merge still open when Kraft finds the forge's head moved is cancelled first.
-One that has already landed cannot be undone: the item stops for you with
+One that has already landed can't be undone: the item stops for you with
 `merge_landed_unreviewed`, and `kraft item complete` or `kraft item skip` on the
 merge node ends the stop.
 
@@ -239,7 +239,7 @@ onto the train.
 | `restart_from` | string | required | Names an exec node strictly before this one, never a gate or this node itself. When a `chain_finalized` gate comes before this node, it must name a node before that gate, so every rewind passes it. |
 | `repair` | mapping | required | The tasks or steps that fix the branch, written like an `on_failure` plan. The shipped `repair_merge_queue_failure` runs the `kraft:merge-queue-repair` skill on the `strong` [agent profile](/reference/harnesses/agent-profiles). |
 
-A node with `on_merge_rejected` cannot also declare a `fix_loop`: only the
+A node with `on_merge_rejected` can't also declare a `fix_loop`: only the
 repair answers a drop, because a fix cycle's commit would be merged by the next
 measure unseen.
 
@@ -284,7 +284,7 @@ repair's commit.
 
 A successful `escalation` task that committed rewinds the chain there, under
 the same cap, instead of re-running the node; one that changed nothing re-runs
-it. A tip Kraft cannot read, before the escalation or after it, counts as a
+it. A tip Kraft can't read, before the escalation or after it, counts as a
 change. An escalation agent's own `kraft item retry` of this node, or of any
 node after `restart_from`, restarts at `restart_from`; one it names at or
 before `restart_from` already passes the gates again, and runs as named.
@@ -301,37 +301,37 @@ on its own.
 
 ### Merge trains and merge queues
 
-A **GitLab merge train** or **GitHub merge queue** does not merge a merge
+A **GitLab merge train** or **GitHub merge queue** doesn't merge a merge
 request when asked. It queues it, then runs a further pipeline on the merge
 request combined with the target branch and everything ahead of it. That
 pipeline can fail after the merge request's own pipeline went green, because the
-target moved or because it runs tests the merge request pipeline does not.
+target moved or because it runs tests the merge request pipeline doesn't.
 
 **Detection.** Kraft reads from the forge, each time the `merge` node runs,
 whether the target branch merges through a train or queue. There is no setting
 to turn on. A repository without one waits for the merge exactly as before.
 
 - GitLab: the project must have both `merge_trains_enabled` and
-  `merge_pipelines_enabled`. A project that does not report them, or a read the
+  `merge_pipelines_enabled`. A project that doesn't report them, or a read the
   forge refuses (403 or 404), counts as having no train.
 - GitLab, queueing: on a train project Kraft adds the merge request through the
   merge-train API with the reviewed commit's sha, so it never merges a head
   nobody reviewed. Only when the project read says there is no train does Kraft
   merge with `glab mr merge`.
 - GitLab, a failed project read: a read that fails any other way, such as a 5xx,
-  a timeout or an answer that is not the project, fails the merge as a failed
+  a timeout or an answer that isn't the project, fails the merge as a failed
   `glab mr merge` would. On GitLab before 19.1 `glab mr merge` can merge
   without going through the train.
 - GitHub: the target branch has a merge queue. Kraft blames only a failed
-  merge-group run created after the pull request's latest enqueue, so a failure
+  merge-group run created after the merge request's latest enqueue, so a failure
   from an earlier drop is never held against the current head. When there is
-  no such run, for example because the checks do not run on GitHub Actions, a
+  no such run, for example because the checks don't run on GitHub Actions, a
   removal reason that names failed or timed-out checks or CI counts as `code`,
   and that reason is what the repair is given.
 
 A read of the train or queue that fails says nothing about the merge, so Kraft
 keeps waiting and notes it in the log. A drop is noticed on the next poll of the
-merge wait. When the forge has not yet written why (no GitLab system note, no
+merge wait. When the forge hasn't yet written why (no GitLab system note, no
 GitHub removal event for this entry), Kraft keeps waiting and reads it again on
 the next poll, up to the merge wait's own timeout.
 
@@ -345,7 +345,7 @@ cause, the forge's reason, the failed jobs and the head. See the
 | `conflict` | The merge request no longer merges cleanly with the target. | Rebases the branch. A clean rebase restarts with no agent. A rebase that conflicts goes to the `repair` to resolve, then Kraft restarts. |
 | `not_added` | GitLab only: the merge request never reached the train, because its own checks failed while it waited to be added. | Treated as `code`. |
 | `infra` | The train or queue's own runners failed. | Asks the forge to queue the same head again, with no agent and no restart, up to 2 times. Then it stops for you. |
-| `other` | A person took it off the train or queue, or the forge's reason cannot be read. | Stops for you. Kraft never re-queues what a person removed, and no repair, recovery or escalation agent runs for it. |
+| `other` | A person took it off the train or queue, or the forge's reason can't be read. | Stops for you. Kraft never re-queues what a person removed, and no repair, recovery or escalation agent runs for it. |
 
 **The restart.** After the repair commits, or after a clean conflict rebase,
 Kraft reopens the approved gates in the span, gives the span's fix loops a
@@ -357,7 +357,7 @@ train/queue rejection" section giving the cause, the reason, the failed jobs and
 what the repair changed.
 
 **What stops the item.** The repair must commit: a head the train already
-rejected would only be rejected again, so a repair that commits nothing, fails,
+rejected would only be rejected again, so a repair that commits nothing, fails
 or asks a question stops for you.
 
 When a repair had already committed before it
@@ -439,7 +439,7 @@ Every task takes these keys, then the keys of its kind. A task takes no
 |---|---|---|---|
 | `harness` | string | required | The [harness profile](/concepts/vocabulary#harness-profile) to run on, an ID from `harnesses.yaml`. A missing or disabled harness profile stops the task and waits for you unless the task declares `fallback`. |
 | `prompt` | string | required | What the task is asked to do. Kraft's output contract comes before the skill and steering. |
-| `skill` | string | none | One skill to launch the agent with (`kraft:code-review`, an [add-on](/reference/configuration/addons#names)'s `release:release-notes`, or another tool's `plugin:skill`). The shipped `spec_author` sets `kraft:spec`, for example. A skill that cannot load stops the task and waits for you. |
+| `skill` | string | none | One skill to launch the agent with (`kraft:code-review`, an [add-on](/reference/configuration/addons#names)'s `release:release-notes`, or another tool's `plugin:skill`). The shipped `spec_author` sets `kraft:spec`, for example. A skill that can't load stops the task and waits for you. |
 | `produces` | string | none | The document kind the task writes (the shipped library uses `spec`, `plan`, `chain_revision`, `mr_meta`, `work_brief` and `review_brief`), to `run/items/<id>/docs/<kind>.md`. A re-run first keeps the current one as `history/<kind>.<n>.md`. |
 | `profile` | string | none | An [agent profile](/reference/harnesses/agent-profiles) from `harnesses.yaml` (`strong`) that sets the model tier. Not allowed with `model` or `effort`. |
 | `model`, `effort` | string | none | This task's runtime options, checked against what the [provider](/concepts/vocabulary#provider) of the task's harness profile accepts. Not allowed with `profile`. |
@@ -468,14 +468,14 @@ Every task takes these keys, then the keys of its kind. A task takes no
 
 `kind: forge` is an action on GitHub or GitLab, resolved from the `forge` in the
 repo's `repos.yaml` entry: a merge-request step, or `ci.pipeline`, a wait for one
-CI pipeline by id.
+CI pipeline by ID.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `target` | string | required | `mr.open_draft`, `mr.sync`, `mr.ci`, `mr.automated_review`, `mr.mark_ready`, `mr.external_approval`, `mr.merge` or `mr.post_merge_ci`. `ci.pipeline` waits for one pipeline by id. _Added in next_ |
+| `target` | string | required | `mr.open_draft`, `mr.sync`, `mr.ci`, `mr.automated_review`, `mr.mark_ready`, `mr.external_approval`, `mr.merge` or `mr.post_merge_ci`. `ci.pipeline` waits for one pipeline by ID. _Added in next_ |
 | `wait` | mapping | none | For a target that waits: `polling`, with an `initial_interval` and a `max_interval`. Set the timeout with the task's `policy`. |
 | `wait.grace_period` | duration | `60s` | Only on `mr.automated_review`: how long a review bot must stay quiet after its last activity on the head to count as finished. Refused on any other target. _Added in 2.4_ |
-| `pipeline` | string | required on `ci.pipeline` | Only on `ci.pipeline`: the pipeline's id as digits, or `$NAME` (or `${NAME}`) for a variable a task in `reads` left. See [Waiting for a pipeline by id](#waiting-for-a-pipeline-by-id). _Added in next_ |
+| `pipeline` | string | required on `ci.pipeline` | Only on `ci.pipeline`: the pipeline's ID as digits, or `$NAME` (or `${NAME}`) for a variable a task in `reads` left. See [Waiting for a pipeline by ID](#waiting-for-a-pipeline-by-id). _Added in next_ |
 | `reviewers` | list | unset | Only on `mr.automated_review`: the reviewers it waits for, each `{bot: LOGIN}` or `{check: NAME}`. The item's `reviewers` override and the repo's `automated_review` come first. `[]` names none. _Added in 2.4_ |
 
 `mr.post_merge_ci` watches the CI of the commit the item merged, however many merges land on the base branch after it. A run cancelled for a newer push moves the watch onto the base's tip, which holds that merge, and records `post_merge_ci_moved`.
@@ -497,15 +497,15 @@ A review wait that names its bots and waits for them to settle:
 
 The shipped chain follows it with a triage step. See [Waiting for several reviewers](/reference/configuration/repos#waiting-for-several-reviewers).
 
-## Waiting for a pipeline by id
+## Waiting for a pipeline by ID
 
 _Added in next_
 
-A `ci.pipeline` task waits for one CI pipeline, named by its id, and nothing else.
-It is not tied to the item's branch or merge request, so it can follow a pipeline
+A `ci.pipeline` task waits for one CI pipeline, named by its ID, and nothing else.
+It isn't tied to the item's branch or merge request, so it can follow a pipeline
 that something else started, such as one a merge triggered.
 
-The id is a GitLab pipeline `id` (not the `iid`) or a GitHub Actions run id (not the
+The ID is a GitLab pipeline `id` (not the `iid`) or a GitHub Actions run ID (not the
 `run_number`). Give it as digits, or as `$NAME` for a variable an earlier task left
 with [`outputs`](#step-outputs) and this task names in `reads`.
 
@@ -529,8 +529,8 @@ with [`outputs`](#step-outputs) and this task names in `reads`.
 ```
 
 The task looks up `$NAME` again at every check, so a writer that ran again while the
-wait was parked is followed to its new id, and the old wait ends as `superseded`. An
-unset variable, a value that is not digits, or an id the repository does not hold stops
+wait was parked is followed to its new ID, and the old wait ends as `superseded`. An
+unset variable, a value that isn't digits, or an ID the repository doesn't hold stops
 the item for you with a message that never quotes the value. On GitHub a run that a
 person re-runs keeps its id: the task follows the newest attempt.
 
@@ -541,29 +541,29 @@ person re-runs keeps its id: the task follows the newest attempt.
 | A manual job (GitLab) or an environment approval (GitHub) holds it | Keeps waiting until the time cap, and says which job or approval in the log and the wait's events. |
 | Failed jobs, or a failed downstream pipeline | The task fails, with the failed jobs as findings. |
 | Failed with no failed job, or a GitHub startup failure | Stops the item for you, naming it. |
-| Skipped, neutral or stale, or ran no job | Stops the item for you. A pipeline that ran nothing is not green. |
+| Skipped, neutral or stale, or ran no job | Stops the item for you. A pipeline that ran nothing isn't green. |
 | Cancelled, and no new run followed within five minutes | Stops the item for you. |
 | The time cap | Stops the item as a timed-out wait. |
-| The forge cannot be reached | Keeps waiting. |
+| The forge can't be reached | Keeps waiting. |
 | The forge refuses the token, or answers a rate limit | Stops as any forge task does. |
 
-- **It never retries a job.** The id may come from a worker, and a retry is a write
+- **It never retries a job.** The ID may come from a worker, and a retry is a write
   made with the server's token. A pipeline that failed on the forge's own infrastructure
   stops the item for you instead.
-- **A red pipeline is not stuck.** The node's `on_failure` handles it when it has one.
+- **A red pipeline isn't stuck.** The node's `on_failure` handles it when it has one.
   Otherwise the item stops for you as a plain failure, and neither the node's
   `escalation` nor `auto_escalate_stuck` sends an agent onto it, because the merge request
   has usually merged by then. No fix loop starts unless the node declares one.
 - **Green is the pipeline's own status.** A downstream pipeline counts only through
   `strategy: depend` in the GitLab trigger job: a failed bridge is red code, not
   infrastructure. `mr.ci` reads it the same way now.
-- **[`ci_checks: false`](/reference/configuration/repos#ci_checks) does not affect it.**
+- **[`ci_checks: false`](/reference/configuration/repos#ci_checks) doesn't affect it.**
   You named the pipeline.
 - **A run from a fork** is a configuration error, as is a pipeline of another project.
-- It cannot be `scope: each_repository`. In a workspace item it reads the root
+- It can't be `scope: each_repository`. In a workspace item it reads the root
   repository only; a pipeline in a member's project answers not found.
-- A node whose only forge tasks are `ci.pipeline` is not a merge-request node, so
-  a merge request closed on the forge does not stop it. A chain revision may skip such
+- A node whose only forge tasks are `ci.pipeline` isn't a merge-request node, so
+  a merge request closed on the forge doesn't stop it. A chain revision may skip such
   a node, which it may not do for the other forge tasks. A revision that skips a writer
   whose reader stays is refused, with the reader's `reads` named.
 - The kraft-lite plugin refuses `ci.pipeline`.
@@ -582,15 +582,15 @@ the plan read_only, the one a `tasks` plan becomes included.
 - **What counts as a change.** Any difference, including an untracked file or a
   commit.
 - **What happens.** The item stops and waits for you, with a `read_only_violated`
-  event and a stop reason naming the changed files. It is not a task failure, so
-  no recovery, fix loop, or attempt is spent on it.
-- **Exclusions.** A read_only step's check does not cover a recovery or a fix
+  event and a stop reason naming the changed files. It isn't a task failure, so
+  no recovery, fix loop or attempt is spent on it.
+- **Exclusions.** A read_only step's check doesn't cover a recovery or a fix
   loop. It runs again when a recovery retries the step's tasks. An `on_failure`
   plan, or a step in it, may be read_only, and is then checked around its own
   tasks. A `fix_loop`, an `on_conflict` and an `on_merge_rejected` repair write
   by design, and refuse `read_only`.
 - **Sandboxed items.** In a [sandboxed](/concepts/vocabulary#sandbox) item, if the worktree gains a repository
-  Kraft did not create, Kraft runs no host git there and reports that repository
+  Kraft didn't create, Kraft runs no host git there and reports that repository
   as the change.
 - **Default.** Off. No shipped chain sets it. Setting it on both a node and its
   steps is allowed and redundant.
@@ -599,7 +599,7 @@ the plan read_only, the one a `tasks` plan becomes included.
 
 _Added in next_
 
-A task can leave files and `KEY=value` variables for a later task. The later task names the writer in `reads` and is given a read-only copy, checked when the writer ended. Kraft does not read the files, and never sets a variable in any environment.
+A task can leave files and `KEY=value` variables for a later task. The later task names the writer in `reads` and is given a read-only copy, checked when the writer ended. Kraft doesn't read the files, and never sets a variable in any environment.
 
 The writer and the reader sit in separate steps, because a step runs its tasks together. Both scripts are the repo's own, not Kraft's:
 
@@ -627,7 +627,7 @@ The writer and the reader sit in separate steps, because a step runs its tasks t
 - The writer gets `KRAFT_OUTPUT_DIR`, a folder only it writes: `out/outputs/` in its session's folder. An agent's prompt names the folder and the declared names, and says what a variable must look like.
 - A variable is one `KEY=value` line in `$KRAFT_OUTPUT_DIR/variables.env`. Blank lines and lines starting with `#` are ignored. A value runs to the end of the line, with no quotes and no `export`; a repeated key keeps its last value.
 - A file name is a plain relative path inside that folder: no `..`, no glob, not `variables.env` in any case, no two names that differ only by case, and no name that is a folder of another. A variable name matches `[A-Z][A-Z0-9_]*`.
-- A resumed agent (a paused session continued under a new session id) starts with a copy of what the paused session had written there, up to the same size limit.
+- A resumed agent (a paused session continued under a new session ID) starts with a copy of what the paused session had written there, up to the same size limit.
 
 ### Reading
 
@@ -650,14 +650,14 @@ When the writer ends `done` or `failed`, Kraft checks everything first. Only the
 ### Where they are allowed
 
 - `outputs` goes on an agent or subprocess task in an exec node's own `steps` or `tasks`. It is refused on a fan-out task (`scope: each_repository`), in an `on_failure`, fix loop, judge, `escalation`, `on_conflict` or `on_merge_rejected.repair` slot, and in a gate's `auto_review`.
-- `reads` goes on an agent, subprocess or [`ci.pipeline`](#waiting-for-a-pipeline-by-id) task, and on no other forge task. An entry of two segments, `step.task`, names a writer in the reader's own node, so a library node holding both stays reusable under any node id. An entry of three, `node.step.task`, names a writer anywhere. A bare task id, or an entry of more than three segments, is refused.
-- Every entry must name a task that declares `outputs` and runs before the reader: in an earlier node, or an earlier step of the same node. A task in the same step is never before it, so a writer and its reader cannot share one `tasks:` list.
+- `reads` goes on an agent, subprocess or [`ci.pipeline`](#waiting-for-a-pipeline-by-id) task, and on no other forge task. An entry of two segments, `step.task`, names a writer in the reader's own node, so a library node holding both stays reusable under any node ID. An entry of three, `node.step.task`, names a writer anywhere. A bare task ID, or an entry of more than three segments, is refused.
+- Every entry must name a task that declares `outputs` and runs before the reader: in an earlier node, or an earlier step of the same node. A task in the same step is never before it, so a writer and its reader can't share one `tasks:` list.
 - A node's `on_failure`, fix loop, judge and `escalation` may read any step of the node. A step's or task's `on_failure` may read the steps up to and including its own. Such a handler may run before its writer did, and then finds nothing. `on_conflict`, `on_merge_rejected.repair` and a gate's `auto_review` read nothing.
 - `kraft admin templates lint` refuses a chain that breaks these rules.
 
 ### When a writer runs again
 
-- Running a writer again, or skipping it, deletes its snapshot, so a later reader never sees outputs of a run that has since been replaced. A reader that already passed is not run again.
+- Running a writer again, or skipping it, deletes its snapshot, so a later reader never sees outputs of a run that has since been replaced. A reader that already passed isn't run again.
 - Archiving the item deletes all its snapshots. Abandoning deletes the whole item folder. See [Logs and disk space](/guides/run/logs-and-disk-space#where-an-items-files-are).
 - A snapshot may still hold a variable that an older chain declared and the current one dropped. Kraft reads only the declared names, but a script that sources the file itself sees every key in it.
 
@@ -665,10 +665,10 @@ When the writer ends `done` or `failed`, Kraft checks everything first. Only the
 
 An `icon` is the kebab-case name of a [Lucide](https://lucide.dev/icons) icon,
 such as `file-text` or `circle-check`. It is optional on an exec node, a step
-and a task, library components included. A name that is not kebab-case is a
+and a task, library components included. A name that isn't kebab-case is a
 schema error.
 
-A kebab-case name that Kraft's Lucide version does not have still loads, and
+A kebab-case name that Kraft's Lucide version doesn't have still loads, and
 the chain runs. `kraft admin templates lint` and a draft's problems report it
 as `unknown icon`, at the component that sets it, and a save in Templates › Chains
 or Library refuses it like any other issue. The board draws the kind's default
@@ -702,7 +702,7 @@ creates one.
 | Key | Type | Meaning |
 |---|---|---|
 | `nodes` | list of exec nodes | The body, run by each child item in its own worktree. It holds no gate, no forge task, no `on_merge_rejected` and no `on_base_changed`. |
-| `unforked` | list of node ids | The body nodes the item runs itself when it does not split, and when a rejection comes back to the group. Every body node when empty. |
+| `unforked` | list of node IDs | The body nodes the item runs itself when it doesn't split, and when a rejection comes back to the group. Every body node when empty. |
 | `on_conflict` | recovery plan | What the join hands a conflict to before it asks you, at `<group>.on_conflict`. Chain revision sets it to the library task `resolve_join_conflict`, your own or else `kraft-default`'s; without one, a conflict stops for you. |
 
 A rejection or restart may name a group as its target. It may not name a node inside one. A
@@ -710,11 +710,11 @@ A rejection or restart may name a group as its target. It may not name a node in
 
 ## Canonical paths
 
-Every task, step, and node has a canonical path, for example
+Every task, step and node has a canonical path, for example
 `spec.main.author`, `verification.review.code_review`, or
 `merge_request_feedback.fix_loop.judge`. Events, sessions,
 `kraft item retry --path`, and `kraft item skip --path` address work by it. A node in a
-[group](#group-node) has the group's id first: `slices.verification.review.code_review`.
+[group](#group-node) has the group's ID first: `slices.verification.review.code_review`.
 
 ## In this section
 

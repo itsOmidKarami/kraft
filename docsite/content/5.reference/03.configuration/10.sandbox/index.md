@@ -31,11 +31,11 @@ The keys depend on `kind`. A key a `kind` refuses stops `repos.yaml` from loadin
 | `kit` | string, pinned by digest | `kit`, required. `docker` and `os` refuse it. | The Kit image, `<name>[:<tag>]@sha256:<64 hex>`. See [Kits](/reference/configuration/sandbox/kits). |
 | `resources` | mapping | `docker`, optional. `kit` and `os` refuse it. | CPU, memory and process limits. See [Resource limits](/reference/configuration/sandbox/resource-limits). |
 | `network` | mapping | `docker`, optional. `kit` refuses it. `os` requires it. | The hosts a task may reach. Set it or `unrestricted_network`: a launch into a sandbox with neither is refused. See [Network policy](/reference/configuration/sandbox/network-policy). |
-| `unrestricted_network` | boolean | `docker`, optional, default `false`. `kit` and `os` refuse it, and so does `network` beside it. | `true` lets a launch run with no `network`: the worker's network is not restricted and gates are not enforced. See [Network policy](/reference/configuration/sandbox/network-policy#without-a-network-policy). |
+| `unrestricted_network` | boolean | `docker`, optional, default `false`. `kit` and `os` refuse it, and so does `network` beside it. | `true` lets a launch run with no `network`: the worker's network isn't restricted and gates aren't enforced. See [Network policy](/reference/configuration/sandbox/network-policy#without-a-network-policy). |
 | `credentials` | list of mappings | `docker`, optional, and it needs `network`. `kit` and `os` refuse it. | Secrets the container never holds. See [Credentials](/reference/configuration/sandbox/credentials). |
 | `expose` | list of paths | `os`, optional. `docker` and `kit` refuse it. | Host paths the sandbox may read, absolute or starting `~/`, for a toolchain outside `/usr`. Every file under one is shared, secrets included: give the narrowest. `~/.cargo/bin` keeps a cargo there from mounting all of `~/.cargo`. _Added in 2.3_ |
 
-Set the key in `repos.yaml` or in `policy.sandbox`, not both. It is part of the repository policy layer: once it is set, no chain, node or task can turn it off or change it, limits and network policy included, and `sandbox: false` on a repo cannot turn off one a layer set.
+Set the key in `repos.yaml` or in `policy.sandbox`, not both. It is part of the repository policy layer: once it is set, no chain, node or task can turn it off or change it, limits and network policy included, and `sandbox: false` on a repo can't turn off one a layer set.
 
 An item keeps the sandbox it was filed with. A later change to the key, `expose`, `network`, `resources` and `kit` included, reaches only items filed after it; `kraft item retry` relaunches the item in the sandbox it was filed with.
 
@@ -48,7 +48,7 @@ _Added in 2.1_
 
 An [in-place item](/guides/run/run-items-in-place) runs in the repo's own checkout, so its agents' files land in the folder you work in, unsandboxed, as you. Kraft refuses the combination rather than dropping either side:
 
-- A `repos.yaml` entry with `worktrees: false` and a `sandbox` does not load.
+- A `repos.yaml` entry with `worktrees: false` and a `sandbox` doesn't load.
 - An item filed to run in place while a sandbox applies to it, from its repo, a policy, its chain or its own policy, is refused, naming both settings.
 - A task of an in-place item whose repo gained a sandbox since it was filed stops as `config`.
 
@@ -60,11 +60,11 @@ A sandboxed item keeps its sandbox when a step of it [runs on another machine](/
 
 The machine must have what a local launch needs: for `docker`, the container CLI with a reachable daemon, and the item's image already pulled when the sandbox sets `network:` (otherwise the first launch pulls it, inside the step's time cap); for `os`, the operating system's process sandbox. Run `kraft admin worker check` on it to see which sandbox backends work there.
 
-The secrets stay on the machine. A [credential](/reference/configuration/sandbox/credentials) the egress proxy injects, and a name in `env_passthrough`, are read from the machine's own environment, never sent by the server. The Kraft CA for those credentials, and the CA bundle the container trusts, are made on the machine. A credential whose variable the machine does not have stops the step, naming the variable.
+The secrets stay on the machine. A [credential](/reference/configuration/sandbox/credentials) the egress proxy injects, and a name in `env_passthrough`, are read from the machine's own environment, never sent by the server. The Kraft CA for those credentials, and the CA bundle the container trusts, are made on the machine. A credential whose variable the machine doesn't have stops the step, naming the variable.
 
-A sandbox the machine cannot build never runs unsandboxed. If it has no runtime, the image is missing or the operating system's sandbox is unavailable, the step ends as `config_error` with a log line naming the machine and what is missing, and nothing runs. A memory kill in the machine's sandbox ends the step the way a local one does, as `config_error` with `sandbox_oom_killed`.
+A sandbox the machine can't build never runs unsandboxed. If it has no runtime, the image is missing or the operating system's sandbox is unavailable, the step ends as `config_error` with a log line naming the machine and what is missing, and nothing runs. A memory kill in the machine's sandbox ends the step the way a local one does, as `config_error` with `sandbox_oom_killed`.
 
-A sandboxed `codex` step whose policy needs Kraft's permission hook cannot run on a machine, because codex's trust of the hook is checked against the image that runs it. Kraft refuses the launch and says so.
+A sandboxed `codex` step whose policy needs Kraft's permission hook can't run on a machine, because codex's trust of the hook is checked against the image that runs it. Kraft refuses the launch and says so.
 
 ## What reaches the container
 
@@ -87,20 +87,20 @@ A sandboxed task runs `docker run --init` (or `podman run`) with every capabilit
 
 - **`HOME`.** `$KRAFT_HOME/run/items/<work item id>/sandbox-home`, read-write and kept across sessions, so an agent CLI keeps its state and can resume a paused session. An item that ran sandboxed before Kraft kept one folder per item keeps its `$KRAFT_HOME/run/sandbox-home/<work item id>` while it exists. A CLI config directory Kraft owns (Cursor's) lives in the home too, one per item; Kraft never follows a link the worker put there.
 - **Results.** The session's own `result.json` and `summary.md`, in its session folder's `out/`, which is mounted read-write, so a tool may write either in place or by renaming a new file over it. Its earlier sessions' result files, summaries, review packages and long instructions are mounted read-only, file by file. No session folder is mounted, and nothing of another [work item](/concepts/vocabulary#work-item)'s.
-- **Documents.** The item's `docs/` folder, `$KRAFT_HOME/run/items/<work item id>/docs`, read-write, so the worker can write the spec or plan it was asked for (`$KRAFT_DOCS_DIR` names it). The item's `history/` and `filed/` folders, and the rest of its folder, are not mounted.
+- **Documents.** The item's `docs/` folder, `$KRAFT_HOME/run/items/<work item id>/docs`, read-write, so the worker can write the spec or plan it was asked for (`$KRAFT_DOCS_DIR` names it). The item's `history/` and `filed/` folders, and the rest of its folder, aren't mounted.
 - **Git identity.** `GIT_AUTHOR_*` and `GIT_COMMITTER_*` from the server's environment, else your `user.name` and `user.email` for the repository. Repository hooks never run in the container, as they never run on a worker's commits outside one.
 
 Abandoning or archiving an item removes its ref store and sandbox home.
 
 ## Forwarded credentials
 
-The container's own environment still holds the values, so `docker inspect` shows them to anyone who can reach the container runtime. A name listed under [`credentials`](/reference/configuration/sandbox/credentials) is the exception: the container holds only its [sentinel](/concepts/vocabulary#sentinel), and `docker inspect` shows that. Logins kept in your home directory or the OS keychain do not reach a sandbox.
+The container's own environment still holds the values, so `docker inspect` shows them to anyone who can reach the container runtime. A name listed under [`credentials`](/reference/configuration/sandbox/credentials) is the exception: the container holds only its [sentinel](/concepts/vocabulary#sentinel), and `docker inspect` shows that. Logins kept in your home directory or the OS keychain don't reach a sandbox.
 
 ## Tool policy
 
 - Amp's and OpenCode's rules travel with the launch, and Amp's rules file is mounted read-only.
 - Which harness's tool policy is accepted or refused, with and without a [network policy](/reference/configuration/sandbox/network-policy), is told in [Callbacks from a sandbox](/reference/configuration/sandbox/callbacks#permission-checks-under-network).
-- Codex runs with `sandbox_mode=danger-full-access` unless a task or [harness profile](/concepts/vocabulary#harness-profile) sets a mode other than `workspace-write`, because its own sandbox cannot start inside Docker.
+- Codex runs with `sandbox_mode=danger-full-access` unless a task or [harness profile](/concepts/vocabulary#harness-profile) sets a mode other than `workspace-write`, because its own sandbox can't start inside Docker.
 
 ## The image
 
@@ -120,8 +120,8 @@ Pull it before filing work, or the first launch pulls it inside the task's time 
 ## Limits
 
 - With `unrestricted_network: true` and no [network policy](/reference/configuration/sandbox/network-policy), the container has the default bridge network: open egress, and on a cloud VM the metadata address is reachable.
-- A worker can still delete objects from your repository, which breaks it loudly but cannot put content on another branch.
-- Without a network policy a worker has no channel to Kraft, and its network is not restricted, so Kraft refuses the launch unless `unrestricted_network: true` is set: see [Callbacks from a sandbox](/reference/configuration/sandbox/callbacks).
+- A worker can still delete objects from your repository, which breaks it loudly but can't put content on another branch.
+- Without a network policy a worker has no channel to Kraft, and its network isn't restricted, so Kraft refuses the launch unless `unrestricted_network: true` is set: see [Callbacks from a sandbox](/reference/configuration/sandbox/callbacks).
 - Only repositories keeping refs in git's default files storage are supported; a reftable repository stops the item.
 
 ## In this section

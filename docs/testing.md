@@ -69,12 +69,12 @@ fixture refuses to answer a `param == "bd"` request against the fake).
 
 ## Shape
 
-- **One behaviour, one test; one case, one row.** A fix to a behavior that
+- **One behaviour, one test; one case, one row.** A fix to a behaviour that
   already has a test adds a `parametrize` case to that test, with a readable
-  `id`, not a new function. A new function is for a new behavior. When you
+  `id`, not a new function. A new function is for a new behaviour. When you
   find yourself writing `test_x_with_a_malformed_file`,
   `test_x_with_invalid_utf8`, `test_x_with_permission_denied`, that is one
-  behavior ("x reports a bad file cleanly") and three rows.
+  behaviour ("x reports a bad file cleanly") and three rows.
 
   ```python
   @pytest.mark.parametrize("after_days", [None, 0], ids=["none", "zero"])
@@ -200,7 +200,7 @@ row.
 CI holds a pull request to that. `dev/check_removals.py`, run by the
 `removals declared` job, fails when the PR deletes a test function (or a
 frontend test file) or drops an intent `## REQ` heading that its body does
-not list under a `Removed tests` or `Removed requirements` heading, one id
+not list under a `Removed tests` or `Removed requirements` heading, one ID
 per line with the reason after it:
 
 ```markdown
@@ -213,33 +213,33 @@ per line with the reason after it:
 - some-req-name -- superseded by other-req-name
 ```
 
-A renamed test counts as removed plus added, so list its old id. A deleted
+A renamed test counts as removed plus added, so list its old ID. A deleted
 file may be listed by its path; a file that only loses some tests may not.
 A parametrize case the PR drops counts as a removal too
-(`tests/test_x.py::test_y[refused]`, with ids read off the source where it
+(`tests/test_x.py::test_y[refused]`, with IDs read off the source where it
 spells them out), and so does a test it newly marks `@pytest.mark.skip`,
-listed by its own id; a test removed whole is declared by its id, cases and
+listed by its own ID; a test removed whole is declared by its ID, cases and
 all. The heading may end in a colon. The failure prints the missing block ready to paste. Edit the body, then
 re-run the job: it reads the body fresh, not from the push that triggered
 it. This exists because a PR once silently reverted two merged PRs with CI
 green — their tests left with them (Kraft-79382).
 
 A fold declares its cluster with a wildcard, so consolidation is one line per
-cluster: an id whose test name ends in `*` covers every removed test in that
-same file whose id starts with the rest (cases included, `[` read literally).
+cluster: an ID whose test name ends in `*` covers every removed test in that
+same file whose ID starts with the rest (cases included, `[` read literally).
 The path stays literal, since a wildcard across files would hide exactly the
 revert this job exists to catch, and a deleted file is still declared by its
 plain path. The prefix must be longer than `test_`, and the line must name the
 replacement as a `path::test` that exists at HEAD (a `[case]` or `[...]`
 suffix is fine). A wildcard that is refused declares nothing, and one that
 matches no removed test fails the job as unused, so a typo in the prefix
-cannot pass unnoticed; each prints its own line saying what to fix.
+can't pass unnoticed; each prints its own line saying what to fix.
 
-**Intent pins:** `docs/intent/*.md` reference test ids by name. Renaming or
+**Intent pins:** `docs/intent/*.md` reference test IDs by name. Renaming or
 parametrizing a pinned test means repointing it in the same change. Run
 `just intent` and `tests/test_intent_origins.py`. `just intent-repoint OLD NEW`
 rewrites every pin on `OLD` (or `OLD[case]`) to `NEW` in one go, and refuses
-when `NEW` does not collect.
+when `NEW` doesn't collect.
 
 ## Running
 
@@ -247,7 +247,7 @@ when `NEW` does not collect.
   (`-n` your logical CPUs + 2) unless you pass `-n` or `-p no:xdist`, name a single test, or
   ask for live output (`-s`, `--capture`, `--trace`); `-n 0` stays in one
   process. `just test-ui` for the frontend.
-- Testmon follows Python execution only, so it cannot see a change to a
+- Testmon follows Python execution only, so it can't see a change to a
   file a test reads or runs as a subprocess: a harness YAML, a skill's
   `.md`, `fixtures/fake-claude.sh`, the `tests/support/` files no test
   imports (the sample repo, the fake agents and reviewer, the non-Python
@@ -258,7 +258,7 @@ when `NEW` does not collect.
   a bare `just test` only warns, since its fallback would be the whole suite.
   `src/kraft/_bundled` is built from `config/` and `plugins/kraft/skills`,
   which are watched in its place. Environment variables are the same blind
-  spot and are not watched. `just test-targeted`, which verification runs,
+  spot and aren't watched. `just test-targeted`, which verification runs,
   runs the full suite for these, with three exceptions that add named tests
   instead (`dev/targeted_tests.py` lists them): `docs/intent/` runs
   `tests/test_intent_origins.py` and the intent check; a YAML or JSON file
@@ -272,7 +272,7 @@ when `NEW` does not collect.
   sets another count (for a Kraft worker, in the repo's `repos.yaml` `env:`).
   Those lists come from tracing readers; `just check-targeted-maps` checks
   them by experiment, running the full suite before and after such a change
-  and failing on a new failure in a test the plan did not name.
+  and failing on a new failure in a test the plan didn't name.
 - `just test <paths>` fails when nothing ran: a path that collects nothing,
   and a run testmon (or `-k`/`-m`) deselected to `0 selected`. Pass
   `--no-testmon` to run the paths regardless.
@@ -332,14 +332,14 @@ shape rules that don't — over both testpaths, `tests/` and
   margin above the file's real size, fails the check until it's tightened
   or removed.
 - **(d)** every `def test_` has an assert, a `pytest.raises`/`pytest.warns`,
-  or delegates to a same-module helper that does. One that cannot fail does
+  or delegates to a same-module helper that does. One that can't fail does
   not count: `assert True` (or `x or True`, or a tuple), a bare
   `pytest.raises(Exception)` with no `match=`, an assert under
   `if False:`, or one only inside a nested function nothing calls or passes
   on. A handful of tests where
   "did not raise" is genuinely the only honest assertion are named in
   `EXPECTATION_ALLOWLIST` (same file), each with an inline reason; an entry
-  for a test id that no longer exists fails the check.
+  for a test ID that no longer exists fails the check.
 - **(e)** no helper body is copied across test files: a module-level function
   (not `test_*`) with the same body as one in another test file, or as a
   function in `tests/support/` (underscore or not), fails the check, naming

@@ -37,7 +37,7 @@ Each command links to its entry.
 | File it with a spec or plan I wrote | [`kraft item create "title" --spec PATH --plan PATH`](/reference/cli/item#attach-a-spec-or-plan) |
 | File it and start it at once | [`kraft item create "title" --autostart`](/reference/cli/item#filing-a-work-item) |
 | Revise a spec or plan before the item starts | [`kraft item set-attachments`](/reference/cli/item#change-an-items-setup) |
-| Switch the [chain](/concepts/vocabulary#chain) of an item that has not started | [`kraft item set-chain`](/reference/cli/item#change-an-items-setup) |
+| Switch the [chain](/concepts/vocabulary#chain) of an item that hasn't started | [`kraft item set-chain`](/reference/cli/item#change-an-items-setup) |
 | Start an item that was filed paused | [`kraft item resume`](/reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget) |
 
 ### Watching
@@ -120,7 +120,7 @@ always the same value:
 - `kraft item create --json` prints a trimmed object, not the raw payload: `id`, `status` and `title`, plus `slots` (when `--autostart` queued the item), `repo_warning`, `bead_warning` or `duplicate_warning` when one applies.
 - `kraft view list --json` is scoped to the repo you are in unless you pass `--all` or `--repo`; `list_work_items` is never scoped.
 
-These verbs do not print the payload:
+These verbs don't print the payload:
 
 | Verb | Use instead |
 |---|---|
@@ -162,7 +162,7 @@ in any shell `argcomplete` supports. Register it by adding
 
 ## In this section
 
-- [Item verbs](/reference/cli/item): file, approve, reject, pause, unblock, resume, retry, skip, escalate, and set policy on a work item.
+- [Item verbs](/reference/cli/item): file, approve, reject, pause, unblock, resume, retry, skip, escalate and set policy on a work item.
 - [View verbs](/reference/cli/view): read the board, follow a running item, and review its diff and documents.
 - [Repo verbs](/reference/cli/repo): connect repositories and reach their worktrees.
-- [Admin verbs](/reference/cli/admin): run, check, update, and configure this machine's server.
+- [Admin verbs](/reference/cli/admin): run, check, update and configure this machine's server.

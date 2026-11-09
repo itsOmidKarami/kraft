@@ -35,7 +35,7 @@ A pre-release's `.vsix` is attached to its GitHub Release, stamped
 last release and before `X.Y.Z`. Someone who side-loads an rc is therefore
 offered the real `X.Y.Z` when it ships. It used to be packed as plain `X.Y.Z`,
 which a side-loaded rc then claimed to be, so the release was never offered.
-`vsce package --pre-release` would not have helped: it flags a listing as a
+`vsce package --pre-release` wouldn't have helped: it flags a listing as a
 pre-release without changing the version number, and no pre-release is
 published to a listing. The count is its own number (`rc.10`, not `rc10`)
 because semver compares text, and `rc10` would sort below `rc9`.
@@ -47,7 +47,7 @@ the version and notes on the run's summary page, and in the job log, without
 releasing anything.
 Leave **sha** empty to release main's tip, or give a commit on main to release
 an earlier point. That is useful while the tip's tests are still running. It
-cannot be a commit behind the newest release.
+can't be a commit behind the newest release.
 
 `.github/workflows/release.yml` collects every pull request merged since the
 previous `vX.Y.Z` tag and bumps by the largest label among them: two
@@ -114,7 +114,7 @@ you press the button:
 ## What a stable run publishes
 
 In this order. Unless noted below, a step that fails stops the ones after it,
-and what already published stays published: the tag exists, so a rerun finds
+and what already published stays published: the tag exists, so a re-run finds
 nothing new to release and you finish the rest by hand. Secrets are repository
 secrets or secrets of the `release` environment.
 
@@ -130,9 +130,9 @@ extension newer than the Kraft it talks to is read-only. It shouldn't arrive
 before that Kraft can be installed.
 
 The cost of that order: any failure before it leaves the extension unpublished.
-That covers minting the stamp token, the stamp pull request, Homebrew, and the
+That covers minting the stamp token, the stamp pull request, Homebrew and the
 PyPI check, which fails when PyPI hasn't served the version within 10 minutes,
-even if it does a minute later. A rerun can't recover it, because the tag
+even if it does a minute later. A re-run can't recover it, because the tag
 exists and the run plans nothing. Fix the step that failed, then publish the
 extension by hand from the GitHub Release:
 
@@ -214,7 +214,7 @@ Two things the build writes into those artifacts, because the tag alone doesn't:
 
 A run with **sha** set to a commit from before `vscode/CHANGELOG.md` existed fails
 at the extension build, which comes before the tag is pushed, so nothing is
-published and a rerun at a later commit is safe.
+published and a re-run at a later commit is safe.
 
 ## Plugin manifest versions
 
@@ -309,7 +309,7 @@ and confirm it passed.
 
 If the run stops on an unlabeled pull request, label it (labels can be changed
 after merge) and run the workflow again. A failed build leaves no tag behind, so
-rerunning is safe.
+re-running is safe.
 
 ## The `release/v1` branch
 

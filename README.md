@@ -10,7 +10,7 @@
 [![Docs](https://img.shields.io/badge/docs-kraft--sdlc.dev-blue)](https://kraft-sdlc.dev/)
 [![Live demo](https://img.shields.io/badge/demo-try_it_in_your_browser-brightgreen)](https://kraft-sdlc.dev/demo/)
 
-**A local orchestrator that takes your coding agent from spec to pull request,
+**A local orchestrator that takes your coding agent from spec to merge request,
 stopping only when a decision is yours.**
 
 **[Try the live demo](https://kraft-sdlc.dev/demo/)**: the web UI on sample
@@ -29,7 +29,7 @@ developers tired of babysitting a session to the end of a task;
 says who it isn't for.
 
 Install it with `uv tool install kraft-sdlc` and run `kraft`. It needs Claude
-Code, logged in; [Install](#install) has Homebrew and the agent plugin.
+Code, signed in; [Install](#install) has Homebrew and the agent plugin.
 
 Kraft works with Claude Code out of the box, and you can drive it from Codex,
 Cursor, Antigravity, OpenCode, Amp or Gemini CLI too. The shipped chains run
@@ -42,10 +42,10 @@ says what to check before you upgrade.
 
 [![The Kraft board in the dark Ink look with a violet accent: filters for chain, gate and stop reason above work items grouped by status, Needs you first with each item's one button (Review at a gate, Retry, Raise cap, Answer, Resume and Raise budget on the stopped ones), and Running below it, with a Select all link on every group and a ? shortcuts button in the toolbar](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)](https://kraft-sdlc.dev/demo/)
 
-- **Gates where a human decides.** Kraft pauses at a spec, a plan, or a merge
+- **Gates where a human decides.** Kraft pauses at a spec, a plan or a merge
   request for your approval; request changes with a note and the node that wrote it
   tries again.
-- **Capped retries, not runaway loops.** Attempts, wall-clock time, and spend
+- **Capped retries, not runaway loops.** Attempts, wall-clock time and spend
   are all bounded. Hit a cap and the item stops and hands you the full trace
   instead of quietly burning tokens.
 - **Isolated git worktrees.** Each work item runs on its own branch in its own
@@ -57,16 +57,16 @@ says what to check before you upgrade.
 - **A board you can check from your phone.** Reach it from another device
   through a tunnel.
 
-New here? [Why Kraft](https://kraft-sdlc.dev/get-started/why-kraft) covers what it does that a session, a loop or a skill does not, and when not to use it.
+New here? [Why Kraft](https://kraft-sdlc.dev/get-started/why-kraft) covers what it does that a session, a loop or a skill doesn't, and when not to use it.
 
-*Kraft* is German for force; in English, its cousin *craft* means skill. Your agent brings the craft; Kraft is the force that carries it from spec to pull request.
+*Kraft* is German for force; in English, its cousin *craft* means skill. Your agent brings the craft; Kraft is the force that carries it from spec to merge request.
 
 **A gate stops the chain where a human decides.** Read what the agent wrote,
 then approve, or request changes with a note that re-runs the node that wrote it.
 
 ![The gate's review page headed Approve final review: Request changes and Approve buttons in the header, a Waiting for you mark, a line saying Approving starts release with no gate after it and the spend, the review brief an agent wrote rendered below, and the files on the branch beside it](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/gate.png)
 
-**Read by name, not by id.** Nodes show as "approve spec" and "chain revision",
+**Read by name, not by ID.** Nodes show as "approve spec" and "chain revision",
 and a chain too long to read whole gets an overview of all of it, one small
 glyph per node with a frame on the part in view, above the full-size graph. The
 board filters by chain, gate and stop reason, and retries or resumes a
@@ -93,7 +93,7 @@ keyboard shortcuts.
 Each work item follows a
 [chain](https://kraft-sdlc.dev/concepts/vocabulary): a list of
 nodes such as write the spec, write the plan, implement, verify and open the
-pull request. Some nodes run your coding agent, some run a command, and some
+merge request. Some nodes run your coding agent, some run a command, and some
 stop and wait for you. Chains are YAML files you can edit. A team can share
 chains as [Kraft add-ons](https://kraft-sdlc.dev/guides/customize/share-chains-with-addons),
 which each instance installs from a git repository or a directory. How the
@@ -103,15 +103,15 @@ pieces fit together is in
 ## Requirements
 
 - **macOS or Linux.** CI runs on Linux, and `kraft admin install-service`
-  supports launchd and systemd only. Windows is not supported, and WSL is
+  supports launchd and systemd only. Windows isn't supported, and WSL is
   untested.
 - **`git`**, with `user.name` and `user.email` set (globally, or in each repo
   you connect). Kraft commits the agents' work under that identity.
 - **[uv](https://docs.astral.sh/uv/)**, which uses a Python 3.12 or newer
   already on your machine, or fetches one. Or Homebrew on macOS.
 - **[Claude Code](https://code.claude.com/docs)**, installed
-  and logged in. Every agent task in the shipped chains runs on it.
-- **`gh` or `glab`**, logged in, for the nodes that open and merge the pull
+  and signed in. Every agent task in the shipped chains runs on it.
+- **`gh` or `glab`**, signed in, for the nodes that open and merge the pull
   request on GitHub or GitLab.
 
 **Supported agents:** Claude Code, Codex, Cursor, Gemini, Antigravity, OpenCode
@@ -158,7 +158,7 @@ kraft              # http://127.0.0.1:8765
 kraft --version    # in another terminal: confirms what you installed
 ```
 
-Then open a Claude Code session in your repo, run this, and follow what it
+Then open a Claude Code session in your repo, run this and follow what it
 asks. It needs the server running:
 
 ```text
@@ -189,7 +189,7 @@ to file your first work item.
 
 ## Analytics
 
-Lead time, cost, and where both go — by node and by repo, over a Range you pick:
+Lead time, cost and where both go — by node and by repo, over a Range you pick:
 7 days, 30 days, 8 weeks (the default) or 90 days, the same menu on a desktop and a phone. Built from the same events the
 board renders live, not a separate pipeline.
 
@@ -204,8 +204,8 @@ board renders live, not a separate pipeline.
 - [Share chains with add-ons](https://kraft-sdlc.dev/guides/customize/share-chains-with-addons): publish chains, skills and agent profiles from a git repository, and install a team's.
 - [Remote access](https://kraft-sdlc.dev/guides/run/remote-access): reach the board from a phone or another machine.
 - [Triggers](https://kraft-sdlc.dev/reference/triggers): start a chain from a schedule or an HTTP call.
-- [Discussions](https://github.com/itsOmidKarami/kraft/discussions): questions, ideas, and the chains you've built.
-- [Start here](https://github.com/itsOmidKarami/kraft/issues/1131): small, self-contained issues for a first pull request.
+- [Discussions](https://github.com/itsOmidKarami/kraft/discussions): questions, ideas and the chains you've built.
+- [Start here](https://github.com/itsOmidKarami/kraft/issues/1131): small, self-contained issues for a first merge request.
 - [Security](https://kraft-sdlc.dev/project/security): threat model; report vulnerabilities per [SECURITY.md](https://github.com/itsOmidKarami/kraft/blob/main/SECURITY.md).
 
 Kraft Lite, a separate plugin, runs a chain inside a single
@@ -219,7 +219,7 @@ Report security problems as [SECURITY.md](https://github.com/itsOmidKarami/kraft
 
 ## Contributing
 
-Set-up, the `just` recipes, tests, and the pull request rules are in
+Set-up, the `just` recipes, tests and the merge request rules are in
 [CONTRIBUTING.md](https://github.com/itsOmidKarami/kraft/blob/main/CONTRIBUTING.md). Releases are described in
 [RELEASING.md](https://github.com/itsOmidKarami/kraft/blob/main/RELEASING.md). Everyone taking part follows the
 [Code of Conduct](https://github.com/itsOmidKarami/kraft/blob/main/CODE_OF_CONDUCT.md).

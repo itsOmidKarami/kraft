@@ -32,7 +32,7 @@ The answer carries:
 | Field | Meaning |
 |---|---|
 | `status` | `ok` or `degraded`. |
-| `invalid_templates`, `invalid_policy`, `invalid_intake`, `invalid_forges` | The reasons it is degraded. `invalid_intake` is why `intake.yaml` does not load, else `null`; `invalid_forges` is the same for `forges.yaml`. |
+| `invalid_templates`, `invalid_policy`, `invalid_intake`, `invalid_forges` | The reasons it is degraded. `invalid_intake` is why `intake.yaml` doesn't load, else `null`; `invalid_forges` is the same for `forges.yaml`. |
 | `forge_tokens` | Each `client: api` account's last token check, by name: `{state, expires_on}`, never who it signs in as. A `state` of `no_token`, `refused`, `forbidden` or `tls`, or an `expires_on` within 7 days, makes `status` `degraded`. _Added in 2.5_ |
 | `storage` | `null` without `storage.worktrees.limit`, else `{state, used_bytes, quota_bytes, limit_bytes, measured_at, too_recent}`. `state` is `ok`, `over_quota` or `held`, and `held` makes `status` `degraded`. `too_recent` counts finished items the last automatic clean-up left because they ended less than `min_age` ago. |
 | `intake_off` | Whether [auto-intake](/concepts/vocabulary#auto-intake) and `intake.yaml`'s schedules are off for it. |
@@ -41,14 +41,14 @@ The answer carries:
 | `run_dir`, `pid`, `uptime_s`, `bind`, `port` | Which instance this is. |
 | `version` | The version it runs. |
 | `installed` | The version installed on disk, which differs until a restart finishes an update. |
-| `reattach_summary` | What startup found of agent sessions that were running: `scanned`, `adopted`, `resolved_from_file`, `unknown` and `resumed_work_items`. Each `adopted`, `resolved_from_file` and `unknown` entry is `<work item id>/<session id>`, since a session id is unique only within its work item. |
+| `reattach_summary` | What startup found of agent sessions that were running: `scanned`, `adopted`, `resolved_from_file`, `unknown` and `resumed_work_items`. Each `adopted`, `resolved_from_file` and `unknown` entry is `<work item id>/<session id>`, since a session ID is unique only within its work item. |
 | `index` | The search index: `last_scan_at`, `repos_scanned`, `documents`, and the state of `embeddings`. |
 | `kraft_default` | `{signature, count}`: a short hash of the lines the `kraft-default` row of `kraft admin doctor` shows, and how many; `{signature: null, count: 0}` when none. The lines are on [`GET /api/kraft-default`](/reference/http-api/repos-chains-harnesses-and-server#get-apikraft-default). _Added in next_ |
 | `session_expiry_days` | How long a login lasts, which the login screen shows. |
 
-An add-on that is installed and did not load is under `invalid_templates`, as `add-on <id>` with the reason, and `status` is `degraded`. A held or failed entry of `addon_updates` leaves `status` as it is.
+An add-on that is installed and didn't load is under `invalid_templates`, as `add-on <id>` with the reason, and `status` is `degraded`. A held or failed entry of `addon_updates` leaves `status` as it is.
 
-`intake_off` is `true` when the server started on an `intake.yaml` that does not load. A [trigger](/concepts/vocabulary#trigger) left in `policy.yaml` still fires. It is `false` when a reload refused the file and the running schedules are kept.
+`intake_off` is `true` when the server started on an `intake.yaml` that doesn't load. A [trigger](/concepts/vocabulary#trigger) left in `policy.yaml` still fires. It is `false` when a reload refused the file and the running schedules are kept.
 
 ## Who may call
 
@@ -67,12 +67,12 @@ The MCP bearer token is a full-access credential. See [Security](/project/securi
 |---|---|
 | `401` | The request has no valid credentials. |
 | `403` | A remote caller, while no password is set. |
-| `403` | The `Host` is not an allowed name: `unexpected Host for a server bound to …`. See the rules below. |
+| `403` | The `Host` isn't an allowed name: `unexpected Host for a server bound to …`. See the rules below. |
 | `403` | A cross-site write. The `/api/ws/events` WebSocket refuses the handshake the same way when its `Origin` is another site's. |
 
-A `Host` is not allowed when:
+A `Host` isn't allowed when:
 
-- Kraft is bound to loopback and the request is not addressed to `127.0.0.1`, `localhost` or `[::1]`.
+- Kraft is bound to loopback and the request isn't addressed to `127.0.0.1`, `localhost` or `[::1]`.
 - Kraft is bound off loopback and the request comes from a browser (it sends `Sec-Fetch-Site`, `Origin`, `Referer` or an HTML `Accept`) whose `Host` is neither a loopback name nor in `allowed_hosts`. The CLI, MCP and `curl` need no entry there.
 
 A browser opening a page (a `GET` outside `/api` with an HTML `Accept`) gets the `403` as a short HTML page instead. The page names the `Host` it sent and how to allow it. The WebSocket applies the same `Host` rules.
@@ -98,7 +98,7 @@ Both pages load their scripts from a public CDN, jsdelivr. Each
 script is pinned to one exact release, and your browser refuses it unless it
 matches the hash Kraft ships. Nothing else on either page comes from another
 site: their policy lets an image load only from Kraft itself or inline, so
-ReDoc's "Redocly" logo is not fetched.
+ReDoc's "Redocly" logo isn't fetched.
 
 On a machine without internet access,
 load `/openapi.json` into your own OpenAPI viewer.
@@ -117,7 +117,7 @@ and everything the route does name the whole ID.
 | An item's whole ID | That item, even when it is also the start of a longer ID. |
 | The start of exactly one item's ID | That item. |
 | The start of more than one | `409`, naming every ID it starts. |
-| Anything else, a value under 4 characters or one with another character included | `404 unknown work item`, as for an ID that does not exist. |
+| Anything else, a value under 4 characters or one with another character included | `404 unknown work item`, as for an ID that doesn't exist. |
 
 A caller the [refusals](#refusals) above turn away gets that refusal first, so
 it learns nothing about which IDs exist. A worker inside a network sandbox
@@ -157,7 +157,7 @@ older routes only for a session from before then, by its whole 32-character ID.
 
 ## Routes the pages document
 
-The pages in this section document the board's routes for work items, repos, chains, harnesses, settings, drafts and the server's own state, and the `/api/ws/events` WebSocket. They do not document every route. [`/openapi.json`](#the-schema) lists every HTTP route, but not the WebSocket, which is only described under [Events](/reference/events#ws-apiwsevents). The pages leave out these groups, which the board uses and a script rarely needs:
+The pages in this section document the board's routes for work items, repos, chains, harnesses, settings, drafts and the server's own state, and the `/api/ws/events` WebSocket. They don't document every route. [`/openapi.json`](#the-schema) lists every HTTP route, but not the WebSocket, which is only described under [Events](/reference/events#ws-apiwsevents). The pages leave out these groups, which the board uses and a script rarely needs:
 
 - review threads and their comments;
 - login and logout, and the browser sessions;
@@ -201,7 +201,7 @@ The pages can change in any release. A script that must keep working calls the [
 | [`POST /api/work-items/{id}/skip`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidskip) | Advances past the current node or gate without running it. |
 | [`POST /api/work-items/{id}/escalate`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidescalate) | Sends a message to an agent that helps with a stopped item. |
 | [`POST /api/work-items/{id}/escalate/stop`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidescalatestop) | Ends the running escalation turn. |
-| [`POST /api/work-items/{id}/retry`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidretry) | Reruns the node an item stopped on. |
+| [`POST /api/work-items/{id}/retry`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidretry) | Re-runs the node an item stopped on. |
 | [`POST /api/work-items/{id}/reopen-mr`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidreopen-mr) | Reopens a merge request closed on the forge, then retries. |
 | [`POST /api/work-items/{id}/progress`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidprogress) | Records that a worker started a plan task. |
 | [`POST /api/work-items/{id}/mr-labels`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidmr-labels) | Labels the item's merge request. |
@@ -365,9 +365,9 @@ _Added in 2.4_
 ## In this section
 
 - [Filing, reading and changing work items](/reference/http-api/work-items): filing and duplicating an item, reading the board and one item, changing an item, and acting on several at once.
-- [Gates, run control, ending and retry](/reference/http-api/gates-run-control-and-ending): deciding a gate, pausing, resuming, skipping and escalating, ending and archiving an item, retrying it, and the routes a worker calls.
+- [Gates, run control, ending and retry](/reference/http-api/gates-run-control-and-ending): deciding a gate, pausing, resuming, skipping and escalating, ending and archiving an item, retrying it and the routes a worker calls.
 - [The work item object](/reference/http-api/work-item-object): the three shapes a work item answers in, its stored columns, and the fields that need an explanation.
 - [Budget, events, diff and documents](/reference/http-api/budget-and-events): the daily spend total and raising a budget, the dry run of a create, events paging, the diff and review routes, and a work item's documents.
 - [Repos, chains, harnesses and the server](/reference/http-api/repos-chains-harnesses-and-server): connecting, changing and disconnecting a repo, chains and library components, harnesses, changes saved but not applied, the update check, and opening an editor.
 - [Drafts](/reference/http-api/drafts): the routes the Templates and Settings editors use to keep, change, publish and discard a draft and the `result` each answers, and the policy and intake-check routes.
-- [Ops for each draft area](/reference/http-api/draft-ops): every op a draft takes, by area, and a work item's own draft.
+- [Ops for each draft area](/reference/http-api/draft-ops): every op a draft takes, by area and a work item's own draft.

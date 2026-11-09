@@ -21,7 +21,7 @@ to where it is done.
 
 ## In this section
 
-- [Sidebar, search, and keyboard](/reference/web-ui/sidebar-search-and-keyboard): the sidebar, search, vector search and the shortcuts every screen shares.
+- [Sidebar, search and keyboard](/reference/web-ui/sidebar-search-and-keyboard): the sidebar, search, vector search and the shortcuts every screen shares.
 - [The board](/reference/web-ui/board): where every work item sits by what it needs from you, with a row's button, the filters and the side panel.
 - [An item's page](/reference/web-ui/item-page): one work item in full, with the header's actions, the chain graph and the inspector.
 - [Fix loops and test scopes](/reference/web-ui/fix-loops-and-test-scopes): a node's own view of a fix loop's rounds, and a changed-test-scope task's frame and chips.

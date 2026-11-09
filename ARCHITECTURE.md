@@ -68,4 +68,4 @@ To add an event type, add the member to its family and then:
 | the regenerated `vscode/schemas/notify.schema.json` (`just schemas`; `notify.yaml`'s `events` lists the valid names) | `tests/test_config_schemas.py::test_the_committed_schema_is_current` and the `config-schemas-current` pre-commit hook |
 | the family size and the total in `tests/vocab/test_events.py` | that test |
 
-`events.append` refuses a type that is not a member, and a test walks `src/kraft` to check every `events.append` names a family member, so a writer cannot use a bare string.
+`events.append` refuses a type that isn't a member, and a test walks `src/kraft` to check every `events.append` names a family member, so a writer can't use a bare string.

@@ -2,12 +2,12 @@
 
 ## Reporting a vulnerability
 
-Please do not open a public issue for a security vulnerability. Report it
+Please don't open a public issue for a security vulnerability. Report it
 privately through GitHub:
 [report a vulnerability](https://github.com/itsOmidKarami/kraft/security/advisories/new).
 Include a description and, if you have one, a reproduction.
 
-If you cannot use GitHub, email **itsomidkarami@gmail.com** instead.
+If you can't use GitHub, email **itsomidkarami@gmail.com** instead.
 
 ## Supported versions
 
@@ -21,5 +21,5 @@ Only the latest release gets security fixes.
 
 ## Threat model
 
-What Kraft protects against, and what it deliberately does not, is documented in
+What Kraft protects against, and what it deliberately doesn't, is documented in
 the [threat model](https://kraft-sdlc.dev/project/security).

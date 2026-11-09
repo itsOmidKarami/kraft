@@ -2,11 +2,11 @@
 title: Project
 navigation:
   title: Overview
-description: Security, data and privacy, release news, status and support, architecture, and how to contribute.
+description: Security, data and privacy, release news, status and support, architecture and how to contribute.
 ---
 
 Read Security and Data and privacy first: they say what Kraft does on your
-machine and what leaves it. Architecture, Source map, and Contributing, the
+machine and what leaves it. Architecture, Source map and Contributing, the
 last three, are for people who work on its code.
 
 ## In this section

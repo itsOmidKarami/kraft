@@ -11,7 +11,7 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 
 | File | What it configures | Created | Page |
 |---|---|---|---|
-| `repos.yaml` | Connected repos: setup command, env, steering, workspaces, and the `sandbox` field ([Sandboxed workers](/reference/configuration/sandbox)). | Seeded, empty | [repos.yaml](/reference/configuration/repos) |
+| `repos.yaml` | Connected repos: setup command, env, steering, workspaces and the `sandbox` field ([Sandboxed workers](/reference/configuration/sandbox)). | Seeded, empty | [repos.yaml](/reference/configuration/repos) |
 | `policy.yaml` | Caps, budget, concurrency, archiving, defaults and maxima. | Seeded | [policy.yaml](/reference/configuration/policy) |
 | `library.yaml` and `chains/*.yaml` | The templates: reusable components and the chains built from them, copied onto each [work item](/concepts/vocabulary#work-item) at intake. | Seeded: the `default` and `quick-task` chains | [Library and chains](/reference/configuration/library-and-chains) |
 | `harnesses.yaml` | [Harness profiles](/concepts/vocabulary#harness-profile) and [agent profiles](/concepts/vocabulary#agent-profile). | Seeded | [harnesses.yaml](/reference/configuration/harnesses-file) |
@@ -23,7 +23,7 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 | `forges.yaml` | Named forge accounts: a host's forge and web address, so connect stops asking. _Added in 2.5_ | `kraft admin forge`, or you | [forges.yaml](/reference/configuration/forges) |
 | `machine.yaml` | On a machine, not the server: how many steps that machine runs at once. _Added in 2.4_ | You | [The machine's own limit](/reference/configuration/workers#the-machines-own-limit) |
 | `theme.yaml` | UI appearance. | The first save in Settings | [theme.yaml](/reference/configuration/theme) |
-| `sandbox.yaml` | Which container CLI runs [sandboxed](/concepts/vocabulary#sandbox) tasks, SELinux, and an extra CA. | You | [sandbox.yaml](/reference/configuration/sandbox/sandbox-yaml) |
+| `sandbox.yaml` | Which container CLI runs [sandboxed](/concepts/vocabulary#sandbox) tasks, SELinux and an extra CA. | You | [sandbox.yaml](/reference/configuration/sandbox/sandbox-yaml) |
 | `detectors.yaml` | Your own conventions for the setup and test commands `kraft repo connect` proposes, layered on the shipped table. | You | [detectors.yaml](/reference/configuration/repos/detectors) |
 | `harnesses/*.yaml` | Your own [harness](/concepts/vocabulary#harness) definitions, which add a harness or override a shipped one. | You | [Harness definition files](/reference/harnesses/harness-files) |
 | `addons.yaml` | The [collections](/concepts/vocabulary#collection) this instance knows and the [Kraft add-ons](/concepts/vocabulary#add-on) installed from them. | `kraft admin addon`, or you | [Add-ons and collections](/reference/configuration/addons#addonsyaml) |
@@ -32,7 +32,7 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 
 ## How Kraft treats the directory
 
-- **Seeding.** Kraft copies the shipped defaults into `config/` on first run and never overwrites it afterwards, so an upgrade cannot clobber an edited policy. Kraft's own chains and library are the built-in add-on `kraft-default`, not seeded files: a new home's `default` and `quick-task` extend it. [Move onto kraft-default](/guides/run/upgrade-your-configuration) moves an older home's copies onto it. The files marked "You", "`kraft admin addon`" or "The first save in Settings" are never seeded.
+- **Seeding.** Kraft copies the shipped defaults into `config/` on first run and never overwrites it afterwards, so an upgrade can't clobber an edited policy. Kraft's own chains and library are the built-in add-on `kraft-default`, not seeded files: a new home's `default` and `quick-task` extend it. [Move onto kraft-default](/guides/run/upgrade-your-configuration) moves an older home's copies onto it. The files marked "You", "`kraft admin addon`" or "The first save in Settings" are never seeded.
 - **Editing.** The **Templates** screens edit `library.yaml` and `chains/`. **Settings** edits the rest, except `sandbox.yaml`, `detectors.yaml`, `harnesses/` and the add-on files and locks, which no screen edits. Editing any file by hand is equally supported.
 - **Moving it.** `KRAFT_HOME` and `KRAFT_CONFIG_DIR` move the directory; see [Environment variables](/reference/configuration/environment-variables).
 - **Validation.** Kraft validates each file when it loads it, and reports a file that fails with the offending key named. Chain rules such as `extends` and `reject_to` are in [Chain file keys](/reference/chain-nodes).
@@ -40,7 +40,7 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 
 Three commands check and reload the files:
 
-- `kraft admin doctor` reports anything that does not parse.
+- `kraft admin doctor` reports anything that doesn't parse.
 - `kraft admin reload` rereads `policy.yaml`, `library.yaml` with its chains, `intake.yaml`, `workers.yaml`, `forges.yaml`, and `addons.yaml` with `addons.lock`, without a restart. A change to `access.yaml`'s `bind` or `port` needs a restart, and a hand edit of `notify.yaml` takes effect at the next save in Settings or a restart.
 - `kraft admin templates lint` checks the whole library and every chain at once, and writes nothing.
 
@@ -53,11 +53,11 @@ Three commands check and reload the files:
 - [access.yaml](/reference/configuration/access): every field in `access.yaml`: bind address, port, password, session expiry and allowed hosts.
 - [intake.yaml](/reference/configuration/intake): every field in `intake.yaml`: autonomous pickup from beads, and cron schedules.
 - [notify.yaml](/reference/configuration/notify): every field in `notify.yaml`: the notification webhook and the events that post to it.
-- [theme.yaml](/reference/configuration/theme): every field in `theme.yaml`: colors, density, the diff and the board.
+- [theme.yaml](/reference/configuration/theme): every field in `theme.yaml`: colours, density, the diff and the board.
 - [Sandboxed workers](/reference/configuration/sandbox): the `sandbox` key of `repos.yaml`, and the pages for the container's resource limits, callbacks, network, credentials, Kits, `sandbox.yaml` and git.
 - [Environment variables](/reference/configuration/environment-variables): the variables that move this directory, every other variable Kraft reads, and the variables a worker gets.
 - [Add-ons and collections](/reference/configuration/addons): `collection.json`, `addon.json`, `addons.yaml` and `addons.lock`, the naming rules, and when an add-on loads, updates and is restored.
 - [Repo libraries](/reference/configuration/repo-libraries): a repository's own `.kraft/` library, where it is read from, how a person accepts it, and `repo-libraries.lock`.
 - [update.yaml](/reference/configuration/update): every field in `update.yaml`: automatic updates, restarting when Kraft is free, the channel and the allowed hours.
 - [workers.yaml](/reference/configuration/workers): every field in `workers.yaml`: the machines that may run steps, how each connects, and why one is offline.
-- [forges.yaml](/reference/configuration/forges): every field in `forges.yaml`: the named forge accounts, which one a repo uses, and what is not there yet.
+- [forges.yaml](/reference/configuration/forges): every field in `forges.yaml`: the named forge accounts, which one a repo uses, and what isn't there yet.

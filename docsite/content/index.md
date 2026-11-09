@@ -1,6 +1,6 @@
 ---
-title: Run your coding agent from spec to pull request
-description: 'A local orchestrator that takes your coding agent from spec to pull request, stopping only when a decision is yours.'
+title: Run your coding agent from spec to merge request
+description: 'A local orchestrator that takes your coding agent from spec to merge request, stopping only when a decision is yours.'
 ---
 
 ::u-page-hero
@@ -37,13 +37,13 @@ uv tool install kraft-sdlc && kraft
 :::stage-strip
 :::
 
-Kraft needs Claude Code installed and logged in. The shipped chains run every agent task on it, and another agent CLI works as a [harness](/reference/harnesses) after a chain edit.
+Kraft needs Claude Code installed and signed in. The shipped chains run every agent task on it, and another agent CLI works as a [harness](/reference/harnesses) after a chain edit.
 
 It adds what a single session can't:
 
-- **A process the agent can't skip.** A chain like the one above is a file you can read and diff; the agent does not decide the workflow fresh each time.
+- **A process the agent can't skip.** A chain like the one above is a file you can read and diff; the agent doesn't decide the workflow fresh each time.
 - **Checks it doesn't grade itself on.** Kraft runs your tests in a node of its own, waits for your CI itself, and has a separate reviewer or judge decide whether a fix is done.
-- **A person at the decisions that matter.** You approve a spec, a plan, or a merge request. Hand it a spec and walk away; retries and spend are capped.
+- **A person at the decisions that matter.** You approve a spec, a plan or a merge request. Hand it a spec and walk away; retries and spend are capped.
 ::
 
 ::u-page-section
@@ -93,7 +93,7 @@ alt: 'A line comment on a one-line change, labelled Must fix, being added to a r
 crop: 500 196 924 244
 width: 1440
 ---
-**The note.** Comment on the lines it is about, and label it must-fix, question, or nit. [Review a change](/guides/day-to-day/review-a-change)
+**The note.** Comment on the lines it is about, and label it must-fix, question or nit. [Review a change](/guides/day-to-day/review-a-change)
 :::::
 
 :::::landing-shot
@@ -107,7 +107,7 @@ width: 390
 :::::
 ::::
 
-- **Search, ⌘K.** Full-text search, with optional vector search, across work items, pending actions, and linked documents.
+- **Search, ⌘K.** Full-text search, with optional vector search, across work items, pending actions and linked documents.
 - **Analytics.** See where lead time and cost go, by node and by repo, over the last 8 weeks (on a phone, the last 7, 30 or 90 days). [The Analytics screen](/reference/web-ui/analytics)
 ::
 

@@ -2,7 +2,7 @@
 title: Reference
 navigation:
   title: Overview
-description: Look-up pages for the web UI, the CLI, the console, configuration files, chain nodes, permissions, harnesses, triggers, the HTTP API, MCP tools, environment variables, and events.
+description: Look-up pages for the web UI, the CLI, the console, configuration files, chain nodes, permissions, harnesses, triggers, the HTTP API, MCP tools, environment variables and events.
 ---
 
 Look up a command, field, endpoint, tool, status or event. The sidebar groups these pages under the three headings below.
@@ -28,7 +28,7 @@ Look up a command, field, endpoint, tool, status or event. The sidebar groups th
 **Drive Kraft from a program**
 
 - [Inbound triggers](/reference/triggers): when you start a chain from a cron schedule or an HTTP call.
-- [HTTP API](/reference/http-api): when you call Kraft over HTTP and want the stable routes, the board's routes and the draft ops, the schema, and who may call.
+- [HTTP API](/reference/http-api): when you call Kraft over HTTP and want the stable routes, the board's routes and the draft ops, the schema and who may call.
 - [MCP tools](/reference/mcp-tools): when you wire an agent to Kraft and want every tool and its `kraft` command.
 - [Events](/reference/events): when you read a work item's timeline, stream events over the WebSocket, or send events to a webhook.
 
