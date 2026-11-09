@@ -41,3 +41,18 @@ origin: src/kraft/acp/client.py
 WHILE no tool policy can be held over ACP, the client SHALL answer each permission ask with the option whose kind is `allow_once`, never an `*_always` option, and log the ask.
 enforced-by: tests/acp/test_client.py::test_a_permission_ask_is_answered_allow_once_by_kind_and_logged
 origin: src/kraft/acp/client.py
+
+## REQ acp-resume-prefers-session-resume-then-session-load
+WHEN an ACP launch resumes, the client SHALL use `session/resume` when the agent offers it, else `session/load` with the replayed history marked, else fail the launch.
+enforced-by: tests/acp/test_client.py::test_a_resume_prefers_session_resume_then_session_load[resume-preferred], tests/acp/test_client.py::test_a_resume_prefers_session_resume_then_session_load[load-fallback], tests/acp/test_client.py::test_an_agent_that_cannot_resume_at_all_fails_the_launch
+origin: src/kraft/acp/client.py
+
+## REQ acp-context-is-a-system-prompt-object-when-offered
+WHERE the agent advertises `sessionCapabilities.systemPrompt`, the client SHALL send Kraft's context as an object `{mode: append, content: [...]}` on a new or resumed session, and otherwise SHALL fold it into the prompt.
+enforced-by: tests/acp/test_client.py::test_context_rides_the_system_prompt_object_or_folds_into_the_prompt[object-when-offered], tests/acp/test_client.py::test_context_rides_the_system_prompt_object_or_folds_into_the_prompt[folded-when-not], tests/acp/test_client.py::test_a_resume_sends_the_system_prompt_object_only_when_the_agent_offers_it[resume-with-system-prompt-offered], tests/acp/test_client.py::test_a_resume_sends_the_system_prompt_object_only_when_the_agent_offers_it[resume-without-it-offered]
+origin: src/kraft/acp/client.py
+
+## REQ acp-refused-config-option-is-a-config-error
+IF the agent refuses a model or effort value, THEN the launch SHALL end as `config_error` naming the option and the values the agent offered.
+enforced-by: tests/acp/test_client.py::test_a_refused_config_option_is_a_config_error_naming_what_was_offered
+origin: src/kraft/acp/client.py

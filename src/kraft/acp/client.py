@@ -37,6 +37,19 @@ class Fail(Exception):
         self.config = config
 
 
+def _values(offered: list, cid: str) -> list[str]:
+    """The values the agent offers for config option `cid` (flat, or grouped)."""
+    for option in offered:
+        if option.get("id") == cid:
+            flat = []
+            for o in option.get("options") or []:
+                flat += (
+                    [x.get("value") for x in o["options"]] if "options" in o else [o.get("value")]
+                )
+            return [v for v in flat if isinstance(v, str)]
+    return []
+
+
 def _code(rc: int) -> int:
     return 128 - rc if rc < 0 else rc  # -9 -> 137, -15 -> 143: what a shell reports
 
@@ -105,7 +118,9 @@ class Client:
                 self.emit(log.event("line_too_long", limit=self.spec.line_limit))
             else:
                 assert isinstance(value, dict)
-                self.emit(log.message("from_agent", value, replay=self.replay))
+                # only the replayed history is marked, not the answer that ends the replay
+                replayed = self.replay and "method" in value
+                self.emit(log.message("from_agent", value, replay=replayed))
                 await self._dispatch(value)
 
     async def _stderr(self) -> None:
@@ -203,16 +218,54 @@ class Client:
         return 0
 
     async def open_session(self, params: dict, caps: dict):
-        """Task 6: `session/new`. Task 7 adds the resume branch in this method."""
+        """`session/new`, or on a resume `session/resume`, else `session/load`."""
+        spec = self.spec
         try:
-            res = await self.request("session/new", params)
+            if not spec.resume:
+                res = await self.request("session/new", params)
+                return res["sessionId"], None, list(res.get("configOptions") or [])
+            if caps["resume"]:
+                res = await self.request("session/resume", {"sessionId": spec.resume, **params})
+                return spec.resume, "resume", list(res.get("configOptions") or [])
+            if caps["load_session"]:
+                self.replay = True  # history replayed before the answer is marked in the log
+                try:
+                    res = await self.request("session/load", {"sessionId": spec.resume, **params})
+                finally:
+                    self.replay = False
+                return spec.resume, "load", list(res.get("configOptions") or [])
         except RpcError as exc:
-            raise Fail(f"the agent refused session/new: {exc}") from exc
-        return res["sessionId"], None, list(res.get("configOptions") or [])
+            raise Fail(f"the agent refused to open the session: {exc}") from exc
+        raise Fail("the agent can resume neither with session/resume nor session/load")
 
     async def apply_options(self, sid: str, offered: list) -> str | None:
-        """Task 7: `session/set_config_option` for model and effort."""
-        return self.spec.model
+        """`session/set_config_option` for model and effort; returns the effective model."""
+        for name, value in (("model", self.spec.model), ("effort", self.spec.effort)):
+            if value is None:
+                continue
+            cid = self.spec.options.get(name)
+            if cid is None:
+                raise Fail(
+                    f"this launch sets {name}={value!r} but the entry maps no {name!r} "
+                    "under options:",
+                    config=True,
+                )
+            try:
+                res = await self.request(
+                    "session/set_config_option",
+                    {"sessionId": sid, "configId": cid, "value": value},
+                )
+            except RpcError as exc:
+                raise Fail(
+                    f"the agent refused {name} {value!r} (config option {cid!r}); it offers: "
+                    f"{', '.join(_values(offered, cid)) or 'nothing'} ({exc})",
+                    config=True,
+                ) from exc
+            offered[:] = res.get("configOptions") or offered
+        cid = self.spec.options.get("model")
+        return self.spec.model or next(
+            (o.get("currentValue") for o in offered if o.get("id") == cid), None
+        )
 
     async def cancel(self, sid: str, prompt) -> int:
         """Task 8."""

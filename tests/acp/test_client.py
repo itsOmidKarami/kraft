@@ -195,3 +195,80 @@ def test_the_client_never_imports_the_server(tmp_path):
     assert "kraft.acp.client" in imported
     assert not {m for m in imported if m.split(".")[0] in ("fastapi", "starlette", "textual")}
     assert not {m for m in imported if m.startswith("kraft.api")}
+
+
+@pytest.mark.parametrize(
+    ("flags", "method", "replayed"),
+    [
+        ("", "session/resume", False),
+        ("no_resume", "session/load", False),
+        ("no_resume,replay", "session/load", True),
+    ],
+    ids=["resume-preferred", "load-fallback", "load-replay-marked"],
+)
+def test_a_resume_prefers_session_resume_then_session_load(tmp_path, flags, method, replayed):
+    _, recs = run_client(tmp_path, flags, resume="old-session")
+    assert method in [m["method"] for m in recorded(tmp_path) if "method" in m]
+    ev = _events(recs, "session")[0]
+    assert ev["session_id"] == "old-session" and ev["resumed"] == method.split("/")[1]
+    marked = [r for r in recs if r.get("replay")]
+    assert bool(marked) is replayed
+
+
+def test_an_agent_that_cannot_resume_at_all_fails_the_launch(tmp_path):
+    done, _ = run_client(tmp_path, "no_resume,no_load", resume="old")
+    assert done.returncode == 1
+    assert "neither" in json.loads((tmp_path / "result.json").read_text())["error"]
+
+
+@pytest.mark.parametrize(
+    ("flags", "where"),
+    [("", "systemPrompt"), ("no_system_prompt", "prompt")],
+    ids=["object-when-offered", "folded-when-not"],
+)
+def test_context_rides_the_system_prompt_object_or_folds_into_the_prompt(tmp_path, flags, where):
+    run_client(tmp_path, flags, context="THE-CONTEXT", prompt="THE-TASK")
+    sent = {m["method"]: m["params"] for m in recorded(tmp_path) if "method" in m}
+    if where == "systemPrompt":
+        assert sent["session/new"]["systemPrompt"] == {
+            "mode": "append",
+            "content": [{"type": "text", "text": "THE-CONTEXT"}],
+        }
+        assert sent["session/prompt"]["prompt"][0]["text"] == "THE-TASK"
+    else:
+        assert "systemPrompt" not in sent["session/new"]
+        assert sent["session/prompt"]["prompt"][0]["text"] == "THE-CONTEXT\n\nTHE-TASK"
+
+
+@pytest.mark.parametrize(
+    ("flags", "offered"),
+    [("", True), ("no_system_prompt", False)],
+    ids=["resume-with-system-prompt-offered", "resume-without-it-offered"],
+)
+def test_a_resume_sends_the_system_prompt_object_only_when_the_agent_offers_it(
+    tmp_path, flags, offered
+):
+    run_client(tmp_path, flags, resume="old-session", context="THE-CONTEXT", prompt="THE-TASK")
+    sent = {m["method"]: m["params"] for m in recorded(tmp_path) if "method" in m}
+    assert ("systemPrompt" in sent["session/resume"]) is offered
+    if offered:
+        assert sent["session/resume"]["systemPrompt"]["content"][0]["text"] == "THE-CONTEXT"
+        assert sent["session/prompt"]["prompt"][0]["text"] == "THE-TASK"
+    else:
+        assert sent["session/prompt"]["prompt"][0]["text"] == "THE-CONTEXT\n\nTHE-TASK"
+
+
+def test_model_and_effort_go_through_set_config_option_with_the_entrys_ids(tmp_path):
+    _, recs = run_client(tmp_path, model="big", effort="high")
+    sets = [
+        m["params"] for m in recorded(tmp_path) if m.get("method") == "session/set_config_option"
+    ]
+    assert [(s["configId"], s["value"]) for s in sets] == [("model", "big"), ("effort", "high")]
+    assert _events(recs, "session")[0]["model"] == "big"
+
+
+def test_a_refused_config_option_is_a_config_error_naming_what_was_offered(tmp_path):
+    done, recs = run_client(tmp_path, "refuse_config", model="nope")
+    assert done.returncode == 78
+    message = _events(recs, "config_error")[0]["message"]
+    assert "model" in message and "fake-model" in message
