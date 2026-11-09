@@ -7,7 +7,13 @@ of flags (see `tests/acp/test_client.py` and `tests/support/acp.py`):
 
   ask fs stray long replay no_cost no_usage no_resume no_load no_system_prompt slow term die
   refuse_config noresult auth die_after_init hang deaf die_on_int exit_on_int kill noisy late
-  slow_init mute badreq die_stderr
+  slow_init mute badreq die_stderr ask_all only_always end_on_reject
+
+`ask_all`: the agent asks before every scripted tool call (as if `asks_everything` had been
+applied); the same switch is `FAKE_ACP_ASK_ALL=1` in the environment. `only_always`: an ask
+offers only an `allow_always` option. `end_on_reject`: a rejected ask ends the turn `cancelled`
+(OpenCode does).
+`KRAFT_FAKE_ACP_CALLS` is a JSON list of scripted tool calls, see `run_calls`.
 
 `KRAFT_FAKE_ACP_RECORD` is a path: every line read from stdin is appended to it, so a test sees
 exactly what the client sent. `KRAFT_FAKE_ACP_STATUS` is the status written to
@@ -37,6 +43,14 @@ USAGE = {
 }
 MODELS = ("fake-model", "big")
 EFFORTS = ("low", "high")
+
+
+ASKING = {"on": False}
+
+
+def asking() -> bool:
+    """Has the agent been told to ask before every call (asks_everything: env, config or mode)?"""
+    return ASKING["on"] or "ask_all" in FLAGS or os.environ.get("FAKE_ACP_ASK_ALL") == "1"
 
 
 def send(msg: dict) -> None:
@@ -101,6 +115,106 @@ def await_response(id_) -> dict | None:
     return None
 
 
+def await_many(ids: list) -> dict:
+    """Read until the client has answered each of our requests in `ids`."""
+    got = {}
+    while len(got) < len(ids) and (msg := read()) is not None:
+        if msg.get("id") in ids and "method" not in msg:
+            got[msg["id"]] = msg
+    return got
+
+
+def settle_call(sid: str, c: dict, resp: dict | None) -> str | None:
+    outcome = ((resp or {}).get("result") or {}).get("outcome") or {}
+    if outcome.get("optionId") == "once" or c.get("run_anyway"):
+        update(
+            sid, {"sessionUpdate": "tool_call_update", "toolCallId": c["id"], "status": "completed"}
+        )
+    else:
+        update(
+            sid, {"sessionUpdate": "tool_call_update", "toolCallId": c["id"], "status": "failed"}
+        )
+        if "end_on_reject" in FLAGS:
+            return "cancelled"  # OpenCode ends the turn after a rejected ask (spec §10)
+    return None
+
+
+def run_calls(sid: str, calls: list) -> str | None:
+    """Scripted tool calls: `KRAFT_FAKE_ACP_CALLS` is a JSON list of {id, name?, kind, input?,
+    ask?, run_anyway?, withdraw?, wait?}. A call that asks announces itself pending, goes
+    in_progress (OpenCode does, *before* it asks), asks, then completes if allowed and fails if
+    rejected; one that does not ask just completes. `ask` absent = ask when `asking()`.
+    `run_anyway`: completes although rejected. `withdraw`: sends `$/cancel_request` for its own
+    ask. `wait: false`: go on without the answer. Returns "cancelled" when a rejection ends the
+    turn (flag `end_on_reject`)."""
+    waiting = []
+    for c in calls:
+        cid = c["id"]
+        view = {
+            "toolCallId": cid,
+            "title": c.get("title", c.get("name", c["kind"])),
+            "kind": c["kind"],
+            "rawInput": c.get("input", {}),
+        }
+        if c.get("name"):
+            view["name"] = c["name"]
+        update(sid, {"sessionUpdate": "tool_call", "status": "pending", **view})
+        if not c.get("ask", asking()):
+            update(
+                sid,
+                {"sessionUpdate": "tool_call_update", "toolCallId": cid, "status": "completed"},
+            )
+            continue
+        update(
+            sid,
+            {
+                "sessionUpdate": "tool_call_update",
+                "status": "in_progress",
+                **{k: v for k, v in view.items() if k != "name"},
+            },
+        )
+        always = {"optionId": "always", "name": "Always", "kind": "allow_always"}
+        options = (
+            [always]
+            if "only_always" in FLAGS
+            else [
+                always,
+                {"optionId": "once", "name": "Once", "kind": "allow_once"},
+                {"optionId": "no", "name": "No", "kind": "reject_once"},
+            ]
+        )
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": f"ask-{cid}",
+                "method": "session/request_permission",
+                "params": {
+                    "sessionId": sid,
+                    "toolCall": {**view, "status": "pending"},
+                    "options": options,
+                },
+            }
+        )
+        if c.get("withdraw"):
+            send(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "$/cancel_request",
+                    "params": {"requestId": f"ask-{cid}"},
+                }
+            )
+        if c.get("wait", True):
+            if stop := settle_call(sid, c, await_response(f"ask-{cid}")):
+                return stop
+        else:
+            waiting.append(c)
+    got = await_many([f"ask-{c['id']}" for c in waiting])
+    for c in waiting:
+        if stop := settle_call(sid, c, got.get(f"ask-{c['id']}")):
+            return stop
+    return None
+
+
 def write_result() -> None:
     path = os.environ.get("KRAFT_RESULT_PATH")
     if path and "noresult" not in FLAGS:
@@ -117,7 +231,8 @@ def prompt(id_, params: dict) -> None:
             "content": {"type": "text", "text": "working on it"},
         },
     )
-    if "ask" in FLAGS:
+    scripted = json.loads(os.environ.get("KRAFT_FAKE_ACP_CALLS") or "[]")
+    if "ask" in FLAGS or (asking() and not scripted):
         send(
             {
                 "jsonrpc": "2.0",
@@ -150,16 +265,18 @@ def prompt(id_, params: dict) -> None:
             }
         )
         await_response("fs-1")
-    update(
-        sid,
-        {
-            "sessionUpdate": "tool_call",
-            "toolCallId": "tc-1",
-            "title": "Run ls",
-            "kind": "execute",
-            "status": "completed",
-        },
-    )
+    ended = run_calls(sid, scripted) if scripted else None
+    if not scripted:
+        update(
+            sid,
+            {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "tc-1",
+                "title": "Run ls",
+                "kind": "execute",
+                "status": "completed",
+            },
+        )
     if "no_cost" not in FLAGS:
         update(
             sid,
@@ -201,7 +318,7 @@ def prompt(id_, params: dict) -> None:
         os._exit(3)
     if "kill" in FLAGS:
         os.kill(os.getpid(), signal.SIGKILL)
-    stop = "end_turn"
+    stop = ended or "end_turn"
     if "slow" in FLAGS:
         if "die_on_int" in FLAGS:
             signal.signal(signal.SIGINT, lambda *_: os._exit(130))
@@ -215,7 +332,8 @@ def prompt(id_, params: dict) -> None:
         if "late" in FLAGS:  # answers the cancel after the client has stopped waiting
             time.sleep(1.0)
         stop = "cancelled"
-    write_result()
+    if ended != "cancelled":
+        write_result()
     result = {"stopReason": stop}
     if "no_usage" not in FLAGS:
         result["usage"] = dict(USAGE)

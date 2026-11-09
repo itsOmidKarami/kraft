@@ -10,7 +10,15 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from support.acp import client_argv, client_env, recorded, run_client, spec
+from support.acp import (
+    client_argv,
+    client_env,
+    fake_gate,
+    recorded,
+    run_client,
+    run_inprocess,
+    spec,
+)
 
 from kraft.acp import log
 
@@ -446,3 +454,97 @@ def test_sigterm_is_forwarded_to_the_agent_and_its_code_is_the_clients(tmp_path)
     proc.communicate(timeout=30)
     assert mark.exists()
     assert proc.returncode == 143
+
+
+TOOLS = {"read": ["Read"], "shell": ["Bash"], "execute": ["Bash"]}
+
+
+def _answers(tmp_path):
+    return [
+        m for m in recorded(tmp_path) if str(m.get("id", "")).startswith("ask-") and "result" in m
+    ]
+
+
+@pytest.mark.parametrize(
+    ("call", "decisions", "answer", "gate_saw"),
+    [
+        ({"id": "c1", "name": "read", "kind": "read"}, {}, "once", "Read"),
+        ({"id": "c1", "name": "shell", "kind": "execute"}, {"Bash": "deny"}, "no", "Bash"),
+        ({"id": "c1", "kind": "execute"}, {}, "once", "Bash"),
+        ({"id": "c1", "name": "Read", "kind": "read"}, {}, "once", "Read"),
+    ],
+    ids=["named-and-allowed", "named-and-denied", "keyed-on-kind", "kraft-name-passes-through"],
+)
+def test_an_ask_is_decided_by_the_gate_on_krafts_tool_names(
+    tmp_path, monkeypatch, call, decisions, answer, gate_saw
+):
+    seen = []
+    code, recs = run_inprocess(
+        tmp_path,
+        monkeypatch,
+        "ask_all",
+        ask=fake_gate(decisions, seen),
+        calls=[call],
+        policy=True,
+        tool_names=TOOLS,
+        harness_id="fake-acp",
+    )
+    assert code == 0
+    assert _answers(tmp_path)[0]["result"]["outcome"] == {"outcome": "selected", "optionId": answer}
+    tool, kw = seen[0]
+    assert (tool, kw["mode"], kw["fail_closed"], kw["harness"]) == (
+        gate_saw,
+        "enforce",
+        True,
+        "fake-acp",
+    )
+    ask = _events(recs, "ask")[0]
+    assert ask["kraft_tool"] == [gate_saw]
+    assert ask["answer"] == ("allow_once" if answer == "once" else "reject_once")
+
+
+def test_an_allowing_ask_with_only_an_always_option_is_answered_cancelled_never_always(
+    tmp_path, monkeypatch
+):
+    run_inprocess(
+        tmp_path,
+        monkeypatch,
+        "ask_all,only_always",
+        ask=fake_gate(),
+        calls=[{"id": "c1", "name": "read", "kind": "read"}],
+        policy=True,
+        tool_names=TOOLS,
+    )
+    assert _answers(tmp_path)[0]["result"]["outcome"] == {"outcome": "cancelled"}
+
+
+def test_without_a_tool_policy_an_ask_is_allowed_locally_and_never_reaches_the_gate(
+    tmp_path, monkeypatch
+):
+    seen = []
+    run_inprocess(
+        tmp_path,
+        monkeypatch,
+        "ask_all",
+        ask=fake_gate({"Read": "deny"}, seen),
+        calls=[{"id": "c1", "name": "read", "kind": "read"}],
+        policy=False,
+        tool_names=TOOLS,
+    )
+    assert seen == []
+    assert _answers(tmp_path)[0]["result"]["outcome"]["optionId"] == "once"
+
+
+def test_a_rejection_that_ends_the_agents_turn_is_a_clean_exit_with_its_stop_reason_logged(
+    tmp_path, monkeypatch
+):
+    code, recs = run_inprocess(
+        tmp_path,
+        monkeypatch,
+        "ask_all,end_on_reject",
+        ask=fake_gate({"Bash": "deny"}),
+        calls=[{"id": "c1", "name": "shell", "kind": "execute"}],
+        policy=True,
+        tool_names=TOOLS,
+    )
+    assert code == 0 and _events(recs, "stop")[0]["stop_reason"] == "cancelled"

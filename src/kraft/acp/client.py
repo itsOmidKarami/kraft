@@ -15,7 +15,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TextIO
 
-from kraft.acp import log, wire
+from kraft.acp import log, tools, wire
 from kraft.acp.spec import LaunchSpec
 
 CONFIG_ERROR_EXIT = 78  # EX_CONFIG; `agent._resolve_status` reads the logged event, not this
@@ -58,8 +58,14 @@ def _code(rc: int) -> int:
 
 
 class Client:
-    def __init__(self, spec: LaunchSpec, out: TextIO):
+    def __init__(self, spec: LaunchSpec, out: TextIO, ask=None):
         self.spec, self.out = spec, out
+        #: The permission gate: `reads.permission_request`'s signature; None means that function,
+        #: imported on first use so a launch with no tool policy never imports it.
+        self.ask = ask
+        self.calls: dict[str, dict] = {}  # what the agent has said of each tool call, by id
+        self.verdicts: dict[str, str] = {}  # toolCallId -> "allow" | "deny": the answer given
+        self._asks: dict = {}  # request id -> the task answering that ask
         self.proc: asyncio.subprocess.Process | None = None
         self._ids = 0
         self._pending: dict[int, asyncio.Future] = {}
@@ -174,25 +180,102 @@ class Client:
         if params is not None and not isinstance(params, dict):
             await self.send(wire.error(req["id"], wire.INVALID_REQUEST, "params must be an object"))
         elif req["method"] == "session/request_permission":
-            params = params or {}
-            option = wire.select_option(params.get("options") or [])
-            outcome = (
-                {"outcome": "selected", "optionId": option} if option else {"outcome": "cancelled"}
-            )
-            call = params.get("toolCall")
-            call = call if isinstance(call, dict) else {}
-            self.emit(
-                log.event(
-                    "ask",
-                    tool=call.get("title") or call.get("kind"),
-                    answer="allow_once" if option else "cancelled",
-                )
-            )
-            await self.send(wire.result(req["id"], {"outcome": outcome}))
+            # Not awaited: the gate's round trip can be long, and an agent may have two asks in
+            # flight; the reader must keep reading.
+            rid = req["id"]
+            task = asyncio.ensure_future(self.permission(rid, params or {}))
+            self._asks[rid] = task
+            task.add_done_callback(lambda _t, rid=rid: self._asks.pop(rid, None))
         else:
             await self.send(
                 wire.error(req["id"], wire.METHOD_NOT_FOUND, "kraft's client offers no such method")
             )
+
+    # -- permission asks ---------------------------------------------------------------
+    async def gate(self, *args, **kw) -> dict:
+        if self.ask is None:
+            from kraft.client import (
+                reads,
+            )  # only a launch with a policy asks: keeps the client light
+
+            self.ask = reads.permission_request
+        return await self.ask(*args, **kw)
+
+    def remember(self, call: dict) -> None:
+        """What the agent has said of a tool call so far: `name` comes with the first message."""
+        cid = call.get("toolCallId")
+        if isinstance(cid, str):
+            known = self.calls.setdefault(cid, {"toolCallId": cid})
+            for key in ("name", "kind", "title", "rawInput"):
+                if call.get(key):
+                    known[key] = call[key]
+
+    def verdict(self, cid, value: str) -> None:
+        if isinstance(cid, str):
+            self.verdicts[cid] = value
+
+    async def decide(self, call: dict) -> tuple[bool, str]:
+        """Allow this tool call? Never raises (a gate failure is a denial: fail-closed)."""
+        spec = self.spec
+        if not spec.policy:
+            return True, "the launch holds no tool policy"
+        tool = tools.resolve(call, spec.tool_names)
+        what = tool.key or "this call"
+        if not tool.names:
+            if spec.allowlist:
+                return (
+                    False,
+                    f"cannot tell which of Kraft's tools {what!r} is, and the task holds "
+                    "an allowlist",
+                )
+            return True, f"{what!r} maps to no Kraft tool and the task holds no allowlist"
+        raw, cid = call.get("rawInput"), call.get("toolCallId")
+        try:
+            got = await self.gate(
+                tool.names[0],
+                raw if isinstance(raw, dict) else {},
+                cid if isinstance(cid, str) else None,
+                also=tool.names[1:],
+                mode="enforce",
+                harness=spec.harness_id or None,
+                cli_tool=tool.key,
+                fail_closed=True,
+            )
+            behavior, message = got.get("behavior"), str(got.get("message") or "")
+        except Exception as exc:  # noqa: BLE001 -- whatever broke, the answer is a denial
+            behavior, message = "unavailable", str(exc)
+        if behavior in ("allow", "no_opinion"):
+            return True, message or "the gate allows it"
+        if behavior == "deny":
+            return False, message
+        return False, f"Kraft's permission gate is {behavior}: {message}"
+
+    async def permission(self, rid, params: dict) -> None:
+        call = params.get("toolCall")
+        call = call if isinstance(call, dict) else {}
+        self.remember(call)
+        cid = call.get("toolCallId")
+        info = self.calls.get(cid, call) if isinstance(cid, str) else call
+        allow, why = await self.decide(info)
+        options = params.get("options") or []
+        option = wire.select_option(options, ("allow_once",) if allow else ("reject_once",))
+        if allow and option is None:  # only an *_always on offer: never take it
+            allow, why = False, "the agent offered no allow_once option"
+            option = wire.select_option(options, ("reject_once",))
+        self.verdict(cid, "allow" if allow else "deny")
+        outcome = (
+            {"outcome": "selected", "optionId": option} if option else {"outcome": "cancelled"}
+        )
+        self.emit(
+            log.event(
+                "ask",
+                tool=call.get("title") or call.get("kind"),
+                kraft_tool=list(tools.resolve(info, self.spec.tool_names).names),
+                reason=why,
+                answer=("allow_once" if allow else "reject_once") if option else "cancelled",
+            )
+        )
+        await self.send(wire.result(rid, {"outcome": outcome}))
 
     # -- the conversation --------------------------------------------------------------
     async def conversation(self) -> int:

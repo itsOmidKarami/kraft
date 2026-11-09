@@ -70,3 +70,55 @@ def recorded(tmp_path: Path) -> list[dict]:
     """Every JSON line the client sent the fake agent."""
     path = tmp_path / "rec"
     return [json.loads(x) for x in path.read_text().splitlines()] if path.exists() else []
+
+
+def fake_gate(decisions=None, seen=None, *, default="allow", delay=0.0, message=None):
+    """Stands in for `reads.permission_request`: `decisions` maps a Kraft tool name to allow/deny; a
+    tool it does not list gets `default`. `message` overrides the answer's text. `ask.peak` is the
+    most calls that were inside the gate at once: a serial client leaves it at 1."""
+    import asyncio
+
+    inside = 0
+
+    async def ask(tool, input, tool_use_id=None, **kw):
+        nonlocal inside
+        if seen is not None:
+            seen.append((tool, kw))
+        inside += 1
+        ask.peak = max(ask.peak, inside)
+        try:
+            await asyncio.sleep(delay)
+        finally:
+            inside -= 1
+        return {
+            "behavior": (decisions or {}).get(tool, default),
+            "message": message or f"{tool}: decided",
+        }
+
+    ask.peak = 0
+    return ask
+
+
+def run_inprocess(tmp_path, monkeypatch, flags="", *, ask=None, calls=None, env=None, **fields):
+    """Kraft's client in this process, against the fake agent, with `ask` as the gate;
+    `(exit code, log records)`. The in-process route is how the unit tier reaches the gate seam."""
+    import asyncio
+    import io
+
+    from kraft.acp.client import Client
+    from kraft.acp.spec import LaunchSpec
+
+    for k, v in {
+        "KRAFT_FAKE_ACP": flags,
+        "KRAFT_FAKE_ACP_RECORD": str(tmp_path / "rec"),
+        "KRAFT_RESULT_PATH": str(tmp_path / "result.json"),
+        **({"KRAFT_FAKE_ACP_CALLS": json.dumps(calls)} if calls else {}),
+        **(env or {}),
+    }.items():
+        monkeypatch.setenv(k, v)
+    out = io.StringIO()
+    client = Client(
+        LaunchSpec.model_validate_json(spec(tmp_path, **fields).read_text()), out, ask=ask
+    )
+    code = asyncio.run(asyncio.wait_for(client.run(), 280))
+    return code, list(log.records(out.getvalue().splitlines()))
