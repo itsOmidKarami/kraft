@@ -19,26 +19,26 @@ const forked = { children: [kid(1, "done"), kid(2, "needs_you")], slices: summar
 describe("a slice group's view", () => {
   it.each([
     ["building its groundwork", at("slices.implementation", "groundwork", { display_status: "running" }), [
-      ["implementation", [["implementation", "current", "tasks 1–3"]]],
+      ["implementation", [["implementation", "current", undefined]]],
       ["verification", [["verification", "todo", undefined]]],
       ["slices", [["slice 1", "todo", "tasks 4–6"], ["slice 2", "todo", "task 7"]]],
       ["join", [["join", "todo", undefined]]],
     ]],
     ["waiting for its slices", at("slices", "slices", { display_status: "waiting", ...forked }), [
-      ["implementation", [["implementation", "done", "tasks 1–3"]]],
+      ["implementation", [["implementation", "done", undefined]]],
       ["verification", [["verification", "done", undefined]]],
       ["slices", [["slice 1", "done", "done"], ["slice 2", "amber", "needs you"]]],
       ["join", [["join", "todo", undefined]]],
     ]],
     // The item stays on the groundwork's last node while its slices run: that node is done all the same.
     ["waiting at the groundwork's last node", at("slices.verification", "slices", { display_status: "needs_you", ...forked }), [
-      ["implementation", [["implementation", "done", "tasks 1–3"]]],
+      ["implementation", [["implementation", "done", undefined]]],
       ["verification", [["verification", "done", undefined]]],
       ["slices", [["slice 1", "done", "done"], ["slice 2", "amber", "needs you"]]],
       ["join", [["join", "todo", undefined]]],
     ]],
     ["joining them", at("slices", "joining", { display_status: "running", ...forked, group: { ...SPLIT, phase: "joining", joined: 1 } }), [
-      ["implementation", [["implementation", "done", "tasks 1–3"]]],
+      ["implementation", [["implementation", "done", undefined]]],
       ["verification", [["verification", "done", undefined]]],
       ["slices", [["slice 1", "done", "done"], ["slice 2", "amber", "needs you"]]],
       ["join", [["join", "current", "slice 2 of 2"]]],
@@ -58,8 +58,9 @@ describe("a slice group's view", () => {
 
   it.each([
     ["building its groundwork", at("slices.implementation", "groundwork", { display_status: "running" }), { sub: "shared groundwork", subTone: "run" }],
-    ["waiting, a slice needing you", at("slices", "slices", { display_status: "waiting", ...forked }), { meta: "1 of 2 slices done", sub: "slice 2 needs you", subTone: "amber" }],
-    ["waiting", at("slices", "slices", { display_status: "waiting", children: [kid(1, "done"), kid(2, "running")], slices: summary(1, 0) }), { sub: "1 of 2 slices done", subTone: "muted" }],
+    ["waiting, a slice needing you", at("slices", "slices", { display_status: "needs_you", ...forked }), { wait: "waiting for slices", meta: "1 of 2 slices done", sub: "slice 2 needs you", subTone: "amber" }],
+    ["waiting, a slice failed", at("slices.verification", "slices", { display_status: "needs_you", children: [kid(1, "done"), kid(2, "failed")], slices: summary(1, 1) }), { wait: "waiting for slices", meta: "1 of 2 slices done", sub: "slice 2 failed", subTone: "amber" }],
+    ["waiting", at("slices", "slices", { display_status: "waiting", children: [kid(1, "done"), kid(2, "running")], slices: summary(1, 0) }), { wait: "waiting for slices", sub: "1 of 2 slices done", subTone: "muted" }],
     ["joining", at("slices", "joining", { display_status: "running", group: { ...SPLIT, phase: "joining", joined: 1 } }), { sub: "joining · slice 2 of 2", subTone: "run" }],
   ])("says on the chain what the group is doing while %s", (_, item, want) => {
     expect(drawn(item)[2]).toMatchObject(want);

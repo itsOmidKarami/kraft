@@ -264,6 +264,7 @@ describe("nodeSub: a chain row's words", () => {
   it.each([
     ["none needs you", "running", 0, { text: "waiting for slices · 1 of 2 slices done", tone: "muted" }],
     ["one needs you", "needs_you", 1, { text: "waiting for slices · 1 of 2 slices done · slice 2 needs you", tone: "warn" }],
+    ["one failed", "failed", 1, { text: "waiting for slices · 1 of 2 slices done · slice 2 failed", tone: "warn" }],
   ] as const)("reads a group waiting for its slices when %s", (_, second, needs_you, want) => {
     const kid = (k: number, display_status: string) => ({ id: `c${k}`, title: "t", slice_key: k, status: "active", display_status, current_node_id: "verification", cost_usd: 0 });
     const parent = sliced("slices", {

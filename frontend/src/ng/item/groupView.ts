@@ -38,8 +38,8 @@ export function groupSteps(item: ItemDetail, drawn: Drawn | undefined): NodeStep
   const steps: NodeStep[] = (own ? (drawn?.body ?? []) : []).map((b, i) => {
     const id = b.id.slice(b.id.indexOf(".") + 1);
     const state: GlyphState = away ? "done" : b.needs ? "amber" : b.state === "current" ? "current" : g?.phase === "joined" ? "done" : b.state === "plain" || !b.state ? "todo" : b.state;
-    const meta = i === 0 && slices.length && g ? tasksWords(g.groundwork) : undefined;
-    return { id, label: i === 0 && slices.length ? PHASE_WORDS.groundwork : "", tasks: [{ id, noun: "node", state, running: state === "current" && b.running, paused: b.paused, meta }] };
+    // "groundwork" over its column: the column is too narrow for the phase's full words, which the pane gives.
+    return { id, label: i === 0 && slices.length ? "groundwork" : "", tasks: [{ id, noun: "node", state, running: state === "current" && b.running, paused: b.paused }] };
   });
   if (!slices.length) return steps;
   steps.push({
@@ -58,16 +58,21 @@ export function groupSteps(item: ItemDetail, drawn: Drawn | undefined): NodeStep
   return steps;
 }
 
+/** A child that stops its parent for a person: one that needs you, failed or escalated (the parent then reads needs you). */
+const STOPS_FOR_YOU = new Set(["needs_you", "failed", "escalated"]);
+
 /** The words under a group's box on the chain: the phase while the item builds the groundwork or joins; while the slices
- *  run, how far they are, and on its own line a slice that needs you. */
-export function groupWords(item: ItemDetail, d: Drawn): Pick<Drawn, "sub" | "subTone" | "meta" | "metaTone"> {
+ *  run, that it waits for them and how far they are, and on its own line a slice that needs you. */
+export function groupWords(item: ItemDetail, d: Drawn): Pick<Drawn, "sub" | "subTone" | "meta" | "metaTone" | "wait"> {
   const g = item.group;
   if (!g?.phase || d.state !== "current") return {};
   if (g.phase === "groundwork") return { sub: [PHASE_WORDS.groundwork, d.running ? d.sub : ""].filter(Boolean).join(" · "), subTone: d.subTone };
   if (g.phase === "joining") return { sub: `joining · ${joinWords(item)}`, subTone: d.subTone };
   if (g.phase !== "slices") return {};
-  const needs = (item.children ?? []).filter((c) => c.display_status === "needs_you");
+  const needs = (item.children ?? []).filter((c) => STOPS_FOR_YOU.has(c.display_status));
   const done = slicesDone(item.slices) || undefined;
-  if (!needs.length) return { sub: done, subTone: "muted" };
-  return { meta: done, sub: needs.length === 1 ? `slice ${needs[0].slice_key} needs you` : `${needs.length} slices need you`, subTone: "amber" };
+  const wait = "waiting for slices";
+  if (!needs.length) return { wait, sub: done, subTone: "muted" };
+  const one = needs.length === 1 && `slice ${needs[0].slice_key} ${needs[0].display_status === "needs_you" ? "needs you" : needs[0].display_status}`;
+  return { wait, meta: done, sub: one || `${needs.length} slices need you`, subTone: "amber" };
 }

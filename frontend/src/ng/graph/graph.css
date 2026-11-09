@@ -174,7 +174,7 @@
 .step-label.mark-change { color: var(--mark-change); }
 .step-prob { color: var(--bad); }
 .graph-node.is-task { gap: 5px; }
-.graph-node.is-task .graph-label { overflow-wrap: anywhere; }
+.graph-node.is-task .graph-label { overflow-wrap: anywhere; hyphens: auto; }
 .graph-node.is-task .graph-meta { margin-top: -2px; }
 /* The chain canvas's node meta stays inside its column, as its name does, and on ONE line ("security_scan overridden here" ends in an ellipsis): a second line would reach the reject arc's arrowhead under the node. Its title and the node's description hold the whole text. */
 .graph-node:not(.is-task) > .graph-meta.is-clamped { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; line-height: 1.3; }
