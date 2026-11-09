@@ -7,7 +7,7 @@ of flags (see `tests/acp/test_client.py` and `tests/support/acp.py`):
 
   ask fs stray long replay no_cost no_usage no_resume no_load no_system_prompt slow term die
   refuse_config noresult auth die_after_init hang deaf die_on_int exit_on_int kill noisy late
-  slow_init mute badreq
+  slow_init mute badreq die_stderr
 
 `KRAFT_FAKE_ACP_RECORD` is a path: every line read from stdin is appended to it, so a test sees
 exactly what the client sent. `KRAFT_FAKE_ACP_STATUS` is the status written to
@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import subprocess
 import sys
 import time
 
@@ -182,6 +183,21 @@ def prompt(id_, params: dict) -> None:
         sys.stderr.write("stderr-done\n")
         sys.stderr.flush()
     if "die" in FLAGS:
+        os._exit(3)
+    if "die_stderr" in FLAGS:
+        # Gone at once with a failure code, but a child it left behind still holds stderr and
+        # writes the crash's last line 0.3s later: the client must wait for the readers.
+        subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import sys, time; time.sleep(0.3); "
+                "print('fatal: the agent crashed', file=sys.stderr)",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            start_new_session=True,
+        )
         os._exit(3)
     if "kill" in FLAGS:
         os.kill(os.getpid(), signal.SIGKILL)

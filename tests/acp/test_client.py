@@ -43,15 +43,25 @@ def test_every_message_both_ways_is_a_log_line(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("flags", "code"),
-    [("die", 3), ("kill", 137)],
-    ids=["agent-died-mid-turn", "agent-sigkilled-mid-turn-reads-as-a-shell-would"],
+    ("flags", "code", "logged"),
+    [
+        ("die", 3, None),
+        ("kill", 137, None),
+        ("die_stderr", 3, "fatal: the agent crashed"),
+    ],
+    ids=[
+        "agent-died-mid-turn",
+        "agent-sigkilled-mid-turn-reads-as-a-shell-would",
+        "agent-died-at-once-its-last-stderr-line-is-in-the-log",
+    ],
 )
 def test_the_agents_own_exit_code_is_the_clients_when_it_died_before_the_turn_ended(
-    tmp_path, flags, code
+    tmp_path, flags, code, logged
 ):
-    done, _ = run_client(tmp_path, flags)
+    done, recs = run_client(tmp_path, flags)
     assert done.returncode == code
+    if logged:
+        assert logged in [r["text"] for r in recs if r.get("event") == "stderr"]
 
 
 @pytest.mark.parametrize(
@@ -407,9 +417,10 @@ def test_the_cancel_wait_ends_before_kraft_kills_the_group_after_a_pause():
     ["slow,die_on_int", "slow,exit_on_int"],
     ids=["agent-dies-on-it", "agent-exits-0-on-it"],
 )
-def test_a_group_sigint_that_ends_the_agent_first_is_still_a_clean_pause(tmp_path, flags):
-    # Kraft's pause signals the whole group: here the fake exits on that SIGINT before it answers
-    # the client's session/cancel, with code 130 or 0 (which a failed result must not follow).
+def test_a_group_sigint_ends_the_client_130_whatever_the_agent_exits_with(tmp_path, flags):
+    # Kraft's pause signals the whole group: the fake exits on that SIGINT, with code 130 or 0.
+    # The client's own SIGINT takes the cancel path here, so this proves the group signal ends 130
+    # against a real process; the agent_exit race itself is pinned by the unit rows above.
     proc = subprocess.Popen(
         client_argv(spec(tmp_path)),
         stdout=subprocess.PIPE,
