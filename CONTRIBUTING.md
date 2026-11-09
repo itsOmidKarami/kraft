@@ -633,7 +633,8 @@ page you're touching, not just the code.
 against the house style. `just vale` runs it, and so does the `lint` job. The
 rules live in `.vale/styles/Kraft/`:
 
-- British spelling, -ise forms: colour, behaviour, labelled, organise.
+- British spelling, -ise forms: colour, behaviour, labelled, organise. The rule
+  lists the US forms to catch (`British.yml`); add one when it slips through.
 - Contractions for a negation: doesn't, can't, isn't. Not it's or that's: a
   contraction can't end a clause.
 - One word per term: re-run, sub-agent, signed in, ID, URL, Docker, Markdown,
@@ -647,12 +648,10 @@ rules live in `.vale/styles/Kraft/`:
 `just vale` covers `docsite/content`, the README and the contributor docs
 (`vale_paths` in the justfile, which CI's step repeats), not `docs/intent/` or an
 add-on's README. Inline code, fenced code and a component's YAML props are
-skipped, and so is a snake_case word, as a config key or an event name.
+skipped.
 
-A real word the spelling rule doesn't know goes in
-`.vale/styles/config/vocabularies/Kraft/accept.txt`, one per line. Where the
-text quotes something exactly, such as a label the app spells its own way, turn
-that one rule off around it, with
+Where the text quotes something exactly, such as a label the app spells its
+own way, turn that one rule off around it, with
 `<!-- vale Kraft.Dashes = NO -->` before and
 `<!-- vale Kraft.Dashes = YES -->` after. A phrase quoted in many places goes
 in `.vale.ini`'s `TokenIgnores`, as the review outcome "could not decide" does.

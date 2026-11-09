@@ -1,5 +1,5 @@
-# The US forms the docs used before they settled on British spelling, with the
-# fix. The spelling rule flags them too, without saying what to write.
+# British spelling: the US forms the docs have used, each with the British form
+# to write. A US spelling this list misses goes here when it turns up.
 extends: substitution
 message: "Use British '%s' instead of '%s'."
 level: error

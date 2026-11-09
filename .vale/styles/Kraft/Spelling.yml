@@ -1,9 +1,0 @@
-# British spelling, -ise forms. The dictionary is SCOWL's en_GB-ise
-# (dictionary-en-gb 3.0.0, MIT AND BSD; see config/dictionaries/en_GB.license).
-# Kraft's own words go in config/vocabularies/Kraft/accept.txt.
-extends: spelling
-message: "Spelling: '%s'. Add it to the Kraft vocabulary if it is a real term."
-level: error
-dicpath: config/dictionaries
-dictionaries:
-  - en_GB
