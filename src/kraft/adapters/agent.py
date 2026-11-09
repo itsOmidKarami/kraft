@@ -17,6 +17,7 @@ from kraft import permission_rules as _permission_rules
 from kraft import policy as _policy
 from kraft import registration as _registration
 from kraft import skill as _skill
+from kraft.acp import launch as _acp
 from kraft.adapters import artifact_notes as _artifact_notes
 from kraft.adapters import hook_install as _hook_install
 from kraft.adapters import subprocess as _subprocess
@@ -1183,6 +1184,17 @@ async def _run_agent_task(
         raise LaunchRefused(
             f"unknown agent harness {harness!r}; known: {sorted(hs.valid)}"
         ) from None
+    if h.kind == "acp" and (
+        why := _acp.launch_refusal(
+            h,
+            allowed_tools=allowed_tools,
+            deny_tools=deny_tools,
+            permission_mode=permission_mode,
+            sandbox=sandbox,
+            runner=runner,
+        )
+    ):
+        raise LaunchRefused(why)
 
     files = files or item_paths.session_files(run_dirs, work_item_id, session_id)
     task_instruction = _bounded_instruction(files.instruction, task_instruction)
@@ -1497,15 +1509,28 @@ async def _run_agent_task(
             text = json.dumps({"mcpServers": servers})
             await asyncio.to_thread(write_whole, handed, text.encode(), 0o600)
             options["extra_mcp_config"] = str(handed)
-    cmd = _harness.build_argv(
-        h,
-        command=command or None,
-        prompt=task_instruction,
-        context=ctx,
-        resume=resume_session_id,
-        options=options,
-        extra=(*hook_argv, *rules_argv),
-    )
+    if h.kind == "acp":
+        cmd = _acp.command(
+            h,
+            files=files,
+            agent_argv=_acp.agent_argv(h, command or None),
+            cwd=cwd,
+            prompt=task_instruction,
+            context=ctx,
+            resume=resume_session_id,
+            model=model,
+            effort=effort,
+        )
+    else:
+        cmd = _harness.build_argv(
+            h,
+            command=command or None,
+            prompt=task_instruction,
+            context=ctx,
+            resume=resume_session_id,
+            options=options,
+            extra=(*hook_argv, *rules_argv),
+        )
     if codex_hook is not None:
         codex_hook["at"] = cmd.index(_MACHINE_HOOK_FLAGS)
         del cmd[codex_hook["at"]]

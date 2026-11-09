@@ -28,3 +28,18 @@ origin: src/kraft/acp/wire.py
 WHEN an ACP agent prints a line that is not JSON-RPC, or one longer than the line limit, the system SHALL skip it and log it, and SHALL NOT fail the session.
 enforced-by: tests/acp/test_wire.py::test_read_line_never_raises_on_what_an_agent_prints[help-text], tests/acp/test_wire.py::test_a_line_past_the_limit_is_skipped_not_read_whole
 origin: src/kraft/acp/wire.py
+
+## REQ acp-launch-refuses-tool-limits-until-part-2
+IF a launch on a `kind: acp` harness sets `allowed_tools` (even empty), `deny_tools` or `permission_mode`, THEN the system SHALL refuse it before it starts, saying tool limits over ACP are not supported yet.
+enforced-by: tests/acp/test_launch.py::test_a_launch_the_client_cannot_yet_hold_is_refused_with_its_reason[allowlist], tests/acp/test_launch.py::test_a_launch_the_client_cannot_yet_hold_is_refused_with_its_reason[empty-allowlist], tests/adapters/test_agent_acp.py::test_the_launch_door_refuses_what_the_client_cannot_yet_hold[tool-policy]
+origin: src/kraft/acp/launch.py
+
+## REQ acp-launch-refuses-sandbox-and-remote-until-part-3
+IF a launch on a `kind: acp` harness is sandboxed or placed on a remote machine, THEN the system SHALL refuse it before it starts, saying why.
+enforced-by: tests/adapters/test_agent_acp.py::test_the_launch_door_refuses_what_the_client_cannot_yet_hold[sandbox], tests/adapters/test_agent_acp.py::test_the_launch_door_refuses_what_the_client_cannot_yet_hold[remote]
+origin: src/kraft/acp/launch.py
+
+## REQ acp-session-command-is-the-client-not-the-agent
+WHEN Kraft launches a `kind: acp` harness locally, the system SHALL run Kraft's client as the session command and hand it the agent's argv in a spec file, and SHALL NOT run the agent as the session command.
+enforced-by: tests/adapters/test_agent_acp.py::test_an_acp_launch_runs_the_client_with_a_spec_and_the_agent_argv_in_it
+origin: src/kraft/acp/launch.py

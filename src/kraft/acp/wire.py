@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 
-#: One JSON-RPC line may be a large tool result; a longer line is skipped and logged,
-#: never read whole.
-LINE_LIMIT = 8 * 1024 * 1024
+# One JSON-RPC line may be a large tool result; a longer line is skipped and logged, never
+# read whole. The number lives in `spec` (which imports nothing of Kraft); re-exported here.
+from kraft.acp.spec import LINE_LIMIT as LINE_LIMIT
+
 PROTOCOL_VERSION = 1
 METHOD_NOT_FOUND = -32601
 
