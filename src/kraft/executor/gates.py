@@ -1429,13 +1429,9 @@ async def resume_after_escalation(
             # The refresh runs host git in the worktree and its members (Kraft-ju36l).
             stops.refuse_planted_repos(row, launch, worktree)
             # Left to a node that rebases itself (`walk.rebases_itself`). A
-            # slice's child and an unjoined parent never move off the fork
-            # commit, as `/resume` and `/retry` skip them too (`refresh_base`).
-            if (
-                walk.rebases_itself(row, node_id)
-                or store.is_child(row)
-                or store.group_unjoined(row)
-            ):
+            # slice's child never moves off its parent's fork commit, as
+            # `/resume` and `/retry` skip it too (`refresh_base`).
+            if walk.rebases_itself(row, node_id) or store.is_child(row):
                 new_base = None
             elif inplace.is_in_place(row):
                 base = await _builtins.base_branch(db, work_item_id, Path(row["repo"]))
