@@ -383,7 +383,7 @@ def _built_before_join(
     from kraft.slices import SliceSplit, parse_slices
 
     text = read_plan(run_dirs, row, worktree, in_place=in_place)
-    # No cap: the group already split this plan under the cap it had.
+    # No real cap: the group already split this plan under the cap it had.
     split = parse_slices(text, max_slices=len(tasks) + 1) if text else None
     if not isinstance(split, SliceSplit):
         return None

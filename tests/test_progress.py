@@ -377,7 +377,8 @@ _WALKS = {
         # are slices 1 and 2, built by its children.
         ("node_completed", 2, ["done", "pending", "pending"], ("prelude", [])),
         ("node_completed", 3, ["done", "done", "pending"], ("forked", [1])),
-        ("node_completed", 3, ["done", "done", "done"], ("joined", [1, 2])),
+        # Joined: every task is settled, a dropped slice (2, never completed) included.
+        ("node_completed", 3, ["done", "done", "done"], ("joined", [1])),
     ],
     ids=[*_WALKS, "groundwork-built", "one-slice-completed", "slices-joined"],
 )
