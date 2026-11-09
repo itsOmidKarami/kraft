@@ -29,7 +29,8 @@ OS_INIT = Path(__file__).parents[2] / "src/kraft/worker/os_init.py"
 PY = [sys.executable, "-I", "-S"]
 HINT = (
     "kraft: a command was not found inside the os sandbox; "
-    "add its directory to the sandbox's expose list"
+    "add its directory to the sandbox's expose list "
+    "(an agent that is a script reads its package too: add the package's directory)"
 )
 linux_only = pytest.mark.skipif(sys.platform != "linux", reason="a Linux-only fence")
 

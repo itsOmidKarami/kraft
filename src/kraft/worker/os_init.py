@@ -37,7 +37,8 @@ import time
 
 HINT = (
     "kraft: a command was not found inside the os sandbox; "
-    "add its directory to the sandbox's expose list"
+    "add its directory to the sandbox's expose list "
+    "(an agent that is a script reads its package too: add the package's directory)"
 )
 KEYCTL_NR = {"x86_64": 250, "aarch64": 219}
 KEYCTL_JOIN_SESSION_KEYRING = 1

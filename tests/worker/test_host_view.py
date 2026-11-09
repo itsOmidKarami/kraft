@@ -404,6 +404,23 @@ def fake_darwin(monkeypatch):
     host_view.system_dirs.cache_clear()
 
 
+def test_an_agent_that_is_a_node_script_shows_its_interpreter_and_its_whole_package(tmp_path, host):
+    home, kraft, checkout = host
+    node = _file(tmp_path / "node-root/bin/node", "#!/bin/sh\n")
+    pkg = tmp_path / "lib/node_modules/bridge"
+    (pkg / "node_modules/dep").mkdir(parents=True)
+    (pkg / "package.json").write_text("{}")
+    script = _file(pkg / "dist/index.js", "#!/usr/bin/env node\n")
+    bin_ = tmp_path / "bin"
+    _link(bin_ / "bridge", script)
+    got = host_view.resolve("bridge", f"{bin_}:{node.parent}", checkout, checkout, home, kraft)
+    roots = set(got.roots)
+    assert pkg.resolve() in roots  # package.json and node_modules, not only dist/
+    assert (
+        tmp_path / "node-root"
+    ).resolve() in roots  # the `env node` interpreter's install prefix
+
+
 @pytest.mark.parametrize(
     ("under_usr_local", "roots"),
     [(True, 1), (False, 0)],

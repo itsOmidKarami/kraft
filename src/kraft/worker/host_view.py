@@ -189,6 +189,15 @@ def _root_of(final: Path, home: Path, kraft_home: Path) -> Path | None:
         up = root.parent
         if up not in (Path("/"), home) and not protected_refusal(up, home, kraft_home):
             root = up
+    # A script of a package (an ACP bridge is `<pkg>/dist/index.js`) reads its package: the
+    # `package.json` and `node_modules` beside `dist/`, so the package's root is shown, not `dist/`.
+    pkg = next((d for d in list(final.parents)[:4] if (d / "package.json").is_file()), None)
+    if (
+        pkg is not None
+        and pkg not in (Path("/"), home)
+        and not protected_refusal(pkg, home, kraft_home)
+    ):
+        root = pkg
     if why := protected_refusal(root, home, kraft_home):
         raise Refused(f"cannot show {final} to the sandbox: {why}; add its toolchain with expose")
     return root
