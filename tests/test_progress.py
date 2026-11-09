@@ -366,24 +366,31 @@ _WALKS = {
 
 
 @pytest.mark.parametrize(
-    ("walk", "current", "states"),
+    ("walk", "current", "states", "sliced"),
     [
-        ("never_started", None, None),
-        ("rewriting_the_plan", None, None),
-        ("stopped_on_the_node", 2, ["done", "current", "pending"]),
-        ("node_completed", 3, ["done", "done", "done"]),
-        ("rework", 3, ["done", "done", "done"]),
+        ("never_started", None, None, None),
+        ("rewriting_the_plan", None, None, None),
+        ("stopped_on_the_node", 2, ["done", "current", "pending"], None),
+        ("node_completed", 3, ["done", "done", "done"], None),
+        ("rework", 3, ["done", "done", "done"], None),
+        # A slice group's parent: task 1 is the groundwork it built, tasks 2 and 3
+        # are slices 1 and 2, built by its children.
+        ("node_completed", 2, ["done", "pending", "pending"], ("prelude", [])),
+        ("node_completed", 3, ["done", "done", "pending"], ("forked", [1])),
+        ("node_completed", 3, ["done", "done", "done"], ("joined", [1, 2])),
     ],
-    ids=list(_WALKS),
+    ids=[*_WALKS, "groundwork-built", "one-slice-completed", "slices-joined"],
 )
 async def test_for_detail_follows_the_implementing_node_past_its_run(
-    walk, current, states, item_on, templates_dir, database
+    walk, current, states, sliced, item_on, templates_dir, database
 ):
     """The detail's `progress` outlives the running node: the live position
     while the item is stopped on it (here, waiting on a person), every task
     done once it completed or a rejection sent it back for rework, and nothing
-    before it started or while the plan is being rewritten. Each task carries
-    the newest commit naming it."""
+    before it started or while the plan is being rewritten. A slice group's
+    parent settles only what is built until its slices join: the groundwork,
+    and the tasks of each slice whose child completed. Each task carries the
+    newest commit naming it."""
     from support.harness import git, v1_named_chain
 
     from kraft import events, store
@@ -396,6 +403,25 @@ async def test_for_detail_follows_the_implementing_node_past_its_run(
     named = git(it.worktree, "rev-parse", "--short", "HEAD")
     git(it.worktree, "commit", "-q", "--allow-empty", "-m", "fmt: tidy")
     tasks = "# p\n\n## Task 1 — parse\n\n## Task 2 — serve\n\n## Task 3 — render\n"
+    if sliced:
+        tasks += "\n## Slices\n\n- **Slice 1: Serve.** Task 2.\n- **Slice 2: Render.** Task 3.\n"
+        phase, completed = sliced
+        state = store.GroupState(group="slices", phase=phase, generation=1, prelude_done=True)
+        await database.write(
+            lambda c: c.execute(
+                "UPDATE work_items SET group_state = ? WHERE id = ?", (state.to_json(), it.id)
+            )
+        )
+        for key in (1, 2):
+            kid = await item_on(v1_named_chain(templates_dir, "default"), wid=f"w1-{key}")
+            status = "completed" if key in completed else "active"
+            await database.write(
+                lambda c, k=kid.id, key=key, status=status: c.execute(
+                    "UPDATE work_items SET parent_id = ?, slice_generation = 1, slice_key = ?, "
+                    "status = ? WHERE id = ?",
+                    (it.id, key, status, k),
+                )
+            )
     write(it.run_dirs.base, item_paths.document_name(it.id, "plan"), tasks)
     await database.write(
         lambda c: c.execute("UPDATE work_items SET base_ref = ? WHERE id = ?", (base, it.id))

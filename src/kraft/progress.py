@@ -363,6 +363,52 @@ def branch_log(row, worktree: Path, *, in_place: bool = False) -> list[tuple[str
     return [(line.partition(" ")[0], line.partition(" ")[2]) for line in (log or "").splitlines()]
 
 
+#: A slice group's stored phases between its groundwork and its join.
+_UNJOINED = ("prelude", "forked", "joining")
+
+
+def _built_before_join(
+    db, row, tasks: list[tuple[str, bool]], run_dirs, worktree: Path, *, in_place: bool
+) -> set[int] | None:
+    """For a slice group's parent whose implementing node finished but whose
+    slices are not joined: the plan tasks built so far, its shared groundwork
+    and the tasks of each slice whose child completed. A slice's tasks are its
+    child's to build, so finishing the groundwork settles none of them. None
+    for any other item."""
+    keys = row.keys()
+    raw = row["group_state"] if "group_state" in keys else None
+    state = _store.GroupState.from_json(raw) if raw else None
+    if state is None or state.phase not in _UNJOINED:
+        return None
+    from kraft.slices import SliceSplit, parse_slices
+
+    text = read_plan(run_dirs, row, worktree, in_place=in_place)
+    # No cap: the group already split this plan under the cap it had.
+    split = parse_slices(text, max_slices=len(tasks) + 1) if text else None
+    if not isinstance(split, SliceSplit):
+        return None
+    kids = db.read(lambda c: _store.children_of(c, row["id"], state.generation))
+    completed = {k["slice_key"] for k in kids if k["status"] == "completed"}
+    return set(split.prelude) | {n for s in split.slices if s.key in completed for n in s.tasks}
+
+
+def _settled(tasks: list[tuple[str, bool]], built: set[int]) -> ProgressReport:
+    """`tasks` with `built` (and any the plan marks `[DONE]`) done and the rest
+    still to build; `current` is the first of those, which the board's row
+    names, or the last task when none is left."""
+    done = {n for n, (_, tagged) in enumerate(tasks, 1) if tagged} | built
+    current = next((n for n in range(1, len(tasks) + 1) if n not in done), len(tasks))
+    return ProgressReport(
+        current=current,
+        total=len(tasks),
+        title=tasks[current - 1][0],
+        tasks=[
+            TaskProgress(n=n, title=title, state="done" if n in done else "pending")
+            for n, (title, _) in enumerate(tasks, 1)
+        ],
+    )
+
+
 def for_detail(
     db, row, worktree: Path, run_dirs, *, in_place: bool = False
 ) -> ProgressReport | None:
@@ -402,9 +448,15 @@ def for_detail(
     log = branch_log(row, worktree, in_place=in_place)
     # A skipped node moved the item on without its plan being done: settled all
     # the same, as the board's other readers treat a skipped node as passed.
-    if max(last(ChainEvent.NODE_COMPLETED), last(ChainEvent.NODE_SKIPPED)) > started or is_rework(
-        evs, node_id
-    ):
+    finished = max(last(ChainEvent.NODE_COMPLETED), last(ChainEvent.NODE_SKIPPED)) > started
+    built = (
+        _built_before_join(db, row, tasks, run_dirs, worktree, in_place=in_place)
+        if finished
+        else None
+    )
+    if built is not None:
+        report = _settled(tasks, built)
+    elif finished or is_rework(evs, node_id):
         report = ProgressReport(
             current=len(tasks),
             total=len(tasks),
