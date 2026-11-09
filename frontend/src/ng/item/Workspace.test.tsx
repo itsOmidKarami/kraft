@@ -223,6 +223,19 @@ describe("Workspace", () => {
     expect(where()).toBe("/work-items/w1/nodes/slices.implementation?sel=slices");
   });
 
+  it("draws a slice group's view: a body node's box selects it, a slice's opens its child item", async () => {
+    const group = { id: "slices", phase: "slices" as const, groundwork: [1], slices: [{ key: 1, title: "Client", tasks: [2] }, { key: 2, title: "Docs", tasks: [3] }], joined: 0 };
+    const children = [1, 2].map((k) => ({ id: `c${k}`, title: `t${k}`, slice_key: k, status: "active", display_status: "running", current_node_id: "verification", cost_usd: 0 }));
+    mount("/work-items/w1/nodes/slices", { chain_definition: { template_id: "default", nodes: SLICED }, current_node_id: "slices", display_status: "waiting", group, children });
+    const canvas = within(screen.getByRole("group", { name: "slices" }));
+    expect(canvas.getAllByRole("button", { name: /, (node|slice|join), / }).map((b) => b.getAttribute("aria-label"))).toEqual(["implementation, node, done", "verification, node, done", "slice 1, slice, running", "slice 2, slice, running", "join, join, not started"]);
+    expect(within(screen.getByRole("complementary", { name: "slices pane" })).getByRole("button", { name: /Docs/ })).toBeInTheDocument();
+    await userEvent.click(canvas.getByRole("button", { name: /^implementation, node/ }));
+    expect(where()).toBe("/work-items/w1/nodes/slices?sel=slices.implementation");
+    await userEvent.dblClick(canvas.getByRole("button", { name: /^slice 2, slice/ }));
+    expect(where()).toBe("/work-items/c2");
+  });
+
   it("goes back to the chain's pane from a node's crumb", async () => {
     mount("/work-items/w1?sel=plan");
     await userEvent.click(within(screen.getByRole("complementary", { name: "plan pane" })).getByRole("button", { name: "default" }));

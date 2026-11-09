@@ -36,6 +36,9 @@ export type GraphItem = {
   faded?: boolean;
   /** Custom content of a one-off chain: drawn with a dashed accent ring. */
   custom?: boolean;
+  /** What the box is, in its accessible name (`<id>, <noun>, <state>`): a step's task by default ("agent task"); a slice
+   *  group's view draws nodes, slices and its join. */
+  noun?: string;
 };
 
 const STATE_WORD: Record<GlyphState, string> = { plain: "", done: "done", current: "running", todo: "not started", failed: "failed", esc: "escalated", ghost: "removed", amber: "waiting", paused: "paused" };

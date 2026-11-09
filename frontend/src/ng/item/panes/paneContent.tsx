@@ -12,10 +12,11 @@ import { DraftNotes } from "../draft/DraftNotes";
 import { AUTO_REVIEW, ESCALATION, escalationsIn, FIX_LOOP, footerState, inHandler, ON_FAILURE, isEscalation, JUDGE, lookWord, loopIdle, loopIdleSentence, loopRounds, NOT_RUN_IN_ROUND, passWords, sessionLook, sessionsOf, settled, standsOn, stateWord } from "../nodeGraph";
 import { findNode } from "../cursor";
 import { drawnOf } from "../graph";
+import { PHASE_WORDS } from "../groupView";
 import { stepsOf, taskName } from "../paths";
 import type { ItemDetail } from "../useItem";
 import { ChainConfig, ChainOverview } from "./ChainPane";
-import { NodeConfig, NodeOverview } from "./NodePane";
+import { GroupOverview, NodeConfig, NodeOverview } from "./NodePane";
 import { GateBody, GateFooter } from "./GatePane";
 import { Log } from "./Log";
 import { PathFooter } from "./PathFooter";
@@ -147,19 +148,25 @@ export function paneContent(a: PaneArgs): PaneContent {
     title: node.id,
     // A node the run stands on but that isn't running says why: "needs you", "paused", "stopped at the cap",
     // "waiting on CI" (R11b-04: those last two read "running").
-    sub: `${node.kind === "gate" ? "gate" : node.kind === "group" ? "group" : "exec"} node · ${earlier || currentWords(drawn, live)}${live && started ? ` ${elapsedBetween(started, null, a.now)}` : ""}`,
+    sub: `${node.kind === "gate" ? "gate" : node.kind === "group" ? "group" : "exec"} node · ${earlier || currentWords(drawn, live)}${live && started ? ` ${elapsedBetween(started, null, a.now)}` : ""}${node.kind === "group" ? groupPhase(item) : ""}`,
     tabs: OVERVIEW_CONFIG,
     body: (
       <>
         <DraftNotes node={node.id} />
         {a.tab === "config"
           ? <><NodeConfig item={item} node={node} controls={fresh} onReset={async () => { const r = await act.patch(item.id, { node_overrides: { [node.id]: {} } }); if (r.ok) a.reload(); }} />{fresh && <NodeOverrideRows item={item} node={node} policy={a.policy} reload={a.reload} />}<AppliedRows applied={a.applied} path={node.id} /><DraftConfig path={node.id} /></>
-          : <NodeOverview item={item} node={node} onStep={(step) => a.pick({ kind: "step", node: node.id, step })} onNode={(n) => a.pick({ kind: "node", node: n })} />}
+          : node.kind === "group"
+            ? <GroupOverview item={item} node={node} onNode={(n) => a.pick({ kind: "node", node: n })} />
+            : <NodeOverview item={item} node={node} onStep={(step) => a.pick({ kind: "step", node: node.id, step })} onNode={(n) => a.pick({ kind: "node", node: n })} />}
       </>
     ),
     footer: footerOf(item, node.id, "node", footerState(item, sessions), a.reload),
   };
 }
+
+/** A group's phase after its state in the pane's subtitle, while the item itself builds or joins (a waiting group's
+ *  state already says it waits for its slices). */
+const groupPhase = (item: ItemDetail) => (item.group?.phase === "groundwork" || item.group?.phase === "joining" ? ` · ${PHASE_WORDS[item.group.phase]}` : "");
 
 /** A node's state in the pane's subtitle, the phone's words for the same node (`phone/item/model`'s `nodeSub`). */
 function currentWords(drawn: GraphNode | undefined, live: boolean | undefined): string {
