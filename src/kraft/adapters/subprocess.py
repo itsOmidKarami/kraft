@@ -23,6 +23,7 @@ import psutil
 from kraft import caps, events, ids, item_paths, logs, outputs, proc_identity, store, subagents
 from kraft import harness as _harness
 from kraft import usage as _usage
+from kraft.acp import launch as _acp
 from kraft.paths import private
 from kraft.vocab import (
     AGENT_REPORTABLE,
@@ -1073,6 +1074,9 @@ async def _run_task(
     command_ran = shlex.join(cmd)
     backend = _backends.for_sandbox(sandbox) if sandbox else None
     network = backend is not None and bool(sandbox.get("network"))
+    #: An ACP launch: the backend wraps the agent's argv inside the spec, never the client `cmd`.
+    acp_spec = Path(cmd[-1]) if reader == "acp" else None
+    agent = _acp.read_spec(acp_spec) if acp_spec is not None else None
 
     await db.write(
         lambda c: store.create_session(
@@ -1242,9 +1246,12 @@ async def _run_task(
                 )
             )
             return "config_error"
+        # An empty `agent_argv` has nothing to probe: it goes on to the client, which fails it as
+        # its own config_error.
+        target = (agent.agent_argv[:1] or [cmd[0]])[0] if agent else cmd[0]
         if problem := await backend.probe(
             sandbox,
-            cmd[0],
+            target,
             # A managed name never crosses, not even into the probe.
             {k: v for k, v in repo_entry.env.items() if k not in withheld}
             if repo_entry is not None
@@ -1320,36 +1327,52 @@ async def _run_task(
             # session folder holds what the host writes and trusts. `db.write`
             # so this session's own row is seen.
             results = await db.write(lambda c: store.result_files(c, run_dirs, work_item_id))
+            if acp_spec is not None:
+                # A stale marker (a reused session folder) must not pass for this launch's.
+                _acp.marker_path(files).unlink(missing_ok=True)
+            # An ACP launch naming no agent has nothing to wrap: the client fails it itself.
             # Off the loop: `kind: os` walks the mounted trees for credential files.
-            cmd = await asyncio.to_thread(
-                backend.wrap,
-                cmd,
-                root,
-                sandbox,
-                results,
-                env={
-                    **{k: v for k, v in identity.items() if k not in repo_env},
-                    **(env or {}),
-                    # Last: the relay is the only route, whatever else says.
-                    **proxy_env,
-                },
-                session_id=session_id,
-                work_item_id=work_item_id,
-                result_path=result_path,
-                rw_files=rw_files,
-                rw_dirs=rw_dirs,
-                cidfile=cidfile,
-                refs=refs,
-                workdir=cwd,
-                home=home,
-                passthrough=(
-                    *(repo_entry.env_passthrough if repo_entry is not None else ()),
-                    *repo_env,
-                ),
-                ro_paths=ro_paths,
-                ca_bundle=ca_bundle,
-                sentinels=sentinels,
+            wrapped = (
+                None
+                if agent and not agent.agent_argv
+                else await asyncio.to_thread(
+                    backend.wrap,
+                    agent.agent_argv if agent else cmd,
+                    root,
+                    sandbox,
+                    results,
+                    env={
+                        **{k: v for k, v in identity.items() if k not in repo_env},
+                        # The entry's asking switch is the agent's: the client sets it only on the
+                        # docker CLI, which does not pass it on.
+                        **(agent.agent_env if agent else {}),
+                        **(env or {}),
+                        # Last: the relay is the only route, whatever else says.
+                        **proxy_env,
+                    },
+                    session_id=session_id,
+                    work_item_id=work_item_id,
+                    result_path=result_path,
+                    rw_files=rw_files,
+                    rw_dirs=rw_dirs,
+                    cidfile=cidfile,
+                    refs=refs,
+                    workdir=cwd,
+                    home=home,
+                    passthrough=(
+                        *(repo_entry.env_passthrough if repo_entry is not None else ()),
+                        *repo_env,
+                    ),
+                    ro_paths=ro_paths,
+                    ca_bundle=ca_bundle,
+                    sentinels=sentinels,
+                    **({"acp": True} if agent else {}),
+                )
             )
+            if not agent:
+                cmd = wrapped
+            elif wrapped is not None:
+                await asyncio.to_thread(_acp.rewrite_agent, acp_spec, wrapped)
         # Kraft-qx1q: `create_session` above inserts this row 'pending' with no
         # pid yet. `pause_work_item`, `chain.skip_node`, and
         # `stop_escalation_session` can all mark a row stopped in the window
@@ -1766,7 +1789,14 @@ async def _run_task(
     # FileNotFoundError branch above, one step later and inside the sandboxed
     # path only (Kraft-nc9gm). Checked before every other status adjustment
     # below so it can't be shadowed by require_result_file or post_resolve.
-    if backend is not None and status == "failed" and backend.launch_failed(cidfile, returncode):
+    if (
+        backend is not None
+        and status == "failed"
+        # An ACP client that failed before it ran the sandbox command never started a sandbox
+        # either: its early exit is its own failure.
+        and (acp_spec is None or _acp.read_spec(acp_spec).started_marker_exists())
+        and backend.launch_failed(cidfile, returncode)
+    ):
         status = "config_error"
     if runner is not None and returncode == 78 and status == "failed":
         status = "config_error"  # the machine could not start the command (remote/standin.py)

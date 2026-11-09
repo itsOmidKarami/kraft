@@ -19,8 +19,8 @@ def agent_argv() -> list[str]:
     return [sys.executable, str(FAKE)]
 
 
-def spec(tmp_path: Path, **fields) -> Path:
-    """Write a `LaunchSpec` for the fake agent into tmp_path and return its path."""
+def spec(tmp_path: Path, *, at: Path | None = None, **fields) -> Path:
+    """Write a `LaunchSpec` for the fake agent into tmp_path (or to `at`) and return its path."""
     from kraft.acp.spec import LaunchSpec
 
     body = {
@@ -32,7 +32,7 @@ def spec(tmp_path: Path, **fields) -> Path:
         "options": {"model": "model", "effort": "effort"},
         **fields,
     }
-    path = tmp_path / "acp-launch.json"
+    path = at or tmp_path / "acp-launch.json"
     path.write_text(LaunchSpec.model_validate(body).model_dump_json())
     return path
 

@@ -46,6 +46,13 @@ class Remote:
         #: Whether `channel.current()` held each session's channel when its route was opened:
         #: where the real backends look for it.
         self.channel_found: list[bool] = []
+        #: The executable `probe` was last asked about, every `wrap`'s keywords, and the
+        #: results files each `wrap` was given to mount.
+        self.probed: str | None = None
+        self.wrap_kw: list[dict] = []
+        self.wrap_results: list = []
+        #: What `launch_failed` answers: the sandbox command never ran.
+        self.never_started = False
 
     def home(self, run_dirs, work_item_id):
         return run_dirs.base / "remote-home" / work_item_id
@@ -57,6 +64,7 @@ class Remote:
 
     async def probe(self, sandbox, executable, env):
         self.touched.append("probe")
+        self.probed = executable
         self.probed_env = env
         return self.unrunnable
 
@@ -77,6 +85,8 @@ class Remote:
         if self.refuse:
             raise SandboxRefused(self.refuse)
         self.wrapped_with.append(kw.get("ca_bundle"))
+        self.wrap_kw.append(kw)
+        self.wrap_results.append(results_dir)
         self.wrapped_env.append(env)
         # Off the event loop: a backend's wrap may walk the trees it mounts.
         try:
@@ -91,7 +101,7 @@ class Remote:
         return None
 
     def launch_failed(self, cidfile, returncode=None):
-        return False
+        return self.never_started
 
     def code_out(self, refs, session_id, *, work_item_id):
         self.touched.append("code_out")

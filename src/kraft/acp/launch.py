@@ -100,6 +100,27 @@ def launch_refusal(
     return None
 
 
+def marker_path(files) -> Path:
+    """Where the client says it reached the spawn (`LaunchSpec.started_marker`)."""
+    return files.instruction.with_name("acp-started")
+
+
+def read_spec(path: Path) -> LaunchSpec:
+    return LaunchSpec.model_validate_json(Path(path).read_text())
+
+
+def rewrite_agent(path: Path, agent_argv: list[str]) -> None:
+    """Put the sandbox's wrapped argv where the client spawns the agent from: whole or not at
+    all, `0600`. The argv the log shows stays the unwrapped one (`logged_agent_argv`): the
+    wrapped one carries env literals."""
+    from kraft.worker.ca import write_whole
+
+    spec = read_spec(path)
+    spec.logged_agent_argv = spec.logged_agent_argv or list(spec.agent_argv)
+    spec.agent_argv = list(agent_argv)
+    write_whole(Path(path), spec.model_dump_json().encode(), 0o600)
+
+
 def agent_argv(h, command: str | None) -> list[str]:
     """The agent's own argv: the profile's `executable:` replaces only its first word."""
     return [*shlex.split(command), *h.command[1:]] if command else list(h.command)
@@ -175,6 +196,7 @@ def command(
         allowed_tools=allowed_tools,
         deny_tools=deny_tools,
     )
+    spec.started_marker = str(marker_path(files))
     path: Path = files.instruction.with_name("acp-launch.json")
     path.parent.mkdir(parents=True, exist_ok=True)
     write_whole(path, spec.model_dump_json().encode(), 0o600)

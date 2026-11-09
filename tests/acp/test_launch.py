@@ -1,3 +1,6 @@
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 
 from kraft import harness
@@ -122,6 +125,32 @@ def test_an_unrestricted_local_launch_is_not_refused():
 )
 def test_a_profile_executable_replaces_only_the_agents_first_word(command, argv):
     assert launch.agent_argv(H, command) == argv
+
+
+def test_the_launch_spec_names_a_marker_and_a_sandbox_rewrite_keeps_the_unwrapped_argv(tmp_path):
+    files = SimpleNamespace(instruction=tmp_path / "instruction.md", result=tmp_path / "r.json")
+    argv = launch.command(
+        H,
+        files=files,
+        agent_argv=["agent", "acp"],
+        cwd=tmp_path,
+        prompt="p",
+        context="c",
+        resume=None,
+        model=None,
+        effort=None,
+    )
+    path = Path(argv[-1])
+    assert launch.read_spec(path).started_marker == str(launch.marker_path(files))
+    assert launch.marker_path(files).name == "acp-started"
+    launch.rewrite_agent(path, ["docker", "run", "-i", "img", "agent", "acp"])
+    launch.rewrite_agent(path, ["docker", "run", "-i", "-e", "X=1", "img", "agent", "acp"])
+    spec = launch.read_spec(path)
+    assert spec.agent_argv[-3:] == ["img", "agent", "acp"] and spec.logged_agent_argv == [
+        "agent",
+        "acp",
+    ]
+    assert oct(path.stat().st_mode & 0o777) == "0o600"
 
 
 @pytest.mark.parametrize(
