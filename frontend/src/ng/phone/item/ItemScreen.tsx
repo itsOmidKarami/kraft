@@ -66,7 +66,8 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
   const { lines, subagents } = useLog(item.id, session && !ended ? session.id : null, live);
   const running = (subagents ?? []).filter((a) => a.status === "running");
   // Nothing to compare before a start, or once the worktree is gone (archived: R12b-11); the server answers 409 or 404.
-  const compare = useCompare(item.id, "base", "latest", false, item.head_sha, neverStarted(item) || item.worktree_exists === false);
+  // A joined slice's commits are read on its parent's branch, so a slice still asks.
+  const compare = useCompare(item.id, "base", "latest", false, item.head_sha, neverStarted(item) || (item.worktree_exists === false && !item.parent_id));
   const files = compare.state === "ready" ? (compare.data.files ?? []) : [];
   const card = cardOf(item, events, files.length);
   const adds = files.reduce((n, f) => n + f.insertions, 0);

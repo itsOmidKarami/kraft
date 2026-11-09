@@ -105,11 +105,15 @@ describe("the item screen (C)", () => {
     expect(calls.some((c) => c.path.startsWith("/work-items/w1/compare"))).toBe(false);
   });
 
-  // R12b-11: an archived item's worktree is gone, and the compare's 404 went to the console on every load.
-  it("asks for no diff once the worktree is gone", async () => {
-    const calls = mount(item("archived", null, { status: "completed", worktree_exists: false }), "/work-items/w1");
+  // R12b-11: an archived item's worktree is gone, and the compare's 404 went to the console on every load. A joined
+  // slice still asks: the server reads its commits on its parent's branch.
+  it.each([
+    ["an item", {}, false],
+    ["a slice", { parent_id: "p1" }, true],
+  ])("asks for %s's diff once its worktree is gone", async (_, more, asks) => {
+    const calls = mount(item("archived", null, { status: "completed", worktree_exists: false, ...more }), "/work-items/w1");
     expect(await screen.findByRole("heading", { level: 1 })).toBeInTheDocument();
-    expect(calls.some((c) => c.path.startsWith("/work-items/w1/compare"))).toBe(false);
+    await waitFor(() => expect(calls.some((c) => c.path.startsWith("/work-items/w1/compare"))).toBe(asks));
   });
 
   describe("Start with a draft (R9b-01 on the phone)", () => {

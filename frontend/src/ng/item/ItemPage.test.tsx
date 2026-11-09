@@ -61,13 +61,21 @@ describe("ItemPage", () => {
     expect(await screen.findByRole("textbox", { name: "Budget in dollars" })).toHaveFocus();
   });
 
-  // R12b-11: an archived item's page asked for its diff, and the 404 went to the console on every load.
-  it("asks for no diff once the item's worktree is gone", async () => {
-    const calls = stubFetch({ "GET /work-items/w1": [200, detail({ status: "completed", display_status: "archived", worktree_exists: false })] });
+  // R12b-11: an archived item's page asked for its diff, and the 404 went to the console on every load. A joined
+  // slice still asks: the server reads its commits on its parent's branch.
+  it.each([
+    ["an item", {}, false],
+    ["a slice", { parent_id: "p1" }, true],
+  ])("asks for %s's diff once its worktree is gone", async (_, more, asks) => {
+    const calls = stubFetch({
+      "GET /work-items/w1": [200, detail({ status: "completed", display_status: "archived", worktree_exists: false, ...more })],
+      "GET /work-items/w1/diff": [200, { files: [], landed: { files: [{ path: "a.py", insertions: 2, deletions: 1 }] } }],
+    });
     mount();
     expect(await screen.findByRole("heading", { level: 1 })).toBeInTheDocument();
     await waitFor(() => expect(calls.some((c) => c.path === "/work-items/w1")).toBe(true));
-    expect(calls.some((c) => c.path.endsWith("/diff"))).toBe(false);
+    if (asks) expect((await screen.findByRole("link", { name: "Review changes" })).parentElement).toHaveTextContent("1 file +2 −1");
+    expect(calls.some((c) => c.path.endsWith("/diff"))).toBe(asks);
   });
 
   it("reads a failed item's diff once for both the diff line and the card's work kept", async () => {

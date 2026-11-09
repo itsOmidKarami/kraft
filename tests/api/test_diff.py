@@ -240,6 +240,45 @@ def test_diff_degrades_gracefully_when_base_ref_is_null_and_worktree_is_gone(
     assert r.json()["base_ref"] is None
 
 
+def test_a_joined_slice_with_no_worktree_reads_its_picks_on_the_parents_branch(
+    client, seeded_item, worktree, tmp_path
+):
+    """A slice is archived, its worktree gone, while its parent is still in
+    review: its diff and compare read the commits the join picked onto the
+    parent's branch, and nothing the parent made before or after them."""
+    fork = git(worktree, "rev-parse", "HEAD")
+    branch = git(worktree, "branch", "--show-current")
+    git(worktree, "switch", "-q", "-c", "slice-1")
+    write(worktree, "slice.py", "the slice\n")
+    made = commit_all(worktree, "Task 2: the slice")
+    git(worktree, "switch", "-q", branch)
+    git(worktree, "cherry-pick", "-x", made)
+    write(worktree, "after.py", "the parent's own\n")
+    commit_all(worktree, "after the join")
+    conn = sqlite3.connect(str(RunDirs(tmp_path / "run").db))
+    conn.executescript(
+        f"CREATE TEMP TABLE kid AS SELECT * FROM work_items WHERE id = '{seeded_item}';"
+        f"UPDATE kid SET id = 'kid1', bead_id = NULL, branch = 'slice-1', "
+        f"parent_id = '{seeded_item}', slice_generation = 1, slice_key = 1;"
+        "INSERT INTO work_items SELECT * FROM kid;"
+    )
+    state = store.GroupState(
+        group="slices", phase="joined", generation=1, fork_commit=fork, recorded={1: [made]}
+    )
+    store.set_group_state(conn, seeded_item, state)
+    conn.commit()
+    conn.close()
+
+    landed = client.get("/api/work-items/kid1/diff").json()["landed"]
+    assert [f["path"] for f in landed["files"]] == ["slice.py"]
+    compare = client.get("/api/work-items/kid1/compare?from=base&to=latest")
+    assert [f["path"] for f in compare.json()["files"]] == ["slice.py"]
+    # Its own gate history went with its worktree; so does all of it with the parent's.
+    assert client.get("/api/work-items/kid1/compare?from=attempt:1").status_code == 404
+    shutil.rmtree(worktree)
+    assert client.get("/api/work-items/kid1/diff").status_code == 404
+
+
 def test_gate_artifact_is_none_without_a_pending_gate(client, seeded_item):
     assert client.get(f"/api/work-items/{seeded_item}").json()["gate_artifact"] is None
 

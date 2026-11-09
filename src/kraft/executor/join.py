@@ -164,6 +164,29 @@ def missing(repo: Path, at_commit: str, recorded: list[str]) -> list[str]:
     return list(recorded[applied:]) if len(picked) <= len(recorded) else list(recorded)
 
 
+def picks_of(repo: Path, since: str, recorded: list[str], *, head: str = "HEAD") -> list[str]:
+    """The commits in `since..head` that git picked from one of `recorded`, by
+    the last `cherry picked from` line of each, oldest first: a joined slice's
+    work on its parent's branch, which outlives the slice's own branch."""
+    log = git_read(
+        repo,
+        "log",
+        "--reverse",
+        "--first-parent",
+        "--format=%H%x00%B%x1e",
+        f"{since}..{head}",
+        strip=False,
+    )
+    out = []
+    for entry in (log or "").split("\x1e"):
+        sha, _, message = entry.strip("\n").partition("\x00")
+        found = _PICKED.findall(message)
+        got = found[-1] if found else None
+        if sha and got and any(w.startswith(got) or got.startswith(w) for w in recorded):
+            out.append(sha)
+    return out
+
+
 def put_back(worktree: Path, branch: str, at_commit: str) -> None:
     """Put the parent back at `at_commit` without trusting its git folder: the
     operation files go first (by `lstat`, never following a symlink), since

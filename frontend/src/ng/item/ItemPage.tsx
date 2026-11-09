@@ -50,7 +50,8 @@ function Item({ item, version, reload }: { item: ItemDetail; version: string; re
   const [cardError, setCardError] = useState<string | null>(null);
   const duplicate = useDuplicate(item.id, setCardError);
   // Read once for the diff line and the failed card's "work kept".
-  const files = useDiffFiles(item.id, runVersion(item), item.worktree_exists === false);
+  // A joined slice's own worktree is gone, but the server reads its commits on its parent's branch.
+  const files = useDiffFiles(item.id, runVersion(item), item.worktree_exists === false && !item.parent_id);
   const openGate = useSelect(item.id);
   const openNode = (node: string) => navigate(placeUrl(item.id, stopPlace(item.stop, node, item.chain_definition.nodes)));
   const settings = () => navigate(placeUrl(item.id, { sel: { kind: "chain" }, tab: "config" }));

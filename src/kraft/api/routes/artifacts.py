@@ -10,7 +10,7 @@ from kraft import events, inplace, item_paths, review, reviewed_head, slices, st
 from kraft.api import api_router, deps, perimeter
 from kraft.api.routes import board
 from kraft.api.routes.search import OpenDocument, _launch_editor
-from kraft.executor import entry, stops
+from kraft.executor import entry, join, stops
 from kraft.index import ingest as ingest_mod
 from kraft.templates import revision
 from kraft.vocab import GateEvent
@@ -85,19 +85,24 @@ async def get_work_item_diff(wid: str, request: Request, ignore_whitespace: bool
             "diff_max_bytes": DIFF_MAX_BYTES,
             "worktree_path": str(inplace.item_folder(st.run_dirs, row)),
         }
-    worktree = inplace.item_folder(st.run_dirs, row)
-    if not worktree.is_dir():
-        raise deps.worktree_missing(row)
-
-    try:
-        # No host git in a sandboxed worktree while its worker can still
-        # write it (Kraft-69rwp): a 409 a reviewer can act on.
-        stops.refuse_live_sandboxed_session(
-            st.db, row, deps.launch(st, row["repo"]), what="the diff"
-        )
-    except RuntimeError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    head = _branch_tip(st, row) if inplace.is_in_place(row) else "HEAD"
+    # A joined slice's worktree is gone with its archive: its commits are read
+    # on its parent's branch, all landed, nothing uncommitted.
+    on_parent = _slice_on_parent(st, row)
+    if on_parent:
+        worktree, base, head = on_parent
+    else:
+        worktree = inplace.item_folder(st.run_dirs, row)
+        if not worktree.is_dir():
+            raise deps.worktree_missing(row)
+        try:
+            # No host git in a sandboxed worktree while its worker can still
+            # write it (Kraft-69rwp): a 409 a reviewer can act on.
+            stops.refuse_live_sandboxed_session(
+                st.db, row, deps.launch(st, row["repo"]), what="the diff"
+            )
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        head = _branch_tip(st, row) if inplace.is_in_place(row) else "HEAD"
     # In place the working tree is the person's: the uncommitted part is the
     # empty range `head..head`, never their files.
     change = review.read_change(
@@ -195,6 +200,48 @@ def _readable_worktree(st, row):
     return worktree
 
 
+def _slice_on_parent(st, row):
+    """A joined slice whose own worktree is gone: `(worktree, base, head)`, its
+    commits as the join picked them onto its parent's branch, read in the
+    parent's worktree. None for any other item, or once the parent's worktree
+    is gone too."""
+    if not row["parent_id"] or inplace.item_folder(st.run_dirs, row).is_dir():
+        return None
+    state = st.db.read(lambda c: store.group_state(c, row["parent_id"]))
+    if state is None or state.generation != row["slice_generation"] or not state.fork_commit:
+        return None
+    recorded = state.recorded.get(row["slice_key"]) or []
+    parent = deps._work_item_row(st, row["parent_id"])
+    worktree = inplace.item_folder(st.run_dirs, parent)
+    if not recorded or not worktree.is_dir():
+        return None
+    try:
+        stops.refuse_live_sandboxed_session(
+            st.db, parent, deps.launch(st, parent["repo"]), what="the diff"
+        )
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    tip = _branch_tip(st, parent) if inplace.is_in_place(parent) else "HEAD"
+    picked = join.picks_of(worktree, state.fork_commit, recorded, head=tip)
+    # A slice's picks are contiguous: the join replays one slice at a time.
+    return (worktree, f"{picked[0]}^", picked[-1]) if picked else None
+
+
+def _targets(st, row, *targets: str):
+    """The worktree a compare reads, and each target's `(sha, base_sha)`. A
+    joined slice has only base and latest, its commits on its parent's branch:
+    its own gate attempts and reviews named commits its archive took with it."""
+    on_parent = _slice_on_parent(st, row)
+    if on_parent is None:
+        gate = board._pending_gate(st, row["id"])
+        return _readable_worktree(st, row), [_resolve_target(st, row, gate, t) for t in targets]
+    worktree, base, head = on_parent
+    ends = {"base": base, "latest": head}
+    if any(t not in ends for t in targets):
+        raise HTTPException(404, "a joined slice compares only base and latest")
+    return worktree, [(ends[t], base) for t in targets]
+
+
 def _blob_at(worktree, to_sha: str | None, path: str) -> str | None:
     """The file's blob id at `to_sha` (None: the working tree); None if absent there."""
     if to_sha:
@@ -209,8 +256,7 @@ async def _set_viewed(wid: str, request: Request, mark: bool):
     path, to = q.get("file", ""), q.get("to", "latest")
     if not path or path.startswith("/") or ".." in path.split("/"):
         raise HTTPException(400, "`file` must be a path inside the repository")
-    worktree = _readable_worktree(st, row)
-    to_sha, _ = _resolve_target(st, row, board._pending_gate(st, wid), to)
+    worktree, [(to_sha, _)] = _targets(st, row, to)
     blob = _blob_at(worktree, to_sha, path)
     if mark:
         await st.db.write(lambda c: store.mark_viewed(c, wid, path, to_sha or "worktree", blob))
@@ -255,10 +301,7 @@ async def compare_work_item(
         not file or "\0" in file or file.startswith("/") or ".." in file.split("/")
     ):
         raise HTTPException(400, "`file` must be a path inside the repository")
-    worktree = _readable_worktree(st, row)
-    gate = board._pending_gate(st, wid)
-    from_sha, from_base = _resolve_target(st, row, gate, frm)
-    to_sha, to_base = _resolve_target(st, row, gate, to)
+    worktree, [(from_sha, from_base), (to_sha, to_base)] = _targets(st, row, frm, to)
     # One file is diffed alone, with its old path beside it when it was renamed.
     paths = (
         list(dict.fromkeys((review.renamed_from(worktree, from_sha, to_sha, file) or file, file)))
