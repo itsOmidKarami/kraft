@@ -484,6 +484,38 @@ async def _sandboxed_job(tmp_path, short_run, monkeypatch, argv, backend=None, *
     return fake, machine, task, t
 
 
+@pytest.mark.parametrize(
+    ("acp", "gets_the_gate"), [(True, True), (False, False)], ids=["acp-job", "plain-sandboxed-job"]
+)
+async def test_a_sandboxed_job_gets_the_gate_address_only_when_it_is_an_acp_step(
+    tmp_path, short_run, monkeypatch, acp, gets_the_gate
+):
+    from support.acp import agent_argv
+    from support.acp import spec as acp_spec
+
+    from kraft.remote.jobs import JobRunner
+
+    # The instance's own address would cross as the instance's: only the forwarder's is meant.
+    monkeypatch.delenv("KRAFT_PORT", raising=False)
+    monkeypatch.delenv("KRAFT_HOST", raising=False)
+    seen = []
+    real = JobRunner._env
+    monkeypatch.setattr(JobRunner, "_env", lambda self: seen.append(real(self)) or seen[-1])
+    job = {}
+    if acp:  # the spec as the machine holds it: where its path map puts the server's `run/`
+        shipped = tmp_path / "home/remote/srv/run/items/w1/acp-launch.json"
+        shipped.parent.mkdir(parents=True)
+        acp_spec(tmp_path, at=shipped, cwd=str(tmp_path / "server"))
+        job = {"acp": {"spec": str(tmp_path / "run/items/w1/acp-launch.json")}}
+    fake, machine, task, t = await _sandboxed_job(
+        tmp_path, short_run, monkeypatch, agent_argv(), **job
+    )
+    await _frames_until(t, "finished")
+    assert [bool(e.get("KRAFT_PORT")) for e in seen] == [gets_the_gate]
+    assert not gets_the_gate or seen[0]["KRAFT_HOST"] == "127.0.0.1"
+    await _end(t, task)
+
+
 async def test_a_sandbox_the_machine_cannot_build_is_rejected_naming_it_and_nothing_runs(
     tmp_path, short_run, monkeypatch
 ):

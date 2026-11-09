@@ -189,10 +189,13 @@ class JobRunner:
         if self._expired() and s.cap is not None:  # the transfer and setup used up the cap
             return Outcome(code=137, capped=s.cap)
         launch: Launch | None = None
-        if box is not None:
+        if box is not None and (argv or s.acp is None):
             step_env = {k: self.pathmap.text(v) for k, v in s.env.items() if k not in _SERVER_ONLY}
+            # The entry's asking switch is the agent's: the client sets it on the docker CLI
+            # only, which does not pass it on. The client's own environment never crosses.
+            agent_env = self._acp_body().get("agent_env", {}) if s.acp is not None else {}
             try:
-                launch = await box.step(argv, env, step_env)
+                launch = await box.step(argv, env, {**step_env, **agent_env}, acp=s.acp is not None)
             except Unavailable as exc:
                 return Outcome(rejected=str(exc), outcome="config_error")
         # An ACP step runs Kraft's own client over a spec of this machine's paths; the agent,
@@ -236,7 +239,9 @@ class JobRunner:
                 # the commits published -- whatever became of the command
                 oom = await launch.finish()
         code = self._proc.returncode
-        if launch is not None and launch.launch_failed(code):
+        if launch is not None and launch.launch_failed(
+            code, client_spawned=s.acp is None or (self.dir / "acp-started").exists()
+        ):
             return Outcome(
                 rejected=f"{self.host.machine}: the sandbox did not start the command",
                 outcome="config_error",

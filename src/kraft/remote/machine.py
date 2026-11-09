@@ -506,10 +506,12 @@ class Machine:
         if job.stopped is not None:  # given up on while it was being prepared
             await self._reject(job, "failed", job.stopped.strip())
             return
-        # A sandboxed worker reaches Kraft through its egress proxy (`channels`), not a port.
+        # A sandboxed worker reaches Kraft through its egress proxy (`channels`), not a port. An
+        # ACP step's client runs outside its sandbox and is what reaches the gate, so it gets the
+        # forwarder either way; the agent never gets its address.
         sandboxed = spec.sandbox is not None
         forwarder = Forwarder(lambda m, target, h, b: self._forward(job, m, target, h, b))
-        port = None if sandboxed else await forwarder.start()
+        port = await forwarder.start() if (not sandboxed or spec.acp is not None) else None
         host = None
         if sandboxed:
             try:

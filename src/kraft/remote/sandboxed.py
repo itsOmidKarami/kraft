@@ -59,9 +59,11 @@ class Launch:
     cidfile: Path
     branch: str | None
 
-    def launch_failed(self, returncode: int | None) -> bool:
-        """The sandbox itself never started, so the command never ran."""
-        return self.backend.launch_failed(self.cidfile, returncode)
+    def launch_failed(self, returncode: int | None, *, client_spawned: bool = True) -> bool:
+        """The sandbox itself never started, so the command never ran. An ACP step's client that
+        never got as far as running the sandbox command (`client_spawned` False) failed on its
+        own: its early exit says nothing of the sandbox."""
+        return client_spawned and self.backend.launch_failed(self.cidfile, returncode)
 
     async def finish(self, *, publish: bool = True) -> backends.OomKill | None:
         """After the command exited, or never started: bring the result home, ask whether the
@@ -132,9 +134,15 @@ class Sandboxed:
                 )
         return rules
 
-    async def step(self, argv: list[str], env: dict[str, str], step_env: dict[str, str]) -> Launch:
-        """The step's command, wrapped. `env` is the client's own, `step_env` what the job set."""
+    async def step(
+        self, argv: list[str], env: dict[str, str], step_env: dict[str, str], *, acp: bool = False
+    ) -> Launch:
+        """The step's command, wrapped. `env` is the client's own, `step_env` what the job set.
+        `acp`: `argv` is an ACP agent's, which speaks on its own stdin and stdout, and the
+        client is the machine's own, outside the sandbox: its environment (the gate's address)
+        never reaches the agent, and its launch spec is never mounted into the sandbox."""
         s = self.spec
+        shipped = self.pathmap.path(s.acp["spec"]) if acp and s.acp else None
         result_path = Path(self.pathmap.text(s.env["KRAFT_RESULT_PATH"]))
         rw_dirs = self._mapped(s.dirs)
         rw_files = [p for p in self._mapped(s.rw) if p not in rw_dirs]
@@ -150,9 +158,10 @@ class Sandboxed:
             result_path=result_path,
             rw_files=rw_files,
             rw_dirs=rw_dirs,
-            results=[p for p in self._mapped(s.ro) if p.is_file()],
+            results=[p for p in self._mapped(s.ro) if p.is_file() and p != shipped],
             workdir=Path(self.pathmap.text(s.cwd)),
             step=True,
+            acp=acp,
         )
 
     async def setup(self, command: str, env: dict[str, str]) -> Launch:
@@ -199,6 +208,7 @@ class Sandboxed:
         results: list[Path] | None,
         workdir: Path | None,
         step: bool,
+        acp: bool = False,
     ) -> Launch:
         from kraft.adapters import subprocess as _subprocess
 
@@ -322,6 +332,7 @@ class Sandboxed:
                 passthrough=(*s.passthrough, *repo_env),
                 ca_bundle=ca_bundle,
                 sentinels=sentinels,
+                **({"acp": True} if acp else {}),
             )
             launch.client_cwd = backend.client_cwd(session_id, work_item_id=wid)
         except BaseException as exc:
