@@ -31,6 +31,8 @@ from pydantic import (
     ValidationError,
 )
 
+from kraft.acp import entry as acp_entry
+from kraft.acp.entry import AcpEntry, AsksEverythingInput, OptionInput
 from kraft.paths import default_harnesses_dir
 from kraft.policy import DEFAULT_SENTINEL, SandboxCredential, host_pattern
 from kraft.yamlload import safe_load
@@ -40,9 +42,10 @@ from kraft.yamlload import safe_load
 #: never again -- a seeded harness would freeze at install time.
 BUNDLED = Path(__file__).parent / "harnesses"
 
-#: The only `kind` implemented. An unknown kind quarantines the file rather
-#: than half-loading it; a second kind arrives with its own adapter.
-KINDS = ("cli",)
+#: The kinds implemented. An unknown kind quarantines the file rather than
+#: half-loading it. `cli`: a CLI Kraft builds argv for; `acp`: an Agent Client
+#: Protocol agent, run through Kraft's client (`kraft.acp`).
+KINDS = ("cli", "acp")
 
 #: Every capability Kraft knows how to ask for. A harness answers these; it
 #: does not invent new names.
@@ -182,6 +185,8 @@ class Harness:
     #: The oldest CLI release whose `--version` a launch accepts, for a CLI
     #: whose older releases refuse this file's argv. None: no check.
     min_version: str | None = None
+    #: A `kind: acp` entry's own fields (`acp/entry.py`); None for any other kind.
+    acp: AcpEntry | None = None
 
     @classmethod
     def from_mapping(cls, data: object, *, where: str, path: Path | None = None) -> Harness:
@@ -203,6 +208,8 @@ class Harness:
         kind = parsed.kind
         if kind not in KINDS:
             raise HarnessError(f"{where}: unknown kind {kind!r}; known: {sorted(KINDS)}")
+        if kind == "acp":
+            return cls._from_acp(parsed, where=where, path=path)
         if not parsed.command:
             raise HarnessError(f"{where}: 'command' must be a non-empty string or list")
         command_resume = tuple(parsed.command_resume)
@@ -331,33 +338,7 @@ class Harness:
                     "'permission_mode' capability accepts"
                 )
 
-        if parsed.min_version is not None and not _VERSION.fullmatch(parsed.min_version):
-            raise HarnessError(f"{where}: min_version {parsed.min_version!r} is not N.N.N")
-
-        try:
-            requires = tuple(map(host_pattern, parsed.network.requires if parsed.network else ()))
-        except ValueError as exc:
-            raise HarnessError(f"{where}: network.requires: {exc}") from None
-
-        for cred in parsed.credentials:
-            if cred.service is None or cred.sentinel is None or not cred.inject:
-                raise HarnessError(
-                    f"{where}: credential {cred.env!r} needs a 'service', a 'sentinel' "
-                    "and where to 'inject' it"
-                )
-            # A repository scopes and binds its own credentials; a harness's
-            # would merge into an entry naming just `env` and redirect it.
-            if cred.phase is not None or cred.source is not None:
-                raise HarnessError(
-                    f"{where}: credential {cred.env!r} cannot set 'phase' or 'source'; "
-                    "a repository's sandbox credentials do"
-                )
-            for rule in cred.inject:
-                if rule.domain not in requires:
-                    raise HarnessError(
-                        f"{where}: credential {cred.env!r} goes to {rule.domain!r}, "
-                        "which is not one of its 'network.requires' hosts"
-                    )
+        requires = _check_shared(parsed, where)
 
         config = parsed.config_dir
         if config is not None:
@@ -392,6 +373,56 @@ class Harness:
             proxy_aware=parsed.proxy_aware,
             credentials=tuple(parsed.credentials),
             min_version=parsed.min_version,
+        )
+
+    @classmethod
+    def _from_acp(cls, parsed: HarnessInput, *, where: str, path: Path | None) -> Harness:
+        """A `kind: acp` entry: only what ACP cannot tell Kraft (spec §5). The
+        capabilities are synthesized (`acp.entry.capabilities_for`), since the agent
+        says what it can do at `initialize`."""
+        if not parsed.command:
+            raise HarnessError(f"{where}: 'command' must be a non-empty string or list")
+        cli_only = {
+            "capabilities": parsed.capabilities,
+            "command_resume": parsed.command_resume,
+            "permission_hook": parsed.permission_hook,
+            "permission_rules": parsed.permission_rules,
+            "container_permission_mode": parsed.container_permission_mode,
+            "unhooked_tools": parsed.unhooked_tools,
+            "config_dir": parsed.config_dir,
+        }
+        for key, value in cli_only.items():
+            if value:
+                raise HarnessError(
+                    f"{where}: {key!r} is not available on kind 'acp': an ACP agent tells "
+                    "Kraft what it can do at initialize; an entry declares only command, "
+                    "reports, asks_everything, tool_names, always_deny, options, network "
+                    "and credentials"
+                )
+        entry = acp_entry.build(
+            parsed.asks_everything,
+            parsed.reports,
+            parsed.always_deny,
+            parsed.options,
+            where=where,
+        )
+        requires = _check_shared(parsed, where)
+        return cls(
+            id=parsed.id,
+            kind="acp",
+            command=tuple(parsed.command),
+            command_resume=(),
+            capabilities=acp_entry.capabilities_for(entry),
+            path=path,
+            launch_env=dict(parsed.launch_env),
+            tool_names={
+                k: (v,) if isinstance(v, str) else tuple(v) for k, v in parsed.tool_names.items()
+            },
+            network_requires=requires,
+            proxy_aware=parsed.proxy_aware,
+            credentials=tuple(parsed.credentials),
+            min_version=parsed.min_version,
+            acp=entry,
         )
 
     def managed_credentials(
@@ -449,6 +480,40 @@ def sandbox_credentials(sandbox: dict | None) -> tuple[SandboxCredential, ...]:
     return tuple(
         SandboxCredential.model_validate(c) for c in (sandbox or {}).get("credentials") or ()
     )
+
+
+def _check_shared(parsed: HarnessInput, where: str) -> tuple[str, ...]:
+    """What every kind checks the same way: `min_version`, `network.requires`
+    and `credentials`. Returns the validated `network.requires` hosts."""
+    if parsed.min_version is not None and not _VERSION.fullmatch(parsed.min_version):
+        raise HarnessError(f"{where}: min_version {parsed.min_version!r} is not N.N.N")
+
+    try:
+        requires = tuple(map(host_pattern, parsed.network.requires if parsed.network else ()))
+    except ValueError as exc:
+        raise HarnessError(f"{where}: network.requires: {exc}") from None
+
+    for cred in parsed.credentials:
+        if cred.service is None or cred.sentinel is None or not cred.inject:
+            raise HarnessError(
+                f"{where}: credential {cred.env!r} needs a 'service', a 'sentinel' "
+                "and where to 'inject' it"
+            )
+        # A repository scopes and binds its own credentials; a harness's
+        # would merge into an entry naming just `env` and redirect it.
+        if cred.phase is not None or cred.source is not None:
+            raise HarnessError(
+                f"{where}: credential {cred.env!r} cannot set 'phase' or 'source'; "
+                "a repository's sandbox credentials do"
+            )
+        for rule in cred.inject:
+            if rule.domain not in requires:
+                raise HarnessError(
+                    f"{where}: credential {cred.env!r} goes to {rule.domain!r}, "
+                    "which is not one of its 'network.requires' hosts"
+                )
+
+    return requires
 
 
 @dataclass(frozen=True)
@@ -521,6 +586,12 @@ class HarnessInput(BaseModel):
     proxy_aware: StrictBool = True
     credentials: list[SandboxCredential] = []
     min_version: StrictStr | None = None
+    # `kind: acp` only (`acp/entry.py`); a cli harness carrying them ignores them, as
+    # it does any key it does not know.
+    asks_everything: AsksEverythingInput | None = None
+    reports: list[StrictStr] = []
+    always_deny: list[StrictStr] = []
+    options: dict[StrictStr, OptionInput] = {}
 
 
 _VERSION = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?")
@@ -586,6 +657,12 @@ def _shape_problem(exc: ValidationError) -> str:
             return "'proxy_aware' must be true or false"
         case ("config_dir", *_):
             return "'config_dir' needs an 'env' string and 'files' mapping names to mappings"
+        case ("asks_everything", *_):
+            return "'asks_everything' takes exactly one of env, config or mode"
+        case ("reports" | "always_deny" as key, *_):
+            return f"{key!r} must be a list of strings"
+        case ("options", *_):
+            return "'options' maps model or effort to {config: <the agent's option id>}"
     return "expected a top-level mapping"
 
 
