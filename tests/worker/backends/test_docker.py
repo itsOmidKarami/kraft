@@ -52,6 +52,14 @@ def test_docker_attaches_stdin_only_for_a_command_that_speaks_acp(acp):
     assert argv[argv.index("img") :] == ["img", "agent", "acp"]
 
 
+@pytest.mark.parametrize("acp", [False, True], ids=["cli-launch", "acp-launch"])
+def test_the_docker_backend_attaches_stdin_when_wrap_is_told_the_command_speaks_acp(acp):
+    argv = docker.DockerBackend().wrap(
+        ["agent", "acp"], "/work/item-1", {"kind": "docker", "image": "img"}, None, acp=acp
+    )
+    assert ("--interactive=true" in argv) is acp
+
+
 def test_the_acp_clients_gate_address_is_never_forwarded_into_the_container(monkeypatch):
     # The client holds KRAFT_HOST/KRAFT_PORT; docker copies a bare `-e NAME` from its own env.
     # `FORWARDED_ENV` names none of them (worker/sandbox.py), and this pins that for the ACP shape.
