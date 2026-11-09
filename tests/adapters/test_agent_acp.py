@@ -20,9 +20,9 @@ ENTRY = {
 }
 
 
-def _launch(run, tmp_path, **kw):
+def _launch(run, tmp_path, entry=ENTRY, **kw):
     hs = harness.HarnessSet(
-        valid={"fake-acp": harness.Harness.from_mapping(ENTRY, where="t")}, invalid={}
+        valid={"fake-acp": harness.Harness.from_mapping(entry, where="t")}, invalid={}
     )
     return run(
         harness="fake-acp",
@@ -32,6 +32,37 @@ def _launch(run, tmp_path, **kw):
         run_dirs=RunDirs(base=tmp_path / "run"),
         **kw,
     )
+
+
+ASKING = {
+    **ENTRY,
+    "asks_everything": {"env": {"FAKE_ACP_ASK_ALL": "1"}},
+    "tool_names": {"read": "Read"},
+}
+
+
+@pytest.mark.parametrize(
+    ("entry", "kw", "policy", "allowlist"),
+    [
+        (ASKING, {"allowed_tools": ("Read",)}, True, True),
+        (ASKING, {"deny_tools": ("Bash",)}, True, False),
+        ({**ASKING, "always_deny": ["Monitor"]}, {}, True, False),
+        (ASKING, {}, False, False),
+    ],
+    ids=["allowlist", "deny-only", "always-deny-alone", "no-policy-still-asks"],
+)
+def test_an_acp_launch_hands_its_tool_policy_to_the_client(
+    run, tmp_path, entry, kw, policy, allowlist
+):
+    spec = json.loads(Path(_launch(run, tmp_path, entry, **kw)["cmd"][7]).read_text())
+    assert (spec["policy"], spec["allowlist"], spec["harness_id"]) == (
+        policy,
+        allowlist,
+        "fake-acp",
+    )
+    assert spec["agent_env"] == {"FAKE_ACP_ASK_ALL": "1"}  # applied on every launch, policy or not
+    assert spec["tool_names"] == {"read": ["Read"]}
+    assert spec["always_deny"] == entry.get("always_deny", [])
 
 
 def test_an_acp_launch_runs_the_client_with_a_spec_and_the_agent_argv_in_it(run, tmp_path):
@@ -55,11 +86,11 @@ def test_a_resumed_acp_launch_carries_the_agents_session_id(run, tmp_path):
 @pytest.mark.parametrize(
     ("kw", "expect"),
     [
-        ({"deny_tools": ("Bash",)}, "tool limits over ACP"),
+        ({"deny_tools": ("Bash",)}, "asks_everything"),
         ({"sandbox": {"kind": "docker", "image": "x", "network": {"allow": []}}}, "part 3"),
         ({"runner": "box"}, "part 3"),
     ],
-    ids=["tool-policy", "sandbox", "remote"],
+    ids=["tool-policy-without-asks-everything", "sandbox", "remote"],
 )
 def test_the_launch_door_refuses_what_the_client_cannot_yet_hold(run, tmp_path, kw, expect):
     with pytest.raises(LaunchRefused, match=expect):

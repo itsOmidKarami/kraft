@@ -33,3 +33,16 @@ class LaunchSpec(BaseModel):
     #: here (Kraft's idle timeout is its bound).
     handshake_timeout_s: float = 120.0
     line_limit: int = LINE_LIMIT
+    harness_id: str = ""
+    #: `asks_everything.env`: set for the agent only, over the client's own environment.
+    agent_env: dict[str, str] = {}
+    asks_config: dict[str, str] = {}  # `asks_everything.config`: option id -> value
+    asks_mode: str | None = None  # `asks_everything.mode`
+    tool_names: dict[str, list[str]] = {}  # the entry's ACP name/kind -> Kraft tool names
+    always_deny: list[str] = []
+    settles_itself: list[str] = []
+    policy: bool = False  # the launch holds a limit: allowlist, deny list or always_deny
+    allowlist: bool = False  # ... and that includes an allowlist (even an empty one)
+    #: Seconds between `heartbeat` log lines while an ask waits on the gate, so `idle_s` never
+    #: fires.
+    heartbeat_s: float = 60.0

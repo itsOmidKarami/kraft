@@ -105,11 +105,25 @@ def agent_argv(h, command: str | None) -> list[str]:
     return [*shlex.split(command), *h.command[1:]] if command else list(h.command)
 
 
-def command(h, *, files, agent_argv, cwd, prompt, context, resume, model, effort) -> list[str]:
+def command(
+    h,
+    *,
+    files,
+    agent_argv,
+    cwd,
+    prompt,
+    context,
+    resume,
+    model,
+    effort,
+    allowed_tools=None,
+    deny_tools=(),
+) -> list[str]:
     """Write the launch spec into the session's own folder (Kraft's, never mounted, which
     also keeps a long prompt out of argv) and return the client's command."""
     from kraft.worker.ca import write_whole
 
+    entry, asks = h.acp, h.acp.asks_everything
     spec = LaunchSpec(
         agent_argv=agent_argv,
         cwd=str(cwd),
@@ -119,7 +133,16 @@ def command(h, *, files, agent_argv, cwd, prompt, context, resume, model, effort
         resume=resume,
         model=model,
         effort=effort,
-        options=dict(h.acp.options),
+        options=dict(entry.options),
+        harness_id=h.id,
+        agent_env=dict(asks.env) if asks else {},
+        asks_config=dict(asks.config) if asks else {},
+        asks_mode=asks.mode if asks else None,
+        tool_names={k: list(v) for k, v in h.tool_names.items()},
+        always_deny=list(entry.always_deny),
+        settles_itself=list(entry.settles_itself),
+        policy=allowed_tools is not None or bool(deny_tools) or bool(entry.always_deny),
+        allowlist=allowed_tools is not None,
     )
     path: Path = files.instruction.with_name("acp-launch.json")
     path.parent.mkdir(parents=True, exist_ok=True)
