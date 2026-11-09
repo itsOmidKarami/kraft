@@ -7,7 +7,7 @@ ignorecase: true
 action:
   name: replace
 swap:
-  color(s|ed|ing|ful)?: colour$1
+  'color(s|ed|ing|ful)?(?![\w-])': colour$1
   behavior(s|al)?: behaviour$1
   label(ed|ing): labell$1
   cancel(ed|ing): cancell$1

@@ -1,7 +1,8 @@
 # "select" also covers the keyboard and a phone, which the docs describe too.
+# A modifier-click (Ctrl-click, Shift-click) is a mouse gesture, like a double-click.
 extends: existence
 message: "Use 'select' instead of '%s'."
 level: error
 ignorecase: true
 tokens:
-  - '(?<!right-)(?<!double-)click(?:s|ed|ing)?(?: on)?'
+  - '(?i)(?<!right-)(?<!double-)(?<!ctrl-)(?<!shift-)(?<!command-)(?<!alt-)(?<!option-)click(?:s|ed|ing)?(?: on)?'

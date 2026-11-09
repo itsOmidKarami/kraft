@@ -236,7 +236,7 @@ class Board(View):
         self._expanded: str | None = None
 
     def compose(self) -> ComposeResult:
-        yield Input(placeholder="filter by title or id · Esc clears", id="board-filter")
+        yield Input(placeholder="filter by title or ID · Esc clears", id="board-filter")
         rows = Rows(id="rows", markup=False)
         rows.can_focus = False
         yield rows

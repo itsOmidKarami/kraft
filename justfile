@@ -10,6 +10,9 @@ _default:
 # workers ask for both: `setup_command: just setup setup-plugins`.
 setup:
     uv sync
+    # The vale wheel fetches its binary on first run: do it now, not in a worker
+    # or a check that may have no network.
+    uv run vale --version
     cd frontend && npm ci
     @echo "the agent plugins are opt-in: 'just setup-plugins' adds them (CONTRIBUTING.md)"
 

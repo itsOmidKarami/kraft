@@ -636,19 +636,28 @@ rules live in `.vale/styles/Kraft/`:
 - British spelling, -ise forms: colour, behaviour, labelled, organise.
 - Contractions for a negation: doesn't, can't, isn't. Not it's or that's: a
   contraction can't end a clause.
-- One word per term: re-run, sub-agent, signed in, ID, merge request. Pull
-  request only on the pages about Kraft's own GitHub repo.
+- One word per term: re-run, sub-agent, signed in, ID, URL, Docker, Markdown,
+  merge request. The pages about Kraft's own GitHub repo say pull request: the
+  contributor docs, and the docs site's Contributing and Source map pages
+  (`.vale.ini` turns the rule off there).
 - No comma before the "and" or "or" that ends a list.
 - `select`, not `click`. The present tense, not `will`. No sentence that
   starts with `So`, no spaces around a dash, no `very`.
 
+`just vale` covers `docsite/content`, the README and the contributor docs
+(`vale_paths` in the justfile, which CI's step repeats), not `docs/intent/` or an
+add-on's README. Inline code, fenced code and a component's YAML props are
+skipped, and so is a snake_case word, as a config key or an event name.
+
 A real word the spelling rule doesn't know goes in
 `.vale/styles/config/vocabularies/Kraft/accept.txt`, one per line. Where the
 text quotes something exactly, such as a label the app spells its own way, turn
-that one rule off around it: `<!-- vale Kraft.Dashes = NO -->` before, `<!--
-vale Kraft.Dashes = YES -->` after. A heading reworded for the style is a
-renamed heading: give it a `renamed from` note, and a redirect if a page links
-to it.
+that one rule off around it, with
+`<!-- vale Kraft.Dashes = NO -->` before and
+`<!-- vale Kraft.Dashes = YES -->` after. A phrase quoted in many places goes
+in `.vale.ini`'s `TokenIgnores`, as the review outcome "could not decide" does.
+A heading reworded for the style is a renamed heading: give it a `renamed
+from` note, and a redirect if a page links to it.
 
 ### Versions of the docs
 

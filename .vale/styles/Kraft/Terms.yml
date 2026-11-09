@@ -8,12 +8,12 @@ action:
 swap:
   '[Rr]erun(s|ning)?(?!-)': re-run$1
   '[Ss]ubagent(s)?': sub-agent$1
-  '(?<!the |a |its |their |session.s )log in\b': sign in
-  '(?<!the |a |its |their |session.s )logs in\b': signs in
-  logged in: signed in
-  logging in: signing in
+  '(?<!the |a |its |their |session.s |Show )[Ll]og in\b': sign in
+  '(?<!the |a |its |their |session.s )[Ll]ogs in\b': signs in
+  '[Ll]ogged in': signed in
+  '[Ll]ogging in': signing in
   '(?<![\w.$/-])id(?![\w=:/-])': ID
   '(?<![\w.$/-])ids(?![\w=:/-])': IDs
-  docker: Docker
+  '(?<![\w./:-]|: )docker(?![\w./-])': Docker
   markdown: Markdown
   '(?<![\w.$/-])url(s)?(?![\w=:/-])': URL$1

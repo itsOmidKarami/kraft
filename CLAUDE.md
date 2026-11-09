@@ -11,6 +11,7 @@ just test       # backend tests affected by your changes (testmon); --no-testmon
 just test-ui    # frontend typecheck + unit tests
 just test-py 3.12  # the unit tier on another Python (CI runs 3.12, 3.13, 3.14); `requires-python` is the floor
 just lint       # ruff check + format check
+just vale       # docs style: British spelling, contractions, one word per term
 ```
 
 **Never call `pytest` / `uv run pytest` directly.** Always go through `just
