@@ -495,7 +495,7 @@ Two ways a branch you're reusing by hand can quietly cost you work:
 **Don't reuse a branch after its pull request merges.** This repo merges by
 squash, so the branch's own commits never become ancestors of `main` — only
 their squashed equivalent does. Push more commits onto that same branch
-afterward and `git diff` against its old merge-base re-presents everything the
+afterwards and `git diff` against its old merge-base re-presents everything the
 squash already landed. Cut a fresh branch from `origin/main` instead.
 
 **Rebuilding a branch by `git reset` + cherry-pick can silently orphan a

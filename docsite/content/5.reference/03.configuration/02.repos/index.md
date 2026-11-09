@@ -139,7 +139,7 @@ It applies above the harness profile's own `defaults:`, below a task's `model:` 
 
 Every command runs from the repository root, without a shell, so one for a project in a subdirectory names that directory itself: `sh -c 'cd frontend && npm test'` (what connect proposes) or `npm --prefix frontend test`, not `npm test`. A command whose own word is a shell operator (`&&`, `|`, `;`, `>`) is refused, and named, when it would run, rather than run with the operator as an argument and the rest ignored.
 
-Kraft doesn't synthesize `test_scopes` from `test_command`: the two stay independently editable.
+Kraft doesn't synthesise `test_scopes` from `test_command`: the two stay independently editable.
 
 #### `targeted_command`
 _Added in 2.4_

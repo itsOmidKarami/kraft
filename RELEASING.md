@@ -307,7 +307,7 @@ that by hand, since the Marketplace can be slow to index. It dispatches the
 docs rebuild without waiting for it, so open the **docs** run on the Actions tab
 and confirm it passed.
 
-If the run stops on an unlabeled pull request, label it (labels can be changed
+If the run stops on an unlabelled pull request, label it (labels can be changed
 after merge) and run the workflow again. A failed build leaves no tag behind, so
 re-running is safe.
 

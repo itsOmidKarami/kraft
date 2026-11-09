@@ -19,5 +19,11 @@ swap:
   catalog(s)?: catalogue$1
   favorite(s)?: favourite$1
   analyz(e|es|ed|ing): analys$1
-  (summar|priorit|custom|initial|normal|serial|optim|minim|maxim|author|emphas|real|final|synchron|sanit|categor|special|standard|visual|recogn|organ|memor|apolog|util|stabil|tokeni|parameter)iz(e|es|ed|ing|ation|ations): $1is$2
+  (summar|priorit|custom|initial|normal|serial|material|synthes|optim|minim|maxim|author|emphas|real|final|synchron|sanit|categor|special|standard|visual|recogn|organ|memor|apolog|util|stabil|tokeni|parameter)iz(e|es|ed|ing|ation|ations): $1is$2
   misspelled: misspelt
+  judgment(s)?: judgement$1
+  honor(s|ed|ing|able)?: honour$1
+  dial(ed|ing): diall$1
+  unlabeled: unlabelled
+  uninitialized: uninitialised
+  afterward: afterwards
