@@ -50,7 +50,7 @@ describe("ChainStrip", () => {
     expect(onBack).toHaveBeenCalled();
   });
 
-  it("draws a group as one glyph with its body inside", async () => {
+  it("draws a group as one glyph like any node: a click opens its view", async () => {
     const user = userEvent.setup();
     const onOpen = vi.fn();
     const withGroup: ChainNode[] = [
@@ -59,25 +59,20 @@ describe("ChainStrip", () => {
       { id: "merge", kind: "gate", state: "todo" },
     ];
     render(<ChainStrip nodes={withGroup} viewing="merge" onOpen={onOpen} />);
-    // Shut, it is one glyph in the line, named by its slices.
+    // One glyph in the line, named by its slices; its body is never drawn.
     expect(strip().getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["plan_approval, gate, done", "slices, group, 2 of 3 slices done", "merge, gate, not started"]);
     const group = strip().getByRole("button", { name: /^slices, group/ });
-    expect(group).toHaveAttribute("aria-expanded", "false");
+    expect(group).not.toHaveAttribute("aria-expanded");
     expect(group.querySelector(".map-glyph")).toHaveClass("is-group");
-    // A click opens it rather than a node view; the body shows inside, each node by its path.
     await user.click(group);
-    expect(onOpen).not.toHaveBeenCalled();
-    expect(group).toHaveAttribute("aria-expanded", "true");
-    expect(strip().getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["plan_approval, gate, done", "slices, group, 2 of 3 slices done", "slices.implementation, node, done", "slices.verification, node, running", "merge, gate, not started"]);
-    await user.click(strip().getByRole("button", { name: /^slices\.verification,/ }));
-    expect(onOpen).toHaveBeenCalledWith("slices.verification");
-    await user.click(group);
+    expect(onOpen).toHaveBeenCalledWith("slices");
     expect(strip().getAllByRole("button")).toHaveLength(3);
   });
 
-  it("opens a group by itself while a node inside it is in view", () => {
-    const g: ChainNode[] = [{ id: "slices", kind: "group", body: [{ id: "slices.implementation", kind: "exec" }] }];
-    render(<ChainStrip nodes={g} viewing="slices.implementation" />);
-    expect(strip().getByRole("button", { name: /^slices\.implementation,/ })).toHaveAttribute("aria-current", "step");
+  it.each([["the group itself", "slices"], ["a node inside it", "slices.implementation"], ["a task inside that", "slices.implementation.main.implement"]])("marks the group's glyph while %s is in view", (_, viewing) => {
+    const g: ChainNode[] = [{ id: "slices", kind: "group", body: [{ id: "slices.implementation", kind: "exec" }] }, { id: "merge", kind: "gate" }];
+    render(<ChainStrip nodes={g} viewing={viewing} />);
+    expect(strip().getByRole("button", { name: /^slices,/ })).toHaveAttribute("aria-current", "step");
+    expect(strip().getAllByRole("button")).toHaveLength(2);
   });
 });
