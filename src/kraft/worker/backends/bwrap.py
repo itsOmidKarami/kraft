@@ -166,6 +166,7 @@ def bwrap_argv(
     run_dirs: RunDirs,
     agent: str | None = None,
     mode: Literal["launch", "oneshot"] = "launch",
+    split_stdio: bool = False,
 ) -> list[str]:
     if (bwrap := shutil.which("bwrap")) is None:
         raise SandboxRefused("bubblewrap is not installed (apt install bubblewrap)")
@@ -186,6 +187,8 @@ def bwrap_argv(
         *("--seccomp-file", str(seccomp_file(run_dirs))),
         # os_init refuses a oneshot that records a start.
         *(("--started", str(started)) if started and mode == "launch" else ()),
+        # An ACP command keeps the launcher's stdout and stderr apart (see `os_init._launch`).
+        *(("--stdio", "split") if split_stdio and mode == "launch" else ()),
         "--",
         os.path.abspath(bwrap),
         *_BWRAP_FLAGS,
@@ -437,6 +440,7 @@ class OsBackend:
         ro_paths: Iterable[str | Path] = (),
         ca_bundle: str | Path | None = None,  # unused: the host's trust store applies
         sentinels: dict[str, str] | None = None,  # unused: `kind: os` refuses credentials
+        acp: bool = False,
     ) -> list[str]:
         if session_id is not None and work_item_id is None:
             raise TypeError("wrap: a session's sandbox is found by its work item too")
@@ -475,6 +479,7 @@ class OsBackend:
             started=Path(cidfile) if cidfile is not None else None,
             search_path=env.get("PATH") or os.environ.get("PATH", os.defpath),
             run_dirs=_run_dirs(),
+            split_stdio=acp,
         )
         if sys.platform == "darwin":
             key = ids.qualified(work_item_id, session_id)

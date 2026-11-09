@@ -126,6 +126,7 @@ def launcher(tmp_path):
         darwin=None,
         sweeps=None,
         plain=False,
+        split=False,
     ):
         real = sys.platform == "darwin"
         darwin = real if darwin is None else darwin
@@ -142,6 +143,7 @@ def launcher(tmp_path):
         for pair in setenv:
             argv += ["--setenv", pair]
         argv += ["--started", str(started)] if started else []
+        argv += ["--stdio", "split"] if split else []
         argv += ["--", *confiner, *inner]
         if darwin and (sweeps or not real) and not plain:
             src = DRIVER.replace("@OS_INIT@", repr(str(OS_INIT)))
@@ -241,6 +243,17 @@ LOG_FAILS = (
     "raise SystemExit(5)"
 )
 KILLED = "import os, signal; os.kill(os.getpid(), signal.SIGKILL)"
+
+
+def test_a_split_launch_keeps_stdin_attached_and_stdout_and_stderr_apart(launcher, tmp_path):
+    started = tmp_path / "started"
+    code = (
+        "import sys; line = sys.stdin.readline(); print(line.upper(), end='', flush=True); "
+        "print('diag', file=sys.stderr, flush=True)"
+    )
+    r = run(launcher("launch", init_argv(*py(code)), started=started, split=True), input="hi\n")
+    assert (r.returncode, r.stdout, r.stderr) == (0, "HI\n", "diag\n")
+    assert started.read_text() == "started\n"
 
 
 @pytest.mark.parametrize(

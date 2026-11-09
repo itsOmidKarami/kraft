@@ -221,6 +221,7 @@ def seatbelt_argv(
     key: str,
     agent: str | None = None,
     mode: Literal["launch", "oneshot"] = "launch",
+    split_stdio: bool = False,
 ) -> list[str]:
     """The whole launch of `cmd` on macOS, as `bwrap.bwrap_argv` builds it on
     Linux: the launcher (`os_init.py launch`, on the host, which is also the
@@ -268,6 +269,7 @@ def seatbelt_argv(
         *(a for name, value in literals.items() for a in ("--setenv", f"{name}={value}")),
         # os_init refuses a oneshot that records a start.
         *(("--started", str(started)) if started and mode == "launch" else ()),
+        *(("--stdio", "split") if split_stdio and mode == "launch" else ()),
         *("--marker", str(files.marker), "--control", str(files.control)),
         *("--tmpdir", str(files.tmpdir)),
         *(("--relay-sock", str(sock_path)) if sock_path is not None else ()),

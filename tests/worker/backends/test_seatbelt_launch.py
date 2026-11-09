@@ -110,6 +110,8 @@ def _launch(argv):
         (lambda m: {}, lambda m, o: o["--marker"] == str(m.files().marker)),
         (lambda m: {}, lambda m, o: o["--control"] == str(m.files().control)),
         (lambda m: {}, lambda m, o: o["--tmpdir"] == str(m.files().tmpdir)),
+        (lambda m: {"split_stdio": True}, lambda m, o: o["--stdio"] == "split"),
+        (lambda m: {}, lambda m, o: "--stdio" not in o),
     ],
     ids=[
         "started",
@@ -121,6 +123,8 @@ def _launch(argv):
         "marker",
         "control",
         "tmpdir",
+        "split-stdio-for-acp",
+        "joined-stdio-by-default",
     ],
 )
 def test_the_launcher_is_told(mac, kw, check):

@@ -62,6 +62,7 @@ LAUNCH_FLAGS = (
     "--control",
     "--tmpdir",
     "--relay-sock",
+    "--stdio",  # `split`: the command keeps the launcher's own stdout and stderr (an ACP agent)
 )
 
 
@@ -138,13 +139,15 @@ def _launch(mode, argv):
         seccomp = os.open(opts["--seccomp-file"], os.O_RDONLY)
         pass_fds.append(seccomp)
         cmd = [cmd[0], "--seccomp", str(seccomp), *cmd[1:]]
+    split = opts.get("--stdio") == "split" and mode == "launch"
     kw = {}
     if mode == "launch":
-        out_r, out_w = os.pipe()
         st_r, st_w = os.pipe()
         env[STARTED_ENV] = str(st_w)
         pass_fds.append(st_w)
-        kw = {"stdout": out_w, "stderr": out_w}
+        if not split:
+            out_r, out_w = os.pipe()
+            kw = {"stdout": out_w, "stderr": out_w}
     # A oneshot's client may hold the operator's terminal: a new session takes it off.
     try:
         proc = subprocess.Popen(
@@ -170,12 +173,21 @@ def _launch(mode, argv):
 
     if mode == "oneshot":
         return wait()
+    result = []
+    if split:
+        # The command keeps the client's stdin, stdout and stderr: nothing is copied, only the
+        # init's one 'started' byte is read.
+        os.close(st_w)
+        waiter = threading.Thread(target=lambda: result.append(wait()))
+        waiter.start()
+        _note_started(st_r, opts.get("--started"), ended)
+        waiter.join()
+        return result[0]
     os.close(out_w)
     os.close(st_w)
     # Orphans hold the output pipe open, so the sweep that ends them runs as soon
     # as the command does, not at EOF; one the sweep cannot end must not hold the
     # launcher too, so the copy stops once the sweep is over and the pipe is idle.
-    result = []
     waiter = threading.Thread(target=lambda: result.append(wait()))
     waiter.start()
     _copy(out_r, st_r, opts.get("--started"), ended if darwin else None)
@@ -222,6 +234,32 @@ def _end_session(opts):
 
 def _exit_code_of(returncode):
     return 128 - returncode if returncode < 0 else returncode
+
+
+def _note_started(st_r, started_file, ended):
+    """Block for the init's one 'started' byte, record it, and close the pipe. EOF with no byte
+    means the command never started: no record, which the caller reads as a launch that failed.
+    A survivor holding the pipe open does not hold the launcher: once the command has ended, the
+    wait gives up."""
+    data = b""
+    try:
+        while not data:
+            if ended.is_set():
+                if not select.select([st_r], [], [], 0)[0]:
+                    break
+            elif not select.select([st_r], [], [], 0.2)[0]:
+                continue
+            data = os.read(st_r, 1)
+            if not data:
+                break
+    finally:
+        os.close(st_r)
+    if data and started_file:
+        try:
+            with open(started_file, "w") as f:
+                f.write("started\n")
+        except OSError:
+            pass  # no record: the caller reads that as a launch that failed
 
 
 def _copy(out_r, st_r, started_file, ended=None):

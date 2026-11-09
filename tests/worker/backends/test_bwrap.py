@@ -188,6 +188,11 @@ def _row(kw, frags, absent=()):
             lambda s: {"agent": str(s.cli), "cmd": [str(s.tool)]},
             lambda s: [("--ro-bind", str(s.real), str(s.real))],
         ),
+        _row(
+            lambda s: {"split_stdio": True},
+            lambda s: [("--seccomp-file", s.seccomp, "--stdio", "split", "--")],
+        ),
+        _row(lambda s: {}, lambda s: [("--", s.bwrap)], lambda s: [("--stdio", "split")]),
     ],
     ids=[
         "die-with-parent",
@@ -206,6 +211,8 @@ def _row(kw, frags, absent=()):
         "session-sorted-by-depth",
         "link-and-cred-shadow",
         "agent-roots-visible-to-command",
+        "split-stdio-for-acp",
+        "joined-stdio-by-default",
     ],
 )
 def test_argv_has(scene, kw, frags, absent):
@@ -221,6 +228,14 @@ def test_argv_has(scene, kw, frags, absent):
         at = i
     for frag in absent(scene):
         assert _at(argv, frag) == -1
+
+
+def test_the_launcher_never_keeps_the_acp_clients_gate_address(scene):
+    # The launcher's `--keep` list is read from its own environment, which for an ACP launch is
+    # the client's: it must never name the client's gate address.
+    argv = scene.build(split_stdio=True)
+    keep = argv[argv.index("--keep") + 1].split(",")
+    assert not {"KRAFT_HOST", "KRAFT_PORT"} & set(keep)
 
 
 def test_system_dirs_are_as_the_host_has_them():
@@ -631,6 +646,13 @@ def test_wrap_forwards_its_launch_arguments(scene, run_dirs, monkeypatch):
     assert "MY_TOKEN" in argv[argv.index("--keep") + 1].split(",")
     assert _at(argv, ("--setenv", "HOME", str(home))) > 0
     assert argv[argv.index("--chdir") + 1] == str(sub)
+
+
+@pytest.mark.parametrize("acp", [False, True], ids=["cli-launch", "acp-launch"])
+def test_wrap_splits_the_commands_stdio_only_for_an_acp_command(scene, run_dirs, monkeypatch, acp):
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dirs.base))
+    argv = bwrap.OsBackend().wrap(["true"], scene.wt, {"kind": "os"}, None, acp=acp)
+    assert (_at(argv, ("--stdio", "split")) > 0) is acp
 
 
 async def test_probe_without_a_path_uses_the_default(monkeypatch):
