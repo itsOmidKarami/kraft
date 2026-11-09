@@ -583,7 +583,14 @@ def _resolve_status(
     """
 
     def resolve(base_status: str, log_path: Path, returncode: int) -> str:
+        from kraft.acp import log as _acp_log  # local: see the module's import block
+
         status = _envelope_is_error(base_status, log_path, returncode, reader)
+        # The ACP client's own failures that are a config problem (an executable it cannot
+        # start, an option the agent refused): `config_error` is not a result-file status, so
+        # the client logs the event and this is where it becomes the session's status.
+        if reader == "acp" and status == "failed" and _acp_log.config_error(log_path) is not None:
+            status = "config_error"
         # Only a *claim of success* is held to the artifact. A worker that
         # stopped to ask a question wrote nothing precisely because it
         # stopped, and `kraft.executor.dispatch.needs_context_question` matches

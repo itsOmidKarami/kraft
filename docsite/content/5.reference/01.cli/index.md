@@ -129,7 +129,7 @@ These verbs do not print the payload:
 | `repo path` | `kraft view show --json` (`path` prints one plain line meant for `cd`) |
 | `admin start`, `stop`, `restart`, `update` | None; these print status lines. |
 | `admin install-service`, `uninstall-service` | None. |
-| `admin mcp`, `admin permission-hook` | None; these speak a protocol on stdio. |
+| `admin mcp`, `admin permission-hook`, `admin acp-client` | None; these speak a protocol on stdio. |
 | `admin addon enable`, `disable` | `kraft admin addon list --json` (these print one line). |
 | `admin init` | None. It accepts `--json` and ignores it; it reports an existing MCP registration before printing one `kraft: wrote PATH` line per file. |
 

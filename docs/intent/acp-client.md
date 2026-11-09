@@ -66,3 +66,13 @@ origin: src/kraft/acp/client.py
 WHEN the client receives SIGTERM, it SHALL forward it to the agent and exit with the agent's code.
 enforced-by: tests/acp/test_client.py::test_sigterm_is_forwarded_to_the_agent_and_its_code_is_the_clients
 origin: src/kraft/acp/client.py
+
+## REQ acp-client-config-failure-resolves-config-error
+WHEN the client logs a `config_error` and the session would otherwise resolve `failed`, the system SHALL resolve it `config_error`, so no fix loop relaunches into the same refusal; a session adopted after a restart, and an agent that dies before any session exists, resolve `failed`.
+enforced-by: tests/adapters/test_agent_acp_status.py::test_a_logged_config_error_is_the_sessions_status[config-error-event], tests/adapters/test_agent_acp_status.py::test_a_logged_config_error_is_the_sessions_status[plain-error]
+origin: src/kraft/adapters/agent.py
+
+## REQ acp-opencode-contract
+The system SHALL treat `opencode acp`'s answer to one turn as a `stopReason` plus a per-turn usage block whose parts sum to its `totalTokens`.
+enforced-by: tests/acp/test_client_e2e.py::test_opencode_acp_answers_one_turn_with_usage
+origin: src/kraft/acp/client.py
