@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
-from support.api import _orchestrator_db, _paused, _seed_session, _statements
+import pytest
+from support.api import (
+    _create_escalation_session,
+    _orchestrator_db,
+    _paused,
+    _seed_session,
+    _statements,
+)
 
-from kraft import store
+from kraft import events, store
 
 
 def _family(client, repo, statuses: tuple[str, ...]) -> tuple[str, list[str]]:
@@ -76,3 +83,38 @@ def test_the_list_reads_children_in_one_pass(client, repo, monkeypatch):
 
     monkeypatch.setattr(store, "usage_rollup", per_child)
     assert client.get("/api/work-items").status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("stop", "shown"),
+    [
+        ("failed", "failed"),
+        ("escalated", "escalated"),
+        ("gate", "needs_you"),
+        ("question", "needs_you"),
+        ("active", "running"),
+    ],
+    ids=["failure-kind", "live-escalation", "pending-gate", "non-failure-kind", "running"],
+)
+def test_a_slice_shows_its_own_stop_on_the_list_and_the_detail(client, repo, stop, shown):
+    """A slice's badge follows the rule a parent row's does: a failed slice
+    reads `failed`, one an escalation turn is working on `escalated`."""
+    parent, (kid,) = _family(client, repo, ("paused",))
+    with _orchestrator_db() as c, c:
+        if stop == "gate":
+            store.request_gate(c, kid, "plan_review", "plan")
+        elif stop == "active":
+            c.execute("UPDATE work_items SET status = 'active' WHERE id = ?", (kid,))
+        else:
+            kind = "failed" if stop == "escalated" else stop
+            store.mark_needs_human(c, kid, "implement", "r", kind=kind)
+        if stop == "escalated":
+            events.append(c, kid, "escalation_message", {"session_id": "e1"})
+    if stop == "escalated":
+        # Its own connection: inside the block above it would wait on the lock.
+        _create_escalation_session(kid, "e1", "implement")
+
+    rows = {i["id"]: i for i in client.get("/api/work-items").json()["items"]}
+    detail = client.get(f"/api/work-items/{parent}").json()
+    assert [k["display_status"] for k in rows[parent]["children"]] == [shown]
+    assert [k["display_status"] for k in detail["children"]] == [shown]
