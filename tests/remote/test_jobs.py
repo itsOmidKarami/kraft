@@ -37,6 +37,13 @@ def test_job_spec_ignores_unknown_fields():
     assert JobSpec.from_frame(frame) == _spec(["true"])
 
 
+def test_job_spec_round_trips_its_acp_field():
+    spec = _spec(["agent", "acp"])
+    spec.acp = {"spec": "/srv/run/items/w/sessions/s/acp-launch.json"}
+    assert JobSpec.from_frame(spec.to_frame()).acp == spec.acp
+    assert JobSpec.from_frame({**spec.to_frame(), "acp": None}).acp is None
+
+
 def _runner(tmp_path, spec, **kw):
     (tmp_path / "area" / "items" / "w1" / "repo").mkdir(parents=True)
     return JobRunner(spec, area=tmp_path / "area", api_port=4242, **kw)

@@ -14,6 +14,7 @@ from support.harness import entry_of, v1_chain
 from support.remote import attach, make_rig, until, workers_file
 
 from kraft import caps
+from kraft.acp import launch as acp_launch
 from kraft.adapters import hook_install
 from kraft.adapters import subprocess as sp
 from kraft.remote import launch, protocol, registry
@@ -209,6 +210,18 @@ async def test_a_sandboxed_job_carries_its_sandbox_lists_and_credential_declarat
     assert spec.withheld == ["EXAMPLE_KEY"] and set(spec.sentinels) == {"EXAMPLE_KEY"}
     assert SECRET not in json.dumps(spec.to_frame())
     assert _row(rig, "s1")["sandbox"] == "remote" and _row(rig, "s1")["runner"] == "gpu"
+
+
+async def test_an_acp_job_carries_the_agent_argv_and_the_launch_spec_not_the_client(rig, sandboxed):
+    _, built = sandboxed
+    files = rig.files("s1")
+    files.folder.mkdir(parents=True, exist_ok=True)
+    spec_path = acp_support.spec(files.folder, at=files.instruction.with_name("acp-launch.json"))
+    await _run(rig, "s1", acp_support.client_argv(spec_path), runner="gpu", reader="acp")
+    (job,) = built
+    assert job.argv == acp_launch.read_spec(spec_path).agent_argv
+    assert job.acp == {"spec": str(spec_path)}
+    assert str(spec_path) in job.ro  # shipped with the other read-only files
 
 
 async def test_a_sandboxed_remote_step_runs_no_backend_on_the_server(rig, sandboxed):

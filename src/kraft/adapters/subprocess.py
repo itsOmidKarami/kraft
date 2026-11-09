@@ -1422,7 +1422,12 @@ async def _run_task(
                         # a reader names stands for the files in it (no link followed).
                         ro=[
                             q
-                            for p in (files.instruction, files.review, *map(Path, ro_paths))
+                            for p in (
+                                files.instruction,
+                                files.review,
+                                *map(Path, ro_paths),
+                                *([acp_spec] if acp_spec else []),
+                            )
                             if p.exists()
                             for q in _remote_files.regular_files(p)
                         ],
@@ -1439,7 +1444,8 @@ async def _run_task(
                         session_id=session_id,
                         node_id=node_id,
                         hook_point=hook_point,
-                        cmd=cmd,
+                        # An ACP step ships the agent's own argv: the machine builds the client's.
+                        cmd=agent.agent_argv if agent else cmd,
                         cwd=cwd,
                         env={**(env or {}), "KRAFT_RESULT_PATH": str(result_path)},
                         repo_entry=repo_entry,
@@ -1456,6 +1462,7 @@ async def _run_task(
                         # machine holds it to the cap this session launched under.
                         outputs_dir=str(item_paths.writer_dir(files)) if declared_outputs else None,
                         outputs_max_bytes=declared_outputs.max_bytes if declared_outputs else None,
+                        acp={"spec": str(acp_spec)} if acp_spec else None,
                     )
                     run = await _remote_runs.current().launch(
                         spec, claim, entries=entries, folder=files.folder

@@ -66,6 +66,10 @@ class JobSpec:
     # output folder over it (or over the entry limit) before packing. A machine that predates the
     # field ignores it, and the server's own capture check fails the writer instead.
     outputs_max_bytes: int | None = None
+    # An ACP step: `{spec}`, the server's path of the launch spec the machine copies (its paths
+    # mapped, the wrapped agent argv in) and runs Kraft's client over; `argv` is then the agent's
+    # own. Sent only to a machine listing the `acp_client` cap.
+    acp: dict | None = None
 
     @property
     def key(self) -> str:

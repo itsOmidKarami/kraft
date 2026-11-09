@@ -389,6 +389,7 @@ def build(
     codex_hook: dict | None = None,
     outputs_dir: str | None = None,
     outputs_max_bytes: int | None = None,
+    acp: dict | None = None,
 ) -> JobSpec:
     done = subprocess.run(
         ["git", "-C", str(cwd), "rev-parse", "--verify", f"refs/heads/{branch}"],
@@ -434,4 +435,5 @@ def build(
         ro=[str(e.path) for e in entries if not e.rw],
         codex_hook=codex_hook,
         outputs_max_bytes=outputs_max_bytes,
+        acp=acp,
     )
