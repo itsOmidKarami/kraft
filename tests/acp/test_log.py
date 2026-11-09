@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from kraft.acp import log
 
 
@@ -31,3 +33,48 @@ def test_config_error_names_the_first_one(tmp_path):
     )
     assert log.config_error(path) == "bad model"
     assert log.config_error(tmp_path / "missing") is None
+
+
+def test_policy_violation_names_the_first_one(tmp_path):
+    path = tmp_path / "log"
+    path.write_text(
+        "".join(
+            x + "\n"
+            for x in (
+                log.event("starting"),
+                log.event("policy_violation", message="Bash ran"),
+                log.event("policy_violation", message="later"),
+            )
+        )
+    )
+    assert log.policy_violation(path) == "Bash ran"
+    assert log.policy_violation(tmp_path / "missing") is None
+
+
+@pytest.mark.parametrize(
+    ("lines", "cause"),
+    [
+        (
+            [
+                log.event("starting"),
+                log.event("config_error", message="refused"),
+                log.event("policy_violation", message="Bash ran"),
+            ],
+            "refused",
+        ),
+        (
+            [log.event("starting"), log.event("policy_violation", message="Bash ran")],
+            "tool policy violated: Bash ran",
+        ),
+        ([log.event("starting"), log.event("stop", stop_reason="end_turn")], ""),
+        (["plain text", '{"type": "system"}'], None),
+    ],
+    ids=[
+        "config-error-beats-violation",
+        "violation-is-prefixed",
+        "acp-log-with-no-cause",
+        "not-an-acp-log-is-none",
+    ],
+)
+def test_cause_of_an_acp_log(lines, cause):
+    assert log.cause("".join(x + "\n" for x in lines)) == cause

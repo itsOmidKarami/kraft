@@ -12,6 +12,7 @@ from kraft import ci_reruns, events, inplace, item_paths, node_runs, reviewed_he
 from kraft import config as _config
 from kraft import findings as _findings
 from kraft import policy as _policy
+from kraft.acp import log as _acp_log
 from kraft.adapters import beads
 from kraft.adapters import forge as forge_mod
 from kraft.adapters import subprocess as _subprocess
@@ -427,6 +428,10 @@ def _task_cause(
     cannot be read. Never raises: a stop must not become less legible than the
     generic pointer to the log, and must never escape the walk."""
     text = _task_log(db, work_item_id, node, task, status)
+    if (acp := _acp_log.cause(text)) is not None:
+        # An ACP log's first line is the client's `starting` record, never the cause.
+        line = " ".join(acp.split())
+        return line if len(line) <= _STOP_CAUSE_MAX else line[: _STOP_CAUSE_MAX - 1] + "…"
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     # The line Kraft appends after the task's own output when the sandbox's
     # memory limit killed it is the cause; the task's first line is not.
@@ -562,7 +567,11 @@ async def _stop_for_config_error(
     named = ", ".join(t.task.id for t in failed)
     causes = [c for t in failed if (c := _task_cause(db, work_item_id, node, t))]
     detail = "; ".join(causes) if causes else "see the session log"
-    reason = f"could not start {named} in node {node.id}: {detail}"
+    if causes and all(c.startswith(_acp_log.VIOLATION_PREFIX) for c in causes):
+        # the session ran: it did not fail to start
+        reason = f"{named} in node {node.id} stopped: {detail}"
+    else:
+        reason = f"could not start {named} in node {node.id}: {detail}"
     await db.write(
         lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind=StopKind.CONFIG)
     )

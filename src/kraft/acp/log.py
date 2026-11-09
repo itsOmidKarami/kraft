@@ -28,7 +28,8 @@ def message(direction: str, msg: dict, *, replay: bool = False) -> str:
 
 def event(name: str, **fields) -> str:
     """A client event: `starting`, `session`, `prompting`, `ask`, `stop`, `config_error`,
-    `error`, `stderr`, `line_too_long`, `cancel_timeout`, `interrupted`."""
+    `error`, `stderr`, `line_too_long`, `cancel_timeout`, `interrupted`, `ask_withdrawn`,
+    `heartbeat`, `unasked_call`, `policy_violation`, `asks_everything`."""
     return _line("client", event=name, **fields)
 
 
@@ -49,13 +50,43 @@ def records(lines: Iterable[str]) -> Iterator[dict]:
             yield obj
 
 
-def config_error(path: Path) -> str | None:
-    """The `message` of the first `config_error` client event in the log at `path`."""
+def _first_event(path: Path, name: str) -> str | None:
     try:
         text = path.read_text()
     except OSError:
         return None
     for rec in records(text.splitlines()):
-        if rec.get("dir") == "client" and rec.get("event") == "config_error":
+        if rec.get("dir") == "client" and rec.get("event") == name:
             return str(rec.get("message") or "")
     return None
+
+
+def config_error(path: Path) -> str | None:
+    """The `message` of the first `config_error` client event in the log at `path`."""
+    return _first_event(path, "config_error")
+
+
+def policy_violation(path: Path) -> str | None:
+    """The `message` of the first `policy_violation` client event: the agent ran a tool the
+    task's policy does not allow (`client.Client.backstop`)."""
+    return _first_event(path, "policy_violation")
+
+
+VIOLATION_PREFIX = "tool policy violated: "
+
+
+def cause(text: str) -> str | None:
+    """Why an ACP session stopped, from its log's text: the `message` of its `config_error`
+    event, else `VIOLATION_PREFIX` + that of its `policy_violation` event, else "". None when
+    the text is not an ACP session log (no line of this format), so the caller keeps its own
+    rule for other harnesses."""
+    seen, found = False, {}
+    for rec in records(text.splitlines()):
+        seen = True
+        if rec.get("dir") == "client" and rec.get("event") in ("config_error", "policy_violation"):
+            found.setdefault(rec["event"], str(rec.get("message") or ""))
+    if not seen:
+        return None
+    if "config_error" in found:
+        return found["config_error"]
+    return VIOLATION_PREFIX + found["policy_violation"] if "policy_violation" in found else ""

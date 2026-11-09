@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from kraft import events, store
+from kraft.acp import log as acp_log
 from kraft.executor import stops, walk
 from kraft.templates.models import DEFAULT_WAIT
 
@@ -294,3 +295,36 @@ async def test_a_wait_with_no_next_observation_is_looked_at_after_the_default_in
     due = (now + DEFAULT_WAIT.initial_interval).isoformat()
     assert (it.status(), it.row()["retry_at"]) == ("waiting", due)
     assert it.events("work_item_waiting")[-1]["payload"].get("reason") == reason
+
+
+def _acp_text(*events: str) -> str:
+    return "".join(x + "\n" for x in (acp_log.event("starting", agent="opencode"), *events))
+
+
+@pytest.mark.parametrize(
+    ("text", "reason"),
+    [
+        (
+            _acp_text(acp_log.event("config_error", message="the agent refused model 'x'")),
+            "could not start check in node verify: the agent refused model 'x'",
+        ),
+        (
+            _acp_text(acp_log.event("policy_violation", message="Bash ran without asking")),
+            "check in node verify stopped: tool policy violated: Bash ran without asking",
+        ),
+        (_acp_text(), "could not start check in node verify: see the session log"),
+    ],
+    ids=[
+        "acp-config-error-not-the-starting-line",
+        "acp-policy-violation-says-so",
+        "acp-log-with-no-cause",
+    ],
+)
+async def test_an_acp_stop_names_its_cause_not_the_clients_first_line(
+    item_on, tmp_path, text, reason
+):
+    log = tmp_path / "s1.log"
+    log.write_text(text)
+    assert (
+        await _config_error_reason(item_on, [("s1", log, "config_error", "2026-01-01")]) == reason
+    )

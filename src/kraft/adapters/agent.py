@@ -589,7 +589,11 @@ def _resolve_status(
         # The ACP client's own failures that are a config problem (an executable it cannot
         # start, an option the agent refused): `config_error` is not a result-file status, so
         # the client logs the event and this is where it becomes the session's status.
-        if reader == "acp" and status == "failed" and _acp_log.config_error(log_path) is not None:
+        # A policy violation (the agent ran a tool the task's policy does not allow) is one too,
+        # whatever the agent wrote: not in ADVANCING, so the artifact check below returns it as is.
+        if reader == "acp" and _acp_log.policy_violation(log_path) is not None:
+            status = "config_error"
+        elif reader == "acp" and status == "failed" and _acp_log.config_error(log_path) is not None:
             status = "config_error"
         # Only a *claim of success* is held to the artifact. A worker that
         # stopped to ask a question wrote nothing precisely because it
