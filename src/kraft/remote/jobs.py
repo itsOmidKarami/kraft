@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import json
 import os
 import shutil
 import signal as _signal
@@ -127,6 +128,7 @@ class JobRunner:
         self._proc: subprocess.Popen | None = None
         self._sent = 0
         self._escalation: asyncio.Task | None = None
+        self._acp: dict | None = None
 
     # ── environment ──
 
@@ -135,7 +137,9 @@ class JobRunner:
         own = {k: self.pathmap.text(v) for k, v in s.env.items() if k not in _SERVER_ONLY}
         own.update(s.identity)
         own["KRAFT_RUN_DIR"] = str(self.area / "run")
-        if s.sandbox is None:  # a sandboxed worker reaches Kraft through its proxy, not a port
+        # A sandboxed worker reaches Kraft through its proxy, not a port; an ACP step's client runs
+        # outside its sandbox and reaches the gate through the machine's forwarder.
+        if s.sandbox is None or s.acp is not None:
             own["KRAFT_HOST"] = "127.0.0.1"
             if self.api_port is not None:
                 own["KRAFT_PORT"] = str(self.api_port)
@@ -175,7 +179,8 @@ class JobRunner:
                 box = Sandboxed(self.host, s, self.pathmap, self.root, self.dir)
             except Unavailable as exc:
                 return Outcome(rejected=str(exc), outcome="config_error")
-        elif (why := self._missing(argv[0], env)) is not None:
+        # An ACP step naming no agent has nothing to look for: the client fails it itself.
+        elif argv and (why := self._missing(argv[0], env)) is not None:
             return Outcome(rejected=why, outcome="config_error")
         if s.codex_hook is not None and (refused := await self._codex_hook(argv, box)):
             return refused
@@ -190,10 +195,15 @@ class JobRunner:
                 launch = await box.step(argv, env, step_env)
             except Unavailable as exc:
                 return Outcome(rejected=str(exc), outcome="config_error")
+        # An ACP step runs Kraft's own client over a spec of this machine's paths; the agent,
+        # wrapped by the sandbox when there is one, is what the client spawns.
+        popen_argv = launch.argv if launch is not None else argv
+        if s.acp is not None:
+            popen_argv = self._acp_command(popen_argv)
         with open(self.log_path, "ab") as log:
             try:
                 self._proc = subprocess.Popen(
-                    launch.argv if launch is not None else argv,
+                    popen_argv,
                     cwd=(launch and launch.client_cwd) or self.pathmap.text(s.cwd),
                     env=env,
                     stdin=subprocess.DEVNULL,
@@ -236,6 +246,43 @@ class JobRunner:
             capped=capped,
             oom={"memory": oom.memory, "confirmed": oom.confirmed} if oom is not None else None,
         )
+
+    def _acp_body(self) -> dict:
+        """The launch spec the server shipped, read once, every string in it on this machine's
+        paths: the agent reads the prompt's and the context's paths here, where the server's do not
+        exist."""
+        if self._acp is None:
+
+            def mapped(v):
+                if isinstance(v, str):
+                    return self.pathmap.text(v)
+                if isinstance(v, list):
+                    return [mapped(x) for x in v]
+                if isinstance(v, dict):
+                    return {k: mapped(x) for k, x in v.items()}
+                return v
+
+            self._acp = mapped(
+                json.loads(Path(self.pathmap.text(self.spec.acp["spec"])).read_text())
+            )
+        return self._acp
+
+    def _acp_command(self, agent_argv: list[str]) -> list[str]:
+        """The client's command over a copy of the shipped spec: this machine's paths, the agent
+        argv the client spawns (wrapped, in a sandbox), and a marker it writes before it spawns."""
+        from kraft.acp import launch as acp_launch
+        from kraft.worker.ca import write_whole
+
+        body = dict(self._acp_body())
+        # What the log shows: the agent as shipped (paths mapped), before any sandbox wraps it.
+        body["logged_agent_argv"] = body.get("logged_agent_argv") or list(body["agent_argv"])
+        body["agent_argv"] = list(agent_argv)
+        marker = self.dir / "acp-started"
+        marker.unlink(missing_ok=True)
+        body["started_marker"] = str(marker)
+        path = self.dir / "acp-launch.json"
+        write_whole(path, json.dumps(body).encode(), 0o600)
+        return [*acp_launch.client_prefix(), "--spec", str(path)]
 
     async def _codex_hook(self, argv: list[str], box: Sandboxed | None) -> Outcome | None:
         """Put the flags that trust Kraft's hook into `argv`, from this machine's codex in its

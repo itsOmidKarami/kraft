@@ -2,8 +2,14 @@
 
 import asyncio
 import base64
+import json
 import sys
 import time
+from pathlib import Path
+
+import pytest
+from support.acp import agent_argv
+from support.acp import spec as acp_spec
 
 from kraft.remote.jobs import JobRunner, JobSpec
 
@@ -193,3 +199,63 @@ async def test_a_command_inside_its_caps_is_not_marked_capped(tmp_path):
     spec = _spec(["sh", "-c", "echo hi"], deadline_s=30, cap={"scope": "x"}, idle_s=30)
     out, _ = await _run(_runner(tmp_path, spec))
     assert out.capped is None and out.code == 0
+
+
+def _acp_job(tmp_path, agent=None, **fields):
+    """An ACP job whose shipped launch spec names the server's paths, as `build` leaves it: the
+    server's run dir and worktree are `srv/run` and `srv/wt`, the machine's copy of the spec is
+    where its path map puts the server's."""
+    server = tmp_path / "srv"
+    shipped = tmp_path / "area/run/items/w1/acp-launch.json"
+    shipped.parent.mkdir(parents=True)
+    acp_spec(
+        tmp_path,
+        at=shipped,
+        cwd=str(server / "wt"),
+        result_path=str(server / "run/r.json"),
+        prompt=f"read {server / 'run/items/w1/instruction.md'}",
+        **fields,
+    )
+    job = _spec(agent if agent is not None else agent_argv())
+    job.acp = {"spec": str(server / "run/items/w1/acp-launch.json")}
+    job.cwd = job.server_worktree = str(server / "wt")
+    job.server_run_dir = str(server / "run")
+    return job, shipped.parent.parent.parent.parent / "jobs" / "w1__s1" / "acp-launch.json"
+
+
+async def test_an_acp_step_runs_the_machines_own_client_over_a_spec_with_the_machines_paths(
+    tmp_path,
+):
+    job, written_at = _acp_job(tmp_path)
+    out, frames = await _run(_runner(tmp_path, job))
+    area = tmp_path / "area"
+    written = json.loads(written_at.read_text())
+    assert (out.code, out.rejected) == (0, None), _text(frames)
+    assert written["cwd"] == f"{area}/items/w1/repo"
+    assert written["result_path"] == f"{area}/run/r.json"
+    assert written["prompt"] == f"read {area}/run/items/w1/instruction.md"
+    assert written["started_marker"] == str(written_at.with_name("acp-started"))
+    assert Path(written["started_marker"]).exists()
+    assert written["logged_agent_argv"] == written["agent_argv"] == agent_argv()
+    assert oct(written_at.stat().st_mode & 0o777) == "0o600"
+
+
+@pytest.mark.parametrize("sandboxed", [False, True], ids=["unsandboxed", "sandboxed"])
+def test_an_acp_steps_client_reaches_the_gate_through_the_machine(tmp_path, sandboxed):
+    job = _spec(agent_argv(), sandbox={"kind": "remote"} if sandboxed else None)
+    job.acp = {"spec": "/x"}
+    env = _runner(tmp_path, job)._env()
+    assert (env["KRAFT_HOST"], env["KRAFT_PORT"]) == ("127.0.0.1", "4242")
+
+
+def test_a_sandboxed_step_that_is_not_acp_has_no_gate_address(tmp_path):
+    env = _runner(tmp_path, _spec(agent_argv(), sandbox={"kind": "remote"}))._env()
+    # the test process's own KRAFT_PORT may cross as the instance's: only the forwarder's is not
+    assert env.get("KRAFT_PORT") != "4242" and env.get("KRAFT_HOST") != "127.0.0.1"
+
+
+async def test_an_acp_step_whose_agent_is_missing_never_starts_and_names_the_agent(tmp_path):
+    job, _ = _acp_job(tmp_path, agent=["opencode-not-installed", "acp"])
+    out, frames = await _run(_runner(tmp_path, job))
+    assert out.outcome == "config_error" and "opencode-not-installed" in out.rejected
+    assert not [f for f in frames if f["t"] == "started"]
