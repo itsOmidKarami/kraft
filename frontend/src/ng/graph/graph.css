@@ -9,10 +9,11 @@
 .glyph-box.is-current { border: 1.5px solid var(--text-sub); background: var(--surface-2); color: var(--text); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-sub) 12%, transparent); }
 .glyph-box.is-todo { border: 1px dashed var(--stroke); color: var(--text-faint); }
 .glyph-box.is-failed { border-color: var(--bad); color: var(--bad); }
-/* Running: a light circles the border (the trace), over the border at --run-edge; it rests as a full border when nothing moves.
-   Only a current box runs: an escalated one stays amber. */
-.glyph-box.is-current.is-running { border-color: color-mix(in srgb, var(--run) var(--run-edge), transparent); color: var(--text); }
-.glyph-box.is-current.is-running::before { content: ""; position: absolute; inset: -1.5px; border-radius: inherit; padding: 1.5px; background: conic-gradient(from var(--run-a), transparent 0 55%, var(--run) 90%, transparent 100%); -webkit-mask: linear-gradient(var(--text) 0 0) content-box, linear-gradient(var(--text) 0 0); -webkit-mask-composite: xor; mask: linear-gradient(var(--text) 0 0) content-box exclude, linear-gradient(var(--text) 0 0); animation: var(--run-trace); pointer-events: none; }
+/* Running: a light circles the border (the trace), under the border at --run-edge; with reduced motion it stops as a
+   still arc. The light is the box's own background, so it snaps with the border at every pixel ratio: one padding-box
+   and one border-box keyword each set origin and clip both (longhands would centre the conic wrong), and the trailing
+   colour keeps the fill under the border. Only a current box runs: an escalated one stays amber. */
+.glyph-box.is-current.is-running { border-color: color-mix(in srgb, var(--run) var(--run-edge), transparent); color: var(--text); background: linear-gradient(var(--surface-2) 0 0) padding-box, conic-gradient(from var(--run-a), transparent 0 55%, var(--run) 90%, transparent 100%) border-box var(--surface-2); animation: var(--run-trace); }
 .glyph-box.is-esc { border: 1.5px solid var(--warn); background: color-mix(in srgb, var(--warn) 10%, var(--bg)); color: var(--warn); }
 .glyph-box.is-ghost { border: 1px dashed var(--stroke); color: var(--text-faint); }
 .glyph-box.is-paused { border: 1.5px solid var(--text-muted); background: var(--surface-2); color: var(--text-sub); }
