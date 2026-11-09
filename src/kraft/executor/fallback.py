@@ -79,6 +79,16 @@ def require_on_path(inv, harnesses) -> None:
         raise Unavailable(f"`{exe}` is not on PATH")
 
 
+def refuse_acp_fallback(inv, harnesses) -> None:
+    """An ACP agent has no rate-limit signal (spec §3), so a launch is never moved onto one."""
+    h = harnesses.valid.get(inv.harness)
+    if h is not None and h.kind == "acp":
+        raise Unavailable(
+            f"`{inv.harness}` is an ACP agent, which has no rate-limit signal and cannot be "
+            "a fallback"
+        )
+
+
 def known_limited(conn, harness: str, model: str | None) -> str | None:
     """`resets_at_iso` of the newest `rate_limit_hit` for `harness`+`model`
     across every work item, when that reset is still ahead; else None

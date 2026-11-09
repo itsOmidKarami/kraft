@@ -21,7 +21,7 @@ from support.harness import v1_node, v1_task, v1_walk, write_harness_profiles
 from kraft import db as _db
 from kraft import events, store
 from kraft.executor import dispatch, fallback
-from kraft.paths import RunDirs
+from kraft.paths import RunDirs, default_harnesses_dir
 
 FAKE_AGENT = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
 
@@ -512,3 +512,29 @@ async def test_a_sandboxed_launch_skips_the_host_path_check(
     assert _fallbacks(evts) == []
     assert [s["status"] for s in sessions] == ["done"]
     assert status == "completed"
+
+
+async def test_a_task_fallback_naming_an_acp_harness_is_skipped_as_unavailable(
+    tmp_path, repo, fake_agent, monkeypatch, soon
+):
+    """An ACP agent has no rate-limit signal, so a launch is never moved onto one:
+    the entry is skipped, the next candidate launches."""
+    harnesses_dir = default_harnesses_dir()
+    harnesses_dir.mkdir(parents=True, exist_ok=True)
+    (harnesses_dir / "fake-acp.yaml").write_text(
+        # An executable that exists, so `require_on_path` passes and only the ACP refusal skips it.
+        f"id: fake-acp\nkind: acp\ncommand: [{sys.executable}]\n"
+    )
+    _profiles(fake_agent, {"acpx": {"provider": "fake-acp"}})
+    _limit(monkeypatch, "opus", resets_at=soon)
+
+    status, evts, sessions, _ = await _walk(
+        tmp_path, repo, _chain(fallback=[{"harness": "acpx"}, {"model": "sonnet"}])
+    )
+
+    assert status == "completed"
+    assert [s["status"] for s in sessions] == ["rate_limited", "done"]
+    _, skip = _fallbacks(evts)
+    assert (skip["reason"], skip["from"]["harness"]) == ("unavailable", "acpx")
+    assert "no rate-limit signal" in skip["detail"]
+    assert skip["to"]["model"] == "sonnet"

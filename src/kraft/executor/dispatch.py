@@ -2042,6 +2042,8 @@ async def _dispatch_task_in(
             )
             if listed and not sandbox:
                 _fallback.require_on_path(inv, harnesses)
+            if not primary:
+                _fallback.refuse_acp_fallback(inv, harnesses)
         except (_agent.HarnessUnavailable, _fallback.Unavailable) as exc:
             if not listed:
                 why = (

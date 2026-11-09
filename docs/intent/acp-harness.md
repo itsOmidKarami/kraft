@@ -13,3 +13,8 @@ origin: src/kraft/acp/entry.py
 IF an ACP entry's `reports` names anything but `tokens` or `cost`, THEN the system SHALL refuse the file at load.
 enforced-by: tests/acp/test_entry.py::test_a_malformed_acp_entry_is_refused_naming_the_key[unknown-report]
 origin: src/kraft/acp/entry.py
+
+## REQ acp-harness-is-never-a-fallback
+IF a `fallback:` entry resolves to a `kind: acp` harness, THEN the system SHALL refuse a profile's list at load and SHALL skip a task's list entry as unavailable at launch.
+enforced-by: tests/test_fallback_profiles.py::test_a_profile_fallback_naming_an_acp_harness_is_refused_at_load, tests/test_fallback_profiles.py::test_a_task_fallback_candidate_on_an_acp_harness_is_unavailable, tests/executor/test_launch_fallback.py::test_a_task_fallback_naming_an_acp_harness_is_skipped_as_unavailable
+origin: src/kraft/executor/fallback.py

@@ -783,6 +783,15 @@ class HarnessProfileTable:
                         f"{path}: profiles.{p.id}.fallback[{n}]: profile {entry.profile!r} "
                         f"is not defined; known are {sorted(agent_profiles)}"
                     )
+                if entry.harness is not None:
+                    target = profiles.get(entry.harness)
+                    provider = harnesses.get(target.provider) if target is not None else None
+                    if provider is not None and provider.kind == "acp":
+                        raise TemplateEnvironmentError(
+                            f"{path}: profiles.{p.id}.fallback[{n}]: harness {entry.harness!r} "
+                            "is an ACP agent, which has no rate-limit signal and cannot be a "
+                            "fallback"
+                        )
         return cls(
             profiles=profiles,
             agent_profiles=agent_profiles,

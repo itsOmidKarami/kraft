@@ -13,8 +13,10 @@ import pytest
 import yaml
 from fastapi import HTTPException
 
-from kraft import doctor
+from kraft import doctor, harness
 from kraft.api.routes import harnesses as harnesses_route
+from kraft.executor import fallback
+from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
 from kraft.templates.library import TemplateLibrary
 
 HARNESSES = {"claude": {"provider": "claude"}, "codex": {"provider": "codex"}}
@@ -115,3 +117,37 @@ def test_doctor_fails_a_fallback_entry_the_launch_would_refuse(tmp_path, monkeyp
 def test_doctor_is_quiet_when_every_entry_pairs(tmp_path, monkeypatch):
     _live(tmp_path, monkeypatch, {"harness": "claude", "profile": "deep"})
     assert not [r for r in doctor._agent_checks() if r["name"].startswith("profile")]
+
+
+_ACP = {"id": "fake-acp", "kind": "acp", "command": ["fake-acp-agent"]}
+
+
+def _providers():
+    return {
+        **harness.load(None).valid,
+        "fake-acp": harness.Harness.from_mapping(_ACP, where="t"),
+    }
+
+
+def test_a_profile_fallback_naming_an_acp_harness_is_refused_at_load(tmp_path):
+    data = {
+        "harnesses": {
+            "claude": {"provider": "claude", "enabled": True},
+            "fake-acp": {"provider": "fake-acp", "enabled": True},
+        },
+        "profiles": {
+            "tier": {
+                "providers": {"claude": {"model": "sonnet"}},
+                "fallback": [{"harness": "fake-acp", "model": "m"}],
+            }
+        },
+    }
+    with pytest.raises(TemplateEnvironmentError, match=r"profiles\.tier\.fallback\[0\].*ACP"):
+        HarnessProfileTable.from_mapping(data, tmp_path / "harnesses.yaml", harnesses=_providers())
+
+
+def test_a_task_fallback_candidate_on_an_acp_harness_is_unavailable():
+    hs = harness.HarnessSet(valid=_providers(), invalid={})
+    with pytest.raises(fallback.Unavailable, match="no rate-limit signal"):
+        fallback.refuse_acp_fallback(SimpleNamespace(harness="fake-acp"), hs)
+    fallback.refuse_acp_fallback(SimpleNamespace(harness="claude"), hs)  # no raise
