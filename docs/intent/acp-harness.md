@@ -18,3 +18,13 @@ origin: src/kraft/acp/entry.py
 IF a `fallback:` entry resolves to a `kind: acp` harness, THEN the system SHALL refuse a profile's list at load and SHALL skip a task's list entry as unavailable at launch.
 enforced-by: tests/test_fallback_profiles.py::test_a_profile_fallback_naming_an_acp_harness_is_refused_at_load, tests/test_fallback_profiles.py::test_a_task_fallback_candidate_on_an_acp_harness_is_unavailable, tests/executor/test_launch_fallback.py::test_a_task_fallback_naming_an_acp_harness_is_skipped_as_unavailable
 origin: src/kraft/executor/fallback.py
+
+## REQ acp-client-advertises-no-host-access
+The system SHALL advertise no `fs` and no `terminal` capability to an ACP agent.
+enforced-by: tests/acp/test_wire.py::test_initialize_advertises_no_fs_and_no_terminal
+origin: src/kraft/acp/wire.py
+
+## REQ acp-line-reading-is-bounded-and-tolerant
+WHEN an ACP agent prints a line that is not JSON-RPC, or one longer than the line limit, the system SHALL skip it and log it, and SHALL NOT fail the session.
+enforced-by: tests/acp/test_wire.py::test_read_line_never_raises_on_what_an_agent_prints[help-text], tests/acp/test_wire.py::test_a_line_past_the_limit_is_skipped_not_read_whole
+origin: src/kraft/acp/wire.py
