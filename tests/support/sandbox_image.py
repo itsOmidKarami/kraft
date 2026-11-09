@@ -10,9 +10,12 @@ import pytest
 IMAGE = "kraft-test-git:latest"
 
 
-def build_git_image(cli: str, tmp_path: Path, monkeypatch, *, curl: bool = False) -> str:
+def build_git_image(
+    cli: str, tmp_path: Path, monkeypatch, *, curl: bool = False, python: bool = False
+) -> str:
     """`alpine/git` with its `git` entrypoint cleared, so a command runs as
-    itself (and `curl`, which the `kraft` shim needs, when asked), built with
+    itself (and `curl`, which the `kraft` shim needs, or `python3`, which a
+    Python agent needs, when asked), built with
     `cli` and made this machine's runtime through
     `sandbox.yaml`, rootless or not as it really is. Skips where the runtime
     cannot build it, unless KRAFT_E2E_REQUIRE names it."""
@@ -21,10 +24,12 @@ def build_git_image(cli: str, tmp_path: Path, monkeypatch, *, curl: bool = False
 
     context = tmp_path / "image"
     context.mkdir()
-    image = f"{IMAGE.split(':')[0]}-curl:latest" if curl else IMAGE
+    extras = [name for name, wanted in (("curl", curl), ("python", python)) if wanted]
+    image = "-".join([IMAGE.split(":")[0], *extras]) + ":latest" if extras else IMAGE
     (context / "Dockerfile").write_text(
         "FROM docker.io/alpine/git:latest\n"
         + ("RUN apk add --no-cache curl\n" if curl else "")
+        + ("RUN apk add --no-cache python3\n" if python else "")
         + "ENTRYPOINT []\n"
     )
     built = subprocess.run(
