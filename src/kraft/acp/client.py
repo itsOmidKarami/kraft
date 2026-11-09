@@ -221,8 +221,12 @@ class Client:
         verdict = self.verdicts.get(cid)
         if verdict == "allow":  # for the names it was asked on: a late `name` can change them
             return self._decided_on.get(cid) == self.names(cid)
-        # asked and rejected, then failed: it did not run (a *completed* one did, `backstop`)
-        return status == "failed" and (verdict == "deny" or cid in self._asked)
+        # asked and rejected, then failed: it did not run (a *completed* one did, `backstop`). So
+        # did a call never asked about that fails once Kraft rejected a tool in this turn: the
+        # agent ends the turn on the rejection and cancels what it had queued ("declined").
+        return status == "failed" and (
+            verdict == "deny" or cid in self._asked or bool(self._turn_rejects)
+        )
 
     def names(self, cid: str) -> tuple[str, ...]:
         return tools.resolve(self.calls.get(cid, {"toolCallId": cid}), self.spec.tool_names).names
@@ -527,7 +531,8 @@ class Client:
         return (
             f"Kraft's permission gate rejected {detail}. {names} "
             f"{'is' if one else 'are'} not available in this task: continue without "
-            f"{'it' if one else 'them'}."
+            f"{'it' if one else 'them'}. Any other call of yours that failed as declined when the "
+            "turn ended was cancelled with it, not denied by Kraft's policy: it can be tried again."
         )
 
     def stop_after_rejections(self) -> int:

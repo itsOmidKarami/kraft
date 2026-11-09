@@ -156,15 +156,32 @@ def settle_call(sid: str, c: dict, resp: dict | None) -> str | None:
     return None
 
 
+def decline(sid: str, queued: list) -> None:
+    """The calls queued behind a rejection end `failed`, never having run (OpenCode's text)."""
+    for cid in queued:
+        declined = "The user declined this tool call"
+        update(
+            sid,
+            {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": cid,
+                "status": "failed",
+                "content": [{"type": "content", "content": {"type": "text", "text": declined}}],
+                "rawOutput": {"error": declined},
+            },
+        )
+
+
 def run_calls(sid: str, calls: list) -> str | None:
     """Scripted tool calls: `KRAFT_FAKE_ACP_CALLS` is a JSON list of {id, name?, kind, input?,
-    ask?, run_anyway?, withdraw?, wait?}. A call that asks announces itself pending, goes
+    ask?, end?, run_anyway?, withdraw?, wait?}. A call that asks announces itself pending, goes
     in_progress (OpenCode does, *before* it asks), asks, then completes if allowed and fails if
     rejected; one that does not ask just completes. `ask` absent = ask when `asking()`.
     `run_anyway`: completes although rejected. `withdraw`: sends `$/cancel_request` for its own
-    ask. `wait: false`: go on without the answer. Returns "cancelled" when a rejection ends the
+    ask. `end: "declined"`: queued, it fails "declined" when a rejection ends the turn.
+    `wait: false`: go on without the answer. Returns "cancelled" when a rejection ends the
     turn (flag `end_on_reject`)."""
-    waiting = []
+    waiting, queued = [], []
     for i, c in enumerate(calls):
         cid = c["id"]
         view = {
@@ -176,6 +193,9 @@ def run_calls(sid: str, calls: list) -> str | None:
         if c.get("name"):
             view["name"] = c["name"]
         update(sid, {"sessionUpdate": "tool_call", "status": "pending", **view})
+        if c.get("end") == "declined":  # queued: it fails when a rejection ends the turn
+            queued.append(cid)
+            continue
         if not c.get("ask", asking()):
             update(
                 sid,
@@ -228,6 +248,7 @@ def run_calls(sid: str, calls: list) -> str | None:
         if c.get("wait", True):
             if stop := settle_call(sid, c, await_response(f"ask-{cid}")):
                 LEFT["calls"] = calls[i + 1 :]
+                decline(sid, queued)
                 return stop
         else:
             waiting.append(c)

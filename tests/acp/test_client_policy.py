@@ -128,6 +128,9 @@ def test_a_rejection_that_ends_the_turn_is_continued_on_the_same_session_until_d
     assert first["sessionId"] == second["sessionId"] == third["sessionId"]
     assert "Write" in _text(second) and "not in this task's allowlist" in _text(second)
     assert "not available in this task" in _text(second) and "Bash" not in _text(second)
+    # the agent also saw its other queued calls fail "declined": those were cancelled, not denied
+    assert "cancelled with it, not denied by Kraft's policy" in _text(second)
+    assert "can be tried again" in _text(second)
     assert "Bash" in _text(third) and "Write" not in _text(third)
     assert json.loads((tmp_path / "result.json").read_text()) == {"status": "done"}
     assert not _events(recs, "policy_violation") and not _events(recs, "rejection_limit")
@@ -463,6 +466,15 @@ def _violation(recs):
         ),
         ([{"id": "c1", "kind": "read", "late_name": "shell"}], {"Bash": "deny"}, {}, True),
         ([{"id": "c1", "kind": "read", "late_name": "read"}], {"Bash": "deny"}, {}, False),
+        (
+            [
+                {"id": "c1", "name": "glob", "kind": "search", "end": "declined"},
+                {"id": "c2", "name": "shell", "kind": "execute"},
+            ],
+            {"Glob": "deny", "Bash": "deny"},
+            {"allowlist": True, "flags": "ask_all,end_on_reject"},
+            False,
+        ),
     ],
     ids=[
         "unasked-and-denied",
@@ -478,6 +490,7 @@ def _violation(recs):
         "unasked-failed-but-allowed",
         "a-late-name-makes-an-allowed-call-another-tool",
         "a-late-name-that-is-the-same-tool",
+        "unasked-and-cancelled-by-a-rejection-that-ended-the-turn",
     ],
 )
 def test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow(
@@ -485,14 +498,16 @@ def test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_al
 ):
     # delay: a withdrawn ask must always be read before the gate answers (else `runs-anyway`
     # could see allow_once recorded first and expect 77 for the wrong reason, or flake).
+    fields = dict(fields)
+    flags = fields.pop("flags", "ask_all")
     code, recs = run_inprocess(
         tmp_path,
         monkeypatch,
-        "ask_all",
+        flags,
         ask=fake_gate(decisions, delay=0.3),
         calls=calls,
         policy=True,
-        tool_names=TOOLS,
+        tool_names={**TOOLS, "search": ["Glob"], "glob": ["Glob"]},
         **fields,
     )
     assert bool(_violation(recs)) is violated
