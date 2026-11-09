@@ -1,6 +1,7 @@
 import { EllipsisVertical, MessageSquare } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useStore } from "../../../store";
 import { DOLLARS_HINT, dollars, dollarsText, elapsedBetween, plural, shortId } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
 import { hintText } from "../../item/cause";
@@ -122,10 +123,12 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
       </Button>
     );
 
+  const parent = useStore((st) => (item.parent_id ? st.workItems[item.parent_id] : undefined));
   return (
     <>
       <ScreenHeader
-        id={item.bead_id || shortId(item.id)}
+        // A slice names its parent first, a link back to it.
+        id={item.parent_id ? <><Link className="ph-header-parent" to={`/work-items/${encodeURIComponent(item.parent_id)}`}>{parent?.bead_id || shortId(item.parent_id)}</Link><span aria-hidden> › </span>{item.bead_id || shortId(item.id)}</> : item.bead_id || shortId(item.id)}
         trailing={<button type="button" className="ph-icon-btn" {...tip("More actions")} onClick={() => sheet.open("kebab")}><EllipsisVertical size={18} aria-hidden="true" /></button>}
       />
       <div className="ph-content">

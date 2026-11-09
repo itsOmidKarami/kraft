@@ -55,3 +55,7 @@
 /* No box of its own: the sheet scrolls, so a long prompt reads by touch and by keyboard alike. */
 .ph-oneoff-part .ph-start-lines { margin: 4px 0 0; }
 .ph-log-subagents { display: block; margin: 0 0 6px; text-align: left; }
+
+/* A slice's header: its parent first, a link back to it. */
+.ph-header-parent { display: inline-block; padding: 15px 4px; margin: -15px -4px; color: inherit; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--text-muted); }
+.ph-header-parent:focus-visible { outline: 2px solid var(--focus); outline-offset: -8px; border-radius: 6px; }

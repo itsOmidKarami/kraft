@@ -1,11 +1,13 @@
 import { Fragment } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useStore } from "../../store";
 import { ApplyChip } from "../apply/ApplyChip";
+import { Menu } from "../ui/Menu";
 import { crumbsFor, type Crumb } from "./crumbs";
 import { usePageItem } from "./pageItem";
 
 export function Crumbs({ crumbs }: { crumbs: Crumb[] }) {
+  const navigate = useNavigate();
   return (
     <nav aria-label="Breadcrumb" className="ng-crumbs-nav">
       <ol className="ng-crumbs">
@@ -20,6 +22,13 @@ export function Crumbs({ crumbs }: { crumbs: Crumb[] }) {
           const cut = c.kind !== "mid";
           const cls = `ng-crumb ng-crumb-${c.kind}${c.whole ? " is-whole" : ""}`;
           const cutProps = cut ? { "data-allow-ellipsis": "", title: c.title ?? c.text } : {};
+          // A sliced item's crumb opens its family: the parent and each slice.
+          if (c.menu)
+            return (
+              <li key={i} className={cls} aria-current={last ? "page" : undefined}>
+                <Menu label="Parent and slices" triggerLabel={`${c.text}, parent and slices`} triggerClass="ng-crumb-menu" trigger={<>{c.text} <span aria-hidden className="ng-crumb-caret">▾</span></>} items={c.menu.map((m) => ({ label: m.text, checked: m.checked, hint: m.hint, onSelect: () => navigate(m.to) }))} />
+              </li>
+            );
           return (
             <Fragment key={i}>
               {(!last || c.kind === "mid") && (c.to || c.href) ? (

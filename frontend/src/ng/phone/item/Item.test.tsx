@@ -62,6 +62,13 @@ describe("the item screen (C)", () => {
     expect(marker.closest(".ph-item-meta")).not.toBeNull();
   });
 
+  it("names a slice's parent in its header, a link back to it", async () => {
+    mount({ ...item("running"), parent_id: "p1", bead_id: "kraft-c1" });
+    const parent = await screen.findByRole("link", { name: "p1" });
+    expect(parent).toHaveAttribute("href", "/work-items/p1");
+    expect(parent.closest(".ph-header-id")).toHaveTextContent("p1 › kraft-c1");
+  });
+
   it("shows the brief, the chain with done nodes collapsed, a log preview and the pair", async () => {
     mount(item("running"));
     expect(await screen.findByRole("heading", { level: 1, name: "Design the cache" })).toBeInTheDocument();

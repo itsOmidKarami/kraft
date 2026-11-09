@@ -53,6 +53,33 @@ describe("crumbsFor", () => {
     expect(node).toMatchObject({ text: "verification", kind: "current" });
   });
 
+  // A slice sits under its parent, and either one's own crumb lists the family: the parent, then each slice.
+  it("puts a slice under its parent, and gives a sliced item's crumb its family as a menu", () => {
+    const kid = (k: number, id: string, display_status: string) => ({ id, title: "t", slice_key: k, status: "active", display_status, current_node_id: null, cost_usd: null });
+    const items: Record<string, ReturnType<Parameters<typeof crumbsFor>[1]>> = {
+      p1: { repo: "/r/x", title: "t", bead_id: "kraft-p", children: [kid(1, "c1", "done"), kid(2, "c2", "needs_you")] },
+      c2: { repo: "/r/x", title: "t", bead_id: "kraft-c2", parent_id: "p1" },
+    };
+    const lookup = (id: string) => items[id];
+    const [, , parent, child] = crumbsFor("/work-items/c2", lookup);
+    expect(parent).toMatchObject({ text: "kraft-p", kind: "mid", to: "/work-items/p1" });
+    expect(child).toMatchObject({ text: "kraft-c2", kind: "current" });
+    const family = [
+      { text: "kraft-p", to: "/work-items/p1", checked: false, hint: "2 slices" },
+      { text: "slice 1", to: "/work-items/c1", checked: false, hint: "done" },
+      { text: "slice 2", to: "/work-items/c2", checked: true, hint: "needs you" },
+    ];
+    expect(child.menu).toEqual(family);
+    // On the parent's own page the menu ticks the parent; in a node view the crumb links back, with no menu.
+    expect(crumbsFor("/work-items/p1", lookup)[2].menu?.map((m) => m.checked)).toEqual([true, false, false]);
+    const inNode = crumbsFor("/work-items/c2/nodes/verification", lookup);
+    expect(inNode.map((c) => c.text)).toEqual(["Board", "x", "kraft-p", "kraft-c2", "verification"]);
+    expect(inNode[3].menu).toBeUndefined();
+    // An ordinary item, and a slice whose parent is not loaded: no menu, the parent by its short id.
+    expect(crumbsFor("/work-items/abc", () => ({ repo: "/r/x", title: "t" }))[2].menu).toBeUndefined();
+    expect(crumbsFor("/work-items/c2", (id) => (id === "c2" ? items.c2 : undefined)).map((c) => c.text)).toEqual(["Board", "x", "p1", "kraft-c2"]);
+  });
+
   it("puts the merge request after the crumbs, merged once the item is done", () => {
     const mr = { number: 142, url: "https://forge/pr/142" };
     const at = (display_status: "running" | "done") => crumbsFor("/work-items/abc", () => ({ repo: "/r/x", title: "t", mr_ref: mr, display_status })).at(-1);

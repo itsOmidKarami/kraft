@@ -20,6 +20,11 @@
 .ng-crumb-mid { flex-shrink: 2; }
 .ng-crumb-repo { flex-shrink: 4; }
 .ng-crumb.ng-crumb-ext { flex: none; }
+/* A sliced item's crumb: its family as a menu, as the board's repo crumb is. */
+.ng-crumb-menu { display: inline-flex; align-items: center; gap: 5px; padding: 1px 6px; margin: -1px 0; border: 0; border-radius: 5px; background: transparent; font: inherit; color: inherit; cursor: pointer; }
+.ng-crumb-menu:is(:hover, :focus-visible), .ng-crumb-menu[aria-expanded="true"] { background: var(--surface-2); }
+.ng-crumb-menu:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.ng-crumb-caret { font-size: var(--fs-label); color: var(--text-muted); }
 .ng-crumb.is-whole { flex: none; }
 .ng-crumb + .ng-crumb-ext::before { content: "·" / ""; margin: 0 6px; }
 .ng-main { flex: 1 1 auto; min-width: 0; }

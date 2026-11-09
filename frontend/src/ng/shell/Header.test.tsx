@@ -1,5 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useStore } from "../../store";
 import { item } from "../../testFixtures";
@@ -8,10 +9,14 @@ import { HeaderActions, HeaderTail } from "./HeaderActions";
 import { Shell } from "./Shell";
 import { usePageItem } from "./pageItem";
 
+function Where() {
+  return <output aria-label="where">{useLocation().pathname}</output>;
+}
 const at = (path: string) =>
   render(
     <MemoryRouter initialEntries={[path]}>
       <Header actionsRef={() => {}} />
+      <Where />
     </MemoryRouter>,
   );
 
@@ -47,6 +52,20 @@ describe("Header", () => {
     const mr = within(nav).getByRole("link", { name: "!7 ↗" });
     expect(mr).toHaveAttribute("target", "_blank");
     expect(mr).toHaveAttribute("rel", "noopener noreferrer");
+    usePageItem.setState({ item: null });
+  });
+
+  it("opens a slice's family from its crumb and goes to the one picked", async () => {
+    const kid = (k: number) => ({ id: `c${k}`, title: "t", slice_key: k, status: "active", display_status: "running", current_node_id: null, cost_usd: null });
+    useStore.setState({ workItems: { p1: item({ id: "p1", repo: "/r/x", bead_id: "kraft-p", children: [kid(1), kid(2)] }) } });
+    usePageItem.setState({ item: item({ id: "c1", repo: "/r/x", bead_id: "kraft-c1", parent_id: "p1" }) });
+    at("/work-items/c1");
+    const nav = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(nav).getByRole("link", { name: "kraft-p" })).toHaveAttribute("href", "/work-items/p1");
+    await userEvent.click(within(nav).getByRole("button", { name: /kraft-c1/ }));
+    expect(screen.getByRole("menuitemradio", { name: /slice 1/ })).toHaveAttribute("aria-checked", "true");
+    await userEvent.click(screen.getByRole("menuitemradio", { name: /slice 2/ }));
+    expect(screen.getByLabelText("where").textContent).toBe("/work-items/c2");
     usePageItem.setState({ item: null });
   });
 
