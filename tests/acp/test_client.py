@@ -761,3 +761,101 @@ def test_the_log_is_not_silent_while_an_ask_waits_on_the_gate(tmp_path, monkeypa
         heartbeat_s=0.1,
     )
     assert len(_events(recs, "heartbeat")) >= 3
+
+
+def _violation(recs):
+    return [r for r in recs if r.get("event") == "policy_violation"]
+
+
+@pytest.mark.parametrize(
+    ("calls", "decisions", "fields", "violated"),
+    [
+        (
+            [{"id": "c1", "name": "shell", "kind": "execute", "ask": False}],
+            {"Bash": "deny"},
+            {},
+            True,
+        ),
+        ([{"id": "c1", "name": "read", "kind": "read", "ask": False}], {}, {}, False),
+        (
+            [{"id": "c1", "name": "read", "kind": "read", "ask": False}],
+            {"Read": "deny"},
+            {"settles_itself": ["Read"]},
+            False,
+        ),
+        ([{"id": "c1", "kind": "other", "ask": False}], {}, {"allowlist": True}, True),
+        (
+            [{"id": "c1", "name": "shell", "kind": "execute", "run_anyway": True}],
+            {"Bash": "deny"},
+            {},
+            True,
+        ),
+        ([{"id": "c1", "name": "read", "kind": "read"}], {}, {}, False),
+        ([{"id": "c1", "name": "shell", "kind": "execute"}], {"Bash": "deny"}, {}, False),
+        ([{"id": "c1", "name": "read", "kind": "read", "withdraw": True}], {}, {}, False),
+        (
+            [{"id": "c1", "name": "read", "kind": "read", "withdraw": True, "run_anyway": True}],
+            {},
+            {},
+            True,
+        ),
+    ],
+    ids=[
+        "unasked-and-denied",
+        "unasked-but-allowed",
+        "unasked-but-settled-by-the-agent",
+        "unasked-and-unnameable-under-an-allowlist",
+        "ran-after-a-rejection",
+        "asked-and-allowed-after-an-early-in_progress",
+        "asked-rejected-and-failed",
+        "withdrawn-ask-that-stays-unrun",
+        "withdrawn-ask-that-runs-anyway",
+    ],
+)
+def test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow(
+    tmp_path, monkeypatch, calls, decisions, fields, violated
+):
+    # delay: a withdrawn ask must always be read before the gate answers (else `runs-anyway`
+    # could see allow_once recorded first and expect 77 for the wrong reason, or flake).
+    code, recs = run_inprocess(
+        tmp_path,
+        monkeypatch,
+        "ask_all",
+        ask=fake_gate(decisions, delay=0.3),
+        calls=calls,
+        policy=True,
+        tool_names=TOOLS,
+        **fields,
+    )
+    assert bool(_violation(recs)) is violated
+    assert code == (77 if violated else 0)
+    if violated:
+        # the agent's own result is never overwritten: the stop comes from the logged event
+        assert json.loads((tmp_path / "result.json").read_text()) == {"status": "done"}
+
+
+def test_a_violation_with_no_result_file_writes_a_failed_one_naming_it(tmp_path, monkeypatch):
+    code, _ = run_inprocess(
+        tmp_path,
+        monkeypatch,
+        "ask_all,noresult",
+        ask=fake_gate({"Bash": "deny"}),
+        calls=[{"id": "c1", "name": "shell", "kind": "execute", "ask": False}],
+        policy=True,
+        tool_names=TOOLS,
+    )
+    body = json.loads((tmp_path / "result.json").read_text())
+    assert code == 77 and body["status"] == "failed" and "Bash ran without asking" in body["error"]
+
+
+def test_a_launch_without_a_policy_has_no_backstop(tmp_path, monkeypatch):
+    code, recs = run_inprocess(
+        tmp_path,
+        monkeypatch,
+        "",
+        ask=fake_gate(default="deny"),
+        calls=[{"id": "c1", "name": "shell", "kind": "execute", "ask": False}],
+        policy=False,
+        tool_names=TOOLS,
+    )
+    assert code == 0 and not _violation(recs)

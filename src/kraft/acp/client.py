@@ -19,6 +19,8 @@ from kraft.acp import log, tools, wire
 from kraft.acp.spec import LaunchSpec
 
 CONFIG_ERROR_EXIT = 78  # EX_CONFIG; `agent._resolve_status` reads the logged event, not this
+POLICY_VIOLATION_EXIT = 77  # EX_NOPERM; `agent._resolve_status` reads the logged event, not this
+SETTLE_S = 6.0  # a backstop check in flight may wait the gate's 5 s timeout
 INTERRUPTED_EXIT = 130  # what a shell reports for SIGINT: a pause
 TERMINATED_EXIT = 143  # ... and for SIGTERM
 PUMP_DRAIN_S = 1.0  # how long the readers get, after the agent is gone, to finish what is buffered
@@ -66,6 +68,10 @@ class Client:
         self.calls: dict[str, dict] = {}  # what the agent has said of each tool call, by id
         self.verdicts: dict[str, str] = {}  # toolCallId -> "allow" | "deny": the answer given
         self._asks: dict = {}  # request id -> the task answering that ask
+        self._checked: set[str] = set()  # tool calls the backstop has looked at
+        self._backstops: set[asyncio.Future] = set()
+        self.violation: str | None = None
+        self.violated = asyncio.Event()
         self._withdrawn: dict = {}  # request id -> Future set when the agent withdraws it
         self.proc: asyncio.subprocess.Process | None = None
         self._ids = 0
@@ -177,7 +183,66 @@ class Client:
         elif method == "$/cancel_request":
             params = msg.get("params")  # {requestId}: ACP's CancelRequestNotification
             self._withdraw(params.get("requestId") if isinstance(params, dict) else None)
-        # any other notification (`session/update`) is only logged
+        elif method == "session/update":
+            params = msg.get("params")
+            self.watch(params.get("update") if isinstance(params, dict) else None)
+        # any other notification is only logged
+
+    def watch(self, update) -> None:
+        """The runtime backstop's eyes (spec §6.5): every tool_call notification."""
+        kind = update.get("sessionUpdate") if isinstance(update, dict) else None
+        if kind not in ("tool_call", "tool_call_update"):
+            return
+        self.remember(update)
+        cid = update.get("toolCallId")
+        if (
+            not self.spec.policy
+            or self.replay
+            or update.get("status") != "completed"
+            or not isinstance(cid, str)
+            or cid in self._checked
+            or self.verdicts.get(cid) == "allow"
+        ):
+            return
+        self._checked.add(cid)
+        task = asyncio.ensure_future(self.backstop(cid))
+        self._backstops.add(task)
+        task.add_done_callback(self._backstops.discard)
+
+    async def backstop(self, cid: str) -> None:
+        """A call completed with no allowing ask on record: is it one the policy allows?"""
+        info = self.calls.get(cid, {"toolCallId": cid})
+        tool = tools.resolve(info, self.spec.tool_names)
+        what = tool.names[0] if tool.names else (tool.key or "an unnamed tool")
+        if self.verdicts.get(cid) == "deny":
+            self.violate(f"{what} ran although Kraft's permission gate rejected it")
+            return
+        if tool.names and all(n in self.spec.settles_itself for n in tool.names):
+            return  # the launch refused any policy that denies it (`launch.tool_limit_refusal`)
+        allow, why = await self.decide(info)
+        self.emit(log.event("unasked_call", tool=what, allowed=allow, reason=why))
+        if not allow:
+            self.violate(
+                f"{what} ran without asking, and the task's tool policy does not allow it ({why})"
+            )
+
+    def violate(self, message: str) -> None:
+        if self.violation is None:
+            self.violation = message
+            self.violated.set()
+
+    async def settle(self) -> None:
+        """Let the checks in flight finish: a violation must not be missed because the turn
+        ended first."""
+        live = [t for t in self._backstops if not t.done()]
+        if live:
+            await asyncio.wait(live, timeout=SETTLE_S)
+
+    def fail_policy(self, message: str) -> int:
+        self.emit(log.event("policy_violation", message=message))
+        print(f"kraft: tool policy violated: {message}", flush=True)
+        self._write_failed(message)
+        return POLICY_VIOLATION_EXIT
 
     def _withdraw(self, rid) -> None:
         """The agent withdrew an ask (`$/cancel_request`, seen from OpenCode): an ask already
@@ -371,10 +436,15 @@ class Client:
             self.request("session/prompt", {"sessionId": sid, "prompt": wire.prompt_blocks(text)})
         )
         interrupted = asyncio.ensure_future(self.interrupted.wait())
-        await asyncio.wait({prompt, interrupted}, return_when=asyncio.FIRST_COMPLETED)
+        violated = asyncio.ensure_future(self.violated.wait())
+        await asyncio.wait({prompt, interrupted, violated}, return_when=asyncio.FIRST_COMPLETED)
         interrupted.cancel()
-        if not prompt.done():  # SIGINT: a pause
-            return await self.cancel(sid, prompt)
+        violated.cancel()
+        if not prompt.done():  # SIGINT: a pause; a violation: the turn is cancelled, usage lands
+            code = await self.cancel(sid, prompt)
+            return (
+                POLICY_VIOLATION_EXIT if self.violation and not self.interrupted.is_set() else code
+            )
         try:
             result = prompt.result()
         except AgentGone:  # the group's SIGINT may take the agent first: still a pause
@@ -535,13 +605,16 @@ class Client:
         """The client's own failure: the result file (only if the agent wrote none), the log."""
         self.emit(log.event("config_error" if config else "error", message=message))
         print(f"kraft: {message}", flush=True)
+        self._write_failed(message)
+        return CONFIG_ERROR_EXIT if config else 1
+
+    def _write_failed(self, message: str) -> None:
         path = Path(self.spec.result_path)
         if not path.exists():
             tmp = path.with_name(f".{path.name}.acp")
             with suppress(OSError):
                 tmp.write_text(json.dumps({"status": "failed", "error": message}))
                 os.replace(tmp, path)
-        return CONFIG_ERROR_EXIT if config else 1
 
     async def run(self) -> int:
         self.emit(log.event("starting", agent=self.spec.agent_argv))
@@ -580,11 +653,14 @@ class Client:
         finally:
             for task in list(self._asks.values()):
                 task.cancel()
+            await self.settle()
             await self.end()
             # The agent is gone: what it wrote last (a crash's traceback) may still be buffered.
             _, rest = await asyncio.wait(pumps, timeout=PUMP_DRAIN_S)
             for pump in rest:
                 pump.cancel()
+        if self.violation is not None and code not in (INTERRUPTED_EXIT, TERMINATED_EXIT):
+            code = self.fail_policy(self.violation)  # never a clean exit, whatever else happened
         return code
 
     def on_term(self) -> None:
