@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../../store";
 import type { DisplayStatus, WorkItemStop, WorkerSession } from "../../../types";
 import { chainGraph } from "../../item/graph";
-import { acceptWrites, detail, FROZEN, V1, holdFetch, LOOPED, pendingRun, SCOPE_PATH, scopeChain, scoped, scopeRun, stubFetch, WORKSPACE, type Call } from "../../item/testkit";
+import { acceptWrites, detail, FROZEN, V1, holdFetch, LOOPED, pendingRun, SCOPE_PATH, scopeChain, scoped, scopeRun, sliced, stubFetch, WORKSPACE, type Call } from "../../item/testkit";
 import { Toaster } from "../nav/Toaster";
 import { nodeBar } from "./model";
 import { NodeRoute } from "./NodeRoute";
@@ -113,6 +113,24 @@ describe("the node screen (D)", () => {
     expect(screen.getAllByText("exec node · running", { exact: false })).toHaveLength(2);
     await userEvent.click(screen.getByRole("button", { name: /code_review/ }));
     expect(where()).toBe("/work-items/w1/nodes/verification?sel=verification.review.code_review");
+  });
+
+  it("lists a slice group as its groundwork, its slices and the join: a node opens its screen, a slice its child item", async () => {
+    const group = { id: "slices", phase: "slices" as const, groundwork: [1], slices: [{ key: 1, title: "a", tasks: [2] }, { key: 2, title: "b", tasks: [3] }], joined: 0 };
+    const children = [1, 2].map((k) => ({ id: `c${k}`, title: "t", slice_key: k, status: "active", display_status: "running", current_node_id: "verification", cost_usd: 0 }));
+    mount(sliced("slices", { display_status: "waiting", group, children }), "/work-items/w1/nodes/slices");
+    expect(await screen.findByRole("heading", { level: 1, name: "slices" })).toBeInTheDocument();
+    expect(screen.getAllByText("group node", { exact: false }).length).toBeGreaterThan(0);
+    expect(screen.getByText("Shared groundwork · task 1")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /slice 2/ }));
+    expect(where()).toBe("/work-items/c2");
+  });
+
+  it("opens a node inside a group on its own screen, its group's chip on", async () => {
+    mount(sliced("slices.implementation", { display_status: "running" }), "/work-items/w1/nodes/slices.implementation");
+    expect(await screen.findByRole("heading", { level: 1, name: "slices.implementation" })).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "Chain" })).getByRole("button", { name: "slices" })).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("button", { name: /work/ })).toBeInTheDocument();
   });
 
   it("lists the plan task's sub-tasks on its overview, the current one marked, a done one with its commit, and only there", async () => {
