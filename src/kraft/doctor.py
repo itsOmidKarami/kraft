@@ -14,6 +14,7 @@ import os
 import shutil
 import stat
 import sys
+import tempfile
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
@@ -116,6 +117,7 @@ async def run_checks() -> list[dict]:
         checks.extend(_forge_account_checks(accounts, "no server" if health is None else None))
     checks.append(_pidfile_check())
     checks.extend(_agent_checks())
+    checks.extend(await _acp_checks())
     checks.append(await _mcp_check(health))
     checks.append(_path_check())
     checks.append(_completion_check())
@@ -818,6 +820,71 @@ def _agent_checks() -> list[dict]:
     for hid, reason in sorted(harnesses.invalid.items()):
         checks.append(_check(f"harness: {hid}", False, reason))
     return checks + _pairing_checks(live, table, harnesses) + _cost_checks(live, harnesses)
+
+
+def _yes(flag: bool) -> str:
+    return "yes" if flag else "no"
+
+
+async def _acp_checks() -> list[dict]:
+    """Two rows per `kind: acp` harness a chain selects (spec §9): `acp: <id>`, the agent's
+    `initialize` answer and whether its login works (no prompt is sent, so it spends nothing),
+    and `acp-cost: <id>`, a warning when its entry reports no cost. Async because the probe is;
+    `_agent_checks` stays sync. A profile or harness that does not load, or an agent program
+    not on PATH, already has its `agent:` / `harnesses.yaml` row there and gets none here."""
+    from kraft.acp import probe
+
+    live = config_dir()
+    harnesses = harness.load(None)
+    try:
+        table = HarnessProfileTable.from_yaml(
+            live / "harnesses.yaml",
+            harnesses=harnesses.valid,
+            addons=addons_load.installed(live),
+        )
+    except TemplateEnvironmentError:
+        return []
+    checks: list[dict] = []
+    done: set[str] = set()
+    for pid in sorted(_selected_profiles(_resolved_chains(live))):
+        profile = table.profiles.get(pid)
+        provider = harnesses.valid.get(profile.provider) if profile else None
+        if provider is None or provider.acp is None or provider.id in done:
+            continue
+        exe = profile.executable or provider.command[0]
+        if not shutil.which(exe):
+            continue
+        done.add(provider.id)
+        with tempfile.TemporaryDirectory() as scratch:
+            shake = await probe.handshake([exe, *provider.command[1:]], cwd=scratch)
+        if shake.needs_login:
+            checks.append(
+                _check(f"acp: {pid}", False, "log in: the agent asked for authentication")
+            )
+        elif not shake.ok:
+            checks.append(_check(f"acp: {pid}", False, shake.error or "no answer"))
+        else:
+            checks.append(
+                _check(
+                    f"acp: {pid}",
+                    True,
+                    f"initialize ok: resume={_yes(shake.resume)} load={_yes(shake.load_session)} "
+                    f"system_prompt={_yes(shake.system_prompt)} "
+                    f"options={','.join(shake.config_options) or 'none'}",
+                )
+            )
+        if "cost" not in provider.acp.reports:
+            checks.append(
+                _check(
+                    f"acp-cost: {pid}",
+                    True,
+                    "its entry reports no cost, so a dollar cap refuses its launches unless it "
+                    "reports tokens on a model prices.json prices; an ACP session with no cost "
+                    "is unknown spend, never $0",
+                    warn=True,
+                )
+            )
+    return checks
 
 
 def _cost_checks(live: Path, harnesses) -> list[dict]:
