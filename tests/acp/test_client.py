@@ -548,3 +548,67 @@ def test_a_rejection_that_ends_the_agents_turn_is_a_clean_exit_with_its_stop_rea
         tool_names=TOOLS,
     )
     assert code == 0 and _events(recs, "stop")[0]["stop_reason"] == "cancelled"
+
+
+async def _gate_down(*a, **kw):
+    raise ConnectionError("kraft is not listening")
+
+
+@pytest.mark.parametrize(
+    ("fields", "call", "gate", "answer"),
+    [
+        ({}, {"id": "c1", "name": "read", "kind": "read"}, _gate_down, "no"),
+        (
+            {},
+            {"id": "c1", "name": "read", "kind": "read"},
+            fake_gate(default="deny", message="cannot resolve this session's policy"),
+            "no",
+        ),
+        ({"allowlist": True}, {"id": "c1", "kind": "other"}, fake_gate(), "no"),
+        ({"allowlist": True}, {"id": "c1", "kind": "fetch"}, fake_gate(), "no"),
+        ({"allowlist": False}, {"id": "c1", "kind": "other"}, fake_gate(), "once"),
+        (
+            {"always_deny": ["Bash"]},
+            {"id": "c1", "name": "shell", "kind": "execute"},
+            fake_gate(),
+            "no",
+        ),
+    ],
+    ids=[
+        "gate-unreachable",
+        "gate-cannot-read-the-policy",
+        "allowlist-unnameable-kind-other",
+        "allowlist-unmapped-kind",
+        "deny-list-lets-the-unnameable-through",
+        "always-deny-wins-over-an-allowing-gate",
+    ],
+)
+def test_the_client_fails_closed_and_rejects_what_the_policy_cannot_name(
+    tmp_path, monkeypatch, fields, call, gate, answer
+):
+    run_inprocess(
+        tmp_path,
+        monkeypatch,
+        "ask_all",
+        ask=gate,
+        calls=[call],
+        policy=True,
+        tool_names=TOOLS,
+        **fields,
+    )
+    assert _answers(tmp_path)[0]["result"]["outcome"]["optionId"] == answer
+
+
+def test_an_always_denied_tool_never_reaches_the_gate(tmp_path, monkeypatch):
+    seen = []
+    run_inprocess(
+        tmp_path,
+        monkeypatch,
+        "ask_all",
+        ask=fake_gate({}, seen),
+        calls=[{"id": "c1", "name": "shell", "kind": "execute"}],
+        policy=True,
+        tool_names=TOOLS,
+        always_deny=["Bash"],
+    )
+    assert seen == []

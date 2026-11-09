@@ -229,6 +229,8 @@ class Client:
                     "an allowlist",
                 )
             return True, f"{what!r} maps to no Kraft tool and the task holds no allowlist"
+        if hit := next((n for n in tool.names if n in spec.always_deny), None):
+            return False, f"{hit} is always denied on this harness"
         raw, cid = call.get("rawInput"), call.get("toolCallId")
         try:
             got = await self.gate(
