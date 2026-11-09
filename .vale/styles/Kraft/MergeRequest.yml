@@ -7,4 +7,4 @@ ignorecase: false
 action:
   name: replace
 swap:
-  '[Pp]ull request(s)?': merge request$1
+  '[Pp]ull [Rr]equest(s)?': merge request$1

@@ -5,4 +5,4 @@ message: "Use 'select' instead of '%s'."
 level: error
 ignorecase: true
 tokens:
-  - '(?i)(?<!right-)(?<!double-)(?<!ctrl-)(?<!shift-)(?<!command-)(?<!alt-)(?<!option-)click(?:s|ed|ing)?(?: on)?'
+  - '(?i)(?<!right-)(?<!double-)(?<!ctrl-)(?<!shift-)(?<!command-)(?<!cmd-)(?<!meta-)(?<!alt-)(?<!option-)click(?:s|ed|ing)?(?: on)?'

@@ -111,8 +111,8 @@ pieces fit together is in
   already on your machine, or fetches one. Or Homebrew on macOS.
 - **[Claude Code](https://code.claude.com/docs)**, installed
   and signed in. Every agent task in the shipped chains runs on it.
-- **`gh` or `glab`**, signed in, for the nodes that open and merge the pull
-  request on GitHub or GitLab.
+- **`gh` or `glab`**, signed in, for the nodes that open the merge
+  request on GitHub or GitLab and merge it.
 
 **Supported agents:** Claude Code, Codex, Cursor, Gemini, Antigravity, OpenCode
 and Amp all run as [harnesses](https://kraft-sdlc.dev/reference/harnesses).
