@@ -139,7 +139,7 @@ A worker can use the CLI's own stored login instead where it has one; [Give a wo
 ### ACP details
 _Added in next_
 
-A harness file with `kind: acp` runs any agent that speaks the Agent Client Protocol, where the shipped seven are `kind: cli`. No ACP harness ships: you write the entry. [ACP entries](/reference/harnesses/harness-files#acp-entries) has its fields, what a launch on it refuses in this release, and how a launch ends. [ACP agents](/reference/harnesses/cost-reporting#acp-agents) has how its spend is counted.
+A harness file with `kind: acp` runs any agent that speaks the Agent Client Protocol, where the shipped seven are `kind: cli`. No ACP harness is bundled: two example entries, `claude-acp` and `opencode-acp`, are shown in [Claude over ACP, compared](/reference/harnesses/claude-over-acp) to copy. [ACP entries](/reference/harnesses/harness-files#acp-entries) has its fields, what a launch on it refuses in this release, and how a launch ends. [ACP agents](/reference/harnesses/cost-reporting#acp-agents) has how its spend is counted.
 
 ## In this section
 
@@ -149,3 +149,4 @@ A harness file with `kind: acp` runs any agent that speaks the Agent Client Prot
 - [Fallback and escalation](/reference/harnesses/fallback-and-escalation): where a launch goes next, and which harness runs an escalation turn.
 - [Cost reporting](/reference/harnesses/cost-reporting): how Kraft estimates the cost of a harness that reports tokens but no dollar figure.
 - [ACP agents, measured](/reference/harnesses/acp-measured): what Kraft found running real ACP agents through its client, and what stays unverified.
+- [Claude over ACP, compared](/reference/harnesses/claude-over-acp): two example ACP entries, and how Claude through the bridge differs from the `claude` harness.
