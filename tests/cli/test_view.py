@@ -440,6 +440,22 @@ def test_show_lists_a_parents_slices(monkeypatch, capsys):
     assert "2  c2  needs_human  implementation  -  p · slice 2: B" in out
 
 
+_ROW = {"id": "w1", "repo": "r", "title": "t", "current_node_id": None, "pending_gate": None}
+
+
+def _list_board(monkeypatch, capsys, items, *flags) -> str:
+    from kraft.client import transport
+
+    monkeypatch.setenv("COLUMNS", "300")
+
+    async def get(path, **_):
+        return {"items": items, "cursor": 0}
+
+    monkeypatch.setattr(transport, "_get", get)
+    cli.main(["view", "list", "--all", *flags])
+    return capsys.readouterr().out
+
+
 def _board_with_a_parent():
     kids = [
         {
@@ -506,48 +522,21 @@ def _board_with_a_parent():
     ],
 )  # fmt: skip
 def test_list_shows_a_parents_children_under_it(monkeypatch, capsys, status, rows, listed):
-    from kraft.client import transport
-
-    # a wide terminal so the slice row's last column is not cut to an ellipsis
-    monkeypatch.setenv("COLUMNS", "300")
-
-    async def get(path, **_):
-        return {"items": _board_with_a_parent(), "cursor": 0}
-
-    monkeypatch.setattr(transport, "_get", get)
     flag = ["--status", status] if status else []
-
-    cli.main(["view", "list", "--all", *flag])
-    out = render.strip_ansi(capsys.readouterr().out)
-    cli.main(["view", "list", "--all", "--json", *flag])
-    payload = json.loads(capsys.readouterr().out)
+    # `_list_board`'s wide terminal keeps the slice row's last column from an ellipsis
+    out = render.strip_ansi(_list_board(monkeypatch, capsys, _board_with_a_parent(), *flag))
+    payload = json.loads(_list_board(monkeypatch, capsys, _board_with_a_parent(), "--json", *flag))
 
     lines = out.splitlines()[1:]
     shown = []
     for line in lines:
-        ident, status = re.split(r" {2,}", line.strip())[:2]
-        shown.append((line.startswith("  "), ident, status.split(" (slices:")[0]))
+        ident, word = re.split(r" {2,}", line.strip())[:2]
+        shown.append((line.startswith("  "), ident, word.split(" (slices:")[0]))
     assert shown == rows
     if status is None:
         assert "slices: 1 done, 1 needs you of 2" in lines[0]
         assert lines[1].split()[2:] == ["-", "verification", "$0.42", "p", "·", "slice", "1:", "A"]
     assert [(i["id"], [k["id"] for k in i.get("children", [])]) for i in payload] == listed
-
-
-_ROW = {"id": "w1", "repo": "r", "title": "t", "current_node_id": None, "pending_gate": None}
-
-
-def _list_board(monkeypatch, capsys, items) -> str:
-    from kraft.client import transport
-
-    monkeypatch.setenv("COLUMNS", "300")
-
-    async def get(path, **_):
-        return {"items": items, "cursor": 0}
-
-    monkeypatch.setattr(transport, "_get", get)
-    cli.main(["view", "list", "--all"])
-    return capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -558,7 +547,7 @@ def _list_board(monkeypatch, capsys, items) -> str:
         pytest.param("needs_human", "needs_you", "needs you", id="needs-you"),
         # An older server sends no display status: its stored word, not a guess.
         pytest.param("active", None, "active", id="no-display-status"),
-        # A newer server's word this client does not know is printed, unpainted.
+        # A newer server's word this client has no colour for is printed, not a crash.
         pytest.param("active", "someday", "someday", id="unknown-display-status"),
     ],
 )
