@@ -711,7 +711,8 @@ def group_view(st, row, chain: dict) -> dict | None:
     them (none for a plan with no usable `## Slices` section); and how many
     slices the join has replayed. A slice's child is the parent's child of the
     same `slice_key`."""
-    group = next((n for n in chain["nodes"] if n["kind"] == "group"), None)
+    # A legacy row's nodes name no kind.
+    group = next((n for n in chain["nodes"] if n.get("kind") == "group"), None)
     if group is None:
         return None
     state = store.GroupState.from_json(row["group_state"]) if row["group_state"] else None
