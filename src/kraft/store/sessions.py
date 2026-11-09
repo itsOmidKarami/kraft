@@ -6,7 +6,7 @@ import stat
 from dataclasses import replace
 from pathlib import Path
 
-from kraft import events, ids, item_paths
+from kraft import acp, events, ids, item_paths
 from kraft import usage as _usage
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import _span_ms
@@ -605,6 +605,8 @@ def _warn_unpriced(
     ).fetchone()
     if (
         row is None
+        # An ACP session's missing cost is unknown spend the caps refuse on, not $0.
+        or row["harness"] in acp.harness_ids()
         or conn.execute(
             "SELECT 1 FROM events WHERE work_item_id = ? AND type = ? LIMIT 1",
             (row["work_item_id"], LimitEvent.SPEND_UNPRICED),

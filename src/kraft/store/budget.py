@@ -185,6 +185,33 @@ def budget_spend(
     return float(item), float(daily)
 
 
+def unknown_acp_launches(
+    conn: sqlite3.Connection, work_item_id: str, *, since: str | None = None
+) -> tuple[int, int]:
+    """`(this work item family's, instance-wide since `since`)`: finished ACP sessions that
+    reached a prompt (`tokens_in` was written) and have no cost. That is unknown spend,
+    which `budget_spend` would count as $0."""
+    from kraft import acp
+    from kraft.vocab import LIVE
+
+    ids = sorted(acp.harness_ids())
+    if not ids:
+        return 0, 0
+    marks, live = ", ".join("?" * len(ids)), ", ".join("?" * len(LIVE))
+    base = (
+        f"SELECT COUNT(*) FROM worker_sessions WHERE harness IN ({marks}) "
+        f"AND cost_usd IS NULL AND tokens_in IS NOT NULL AND status NOT IN ({live})"
+    )
+    family = family_ids(conn, work_item_id)
+    item = conn.execute(
+        f"{base} AND work_item_id IN ({', '.join('?' * len(family))})", (*ids, *LIVE, *family)
+    ).fetchone()[0]
+    daily = conn.execute(
+        base + (" AND created_at >= ?" if since else ""), (*ids, *LIVE, *([since] if since else []))
+    ).fetchone()[0]
+    return item, daily
+
+
 def effective_work_item_cap(row, policy_budget) -> tuple[float | None, str]:
     """`(cap_usd, source)` for one work item -- `source` is `"item"` when the
     item has its own cap (set or explicitly cleared to "no cap"), else

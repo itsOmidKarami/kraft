@@ -43,14 +43,23 @@ def _chain(level: str | None = None, cap: dict | None = None):
     )
 
 
-async def _spent(it, path: str, *, tokens: int = 0, usd: float | None = None, status="done"):
+async def _spent(
+    it,
+    path: str,
+    *,
+    tokens: int | None = 0,
+    usd: float | None = None,
+    status="done",
+    harness=None,
+):
+    """`tokens=None` leaves the token columns NULL: a session that never reached a prompt."""
     sid = f"s-{path}-{tokens}-{usd}-{status}"
     await it.session(sid, path, status if status != "running" else None)
     await it.database.write(
         lambda c: c.execute(
-            "UPDATE worker_sessions SET tokens_in = ?, tokens_out = 0, cost_usd = ?, "
-            "status = ? WHERE id = ?",
-            (tokens, usd, status, sid),
+            "UPDATE worker_sessions SET tokens_in = ?, tokens_out = ?, cost_usd = ?, "
+            "status = ?, harness = ? WHERE id = ?",
+            (tokens, None if tokens is None else 0, usd, status, harness, sid),
         )
     )
 
@@ -677,3 +686,65 @@ async def test_an_instance_dollar_cap_counts_as_a_dollar_cap(item_on):
         lambda c: caps.spend_caps_in_effect(c, it.row(), TASK, _policy.Budget(daily_usd=5))
     )
     assert tuple(got) == (False, True)
+
+
+@pytest.fixture
+def acp_harness(monkeypatch):
+    monkeypatch.setattr("kraft.acp.harness_ids", lambda hs=None: frozenset({"fake-acp"}))
+
+
+@pytest.mark.parametrize(
+    ("harness", "tokens", "unknown"),
+    [("fake-acp", 0, True), (None, 0, False), ("fake-acp", None, False)],
+    ids=["acp-zero-tokens", "cli-zero-tokens", "acp-never-reached-a-prompt"],
+)
+async def test_an_acp_session_with_no_cost_is_unknown_spend_even_at_zero_tokens(
+    item_on, acp_harness, harness, tokens, unknown
+):
+    it = await _item(item_on, "task", {"budget_usd": 5})
+    await _spent(it, TASK, tokens=tokens, usd=None, harness=harness)
+    got = _breach(it)
+    assert (isinstance(got, UsdBreach) and got.unknown_launches == 1) is unknown
+
+
+async def test_an_acp_sessions_unknown_cost_stops_the_item_dollar_cap_too(item_on, acp_harness):
+    it = await item_on(_chain())
+    await _spent(it, TASK, tokens=0, usd=None, harness="fake-acp")
+    got = stops.budget_breach(
+        it.database, it.id, _policy.Budget(work_item_usd=100), row=it.row(), path=TASK
+    )
+    assert isinstance(got, UsdBreach) and got.unknown_launches == 1 and got.cap_usd == 100
+
+
+async def test_a_session_that_never_reached_a_prompt_does_not_make_the_item_unknown(
+    item_on, acp_harness
+):
+    it = await item_on(_chain())
+    await _spent(it, TASK, tokens=None, usd=None, harness="fake-acp")  # config_error, login, kill
+    assert (
+        stops.budget_breach(
+            it.database, it.id, _policy.Budget(work_item_usd=100), row=it.row(), path=TASK
+        )
+        is None
+    )
+
+
+async def test_an_acp_session_that_reported_a_cost_is_ordinary_spend(item_on, acp_harness):
+    it = await item_on(_chain())
+    await _spent(it, TASK, tokens=10, usd=1.0, harness="fake-acp")
+    assert (
+        stops.budget_breach(
+            it.database, it.id, _policy.Budget(work_item_usd=100), row=it.row(), path=TASK
+        )
+        is None
+    )
+
+
+async def test_an_acp_row_writes_no_spend_unpriced_event(item_on, acp_harness):
+    it = await item_on(_chain())
+    await it.session("s", "ship.main.go", harness="fake-acp", model=None)
+    spent = usage.Usage(tokens_in=1000, tokens_out=0)  # a turn, no cost, no priced model
+    await it.database.write(
+        lambda c: store.session_exited(c, "s", "done", None, spent, work_item_id=it.id)
+    )
+    assert it.events("spend_unpriced") == []

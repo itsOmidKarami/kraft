@@ -1105,6 +1105,17 @@ def _spend_caps(db, item_row, scope: str, budget) -> caps.SpendCaps:
     return db.read(lambda c: caps.spend_caps_in_effect(c, item_row, scope, budget))
 
 
+def _unknown_acp_today(db, work_item_id: str, budget) -> int:
+    """ACP sessions finished today that reached a prompt and reported no cost: under a
+    daily dollar cap their spend is unknown, which the instance-wide sum counts as $0."""
+    if budget.daily_usd is None:
+        return 0
+    since = store.local_midnight_utc()
+    return (db.read(lambda c: store.unknown_acp_launches(c, work_item_id, since=since)) or (0, 0))[
+        1
+    ]
+
+
 async def _run_agent_task(
     db,
     run_dirs,
@@ -1239,6 +1250,12 @@ async def _run_agent_task(
         )
     ):
         raise LaunchRefused(why)
+    if h.kind == "acp" and (n := _unknown_acp_today(db, work_item_id, budget)):
+        raise LaunchRefused(
+            f"daily_usd cannot be checked: {n} ACP launch(es) today reported no cost, and "
+            "unknown spend is never counted as free; raise or clear `budget.daily_usd`, or give "
+            "the entry a `reports` the cap can count (kraft admin doctor shows what it reports)"
+        )
     in_place = item_row is not None and store.is_in_place(item_row)
     in_copy = in_copy and in_place
     probe_cwd = cwd

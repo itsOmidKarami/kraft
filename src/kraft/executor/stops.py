@@ -131,6 +131,18 @@ def budget_breach(
         return None
     since = store.local_midnight_utc() if budget.daily_usd is not None else None
     item_usd, daily_usd = db.read(lambda c: store.budget_spend(c, work_item_id, since=since))
+    # An ACP session that reached a prompt and reported no cost is unknown spend, which the
+    # sum above counts as $0: the item cap cannot be checked, never passed as free. (The
+    # daily cap is instance-wide: it refuses ACP launches only, at the launch door.)
+    item_unknown, _ = db.read(lambda c: store.unknown_acp_launches(c, work_item_id))
+    if budget.work_item_usd is not None and item_unknown:
+        return UsdBreach(
+            scope="usd",
+            path="",
+            spent_usd=item_usd,
+            cap_usd=budget.work_item_usd,
+            unknown_launches=item_unknown,
+        )
     if budget.work_item_usd is not None and item_usd >= budget.work_item_usd:
         return WorkItemBreach(scope="work_item", spent_usd=item_usd, cap_usd=budget.work_item_usd)
     if budget.daily_usd is not None and daily_usd >= budget.daily_usd:

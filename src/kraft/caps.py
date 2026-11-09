@@ -53,6 +53,7 @@ from typing import Annotated, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from kraft import acp as _acp
 from kraft import events, store
 from kraft import usage as _usage
 from kraft.policy import BUDGET_FIELDS, CAP_FIELDS
@@ -562,11 +563,13 @@ def budget_breach(conn, row, path: str) -> TokenBreach | UsdBreach | None:
             "hook_point": s["node_id"] if s["hook_point"] == "escalation" else s["hook_point"],
         }
         for s in conn.execute(
-            f"SELECT work_item_id, node_id, hook_point, status, {', '.join(_usage.KINDS)}, "
-            f"cost_usd FROM worker_sessions WHERE work_item_id IN ({', '.join('?' * len(family))})",
+            f"SELECT work_item_id, node_id, hook_point, status, harness, "
+            f"{', '.join(_usage.KINDS)}, cost_usd FROM worker_sessions "
+            f"WHERE work_item_id IN ({', '.join('?' * len(family))})",
             family,
         ).fetchall()
     ]
+    acp = _acp.harness_ids()
     above = dict.fromkeys(BUDGET_FIELDS)
     for level in levels:
         policy = snapshot.policy_at(level) if level else snapshot.work_item_policy()
@@ -596,7 +599,11 @@ def budget_breach(conn, row, path: str) -> TokenBreach | UsdBreach | None:
             unknown = sum(
                 1
                 for s in under
-                if s["cost_usd"] is None and _usage.spent(s) > 0 and s["status"] not in LIVE
+                if s["cost_usd"] is None
+                # An ACP session that reached a prompt and reported no cost is unknown
+                # spend even at zero tokens; a CLI session's rule is `spent > 0`.
+                and (_usage.spent(s) > 0 or (s["harness"] in acp and s["tokens_in"] is not None))
+                and s["status"] not in LIVE
             )
             spent = sum(s["cost_usd"] or 0.0 for s in under)
             if unknown or spent >= cap:

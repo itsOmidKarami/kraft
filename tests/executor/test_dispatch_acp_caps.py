@@ -2,17 +2,11 @@
 
 from pathlib import Path
 
+from support.harness import v1_node, v1_task
+
 from kraft import harness
 from kraft import policy as _policy
 from kraft.executor import dispatch
-
-
-def _exec(node_id, *tasks):
-    return {"id": node_id, "kind": "exec", "tasks": list(tasks)}
-
-
-def _agent():
-    return {"id": "implement", "kind": "agent", "harness": "fake", "prompt": "Do it."}
 
 
 async def test_an_instance_dollar_cap_refuses_an_acp_launch_whose_entry_reports_nothing(
@@ -36,7 +30,9 @@ async def test_an_instance_dollar_cap_refuses_an_acp_launch_whose_entry_reports_
         "load",
         lambda *_: harness.HarnessSet(valid={**real.valid, "fake": acp}, invalid=real.invalid),
     )
-    it = await item_on([_exec("implementation", _agent())])
+    it = await item_on(
+        [v1_node("implementation", tasks=[v1_task("implement", kind="agent", harness="fake")])]
+    )
     node = it.chain.chain.nodes[0]
 
     await dispatch.dispatch_node(

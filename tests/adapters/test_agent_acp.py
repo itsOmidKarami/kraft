@@ -9,6 +9,7 @@ from kraft import harness
 from kraft.adapters.agent import LaunchRefused
 from kraft.caps import SpendCaps
 from kraft.paths import RunDirs
+from kraft.policy import Budget
 
 ENTRY = {
     "id": "fake-acp",
@@ -82,3 +83,17 @@ def test_the_scope_a_launchs_caps_are_read_at(hook_point, node_id, scope):
     from kraft.adapters import agent
 
     assert agent._scope_path(hook_point, node_id) == scope
+
+
+def test_an_acp_launch_is_refused_under_a_daily_cap_while_an_acp_session_today_has_no_cost(
+    run, tmp_path, monkeypatch
+):
+    monkeypatch.setattr("kraft.adapters.agent._unknown_acp_today", lambda *a, **k: 1)
+    with pytest.raises(LaunchRefused, match=r"daily_usd cannot be checked.*no cost"):
+        _launch(run, tmp_path, budget=Budget(daily_usd=5))
+
+
+def test_a_cli_launch_is_not_refused_by_the_acp_unknown_count(run, monkeypatch):
+    monkeypatch.setattr("kraft.adapters.agent._unknown_acp_today", lambda *a, **k: 1)
+    seen = run(budget=Budget(daily_usd=5))  # the stock `run` launch is a cli harness (`claude`)
+    assert seen["cmd"]  # it launched
