@@ -7,7 +7,7 @@
 .glyph-exec .glyph-box, .glyph-slot .glyph-box, .glyph-group .glyph-box { width: 100%; height: 100%; }
 /* A group: a second edge behind its box, as its strip and overview glyphs have (`.map-glyph.is-group`). */
 .glyph-group { isolation: isolate; }
-.glyph-group .glyph-box::before { content: ""; position: absolute; inset: 4px -5px -5px 4px; border: 1px solid var(--stroke); border-radius: inherit; background: var(--bg); z-index: -1; }
+.glyph-group .glyph-box::before { content: ""; position: absolute; inset: 3px -3px -3px 3px; border: 1px solid var(--stroke); border-radius: inherit; background: var(--bg); z-index: -1; }
 .glyph-box.is-done { color: var(--text-muted); }
 .glyph-box.is-current { border: 1.5px solid var(--text-sub); background: var(--surface-2); color: var(--text); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-sub) 12%, transparent); }
 .glyph-box.is-todo { border: 1px dashed var(--stroke); color: var(--text-faint); }
