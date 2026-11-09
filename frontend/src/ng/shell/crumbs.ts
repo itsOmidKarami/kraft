@@ -14,7 +14,7 @@ export interface Crumb {
   whole?: boolean;
   /** `ext`: a link out of Kraft after the crumbs (the item's merge request), opened in a new tab. */
   kind: "repo" | "mid" | "current" | "ext";
-  /** A sliced item's family, on its own crumb: the parent, then each slice, the page in view ticked. */
+  /** A slice's family, on its own crumb: the parent, then each slice, the page in view ticked. */
   menu?: { text: string; to: string; checked: boolean; hint?: string }[];
 }
 
@@ -47,15 +47,15 @@ export function crumbsFor(pathname: string, item: ItemLookup): Crumb[] {
     const out: Crumb[] = [mid("Board", { to: "/" })];
     // The repo, like the draft page's, is the board filtered to it.
     if (it) out.push({ text: repoName(it.repo), kind: "repo", title: it.repo, to: `/?repo=${encodeURIComponent(it.repo)}` });
-    // A slice sits under its parent; either one's crumb lists the family: the parent, then its slices.
+    // A slice sits under its parent, and its own crumb lists the family: the parent, then its slices. A parent's
+    // crumb has no menu: crumbs lead up, and its slices node already opens each slice.
     const parentId = it?.parent_id ?? null;
-    const head = parentId ? item(parentId) : it;
-    const headId = parentId ?? id;
-    const headName = head?.bead_id || shortId(headId);
+    const head = parentId ? item(parentId) : null;
+    const headName = head?.bead_id || shortId(parentId ?? "");
     if (parentId) out.push(mid(headName, { to: url(parentId), title: parentId }));
     const kids = head?.children ?? [];
-    const menu = kids.length
-      ? [{ text: headName, to: url(headId), checked: headId === id, hint: `${kids.length} slices` }, ...kids.map((k) => ({ text: `slice ${k.slice_key}`, to: url(k.id), checked: k.id === id, hint: k.display_status.replace(/_/g, " ") }))]
+    const menu = parentId && kids.length
+      ? [{ text: headName, to: url(parentId), checked: false, hint: `${kids.length} slices` }, ...kids.map((k) => ({ text: `slice ${k.slice_key}`, to: url(k.id), checked: k.id === id, hint: k.display_status.replace(/_/g, " ") }))]
       : undefined;
     // The id never gives way: the header's chips ("in your checkout") shrink the repo instead.
     out.push(node ? mid(name, { to: url(id), title: id, whole: true }) : { text: name, kind: "current", title: id, whole: true, ...(menu && { menu }) });

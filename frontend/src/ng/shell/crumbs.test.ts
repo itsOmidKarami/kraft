@@ -53,8 +53,8 @@ describe("crumbsFor", () => {
     expect(node).toMatchObject({ text: "verification", kind: "current" });
   });
 
-  // A slice sits under its parent, and either one's own crumb lists the family: the parent, then each slice.
-  it("puts a slice under its parent, and gives a sliced item's crumb its family as a menu", () => {
+  // A slice sits under its parent, and its own crumb lists the family: the parent, then each slice.
+  it("puts a slice under its parent, and gives a slice's crumb its family as a menu", () => {
     const kid = (k: number, id: string, display_status: string) => ({ id, title: "t", slice_key: k, status: "active", display_status, current_node_id: null, cost_usd: null });
     const items: Record<string, ReturnType<Parameters<typeof crumbsFor>[1]>> = {
       p1: { repo: "/r/x", title: "t", bead_id: "kraft-p", children: [kid(1, "c1", "done"), kid(2, "c2", "needs_you")] },
@@ -70,8 +70,9 @@ describe("crumbsFor", () => {
       { text: "slice 2", to: "/work-items/c2", checked: true, hint: "needs you" },
     ];
     expect(child.menu).toEqual(family);
-    // On the parent's own page the menu ticks the parent; in a node view the crumb links back, with no menu.
-    expect(crumbsFor("/work-items/p1", lookup)[2].menu?.map((m) => m.checked)).toEqual([true, false, false]);
+    // The parent's own crumb has no menu: crumbs lead up. In a node view the crumb links back, with no menu.
+    expect(crumbsFor("/work-items/p1", lookup)[2]).toMatchObject({ text: "kraft-p", kind: "current" });
+    expect(crumbsFor("/work-items/p1", lookup)[2].menu).toBeUndefined();
     const inNode = crumbsFor("/work-items/c2/nodes/verification", lookup);
     expect(inNode.map((c) => c.text)).toEqual(["Board", "x", "kraft-p", "kraft-c2", "verification"]);
     expect(inNode[3].menu).toBeUndefined();
