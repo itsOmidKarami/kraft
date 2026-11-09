@@ -406,15 +406,17 @@ async def test_a_machine_that_turned_a_step_away_is_left_alone_until_something_c
 
 
 @pytest.mark.parametrize(
-    ("caps", "machine", "wait"),
+    ("cap", "caps", "machine", "wait"),
     [
-        ((), None, "waiting for any machine allowed for this item"),
-        (("codex_hook",), "gpu", None),
+        (protocol.CODEX_HOOK, (), None, "waiting for any machine allowed for this item"),
+        (protocol.CODEX_HOOK, (protocol.CODEX_HOOK,), "gpu", None),
+        (protocol.ACP_CLIENT, (), None, "waiting for any machine allowed for this item"),
+        (protocol.ACP_CLIENT, (protocol.ACP_CLIENT,), "gpu", None),
     ],
-    ids=["machine-lacks-it", "machine-has-it"],
+    ids=["machine-lacks-it", "machine-has-it", "acp-machine-lacks-it", "acp-machine-has-it"],
 )
 async def test_any_gives_a_step_that_needs_a_cap_only_to_a_machine_that_lists_it(
-    caps, machine, wait
+    cap, caps, machine, wait
 ):
     hub = Hub("2.3.0")
     other = {"token_sha256": registry.hash_token("kwt_other")}  # never connected
@@ -424,17 +426,22 @@ async def test_any_gives_a_step_that_needs_a_cap_only_to_a_machine_that_lists_it
         )
     )
     await _online(hub, *caps)
-    verdict = hub.decide("any", [], needs={"codex_hook": "the hook"})
+    verdict = hub.decide("any", [], needs={cap: "the cap"})
     assert (verdict.machine, verdict.wait, verdict.refusal) == (machine, wait, None)
 
 
 @pytest.mark.parametrize("runner", ["gpu", "any"])
-async def test_a_step_no_connected_machine_can_take_for_want_of_a_cap_is_refused_saying_so(runner):
+@pytest.mark.parametrize(
+    "cap", [protocol.CODEX_HOOK, protocol.ACP_CLIENT], ids=["codex-hook", "acp-client"]
+)
+async def test_a_step_no_connected_machine_can_take_for_want_of_a_cap_is_refused_saying_so(
+    runner, cap
+):
     hub = Hub("2.3.0")
     hub.apply(_limits_file(None))
     await _online(hub)
-    refusal = hub.decide(runner, [], needs={"codex_hook": "harness 'codex' cannot run the hook"})
-    assert "harness 'codex' cannot run the hook" in refusal.refusal
+    refusal = hub.decide(runner, [], needs={cap: "the step cannot run here"})
+    assert "the step cannot run here" in refusal.refusal
     assert "update Kraft on that machine" in refusal.refusal
     assert hub.decide(runner, []).machine == "gpu"
 
@@ -535,12 +542,15 @@ async def test_a_group_no_member_may_work_for_is_refused_naming_the_repo():
     assert "group 'gpu'" in refusal and "infra" in refusal
 
 
-async def test_a_group_still_hands_a_codex_step_only_to_a_member_that_lists_the_cap():
+@pytest.mark.parametrize(
+    "cap", [protocol.CODEX_HOOK, protocol.ACP_CLIENT], ids=["codex-hook", "acp-client"]
+)
+async def test_a_group_still_hands_a_capped_step_only_to_a_member_that_lists_the_cap(cap):
     hub = Hub("2.3.0")
     hub.apply(_grouped())
     await attach(hub, Peer(), "a", caps=frozenset(), token="kwt_a")
-    await attach(hub, Peer(), "b", caps=frozenset({"codex_hook"}), token="kwt_b")
-    assert hub.decide("gpu", [], needs={"codex_hook": "the hook"}).machine == "b"
+    await attach(hub, Peer(), "b", caps=frozenset({cap}), token="kwt_b")
+    assert hub.decide("gpu", [], needs={cap: "the cap"}).machine == "b"
 
 
 def _disableable(**gpu):

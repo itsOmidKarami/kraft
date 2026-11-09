@@ -17,7 +17,8 @@ Protocol 2. `id` is the job key `"<work item id>/<session id>"`. Frames:
 - `job`, server to machine: `{id, spec, blobs}`. `spec` is `JobSpec.to_frame()`;
   `blobs` names the `code`, `lfs-<oid>` (one LFS object each) and `files` blobs that follow.
   Its `codex_hook` is sent only to a machine listing the `codex_hook` cap: the machine's own
-  codex vouches for Kraft's hook there.
+  codex vouches for Kraft's hook there. Its `acp` (an ACP step, whose `argv` is then the agent's)
+  is sent only to a machine listing `acp_client`.
 - `blob`, both ways: `{id, name, seq, last, data}` with `data` in base64. `code`
   (a git bundle), `lfs-<oid>` (an LFS object) and `files` (a tar.gz) go to the machine;
   `commits`, `lfs-<oid>` and `out` come back.
@@ -68,7 +69,13 @@ RESERVE = "reserve"
 #: The machine has git-lfs: it can take a step of an LFS repo (`lfs.available`). Only a machine
 #: that has it lists it, so it is in `CAPS` and dropped by `machine_caps` when it does not.
 LFS = "lfs"
-CAPS: frozenset[str] = frozenset({CODEX_HOOK, RESERVE, LFS})
+#: The machine has Kraft's ACP client (`kraft admin acp-client`) and builds an ACP step's command
+#: itself (`JobSpec.acp`). It ships in the same package as `worker serve`, and the flag in the same
+#: release, so a machine listing it has the client. A flag and not a `PROTOCOL_VERSION` bump: the
+#: version is strict equality and would refuse every connected machine, and an optional job field
+#: an older machine ignores would have it wrap the client into the image.
+ACP_CLIENT = "acp_client"
+CAPS: frozenset[str] = frozenset({CODEX_HOOK, RESERVE, LFS, ACP_CLIENT})
 _CAPACITY = "capacity="
 HANDSHAKE_S = 10.0
 PING_S = 20.0

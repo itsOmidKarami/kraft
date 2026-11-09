@@ -840,6 +840,11 @@ class _Held:
     claim = None
 
 
+_ACP_CLIENT_NEEDED = (
+    "this step runs an ACP agent, which needs a machine whose Kraft has the ACP client"
+)
+
+
 async def run_task(db, run_dirs, *, session_id: str, work_item_id: str, **kwargs) -> str:
     """`_run_task`, closing the session it wrote when whatever ends it -- a
     cancel, most often a co-task's failure or a stop -- comes before the
@@ -1027,7 +1032,7 @@ async def _run_task(
         from kraft.remote import launch as _launch
         from kraft.remote import runs as _remote_runs
         from kraft.remote import standin as _standin
-        from kraft.remote.protocol import CODEX_HOOK
+        from kraft.remote.protocol import ACP_CLIENT, CODEX_HOOK
 
         claim, refusal, time_cap = await _launch.claim(
             db,
@@ -1045,7 +1050,8 @@ async def _run_task(
                 }
                 if codex_hook is not None
                 else {}
-            ),
+            )
+            | ({ACP_CLIENT: _ACP_CLIENT_NEEDED} if reader == "acp" else {}),
         )
         held.claim = claim
         hub = _remote_runs.current().hub if claim is not None else None
@@ -1058,6 +1064,12 @@ async def _run_task(
                 f"harness {codex_hook['harness']!r} cannot run Kraft's permission hook, which "
                 f"this launch's policy needs: machine {claim.machine!r} runs a Kraft that "
                 f"cannot have its own codex trust the hook; update Kraft on that machine"
+            )
+        elif reader == "acp" and hub is not None and ACP_CLIENT not in hub.caps(claim.machine):
+            _launch.release(claim)
+            refusal = (
+                f"{_ACP_CLIENT_NEEDED}: machine {claim.machine!r} runs a Kraft with no ACP "
+                f"client; update Kraft on that machine"
             )
     files = files or item_paths.session_files(run_dirs, work_item_id, session_id)
     # Kraft's own folder: the log, and the two sidecars below, are written

@@ -372,7 +372,7 @@ origin: src/kraft/remote/placement.py §group_problem
 
 ## REQ step-on-a-group-places-again-for-a-missing-cap
 IF the member a step on a group was given lacks a capability the launch needs, THEN the system SHALL place the step again, on a capable member or the local worker.
-enforced-by: tests/remote/test_launch.py::test_a_launch_the_group_member_cannot_take_places_the_step_again, tests/remote/test_launch.py::test_a_codex_step_places_again_on_the_local_worker_when_no_remote_member_has_the_cap
+enforced-by: tests/remote/test_launch.py::test_a_launch_the_group_member_cannot_take_places_the_step_again, tests/remote/test_launch.py::test_a_capped_step_places_again_on_the_local_worker_when_no_remote_member_has_the_cap[codex-hook]
 origin: src/kraft/remote/launch.py §run_placed
 
 ## REQ lfs-objects-go-to-the-machine-that-lacks-them

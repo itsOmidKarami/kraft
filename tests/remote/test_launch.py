@@ -167,10 +167,13 @@ async def _enter(world):
         return held
 
 
-async def test_a_codex_step_places_again_on_the_local_worker_when_no_remote_member_has_the_cap(
-    world,
+@pytest.mark.parametrize(
+    "cap", [protocol.CODEX_HOOK, protocol.ACP_CLIENT], ids=["codex-hook", "acp-client"]
+)
+async def test_a_capped_step_places_again_on_the_local_worker_when_no_remote_member_has_the_cap(
+    world, cap
 ):
-    needs = {protocol.CODEX_HOOK: "the hook"}
+    needs = {cap: "the cap"}
     async with _placed(world) as p:
         assert p.held.machine == "a"
         await p.choose(needs)  # what `PlaceAgain` asks for

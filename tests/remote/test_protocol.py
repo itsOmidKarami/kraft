@@ -194,6 +194,7 @@ async def test_a_machines_own_limit_travels_in_its_hello_caps(capacity, reported
         ),
     )
     assert protocol.RESERVE in peer.caps
+    assert protocol.ACP_CLIENT in peer.caps
     assert (protocol.LFS in peer.caps) is has_lfs
     assert protocol.reported_capacity(peer.caps) == reported
 
