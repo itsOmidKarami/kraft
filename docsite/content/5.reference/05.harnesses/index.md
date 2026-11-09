@@ -143,3 +143,4 @@ A worker can use the CLI's own stored login instead where it has one; [Give a wo
 - [Harness definition files](/reference/harnesses/harness-files): the YAML file that describes one harness, and every capability it can declare.
 - [Fallback and escalation](/reference/harnesses/fallback-and-escalation): where a launch goes next, and which harness runs an escalation turn.
 - [Cost reporting](/reference/harnesses/cost-reporting): how Kraft estimates the cost of a harness that reports tokens but no dollar figure.
+- [ACP agents, measured](/reference/harnesses/acp-measured): what Kraft found running real ACP agents through its client, and what stays unverified.
