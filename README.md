@@ -205,7 +205,7 @@ board renders live, not a separate pipeline.
 - [Remote access](https://kraft-sdlc.dev/guides/run/remote-access): reach the board from a phone or another machine.
 - [Triggers](https://kraft-sdlc.dev/reference/triggers): start a chain from a schedule or an HTTP call.
 - [Discussions](https://github.com/itsOmidKarami/kraft/discussions): questions, ideas and the chains you've built.
-- [Start here](https://github.com/itsOmidKarami/kraft/issues/1131): small, self-contained issues for a first merge request.
+- [Start here](https://github.com/itsOmidKarami/kraft/issues/1131): small, self-contained issues for a first contribution.
 - [Security](https://kraft-sdlc.dev/project/security): threat model; report vulnerabilities per [SECURITY.md](https://github.com/itsOmidKarami/kraft/blob/main/SECURITY.md).
 
 Kraft Lite, a separate plugin, runs a chain inside a single
@@ -219,7 +219,7 @@ Report security problems as [SECURITY.md](https://github.com/itsOmidKarami/kraft
 
 ## Contributing
 
-Set-up, the `just` recipes, tests and the merge request rules are in
+Set-up, the `just` recipes, tests and the contribution rules are in
 [CONTRIBUTING.md](https://github.com/itsOmidKarami/kraft/blob/main/CONTRIBUTING.md). Releases are described in
 [RELEASING.md](https://github.com/itsOmidKarami/kraft/blob/main/RELEASING.md). Everyone taking part follows the
 [Code of Conduct](https://github.com/itsOmidKarami/kraft/blob/main/CODE_OF_CONDUCT.md).

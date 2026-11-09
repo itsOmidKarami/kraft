@@ -114,7 +114,7 @@ fixture refuses to answer a `param == "bd"` request against the fake).
     `support.harness.Item`: `.row()`, `.status()`, `.events(type)`,
     `.sessions(node)`, `.worktree`, `await .session(sid, "node.step.task",
     status, ...)`.
-  - `bd`: `support.fake_beads.Bd`: `.status(id, cwd=)`, `.ids(cwd=)`,
+  - `bd` (`support.fake_beads.Bd`): `.status(id, cwd=)`, `.ids(cwd=)`,
     `.block(id, blocker, cwd=)`, `.init(path)`, answered by the fake in the
     unit tier and the real CLI under `e2e("bd")` (see `ON_FAKE_AND_REAL_BD`
     above).

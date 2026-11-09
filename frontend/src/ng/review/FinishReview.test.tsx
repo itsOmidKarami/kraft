@@ -224,7 +224,7 @@ describe("BottomBar", () => {
   it("before anything is published: drafts by label, agent replies, Finish review", () => {
     const onFinish = bar([th({ label: "must_fix" }), th({ id: "t2" }), th({ id: "t3", draft: false, comments: [c({ draft: false }), c({ id: "a", author: "implementation", draft: false })] })].filter((t) => t.draft));
     expect(screen.getByText("Your review")).toBeInTheDocument();
-    expect(screen.getByText("2 pending, 1 must fix, 1 unlabeled")).toBeInTheDocument();
+    expect(screen.getByText("2 pending, 1 must fix, 1 unlabelled")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Finish review" }));
     expect(onFinish).toHaveBeenCalledWith();
   });

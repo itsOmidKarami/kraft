@@ -9,7 +9,6 @@ swap:
   '[Rr]erun(s|ning)?(?!-)': re-run$1
   '[Ss]ubagent(s)?': sub-agent$1
   '(?<!the |a |its |their |session.s |Show )[Ll]og in\b': sign in
-  '(?<!the |a |its |their |session.s )[Ll]ogs in\b': signs in
   '[Ll]ogged in': signed in
   '[Ll]ogging in': signing in
   '(?<![\w.$/-])id(?![\w=:/-])': ID

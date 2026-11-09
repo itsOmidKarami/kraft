@@ -91,7 +91,7 @@ export function barText(threads: ReviewThread[], item: Pick<WorkItem, "pending_g
       published: false,
       title: "Your review",
       text: pend.length
-        ? `${pend.length} pending, ${pend.filter((t) => t.label === "must_fix").length} must fix, ${pend.filter((t) => !t.label).length} unlabeled`
+        ? `${pend.length} pending, ${pend.filter((t) => t.label === "must_fix").length} must fix, ${pend.filter((t) => !t.label).length} unlabelled`
         : `No comments yet${!!gate && item.pending_gate === gate ? " · Ready to approve" : ""}`,
       agent: agentReplies ? `${agentReplies} agent ${agentReplies === 1 ? "reply" : "replies"}` : null,
       pending: pend.length,
