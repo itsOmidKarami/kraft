@@ -66,6 +66,7 @@ class Client:
         self.calls: dict[str, dict] = {}  # what the agent has said of each tool call, by id
         self.verdicts: dict[str, str] = {}  # toolCallId -> "allow" | "deny": the answer given
         self._asks: dict = {}  # request id -> the task answering that ask
+        self._withdrawn: dict = {}  # request id -> Future set when the agent withdraws it
         self.proc: asyncio.subprocess.Process | None = None
         self._ids = 0
         self._pending: dict[int, asyncio.Future] = {}
@@ -173,7 +174,17 @@ class Client:
                 await self.send(wire.error(None, wire.INVALID_REQUEST, "invalid request"))
             else:
                 await self._answer(msg)
-        # a notification (`session/update`, `$/cancel_request`) is only logged
+        elif method == "$/cancel_request":
+            params = msg.get("params")  # {requestId}: ACP's CancelRequestNotification
+            self._withdraw(params.get("requestId") if isinstance(params, dict) else None)
+        # any other notification (`session/update`) is only logged
+
+    def _withdraw(self, rid) -> None:
+        """The agent withdrew an ask (`$/cancel_request`, seen from OpenCode): an ask already
+        answered has no future."""
+        fut = self._withdrawn.get(rid) if isinstance(rid, (str, int)) else None
+        if fut is not None and not fut.done():
+            fut.set_result(True)
 
     async def _answer(self, req: dict) -> None:
         params = req.get("params")
@@ -182,10 +193,15 @@ class Client:
         elif req["method"] == "session/request_permission":
             # Not awaited: the gate's round trip can be long, and an agent may have two asks in
             # flight; the reader must keep reading.
+            # The withdrawal future is made before the task: the agent's `$/cancel_request` can be
+            # read before the task has taken its first step.
             rid = req["id"]
+            self._withdrawn[rid] = asyncio.get_running_loop().create_future()
             task = asyncio.ensure_future(self.permission(rid, params or {}))
             self._asks[rid] = task
-            task.add_done_callback(lambda _t, rid=rid: self._asks.pop(rid, None))
+            task.add_done_callback(
+                lambda _t, rid=rid: (self._asks.pop(rid, None), self._withdrawn.pop(rid, None))
+            )
         else:
             await self.send(
                 wire.error(req["id"], wire.METHOD_NOT_FOUND, "kraft's client offers no such method")
@@ -252,13 +268,43 @@ class Client:
             return False, message
         return False, f"Kraft's permission gate is {behavior}: {message}"
 
+    async def heartbeat(self, call: dict) -> None:
+        """While an ask waits, the log must not go quiet: `idle_s` kills a session whose log
+        stays unwritten."""
+        while True:
+            await asyncio.sleep(self.spec.heartbeat_s)
+            self.emit(
+                log.event(
+                    "heartbeat", waiting_on="gate", tool=call.get("title") or call.get("kind")
+                )
+            )
+
     async def permission(self, rid, params: dict) -> None:
         call = params.get("toolCall")
         call = call if isinstance(call, dict) else {}
         self.remember(call)
         cid = call.get("toolCallId")
         info = self.calls.get(cid, call) if isinstance(cid, str) else call
-        allow, why = await self.decide(info)
+        # Raced, not awaited, against the agent's withdrawal: cancelling the task instead would
+        # skip every handler of a task that has not yet started, and no `cancelled` would be sent.
+        beat = asyncio.ensure_future(self.heartbeat(call))
+        decision = asyncio.ensure_future(self.decide(info))
+        withdrawn = self._withdrawn.get(rid)
+        try:
+            await asyncio.wait(
+                {decision, *([withdrawn] if withdrawn else [])},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            beat.cancel()
+            if not decision.done():
+                decision.cancel()  # withdrawn, or the client is ending
+        if withdrawn is not None and withdrawn.done():  # withdrawn wins even if the gate answered
+            self.emit(log.event("ask_withdrawn", tool=call.get("title") or call.get("kind")))
+            self.verdict(cid, "deny")  # a call that then runs anyway is a violation
+            await self.send(wire.result(rid, {"outcome": {"outcome": "cancelled"}}))
+            return
+        allow, why = decision.result()
         options = params.get("options") or []
         option = wire.select_option(options, ("allow_once",) if allow else ("reject_once",))
         if allow and option is None:  # only an *_always on offer: never take it
@@ -532,6 +578,8 @@ class Client:
         except Exception as exc:  # noqa: BLE001 -- a bug here is still a failed result file
             code = self.fail(f"the client failed: {exc!r}")
         finally:
+            for task in list(self._asks.values()):
+                task.cancel()
             await self.end()
             # The agent is gone: what it wrote last (a crash's traceback) may still be buffered.
             _, rest = await asyncio.wait(pumps, timeout=PUMP_DRAIN_S)

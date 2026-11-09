@@ -713,3 +713,51 @@ def test_an_agent_that_refuses_the_asking_mode_ends_the_launch_as_config_error(
         asks_mode="paranoid",
     )
     assert code == 78 and "asks_everything mode" in _events(recs, "config_error")[0]["message"]
+
+
+def test_a_withdrawn_ask_is_answered_cancelled_while_the_gate_is_still_thinking(
+    tmp_path, monkeypatch
+):
+    # The gate never answers: only an ask that races the gate against its withdrawal can end.
+    code, recs = run_inprocess(
+        tmp_path,
+        monkeypatch,
+        "ask_all",
+        ask=fake_gate(delay=3600),
+        calls=[{"id": "c1", "name": "read", "kind": "read", "withdraw": True}],
+        policy=True,
+        tool_names=TOOLS,
+    )
+    assert code == 0
+    assert _answers(tmp_path)[0]["result"]["outcome"] == {"outcome": "cancelled"}
+    assert _events(recs, "ask_withdrawn") and not _events(recs, "ask")
+
+
+def test_two_asks_in_flight_are_both_answered(tmp_path, monkeypatch):
+    # A serial client (one ask handled to the end before the next is read) answers both too, so
+    # the answers alone cannot fail it: assert the two gate calls were *in flight together*.
+    calls = [
+        {"id": "c1", "name": "read", "kind": "read", "wait": False},
+        {"id": "c2", "name": "shell", "kind": "execute", "wait": False},
+    ]
+    gate = fake_gate({"Bash": "deny"}, delay=0.3)
+    run_inprocess(
+        tmp_path, monkeypatch, "ask_all", ask=gate, calls=calls, policy=True, tool_names=TOOLS
+    )
+    got = {m["id"]: m["result"]["outcome"]["optionId"] for m in _answers(tmp_path)}
+    assert got == {"ask-c1": "once", "ask-c2": "no"}
+    assert gate.peak == 2
+
+
+def test_the_log_is_not_silent_while_an_ask_waits_on_the_gate(tmp_path, monkeypatch):
+    _, recs = run_inprocess(
+        tmp_path,
+        monkeypatch,
+        "ask_all",
+        ask=fake_gate(delay=0.6),
+        calls=[{"id": "c1", "name": "read", "kind": "read"}],
+        policy=True,
+        tool_names=TOOLS,
+        heartbeat_s=0.1,
+    )
+    assert len(_events(recs, "heartbeat")) >= 3
