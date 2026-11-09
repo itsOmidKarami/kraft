@@ -42,6 +42,22 @@ def test_a_missing_agent_is_a_failed_handshake_not_a_crash():
     assert got.ok is False and "no/such" in got.error
 
 
+def test_an_agent_that_exited_before_we_wrote_is_a_failed_handshake_not_a_reset():
+    async def go():
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            "pass",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+        )
+        await proc.wait()
+        with pytest.raises(probe._Failed, match="exited before answering initialize"):
+            await probe._ask(proc, 1, "initialize", {})
+
+    asyncio.run(go())
+
+
 def test_an_agent_that_never_answers_fails_at_the_timeout():
     silent = [sys.executable, "-c", "import time; time.sleep(60)"]
     got = asyncio.run(probe.handshake(silent, cwd="/tmp", timeout_s=0.5))

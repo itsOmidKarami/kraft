@@ -37,4 +37,4 @@ def test_opencode_acp_answers_one_turn_with_usage(tmp_path):
     if "totalTokens" in block:
         assert sum(block.get(k, 0) for k in parts) == block["totalTokens"], json.dumps(block)
     session = next(r for r in recs if r.get("event") == "session")
-    assert session["session_id"] and session["capabilities"]["load_session"] in (True, False)
+    assert session["session_id"]

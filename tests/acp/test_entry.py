@@ -46,20 +46,6 @@ def test_a_command_given_as_one_string_is_one_word_not_split():
     assert h.command == ("agent acp",)
 
 
-def test_harness_ids_names_only_the_acp_ones_and_reads_a_given_set_without_a_reload(monkeypatch):
-    from kraft import acp
-
-    hs = harness.HarnessSet(
-        valid={
-            "fake-acp": harness.Harness.from_mapping(ACP, where="t"),
-            "claude": harness.load(None).valid["claude"],
-        },
-        invalid={},
-    )
-    monkeypatch.setattr(harness, "load", lambda *_: pytest.fail("a given set must not reload"))
-    assert acp.harness_ids(hs) == frozenset({"fake-acp"})
-
-
 @pytest.mark.parametrize(
     ("patch", "expect"),
     [

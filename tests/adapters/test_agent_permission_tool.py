@@ -113,7 +113,7 @@ def test_a_copy_launch_finds_the_checkouts_registration_and_is_handed_it(
         config = json.loads(user.read_text()) if scope != "local-scope" else {}
         config["projects"] = {str(repo.resolve()): {"mcpServers": local}}
         user.write_text(json.dumps(config))
-    row = {"id": "w1", "branch": None, "repo": str(repo)}
+    row = {"id": "w1", "branch": None, "budget_set": 0, "repo": str(repo)}
     kw = {}
     if old_file:
         hs = _harness.load(None)
@@ -195,7 +195,7 @@ def test_a_launch_whose_kraft_server_cannot_start_on_the_workers_path_is_refused
         write(repo.parent if disk == "parent" else repo, ".mcp.json", json.dumps(on_disk))
     if disk == "checkout":
         request.getfixturevalue("in_place")
-        row = {"id": "w1", "branch": None, "repo": str(repo)}
+        row = {"id": "w1", "branch": None, "budget_set": 0, "repo": str(repo)}
         kw.update(db=SimpleNamespace(read=lambda fn: row), cwd=str(tmp_path / "copy"), in_copy=True)
     if launch.get("entry_path"):
         config["mcpServers"]["kraft"] = {**server, "env": {"PATH": str(kraft_on_path.parent)}}

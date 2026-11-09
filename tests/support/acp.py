@@ -20,7 +20,7 @@ def agent_argv() -> list[str]:
 
 def spec(tmp_path: Path, **fields) -> Path:
     """Write a `LaunchSpec` for the fake agent into tmp_path and return its path."""
-    from kraft.acp.spec import LaunchSpec  # created by task 5: imported here so task 4 collects
+    from kraft.acp.spec import LaunchSpec
 
     body = {
         "agent_argv": agent_argv(),

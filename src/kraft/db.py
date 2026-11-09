@@ -26,7 +26,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 60
+SCHEMA_VERSION = 61
 
 _SCHEMA_TEMPLATE = """
 CREATE TABLE work_items (
@@ -242,6 +242,9 @@ CREATE TABLE worker_sessions (
   -- the machine a remote step ran on (`kraft.remote`), NULL for a local one and
   -- every row older than this column
   runner         TEXT,
+  -- 1 for a session that ran on an ACP agent (`kind: acp`), as it was launched: the
+  -- caps read it here, never off the harness file, which a reload may have changed
+  acp            INTEGER NOT NULL DEFAULT 0,
   -- a session's id is unique only within its work item (`store.new_session_id`),
   -- and a row from before that keeps its 32-character id, unique on its own
   PRIMARY KEY (work_item_id, id)
@@ -1470,6 +1473,9 @@ SELECT rowid, id, work_item_id, node_id, hook_point, pid, pid_start_time, log_pa
         "CREATE UNIQUE INDEX idx_work_items_slice "
         "ON work_items(parent_id, slice_generation, slice_key) WHERE parent_id IS NOT NULL",
     ],
+    # Whether a session ran on an ACP agent: unknown ACP spend is counted off this, so removing
+    # or renaming the harness later cannot turn it into $0.
+    60: ["ALTER TABLE worker_sessions ADD COLUMN acp INTEGER NOT NULL DEFAULT 0"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins

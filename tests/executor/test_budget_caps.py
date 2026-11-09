@@ -50,16 +50,26 @@ async def _spent(
     tokens: int | None = 0,
     usd: float | None = None,
     status="done",
-    harness=None,
+    acp=False,
 ):
-    """`tokens=None` leaves the token columns NULL: a session that never reached a prompt."""
+    """`tokens=None` leaves the token columns NULL: a session that never reached a prompt.
+    `acp` marks a session that ran on an ACP agent. Its harness (`fake-acp`) is in no harness
+    file: what counts is the flag the session was launched with."""
     sid = f"s-{path}-{tokens}-{usd}-{status}"
     await it.session(sid, path, status if status != "running" else None)
     await it.database.write(
         lambda c: c.execute(
             "UPDATE worker_sessions SET tokens_in = ?, tokens_out = ?, cost_usd = ?, "
-            "status = ?, harness = ? WHERE id = ?",
-            (tokens, None if tokens is None else 0, usd, status, harness, sid),
+            "status = ?, harness = ?, acp = ? WHERE id = ?",
+            (
+                tokens,
+                None if tokens is None else 0,
+                usd,
+                status,
+                "fake-acp" if acp else None,
+                int(acp),
+                sid,
+            ),
         )
     )
 
@@ -688,63 +698,72 @@ async def test_an_instance_dollar_cap_counts_as_a_dollar_cap(item_on):
     assert tuple(got) == (False, True)
 
 
-@pytest.fixture
-def acp_harness(monkeypatch):
-    monkeypatch.setattr("kraft.acp.harness_ids", lambda hs=None: frozenset({"fake-acp"}))
-
-
 @pytest.mark.parametrize(
-    ("harness", "tokens", "unknown"),
-    [("fake-acp", 0, True), (None, 0, False), ("fake-acp", None, False)],
+    ("acp", "tokens", "unknown"),
+    [(True, 0, True), (False, 0, False), (True, None, False)],
     ids=["acp-zero-tokens", "cli-zero-tokens", "acp-never-reached-a-prompt"],
 )
 async def test_an_acp_session_with_no_cost_is_unknown_spend_even_at_zero_tokens(
-    item_on, acp_harness, harness, tokens, unknown
+    item_on, acp, tokens, unknown
 ):
     it = await _item(item_on, "task", {"budget_usd": 5})
-    await _spent(it, TASK, tokens=tokens, usd=None, harness=harness)
+    await _spent(it, TASK, tokens=tokens, usd=None, acp=acp)
     got = _breach(it)
     assert (isinstance(got, UsdBreach) and got.unknown_launches == 1) is unknown
 
 
-async def test_an_acp_sessions_unknown_cost_stops_the_item_dollar_cap_too(item_on, acp_harness):
+async def test_an_acp_sessions_unknown_cost_stops_the_item_dollar_cap_too(item_on):
     it = await item_on(_chain())
-    await _spent(it, TASK, tokens=0, usd=None, harness="fake-acp")
+    await _spent(it, TASK, tokens=0, usd=None, acp=True)
     got = stops.budget_breach(
         it.database, it.id, _policy.Budget(work_item_usd=100), row=it.row(), path=TASK
     )
     assert isinstance(got, UsdBreach) and got.unknown_launches == 1 and got.cap_usd == 100
 
 
-async def test_a_session_that_never_reached_a_prompt_does_not_make_the_item_unknown(
-    item_on, acp_harness
+async def test_a_session_that_never_reached_a_prompt_does_not_make_the_item_unknown(item_on):
+    it = await item_on(_chain())
+    await _spent(it, TASK, tokens=None, usd=None, acp=True)  # config_error, login, kill
+    assert (
+        stops.budget_breach(
+            it.database, it.id, _policy.Budget(work_item_usd=100), row=it.row(), path=TASK
+        )
+        is None
+    )
+
+
+async def test_an_acp_session_that_reported_a_cost_is_ordinary_spend(item_on):
+    it = await item_on(_chain())
+    await _spent(it, TASK, tokens=10, usd=1.0, acp=True)
+    assert (
+        stops.budget_breach(
+            it.database, it.id, _policy.Budget(work_item_usd=100), row=it.row(), path=TASK
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize("cap", ["scope", "instance"])
+@pytest.mark.parametrize(
+    ("model", "unknown"),
+    [("claude-sonnet-4-5", 0), (None, 1)],
+    ids=["tokens-on-a-priced-model-are-priced", "tokens-on-no-model-are-unknown"],
+)
+async def test_an_acp_turn_that_reported_tokens_and_no_cost_is_priced_or_unknown_never_free(
+    item_on, model, unknown, cap
 ):
-    it = await item_on(_chain())
-    await _spent(it, TASK, tokens=None, usd=None, harness="fake-acp")  # config_error, login, kill
-    assert (
-        stops.budget_breach(
-            it.database, it.id, _policy.Budget(work_item_usd=100), row=it.row(), path=TASK
-        )
-        is None
-    )
-
-
-async def test_an_acp_session_that_reported_a_cost_is_ordinary_spend(item_on, acp_harness):
-    it = await item_on(_chain())
-    await _spent(it, TASK, tokens=10, usd=1.0, harness="fake-acp")
-    assert (
-        stops.budget_breach(
-            it.database, it.id, _policy.Budget(work_item_usd=100), row=it.row(), path=TASK
-        )
-        is None
-    )
-
-
-async def test_an_acp_row_writes_no_spend_unpriced_event(item_on, acp_harness):
-    it = await item_on(_chain())
-    await it.session("s", "ship.main.go", harness="fake-acp", model=None)
-    spent = usage.Usage(tokens_in=1000, tokens_out=0)  # a turn, no cost, no priced model
+    """Through the real exit writer: a priced model's tokens settle to a cost, so the first turn
+    is not counted unknown and the item stopped after it; tokens on no priced model stay unknown.
+    Neither writes the CLI's `spend_unpriced` warning: an ACP launch is stopped on it instead."""
+    it = await (_item(item_on, "item", {"budget_usd": 5}) if cap == "scope" else item_on(_chain()))
+    await it.session("s", TASK, harness="fake-acp", model=model, acp=True)
+    spent = usage.Usage(tokens_in=1000, tokens_out=500, model=model)  # a turn, no cost
     await it.database.write(
         lambda c: store.session_exited(c, "s", "done", None, spent, work_item_id=it.id)
     )
+    budget = _policy.Budget(work_item_usd=100) if cap == "instance" else _policy.NO_BUDGET
+    got = stops.budget_breach(it.database, it.id, budget, row=it.row(), path=TASK)
+    assert (got.unknown_launches if isinstance(got, UsdBreach) else 0) == unknown
+    assert (got is None) is (not unknown)
+    assert (it.sessions()[0]["cost_usd"] is None) is bool(unknown)
     assert it.events("spend_unpriced") == []

@@ -32,12 +32,21 @@ class _Failed(Exception):
         super().__init__(str(error))
 
 
+async def _write(proc: asyncio.subprocess.Process, method: str, msg: dict) -> None:
+    """One line to the agent's stdin; an agent that already exited is a failed handshake."""
+    assert proc.stdin is not None
+    try:
+        proc.stdin.write(wire.encode(msg))
+        await proc.stdin.drain()
+    except ConnectionError:  # BrokenPipeError, ConnectionResetError
+        raise _Failed(f"the agent exited before answering {method}") from None
+
+
 async def _ask(proc: asyncio.subprocess.Process, id_: int, method: str, params: dict) -> dict:
     """The `result` of our request `id_`; an agent-to-client request meanwhile is answered
     "method not found" (this client offers nothing), anything else is skipped."""
     assert proc.stdin is not None and proc.stdout is not None
-    proc.stdin.write(wire.encode({"jsonrpc": "2.0", "id": id_, "method": method, "params": params}))
-    await proc.stdin.drain()
+    await _write(proc, method, {"jsonrpc": "2.0", "id": id_, "method": method, "params": params})
     while True:
         kind, msg = await wire.read_line(proc.stdout)
         if kind == "eof":
@@ -47,10 +56,9 @@ async def _ask(proc: asyncio.subprocess.Process, id_: int, method: str, params: 
         assert isinstance(msg, dict)
         if "method" in msg:
             if "id" in msg:
-                proc.stdin.write(
-                    wire.encode(wire.error(msg["id"], wire.METHOD_NOT_FOUND, "method not found"))
+                await _write(
+                    proc, method, wire.error(msg["id"], wire.METHOD_NOT_FOUND, "method not found")
                 )
-                await proc.stdin.drain()
             continue
         if msg.get("id") != id_:
             continue

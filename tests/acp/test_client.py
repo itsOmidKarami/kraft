@@ -44,8 +44,8 @@ def test_every_message_both_ways_is_a_log_line(tmp_path):
 
 @pytest.mark.parametrize(
     ("flags", "code"),
-    [("die", 3)],
-    ids=["agent-died-mid-turn"],
+    [("die", 3), ("kill", 137)],
+    ids=["agent-died-mid-turn", "agent-sigkilled-mid-turn-reads-as-a-shell-would"],
 )
 def test_the_agents_own_exit_code_is_the_clients_when_it_died_before_the_turn_ended(
     tmp_path, flags, code
@@ -54,11 +54,20 @@ def test_the_agents_own_exit_code_is_the_clients_when_it_died_before_the_turn_en
     assert done.returncode == code
 
 
-def test_a_missing_agent_is_a_config_error_with_a_failed_result_file(tmp_path):
-    done, recs = run_client(tmp_path, agent_argv=["/no/such/agent-binary"])
+@pytest.mark.parametrize(
+    ("argv", "needle"),
+    [(["/no/such/agent-binary"], "no/such"), ([], "no agent command")],
+    ids=["missing-binary", "empty-argv"],
+)
+def test_an_agent_that_cannot_start_is_a_config_error_with_a_failed_result_file(
+    tmp_path, argv, needle
+):
+    done, recs = run_client(tmp_path, agent_argv=argv)
     assert done.returncode == 78
-    assert "no/such" in _events(recs, "config_error")[0]["message"]
+    assert needle in _events(recs, "config_error")[0]["message"]
     assert json.loads((tmp_path / "result.json").read_text())["status"] == "failed"
+    # logged before the spawn is tried, so even a launch that never ran has its first line
+    assert [r["event"] for r in recs if r["dir"] == "client"][0] == "starting"
 
 
 def test_a_login_the_agent_wants_is_a_failed_result_not_a_hang(tmp_path):
@@ -105,6 +114,33 @@ def test_a_line_past_the_limit_is_skipped_logged_and_the_turn_still_ends(tmp_pat
     assert done.returncode == 0, done.stderr
     assert _events(recs, "line_too_long")[0]["limit"] == 2000
     assert _events(recs, "stop")[0]["stop_reason"] == "end_turn"
+
+
+def test_an_agent_that_never_answers_initialize_fails_with_a_reason_not_a_hang(tmp_path):
+    done, recs = run_client(tmp_path, "mute", handshake_timeout_s=1.0, timeout=20)
+    assert done.returncode == 1
+    assert "did not answer initialize within 1s" in _events(recs, "error")[0]["message"]
+    assert "initialize" in json.loads((tmp_path / "result.json").read_text())["error"]
+    assert "session/prompt" not in [m.get("method") for m in recorded(tmp_path)]
+
+
+def test_stderr_is_drained_past_what_a_pipe_holds_and_past_a_line_over_the_limit(tmp_path):
+    # `noisy` writes one 5000-byte line, then ~300 KB more, before it answers the prompt: a
+    # reader that stopped at the long line would let the 64 KB pipe fill and block the agent.
+    done, recs = run_client(tmp_path, "noisy", line_limit=2000, timeout=30)
+    assert done.returncode == 0, done.stderr
+    assert [r["text"] for r in recs if r.get("event") == "stderr"][-1] == "stderr-done"
+    assert _events(recs, "line_too_long")[0]["stream"] == "stderr"
+    assert _events(recs, "stop")[0]["stop_reason"] == "end_turn"
+
+
+def test_an_agent_request_with_an_unhashable_id_or_non_object_params_is_answered_invalid(tmp_path):
+    done, recs = run_client(tmp_path, "badreq")
+    assert done.returncode == 0, done.stderr
+    sent = recorded(tmp_path)
+    by_id = {json.dumps(m.get("id")): m for m in sent if "error" in m}
+    assert by_id["null"]["error"]["code"] == by_id['"odd-1"']["error"]["code"] == -32600
+    assert not _events(recs, "error")  # the reader never failed on them
 
 
 def test_an_agent_that_dies_before_session_new_ends_the_launch_not_hangs_it(tmp_path):
@@ -226,39 +262,29 @@ def test_an_agent_that_cannot_resume_at_all_fails_the_launch(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("flags", "where"),
-    [("", "systemPrompt"), ("no_system_prompt", "prompt")],
-    ids=["object-when-offered", "folded-when-not"],
+    ("flags", "resume", "where"),
+    [
+        ("", None, "systemPrompt"),
+        ("no_system_prompt", None, "prompt"),
+        ("", "old-session", "systemPrompt"),
+        ("no_system_prompt", "old-session", "prompt"),
+    ],
+    ids=["object-when-offered", "folded-when-not", "resume-object-when-offered", "resume-folded"],
 )
-def test_context_rides_the_system_prompt_object_or_folds_into_the_prompt(tmp_path, flags, where):
-    run_client(tmp_path, flags, context="THE-CONTEXT", prompt="THE-TASK")
+def test_context_rides_the_system_prompt_object_or_folds_into_the_prompt(
+    tmp_path, flags, resume, where
+):
+    run_client(tmp_path, flags, context="THE-CONTEXT", prompt="THE-TASK", resume=resume)
     sent = {m["method"]: m["params"] for m in recorded(tmp_path) if "method" in m}
+    opened = sent["session/resume" if resume else "session/new"]
     if where == "systemPrompt":
-        assert sent["session/new"]["systemPrompt"] == {
+        assert opened["systemPrompt"] == {
             "mode": "append",
             "content": [{"type": "text", "text": "THE-CONTEXT"}],
         }
         assert sent["session/prompt"]["prompt"][0]["text"] == "THE-TASK"
     else:
-        assert "systemPrompt" not in sent["session/new"]
-        assert sent["session/prompt"]["prompt"][0]["text"] == "THE-CONTEXT\n\nTHE-TASK"
-
-
-@pytest.mark.parametrize(
-    ("flags", "offered"),
-    [("", True), ("no_system_prompt", False)],
-    ids=["resume-with-system-prompt-offered", "resume-without-it-offered"],
-)
-def test_a_resume_sends_the_system_prompt_object_only_when_the_agent_offers_it(
-    tmp_path, flags, offered
-):
-    run_client(tmp_path, flags, resume="old-session", context="THE-CONTEXT", prompt="THE-TASK")
-    sent = {m["method"]: m["params"] for m in recorded(tmp_path) if "method" in m}
-    assert ("systemPrompt" in sent["session/resume"]) is offered
-    if offered:
-        assert sent["session/resume"]["systemPrompt"]["content"][0]["text"] == "THE-CONTEXT"
-        assert sent["session/prompt"]["prompt"][0]["text"] == "THE-TASK"
-    else:
+        assert "systemPrompt" not in opened
         assert sent["session/prompt"]["prompt"][0]["text"] == "THE-CONTEXT\n\nTHE-TASK"
 
 
@@ -278,11 +304,15 @@ def test_a_refused_config_option_is_a_config_error_naming_what_was_offered(tmp_p
     assert "model" in message and "fake-model" in message
 
 
-def _until_prompting(proc):
+def _until(proc, match):
     for line in proc.stdout:
         rec = next(log.records([line]), None)
-        if rec and rec.get("event") == "prompting":
+        if rec and match(rec):
             return
+
+
+def _until_prompting(proc):
+    _until(proc, lambda rec: rec.get("event") == "prompting")
 
 
 def test_sigint_becomes_session_cancel_and_the_usage_still_lands(tmp_path):
@@ -303,6 +333,67 @@ def test_sigint_becomes_session_cancel_and_the_usage_still_lands(tmp_path):
     assert any(r.get("msg", {}).get("result", {}).get("usage") for r in recs)
 
 
+def test_a_sigint_during_the_handshake_starts_no_turn(tmp_path):
+    # `slow_init` holds the initialize answer a second: the pause lands before any prompt.
+    proc = subprocess.Popen(
+        client_argv(spec(tmp_path)),
+        stdout=subprocess.PIPE,
+        text=True,
+        env=client_env(tmp_path, "slow_init"),
+        cwd=tmp_path,
+    )
+    _until(proc, lambda rec: rec.get("dir") == "to_agent")  # initialize is out; handlers are set
+    proc.send_signal(signal.SIGINT)
+    rest, _ = proc.communicate(timeout=30)
+    assert proc.returncode == 130
+    assert "session/prompt" not in [m.get("method") for m in recorded(tmp_path)]
+    assert not (tmp_path / "result.json").exists()  # a pause is not a failed result
+    assert _events(list(log.records(rest.splitlines())), "interrupted")[0]["before"] == "prompt"
+
+
+def test_a_late_answer_after_the_cancel_wait_is_dropped_not_a_reader_failure(tmp_path):
+    # `late` answers the cancel a second after the client stopped waiting (0.3s): the answer
+    # reaches a future the timeout cancelled.
+    proc = subprocess.Popen(
+        client_argv(spec(tmp_path, cancel_wait_s=0.3)),
+        stdout=subprocess.PIPE,
+        text=True,
+        env=client_env(tmp_path, "slow,late"),
+        cwd=tmp_path,
+    )
+    _until_prompting(proc)
+    proc.send_signal(signal.SIGINT)
+    rest, _ = proc.communicate(timeout=30)
+    recs = list(log.records(rest.splitlines()))
+    assert proc.returncode == 130
+    assert _events(recs, "cancel_timeout")
+    assert any(r.get("msg", {}).get("result", {}).get("stopReason") for r in recs)  # it did land
+    assert not _events(recs, "error")
+
+
+@pytest.mark.parametrize(
+    ("rc", "interrupted", "terminated", "expect"),
+    [(0, True, False, 130), (1, True, False, 130), (0, False, True, 143), (0, True, True, 143)],
+    ids=["exit-0-after-sigint", "exit-1-after-sigint", "exit-0-after-sigterm", "term-wins"],
+)
+def test_an_agent_that_is_gone_after_a_signal_is_that_signals_code_not_a_failure(
+    tmp_path, rc, interrupted, terminated, expect
+):
+    async def go():
+        client = _client(tmp_path, io.StringIO())
+
+        async def wait():
+            return rc
+
+        client.proc = SimpleNamespace(wait=wait, returncode=rc)
+        if interrupted:
+            client.interrupted.set()
+        client.terminated = terminated
+        return await client.agent_exit()
+
+    assert asyncio.run(go()) == expect
+
+
 def test_the_cancel_wait_ends_before_kraft_kills_the_group_after_a_pause():
     from kraft.acp.spec import LaunchSpec
     from kraft.adapters import subprocess as run_subprocess
@@ -311,14 +402,19 @@ def test_the_cancel_wait_ends_before_kraft_kills_the_group_after_a_pause():
     assert LaunchSpec.model_fields["cancel_wait_s"].default < flush_grace
 
 
-def test_a_group_sigint_that_kills_the_agent_first_is_still_a_clean_pause(tmp_path):
-    # Kraft's pause signals the whole group: here the fake dies on that SIGINT (`die_on_int`)
-    # before it answers the client's session/cancel.
+@pytest.mark.parametrize(
+    "flags",
+    ["slow,die_on_int", "slow,exit_on_int"],
+    ids=["agent-dies-on-it", "agent-exits-0-on-it"],
+)
+def test_a_group_sigint_that_ends_the_agent_first_is_still_a_clean_pause(tmp_path, flags):
+    # Kraft's pause signals the whole group: here the fake exits on that SIGINT before it answers
+    # the client's session/cancel, with code 130 or 0 (which a failed result must not follow).
     proc = subprocess.Popen(
         client_argv(spec(tmp_path)),
         stdout=subprocess.PIPE,
         text=True,
-        env=client_env(tmp_path, "slow,die_on_int"),
+        env=client_env(tmp_path, flags),
         cwd=tmp_path,
         start_new_session=True,
     )

@@ -3,10 +3,11 @@
 
 Stdlib only and nothing from Kraft: it stands in for a third-party agent. It answers one turn
 with fixed usage and cost, and misbehaves on request. `KRAFT_FAKE_ACP` is a comma-separated list
-of flags (see `tests/test_fake_acp_agent.py` and `tests/support/acp.py`):
+of flags (see `tests/acp/test_client.py` and `tests/support/acp.py`):
 
   ask fs stray long replay no_cost no_usage no_resume no_load no_system_prompt slow term die
-  refuse_config noresult auth die_after_init hang deaf die_on_int
+  refuse_config noresult auth die_after_init hang deaf die_on_int exit_on_int kill noisy late
+  slow_init mute badreq
 
 `KRAFT_FAKE_ACP_RECORD` is a path: every line read from stdin is appended to it, so a test sees
 exactly what the client sent. `KRAFT_FAKE_ACP_STATUS` is the status written to
@@ -168,17 +169,35 @@ def prompt(id_, params: dict) -> None:
                 "cost": {"amount": 0.0123, "currency": "USD"},
             },
         )
+    if "badreq" in FLAGS:  # requests no client can make sense of: it must answer, not die
+        send({"jsonrpc": "2.0", "id": ["not", "hashable"], "method": "x/odd", "params": {}})
+        send(
+            {"jsonrpc": "2.0", "id": "odd-1", "method": "session/request_permission", "params": [1]}
+        )
+        await_response("odd-1")
+    if "noisy" in FLAGS:  # past the 64 KB a pipe holds, after one line past any limit
+        sys.stderr.write("x" * 5000 + "\n")
+        for n in range(300):
+            sys.stderr.write(f"noise {n} " + "y" * 900 + "\n")
+        sys.stderr.write("stderr-done\n")
+        sys.stderr.flush()
     if "die" in FLAGS:
         os._exit(3)
+    if "kill" in FLAGS:
+        os.kill(os.getpid(), signal.SIGKILL)
     stop = "end_turn"
     if "slow" in FLAGS:
         if "die_on_int" in FLAGS:
             signal.signal(signal.SIGINT, lambda *_: os._exit(130))
+        elif "exit_on_int" in FLAGS:
+            signal.signal(signal.SIGINT, lambda *_: os._exit(0))
         else:
             signal.signal(signal.SIGINT, signal.SIG_IGN)
         while (msg := read()) is not None:
             if msg.get("method") == "session/cancel":
                 break
+        if "late" in FLAGS:  # answers the cancel after the client has stopped waiting
+            time.sleep(1.0)
         stop = "cancelled"
     write_result()
     result = {"stopReason": stop}
@@ -210,6 +229,10 @@ def main() -> None:
     while (msg := read()) is not None:
         method, id_, params = msg.get("method"), msg.get("id"), msg.get("params") or {}
         if method == "initialize":
+            if "mute" in FLAGS:
+                continue  # never answers
+            if "slow_init" in FLAGS:
+                time.sleep(1.0)
             if "long" in FLAGS:
                 send({"jsonrpc": "2.0", "method": "x/pad", "params": {"pad": "x" * 5000}})
             caps = {}

@@ -19,6 +19,9 @@ from kraft.acp import log, wire
 from kraft.acp.spec import LaunchSpec
 
 CONFIG_ERROR_EXIT = 78  # EX_CONFIG; `agent._resolve_status` reads the logged event, not this
+INTERRUPTED_EXIT = 130  # what a shell reports for SIGINT: a pause
+TERMINATED_EXIT = 143  # ... and for SIGTERM
+PUMP_DRAIN_S = 1.0  # how long the readers get, after the agent is gone, to finish what is buffered
 
 
 class RpcError(Exception):
@@ -63,6 +66,7 @@ class Client:
         self.replay = False
         self.gone = False  # the agent's stdout closed or its pump failed: nothing will answer
         self.interrupted = asyncio.Event()
+        self.terminated = False  # SIGTERM arrived: whatever the agent exits with, this was a stop
 
     # -- output ------------------------------------------------------------------------
     def emit(self, line: str) -> None:
@@ -73,18 +77,27 @@ class Client:
     async def send(self, msg: dict) -> None:
         self.emit(log.message("to_agent", msg))
         assert self.proc and self.proc.stdin
-        with suppress(BrokenPipeError, ConnectionResetError):
+        try:
             self.proc.stdin.write(wire.encode(msg))
             await self.proc.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError):
+            self._eof()  # nothing reads what we write any more, so nothing will answer
 
-    async def request(self, method: str, params: dict) -> dict:
+    async def request(self, method: str, params: dict, *, timeout: float | None = None) -> dict:
+        """The `result` of a request; `timeout` (None: wait for the turn) bounds the wait, and
+        a late answer is then dropped (`_dispatch`)."""
         if self.gone:  # never register a future nobody can resolve
             raise AgentGone()
         self._ids += 1
+        id_ = self._ids
         fut = asyncio.get_running_loop().create_future()
-        self._pending[self._ids] = fut
-        await self.send({"jsonrpc": "2.0", "id": self._ids, "method": method, "params": params})
-        return await fut
+        self._pending[id_] = fut
+        await self.send({"jsonrpc": "2.0", "id": id_, "method": method, "params": params})
+        try:
+            return await asyncio.wait_for(fut, timeout)
+        except TimeoutError:
+            self._pending.pop(id_, None)
+            raise Fail(f"the agent did not answer {method} within {timeout:g}s") from None
 
     async def notify(self, method: str, params: dict) -> None:
         await self.send({"jsonrpc": "2.0", "method": method, "params": params})
@@ -124,30 +137,50 @@ class Client:
                 await self._dispatch(value)
 
     async def _stderr(self) -> None:
+        """Drain the agent's stderr to the log for as long as it writes: a reader that stops
+        lets the pipe fill (64 KB), and the agent then blocks on its next write."""
         assert self.proc and self.proc.stderr
-        while raw := await self.proc.stderr.readline():
+        while True:
+            try:
+                raw = await self.proc.stderr.readline()
+            except ValueError:  # a line past the limit; its tail arrives as the next "line"
+                self.emit(log.event("line_too_long", stream="stderr", limit=self.spec.line_limit))
+                continue
+            if not raw:
+                return
             self.emit(log.event("stderr", text=raw.decode("utf-8", "replace").rstrip("\r\n")))
 
     async def _dispatch(self, msg: dict) -> None:
         method, id_ = msg.get("method"), msg.get("id")
-        if method is None and id_ in self._pending:
-            fut = self._pending.pop(id_)
+        hashable = id_ is None or isinstance(id_, (str, int, float))
+        if method is None:
+            fut = self._pending.pop(id_, None) if hashable else None
+            if fut is None or fut.done():  # unknown, or its waiter gave up (a cancel timeout)
+                return
             if "error" in msg:
-                fut.set_exception(RpcError(msg["error"] or {}))
+                fut.set_exception(RpcError(msg["error"] if isinstance(msg["error"], dict) else {}))
             else:
-                fut.set_result(msg.get("result") or {})
-        elif method is not None and id_ is not None:
-            await self._answer(msg)
+                result = msg.get("result")
+                fut.set_result(result if isinstance(result, dict) else {})
+        elif id_ is not None:
+            if not hashable or not isinstance(method, str):
+                await self.send(wire.error(None, wire.INVALID_REQUEST, "invalid request"))
+            else:
+                await self._answer(msg)
         # a notification (`session/update`, `$/cancel_request`) is only logged
 
     async def _answer(self, req: dict) -> None:
-        if req["method"] == "session/request_permission":
-            params = req.get("params") or {}
+        params = req.get("params")
+        if params is not None and not isinstance(params, dict):
+            await self.send(wire.error(req["id"], wire.INVALID_REQUEST, "params must be an object"))
+        elif req["method"] == "session/request_permission":
+            params = params or {}
             option = wire.select_option(params.get("options") or [])
             outcome = (
                 {"outcome": "selected", "optionId": option} if option else {"outcome": "cancelled"}
             )
-            call = params.get("toolCall") or {}
+            call = params.get("toolCall")
+            call = call if isinstance(call, dict) else {}
             self.emit(
                 log.event(
                     "ask",
@@ -171,7 +204,9 @@ class Client:
             ver = "0"
         spec = self.spec
         try:
-            init = await self.request("initialize", wire.initialize_params(ver))
+            init = await self.request(
+                "initialize", wire.initialize_params(ver), timeout=spec.handshake_timeout_s
+            )
         except RpcError as exc:
             raise Fail(f"the agent refused initialize: {exc}") from exc
         agent_caps = init.get("agentCapabilities") or {}
@@ -195,6 +230,9 @@ class Client:
                 capabilities={**caps, "config_options": [o.get("id") for o in offered]},
             )
         )
+        if self.interrupted.is_set():  # a pause during the handshake: no turn is started
+            self.emit(log.event("interrupted", before="prompt"))
+            return INTERRUPTED_EXIT
         text = spec.prompt if caps["system_prompt"] else f"{spec.context}\n\n{spec.prompt}"
         self.emit(log.event("prompting"))
         prompt = asyncio.ensure_future(
@@ -207,7 +245,7 @@ class Client:
             return await self.cancel(sid, prompt)
         try:
             result = prompt.result()
-        except AgentGone:
+        except AgentGone:  # the group's SIGINT may take the agent first: still a pause
             return await self.agent_exit()
         except RpcError as exc:
             raise Fail(f"the agent refused the prompt: {exc}") from exc
@@ -220,17 +258,22 @@ class Client:
     async def open_session(self, params: dict, caps: dict):
         """`session/new`, or on a resume `session/resume`, else `session/load`."""
         spec = self.spec
+        limit = spec.handshake_timeout_s
         try:
             if not spec.resume:
-                res = await self.request("session/new", params)
+                res = await self.request("session/new", params, timeout=limit)
                 return res["sessionId"], None, list(res.get("configOptions") or [])
             if caps["resume"]:
-                res = await self.request("session/resume", {"sessionId": spec.resume, **params})
+                res = await self.request(
+                    "session/resume", {"sessionId": spec.resume, **params}, timeout=limit
+                )
                 return spec.resume, "resume", list(res.get("configOptions") or [])
             if caps["load_session"]:
                 self.replay = True  # history replayed before the answer is marked in the log
                 try:
-                    res = await self.request("session/load", {"sessionId": spec.resume, **params})
+                    res = await self.request(
+                        "session/load", {"sessionId": spec.resume, **params}, timeout=limit
+                    )
                 finally:
                     self.replay = False
                 return spec.resume, "load", list(res.get("configOptions") or [])
@@ -254,6 +297,7 @@ class Client:
                 res = await self.request(
                     "session/set_config_option",
                     {"sessionId": sid, "configId": cid, "value": value},
+                    timeout=self.spec.handshake_timeout_s,
                 )
             except RpcError as exc:
                 raise Fail(
@@ -274,11 +318,11 @@ class Client:
             result = await asyncio.wait_for(prompt, self.spec.cancel_wait_s)
         except TimeoutError:
             self.emit(log.event("cancel_timeout", waited_s=self.spec.cancel_wait_s))
-            return 130
+            return INTERRUPTED_EXIT
         except (AgentGone, RpcError):
-            return 130
+            return INTERRUPTED_EXIT
         self.emit(log.event("stop", stop_reason=result.get("stopReason")))
-        return 130
+        return INTERRUPTED_EXIT
 
     async def agent_exit(self) -> int:
         assert self.proc
@@ -288,6 +332,12 @@ class Client:
             with suppress(ProcessLookupError):
                 self.proc.terminate()
         rc = _code(await self.proc.wait())
+        # Whatever the agent exits with, a signal sent to Kraft's group is why: SIGTERM is a stop,
+        # SIGINT a pause, and a pause is never a failed result.
+        if self.terminated:
+            return TERMINATED_EXIT
+        if self.interrupted.is_set():
+            return INTERRUPTED_EXIT
         if rc == 0:
             raise Fail("the agent exited before answering the prompt")
         self.emit(log.event("error", message=f"the agent exited with code {rc} mid-turn"))
@@ -329,6 +379,8 @@ class Client:
 
     async def run(self) -> int:
         self.emit(log.event("starting", agent=self.spec.agent_argv))
+        if not self.spec.agent_argv:
+            return self.fail("the launch names no agent command", config=True)
         try:
             self.proc = await asyncio.create_subprocess_exec(
                 *self.spec.agent_argv,
@@ -358,12 +410,15 @@ class Client:
             code = self.fail(f"the client failed: {exc!r}")
         finally:
             await self.end()
-            for pump in pumps:
+            # The agent is gone: what it wrote last (a crash's traceback) may still be buffered.
+            _, rest = await asyncio.wait(pumps, timeout=PUMP_DRAIN_S)
+            for pump in rest:
                 pump.cancel()
         return code
 
     def on_term(self) -> None:
         """SIGTERM is forwarded; the conversation then sees the agent go and exits with its code."""
+        self.terminated = True
         if self.proc is not None and self.proc.returncode is None:
             with suppress(ProcessLookupError):
                 self.proc.terminate()

@@ -1094,6 +1094,7 @@ async def _run_task(
             takes_checkout=takes_checkout,
             tips=tips,
             runner=claim.machine if claim is not None else None,
+            acp=reader == "acp",
         )
     )
     store.replay_claimed()  # a queued replay holds its session (`start_queue`)

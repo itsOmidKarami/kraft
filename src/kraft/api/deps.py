@@ -38,6 +38,7 @@ from kraft.addons import load as addons_load
 from kraft.config import RepoEntry
 from kraft.policy import (
     DEFAULT_OUTPUTS_MAX_BYTES,
+    NO_BUDGET,
     InstancePolicy,
     InstancePolicyInput,
     Policy,
@@ -1364,6 +1365,7 @@ def launch(st, repo: str) -> executor.LaunchContext:
         getattr(st, "policy", None), "outputs_max_bytes", DEFAULT_OUTPUTS_MAX_BYTES
     )
     max_slices = globals()["max_slices"](st)
+    instance_budget = getattr(getattr(st, "policy", None), "budget", NO_BUDGET)
     try:
         repos = config_mod.load_repos(repos_path(st))
     except config_mod.ConfigError as exc:
@@ -1380,6 +1382,7 @@ def launch(st, repo: str) -> executor.LaunchContext:
             outputs_max_bytes=outputs_max_bytes,
             max_slices=max_slices,
             slice_room=functools.partial(storage.room_for, st),
+            budget=instance_budget,
         )
     entry = _connected(repos, repo)
     repo_id = entry.id if entry is not None else None
@@ -1394,4 +1397,5 @@ def launch(st, repo: str) -> executor.LaunchContext:
         outputs_max_bytes=outputs_max_bytes,
         max_slices=max_slices,
         slice_room=functools.partial(storage.room_for, st),
+        budget=instance_budget,
     )

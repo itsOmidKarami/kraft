@@ -715,6 +715,7 @@ async def dispatch(
             files=files,
             time_cap=time_cap,
             takes_checkout=True,
+            budget=launch.budget,
             # The head it starts over when the item stands on its final gate:
             # a person's approval that stops it pins only a head it did not
             # move (`reviewed_head.moved_under`).

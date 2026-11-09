@@ -28,7 +28,7 @@ def message(direction: str, msg: dict, *, replay: bool = False) -> str:
 
 def event(name: str, **fields) -> str:
     """A client event: `starting`, `session`, `prompting`, `ask`, `stop`, `config_error`,
-    `error`, `stderr`, `line_too_long`, `cancel_timeout`."""
+    `error`, `stderr`, `line_too_long`, `cancel_timeout`, `interrupted`."""
     return _line("client", event=name, **fields)
 
 

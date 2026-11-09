@@ -1397,7 +1397,8 @@ def _sessions_out(
 
     return [
         {
-            **{k: s[k] for k in s.keys()},
+            # `acp` is the caps' own bookkeeping (`worker_sessions.acp`), not part of the answer
+            **{k: s[k] for k in s.keys() if k != "acp"},
             "skipped": cut_short(s),
             "runner_unreachable_since": (
                 unreachable(s["runner"]) if s["runner"] and s["status"] in _ON_A_MACHINE else None

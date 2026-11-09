@@ -11,13 +11,13 @@ def _turn(id_=3, **usage_fields):
     )
 
 
-def _update(**fields):
+def _update(sid="s", **fields):
     return log.message(
         "from_agent",
         {
             "jsonrpc": "2.0",
             "method": "session/update",
-            "params": {"sessionId": "s", "update": {"sessionUpdate": "usage_update", **fields}},
+            "params": {"sessionId": sid, "update": {"sessionUpdate": "usage_update", **fields}},
         },
     )
 
@@ -83,6 +83,31 @@ def test_turns_of_two_launches_in_one_log_both_count_though_their_ids_repeat(tmp
     assert (u.tokens_in, u.tokens_out) == (20, 16)
 
 
+def _usd(amount):
+    return {"amount": amount, "currency": "USD"}
+
+
+@pytest.mark.parametrize(
+    ("lines", "cost"),
+    [
+        (
+            [log.event("starting"), _update("a", cost=_usd(0.01)), log.event("starting")]
+            + [_update("a", cost=_usd(0.03))],
+            0.03,
+        ),
+        (
+            [log.event("starting"), _update("a", cost=_usd(0.01)), log.event("starting")]
+            + [_update("b", cost=_usd(0.03))],
+            0.04,
+        ),
+    ],
+    ids=["a-resumed-session-is-cumulative", "a-fresh-session-on-a-second-launch-adds"],
+)
+def test_the_cost_of_two_launches_in_one_log_is_summed_per_agent_session(tmp_path, lines, cost):
+    u = usage.from_envelope(READER.envelope(_write(tmp_path, *lines, _turn(**FULL))))
+    assert u.cost_usd == pytest.approx(cost)
+
+
 @pytest.mark.parametrize(
     "lines",
     [
@@ -94,6 +119,22 @@ def test_turns_of_two_launches_in_one_log_both_count_though_their_ids_repeat(tmp
 def test_a_cancelled_turn_with_a_cost_and_no_prompt_usage_keeps_its_cost(tmp_path, lines):
     u = usage.from_envelope(READER.envelope(_write(tmp_path, *lines)))
     assert (u.cost_usd, u.total) == (0.04, 0)
+
+
+@pytest.mark.parametrize(
+    "envelope",
+    [
+        {"total_cost_usd": 0.5, "usage": {"input_tokens": 0}},
+        {"cost_usd": 0.5, "usage": {}},
+        {"total_cost_usd": 0.5, "usage": {}, "modelUsage": {}},
+    ],
+    ids=["cli-result-line", "result-file", "cli-interrupted-envelope"],
+)
+def test_a_known_cost_beside_no_tokens_is_no_invocation_unless_it_is_an_acp_logs(envelope):
+    """Only the ACP log's own envelope keeps a cost that has no tokens (a cancelled turn): a CLI
+    result line or a result file that reports a cost and nothing else is still no usage."""
+    assert usage.from_envelope(envelope) is None
+    assert usage.from_envelope({**envelope, usage.ACP_ENVELOPE: True}).cost_usd == 0.5
 
 
 def test_context_size_is_never_counted_as_tokens_or_cost(tmp_path):

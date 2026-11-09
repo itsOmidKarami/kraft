@@ -538,6 +538,7 @@ async def review(
             time_cap=time_cap,
             harness_id=auto_review.task.harness,
             takes_checkout=True,
+            budget=launch.budget,
             tips=tips,
             on_session=start,
             after_checkout=after_checkout if copy else None,

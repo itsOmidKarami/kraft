@@ -282,6 +282,9 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         drop_lines = (*drop_lines, "slice", "parent_id", "docs_commit", "pinned_head")
         drop_lines = (*drop_lines, "group_state", "paused_by_parent", "while a child")
         skip_stmts = (*skip_stmts, "idx_work_items_slice")
+    if version < 61:
+        drop_lines = (*drop_lines, "-- 1 for a session that ran on an ACP", "-- caps read it")
+        drop_lines = (*drop_lines, "acp            INTEGER")
     if version < 56:
         old = "                    'waiting', 'conflict', 'infra', 'infra_stop')),"
         replace = (*replace, ("'infra_stop', 'merge_rejected')),", old))

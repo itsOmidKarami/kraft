@@ -226,7 +226,7 @@ def test_a_named_credential_is_launched_as_its_harness_declares_it(
         command="claude",
         run_dirs=RunDirs(base=tmp_path),
         sandbox=sandbox,
-        db=SimpleNamespace(read=lambda fn: {"id": "w1", "branch": None}),
+        db=SimpleNamespace(read=lambda fn: {"id": "w1", "branch": None, "budget_set": 0}),
     )
     (credential,) = harness.manage(harness.sandbox_credentials(sandbox), seen["declared"])
     assert credential.sentinel == (

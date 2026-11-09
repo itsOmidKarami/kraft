@@ -28,4 +28,8 @@ class LaunchSpec(BaseModel):
     cancel_wait_s: float = 1.5
     #: How long the client waits, after closing the agent's stdin, for it to exit.
     grace_s: float = 3.0
+    #: How long the client waits for the answer to each request before the turn: `initialize`,
+    #: `session/new|resume|load` and `session/set_config_option`. The turn itself is not bounded
+    #: here (Kraft's idle timeout is its bound).
+    handshake_timeout_s: float = 120.0
     line_limit: int = LINE_LIMIT

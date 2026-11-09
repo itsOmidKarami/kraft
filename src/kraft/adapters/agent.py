@@ -1164,7 +1164,7 @@ async def _run_agent_task(
     repo_entry: RepoEntry | None = None,
     time_cap=None,
     #: The instance's dollar caps, which an ACP launch is refused under when its entry cannot
-    #: be counted against them; only the walk (`dispatch_node`) passes them.
+    #: be counted against them (the item's own cap is folded in here, whoever called).
     budget: _policy.Budget = _policy.NO_BUDGET,
     #: The session's files, else its own folder's (`item_paths.session_files`):
     #: an escalation turn's result and summary are its thread's (Kraft-s7c04.54).
@@ -1244,6 +1244,10 @@ async def _run_agent_task(
     item_row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )
+    if item_row is not None:
+        # Resolved here, not by the caller: an escalation turn, a gate review and a review reply
+        # have no walk's `budget`, and the item's own dollar cap binds all of them.
+        budget = store.effective_budget(item_row, budget)
     if h.kind == "acp" and (
         why := _acp.cap_refusal(
             h, _spend_caps(db, item_row, _scope_path(hook_point, node_id), budget), model

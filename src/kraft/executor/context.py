@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from kraft.caps import TIME_CAPPED
-from kraft.policy import DEFAULT_OUTPUTS_MAX_BYTES
+from kraft.policy import DEFAULT_OUTPUTS_MAX_BYTES, NO_BUDGET, Budget
 from kraft.vocab import ADVANCING
 
 if TYPE_CHECKING:
@@ -232,6 +232,10 @@ class LaunchContext:
     #: total (`kraft.outputs`). Recorded with the session, so a capture after a
     #: restart uses the number the session launched under.
     outputs_max_bytes: int = DEFAULT_OUTPUTS_MAX_BYTES
+    #: The instance's dollar caps (`policy.budget`), for the launches that are not the walk's:
+    #: an escalation turn, a gate review, a review reply. An ACP launch is refused under a cap
+    #: its entry cannot be counted against (`agent._run_agent_task`).
+    budget: Budget = NO_BUDGET
 
 
 class Steer:

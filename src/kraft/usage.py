@@ -297,9 +297,7 @@ def from_envelope(envelope: object) -> Usage | None:
         # An ACP cancelled turn can leave a cost and no prompt usage: the cost is still
         # known. Not for a CLI result line that reports nothing (its `usage` is zeroed and
         # its `modelUsage` empty, cost 0): that is no invocation (see `_combine`).
-        if not (
-            cost_known and isinstance(envelope.get("usage"), dict) and "modelUsage" not in envelope
-        ):
+        if not (cost_known and envelope.get(ACP_ENVELOPE) is True):
             return None
         return Usage(cost_usd=float(cost), model=_model_of(envelope))
     if cost_known:
@@ -1147,7 +1145,10 @@ def _rate_limit_antigravity(log_path: Path) -> RateLimitInfo | None:
 
 
 _ACP_MODEL = "\x00model"
-_ACP_COST = "\x00cost"
+#: `seen` keys `cost:<session id>`: the last `usage_update` cost of each agent session in the log.
+_ACP_COST = "cost:"
+#: Marks the envelope `_envelope_acp` builds, so `from_envelope` can tell it from a CLI's.
+ACP_ENVELOPE = "kraft_acp_envelope"
 _ACP_LAUNCH = "\x00launch"  # tokens_in counts the `starting` records seen: the launch ordinal
 
 
@@ -1168,8 +1169,10 @@ def _acp_turn(block: dict) -> Usage:
 
 def _stream_acp(lines: Iterable[str], seen: dict[str, Usage]) -> Usage | None:
     """An ACP session log (`kraft.acp.log`): each prompt response's usage block, summed over
-    every launch the log holds, and the last `usage_update` cost (cumulative for the
-    session). History replayed by `session/load` is never counted, nor is `update.used`
+    every launch the log holds, and the last `usage_update` cost of each agent session
+    (cumulative for that session, so a resume of the same session id is not counted twice, and a
+    launch that opened a fresh session adds its own). History replayed by `session/load` is never
+    counted, nor is `update.used`
     (context size, not spend)."""
     for rec in _acp_log.records(lines):
         if rec.get("replay"):
@@ -1204,13 +1207,18 @@ def _stream_acp(lines: Iterable[str], seen: dict[str, Usage]) -> Usage | None:
                 and isinstance(cost.get("amount"), int | float)
                 and not isinstance(cost.get("amount"), bool)
             ):
-                seen[_ACP_COST] = Usage(cost_usd=float(cost["amount"]))
+                seen[f"{_ACP_COST}{(msg.get('params') or {}).get('sessionId')}"] = Usage(
+                    cost_usd=float(cost["amount"])
+                )
     turns = [u for k, u in seen.items() if k.startswith("turn:")]
-    cost, model = seen.get(_ACP_COST), seen.get(_ACP_MODEL)
-    if not turns and cost is None:
+    costs = [u.cost_usd for k, u in seen.items() if k.startswith(_ACP_COST)]
+    model = seen.get(_ACP_MODEL)
+    if not turns and not costs:
         return None
     return replace(
-        _sum(turns), cost_usd=cost.cost_usd if cost else None, model=model.model if model else None
+        _sum(turns),
+        cost_usd=sum(c for c in costs if c is not None) if costs else None,
+        model=model.model if model else None,
     )
 
 
@@ -1221,7 +1229,11 @@ def _envelope_acp(log_path: Path) -> dict | None:
         return None
     if u is None:
         return None
-    envelope: dict = {"usage": {k: getattr(u, k) for k in KINDS}, "model": u.model}
+    envelope: dict = {
+        ACP_ENVELOPE: True,
+        "usage": {k: getattr(u, k) for k in KINDS},
+        "model": u.model,
+    }
     if u.cost_usd is not None:
         envelope["total_cost_usd"] = u.cost_usd
     return envelope

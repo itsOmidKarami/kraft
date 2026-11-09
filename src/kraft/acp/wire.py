@@ -11,6 +11,7 @@ from kraft.acp.spec import LINE_LIMIT as LINE_LIMIT
 
 PROTOCOL_VERSION = 1
 METHOD_NOT_FOUND = -32601
+INVALID_REQUEST = -32600
 
 
 def encode(msg: dict) -> bytes:

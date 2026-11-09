@@ -210,6 +210,7 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
             time_cap=time_cap,
             harness_id=task.task.harness,
             takes_checkout=True,
+            budget=launch.budget,
             tips=tips,
             after_checkout=after_checkout if copy else None,
             in_copy=copy is not None,
