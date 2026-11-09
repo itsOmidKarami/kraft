@@ -1,5 +1,5 @@
 import { until } from "../../format";
-import type { ChainNode, ItemAction, SliceSummary, TaskProgress, WorkItem } from "../../types";
+import type { ChainNode, ItemAction, SliceChild, SliceSummary, TaskProgress, WorkItem } from "../../types";
 import type { GlyphKind, GlyphState } from "../graph/types";
 import { within } from "../item/cursor";
 import { admits } from "../item/status";
@@ -50,6 +50,17 @@ export function slicesLine(i: Pick<WorkItem, "slices">): string {
   const parts = SLICE_PARTS.filter(([k]) => s[k] > 0).map(([k, w]) => `${s[k]} ${w}`);
   return `slices: ${parts.join(", ") || `${s.total} in all`}`;
 }
+
+/** A slice's own name under its parent: Kraft files it `<parent> · slice N: <name>`, and the parent's row already says the rest. */
+export const sliceName = (title: string) => / · slice \d+: (.+)$/s.exec(title)?.[1] ?? title;
+
+/** The slices a parent's board row lists: only those that need a person. A slice has no row of its own, so this
+ *  is the board's one way to it; the summary line counts the rest, and the item page shows the whole family. */
+export const slicesNeedingYou = (i: Pick<WorkItem, "children">) => (i.children ?? []).filter((c) => groupOf(c as Pick<WorkItem, "display_status" | "current_node_id">) === "needs"); // a child's display_status is typed a plain string; groupOf files one it does not know as running
+
+/** A slice's state under its parent, with the node it stands at. */
+export const sliceState = (c: Pick<SliceChild, "display_status" | "current_node_id">) =>
+  `${c.display_status.replace(/_/g, " ")}${c.current_node_id ? ` · ${nodeWords(c.current_node_id)}` : ""}`;
 
 /** The note a group's accessible name carries: `2 of 3 slices done`. */
 export const slicesDone = (s: SliceSummary | null | undefined): string => (s && s.total ? `${s.done} of ${s.total} slices done` : "");
