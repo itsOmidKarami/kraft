@@ -20,11 +20,9 @@ _STORED = frozenset(s.value for s in WorkItemStatus)
 
 #: What a status filter takes: every stored status, then the words only the
 #: displayed status has. Not `archived`: the board leaves archived items off.
-STATUS_FILTERS = tuple(
-    dict.fromkeys(
-        [*(s.value for s in WorkItemStatus)]
-        + [d.value for d in DisplayStatus if d is not DisplayStatus.ARCHIVED]
-    )
+STATUS_FILTERS = (
+    *(s.value for s in WorkItemStatus),
+    *(d.value for d in DisplayStatus if d.value not in _STORED and d is not DisplayStatus.ARCHIVED),
 )
 
 

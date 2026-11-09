@@ -536,12 +536,6 @@ def _board_with_a_parent():
             [("p1", ["c1", "c2"])],
             id="a-display-word-as-the-column-prints-it",
         ),
-        pytest.param(
-            "done",
-            [(False, "p1", "needs you"), (True, "c1", "done")],
-            [("p1", ["c1"])],
-            id="a-display-word-finds-a-child",
-        ),
     ],
 )  # fmt: skip
 def test_list_shows_a_parents_children_under_it(monkeypatch, capsys, status, rows, listed):

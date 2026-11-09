@@ -574,7 +574,7 @@ def _add_view(subs, common: argparse.ArgumentParser) -> None:
         metavar="STATUS",
         help="filter by stored status, as --json's status field has it, or by a word only "
         "the STATUS column shows, such as failed or 'needs you'. A word both have, like "
-        "waiting, means the stored status: %(choices)s",
+        "waiting, means the stored status. Choices: %(choices)s",
     )
     listing.add_argument("--repo", help="only this repo (default: the repo you are standing in)")
     listing.add_argument("--all", action="store_true", help="every repo, ignoring the cwd")
