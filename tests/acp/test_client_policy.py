@@ -2,12 +2,19 @@
 (`kraft.acp.client`'s permission half, with the fake agent and a fake gate)."""
 
 import json
+import signal
+import subprocess
 
 import pytest
+from pydantic import ValidationError
+from support.acp import client_argv, client_env, fake_gate, recorded, run_inprocess, spec
 from support.acp import events as _events
-from support.acp import fake_gate, recorded, run_inprocess
 
-TOOLS = {"read": ["Read"], "shell": ["Bash"], "execute": ["Bash"]}
+from kraft.acp import log
+from kraft.acp.client import Client
+from kraft.acp.spec import LaunchSpec
+
+TOOLS = {"read": ["Read"], "write": ["Write"], "shell": ["Bash"], "execute": ["Bash"]}
 
 
 def _answers(tmp_path):
@@ -86,10 +93,79 @@ def test_without_a_tool_policy_an_ask_is_allowed_locally_and_never_reaches_the_g
     assert _answers(tmp_path)[0]["result"]["outcome"]["optionId"] == "once"
 
 
-def test_a_rejection_that_ends_the_agents_turn_is_a_clean_exit_with_its_stop_reason_logged(
+def _prompts(tmp_path):
+    return [m["params"] for m in recorded(tmp_path) if m.get("method") == "session/prompt"]
+
+
+def _text(prompt):
+    return prompt["prompt"][0]["text"]
+
+
+def test_a_rejection_that_ends_the_turn_is_continued_on_the_same_session_until_done(
     tmp_path, monkeypatch
 ):
+    # OpenCode ends the turn `cancelled` after a rejected ask (spec §10); the task is not over.
     code, recs = run_inprocess(
+        tmp_path,
+        monkeypatch,
+        "ask_all,end_on_reject",
+        ask=fake_gate({"Write": "deny", "Bash": "deny"}, message="not in this task's allowlist"),
+        calls=[
+            {"id": "c1", "name": "write", "kind": "edit"},
+            {"id": "c2", "name": "shell", "kind": "execute"},
+        ],
+        policy=True,
+        tool_names=TOOLS,
+    )
+    assert code == 0
+    assert [e["stop_reason"] for e in _events(recs, "stop")] == [
+        "cancelled",
+        "cancelled",
+        "end_turn",
+    ]
+    assert [a["kraft_tool"] for a in _events(recs, "ask")] == [["Write"], ["Bash"]]
+    first, second, third = _prompts(tmp_path)
+    assert first["sessionId"] == second["sessionId"] == third["sessionId"]
+    assert "Write" in _text(second) and "not in this task's allowlist" in _text(second)
+    assert "not available in this task" in _text(second) and "Bash" not in _text(second)
+    assert "Bash" in _text(third) and "Write" not in _text(third)
+    assert json.loads((tmp_path / "result.json").read_text()) == {"status": "done"}
+    assert not _events(recs, "policy_violation") and not _events(recs, "rejection_limit")
+
+
+def test_continuations_are_capped_and_the_stop_names_the_tool_and_the_limit(tmp_path, monkeypatch):
+    calls = [{"id": f"c{n}", "name": "shell", "kind": "execute"} for n in (1, 2, 3)]
+    code, recs = run_inprocess(
+        tmp_path,
+        monkeypatch,
+        "ask_all,end_on_reject",
+        ask=fake_gate({"Bash": "deny"}),
+        calls=calls,
+        policy=True,
+        tool_names=TOOLS,
+        deny_tools=["Bash"],
+        max_continuations=1,
+    )
+    message = "the agent ended its turn after Kraft rejected Bash (deny_tools) 2 times"
+    assert code == 77 and len(_prompts(tmp_path)) == 2
+    assert _events(recs, "rejection_limit")[0]["message"] == message
+    assert json.loads((tmp_path / "result.json").read_text()) == {
+        "status": "failed",
+        "error": message,
+    }
+    text = "".join(json.dumps(r) + "\n" for r in recs).replace('"kraft_acp": 1', '"kraft_acp":1')
+    assert log.cause(text) == message
+
+
+def test_a_pause_that_lands_as_a_rejected_turn_ends_is_not_continued_past(tmp_path, monkeypatch):
+    settle = Client.settle
+
+    async def settle_then_pause(self):
+        await settle(self)
+        self.interrupted.set()
+
+    monkeypatch.setattr(Client, "settle", settle_then_pause)
+    code, _ = run_inprocess(
         tmp_path,
         monkeypatch,
         "ask_all,end_on_reject",
@@ -98,7 +174,29 @@ def test_a_rejection_that_ends_the_agents_turn_is_a_clean_exit_with_its_stop_rea
         policy=True,
         tool_names=TOOLS,
     )
-    assert code == 0 and _events(recs, "stop")[0]["stop_reason"] == "cancelled"
+    assert code == 130 and len(_prompts(tmp_path)) == 1
+
+
+def test_a_pause_during_a_continuation_still_ends_130(tmp_path):
+    # No gate in a bare subprocess: every ask is rejected (fail-closed), which ends the turn.
+    env = client_env(
+        tmp_path,
+        "ask_all,end_on_reject,slow_continue",
+        KRAFT_FAKE_ACP_CALLS=json.dumps([{"id": "c1", "name": "shell", "kind": "execute"}]),
+    )
+    proc = subprocess.Popen(
+        client_argv(spec(tmp_path, policy=True, tool_names=TOOLS)),
+        stdout=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+    )
+    for line in proc.stdout:  # the second prompt is out: the continuation is under way
+        if (rec := next(log.records([line]), None)) and rec.get("event") == "continuing":
+            break
+    proc.send_signal(signal.SIGINT)
+    proc.communicate(timeout=30)
+    assert proc.returncode == 130 and len(_prompts(tmp_path)) == 2
 
 
 async def _gate_down(*a, **kw):
@@ -278,6 +376,7 @@ def test_a_withdrawn_ask_is_answered_cancelled_while_the_gate_is_still_thinking(
         calls=[{"id": "c1", "name": "read", "kind": "read", "withdraw": True}],
         policy=True,
         tool_names=TOOLS,
+        timeout=20,  # a regression waits on the gate for good: fail fast, not after minutes
     )
     assert code == 0
     assert _answers(tmp_path)[0]["result"]["outcome"] == {"outcome": "cancelled"}
@@ -350,6 +449,20 @@ def _violation(recs):
             {},
             True,
         ),
+        (
+            [{"id": "c1", "name": "shell", "kind": "execute", "ask": False, "end": "failed"}],
+            {"Bash": "deny"},
+            {},
+            True,
+        ),
+        (
+            [{"id": "c1", "name": "shell", "kind": "execute", "ask": False, "end": "failed"}],
+            {},
+            {},
+            False,
+        ),
+        ([{"id": "c1", "kind": "read", "late_name": "shell"}], {"Bash": "deny"}, {}, True),
+        ([{"id": "c1", "kind": "read", "late_name": "read"}], {"Bash": "deny"}, {}, False),
     ],
     ids=[
         "unasked-and-denied",
@@ -361,6 +474,10 @@ def _violation(recs):
         "asked-rejected-and-failed",
         "withdrawn-ask-that-stays-unrun",
         "withdrawn-ask-that-runs-anyway",
+        "unasked-and-failed-after-running",
+        "unasked-failed-but-allowed",
+        "a-late-name-makes-an-allowed-call-another-tool",
+        "a-late-name-that-is-the-same-tool",
     ],
 )
 def test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow(
@@ -385,7 +502,12 @@ def test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_al
         assert json.loads((tmp_path / "result.json").read_text()) == {"status": "done"}
 
 
-def test_a_violation_with_no_result_file_writes_a_failed_one_naming_it(tmp_path, monkeypatch):
+@pytest.mark.parametrize("precreated", [False, True], ids=["absent", "pre-created-empty"])
+def test_a_violation_with_no_result_writes_a_failed_one_naming_it(
+    tmp_path, monkeypatch, precreated
+):
+    if precreated:  # Kraft creates the session's empty result file before the agent starts
+        (tmp_path / "result.json").write_text("")
     code, _ = run_inprocess(
         tmp_path,
         monkeypatch,
@@ -410,3 +532,51 @@ def test_a_launch_without_a_policy_has_no_backstop(tmp_path, monkeypatch):
         tool_names=TOOLS,
     )
     assert code == 0 and not _violation(recs)
+
+
+def test_a_violation_that_meets_a_pause_keeps_the_pauses_code_and_is_still_logged(
+    tmp_path, monkeypatch
+):
+    violate = Client.violate
+
+    def violate_and_pause(self, message):
+        violate(self, message)
+        self.interrupted.set()
+
+    monkeypatch.setattr(Client, "violate", violate_and_pause)
+    code, recs = run_inprocess(
+        tmp_path,
+        monkeypatch,
+        "ask_all,slow",  # the turn is still running when both arrive
+        ask=fake_gate({"Bash": "deny"}),
+        calls=[{"id": "c1", "name": "shell", "kind": "execute", "ask": False}],
+        policy=True,
+        tool_names=TOOLS,
+    )
+    assert code == 130
+    assert "Bash ran without asking" in _violation(recs)[0]["message"]
+
+
+def test_a_backstop_that_raises_is_a_violation_not_silence(tmp_path, monkeypatch):
+    async def broken(self, cid):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(Client, "backstop", broken)
+    code, recs = run_inprocess(
+        tmp_path,
+        monkeypatch,
+        "ask_all",
+        ask=fake_gate(),
+        calls=[{"id": "c1", "name": "read", "kind": "read", "ask": False}],
+        policy=True,
+        tool_names=TOOLS,
+    )
+    assert code == 77 and "backstop failed: RuntimeError('boom')" in _violation(recs)[0]["message"]
+
+
+@pytest.mark.parametrize(
+    "field", [{"heartbeat_s": 0}, {"max_continuations": -1}], ids=["heartbeat-zero", "negative-cap"]
+)
+def test_a_launch_spec_refuses_a_busy_loop_or_a_negative_cap(field):
+    with pytest.raises(ValidationError):
+        LaunchSpec(agent_argv=["a"], cwd="/", prompt="p", context="c", result_path="/r", **field)

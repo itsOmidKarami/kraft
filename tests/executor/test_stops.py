@@ -312,11 +312,22 @@ def _acp_text(*events: str) -> str:
             _acp_text(acp_log.event("policy_violation", message="Bash ran without asking")),
             "check in node verify stopped: tool policy violated: Bash ran without asking",
         ),
+        (
+            _acp_text(
+                acp_log.event(
+                    "rejection_limit",
+                    message=acp_log.REJECTION_PREFIX + "Bash (deny_tools) 4 times",
+                )
+            ),
+            "check in node verify stopped: the agent ended its turn after Kraft rejected Bash "
+            "(deny_tools) 4 times",
+        ),
         (_acp_text(), "could not start check in node verify: see the session log"),
     ],
     ids=[
         "acp-config-error-not-the-starting-line",
         "acp-policy-violation-says-so",
+        "acp-rejection-limit-says-so",
         "acp-log-with-no-cause",
     ],
 )

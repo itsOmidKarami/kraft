@@ -8,11 +8,14 @@ of flags (see `tests/acp/test_client.py` and `tests/support/acp.py`):
   ask fs stray long replay no_cost no_usage no_resume no_load no_system_prompt slow term die
   refuse_config noresult auth die_after_init hang deaf die_on_int exit_on_int kill noisy late
   slow_init mute badreq die_stderr ask_all only_always end_on_reject mode_option refuse_mode
+  slow_continue
 
 `ask_all`: the agent asks before every scripted tool call (as if `asks_everything` had been
 applied); the same switch is `FAKE_ACP_ASK_ALL=1` in the environment. `only_always`: an ask
 offers only an `allow_always` option. `end_on_reject`: a rejected ask ends the turn `cancelled`
-(OpenCode does).
+(OpenCode does); the calls after it wait, and the next `session/prompt` runs them, so a client
+that continues the conversation sees the task finish. `slow_continue`: from the second prompt on,
+the turn waits for `session/cancel` as `slow` does.
 `mode_option`: the session offers a `mode` config option (`default` makes the agent ask);
 `refuse_mode`: `session/set_mode` fails. `KRAFT_FAKE_ACP_CALLS` is a JSON list of scripted tool
 calls, see `run_calls`.
@@ -49,6 +52,7 @@ MODES = ("auto", "default")  # `default` asks before every call, as OpenCode's d
 
 
 ASKING = {"on": False}
+LEFT: dict = {"calls": None, "prompts": 0}  # calls a rejection kept from running; prompts seen
 
 
 def asking() -> bool:
@@ -133,8 +137,15 @@ def await_many(ids: list) -> dict:
 def settle_call(sid: str, c: dict, resp: dict | None) -> str | None:
     outcome = ((resp or {}).get("result") or {}).get("outcome") or {}
     if outcome.get("optionId") == "once" or c.get("run_anyway"):
+        late = {"name": c["late_name"]} if c.get("late_name") else {}
         update(
-            sid, {"sessionUpdate": "tool_call_update", "toolCallId": c["id"], "status": "completed"}
+            sid,
+            {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": c["id"],
+                "status": "completed",
+                **late,
+            },
         )
     else:
         update(
@@ -154,7 +165,7 @@ def run_calls(sid: str, calls: list) -> str | None:
     ask. `wait: false`: go on without the answer. Returns "cancelled" when a rejection ends the
     turn (flag `end_on_reject`)."""
     waiting = []
-    for c in calls:
+    for i, c in enumerate(calls):
         cid = c["id"]
         view = {
             "toolCallId": cid,
@@ -168,7 +179,12 @@ def run_calls(sid: str, calls: list) -> str | None:
         if not c.get("ask", asking()):
             update(
                 sid,
-                {"sessionUpdate": "tool_call_update", "toolCallId": cid, "status": "completed"},
+                {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": cid,
+                    "status": c.get("end", "completed"),
+                    **({"name": c["late_name"]} if c.get("late_name") else {}),
+                },
             )
             continue
         update(
@@ -211,6 +227,7 @@ def run_calls(sid: str, calls: list) -> str | None:
             )
         if c.get("wait", True):
             if stop := settle_call(sid, c, await_response(f"ask-{cid}")):
+                LEFT["calls"] = calls[i + 1 :]
                 return stop
         else:
             waiting.append(c)
@@ -237,8 +254,13 @@ def prompt(id_, params: dict) -> None:
             "content": {"type": "text", "text": "working on it"},
         },
     )
-    scripted = json.loads(os.environ.get("KRAFT_FAKE_ACP_CALLS") or "[]")
-    if "ask" in FLAGS:
+    LEFT["prompts"] += 1
+    later = LEFT["prompts"] > 1  # a continuation: only what a rejection kept from running is left
+    if later:
+        scripted, LEFT["calls"] = LEFT["calls"] or [], None
+    else:
+        scripted = json.loads(os.environ.get("KRAFT_FAKE_ACP_CALLS") or "[]")
+    if "ask" in FLAGS and not later:
         send(
             {
                 "jsonrpc": "2.0",
@@ -261,7 +283,7 @@ def prompt(id_, params: dict) -> None:
             }
         )
         await_response("ask-1")
-    if "fs" in FLAGS:
+    if "fs" in FLAGS and not later:
         send(
             {
                 "jsonrpc": "2.0",
@@ -272,7 +294,7 @@ def prompt(id_, params: dict) -> None:
         )
         await_response("fs-1")
     ended = run_calls(sid, scripted) if scripted else None
-    if not scripted:
+    if not scripted and not later:
         if asking() and "ask" not in FLAGS:
             # the agent was told to ask: the default call asks and honours the answer
             ended = run_calls(
@@ -332,7 +354,7 @@ def prompt(id_, params: dict) -> None:
     if "kill" in FLAGS:
         os.kill(os.getpid(), signal.SIGKILL)
     stop = ended or "end_turn"
-    if "slow" in FLAGS:
+    if "slow" in FLAGS or ("slow_continue" in FLAGS and later):
         if "die_on_int" in FLAGS:
             signal.signal(signal.SIGINT, lambda *_: os._exit(130))
         elif "exit_on_int" in FLAGS:

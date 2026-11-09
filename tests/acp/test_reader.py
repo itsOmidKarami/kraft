@@ -83,6 +83,21 @@ def test_turns_of_two_launches_in_one_log_both_count_though_their_ids_repeat(tmp
     assert (u.tokens_in, u.tokens_out) == (20, 16)
 
 
+def test_two_turns_of_one_launch_sum_their_tokens_and_count_the_sessions_cost_once(tmp_path):
+    # a rejection that ended the first turn is followed by a second prompt on the same session
+    path = _write(
+        tmp_path,
+        log.event("starting"),
+        _update("s", cost=_usd(0.01)),
+        _turn(id_=3, **FULL),
+        _update("s", cost=_usd(0.03)),
+        _turn(id_=4, **FULL),
+    )
+    u = usage.from_envelope(READER.envelope(path))
+    assert (u.tokens_in, u.tokens_out, u.tokens_cache_read) == (20, 16, 4)
+    assert u.cost_usd == pytest.approx(0.03)
+
+
 def _usd(amount):
     return {"amount": amount, "currency": "USD"}
 

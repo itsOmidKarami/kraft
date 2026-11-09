@@ -567,7 +567,7 @@ async def _stop_for_config_error(
     named = ", ".join(t.task.id for t in failed)
     causes = [c for t in failed if (c := _task_cause(db, work_item_id, node, t))]
     detail = "; ".join(causes) if causes else "see the session log"
-    if causes and all(c.startswith(_acp_log.VIOLATION_PREFIX) for c in causes):
+    if causes and all(c.startswith(_acp_log.RAN_PREFIXES) for c in causes):
         # the session ran: it did not fail to start
         reason = f"{named} in node {node.id} stopped: {detail}"
     else:

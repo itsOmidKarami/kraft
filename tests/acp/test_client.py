@@ -85,7 +85,10 @@ def test_an_agent_that_cannot_start_is_a_config_error_with_a_failed_result_file(
     assert [r["event"] for r in recs if r["dir"] == "client"][0] == "starting"
 
 
-def test_a_login_the_agent_wants_is_a_failed_result_not_a_hang(tmp_path):
+@pytest.mark.parametrize("precreated", [False, True], ids=["absent", "pre-created-empty"])
+def test_a_login_the_agent_wants_is_a_failed_result_not_a_hang(tmp_path, precreated):
+    if precreated:  # Kraft creates the session's empty result file before the agent starts
+        (tmp_path / "result.json").write_text("")
     done, recs = run_client(tmp_path, "auth")
     assert done.returncode == 1
     assert "Authentication required" in json.loads((tmp_path / "result.json").read_text())["error"]

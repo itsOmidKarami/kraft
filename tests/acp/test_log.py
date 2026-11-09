@@ -66,12 +66,20 @@ def test_policy_violation_names_the_first_one(tmp_path):
             [log.event("starting"), log.event("policy_violation", message="Bash ran")],
             "tool policy violated: Bash ran",
         ),
+        (
+            [
+                log.event("starting"),
+                log.event("rejection_limit", message=log.REJECTION_PREFIX + "Bash (deny_tools) 2"),
+            ],
+            "the agent ended its turn after Kraft rejected Bash (deny_tools) 2",
+        ),
         ([log.event("starting"), log.event("stop", stop_reason="end_turn")], ""),
         (["plain text", '{"type": "system"}'], None),
     ],
     ids=[
         "config-error-beats-violation",
         "violation-is-prefixed",
+        "rejection-limit-has-its-own-prefix",
         "acp-log-with-no-cause",
         "not-an-acp-log-is-none",
     ],

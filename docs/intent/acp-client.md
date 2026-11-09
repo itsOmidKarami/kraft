@@ -134,7 +134,7 @@ origin: src/kraft/acp/client.py
 
 ## REQ acp-backstop-ends-a-session-that-ran-what-policy-forbids
 IF a launch holds a tool policy and a tool call completes with no allowing ask on record and the policy does not allow it, THEN the client SHALL cancel the turn, log `policy_violation` and exit 77, and SHALL NOT overwrite a result file the agent wrote.
-enforced-by: tests/acp/test_client_policy.py::test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow[unasked-and-denied], tests/acp/test_client_policy.py::test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow[unasked-and-unnameable-under-an-allowlist], tests/acp/test_client_policy.py::test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow[ran-after-a-rejection], tests/acp/test_client_policy.py::test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow[withdrawn-ask-that-runs-anyway], tests/acp/test_client_policy.py::test_a_violation_with_no_result_file_writes_a_failed_one_naming_it
+enforced-by: tests/acp/test_client_policy.py::test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow[unasked-and-denied], tests/acp/test_client_policy.py::test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow[unasked-and-unnameable-under-an-allowlist], tests/acp/test_client_policy.py::test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow[ran-after-a-rejection], tests/acp/test_client_policy.py::test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow[withdrawn-ask-that-runs-anyway], tests/acp/test_client_policy.py::test_a_violation_with_no_result_writes_a_failed_one_naming_it[absent]
 origin: src/kraft/acp/client.py
 
 ## REQ acp-backstop-ignores-what-ran-with-permission
@@ -165,4 +165,24 @@ origin: src/kraft/acp/client.py
 ## REQ acp-opencode-unasked-call-is-caught
 IF `opencode acp` runs a call it was not asked about under a tool policy, THEN the client SHALL end the session as a policy violation.
 enforced-by: tests/acp/test_client_e2e.py::test_the_backstop_catches_an_opencode_that_does_not_ask
+origin: src/kraft/acp/client.py
+
+## REQ acp-a-rejection-that-ends-the-turn-is-continued
+WHEN the agent ends a turn `cancelled` directly after the client answered `reject_once`, and neither a pause, a stop nor a violation caused it, the client SHALL send another `session/prompt` on the same session that names the rejected tool and the gate's reason and says the tool is not available in this task; it SHALL do so at most `max_continuations` times per launch, and a pause SHALL still end the launch with 130.
+enforced-by: tests/acp/test_client_policy.py::test_a_rejection_that_ends_the_turn_is_continued_on_the_same_session_until_done, tests/acp/test_client_policy.py::test_a_pause_during_a_continuation_still_ends_130, tests/acp/test_client_policy.py::test_a_pause_that_lands_as_a_rejected_turn_ends_is_not_continued_past
+origin: src/kraft/acp/client.py
+
+## REQ acp-continuation-cap-is-a-stop-naming-the-tool-and-limit
+IF the agent ends its turn after a rejection once the continuations are spent, THEN the client SHALL log `rejection_limit` naming the tool, the limit and the count, write a failed result, and exit 77, and the system SHALL resolve the session `config_error` and stop the item with that message, saying the session stopped rather than failed to start.
+enforced-by: tests/acp/test_client_policy.py::test_continuations_are_capped_and_the_stop_names_the_tool_and_the_limit, tests/acp/test_log.py::test_cause_of_an_acp_log[rejection-limit-has-its-own-prefix], tests/adapters/test_agent_acp_status.py::test_a_logged_config_error_is_the_sessions_status[rejection-limit], tests/executor/test_stops.py::test_an_acp_stop_names_its_cause_not_the_clients_first_line[acp-rejection-limit-says-so]
+origin: src/kraft/acp/client.py
+
+## REQ acp-failed-result-replaces-an-empty-file
+WHEN the client writes a failed result and the result file is absent or empty, it SHALL write it; a result file that holds anything is never overwritten.
+enforced-by: tests/acp/test_client_policy.py::test_a_violation_with_no_result_writes_a_failed_one_naming_it[pre-created-empty], tests/acp/test_client.py::test_a_login_the_agent_wants_is_a_failed_result_not_a_hang[pre-created-empty], tests/acp/test_client.py::test_the_agents_own_result_file_is_never_overwritten
+origin: src/kraft/acp/client.py
+
+## REQ acp-backstop-fails-closed-and-keeps-the-record
+The backstop SHALL treat a call that ended `failed` with no ask on record as it treats a completed one, SHALL decide a call again when a late `name` makes it another Kraft tool than the one an ask allowed, SHALL end the session as a violation when the check itself raises, and SHALL log a violation that arrives together with a pause or stop while keeping that exit code.
+enforced-by: tests/acp/test_client_policy.py::test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow[unasked-and-failed-after-running], tests/acp/test_client_policy.py::test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow[a-late-name-makes-an-allowed-call-another-tool], tests/acp/test_client_policy.py::test_a_backstop_that_raises_is_a_violation_not_silence, tests/acp/test_client_policy.py::test_a_violation_that_meets_a_pause_keeps_the_pauses_code_and_is_still_logged
 origin: src/kraft/acp/client.py

@@ -104,7 +104,9 @@ def fake_gate(decisions=None, seen=None, *, default="allow", delay=0.0, message=
     return ask
 
 
-def run_inprocess(tmp_path, monkeypatch, flags="", *, ask=None, calls=None, env=None, **fields):
+def run_inprocess(
+    tmp_path, monkeypatch, flags="", *, ask=None, calls=None, env=None, timeout=280, **fields
+):
     """Kraft's client in this process, against the fake agent, with `ask` as the gate;
     `(exit code, log records)`. The in-process route is how the unit tier reaches the gate seam."""
     import asyncio
@@ -125,5 +127,5 @@ def run_inprocess(tmp_path, monkeypatch, flags="", *, ask=None, calls=None, env=
     client = Client(
         LaunchSpec.model_validate_json(spec(tmp_path, **fields).read_text()), out, ask=ask
     )
-    code = asyncio.run(asyncio.wait_for(client.run(), 280))
+    code = asyncio.run(asyncio.wait_for(client.run(), timeout))
     return code, list(log.records(out.getvalue().splitlines()))

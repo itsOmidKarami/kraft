@@ -63,6 +63,7 @@ def test_an_acp_launch_hands_its_tool_policy_to_the_client(
     assert spec["agent_env"] == {"FAKE_ACP_ASK_ALL": "1"}  # applied on every launch, policy or not
     assert spec["tool_names"] == {"read": ["Read"]}
     assert spec["always_deny"] == entry.get("always_deny", [])
+    assert spec["deny_tools"] == list(kw.get("deny_tools", ()))  # names the limit in a stop
 
 
 def test_an_acp_launch_runs_the_client_with_a_spec_and_the_agent_argv_in_it(run, tmp_path):

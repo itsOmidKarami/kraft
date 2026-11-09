@@ -591,7 +591,11 @@ def _resolve_status(
         # the client logs the event and this is where it becomes the session's status.
         # A policy violation (the agent ran a tool the task's policy does not allow) is one too,
         # whatever the agent wrote: not in ADVANCING, so the artifact check below returns it as is.
-        if reader == "acp" and _acp_log.policy_violation(log_path) is not None:
+        # So is the agent's turn ending, again and again, after Kraft rejected a tool.
+        if reader == "acp" and (
+            _acp_log.policy_violation(log_path) is not None
+            or _acp_log.rejection_limit(log_path) is not None
+        ):
             status = "config_error"
         elif reader == "acp" and status == "failed" and _acp_log.config_error(log_path) is not None:
             status = "config_error"

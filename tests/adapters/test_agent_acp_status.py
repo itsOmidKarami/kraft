@@ -14,6 +14,7 @@ from kraft.paths import RunDirs
         (["config_error"], "failed", "claude-stream-json", "failed"),
         (["policy_violation"], "done", "acp", "config_error"),
         (["policy_violation"], "done", "claude-stream-json", "done"),
+        (["rejection_limit"], "failed", "acp", "config_error"),
     ],
     ids=[
         "config-error-event",
@@ -22,6 +23,7 @@ from kraft.paths import RunDirs
         "other-reader-untouched",
         "policy-violation-beats-done",
         "policy-violation-only-for-acp",
+        "rejection-limit",
     ],
 )
 def test_a_logged_config_error_is_the_sessions_status(tmp_path, events, status, reader, expected):

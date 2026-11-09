@@ -29,7 +29,8 @@ def message(direction: str, msg: dict, *, replay: bool = False) -> str:
 def event(name: str, **fields) -> str:
     """A client event: `starting`, `session`, `prompting`, `ask`, `stop`, `config_error`,
     `error`, `stderr`, `line_too_long`, `cancel_timeout`, `interrupted`, `ask_withdrawn`,
-    `heartbeat`, `unasked_call`, `policy_violation`, `asks_everything`."""
+    `heartbeat`, `unasked_call`, `policy_violation`, `asks_everything`, `continuing`,
+    `rejection_limit`."""
     return _line("client", event=name, **fields)
 
 
@@ -72,21 +73,38 @@ def policy_violation(path: Path) -> str | None:
     return _first_event(path, "policy_violation")
 
 
+def rejection_limit(path: Path) -> str | None:
+    """The `message` of the first `rejection_limit` client event: the agent kept ending its
+    turn after Kraft rejected a tool, past the launch's cap on continuations."""
+    return _first_event(path, "rejection_limit")
+
+
 VIOLATION_PREFIX = "tool policy violated: "
+#: Begins every `rejection_limit` message (`client.Client.stop_after_rejections`).
+REJECTION_PREFIX = "the agent ended its turn after Kraft rejected "
+#: What a cause begins with when the session ran and was stopped, rather than failing to start.
+RAN_PREFIXES = (VIOLATION_PREFIX, REJECTION_PREFIX)
 
 
 def cause(text: str) -> str | None:
     """Why an ACP session stopped, from its log's text: the `message` of its `config_error`
-    event, else `VIOLATION_PREFIX` + that of its `policy_violation` event, else "". None when
+    event, else `VIOLATION_PREFIX` + that of its `policy_violation` event, else that of its
+    `rejection_limit` event (which carries its own `REJECTION_PREFIX`), else "". None when
     the text is not an ACP session log (no line of this format), so the caller keeps its own
     rule for other harnesses."""
     seen, found = False, {}
     for rec in records(text.splitlines()):
         seen = True
-        if rec.get("dir") == "client" and rec.get("event") in ("config_error", "policy_violation"):
+        if rec.get("dir") == "client" and rec.get("event") in (
+            "config_error",
+            "policy_violation",
+            "rejection_limit",
+        ):
             found.setdefault(rec["event"], str(rec.get("message") or ""))
     if not seen:
         return None
     if "config_error" in found:
         return found["config_error"]
-    return VIOLATION_PREFIX + found["policy_violation"] if "policy_violation" in found else ""
+    if "policy_violation" in found:
+        return VIOLATION_PREFIX + found["policy_violation"]
+    return found.get("rejection_limit", "")

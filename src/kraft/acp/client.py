@@ -67,6 +67,13 @@ class Client:
         self.ask = ask
         self.calls: dict[str, dict] = {}  # what the agent has said of each tool call, by id
         self.verdicts: dict[str, str] = {}  # toolCallId -> "allow" | "deny": the answer given
+        #: toolCallId -> the Kraft names an allow was decided on: a `name` that arrives later may
+        #: make the call another tool (`settled`).
+        self._decided_on: dict[str, tuple[str, ...]] = {}
+        self._asked: set[str] = set()  # tool calls the agent has asked about
+        #: This turn's rejected asks: (Kraft tool, its Kraft names, the gate's reason).
+        self._turn_rejects: list[tuple[str, tuple[str, ...], str]] = []
+        self.continuations = 0  # prompts sent after a rejection ended a turn (`conversation`)
         self._asks: dict = {}  # request id -> the task answering that ask
         self._checked: set[str] = set()  # tool calls the backstop has looked at
         self._backstops: set[asyncio.Future] = set()
@@ -194,20 +201,36 @@ class Client:
         if kind not in ("tool_call", "tool_call_update"):
             return
         self.remember(update)
-        cid = update.get("toolCallId")
+        cid, status = update.get("toolCallId"), update.get("status")
         if (
             not self.spec.policy
             or self.replay
-            or update.get("status") != "completed"
+            or status not in ("completed", "failed")  # a call that ran can still end failed
             or not isinstance(cid, str)
             or cid in self._checked
-            or self.verdicts.get(cid) == "allow"
+            or self.settled(cid, status)
         ):
             return
         self._checked.add(cid)
         task = asyncio.ensure_future(self.backstop(cid))
         self._backstops.add(task)
-        task.add_done_callback(self._backstops.discard)
+        task.add_done_callback(self._backstop_done)
+
+    def settled(self, cid: str, status: str) -> bool:
+        """Does an ask already cover this call's end, so the backstop has nothing to decide?"""
+        verdict = self.verdicts.get(cid)
+        if verdict == "allow":  # for the names it was asked on: a late `name` can change them
+            return self._decided_on.get(cid) == self.names(cid)
+        # asked and rejected, then failed: it did not run (a *completed* one did, `backstop`)
+        return status == "failed" and (verdict == "deny" or cid in self._asked)
+
+    def names(self, cid: str) -> tuple[str, ...]:
+        return tools.resolve(self.calls.get(cid, {"toolCallId": cid}), self.spec.tool_names).names
+
+    def _backstop_done(self, task: asyncio.Future) -> None:
+        self._backstops.discard(task)
+        if not task.cancelled() and (exc := task.exception()) is not None:
+            self.violate(f"backstop failed: {exc!r}")  # fail closed: a check that broke is a stop
 
     async def backstop(self, cid: str) -> None:
         """A call completed with no allowing ask on record: is it one the policy allows?"""
@@ -261,6 +284,9 @@ class Client:
             # The withdrawal future is made before the task: the agent's `$/cancel_request` can be
             # read before the task has taken its first step.
             rid = req["id"]
+            call = (params or {}).get("toolCall")
+            if isinstance(call, dict) and isinstance(call.get("toolCallId"), str):
+                self._asked.add(call["toolCallId"])
             self._withdrawn[rid] = asyncio.get_running_loop().create_future()
             task = asyncio.ensure_future(self.permission(rid, params or {}))
             self._asks[rid] = task
@@ -291,9 +317,10 @@ class Client:
                 if call.get(key):
                     known[key] = call[key]
 
-    def verdict(self, cid, value: str) -> None:
+    def verdict(self, cid, value: str, names: tuple[str, ...] = ()) -> None:
         if isinstance(cid, str):
             self.verdicts[cid] = value
+            self._decided_on[cid] = names
 
     async def decide(self, call: dict) -> tuple[bool, str]:
         """Allow this tool call? Never raises (a gate failure is a denial: fail-closed)."""
@@ -375,7 +402,11 @@ class Client:
         if allow and option is None:  # only an *_always on offer: never take it
             allow, why = False, "the agent offered no allow_once option"
             option = wire.select_option(options, ("reject_once",))
-        self.verdict(cid, "allow" if allow else "deny")
+        tool = tools.resolve(info, self.spec.tool_names)
+        self.verdict(cid, "allow" if allow else "deny", tool.names)
+        if option and not allow:
+            what = tool.names[0] if tool.names else (tool.key or "an unnamed tool")
+            self._turn_rejects.append((what, tool.names, why))
         outcome = (
             {"outcome": "selected", "optionId": option} if option else {"outcome": "cancelled"}
         )
@@ -383,7 +414,7 @@ class Client:
             log.event(
                 "ask",
                 tool=call.get("title") or call.get("kind"),
-                kraft_tool=list(tools.resolve(info, self.spec.tool_names).names),
+                kraft_tool=list(tool.names),
                 reason=why,
                 answer=("allow_once" if allow else "reject_once") if option else "cancelled",
             )
@@ -432,6 +463,41 @@ class Client:
             return INTERRUPTED_EXIT
         text = spec.prompt if caps["system_prompt"] else f"{spec.context}\n\n{spec.prompt}"
         self.emit(log.event("prompting"))
+        while True:
+            got = await self.turn(sid, text)
+            if isinstance(got, int):
+                return got
+            reason = got.get("stopReason")
+            self.emit(log.event("stop", stop_reason=reason))
+            # OpenCode ends the turn `cancelled` once Kraft rejects a tool (spec §10): the task is
+            # not over, so the same session is prompted again, naming what is not available.
+            if reason != "cancelled" or not self._turn_rejects:
+                if reason != "end_turn":
+                    print(f"kraft: the agent's turn ended with stopReason={reason}", flush=True)
+                return 0
+            await self.settle()
+            if self.violation:  # `run` turns it into the stop
+                return 0
+            if self.terminated:
+                return TERMINATED_EXIT
+            if self.interrupted.is_set():  # a pause is never continued past
+                return INTERRUPTED_EXIT
+            if self.continuations >= spec.max_continuations:
+                return self.stop_after_rejections()
+            self.continuations += 1
+            text = self.continuation_prompt()
+            self.emit(
+                log.event(
+                    "continuing",
+                    n=self.continuations,
+                    tools=list(dict.fromkeys(what for what, _, _ in self._turn_rejects)),
+                )
+            )
+
+    async def turn(self, sid: str, text: str) -> dict | int:
+        """One `session/prompt`: the agent's answer, or the exit code of a turn that ended
+        otherwise (a pause, a violation, the agent gone)."""
+        self._turn_rejects = []
         prompt = asyncio.ensure_future(
             self.request("session/prompt", {"sessionId": sid, "prompt": wire.prompt_blocks(text)})
         )
@@ -446,16 +512,46 @@ class Client:
                 POLICY_VIOLATION_EXIT if self.violation and not self.interrupted.is_set() else code
             )
         try:
-            result = prompt.result()
+            return prompt.result()
         except AgentGone:  # the group's SIGINT may take the agent first: still a pause
             return await self.agent_exit()
         except RpcError as exc:
             raise Fail(f"the agent refused the prompt: {exc}") from exc
-        reason = result.get("stopReason")
-        self.emit(log.event("stop", stop_reason=reason))
-        if reason != "end_turn":
-            print(f"kraft: the agent's turn ended with stopReason={reason}", flush=True)
-        return 0
+
+    def continuation_prompt(self) -> str:
+        """What the agent is told after a rejection ended its turn."""
+        reasons = {what: why for what, _, why in self._turn_rejects}
+        names = ", ".join(reasons)
+        one = len(reasons) == 1
+        detail = "; ".join(f"{what}: {why}" for what, why in reasons.items())
+        return (
+            f"Kraft's permission gate rejected {detail}. {names} "
+            f"{'is' if one else 'are'} not available in this task: continue without "
+            f"{'it' if one else 'them'}."
+        )
+
+    def stop_after_rejections(self) -> int:
+        """The continuations ran out: a failure that names the tool and the limit, never a
+        `failed` result with no cause (`log.cause` reads the event)."""
+        spec = self.spec
+        rejected = list(dict.fromkeys(what for what, _, _ in self._turn_rejects))
+
+        def limit(names: tuple[str, ...]) -> str:
+            if any(n in spec.always_deny for n in names):
+                return "always_deny"
+            if any(n in spec.deny_tools for n in names):
+                return "deny_tools"
+            return "allowed_tools" if spec.allowlist else "the task's tool policy"
+
+        limits = list(dict.fromkeys(limit(names) for _, names, _ in self._turn_rejects))
+        message = (
+            f"{log.REJECTION_PREFIX}{', '.join(rejected)} ({', '.join(limits)}) "
+            f"{self.continuations + 1} times"
+        )
+        self.emit(log.event("rejection_limit", message=message, tools=rejected))
+        print(f"kraft: {message}", flush=True)
+        self._write_failed(message)
+        return POLICY_VIOLATION_EXIT  # never a clean exit; the status is the logged event's
 
     async def open_session(self, params: dict, caps: dict):
         """`session/new`, or on a resume `session/resume`, else `session/load`."""
@@ -610,11 +706,13 @@ class Client:
 
     def _write_failed(self, message: str) -> None:
         path = Path(self.spec.result_path)
-        if not path.exists():
+        # Kraft pre-creates an empty result file at session start: empty is as good as absent.
+        with suppress(OSError):
+            if path.exists() and path.stat().st_size > 0:
+                return
             tmp = path.with_name(f".{path.name}.acp")
-            with suppress(OSError):
-                tmp.write_text(json.dumps({"status": "failed", "error": message}))
-                os.replace(tmp, path)
+            tmp.write_text(json.dumps({"status": "failed", "error": message}))
+            os.replace(tmp, path)
 
     async def run(self) -> int:
         self.emit(log.event("starting", agent=self.spec.agent_argv))
@@ -659,8 +757,12 @@ class Client:
             _, rest = await asyncio.wait(pumps, timeout=PUMP_DRAIN_S)
             for pump in rest:
                 pump.cancel()
-        if self.violation is not None and code not in (INTERRUPTED_EXIT, TERMINATED_EXIT):
-            code = self.fail_policy(self.violation)  # never a clean exit, whatever else happened
+        if self.violation is not None:
+            if code in (INTERRUPTED_EXIT, TERMINATED_EXIT):
+                # a pause or a stop keeps its code, but the violation is still on record
+                self.emit(log.event("policy_violation", message=self.violation))
+            else:
+                code = self.fail_policy(self.violation)  # never a clean exit, whatever else
         return code
 
     def on_term(self) -> None:

@@ -77,9 +77,12 @@ def test_opencode_asks_per_call_and_a_rejection_holds(tmp_path, monkeypatch):
     )
     asks = [r for r in recs if r.get("event") == "ask"]
     assert any(a["kraft_tool"] == ["Read"] and a["answer"] == "allow_once" for a in asks)
-    assert any(
-        a["answer"] == "reject_once" and a["kraft_tool"] in (["Write"], ["Bash"]) for a in asks
-    )
+    # OpenCode ends its turn after a rejection: the launch goes on (spec §10) until both the
+    # write and the shell call have been asked about and rejected, and it ends clean
+    no = [a["kraft_tool"] for a in asks if a["answer"] == "reject_once" and a["kraft_tool"]]
+    rejected = {names[0] for names in no}
+    assert {"Write", "Bash"} <= rejected
+    assert code == 0, [r for r in recs if r.get("event") in ("rejection_limit", "error")]
     # only the Read/Write/Bash asks are asserted on: the other tools OpenCode calls are not
     # this test's business
     assert all(

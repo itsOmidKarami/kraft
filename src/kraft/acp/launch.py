@@ -140,6 +140,7 @@ def command(
         asks_mode=asks.mode if asks else None,
         tool_names={k: list(v) for k, v in h.tool_names.items()},
         always_deny=list(entry.always_deny),
+        deny_tools=list(deny_tools),
         settles_itself=list(entry.settles_itself),
         policy=allowed_tools is not None or bool(deny_tools) or bool(entry.always_deny),
         allowlist=allowed_tools is not None,
