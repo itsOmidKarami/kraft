@@ -30,12 +30,14 @@ const joinWords = (item: ItemDetail) => `slice ${Math.min((item.group?.joined ??
 export function groupSteps(item: ItemDetail, drawn: Drawn | undefined): NodeStep[] {
   const g = item.group;
   const slices = g?.slices ?? [];
-  const past = g?.phase === "slices" || g?.phase === "joining" || g?.phase === "joined";
+  // While the slices run or join the item runs none of its body, whatever node it last stood on (the groundwork's last);
+  // once joined, a rework runs its first node again and the rest stay done.
+  const away = g?.phase === "slices" || g?.phase === "joining";
   // With no groundwork the item runs none of its body: the slices do.
   const own = !slices.length || !!g?.groundwork.length;
   const steps: NodeStep[] = (own ? (drawn?.body ?? []) : []).map((b, i) => {
     const id = b.id.slice(b.id.indexOf(".") + 1);
-    const state: GlyphState = b.needs ? "amber" : b.state === "current" ? "current" : past ? "done" : b.state === "plain" || !b.state ? "todo" : b.state;
+    const state: GlyphState = away ? "done" : b.needs ? "amber" : b.state === "current" ? "current" : g?.phase === "joined" ? "done" : b.state === "plain" || !b.state ? "todo" : b.state;
     const meta = i === 0 && slices.length && g ? tasksWords(g.groundwork) : undefined;
     return { id, label: i === 0 && slices.length ? PHASE_WORDS.groundwork : "", tasks: [{ id, noun: "node", state, running: state === "current" && b.running, paused: b.paused, meta }] };
   });

@@ -30,6 +30,13 @@ describe("a slice group's view", () => {
       ["slices", [["slice 1", "done", "done"], ["slice 2", "amber", "needs you"]]],
       ["join", [["join", "todo", undefined]]],
     ]],
+    // The item stays on the groundwork's last node while its slices run: that node is done all the same.
+    ["waiting at the groundwork's last node", at("slices.verification", "slices", { display_status: "needs_you", ...forked }), [
+      ["implementation", [["implementation", "done", "tasks 1–3"]]],
+      ["verification", [["verification", "done", undefined]]],
+      ["slices", [["slice 1", "done", "done"], ["slice 2", "amber", "needs you"]]],
+      ["join", [["join", "todo", undefined]]],
+    ]],
     ["joining them", at("slices", "joining", { display_status: "running", ...forked, group: { ...SPLIT, phase: "joining", joined: 1 } }), [
       ["implementation", [["implementation", "done", "tasks 1–3"]]],
       ["verification", [["verification", "done", undefined]]],
