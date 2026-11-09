@@ -42,11 +42,6 @@ IF the client itself fails (agent not startable, handshake or login refused), TH
 enforced-by: tests/acp/test_client.py::test_an_agent_that_cannot_start_is_a_config_error_with_a_failed_result_file[missing-binary], tests/acp/test_client.py::test_an_agent_that_cannot_start_is_a_config_error_with_a_failed_result_file[empty-argv], tests/acp/test_client.py::test_the_agents_own_result_file_is_never_overwritten
 origin: src/kraft/acp/client.py
 
-## REQ acp-client-answers-asks-allow-once-until-part-2
-WHILE no tool policy can be held over ACP, the client SHALL answer each permission ask with the option whose kind is `allow_once`, never an `*_always` option, and log the ask.
-enforced-by: tests/acp/test_client.py::test_a_permission_ask_is_answered_allow_once_by_kind_and_logged
-origin: src/kraft/acp/client.py
-
 ## REQ acp-resume-prefers-session-resume-then-session-load
 WHEN an ACP launch resumes, the client SHALL use `session/resume` when the agent offers it, else `session/load` with the replayed history marked, else fail the launch.
 enforced-by: tests/acp/test_client.py::test_a_resume_prefers_session_resume_then_session_load[resume-preferred], tests/acp/test_client.py::test_a_resume_prefers_session_resume_then_session_load[load-fallback], tests/acp/test_client.py::test_an_agent_that_cannot_resume_at_all_fails_the_launch
@@ -80,4 +75,94 @@ origin: src/kraft/adapters/agent.py
 ## REQ acp-opencode-contract
 The system SHALL treat `opencode acp`'s answer to one turn as a `stopReason` plus a per-turn usage block whose parts sum to its `totalTokens`.
 enforced-by: tests/acp/test_client_e2e.py::test_opencode_acp_answers_one_turn_with_usage
+origin: src/kraft/acp/client.py
+
+## REQ acp-no-policy-asks-are-allowed-locally
+WHERE a launch holds no tool policy, the client SHALL answer each permission ask with the option whose kind is `allow_once`, without asking the gate, and log it.
+enforced-by: tests/acp/test_client.py::test_a_permission_ask_is_answered_allow_once_by_kind_and_logged, tests/acp/test_client_policy.py::test_without_a_tool_policy_an_ask_is_allowed_locally_and_never_reaches_the_gate
+origin: src/kraft/acp/client.py
+
+## REQ acp-asks-are-decided-by-the-gate-on-kraft-tool-names
+WHEN the agent asks permission and the launch holds a tool policy, the client SHALL name the tool from the call's `name`, else its `kind`, through the entry's `tool_names`, and ask the permission gate as this session.
+enforced-by: tests/acp/test_tools.py::test_a_tool_call_is_named_by_its_name_else_its_kind[named], tests/acp/test_tools.py::test_a_tool_call_is_named_by_its_name_else_its_kind[kind-only], tests/acp/test_client_policy.py::test_an_ask_is_decided_by_the_gate_on_krafts_tool_names[named-and-allowed], tests/acp/test_client_policy.py::test_an_ask_is_decided_by_the_gate_on_krafts_tool_names[named-and-denied], tests/acp/test_client_policy.py::test_an_ask_is_decided_by_the_gate_on_krafts_tool_names[keyed-on-kind]
+origin: src/kraft/acp/tools.py
+
+## REQ acp-asks-are-answered-allow-once-or-reject-once
+The client SHALL answer a permission ask only with a `allow_once` or `reject_once` option, never an `*_always` option.
+enforced-by: tests/acp/test_client_policy.py::test_an_allowing_ask_with_only_an_always_option_is_answered_cancelled_never_always, tests/acp/test_client_policy.py::test_an_ask_is_decided_by_the_gate_on_krafts_tool_names[named-and-denied]
+origin: src/kraft/acp/client.py
+
+## REQ acp-policy-fails-closed
+IF a launch holds a tool policy and the permission gate cannot be reached or cannot read the task's policy, THEN the client SHALL reject the ask.
+enforced-by: tests/acp/test_client_policy.py::test_the_client_fails_closed_and_rejects_what_the_policy_cannot_name[gate-unreachable], tests/acp/test_client_policy.py::test_the_client_fails_closed_and_rejects_what_the_policy_cannot_name[gate-cannot-read-the-policy], tests/acp/test_client_policy.py::test_an_ask_is_decided_by_the_gate_on_krafts_tool_names[named-and-allowed]
+origin: src/kraft/acp/client.py
+
+## REQ acp-allowlist-rejects-what-it-cannot-name
+IF a launch holds an allowlist and an ask is for a call with no `name` whose `kind` is `other` or maps to no Kraft tool, THEN the client SHALL reject it.
+enforced-by: tests/acp/test_client_policy.py::test_the_client_fails_closed_and_rejects_what_the_policy_cannot_name[allowlist-unnameable-kind-other], tests/acp/test_client_policy.py::test_the_client_fails_closed_and_rejects_what_the_policy_cannot_name[allowlist-unmapped-kind]
+origin: src/kraft/acp/client.py
+
+## REQ acp-always-deny-is-rejected-whatever-the-policy
+The client SHALL reject an ask for a tool in the entry's `always_deny` without asking the gate.
+enforced-by: tests/acp/test_client_policy.py::test_an_always_denied_tool_never_reaches_the_gate, tests/acp/test_client_policy.py::test_the_client_fails_closed_and_rejects_what_the_policy_cannot_name[always-deny-wins-over-an-allowing-gate]
+origin: src/kraft/acp/client.py
+
+## REQ acp-asks-everything-is-applied-on-every-launch
+WHEN an ACP launch starts, new or resumed, with or without a tool policy, the client SHALL apply the entry's `asks_everything`: its env to the agent's environment only, its config options and mode to the session.
+enforced-by: tests/acp/test_client_policy.py::test_asks_everything_makes_the_agent_ask_on_every_launch[env], tests/acp/test_client_policy.py::test_asks_everything_makes_the_agent_ask_on_every_launch[config], tests/acp/test_client_policy.py::test_asks_everything_makes_the_agent_ask_on_every_launch[mode-as-set-mode], tests/acp/test_client_policy.py::test_asks_everything_makes_the_agent_ask_on_every_launch[applied-on-a-resumed-launch-too], tests/acp/test_client_policy.py::test_the_same_launch_without_asks_everything_makes_no_ask
+origin: src/kraft/acp/client.py
+
+## REQ acp-refused-asking-mode-is-a-config-error
+IF the agent refuses the entry's `asks_everything` mode or config option, THEN the launch SHALL end as `config_error` naming it.
+enforced-by: tests/acp/test_client_policy.py::test_an_agent_that_refuses_the_asking_mode_ends_the_launch_as_config_error
+origin: src/kraft/acp/client.py
+
+## REQ acp-withdrawn-ask-is-answered-cancelled
+WHEN the agent withdraws an ask with `$/cancel_request` before the client has answered it, the client SHALL answer the ask with the `cancelled` outcome without waiting for the gate.
+enforced-by: tests/acp/test_client_policy.py::test_a_withdrawn_ask_is_answered_cancelled_while_the_gate_is_still_thinking
+origin: src/kraft/acp/client.py
+
+## REQ acp-asks-do-not-block-the-reader
+WHILE an ask waits on the gate, the client SHALL keep reading the agent's messages.
+enforced-by: tests/acp/test_client_policy.py::test_two_asks_in_flight_are_both_answered, tests/acp/test_client_policy.py::test_a_withdrawn_ask_is_answered_cancelled_while_the_gate_is_still_thinking
+origin: src/kraft/acp/client.py
+
+## REQ acp-log-is-not-silent-while-an-ask-waits
+WHILE an ask waits on the gate, the client SHALL write a `heartbeat` log line every `heartbeat_s` seconds.
+enforced-by: tests/acp/test_client_policy.py::test_the_log_is_not_silent_while_an_ask_waits_on_the_gate
+origin: src/kraft/acp/client.py
+
+## REQ acp-backstop-ends-a-session-that-ran-what-policy-forbids
+IF a launch holds a tool policy and a tool call completes with no allowing ask on record and the policy does not allow it, THEN the client SHALL cancel the turn, log `policy_violation` and exit 77, and SHALL NOT overwrite a result file the agent wrote.
+enforced-by: tests/acp/test_client_policy.py::test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow[unasked-and-denied], tests/acp/test_client_policy.py::test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow[unasked-and-unnameable-under-an-allowlist], tests/acp/test_client_policy.py::test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow[ran-after-a-rejection], tests/acp/test_client_policy.py::test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow[withdrawn-ask-that-runs-anyway], tests/acp/test_client_policy.py::test_a_violation_with_no_result_file_writes_a_failed_one_naming_it
+origin: src/kraft/acp/client.py
+
+## REQ acp-backstop-ignores-what-ran-with-permission
+The client SHALL NOT report a violation for a call the policy allows, a call the entry's `settles_itself` names, a call that was asked and allowed, or an in-progress report that precedes its ask, and SHALL NOT run the backstop for a launch with no tool policy.
+enforced-by: tests/acp/test_client_policy.py::test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow[unasked-but-allowed], tests/acp/test_client_policy.py::test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow[unasked-but-settled-by-the-agent], tests/acp/test_client_policy.py::test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow[asked-and-allowed-after-an-early-in_progress], tests/acp/test_client_policy.py::test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow[asked-rejected-and-failed], tests/acp/test_client_policy.py::test_a_launch_without_a_policy_has_no_backstop, tests/acp/test_client_policy.py::test_a_rejected_default_call_ends_failed_not_as_a_violation
+origin: src/kraft/acp/client.py
+
+## REQ acp-policy-violation-is-never-done
+IF an ACP session's log holds a `policy_violation`, THEN the system SHALL resolve the session `config_error`, whatever result the agent wrote.
+enforced-by: tests/adapters/test_agent_acp_status.py::test_a_logged_config_error_is_the_sessions_status[policy-violation-beats-done], tests/adapters/test_agent_acp_status.py::test_a_logged_config_error_is_the_sessions_status[policy-violation-only-for-acp], tests/acp/test_log.py::test_policy_violation_names_the_first_one
+origin: src/kraft/adapters/agent.py
+
+## REQ acp-stop-reason-names-the-cause
+IF an ACP session stops for a config error, THEN the system SHALL give as the stop's cause the message of the log's `config_error` event, never the client's `starting` record.
+enforced-by: tests/executor/test_stops.py::test_an_acp_stop_names_its_cause_not_the_clients_first_line[acp-config-error-not-the-starting-line], tests/acp/test_log.py::test_cause_of_an_acp_log[config-error-beats-violation], tests/acp/test_log.py::test_cause_of_an_acp_log[not-an-acp-log-is-none]
+origin: src/kraft/executor/walk.py
+
+## REQ acp-policy-violation-stop-says-so
+IF an ACP session ran and its log holds a `policy_violation`, THEN the system SHALL stop the item with a reason that says the tool policy was violated, not that the task could not start.
+enforced-by: tests/executor/test_stops.py::test_an_acp_stop_names_its_cause_not_the_clients_first_line[acp-policy-violation-says-so]
+origin: src/kraft/executor/walk.py
+
+## REQ acp-opencode-asks-per-call-and-a-rejection-holds
+The system SHALL treat `opencode acp` with `{"permission":{"*":"ask"}}` as asking before each tool call and as honouring a rejected ask.
+enforced-by: tests/acp/test_client_e2e.py::test_opencode_asks_per_call_and_a_rejection_holds
+origin: src/kraft/acp/client.py
+
+## REQ acp-opencode-unasked-call-is-caught
+IF `opencode acp` runs a call it was not asked about under a tool policy, THEN the client SHALL end the session as a policy violation.
+enforced-by: tests/acp/test_client_e2e.py::test_the_backstop_catches_an_opencode_that_does_not_ask
 origin: src/kraft/acp/client.py

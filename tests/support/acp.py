@@ -66,6 +66,11 @@ def run_client(tmp_path: Path, flags: str = "", *, timeout: int = 60, **fields):
     return done, list(log.records(done.stdout.splitlines()))
 
 
+def events(records, name):
+    """The client's own log events called `name`."""
+    return [r for r in records if r.get("dir") == "client" and r.get("event") == name]
+
+
 def recorded(tmp_path: Path) -> list[dict]:
     """Every JSON line the client sent the fake agent."""
     path = tmp_path / "rec"
