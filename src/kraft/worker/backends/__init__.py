@@ -79,7 +79,9 @@ class SandboxBackend(Protocol):
         credential's variable and what it holds in the value's place,
         `workdir=` where under `cwd` the command runs when not at its top.
         `session_id=` and `work_item_id=` name the session it runs, together
-        or not at all."""
+        or not at all. `acp=True`: the command speaks the Agent Client Protocol
+        on its own stdin and stdout; keep stdin attached and its stderr apart
+        from its stdout."""
 
     def oneshot(
         self,

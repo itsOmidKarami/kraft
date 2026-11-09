@@ -872,6 +872,7 @@ def docker_argv(
     ca_bundle: str | Path | None = None,
     relay: str | None = None,
     sentinels: dict[str, str] | None = None,
+    interactive: bool = False,
 ) -> list[str]:
     """Wrap `cmd` to run inside `sandbox['image']` instead of directly on the host.
 
@@ -1016,6 +1017,9 @@ def docker_argv(
         # PID 1 ignores a signal it installed no handler for, so without an
         # init neither a pause's SIGINT nor a cap's SIGTERM reaches the agent.
         "--init",
+        # An ACP command is a conversation on stdin and stdout: `docker run` without
+        # `-i` gives it /dev/null. Never `-t`: a tty would join stderr to stdout.
+        *(["--interactive=true"] if interactive else []),
         "--label",
         home_label(),
         *host.user_args(),
@@ -1589,6 +1593,7 @@ class DockerBackend:
         ro_paths: Iterable[str | Path] = (),
         ca_bundle: str | Path | None = None,
         sentinels: dict[str, str] | None = None,
+        acp: bool = False,
     ) -> list[str]:
         if session_id is not None and work_item_id is None:
             raise TypeError("wrap: a session's container is named by its work item too")
@@ -1613,6 +1618,7 @@ class DockerBackend:
             ca_bundle=ca_bundle,
             relay=_relay(name) if network else None,
             sentinels=sentinels,
+            interactive=acp,
         )
 
     def oneshot(

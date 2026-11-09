@@ -40,6 +40,29 @@ def test_docker_argv_wraps_the_command_and_forwards_the_fixed_env_set():
     assert argv[image_i + 1 :] == cmd
 
 
+@pytest.mark.parametrize("acp", [False, True], ids=["session-stdin-closed", "acp-stdin-attached"])
+def test_docker_attaches_stdin_only_for_a_command_that_speaks_acp(acp):
+    argv = docker.docker_argv(
+        ["agent", "acp"], "/work/item-1", {"kind": "docker", "image": "img"}, None, interactive=acp
+    )
+    assert ("--interactive=true" in argv) is acp
+    assert (
+        "-t" not in argv and "--tty" not in argv
+    )  # a tty would merge stderr and mangle the stream
+    assert argv[argv.index("img") :] == ["img", "agent", "acp"]
+
+
+def test_the_acp_clients_gate_address_is_never_forwarded_into_the_container(monkeypatch):
+    # The client holds KRAFT_HOST/KRAFT_PORT; docker copies a bare `-e NAME` from its own env.
+    # `FORWARDED_ENV` names none of them (worker/sandbox.py), and this pins that for the ACP shape.
+    monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
+    monkeypatch.setenv("KRAFT_PORT", "424242-canary")
+    argv = docker.docker_argv(
+        ["agent", "acp"], "/work/item-1", {"kind": "docker", "image": "img"}, None, interactive=True
+    )
+    assert not {"KRAFT_HOST", "KRAFT_PORT"} & set(argv) and "424242-canary" not in " ".join(argv)
+
+
 def _worktree(tmp_path):
     """A Kraft worktree: `.git` is a file pointing at `<repo>/.git/worktrees/<id>`,
     outside the worktree itself."""
