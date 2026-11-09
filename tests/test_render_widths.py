@@ -13,7 +13,7 @@ from kraft import render
 
 _COLUMNS = [("STATUS", "status"), ("ID", "id"), ("TITLE", "title")]
 _ROWS = [
-    {"status": "active", "id": "wi-1", "title": "first"},
+    {"status": "running", "id": "wi-1", "title": "first"},
     {"status": "paused", "id": "wi-2", "title": "second"},
 ]
 
@@ -25,7 +25,7 @@ def painting(monkeypatch):
 
 def _paint_status(rows):
     return [
-        {**row, "status": render.paint(row["status"], render.STATUS_COLORS[row["status"]])}
+        {**row, "status": render.paint(row["status"], render.DISPLAY_COLORS[row["status"]])}
         for row in rows
     ]
 

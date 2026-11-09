@@ -73,6 +73,7 @@ def test_list_work_items_is_trimmed(wired, tmp_path):
         "title",
         "repo",
         "status",
+        "display_status",
         "current_node_id",
         "pending_gate",
         "progress",

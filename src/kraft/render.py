@@ -17,7 +17,7 @@ import unicodedata
 from datetime import UTC, datetime
 from typing import TextIO
 
-from kraft.vocab import WorkItemStatus
+from kraft.vocab import DisplayStatus
 from kraft.vocab.total import total
 
 RESET = "\033[0m"
@@ -29,21 +29,24 @@ DIM = "\033[2m"
 #: string shears every column to its right (spec F §2.1).
 _ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
-#: Status -> ANSI colour. Anything unlisted renders unpainted.
-STATUS_COLORS = total(
-    WorkItemStatus,
+#: Display status -> ANSI colour, as the web's TONE (frontend/src/ng/item/status.ts):
+#: blue is running, yellow needs a person, red failed, green done, the rest dim.
+DISPLAY_COLORS = total(
+    DisplayStatus,
     {
-        WorkItemStatus.ACTIVE: "\033[32m",
-        WorkItemStatus.NEEDS_HUMAN: "\033[33m",
-        WorkItemStatus.PAUSED: DIM,
-        WorkItemStatus.COMPLETED: "",
-        WorkItemStatus.ABANDONED: "",
-        WorkItemStatus.RATE_LIMITED: "",
-        WorkItemStatus.WAITING: "",
-        WorkItemStatus.QUEUED: "",
-        WorkItemStatus.BLOCKED: "",
+        DisplayStatus.RUNNING: "\033[34m",
+        DisplayStatus.NEEDS_YOU: "\033[33m",
+        DisplayStatus.ESCALATED: "\033[33m",
+        DisplayStatus.FAILED: "\033[31m",
+        DisplayStatus.DONE: "\033[32m",
+        DisplayStatus.PAUSED: DIM,
+        DisplayStatus.WAITING: DIM,
+        DisplayStatus.QUEUED: DIM,
+        DisplayStatus.BLOCKED: DIM,
+        DisplayStatus.CANCELLED: DIM,
+        DisplayStatus.ARCHIVED: DIM,
     },
-    name="STATUS_COLORS",
+    name="DISPLAY_COLORS",
 )
 
 

@@ -4,6 +4,7 @@ behaviour is in `test_verbs.py` and `test_watching.py`."""
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -446,6 +447,7 @@ def _board_with_a_parent():
             "title": "p · slice 1: A",
             "slice_key": 1,
             "status": "completed",
+            "display_status": "done",
             "current_node_id": "verification",
             "cost_usd": 0.42,
         },
@@ -454,6 +456,7 @@ def _board_with_a_parent():
             "title": "p · slice 2: B",
             "slice_key": 2,
             "status": "needs_human",
+            "display_status": "needs_you",
             "current_node_id": "implementation",
             "cost_usd": 0.0,
         },
@@ -469,9 +472,10 @@ def _board_with_a_parent():
     }
     row = {"repo": "r", "pending_gate": None, "children": None, "slices": None}
     return [
-        {**row, "id": "p1", "status": "waiting", "current_node_id": "slices", "title": "t",
-         "children": kids, "slices": slices},
-        {**row, "id": "w2", "status": "paused", "current_node_id": None, "title": "other"},
+        {**row, "id": "p1", "status": "waiting", "display_status": "needs_you",
+         "current_node_id": "slices", "title": "t", "children": kids, "slices": slices},
+        {**row, "id": "w2", "status": "paused", "display_status": "paused",
+         "current_node_id": None, "title": "other"},
     ]  # fmt: skip
 
 
@@ -480,7 +484,7 @@ def _board_with_a_parent():
     [
         pytest.param(
             None,
-            [(False, "p1", "waiting"), (True, "c1", "completed"), (True, "c2", "needs_human"),
+            [(False, "p1", "needs you"), (True, "c1", "done"), (True, "c2", "needs you"),
              (False, "w2", "paused")],
             [("p1", ["c1", "c2"]), ("w2", [])],
             id="every-child-under-its-parent",
@@ -488,13 +492,13 @@ def _board_with_a_parent():
         # A slice is not a board row: a filter finds it through its parent.
         pytest.param(
             "needs_human",
-            [(False, "p1", "waiting"), (True, "c2", "needs_human")],
+            [(False, "p1", "needs you"), (True, "c2", "needs you")],
             [("p1", ["c2"])],
             id="a-filter-finds-a-child",
         ),
         pytest.param(
             "waiting",
-            [(False, "p1", "waiting"), (True, "c1", "completed"), (True, "c2", "needs_human")],
+            [(False, "p1", "needs you"), (True, "c1", "done"), (True, "c2", "needs you")],
             [("p1", ["c1", "c2"])],
             id="a-matching-parent-keeps-every-child",
         ),
@@ -519,8 +523,59 @@ def test_list_shows_a_parents_children_under_it(monkeypatch, capsys, status, row
     payload = json.loads(capsys.readouterr().out)
 
     lines = out.splitlines()[1:]
-    assert [(line.startswith("  "), *line.split()[:2]) for line in lines] == rows
+    shown = []
+    for line in lines:
+        ident, status = re.split(r" {2,}", line.strip())[:2]
+        shown.append((line.startswith("  "), ident, status.split(" (slices:")[0]))
+    assert shown == rows
     if status is None:
         assert "slices: 1 done, 1 needs you of 2" in lines[0]
         assert lines[1].split()[2:] == ["-", "verification", "$0.42", "p", "·", "slice", "1:", "A"]
     assert [(i["id"], [k["id"] for k in i.get("children", [])]) for i in payload] == listed
+
+
+_ROW = {"id": "w1", "repo": "r", "title": "t", "current_node_id": None, "pending_gate": None}
+
+
+def _list_board(monkeypatch, capsys, items) -> str:
+    from kraft.client import transport
+
+    monkeypatch.setenv("COLUMNS", "300")
+
+    async def get(path, **_):
+        return {"items": items, "cursor": 0}
+
+    monkeypatch.setattr(transport, "_get", get)
+    cli.main(["view", "list", "--all"])
+    return capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("status", "display", "printed"),
+    [
+        pytest.param("active", "running", "running", id="running"),
+        pytest.param("needs_human", "failed", "failed", id="a-stop-is-failed"),
+        pytest.param("needs_human", "needs_you", "needs you", id="needs-you"),
+        # An older server sends no display status: its stored word, not a guess.
+        pytest.param("active", None, "active", id="no-display-status"),
+        # A newer server's word this client does not know is printed, unpainted.
+        pytest.param("active", "someday", "someday", id="unknown-display-status"),
+    ],
+)
+def test_list_prints_the_display_status(monkeypatch, capsys, status, display, printed):
+    row = {**_ROW, "status": status}
+    if display is not None:
+        row["display_status"] = display
+    line = _list_board(monkeypatch, capsys, [row]).splitlines()[1]
+    assert re.split(r" {2,}", line.strip())[1] == printed
+
+
+def test_list_paints_running_blue_and_an_old_servers_row_not_at_all(monkeypatch, capsys):
+    monkeypatch.setattr(render, "use_color", lambda stream=None: True)
+    rows = [
+        {**_ROW, "status": "active", "display_status": "running"},
+        {**_ROW, "id": "w2", "status": "active"},
+    ]
+    out = _list_board(monkeypatch, capsys, rows)
+    assert "\033[34mrunning\033[0m" in out
+    assert "\033[32m" not in out

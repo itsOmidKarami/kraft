@@ -99,7 +99,12 @@ def trim_work_items(items: list[dict], status: str | None = None) -> list[dict]:
     keep = ("id", "title", "repo", "status", "current_node_id", "pending_gate")
     trimmed = []
     for item in items:
-        row = {**{k: item[k] for k in keep}, "progress": item.get("progress")}
+        row = {
+            **{k: item[k] for k in keep},
+            # `.get`: an older server sends none, and the CLI then prints `status`.
+            "display_status": item.get("display_status"),
+            "progress": item.get("progress"),
+        }
         children = item.get("children") or []
         if status is not None and item["status"] != status:
             # A slice is not a board row, so a filter finds it through its

@@ -8,12 +8,25 @@ from datetime import UTC, datetime
 import pytest
 
 from kraft import render
-from kraft.vocab import WorkItemStatus
+from kraft.vocab import DisplayStatus
 
 
-@pytest.mark.parametrize("status", list(WorkItemStatus))
-def test_every_status_has_a_colour_entry(status):
-    assert status in render.STATUS_COLORS
+@pytest.mark.parametrize(
+    ("status", "code"),
+    [
+        ("running", "\033[34m"),
+        ("needs_you", "\033[33m"),
+        ("escalated", "\033[33m"),
+        ("failed", "\033[31m"),
+        ("done", "\033[32m"),
+        *[
+            (s, render.DIM)
+            for s in ("paused", "waiting", "queued", "blocked", "cancelled", "archived")
+        ],
+    ],
+)
+def test_each_display_status_has_its_colour(status, code):
+    assert render.DISPLAY_COLORS[DisplayStatus(status)] == code
 
 
 def test_table_aligns_columns_and_prints_a_header():

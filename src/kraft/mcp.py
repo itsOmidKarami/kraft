@@ -97,7 +97,8 @@ def build() -> MCPServer:
         status: "paused", "active", "queued", "blocked", "waiting", "rate_limited",
         "needs_human", "completed" or "abandoned". Abandoned items, cancelled ones included,
         are listed only when you ask for "abandoned". Returns id, title, repo,
-        status, current node, and any gate waiting on a human."""
+        status, display status (the board's badge word), current node, and any
+        gate waiting on a human."""
         return await client.list_work_items(status)
 
     @server.tool()

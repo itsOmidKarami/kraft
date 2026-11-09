@@ -41,7 +41,7 @@ def _render_list(items: list[dict]) -> str:
         painted.append(
             {
                 **item,
-                "status": _painted_status(item["status"])
+                "status": _painted_status(item)
                 + (f" (slices: {_slices_text(item['slices'])})" if item.get("slices") else ""),
                 "current_node_id": (
                     f"{item['current_node_id']} {p['current']}/{p['total']}"
@@ -51,11 +51,11 @@ def _render_list(items: list[dict]) -> str:
             }
         )
         # A parent's slices, indented under it:
-        # `  <id>  needs_human  -  implementation  $0.42  title`.
+        # `  <id>  needs you  -  implementation  $0.42  title`.
         painted += [
             {
                 "id": f"  {kid['id']}",
-                "status": _painted_status(kid["status"]),
+                "status": _painted_status(kid),
                 "current_node_id": kid.get("current_node_id"),
                 "title": f"{_cost_text(kid)}  {kid['title']}",
             }
@@ -64,8 +64,14 @@ def _render_list(items: list[dict]) -> str:
     return render.table(painted, _LIST_COLUMNS)
 
 
-def _painted_status(status: str) -> str:
-    return render.paint(status, render.STATUS_COLORS.get(status, ""))
+def _painted_status(row: dict) -> str:
+    """The server's display status, as the web and console word and colour it. An
+    older server sends none: its stored status then, unpainted, never a guess."""
+    shown = row.get("display_status")
+    if shown is None:
+        return row["status"]
+    # `.get`: a newer server may send a word this client has no colour for.
+    return render.paint(shown.replace("_", " "), render.DISPLAY_COLORS.get(shown, ""))
 
 
 def _cost_text(child: dict) -> str:
@@ -558,7 +564,12 @@ def _cmd_storage(ns: argparse.Namespace) -> None:
 def _add_view(subs, common: argparse.ArgumentParser) -> None:
     """The verbs that only read: the board, one item, its documents and its streams."""
     listing = subs.add_parser("list", parents=[common], help="the board")
-    listing.add_argument("--status", choices=STATUSES, metavar="STATUS", help="one of: %(choices)s")
+    listing.add_argument(
+        "--status",
+        choices=STATUSES,
+        metavar="STATUS",
+        help="filter by stored status, as --json's status field has it: %(choices)s",
+    )
     listing.add_argument("--repo", help="only this repo (default: the repo you are standing in)")
     listing.add_argument("--all", action="store_true", help="every repo, ignoring the cwd")
     # Not folded into --all: that one widens the *repo* scope, and abandoning is
