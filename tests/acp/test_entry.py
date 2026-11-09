@@ -9,6 +9,7 @@ ACP = {
     "reports": ["tokens", "cost"],
     "tool_names": {"read": "Read", "shell": "Bash"},
     "always_deny": ["Monitor"],
+    "settles_itself": ["Read"],
     "asks_everything": {"env": {"X_ASK": "1"}},
     "options": {"model": {"config": "model"}, "effort": {"config": "effort"}},
 }
@@ -19,6 +20,7 @@ def test_an_acp_entry_loads_with_the_capabilities_kraft_reads():
     assert (h.kind, h.command) == ("acp", ("fake-acp-agent",))
     assert h.acp.reports == frozenset({"tokens", "cost"})
     assert h.acp.always_deny == ("Monitor",)
+    assert h.acp.settles_itself == ("Read",)
     assert h.acp.options == {"model": "model", "effort": "effort"}
     assert h.acp.asks_everything.env == {"X_ASK": "1"}
     assert h.tool_names == {"read": ("Read",), "shell": ("Bash",)}
@@ -34,7 +36,12 @@ def test_an_acp_entry_declares_only_what_the_agent_cannot_tell():
     minimal = {"id": "m", "kind": "acp", "command": ["agent", "acp"]}
     h = harness.Harness.from_mapping(minimal, where="t")
     assert h.command == ("agent", "acp")
-    assert (h.acp.reports, h.acp.options, h.acp.asks_everything) == (frozenset(), {}, None)
+    assert (h.acp.reports, h.acp.options, h.acp.asks_everything, h.acp.settles_itself) == (
+        frozenset(),
+        {},
+        None,
+        (),
+    )
     assert not h.supports("model") and not h.supports("effort")
 
 
@@ -54,6 +61,7 @@ def test_a_command_given_as_one_string_is_one_word_not_split():
         ({"asks_everything": {"env": {"A": "1"}, "mode": "default"}}, "exactly one"),
         ({"asks_everything": {}}, "exactly one"),
         ({"always_deny": "Monitor"}, "always_deny"),
+        ({"settles_itself": "Read"}, "settles_itself"),
         ({"options": {"color": {"config": "c"}}}, "options"),
         ({"options": {"model": {}}}, "options"),
         ({"capabilities": {"prompt": {"cli": ["{value}"]}}}, "capabilities"),
@@ -68,6 +76,7 @@ def test_a_command_given_as_one_string_is_one_word_not_split():
         "asks-two-ways",
         "asks-nothing",
         "always-deny-not-a-list",
+        "settles-itself-not-a-list",
         "unknown-option",
         "option-without-config",
         "capabilities-given",

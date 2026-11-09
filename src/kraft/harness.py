@@ -396,13 +396,14 @@ class Harness:
                 raise HarnessError(
                     f"{where}: {key!r} is not available on kind 'acp': an ACP agent tells "
                     "Kraft what it can do at initialize; an entry declares only command, "
-                    "reports, asks_everything, tool_names, always_deny, options, network "
-                    "and credentials"
+                    "reports, asks_everything, tool_names, always_deny, settles_itself, "
+                    "options, network and credentials"
                 )
         entry = acp_entry.build(
             parsed.asks_everything,
             parsed.reports,
             parsed.always_deny,
+            parsed.settles_itself,
             parsed.options,
             where=where,
         )
@@ -591,6 +592,7 @@ class HarnessInput(BaseModel):
     asks_everything: AsksEverythingInput | None = None
     reports: list[StrictStr] = []
     always_deny: list[StrictStr] = []
+    settles_itself: list[StrictStr] = []
     options: dict[StrictStr, OptionInput] = {}
 
 
@@ -659,7 +661,7 @@ def _shape_problem(exc: ValidationError) -> str:
             return "'config_dir' needs an 'env' string and 'files' mapping names to mappings"
         case ("asks_everything", *_):
             return "'asks_everything' takes exactly one of env, config or mode"
-        case ("reports" | "always_deny" as key, *_):
+        case ("reports" | "always_deny" | "settles_itself" as key, *_):
             return f"{key!r} must be a list of strings"
         case ("options", *_):
             return "'options' maps model or effort to {config: <the agent's option id>}"

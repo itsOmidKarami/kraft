@@ -17,7 +17,8 @@ OPTIONS = ("model", "effort")
 
 class AsksEverythingInput(BaseModel):
     """How to make the agent ask before every tool call (spec §6): one of an env
-    mapping, session config options, or a mode. Stored here, applied by part 2."""
+    mapping, session config options, or a mode. Applied by the client on every launch
+    (`Client.apply_asks`, and `LaunchSpec.agent_env` at spawn)."""
 
     model_config = ConfigDict(strict=True, extra="forbid")
 
@@ -45,8 +46,12 @@ class AcpEntry:
     #: Subset of `REPORTS`: what this agent sends, so a cap that needs more refuses
     #: the launch before it starts (`acp.launch.cap_refusal`).
     reports: frozenset[str]
-    #: ACP tools the client always rejects, whatever the task's policy (part 2).
+    #: ACP tools the client always rejects, whatever the task's policy; `decide` rejects them
+    #: and a policy-keyed launch counts them as a limit.
     always_deny: tuple[str, ...]
+    #: Kraft tool names the agent runs without asking (spec §6.6): a launch whose policy
+    #: denies one refuses (`launch.tool_limit_refusal`), and the backstop does not flag it.
+    settles_itself: tuple[str, ...]
     #: Kraft option name -> the agent's session config option id.
     options: dict[str, str]
 
@@ -55,6 +60,7 @@ def build(
     parsed_asks: AsksEverythingInput | None,
     reports: list[str],
     always_deny: list[str],
+    settles_itself: list[str],
     options: dict[str, OptionInput],
     *,
     where: str,
@@ -85,6 +91,7 @@ def build(
         asks_everything=asks,
         reports=frozenset(reports),
         always_deny=tuple(always_deny),
+        settles_itself=tuple(settles_itself),
         options={k: v.config for k, v in options.items()},
     )
 
