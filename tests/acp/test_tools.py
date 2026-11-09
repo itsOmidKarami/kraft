@@ -2,7 +2,13 @@ import pytest
 
 from kraft.acp import tools
 
-MAP = {"read": ["Read"], "shell": ["Bash"], "execute": ["Bash"], "edit": ["Write", "Edit"]}
+MAP = {
+    "other": ["X"],
+    "read": ["Read"],
+    "shell": ["Bash"],
+    "execute": ["Bash"],
+    "edit": ["Write", "Edit"],
+}
 
 
 @pytest.mark.parametrize(
