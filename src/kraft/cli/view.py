@@ -124,6 +124,8 @@ def _usage_text(u: dict) -> str:
 
 
 def _show_value(item: dict, key: str, value) -> str:
+    if key == "display_status" and value:
+        return value.replace("_", " ")  # as `view list` prints it
     if key == "progress" and value:
         return _progress_text(value)
     if key == "usage" and value:

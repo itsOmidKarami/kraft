@@ -217,6 +217,8 @@ def test_get_work_item_names_the_next_node(wired, tmp_path):
     node_ids = [node["id"] for node in full["chain_definition"]["nodes"]]
     assert full["current_node_id"] is None
     assert item["next_node_id"] == node_ids[0]
+    # the badge word the board shows, as the server derived it (a filed item is paused)
+    assert item["display_status"] == full["display_status"] == "paused"
     # the chain itself is still trimmed away: one string, not the whole chain
     assert "chain_definition" not in item
 

@@ -100,6 +100,9 @@ def test_show_takes_an_explicit_id(app, capsys, make_item, repo):
     cli.main(["view", "show", wid])
     out = capsys.readouterr().out
     assert wid in out and "detail me" in out
+    keys = [line.split()[0] for line in out.splitlines() if line.strip()]
+    assert keys[keys.index("status") + 1] == "display_status"
+    assert re.search(r"^display_status +paused$", out, re.M)
 
 
 def test_show_defaults_to_the_work_item_this_session_is_in(

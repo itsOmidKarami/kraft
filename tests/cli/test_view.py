@@ -8,7 +8,7 @@ import re
 
 import pytest
 
-from kraft import cli, render
+from kraft import cli, client, render
 from kraft.cli import view
 from kraft.vocab import WorkItemStatus
 
@@ -591,3 +591,22 @@ def test_list_paints_running_blue_and_an_old_servers_row_not_at_all(monkeypatch,
     out = _list_board(monkeypatch, capsys, rows)
     assert "\033[34mrunning\033[0m" in out
     assert "\033[32m" not in out
+
+
+@pytest.mark.parametrize(
+    ("row", "line"),
+    [
+        pytest.param(
+            {"status": "needs_human", "display_status": "needs_you"},
+            "display_status  needs you",
+            id="needs-you-with-a-space",
+        ),
+        # An older server sends none: no line, and no KeyError.
+        pytest.param({"status": "active"}, None, id="an-older-server-sends-none"),
+    ],
+)
+def test_show_prints_the_display_status_as_the_list_does(row, line):
+    item = {**row, "id": "w1", "current_node_id": None, "chain_definition": {"nodes": []}}
+    out = render.strip_ansi(view._render_show(client.trim_work_item(item)))
+    shown = [re.sub(r" {2,}", "  ", text) for text in out.splitlines()]
+    assert [t for t in shown if t.startswith("display_status")] == ([line] if line else [])

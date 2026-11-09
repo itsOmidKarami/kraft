@@ -187,6 +187,8 @@ def trim_work_item(item: dict) -> dict:
         "description",
         "repo",
         "status",
+        # the word the board shows; an older server sends none, and is skipped
+        "display_status",
         "current_node_id",
         "pending_gate",
         "gate_artifact",
