@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "kraft",
-  "description": "Kraft, a local orchestrator that takes your coding agent from spec to pull request, stopping only when a decision is yours; and Kraft Lite, its chains without the orchestrator.",
+  "description": "Kraft, a local orchestrator that takes your coding agent from spec to merge request, stopping only when a decision is yours; and Kraft Lite, its chains without the orchestrator.",
   "owner": {
     "name": "Omid Karami",
     "url": "https://github.com/itsOmidKarami"

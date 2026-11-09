@@ -5,7 +5,7 @@ description: 'A local orchestrator that takes your coding agent from spec to mer
 
 ::u-page-hero
 ---
-title: 'Run your coding agent from spec to pull request.'
+title: 'Run your coding agent from spec to merge request.'
 description: "A local orchestrator. Kraft isn't another coding agent: it runs Claude Code, the one you may already use, and stops only when a decision is yours."
 links:
   - label: Get started

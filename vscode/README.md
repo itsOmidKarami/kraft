@@ -1,6 +1,6 @@
 # Kraft for VS Code
 
-**A local orchestrator that takes your coding agent from spec to pull request,
+**A local orchestrator that takes your coding agent from spec to merge request,
 stopping only when a decision is yours.**
 
 Kraft isn't another coding agent. It runs the one you already use (Claude Code,

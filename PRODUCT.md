@@ -12,7 +12,7 @@ Developers who hand coding tasks to the agent they already use (Claude Code, Cod
 
 ## Product Purpose
 
-Kraft is a local orchestrator that takes a coding agent from spec to pull request, stopping only when a decision is the person's: approving the spec, approving the plan, reviewing the change, and the final call before merge. Between those stops it runs on its own in an isolated git worktree and branch, with tests, repairs and retries bounded by caps on attempts, time and spend. Success is a person who hands a task over and walks away, instead of babysitting a session to the end.
+Kraft is a local orchestrator that takes a coding agent from spec to merge request, stopping only when a decision is the person's: approving the spec, approving the plan, reviewing the change, and the final call before merge. Between those stops it runs on its own in an isolated git worktree and branch, with tests, repairs and retries bounded by caps on attempts, time and spend. Success is a person who hands a task over and walks away, instead of babysitting a session to the end.
 
 ## Positioning
 

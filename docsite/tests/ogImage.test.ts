@@ -7,9 +7,9 @@ import { formatOgDescription } from '../app/utils/ogImage.ts'
 
 const cases: [string, string | undefined, string | undefined, string | undefined][] = [
   ['the home page ends on a whole word',
-    'Run your coding agent from spec to pull request',
-    'A local orchestrator that takes your coding agent from spec to pull request, stopping only when a decision is yours.',
-    'A local orchestrator that takes your coding agent from spec to pull request, stopping only when a…'],
+    'Run your coding agent from spec to merge request',
+    'A local orchestrator that takes your coding agent from spec to merge request, stopping only when a decision is yours.',
+    'A local orchestrator that takes your coding agent from spec to merge request, stopping only when a…'],
   ['a description that fits is kept whole', 'Install', 'Install Kraft with uv or Homebrew.', 'Install Kraft with uv or Homebrew.'],
   ['a full stop inside the budget ends it there',
     'Caps',
