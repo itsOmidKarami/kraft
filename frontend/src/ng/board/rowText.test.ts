@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DisplayStatus, StopKind, WorkItem } from "../../types";
 import { detail, sliced } from "../item/testkit";
-import { admittedRowAction, displayName, gateName, gateWords, glyphOf, nameOf, reasonTail, rowAction, ticksOf } from "./rowText";
+import { admittedRowAction, displayName, gateName, gateWords, glyphOf, nameOf, reasonTail, rowAction, sliceName, ticksOf } from "./rowText";
 
 const NOW = Date.parse("2026-09-13T10:00:00Z");
 const stop = (kind: StopKind, more: Partial<NonNullable<WorkItem["stop"]>> = {}) => ({ kind, node: "verification", reason: null, resume_at: null, ...more }) as WorkItem["stop"];
@@ -174,4 +174,12 @@ describe("a gate row", () => {
     const r = row("needs_you", { stop: stop("gate", { node: "final_review" }), pending_gate: "final_review", chain_definition: { nodes } as WorkItem["chain_definition"] });
     expect(reasonTail(r, NOW)).toBe("approve final review");
   });
+});
+
+describe("sliceName: a slice's own name, its parent's title left off", () => {
+  it.each([
+    ["as Kraft files it", "Design the cache · slice 2: Cache writes", "Cache writes"],
+    ["a parent title holding the marker itself", "Redo · slice 1: old · slice 3: Eviction", "Eviction"],
+    ["a title without the marker", "Cache writes", "Cache writes"],
+  ])("%s", (_, title, name) => expect(sliceName(title)).toBe(name));
 });

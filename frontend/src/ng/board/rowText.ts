@@ -52,7 +52,7 @@ export function slicesLine(i: Pick<WorkItem, "slices">): string {
 }
 
 /** A slice's own name under its parent: Kraft files it `<parent> · slice N: <name>`, and the parent's row already says the rest. */
-export const sliceName = (title: string) => / · slice \d+: (.+)$/s.exec(title)?.[1] ?? title;
+export const sliceName = (title: string) => /^.* · slice \d+: (.+)$/s.exec(title)?.[1] ?? title;
 
 /** The slices a parent's board row lists: only those that need a person. A slice has no row of its own, so this
  *  is the board's one way to it; the summary line counts the rest, and the item page shows the whole family. */
