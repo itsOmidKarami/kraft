@@ -30,9 +30,12 @@ of this guide is the full reference; a starter issue rarely needs it.
 
 - [just](https://just.systems), the command runner every step below uses:
   `brew install just`, `cargo install just`, or `uv tool install rust-just`.
-- [uv](https://docs.astral.sh/uv/). If you don't have a supported Python
-  (3.12 or newer, `requires-python` in `pyproject.toml`), the first `uv sync`
-  downloads one. CI tests 3.12, 3.13 and 3.14 on `main` and 3.12 and 3.14 on a
+- [uv](https://docs.astral.sh/uv/). `.python-version` pins a checkout's venv to
+  Python 3.14, the version CI builds with, and the first `uv sync` downloads
+  it if you don't have it. Without the pin, uv picks the newest Python
+  installed, and Python 3.15.2 hangs `uv sync`: `setuptools-scm`'s
+  `git check-attr` call deadlocks in `subprocess.run`. Kraft runs on 3.12 or
+  newer (`requires-python` in `pyproject.toml`). CI tests 3.12, 3.13 and 3.14 on `main` and 3.12 and 3.14 on a
   pull request; `just test-py 3.12` reproduces one version's failure locally.
   Code must run on 3.12: no syntax or stdlib
   API added later (3.13's `Path.read_text(newline=)`, 3.14's t-strings,
