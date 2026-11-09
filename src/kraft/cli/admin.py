@@ -1846,6 +1846,14 @@ def _cmd_mcp(ns: argparse.Namespace) -> None:
     serve_stdio()
 
 
+def _cmd_acp_client(ns: argparse.Namespace) -> None:
+    """What Kraft runs as an ACP session's command; never by hand. Imports nothing of the
+    server: it is on the session's critical path, like the permission hook."""
+    from kraft.acp import client
+
+    sys.exit(client.main(ns.spec))
+
+
 def _cmd_permission_hook(ns: argparse.Namespace) -> None:
     """What a harness's pre-tool hook runs, as `sys.executable -I -m kraft` so it
     is the daemon's own install. Client side only: no server import, since
@@ -2338,3 +2346,10 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
         help="deny, not no opinion, when Kraft cannot answer (also KRAFT_PERMISSION_FAIL_CLOSED=1)",
     )
     hook.set_defaults(func=_cmd_permission_hook)
+
+    acp_client = subs.add_parser(
+        "acp-client",
+        help="speak ACP to an agent for one session (run by Kraft, not by hand)",
+    )
+    acp_client.add_argument("--spec", required=True, help="the launch spec Kraft wrote")
+    acp_client.set_defaults(func=_cmd_acp_client)

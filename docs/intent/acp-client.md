@@ -1,0 +1,43 @@
+# ACP client
+
+What Kraft's client does between the session and an ACP agent (local, unsandboxed).
+
+## REQ acp-launch-is-one-session-and-one-prompt
+WHEN an ACP launch runs, the client SHALL open one session and send one `session/prompt`, then close the agent's stdin and end it, and SHALL exit 0 after a completed turn.
+enforced-by: tests/acp/test_client.py::test_one_launch_is_one_session_one_prompt_and_exit_zero
+origin: src/kraft/acp/client.py
+
+## REQ acp-client-ends-an-agent-that-will-not-exit
+WHEN the turn is over, the client SHALL close the agent's stdin, wait the grace, then terminate and finally kill it, so an agent that ignores EOF (or SIGTERM) is gone within the grace plus two seconds and a start-up margin.
+enforced-by: tests/acp/test_client.py::test_an_agent_that_will_not_exit_is_ended_within_the_grace_and_the_ladder[ignores-stdin-eof-sigterm-ends-it], tests/acp/test_client.py::test_an_agent_that_will_not_exit_is_ended_within_the_grace_and_the_ladder[ignores-sigterm-too-sigkill-ends-it]
+origin: src/kraft/acp/client.py
+
+## REQ acp-client-never-waits-on-a-dead-agent
+IF the agent's output ends, or the client's own reader fails, THEN every waiting request SHALL fail at once with the agent gone, and a request made afterwards SHALL fail at once too, never hang.
+enforced-by: tests/acp/test_client.py::test_an_agent_that_dies_before_session_new_ends_the_launch_not_hangs_it, tests/acp/test_client.py::test_request_after_the_agent_is_gone_raises_at_once, tests/acp/test_client.py::test_a_pump_that_raises_is_logged_and_treated_as_eof_not_silent
+origin: src/kraft/acp/client.py
+
+## REQ acp-client-logs-and-survives-what-an-agent-should-not-send
+WHEN an agent prints a line that is not JSON-RPC or longer than the line limit, the client SHALL log it (`stray`, `line_too_long`) and still finish the turn.
+enforced-by: tests/acp/test_client.py::test_a_non_json_stdout_line_is_logged_as_stray_and_the_turn_still_ends, tests/acp/test_client.py::test_a_line_past_the_limit_is_skipped_logged_and_the_turn_still_ends
+origin: src/kraft/acp/client.py
+
+## REQ acp-client-exits-with-the-agents-code-when-it-died-early
+IF the agent exits before answering the prompt, THEN the client SHALL exit with the agent's own exit code, and 128 plus the signal number for a signal.
+enforced-by: tests/acp/test_client.py::test_the_agents_own_exit_code_is_the_clients_when_it_died_before_the_turn_ended[agent-died-mid-turn]
+origin: src/kraft/acp/client.py
+
+## REQ acp-client-refuses-host-access-requests
+IF an ACP agent sends the client any request other than `session/request_permission`, THEN the client SHALL answer it with a method-not-found error.
+enforced-by: tests/acp/test_client.py::test_an_fs_request_gets_method_not_found_and_initialize_offers_no_fs
+origin: src/kraft/acp/client.py
+
+## REQ acp-client-failures-are-the-result-file
+IF the client itself fails (agent not startable, handshake or login refused), THEN it SHALL write a `failed` result file unless the agent wrote one, and SHALL NOT overwrite the agent's.
+enforced-by: tests/acp/test_client.py::test_a_missing_agent_is_a_config_error_with_a_failed_result_file, tests/acp/test_client.py::test_the_agents_own_result_file_is_never_overwritten
+origin: src/kraft/acp/client.py
+
+## REQ acp-client-answers-asks-allow-once-until-part-2
+WHILE no tool policy can be held over ACP, the client SHALL answer each permission ask with the option whose kind is `allow_once`, never an `*_always` option, and log the ask.
+enforced-by: tests/acp/test_client.py::test_a_permission_ask_is_answered_allow_once_by_kind_and_logged
+origin: src/kraft/acp/client.py
