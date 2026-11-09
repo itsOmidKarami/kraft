@@ -1,0 +1,19 @@
+# Claude Code over ACP, through the bridge `@agentclientprotocol/claude-agent-acp` (0.101.0).
+# Copy to $KRAFT_HOME/config/harnesses/claude-acp.yaml, add a profile naming it by `provider:`.
+# Kraft never installs the bridge: it must be on the PATH Kraft's workers get.
+# The bridge spawns its own bundled Claude Code, so this is the *comparison* route: the shipped
+# `claude` harness (kind: cli) stays the default (docs: reference/harnesses/claude-over-acp).
+id: claude-acp
+kind: acp
+command: [claude-agent-acp]
+reports: [tokens, cost]
+# `mode` is a session config option of the bridge; "default" is its "Manual" (asks before changes).
+asks_everything: { mode: default }
+# Claude's own always-on deny (claude.yaml, Kraft-avpe): no Monitor in a one-shot launch.
+always_deny: [Monitor]
+# Tools the bridge runs without asking in Manual mode (spike, spec §11: reads). Task 5 of the plan
+# adds any other tool the conformance probe finds unasked.
+settles_itself: [Read]
+options:
+  model:  { config: model }
+  effort: { config: effort }

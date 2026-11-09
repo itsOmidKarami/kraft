@@ -1,0 +1,10 @@
+# OpenCode over ACP (`opencode acp`, 2.2.5). Copy to $KRAFT_HOME/config/harnesses/opencode-acp.yaml.
+id: opencode-acp
+kind: acp
+command: [opencode, acp]
+reports: [tokens, cost]
+asks_everything:
+  env: { OPENCODE_CONFIG_CONTENT: '{"permission":{"*":"ask"}}' }
+tool_names: { read: Read, write: Write, edit: Edit, shell: Bash, glob: Glob, grep: Grep, webfetch: WebFetch }
+options:
+  model: { config: model }
