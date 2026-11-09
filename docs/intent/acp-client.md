@@ -56,3 +56,13 @@ origin: src/kraft/acp/client.py
 IF the agent refuses a model or effort value, THEN the launch SHALL end as `config_error` naming the option and the values the agent offered.
 enforced-by: tests/acp/test_client.py::test_a_refused_config_option_is_a_config_error_naming_what_was_offered
 origin: src/kraft/acp/client.py
+
+## REQ acp-pause-cancels-the-turn-and-keeps-its-usage
+WHEN the client receives SIGINT during a turn, it SHALL send `session/cancel`, wait for the prompt response for less than Kraft's flush grace so its usage is logged before the group is killed, and exit 130; WHERE the agent also received the pause's group SIGINT and died before answering, the client SHALL still exit 130.
+enforced-by: tests/acp/test_client.py::test_sigint_becomes_session_cancel_and_the_usage_still_lands, tests/acp/test_client.py::test_the_cancel_wait_ends_before_kraft_kills_the_group_after_a_pause, tests/acp/test_client.py::test_a_group_sigint_that_kills_the_agent_first_is_still_a_clean_pause
+origin: src/kraft/acp/client.py
+
+## REQ acp-sigterm-is-forwarded-to-the-agent
+WHEN the client receives SIGTERM, it SHALL forward it to the agent and exit with the agent's code.
+enforced-by: tests/acp/test_client.py::test_sigterm_is_forwarded_to_the_agent_and_its_code_is_the_clients
+origin: src/kraft/acp/client.py

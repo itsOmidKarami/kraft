@@ -1,7 +1,9 @@
 import asyncio
+import inspect
 import io
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -9,6 +11,8 @@ from types import SimpleNamespace
 
 import pytest
 from support.acp import client_argv, client_env, recorded, run_client, spec
+
+from kraft.acp import log
 
 
 def _events(records, name):
@@ -272,3 +276,66 @@ def test_a_refused_config_option_is_a_config_error_naming_what_was_offered(tmp_p
     assert done.returncode == 78
     message = _events(recs, "config_error")[0]["message"]
     assert "model" in message and "fake-model" in message
+
+
+def _until_prompting(proc):
+    for line in proc.stdout:
+        rec = next(log.records([line]), None)
+        if rec and rec.get("event") == "prompting":
+            return
+
+
+def test_sigint_becomes_session_cancel_and_the_usage_still_lands(tmp_path):
+    proc = subprocess.Popen(
+        client_argv(spec(tmp_path)),
+        stdout=subprocess.PIPE,
+        text=True,
+        env=client_env(tmp_path, "slow"),
+        cwd=tmp_path,
+    )
+    _until_prompting(proc)
+    proc.send_signal(signal.SIGINT)  # the client only: the fake ignores SIGINT itself
+    rest, _ = proc.communicate(timeout=30)
+    recs = list(log.records(rest.splitlines()))
+    assert "session/cancel" in [m.get("method") for m in recorded(tmp_path)]
+    assert _events(recs, "stop")[0]["stop_reason"] == "cancelled"
+    assert proc.returncode == 130
+    assert any(r.get("msg", {}).get("result", {}).get("usage") for r in recs)
+
+
+def test_the_cancel_wait_ends_before_kraft_kills_the_group_after_a_pause():
+    from kraft.acp.spec import LaunchSpec
+    from kraft.adapters import subprocess as run_subprocess
+
+    flush_grace = inspect.signature(run_subprocess._run_task).parameters["flush_grace"].default
+    assert LaunchSpec.model_fields["cancel_wait_s"].default < flush_grace
+
+
+def test_a_group_sigint_that_kills_the_agent_first_is_still_a_clean_pause(tmp_path):
+    # Kraft's pause signals the whole group: here the fake dies on that SIGINT (`die_on_int`)
+    # before it answers the client's session/cancel.
+    proc = subprocess.Popen(
+        client_argv(spec(tmp_path)),
+        stdout=subprocess.PIPE,
+        text=True,
+        env=client_env(tmp_path, "slow,die_on_int"),
+        cwd=tmp_path,
+        start_new_session=True,
+    )
+    _until_prompting(proc)
+    os.killpg(proc.pid, signal.SIGINT)
+    proc.communicate(timeout=30)
+    assert proc.returncode == 130
+
+
+def test_sigterm_is_forwarded_to_the_agent_and_its_code_is_the_clients(tmp_path):
+    mark = tmp_path / "term-mark"
+    env = client_env(tmp_path, "slow,term", KRAFT_FAKE_ACP_TERM_MARK=str(mark))
+    proc = subprocess.Popen(
+        client_argv(spec(tmp_path)), stdout=subprocess.PIPE, text=True, env=env, cwd=tmp_path
+    )
+    _until_prompting(proc)
+    proc.send_signal(signal.SIGTERM)
+    proc.communicate(timeout=30)
+    assert mark.exists()
+    assert proc.returncode == 143

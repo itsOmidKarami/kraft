@@ -203,7 +203,7 @@ class Client:
         interrupted = asyncio.ensure_future(self.interrupted.wait())
         await asyncio.wait({prompt, interrupted}, return_when=asyncio.FIRST_COMPLETED)
         interrupted.cancel()
-        if not prompt.done():  # Task 8: SIGINT -> session/cancel
+        if not prompt.done():  # SIGINT: a pause
             return await self.cancel(sid, prompt)
         try:
             result = prompt.result()
@@ -268,8 +268,17 @@ class Client:
         )
 
     async def cancel(self, sid: str, prompt) -> int:
-        """Task 8."""
-        raise NotImplementedError
+        """A pause: `session/cancel`, then the turn's answer (its usage) if it comes in time."""
+        await self.notify("session/cancel", {"sessionId": sid})
+        try:
+            result = await asyncio.wait_for(prompt, self.spec.cancel_wait_s)
+        except TimeoutError:
+            self.emit(log.event("cancel_timeout", waited_s=self.spec.cancel_wait_s))
+            return 130
+        except (AgentGone, RpcError):
+            return 130
+        self.emit(log.event("stop", stop_reason=result.get("stopReason")))
+        return 130
 
     async def agent_exit(self) -> int:
         assert self.proc
@@ -333,7 +342,7 @@ class Client:
                 f"cannot start the agent {self.spec.agent_argv[0]!r}: {exc}", config=True
             )
         loop = asyncio.get_running_loop()
-        loop.add_signal_handler(signal.SIGINT, self.interrupted.set)  # Task 8 gives it meaning
+        loop.add_signal_handler(signal.SIGINT, self.interrupted.set)
         loop.add_signal_handler(signal.SIGTERM, self.on_term)
         pumps = [asyncio.ensure_future(self.pump()), asyncio.ensure_future(self._stderr())]
         try:
@@ -353,8 +362,11 @@ class Client:
                 pump.cancel()
         return code
 
-    def on_term(self) -> None:  # Task 8 forwards it to the agent
-        raise SystemExit(143)
+    def on_term(self) -> None:
+        """SIGTERM is forwarded; the conversation then sees the agent go and exits with its code."""
+        if self.proc is not None and self.proc.returncode is None:
+            with suppress(ProcessLookupError):
+                self.proc.terminate()
 
 
 def main(spec_path: str) -> int:
