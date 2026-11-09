@@ -4,6 +4,8 @@ Imports only pydantic, so the client starts light."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import BaseModel, Field
 
 LINE_LIMIT = 8 * 1024 * 1024  # = wire.LINE_LIMIT, which takes it from here
@@ -34,6 +36,11 @@ class LaunchSpec(BaseModel):
     handshake_timeout_s: float = 120.0
     line_limit: int = LINE_LIMIT
     harness_id: str = ""
+    #: Written before the agent is spawned: the client got as far as running the sandbox command.
+    started_marker: str | None = None
+    #: What the log shows as the agent: the argv before a sandbox wrapped it (the wrapped one
+    #: carries env literals).
+    logged_agent_argv: list[str] | None = None
     #: `asks_everything.env`: set for the agent only, over the client's own environment.
     agent_env: dict[str, str] = {}
     asks_config: dict[str, str] = {}  # `asks_everything.config`: option id -> value
@@ -51,3 +58,6 @@ class LaunchSpec(BaseModel):
     #: its turn `cancelled` right after a rejected ask (OpenCode does; spec §10). Past it the
     #: launch ends as a failure naming the tool and the limit.
     max_continuations: int = Field(3, ge=0)
+
+    def started_marker_exists(self) -> bool:
+        return bool(self.started_marker) and Path(self.started_marker).exists()

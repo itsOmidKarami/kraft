@@ -720,10 +720,13 @@ class Client:
             os.replace(tmp, path)
 
     async def run(self) -> int:
-        self.emit(log.event("starting", agent=self.spec.agent_argv))
+        self.emit(log.event("starting", agent=self.spec.logged_agent_argv or self.spec.agent_argv))
         if not self.spec.agent_argv:
             return self.fail("the launch names no agent command", config=True)
         try:
+            if self.spec.started_marker:
+                with suppress(OSError):
+                    Path(self.spec.started_marker).write_text("1")
             # the client's own environment, plus the entry's asking switch, for the agent only
             env = {**os.environ, **self.spec.agent_env} if self.spec.agent_env else None
             self.proc = await asyncio.create_subprocess_exec(

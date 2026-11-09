@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 from support.acp import (
+    agent_argv,
     client_argv,
     client_env,
     recorded,
@@ -34,6 +35,26 @@ def test_one_launch_is_one_session_one_prompt_and_exit_zero(tmp_path):
     assert _events(recs, "session")[0]["session_id"] == "fake-session-1"
     assert _events(recs, "stop")[0]["stop_reason"] == "end_turn"
     assert json.loads((tmp_path / "result.json").read_text()) == {"status": "done"}
+
+
+@pytest.mark.parametrize(
+    ("fields", "marked"),
+    [({}, True), ({"agent_argv": []}, False)],
+    ids=["written-before-the-agent-spawns", "not-written-when-the-client-fails-first"],
+)
+def test_the_client_marks_that_it_got_as_far_as_spawning(tmp_path, fields, marked):
+    marker = tmp_path / "acp-started"
+    run_client(tmp_path, started_marker=str(marker), **fields)
+    assert marker.exists() is marked
+
+
+def test_the_log_records_the_agent_argv_as_it_was_before_a_sandbox_wrapped_it(tmp_path):
+    original = agent_argv()
+    wrapped = ["env", "SECRET=canary-9f3a", *original]  # stands in for `docker run -e SECRET=… …`
+    done, records = run_client(tmp_path, agent_argv=wrapped, logged_agent_argv=original)
+    assert done.returncode == 0
+    assert _events(records, "starting")[0]["agent"] == original
+    assert "canary-9f3a" not in done.stdout  # the client's whole log goes to stdout
 
 
 def test_every_message_both_ways_is_a_log_line(tmp_path):
