@@ -783,6 +783,7 @@
      "then": []
     },
     "gate_artifact": "_",
+    "group": "_",
     "group_state": "_",
     "head_sha": "_",
     "id": "_",

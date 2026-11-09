@@ -3,6 +3,9 @@
 export const DISPLAY_STATUSES = ["archived", "done", "cancelled", "paused", "running", "waiting", "queued", "blocked", "needs_you", "escalated", "failed"] as const;
 export type DisplayStatus = (typeof DISPLAY_STATUSES)[number];
 
+export const GROUP_PHASES = ["deciding", "groundwork", "slices", "joining", "joined"] as const;
+export type GroupPhase = (typeof GROUP_PHASES)[number];
+
 export const STOP_KINDS = ["gate", "question", "cap", "budget", "failed", "conflict", "mr_closed", "config", "infra", "stuck", "wait", "rate_limit", "checkout", "slices"] as const;
 export type StopKind = (typeof STOP_KINDS)[number];
 

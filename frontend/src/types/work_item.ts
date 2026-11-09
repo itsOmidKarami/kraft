@@ -1,5 +1,5 @@
 import type { RepoRow } from "./settings";
-import type { DisplayStatus, EventType, ItemAction, SessionStatus, StopKind, WorkItemStatus } from "./vocab.generated";
+import type { DisplayStatus, EventType, GroupPhase, ItemAction, SessionStatus, StopKind, WorkItemStatus } from "./vocab.generated";
 
 export interface ChainNode {
   id: string;
@@ -241,6 +241,15 @@ export interface SliceSummary {
   total: number;
 }
 
+/** An item's slice group as its views draw it (`board.group_view`). */
+export interface SliceGroup {
+  id: string;
+  phase: GroupPhase | null;
+  groundwork: number[];
+  slices: { key: number; title: string; tasks: number[] }[];
+  joined: number;
+}
+
 /** One child of a parent, in slice order (`GET /work-items/{id}` on a parent). */
 export interface SliceChild {
   id: string;
@@ -309,6 +318,10 @@ export interface WorkItem {
   /** A parent's children, slice order, on its detail and on its list row; null
    *  for an item with none. */
   children?: SliceChild[] | null;
+  /** On the detail, the item's slice group (null for a chain with none): its phase (null until the run reaches it),
+   *  the plan's shared-groundwork tasks and its slices, and how many slices the join has replayed. A slice's child is
+   *  the child of the same `slice_key`. */
+  group?: SliceGroup | null;
   /** Only on a child's detail: the parent it belongs to and its slice. */
   parent_id?: string | null;
   slice_key?: number | null;

@@ -10,8 +10,9 @@ from support.api import (
     _seed_session,
     _statements,
 )
+from support.frozen import v1_frozen
 
-from kraft import events, store
+from kraft import events, item_paths, store
 
 
 def _family(client, repo, statuses: tuple[str, ...]) -> tuple[str, list[str]]:
@@ -118,3 +119,57 @@ def test_a_slice_shows_its_own_stop_on_the_list_and_the_detail(client, repo, sto
     detail = client.get(f"/api/work-items/{parent}").json()
     assert [k["display_status"] for k in rows[parent]["children"]] == [shown]
     assert [k["display_status"] for k in detail["children"]] == [shown]
+
+
+#: A chain whose implementation and verification revision wrapped in a group.
+RUN = [{"id": "run", "kind": "subprocess", "command": "true"}]
+GROUPED = [
+    {
+        "id": "slices",
+        "kind": "group",
+        "nodes": [
+            {"id": n, "kind": "exec", "tasks": RUN} for n in ("implementation", "verification")
+        ],
+        "unforked": ["implementation"],
+    },
+    {"id": "after", "kind": "exec", "tasks": RUN},
+]
+TASKS = "### Task 1: a\n\n### Task 2: b\n\n### Task 3: c\n\n### Task 4: d\n"
+SLICES = "## Slices\n\n- **Slice 1: Parser.** Tasks 2-3.\n- **Slice 2: CLI.** Task 4.\n\n"
+SPLIT = {
+    "groundwork": [1],
+    "slices": [
+        {"key": 1, "title": "Parser", "tasks": [2, 3]},
+        {"key": 2, "title": "CLI", "tasks": [4]},
+    ],
+}
+NO_SPLIT = {"groundwork": [], "slices": []}
+
+
+@pytest.mark.parametrize(
+    ("stored", "plan", "shown"),
+    [
+        (None, SLICES, {"phase": None, **SPLIT, "joined": 0}),
+        ("deciding", SLICES, {"phase": "deciding", **SPLIT, "joined": 2}),
+        ("prelude", SLICES, {"phase": "groundwork", **SPLIT, "joined": 2}),
+        ("forked", SLICES, {"phase": "slices", **SPLIT, "joined": 2}),
+        ("joining", SLICES, {"phase": "joining", **SPLIT, "joined": 2}),
+        ("joined", SLICES, {"phase": "joined", **SPLIT, "joined": 2}),
+        ("deciding", "", {"phase": "deciding", **NO_SPLIT, "joined": 2}),
+    ],
+    ids=["unreached", "deciding", "groundwork", "slices", "joining", "joined", "no-section"],
+)
+def test_the_detail_names_the_groups_phase_and_the_plans_split(client, repo, stored, plan, shown):
+    wid = _paused(client, repo, chain_template="default")
+    assert client.get(f"/api/work-items/{wid}").json()["group"] is None  # a chain with no group
+    docs = item_paths.docs_dir(client.app.state.run_dirs, wid)
+    docs.mkdir(parents=True, exist_ok=True)
+    (docs / "plan.md").write_text("# Plan\n\n" + plan + TASKS)
+    state = store.GroupState(group="slices", phase=stored, joined_through=2) if stored else None
+    with _orchestrator_db() as conn, conn:
+        conn.execute(
+            "UPDATE work_items SET materialized_chain = ?, group_state = ? WHERE id = ?",
+            (v1_frozen(GROUPED, repo=str(repo)).to_json(), state and state.to_json(), wid),
+        )
+
+    assert client.get(f"/api/work-items/{wid}").json()["group"] == {"id": "slices", **shown}
