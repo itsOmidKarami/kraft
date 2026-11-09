@@ -11,9 +11,11 @@ reports: [tokens, cost]
 asks_everything: { mode: default }
 # Claude's own always-on deny (claude.yaml, Kraft-avpe): no Monitor in a one-shot launch.
 always_deny: [Monitor]
-# Tools the bridge runs without asking in Manual mode (spike, spec §11: reads). Task 5 of the plan
-# adds any other tool the conformance probe finds unasked.
-settles_itself: [Read]
+# Tools the bridge runs without asking in Manual mode, measured with `kraft admin acp-probe` (four
+# runs, bridge 0.101.0): Read, Bash and ToolSearch. It asked only before Write; Glob and Grep were
+# never called (the model used Bash for those steps).
+# A task whose policy denies one of these, or leaves it out of an allowlist, refuses at launch.
+settles_itself: [Read, Bash, ToolSearch]
 options:
   model:  { config: model }
   effort: { config: effort }

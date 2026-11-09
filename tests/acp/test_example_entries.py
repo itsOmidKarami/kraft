@@ -26,7 +26,8 @@ def test_the_claude_entry_asks_in_manual_mode_and_always_denies_monitor():
     assert entry.always_deny == ("Monitor",)
     assert entry.reports == frozenset({"tokens", "cost"})
     assert entry.options == {"model": "model", "effort": "effort"}
-    assert "Read" in entry.settles_itself  # §11: reads run unasked in Manual mode
+    # measured by the probe (plan task 5): the tools the bridge runs unasked in Manual mode
+    assert entry.settles_itself == ("Read", "Bash", "ToolSearch")
 
 
 def test_the_opencode_entry_asks_through_its_config_env():
@@ -45,7 +46,9 @@ def test_the_opencode_entry_asks_through_its_config_env():
     [
         ({"allowed_tools": ["Write", "Bash"]}, "runs Read without asking"),
         ({"permission_mode": "auto"}, "permission_mode"),
-        ({"allowed_tools": ["Read", "Write", "Bash"]}, None),
+        ({"allowed_tools": ["Read", "Write", "Bash"]}, "runs ToolSearch without asking"),
+        ({"deny_tools": ["Bash"]}, "runs Bash without asking"),
+        ({"allowed_tools": ["Read", "Write", "Bash", "ToolSearch"]}, None),
         ({"deny_tools": ["Write"]}, None),
         ({"deny_tools": ["Monitor"]}, None),
         ({}, None),
@@ -53,7 +56,9 @@ def test_the_opencode_entry_asks_through_its_config_env():
     ids=[
         "allowlist-omits-a-settled-tool",
         "permission-mode",
-        "allowlist-keeps-it",
+        "allowlist-omits-toolsearch",
+        "deny-bash",
+        "allowlist-keeps-them",
         "deny-list",
         "deny-monitor",
         "no-limit",

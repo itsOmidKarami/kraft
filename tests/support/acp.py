@@ -54,13 +54,17 @@ def client_env(tmp_path: Path, flags: str = "", **extra: str) -> dict:
     )
 
 
-def run_client(tmp_path: Path, flags: str = "", *, timeout: int = 60, **fields):
-    """Run the client to completion; `(CompletedProcess, [log records])`."""
+def run_client(
+    tmp_path: Path, flags: str = "", *, timeout: int = 60, env: dict | None = None, **fields
+):
+    """Run the client to completion; `(CompletedProcess, [log records])`. `env` is set on the
+    child on top of `client_env`'s: a real agent that needs the operator's login passes
+    `env={"HOME": str(Path.home())}`."""
     done = subprocess.run(
         client_argv(spec(tmp_path, **fields)),
         capture_output=True,
         text=True,
-        env=client_env(tmp_path, flags),
+        env=client_env(tmp_path, flags, **(env or {})),
         timeout=timeout,
         cwd=tmp_path,
     )
