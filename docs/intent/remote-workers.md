@@ -389,3 +389,23 @@ origin: src/kraft/remote/runs.py §_take_lfs
 The system SHALL place a step of an item in a Git LFS repo only on a machine that has git-lfs.
 enforced-by: tests/remote/test_hub.py::test_a_step_of_an_lfs_repo_goes_only_to_a_machine_that_lists_lfs[named-lacks-it], tests/remote/test_hub.py::test_a_step_of_an_lfs_repo_goes_only_to_a_machine_that_lists_lfs[any-picks-the-one-with-it], tests/remote/test_hub.py::test_a_step_of_an_lfs_repo_goes_only_to_a_machine_that_lists_lfs[group-picks-the-one-with-it], tests/remote/test_runs.py::test_a_step_of_an_lfs_repo_given_a_machine_without_git_lfs_ends_as_a_config_error
 origin: src/kraft/remote/hub.py §decide
+
+## REQ acp-steps-go-only-to-a-machine-with-the-client
+The system SHALL place an ACP step only on a machine that lists the `acp_client` capability, and SHALL refuse one pinned to a machine that does not, naming the reason.
+enforced-by: tests/remote/test_hub.py::test_any_gives_a_step_that_needs_a_cap_only_to_a_machine_that_lists_it[acp-machine-lacks-it], tests/remote/test_hub.py::test_any_gives_a_step_that_needs_a_cap_only_to_a_machine_that_lists_it[acp-machine-has-it], tests/remote/test_hub.py::test_a_step_no_connected_machine_can_take_for_want_of_a_cap_is_refused_saying_so[acp-client-gpu], tests/remote/test_launch.py::test_a_capped_step_places_again_on_the_local_worker_when_no_remote_member_has_the_cap[acp-client], tests/adapters/test_subprocess_remote.py::test_an_acp_step_pinned_to_a_machine_without_the_client_cap_is_refused_with_the_reason
+origin: src/kraft/remote/protocol.py
+
+## REQ acp-machine-builds-its-own-client-command
+WHEN a machine runs an ACP step, the system SHALL send it the agent's argv and the launch spec's path, and the machine SHALL run its own client over a copy of the spec with its own paths.
+enforced-by: tests/adapters/test_subprocess_remote.py::test_an_acp_job_carries_the_agent_argv_and_the_launch_spec_not_the_client, tests/remote/test_jobs.py::test_job_spec_round_trips_its_acp_field, tests/remote/test_jobs.py::test_an_acp_step_runs_the_machines_own_client_over_a_spec_with_the_machines_paths
+origin: src/kraft/remote/jobs.py
+
+## REQ acp-clients-gate-address-never-reaches-the-agents-sandbox
+The system SHALL NOT give an agent in a sandbox the client's `KRAFT_HOST` or `KRAFT_PORT`. The agent may still reach Kraft through the sandbox's own egress channel (the `kraft` shim, `http://kraft`, the routes for its own session's `/permission` and `/mcp`, `KRAFT_SESSION_ID` and `KRAFT_WORK_ITEM_ID`), as in every harness; that is not a bypass, since the runtime backstop and the asks use the client's own records and the gate answers by policy. The invariant is the address, not "the agent never reaches Kraft".
+enforced-by: tests/remote/test_sandboxed.py::test_the_clients_gate_address_never_reaches_the_agents_sandbox, tests/worker/backends/test_docker.py::test_the_acp_clients_gate_address_is_never_forwarded_into_the_container, tests/worker/backends/test_bwrap.py::test_the_launcher_never_keeps_the_acp_clients_gate_address
+origin: src/kraft/remote/sandboxed.py
+
+## REQ acp-sandboxed-machine-step-gets-a-forwarder
+WHEN a machine runs a sandboxed ACP step, the machine SHALL start its forwarder for the step's client, which runs outside the sandbox and reaches the gate through it, and SHALL NOT start one for a sandboxed step that is not ACP.
+enforced-by: tests/remote/test_machine.py::test_a_sandboxed_job_gets_the_gate_address_only_when_it_is_an_acp_step[acp-job], tests/remote/test_machine.py::test_a_sandboxed_job_gets_the_gate_address_only_when_it_is_an_acp_step[plain-sandboxed-job]
+origin: src/kraft/remote/machine.py

@@ -1,6 +1,6 @@
 # ACP client
 
-What Kraft's client does between the session and an ACP agent (local, unsandboxed).
+What Kraft's client does between the session and an ACP agent (on the server's machine, in a sandbox or on a remote machine).
 
 ## REQ acp-launch-is-one-session-and-one-prompt
 WHEN an ACP launch runs, the client SHALL open one session and send one `session/prompt`, then close the agent's stdin and end it, and SHALL exit 0 after a completed turn.
@@ -185,4 +185,34 @@ origin: src/kraft/acp/client.py
 ## REQ acp-backstop-fails-closed-and-keeps-the-record
 The backstop SHALL treat a call that ended `failed` with no ask on record as it treats a completed one, SHALL decide a call again when a late `name` makes it another Kraft tool than the one an ask allowed, SHALL end the session as a violation when the check itself raises, and SHALL log a violation that arrives together with a pause or stop while keeping that exit code.
 enforced-by: tests/acp/test_client_policy.py::test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow[unasked-and-failed-after-running], tests/acp/test_client_policy.py::test_the_backstop_ends_a_session_whose_agent_ran_what_the_policy_does_not_allow[a-late-name-makes-an-allowed-call-another-tool], tests/acp/test_client_policy.py::test_a_backstop_that_raises_is_a_violation_not_silence, tests/acp/test_client_policy.py::test_a_violation_that_meets_a_pause_keeps_the_pauses_code_and_is_still_logged
+origin: src/kraft/acp/client.py
+
+## REQ acp-launch-in-a-sandbox-wraps-only-the-agent
+WHEN an ACP launch runs in a sandbox, the system SHALL wrap only the agent's argv in the sandbox and run the client outside it.
+enforced-by: tests/adapters/test_subprocess_acp_sandbox.py::test_only_the_agent_is_wrapped_and_the_client_stays_the_command, tests/adapters/test_subprocess_acp_sandbox.py::test_the_probe_targets_the_agent_not_the_client
+origin: src/kraft/adapters/subprocess.py
+
+## REQ acp-docker-attaches-stdin-without-a-tty
+WHEN docker runs an ACP agent, the system SHALL keep the agent's stdin attached, and SHALL NOT allocate a terminal, which would join its stderr to the stdout the protocol speaks on.
+enforced-by: tests/worker/backends/test_docker.py::test_docker_attaches_stdin_only_for_a_command_that_speaks_acp[acp-stdin-attached], tests/worker/backends/test_docker.py::test_docker_attaches_stdin_only_for_a_command_that_speaks_acp[session-stdin-closed], tests/worker/backends/test_docker.py::test_the_docker_backend_attaches_stdin_when_wrap_is_told_the_command_speaks_acp[acp-launch], tests/worker/backends/test_docker.py::test_the_docker_backend_attaches_stdin_when_wrap_is_told_the_command_speaks_acp[cli-launch]
+origin: src/kraft/worker/backends/docker.py
+
+## REQ acp-os-sandbox-keeps-stderr-off-stdout
+WHEN the `os` sandbox runs an ACP agent, the launcher SHALL leave the agent the client's own stdin, stdout and stderr, and SHALL NOT copy its stderr into its stdout.
+enforced-by: tests/worker/test_os_init_acp.py::test_a_split_launch_keeps_stdin_attached_and_stdout_and_stderr_apart, tests/worker/backends/test_seatbelt_launch.py::test_the_launcher_is_told[split-stdio-for-acp], tests/worker/backends/test_seatbelt_launch.py::test_the_launcher_is_told[joined-stdio-by-default], tests/worker/backends/test_bwrap.py::test_argv_has[split-stdio-for-acp], tests/worker/backends/test_bwrap.py::test_argv_has[joined-stdio-by-default], tests/worker/backends/test_bwrap.py::test_wrap_splits_the_commands_stdio_only_for_an_acp_command[acp-launch], tests/worker/backends/test_bwrap.py::test_wrap_splits_the_commands_stdio_only_for_an_acp_command[cli-launch]
+origin: src/kraft/worker/os_init.py
+
+## REQ acp-entry-asking-switch-crosses-the-sandbox
+WHEN an ACP agent runs in a sandbox, the system SHALL give the sandbox the entry's `asks_everything.env`, which the client sets only on the agent's own command and the sandbox does not pass on.
+enforced-by: tests/adapters/test_subprocess_acp_sandbox.py::test_the_entrys_asking_switch_crosses_into_the_sandbox
+origin: src/kraft/adapters/subprocess.py
+
+## REQ acp-client-early-failure-is-not-a-sandbox-that-never-started
+IF the client fails before it runs the sandbox command, THEN the system SHALL read the exit as the client's own failure and SHALL NOT read it as a sandbox that never started.
+enforced-by: tests/acp/test_client.py::test_the_client_marks_that_it_got_as_far_as_spawning[written-before-the-agent-spawns], tests/acp/test_client.py::test_the_client_marks_that_it_got_as_far_as_spawning[not-written-when-the-client-fails-first], tests/adapters/test_subprocess_acp_sandbox.py::test_a_client_that_fails_before_spawning_is_not_a_sandbox_that_never_started[client-failed-first], tests/adapters/test_subprocess_acp_sandbox.py::test_a_client_that_fails_before_spawning_is_not_a_sandbox_that_never_started[sandbox-never-started], tests/adapters/test_subprocess_acp_sandbox.py::test_a_client_that_fails_before_spawning_is_not_a_sandbox_that_never_started[stale-marker-is-ignored], tests/remote/test_sandboxed.py::test_a_client_that_died_before_spawning_is_not_a_sandbox_that_never_started[client-died-before-spawning], tests/remote/test_sandboxed.py::test_a_client_that_died_before_spawning_is_not_a_sandbox_that_never_started[sandbox-never-started]
+origin: src/kraft/adapters/subprocess.py
+
+## REQ acp-session-log-never-holds-the-wrapped-agent-argv
+The system SHALL NOT write the argv a sandbox wrapped an ACP agent in to the session log: it carries env literals, a proxy URL's token among them.
+enforced-by: tests/acp/test_client.py::test_the_log_records_the_agent_argv_as_it_was_before_a_sandbox_wrapped_it, tests/adapters/test_subprocess_acp_sandbox.py::test_a_wrapped_launch_leaves_no_env_literal_in_the_session_log
 origin: src/kraft/acp/client.py

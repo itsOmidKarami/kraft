@@ -139,7 +139,7 @@ A worker can use the CLI's own stored login instead where it has one; [Give a wo
 ### ACP details
 _Added in next_
 
-A harness file with `kind: acp` runs any agent that speaks the Agent Client Protocol, where the shipped seven are `kind: cli`. No ACP harness is bundled: two example entries, `claude-acp` and `opencode-acp`, are shown in [Claude over ACP, compared](/reference/harnesses/claude-over-acp) to copy. [ACP entries](/reference/harnesses/harness-files#acp-entries) has its fields, what a launch on it refuses in this release, and how a launch ends. [ACP agents](/reference/harnesses/cost-reporting#acp-agents) has how its spend is counted.
+A harness file with `kind: acp` runs any agent that speaks the Agent Client Protocol, where the shipped seven are `kind: cli`. No ACP harness is bundled: two example entries, `claude-acp` and `opencode-acp`, are shown in [Claude over ACP, compared](/reference/harnesses/claude-over-acp) to copy. [ACP entries](/reference/harnesses/harness-files#acp-entries) has its fields, what a launch on it refuses, how it runs [in a sandbox or on a machine](/reference/harnesses/harness-files#acp-in-a-sandbox-or-on-a-machine), and how a launch ends. [ACP agents](/reference/harnesses/cost-reporting#acp-agents) has how its spend is counted.
 
 ## In this section
 

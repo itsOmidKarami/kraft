@@ -24,14 +24,10 @@ from support.server import on_a_free_port
 
 from kraft.worker import os_init
 from kraft.worker.mounts import RELAY_PROXY_ENV
+from kraft.worker.os_init import HINT
 
 OS_INIT = Path(__file__).parents[2] / "src/kraft/worker/os_init.py"
 PY = [sys.executable, "-I", "-S"]
-HINT = (
-    "kraft: a command was not found inside the os sandbox; "
-    "add its directory to the sandbox's expose list "
-    "(an agent that is a script reads its package too: add the package's directory)"
-)
 linux_only = pytest.mark.skipif(sys.platform != "linux", reason="a Linux-only fence")
 
 # Stands in for bwrap: checks `--seccomp <fd>` follows argv[0] and that fd is
@@ -244,17 +240,6 @@ LOG_FAILS = (
     "raise SystemExit(5)"
 )
 KILLED = "import os, signal; os.kill(os.getpid(), signal.SIGKILL)"
-
-
-def test_a_split_launch_keeps_stdin_attached_and_stdout_and_stderr_apart(launcher, tmp_path):
-    started = tmp_path / "started"
-    code = (
-        "import sys; line = sys.stdin.readline(); print(line.upper(), end='', flush=True); "
-        "print('diag', file=sys.stderr, flush=True)"
-    )
-    r = run(launcher("launch", init_argv(*py(code)), started=started, split=True), input="hi\n")
-    assert (r.returncode, r.stdout, r.stderr) == (0, "HI\n", "diag\n")
-    assert started.read_text() == "started\n"
 
 
 @pytest.mark.parametrize(
