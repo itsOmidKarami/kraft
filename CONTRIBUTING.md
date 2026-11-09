@@ -645,7 +645,8 @@ rules live in `.vale/styles/Kraft/`:
 - `select`, not `click`. The present tense, not `will`. No sentence that
   starts with `So`, no spaces around a dash, no `very`.
 
-`just vale` covers `docsite/content`, the README and the contributor docs
+`just vale` covers `docsite/content`, the README, the VS Code extension's
+README (its Marketplace page) and the contributor docs
 (`vale_paths` in the justfile, which CI's step repeats), not `docs/intent/` or an
 add-on's README. Inline code, fenced code and a component's YAML props are
 skipped.

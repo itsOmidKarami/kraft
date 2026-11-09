@@ -32,7 +32,7 @@ flagged as you type.
    `$KRAFT_HOME/config/access.yaml`, and falls back to `127.0.0.1:8765`. Set
    `kraft.url` only when Kraft listens somewhere else.
 
-If Kraft isn't running, the board shows **Kraft isn't running — Start**, which
+If Kraft isn't running, the board shows `Kraft isn't running — Start`, which
 runs `kraft admin start` in a terminal.
 
 ## Board
@@ -46,11 +46,11 @@ implementation"), with an icon whose colour tells a gate from a failure. It
 shows the repos open in the window; the filter button shows every repo.
 Right-click an item to pause, resume, retry, skip, escalate, cancel or archive
 it, or open the **Open** submenu for its worktree, its merge request, its spec
-and plan, the worker log or the web UI. Hover a row for its id and the full
+and plan, the worker log or the web UI. Hover a row for its ID and the full
 reason.
 
 The status bar item `Kraft` shows a bell and the count on a warning background
-while anything waits on you, and a check mark when nothing does. Click it for
+while anything waits on you, and a check mark when nothing does. Select it for
 the log, the web UI and Retry Now.
 
 ## Gates
@@ -85,7 +85,7 @@ Default keys (`Cmd+Alt+K` on macOS), each chord starting `Ctrl+Alt+K`:
 
 Run **Review Changes** from an item's menu on the board, or from a gate
 document's title bar, to open its branch in the multi-file diff editor. Findings from the review agents show on the lines they
-name, as a colored bar with the message beside the line, and in the Problems panel.
+name, as a coloured bar with the message beside the line, and in the Problems panel.
 
 Comments are Kraft's review threads, the same ones the web UI's review and
 `kraft view threads` show, with their label, lines and side. Every comment is a
@@ -136,7 +136,7 @@ startup.
 
 - `kraft.url`: where Kraft listens. Empty reads `KRAFT_HOST` and `KRAFT_PORT`,
   then `bind` and `port` from `$KRAFT_HOME/config/access.yaml`. Set it in your
-  user or Remote settings only: a workspace's settings cannot change it.
+  user or Remote settings only: a workspace's settings can't change it.
 - `kraft.path`: the `kraft` binary **Start Kraft** runs, and the restart a
   config change offers. Empty runs `kraft` on your `PATH`; a leading `~` means
   your home folder. Set it in your user or Remote settings only.
@@ -147,6 +147,6 @@ startup.
 ## Learn more
 
 - [Kraft for VS Code](https://kraft-sdlc.dev/guides/vscode), the guide to this extension
-- [Why Kraft](https://kraft-sdlc.dev/get-started/why-kraft): what it does that a session, a loop or a skill does not
+- [Why Kraft](https://kraft-sdlc.dev/get-started/why-kraft): what it does that a session, a loop or a skill doesn't
 - [Documentation](https://kraft-sdlc.dev/)
 - [GitHub](https://github.com/itsOmidKarami/kraft): source, releases and issues
