@@ -124,7 +124,8 @@ describe("ng CSS", () => {
     const css = readFileSync(join(here, "theme/base.css"), "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
     const block = /@media \(prefers-reduced-motion: reduce\) {([^\n]*)}\s*(?:\n|$)/.exec(css)?.[1] ?? "";
     for (const v of ["--run-trace", "--run-sheen", "--run-breathe"]) expect(block).toMatch(new RegExp(`${v}:\\s*none`));
-    expect(block).toMatch(/--run-edge:\s*100%/);
+    // The border keeps its resting strength, so the stopped light still shows as a lit arc (mono has no hue to tell it by).
+    expect(block).not.toMatch(/--run-edge/);
   });
 
   // The overview's glyphs are `.minimap-node` buttons placed with position: absolute; a running one must stay there.

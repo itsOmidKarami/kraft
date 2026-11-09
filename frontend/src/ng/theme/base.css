@@ -15,19 +15,20 @@
   --row-pad-add: 0px;
   /* Running: blue, never amber (amber is "needs you"). A running node, tick or bar carries a light that travels along
      it (trace, sheen); a small mark (a sub-agent, a plan task, a CI check) breathes. Reduced motion sets all three to
-     none below, leaving the colour and the words. */
+     none below, leaving the colour, the words and the trace's light stopped where it starts. */
   --run: var(--info);
   --run-trace: run-trace 1.8s linear infinite;
   --run-sheen: run-sheen 1.6s ease-in-out infinite;
   --run-breathe: run-breathe 2s ease-in-out infinite;
-  /* A running border's resting strength, under the light that circles it: full when nothing moves. */
+  /* A running border's resting strength, under the light that circles it. It stays at this when nothing moves,
+     so a stopped light still reads as a lit arc in mono, where the colour alone does not tell running apart. */
   --run-edge: 30%;
   /* The one column every settings page (Appearance to Auto-intake) sits in. */
   --set-page-w: 820px;
 }
 :root[data-mode="light"] { --warn-wash: color-mix(in oklab, var(--warn) 12%, var(--surface)); --warn-edge: color-mix(in oklab, var(--warn) 75%, transparent); }
 :root[data-density="comfortable"] { --row-pad-add: 2px; --fs-meta: 14px; --fs-label: 13px; --fs-body: 15px; }
-@media (prefers-reduced-motion: reduce) { :root { --run-trace: none; --run-sheen: none; --run-breathe: none; --run-edge: 100%; } }
+@media (prefers-reduced-motion: reduce) { :root { --run-trace: none; --run-sheen: none; --run-breathe: none; } }
 @property --run-a { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
 @keyframes run-trace { to { --run-a: 360deg; } }
 @keyframes run-sheen { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
