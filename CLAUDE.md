@@ -2,7 +2,7 @@
 
 ## Build & Test
 
-Everything goes through `just` — run `just` for the list.
+Everything goes through `just`: run `just` for the list.
 
 ```bash
 just setup      # uv sync + npm ci; Kraft workers run `just setup setup-plugins`
@@ -219,7 +219,7 @@ CONTRIBUTING.md's "User-facing docs" has the details.
 
 ### The test tree mirrors the source tree
 
-A test for `src/kraft/<pkg>/<mod>.py` lives at `tests/<pkg>/test_<mod>.py` — not
+A test for `src/kraft/<pkg>/<mod>.py` lives at `tests/<pkg>/test_<mod>.py`, not
 `tests/test_<pkg>_<mod>.py`. Flat names under a hierarchical source is how the
 layout drifted the first time. A module with no package mirrors nothing and
 stays at `tests/test_<mod>.py`.
@@ -229,7 +229,7 @@ load-bearing, not tidiness. The mirrored tree has duplicate basenames (about
 twenty: `test_gates.py` exists under `api/`, `executor/` and the root,
 and so on for `test_db`, `test_auth`, `test_review`, `test_run` and more),
 which pytest's default prepend import mode rejects as a hard collection error.
-Packages fix it with no config change, and they keep `tests/` on `sys.path` —
+Packages fix it with no config change, and they keep `tests/` on `sys.path`,
 which the many files doing `from support.harness import ...` depend on. Don't
 "simplify" this by switching to `--import-mode=importlib`; that drops `tests/`
 off `sys.path` and breaks every one of them.
@@ -263,7 +263,7 @@ Read `docs/testing.md` before the first test. The short version a worker needs:
 ### Marking a task already done in a reused plan
 
 A plan attached to one work item is sometimes reused for a later item that
-only implements one of its tasks — the rest already merged elsewhere. Say so
+only implements one of its tasks: the rest already merged elsewhere. Say so
 on the heading itself, not in prose the tooling can't read:
 
 ```
@@ -278,7 +278,7 @@ running work item.
 
 A session with `$KRAFT_WORK_ITEM_ID` set is a Kraft worker, running in a
 throwaway git worktree on its own branch. It commits everything it changes
-before it exits — uncommitted work never reaches the merge request and is
+before it exits: uncommitted work never reaches the merge request and is
 destroyed with the worktree. This overrides any standing instruction not to
 run `git commit` (the maintainer's own agent profile has one), for commits
 only: a worker still doesn't push, merge, sync Dolt (the versioned database
@@ -295,7 +295,7 @@ vars, the nine `KRAFT_*` that locate the instance (`KRAFT_HOME`, `KRAFT_RUN_DIR`
 `KRAFT_CONFIG_DIR` and its 1.x name `KRAFT_TEMPLATES_DIR`, `KRAFT_SKILLS_DIR`, `KRAFT_HOST`, `KRAFT_PORT`,
 `KRAFT_DAEMON_PID`, `KRAFT_DAEMON_PORT`) plus the ones Kraft sets per session, and
 Claude Code's credential vars (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`; another agent's key needs `env_passthrough`). Any other `KRAFT_*` var, and anything else a
-repo needs, is declared in its `repos.yaml` entry — `env:` for literal values,
+repo needs, is declared in its `repos.yaml` entry: `env:` for literal values,
 `env_passthrough:` to name a var the daemon already has. Don't assume a
 variable from your own shell is present in a worktree.
 

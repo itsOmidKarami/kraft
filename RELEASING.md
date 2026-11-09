@@ -239,7 +239,7 @@ forever. `release.yml` mints a short-lived token from a GitHub App installed
 on this repo instead (`RELEASE_BOT_CLIENT_ID` / `RELEASE_BOT_PRIVATE_KEY`),
 scoped to just contents and pull-request writes on `kraft`.
 
-So the tagged commit lags its own release by design: at `vX.Y.Z` the
+The tagged commit therefore lags its own release by design: at `vX.Y.Z` the
 `plugin.json` files, `vscode/package.json` and both changelogs still describe the
 release before it. The artifacts don't lag. The wheel's version comes from the
 tag through setuptools-scm, and the `.vsix` gets its version from the
@@ -296,7 +296,7 @@ for the plugin manifests has merged. The checks under
 targets, one line each.
 
 A dry run stops after the notes: every step that builds, packs or publishes is
-skipped. So it can't tell you the wheel was pinned, the `.vsix` got its version,
+skipped, so it can't tell you the wheel was pinned, the `.vsix` got its version,
 or a credential works; a change to any of those first shows on a real
 pre-release (`rc`, which reaches PyPI and the GitHub Release and nothing else).
 

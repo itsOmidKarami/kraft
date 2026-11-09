@@ -309,7 +309,7 @@ export function BoardPage() {
       <div className="board-filters">
         <label className="board-filter">
           <span className="board-visually-hidden">Filter</span>
-          <input ref={filterRef} type="search" value={query.q} placeholder="Filter by title or id" aria-keyshortcuts="/" onChange={(e) => setQuery({ q: e.target.value })} />
+          <input ref={filterRef} type="search" value={query.q} placeholder="Filter by title or ID" aria-keyshortcuts="/" onChange={(e) => setQuery({ q: e.target.value })} />
           {!query.q && <span className="board-filter-kbd" aria-hidden><Kbd>/</Kbd></span>}
         </label>
         <Menu

@@ -198,7 +198,7 @@ const ROWS: Row[] = [
     run: async (p) => {
       await app(p, `/work-items/new?${new URLSearchParams({ repo: "/Users/dev/code/kraft-plugins", chain: "default", title: "Load test it" })}`, { ready: (pg) => pg.getByText(/nodes run ·/).first().waitFor() });
       await p.getByRole("button", { name: /^default/ }).click();
-      await p.getByRole("menuitem", { name: "Customize for this item" }).click(); await pause(p, 800);
+      await p.getByRole("menuitem", { name: "Customise for this item" }).click(); await pause(p, 800);
       await expect(p.getByRole("button", { name: /^one-off · extends default/ })).toBeVisible();
       await p.locator(".seam").first().click();
       await p.getByRole("menuitem", { name: /Custom agent node/ }).click();

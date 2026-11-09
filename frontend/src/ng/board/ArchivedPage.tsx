@@ -74,7 +74,7 @@ export function ArchivedPage() {
       <div className="board-filters">
         <label className="board-filter">
           <span className="board-visually-hidden">Filter</span>
-          <input type="search" value={q} placeholder="Filter by title or id" onChange={(e) => set("q", e.target.value)} />
+          <input type="search" value={q} placeholder="Filter by title or ID" onChange={(e) => set("q", e.target.value)} />
         </label>
         <span className="board-filters-gap" />
         <Menu

@@ -63,7 +63,7 @@ just dev        # backend + vite, state in .dev/, agents faked, UI on :5173
 and [impeccable](https://impeccable.style) for every agent this repo is worked
 on with, and for Claude Code also
 [ponytail](https://github.com/DietrichGebert/ponytail),
-[techdocs-authoring](https://github.com/pkloehn1/techdocs-authoring), and the
+[techdocs-authoring](https://github.com/pkloehn1/techdocs-authoring) and the
 engineering and design plugins from
 [knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins).
 It is opt-in, and `just setup` never runs it, so a contributor's agents get
@@ -87,8 +87,8 @@ worktree. Claude Code's plugins live in `~/.claude` and need no setup per
 worktree.
 
 superpowers is off in Kraft workers: its skills ask a person questions and push
-or merge a finished branch, and a worker does neither. So is ponytail, which
-puts a session into its own coding mode where a worker follows Kraft's
+or merge a finished branch, and a worker does neither. ponytail is off
+too: it puts a session into its own coding mode where a worker follows Kraft's
 instructions. For Claude Code, `.claude/hooks/kraft-worker-plugins.sh` refuses
 every superpowers and ponytail skill in a session with `$KRAFT_WORK_ITEM_ID` set
 and tells the session and its sub-agents so.
@@ -344,7 +344,7 @@ verification runs it.
 
 | CI job | What it runs | Run it locally with |
 |---|---|---|
-| `lint` | ruff check and format, `dev/check_docs_coverage.py`, `dev/check_docs_walls.py`, `dev/check_docs_redirects.py`, `dev/check_docs_landings.py`, `dev/check_docs_shell.py`, `dev/check_docs_ledes.py`, `dev/check_docs_added_in.py`, `dev/check_addon_versions.py`, `dev/check_tests.py` | `just ci-test`, or `just lint` and `just check-tests` |
+| `lint` | ruff check and format, `dev/check_docs_coverage.py`, `dev/check_docs_walls.py`, `dev/check_docs_redirects.py`, `dev/check_docs_landings.py`, `dev/check_docs_shell.py`, `dev/check_docs_ledes.py`, `dev/check_docs_added_in.py`, `vale` (the docs' [voice and spelling](#voice-and-spelling)), `dev/check_addon_versions.py`, `dev/check_tests.py` | `just ci-test`, or `just lint`, `just vale` and `just check-tests` |
 | `changes` | decides whether the pull request is docs-only, or changes no Python, and so which Pythons the unit tier runs | nothing to run |
 | `test (python 3.12 / 3.13 / 3.14, 1/4 … 4/4)` *(code)* | the unit tier (`-m "not e2e"`) in four shards, with `python -m kraft.intent` in the first; on 3.12, 3.13 and 3.14 for a push to `main`, on 3.12 and 3.14 for a pull request, on 3.14 alone when it changes no Python | `just ci-test`, or `just test` and `just intent`; `just test-py 3.12` for another version |
 | `test report` *(code)* | the shards' junit annotations and the coverage comment; reports only, so it isn't part of `test` | nothing to run |
@@ -386,9 +386,9 @@ Kraft's version is the git tag. `setuptools-scm` derives it at build time, so
 there is no `version =` line to bump and no bump commit to forget.
 
 That removes the loud failure and leaves a quiet one: if nobody ever makes a
-tag, nothing fails — `main` just accumulates untagged commits while the install
-instructions keep serving a release from months ago. So every pull request
-declares what it ships, and a maintainer cuts a release from whatever has
+tag, nothing fails: `main` just accumulates untagged commits while the install
+instructions keep serving a release from months ago. Every pull request
+therefore declares what it ships, and a maintainer cuts a release from whatever has
 merged since the last one (see [RELEASING.md](RELEASING.md)).
 
 Put exactly one of these labels on your pull request:
@@ -441,7 +441,7 @@ Keep pictures to highlights: an entry under New or Fixes is one line. A
 `release::none` pull request with the label stops the release, since there is
 no entry to highlight. See [RELEASING.md](RELEASING.md#cut-a-release).
 
-**Pull requests from forks aren't asked for a label** — only people with write
+**Pull requests from forks aren't asked for a label**: only people with write
 access can apply one. A maintainer labels the pull request before merging. One
 merged without a label stops the next release, naming it; label it (labels
 can still be changed after merge) and run the release again.
@@ -493,14 +493,14 @@ as well.
 Two ways a branch you're reusing by hand can quietly cost you work:
 
 **Don't reuse a branch after its pull request merges.** This repo merges by
-squash, so the branch's own commits never become ancestors of `main` — only
+squash, so the branch's own commits never become ancestors of `main`; only
 their squashed equivalent does. Push more commits onto that same branch
 afterwards and `git diff` against its old merge-base re-presents everything the
 squash already landed. Cut a fresh branch from `origin/main` instead.
 
 **Rebuilding a branch by `git reset` + cherry-pick can silently orphan a
 commit.** Resetting a branch to an earlier point and re-picking commits drops
-anything you forgot to include — no warning, and the commit survives only as a
+anything you forgot to include, with no warning, and the commit survives only as a
 dangling object until the next `git gc`. Before you reset, capture the tip:
 
 ```bash
@@ -562,7 +562,7 @@ Page rules:
   any docs address that Kraft itself links to and that no longer resolves.
   It also fails a `](/page#heading)` link between pages that lands on no
   heading, or on an address the file forwards (write the target), so a
-  moved heading cannot leave a dead link behind.
+  moved heading can't leave a dead link behind.
 - Mark what is new. A page, section or CLI verb that is new since the latest
   release carries `_Added in next_` on its own line directly under its heading
   (a new page: under its title, which covers its sections), or at the end of
@@ -574,15 +574,15 @@ Page rules:
   then "Added in 2.1"); in the Markdown, `llms-full.txt` and search it stays plain
   words. `dev/check_docs_added_in.py` (the `lint` job) compares `docsite/content`
   with the latest release tag and fails on a new page, heading or verb with no
-  note, on a note in the wrong place or naming a release that does not exist,
+  note, on a note in the wrong place or naming a release that doesn't exist,
   and warns on a `next` note on something the release already had. A heading
-  is not new if its page moved (`redirects.yml`), or if you say so under it:
+  isn't new if its page moved (`redirects.yml`), or if you say so under it:
   `<!-- renamed from: Old heading -->` for an old heading under a new name
   (`/page#Old heading` from another page, `/old/page` for a page split or
   renamed), `<!-- not new: why -->` for new text about something that already
-  shipped. The comment does not render, and the release deletes it.
+  shipped. The comment doesn't render, and the release deletes it.
 - No comment in a shell block (`bash`, `sh`, `shell`, `zsh`, `console`): an
-  interactive zsh, the macOS default, does not read `#` as one, so a
+  interactive zsh, the macOS default, doesn't read `#` as one, so a
   pasted `cmd # note` fails with `command not found: #`. Put the remark in
   the sentence above the block. `dev/check_docs_shell.py` (the `lint` job)
   fails a line that starts with `#` or has one after whitespace outside
@@ -623,9 +623,32 @@ a page that doesn't parse, but a link to a page or heading that no longer
 exists renders instead of failing the build. The docs workflow catches those:
 on a pull request it runs [lychee](https://lychee.cli.rs) over the built
 pages and their Markdown, and fails on a broken internal link, a missing anchor, or an external
-link that does not answer. Nothing catches "this paragraph no longer describes the
+link that doesn't answer. Nothing catches "this paragraph no longer describes the
 code", and `docs/intent/`'s `enforced-by:` pinning doesn't either. Read the
 page you're touching, not just the code.
+
+### Voice and spelling
+
+[Vale](https://vale.sh) checks the docs site, the README and the contributor docs
+against the house style. `just vale` runs it, and so does the `lint` job. The
+rules live in `.vale/styles/Kraft/`:
+
+- British spelling, -ise forms: colour, behaviour, labelled, organise.
+- Contractions for a negation: doesn't, can't, isn't. Not it's or that's: a
+  contraction can't end a clause.
+- One word per term: re-run, sub-agent, signed in, ID, merge request. Pull
+  request only on the pages about Kraft's own GitHub repo.
+- No comma before the "and" or "or" that ends a list.
+- `select`, not `click`. The present tense, not `will`. No sentence that
+  starts with `So`, no spaces around a dash, no `very`.
+
+A real word the spelling rule doesn't know goes in
+`.vale/styles/config/vocabularies/Kraft/accept.txt`, one per line. Where the
+text quotes something exactly, such as a label the app spells its own way, turn
+that one rule off around it: `<!-- vale Kraft.Dashes = NO -->` before, `<!--
+vale Kraft.Dashes = YES -->` after. A heading reworded for the style is a
+renamed heading: give it a `renamed from` note, and a redirect if a page links
+to it.
 
 ### Versions of the docs
 

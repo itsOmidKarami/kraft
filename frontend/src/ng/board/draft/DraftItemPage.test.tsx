@@ -278,11 +278,11 @@ describe("DraftItemPage", () => {
       mount({ draft: FILED });
       await settle();
       fireEvent.click(screen.getByRole("button", { name: /^default/ }));
-      fireEvent.click(screen.getByRole("menuitem", { name: "Customize for this item" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Customise for this item" }));
       await settle();
     };
 
-    it("Customize for this item shows the one-off head, and Back restores the page", async () => {
+    it("Customise for this item shows the one-off head, and Back restores the page", async () => {
       stub();
       await customize();
       expect(screen.getByRole("button", { name: /^one-off · extends default/ })).toBeInTheDocument();
@@ -299,7 +299,7 @@ describe("DraftItemPage", () => {
       mount({ draft: FILED });
       await settle();
       fireEvent.click(screen.getByRole("button", { name: /^default/ }));
-      fireEvent.click(screen.getByRole("menuitem", { name: "Customize for this item" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Customise for this item" }));
       expect(screen.getByText("DRAFT · NOT CREATED")).toBeInTheDocument();
       expect(screen.getByRole("status", { name: "" })).toHaveTextContent("Reading the chain…");
       await settle();
@@ -334,7 +334,7 @@ describe("DraftItemPage", () => {
       mount(undefined, `/work-items/new?repo=/code/kraft-plugins&title=t&chain=${chain}`);
       await settle();
       fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${decodeURIComponent(chain).split("\n")[0]}`) }));
-      expect(screen.queryByRole("menuitem", { name: "Customize for this item" })).toBeNull();
+      expect(screen.queryByRole("menuitem", { name: "Customise for this item" })).toBeNull();
     });
 
     it("counts as an edit: leaving with no title still asks, and says the chain goes too", async () => {
@@ -342,7 +342,7 @@ describe("DraftItemPage", () => {
       mount({ draft: { repo: "/code/kraft-plugins", chain: "default" } });
       await settle();
       fireEvent.click(screen.getByRole("button", { name: /^default/ }));
-      fireEvent.click(screen.getByRole("menuitem", { name: "Customize for this item" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Customise for this item" }));
       await settle();
       fireEvent.keyDown(window, { key: "Escape" });
       expect(screen.getByRole("alertdialog", { name: "Discard this draft?" })).toHaveTextContent("The title, brief, one-off chain and settings you entered are lost.");
@@ -391,7 +391,7 @@ describe("DraftItemPage", () => {
       mount({ draft: { ...FILED, spec: "docs/spec.md", skip: ["implementation"] } });
       await settle();
       fireEvent.click(screen.getByRole("button", { name: /^default/ }));
-      fireEvent.click(screen.getByRole("menuitem", { name: "Customize for this item" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Customise for this item" }));
       await settle();
       const gate = screen.getByRole("button", { name: /^approve spec, gate/ });
       expect(gate.textContent).toContain("covered");
@@ -472,7 +472,7 @@ describe("DraftItemPage", () => {
       await settle();
       oneOff.nodes = NODES.filter((n) => n.id !== "final_review");
       fireEvent.click(screen.getByRole("button", { name: /^default/ }));
-      fireEvent.click(screen.getByRole("menuitem", { name: "Customize for this item" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Customise for this item" }));
       await settle();
       expect(JSON.parse(sessionStorage.getItem(DRAFT_KEY)!).skip).toEqual([]);
     });

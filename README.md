@@ -52,7 +52,7 @@ says what to check before you upgrade.
   worktree by default, so your checkout stays as you left it and items run in
   parallel. A repo whose setup is heavy can run its items in its own checkout
   instead, one at a time.
-- **Local.** One process on your machine, bound to loopback by default — not a
+- **Local.** One process on your machine, bound to loopback by default, not a
   hosted service.
 - **A board you can check from your phone.** Reach it from another device
   through a tunnel.
@@ -62,7 +62,7 @@ New here? [Why Kraft](https://kraft-sdlc.dev/get-started/why-kraft) covers what 
 *Kraft* is German for force; in English, its cousin *craft* means skill. Your agent brings the craft; Kraft is the force that carries it from spec to merge request.
 
 **A gate stops the chain where a human decides.** Read what the agent wrote,
-then approve, or request changes with a note that re-runs the node that wrote it.
+then approve or request changes with a note that re-runs the node that wrote it.
 
 ![The gate's review page headed Approve final review: Request changes and Approve buttons in the header, a Waiting for you mark, a line saying Approving starts release with no gate after it and the spend, the review brief an agent wrote rendered below, and the files on the branch beside it](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/gate.png)
 
@@ -189,7 +189,7 @@ to file your first work item.
 
 ## Analytics
 
-Lead time, cost and where both go — by node and by repo, over a Range you pick:
+Lead time, cost and where both go, by node and by repo, over a Range you pick:
 7 days, 30 days, 8 weeks (the default) or 90 days, the same menu on a desktop and a phone. Built from the same events the
 board renders live, not a separate pipeline.
 

@@ -8,7 +8,7 @@ test("design a one-off chain on the new-item page, approve it and create the ite
   await connectRepo(page, REPO);
   await page.goto(`/work-items/new?${new URLSearchParams({ repo: REPO, chain: "quick-task", title: "ui one-off design" })}`);
   await page.getByRole("button", { name: /^quick-task/ }).click();
-  await page.getByRole("menuitem", { name: "Customize for this item" }).click();
+  await page.getByRole("menuitem", { name: "Customise for this item" }).click();
   await expect(page.getByRole("button", { name: /^one-off · extends quick-task/ })).toBeVisible();
 
   await page.locator(".seam").first().click();

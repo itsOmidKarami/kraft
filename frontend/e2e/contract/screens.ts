@@ -49,7 +49,7 @@ const appSearch = (q: string, then?: (p: Page) => Promise<unknown>) => async (p:
 const appOneOff = (then?: (p: Page) => Promise<unknown>) => async (p: Page) => {
   await app(p, `/work-items/new?${new URLSearchParams({ repo: "/Users/dev/code/kraft-plugins", chain: "default", title: "Load test it" })}`, { ready: (pg) => pg.getByText(/nodes run ·/).first().waitFor() });
   await p.getByRole("button", { name: /^default/ }).click();
-  await p.getByRole("menuitem", { name: "Customize for this item" }).click();
+  await p.getByRole("menuitem", { name: "Customise for this item" }).click();
   await p.waitForTimeout(800);
   if (then) await then(p);
 };

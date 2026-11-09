@@ -643,7 +643,7 @@ When the writer ends `done` or `failed`, Kraft checks everything first. Only the
 
 - The writer fails, and nothing is kept, when the folder is over [`storage.outputs.max_size`](/reference/configuration/policy#step-output-keys) or holds more than 100 entries; when a declared variable is missing, over 4 KiB, or holds a control character other than a tab; or when `variables.env` holds more than 50 variables.
 - A declared file that is missing is simply absent. An undeclared file or variable is ignored. A symlink, a file with another hard link and a FIFO are left out.
-- A writer whose processes outlive it fails with nothing kept. So does a remote writer whose machine dropped its folder for being over the limit, even if the server restarts before the writer is recorded.
+- A writer whose processes outlive it fails with nothing kept, as does a remote writer whose machine dropped its folder for being over the limit, even if the server restarts before the writer is recorded.
 - A failed check also removes the writer's snapshot from an earlier run, so a reader never sees it.
 - The writer's `session.log` gets one line with the counts of files kept and missing and the declared variable names. A message never holds a name or value the worker chose.
 

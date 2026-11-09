@@ -402,7 +402,7 @@ export function DraftItemPage() {
               ...(own
                 ? [{ label: `Back to ${d.chain}`, group: "This item", onSelect: () => dropOneOff({}) }]
                 // Only a library chain of this repo, quoted: the id came from the address and is never YAML of its own.
-                : repoChains.some((c) => c.id === d.chain) ? [{ label: "Customize for this item", group: "This item", onSelect: () => { set({ oneOff: `id: one-off\nextends: ${JSON.stringify(d.chain)}\n` }); setSel(null); } }] : []),
+                : repoChains.some((c) => c.id === d.chain) ? [{ label: "Customise for this item", group: "This item", onSelect: () => { set({ oneOff: `id: one-off\nextends: ${JSON.stringify(d.chain)}\n` }); setSel(null); } }] : []),
             ]}
           />
           {(!own || oo.view) && <span>{runText}</span>}

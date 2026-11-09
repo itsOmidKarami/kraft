@@ -16,4 +16,4 @@ swap:
   '(?<![\w.$/-])ids(?![\w=:/-])': IDs
   docker: Docker
   markdown: Markdown
-  'url(s)?(?![\w=:/-])': URL$1
+  '(?<![\w.$/-])url(s)?(?![\w=:/-])': URL$1
