@@ -19,3 +19,18 @@ origin: fixtures/claude-acp.yaml
 IF a task's tool limit would deny, or leave out of an allowlist, a tool the Claude-over-ACP entry lists in `settles_itself`, THEN the system SHALL refuse the launch before it starts.
 enforced-by: tests/acp/test_example_entries.py::test_the_claude_entry_refuses_a_limit_that_denies_a_tool_the_bridge_settles[allowlist-omits-a-settled-tool]
 origin: fixtures/claude-acp.yaml
+
+## REQ acp-probe-judges-each-call-by-what-the-entry-declares
+IF the entry declares `asks_everything` and a probe tool call ran without an ask while its Kraft tool is not in `settles_itself`, THEN the probe SHALL report a mismatch naming the tool.
+enforced-by: tests/acp/test_conformance.py::test_the_probe_judges_each_call_by_what_the_entry_declares[unasked-and-undeclared], tests/acp/test_conformance.py::test_the_probe_judges_each_call_by_what_the_entry_declares[unasked-and-declared-settled]
+origin: src/kraft/acp/conformance.py
+
+## REQ acp-probe-judges-reported-usage-by-the-entry
+IF the entry's `reports` declares tokens or cost and the probe session sent none, THEN the probe SHALL report a mismatch naming which.
+enforced-by: tests/acp/test_conformance.py::test_the_probe_judges_reported_usage_by_the_entry[tokens-missing], tests/acp/test_conformance.py::test_the_probe_judges_reported_usage_by_the_entry[cost-missing]
+origin: src/kraft/acp/conformance.py
+
+## REQ acp-probe-notes-usage-the-entry-does-not-declare
+WHEN the agent reports tokens or cost that the entry's `reports` does not declare, the probe SHALL note it and SHALL NOT call it a mismatch.
+enforced-by: tests/acp/test_conformance.py::test_the_probe_judges_reported_usage_by_the_entry[undeclared-cost], tests/acp/test_conformance.py::test_the_probe_judges_reported_usage_by_the_entry[undeclared-tokens]
+origin: src/kraft/acp/conformance.py
