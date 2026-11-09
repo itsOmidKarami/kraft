@@ -26,11 +26,11 @@ function timesRun(item: ItemDetail, work: WorkerSession[]): number {
   }));
 }
 
-/** The node a gate rejects to: its own `reject_to`, else the nearest earlier exec node or group (R23; the server's
- *  `preceding_exec_node`). */
 /** The drawn node `id` names: a chain node, or a node inside a group, which its group's `body` draws. */
 export const drawnOf = (nodes: ChainNode[], id: string): ChainNode | undefined => nodes.find((n) => n.id === id) ?? nodes.flatMap((n) => n.body ?? []).find((b) => b.id === id);
 
+/** The node a gate rejects to: its own `reject_to`, else the nearest earlier exec node or group (R23; the server's
+ *  `preceding_exec_node`). */
 export function rejectTarget(nodes: ApiNode[], gate: string): string | null {
   const i = nodes.findIndex((n) => n.id === gate);
   if (i < 0) return null;

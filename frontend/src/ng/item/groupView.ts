@@ -21,15 +21,19 @@ export const childOf = (item: ItemDetail, key: number): SliceChild | undefined =
 /** A child's state in words, as the board's row says it: the node it runs while it runs. */
 export const childWords = (c: SliceChild) => (c.display_status === "running" && c.current_node_id ? nodeWords(c.current_node_id) : c.display_status.replace(/_/g, " "));
 
+/** The group's slices: the plan's, else (a plan that no longer splits as it did) its children's. */
+export const slicesOf = (item: ItemDetail): { key: number; title: string; tasks: number[] }[] =>
+  item.group?.slices.length ? item.group.slices : (item.children ?? []).map((c) => ({ key: c.slice_key, title: c.title, tasks: [] }));
+
 /** Which slice the join replays now, as `slice 2 of 3`. */
-const joinWords = (item: ItemDetail) => `slice ${Math.min((item.group?.joined ?? 0) + 1, item.group?.slices.length ?? 0)} of ${item.group?.slices.length ?? 0}`;
+const joinWords = (item: ItemDetail) => `slice ${Math.min((item.group?.joined ?? 0) + 1, slicesOf(item).length)} of ${slicesOf(item).length}`;
 
 /** The group's view: the shared groundwork the item builds itself (its body nodes, in the states the chain draws them,
  *  or the whole body when the plan was not split), then one box per slice in its child's state, then the join. Step and
  *  box ids: a body node's own id (`implementation`), `slices` with each slice's key, `join`. */
 export function groupSteps(item: ItemDetail, drawn: Drawn | undefined): NodeStep[] {
   const g = item.group;
-  const slices = g?.slices ?? [];
+  const slices = slicesOf(item);
   // While the slices run or join the item runs none of its body, whatever node it last stood on (the groundwork's last);
   // once joined, a rework runs its first node again and the rest stay done.
   const away = g?.phase === "slices" || g?.phase === "joining";
@@ -65,7 +69,8 @@ const STOPS_FOR_YOU = new Set(["needs_you", "failed", "escalated"]);
  *  run, that it waits for them and how far they are, and on its own line a slice that needs you. */
 export function groupWords(item: ItemDetail, d: Drawn): Pick<Drawn, "sub" | "subTone" | "meta" | "metaTone" | "wait"> {
   const g = item.group;
-  if (!g?.phase || d.state !== "current") return {};
+  // A stop of the item's own (it needs you, it is paused) says so as for any node.
+  if (!g?.phase || d.state !== "current" || d.paused || (d.needs && g.phase !== "slices")) return {};
   if (g.phase === "groundwork") return { sub: [PHASE_WORDS.groundwork, d.running ? d.sub : ""].filter(Boolean).join(" · "), subTone: d.subTone };
   if (g.phase === "joining") return { sub: `joining · ${joinWords(item)}`, subTone: d.subTone };
   if (g.phase !== "slices") return {};

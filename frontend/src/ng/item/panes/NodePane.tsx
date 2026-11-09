@@ -3,7 +3,7 @@ import type { ChainNode } from "../../../types";
 import { nameOf, slicesDone } from "../../board/rowText";
 import { useNavigate } from "react-router-dom";
 import { nextNode } from "../cursor";
-import { childOf, childWords, PHASE_WORDS, tasksWords } from "../groupView";
+import { childOf, childWords, PHASE_WORDS, slicesOf, tasksWords } from "../groupView";
 import { stepsOf, taskName } from "../paths";
 import { loopRounds, sessionsOf, settled } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
@@ -56,7 +56,7 @@ export function NodeOverview({ item, node, onStep, onNode }: { item: ItemDetail;
 export function GroupOverview({ item, node, onNode }: { item: ItemDetail; node: ChainNode; onNode: (node: string) => void }) {
   const navigate = useNavigate();
   const g = item.group;
-  const slices = g?.slices ?? [];
+  const slices = slicesOf(item);
   const next = nextNode(item.chain_definition.nodes, node.id);
   return (
     <>
@@ -78,7 +78,7 @@ export function GroupOverview({ item, node, onNode }: { item: ItemDetail; node: 
                   <button type="button" className="ip-row" disabled={!kid} onClick={() => kid && navigate(`/work-items/${encodeURIComponent(kid.id)}`)}>
                     <span className="ip-mark" aria-hidden>{s.key}</span>
                     <span>{s.title}</span>
-                    <span className="ip-row-meta">{kid ? childWords(kid) : tasksWords(s.tasks)}</span>
+                    <span className="ip-row-meta">{kid ? childWords(kid) : s.tasks.length ? tasksWords(s.tasks) : ""}</span>
                   </button>
                 </li>
               );

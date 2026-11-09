@@ -48,6 +48,13 @@ describe("a slice group's view", () => {
       ["slices", [["slice 1", "done", "done"], ["slice 2", "amber", "needs you"]]],
       ["join", [["join", "todo", undefined]]],
     ]],
+    // A plan that no longer splits as it did still draws the slices its children run.
+    ["forked from a plan that no longer splits", at("slices", "slices", { display_status: "needs_you", ...forked, group: { ...SPLIT, slices: [], phase: "slices" } }), [
+      ["implementation", [["implementation", "done", undefined]]],
+      ["verification", [["verification", "done", undefined]]],
+      ["slices", [["slice 1", "done", "done"], ["slice 2", "amber", "needs you"]]],
+      ["join", [["join", "todo", undefined]]],
+    ]],
     ["not split", at("slices.verification", "deciding", { display_status: "running", group: { ...SPLIT, groundwork: [], slices: [], phase: "deciding" } }), [
       ["implementation", [["implementation", "done", undefined]]],
       ["verification", [["verification", "current", undefined]]],
@@ -62,6 +69,9 @@ describe("a slice group's view", () => {
     ["waiting, a slice failed", at("slices.verification", "slices", { display_status: "needs_you", children: [kid(1, "done"), kid(2, "failed")], slices: summary(1, 1) }), { wait: "waiting for slices", meta: "1 of 2 slices done", sub: "slice 2 failed", subTone: "amber" }],
     ["waiting", at("slices", "slices", { display_status: "waiting", children: [kid(1, "done"), kid(2, "running")], slices: summary(1, 0) }), { wait: "waiting for slices", sub: "1 of 2 slices done", subTone: "muted" }],
     ["joining", at("slices", "joining", { display_status: "running", group: { ...SPLIT, phase: "joining", joined: 1 } }), { sub: "joining · slice 2 of 2", subTone: "run" }],
+    // A stop of the item's own reads as for any node: the phase does not hide it.
+    ["joining, needing you itself", at("slices", "joining", { display_status: "needs_you", group: { ...SPLIT, phase: "joining", joined: 1 } }), { sub: "needs you", subTone: "amber" }],
+    ["building its groundwork, paused", at("slices.implementation", "groundwork", { display_status: "paused" }), { sub: "paused" }],
   ])("says on the chain what the group is doing while %s", (_, item, want) => {
     expect(drawn(item)[2]).toMatchObject(want);
   });

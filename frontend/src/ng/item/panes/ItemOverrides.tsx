@@ -3,7 +3,7 @@ import { useProviders } from "../../harnesses/useProviders";
 import { useHarnessOptions } from "../../templates/panes/useHarnessOptions";
 import type { ChainNode, Policy } from "../../../types";
 import { act } from "../actions";
-import { agentTasks, attemptsAt, effortOf, effortOptions, materialized, modelOf, modelSuggestions, oneOf, providersOf, type Given } from "../chainValues";
+import { agentTasks, attemptsAt, effortOf, effortOptions, materialized, modelOf, modelSuggestions, nodeAt, oneOf, providersOf, type Given } from "../chainValues";
 import type { ItemDetail } from "../useItem";
 import { useRepoEntry } from "../useRepoEntry";
 import { OverrideRow } from "./OverrideRow";
@@ -93,7 +93,7 @@ export function NodeOverrideRows({ item, node, policy, reload }: { item: ItemDet
   const { errors, send } = useSave(item, reload);
   const own: NodeFields = item.node_overrides?.[node.id] ?? {};
   const chain = materialized(item);
-  const loop = chain?.chain.nodes.find((n) => n.id === node.id)?.fix_loop;
+  const loop = chain && nodeAt(chain, node.id)?.fix_loop;
   const put = (key: keyof NodeFields, value: unknown) => void send(key, { node_overrides: { [node.id]: { [key]: value ?? null } } });
   const row = (key: keyof NodeFields, props: Omit<React.ComponentProps<typeof OverrideRow>, "own" | "onSave" | "onReset" | "problem" | "scope">) => (
     <OverrideRow key={key} {...props} scope="node" own={own[key] ?? undefined} problem={errors[key]} onSave={(v) => put(key, v)} onReset={() => put(key, undefined)} />
