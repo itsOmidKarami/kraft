@@ -74,30 +74,18 @@ def tool_limit_refusal(h, *, allowed_tools, deny_tools, permission_mode, grants=
     return None
 
 
-def launch_refusal(
-    h, *, allowed_tools, deny_tools, permission_mode, sandbox, runner, grants=()
-) -> str | None:
+def launch_refusal(h, *, allowed_tools, deny_tools, permission_mode, grants=()) -> str | None:
     """Why this launch cannot run on the harness `h`, or None. An empty allowlist is a
-    limit (it allows nothing); `restrict_tools` is only derived from `allowed_tools`."""
-    if why := tool_limit_refusal(
+    limit (it allows nothing); `restrict_tools` is only derived from `allowed_tools`. A sandbox or a
+    machine is not this door's business: the client runs outside the sandbox over the agent's
+    wrapped argv, and a machine without the client is refused by placement (`ACP_CLIENT`)."""
+    return tool_limit_refusal(
         h,
         allowed_tools=allowed_tools,
         deny_tools=deny_tools,
         permission_mode=permission_mode,
         grants=grants,
-    ):
-        return why
-    if sandbox:
-        return (
-            f"harness {h.id!r} is an ACP agent, which cannot run in a sandbox until "
-            "sandboxed ACP launches land (ACP part 3)"
-        )
-    if runner:
-        return (
-            f"harness {h.id!r} is an ACP agent, which cannot run on a remote machine until "
-            "remote ACP launches land (ACP part 3)"
-        )
-    return None
+    )
 
 
 def marker_path(files) -> Path:

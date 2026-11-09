@@ -1,6 +1,7 @@
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from support.acp import FAKE
@@ -10,6 +11,8 @@ from kraft.adapters.agent import LaunchRefused
 from kraft.caps import SpendCaps
 from kraft.paths import RunDirs
 from kraft.policy import Budget
+from kraft.remote import launch as remote_launch
+from kraft.remote import protocol
 
 ENTRY = {
     "id": "fake-acp",
@@ -84,18 +87,53 @@ def test_a_resumed_acp_launch_carries_the_agents_session_id(run, tmp_path):
     assert json.loads(Path(seen["cmd"][7]).read_text())["resume"] == "fake-session-1"
 
 
+def test_the_launch_door_refuses_what_it_cannot_hold(run, tmp_path):
+    with pytest.raises(LaunchRefused, match="asks_everything"):
+        _launch(run, tmp_path, deny_tools=("Bash",))
+
+
 @pytest.mark.parametrize(
-    ("kw", "expect"),
+    ("kw", "refused"),
     [
-        ({"deny_tools": ("Bash",)}, "asks_everything"),
-        ({"sandbox": {"kind": "docker", "image": "x", "network": {"allow": []}}}, "part 3"),
-        ({"runner": "box"}, "part 3"),
+        ({"sandbox": {"kind": "docker", "image": "x", "network": {"allow": []}}}, None),
+        ({"sandbox": {"kind": "docker", "image": "x"}}, "no `network:` policy"),
+        ({"runner": "box"}, None),
     ],
-    ids=["tool-policy-without-asks-everything", "sandbox", "remote"],
+    ids=[
+        "sandbox-with-network-runs",
+        "sandbox-without-network-keeps-the-general-refusal",
+        "machine-runs",
+    ],
 )
-def test_the_launch_door_refuses_what_the_client_cannot_yet_hold(run, tmp_path, kw, expect):
-    with pytest.raises(LaunchRefused, match=expect):
-        _launch(run, tmp_path, **kw)
+def test_an_acp_launch_in_a_sandbox_or_on_a_machine_runs_or_is_refused_by_the_general_rule(
+    run, tmp_path, kw, refused
+):
+    if refused:
+        with pytest.raises(LaunchRefused, match=refused):
+            _launch(run, tmp_path, **kw)
+    else:
+        assert _launch(run, tmp_path, **kw)["reader"] == "acp"
+
+
+@pytest.mark.parametrize(
+    ("caps", "places_again"),
+    [(frozenset(), True), (frozenset({protocol.ACP_CLIENT}), False)],
+    ids=["machine-lacks-the-client", "machine-has-the-client"],
+)
+def test_an_acp_launch_placed_on_a_machine_without_the_client_asks_to_be_placed_again(
+    run, tmp_path, monkeypatch, caps, places_again
+):
+    monkeypatch.setattr(
+        "kraft.remote.runs.current",
+        lambda: SimpleNamespace(hub=SimpleNamespace(caps=lambda m: caps)),
+    )
+    kw = {"runner": "gpu", "placed_claim": SimpleNamespace(machine="a")}
+    if places_again:
+        with pytest.raises(remote_launch.PlaceAgain) as raised:
+            _launch(run, tmp_path, **kw)
+        assert protocol.ACP_CLIENT in raised.value.needs
+    else:
+        assert _launch(run, tmp_path, **kw)["reader"] == "acp"
 
 
 def test_a_launch_under_a_cap_its_entry_does_not_report_is_refused_before_it_starts(

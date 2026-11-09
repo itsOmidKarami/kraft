@@ -1231,8 +1231,6 @@ async def _run_agent_task(
             allowed_tools=allowed_tools,
             deny_tools=deny_tools,
             permission_mode=permission_mode,
-            sandbox=sandbox,
-            runner=runner,
             grants=grants,
         )
     ):
@@ -1497,6 +1495,20 @@ async def _run_agent_task(
                     f"harness {harness!r} cannot run Kraft's permission hook, which this "
                     f"launch's policy needs: {exc}"
                 ) from exc
+    if h.kind == "acp" and runner and placed_claim is not None:
+        # Lazy: `kraft.remote` imports `store`, which imports this module.
+        from kraft.remote import launch as _launch
+        from kraft.remote import runs as _remote_runs
+        from kraft.remote.protocol import ACP_CLIENT
+
+        if ACP_CLIENT not in _remote_runs.current().hub.caps(placed_claim.machine):
+            # A group's member whose Kraft has no ACP client: `launch.placed` places again.
+            raise _launch.PlaceAgain(
+                {
+                    ACP_CLIENT: f"harness {harness!r} runs an ACP agent, which needs a machine "
+                    "whose Kraft has the ACP client"
+                }
+            )
     rules_env: dict[str, str] = {}
     rules_argv: tuple[str, ...] = ()
     rules_files: tuple[str, ...] = ()

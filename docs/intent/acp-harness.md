@@ -31,7 +31,7 @@ origin: src/kraft/acp/wire.py
 
 ## REQ acp-launch-refuses-tool-limits-it-cannot-hold
 IF a launch on a `kind: acp` harness sets `permission_mode`, or holds a named grant alongside a limit that denies `Bash`, or holds a tool policy on an entry that declares no `asks_everything`, or one its `tool_names` cannot tell apart, or one that denies a tool its `settles_itself` names, THEN the system SHALL refuse it before it starts, saying why.
-enforced-by: tests/acp/test_launch.py::test_a_tool_limit_the_entry_cannot_hold_is_refused_with_its_reason[permission-mode], tests/acp/test_launch.py::test_a_tool_limit_the_entry_cannot_hold_is_refused_with_its_reason[grant-with-bash-denied], tests/acp/test_launch.py::test_a_tool_limit_the_entry_cannot_hold_is_refused_with_its_reason[grant-with-allowlist-omitting-bash], tests/acp/test_launch.py::test_a_tool_limit_the_entry_cannot_hold_is_refused_with_its_reason[deny-list-no-asks], tests/acp/test_launch.py::test_a_tool_limit_the_entry_cannot_hold_is_refused_with_its_reason[allowlist-splits-a-kind], tests/acp/test_launch.py::test_a_tool_limit_the_entry_cannot_hold_is_refused_with_its_reason[deny-of-a-settled-tool], tests/adapters/test_agent_acp.py::test_the_launch_door_refuses_what_the_client_cannot_yet_hold[tool-policy-without-asks-everything]
+enforced-by: tests/acp/test_launch.py::test_a_tool_limit_the_entry_cannot_hold_is_refused_with_its_reason[permission-mode], tests/acp/test_launch.py::test_a_tool_limit_the_entry_cannot_hold_is_refused_with_its_reason[grant-with-bash-denied], tests/acp/test_launch.py::test_a_tool_limit_the_entry_cannot_hold_is_refused_with_its_reason[grant-with-allowlist-omitting-bash], tests/acp/test_launch.py::test_a_tool_limit_the_entry_cannot_hold_is_refused_with_its_reason[deny-list-no-asks], tests/acp/test_launch.py::test_a_tool_limit_the_entry_cannot_hold_is_refused_with_its_reason[allowlist-splits-a-kind], tests/acp/test_launch.py::test_a_tool_limit_the_entry_cannot_hold_is_refused_with_its_reason[deny-of-a-settled-tool], tests/adapters/test_agent_acp.py::test_the_launch_door_refuses_what_it_cannot_hold
 origin: src/kraft/acp/launch.py
 
 ## REQ acp-launch-accepts-a-tool-policy-the-entry-can-hold
@@ -49,9 +49,9 @@ WHEN Kraft launches a `kind: acp` harness, the system SHALL put the entry's aski
 enforced-by: tests/adapters/test_agent_acp.py::test_an_acp_launch_hands_its_tool_policy_to_the_client[allowlist], tests/adapters/test_agent_acp.py::test_an_acp_launch_hands_its_tool_policy_to_the_client[deny-only], tests/adapters/test_agent_acp.py::test_an_acp_launch_hands_its_tool_policy_to_the_client[always-deny-alone], tests/adapters/test_agent_acp.py::test_an_acp_launch_hands_its_tool_policy_to_the_client[no-policy-still-asks]
 origin: src/kraft/acp/launch.py
 
-## REQ acp-launch-refuses-sandbox-and-remote-until-part-3
-IF a launch on a `kind: acp` harness is sandboxed or placed on a remote machine, THEN the system SHALL refuse it before it starts, saying why.
-enforced-by: tests/adapters/test_agent_acp.py::test_the_launch_door_refuses_what_the_client_cannot_yet_hold[sandbox], tests/adapters/test_agent_acp.py::test_the_launch_door_refuses_what_the_client_cannot_yet_hold[remote]
+## REQ acp-launch-door-leaves-placement-and-sandbox-to-their-own-rules
+The system SHALL NOT refuse a launch on a `kind: acp` harness for being sandboxed or placed on a remote machine; a sandbox without `network:` stays refused for every harness.
+enforced-by: tests/adapters/test_agent_acp.py::test_an_acp_launch_in_a_sandbox_or_on_a_machine_runs_or_is_refused_by_the_general_rule[sandbox-with-network-runs], tests/adapters/test_agent_acp.py::test_an_acp_launch_in_a_sandbox_or_on_a_machine_runs_or_is_refused_by_the_general_rule[sandbox-without-network-keeps-the-general-refusal], tests/adapters/test_agent_acp.py::test_an_acp_launch_in_a_sandbox_or_on_a_machine_runs_or_is_refused_by_the_general_rule[machine-runs]
 origin: src/kraft/acp/launch.py
 
 ## REQ acp-session-command-is-the-client-not-the-agent

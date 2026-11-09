@@ -10,19 +10,7 @@ from kraft.caps import SpendCaps
 H = harness.Harness.from_mapping(
     {"id": "fake-acp", "kind": "acp", "command": ["agent", "acp"]}, where="t"
 )
-NONE = dict(allowed_tools=None, deny_tools=(), permission_mode=None, sandbox=None, runner=None)
-
-
-@pytest.mark.parametrize(
-    ("patch", "expect"),
-    [
-        ({"sandbox": {"kind": "docker"}}, "part 3"),
-        ({"runner": "box"}, "part 3"),
-    ],
-    ids=["sandbox", "remote"],
-)
-def test_a_launch_the_client_cannot_yet_hold_is_refused_with_its_reason(patch, expect):
-    assert expect in launch.launch_refusal(H, **{**NONE, **patch})
+NONE = dict(allowed_tools=None, deny_tools=(), permission_mode=None)
 
 
 def _acp(**entry):
