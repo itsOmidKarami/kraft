@@ -137,6 +137,7 @@ kraft admin forge list / kraft admin forge remove NAME   # remove is refused (40
 kraft admin forge test NAME                  # cli account: the server runs `gh|glab auth status`; api account: probes the token; exit 1 on failure
 kraft admin init [--repo] / kraft admin mcp  # register Kraft with an agent
 kraft admin permission-hook codex|cursor     # run by a harness's pre-tool hook, not by hand
+kraft admin acp-probe [HARNESS | --file PATH] [--model M]  # one scripted session against an ACP harness; checks its entry; answers every ask allow_once; exit 1 on a mismatch
 ```
 
 Verbs live in four groups: `item` acts, `view` reads, `repo` is repositories and

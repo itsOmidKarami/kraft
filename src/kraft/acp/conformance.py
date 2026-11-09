@@ -249,3 +249,50 @@ async def run(
                 log=tuple(lines),
             )
         return replace(analyze(lines, h, exit_code=proc.returncode or 0), log=tuple(lines))
+
+
+class ProbeError(Exception):
+    """The probe cannot start: no such harness, a file that is not an entry, or not `kind: acp`."""
+
+
+def load_entry(harness_id: str | None, file: str | None):
+    """The harness to probe: `--file PATH` (an entry not yet installed, such as
+    fixtures/claude-acp.yaml), else `harness_id` from the live config."""
+    import yaml
+
+    from kraft import harness
+    from kraft.yamlload import safe_load
+
+    if file:
+        path = Path(file)
+        try:
+            h = harness.Harness.from_mapping(
+                safe_load(path.read_text()), where=str(path), path=path
+            )
+        except (OSError, harness.HarnessError, ValueError, yaml.YAMLError) as exc:
+            # yaml.YAMLError is not a ValueError: a malformed file is a message, not a traceback
+            raise ProbeError(f"cannot load {file}: {exc}") from exc
+    elif harness_id:
+        found = harness.load(None)
+        h = found.valid.get(harness_id)
+        if h is None:
+            raise ProbeError(found.invalid.get(harness_id) or f"no harness {harness_id!r}")
+    else:
+        raise ProbeError("name a harness, or give --file PATH")
+    if h.kind != "acp":
+        raise ProbeError(f"harness {h.id!r} is kind: {h.kind}; the probe needs kind: acp")
+    return h
+
+
+def render(r: Report) -> str:
+    rows = [f"agent: {r.agent or 'unknown'}", f"stop reason: {r.stop_reason or 'none'}"]
+    for c in r.calls:
+        tool = "/".join(c.kraft) or f"? ({c.key or c.id})"
+        rows.append(f"  {tool}: {'asked' if c.asked else 'NOT asked'}, {c.status or 'no status'}")
+    rows.append(f"tokens reported: {'yes' if r.tokens_reported else 'no'}")
+    rows.append(f"cost reported: {'yes' if r.cost_reported else 'no'}")
+    rows += [f"PROBLEM: {p}" for p in r.problems]
+    rows += [f"MISMATCH: {m}" for m in r.mismatches]
+    rows += [f"note: {n}" for n in r.notes]
+    rows.append("conforms to its entry" if r.ok else "does NOT conform to its entry")
+    return "\n".join(rows)

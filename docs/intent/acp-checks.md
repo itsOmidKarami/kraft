@@ -39,3 +39,8 @@ origin: src/kraft/acp/conformance.py
 WHEN an operator runs the conformance probe, the system SHALL run Kraft's own ACP client against the agent in a scratch folder with the entry's asking switch applied, ask the agent to read a file, write a file, run a command, glob and grep, answer every ask `allow_once` without the permission gate even when the entry always denies a tool, report the agent's version, and kill the client's process group when the probe is cancelled.
 enforced-by: tests/acp/test_conformance.py::test_the_probe_runs_the_client_against_the_agent_and_judges_the_log, tests/acp/test_conformance.py::test_the_probe_sends_no_host_access_enforces_no_policy_and_sets_no_model, tests/acp/test_conformance.py::test_the_probe_enforces_nothing_even_when_the_entry_always_denies_a_tool, tests/acp/test_conformance.py::test_cancelling_the_probe_kills_the_client_and_the_agent
 origin: src/kraft/acp/conformance.py
+
+## REQ acp-probe-verb-exits-one-on-a-mismatch
+WHEN `kraft admin acp-probe` finds a problem or a mismatch between the session and the entry, the system SHALL exit 1 after printing the report, and SHALL exit 0 when the session conforms.
+enforced-by: tests/cli/test_admin_acp_probe.py::test_the_verb_exits_one_on_a_mismatch[conforms], tests/cli/test_admin_acp_probe.py::test_the_verb_exits_one_on_a_mismatch[a-call-ran-unasked]
+origin: src/kraft/cli/admin.py

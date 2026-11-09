@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import dataclasses
 import errno
 import logging
 import os
@@ -1854,6 +1855,22 @@ def _cmd_acp_client(ns: argparse.Namespace) -> None:
     sys.exit(client.main(ns.spec))
 
 
+def _cmd_acp_probe(ns: argparse.Namespace) -> None:
+    from kraft.acp import conformance
+
+    try:
+        h = conformance.load_entry(ns.harness, ns.file)
+    except conformance.ProbeError as exc:
+        raise SystemExit(f"kraft: {exc}") from None
+    report = asyncio.run(
+        conformance.run(h, executable=ns.executable, model=ns.model, timeout_s=ns.timeout)
+    )
+    payload = {**dataclasses.asdict(report), "ok": report.ok, "unasked": list(report.unasked)}
+    common.emit(payload, lambda _: conformance.render(report), ns.json)
+    if not report.ok:
+        raise SystemExit(1)
+
+
 def _cmd_permission_hook(ns: argparse.Namespace) -> None:
     """What a harness's pre-tool hook runs, as `sys.executable -I -m kraft` so it
     is the daemon's own install. Client side only: no server import, since
@@ -2353,3 +2370,23 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
     )
     acp_client.add_argument("--spec", required=True, help="the launch spec Kraft wrote")
     acp_client.set_defaults(func=_cmd_acp_client)
+
+    acp_probe = subs.add_parser(
+        "acp-probe",
+        parents=[common],
+        help="run one scripted session against an ACP harness and compare it with its entry",
+        description=(
+            "Starts the agent in a scratch folder with the entry's asking switch on, asks it to "
+            "read a file, write a file, run a command, glob and grep, and reports per call whether "
+            "it asked, whether tokens and cost came back, and the agent's version. It spends a few "
+            "tokens and is never run by doctor or at a launch. It is not a real launch: it answers "
+            "EVERY ask allow_once (no tool limit is enforced), and the agent runs with this "
+            "shell's whole environment, where a launch's is built from an allowlist."
+        ),
+    )
+    acp_probe.add_argument("harness", nargs="?", help="a kind: acp harness id from the live config")
+    acp_probe.add_argument("--file", help="an entry file not yet installed, instead of HARNESS")
+    acp_probe.add_argument("--executable", help="replaces the first word of the entry's command")
+    acp_probe.add_argument("--model", help="the agent's model; default: the agent's own default")
+    acp_probe.add_argument("--timeout", type=float, default=300.0, help="seconds, default 300")
+    acp_probe.set_defaults(func=_cmd_acp_probe)
