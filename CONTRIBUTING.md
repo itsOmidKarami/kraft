@@ -164,7 +164,7 @@ rebuild the extension first.
 ### Pre-commit hooks
 
 `.pre-commit-config.yaml` runs ruff, whitespace, YAML and file-size checks,
-and two local hooks. In a fresh clone, `uv run pre-commit install` sets them
+and three local hooks. In a fresh clone, `uv run pre-commit install` sets them
 up. In a checkout that uses beads, `bd hooks install` writes its hooks to the
 git directory (`.git/hooks/`, shared by every linked worktree); there, append
 this below beads' block in `.git/hooks/pre-commit` instead:
@@ -185,8 +185,10 @@ reason.
 Either way, `uv run pre-commit run --all-files` runs them by hand. CI is the
 real gate; the hooks only catch things sooner.
 
-The two local hooks need `just` on `PATH`:
+The three local hooks need `just` on `PATH`:
 
+- `vale` runs `just vale` when a Markdown file changes, and fails the commit
+  on any alert. See [Voice and spelling](#voice-and-spelling).
 - `config-schemas-current` runs `just schemas` when `src/kraft/` or
   `vscode/schemas/` changes, and fails the commit if that rewrote a schema.
   Stage the regenerated files and commit again.
@@ -630,7 +632,7 @@ page you're touching, not just the code.
 ### Voice and spelling
 
 [Vale](https://vale.sh) checks the docs site, the README and the contributor docs
-against the house style. `just vale` runs it, and so does the `lint` job. The
+against the house style. `just vale` runs it, and so do the pre-commit hook and the `lint` job. The
 rules live in `.vale/styles/Kraft/`:
 
 - British spelling, -ise forms: colour, behaviour, labelled, organise. The rule

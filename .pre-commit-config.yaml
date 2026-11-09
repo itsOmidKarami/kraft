@@ -51,3 +51,11 @@ repos:
         language: system
         pass_filenames: false
         files: ^(src/kraft/|vscode/schemas/)
+      # The docs style (.vale.ini). All of vale_paths takes under a second, so it
+      # runs whole on any Markdown change rather than keep a third file list.
+      - id: vale
+        name: docs follow the house style (vale)
+        entry: just vale
+        language: system
+        pass_filenames: false
+        types: [markdown]
