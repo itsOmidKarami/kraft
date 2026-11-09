@@ -7,6 +7,9 @@ import time
 from pathlib import Path
 
 import pytest
+import yaml
+
+from kraft import harness
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "fixtures" / "fake-claude.sh"
 
@@ -200,3 +203,13 @@ def test_the_skip_knob_suppresses_the_artifact_on_a_done_report(tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert not artifact.exists()
     assert json.loads((tmp_path / "result.json").read_text())["status"] == "done"
+
+
+def test_the_dev_acp_entry_loads_and_its_agent_is_on_the_fixtures_path():
+    root = Path(__file__).resolve().parents[1]
+    h = harness.Harness.from_mapping(
+        yaml.safe_load((root / "fixtures/fake-acp.yaml").read_text()),
+        where="fixtures/fake-acp.yaml",
+    )
+    assert (h.id, h.kind, h.command) == ("fake-acp", "acp", ("fake-acp-agent",))
+    assert (root / "fixtures/bin" / h.command[0]).resolve() == root / "fixtures/fake_acp_agent.py"

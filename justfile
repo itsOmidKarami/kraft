@@ -161,6 +161,8 @@ _dev-home:
     @mkdir -p .dev
     @[ -d .dev/config ] || {{ '{' }} [ -d .dev/templates ] && mv .dev/templates .dev/config; {{ '}' }} || {{ '{' }} rm -rf .dev/config.tmp && cp -R config .dev/config.tmp && rm -rf .dev/config.tmp/chains .dev/config.tmp/library.yaml .dev/config.tmp/.kraft && {{dev_env}} uv run python -c 'import sys,pathlib; from kraft.addons import builtin; builtin.write_thin_seed(pathlib.Path(sys.argv[1]))' .dev/config.tmp && mv .dev/config.tmp .dev/config; {{ '}' }}
     @rm -f .dev/config/access.yaml
+    @mkdir -p .dev/config/harnesses && cp fixtures/fake-acp.yaml .dev/config/harnesses/fake-acp.yaml
+    @{{dev_env}} uv run python -c 'import pathlib,yaml; p=pathlib.Path(".dev/config/harnesses.yaml"); d=yaml.safe_load(p.read_text()) or {}; d.setdefault("harnesses",{}).setdefault("fake-acp",{"provider":"fake-acp","enabled":True,"executable":"fake-acp-agent"}); p.write_text(yaml.safe_dump(d, sort_keys=False))'
     @{{dev_env}} uv run python dev/seed.py --repo-only
 
 # Run backend only, against the dev home (127.0.0.1:8766, or KRAFT_DEV_PORT)

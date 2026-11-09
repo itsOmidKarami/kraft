@@ -1,0 +1,9 @@
+# The dev instance's ACP agent: fixtures/fake_acp_agent.py, which spends no tokens.
+# `just dev` copies this into .dev/config/harnesses/ and adds a `fake-acp` profile.
+id: fake-acp
+kind: acp
+command: [fake-acp-agent]
+reports: [tokens, cost]
+options:
+  model: { config: model }
+  effort: { config: effort }
