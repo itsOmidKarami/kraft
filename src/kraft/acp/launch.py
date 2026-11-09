@@ -73,3 +73,25 @@ def command(h, *, files, agent_argv, cwd, prompt, context, resume, model, effort
     path.parent.mkdir(parents=True, exist_ok=True)
     write_whole(path, spec.model_dump_json().encode(), 0o600)
     return [*client_prefix(), "--spec", str(path)]
+
+
+def cap_refusal(h, caps, model) -> str | None:
+    """Why a launch under `caps` cannot be counted against, or None. A token cap needs the
+    entry to report tokens; a dollar cap needs its cost, else its tokens on a model
+    `prices.json` prices (the order the settled cost is chosen in)."""
+    from kraft import usage
+
+    reports = h.acp.reports
+    if caps.tokens and "tokens" not in reports:
+        return (
+            f"a token_budget is in effect, and ACP harness {h.id!r} does not declare "
+            "that it reports per-turn tokens (`reports: [tokens]` in its entry), so Kraft "
+            "cannot count its spend"
+        )
+    if caps.usd and "cost" not in reports and not ("tokens" in reports and usage.priced(model)):
+        return (
+            f"a dollar cap is in effect, and ACP harness {h.id!r} reports neither a cost "
+            "nor tokens on a model prices.json prices (its entry's `reports`, and the "
+            f"launch's model {model!r}), so Kraft cannot count its spend"
+        )
+    return None

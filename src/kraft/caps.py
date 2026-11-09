@@ -49,7 +49,7 @@ import math
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -496,6 +496,38 @@ Breach = Annotated[
 ]
 
 
+class SpendCaps(NamedTuple):
+    """Which kinds of spend cap bound a launch: a `token_budget`, a dollar cap."""
+
+    tokens: bool
+    usd: bool
+
+
+def _scope_levels(snapshot, path: str) -> list[str]:
+    """`""` (the work item) then every enclosing scope of `path` that can carry a cap."""
+    kinds = {p: k for p, k, _ in snapshot.chain.cap_scopes()}
+    segments = path.split(".")
+    return [
+        "",
+        *(p for i in range(1, len(segments) + 1) if (p := ".".join(segments[:i])) in kinds),
+    ]
+
+
+def spend_caps_in_effect(conn, row, path: str, budget) -> SpendCaps:
+    """The spend caps a launch at `path` runs under: any enclosing scope's policy, or the
+    instance `budget`'s dollar caps. Decided before the launch, from the caps alone."""
+    snapshot = store.materialized_chain_of(row) if row is not None else None
+    tokens = usd = False
+    if snapshot is not None:
+        for level in _scope_levels(snapshot, path):
+            policy = snapshot.policy_at(level) if level else snapshot.work_item_policy()
+            tokens |= policy.token_budget not in (None, math.inf)
+            usd |= policy.budget_usd not in (None, math.inf)
+    return SpendCaps(
+        tokens, usd or budget.work_item_usd is not None or budget.daily_usd is not None
+    )
+
+
 def budget_breach(conn, row, path: str) -> TokenBreach | UsdBreach | None:
     """The first spend cap already reached over a launch at `path` (a task's,
     or a node's for its escalation turn), broadest scope first, or None
@@ -520,12 +552,7 @@ def budget_breach(conn, row, path: str) -> TokenBreach | UsdBreach | None:
     snapshot = store.materialized_chain_of(row)
     if snapshot is None:
         return None
-    kinds = {p: k for p, k, _ in snapshot.chain.cap_scopes()}
-    segments = path.split(".")
-    levels = [
-        "",
-        *(p for i in range(1, len(segments) + 1) if (p := ".".join(segments[:i])) in kinds),
-    ]
+    levels = _scope_levels(snapshot, path)
     # The item-wide cap covers the whole family of a sliced item: the parent's and
     # every child's spend. A scope inside a node is the item's own.
     family = store.family_ids(conn, row["id"])

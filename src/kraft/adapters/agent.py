@@ -1093,6 +1093,18 @@ async def run_agent_task(db, run_dirs, *, follow_node: bool = False, **kw) -> st
     )
 
 
+def _scope_path(hook_point: str, node_id: str) -> str:
+    """The scope a launch's caps are read at: its `hook_point` (a task's path), except an
+    escalation turn's literal "escalation", whose scope is its node (as `caps.budget_breach`)."""
+    return node_id if hook_point == "escalation" else hook_point
+
+
+def _spend_caps(db, item_row, scope: str, budget) -> caps.SpendCaps:
+    if item_row is None:
+        return caps.SpendCaps(False, False)
+    return db.read(lambda c: caps.spend_caps_in_effect(c, item_row, scope, budget))
+
+
 async def _run_agent_task(
     db,
     run_dirs,
@@ -1140,6 +1152,9 @@ async def _run_agent_task(
     repository: str | None = None,
     repo_entry: RepoEntry | None = None,
     time_cap=None,
+    #: The instance's dollar caps, which an ACP launch is refused under when its entry cannot
+    #: be counted against them; only the walk (`dispatch_node`) passes them.
+    budget: _policy.Budget = _policy.NO_BUDGET,
     #: The session's files, else its own folder's (`item_paths.session_files`):
     #: an escalation turn's result and summary are its thread's (Kraft-s7c04.54).
     files: item_paths.SessionFiles | None = None,
@@ -1218,6 +1233,12 @@ async def _run_agent_task(
     item_row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )
+    if h.kind == "acp" and (
+        why := _acp.cap_refusal(
+            h, _spend_caps(db, item_row, _scope_path(hook_point, node_id), budget), model
+        )
+    ):
+        raise LaunchRefused(why)
     in_place = item_row is not None and store.is_in_place(item_row)
     in_copy = in_copy and in_place
     probe_cwd = cwd

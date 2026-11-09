@@ -11,7 +11,7 @@ import pydantic
 import pytest
 from support.harness import v1_node
 
-from kraft import events, store, usage
+from kraft import caps, events, store, usage
 from kraft import policy as _policy
 from kraft.caps import DailyBreach, TokenBreach, UsdBreach, WorkItemBreach
 from kraft.executor import stops
@@ -651,3 +651,29 @@ async def test_a_slice_refused_on_the_family_cap_stops_its_family_at_once(
     assert len(c1.events("work_item_needs_human")) == int(c1_ends == "needs_human")
     assert len(parent.events("work_item_needs_human")) == int(cascades)
     assert (c2.row()["status"] == "paused") is cascades
+
+
+@pytest.mark.parametrize(
+    ("level", "cap", "expect"),
+    [
+        ("task", {"token_budget": 1000}, (True, False)),
+        ("step", {"budget_usd": 5}, (False, True)),
+        ("chain", {"token_budget": 1000, "budget_usd": 5}, (True, True)),
+        (None, None, (False, False)),
+    ],
+    ids=["task-token", "step-usd", "chain-both", "none"],
+)
+async def test_spend_caps_in_effect_reads_every_enclosing_scope(item_on, level, cap, expect):
+    it = await (item_on(_chain(level, cap)) if level else item_on(_chain()))
+    got = it.database.read(
+        lambda c: caps.spend_caps_in_effect(c, it.row(), TASK, _policy.NO_BUDGET)
+    )
+    assert tuple(got) == expect
+
+
+async def test_an_instance_dollar_cap_counts_as_a_dollar_cap(item_on):
+    it = await item_on(_chain())
+    got = it.database.read(
+        lambda c: caps.spend_caps_in_effect(c, it.row(), TASK, _policy.Budget(daily_usd=5))
+    )
+    assert tuple(got) == (False, True)

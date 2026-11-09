@@ -7,6 +7,7 @@ from support.acp import FAKE
 
 from kraft import harness
 from kraft.adapters.agent import LaunchRefused
+from kraft.caps import SpendCaps
 from kraft.paths import RunDirs
 
 ENTRY = {
@@ -62,3 +63,22 @@ def test_a_resumed_acp_launch_carries_the_agents_session_id(run, tmp_path):
 def test_the_launch_door_refuses_what_the_client_cannot_yet_hold(run, tmp_path, kw, expect):
     with pytest.raises(LaunchRefused, match=expect):
         _launch(run, tmp_path, **kw)
+
+
+def test_a_launch_under_a_cap_its_entry_does_not_report_is_refused_before_it_starts(
+    run, tmp_path, monkeypatch
+):
+    monkeypatch.setattr("kraft.adapters.agent._spend_caps", lambda *a, **k: SpendCaps(True, False))
+    with pytest.raises(LaunchRefused, match=r"token_budget.*reports"):
+        _launch(run, tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("hook_point", "node_id", "scope"),
+    [("build.run.impl", "build", "build.run.impl"), ("escalation", "build", "build")],
+    ids=["task-hook-point", "escalation-uses-the-node-id"],
+)
+def test_the_scope_a_launchs_caps_are_read_at(hook_point, node_id, scope):
+    from kraft.adapters import agent
+
+    assert agent._scope_path(hook_point, node_id) == scope
