@@ -14,7 +14,18 @@ import httpx
 from kraft import auth, ids, logs
 from kraft.client import context, transport
 from kraft.paths import RunDirs, default_run_dir
-from kraft.vocab import ThreadState, WorkItemStatus
+from kraft.vocab import DisplayStatus, ThreadState, WorkItemStatus
+
+_STORED = frozenset(s.value for s in WorkItemStatus)
+
+#: What a status filter takes: every stored status, then the words only the
+#: displayed status has. Not `archived`: the board leaves archived items off.
+STATUS_FILTERS = tuple(
+    dict.fromkeys(
+        [*(s.value for s in WorkItemStatus)]
+        + [d.value for d in DisplayStatus if d is not DisplayStatus.ARCHIVED]
+    )
+)
 
 
 async def board_rows(*, include_abandoned: bool = False) -> tuple[list[dict], int]:
@@ -45,7 +56,8 @@ async def board(
     `with_cursor=True` flag on `list_work_items` that returns two different
     types: two fields, one caller that needs both.
     """
-    wanted = include_abandoned or status == WorkItemStatus.ABANDONED
+    # A cancelled item is stored `abandoned`, so either word needs them on the board.
+    wanted = include_abandoned or status in (WorkItemStatus.ABANDONED, DisplayStatus.CANCELLED)
     rows, cursor = await board_rows(include_abandoned=wanted)
     return trim_work_items(rows, status), cursor
 
@@ -61,8 +73,8 @@ async def list_work_items(
 
     Abandoned items are off the board by default. Without the flag there is no
     way to see one again from the CLI, which makes `kraft item abandon` look like a
-    delete. Asking for `status="abandoned"` turns it on: that filter could
-    match nothing otherwise.
+    delete. Asking for `status="abandoned"` (or `"cancelled"`) turns it on:
+    that filter could match nothing otherwise.
     """
     return (await board(status, include_abandoned=include_abandoned))[0]
 
@@ -89,6 +101,15 @@ async def work_item_ids() -> set[str]:
     return ids
 
 
+def _status_matches(row: dict, status: str) -> bool:
+    """A stored word matches the stored status, as it always has, so a
+    rate-limited item that displays `waiting` is not `waiting`. Any other word
+    matches the displayed status, which an older server does not send."""
+    if status in _STORED:
+        return row["status"] == status
+    return row.get("display_status") == status
+
+
 def trim_work_items(items: list[dict], status: str | None = None) -> list[dict]:
     """The board rows, trimmed to the fields a caller can act on.
 
@@ -106,10 +127,10 @@ def trim_work_items(items: list[dict], status: str | None = None) -> list[dict]:
             "progress": item.get("progress"),
         }
         children = item.get("children") or []
-        if status is not None and item["status"] != status:
+        if status is not None and not _status_matches(item, status):
             # A slice is not a board row, so a filter finds it through its
             # parent: the parent is listed with just the children that match.
-            children = [k for k in children if k["status"] == status]
+            children = [k for k in children if _status_matches(k, status)]
             if not children:
                 continue
         if children:

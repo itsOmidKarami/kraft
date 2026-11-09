@@ -20,7 +20,7 @@ from support.server import child_env
 
 from kraft import client, db, mcp
 from kraft.update import installed
-from kraft.vocab import WorkItemStatus
+from kraft.vocab import DisplayStatus
 
 
 def _tools():
@@ -239,15 +239,32 @@ def test_every_tool_has_a_description_an_agent_can_act_on():
 def test_list_work_items_names_every_status_the_schema_allows():
     """The filter is an exact match, so a status the description leaves out is
     one an agent never asks for, and one it invents always returns []."""
-    allowed = set(re.findall(r"'(\w+)'", re.search(r"status IN\s*\(([^)]*)\)", db.SCHEMA_SQL)[1]))
+    stored = set(re.findall(r"'(\w+)'", re.search(r"status IN\s*\(([^)]*)\)", db.SCHEMA_SQL)[1]))
+    # `archived` is not offered: the board leaves archived items off.
+    display_only = {d.value for d in DisplayStatus} - stored - {"archived"}
     listing = next(t for t in _tools() if t.name == "list_work_items")
-    assert set(re.findall(r'"(\w+)"', listing.description)) == allowed
+    assert set(re.findall(r'"(\w+)"', listing.description)) == stored | display_only
 
 
 def test_list_work_items_schema_lists_the_statuses():
+    """One flat enum an MCP client can offer: a union of the two vocabularies
+    would be two `$ref`s, overlapping, with `archived` in one."""
     listing = next(t for t in _tools() if t.name == "list_work_items")
-    schema = json.dumps(listing.input_schema)
-    assert all(f'"{s.value}"' in schema for s in WorkItemStatus)
+    schema = listing.input_schema
+    assert schema["properties"]["status"]["anyOf"][0]["enum"] == list(client.STATUS_FILTERS)
+    assert "$defs" not in schema and "archived" not in json.dumps(schema)
+
+
+def test_list_work_items_passes_a_display_word_through(monkeypatch):
+    calls = []
+
+    async def listing(status=None):
+        calls.append(status)
+        return []
+
+    monkeypatch.setattr(mcp.client, "list_work_items", listing)
+    asyncio.run(mcp.build().call_tool("list_work_items", {"status": "failed"}))
+    assert calls == ["failed"]
 
 
 @pytest.mark.slow

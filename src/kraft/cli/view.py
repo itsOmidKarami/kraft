@@ -13,7 +13,7 @@ from kraft.vocab import StopKind, WorkItemEvent, WorkItemStatus
 
 #: argparse choices; a typo answers an error, not an empty board. Plain strings,
 #: not members: argparse prints `repr(choice)` in its error.
-STATUSES = tuple(s.value for s in WorkItemStatus)
+STATUSES = client.STATUS_FILTERS
 
 _LIST_COLUMNS = [
     ("ID", "id"),
@@ -566,9 +566,13 @@ def _add_view(subs, common: argparse.ArgumentParser) -> None:
     listing = subs.add_parser("list", parents=[common], help="the board")
     listing.add_argument(
         "--status",
+        # `needs you` as the STATUS column prints it; argparse runs `type` before `choices`.
+        type=lambda s: s.replace(" ", "_"),
         choices=STATUSES,
         metavar="STATUS",
-        help="filter by stored status, as --json's status field has it: %(choices)s",
+        help="filter by stored status, as --json's status field has it, or by a word only "
+        "the STATUS column shows, such as failed or 'needs you'. A word both have, like "
+        "waiting, means the stored status: %(choices)s",
     )
     listing.add_argument("--repo", help="only this repo (default: the repo you are standing in)")
     listing.add_argument("--all", action="store_true", help="every repo, ignoring the cwd")

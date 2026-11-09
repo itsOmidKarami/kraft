@@ -14,14 +14,13 @@ import functools
 import inspect
 import os
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from kraft import client
 from kraft.update import installed
-from kraft.vocab import WorkItemStatus
 
 
 def _refusals_reach_the_agent(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
@@ -86,17 +85,25 @@ class _Server(MCPServer):
         return wrap
 
 
+#: One flat enum in the tool schema: a `WorkItemStatus | DisplayStatus` union is
+#: two `$ref`s that overlap, with `archived`, which the board never lists.
+StatusFilter = Literal[client.STATUS_FILTERS]
+
+
 def build() -> MCPServer:
     """The server, tools registered. Split from `serve_stdio` so a test can list
     the tools without owning a transport."""
     server = _Server("kraft", version=installed())
 
     @server.tool()
-    async def list_work_items(status: WorkItemStatus | None = None) -> list[dict]:
+    async def list_work_items(status: StatusFilter | None = None) -> list[dict]:
         """List Kraft work items — the board. Optionally filter by one exact
         status: "paused", "active", "queued", "blocked", "waiting", "rate_limited",
-        "needs_human", "completed" or "abandoned". Abandoned items, cancelled ones included,
-        are listed only when you ask for "abandoned". Returns id, title, repo,
+        "needs_human", "completed" or "abandoned", or by one only the board's badge
+        shows: "running", "needs_you", "escalated", "failed", "done" or "cancelled".
+        A word both have ("paused", "queued", "blocked", "waiting") means the stored
+        status. Abandoned items, cancelled ones included, are listed only when you
+        ask for "abandoned" or "cancelled". Returns id, title, repo,
         status, display status (the board's badge word), current node, and any
         gate waiting on a human."""
         return await client.list_work_items(status)

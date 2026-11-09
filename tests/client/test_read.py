@@ -90,9 +90,48 @@ def test_list_work_items_filters_by_status(wired, tmp_path):
     assert run_with_app(wired, scenario) == []
 
 
+_ROW = {"title": "t", "repo": "r", "current_node_id": None, "pending_gate": None}
+
+_BOARD = [
+    {**_ROW, "id": "a", "status": "active", "display_status": "running"},
+    {**_ROW, "id": "f", "status": "needs_human", "display_status": "failed"},
+    {**_ROW, "id": "w", "status": "waiting", "display_status": "waiting"},
+    {**_ROW, "id": "r", "status": "rate_limited", "display_status": "waiting"},
+    {**_ROW, "id": "o", "status": "needs_human"},  # an older server: no display_status
+    {**_ROW, "id": "p1", "status": "waiting", "display_status": "needs_you", "slices": {},
+     "children": [{"id": "c1", "status": "completed", "display_status": "done"},
+                  {"id": "c2", "status": "needs_human", "display_status": "needs_you"}]},
+]  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("status", "listed"),
+    [
+        pytest.param(
+            "needs_human", [("f", []), ("o", []), ("p1", ["c2"])], id="a-stored-word-matches-status"
+        ),
+        pytest.param("failed", [("f", [])], id="a-display-only-word-matches-display-status"),
+        # A rate-limited item displays `waiting`, but the stored word keeps its meaning.
+        pytest.param(
+            "waiting",
+            [("w", []), ("p1", ["c1", "c2"])],
+            id="a-shared-word-keeps-its-stored-meaning",
+        ),
+        pytest.param("done", [("p1", ["c1"])], id="a-child-matched-by-its-display-status"),
+        pytest.param(
+            "needs_you", [("p1", ["c1", "c2"])], id="an-older-servers-row-matches-no-display-word"
+        ),
+    ],
+)
+def test_the_status_filter_rule(status, listed):
+    rows = client.trim_work_items(_BOARD, status)
+    assert [(r["id"], [k["id"] for k in r.get("children", [])]) for r in rows] == listed
+
+
 def test_cancelled_and_archived_items_are_reachable_on_request(wired, tmp_path):
     """Cancel stores `abandoned`, which the board leaves off. The flag (or
-    asking for that status, as the MCP tool does) brings it back, and
+    asking for that status, or for `cancelled`, what a cancelled item
+    displays, as the MCP tool does) brings it back, and
     `work_item_ids` -- doctor's list of every row -- has archived items too.
     Through the real transport: the flag once rode in the path, and httpx
     dropped it for the empty `params` beside it."""
@@ -110,14 +149,17 @@ def test_cancelled_and_archived_items_are_reachable_on_request(wired, tmp_path):
             await client.list_work_items(),
             await client.list_work_items(include_abandoned=True),
             await client.list_work_items(status="abandoned"),
+            await client.list_work_items(status="cancelled"),
         ]
         return (open_id, cancelled, archived), lists, await client.work_item_ids()
 
     (open_id, cancelled, archived), lists, ids = run_with_app(wired, scenario)
-    board, with_abandoned, only_abandoned = ([i["id"] for i in items] for items in lists)
+    board, with_abandoned, only_abandoned, shown_cancelled = (
+        [i["id"] for i in items] for items in lists
+    )
     assert board == [open_id]
     assert with_abandoned == [open_id, cancelled]
-    assert only_abandoned == [cancelled]
+    assert only_abandoned == shown_cancelled == [cancelled]
     assert ids == {open_id, cancelled, archived}
 
 

@@ -13,15 +13,25 @@ from kraft.cli import view
 from kraft.vocab import WorkItemStatus
 
 
-def test_the_list_filter_offers_exactly_the_work_item_statuses():
-    assert view.STATUSES == tuple(s.value for s in WorkItemStatus)
+def test_the_list_filter_offers_the_stored_then_the_display_only_statuses():
+    stored = tuple(s.value for s in WorkItemStatus)
+    display_only = ("done", "cancelled", "running", "needs_you", "escalated", "failed")
+    assert view.STATUSES == (*stored, *display_only)
 
 
-def test_list_refuses_a_status_typo_instead_of_showing_an_empty_board(capsys):
+@pytest.mark.parametrize(
+    "word",
+    [
+        pytest.param("needs-human", id="a-typo"),
+        # The board leaves archived items off, so it could only ever match nothing.
+        pytest.param("archived", id="archived-is-never-on-the-board"),
+    ],
+)
+def test_list_refuses_a_status_typo_instead_of_showing_an_empty_board(capsys, word):
     with pytest.raises(SystemExit) as caught:
-        cli.main(["view", "list", "--status", "needs-human"])
+        cli.main(["view", "list", "--status", word])
     assert caught.value.code == 2
-    assert "invalid choice: 'needs-human'" in capsys.readouterr().err
+    assert f"invalid choice: '{word}'" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
@@ -519,6 +529,19 @@ def _board_with_a_parent():
             id="a-matching-parent-keeps-every-child",
         ),
         pytest.param("paused", [(False, "w2", "paused")], [("w2", [])], id="no-child-matches"),
+        # What the STATUS column prints, pasted back: a display-only word, with its space.
+        pytest.param(
+            "needs you",
+            [(False, "p1", "needs you"), (True, "c1", "done"), (True, "c2", "needs you")],
+            [("p1", ["c1", "c2"])],
+            id="a-display-word-as-the-column-prints-it",
+        ),
+        pytest.param(
+            "done",
+            [(False, "p1", "needs you"), (True, "c1", "done")],
+            [("p1", ["c1"])],
+            id="a-display-word-finds-a-child",
+        ),
     ],
 )  # fmt: skip
 def test_list_shows_a_parents_children_under_it(monkeypatch, capsys, status, rows, listed):
