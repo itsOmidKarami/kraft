@@ -249,20 +249,26 @@ def test_a_door_rebases_a_stopped_item_onto_its_base_branch(
 
 
 @pytest.mark.parametrize(
-    ("chain", "rebased"),
+    ("chain", "child", "rebased"),
     [
-        (_ONE_NODE, ["release"]),
-        ([{**_ONE_NODE[0], "id": "m"}, {**_ONE_NODE[0], **_RESTART}], ["release"]),
-        ([{**_ONE_NODE[0], "id": "m"}, {**_ONE_NODE[0], **_RESTART, "tasks": [_REBASE]}], []),
+        (_ONE_NODE, False, ["release"]),
+        ([{**_ONE_NODE[0], "id": "m"}, {**_ONE_NODE[0], **_RESTART}], False, ["release"]),
+        (
+            [{**_ONE_NODE[0], "id": "m"}, {**_ONE_NODE[0], **_RESTART, "tasks": [_REBASE]}],
+            False,
+            [],
+        ),
+        (_ONE_NODE, True, []),
     ],
     ids=[
         "onto-the-base",
         "before-a-node-that-only-declares-on_base_changed",
         "not-before-a-node-that-rebases-itself",
+        "not-a-slices-child-which-stays-on-its-fork-commit",
     ],
 )
 async def test_an_escalations_self_retry_rebases_onto_the_items_base_branch(
-    item_on, run_dirs, repo, monkeypatch, chain, rebased
+    item_on, run_dirs, repo, monkeypatch, chain, child, rebased
 ):
     from kraft import events, store
     from kraft.executor import gates
@@ -281,6 +287,12 @@ async def test_an_escalations_self_retry_rebases_onto_the_items_base_branch(
     monkeypatch.setattr(sys.modules["kraft.executor.retry"], "retry", walk)
     target = WorkItemTarget.for_repository("target", base_branch="release")
     it = await item_on(chain, "n", target=target)
+    if child:
+        await it.database.write(
+            lambda c: c.execute(
+                "UPDATE work_items SET parent_id = 'p', slice_key = '1' WHERE id = ?", (it.id,)
+            )
+        )
     await it.database.write(
         lambda c: store.mark_needs_human(c, it.id, "n", "stuck", stuck=True, kind="stuck")
     )
