@@ -298,9 +298,13 @@ def _install_on_a_free_port(monkeypatch, run_dir: pathlib.Path) -> None:
         cli.main(["admin", "uninstall-service"])
         assert _wait_for(lambda: cli.admin._read_pid(RunDirs(run_dir).pid) is None)
 
-    on_a_free_port(start, owns, stop)
+    # A cold `kraft` started by launchd/systemd while the parallel suite saturates the machine
+    # took over the default 15s to answer, and 45s under heavier load: wait 90s. The tests
+    # calling this carry their own timeout for that and the two 15s teardown waits.
+    on_a_free_port(start, owns, stop, timeout=90.0)
 
 
+@pytest.mark.timeout(240)
 @pytest.mark.skipif(sys.platform != "darwin", reason="launchd is macOS-only")
 @pytest.mark.skipif(not shutil.which("kraft"), reason="no installed `kraft` on PATH to supervise")
 @pytest.mark.skipif(
@@ -329,6 +333,7 @@ def test_install_and_uninstall_service_use_the_real_launchd(tmp_path, monkeypatc
         assert stopped, "uninstall-service did not stop the supervised daemon"
 
 
+@pytest.mark.timeout(240)
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="systemd --user is Linux-only")
 @pytest.mark.skipif(not shutil.which("kraft"), reason="no installed `kraft` on PATH to supervise")
 @pytest.mark.skipif(not shutil.which("systemctl"), reason="no systemctl on this box")
