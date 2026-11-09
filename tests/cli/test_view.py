@@ -430,13 +430,19 @@ def test_show_lists_a_parents_slices(monkeypatch, capsys):
             "status": "waiting",
             "title": "the parent",
             "chain_definition": {"nodes": []},
-            "slices": {"done": 1, "needs_you": 1, "paused": 0, "running": 0, "queued": 0,
-                       "dropped": 0, "total": 2},
+            "slices": {"done": 1, "needs_you": 3, "paused": 0, "running": 0, "queued": 0,
+                       "dropped": 0, "total": 4},
             "children": [
                 {"id": "c1", "title": "p · slice 1: A", "slice_key": 1, "status": "completed",
-                 "current_node_id": "verification", "cost_usd": 0.42},
+                 "display_status": "done", "current_node_id": "verification", "cost_usd": 0.42},
                 {"id": "c2", "title": "p · slice 2: B", "slice_key": 2, "status": "needs_human",
-                 "current_node_id": "implementation", "cost_usd": None},
+                 "display_status": "failed", "current_node_id": "implementation",
+                 "cost_usd": None},
+                {"id": "c3", "title": "p · slice 3: C", "slice_key": 3, "status": "needs_human",
+                 "display_status": "needs_you", "current_node_id": None, "cost_usd": None},
+                # An older server sends no display status: the stored one, as `view list` does.
+                {"id": "c4", "title": "p · slice 4: D", "slice_key": 4, "status": "needs_human",
+                 "current_node_id": None, "cost_usd": None},
             ],
         }  # fmt: skip
 
@@ -445,9 +451,11 @@ def test_show_lists_a_parents_slices(monkeypatch, capsys):
     cli.main(["view", "show", "p1"])
 
     out = capsys.readouterr().out
-    assert "1 done, 1 needs you of 2" in out
-    assert "1  c1  completed  verification  $0.42  p · slice 1: A" in out
-    assert "2  c2  needs_human  implementation  -  p · slice 2: B" in out
+    assert "1 done, 3 needs you of 4" in out
+    assert "1  c1  done  verification  $0.42  p · slice 1: A" in out
+    assert "2  c2  failed  implementation  -  p · slice 2: B" in out
+    assert "3  c3  needs you  -  -  p · slice 3: C" in out
+    assert "4  c4  needs_human  -  -  p · slice 4: D" in out
 
 
 _ROW = {"id": "w1", "repo": "r", "title": "t", "current_node_id": None, "pending_gate": None}

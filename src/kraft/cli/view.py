@@ -188,11 +188,14 @@ def _render_show(item: dict, full: dict | None = None) -> str:
 
 
 def _child_line(child: dict) -> str:
-    """One slice of a parent: `1  <id>  completed  implementation  $0.42  title`."""
+    """One slice of a parent: `1  <id>  done  implementation  $0.42  title`. Its
+    display status, as `view list` words it; an older server's stored status."""
+    shown = child.get("display_status")
+    status = shown.replace("_", " ") if shown else child["status"]
     node = child.get("current_node_id") or "-"
     title = render.plain_text(str(child["title"]))
     cost = _cost_text(child)
-    return f"{child['slice_key']}  {child['id']}  {child['status']}  {node}  {cost}  {title}"
+    return f"{child['slice_key']}  {child['id']}  {status}  {node}  {cost}  {title}"
 
 
 def _one_off_line(one_off: dict) -> str:
