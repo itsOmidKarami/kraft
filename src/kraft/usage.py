@@ -50,6 +50,7 @@ from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 from pathlib import Path
 
+from kraft.acp import log as _acp_log
 from kraft.worker.worktree_read import read_no_follow
 
 
@@ -290,10 +291,18 @@ def from_envelope(envelope: object) -> Usage | None:
     u = _from_model_usage(envelope.get("modelUsage"), _model_of(envelope))
     if u is None:
         u = _from_usage_block(envelope.get("usage"), _model_of(envelope))
-    if u is None:
-        return None
     cost = envelope.get("total_cost_usd", envelope.get("cost_usd"))
-    if isinstance(cost, int | float) and not isinstance(cost, bool):
+    cost_known = isinstance(cost, int | float) and not isinstance(cost, bool)
+    if u is None:
+        # An ACP cancelled turn can leave a cost and no prompt usage: the cost is still
+        # known. Not for a CLI result line that reports nothing (its `usage` is zeroed and
+        # its `modelUsage` empty, cost 0): that is no invocation (see `_combine`).
+        if not (
+            cost_known and isinstance(envelope.get("usage"), dict) and "modelUsage" not in envelope
+        ):
+            return None
+        return Usage(cost_usd=float(cost), model=_model_of(envelope))
+    if cost_known:
         u = replace(u, cost_usd=float(cost))
     return u
 
@@ -1137,6 +1146,98 @@ def _rate_limit_antigravity(log_path: Path) -> RateLimitInfo | None:
     return None
 
 
+_ACP_MODEL = "\x00model"
+_ACP_COST = "\x00cost"
+_ACP_LAUNCH = "\x00launch"  # tokens_in counts the `starting` records seen: the launch ordinal
+
+
+def _acp_turn(block: dict) -> Usage:
+    """One `PromptResponse.usage`: uncached input, output plus thought tokens (measured:
+    they are an addend of `totalTokens`), cache read and write."""
+
+    def pick(camel: str, snake: str) -> int:
+        return _int(block.get(camel, block.get(snake)))
+
+    return Usage(
+        tokens_in=pick("inputTokens", "input_tokens"),
+        tokens_out=pick("outputTokens", "output_tokens") + pick("thoughtTokens", "thought_tokens"),
+        tokens_cache_read=pick("cachedReadTokens", "cached_read_tokens"),
+        tokens_cache_write=pick("cachedWriteTokens", "cached_write_tokens"),
+    )
+
+
+def _stream_acp(lines: Iterable[str], seen: dict[str, Usage]) -> Usage | None:
+    """An ACP session log (`kraft.acp.log`): each prompt response's usage block, summed over
+    every launch the log holds, and the last `usage_update` cost (cumulative for the
+    session). History replayed by `session/load` is never counted, nor is `update.used`
+    (context size, not spend)."""
+    for rec in _acp_log.records(lines):
+        if rec.get("replay"):
+            continue
+        if rec.get("dir") == "client" and rec.get("event") == "starting":
+            seen[_ACP_LAUNCH] = Usage(tokens_in=seen.get(_ACP_LAUNCH, Usage()).tokens_in + 1)
+            continue
+        if rec.get("dir") == "client" and rec.get("event") == "session":
+            model = rec.get("model")
+            if isinstance(model, str) and model:
+                seen[_ACP_MODEL] = Usage(model=model)
+            continue
+        msg = rec.get("msg") if rec.get("dir") == "from_agent" else None
+        if not isinstance(msg, dict):
+            continue
+        result = msg.get("result")
+        if (
+            isinstance(result, dict)
+            and "stopReason" in result
+            and isinstance(result.get("usage"), dict)
+        ):
+            launch = seen.get(_ACP_LAUNCH, Usage()).tokens_in
+            seen[f"turn:{launch}:{msg.get('id')}"] = _acp_turn(result["usage"])
+        elif msg.get("method") == "session/update":
+            update = (msg.get("params") or {}).get("update")
+            cost = update.get("cost") if isinstance(update, dict) else None
+            if (
+                isinstance(update, dict)
+                and update.get("sessionUpdate") == "usage_update"
+                and isinstance(cost, dict)
+                and cost.get("currency") == "USD"
+                and isinstance(cost.get("amount"), int | float)
+                and not isinstance(cost.get("amount"), bool)
+            ):
+                seen[_ACP_COST] = Usage(cost_usd=float(cost["amount"]))
+    turns = [u for k, u in seen.items() if k.startswith("turn:")]
+    cost, model = seen.get(_ACP_COST), seen.get(_ACP_MODEL)
+    if not turns and cost is None:
+        return None
+    return replace(
+        _sum(turns), cost_usd=cost.cost_usd if cost else None, model=model.model if model else None
+    )
+
+
+def _envelope_acp(log_path: Path) -> dict | None:
+    try:
+        u = _stream_acp(log_path.read_text().splitlines(), {})
+    except OSError:
+        return None
+    if u is None:
+        return None
+    envelope: dict = {"usage": {k: getattr(u, k) for k in KINDS}, "model": u.model}
+    if u.cost_usd is not None:
+        envelope["total_cost_usd"] = u.cost_usd
+    return envelope
+
+
+def _session_id_acp(log_path: Path) -> str | None:
+    try:
+        lines = log_path.read_text().splitlines()
+    except OSError:
+        return None
+    for rec in _acp_log.records(lines):
+        if rec.get("dir") == "client" and rec.get("event") == "session" and rec.get("session_id"):
+            return str(rec["session_id"])
+    return None
+
+
 @dataclass(frozen=True)
 class Reader:
     """A log schema Kraft knows how to parse.
@@ -1238,6 +1339,14 @@ READERS: dict[str, Reader] = {
         rate_limit=_rate_limit_antigravity,
         session_id=_session_id_antigravity,
         reports_cost=False,
+        running_totals=False,
+    ),
+    "acp": Reader(
+        name="acp",
+        stream=_stream_acp,
+        envelope=_envelope_acp,
+        rate_limit=lambda _log_path: None,
+        session_id=_session_id_acp,
         running_totals=False,
     ),
 }

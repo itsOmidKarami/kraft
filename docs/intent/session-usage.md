@@ -48,3 +48,8 @@ origin: src/kraft/store/budget.py §usage_rollup (Kraft-wz83s)
 WHEN a session's log carries sub-agent lines, the system SHALL read its usage and cost exactly as it reads them without sub-agent tracking.
 enforced-by: tests/test_usage.py::test_a_log_with_several_result_envelopes_counts_every_invocation[sub-agent-progress-lines]
 origin: src/kraft/usage.py §read_envelope
+
+## REQ acp-usage-is-per-turn-and-context-size-is-not-spend
+The system SHALL read an ACP session's tokens from each prompt response's usage block (output plus thought tokens, so the parts sum to the agent's total) and its cost from the last `usage_update` cost, SHALL count the turns of every launch a log holds, SHALL keep a cost that arrives with no prompt usage, SHALL skip history replayed by `session/load`, and SHALL NOT count `usage_update.used` as tokens or cost.
+enforced-by: tests/acp/test_reader.py::test_a_turns_tokens_and_the_cumulative_cost_are_read, tests/acp/test_reader.py::test_a_measured_usage_block_totals_exactly_what_the_agent_reported[opencode-2.2.5], tests/acp/test_reader.py::test_a_measured_usage_block_totals_exactly_what_the_agent_reported[claude-bridge], tests/acp/test_reader.py::test_turns_of_two_launches_in_one_log_both_count_though_their_ids_repeat, tests/acp/test_reader.py::test_a_cancelled_turn_with_a_cost_and_no_prompt_usage_keeps_its_cost[cost-only], tests/acp/test_reader.py::test_context_size_is_never_counted_as_tokens_or_cost, tests/acp/test_reader.py::test_replay_and_foreign_currency_are_not_counted[replayed-history-skipped]
+origin: src/kraft/usage.py §_stream_acp
