@@ -24,3 +24,17 @@ export const standingNode = (nodes: ChainNode[], current: string | null | undefi
   const c = cursorOf(nodes, current);
   return c ? (c.inner ?? c.node) : undefined;
 };
+
+/** The chain node `id` names: a top-level node, or one inside a group by its path (`slices.implementation`). */
+export function findNode(nodes: ChainNode[], id: string | null | undefined): ChainNode | undefined {
+  if (!id) return undefined;
+  return nodes.find((n) => n.id === id) ?? nodes.flatMap((n) => (n.kind === "group" ? (n.nodes ?? []) : [])).find((b) => b.id === id);
+}
+
+/** The node after `id`: the next one in its group's body, else the next in the chain (after a group, its last node too). */
+export function nextNode(nodes: ChainNode[], id: string): ChainNode | undefined {
+  const c = cursorOf(nodes, id);
+  if (!c) return undefined;
+  const body = c.node.kind === "group" ? (c.node.nodes ?? []) : [];
+  return (c.inner && body[c.innerIndex + 1]) || nodes[c.index + 1];
+}

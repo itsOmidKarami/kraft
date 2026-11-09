@@ -1,5 +1,6 @@
 import { breakable } from "../../ui/breakable";
 import { nameOf } from "../../board/rowText";
+import { findNode } from "../../item/cursor";
 import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -30,7 +31,7 @@ export function TaskScreen({ item, version, events, docs, place, node: nodeId, n
   const navigate = useNavigate();
   const path = selPath(place.sel)!;
   const esc = place.sel.step === ESCALATION;
-  const apiNode = item.chain_definition.nodes.find((n) => n.id === nodeId)!;
+  const apiNode = findNode(item.chain_definition.nodes, nodeId)!;
   // In a fix-loop node the screen is one round's, as the desktop's pane is: a task and the judge as the round
   // measured, the repair as it went on to the next.
   const loop = !esc && place.sel.step === FIX_LOOP ? (place.sel.task === JUDGE ? "judge" : "repair") : null;

@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-rou
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkerSession } from "../../types";
 import { layout } from "../graph/layout";
-import { detail, fresh, stubFetch } from "./testkit";
+import { detail, fresh, SLICED, stubFetch } from "./testkit";
 import { openBudgetEditor, usePaneMemory, Workspace } from "./Workspace";
 
 beforeEach(() => {
@@ -211,6 +211,29 @@ describe("Workspace", () => {
       expect(screen.queryByText(/Review diff/)).toBeNull();
       expect(screen.getByRole("button", { name: "agent: Explore codebase" })).toBeInTheDocument();
     });
+  });
+
+  it("opens a node inside a group on its own view: its task on the canvas, its group in the crumbs, its next node", async () => {
+    mount("/work-items/w1/nodes/slices.implementation", { chain_definition: { template_id: "default", nodes: SLICED }, current_node_id: "slices.implementation" });
+    expect(screen.getByRole("group", { name: "slices.implementation" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^work, / })).toBeInTheDocument();
+    const pane = screen.getByRole("complementary", { name: "slices.implementation pane" });
+    expect(within(pane).getByRole("button", { name: "slices.verification" })).toBeInTheDocument();
+    await userEvent.click(within(pane).getByRole("button", { name: "slices" }));
+    expect(where()).toBe("/work-items/w1/nodes/slices.implementation?sel=slices");
+  });
+
+  it("draws a slice group's view: a body node's box selects it, a slice's opens its child item", async () => {
+    const group = { id: "slices", phase: "slices" as const, groundwork: [1], slices: [{ key: 1, title: "Client", tasks: [2] }, { key: 2, title: "Docs", tasks: [3] }], joined: 0 };
+    const children = [1, 2].map((k) => ({ id: `c${k}`, title: `t${k}`, slice_key: k, status: "active", display_status: "running", current_node_id: "verification", cost_usd: 0 }));
+    mount("/work-items/w1/nodes/slices", { chain_definition: { template_id: "default", nodes: SLICED }, current_node_id: "slices", display_status: "waiting", group, children });
+    const canvas = within(screen.getByRole("group", { name: "slices" }));
+    expect(canvas.getAllByRole("button", { name: /, (node|slice|join), / }).map((b) => b.getAttribute("aria-label"))).toEqual(["implementation, node, done", "verification, node, done", "slice 1, slice, running", "slice 2, slice, running", "join, join, not started"]);
+    expect(within(screen.getByRole("complementary", { name: "slices pane" })).getByRole("button", { name: /Docs/ })).toBeInTheDocument();
+    await userEvent.click(canvas.getByRole("button", { name: /^implementation, node/ }));
+    expect(where()).toBe("/work-items/w1/nodes/slices?sel=slices.implementation");
+    await userEvent.dblClick(canvas.getByRole("button", { name: /^slice 2, slice/ }));
+    expect(where()).toBe("/work-items/c2");
   });
 
   it("goes back to the chain's pane from a node's crumb", async () => {

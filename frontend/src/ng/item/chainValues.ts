@@ -10,7 +10,7 @@ type Pol = Record<string, unknown> | null | undefined;
 export type MTask = { id: string; kind: string; ref?: string | null; execution?: string | null; skill?: string | null; produces?: string | null; harness?: string | null; model?: string | null; effort?: string | null; profile?: string | null; prompt?: string | null; command?: unknown; policy?: Pol; on_failure?: MLoop | null };
 type MStep = { id: string; tasks: MTask[]; policy?: Pol; on_failure?: MLoop | null };
 export type MLoop = { max_attempts?: number | null; tasks?: MTask[] | null; steps?: MStep[] | null; judge?: MTask | null };
-export type MNode = { id: string; kind: string; tasks?: MTask[] | null; steps?: MStep[] | null; policy?: Pol; fix_loop?: MLoop | null; on_failure?: MLoop | null; auto_review?: MTask | null; auto_review_mode?: "decides" | "checks_first" | null; message?: string | null; artifact?: string | null };
+export type MNode = { id: string; kind: string; tasks?: MTask[] | null; steps?: MStep[] | null; policy?: Pol; fix_loop?: MLoop | null; on_failure?: MLoop | null; auto_review?: MTask | null; auto_review_mode?: "decides" | "checks_first" | null; message?: string | null; artifact?: string | null; /** A slice group's body, by their own ids. */ nodes?: MNode[] | null };
 /** What the item runs against, frozen at intake: a workspace's root and its members, in the order a fanned-out task visits them. */
 export type MTarget = { kind: string; root?: string | null; mounts?: Record<string, { repository: string; path: string }> };
 export type Materialized = {
@@ -63,13 +63,17 @@ export const handlerPaths = (plan: MLoop, owner: string) => (plan.steps ?? (plan
 
 /** The node, step and task a path names, broadest first. */
 function scopes(m: Materialized, path: string) {
-  const [n, s, t] = path.split(".");
-  const node = m.chain.nodes.find((x) => x.id === n);
+  // A node inside a group is named by its path (`slices.verification`): one segment here, its steps and tasks after it.
+  const all = path.split(".");
+  const inner = all.length > 1 && nodeAt(m, `${all[0]}.${all[1]}`) && m.chain.nodes.some((x) => x.id === all[0] && x.nodes) ? 2 : 1;
+  const parts = [all.slice(0, inner).join("."), ...all.slice(inner)];
+  const [n, s, t] = parts;
+  const node = nodeAt(m, n);
   const step = node && s ? stepsOfNode(node).find((x) => x.id === s) : undefined;
   // A gate's reviewer is `<gate>.auto_review`: no step of the chain, but a task of its own.
-  const task = step && t ? step.tasks.find((x) => x.id === t) : node?.kind === "gate" && s === "auto_review" && !t ? node.auto_review ?? undefined : s === "fix_loop" || s === "on_failure" ? loopTaskAt(node, path.split(".").slice(2), s) : undefined;
+  const task = step && t ? step.tasks.find((x) => x.id === t) : node?.kind === "gate" && s === "auto_review" && !t ? node.auto_review ?? undefined : s === "fix_loop" || s === "on_failure" ? loopTaskAt(node, parts.slice(2), s) : undefined;
   // A step's or a task's own on_failure handler: `<node>.<step>[.<task>].on_failure.<step>.<task>`.
-  const segs = path.split("."), at = segs.indexOf("on_failure");
+  const segs = parts, at = segs.indexOf("on_failure");
   if (step && (at === 2 || at === 3)) {
     const owner = at === 2 ? step : step.tasks.find((x) => x.id === t);
     const [hs, ht] = segs.slice(at + 1);
@@ -134,7 +138,11 @@ export const loopStepPaths = (m: Materialized | null, node: string, step: string
 
 /** A task's kind by its path, from the frozen chain. */
 export const taskKindAt = (m: Materialized | null, path: string) => glyphKind(m ? taskAt(m, path)?.kind : undefined);
-export const nodeAt = (m: Materialized, id: string) => m.chain.nodes.find((n) => n.id === id);
+/** A frozen node by id, or one inside a group by its path (`slices.verification`): the group freezes its body by their own ids. */
+export const nodeAt = (m: Materialized, id: string): MNode | undefined => {
+  const [g, b] = id.split(".");
+  return m.chain.nodes.find((n) => n.id === id) ?? (b ? m.chain.nodes.find((n) => n.id === g)?.nodes?.find((x) => x.id === b) : undefined);
+};
 
 /** What a gate says when it waits (its `message:`), from the frozen chain; the API's chain listing carries none. */
 export const gateMessage = (m: Materialized | null, id: string): string | undefined => (m && nodeAt(m, id)?.message) || undefined;

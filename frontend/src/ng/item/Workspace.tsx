@@ -16,7 +16,9 @@ import { useDraft } from "./draft/context";
 import { useApplied } from "./draft/useApplied";
 import { markNodes, markSteps } from "./draft/draftGraph";
 import { useOneOffMarks } from "./oneOffMarks";
-import { chainGraph } from "./graph";
+import { findNode } from "./cursor";
+import { chainGraph, drawnOf } from "./graph";
+import { childOf, groupSteps } from "./groupView";
 import { DocViewer, docBy } from "./DocViewer";
 import { gateView, reviewerSel } from "./gateView";
 import { asOfPass, nodeGraph, passList, roundShown } from "./nodeGraph";
@@ -177,7 +179,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
     dispatch(state.level === "chain" && (to.kind === "step" || to.kind === "task") ? { type: "focus", node: to.node, sel: to } : { type: "pick", sel: to });
   };
   const tab = place.tab ?? "";
-  const viewing = place.node ? nodes.find((n) => n.id === place.node) : undefined;
+  const viewing = findNode(nodes, place.node);
   // The pass of the node and the fix-loop round the canvas shows are in the URL (`?pass=`, `?round=`; neither: the
   // newest), as on the phone, so a link opens on them. An earlier pass is read off the item as that pass left it.
   const passes = viewing && passList(item, viewing.id, place.pass);
@@ -223,6 +225,17 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   // The sub-agent picked, when its task's box draws it among its marks: a stale id, or "main", marks none.
   const agentOn = (step: string, task: string) => (place.agent && inside?.steps.find((st) => st.id === step)?.tasks.find((t) => t.id === task)?.agents?.some((x) => x.id === place.agent) ? place.agent : undefined);
   const nodeSel = (x: NodeSel): Sel => (x.task ? { kind: "task", node: viewing!.id, step: x.step, task: x.task } : { kind: "step", node: viewing!.id, step: x.step });
+  // A slice group's view: a body node's box is that node; a slice's box and the join's are the group's own pane. Opening
+  // a body node goes into it, opening a slice goes to its child item.
+  const groupNode = (x: NodeSel) => (x.step === "slices" || x.step === "join" ? viewing!.id : `${viewing!.id}.${x.step}`);
+  const openInGroup = (x: NodeSel) => {
+    const kid = x.step === "slices" && x.task ? childOf(item, Number(x.task)) : undefined;
+    if (kid) navigate(`/work-items/${encodeURIComponent(kid.id)}`);
+    else if (x.step === "slices" || x.step === "join") dispatch({ type: "expand", sel: { kind: "node", node: groupNode(x) } });
+    else dispatch({ type: "focus", node: groupNode(x) });
+  };
+  const selNode = sel.kind === "chain" ? undefined : sel.node;
+  const inGroup = viewing && selNode?.startsWith(`${viewing.id}.`) ? selNode.slice(viewing.id.length + 1) : undefined;
 
   return (
     <div className="item-canvas" ref={frame}>
@@ -232,6 +245,18 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
           <GateView {...gateView(item, viewing, events, now, sel, { doc: () => setArtifact(true), reject: (to) => dispatch({ type: "focus", node: to }) })} right={reserve}
             onGate={() => pick({ kind: "node", node: viewing.id })}
             onReviewer={() => pick(reviewerSel(item, viewing))}
+            onBackground={() => dispatch({ type: "background" })}
+          />
+        ) : viewing?.kind === "group" ? (
+          <NodeGraph
+            name={viewing.id}
+            steps={groupSteps(shown, drawnOf(graph.nodes, viewing.id))}
+            reserve={reserve}
+            selected={inGroup ? { step: inGroup, task: inGroup } : undefined}
+            onSelect={(x) => pick({ kind: "node", node: groupNode(x) })}
+            onOpen={openInGroup}
+            onExpand={openInGroup}
+            onEscape={back}
             onBackground={() => dispatch({ type: "background" })}
           />
         ) : viewing && inside ? (

@@ -6,7 +6,7 @@ import type { KraftEvent, WorkItemDocument } from "../../../types";
 import { lineCount } from "../../../format";
 import { NodeGlyph } from "../../graph/NodeGlyph";
 import { act } from "../../item/actions";
-import { chainGraph, rejectTarget } from "../../item/graph";
+import { chainGraph, drawnOf, rejectTarget } from "../../item/graph";
 import { escalationsIn, ESCALATION, FIX_LOOP, nodeGraph, passList, passOf, stateWord } from "../../item/nodeGraph";
 import { stepsOf, taskName } from "../../item/paths";
 import { TestsLine } from "../../item/TestsLine";
@@ -29,6 +29,8 @@ import { appliedRows } from "../../item/draft/applied";
 import { useApplied } from "../../item/draft/useApplied";
 import { gateMessage, loopPaths, materialized, nodeAt } from "../../item/chainValues";
 import { nameOf } from "../../board/rowText";
+import { findNode, nextNode } from "../../item/cursor";
+import { childOf, groupSteps, PHASE_WORDS, tasksWords } from "../../item/groupView";
 import "../areas/areas.css";
 import { yamlOf } from "../areas/yaml";
 import "./node.css";
@@ -59,10 +61,11 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
   const sheet = useSheet();
   const { busy, run } = useDo(reload);
   const name = nameOf(item.chain_definition.nodes, nodeId);
-  const api = item.chain_definition.nodes.find((n) => n.id === nodeId)!;
+  const api = findNode(item.chain_definition.nodes, nodeId)!;
   const { nodes } = useMemo(() => chainGraph(item, events, now), [item, events, now]);
-  const graph = nodes.find((n) => n.id === nodeId)!;
+  const graph = drawnOf(nodes, nodeId)!;
   const gate = api.kind === "gate";
+  const kindWords = gate ? "gate" : api.kind === "group" ? "group node" : "exec node";
   const sub = nodeSub(graph, gate && gateSkipped(events, nodeId));
   const tab = (TABS.some((t) => t.id === place.tab) ? place.tab : "overview") as NodeTab;
   const bar = nodeBar(item, api, graph);
@@ -71,7 +74,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
   const drafted = appliedRows(useApplied(item.id, version, tab === "config"), nodeId).map((r) => `${r.path} ${r.text} · applied by the draft`);
   const mine = overrideWords(item, nodeId);
   const overridden = !!mine || drafted.length > 0;
-  const next = item.chain_definition.nodes[item.chain_definition.nodes.findIndex((n) => n.id === nodeId) + 1];
+  const next = nextNode(item.chain_definition.nodes, nodeId);
   // The round in the URL, as the desktop canvas has its picker: every task, the repair and the judge follow it.
   const { steps, side, loop, onFailure, rounds } = useMemo(() => nodeGraph(seen, api, now, events, place.round), [seen, api, now, events, place.round]);
   const passes = passList(item, nodeId, place.pass);
@@ -108,7 +111,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
       <div className="ph-content">
         <div className="ph-node-head">
           <h1 className="ph-node-title">{breakable(nodeId)}</h1>
-          <p className={`ph-node-sub ph-tone-${sub.tone}`}>{gate ? "gate" : "exec node"} · {sub.text}</p>
+          <p className={`ph-node-sub ph-tone-${sub.tone}`}>{kindWords} · {sub.text}</p>
         </div>
         <TabStrip label="Node" tabs={TABS} value={tab} onChange={(t) => setPlace({ tab: t === "overview" ? undefined : t })} />
         {passes && !gate && (tab === "overview" || tab === "log") && (
@@ -133,7 +136,8 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
         {tab === "overview" && (
           <>
             <Facts rows={[
-              ["status", `${gate ? "gate" : "exec node"} · ${sub.text}`],
+              ["status", `${kindWords} · ${sub.text}`],
+              ...(item.group?.phase && api.kind === "group" ? ([["phase", PHASE_WORDS[item.group.phase]]] as [string, React.ReactNode][]) : []),
               ...(gate
                 ? ([
                     ...(message ? [["message", message]] : []),
@@ -160,6 +164,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
                 </ol>
               </Block>
             )}
+            {api.kind === "group" && <GroupBlocks item={seen} steps={groupSteps(seen, graph)} onNode={(id) => setPlace({ node: `${nodeId}.${id}`, sel: { kind: "node", node: `${nodeId}.${id}` } })} onItem={(id) => navigate(`/work-items/${encodeURIComponent(id)}`)} />}
             {!gate && steps.map((st, i) => (
               <Block key={st.id} title={`${st.id}${st.tasks.length > 1 ? ` · ${st.tasks.length} tasks in parallel` : ""}`}>
                 <div className="ph-list">
@@ -283,6 +288,44 @@ function NodeLog({ item, node, round }: { item: ItemDetail; node: string; round?
         <span className="ph-count">{lines ? lineCount(lines.length) : "Reading…"}</span>
       </div>
       <LogLines lines={shown} empty="No lines to show. Clear the filter, or the node has not started." />
+    </>
+  );
+}
+
+/** A slice group's screen, as its desktop view in a list: the shared groundwork the item builds itself (each node opens
+ *  its own screen), then each slice (opening its child item), then the join. */
+function GroupBlocks({ item, steps, onNode, onItem }: { item: ItemDetail; steps: ReturnType<typeof groupSteps>; onNode: (id: string) => void; onItem: (id: string) => void }) {
+  const own = steps.filter((st) => st.id !== "slices" && st.id !== "join");
+  const slices = steps.find((st) => st.id === "slices");
+  const join = steps.find((st) => st.id === "join")?.tasks[0];
+  const row = (t: (typeof own)[number]["tasks"][number], onClick?: () => void) => {
+    const inner = (
+      <>
+        <NodeGlyph kind="exec" size="sm" state={t.state} icon={t.icon} running={t.running} paused={t.paused} />
+        <span className="ph-row-text">
+          <span className="ph-row-label ph-mono">{t.label ?? t.id}</span>
+          <span className="ph-row-hint">{t.meta ?? stateWord(t.state)}</span>
+        </span>
+      </>
+    );
+    return onClick
+      ? <button key={t.id} type="button" className="ph-row ph-task-row" onClick={onClick}>{inner}<ChevronRight size={16} className="ph-chev" aria-hidden="true" /></button>
+      : <div key={t.id} className="ph-row ph-task-row">{inner}</div>;
+  };
+  const g = item.group;
+  return (
+    <>
+      {own.length > 0 && (
+        <Block title={slices && g?.groundwork.length ? `Shared groundwork · ${tasksWords(g.groundwork)}` : "In this item"}>
+          <div className="ph-list">{own.map((st) => row(st.tasks[0], () => onNode(st.id)))}</div>
+        </Block>
+      )}
+      {slices && (
+        <Block title="Slices">
+          <div className="ph-list">{slices.tasks.map((t) => { const kid = childOf(item, Number(t.id)); return row(t, kid ? () => onItem(kid.id) : undefined); })}</div>
+        </Block>
+      )}
+      {join && <Block title="Join"><div className="ph-list">{row(join)}</div></Block>}
     </>
   );
 }

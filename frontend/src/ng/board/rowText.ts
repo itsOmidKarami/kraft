@@ -220,7 +220,7 @@ export function admittedRowAction(i: Row & Pick<WorkItem, "actions">): RowAction
 }
 
 /** The row's NodeGlyph: the current node's kind and icon, its state from the status. */
-export function glyphOf(i: Row): { kind: GlyphKind; icon?: string; state: GlyphState; running: boolean } {
+export function glyphOf(i: Pick<Row, "display_status" | "current_node_id" | "status"> & Partial<Pick<Row, "chain_definition">>): { kind: GlyphKind; icon?: string; state: GlyphState; running: boolean } {
   const nodes: ChainNode[] = i.chain_definition?.nodes ?? [];
   const n = nodes.find((x) => within(x.id, i.current_node_id)) ?? nodes[nodes.length - 1];
   const kind: GlyphKind = n?.kind === "gate" ? "gate" : n?.kind === "group" ? "group" : "exec";

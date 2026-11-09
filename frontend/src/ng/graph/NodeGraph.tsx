@@ -295,8 +295,9 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
         ref={away === undefined ? roving.ref(key) : undefined}
         type="button"
         tabIndex={away === undefined ? tabStop(key) : -1}
-        // A fix loop's or an on_failure handler's task is selected under a path but named by the task.
-        aria-label={accessibleName(s.step === "fix_loop" || kind.startsWith("on-failure") ? { ...t, id: t.label ?? t.id } : t, kind)}
+        // A fix loop's or an on_failure handler's task is selected under a path but named by the task; a box with a noun of
+        // its own (a slice group's) by its label.
+        aria-label={accessibleName(s.step === "fix_loop" || kind.startsWith("on-failure") || t.noun ? { ...t, id: t.label ?? t.id } : t, kind)}
         aria-pressed={sel}
         aria-hidden={away || undefined}
         className={`graph-node is-task${sel || t.state === "current" ? " is-bold" : ""}${t.state === "todo" ? " is-todo" : ""}${t.state === "esc" || t.state === "amber" ? " is-warn" : ""}${t.pending ? " is-pending" : ""}${away ? " is-away" : ""}${extra}`}
@@ -389,7 +390,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
               {st.label ?? st.id}
               {st.prob && <span className="step-prob" aria-hidden="true"> !</span>}
             </button>,
-            ...st.tasks.map((t, i) => taskButton({ step: st.id, task: t.id }, t, cx, ys[i], `${t.taskKind ?? "agent"} task`, "", open && phase.mounted && k === open.step && i === open.row ? phase.layout || phase.content : undefined)),
+            ...st.tasks.map((t, i) => taskButton({ step: st.id, task: t.id }, t, cx, ys[i], t.noun ?? `${t.taskKind ?? "agent"} task`, "", open && phase.mounted && k === open.step && i === open.row ? phase.layout || phase.content : undefined)),
             !st.tasks.length && st.slot && (
               <button key={`slot${st.id}`} type="button" className="graph-node is-task is-slot" style={{ left: cx - G.COL / 2, top: ys[0] - G.BOX / 2, width: G.COL }} onClick={(e) => onSlot?.(st.id, e.currentTarget)}>
                 <NodeGlyph kind="slot" size="md" />

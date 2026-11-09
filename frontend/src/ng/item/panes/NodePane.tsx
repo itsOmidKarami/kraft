@@ -1,6 +1,9 @@
 import { tokenText, tokenTip, usd } from "../../../format";
 import type { ChainNode } from "../../../types";
-import { nameOf } from "../../board/rowText";
+import { nameOf, slicesDone } from "../../board/rowText";
+import { useNavigate } from "react-router-dom";
+import { nextNode } from "../cursor";
+import { childOf, childWords, PHASE_WORDS, slicesOf, tasksWords } from "../groupView";
 import { stepsOf, taskName } from "../paths";
 import { loopRounds, sessionsOf, settled } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
@@ -12,8 +15,7 @@ export function NodeOverview({ item, node, onStep, onNode }: { item: ItemDetail;
   const { steps } = stepsOf(node);
   const paths = steps.flatMap((s) => s.tasks);
   const done = paths.filter((p) => settled(item, p)).length;
-  const nodes = item.chain_definition.nodes;
-  const next = nodes[nodes.findIndex((n) => n.id === node.id) + 1];
+  const next = nextNode(item.chain_definition.nodes, node.id);
   const rounds = loopRounds(item, node);
   const by = item.usage?.by_node.find((r) => r.node === node.id);
   return (
@@ -38,6 +40,45 @@ export function NodeOverview({ item, node, onStep, onNode }: { item: ItemDetail;
                     <span className={`ip-mark${mark === "●" ? " is-live" : ""}`} aria-hidden>{mark}</span>
                     <span className="is-mono">{s.id}</span>
                     <span className="ip-row-meta">{s.tasks.length === 1 ? taskName(s.tasks[0]) : `${s.tasks.length} tasks`}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+    </>
+  );
+}
+
+/** A slice group's Overview: its phase, the groundwork the item builds itself, each slice with its child item (a click
+ *  opens it), the join while it runs, then the node after the group. */
+export function GroupOverview({ item, node, onNode }: { item: ItemDetail; node: ChainNode; onNode: (node: string) => void }) {
+  const navigate = useNavigate();
+  const g = item.group;
+  const slices = slicesOf(item);
+  const next = nextNode(item.chain_definition.nodes, node.id);
+  return (
+    <>
+      <dl className="item-facts ip-facts">
+        {g?.phase && <div><dt>phase</dt><dd>{PHASE_WORDS[g.phase]}</dd></div>}
+        {g?.groundwork.length ? <div><dt>groundwork</dt><dd>{tasksWords(g.groundwork)} · in this item</dd></div> : null}
+        {slices.length > 0 && <div><dt>slices</dt><dd>{slicesDone(item.slices) || `${slices.length} from the plan`}</dd></div>}
+        {g?.phase === "joining" && <div><dt>join</dt><dd>slice {Math.min(g.joined + 1, slices.length)} of {slices.length}</dd></div>}
+        {next && <div><dt>then</dt><dd><LinkButton strong mono onClick={() => onNode(next.id)}>{next.id}</LinkButton></dd></div>}
+      </dl>
+      {slices.length > 0 && (
+        <>
+          <h3 className="ip-h">Slices</h3>
+          <ul className="ip-list">
+            {slices.map((s) => {
+              const kid = childOf(item, s.key);
+              return (
+                <li key={s.key}>
+                  <button type="button" className="ip-row" disabled={!kid} onClick={() => kid && navigate(`/work-items/${encodeURIComponent(kid.id)}`)}>
+                    <span className="ip-mark" aria-hidden>{s.key}</span>
+                    <span>{s.title}</span>
+                    <span className="ip-row-meta">{kid ? childWords(kid) : s.tasks.length ? tasksWords(s.tasks) : ""}</span>
                   </button>
                 </li>
               );

@@ -1,5 +1,6 @@
 import { loopRounds, passWords, roundShown } from "../../item/nodeGraph";
 import { nameOf } from "../../board/rowText";
+import { findNode } from "../../item/cursor";
 import { otherRounds, scopeAt, scopesView, stateWords, statusWords } from "../../item/scopeView";
 import { selPath, type Place } from "../../item/url";
 import { ScreenHeader } from "../nav/ScreenHeader";
@@ -15,7 +16,7 @@ const TABS = [{ id: "overview" as const, label: "Overview" }, { id: "log" as con
  *  it ran in, how the other rounds treated it, and its log once there is a run to read. */
 export function ScopeScreen({ item, place, node: nodeId, now, setPlace }: PlaceProps & { place: Place & { scope: string; sel: { kind: "task"; node: string; step: string; task: string } } }) {
   const path = selPath(place.sel)!;
-  const apiNode = item.chain_definition.nodes.find((n) => n.id === nodeId)!;
+  const apiNode = findNode(item.chain_definition.nodes, nodeId)!;
   const round = roundShown(item, apiNode, place.round) ?? 1;
   const rounds = loopRounds(item, apiNode);
   const total = rounds?.total;

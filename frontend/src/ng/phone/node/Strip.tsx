@@ -6,6 +6,8 @@ import type { ChainNode } from "../../graph/layout";
  *  44px high, the label wrapping instead of cutting (R10), the current one scrolled into view. */
 export function Strip({ nodes, current, name, onPick }: { nodes: ChainNode[]; current: string; name: (id: string) => string; onPick: (id: string) => void }) {
   const on = useRef<HTMLButtonElement>(null);
+  // A node inside a group (`slices.implementation`) is on under its group's chip.
+  const here = nodes.find((n) => current === n.id || current.startsWith(`${n.id}.`))?.id;
   useEffect(() => {
     // A block, not an expression: an effect must return nothing or a cleanup, and a browser's scrollIntoView returns its own value.
     on.current?.scrollIntoView?.({ inline: "center", block: "nearest" });
@@ -13,7 +15,7 @@ export function Strip({ nodes, current, name, onPick }: { nodes: ChainNode[]; cu
   return (
     <div className="ph-strip" role="group" aria-label="Chain">
       {nodes.map((n) => (
-        <button key={n.id} ref={n.id === current ? on : undefined} type="button" className={`ph-strip-chip${n.id === current ? " ph-is-on" : ""}`} aria-current={n.id === current ? "true" : undefined} onClick={() => onPick(n.id)}>
+        <button key={n.id} ref={n.id === here ? on : undefined} type="button" className={`ph-strip-chip${n.id === here ? " ph-is-on" : ""}`} aria-current={n.id === here ? "true" : undefined} onClick={() => onPick(n.id)}>
           <NodeGlyph kind={n.kind} size="sm" state={n.state} icon={n.icon} running={n.running} paused={n.paused} capped={n.capped} />
           <span className="ph-strip-label">{name(n.id)}</span>
         </button>

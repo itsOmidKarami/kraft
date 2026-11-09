@@ -259,6 +259,23 @@ describe("nodeSub: a chain row's words", () => {
     expect(nodeSub(graph(mk("escalated")).find((n) => n.id === "verification")!)).toMatchObject({ text: expect.stringMatching(/^escalated/), tone: "warn" });
     expect(nodeSub(graph(mk("waiting", stop("wait"))).find((n) => n.id === "verification")!).tone).toBe("muted");
   });
+
+  // A parent waiting for its slices says how far they are once, and turns amber with one that needs you.
+  it.each([
+    ["none needs you", "running", 0, { text: "waiting for slices · 1 of 2 slices done", tone: "muted" }],
+    ["one needs you", "needs_you", 1, { text: "waiting for slices · 1 of 2 slices done · slice 2 needs you", tone: "warn" }],
+    ["one failed", "failed", 1, { text: "waiting for slices · 1 of 2 slices done · slice 2 failed", tone: "warn" }],
+  ] as const)("reads a group waiting for its slices when %s", (_, second, needs_you, want) => {
+    const kid = (k: number, display_status: string) => ({ id: `c${k}`, title: "t", slice_key: k, status: "active", display_status, current_node_id: "verification", cost_usd: 0 });
+    const parent = sliced("slices", {
+      display_status: "waiting",
+      stop: stop("slices", { node: "slices" }),
+      group: { id: "slices", phase: "slices", groundwork: [], slices: [{ key: 1, title: "a", tasks: [1] }, { key: 2, title: "b", tasks: [2] }], joined: 0 },
+      children: [kid(1, "done"), kid(2, second)],
+      slices: { done: 1, needs_you, paused: 0, running: 0, queued: 0, dropped: 0, total: 2 },
+    });
+    expect(nodeSub(graph(parent).find((n) => n.id === "slices")!)).toEqual(want);
+  });
 });
 
 describe("a budget stop's spent fact", () => {

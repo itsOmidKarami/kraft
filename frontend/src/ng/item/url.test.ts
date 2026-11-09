@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChainNode } from "../../types";
+import { SLICED } from "./testkit";
 import { placeUrl, pushes, readPlace, stopPlace } from "./url";
 
 const nodes: ChainNode[] = [
@@ -97,6 +98,13 @@ describe("item URL", () => {
     expect(readPlace("final_review", q("sel=final_review.auto_review&tab=log&attempt=2"), gated)).toMatchObject({ sel, tab: "log", attempt: 2 });
     expect(placeUrl("w1", { node: "final_review", sel, tab: "log", attempt: 2 })).toBe("/work-items/w1/nodes/final_review?sel=final_review.auto_review&tab=log&attempt=2");
     expect(readPlace("verification", q("sel=verification.auto_review"), gated).sel).toEqual({ kind: "node", node: "verification" });
+  });
+
+  it("reads a node inside a group by its path, its steps and tasks after that path, and writes it back", () => {
+    expect(readPlace("slices.implementation", q("sel=slices.implementation.run.work"), SLICED)).toMatchObject({ node: "slices.implementation", sel: { kind: "task", node: "slices.implementation", step: "run", task: "work" } });
+    expect(readPlace("slices", q("sel=slices.verification"), SLICED)).toMatchObject({ node: "slices", sel: { kind: "node", node: "slices.verification" } });
+    const step = { node: "slices.verification", sel: { kind: "step", node: "slices.verification", step: "run" } } as const;
+    expect(readPlace(step.node, q(placeUrl("w", step).split("?")[1]), SLICED).sel).toEqual(step.sel);
   });
 
   it("falls back to the floor for an unknown sel, and to the chain for an unknown node", () => {

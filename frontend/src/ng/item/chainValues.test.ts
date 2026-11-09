@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Harnesses } from "../../types";
-import { agentTasks, attemptsAt, capAt, capText, effortOf, effortOptions, materialized, modelOf, modelSuggestions, notStarted, oneOf, producerOf, taskAt, type MTask } from "./chainValues";
+import { agentTasks, attemptsAt, capAt, capText, effortOf, effortOptions, loopPaths, materialized, modelOf, modelSuggestions, nodeAt, notStarted, oneOf, producerOf, taskAt, taskKindAt, type Materialized, type MTask } from "./chainValues";
 import { API_ITEM, SERVER_ATTEMPTS, SERVER_CAPS } from "./fixture.api";
 import { detail, FROZEN } from "./testkit";
 
@@ -111,4 +111,19 @@ describe("producerOf", () => {
     { id: "local_review", kind: "gate", artifact: "work_brief" },
   ] } }) });
   it.each([["final_review", "summary.main.write"], ["local_review", null], ["no_such_gate", null]])("%s's document was written by %s", (gate, by) => expect(producerOf(m, gate)).toBe(by));
+});
+
+// A slice group freezes its body by their own ids; the item names them by path (`slices.verification`).
+describe("a node inside a group, in the frozen chain", () => {
+  const m: Materialized = { chain: { nodes: [{ id: "slices", kind: "group", nodes: [
+    { id: "verification", kind: "exec", fix_loop: { max_attempts: 3, tasks: [{ id: "repair", kind: "agent" }] }, steps: [{ id: "tests", tasks: [{ id: "run", kind: "subprocess" }] }] },
+  ] }, { id: "verification", kind: "exec", steps: [{ id: "review", tasks: [{ id: "code_review", kind: "agent" }] }] }] } };
+  it("finds the node, its tasks and its loop by path, and the node of the same id after the group by its own", () => {
+    expect(nodeAt(m, "slices.verification")?.fix_loop?.max_attempts).toBe(3);
+    expect(taskAt(m, "slices.verification.tests.run")?.id).toBe("run");
+    expect(taskKindAt(m, "slices.verification.tests.run")).toBe("subprocess");
+    expect(loopPaths(m, "slices.verification").repair).toEqual(["slices.verification.fix_loop.main.repair"]);
+    expect(taskAt(m, "verification.review.code_review")?.id).toBe("code_review");
+    expect(nodeAt(m, "slices.ghost")).toBeUndefined();
+  });
 });

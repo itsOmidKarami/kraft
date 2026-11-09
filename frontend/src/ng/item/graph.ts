@@ -5,6 +5,7 @@ import type { ChainArc, ChainNode } from "../graph/layout";
 import { escalationsIn, isEscalation, passOf } from "./nodeGraph";
 import { materialized, nodeTaskKind } from "./chainValues";
 import { cursorOf, within } from "./cursor";
+import { groupWords } from "./groupView";
 import { isScopeTask } from "./scopeView";
 import { waitTitle } from "./sharedWords";
 import type { ItemDetail } from "./useItem";
@@ -24,6 +25,9 @@ function timesRun(item: ItemDetail, work: WorkerSession[]): number {
     return rounds.filter((r, i) => i === 0 || r !== rounds[i - 1]).length;
   }));
 }
+
+/** The drawn node `id` names: a chain node, or a node inside a group, which its group's `body` draws. */
+export const drawnOf = (nodes: ChainNode[], id: string): ChainNode | undefined => nodes.find((n) => n.id === id) ?? nodes.flatMap((n) => n.body ?? []).find((b) => b.id === id);
 
 /** The node a gate rejects to: its own `reject_to`, else the nearest earlier exec node or group (R23; the server's
  *  `preceding_exec_node`). */
@@ -94,7 +98,7 @@ export function chainGraph(item: ItemDetail, events: KraftEvent[], now = Date.no
       const state = d.state === "done" || d.state === "todo" ? d.state : j0 < 0 ? "plain" : j < j0 ? "done" : j === j0 ? d.state : "todo";
       return { id: b.id, kind: "exec", state, ...(j === j0 && { running: d.running, paused: d.paused, needs: d.needs }) };
     });
-    return { ...d, body, summary: slicesDone(item.slices) || undefined };
+    return { ...d, body, summary: slicesDone(item.slices) || undefined, ...groupWords(item, d) };
   });
 
   const loops: ChainArc[] = api.flatMap((n, i) => {
