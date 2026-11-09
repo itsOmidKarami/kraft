@@ -136,6 +136,11 @@ A worker can use the CLI's own stored login instead where it has one; [Give a wo
 | Cost | Amp's bill (`amp threads usage`) can count a few requests that are not in the thread. It is the only place Amp reports cost, so Kraft records none. |
 | Needs | Credentials a headless process can use. See [Give a worker its login](/guides/harnesses/give-a-worker-its-login). |
 
+### ACP details
+_Added in next_
+
+A harness file with `kind: acp` runs any agent that speaks the Agent Client Protocol, where the shipped seven are `kind: cli`. No ACP harness ships: you write the entry. [ACP entries](/reference/harnesses/harness-files#acp-entries) has its fields, what a launch on it refuses in this release, and how a launch ends. [ACP agents](/reference/harnesses/cost-reporting#acp-agents) has how its spend is counted.
+
 ## In this section
 
 - [Unattended runs](/reference/harnesses/unattended-runs): the mode each CLI runs in when nobody can answer a prompt.
