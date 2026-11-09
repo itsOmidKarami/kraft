@@ -7,3 +7,7 @@ reports: [tokens, cost]
 options:
   model: { config: model }
   effort: { config: effort }
+# Every dev-instance task holds a tool policy, and an entry that cannot make the agent ask
+# refuses one: the fake agent asks before every call when this switch is set.
+asks_everything: { env: { FAKE_ACP_ASK_ALL: "1" } }
+tool_names: { execute: Bash, read: Read, edit: Edit }

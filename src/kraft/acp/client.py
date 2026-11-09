@@ -306,6 +306,7 @@ class Client:
             params["systemPrompt"] = wire.system_prompt(spec.context)
         sid, how, offered = await self.open_session(params, caps)
         model = await self.apply_options(sid, offered)
+        await self.apply_asks(sid, offered)
         self.emit(
             log.event(
                 "session",
@@ -378,23 +379,57 @@ class Client:
                     "under options:",
                     config=True,
                 )
-            try:
-                res = await self.request(
-                    "session/set_config_option",
-                    {"sessionId": sid, "configId": cid, "value": value},
-                    timeout=self.spec.handshake_timeout_s,
-                )
-            except RpcError as exc:
-                raise Fail(
-                    f"the agent refused {name} {value!r} (config option {cid!r}); it offers: "
-                    f"{', '.join(_values(offered, cid)) or 'nothing'} ({exc})",
-                    config=True,
-                ) from exc
-            offered[:] = res.get("configOptions") or offered
+            await self.set_option(sid, cid, value, offered, name)
         cid = self.spec.options.get("model")
         return self.spec.model or next(
             (o.get("currentValue") for o in offered if o.get("id") == cid), None
         )
+
+    async def set_option(self, sid: str, cid: str, value: str, offered: list, what: str) -> None:
+        try:
+            res = await self.request(
+                "session/set_config_option",
+                {"sessionId": sid, "configId": cid, "value": value},
+                timeout=self.spec.handshake_timeout_s,
+            )
+        except RpcError as exc:
+            raise Fail(
+                f"the agent refused {what} {value!r} (config option {cid!r}); it offers: "
+                f"{', '.join(_values(offered, cid)) or 'nothing'} ({exc})",
+                config=True,
+            ) from exc
+        offered[:] = res.get("configOptions") or offered
+
+    async def apply_asks(self, sid: str, offered: list) -> None:
+        """`asks_everything`'s session half, new and resumed launches alike (its env half is the
+        spawn env)."""
+        spec = self.spec
+        for cid, value in spec.asks_config.items():
+            await self.set_option(sid, cid, value, offered, "asks_everything")
+        if spec.asks_mode is not None:
+            if any(o.get("id") == "mode" for o in offered):
+                await self.set_option(sid, "mode", spec.asks_mode, offered, "asks_everything mode")
+            else:
+                try:
+                    await self.request(
+                        "session/set_mode",
+                        {"sessionId": sid, "modeId": spec.asks_mode},
+                        timeout=spec.handshake_timeout_s,
+                    )
+                except RpcError as exc:
+                    raise Fail(
+                        f"the agent refused asks_everything mode {spec.asks_mode!r}: {exc}",
+                        config=True,
+                    ) from exc
+        if spec.agent_env or spec.asks_config or spec.asks_mode is not None:
+            self.emit(
+                log.event(
+                    "asks_everything",
+                    env=sorted(spec.agent_env),
+                    config=spec.asks_config,
+                    mode=spec.asks_mode,
+                )
+            )
 
     async def cancel(self, sid: str, prompt) -> int:
         """A pause: `session/cancel`, then the turn's answer (its usage) if it comes in time."""
@@ -467,11 +502,14 @@ class Client:
         if not self.spec.agent_argv:
             return self.fail("the launch names no agent command", config=True)
         try:
+            # the client's own environment, plus the entry's asking switch, for the agent only
+            env = {**os.environ, **self.spec.agent_env} if self.spec.agent_env else None
             self.proc = await asyncio.create_subprocess_exec(
                 *self.spec.agent_argv,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=env,
                 limit=self.spec.line_limit,
             )
         except OSError as exc:

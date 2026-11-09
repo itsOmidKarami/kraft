@@ -7,13 +7,15 @@ of flags (see `tests/acp/test_client.py` and `tests/support/acp.py`):
 
   ask fs stray long replay no_cost no_usage no_resume no_load no_system_prompt slow term die
   refuse_config noresult auth die_after_init hang deaf die_on_int exit_on_int kill noisy late
-  slow_init mute badreq die_stderr ask_all only_always end_on_reject
+  slow_init mute badreq die_stderr ask_all only_always end_on_reject mode_option refuse_mode
 
 `ask_all`: the agent asks before every scripted tool call (as if `asks_everything` had been
 applied); the same switch is `FAKE_ACP_ASK_ALL=1` in the environment. `only_always`: an ask
 offers only an `allow_always` option. `end_on_reject`: a rejected ask ends the turn `cancelled`
 (OpenCode does).
-`KRAFT_FAKE_ACP_CALLS` is a JSON list of scripted tool calls, see `run_calls`.
+`mode_option`: the session offers a `mode` config option (`default` makes the agent ask);
+`refuse_mode`: `session/set_mode` fails. `KRAFT_FAKE_ACP_CALLS` is a JSON list of scripted tool
+calls, see `run_calls`.
 
 `KRAFT_FAKE_ACP_RECORD` is a path: every line read from stdin is appended to it, so a test sees
 exactly what the client sent. `KRAFT_FAKE_ACP_STATUS` is the status written to
@@ -43,6 +45,7 @@ USAGE = {
 }
 MODELS = ("fake-model", "big")
 EFFORTS = ("low", "high")
+MODES = ("auto", "default")  # `default` asks before every call, as OpenCode's does
 
 
 ASKING = {"on": False}
@@ -93,7 +96,7 @@ def read():
             return msg
 
 
-def config_options(model: str = MODELS[0], effort: str = EFFORTS[0]) -> list:
+def config_options(model: str = MODELS[0], effort: str = EFFORTS[0], mode: str = "auto") -> list:
     def one(id_, name, current, values):
         return {
             "id": id_,
@@ -104,7 +107,10 @@ def config_options(model: str = MODELS[0], effort: str = EFFORTS[0]) -> list:
             "options": [{"value": v, "name": v} for v in values],
         }
 
-    return [one("model", "Model", model, MODELS), one("effort", "Effort", effort, EFFORTS)]
+    options = [one("model", "Model", model, MODELS), one("effort", "Effort", effort, EFFORTS)]
+    if "mode_option" in FLAGS:
+        options.append(one("mode", "Mode", mode, MODES))
+    return options
 
 
 def await_response(id_) -> dict | None:
@@ -232,7 +238,7 @@ def prompt(id_, params: dict) -> None:
         },
     )
     scripted = json.loads(os.environ.get("KRAFT_FAKE_ACP_CALLS") or "[]")
-    if "ask" in FLAGS or (asking() and not scripted):
+    if "ask" in FLAGS:
         send(
             {
                 "jsonrpc": "2.0",
@@ -267,16 +273,23 @@ def prompt(id_, params: dict) -> None:
         await_response("fs-1")
     ended = run_calls(sid, scripted) if scripted else None
     if not scripted:
-        update(
-            sid,
-            {
-                "sessionUpdate": "tool_call",
-                "toolCallId": "tc-1",
-                "title": "Run ls",
-                "kind": "execute",
-                "status": "completed",
-            },
-        )
+        if asking() and "ask" not in FLAGS:
+            # the agent was told to ask: the default call asks and honours the answer
+            ended = run_calls(
+                sid,
+                [{"id": "tc-1", "title": "Run ls", "kind": "execute", "input": {"command": "ls"}}],
+            )
+        else:  # legacy: the flag-driven ask block above, or no asking at all
+            update(
+                sid,
+                {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "tc-1",
+                    "title": "Run ls",
+                    "kind": "execute",
+                    "status": "completed",
+                },
+            )
     if "no_cost" not in FLAGS:
         update(
             sid,
@@ -410,7 +423,9 @@ def main() -> None:
             reply(id_, {"configOptions": config_options()})
         elif method == "session/set_config_option":
             value = params.get("value")
-            offered = {"model": MODELS, "effort": EFFORTS}.get(params.get("configId"), ())
+            offered = {"model": MODELS, "effort": EFFORTS, "mode": MODES}.get(
+                params.get("configId"), ()
+            )
             if "refuse_config" in FLAGS or value not in offered:
                 fail(
                     id_,
@@ -419,7 +434,16 @@ def main() -> None:
                     f"offered: {list(offered)}",
                 )
             else:
+                if params.get("configId") == "mode" and value == "default":
+                    ASKING["on"] = True
                 reply(id_, {"configOptions": config_options(**{params["configId"]: value})})
+        elif method == "session/set_mode":
+            if "refuse_mode" in FLAGS:
+                fail(id_, -32602, f"invalid mode {params.get('modeId')!r}")
+            else:
+                if params.get("modeId") == "default":
+                    ASKING["on"] = True
+                reply(id_, {})
         elif method == "session/prompt":
             prompt(id_, params)
         elif method == "session/cancel":

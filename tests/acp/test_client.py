@@ -612,3 +612,104 @@ def test_an_always_denied_tool_never_reaches_the_gate(tmp_path, monkeypatch):
         always_deny=["Bash"],
     )
     assert seen == []
+
+
+CALL = [{"id": "c1", "name": "read", "kind": "read"}]  # asks only when the agent was told to
+
+
+@pytest.mark.parametrize(
+    ("flags", "fields", "resume", "setter"),
+    [
+        ("", {"agent_env": {"FAKE_ACP_ASK_ALL": "1"}}, None, None),
+        (
+            "mode_option",
+            {"asks_config": {"mode": "default"}},
+            None,
+            ("session/set_config_option", "value", "default"),
+        ),
+        (
+            "mode_option",
+            {"asks_mode": "default"},
+            None,
+            ("session/set_config_option", "value", "default"),
+        ),
+        ("", {"asks_mode": "default"}, None, ("session/set_mode", "modeId", "default")),
+        (
+            "mode_option",
+            {"asks_mode": "default"},
+            "old-session",
+            ("session/set_config_option", "value", "default"),
+        ),
+    ],
+    ids=[
+        "env",
+        "config",
+        "mode-as-config-option",
+        "mode-as-set-mode",
+        "applied-on-a-resumed-launch-too",
+    ],
+)
+def test_asks_everything_makes_the_agent_ask_on_every_launch(
+    tmp_path, monkeypatch, flags, fields, resume, setter
+):
+    run_inprocess(
+        tmp_path,
+        monkeypatch,
+        flags,
+        ask=fake_gate(),
+        calls=CALL,
+        policy=True,
+        tool_names=TOOLS,
+        resume=resume,
+        **fields,
+    )
+    assert len(_answers(tmp_path)) == 1  # the agent asked
+    if setter:
+        method, key, value = setter
+        assert any(
+            m.get("method") == method and m["params"].get(key) == value for m in recorded(tmp_path)
+        )
+
+
+def test_a_rejected_default_call_ends_failed_not_as_a_violation(tmp_path, monkeypatch):
+    # No scripted calls: the fake's own default `tc-1` (execute -> Bash) asks because the agent
+    # was told to.
+    code, recs = run_inprocess(
+        tmp_path,
+        monkeypatch,
+        "ask_all",
+        ask=fake_gate({"Bash": "deny"}),
+        policy=True,
+        tool_names=TOOLS,
+    )
+    updates = [
+        r["msg"]["params"]["update"]
+        for r in recs
+        if r.get("dir") == "from_agent" and r.get("msg", {}).get("method") == "session/update"
+    ]
+    tc1 = [u["status"] for u in updates if u.get("toolCallId") == "tc-1" and u.get("status")]
+    assert tc1[-1] == "failed"  # the rejection held: the call did not run
+    assert code == 0 and not [r for r in recs if r.get("event") == "policy_violation"]
+
+
+def test_the_same_launch_without_asks_everything_makes_no_ask(tmp_path, monkeypatch):
+    run_inprocess(
+        tmp_path, monkeypatch, "", ask=fake_gate(), calls=CALL, policy=False, tool_names=TOOLS
+    )
+    assert _answers(tmp_path) == []
+
+
+def test_an_agent_that_refuses_the_asking_mode_ends_the_launch_as_config_error(
+    tmp_path, monkeypatch
+):
+    code, recs = run_inprocess(
+        tmp_path,
+        monkeypatch,
+        "mode_option",
+        ask=fake_gate(),
+        calls=CALL,
+        policy=True,
+        tool_names=TOOLS,
+        asks_mode="paranoid",
+    )
+    assert code == 78 and "asks_everything mode" in _events(recs, "config_error")[0]["message"]
