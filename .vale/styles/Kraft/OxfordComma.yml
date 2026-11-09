@@ -1,0 +1,7 @@
+# No comma before the "and" or "or" that ends a list: "a, b and c".
+extends: existence
+message: "No Oxford comma: '%s'."
+level: error
+nonword: true
+tokens:
+  - '\b\w+, [\w-]+(?: [\w-]+)?, (?:and|or)\b'

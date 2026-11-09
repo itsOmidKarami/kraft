@@ -1,0 +1,6 @@
+extends: existence
+message: "Remove the spaces around '%s'."
+level: error
+nonword: true
+tokens:
+  - '\s[—–]\s|\s[—–]|[—–]\s'

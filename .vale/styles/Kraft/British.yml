@@ -1,0 +1,23 @@
+# The US forms the docs used before they settled on British spelling, with the
+# fix. The spelling rule flags them too, without saying what to write.
+extends: substitution
+message: "Use British '%s' instead of '%s'."
+level: error
+ignorecase: true
+action:
+  name: replace
+swap:
+  color(s|ed|ing|ful)?: colour$1
+  behavior(s|al)?: behaviour$1
+  label(ed|ing): labell$1
+  cancel(ed|ing): cancell$1
+  model(ed|ing): modell$1
+  travel(ed|ing): travell$1
+  gray(s|ed|ing)?: grey$1
+  center(s)?: centre$1
+  centered: centred
+  catalog(s)?: catalogue$1
+  favorite(s)?: favourite$1
+  analyz(e|es|ed|ing): analys$1
+  (summar|priorit|custom|initial|normal|serial|optim|minim|maxim|author|emphas|real|final|synchron|sanit|categor|special|standard|visual|recogn|organ|memor|apolog|util|stabil|tokeni|parameter)iz(e|es|ed|ing|ation|ations): $1is$2
+  misspelled: misspelt

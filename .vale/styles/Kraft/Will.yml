@@ -1,0 +1,7 @@
+# Present tense: "you find", not "you will find".
+extends: existence
+message: "Avoid '%s': say what happens, in the present tense."
+level: error
+ignorecase: true
+tokens:
+  - will

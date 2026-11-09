@@ -151,6 +151,10 @@ dev_env := "KRAFT_HOME=" + justfile_directory() + "/.dev" + \
 # The fake agent ahead of the real `claude`, so a dev instance never spends tokens.
 fake_agent := "PATH=" + justfile_directory() + "/fixtures/bin:$PATH"
 
+# The Markdown Vale checks: the docs site, the README and the contributor docs.
+# .github/workflows/test.yml's `lint` job lists the same paths.
+vale_paths := "docsite/content README.md CONTRIBUTING.md ARCHITECTURE.md CLAUDE.md AGENTS.md RELEASING.md SECURITY.md docs/testing.md"
+
 # A dev home starts as a copy of the tracked config/ with thin chains that extend
 # the built-in kraft-default (read from this checkout), plus the throwaway repo
 # beads and the seeded work items live in. Copied, not pointed at: the Settings
@@ -553,6 +557,10 @@ lint:
     uv run ruff check .
     uv run ruff format --check .
 
+[doc("Docs style: British spelling, contractions, one spelling per term (.vale.ini)")]
+vale *args:
+    uv run vale {{args}} {{vale_paths}}
+
 # Autofix lint + format
 fix:
     uv run ruff check --fix .
@@ -591,6 +599,7 @@ ci-checks:
     uv run python dev/check_docs_shell.py
     uv run python dev/check_docs_ledes.py
     uv run python dev/check_docs_added_in.py
+    uv run vale {{vale_paths}}
     uv run python dev/check_addon_versions.py
     uv run python dev/check_tests.py
     uv run python -m kraft.intent

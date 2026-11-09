@@ -1,0 +1,10 @@
+# Kraft's word for a GitHub pull request and a GitLab merge request alike.
+# Off for the pages about Kraft's own GitHub repo (see .vale.ini).
+extends: substitution
+message: "Use '%s' instead of '%s'."
+level: error
+ignorecase: false
+action:
+  name: replace
+swap:
+  '[Pp]ull request(s)?': merge request$1

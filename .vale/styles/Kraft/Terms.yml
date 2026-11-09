@@ -1,0 +1,19 @@
+# One spelling for each term the docs used two ways.
+extends: substitution
+message: "Use '%s' instead of '%s'."
+level: error
+ignorecase: false
+action:
+  name: replace
+swap:
+  '[Rr]erun(s|ning)?(?!-)': re-run$1
+  '[Ss]ubagent(s)?': sub-agent$1
+  '(?<!the |a |its |their |session.s )log in\b': sign in
+  '(?<!the |a |its |their |session.s )logs in\b': signs in
+  logged in: signed in
+  logging in: signing in
+  '(?<![\w.$/-])id(?![\w=:/-])': ID
+  '(?<![\w.$/-])ids(?![\w=:/-])': IDs
+  docker: Docker
+  markdown: Markdown
+  'url(s)?(?![\w=:/-])': URL$1

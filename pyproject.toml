@@ -91,6 +91,7 @@ dev = [
     # hour of counting progress characters to find one nested test run.
     "pytest-timeout>=2.3",
     "jsonschema>=4",  # test-only: validates the exported config schemas
+    "vale==3.26.0.1",  # the docs style check: .vale.ini, `just vale`
 ]
 
 [project.scripts]

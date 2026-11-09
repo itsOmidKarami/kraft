@@ -1,0 +1,7 @@
+# "select" also covers the keyboard and a phone, which the docs describe too.
+extends: existence
+message: "Use 'select' instead of '%s'."
+level: error
+ignorecase: true
+tokens:
+  - '(?<!right-)(?<!double-)click(?:s|ed|ing)?(?: on)?'
