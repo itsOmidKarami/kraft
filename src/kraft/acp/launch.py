@@ -6,12 +6,8 @@ import shlex
 import sys
 from pathlib import Path
 
+from kraft.acp import tools
 from kraft.acp.spec import LaunchSpec
-
-TOOL_LIMITS_REFUSAL = (
-    "tool limits over ACP are not supported yet (this launch sets {what}); remove the tool "
-    "policy at the layer that sets it, or use a kind: cli harness"
-)
 
 
 def client_prefix() -> list[str]:
@@ -21,20 +17,76 @@ def client_prefix() -> list[str]:
     return [sys.executable, "-I", "-m", "kraft", "admin", "acp-client"]
 
 
-def launch_refusal(h, *, allowed_tools, deny_tools, permission_mode, sandbox, runner) -> str | None:
+def tool_limit_refusal(h, *, allowed_tools, deny_tools, permission_mode, grants=()) -> str | None:
+    """Why this launch's tool limits cannot be held over ACP, or None (spec §2 rule 2, §6)."""
+    entry = h.acp
+    if permission_mode:
+        return (
+            f"permission_mode {permission_mode!r} is a kind: cli harness's own mode; an ACP "
+            f"agent's asking is its entry's `asks_everything`, so a task cannot set one on "
+            f"{h.id!r}; remove it at the layer that sets it"
+        )
+    if allowed_tools is None and not deny_tools and not entry.always_deny:
+        return None  # no limit: a grant (an escalation turn always holds some) widens nothing
+    # A grant only widens what a limit would deny, and every grant is a git subcommand run
+    # through Bash: refuse it only when this launch's limit would deny Bash, which a grant could
+    # then change.
+    bash_denied = (
+        "Bash" in deny_tools
+        or "Bash" in entry.always_deny
+        or (allowed_tools is not None and "Bash" not in allowed_tools)
+    )
+    if grants and bash_denied:
+        return (
+            f"the task holds the named grant(s) {', '.join(grants)}, which match a shell call's "
+            f"own text and would widen a limit that denies Bash; over ACP that text is only the "
+            f"agent's description of the call, so ACP harness {h.id!r} cannot honour a grant: "
+            "remove the grant or the limit at the layer that sets it, or use a kind: cli harness"
+        )
+    if entry.asks_everything is None:
+        return (
+            f"this launch holds a tool policy, and ACP harness {h.id!r} declares no "
+            "`asks_everything`, so Kraft cannot make it ask before tool calls and the policy "
+            "would be caught only after a call ran; add `asks_everything` to its entry, or "
+            "remove the tool policy"
+        )
+    denied = {*deny_tools, *entry.always_deny}
+
+    def stance(n):  # how the policy treats tool n: (denied, allowed-by-the-allowlist)
+        return (n in denied, allowed_tools is None or n in allowed_tools)
+
+    for key, names in h.tool_names.items():
+        # Only a *kind* is ambiguous (spec §6.3): a call that carries a `name` is keyed on it,
+        # and a name that is several Kraft tools at once is the gate's `also` rule (denied if
+        # any is denied).
+        if key in tools.KINDS and len({stance(n) for n in names}) > 1:
+            return (
+                f"ACP harness {h.id!r} maps one tool kind ({key!r}) onto {', '.join(names)}, and "
+                "this launch's policy treats them differently; its entry cannot tell them apart, "
+                "so the policy cannot be held. Treat them alike, or map each by its own `name`"
+            )
+    for n in entry.settles_itself:
+        if stance(n) != (False, True):
+            return (
+                f"ACP harness {h.id!r} runs {n} without asking, so denying it, or leaving it out "
+                "of an allowlist, cannot be held before the call"
+            )
+    return None
+
+
+def launch_refusal(
+    h, *, allowed_tools, deny_tools, permission_mode, sandbox, runner, grants=()
+) -> str | None:
     """Why this launch cannot run on the harness `h`, or None. An empty allowlist is a
     limit (it allows nothing); `restrict_tools` is only derived from `allowed_tools`."""
-    limits = [
-        name
-        for name, on in (
-            ("allowed_tools", allowed_tools is not None),
-            ("deny_tools", bool(deny_tools)),
-            ("permission_mode", bool(permission_mode)),
-        )
-        if on
-    ]
-    if limits:
-        return TOOL_LIMITS_REFUSAL.format(what=", ".join(limits))
+    if why := tool_limit_refusal(
+        h,
+        allowed_tools=allowed_tools,
+        deny_tools=deny_tools,
+        permission_mode=permission_mode,
+        grants=grants,
+    ):
+        return why
     if sandbox:
         return (
             f"harness {h.id!r} is an ACP agent, which cannot run in a sandbox until "

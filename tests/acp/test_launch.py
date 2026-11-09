@@ -13,17 +13,98 @@ NONE = dict(allowed_tools=None, deny_tools=(), permission_mode=None, sandbox=Non
 @pytest.mark.parametrize(
     ("patch", "expect"),
     [
-        ({"allowed_tools": ("Read",)}, "tool limits over ACP are not supported yet"),
-        ({"allowed_tools": ()}, "tool limits over ACP are not supported yet"),
-        ({"deny_tools": ("Bash",)}, "tool limits over ACP are not supported yet"),
-        ({"permission_mode": "auto"}, "tool limits over ACP are not supported yet"),
         ({"sandbox": {"kind": "docker"}}, "part 3"),
         ({"runner": "box"}, "part 3"),
     ],
-    ids=["allowlist", "empty-allowlist", "deny-list", "permission-mode", "sandbox", "remote"],
+    ids=["sandbox", "remote"],
 )
 def test_a_launch_the_client_cannot_yet_hold_is_refused_with_its_reason(patch, expect):
     assert expect in launch.launch_refusal(H, **{**NONE, **patch})
+
+
+def _acp(**entry):
+    return harness.Harness.from_mapping(
+        {
+            "id": "fake-acp",
+            "kind": "acp",
+            "command": ["agent", "acp"],
+            "asks_everything": {"env": {"A": "1"}},
+            **entry,
+        },
+        where="t",
+    )
+
+
+@pytest.mark.parametrize(
+    ("entry", "patch", "expect"),
+    [
+        ({}, {"permission_mode": "auto"}, "permission_mode"),
+        ({}, {"deny_tools": ("Bash",), "grants": ("git-commit",)}, "named grant"),
+        ({}, {"allowed_tools": ("Read",), "grants": ("git-commit",)}, "named grant"),
+        ({"asks_everything": None}, {"deny_tools": ("Bash",)}, "declares no `asks_everything`"),
+        (
+            {"asks_everything": None, "always_deny": ["Monitor"]},
+            {},
+            "declares no `asks_everything`",
+        ),
+        (
+            {"tool_names": {"edit": ["Write", "Edit"]}},
+            {"allowed_tools": ("Write",)},
+            "cannot tell them apart",
+        ),
+        (
+            {"tool_names": {"edit": ["Write", "Edit"]}},
+            {"deny_tools": ("Edit",)},
+            "cannot tell them apart",
+        ),
+        ({"settles_itself": ["Read"]}, {"deny_tools": ("Read",)}, "without asking"),
+        ({"settles_itself": ["Read"]}, {"allowed_tools": ("Bash",)}, "without asking"),
+        ({"settles_itself": ["Read"], "always_deny": ["Read"]}, {}, "without asking"),
+    ],
+    ids=[
+        "permission-mode",
+        "grant-with-bash-denied",
+        "grant-with-allowlist-omitting-bash",
+        "deny-list-no-asks",
+        "always-deny-no-asks",
+        "allowlist-splits-a-kind",
+        "deny-list-splits-a-kind",
+        "deny-of-a-settled-tool",
+        "allowlist-omits-a-settled-tool",
+        "always-deny-of-a-settled-tool",
+    ],
+)
+def test_a_tool_limit_the_entry_cannot_hold_is_refused_with_its_reason(entry, patch, expect):
+    assert expect in launch.launch_refusal(_acp(**entry), **{**NONE, **patch})
+
+
+@pytest.mark.parametrize(
+    ("entry", "patch"),
+    [
+        ({}, {"allowed_tools": ("Read", "Bash")}),
+        ({}, {"allowed_tools": ()}),
+        ({}, {"deny_tools": ("Bash",)}),
+        ({"tool_names": {"edit": ["Write", "Edit"]}}, {"allowed_tools": ("Write", "Edit")}),
+        ({"tool_names": {"edit": ["Write", "Edit"]}}, {"deny_tools": ("Write", "Edit")}),
+        ({"settles_itself": ["Read"]}, {"allowed_tools": ("Read",)}),
+        ({"tool_names": {"write": ["Write", "Edit"]}}, {"deny_tools": ("Edit",)}),
+        ({}, {"grants": ("git-commit", "git-rebase", "git-push")}),
+        ({}, {"deny_tools": ("WebFetch",), "grants": ("git-commit", "git-rebase", "git-push")}),
+    ],
+    ids=[
+        "allowlist",
+        "empty-allowlist",
+        "deny-list",
+        "kind-kept-whole-allow",
+        "kind-kept-whole-deny",
+        "settled-tool-allowed",
+        "name-covering-two-tools-is-the-gates-also-rule",
+        "grants-with-no-policy",
+        "grants-with-a-deny-that-leaves-bash",
+    ],
+)
+def test_a_tool_limit_the_entry_can_hold_is_not_refused(entry, patch):
+    assert launch.launch_refusal(_acp(**entry), **{**NONE, **patch}) is None
 
 
 def test_an_unrestricted_local_launch_is_not_refused():
