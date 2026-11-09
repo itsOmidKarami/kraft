@@ -16,6 +16,7 @@ import { useDraft } from "./draft/context";
 import { useApplied } from "./draft/useApplied";
 import { markNodes, markSteps } from "./draft/draftGraph";
 import { useOneOffMarks } from "./oneOffMarks";
+import { findNode } from "./cursor";
 import { chainGraph } from "./graph";
 import { DocViewer, docBy } from "./DocViewer";
 import { gateView, reviewerSel } from "./gateView";
@@ -177,7 +178,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
     dispatch(state.level === "chain" && (to.kind === "step" || to.kind === "task") ? { type: "focus", node: to.node, sel: to } : { type: "pick", sel: to });
   };
   const tab = place.tab ?? "";
-  const viewing = place.node ? nodes.find((n) => n.id === place.node) : undefined;
+  const viewing = findNode(nodes, place.node);
   // The pass of the node and the fix-loop round the canvas shows are in the URL (`?pass=`, `?round=`; neither: the
   // newest), as on the phone, so a link opens on them. An earlier pass is read off the item as that pass left it.
   const passes = viewing && passList(item, viewing.id, place.pass);

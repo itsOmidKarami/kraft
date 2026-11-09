@@ -1,6 +1,7 @@
 import { tokenText, tokenTip, usd } from "../../../format";
 import type { ChainNode } from "../../../types";
 import { nameOf } from "../../board/rowText";
+import { nextNode } from "../cursor";
 import { stepsOf, taskName } from "../paths";
 import { loopRounds, sessionsOf, settled } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
@@ -12,8 +13,7 @@ export function NodeOverview({ item, node, onStep, onNode }: { item: ItemDetail;
   const { steps } = stepsOf(node);
   const paths = steps.flatMap((s) => s.tasks);
   const done = paths.filter((p) => settled(item, p)).length;
-  const nodes = item.chain_definition.nodes;
-  const next = nodes[nodes.findIndex((n) => n.id === node.id) + 1];
+  const next = nextNode(item.chain_definition.nodes, node.id);
   const rounds = loopRounds(item, node);
   const by = item.usage?.by_node.find((r) => r.node === node.id);
   return (

@@ -10,6 +10,8 @@ import { AppliedRows } from "../draft/AppliedRows";
 import { DraftConfig } from "../draft/DraftConfig";
 import { DraftNotes } from "../draft/DraftNotes";
 import { AUTO_REVIEW, ESCALATION, escalationsIn, FIX_LOOP, footerState, inHandler, ON_FAILURE, isEscalation, JUDGE, lookWord, loopIdle, loopIdleSentence, loopRounds, NOT_RUN_IN_ROUND, passWords, sessionLook, sessionsOf, settled, standsOn, stateWord } from "../nodeGraph";
+import { findNode } from "../cursor";
+import { drawnOf } from "../graph";
 import { stepsOf, taskName } from "../paths";
 import type { ItemDetail } from "../useItem";
 import { ChainConfig, ChainOverview } from "./ChainPane";
@@ -106,7 +108,7 @@ export function paneContent(a: PaneArgs): PaneContent {
         </>
       ),
     };
-  const node = item.chain_definition.nodes.find((n) => n.id === sel.node)!;
+  const node = findNode(item.chain_definition.nodes, sel.node)!;
   if (sel.kind === "node" && node.kind === "gate") {
     const pending = item.pending_gate === node.id;
     return {
@@ -118,16 +120,19 @@ export function paneContent(a: PaneArgs): PaneContent {
       footer: pending ? <GateFooter item={item} gate={node} reload={a.reload} onRead={a.onArtifact} /> : undefined,
     };
   }
+  // A node inside a group (`slices.implementation`) sits under its group's crumb.
+  const group = findNode(item.chain_definition.nodes, node.id.includes(".") ? node.id.split(".")[0] : null);
+  const toGroup = group ? [{ label: group.id, onClick: () => a.pick({ kind: "node", node: group.id }) }] : [];
   const toNode = { label: node.id, onClick: () => a.pick({ kind: "node", node: node.id }) };
-  if (sel.kind === "step") return stepPane(a, node, sel.step, [toChain, toNode]);
+  if (sel.kind === "step") return stepPane(a, node, sel.step, [toChain, ...toGroup, toNode]);
   // A fix loop's own step, selected as its id where a loop task is `<step>.<task>`: the canvas draws one of several tasks as one box.
-  const loopStep = sel.kind === "task" && sel.step === FIX_LOOP ? loopStepPane(a, node, sel.task, [toChain, toNode, { label: FIX_LOOP }]) : null;
+  const loopStep = sel.kind === "task" && sel.step === FIX_LOOP ? loopStepPane(a, node, sel.task, [toChain, ...toGroup, toNode, { label: FIX_LOOP }]) : null;
   if (loopStep) return loopStep;
   // A task of a loop step of several leads back to that step, which the canvas draws as its frame.
   const up = sel.kind === "task" && sel.step === FIX_LOOP ? sel.task.split(".")[0] : "";
   const toLoopStep = up && loopStepPaths(materialized(item), node.id, up).length > 1 ? [{ label: up, onClick: () => a.pick({ kind: "task", node: node.id, step: FIX_LOOP, task: up }) }] : [];
-  if (sel.kind === "task") return taskPane(a, node, sel.step, sel.task, [toChain, toNode, { label: sel.step, onClick: sel.step === ESCALATION || sel.step === FIX_LOOP || sel.step === ON_FAILURE || (node.kind === "gate" && sel.step === AUTO_REVIEW) ? undefined : () => a.pick({ kind: "step", node: node.id, step: sel.step }) }, ...toLoopStep]);
-  const drawn = a.graph.find((g) => g.id === sel.node);
+  if (sel.kind === "task") return taskPane(a, node, sel.step, sel.task, [toChain, ...toGroup, toNode, { label: sel.step, onClick: sel.step === ESCALATION || sel.step === FIX_LOOP || sel.step === ON_FAILURE || (node.kind === "gate" && sel.step === AUTO_REVIEW) ? undefined : () => a.pick({ kind: "step", node: node.id, step: sel.step }) }, ...toLoopStep]);
+  const drawn = drawnOf(a.graph, sel.node);
   const sessions = item.worker_sessions.filter((s) => s.node_id === node.id && !isEscalation(s));
   const started = sessions.map((s) => s.started_at).filter(Boolean).sort().at(-1);
   // An earlier pass of the node says which it is: the node's state now is its newest pass's.
@@ -136,7 +141,7 @@ export function paneContent(a: PaneArgs): PaneContent {
   // Before the item starts, an exec node's own overrides are set in place.
   const fresh = notStarted(item) && node.kind !== "gate";
   return {
-    crumbs: [toChain],
+    crumbs: [toChain, ...toGroup],
     icon: (node.steps?.length ?? 0) > 1 ? "layers" : undefined,
     gate: node.kind === "gate",
     title: node.id,

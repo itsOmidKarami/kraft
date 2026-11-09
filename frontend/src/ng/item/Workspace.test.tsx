@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-rou
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkerSession } from "../../types";
 import { layout } from "../graph/layout";
-import { detail, fresh, stubFetch } from "./testkit";
+import { detail, fresh, SLICED, stubFetch } from "./testkit";
 import { openBudgetEditor, usePaneMemory, Workspace } from "./Workspace";
 
 beforeEach(() => {
@@ -211,6 +211,16 @@ describe("Workspace", () => {
       expect(screen.queryByText(/Review diff/)).toBeNull();
       expect(screen.getByRole("button", { name: "agent: Explore codebase" })).toBeInTheDocument();
     });
+  });
+
+  it("opens a node inside a group on its own view: its task on the canvas, its group in the crumbs, its next node", async () => {
+    mount("/work-items/w1/nodes/slices.implementation", { chain_definition: { template_id: "default", nodes: SLICED }, current_node_id: "slices.implementation" });
+    expect(screen.getByRole("group", { name: "slices.implementation" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^work, / })).toBeInTheDocument();
+    const pane = screen.getByRole("complementary", { name: "slices.implementation pane" });
+    expect(within(pane).getByRole("button", { name: "slices.verification" })).toBeInTheDocument();
+    await userEvent.click(within(pane).getByRole("button", { name: "slices" }));
+    expect(where()).toBe("/work-items/w1/nodes/slices.implementation?sel=slices");
   });
 
   it("goes back to the chain's pane from a node's crumb", async () => {

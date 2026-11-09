@@ -1,6 +1,7 @@
 import type { ChainNode } from "../../types";
 import type { Sel } from "../graph/usePaneSelection";
 import { AUTO_REVIEW, ESCALATION, FIX_LOOP, inHandler, ON_FAILURE } from "./nodeGraph";
+import { findNode } from "./cursor";
 import { stepsOf } from "./paths";
 
 /** Where the item page is: the node view (if any), the selection, its tab and
@@ -35,8 +36,12 @@ export function selPath(sel: Sel): string | null {
 
 /** The selection a path names, or null when the chain has no such node, step or task. */
 export function pathSel(path: string, nodes: ChainNode[]): Sel | null {
-  const [n, step, task, ...rest] = path.split(".");
-  const node = nodes.find((x) => x.id === n);
+  // A node inside a group is named by its path (`slices.implementation`): its steps and tasks follow that.
+  const segs = path.split(".");
+  const inner = segs.length > 1 && findNode(nodes, `${segs[0]}.${segs[1]}`) ? 2 : 1;
+  const n = segs.slice(0, inner).join(".");
+  const [step, task, ...rest] = segs.slice(inner);
+  const node = findNode(nodes, n);
   // A fix loop's repair and judge: `<node>.fix_loop.<task>`, the task `<step>.<task>` in a loop of steps.
   if (node?.fix_loop && step === FIX_LOOP && task) return { kind: "task", node: n, step, task: [task, ...rest].join(".") };
   // An on_failure handler's task: `<node>.on_failure.<step>.<task>`, one of the hook points the node lists.
@@ -69,7 +74,7 @@ export function stopPlace(stop: { node?: string | null; task?: string | null } |
 /** Read a URL. An unknown node view falls back to the chain; an unknown `sel`
  *  to the floor (the node in a node view, else the chain). */
 export function readPlace(nodeParam: string | undefined, search: URLSearchParams, nodes: ChainNode[]): Place {
-  const node = nodeParam && nodes.some((n) => n.id === nodeParam) ? nodeParam : undefined;
+  const node = findNode(nodes, nodeParam) ? nodeParam : undefined;
   const floor: Sel = node ? { kind: "node", node } : { kind: "chain" };
   const raw = search.get("sel");
   const sel = (raw && pathSel(raw, nodes)) || floor;

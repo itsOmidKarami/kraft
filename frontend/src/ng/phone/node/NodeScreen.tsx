@@ -6,7 +6,7 @@ import type { KraftEvent, WorkItemDocument } from "../../../types";
 import { lineCount } from "../../../format";
 import { NodeGlyph } from "../../graph/NodeGlyph";
 import { act } from "../../item/actions";
-import { chainGraph, rejectTarget } from "../../item/graph";
+import { chainGraph, drawnOf, rejectTarget } from "../../item/graph";
 import { escalationsIn, ESCALATION, FIX_LOOP, nodeGraph, passList, passOf, stateWord } from "../../item/nodeGraph";
 import { stepsOf, taskName } from "../../item/paths";
 import { TestsLine } from "../../item/TestsLine";
@@ -29,6 +29,7 @@ import { appliedRows } from "../../item/draft/applied";
 import { useApplied } from "../../item/draft/useApplied";
 import { gateMessage, loopPaths, materialized, nodeAt } from "../../item/chainValues";
 import { nameOf } from "../../board/rowText";
+import { findNode, nextNode } from "../../item/cursor";
 import "../areas/areas.css";
 import { yamlOf } from "../areas/yaml";
 import "./node.css";
@@ -59,9 +60,9 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
   const sheet = useSheet();
   const { busy, run } = useDo(reload);
   const name = nameOf(item.chain_definition.nodes, nodeId);
-  const api = item.chain_definition.nodes.find((n) => n.id === nodeId)!;
+  const api = findNode(item.chain_definition.nodes, nodeId)!;
   const { nodes } = useMemo(() => chainGraph(item, events, now), [item, events, now]);
-  const graph = nodes.find((n) => n.id === nodeId)!;
+  const graph = drawnOf(nodes, nodeId)!;
   const gate = api.kind === "gate";
   const sub = nodeSub(graph, gate && gateSkipped(events, nodeId));
   const tab = (TABS.some((t) => t.id === place.tab) ? place.tab : "overview") as NodeTab;
@@ -71,7 +72,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
   const drafted = appliedRows(useApplied(item.id, version, tab === "config"), nodeId).map((r) => `${r.path} ${r.text} · applied by the draft`);
   const mine = overrideWords(item, nodeId);
   const overridden = !!mine || drafted.length > 0;
-  const next = item.chain_definition.nodes[item.chain_definition.nodes.findIndex((n) => n.id === nodeId) + 1];
+  const next = nextNode(item.chain_definition.nodes, nodeId);
   // The round in the URL, as the desktop canvas has its picker: every task, the repair and the judge follow it.
   const { steps, side, loop, onFailure, rounds } = useMemo(() => nodeGraph(seen, api, now, events, place.round), [seen, api, now, events, place.round]);
   const passes = passList(item, nodeId, place.pass);
