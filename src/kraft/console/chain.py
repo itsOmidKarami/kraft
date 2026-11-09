@@ -228,15 +228,19 @@ def _state_line(item: dict, node_id: str, state: str, is_gate: bool) -> str:
     return STATE_WORDS[state]
 
 
-def node_detail(item, events, k, state, at, clock, colour, width=80) -> tuple[list[Text], int]:
+def node_detail(
+    item, events, k, state, at, clock, colour, width=80, *, still=False
+) -> tuple[list[Text], int]:
     """The open node `k`'s lines, indented under its row, and which of them
-    the session cursor `at` sits on (-1: none)."""
+    the session cursor `at` sits on (-1: none). `still`: a terminal that
+    cannot fade (`pulse.breathes`) draws a small running mark steady."""
     nodes = words.nodes_of(item) or []
     node = nodes[k]
     node_id, muted = node["id"], colour["kraft-muted"]
     out: list[Text] = []
     # A small running mark's colour this beat (`pulse.breathe`).
-    breath = pulse.breathe(clock[1], colour["kraft-info"], colour["background"])
+    info = colour["kraft-info"]
+    breath = info if still else pulse.breathe(clock[1], info, colour["background"])
 
     def add(text: str, style: str = "", mark: str = "") -> None:
         """`text` wrapped under its own start, not at the pane's edge; with
@@ -303,7 +307,7 @@ def node_detail(item, events, k, state, at, clock, colour, width=80) -> tuple[li
     return out, cursor_line
 
 
-def chain_lines(item, events, place, width, clock, colour):
+def chain_lines(item, events, place, width, clock, colour, *, still=False):
     """The tab's lines: a row per node, the open node's detail under its row.
     `place` is `(cursor, opened, session under it)`, `clock` `(now, tick)`.
     Returns `(lines, line the cursor is on, first line of the open node)`."""
@@ -340,7 +344,9 @@ def chain_lines(item, events, place, width, clock, colour):
             on = top = len(out)
         out.append(row)
         if lit and opened:
-            lines, at = node_detail(item, events, k, state, session_at, clock, colour, width)
+            lines, at = node_detail(
+                item, events, k, state, session_at, clock, colour, width, still=still
+            )
             on = top + 1 + at if at >= 0 else top
             out += lines
     return out, on, top

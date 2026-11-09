@@ -147,6 +147,18 @@ async def _read_done(console, app, pilot) -> None:
             None,
         ),
         (
+            # A failure is red where it stands too, not amber.
+            FAILED | {"current_node_id": "implement"},
+            "Board › m03d77b1  item m03d77b1",
+            "● Failed · failed at verification",
+            "▌ Failed at verification. Tests failed: 3 of 120.",
+            "$error",
+            "1h",
+            "r · default",
+            "spec → spec_approval → plan → implement ●",
+            "bold $error",
+        ),
+        (
             # A stop that needed a person: amber, and still (no working line).
             RUNNING | {"display_status": "escalated"},
             "Board › k7f2e9a0  Docs per major",
@@ -179,6 +191,7 @@ async def _read_done(console, app, pilot) -> None:
         "stuck",
         "stopped-saying-nothing",
         "not-started",
+        "failed-on-a-node",
         "escalated",
         "waiting",
     ],

@@ -375,12 +375,14 @@ def test_the_chain_line_is_a_window_around_where_the_item_stands(at, states, wid
         (RUNNING, "implement ●", "bold $kraft-info"),
         (_row("w", "waiting"), "implement ●", "bold $foreground"),
         (GATE, "spec_approval ●", "bold $warning"),
+        (_row("f", "failed"), "implement ●", "bold $error"),
     ],
-    ids=["running", "waits-on-nobody", "needs-you"],
+    ids=["running", "waits-on-nobody", "needs-you", "failed"],
 )
 def test_where_the_item_stands_is_blue_while_it_runs_and_amber_when_it_needs_you(row, node, style):
-    """The cursor row's chain: the place's colour says what the item is doing,
-    never the accent, which is the cursor's. (Lit, it is drawn on that colour.)"""
+    """The cursor row's chain: the place's colour says what the item is doing
+    (a failure is red, not amber), never the accent, which is the cursor's.
+    (Lit, it is drawn on that colour.)"""
     line = board_view.detail_line(row, 120)
     assert [str(s.style) for s in line.spans if line.plain[s.start : s.end] == node] == [style]
 

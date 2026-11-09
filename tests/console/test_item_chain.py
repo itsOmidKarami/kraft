@@ -543,17 +543,25 @@ def test_the_node_the_item_stands_on_says_what_it_is_doing(status, fields, mark,
 
 
 @pytest.mark.parametrize(
-    ("status", "width", "task_breathes"),
-    [("running", 80, True), ("paused", 80, False), ("running", 25, True)],
-    ids=["running", "paused", "narrow-pane-wraps-the-session-line"],
+    ("status", "width", "still", "task_breathes"),
+    [
+        ("running", 80, False, True),
+        ("paused", 80, False, False),
+        ("running", 25, False, True),
+        ("running", 80, True, True),
+    ],
+    ids=["running", "paused", "narrow-pane-wraps-the-session-line", "cannot-fade-is-still"],
 )
-def test_a_running_mark_breathes_where_work_is_happening(status, width, task_breathes):
+def test_a_running_mark_breathes_where_work_is_happening(status, width, still, task_breathes):
     """The plan task being worked on breathes while its item runs; a running
-    session's mark breathes while it runs, on whichever line it wrapped to."""
+    session's mark breathes while it runs, on whichever line it wrapped to. A
+    terminal that cannot fade draws both marks a steady blue."""
     tasks = [{"n": 1, "title": "Draw it", "state": "current"}]
     item = _flow(_running(), progress={"tasks": tasks}) | {"display_status": status}
     tick = pulse.BREATH // 2
-    lines, _, _ = chain.chain_lines(item, [], (3, True, -1), width, (NOW, tick), COLOUR)
+    lines, _, _ = chain.chain_lines(
+        item, [], (3, True, -1), width, (NOW, tick), COLOUR, still=still
+    )
 
     def mark(word: str) -> list[str]:
         at = next(k for k, line in enumerate(lines) if word in line.plain)
@@ -562,5 +570,9 @@ def test_a_running_mark_breathes_where_work_is_happening(status, width, task_bre
         at = line.plain.index("●")
         return [str(s.style) for s in line.spans if (s.start, s.end) == (at, at + 1)]
 
-    breath = pulse.breathe(tick, COLOUR["kraft-info"], COLOUR["background"])
+    breath = (
+        COLOUR["kraft-info"]
+        if still
+        else pulse.breathe(tick, COLOUR["kraft-info"], COLOUR["background"])
+    )
     assert (mark("Draw it"), mark("attempt")) == ([breath] if task_breathes else [], [breath])

@@ -105,6 +105,7 @@ class ChainTab:
             width,
             (self._now(), self.app.pulse.tick),
             self.app.theme_variables,
+            still=not pulse.breathes(self.app),
         )
         for line in lines:  # at the pane's width: a row is padded to it
             log.write(line, width=width, scroll_end=False)

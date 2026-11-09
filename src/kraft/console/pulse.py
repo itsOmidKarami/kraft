@@ -47,6 +47,13 @@ def frame(tick: int) -> str:
     return FRAMES[tick % len(FRAMES)]
 
 
+def breathes(app: App) -> bool:
+    """Whether the terminal can draw a breath: a fade needs every shade of
+    truecolor. With NO_COLOR, or fewer colours (a fade would jump between a
+    few, or vanish), a small running mark is a still `●` in the running colour."""
+    return not app.no_color and app.console.color_system == "truecolor"
+
+
 def breathe(tick: int, colour: str, ground: str) -> str:
     """A small running mark's colour this beat: `colour` fading toward
     `ground` and back over a breath, as the web's breathing dot does."""

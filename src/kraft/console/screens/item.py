@@ -24,7 +24,7 @@ from kraft.console import acts, words
 from kraft.console.dialogs import Reject, reject_asks
 from kraft.console.pulse import Working, spins
 from kraft.console.screens import View
-from kraft.console.screens.board import bar_of, chain_line
+from kraft.console.screens.board import bar_of, chain_line, place_tone
 from kraft.console.screens.item_chain import ChainPane, ChainTab
 from kraft.console.screens.item_menu import MenuActions
 from kraft.console.words import status_words, usd
@@ -346,7 +346,7 @@ class Item(ChainTab, MenuActions, View):
             chain = self.query_one("#item-chain")
             # Inside the header's panel: its own width once laid out.
             width = chain.content_region.width or self.app.size.width - 4
-            line = chain_line(marks, width, lit=self._lit, running=spins(self.item))
+            line = chain_line(marks, width, lit=self._lit, tone=place_tone(self.item))
             self.query_one("#item-chain", Static).update(line)
 
     def _light(self) -> None:

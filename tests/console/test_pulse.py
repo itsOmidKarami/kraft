@@ -47,6 +47,17 @@ def test_a_small_running_mark_breathes_down_to_a_third_and_back(tick, fade):
     assert pulse.breathe(tick, blue.hex, ground.hex) == blue.blend(ground, fade).hex
 
 
+@pytest.mark.parametrize(
+    ("no_color", "system", "breathes"),
+    [(False, "truecolor", True), (False, "256", False), (True, "truecolor", False)],
+    ids=["truecolor", "256-colours", "no-color"],
+)
+def test_only_a_truecolor_terminal_draws_a_breath(no_color, system, breathes):
+    """A fade needs every shade: with fewer, or NO_COLOR, a small running mark is still."""
+    app = SimpleNamespace(no_color=no_color, console=SimpleNamespace(color_system=system))
+    assert pulse.breathes(app) is breathes
+
+
 class Recorded:
     """The pulse's timer, stepped by the test instead of the clock."""
 

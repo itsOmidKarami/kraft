@@ -131,8 +131,18 @@ def detail_line(row: dict, width: int) -> Content:
     head = chips(os.path.basename(row.get("repo", "").rstrip("/")), words.chain_of(row))
     lead = Content.assemble(" " * DETAIL_INDENT, head, (" · ", "$kraft-faint"))
     room = max(width - lead.cell_length, 1)
-    marks = chain_line(words.chain_marks(row), room, running=pulse.spins(row))
+    marks = chain_line(words.chain_marks(row), room, tone=place_tone(row))
     return Content.assemble(lead, marks).truncate(width, ellipsis=True)
+
+
+def place_tone(row: dict) -> str:
+    """The colour of where the item stands on its chain: blue while it runs,
+    red when it failed, amber when it needs you, plain when it waits on nobody."""
+    if pulse.spins(row):
+        return "$kraft-info"
+    if row.get("display_status") == "failed":
+        return "$error"
+    return "$warning" if words.is_hot(row) else "$foreground"
 
 
 def heading(key: str, label: str, members: list[dict], folded: bool) -> Content:
@@ -147,13 +157,13 @@ def heading(key: str, label: str, members: list[dict], folded: bool) -> Content:
 
 
 def chain_line(
-    marks: list[dict], width: int, *, lit: bool = False, running: bool = False
+    marks: list[dict], width: int, *, lit: bool = False, tone: str | None = None
 ) -> Content:
     """The chain as a window around where the item stands (spec §6): what fits
     on either side, `+N …` and `… +N` counting what is hidden. An ended chain
-    shows its end, one not started its start. The item's place is `●`: blue
-    while it runs, amber when it needs you, plain otherwise; on its colour
-    when `lit` (just moved there). Done nodes are faint."""
+    shows its end, one not started its start. The item's place is `●` in
+    `tone` (`place_tone`), or without one amber when it needs you and plain
+    otherwise; on its colour when `lit` (just moved there). Done nodes are faint."""
     if not marks:
         return Content("")
     names = [m["node"] + (" ●" if m["state"] in ("current", "hot") else "") for m in marks]
@@ -181,8 +191,8 @@ def chain_line(
     def here(tone: str) -> str:
         return f"bold $background on {tone}" if lit else f"bold {tone}"
 
-    current = here("$kraft-info") if running else here("$foreground")
-    style = {"done": "$kraft-faint", "current": current, "hot": here("$warning"), "todo": ""}
+    current, hot = here(tone or "$foreground"), here(tone or "$warning")
+    style = {"done": "$kraft-faint", "current": current, "hot": hot, "todo": ""}
     parts: list[str | tuple[str, str]] = [(f"+{lo} … ", "$kraft-faint")] if lo else []
     for k in range(lo, hi + 1):
         parts += [(" → ", "$kraft-faint")] if k > lo else []
