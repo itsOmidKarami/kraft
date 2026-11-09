@@ -116,6 +116,17 @@ def test_ensure_repo_reports_a_path_that_is_not_a_repo(wired, tmp_path):
         run_with_app(wired, scenario)
 
 
+def test_update_repo_refuses_an_answer_that_is_not_json(monkeypatch):
+    async def send(method, path, **kwargs):
+        return httpx.Response(200, text="<html>proxy</html>")
+
+    monkeypatch.setattr(client.transport, "_send", send)
+    with pytest.raises(client.ClientError) as caught:
+        asyncio.run(client.update_repo("/r", {"enabled": False}))
+    assert caught.value.kind == client.Failure.BAD_RESPONSE
+    assert str(caught.value) == "kraft 200: the answer was not JSON"
+
+
 @pytest.mark.parametrize(
     "call",
     [

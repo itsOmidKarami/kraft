@@ -241,13 +241,9 @@ async def ensure_repo(
 async def update_repo(path: str, fields: dict) -> dict:
     """Change a connected repo's `fields` (`PATCH /repos`); the entry as saved."""
     response = await transport._send("PATCH", "/repos", params={"path": path}, json=fields)
-    try:
-        body = response.json() if response.content else {}
-    except ValueError:
-        body = {"detail": response.text}
     if response.status_code >= 400:
-        raise transport.status_error(response.status_code, str(body.get("detail", body)))
-    return body
+        raise transport.status_error(response.status_code, transport._detail(response))
+    return transport._json(response)
 
 
 async def _connected_path(path: str | None) -> str:
