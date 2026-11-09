@@ -89,8 +89,9 @@ async def get_work_item_diff(wid: str, request: Request, ignore_whitespace: bool
     # on its parent's branch, all landed, nothing uncommitted.
     on_parent = _slice_on_parent(st, row)
     if on_parent:
-        worktree, base, head = on_parent
+        worktree, since, head = on_parent
     else:
+        since = base
         worktree = inplace.item_folder(st.run_dirs, row)
         if not worktree.is_dir():
             raise deps.worktree_missing(row)
@@ -108,7 +109,7 @@ async def get_work_item_diff(wid: str, request: Request, ignore_whitespace: bool
     change = review.read_change(
         worktree, head, head=None if head == "HEAD" else head, ignore_whitespace=ignore_whitespace
     )
-    landed = review.read_change(worktree, base, head=head, ignore_whitespace=ignore_whitespace)
+    landed = review.read_change(worktree, since, head=head, ignore_whitespace=ignore_whitespace)
     if change is None or landed is None:
         # None means git itself failed (and git_read has already logged the
         # command and stderr). Returning an empty diff here would be
@@ -228,18 +229,20 @@ def _slice_on_parent(st, row):
 
 
 def _targets(st, row, *targets: str):
-    """The worktree a compare reads, and each target's `(sha, base_sha)`. A
-    joined slice has only base and latest, its commits on its parent's branch:
-    its own gate attempts and reviews named commits its archive took with it."""
+    """The worktree a compare reads, each target's `(sha, base_sha)`, and
+    whether it is a joined slice's. A joined slice has only base and latest,
+    its commits on its parent's branch: its own gate attempts and reviews named
+    commits its archive took with it."""
     on_parent = _slice_on_parent(st, row)
     if on_parent is None:
         gate = board._pending_gate(st, row["id"])
-        return _readable_worktree(st, row), [_resolve_target(st, row, gate, t) for t in targets]
+        worktree = _readable_worktree(st, row)
+        return worktree, [_resolve_target(st, row, gate, t) for t in targets], False
     worktree, base, head = on_parent
     ends = {"base": base, "latest": head}
     if any(t not in ends for t in targets):
         raise HTTPException(404, "a joined slice compares only base and latest")
-    return worktree, [(ends[t], base) for t in targets]
+    return worktree, [(ends[t], base) for t in targets], True
 
 
 def _blob_at(worktree, to_sha: str | None, path: str) -> str | None:
@@ -256,7 +259,7 @@ async def _set_viewed(wid: str, request: Request, mark: bool):
     path, to = q.get("file", ""), q.get("to", "latest")
     if not path or path.startswith("/") or ".." in path.split("/"):
         raise HTTPException(400, "`file` must be a path inside the repository")
-    worktree, [(to_sha, _)] = _targets(st, row, to)
+    worktree, [(to_sha, _)], _ = _targets(st, row, to)
     blob = _blob_at(worktree, to_sha, path)
     if mark:
         await st.db.write(lambda c: store.mark_viewed(c, wid, path, to_sha or "worktree", blob))
@@ -301,7 +304,7 @@ async def compare_work_item(
         not file or "\0" in file or file.startswith("/") or ".." in file.split("/")
     ):
         raise HTTPException(400, "`file` must be a path inside the repository")
-    worktree, [(from_sha, from_base), (to_sha, to_base)] = _targets(st, row, frm, to)
+    worktree, [(from_sha, from_base), (to_sha, to_base)], joined = _targets(st, row, frm, to)
     # One file is diffed alone, with its old path beside it when it was renamed.
     paths = (
         list(dict.fromkeys((review.renamed_from(worktree, from_sha, to_sha, file) or file, file)))
@@ -318,7 +321,9 @@ async def compare_work_item(
     )
     if change is None:
         raise HTTPException(500, "git could not diff these two targets")
-    runs = st.db.read(lambda c: store.node_run_rows(c, wid))
+    # A joined slice's node runs ended on its own commits, not on the picks the
+    # parent holds, so no file can be traced to one of its nodes.
+    runs = [] if joined else st.db.read(lambda c: store.node_run_rows(c, wid))
     head = to_sha or config_mod.git_read(worktree, "rev-parse", "HEAD")
     attribution = review.touched_by(worktree, runs, from_sha, head)
     marks = st.db.read(

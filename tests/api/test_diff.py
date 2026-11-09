@@ -244,35 +244,48 @@ def test_a_joined_slice_with_no_worktree_reads_its_picks_on_the_parents_branch(
     client, seeded_item, worktree, tmp_path
 ):
     """A slice is archived, its worktree gone, while its parent is still in
-    review: its diff and compare read the commits the join picked onto the
-    parent's branch, and nothing the parent made before or after them."""
+    review: its diff and compare read only the commits the join picked onto the
+    parent's branch for it, not another slice's, nor what the parent made after.
+    A slice of an earlier generation has nothing there to read."""
     fork = git(worktree, "rev-parse", "HEAD")
+    base = client.get(f"/api/work-items/{seeded_item}").json()["base_ref"]
     branch = git(worktree, "branch", "--show-current")
-    git(worktree, "switch", "-q", "-c", "slice-1")
-    write(worktree, "slice.py", "the slice\n")
-    made = commit_all(worktree, "Task 2: the slice")
+    made = {}
+    for key in (1, 2):
+        git(worktree, "switch", "-q", "-c", f"slice-{key}", fork)
+        write(worktree, f"slice{key}.py", f"slice {key}\n")
+        made[key] = commit_all(worktree, f"Task {key}: slice {key}")
     git(worktree, "switch", "-q", branch)
-    git(worktree, "cherry-pick", "-x", made)
+    for key in (1, 2):
+        git(worktree, "cherry-pick", "-x", made[key])
     write(worktree, "after.py", "the parent's own\n")
     commit_all(worktree, "after the join")
     conn = sqlite3.connect(str(RunDirs(tmp_path / "run").db))
-    conn.executescript(
-        f"CREATE TEMP TABLE kid AS SELECT * FROM work_items WHERE id = '{seeded_item}';"
-        f"UPDATE kid SET id = 'kid1', bead_id = NULL, branch = 'slice-1', "
-        f"parent_id = '{seeded_item}', slice_generation = 1, slice_key = 1;"
-        "INSERT INTO work_items SELECT * FROM kid;"
-    )
+    for kid, key, generation in (("kid1", 1, 1), ("kid2", 2, 1), ("old2", 2, 0)):
+        conn.executescript(
+            f"CREATE TEMP TABLE kid AS SELECT * FROM work_items WHERE id = '{seeded_item}';"
+            f"UPDATE kid SET id = '{kid}', bead_id = NULL, branch = '{kid}', "
+            f"parent_id = '{seeded_item}', slice_generation = {generation}, slice_key = {key};"
+            "INSERT INTO work_items SELECT * FROM kid; DROP TABLE kid;"
+        )
     state = store.GroupState(
-        group="slices", phase="joined", generation=1, fork_commit=fork, recorded={1: [made]}
+        group="slices",
+        phase="joined",
+        generation=1,
+        fork_commit=fork,
+        recorded={1: [made[1]], 2: [made[2]]},
     )
     store.set_group_state(conn, seeded_item, state)
     conn.commit()
     conn.close()
 
-    landed = client.get("/api/work-items/kid1/diff").json()["landed"]
-    assert [f["path"] for f in landed["files"]] == ["slice.py"]
-    compare = client.get("/api/work-items/kid1/compare?from=base&to=latest")
-    assert [f["path"] for f in compare.json()["files"]] == ["slice.py"]
+    for kid, key in (("kid1", 1), ("kid2", 2)):
+        diff = client.get(f"/api/work-items/{kid}/diff").json()
+        assert [f["path"] for f in diff["landed"]["files"]] == [f"slice{key}.py"]
+        assert diff["base_ref"] == base
+        compare = client.get(f"/api/work-items/{kid}/compare?from=base&to=latest").json()
+        assert [f["path"] for f in compare["files"]] == [f"slice{key}.py"]
+    assert client.get("/api/work-items/old2/diff").status_code == 404
     # Its own gate history went with its worktree; so does all of it with the parent's.
     assert client.get("/api/work-items/kid1/compare?from=attempt:1").status_code == 404
     shutil.rmtree(worktree)
