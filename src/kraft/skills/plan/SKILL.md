@@ -70,9 +70,17 @@ to, each test seen to fail for the stated reason before the code makes it pass.
 
 ## Slicing a large plan
 
-When the plan is large and parts of it do not depend on each other, end it with a `## Slices`
-section, one bullet per slice. Kraft builds the slices in parallel, each by its own agent in its
-own worktree, then joins them:
+Slices don't replace sub-agents. Each slice becomes a child work item, with its own worktree
+and branch, its own setup, its own implementer session and the nodes after it, and a join that
+replays its commits. That overhead pays only when every slice is large enough to be a work item
+of its own: several tasks, the size of a pull request someone would review by itself. Smaller
+independent tasks stay unsliced: the implementer builds them in one session and can hand them to
+sub-agents there, which share its worktree, start at once and need no join. When in doubt, don't
+slice.
+
+When the plan is large, its parts don't depend on each other, and each part is that big, end it
+with a `## Slices` section, one bullet per slice. Kraft builds the slices in parallel, each by
+its own agent in its own worktree, then joins them:
 
 ```
 ## Slices
@@ -87,7 +95,8 @@ and sees none of another's work, so a slice may not use a helper another slice c
 shared groundwork (a helper two slices would both write, a schema both need) in tasks outside
 every slice; Kraft builds those first and tests them before any slice starts. Never write that
 one slice "comes after" another: that is refused. Use at most six slices, and at least two.
-When the plan is small or its tasks build on each other, write no section at all.
+When the plan is small, its tasks build on each other, or a slice would hold one small task,
+write no section at all.
 
 ## Check your own plan before you finish
 

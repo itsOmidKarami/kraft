@@ -30,11 +30,22 @@ judge it yourself by those three classes and say that you did:
   the repo's shared test helpers and fixtures before writing one, since a
   copied helper is a second place to keep current. The repo's own testing
   guidance (its `CLAUDE.md`, `AGENTS.md` or CONTRIBUTING) says where they live.
+  Independent parts of inline work go to sub-agents in this session.
 - **Handoff** - the spec came out architectural-classified, or the user already
   said the work is too big for this session, needs gates, or spans sessions.
   Use `kraft:handoff` to file it, attaching the spec. Kraft's own chain plans it -
   don't write a plan doc just to hand it straight to something that writes its
   own.
+
+**Slices or sub-agents.** Kraft's plan can split a handed-off item into slices,
+built in parallel and joined into one merge request. Slices don't replace
+sub-agents: each slice is a child work item with its own worktree, setup,
+implementer session and review, so it pays only when each part is large enough
+to be a work item of its own, the size of a pull request someone would review
+by itself. When the spec has independent parts that big, say so in the spec and
+in your judgment, so the plan slices them. Smaller independent parts stay in one
+item, or inline, and go to sub-agents, which share the worktree and start at
+once. When in doubt, recommend sub-agents.
 
 **Explicit user override wins outright.** If the user already said "do this
 inline" or "hand this to Kraft," skip judgment and honor that instead - still
@@ -52,7 +63,8 @@ If asked, run a plan skill - default `superpowers:writing-plans` - with its own
 review gate. Re-run the judgment above with the plan in hand (it sharpens the
 same inline/handoff call - e.g. a plan that turns out to be one small task can
 downgrade an architectural spec to inline), and attach the plan alongside the
-spec if handing off.
+spec if handing off. Give a plan headed for Kraft a `## Slices` section only by
+the rule above.
 
 **Do not put a full-test-suite run in the plan.** A plan headed for Kraft runs
 under a chain whose verification node already runs the suite (and local review)
