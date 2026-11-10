@@ -269,6 +269,11 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
     }
     case "needs-gate": {
       ev("node_started", { node_id: "final_review" }, 1);
+      // Round 1, a review that sent it back: asked at t(91), rejected at t(95), the instant the review was submitted.
+      ev("gate_requested", { node_id: "final_review", gate: "final_review" }, 0);
+      events.at(-1).created_at = t(91);
+      ev("gate_rejected", { gate: "final_review", node: "implementation", by: "human", note: "must fix: `commits` can be empty\n\nquestion: why no size bound?" }, 0);
+      events.at(-1).created_at = t(95);
       ev("gate_requested", { node_id: "final_review", gate: "final_review" }, 0.2);
       item.status = "needs_human"; item.display_status = "needs_you"; item.pending_gate = "final_review";
       // A re-review (ux2-W8): two attempts at the gate, and a review submitted on the first.
@@ -327,8 +332,13 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
   });
   const total = byNode.reduce((a, r) => ({ tokens_in: a.tokens_in + r.tokens_in, tokens_out: a.tokens_out + r.tokens_out, cost_usd: a.cost_usd + r.cost_usd, wall_ms: a.wall_ms + r.wall_ms }), { tokens_in: 0, tokens_out: 0, cost_usd: 0, wall_ms: 0 });
   item.usage = { total: { ...total, cost_complete: true, sessions: sessions.length, rounds: 1, capped_out: 0 }, by_node: byNode };
-  const threads = sc === "needs-gate" ? [{ id: "th1", work_item_id: id, gate: null, node_id: "local_review", file_path: "search/cache.py", side: "new", start_line: 40, end_line: 44, label: "question", state: "open", created_at: t(90), comments: [{ id: "c1", author: "you", body: "cache has no size bound", created_at: t(90) }] }] : [];
-  return { item, sessions, events, logs, threads };
+  const threads = sc === "needs-gate" ? [
+    { id: "th-r1-must", work_item_id: id, gate: "final_review", node_id: "implementation", file_path: "search/cache.py", side: "new", start_line: 12, end_line: 14, label: "must_fix", state: "resolved", resolved_at: t(94), created_at: t(92), comments: [{ id: "c-r1-must", author: "you", body: "`commits` can be empty: `max()` of an empty generator raises", created_at: t(92) }] },
+    { id: "th-r1-q", work_item_id: id, gate: "final_review", node_id: "implementation", file_path: "search/reindex.py", side: "new", start_line: 30, end_line: 30, label: "question", state: "open", created_at: t(93), comments: [{ id: "c-r1-q", author: "you", body: "why no size bound?", created_at: t(93) }] },
+    { id: "th1", work_item_id: id, gate: null, node_id: "local_review", file_path: "search/cache.py", side: "new", start_line: 40, end_line: 44, label: "question", state: "open", created_at: t(90), comments: [{ id: "c1", author: "you", body: "cache has no size bound", created_at: t(90) }] },
+  ] : [];
+  const reviews = sc === "needs-gate" ? [{ id: "rv1", gate: "final_review", outcome: "request_changes", summary: "Two things before this ships.", head_sha: "4d1e2f3", submitted_at: t(95) }] : [];
+  return { item, sessions, events, logs, threads, reviews };
 }
 
 /** An item filed paused that never ran: the V1 chain, no node, no session, no event, nothing spent. What a new item

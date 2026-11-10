@@ -1,6 +1,6 @@
 import { NG_CHAINS, NG_EXTENDING_CHAIN, NG_REPOS, NG_WORKSPACES, ngDryRun } from "./ngBoard";
 import { inTreeOrder, tree } from "../../../src/ng/review/model";
-import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchFor, subagentList, WORKERS_FIXTURE, type Scenario } from "./fixtures";
+import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, gateRoundsOf, roundWindows, searchFor, subagentList, within, WORKERS_FIXTURE, type Scenario } from "./fixtures";
 import { makeAreas } from "./areasMock";
 import { ngThreads } from "./ngItems";
 import { harnessesServer, PROVIDER_STATUS } from "./ngHarnesses";
@@ -312,14 +312,21 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
   // ux2-W8: review threads per item, seeded for a needs-gate item on first read.
   const threads: Record<string, any[]> = {};
   // W5b's gate-pane thread (the bundle's) comes first, in the full thread shape, then W8's review set.
-  const threadsOf = (wid: string) =>
-    (threads[wid] ??= ([
+  const threadsOf = (wid: string) => {
+    if (threads[wid]) return threads[wid];
+    const seeded = ([
       ...(S.bundles[wid]?.threads ?? []).map((t: any) => ({ anchor_sha: "9c8d7e6", resolved_at: null, draft: false, ...t, comments: t.comments.map((c: any) => ({ thread_id: t.id, review_id: "r1", attempt: null, suggestion: null, claim: null, draft: false, ...c })) })),
       // In the review tree's order, so the seeded threads land on the file shown first.
       ...(S.bundles[wid]?.item.pending_gate === "final_review" && Object.values(S.ng).includes(wid)
         ? ngThreads(wid, inTreeOrder(tree(compareFor(wid, S.variant).files as never)).map((f) => f.path))
         : []),
-    ] as any[]).map((t) => ({ quote: null, start_side: null, ...t })));
+    ] as any[]).map((t) => ({ quote: null, start_side: null, ...t }));
+    threads[wid] = seeded;
+    // The counts in each round read this same list (`gateRoundsOf`), so the endpoint and the item agree.
+    const b = S.bundles[wid];
+    if (b) b.item.gate_rounds = gateRoundsOf(b.events, seeded, b.reviews ?? []);
+    return seeded;
+  };
   const findThread = (tid: string) => Object.values(threads).flat().find((t) => t.id === tid);
   const findComment = (cid: string) => Object.values(threads).flat().flatMap((t) => t.comments).find((c) => c.id === cid);
   const mustFix = (wid: string) => threadsOf(wid).filter((t) => t.label === "must_fix" && t.state !== "resolved").map((t) => t.id);
@@ -494,7 +501,18 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     /* ux2-W8: review threads and comments, kept for the test's life */
     if ((m = p.match(/^\/work-items\/([^/]+)\/threads$/))) {
       const list = threadsOf(m[1]);
-      if (method === "GET") return json(list);
+      if (method === "GET") {
+        // `?gate=&round=`: the threads that round's count covers (`store.threads_in_round`), drafts out.
+        const round = q.get("round");
+        if (round === null) return json(list);
+        const gate = q.get("gate");
+        if (!gate) return json({ detail: "round needs gate" }, 400);
+        const bundle = S.bundles[m[1]];
+        const rounds = gateRoundsOf(bundle?.events ?? [], list, bundle?.reviews ?? [])[gate] ?? [];
+        const w = roundWindows(rounds)[Number(round) - 1];
+        if (!w) return json({ detail: `${gate} has no round ${round}` }, 404);
+        return json(list.filter((t) => t.gate === gate && !t.draft && within(w, t.created_at)));
+      }
       const b = req.json() ?? {};
       const id = `th-new${seq++}`;
       const t = { id, work_item_id: m[1], gate: S.bundles[m[1]]?.item.pending_gate ?? null, node_id: b.node_id ?? null, file_path: b.file_path ?? null, side: b.side ?? null, start_side: b.start_side ?? null, quote: b.quote ?? null, start_line: b.start_line ?? null, end_line: b.end_line ?? null, anchor_sha: b.anchor_sha ?? "9c8d7e6", label: b.label ?? null, state: "open", resolved_at: null, created_at: "2026-09-13T10:09:00.000Z", draft: true,

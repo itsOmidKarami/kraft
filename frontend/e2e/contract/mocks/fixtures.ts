@@ -183,6 +183,8 @@ export interface ItemBundle {
   threads?: any[];
   /** Bead ids the item names: what GET /work-items/{id}/cancel-preview lists under `beads` (Mark complete's "beads" row). */
   beads?: string[];
+  /** The reviews submitted on the item (`reviews` rows): what `gateRoundsOf` puts in each round's `review`. */
+  reviews?: any[];
 }
 
 export function logLines(sessionId: string, n: number, long: boolean): any[] {
@@ -692,10 +694,20 @@ export function artifactFor(item: any, variant: Variant) {
   };
 }
 
+/** A round's window `(after, upto]` (`store/gates.py` `_windows`): `after` is the previous round's `ended_at`, `upto` its
+ *  own (null while pending). */
+export type RoundWindow = [after: string | null, upto: string | null];
+export const roundWindows = (list: GateRound[]): RoundWindow[] => list.map((r, i): RoundWindow => [i ? list[i - 1].ended_at : null, r.ended_at]);
+/** Whether `at` is in the window: lower bound exclusive, upper inclusive (`store/gates.py` `_in_window`). ISO strings compare as text. */
+export const within = ([after, upto]: RoundWindow, at: string): boolean => (after === null || at > after) && (upto === null || at <= upto);
+
 /** `store.gate_rounds`, ported for the event types the mock writes: a round opens at a `gate_requested` (a repeat while
  *  one is open is the same round), and ends at the gate's approval, rejection or skip (`payload.gate`; a skip with no
- *  gate is none, unless its node is a gate with rounds), or at the item's end. An ending with no open round is a round of its own. */
-export function gateRoundsOf(events: Ev[]): Record<string, GateRound[]> {
+ *  gate is none, unless its node is a gate with rounds), or at the item's end. An ending with no open round is a round of its own.
+ *  Each round's `review` and `threads` ports the window rule of `store/gates.py` `_windows`, from `reviews` and `threads`:
+ *  the one thread list the threads endpoint serves, drafts left out. After a transition (`settle`) the counts come from the
+ *  bundle's own threads, without the seeded review set `ngThreads` adds, as the demo has no other thread write that moves a window. */
+export function gateRoundsOf(events: Ev[], threads: any[] = [], reviews: any[] = []): Record<string, GateRound[]> {
   const rounds: Record<string, GateRound[]> = {};
   const open: Record<string, GateRound> = {};
   const round = (gate: string, at: string | null): GateRound => {
@@ -734,6 +746,20 @@ export function gateRoundsOf(events: Ev[]): Record<string, GateRound[]> {
       if (newest?.outcome === "rejected") newest.sent_to = null;
     }
   }
+  for (const [gate, list] of Object.entries(rounds)) {
+    roundWindows(list).forEach((w, i) => {
+      const made = reviews.filter((r) => r.gate === gate && within(w, r.submitted_at));
+      const newest = made.sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1)).at(-1);
+      if (newest) list[i].review = { id: newest.id, outcome: newest.outcome, summary: newest.summary ?? "", head_sha: newest.head_sha ?? null };
+      const mine = threads.filter((t) => t.gate === gate && !t.draft && within(w, t.created_at));
+      const by_label = { must_fix: 0, question: 0, nit: 0 };
+      for (const t of mine) if (t.label in by_label) by_label[t.label as keyof typeof by_label]++;
+      list[i].threads = { total: mine.length, open: mine.filter((t) => t.state !== "resolved").length, by_label };
+      list[i].first_threads = [...mine].sort((a, b) => Number(a.label !== "must_fix") - Number(b.label !== "must_fix")).slice(0, 3).map((t) => ({
+        id: t.id, file_path: t.file_path ?? null, start_line: t.start_line ?? null, end_line: t.end_line ?? null, label: t.label ?? null, state: t.state, body: String(t.comments[0]?.body ?? "").split("\n")[0],
+      }));
+    });
+  }
   return rounds;
 }
 
@@ -755,7 +781,7 @@ export function serverKeys(b: ItemBundle): ItemBundle {
     group: null, group_state: null, paused_by_parent: 0,
   });
   // Not through `fill`: a transition's new event has to show, and `settle` sets it again after each transition.
-  it.gate_rounds = gateRoundsOf(b.events);
+  it.gate_rounds = gateRoundsOf(b.events, b.threads ?? [], b.reviews ?? []);
   if (it.budget_cap && !("key" in it.budget_cap)) it.budget_cap.key = "budget_usd";
   const run = `/Users/dev/.kraft/run/items/${it.id}/sessions`;
   for (const s of b.sessions) fill(s, {

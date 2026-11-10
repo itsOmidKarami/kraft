@@ -158,7 +158,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
   const liveTurn = (b: ItemBundle) => liveThread({ escalation_threads: escalationThreads(b.sessions) });
   const settle = (item: any) => {
     item.escalation_threads = escalationThreads(S.bundles[item.id].sessions);
-    item.gate_rounds = gateRoundsOf(S.bundles[item.id].events);
+    item.gate_rounds = gateRoundsOf(S.bundles[item.id].events, S.bundles[item.id].threads ?? [], S.bundles[item.id].reviews ?? []);
     item.display_status = displayStatus(item);
     item.updated_at = now();
     return item;
