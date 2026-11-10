@@ -56,20 +56,56 @@ TASK_KEYS = (
 #: What the verify task's `suite` may be (`kraft.templates.models.TestSuite`):
 #: the scope's targeted command where it has one, or always its full one.
 SUITES = ("targeted", "full")
-#: Every other key of Kraft's node, step and task models, by what Lite does
-#: with it. A key Kraft adds that none of these names fails the parity test.
-WALKED = (
-    *("steering", "tasks", "steps", "on_failure", "fix_loop", "judge", "max_attempts"),
-    *("on_base_changed", "on_merge_rejected", "message", "artifact", "artifact_required"),
-    *("reject_to", "auto_review", "auto_review_mode"),
-)
-REFUSED = ("outputs", "reads")  # and a step's or a task's own `on_failure`
-#: Run without: Lite cannot enforce them in one session. Of `policy`, only a
-#: node's `max_attempts` counts, as its fix loop's cap.
-READ_PAST = (
-    *("policy", "wait", "scope", "execution", "harness", "fallback", "inputs", "skippable"),
-    *("read_only", "icon", "timeout", "escalation", "runner", "reviewers", "pipeline"),
-)
+#: Every key of each of Kraft's chain models (`kraft.templates.models`), by what
+#: Lite does with it: reads it, reads past it (it can't enforce it in one
+#: session), or refuses it. The parity test fails when a model's keys and its
+#: row here differ. Of a node's `policy`, only `max_attempts` is read, as its
+#: fix loop's cap; a step's or a task's own `on_failure` is refused.
+_TASK = {
+    "read": ("id", "kind", "steering"),
+    "read_past": ("policy", "scope", "skippable", "icon"),
+    "refused": ("on_failure", "reads"),
+}
+
+
+def _plus(base: dict, **more: tuple) -> dict:
+    return {key: (*base.get(key, ()), *more.get(key, ())) for key in _TASK}
+
+
+MODEL_KEYS = {
+    "AgentTask": _plus(
+        _TASK,
+        read=("prompt", "skill", "produces", "profile", "model", "effort"),
+        read_past=("harness", "fallback", "inputs"),
+        refused=("outputs",),
+    ),
+    "ForgeTask": _plus(_TASK, read=("target",), read_past=("wait", "reviewers", "pipeline")),
+    "BuiltinTask": _plus(_TASK, read=("ref", "suite"), read_past=("execution",)),
+    "SubprocessTask": _plus(_TASK, read=("command",), refused=("outputs",)),
+    "ExecNode": _plus(
+        {},
+        read=(
+            *("id", "kind", "tasks", "steps", "policy", "on_failure", "fix_loop"),
+            *("on_base_changed", "on_merge_rejected"),
+        ),
+        read_past=("escalation", "icon", "read_only", "runner", "skippable"),
+    ),
+    "GateNode": _plus(
+        {},
+        read=(
+            *("id", "kind", "message", "artifact", "artifact_required", "reject_to"),
+            *("chain_finalized", "auto_review", "auto_review_mode"),
+        ),
+        read_past=("policy", "runner", "skippable", "timeout"),
+    ),
+    "Step": _plus(
+        {},
+        read=("id", "tasks"),
+        read_past=("icon", "policy", "read_only", "runner", "skippable"),
+        refused=("on_failure",),
+    ),
+    "FixLoop": _plus({}, read=("judge", "max_attempts", "steps", "tasks")),
+}
 #: The keys an extending chain edits its parent with, and what an override may not set.
 EDIT_KEYS = ("remove", "add", "overrides")
 IDENTITY = ("id", "kind", "extends", "chain_finalized")

@@ -301,18 +301,14 @@ def test_lite_knows_every_key_of_kraft_template_models(kl_modules):
     on purpose, never one it drops unseen; and the names Lite copied of
     Kraft's enums and handler models still match them."""
     _, kl_chains = kl_modules
-    known = {
-        *kl_chains.TASK_KEYS,
-        *kl_chains.IDENTITY,
-        *kl_chains.WALKED,
-        *kl_chains.REFUSED,
-        *kl_chains.READ_PAST,
+    for name, keys in kl_chains.MODEL_KEYS.items():
+        declared = [key for group in keys.values() for key in group]
+        assert len(declared) == len(set(declared)), f"{name}: a key in two groups"
+        assert set(declared) == set(getattr(models, name).model_fields), name
+    assert set(kl_chains.MODEL_KEYS) == {
+        *("AgentTask", "ForgeTask", "BuiltinTask", "SubprocessTask"),
+        *("ExecNode", "GateNode", "Step", "FixLoop"),
     }
-    for model in (
-        *(models.AgentTask, models.ForgeTask, models.BuiltinTask, models.SubprocessTask),
-        *(models.ExecNode, models.GateNode, models.Step, models.FixLoop),
-    ):
-        assert set(model.model_fields) <= known, model.__name__
 
     assert kl_chains.BUILTIN_REFS == tuple(models.BuiltinAction)
     assert kl_chains.FORGE_TARGETS == tuple(

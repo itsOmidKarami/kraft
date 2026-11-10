@@ -232,6 +232,15 @@ NO_CHANGE = '```json\n{"rationale": "The chain fits."}\n```\n'
         ),
         pytest.param('```json\n{"rationale": ""}\n```\n', None, id="no_rationale"),
         pytest.param("proposal", None, id="slicing_proposed"),
+        # As Kraft's strict read: a key twice, a symlink, a file outside the repo, past 1 MB.
+        pytest.param(
+            '```json\n{"rationale": "Fits.", "add": [{"after": "x"}], "add": []}\n```',
+            None,
+            id="duplicate_key",
+        ),
+        pytest.param("symlink", None, id="behind_a_symlink"),
+        pytest.param("outside", None, id="outside_the_repo"),
+        pytest.param("too_big", None, id="past_the_size_cap"),
     ],
 )
 def test_an_unchanged_chain_revision_passes_without_asking(walk, kl_cli, tmp_path, body, rationale):
@@ -241,9 +250,16 @@ def test_an_unchanged_chain_revision_passes_without_asking(walk, kl_cli, tmp_pat
     if body == "proposal":
         (tmp_path / kl.STATE_DIR / "proposals").mkdir()
         (tmp_path / kl.STATE_DIR / "proposals" / f"{chain_id}.json").write_text("{}")
-    revision = tmp_path / "revision.md"
-    revision.write_text(NO_CHANGE if body == "proposal" else body)
+    special = {"too_big": NO_CHANGE + " " * kl.REVISION_MAX_BYTES}
+    special |= dict.fromkeys(("proposal", "symlink", "outside"), NO_CHANGE)
+    outside = tmp_path.parent / f"{tmp_path.name}-revision.md"
+    revision = outside if body == "outside" else tmp_path / "revision.md"
+    revision.write_text(special.get(body, body))
     kl_cli(tmp_path, "produced", "--kind", "chain_revision", "--path", str(revision))
+    if body == "symlink":  # swapped after it was recorded, as Kraft's read guards against
+        (tmp_path / "real.md").write_text(NO_CHANGE)
+        revision.unlink()
+        revision.symlink_to(tmp_path / "real.md")
     kl_cli(tmp_path, "close")
 
     state = kl_cli(tmp_path, "gate")

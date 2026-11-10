@@ -2350,19 +2350,37 @@ REVISION_BODY = re.compile(r"\A\s*```json\n(.*)\n```\s*\Z", re.DOTALL)
 REVISION_CHANGES = {"skip": [], "add": [], "overrides": {}}
 #: The line a gate that passed without asking keeps, with the proposal's rationale.
 UNCHANGED_PREFIX = "Passed unchanged: "
+#: Kraft's cap on a change set it reads (`revision._MAX_BYTES`); a larger file goes to a person.
+REVISION_MAX_BYTES = 1_000_000
 
 
-def unchanged_revision(path: Path) -> str | None:
-    """The rationale of the change set at `path` when it proposes no change,
-    else None, as Kraft's `revision.unchanged`: a file that does not read as a
-    change set, or proposes anything, goes to a person."""
+def _refuse_duplicates(pairs: list[tuple[str, object]]) -> dict:
+    """A JSON object read as Kraft's `revision.parse` reads it: a key twice is no change set."""
+    keys = [key for key, _ in pairs]
+    if len(set(keys)) != len(keys):
+        raise ValueError("a key appears twice")
+    return dict(pairs)
+
+
+def unchanged_revision(root: Path, rel: str) -> str | None:
+    """The rationale of the change set at `rel` under `root` when it proposes
+    no change, else None, as Kraft's `revision.unchanged`: a file outside the
+    repo, behind a symlink, past the size cap, or not a change set, or one
+    proposing anything, goes to a person."""
+    path = root / rel
     try:
-        text = path.read_text()
-    except (OSError, UnicodeDecodeError):
+        resolved = path.resolve(strict=True)
+        # Unresolved equal to resolved: no component is a symlink.
+        if resolved != Path(os.path.abspath(path)) or not resolved.is_relative_to(root.resolve()):
+            return None
+        with resolved.open("rb") as fh:
+            raw = fh.read(REVISION_MAX_BYTES + 1)
+        text = raw.decode() if len(raw) <= REVISION_MAX_BYTES else ""
+    except (OSError, ValueError):  # UnicodeDecodeError is a ValueError
         return None
     match = REVISION_BODY.match(FRONT_MATTER.sub("", text, count=1))
     try:
-        data = json.loads(match[1]) if match else None
+        data = json.loads(match[1], object_pairs_hook=_refuse_duplicates) if match else None
     except ValueError:
         return None
     if not isinstance(data, dict) or set(data) - {"rationale", *REVISION_CHANGES}:
@@ -2384,7 +2402,7 @@ def _unchanged_rationale(
     if (root / STATE_DIR / "proposals" / f"{chain_id}.json").exists():
         return None
     path = _document(root, records, CHAIN_REVISION)
-    return unchanged_revision(root / path) if path else None
+    return unchanged_revision(root, path) if path else None
 
 
 def _document(root: Path, records: list[dict], kind: str | None) -> str | None:
