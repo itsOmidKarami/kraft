@@ -71,7 +71,7 @@ _CTX = (
     "---\n"
     "\n"
     'Report how it went as "status" in the JSON result file at '
-    '$KRAFT_RESULT_PATH: "done" if you finished the work; '
+    '$KRAFT_RESULT_PATH, which is {result_path}: "done" if you finished the work; '
     '"done_with_concerns" if you finished it but have '
     'doubts about correctness, with why in a "concerns" field; "failed" if you '
     'could not complete the task; or "needs_context" if you were missing '
@@ -669,6 +669,10 @@ def context_sections(
     #: escalation thread's shared one), absolute; None shows a placeholder
     #: (the steering preview, which has no session).
     summary_path: str | None = None,
+    #: Where it writes its JSON result (`SessionFiles.result`), absolute; spelled
+    #: out beside `$KRAFT_RESULT_PATH`, which a weaker agent leaves unexpanded
+    #: (Kraft-flktg.8). None shows a placeholder, as for `summary_path`.
+    result_path: str | None = None,
     #: Where it writes the `artifact` document (`artifact_path`), absolute;
     #: None shows a placeholder, as for `summary_path`.
     document_path: str | None = None,
@@ -695,6 +699,7 @@ def context_sections(
                 hook_point=hook_point,
                 session_id=session_id,
                 summary_path=summary_path or "<session summary path>",
+                result_path=result_path or "<result path>",
                 edits=_READ_ONLY + (_READ_ONLY_COPY.format(branch=branch) if in_place else "")
                 if read_only
                 else _TESTS
@@ -1293,6 +1298,7 @@ async def _run_agent_task(
         intent_dir=repo_entry.intent_dir if repo_entry is not None else None,
         steering_texts=steering_texts,
         summary_path=str(files.summary),
+        result_path=str(files.result),
         document_path=str(artifact_path(run_dirs, artifact, work_item_id)) if artifact else None,
         documents=documents_note(run_dirs, item_row, worktree=Path(cwd)),
         in_place=in_place,

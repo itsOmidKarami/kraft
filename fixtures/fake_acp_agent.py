@@ -361,13 +361,14 @@ def prompt(id_, params: dict) -> None:
         os._exit(3)
     if "die_stderr" in FLAGS:
         # Gone at once with a failure code, but a child it left behind still holds stderr and
-        # writes the crash's last line 0.3s later: the client must wait for the readers.
+        # writes the crash's last line after the agent exits: the client must wait for the
+        # readers. No sleep: the child's own startup already lands the line after the exit, and
+        # a sleep only narrows the margin under load (Kraft-flktg.10).
         subprocess.Popen(
             [
                 sys.executable,
                 "-c",
-                "import sys, time; time.sleep(0.3); "
-                "print('fatal: the agent crashed', file=sys.stderr)",
+                "import sys; print('fatal: the agent crashed', file=sys.stderr)",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,

@@ -67,13 +67,23 @@ def test_front_matter_asked_for_keeps_a_digits_only_id_a_string(artifact):
         assert fm["work_item_ids"] == ["01234567"]
 
 
-def test_a_resumed_launch_names_its_own_session_files(run):
+@pytest.mark.parametrize(
+    "resume, told",
+    [
+        # Kraft-flktg.8: told only `$KRAFT_RESULT_PATH`, a weaker agent wrote no result.
+        (None, "$KRAFT_RESULT_PATH, which is {out}/result.json"),
+        ("cli-session-abc", "$KRAFT_RESULT_PATH, which is now {out}/result.json"),
+    ],
+    ids=["fresh", "resumed"],
+)
+def test_a_launch_names_its_own_session_files(run, resume, told):
     """Kraft-vjo4g: a resumed conversation remembers the summary and result
     paths of the session it began in, and wrote there; each session's are its
-    own, so the turn must be told this one's."""
-    cmd = run(session_id="s2", resume_session_id="cli-session-abc")["cmd"]
-    prompt = cmd[cmd.index("-p") + 1]
+    own, so the turn must be told this one's. A fresh launch is told its
+    result path in its context; a resumed one, in its prompt."""
+    cmd = run(session_id="s2", resume_session_id=resume)["cmd"]
+    text = cmd[cmd.index("-p") + 1] if resume else "\n".join(cmd)
     out = "/kraft/run/items/w1/sessions/s2/out"
-    assert f"{out}/summary.md" in prompt
-    assert f"$KRAFT_RESULT_PATH, which is now {out}/result.json" in prompt
-    assert 'worker_session_id: "s2"' in prompt
+    assert f"{out}/summary.md" in text
+    assert told.format(out=out) in text
+    assert 'worker_session_id: "s2"' in text

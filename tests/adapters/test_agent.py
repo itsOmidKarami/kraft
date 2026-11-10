@@ -283,8 +283,7 @@ def test_default_profile_reproduces_todays_command_line(run):
       object at exit, so no log to tail, no tokens to count, no model until the
       node is over (Kraft-77z, 54dk, 2r8s); without `--verbose` the CLI exits 1.
     - no `--model`/`--effort`: an unset one leaves the CLI's own default.
-    - `Monitor` always denied (Kraft-avpe): a one-shot `claude -p` session has
-      no later turn to resume into.
+    - `Monitor` always denied (Kraft-avpe): a one-shot `claude -p` has no later turn to resume into.
     - `--permission-mode auto`, always: without it `claude -p` has nobody to
       answer a prompt and denies instead (6363c65e: 13 denials, Kraft-8pe/7lu);
       no `--allowedTools` for a silent binding.
@@ -301,6 +300,7 @@ def test_default_profile_reproduces_todays_command_line(run):
         hook_point="on.implementation.start",
         session_id="s1",
         summary_path="/kraft/run/items/w1/sessions/s1/out/summary.md",
+        result_path="/kraft/run/items/w1/sessions/s1/out/result.json",
         edits=agent._TESTS + agent._WORKTREE + agent._GITIGNORED,
     )
 
