@@ -123,9 +123,8 @@ startup.
 ## Requirements
 
 - Kraft running, on this machine (`kraft`, or `kraft admin start`) or on another
-  one you sign in to, on the
-  extension's major release and at least its minor: the 2.0 extension needs
-  Kraft 2.0 or a later 2.x. Against any other Kraft the extension turns
+  one you sign in to, on the extension's major release and at least its minor:
+  the 2.0 extension needs Kraft 2.0 or a later 2.x. Against any other Kraft the extension turns
   read-only: the board still updates, every action is disabled, and the status
   bar's tooltip says whether to update Kraft or the extension.
 - A trusted workspace to act. In Restricted Mode the board, gate documents and

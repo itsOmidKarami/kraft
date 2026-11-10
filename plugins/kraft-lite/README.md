@@ -431,7 +431,7 @@ names a dropped node moves to the nearest kept exec node before it, else to
 the child chain's first node.
 
 The child's `slice:` bindings win over everything else. Without them, the
-agent tasks of the first build node run the sub-agent-driven skill, whatever
+agent tasks of the first build node run the `subagent-driven-development` skill, whatever
 component they extend. The changed-scope tests run only the paths the slice
 touches, and the merge request's automated review is skipped, because the
 controller's review is that review. CI runs the full suite.

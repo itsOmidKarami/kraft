@@ -43,7 +43,7 @@ nodes:
           prompt: Fix what the checks reported.
       judge:
         id: judge
-        extends: strict_judge
+        extends: kraft-default:strict_judge
       max_attempts: 3
 
   - id: review

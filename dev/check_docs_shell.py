@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
@@ -49,7 +50,7 @@ def _label(page: Path, content: Path) -> Path:
     return page
 
 
-def problems(content: Path, files: list[Path] = ()) -> list[str]:
+def problems(content: Path, files: Sequence[Path] = ()) -> list[str]:
     found = []
     for page in [*sorted(content.rglob("*.md")), *files]:
         fence = ""  # the marker that opened the block we are in

@@ -11,4 +11,4 @@ level: error
 nonword: true
 tokens:
   - '\b\w+, [\w-]+(?: [\w-]+)?, (?:and|or)\b'
-  - '\b(?:the|an?) [\w-]+(?: [\w-]+){0,3}, (?:the|an?) [\w-]+(?: [\w-]+){0,3}, (?:and|or) (?:the|an?)\b'
+  - '\b(?:[Tt]he|[Aa]n?) [\w-]+(?: [\w-]+){0,3}, (?:[Tt]he|[Aa]n?) [\w-]+(?: [\w-]+){0,3}, (?:and|or) (?:[Tt]he|[Aa]n?)\b'
