@@ -11,7 +11,9 @@ These are this repository's conventions for getting a pull request mergeable.
 wins. Read its "What CI checks" table before working a red check.
 
 **In a Kraft worker** (`$KRAFT_WORK_ITEM_ID` set) there's no `gh` and no user
-to ask. Set a label with `kraft item mr-label`, re-run a job with
+to ask. Set a label with `kraft item mr-label`; where it isn't available (a
+sandboxed worker has only `item progress`, `rerun-ci` and `reply`), name the
+label you need in your summary. Re-run a job with
 `kraft item rerun-ci --reason "..."`, and leave a conflict with `main` to
 Kraft: report it, never merge in the worktree. What this file says to ask the
 user about, leave undone and say so in your summary.
@@ -28,7 +30,7 @@ fresh checkout.
 | The diff touches | Run |
 |---|---|
 | anything | `just ci-checks` (CI's whole `lint` job, plus the intent check) |
-| `src/`, `tests/`, `config/`, skills, fixtures | `just test-targeted` (testmon can't see `config/`, skills or fixtures, so it runs the full suite for those); `just test tests/<pkg> -n auto` is the quick loop |
+| `src/`, `tests/`, `config/`, skills, fixtures | `just test-targeted` (testmon can't see `config/`, packaged skills or fixtures, so it adds the tests that read them, or runs the full suite); `just test tests/<pkg> -n auto` is the quick loop |
 | `frontend/` | `just test-ui` |
 | `vscode/` or a config model | `just test-vscode` |
 | `plugins/kraft-lite/` | CI's own command: `uv run --python 3.10 --no-project --with pytest pytest plugins/kraft-lite/tests -q` |
