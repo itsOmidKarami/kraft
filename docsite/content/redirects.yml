@@ -438,8 +438,10 @@
 /project/security#login: /project/security-in-depth#login
 /project/security#gates: /project/security-in-depth#agents-and-gates
 /concepts/vocabulary#the-shipped-chains: /concepts/how-a-work-item-runs#the-shipped-chains
-/concepts/vocabulary#the-default-chain: /concepts/how-a-work-item-runs#the-default-chain
-/concepts/vocabulary#the-quick-task-chain: /concepts/how-a-work-item-runs#the-quick-task-chain
+/concepts/vocabulary#the-default-chain: /reference/chain-nodes/shipped-chains#the-default-chain
+/concepts/vocabulary#the-quick-task-chain: /reference/chain-nodes/shipped-chains#the-quick-task-chain
+/concepts/how-a-work-item-runs#the-default-chain: /reference/chain-nodes/shipped-chains#the-default-chain
+/concepts/how-a-work-item-runs#the-quick-task-chain: /reference/chain-nodes/shipped-chains#the-quick-task-chain
 /concepts/vocabulary#run-fork: /reference/cli/item#addressing-work-by-path
 /concepts/vocabulary#classifier-mode: /reference/harnesses/unattended-runs
 /concepts/permission-gate#why-an-escalation-gets-git-grants-by-default: /concepts/permission-gate#why-grants-are-names-not-command-patterns

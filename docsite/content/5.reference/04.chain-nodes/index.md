@@ -329,6 +329,7 @@ Every task, step and node has a canonical path, for example
 
 ## In this section
 
+- [The shipped chains](/reference/chain-nodes/shipped-chains): the nodes of the default and quick-task chains in order, with the gates marked.
 - [Subprocess tasks](/reference/chain-nodes/subprocess-tasks): what Kraft passes a command, and how its exit code becomes a status.
 - [Fix loop and judge](/reference/chain-nodes/fix-loop): when a fix loop opens, what each cycle does, and what the judge's verdicts mean.
 - [Result file](/reference/chain-nodes/result-file): the JSON a task writes at `$KRAFT_RESULT_PATH`, field by field.
