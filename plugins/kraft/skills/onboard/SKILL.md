@@ -10,18 +10,27 @@ connection error.
 
 # Onboarding a repo
 
-Five steps (connect, register, rehearse, narrow the tests, verify), each followed by a check
-against the repo itself — a zero exit code says the command ran, not that what
-it did was right. Then hand off to `kraft:check`.
+Five steps (connect, register, rehearse, narrow the tests only when the repo
+has a test-selection tool, verify), each followed by a check against the repo
+itself — a zero exit code says the command ran, not that what it did was
+right. Then hand off to `kraft:check`.
 
-1. **Connect.** Read how the repo says to build and test itself before you
+Connecting and `--verify` both go through the server, so run `kraft admin
+health` first: it exits 1 when the server isn't up. If it fails, report that
+and stop - `kraft admin start --detach` (or the service) comes first.
+
+1. **Connect.** If `ensure_repo()` answers `already_connected: true`, the repo
+   keeps the commands it has: read them against the repo's docs, and any
+   correction goes to the person (below). Otherwise read how the repo says to
+   build and test itself before you
    connect it: its README, CONTRIBUTING, agent instructions (`CLAUDE.md`,
    `AGENTS.md`) and CI config. Look for the command a contributor is told to
    run, and any rule that the raw runner must not be called directly.
 
    Then `ensure_repo()` (or `kraft repo connect [PATH]` from a terminal). It
    proposes a test and a setup command from the repo's own committed files
-   (origin's default branch, so a change not pushed yet is not read), best
+   (origin's default branch, or HEAD with no origin, so a change not pushed
+   yet is not read), best
    evidence first:
    - a task runner's `test`/`setup` task (justfile, Makefile, Taskfile, mise,
      `script/test`)
@@ -39,12 +48,13 @@ it did was right. Then hand off to `kraft:check`.
 
    `ensure_repo` saves as soon as it is called. With Kraft's own proposal the
    repo is saved enabled when it found a test command (disabled when it found
-   none), so the person sees those commands only through you.
-   Commands you pass save it disabled (the answer's `held` says so): they run
-   for every work item, so you cannot file work on it until the person has
-   read them in Settings › Repos and enabled it there. Either way, show them what was saved, each command with
-   its source, and the candidates it passed over, then ask them to confirm
-   or correct it before the first work item. Say which you chose and why.
+   none), so the person sees those commands only through you. Commands you pass
+   save it disabled (the answer's `held` says so): they run for every work item,
+   so you cannot file work on it until the person has read them in Settings ›
+   Repos and enabled it there. Either way, show them what was saved, each
+   command with its source, and the candidates it passed over, then ask them to
+   confirm or correct it before the first work item. Say which you chose and
+   why.
 
    An empty command means "deliberately nothing", not an oversight:
    - A repo with nothing to prepare declares `setup_command: ""`. A repo with no
@@ -62,10 +72,15 @@ it did was right. Then hand off to `kraft:check`.
 
    Once a repo is connected, `ensure_repo` leaves it alone, and its commands
    are a person's to change. To correct them, tell the person
-   what to change and why: they change it in Settings › Repos. Do not edit `~/.kraft/config/repos.yaml` yourself; a
-   command there runs for every work item, so a person sets it. A convention Kraft keeps getting wrong
+   what to change and why: they change it in Settings › Repos. Don't edit a
+   command in `~/.kraft/config/repos.yaml` yourself; a command there runs for
+   every work item, so a person sets it. A convention Kraft keeps getting wrong
    across repos belongs in `~/.kraft/config/detectors.yaml` instead: see
    https://kraft-sdlc.dev/reference/configuration/repos/detectors
+
+   If connect fails: a repo with no commit yet is refused, since a work item's
+   branch starts from one. A connect that times out may still be saved, so
+   check `kraft repo list` before connecting again.
 
    If the repo has submodules, connect writes each `.gitmodules` path as its
    own repo entry, not a sub-field of this one — run `kraft repo list --all`
@@ -95,8 +110,9 @@ it did was right. Then hand off to `kraft:check`.
    and on one that leaves files every work item would commit. These are
    the repo's own commands running on this machine, and the test suite can
    take minutes, not seconds: say what you are about to run and let the
-   person decide whether to run it now. A sandboxed repo is refused unless
-   the person asks for `--on-host`.
+   person decide whether to run it now. If they decline, or it can't run
+   here, say onboarding is unverified and still run step 5. A sandboxed repo
+   is refused unless the person asks for `--on-host`.
 
    A failure is the finding, not an error to route around. Run
    `git -C <repo> ls-files --others --directory`: a root-level file it lists
@@ -117,26 +133,32 @@ it did was right. Then hand off to `kraft:check`.
 
    Kraft copies those into every worktree before it runs `setup_command`, and
    **refuses any entry the repo does not gitignore** — it cannot keep an
-   unignored file out of a commit. If a needed file is not ignored, add it to
-   `.gitignore` rather than dropping it from `local_files`. Re-run
-   `kraft repo connect --verify` after editing, and say whether it went green.
+   unignored file out of a commit. If a needed file isn't ignored, it needs an
+   ignore rule rather than dropping it from `local_files`, and the rule has to
+   be on the branch the worktree is cut from (origin's default branch, or HEAD
+   with no origin): a local `.gitignore` edit changes nothing for `--verify`.
+   That is a commit and push in the person's repo, so ask first; `--verify`
+   stays red until it lands. Re-run `kraft repo connect --verify` then, and say
+   whether it went green.
 
    Do not put a directory or a glob in `local_files`; it takes literal file
    paths, and the list is validated on load.
 
-4. **Narrow the tests.** Verification runs a scope's `command`, normally the
-   whole suite, in its first round and in every repair round. A repo whose
-   tooling can pick the tests a change affects can let verification run only
-   those, and leave the full suite to the merge request's CI.
+4. **Narrow the tests (only with a test-selection tool).** Verification runs a
+   scope's `command`, normally the whole suite, in its first round and in every
+   repair round. A repo whose tooling can pick the tests a change affects can
+   let verification run only those, and leave the full suite to the merge
+   request's CI.
 
    - **Find the tool.** Look for what the repo already uses to pick tests:
      pytest-testmon, `jest --findRelatedTests`, `nx affected`, Go's package
      graph, Bazel. For each test scope, propose a `targeted_command` beside its
-     `command`. Kraft gives it `KRAFT_TEST_BASE` (the branch's base commit) and
-     `KRAFT_CHANGED_FILES` (the path of a file listing the changed paths, one
-     per line). It must run more, never less, when it cannot see a change: a
-     YAML or a generated file is invisible to testmon, so the command runs the
-     full suite for one.
+     `command`, as YAML for the person to save in Settings › Repos: it's a
+     command, so it's theirs, and so is `carry`. Kraft gives it
+     `KRAFT_TEST_BASE` (the branch's base commit) and `KRAFT_CHANGED_FILES` (the
+     path of a file listing the changed paths, one per line). It must run more,
+     never less, when it cannot see a change: a YAML or a generated file is
+     invisible to testmon, so the command runs the full suite for one.
    - **`carry`.** Only for a tool whose state lives in files: testmon's
      `.testmondata` and `.testmondata-wal` (a single-process run leaves the
      WAL, an xdist run does not). Only state that is safe when stale: the tool
@@ -171,17 +193,19 @@ it did was right. Then hand off to `kraft:check`.
      a scratch worktree.
    - **No such tool:** say so, and leave both fields out.
 
-   Finish with `kraft repo connect --verify`. It seeds the carried files as a
-   work item would, runs the targeted command against the changes of `HEAD^1`
-   (a repo with a single commit skips that run and says so), and lists each
-   carried file with where it came from and whether git ignores it.
+   Once they've saved it, finish with `kraft repo connect --verify`. It seeds
+   the carried files as a work item would, runs the targeted command against the
+   changes of `HEAD^1` (a repo with a single commit skips that run and says so),
+   and lists each carried file with where it came from and whether git ignores
+   it.
 
-5. **Verify.** First `kraft admin health`: it exits 1 when the server is not
-   up, and every check after it needs the server. If it fails, report that
-   and stop - `kraft admin start` (or the service) comes first. Then `kraft
-   admin doctor` - confirm `mcp server` and the `repo <name>` row both read
-   `ok`. If either doesn't, stop and report the exact line rather than
-   declaring onboarding done with a known problem still open.
+5. **Verify.** Run `kraft admin doctor` - confirm `mcp server` and the
+   `repo <name>` row both read `ok`. If either doesn't, stop and report the
+   exact line rather than declaring onboarding done with a known problem still
+   open. Then report: the commands saved and their source, the candidates
+   passed over, the `--verify` result per command, the untracked root files
+   found and any `local_files` added, and what the person still owes (enabling
+   the repo in Settings › Repos).
 
 Finish by handing off into `kraft:check` for the full drift report against
 this install's library and chains — that skill already owns the diff, no need

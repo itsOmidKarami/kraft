@@ -28,7 +28,7 @@ verification runs it.
 | `docs tests` (docs-only pull requests) | the unit test files that name a docs path, on Python 3.14 | `just test` on the files the `git grep` in `test.yml`'s `docs-tests` job lists |
 | `test` | the one check branch protection requires: it passes when every job above passes, and a job skipped because of the paths changed counts as passing (a docs-only pull request needs `docs tests` instead) | nothing to run |
 | `e2e (real CLIs)` *(python)* | the e2e tier against real `bd`, bubblewrap, Docker and podman | `just test -m e2e --no-testmon`; a test whose CLI is missing skips |
-| `kraft-lite on python 3.10 / 3.14` | `plugins/kraft-lite/tests` with nothing installed but pytest | `just test plugins/kraft-lite/tests` |
+| `kraft-lite on python 3.10 / 3.14` | `plugins/kraft-lite/tests` with nothing installed but pytest | `uv run --python 3.10 --no-project --with pytest pytest plugins/kraft-lite/tests -q` (or `3.14`) |
 | `frontend` *(code)* | `npm ci`, `npm run build` (which typechecks), `npm test` | `just test-ui` |
 | `vscode` *(code)* | typecheck, unit tests, integration tests | `just test-vscode`, then `npm run test:integration` in `vscode/` |
 | `playwright` *(code)* | the browser e2e suite against a fixture server | `just e2e-ci` |

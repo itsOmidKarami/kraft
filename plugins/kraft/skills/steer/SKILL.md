@@ -1,6 +1,6 @@
 ---
 name: steer
-description: "Redirects a Kraft work item by revising its spec or plan before it starts, or by pausing and resuming it with a steer once it has. Use when a work item is heading the wrong way or its spec or plan needs revising; to find out why one stopped, use kraft:triage."
+description: "Redirects a Kraft work item by revising its spec or plan before it starts, or by pausing it and resuming it with a steer once it has. Use when a running or paused work item is off track, needs pausing or resuming, or its spec or plan needs revising; a stopped item is kraft:triage, a gate waiting on a person kraft:gates."
 ---
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
@@ -30,11 +30,19 @@ holds the documents, committed on its branch, and steering is the only route.
 
 ## Started: stop, then restart with a steer
 
-Ask the person before pausing, unless pausing is what they asked for: it
-discards the running attempt.
+Ask the person before pausing, unless they said pause or stop: the turn in
+flight stops, and on resume the agent picks its session back up if it can, else
+restarts the task.
 
 - Running and going wrong: `pause_work_item()`, then `resume_work_item(steer="...")`.
-- Already stopped: `retry_work_item(steer="...")`, see `kraft:triage`.
+  A pause that stopped no agent task (a test run, a CI wait) takes no steer:
+  `steerable` in `kraft view show ID --json` reads false and a steer is refused.
+  Resume without one and tell the person the steer waits for the next agent
+  task.
+- Waiting at a gate: it can't be paused. Redirect it by rejecting the gate with
+  a note (`kraft:gates`).
+- Already stopped: that's `kraft:triage`, which retries with a steer written as
+  below.
 - Several agent tasks paused, each needing different guidance: `resume` takes
   `steers={"node.step.task": "..."}` (CLI `--steer-task PATH=TEXT`, repeatable).
 

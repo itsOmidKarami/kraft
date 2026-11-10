@@ -11,15 +11,16 @@ connection error.
 # Reading Kraft
 
 - `list_work_items(status)` - the board. `status="needs_human"` is what is
-  waiting on a person: an item with a pending gate needs an answer
-  (`kraft:gates`), one without has stopped (`kraft:triage`). `status="paused"`
-  is filed but not started, or paused by hand; `status="active"` is running now.
+  waiting on a person: a row whose `pending_gate` is set needs an answer
+  (`kraft:review` to decide, `kraft:gates` to record it), one without has
+  stopped (`kraft:triage`). `status="paused"` is filed but not started, or
+  paused by hand; `status="active"` is running now. `status="blocked"` comes
+  after an unfinished item, and `status="queued"` waits for a free slot.
   Without `status` it lists every item except abandoned ones.
-- `get_work_item()` - one item in full: its chain, its current node, any gate it
-  is waiting on. With no argument it resolves the item this session is standing
-  in, which is correct when the cwd is a Kraft worktree.
+- `get_work_item()` - one item past its board row: status, current and next
+  node, pending gate, stop reason, dependencies, not its chain. With no argument
+  it resolves the item this session is standing in, which is correct when the
+  cwd is a Kraft worktree. Its progress and a watch are `kraft:status`'s.
 - `search(q)` - specs, plans, and session summaries across every connected repo.
-
-**Search before writing a spec.** The decision you are about to make may already
-have been made and written down in another repo. That is the whole reason the
-index spans them.
+  A decision may already have been made and written down in another repo: that
+  is the whole reason the index spans them.
