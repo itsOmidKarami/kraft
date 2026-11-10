@@ -99,14 +99,14 @@ Each command links to its entry.
 | Check that the server is up | [`kraft admin health`](/reference/cli/server#what-health-prints) |
 | Check the whole install | [`kraft admin doctor`](/reference/cli/server#what-doctor-checks) |
 | Start, stop or restart the server | [`kraft admin start`, `stop`, `restart`](/reference/cli/server#run-the-server) |
-| Run Kraft as a service | [`kraft admin install-service`](/reference/cli/server) |
-| Install the newest release | [`kraft admin update`](/reference/cli/server#update-kraft) |
-| Reread the templates and [policy](/concepts/vocabulary#policy) after editing them | [`kraft admin reload`](/reference/cli/server#reload-the-configuration) |
-| Check my chains | [`kraft admin templates lint`](/reference/cli/server#lint-the-templates) |
-| Read a chain or a [library](/concepts/vocabulary#library) component | [`kraft admin templates show`, `templates library`](/reference/cli/server#show-a-chain) |
-| See the [harness profiles](/concepts/vocabulary#harness-profile) and what selects each | [`kraft admin harnesses`](/reference/cli/server) |
-| Rescan documents into the search index | [`kraft admin reindex`](/reference/cli/server) |
-| Register Kraft with an agent | [`kraft admin init`](/reference/cli/server) |
+| Run Kraft as a service | [`kraft admin install-service`](/reference/cli/server#admin-install-service) |
+| Install the newest release | [`kraft admin update`](/reference/cli/server#admin-update) |
+| Reread the templates and [policy](/concepts/vocabulary#policy) after editing them | [`kraft admin reload`](/reference/cli/server#admin-reload) |
+| Check my chains | [`kraft admin templates lint`](/reference/cli/server#admin-templates-lint) |
+| Read a chain or a [library](/concepts/vocabulary#library) component | [`kraft admin templates show`](/reference/cli/server#admin-templates-show), [`templates library`](/reference/cli/server#admin-templates-library) |
+| See the [harness profiles](/concepts/vocabulary#harness-profile) and what selects each | [`kraft admin harnesses`](/reference/cli/server#admin-harnesses) |
+| Rescan documents into the search index | [`kraft admin reindex`](/reference/cli/server#admin-reindex) |
+| Register Kraft with an agent | [`kraft admin init`](/reference/cli/server#admin-init) |
 
 `kraft item progress` and `kraft item reply` are [called by a worker](/reference/cli/item#verbs-a-worker-calls), not by you.
 
