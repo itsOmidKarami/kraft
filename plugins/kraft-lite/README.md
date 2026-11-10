@@ -421,8 +421,9 @@ Independent slices are the default, and the form Kraft shares. Lite also lets a
 slice come after another, for one built on another's merged work, as the
 bullet's last sentence: `- **Slice 3: Export command.** Task 6. Comes after slice 1.`
 That's Lite's own extension, and it costs early starts and rebases (below).
-Kraft refuses a section that says a slice comes after another, and runs that
-plan as one work item.
+
+A plan that uses `Comes after slice N.` can't be sliced by Kraft: Kraft
+refuses its `## Slices` section and runs the plan unsliced, as one work item.
 
 The proposal is shown at the slice gate, and your answer is the
 approval. A plan whose parts don't stand alone isn't sliced: the controller

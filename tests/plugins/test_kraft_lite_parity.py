@@ -18,6 +18,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from kraft import progress as kraft_progress
+from kraft import slices as kraft_slices
 from kraft.addons import builtin, load
 from kraft.slices import SliceRefusal, parse_slices
 from kraft.templates import models
@@ -436,6 +438,43 @@ def _lite_slices(text: str):
 )
 def test_kraft_and_lite_read_a_slices_section_alike(text):
     assert _lite_slices(text) == _kraft_slices(text)
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        pytest.param("Task 2. Depends on slice 1.", id="depends_on"),
+        pytest.param("Task 2. Needs slice 1.", id="needs_slice"),
+        pytest.param("Task 3, after slice 1", id="after_slice"),
+        # Lite reads `Comes after` only as the last sentence, so its reason differs.
+        pytest.param("Comes after slice 1, then Task 2.", id="comes_after_mid_text"),
+    ],
+)
+def test_kraft_and_lite_both_refuse_a_dependency_in_other_words(tail):
+    """Read as task numbers, the `1` in any of these would be a task: both refuse."""
+    text = _plan(f"- **Slice 1: A.** Task 1.\n- **Slice 2: B.** {tail}")
+
+    assert isinstance(_kraft_slices(text), str) and isinstance(_lite_slices(text), str)
+    assert "comes after" in _kraft_slices(text) and "comes after" in _lite_slices(text)
+
+
+@pytest.mark.parametrize(
+    "name, kraft",
+    [
+        pytest.param(name, module, id=name)
+        for module, names in (
+            (kraft_slices, ("_HEADING", "_SLICES_HEADING", "_BULLET", "_SLICE_BOLD")),
+            (kraft_slices, ("_COMES_AFTER", "_TASK_ITEM")),
+            (kraft_progress, ("_TASK_HEADING", "_FENCE")),
+        )
+        for name in names
+    ],
+)
+def test_lites_copied_regexes_are_krafts(name, kraft):
+    """The grammar is copied, not imported: Lite ships without Kraft."""
+    ours, theirs = getattr(kl_slices, name), getattr(kraft, name)
+
+    assert (ours.pattern, ours.flags) == (theirs.pattern, theirs.flags)
 
 
 def _documented_examples() -> list:
