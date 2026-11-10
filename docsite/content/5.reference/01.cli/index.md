@@ -70,7 +70,7 @@ Each command links to its entry.
 | Read the item's merge request, pipelines, job logs, merged requests or labels | [`kraft view mr`, `pipelines`, `jobs`, `job-log`, `merged`, `labels`](/reference/cli/view#reading-the-forge) _Added in 2.5_ |
 | List [review threads](/concepts/vocabulary#review-thread) | [`kraft view threads`](/reference/cli/view#reviewing-threads-and-comparing-attempts) |
 | Mark a thread resolved, or reopen it | [`kraft item resolve`, `kraft item reopen`](/reference/cli/item#reviewing-a-change) |
-| Pass a gate without running it | [`kraft item skip`](/reference/cli/item#skip-escalate-end-or-drop-an-item) |
+| Pass a gate without running it | [`kraft item skip`](/reference/cli/item#item-skip) |
 | Label an item's merge request | [`kraft item mr-label`](/reference/cli/item#label-the-merge-request) |
 
 ### When it stops
@@ -84,18 +84,18 @@ Each command links to its entry.
 | Raise a time or token [cap](/concepts/vocabulary#cap) | [`kraft item set-policy`](/reference/cli/item#a-work-items-own-policy) |
 | Steer an agent that is paused | [`kraft item resume --steer "..."`](/reference/cli/item#item-resume) |
 | Pause a running item | [`kraft item pause`](/reference/cli/item#item-pause) |
-| Ask an agent to help with the stop | [`kraft item escalate --message "..."`](/reference/cli/item#escalate-a-stopped-item) |
-| Skip the node it stopped on | [`kraft item skip`](/reference/cli/item#skip-escalate-end-or-drop-an-item) |
+| Ask an agent to help with the stop | [`kraft item escalate --message "..."`](/reference/cli/item#item-escalate) |
+| Skip the node it stopped on | [`kraft item skip`](/reference/cli/item#item-skip) |
 | Pick another model or effort for it | [`kraft item set-overrides`](/reference/cli/item#set-item-wide-overrides), or [`kraft item set-node-override`](/reference/cli/item#one-nodes-agent-tasks) |
-| End it as done, or as cancelled | [`kraft item complete`, `kraft item cancel`](/reference/cli/item#skip-escalate-end-or-drop-an-item) |
-| Drop it and delete its worktree | [`kraft item abandon --reason "..." --yes`](/reference/cli/item#skip-escalate-end-or-drop-an-item) |
+| End it as done, or as cancelled | [`kraft item complete`](/reference/cli/item#item-complete), [`kraft item cancel`](/reference/cli/item#item-cancel) |
+| Drop it and delete its worktree | [`kraft item abandon --reason "..." --yes`](/reference/cli/item#item-abandon) |
 
 ### Housekeeping
 
 | I want to | Command |
 |---|---|
-| Archive finished items and free their worktrees | [`kraft item archive`](/reference/cli/item#archive-and-restore-finished-items) |
-| Bring an archived item back under Done | [`kraft item restore`](/reference/cli/item#archive-and-restore-finished-items) |
+| Archive finished items and free their worktrees | [`kraft item archive`](/reference/cli/item#item-archive) |
+| Bring an archived item back under Done | [`kraft item restore`](/reference/cli/item#item-restore) |
 | Check that the server is up | [`kraft admin health`](/reference/cli/admin#what-health-prints) |
 | Check the whole install | [`kraft admin doctor`](/reference/cli/admin#what-doctor-checks) |
 | Start, stop or restart the server | [`kraft admin start`, `stop`, `restart`](/reference/cli/admin#run-the-server) |
