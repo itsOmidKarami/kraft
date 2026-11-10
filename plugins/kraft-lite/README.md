@@ -409,9 +409,10 @@ same plan slices the same way in Kraft:
 
 Task numbers name the plan's `### Task N` headings. Every task sits in exactly
 one slice: a task in no slice, task 1 here, is groundwork, which Lite builds as a
-first slice, `groundwork`, that the others come after. `kl.py plan-slices`
-reads the section and prints the proposal's slices, or refuses it with the
-reason. A plan without the section gets a proposed grouping by the same rule,
+first slice, `groundwork`, that the others come after.
+
+`kl.py plan-slices` reads the section and prints the proposal's slices, or
+refuses it with the reason. A plan without the section gets a proposed grouping by the same rule,
 and `approve --slices` refuses a proposal that leaves a plan task out. Either
 way the proposal shows which slices run in parallel, and gives each helper or
 fixture that two slices would create one owner.
@@ -622,7 +623,7 @@ or why the chain can't be sliced.
 |---|---|
 | `approve --slices FILE` | Approves the slice gate and creates the slices. A plan with a cycle, an unknown `after`, a duplicate key, an empty task list, a task in two slices or a bad branch is refused, and nothing is written. |
 | `start --slice-of FILE` | Starts a child on the child chain cut from the exported `chain.json` at FILE, with the `slice:` bindings. It takes no `--chain`, `--spec` or `--plan`. |
-| `plan-slices [--plan FILE]` | Reads the `## Slices` section of the plan the chain recorded, or of FILE, and prints a proposal's `slices`, groundwork first. A section out of grammar, or naming a task twice or one the plan lacks, is refused. |
+| `plan-slices [--plan FILE]` | Prints a proposal's `slices` from the `## Slices` section of the chain's plan, or of FILE, groundwork first. A section out of grammar, or naming a task twice or one the plan lacks, is refused. |
 | `slices` | Lists the slices, and which may start or must rebase (below). |
 | `slice-set --slice KEY` | Sets `--status`, `--session`, `--branch` or `--fork`. Statuses: `waiting`, `starting`, `running`, `in_review`, `ready_to_merge`, `merged`. The last slice merged closes the run. A call that changes nothing writes nothing. |
 | `settings` | Prints the mode and the rights in effect. |
