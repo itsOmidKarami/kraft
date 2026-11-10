@@ -37,6 +37,13 @@ the same window, so a review or thread belongs to exactly one round.
 enforced-by: tests/store/test_gates.py::test_a_rounds_review_and_threads[a-review-and-threads-belong-to-the-round-they-were-made-in], tests/store/test_gates.py::test_a_rounds_review_and_threads[made-between-two-rounds-belongs-to-the-later], tests/store/test_gates.py::test_a_rounds_review_and_threads[a-round-with-no-request-still-has-a-window], tests/store/test_gates.py::test_a_rounds_review_and_threads[drafts-and-other-gates-are-no-part-of-a-round], tests/store/test_gates.py::test_a_rounds_review_and_threads[first-three-are-must-fix-first-then-oldest-and-the-newest-review-wins], tests/store/test_gates.py::test_a_rounds_review_and_threads[a-thread-shows-its-state-now-on-the-round-it-was-opened-in]
 origin: src/kraft/store/gates.py
 
+## REQ a-rounds-threads-are-listed-by-the-same-window
+WHEN a person lists an item's threads for a gate and a round, the system SHALL
+answer with the threads that round's count in the item's gate rounds covers, and
+SHALL answer 404 for a round the gate does not have.
+enforced-by: tests/api/test_review_rounds.py::test_threads_of_a_round
+origin: src/kraft/api/routes/review.py
+
 ## REQ intake-copies-an-attachment
 WHEN intake accepts an attachment, the system SHALL copy it into Kraft's own
 storage.

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Query, Request
 from pydantic import BaseModel, field_validator, model_validator
 
 from kraft import config as config_mod
@@ -170,11 +170,25 @@ def _one(st, wid: str, tid: str) -> dict:
 
 
 @api_router.get("/work-items/{wid}/threads")
-async def list_threads(wid: str, request: Request):
-    """The item's review threads, drafts included."""
+async def list_threads(
+    wid: str,
+    request: Request,
+    gate: str | None = None,
+    round_n: int | None = Query(None, alias="round", ge=1),
+):
+    """The item's review threads, drafts included. With `gate` and `round`, the
+    threads that round's count covers (`store.threads_in_round`), drafts
+    excluded."""
     st = request.app.state
     deps._work_item_row(st, wid)
-    return st.db.read(lambda c: store.threads_for(c, wid))
+    if round_n is None:
+        return st.db.read(lambda c: store.threads_for(c, wid))
+    if gate is None:
+        raise HTTPException(400, "round needs gate")
+    got = st.db.read(lambda c: store.threads_in_round(c, wid, gate, round_n))
+    if got is None:
+        raise HTTPException(404, f"{gate} has no round {round_n}")
+    return got
 
 
 @api_router.post("/work-items/{wid}/threads", status_code=201)
