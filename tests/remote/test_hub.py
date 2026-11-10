@@ -638,6 +638,32 @@ async def test_a_test_group_runs_one_at_a_time_on_a_machine_but_each_machine_may
         await accepted
 
 
+async def test_an_abandoned_claim_holds_nothing():
+    hub = Hub("2.3.0")
+    hub.apply(_two_machines())
+    machines = [await _dial(hub), await _dial(hub, _OTHER)]
+    repos = _repos("kraft")
+    held = [
+        await hub.claim("any", repos, key, group="heavy", poll_s=0.01) for key in ("a/1", "b/1")
+    ]
+    gone = {"now": False}
+    waiter = asyncio.create_task(
+        hub.claim("any", repos, "c/1", group="heavy", poll_s=0.01, abandon=lambda: gone["now"])
+    )
+    await asyncio.sleep(0.1)
+    assert not waiter.done()  # the group is held on both machines
+    gone["now"] = True
+    for claim in held:  # the group frees in the same step: abandon is read before decide
+        hub.release(claim)
+    with pytest.raises(protocol.StepAbandoned):
+        await asyncio.wait_for(waiter, 1)
+    assert hub.slots_used("home") == 0 and hub.slots_used("work") == 0  # no claim, no group entry
+    assert hub.decide("any", repos, concurrency_group="heavy").machine
+    for machine, _w, accepted in machines:
+        await machine.close()
+        await accepted
+
+
 async def test_a_claim_rebuilt_from_machine_and_key_frees_the_group_a_refused_reserve_held():
     hub = Hub("2.3.0")
     hub.apply(_file())

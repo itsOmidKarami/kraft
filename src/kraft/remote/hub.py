@@ -488,13 +488,17 @@ class Hub:
         wait: bool = True,
         exclude: Collection[str] = (),
         group: str | None = None,
+        abandon: Callable[[], bool] | None = None,
     ) -> Claim | None:
         """A slot for `key`, waiting (and saying so through `on_wait`, once per reason) until a
         machine can take it; with `wait=False`, None when none can now. Raises
         `PlacementRefused`; cancelling the caller gives nothing back because nothing is held
-        while it waits."""
+        while it waits. With `abandon`, a waiting claim raises `StepAbandoned` once it returns
+        true, holding nothing."""
         said = None
         while True:
+            if wait and abandon is not None and abandon():
+                raise protocol.StepAbandoned()
             v = self.decide(
                 runner,
                 repos,
