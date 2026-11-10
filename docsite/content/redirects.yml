@@ -593,7 +593,7 @@
 /guides/operations#before-you-start: /reference/configuration/environment-variables
 /troubleshooting/faq#faq: /get-started/faq
 /get-started/first-work-item#where-to-go-from-here: /get-started/the-real-chain#next-steps
-/get-started/install#enable-vector-search: /reference/web-ui/sidebar-search-and-keyboard#vector-search
+/get-started/install#enable-vector-search: /guides/run/upgrade-kraft#add-vector-search
 /guides/operations#related: /guides/run/restart-kraft#next-steps
 /guides/remote-access#related: /guides/run/remote-access#next-steps
 /guides/schedule-and-webhook-work#related: /guides/customize/schedule-and-webhook-work#next-steps
