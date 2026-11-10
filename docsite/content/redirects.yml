@@ -309,6 +309,7 @@
 /reference/configuration/repos/detectors#repos-that-get-no-proposal: /reference/configuration/repos/connect-proposals#a-python-project-with-no-lockfile
 /reference/configuration/repos/detectors#the-packaged-table: /reference/configuration/repos/detectors
 /reference/configuration/repos#sandboxed-workers: /reference/configuration/sandbox
+/reference/configuration/repos#waiting-for-several-reviewers: /concepts/how-review-and-ci-waits-settle
 /reference/configuration/policy#retired-and-moved-keys: /reference/configuration/policy#top-level-keys
 /reference/configuration/sandbox#field-details: /reference/configuration/sandbox/sandbox-yaml#field-details
 /reference/configuration/sandbox#selinux: /reference/configuration/sandbox/sandbox-yaml#selinux

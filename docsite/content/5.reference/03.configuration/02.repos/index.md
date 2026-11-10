@@ -263,15 +263,8 @@ _Added in 2.1_
 
 `automated_review` names one reviewer, or a list of them, each named one of two ways. They are the reviewers a chain's `mr.automated_review` task waits for.
 
-- `bot: <login>` settles when that forge login has finished with the merge request's current head. How Kraft tells, and what it reads, depends on the chain: see [Waiting for several reviewers](#waiting-for-several-reviewers).
+- `bot: <login>` settles when that forge login has finished with the merge request's current head.
 - `check: <name>` settles when that check run or commit status on the head completes. Success is clean. Failure is actionable, with its output as the finding.
-
-Unset here and everywhere else, the repository expects no automated review: the task settles clean at once and records `automated_review_not_configured`. A reviewer that errors stops the item for you rather than spending a repair.
-
-Kraft reads only the first page of 100 of each list it asks for: the merge request's reviews, a review's comments, and a GitLab merge request's discussions and commit statuses. A bot with no match on that first page reads as not having reviewed yet.
-
-### Waiting for several reviewers
-_Added in 2.4_
 
 Reviewers can be named in three places. The nearest wins, and its list is the whole list:
 
@@ -279,33 +272,13 @@ Reviewers can be named in three places. The nearest wins, and its list is the wh
 2. This repo's `automated_review`.
 3. The review task's `reviewers` in the chain or library.
 
-`[]` counts as naming reviewers, meaning none: `automated_review: []` turns the review off even when the chain's task lists bots. A reviewer with both `bot` and `check`, or neither, is refused when the file loads.
+`[]` counts as naming reviewers, meaning none: `automated_review: []` turns the review off even when the chain's task lists bots. A reviewer with both `bot` and `check`, or neither, is refused when the file loads. Unset here and everywhere else, the repository expects no automated review: the task settles clean at once and records `automated_review_not_configured`.
 
-What the wait does with them depends on the chain.
-
-- **The collect path.** When a later task in the same node declares the `bot_feedback` input, as the shipped triage step does, the wait holds until every reviewer has finished with the latest push, then hands what they said to that task. The wait never fails on feedback; the triage agent decides what needs a change.
-- **Nothing reads the feedback.** When the node has no such task, as in a chain from before the triage step, or the item covers several repos, a bot is still waited for until it has finished with the push, as on the collect path. On a multi-repo item, each repo's bot is waited for against that repo's own push. Kraft then judges what was said itself:
-  - Each unresolved thread, a newest review that requests changes (when the bot left no thread), and a check that finished without passing fail the wait and go to the fix loop. Anything else is clean.
-  - On a multi-repo item, a member repo's findings give its paths from the item's own checkout, such as `repos/pkg/calc.py:3`, so the fix loop finds the file.
-  - Kraft can't tell what a bot's summary says, so a summary alone reads as clean, and the node's log names it as not read. `kraft admin doctor`'s `triage_review_feedback` row shows the edit that adds the triage step.
-  - A check still unfinished at the timeout stops the item for you, as it would alone.
-- **The direct path.** Reviewers that are only checks, when nothing collects them, are each read once per look. Any actionable feedback fails the wait at once, with every finding read in that check, and goes to the fix loop. A timeout stops the item for you.
-
-A bot is finished with a push when it has been active since Kraft pushed that head and then quiet for the grace period, `wait.grace_period` on the task (60 seconds by default). Its activity is a new or edited comment, a review, an inline comment, a thread it resolved, or, on GitLab, an approval it gave or withdrew. Threads already open on the first check set a baseline and aren't activity. A check is finished when it completes.
-
-On the collect path, and for a bot that nothing reads, the timeout settles the wait: a bot that never posted had nothing to say, and the item goes on with what was collected. The timeout is recorded in the wait's events as `timed_out`.
-
-Every settled review records which bots posted and which never did (`automated_review_settled`). A bot that has never posted in a repo, across three items or more, is likely misconfigured, and `kraft admin doctor`'s `review bots` row names it.
-
-Forge clocks are compared with Kraft's push time as they are, with no allowance for skew. A bot that posts a placeholder and edits it long after the grace period is read early; a longer `grace_period` on that chain is the fix.
+How the wait treats what a reviewer said, and when it ends, is in [How review and CI waits settle](/concepts/how-review-and-ci-waits-settle).
 
 ### `ci_checks`
 
-The two waits are a chain's `mr.ci` task before the merge and its `mr.post_merge_ci` task after it. Each records `ci_not_configured` when it passes at once because `ci_checks` is `false`. It doesn't touch `mr.automated_review` or `mr.external_approval`, nor `ci.pipeline`, which waits for the pipeline you named.
-
-With `ci_checks` left on, `mr.post_merge_ci` still passes on a merge commit that has no CI run at all five minutes after its wait started, and records `post_merge_ci_absent`. That is a branch whose CI doesn't run on a push, such as a workflow on `pull_request` only, merged into a branch other than the default. A commit with any run, even a pending one, is waited for as before.
-
-On GitHub, where Kraft reads only Actions runs, a commit whose CI reports from another app as a check run or commit status doesn't pass this way: the wait stays pending.
+The two waits are a chain's `mr.ci` task before the merge and its `mr.post_merge_ci` task after it. Each records `ci_not_configured` when it passes at once because `ci_checks` is `false`. It doesn't touch `mr.automated_review` or `mr.external_approval`, nor `ci.pipeline`, which waits for the pipeline you named. With `ci_checks` left on, a post-merge commit with no CI run can still pass early: see [How review and CI waits settle](/concepts/how-review-and-ci-waits-settle#the-post-merge-ci-wait).
 
 ## In this section
 

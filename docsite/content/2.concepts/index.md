@@ -21,3 +21,4 @@ is the glossary: look a term up there when a page uses one you don't know.
 - [Why a permission gate](/concepts/permission-gate): why Kraft answers a worker's permission prompts itself. Read it when you restrict a worker's tools.
 - [Vocabulary](/concepts/vocabulary): what each Kraft term means, from work item, chain, node, task, gate and cap to harness, sandbox and worktree. Look a term up; don't read it through.
 - [Where a step runs](/concepts/where-a-step-runs): why a step runs through a worker, what travels to a machine and what the server checks, and how Kraft picks where. Read it when you add a machine.
+- [How review and CI waits settle](/concepts/how-review-and-ci-waits-settle): when a review bot counts as finished with a push, what the wait does with what it said, and when it ends. Read it when a review wait holds or settles early.

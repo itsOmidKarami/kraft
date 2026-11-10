@@ -326,7 +326,7 @@ A review wait that names its bots and waits for them to settle:
   wait: {grace_period: 90s}
 ```
 
-The shipped chain follows it with a triage step. See [Waiting for several reviewers](/reference/configuration/repos#waiting-for-several-reviewers).
+The shipped chain follows it with a triage step. See [How review and CI waits settle](/concepts/how-review-and-ci-waits-settle).
 
 ## Icons
 
