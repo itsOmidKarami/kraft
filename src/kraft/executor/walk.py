@@ -688,8 +688,9 @@ class _Stuck:
     **The one definition of the stuck set** (Ruling 176): a task failed after
     recovery, an exhausted fix-loop cap, a stall, the judge's
     `stop_needs_human`, a node-level repair that finished with concerns in
-    a node with no fix loop (Kraft-yi005), and a fix round that changed
-    nothing (Kraft-6rph9) -- the six places this is constructed. Automatic
+    a node with no fix loop (Kraft-yi005), a fix round that changed nothing
+    (Kraft-6rph9), and a forge task's rebase conflict in a fix-loop node
+    (Kraft-e42v9) -- the places this is constructed. Automatic
     escalation answers these and nothing else: the node's declared escalation
     reads this value, and the generic `gates.auto_escalate_stuck` reads the
     `stuck` mark `_stop_stuck` records from it. One exception: when every
