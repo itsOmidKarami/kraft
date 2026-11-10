@@ -381,6 +381,7 @@ _ACP = "fixtures/fake_acp_agent.py"
             {"tests/test_acp.py": "'fake_acp_agent'", "tests/support/x.py": "fake_acp_agent"},
             None,
         ),
+        (_ACP, {"tests/test_data/test_x.yaml": "fake_acp_agent"}, None),
         ("fixtures/fake_acp_agent.sh", {}, None),
         ("fixtures/bin/fake_acp_agent.py", {}, None),
     ],
@@ -392,6 +393,7 @@ _ACP = "fixtures/fake_acp_agent.py"
         "named-by-a-support-helper",
         "named-in-src",
         "one-non-test-reader-is-enough",
+        "a-test-named-data-file-is-not-a-test",
         "not-python",
         "not-directly-under-fixtures",
     ],
@@ -418,4 +420,12 @@ def test_a_deleted_fixture_script_stays_blind(tt, tmp_path):
     write(repo, _ACP, "print(1)\n")
     base = commit_all(repo, "base")
     (repo / _ACP).unlink()
+    assert _ACP in tt.plan([_ACP], base, repo).reason
+
+
+def test_a_git_that_fails_leaves_a_fixture_script_blind(tt, tmp_path):
+    repo = make_repo(tmp_path)
+    base = commit_all(repo, "base")
+    write(repo, _ACP, "print(1)\n")
+    (repo / ".git" / "HEAD").write_text("garbage")
     assert _ACP in tt.plan([_ACP], base, repo).reason

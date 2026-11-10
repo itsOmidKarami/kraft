@@ -265,22 +265,33 @@ def fixture_readers(path: str, cwd: Path) -> list[str] | None:
     directory, _, name = path.rpartition("/")
     if directory != "fixtures" or not name.endswith(".py") or not (cwd / path).is_file():
         return None
-    hits = _git(
-        cwd,
-        "grep",
-        "--untracked",
-        "-l",
-        "-F",
-        "-e",
-        name[:-3],
-        "--",
-        ".",
-        f":(exclude){path}",
-        ":(exclude,glob)**/*.md",
-        ":(exclude,glob)justfile",
+    done = subprocess.run(
+        [
+            "git",
+            "grep",
+            "--untracked",
+            "-l",
+            "-F",
+            "-e",
+            name[:-3],
+            "--",
+            ".",
+            f":(exclude){path}",
+            ":(exclude,glob)**/*.md",
+            ":(exclude,glob)justfile",
+        ],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
     )
-    found = (hits or "").splitlines()
-    if any(not (h.startswith("tests/") and Path(h).name.startswith("test_")) for h in found):
+    if done.returncode > 1:  # 1 is "no match"; anything else is git failing
+        return None
+    found = done.stdout.splitlines()
+    if any(
+        not (h.startswith("tests/") and h.endswith(".py") and Path(h).name.startswith("test_"))
+        for h in found
+    ):
         return None
     return found
 
