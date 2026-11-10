@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import os
 import shutil
-import stat
 import sys
 import tempfile
 import threading
@@ -30,7 +28,7 @@ from kraft.paths import RunDirs
 #: `support.local_worker`: the in-process local worker every test starts its sessions through.
 #: `support.redaction`: every test starts with no secret registered with `kraft.redact`.
 pytest_plugins = [
-    f"support.{m}" for m in ("rig_fixtures", "local_worker", "redaction", "forge_probe")
+    f"support.{m}" for m in ("rig_fixtures", "local_worker", "redaction", "forge_probe", "basetemp")
 ]
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -186,38 +184,6 @@ def _forward_fake_agent_env_vars_into_worker_env(monkeypatch):
 def _e2e_binaries(item) -> set[str]:
     """The real CLIs an `e2e` test names: `@pytest.mark.e2e("bd")`."""
     return {name for mark in item.iter_markers("e2e") for name in mark.args}
-
-
-@pytest.hookimpl(tryfirst=True)
-def pytest_sessionfinish(session):
-    """Leave pytest's keep-last-3 cleanup of old basetemps able to work
-    (Kraft-t7aeb). Before that cleanup runs, so it acts on both.
-
-    The add-on store's folders are read-only (`addons/fetch.write_store`), and
-    `rm -rf` or a plain `shutil.rmtree` cannot empty a read-only folder, so
-    this run's are made writable again. And a run killed before its end keeps
-    its basetemp's `.lock`, which pytest honours for three days: one whose
-    process is gone is dropped, so this run's cleanup removes that basetemp.
-    Best effort: nothing here may fail a session.
-    """
-    basetemp = session.config._tmp_path_factory._basetemp
-    if basetemp is None or hasattr(session.config, "workerinput"):
-        return  # none made; or an xdist worker, whose folders the controller does
-    for dirpath, _dirs, _files in os.walk(basetemp):
-        mode = os.lstat(dirpath).st_mode
-        if not mode & stat.S_IWUSR:
-            with contextlib.suppress(OSError):
-                os.chmod(dirpath, mode | stat.S_IWUSR)
-    if not basetemp.parent.name.startswith("pytest-of-"):
-        return  # a --basetemp of the caller's: its siblings are not pytest's
-    for lock in [*basetemp.parent.glob("pytest-*/.lock"), *basetemp.parent.glob("garbage-*/.lock")]:
-        try:
-            os.kill(int(lock.read_text()), 0)
-        except ProcessLookupError:
-            with contextlib.suppress(OSError):
-                lock.unlink()
-        except (OSError, ValueError, OverflowError):
-            pass  # alive, someone else's, or not a pid: pytest decides
 
 
 def pytest_collection_modifyitems(config, items):
