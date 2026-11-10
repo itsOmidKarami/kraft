@@ -63,6 +63,7 @@ export const YAML_ONLY: { key: string; label: string }[] = [
   { key: "ci_checks", label: "CI checks" },
   { key: "library_auto_update", label: "library auto-update" },
   { key: "automated_review", label: "automated review" },
+  { key: "post_merge_publish_jobs", label: "post-merge publish jobs" },
 ];
 
 export const FORGES = ["gitlab", "github", "none"];
