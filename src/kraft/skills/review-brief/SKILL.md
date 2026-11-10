@@ -69,9 +69,9 @@ In this order, leaving out a conditional part when its condition doesn't hold:
   say so in the first line — a brief that buries a failed pipeline is worse
   than no brief, because it converts a human check into a rubber stamp. Take
   CI's newest wait (after a merge-queue rewind it runs again, and the older one
-  is stale). Only a settled wait whose `result` isn't `failed` is green: a
-  timed-out, errored or superseded wait, or none recorded, is reported as
-  exactly that, never as passing.
+  is stale). Only a settled wait whose `result` is `done` is green. Any other
+  result (`failed`, `conflict`, `infra`), a timed-out, errored or superseded
+  wait, or none recorded, is reported as exactly that, never as passing.
 - **What the local review flagged**, including findings that did not burn a fix
   cycle. A minor finding nobody is shown is a silent discard. A review that
   didn't run, or whose findings were dropped, is reported as that, never as
