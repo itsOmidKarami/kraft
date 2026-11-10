@@ -153,7 +153,7 @@ the span.
 
 _Added in next_
 
-The shipped library has the task `resolve_rebase_conflict`, and no shipped chain names it. Name it under `on_conflict` and a base that moves and conflicts while the item waits on CI goes to an agent first. It re-runs the rebase on the item's branch and resolves the conflict. Kraft then restarts the span, so verification runs again on the new base.
+The shipped library has the task `resolve_rebase_conflict`, and no shipped chain names it. Name it, as `kraft-default:resolve_rebase_conflict`, under `on_conflict` and a base that moves and conflicts while the item waits on CI goes to an agent first. It re-runs the rebase on the item's branch and resolves the conflict. Kraft then restarts the span, so verification runs again on the new base, and a gate in the span that was approved reopens.
 
 ```yaml [config/chains/my-chain.yaml]
 id: my-chain
@@ -164,10 +164,10 @@ overrides:
       on_conflict:
         tasks:
           - id: resolve
-            extends: resolve_rebase_conflict
+            extends: kraft-default:resolve_rebase_conflict
 ```
 
-If the agent reports `failed`, or ends without rebasing onto the new base, the item stops with a `conflict` stop and git's rebase output in its reason. A `needs_context` answer stops it with the agent's question.
+If the agent reports `failed`, or aborts the rebase, the item stops with a `conflict` stop and git's rebase output in its reason. A `needs_context` answer stops it with the agent's question.
 
 ## on_merge_rejected
 
