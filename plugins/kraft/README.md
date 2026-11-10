@@ -82,9 +82,9 @@ without the slash (`kraft:board`).
 | `/kraft:prepare` | Write a spec, then decide whether the work runs inline or in Kraft. |
 | `/kraft:handoff` | File work with Kraft, with any agreed spec and plan attached. It lands paused. |
 | `/kraft:status` | Report where a work item has got to, or watch it until it ends. |
-| `/kraft:gates` | Approve or reject the gate a work item is waiting on, leave review threads and submit a review, or pause and resume it. |
+| `/kraft:gates` | Approve or reject the gate a work item is waiting on, leave review threads and submit a review, or start a filed item. |
 | `/kraft:review` | Read what a gate is about and recommend approve or reject, with reasons. |
-| `/kraft:steer` | Redirect a work item that is heading the wrong way. |
+| `/kraft:steer` | Pause, resume or redirect a work item that is heading the wrong way. |
 | `/kraft:triage` | Find out why a work item stopped and route it. |
 | `/kraft:check` | Report where a repo's Kraft config has drifted from this version. |
 | `/kraft:doctor` | Diagnose and fix an unhealthy Kraft server. |

@@ -443,8 +443,9 @@ def build() -> MCPServer:
         retry's prompt: the node it stopped on (after a time or budget cap, the
         step it stopped in), or `path` (canonical: `node`,
         `node.step` or `node.step.task`) and everything after it; `restart`
-        reruns the whole chain. This is the only way back onto an item that
-        stopped for a human: resume only takes a paused item. With every slot busy
+        reruns the whole chain. This is the way back onto an item that stopped
+        for a human; resume_work_item also takes one stopped on an agent's
+        question, with the answer as its steer. With every slot busy
         the item is queued (status "queued") and starts on its own when one
         frees. An item that comes after an unfinished one is blocked (status
         "blocked") and starts when they complete."""
