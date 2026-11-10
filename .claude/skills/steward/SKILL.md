@@ -12,8 +12,8 @@ wins. Read its "What CI checks" table before working a red check.
 
 **In a Kraft worker** (`$KRAFT_WORK_ITEM_ID` set) there's no `gh` and no user
 to ask. Set a label with `kraft item mr-label`; where it isn't available (a
-sandboxed worker has only `item progress`, `rerun-ci` and `reply`), name the
-label you need in your summary. Re-run a job with
+sandboxed worker's `kraft` has no `mr-label`), name the label you need in your
+summary. Re-run a job with
 `kraft item rerun-ci --reason "..."`, and leave a conflict with `main` to
 Kraft: report it, never merge in the worktree. What this file says to ask the
 user about, leave undone and say so in your summary.
