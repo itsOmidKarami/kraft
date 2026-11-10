@@ -32,6 +32,7 @@ async def search(
     mode: str = "hybrid",
     limit: int = 20,
 ):
+    """Search work items, specs, plans and session summaries across every connected repo."""
     if not q.strip():
         raise HTTPException(422, "q is required")
     limit = max(1, min(limit, 100))
@@ -98,6 +99,7 @@ async def _beads_search(st, q: str, limit: int) -> list[dict]:
 
 @api_router.get("/documents/{doc_id}")
 async def get_document(doc_id: str, request: Request):
+    """One indexed document with its text."""
     doc = request.app.state.indexer.get_document(doc_id)
     if doc is None:
         raise HTTPException(404, "unknown document")
@@ -297,6 +299,7 @@ async def get_analytics(
 
 @api_router.post("/index/rescan")
 async def index_rescan(request: Request, repo: str | None = None):
+    """Reindex one repo, or every repo when `repo` is not given, and report what changed."""
     ix = request.app.state.indexer
     if repo is not None:
         if repo not in ix.repos():

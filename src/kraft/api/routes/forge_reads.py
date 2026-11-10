@@ -78,6 +78,7 @@ async def _read(call):
 
 @api_router.get("/work-items/{wid}/forge/mr")
 async def forge_mr(wid: str, request: Request, repo: str | None = None):
+    """The item's merge request: state, checks and review status."""
     forge, checkout, branch, _ = await _item_forge(request.app.state, wid, repo)
     found = await _read(forge.mr_details(repo=checkout, branch=branch))
     if found is None:
@@ -87,6 +88,7 @@ async def forge_mr(wid: str, request: Request, repo: str | None = None):
 
 @api_router.get("/work-items/{wid}/forge/pipelines")
 async def forge_pipelines(wid: str, request: Request, repo: str | None = None):
+    """The CI pipelines for the item's branch."""
     forge, checkout, branch, base = await _item_forge(request.app.state, wid, repo)
     return [
         asdict(p) for p in await _read(forge.pipelines(repo=checkout, branch=branch, base=base))
@@ -103,6 +105,7 @@ async def _own_jobs(forge: Forge, checkout: Path, branch: str, base: str, pid: s
 
 @api_router.get("/work-items/{wid}/forge/pipelines/{pid}/jobs")
 async def forge_jobs(wid: str, pid: str, request: Request, repo: str | None = None):
+    """The jobs of one pipeline."""
     forge, checkout, branch, base = await _item_forge(request.app.state, wid, repo)
     return [asdict(j) for j in await _own_jobs(forge, checkout, branch, base, pid)]
 
@@ -116,6 +119,7 @@ async def forge_job_log(
     repo: str | None = None,
     lines: int = Query(200, ge=1, le=5000),
 ):
+    """The log of one CI job; `lines` limits it to the last lines."""
     forge, checkout, branch, base = await _item_forge(request.app.state, wid, repo)
     if jid not in {j.id for j in await _own_jobs(forge, checkout, branch, base, pid)}:
         raise HTTPException(404, f"job {jid} is not in pipeline {pid}")
@@ -132,11 +136,13 @@ async def forge_merged(
     repo: str | None = None,
     limit: int = Query(20, ge=1, le=100),
 ):
+    """Recently merged merge requests in the item's repo."""
     forge, checkout, _, base = await _item_forge(request.app.state, wid, repo)
     return [asdict(m) for m in await _read(forge.merged_mrs(repo=checkout, base=base, limit=limit))]
 
 
 @api_router.get("/work-items/{wid}/forge/labels")
 async def forge_labels(wid: str, request: Request, repo: str | None = None):
+    """The labels the forge offers for the item's merge request."""
     forge, checkout, _, _ = await _item_forge(request.app.state, wid, repo)
     return [asdict(x) for x in await _read(forge.labels(repo=checkout))]

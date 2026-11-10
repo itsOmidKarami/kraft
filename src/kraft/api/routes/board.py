@@ -360,6 +360,9 @@ async def budget_today(request: Request):
 
 @api_router.get("/work-items")
 async def list_work_items(request: Request):
+    """The board: every top-level work item with its status and current node. Archived items
+    are left out unless `archived=true`, which lists only them; abandoned ones need
+    `include_abandoned=true`."""
     st = request.app.state
     # Read outside `_read`: that closure runs on the database thread and has no
     # request to ask.
@@ -1472,6 +1475,8 @@ _ENDINGS = (
 
 @api_router.get("/work-items/{wid}")
 async def get_work_item(wid: str, request: Request):
+    """One work item: its status, chain, current node, pending gate, cost and links. The object
+    a client reads most."""
     from kraft.api.routes import lifecycle
 
     st = request.app.state
@@ -1717,6 +1722,7 @@ async def get_events(
     before_seq: int | None = None,
     limit: int | None = None,
 ):
+    """The item's event log in order, a page at a time with `after_seq` or `before_seq`."""
     st = request.app.state
     deps._work_item_row(st, wid)
     if after_seq is not None and before_seq is not None:
@@ -1732,6 +1738,8 @@ async def get_events(
 
 @api_router.get("/work-items/{wid}/documents")
 async def get_work_item_documents(wid: str, request: Request):
+    """The documents this item has produced or was filed with: specs, plans, review briefs and
+    session summaries."""
     st = request.app.state
     deps._work_item_row(st, wid)  # 404s on an unknown work item
     return {"work_item_id": wid, "documents": st.indexer.documents_for_work_item(wid)}
