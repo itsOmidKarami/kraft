@@ -680,6 +680,7 @@
 /guides/day-to-day/raise-a-cap#raising-a-budget-from-the-command-line: /guides/day-to-day/raise-a-cap#raise-the-cap-and-retry
 /guides/day-to-day/raise-a-cap#before-you-start: /guides/day-to-day/raise-a-cap#raise-the-cap-and-retry
 /guides/day-to-day/review-a-change#a-gate-with-a-must-fix-does-not-open: /guides/day-to-day/review-a-change#a-gate-with-a-must-fix-doesnt-open
+/guides/day-to-day/notifications#what-sends-a-notification: /reference/events#which-events-send
 /guides/harnesses/switch-harness#the-harness-is-not-allowed: /guides/harnesses/switch-harness#the-harness-isnt-allowed
 /troubleshooting/why-did-my-item-stop#a-task-kraft-would-not-launch: /troubleshooting/launch-and-setup-stops#a-task-kraft-wouldnt-launch
 /troubleshooting/stop-reasons-in-detail#a-budget-cap-cannot-be-checked: /troubleshooting/caps-budgets-and-waits#a-budget-cap-cant-be-checked
