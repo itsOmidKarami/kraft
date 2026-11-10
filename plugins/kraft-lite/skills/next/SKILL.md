@@ -23,7 +23,7 @@ migrate`, then go on with the new id it prints.
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" state --chain-id <id>
 
 You get `chain_id`, `node`, `kind` (`exec` or `gate`), `status`, `note`, `attempt`, `cap`,
-`steps`, `on_failure`, `on_failure_ran`, `fix_loop`, `on_base_changed`,
+`read_only`, `steps`, `on_failure`, `on_failure_ran`, `fix_loop`, `on_base_changed`,
 `on_merge_rejected`, `gate` and `sliced`.
 
 - `status: unstarted` - there is no chain here: tell the user so. Invoke
@@ -90,6 +90,12 @@ where they name one, not the strongest by default). Run each task by its `kind`:
   skill is not installed here: say you fell back.
 - `subprocess` - run `command` as an argument list, without a shell; show its output.
 - `skip` - run nothing; say the task was skipped, and its `why`.
+
+A step with `read_only: true`, or any step in `steps` when the node's own
+`read_only` is true, changes nothing: write, edit and commit nothing, run no
+test or command that writes, leave no file behind. The node's flag doesn't reach
+its `on_failure` or `fix_loop` steps, which repair. Kraft Lite does not check
+this: the rule is yours to keep.
 
 After a task with `produces`, record the file it wrote before anything else:
 `KL produced --kind <produces> --path <file>`, `<file>` being the absolute path

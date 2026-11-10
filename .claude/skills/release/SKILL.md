@@ -31,6 +31,8 @@ versions, or `_Added in next_` notes. The release writes them.
 3. Any fix that changes code, unless they have already said "fix what you find".
 4. Anything after a real run that did not conclude `success`: no rerun, no
    publishing by hand, no yanking.
+5. Treating a Phase 3 finding as not blocking the release: report it with your
+   view and wait for their ruling.
 
 An rc run needs no extra confirmation once they have asked for one, unless its
 dry run plans a version they would not expect (a major, or a number other than
@@ -191,12 +193,16 @@ The stable run publishes everywhere and cannot be undone.
 6. On Go, the **real run**, the same inputs with `dry_run=false`.
 7. If it concluded `success`, wait in the background:
    `.claude/skills/release/scripts/wait_published.sh X.Y.Z pypi brew openvsx`.
-   Then check the rest:
+   If the script exits 1 (a target still not serving after 30 minutes) on a
+   run that concluded `success`, report it and confirm by hand with the
+   per-target check under "What a stable run publishes" in `RELEASING.md`:
+   after a `success` run it is more likely lag than a missed publish. Then
+   check the rest:
 
    | Target | Check |
    |---|---|
    | GitHub Release | `vX.Y.Z`, not a pre-release, wheel and `.vsix` attached |
-   | VS Code Marketplace | the run's "publish the VS Code extension" step succeeded. A failure there usually means the identity's login or membership lapsed, and the extension is not published: report it. |
+   | VS Code Marketplace | the run's "publish the VS Code extension" step succeeded, and its "check the Marketplace lists this release" step ended without its 5-minute warning; if it warned, `npx --prefix vscode vsce show kraft-sdlc.kraft` names the version. A failed publish step usually means the identity's login or membership lapsed, and the extension is not published: report it. |
    | Docs | the `docs` run the release dispatched passed; a warning that it was not dispatched means run `docs` by hand |
 
 8. `.claude/skills/release/scripts/smoke.sh X.Y.Z`, as in Phase 3.

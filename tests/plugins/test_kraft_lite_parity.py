@@ -171,6 +171,7 @@ EXTENDING = {
             node:
               id: lint
               kind: exec
+              read_only: true
               tasks: [{id: run, extends: verify_changed_scopes, suite: full}]
           - after: local_review
             node:
@@ -210,7 +211,7 @@ def _project_kraft(resolved) -> list:
         )
 
     def steps(group):
-        return [(s.id, [task(t) for t in s.tasks]) for s in group]
+        return [(s.id, s.read_only, [task(t) for t in s.tasks]) for s in group]
 
     out = []
     for n in resolved.nodes:
@@ -235,6 +236,7 @@ def _project_kraft(resolved) -> list:
             (
                 n.id,
                 "exec",
+                n.node.read_only,
                 policy.max_attempts if policy else None,
                 steps(n.steps),
                 steps(n.on_failure),
@@ -258,7 +260,7 @@ def _project_lite(chain: dict) -> list:
         return (*(t[key] for key in keys), suite, t["command"])
 
     def steps(group):
-        return [(s["id"], [task(t) for t in s["tasks"]]) for s in group]
+        return [(s["id"], s["read_only"], [task(t) for t in s["tasks"]]) for s in group]
 
     out = []
     for n in chain["nodes"]:
@@ -279,6 +281,7 @@ def _project_lite(chain: dict) -> list:
             (
                 n["id"],
                 "exec",
+                n["read_only"],
                 (n["policy"] or {}).get("max_attempts"),
                 steps(n["steps"]),
                 steps(n["on_failure"]["steps"]) if n["on_failure"] else [],

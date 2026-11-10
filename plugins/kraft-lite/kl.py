@@ -1096,6 +1096,21 @@ def shape_view(chain: dict | None, epic: dict | None) -> dict | None:
     }
 
 
+def _refuse_uncovered(
+    root: Path, records: list[dict], slices: list[dict], text: str | None = None
+) -> None:
+    """A `SystemExit` unless `slices` hold every task of the chain's recorded plan:
+    `approve --slices` and `plan-slices --check` refuse in one voice."""
+    if text is None:
+        recorded = _artifact(records, "plan")
+        if recorded is None or not (root / recorded).is_file():
+            raise SystemExit("kraft-lite: cannot check the slices: this chain has no plan on disk")
+        text = (root / recorded).read_text()
+    hole = kl_slices.coverage_refusal(text, slices)
+    if hole:
+        raise SystemExit(f"kraft-lite: the proposal does not cover the plan: {hole}")
+
+
 def slices_for_gate(
     records: list[dict], node_record: dict, chain_id: str, path: Path, root: Path, chain: dict
 ) -> list[dict]:
@@ -1125,7 +1140,9 @@ def slices_for_gate(
         # Read only when the plan names no mode: a slices.json that cannot be read
         # has nothing to say to a plan that already decided.
         plan = dict(plan, mode=settings(root)["mode"])
-    return materialize_slices(plan, chain_id)
+    made = materialize_slices(plan, chain_id)
+    _refuse_uncovered(root, records, plan["slices"])
+    return made
 
 
 def plan_slices(root: Path, records: list[dict], plan: Path | None, check: Path | None) -> dict:
@@ -1142,11 +1159,10 @@ def plan_slices(root: Path, records: list[dict], plan: Path | None, check: Path 
         raise SystemExit(f"kraft-lite: cannot read the plan {recorded}: {error}") from error
     if check is not None:
         try:
-            hole = kl_slices.coverage_refusal(text, json.loads(check.read_text())["slices"])
+            slices = json.loads(check.read_text())["slices"]
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
             raise SystemExit(f"kraft-lite: cannot read the slices in {check}: {error}") from error
-        if hole:
-            raise SystemExit(f"kraft-lite: the proposal does not cover the plan: {hole}")
+        _refuse_uncovered(root, records, slices, text)
         return {"plan": str(recorded), "covered": True}
     split = kl_slices.parse_slices(text)
     if isinstance(split, str):
@@ -1542,7 +1558,12 @@ def _dispatched(container: dict | None, dispatch) -> list[dict] | None:
     if container is None:
         return None
     return [
-        {"id": step["id"], "tasks": [dispatch(task) for task in step["tasks"]]}
+        {
+            "id": step["id"],
+            # Optional: a chain frozen before this key has none.
+            "read_only": step.get("read_only", False),
+            "tasks": [dispatch(task) for task in step["tasks"]],
+        }
         for step in container["steps"]
     ]
 
@@ -1571,6 +1592,7 @@ STATE_KEYS = (
     "status",
     "attempt",
     "cap",
+    "read_only",
     "note",
     "backend",
     "sliced",
@@ -1664,6 +1686,7 @@ def _state(
     rejected = definition["on_merge_rejected"]
     state.update(
         cap=_cap(definition),
+        read_only=definition.get("read_only", False),
         steps=_dispatched(definition, dispatch),
         on_failure={"steps": _dispatched(definition["on_failure"], dispatch)}
         if definition["on_failure"]

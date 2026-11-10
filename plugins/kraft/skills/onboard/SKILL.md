@@ -19,48 +19,54 @@ Connecting and `--verify` both go through the server, so run `kraft admin
 health` first: it exits 1 when the server isn't up. If it fails, report that
 and stop - `kraft admin start --detach` (or the service) comes first.
 
-1. **Connect.** If `ensure_repo()` answers `already_connected: true`, the repo
-   keeps the commands it has: read them against the repo's docs, and any
-   correction goes to the person (below). Otherwise read how the repo says to
-   build and test itself before you
-   connect it: its README, CONTRIBUTING, agent instructions (`CLAUDE.md`,
-   `AGENTS.md`) and CI config. Look for the command a contributor is told to
-   run, and any rule that the raw runner must not be called directly.
+1. **Connect.** First learn whether the repo is already connected, without
+   calling `ensure_repo` (it saves as soon as it is called): `kraft repo list`
+   marks the repo you are in with `*`. If it is listed, the repo keeps the
+   commands it has: read them (`kraft repo list --json` carries each repo's
+   `test_command`, or its `test_scopes`, and `setup_command`) against the
+   repo's docs, and any correction goes to the person (below). Otherwise read
+   how the repo says to build and test itself before you connect it: its
+   README, CONTRIBUTING, agent instructions (`CLAUDE.md`, `AGENTS.md`) and CI
+   config. Look for the command a contributor is told to run, and any rule that
+   the raw runner must not be called directly.
 
-   Then `ensure_repo()` (or `kraft repo connect [PATH]` from a terminal). It
-   proposes a test and a setup command from the repo's own committed files
-   (origin's default branch, or HEAD with no origin, so a change not pushed
-   yet is not read), best
-   evidence first:
+   `ensure_repo` saves as soon as it is called, and a second call with commands
+   changes nothing, so decide before the first. If the docs name a test or setup
+   command, pass it in that call (a wrapper the probe can't know, such as
+   `./ci/run-tests`): `ensure_repo(test_command=..., setup_command=...)`. Call it
+   bare only when they name none. It then proposes a test and a setup command
+   from the repo's own committed files (origin's default branch, or HEAD with no
+   origin, so a change not pushed yet is not read), best evidence first:
    - a task runner's `test`/`setup` task (justfile, Makefile, Taskfile, mise,
      `script/test`)
    - the toolchain its lockfile names (pnpm, Poetry, Gradle, Cargo, ...)
    - what CI runs, where neither of those has a test command
 
-   It returns each command's source and every other candidate it saw. Compare
-   them with what the repo's docs say:
-   - They agree: keep what it proposed.
-   - The docs say something else (a wrapper the probe cannot know, such as
-     `./ci/run-tests`): connect with the repo's own commands rather than
-     correcting afterwards:
-     `ensure_repo(test_command=..., setup_command=...)`, or
-     `kraft repo connect --test-command ... --setup-command ...`.
+   The answer gives each command's source (`test_markers`, `scopes`) and every
+   other candidate it saw (`candidates`). Report `missing_setup` (a directory
+   with tests and no setup), `stopped` (why no test command was found) and
+   `missing_tools` (programs a command needs that PATH lacks) when they aren't
+   empty.
 
-   `ensure_repo` saves as soon as it is called. With Kraft's own proposal the
-   repo is saved enabled when it found a test command (disabled when it found
-   none), so the person sees those commands only through you. Commands you pass
-   save it disabled (the answer's `held` says so): they run for every work item,
-   so you cannot file work on it until the person has read them in Settings ›
-   Repos and enabled it there. Either way, show them what was saved, each
-   command with its source, and the candidates it passed over, then ask them to
-   confirm or correct it before the first work item. Say which you chose and
-   why.
+   Pass commands through `ensure_repo`, not `kraft repo connect --test-command`
+   from your shell: Kraft records that as the person's own call, saves the repo
+   enabled and never says `held`. What the call saves:
+   - Kraft's own proposal with a test command: saved enabled.
+   - Kraft's own proposal with none: saved disabled.
+   - Commands you pass: saved disabled (the answer's `held` says so). They run
+     for every work item, so you can't file work on it until the person has read
+     them in Settings › Repos and enabled it there.
+
+   Either way the person sees the commands only through you. Show them what was
+   saved, each command with its source, and the candidates it passed over, then
+   ask them to confirm or correct it before the first work item. Say which you
+   chose and why.
 
    An empty command means "deliberately nothing", not an oversight:
    - A repo with nothing to prepare declares `setup_command: ""`. A repo with no
      `setup_command` key at all is a different case: its next work item stops
      rather than guessing.
-   - A repo with no tests declares `test_command: ""` (`--no-tests`). Declare
+   - A repo with no tests declares `test_command: ""`. Declare
      no tests only when the person says the repo has none: every work item on
      it passes verification without running a test. `ensure_repo(test_command="")`
      saves the repo disabled for that reason, and the person enables it.
@@ -110,9 +116,10 @@ and stop - `kraft admin start --detach` (or the service) comes first.
    and on one that leaves files every work item would commit. These are
    the repo's own commands running on this machine, and the test suite can
    take minutes, not seconds: say what you are about to run and let the
-   person decide whether to run it now. If they decline, or it can't run
-   here, say onboarding is unverified and still run step 5. A sandboxed repo
-   is refused unless the person asks for `--on-host`.
+   person decide whether to run it now. A harness's tool timeout can cut a long
+   run off, so run it in the background, or give the person the command. If they
+   decline, or it can't run here, say onboarding is unverified and still run
+   step 5. A sandboxed repo is refused unless the person asks for `--on-host`.
 
    A failure is the finding, not an error to route around. Run
    `git -C <repo> ls-files --others --directory`: a root-level file it lists

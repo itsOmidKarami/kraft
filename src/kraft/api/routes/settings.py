@@ -289,6 +289,7 @@ async def steering_preview(chain: str, task: str, repo: str, request: Request):
     except (agent.HarnessUnavailable, skill_mod.SkillError, steering_mod.SteeringError) as exc:
         raise HTTPException(422, f"{task}: {exc}") from exc
     # `inv.steering_texts` is the repository's then the task's, as launched.
+    checks_first_reviewer = rt is node.auto_review and gate_review.checks_first(node)
     names = [f"repo:{n}" for n in entry.steering] + [f"task:{n}" for n in rt.task.steering]
     sections = agent.context_sections(
         usage_source=harnesses.valid[inv.harness].capabilities["usage"].source,
@@ -309,8 +310,11 @@ async def steering_preview(chain: str, task: str, repo: str, request: Request):
         intent_dir=entry.intent_dir,
         steering=list(zip(names, inv.steering_texts, strict=True)),
         in_place=not entry.worktrees,
-        # As `gate_review` launches it: a reviewer that checks first is told to change nothing.
-        read_only=rt is node.auto_review and gate_review.checks_first(node),
+        # As launched: `gate_review` runs a checks-first reviewer in a copy, told to change
+        # nothing; `dispatch` tells a task in a read_only scope the same, in the checkout
+        # it runs in.
+        in_copy=checks_first_reviewer and not entry.worktrees,
+        read_only=checks_first_reviewer or node.checks_read_only(rt),
     )
     return {"sections": [{"kind": k, "source": s, "text": t} for k, s, t in sections]}
 

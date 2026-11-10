@@ -77,3 +77,37 @@ def test_a_resumed_launch_names_its_own_session_files(run):
     assert f"{out}/summary.md" in prompt
     assert f"$KRAFT_RESULT_PATH, which is now {out}/result.json" in prompt
     assert 'worker_session_id: "s2"' in prompt
+
+
+@pytest.mark.parametrize(
+    ("read_only", "in_place", "in_copy", "writer", "copy"),
+    [
+        pytest.param(False, False, False, True, False, id="writer"),
+        pytest.param(True, False, False, False, False, id="read-only-worktree"),
+        pytest.param(True, True, False, False, False, id="read-only-in-the-persons-checkout"),
+        pytest.param(True, True, True, False, True, id="read-only-in-a-copy"),
+    ],
+)
+def test_a_read_only_launch_is_told_to_change_nothing_and_to_be_in_a_copy_only_in_one(
+    read_only, in_place, in_copy, writer, copy
+):
+    """The copy sentence is true only where `run_agent_task(in_copy=True)` made one;
+    a read_only step dispatched in place runs in the person's own checkout."""
+    contract = agent.context_sections(
+        title="t",
+        task_instruction="do it",
+        repo_path="/r",
+        work_item_id="w1",
+        node_id="verification",
+        hook_point="verification.review.code_review",
+        session_id="s1",
+        usage_source="result_file",
+        branch="kraft/b",
+        read_only=read_only,
+        in_place=in_place,
+        in_copy=in_copy,
+    )[0][2]
+
+    assert ("Commit everything you change" in contract) is writer
+    assert ("Kraft compares it after you" in contract) is read_only
+    assert ("throwaway copy" in contract) is copy

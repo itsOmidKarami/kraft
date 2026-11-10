@@ -120,7 +120,7 @@ A worker can use the CLI's own stored login instead where it has one; [Give a wo
 |---|---|
 | Command | `gemini --skip-trust`. The prompt follows `-p`, and `--skip-trust` trusts the worktree for the session, since a headless `gemini` outside a trusted folder refuses to start. |
 | API key | `GEMINI_API_KEY`. |
-| Accounts | Gemini CLI stopped serving free, Google AI Pro and Ultra accounts on 2026-06-18. `gemini` works with a Gemini API key or Gemini Code Assist. For Gemini models on an individual Google account, use `antigravity`. |
+| Accounts | `gemini` works with a Gemini API key or Gemini Code Assist, not a free, Google AI Pro or Ultra account. For Gemini models on an individual Google account, use `antigravity`. |
 | Resume | No `resume` at all. Gemini's `--resume` takes an index or `"latest"`, not a session ID, so the capability isn't declared. |
 
 ### Amp details

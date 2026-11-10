@@ -53,12 +53,14 @@ Do not pass `--type`. `-f` ends itself on `work_item_completed` or
 silent through exactly the escalation the person needs to hear about. A chain
 emits tens of events over its life, not thousands. Add `--json` for NDJSON, one
 object per line. It prints the history first, so trust the phase line for where
-it is now. When a line arrives, tell the person about a gate, a stop or the end;
-say nothing for a node starting or finishing.
+it is now. When a line arrives, tell the person about a gate
+(`gate_requested`), a stop (`work_item_needs_human`) or the end
+(`work_item_completed`, `work_item_abandoned`); say nothing for a node starting
+or finishing.
 
 ## What to report
 
-Say the phase and the next node, then by status:
+Say the phase, and the next node unless it has ended, then by status:
 
 - A gate pending: say which one and that it is waiting on a person. It isn't
   stuck, and calling it stuck sends someone looking for a fault that isn't
@@ -66,7 +68,10 @@ Say the phase and the next node, then by status:
 - `needs_human` with no gate: it has stopped; `kraft:triage` finds out why.
 - `paused`, `queued` or `blocked`: not running, and not a fault; say which
   (`dependencies` names what a blocked item waits on; dropping one with `kraft
-  item unblock` is the person's call). `kraft:gates` starts a filed item,
-  `kraft:steer` resumes a paused one.
-- `waiting` or `rate_limited`: Kraft is holding it, and ends the wait itself.
-- `completed` or `abandoned`: say so.
+  item unblock` is the person's call). A paused item whose phase line says `not
+  started` was filed: `kraft:gates` starts it. One paused mid-chain:
+  `kraft:steer` resumes it. `queued` starts itself when a slot frees.
+- `waiting` or `rate_limited`: Kraft is holding it and ends the wait itself,
+  when the limit resets or the pipeline finishes. Quote `stop_reason`, which
+  says what it waits on; a manual CI job it names needs a person.
+- `completed` or `abandoned`: say so; nothing runs next.

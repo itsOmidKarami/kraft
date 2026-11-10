@@ -128,7 +128,12 @@ records the answer:
       python3 "$CLAUDE_PLUGIN_ROOT/kl.py" approve --slices .kraft-lite/proposals/<chain-id>.json --chain-id <id>
 
   A plain `approve` here leaves the chain unsliced. If it refuses, tell the user
-  what it said and ask whether to approve unsliced.
+  what it said and ask whether to approve unsliced. A refusal that says the
+  proposal does not cover the plan has a fix: put every plan task in a slice in
+  the proposal, check it with
+  `KL plan-slices --check .kraft-lite/proposals/<chain-id>.json`, and show the
+  user the changed slicing. That is a new decision: approve it with `--slices`
+  only once they agree to it.
 - `sliced` null and no proposal file: a plain `approve`.
 
 ### Reject

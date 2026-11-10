@@ -86,6 +86,11 @@ SAYS = {
         ),
     },
     ("next", 2): {
+        "next-read-only-scope": (
+            "changes nothing: write, edit and commit nothing",
+            "run no test or command that writes",
+            "leave no file behind",
+        ),
         "next-exports-after-close": "export state after every `close`",
         "next-subprocess-without-a-shell": "run `command` as an argument list, without a shell",
         "next-records-what-a-task-produced": "`KL produced --kind <produces> --path <file>`",
@@ -175,6 +180,12 @@ SAYS = {
         "gate-reviewer-reject-capped": "`KL summary` already shows 3 `rejections` on the node",
     },
     ("gate", 2): {
+        "gate-coverage-refusal-has-a-fix": (
+            "A refusal that says the proposal does not cover the plan has a fix: put every "
+            "plan task in a slice in the proposal, check it with `KL plan-slices --check "
+            ".kraft-lite/proposals/<chain-id>.json`, and show the user the changed slicing. "
+            "That is a new decision: approve it with `--slices` only once they agree to it."
+        ),
         "gate-refused-slices-asks": (
             "If it refuses, tell the user what it said and ask whether to approve unsliced."
         ),

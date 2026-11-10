@@ -10,11 +10,12 @@ does what the task would have done to the worktree.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from support.harness import entry_of, git, v1_node, write
+from support.harness import entry_of, git, seed_v1_library, v1_node, write
 from support.workspace import workspace_item
 
 from kraft import store
@@ -385,3 +386,57 @@ async def test_an_in_place_take_is_not_the_read_only_steps_write(item_on, monkey
 
     assert git(it.repo, "symbolic-ref", "HEAD") == f"refs/heads/{branch}"
     assert it.events("read_only_violated") == []
+
+
+@pytest.mark.parametrize(
+    ("node", "failing", "expected"),
+    [
+        pytest.param(
+            {"steps": [{"id": "check", "read_only": True, "tasks": [_agent()]}]},
+            (),
+            {"build.check.review": True},
+            id="step",
+        ),
+        pytest.param(
+            {"read_only": True, "steps": [{"id": "check", "tasks": [_agent()]}]},
+            (),
+            {"build.check.review": True},
+            id="node",
+        ),
+        pytest.param(
+            {"steps": [{"id": "check", "tasks": [_agent()]}]},
+            (),
+            {"build.check.review": False},
+            id="neither",
+        ),
+        pytest.param(
+            {
+                "read_only": True,
+                "steps": [{"id": "check", "tasks": [_agent()]}],
+                "on_failure": {"tasks": [_agent("repair")]},
+            },
+            ("build.check.review",),
+            {"build.check.review": True, "build.on_failure.main.repair": False},
+            id="a-handler-of-a-read-only-node",
+        ),
+    ],
+)
+async def test_an_agent_in_a_read_only_scope_is_launched_with_the_read_only_contract(
+    item_on, monkeypatch, node, failing, expected
+):
+    """`measure_node` checks a read_only step, and a read_only node's own steps,
+    never its handlers; the agent is told exactly where it is checked."""
+    seen = {}
+    seed_v1_library(Path(os.environ["KRAFT_HOME"]) / "config", agent_command="true")
+
+    async def run_agent_task(db_, run_dirs_, *, hook_point, read_only=None, **kw):
+        seen[hook_point] = read_only  # None: the caller passed nothing
+        return "failed" if hook_point in failing else "done"
+
+    monkeypatch.setattr(dispatch._agent, "run_agent_task", run_agent_task)
+    it = await item_on([v1_node(**node)])
+    git(it.repo, "checkout", "-qb", store.branch_for(it.row()))  # a worktree is on its branch
+
+    await _walk(it)
+
+    assert seen == expected

@@ -1769,6 +1769,17 @@ class ResolvedNode:
                 for handler in (step.on_failure, *(t.on_failure for t in step.tasks)):
                     yield from handler
 
+    def checks_read_only(self, task: ResolvedTask) -> bool:
+        """Whether Kraft verifies the worktree around `task` (`dispatch.measure_node`):
+        its step is read_only, or the node is and the step is one of its own, which
+        is all a node's `read_only` covers. A judge, an escalation or a gate
+        reviewer is in no step, and so is not."""
+        node_wide = getattr(self.node, "read_only", False)
+        for step in self.steps_in():
+            if any(t.path == task.path for t in step.tasks):
+                return step.read_only or (node_wide and any(step is own for own in self.steps))
+        return False
+
     def tasks(self) -> Iterator[ResolvedTask]:
         for step in self.steps_in():
             yield from step.tasks

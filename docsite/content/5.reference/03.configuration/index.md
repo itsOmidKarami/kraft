@@ -14,14 +14,14 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 | `repos.yaml` | Connected repos: setup command, env, steering, workspaces and the `sandbox` field ([Sandboxed workers](/reference/configuration/sandbox)). | Seeded, empty | [repos.yaml](/reference/configuration/repos) |
 | `policy.yaml` | Caps, budget, concurrency, archiving, defaults and maxima. | Seeded | [policy.yaml](/reference/configuration/policy) |
 | `library.yaml` and `chains/*.yaml` | The templates: reusable components and the chains built from them, copied onto each [work item](/concepts/vocabulary#work-item) at intake. | Seeded: the `default` and `quick-task` chains | [Library and chains](/reference/configuration/library-and-chains) |
-| `harnesses.yaml` | [Harness profiles](/concepts/vocabulary#harness-profile) and [agent profiles](/concepts/vocabulary#agent-profile). | Seeded | [harnesses.yaml](/reference/configuration/harnesses-file) |
+| `harnesses.yaml` | [Harness profiles](/concepts/vocabulary#harness-profile) and [agent profiles](/concepts/vocabulary#agent-profile). | Seeded | [Harness profiles](/reference/harnesses/harness-files#harness-profiles) and [Agent profiles](/reference/harnesses/agent-profiles) |
 | `access.yaml` | Bind address, password, remote access. | The first save in Settings | [access.yaml](/reference/configuration/access) |
 | `intake.yaml` | Autonomous pickup of issues, and schedules. | Seeded | [intake.yaml](/reference/configuration/intake) |
 | `notify.yaml` | The notification webhook. | The first save in Settings | [notify.yaml](/reference/configuration/notify) |
 | `update.yaml` | Automatic updates, restarting when Kraft is free, and the hours Kraft may do either in. _Added in 2.3_ | The first save in Settings | [update.yaml](/reference/configuration/update) |
 | `workers.yaml` | The machines that may run work item steps, and how each connects. _Added in 2.4_ | `kraft admin worker`, or you | [workers.yaml](/reference/configuration/workers) |
 | `forges.yaml` | Named forge accounts: a host's forge and web address, so connect stops asking. _Added in 2.5_ | `kraft admin forge`, or you | [forges.yaml](/reference/configuration/forges) |
-| `machine.yaml` | On a machine, not the server: how many steps that machine runs at once. _Added in 2.4_ | You | [The machine's own limit](/reference/configuration/workers#the-machines-own-limit) |
+| `machine.yaml` | On a machine, not the server: how many steps that machine runs at once. _Added in 2.4_ | You | [The machine's own limit](/concepts/how-workers-and-machines-behave#the-machines-own-limit) |
 | `theme.yaml` | UI appearance. | The first save in Settings | [theme.yaml](/reference/configuration/theme) |
 | `sandbox.yaml` | Which container CLI runs [sandboxed](/concepts/vocabulary#sandbox) tasks, SELinux and an extra CA. | You | [sandbox.yaml](/reference/configuration/sandbox/sandbox-yaml) |
 | `detectors.yaml` | Your own conventions for the setup and test commands `kraft repo connect` proposes, layered on the shipped table. | You | [detectors.yaml](/reference/configuration/repos/detectors) |
@@ -36,7 +36,7 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 - **Editing.** The **Templates** screens edit `library.yaml` and `chains/`. **Settings** edits the rest, except `sandbox.yaml`, `detectors.yaml`, `harnesses/` and the add-on files and locks, which no screen edits. Editing any file by hand is equally supported.
 - **Moving it.** `KRAFT_HOME` and `KRAFT_CONFIG_DIR` move the directory; see [Environment variables](/reference/configuration/environment-variables).
 - **Validation.** Kraft validates each file when it loads it, and reports a file that fails with the offending key named. Chain rules such as `extends` and `reject_to` are in [Chain file keys](/reference/chain-nodes).
-- **An old directory.** Before 2.0, the directory was `templates/`; see [Coming from 1.4](/guides/run/coming-from-1-4#config-directory-and-files). A home still in the 0.x template format (a `registry.yaml`, hook names or `gate_after`) is refused until you run `kraft admin update`; see [Migrating a home from 0.x](/guides/run/coming-from-1-4#a-0x-home).
+- **An old directory.** An older home has `templates/` in its place; see [Coming from 1.4](/guides/run/coming-from-1-4#config-directory-and-files). A home still in the 0.x template format (a `registry.yaml`, hook names or `gate_after`) is refused until you run `kraft admin update`; see [Migrating a home from 0.x](/guides/run/coming-from-1-4#a-0x-home).
 
 Three commands check and reload the files:
 
@@ -49,7 +49,6 @@ Three commands check and reload the files:
 - [repos.yaml](/reference/configuration/repos): every field in `repos.yaml`, and the pages for how connect proposes commands, `detectors.yaml` and workspaces.
 - [policy.yaml](/reference/configuration/policy): every field in `policy.yaml`: caps, budget, concurrency, archiving, defaults and maxima.
 - [Library and chains](/reference/configuration/library-and-chains): the sections of `library.yaml`, and how `chains/*.yaml` files compose them into chains.
-- [harnesses.yaml](/reference/configuration/harnesses-file): every field in `harnesses.yaml`, for harness profiles and agent profiles.
 - [access.yaml](/reference/configuration/access): every field in `access.yaml`: bind address, port, password, session expiry and allowed hosts.
 - [intake.yaml](/reference/configuration/intake): every field in `intake.yaml`: autonomous pickup from beads, and cron schedules.
 - [notify.yaml](/reference/configuration/notify): every field in `notify.yaml`: the notification webhook and the events that post to it.
@@ -60,4 +59,9 @@ Three commands check and reload the files:
 - [Repo libraries](/reference/configuration/repo-libraries): a repository's own `.kraft/` library, where it is read from, how a person accepts it, and `repo-libraries.lock`.
 - [update.yaml](/reference/configuration/update): every field in `update.yaml`: automatic updates, restarting when Kraft is free, the channel and the allowed hours.
 - [workers.yaml](/reference/configuration/workers): every field in `workers.yaml`: the machines that may run steps, how each connects, and why one is offline.
-- [forges.yaml](/reference/configuration/forges): every field in `forges.yaml`: the named forge accounts, which one a repo uses, and what isn't there yet.
+- [forges.yaml](/reference/configuration/forges): every field in `forges.yaml`: the named forge accounts, and which one a repo uses.
+
+## Related
+<!-- not new: the harnesses.yaml link moved here from In this section -->
+
+- [Agent harnesses](/reference/harnesses): the fields of `harnesses.yaml`, for harness profiles and agent profiles, and the harnesses they configure.

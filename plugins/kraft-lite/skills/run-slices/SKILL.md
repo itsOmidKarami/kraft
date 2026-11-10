@@ -76,7 +76,8 @@ and invoke `kraft-lite:gate`; the chain continues as one.
    `{"mode", "feature_branch", "state_branch", "slices": [{"key", "title", "tasks": [N], "after": [key]}]}`.
    Then `KL plan-slices --check .kraft-lite/proposals/<chain-id>.json`: it
    refuses a proposal that leaves a plan task out. Fix the proposal until it
-   passes.
+   passes. `approve --slices` runs the same check, and refuses an uncovered
+   proposal.
 5. `KL gate`, then invoke `kraft-lite:gate`. It presents the gate's own
    artifact with the proposal beside it, and records the user's answer: an
    approval as `approve --slices .kraft-lite/proposals/<chain-id>.json`, a

@@ -144,8 +144,8 @@ _READ_ONLY = (
     "You are reading this work item's checkout. Change, write and commit "
     "nothing in it, and leave no file behind: Kraft compares it after you."
 )
-#: Added to `_READ_ONLY` in place: such an agent runs in a copy of the branch
-#: (`run_agent_task(in_copy=True)`), never the person's checkout.
+#: Added to `_READ_ONLY` for an agent in a copy of the branch
+#: (`run_agent_task(in_copy=True)`), not the person's checkout.
 _READ_ONLY_COPY = (
     " It is a throwaway copy of this work item's branch `{branch}`, made for"
     " this session and deleted when it ends: nothing you change here is kept."
@@ -663,6 +663,9 @@ def context_sections(
     branch: str = "<branch>",
     #: The agent must change nothing: told neither to commit nor to run tests.
     read_only: bool = False,
+    #: The read-only agent runs in a copy of the branch (`run_agent_task(in_copy=True)`),
+    #: not the person's checkout.
+    in_copy: bool = False,
 ) -> list[tuple[str, str, str]]:
     """A launch's context as `(kind, source, text)` sections, in the order the
     agent reads them; joined, they are exactly `build_context`'s text."""
@@ -679,7 +682,7 @@ def context_sections(
                 hook_point=hook_point,
                 session_id=session_id,
                 summary_path=summary_path or "<session summary path>",
-                edits=_READ_ONLY + (_READ_ONLY_COPY.format(branch=branch) if in_place else "")
+                edits=_READ_ONLY + (_READ_ONLY_COPY.format(branch=branch) if in_copy else "")
                 if read_only
                 else _TESTS
                 + (_IN_PLACE.format(branch=branch) if in_place else _WORKTREE)
@@ -1230,6 +1233,7 @@ async def _run_agent_task(
         in_place=in_place,
         branch=store.branch_for(item_row) if in_place else "<branch>",
         read_only=read_only,
+        in_copy=in_copy,
     )
     options = {
         k: v
