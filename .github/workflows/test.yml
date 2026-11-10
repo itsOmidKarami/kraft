@@ -41,11 +41,11 @@ jobs:
     # builds it), .github/assets/, and docs/*.md (not docs/intent/, whose pins
     # the test job checks). `python` is false for those and for one that also
     # changes frontend/, with nothing else and no .py file among them: no
-    # Python moved, so the unit tier runs on the newest Python alone and the
-    # real-CLI tier skips. `pythons` is the unit tier's matrix: all three on a
-    # push to main, the floor and the newest on a pull request (3.13 sits
-    # between them, and a failure on it alone was as rare as on 3.12 or 3.14
-    # alone, and read as a flake), the newest alone when `python` is false.
+    # Python moved, so the unit tier runs on 3.14 alone (the Python CI builds
+    # with) and the real-CLI tier skips. `pythons` is the unit tier's matrix:
+    # all four on a push to main, the floor and 3.14 on a pull request (main
+    # still runs 3.13 and 3.15; a failure on 3.13 alone was as rare as on 3.12
+    # or 3.14 alone, and read as a flake), 3.14 alone when `python` is false.
     # Pushes to main run everything, and so does a PR if
     # this job fails: nothing is trimmed or skipped except on an explicit
     # 'false'. The unit tests that read the docs still run on a docs-only
@@ -66,7 +66,7 @@ jobs:
           code=true
           python=true
           # No spaces: the value is one `name=value` line in $GITHUB_OUTPUT.
-          pythons='["3.12","3.13","3.14"]'
+          pythons='["3.12","3.13","3.14","3.15"]'
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
             pythons='["3.12","3.14"]'
             git fetch --no-tags --depth=1 origin "$BASE"
@@ -128,15 +128,15 @@ jobs:
 
   test:
     # The unit tier on the supported Pythons (`requires-python` in pyproject.toml
-    # is the floor, 3.12; the newest is 3.14), each in four shards
+    # is the floor, 3.12; the newest is 3.15), each in four shards
     # (`KRAFT_TEST_SHARD`, read by the repo-root conftest.py). One wheel serves
     # all of them, so this is the only place a version gap shows. `changes`
-    # picks the Pythons: all three on a push to main, the floor and the newest
-    # on a pull request, and when it fails, all three. A pull request that
-    # changes no Python runs the newest alone: every unit test still runs,
+    # picks the Pythons: all four on a push to main, the floor and 3.14
+    # on a pull request, and when it fails, all four. A pull request that
+    # changes no Python runs 3.14 alone: every unit test still runs,
     # since some read frontend/ files, but nothing in it can differ by Python
-    # version. Coverage and junit come from the newest Python only, one file
-    # per shard, and `test-report` below puts them together. fail-fast off, so
+    # version. Coverage and junit come from 3.14 only, one file per
+    # shard, and `test-report` below puts them together. fail-fast off, so
     # one leg's failure doesn't hide another's.
     name: test (python ${{ matrix.python-version }}, ${{ matrix.shard }}/4)
     needs: changes
@@ -145,7 +145,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ${{ fromJSON(needs.changes.outputs.pythons || '["3.12", "3.13", "3.14"]') }}
+        python-version: ${{ fromJSON(needs.changes.outputs.pythons || '["3.12", "3.13", "3.14", "3.15"]') }}
         shard: [1, 2, 3, 4]
     # Job-level, so it beats the workflow's UV_PYTHON for `uv run` too: `uv run`
     # rebuilds the venv whenever UV_PYTHON names another version than the one

@@ -277,8 +277,8 @@ when `NEW` doesn't collect.
   and a run testmon (or `-k`/`-m`) deselected to `0 selected`. Pass
   `--no-testmon` to run the paths regardless.
 - The full suite runs in CI, so push and read CI rather than running it
-  locally. CI runs the unit tier on 3.12, 3.13 and 3.14 for a push to `main`
-  and on 3.12 and 3.14 for a pull request;
+  locally. CI runs the unit tier on 3.12, 3.13, 3.14 and 3.15 for a push to
+  `main` and on 3.12 and 3.14 for a pull request;
   `just test-py 3.12` reproduces one version's failure locally, in its own
   environment. A test must pass on the floor, so it never relies on a newer
   stdlib API or on 3.14's lazy annotations.

@@ -29,7 +29,7 @@ The kraft-lite row is the one exception: CI runs it on Python 3.10 with
 nothing installed, which `just test` cannot reproduce. `just ci-test`
 reproduces CI's `lint` and unit jobs on the full suite (about 14 minutes);
 keep it for when a targeted run cannot reproduce a failure. A unit shard red
-on one Python version only: `just test-py 3.12` (or `3.13`, `3.14`).
+on one Python version only: `just test-py 3.12` (or `3.13`, `3.14`, `3.15`).
 
 ## Regenerate, never hand-edit
 

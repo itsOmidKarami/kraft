@@ -33,10 +33,9 @@ of this guide is the full reference; a starter issue rarely needs it.
 - [uv](https://docs.astral.sh/uv/). `.python-version` pins a checkout's venv to
   Python 3.14, the version CI builds with, and the first `uv sync` downloads
   it if you don't have it. Without the pin, uv picks the newest Python
-  installed, and Python 3.15.2 hangs `uv sync`: `setuptools-scm`'s
-  `git check-attr` call deadlocks in `subprocess.run`. Kraft runs on 3.12 or
-  newer (`requires-python` in `pyproject.toml`). CI tests 3.12, 3.13 and 3.14 on `main` and 3.12 and 3.14 on a
-  pull request; `just test-py 3.12` reproduces one version's failure locally.
+  installed. Kraft runs on 3.12 or newer (`requires-python` in
+  `pyproject.toml`). CI tests 3.12, 3.13, 3.14 and 3.15 on `main` and 3.12 and
+  3.14 on a pull request; `just test-py 3.12` reproduces one version's failure locally.
   Code must run on 3.12: no syntax or stdlib
   API added later (3.13's `Path.read_text(newline=)`, 3.14's t-strings,
   unparenthesized `except A, B:`), and every module under `src/` starts with
@@ -351,7 +350,7 @@ verification runs it.
 |---|---|---|
 | `lint` | ruff check and format, `dev/check_docs_coverage.py`, `dev/check_docs_walls.py`, `dev/check_docs_redirects.py`, `dev/check_docs_landings.py`, `dev/check_docs_shell.py`, `dev/check_docs_ledes.py`, `dev/check_docs_added_in.py`, `vale` (the docs' [voice and spelling](#voice-and-spelling)), `dev/check_addon_versions.py`, `dev/check_tests.py` | `just ci-test`, or `just lint`, `just vale` and `just check-tests` |
 | `changes` | decides whether the pull request is docs-only, or changes no Python, and so which Pythons the unit tier runs | nothing to run |
-| `test (python 3.12 / 3.13 / 3.14, 1/4 … 4/4)` *(code)* | the unit tier (`-m "not e2e"`) in four shards, with `python -m kraft.intent` in the first; on 3.12, 3.13 and 3.14 for a push to `main`, on 3.12 and 3.14 for a pull request, on 3.14 alone when it changes no Python | `just ci-test`, or `just test` and `just intent`; `just test-py 3.12` for another version |
+| `test (python 3.12 / 3.13 / 3.14 / 3.15, 1/4 … 4/4)` *(code)* | the unit tier (`-m "not e2e"`) in four shards, with `python -m kraft.intent` in the first; on 3.12, 3.13, 3.14 and 3.15 for a push to `main`, on 3.12 and 3.14 for a pull request, on 3.14 alone when it changes no Python | `just ci-test`, or `just test` and `just intent`; `just test-py 3.12` for another version |
 | `test report` *(code)* | the shards' junit annotations and the coverage comment; reports only, so it isn't part of `test` | nothing to run |
 | `docs tests` (docs-only pull requests) | the unit test files that name a docs path, on Python 3.14 | `just test` on the files the `git grep` in `test.yml`'s `docs-tests` job lists |
 | `test` | passes only when `lint`, every `test (python …)` leg, `e2e (real CLIs)`, `frontend`, `vscode`, `playwright` and `ui contract` all pass; a job that skips because of the paths changed (*(python)*, and on a docs-only pull request *(code)* too) counts as passing, and on a docs-only pull request `docs tests` must pass instead. Branch protection requires it alongside those jobs by name; once the ruleset names only `test` (with the kraft-lite checks, `removals declared` and `release impact declared`), the supported range and the job list can change without editing repo settings | nothing to run |
