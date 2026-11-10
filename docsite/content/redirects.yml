@@ -489,6 +489,14 @@
 /reference/chain-nodes#other-task-kinds: /reference/chain-nodes#subprocess-task-keys
 /reference/chain-nodes#what-the-final-review-approves: /reference/chain-nodes/final-review-approval
 /reference/chain-nodes#merge-trains-and-merge-queues: /reference/chain-nodes/merge-queue-drops
+/reference/chain-nodes#waiting-for-a-pipeline-by-id: /reference/chain-nodes/wait-for-a-pipeline
+/reference/chain-nodes#read_only: /reference/chain-nodes/read-only
+/reference/chain-nodes#step-outputs: /reference/chain-nodes/step-outputs
+/reference/chain-nodes#writing: /reference/chain-nodes/step-outputs#writing
+/reference/chain-nodes#reading: /reference/chain-nodes/step-outputs#reading
+/reference/chain-nodes#what-is-checked: /reference/chain-nodes/step-outputs#what-is-checked
+/reference/chain-nodes#where-they-are-allowed: /reference/chain-nodes/step-outputs#where-they-are-allowed
+/reference/chain-nodes#when-a-writer-runs-again: /reference/chain-nodes/step-outputs#when-a-writer-runs-again
 /reference/chain-nodes/result-file#example: /reference/chain-nodes/result-file#examples
 /guides/customize/write-your-own-chain#verify: /guides/customize/write-your-own-chain#check-it-worked
 /guides/customize/write-your-own-chain#how-the-lint-node-runs: /guides/customize/write-your-own-chain#_1-add-the-tasks-to-the-library

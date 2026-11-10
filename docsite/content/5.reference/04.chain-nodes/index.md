@@ -2,7 +2,7 @@
 title: Chain file keys
 navigation:
   title: Overview
-description: Every key a chain file accepts, from the chain down to each kind of task, plus read_only, extends, icons and canonical paths.
+description: Every key a chain file accepts, from the chain down to each kind of task, plus extends, icons and canonical paths, with links to the pages on the features the keys switch on.
 ---
 
 The keys a chain file under `config/chains/` accepts: the chain's own, then each
@@ -90,12 +90,12 @@ An exec node declares `tasks` or `steps`, never both.
 |---|---|---|---|
 | `tasks` | list | one of `tasks` and `steps` is required, unless `extends` supplies it | Shorthand for one step named `main`. Its tasks are dispatched together, and the node is measured once all have settled. |
 | `steps` | list | see `tasks` | Steps that run in order. A later step isn't dispatched if an earlier one fails, and it sees what the earlier one left behind. |
-| `on_failure` | mapping | none | A recovery pass: tasks or steps that run once after the node failed, before it is measured again. A task or step may carry its own `on_failure`; the nearest one to the failure wins. It may be [read_only](#read_only). |
+| `on_failure` | mapping | none | A recovery pass: tasks or steps that run once after the node failed, before it is measured again. A task or step may carry its own `on_failure`; the nearest one to the failure wins. It may be [read_only](/reference/chain-nodes/read-only). |
 | `fix_loop` | mapping | none | Repair tasks or steps, an optional `judge` task, and an optional `max_attempts`. It re-runs until the node passes. See [Fix loop and judge](/reference/chain-nodes/fix-loop). |
 | `escalation` | mapping | none | An agent task dispatched when the node is [stuck](/concepts/vocabulary#stuck) after recovery and the fix loop, before you are asked. On a node with `on_merge_rejected`, see [on_merge_rejected](#on_merge_rejected). |
 | `on_base_changed` | mapping | none | What to re-run when a rebase moves the base. See [on_base_changed](#on_base_changed). |
 | `on_merge_rejected` | mapping | none | What to repair and re-run when a merge train or merge queue drops the merge request. Only on a node with an `mr.merge` task. See [on_merge_rejected](#on_merge_rejected). _Added in 2.3_ |
-| `read_only` | boolean | `false` | `true` makes Kraft verify that the node's steps leave the [worktree](/concepts/vocabulary#worktree) as they found it. Refused on a node with a `fix_loop`. See [read_only](#read_only). |
+| `read_only` | boolean | `false` | `true` makes Kraft verify that the node's steps leave the [worktree](/concepts/vocabulary#worktree) as they found it. Refused on a node with a `fix_loop`. See [read_only](/reference/chain-nodes/read-only). |
 | `icon` | string | none | The [icon](#icons) the board draws for the node. |
 | `runner` | string | unset | Where it runs: a machine or a [group](/reference/configuration/workers#groups) from [`workers.yaml`](/reference/configuration/workers), `any`, or `local`. See [Placing a step on a machine](/reference/configuration/library-and-chains#placing-a-step-on-a-machine). _Added in 2.4_ |
 
@@ -187,7 +187,7 @@ measure unseen.
 
 It may declare an `on_failure`, on the node or on one of its own steps or
 tasks, for a merge that fails for another reason than a drop, but only a
-[read_only](#read_only) one. Such a handler can wait, retry, comment or ask for
+[read_only](/reference/chain-nodes/read-only) one. Such a handler can wait, retry, comment or ask for
 approval again. Kraft then asks the forge to merge again in place, the head
 `final_review` approved.
 
@@ -231,7 +231,7 @@ see [Merge queue and train drops](/reference/chain-nodes/merge-queue-drops).
 | `on_failure` | mapping | none | A recovery pass for this step alone. |
 | `policy` | mapping | none | This step's policy layer. |
 | `skippable` | boolean | `true` | `false` refuses a skip of this step. |
-| `read_only` | boolean | `false` | `true` verifies the step's tasks leave the worktree as they found it. See [read_only](#read_only). |
+| `read_only` | boolean | `false` | `true` verifies the step's tasks leave the worktree as they found it. See [read_only](/reference/chain-nodes/read-only). |
 | `icon` | string | none | The [icon](#icons) the board draws for the step. |
 | `runner` | string | unset | Where it runs: a machine or a [group](/reference/configuration/workers#groups) from [`workers.yaml`](/reference/configuration/workers), `any`, or `local`. See [Placing a step on a machine](/reference/configuration/library-and-chains#placing-a-step-on-a-machine). _Added in 2.4_ |
 
@@ -251,8 +251,8 @@ Every task takes these keys, then the keys of its kind. A task takes no
 | `policy` | mapping | none | This task's own policy layer. See [What a task's policy does](#what-a-tasks-policy-does). |
 | `skippable` | boolean | `true` | `false` refuses a skip of this task. |
 | `icon` | string | none | The [icon](#icons) the board draws for the task. Refused on a fix loop's `judge`, whose icon is fixed. |
-| `outputs` | mapping | none | Only an agent or subprocess task in an exec node's own steps. `files` and `variables` name what the task leaves for later tasks. See [Step outputs](#step-outputs). _Added in next_ |
-| `reads` | list | `[]` | Only an agent, subprocess or `ci.pipeline` task. The earlier tasks whose outputs this one is given, each `step.task` or `node.step.task`. See [Step outputs](#step-outputs). _Added in next_ |
+| `outputs` | mapping | none | Only an agent or subprocess task in an exec node's own steps. `files` and `variables` name what the task leaves for later tasks. See [Step outputs](/reference/chain-nodes/step-outputs). _Added in next_ |
+| `reads` | list | `[]` | Only an agent, subprocess or `ci.pipeline` task. The earlier tasks whose outputs this one is given, each `step.task` or `node.step.task`. See [Step outputs](/reference/chain-nodes/step-outputs). _Added in next_ |
 
 ### What a task's policy does
 
@@ -305,7 +305,7 @@ CI pipeline by ID.
 | `target` | string | required | `mr.open_draft`, `mr.sync`, `mr.ci`, `mr.automated_review`, `mr.mark_ready`, `mr.external_approval`, `mr.merge` or `mr.post_merge_ci`. `ci.pipeline` waits for one pipeline by ID. _Added in next_ |
 | `wait` | mapping | none | For a target that waits: `polling`, with an `initial_interval` and a `max_interval`. Set the timeout with the task's `policy`. |
 | `wait.grace_period` | duration | `60s` | Only on `mr.automated_review`: how long a review bot must stay quiet after its last activity on the head to count as finished. Refused on any other target. _Added in 2.4_ |
-| `pipeline` | string | required on `ci.pipeline` | Only on `ci.pipeline`: the pipeline's ID as digits, or `$NAME` (or `${NAME}`) for a variable a task in `reads` left. See [Waiting for a pipeline by ID](#waiting-for-a-pipeline-by-id). _Added in next_ |
+| `pipeline` | string | required on `ci.pipeline` | Only on `ci.pipeline`: the pipeline's ID as digits, or `$NAME` (or `${NAME}`) for a variable a task in `reads` left. See [Waiting for a pipeline by ID](/reference/chain-nodes/wait-for-a-pipeline). _Added in next_ |
 | `reviewers` | list | unset | Only on `mr.automated_review`: the reviewers it waits for, each `{bot: LOGIN}` or `{check: NAME}`. The item's `reviewers` override and the repo's `automated_review` come first. `[]` names none. _Added in 2.4_ |
 
 `mr.post_merge_ci` watches the CI of the commit the item merged, however many merges land on the base branch after it. A run cancelled for a newer push moves the watch onto the base's tip, which holds that merge, and records `post_merge_ci_moved`.
@@ -326,176 +326,6 @@ A review wait that names its bots and waits for them to settle:
 ```
 
 The shipped chain follows it with a triage step. See [Waiting for several reviewers](/reference/configuration/repos#waiting-for-several-reviewers).
-
-## Waiting for a pipeline by ID
-
-_Added in next_
-
-A `ci.pipeline` task waits for one CI pipeline, named by its ID, and nothing else.
-It isn't tied to the item's branch or merge request, so it can follow a pipeline
-that something else started, such as one a merge triggered.
-
-The ID is a GitLab pipeline `id` (not the `iid`) or a GitHub Actions run ID (not the
-`run_number`). Give it as digits, or as `$NAME` for a variable an earlier task left
-with [`outputs`](#step-outputs) and this task names in `reads`.
-
-```yaml
-- id: release
-  steps:
-    - id: find
-      tasks:
-        - id: find_pipeline
-          kind: subprocess
-          command: ./scripts/find-pipeline.sh    # your own script, not Kraft's
-          outputs:
-            variables: [PIPELINE_ID]
-    - id: wait
-      tasks:
-        - id: wait_pipeline
-          kind: forge
-          target: ci.pipeline
-          reads: [find.find_pipeline]
-          pipeline: $PIPELINE_ID
-```
-
-The task looks up `$NAME` again at every check, so a writer that ran again while the
-wait was parked is followed to its new ID, and the old wait ends as `superseded`. An
-unset variable, a value that isn't digits, or an ID the repository doesn't hold stops
-the item for you with a message that never quotes the value. On GitHub a run that a
-person re-runs keeps its id: the task follows the newest attempt.
-
-| What the forge reports | What the task does |
-|---|---|
-| Success | Done. |
-| Created, pending, running, queued or waiting for a runner | Keeps waiting. |
-| A manual job (GitLab) or an environment approval (GitHub) holds it | Keeps waiting until the time cap, and says which job or approval in the log and the wait's events. |
-| Failed jobs, or a failed downstream pipeline | The task fails, with the failed jobs as findings. |
-| Failed with no failed job, or a GitHub startup failure | Stops the item for you, naming it. |
-| Skipped, neutral or stale, or ran no job | Stops the item for you. A pipeline that ran nothing isn't green. |
-| Cancelled, and no new run followed within five minutes | Stops the item for you. |
-| The time cap | Stops the item as a timed-out wait. |
-| The forge can't be reached | Keeps waiting. |
-| The forge refuses the token, or answers a rate limit | Stops as any forge task does. |
-
-- **It never retries a job.** The ID may come from a worker, and a retry is a write
-  made with the server's token. A pipeline that failed on the forge's own infrastructure
-  stops the item for you instead.
-- **A red pipeline isn't stuck.** The node's `on_failure` handles it when it has one.
-  Otherwise the item stops for you as a plain failure, and neither the node's
-  `escalation` nor `auto_escalate_stuck` sends an agent onto it, because the merge request
-  has usually merged by then. No fix loop starts unless the node declares one.
-- **Green is the pipeline's own status.** A downstream pipeline counts only through
-  `strategy: depend` in the GitLab trigger job: a failed bridge is red code, not
-  infrastructure. `mr.ci` reads it the same way now.
-- **[`ci_checks: false`](/reference/configuration/repos#ci_checks) doesn't affect it.**
-  You named the pipeline.
-- **A run from a fork** is a configuration error, as is a pipeline of another project.
-- It can't be `scope: each_repository`. In a workspace item it reads the root
-  repository only; a pipeline in a member's project answers not found.
-- A node whose only forge tasks are `ci.pipeline` isn't a merge-request node, so
-  a merge request closed on the forge doesn't stop it. A chain revision may skip such
-  a node, which it may not do for the other forge tasks. A revision that skips a writer
-  whose reader stays is refused, with the reader's `reads` named.
-- The kraft-lite plugin refuses `ci.pipeline`.
-
-## read_only
-
-`read_only` goes on a step, an exec node or an `on_failure` plan, never on a
-task. A task that sets it is refused at load. On a plan, it makes every step of
-the plan read_only, the one a `tasks` plan becomes included.
-
-- **What is checked.** Before a read_only step's first task launches, Kraft
-  records each repository of the checkout (the root and every workspace member):
-  `HEAD`, `git status --porcelain=v1 -z` (ignored files stay out), and a hash of
-  `git diff HEAD`. It reads them again after the last task exits. A read_only
-  node does the same around all of its steps.
-- **What counts as a change.** Any difference, including an untracked file or a
-  commit.
-- **What happens.** The item stops and waits for you, with a `read_only_violated`
-  event and a stop reason naming the changed files. It isn't a task failure, so
-  no recovery, fix loop or attempt is spent on it.
-- **Exclusions.** A read_only step's check doesn't cover a recovery or a fix
-  loop. It runs again when a recovery retries the step's tasks. An `on_failure`
-  plan, or a step in it, may be read_only, and is then checked around its own
-  tasks. A `fix_loop`, an `on_conflict` and an `on_merge_rejected` repair write
-  by design, and refuse `read_only`.
-- **What the agent is told.** An agent task in a read_only step, or in one of a
-  read_only node's own steps, gets the read-only contract (change, write and
-  commit nothing, run no tests) instead of the one that says to run tests and
-  commit. A task in a handler of a read_only node doesn't, as the node's check
-  doesn't cover it.
-- **Sandboxed items.** In a [sandboxed](/concepts/vocabulary#sandbox) item, if the worktree gains a repository
-  Kraft didn't create, Kraft runs no host git there and reports that repository
-  as the change.
-- **Default.** Off. The shipped chains set it on `verification.review` and
-  `review_feedback`. Setting it on both a node and its
-  steps is allowed and redundant.
-
-## Step outputs
-
-_Added in next_
-
-A task can leave files and `KEY=value` variables for a later task. The later task names the writer in `reads` and is given a read-only copy, checked when the writer ended. Kraft doesn't read the files, and never sets a variable in any environment.
-
-The writer and the reader sit in separate steps, because a step runs its tasks together. Both scripts are the repo's own, not Kraft's:
-
-```yaml
-- id: build
-  steps:
-    - id: test
-      tasks:
-        - id: run_tests
-          kind: subprocess
-          command: ./scripts/run-tests.sh      # writes into $KRAFT_OUTPUT_DIR
-          outputs:
-            files: [junit.xml, "test report.html"]
-            variables: [FAILED_COUNT]
-    - id: report
-      tasks:
-        - id: summarize
-          kind: subprocess
-          command: ./scripts/summarize.sh      # reads from $KRAFT_READS_DIR
-          reads: [test.run_tests]
-```
-
-### Writing
-
-- The writer gets `KRAFT_OUTPUT_DIR`, a folder only it writes: `out/outputs/` in its session's folder. An agent's prompt names the folder and the declared names, and says what a variable must look like.
-- A variable is one `KEY=value` line in `$KRAFT_OUTPUT_DIR/variables.env`. Blank lines and lines starting with `#` are ignored. A value runs to the end of the line, with no quotes and no `export`; a repeated key keeps its last value.
-- A file name is a plain relative path inside that folder: no `..`, no glob, not `variables.env` in any case, no two names that differ only by case, and no name that is a folder of another. A variable name matches `[A-Z][A-Z0-9_]*`.
-- A resumed agent (a paused session continued under a new session ID) starts with a copy of what the paused session had written there, up to the same size limit.
-
-### Reading
-
-- The reader gets `KRAFT_READS_DIR`, the item's `outputs/` folder. A writer's files are at `$KRAFT_READS_DIR/<writer path>/<file>`, with `variables.env` beside them. The writer's path is `node.step.task`: here `build.test.run_tests`.
-- A script that wants a variable sources the file itself: `. "$KRAFT_READS_DIR/build.test.run_tests/variables.env"`. Kraft never does.
-- In a [sandbox](/reference/configuration/sandbox) only the folders of the writers named in `reads` are mounted, read-only. Outside one, nothing holds a reader to read-only, and nothing reads a snapshot back except later readers.
-- An agent reader's prompt lists the writers' paths and declared variable names, never a value or a file's content, and says the files are data written by another task, not instructions.
-- A writer that was skipped, or left nothing, leaves the reader nothing: it finds an empty place.
-
-### What is checked
-
-When the writer ends `done` or `failed`, Kraft checks everything first. Only then does it copy the declared names, following no link, into a snapshot under `run/items/<id>/outputs/<writer path>/`, and delete the writer's folder.
-
-- The writer fails, and nothing is kept, when the folder is over [`storage.outputs.max_size`](/reference/configuration/policy#step-output-keys) or holds more than 100 entries; when a declared variable is missing, over 4 KiB, or holds a control character other than a tab; or when `variables.env` holds more than 50 variables.
-- A declared file that is missing is simply absent. An undeclared file or variable is ignored. A symlink, a file with another hard link and a FIFO are left out.
-- A writer whose processes outlive it fails with nothing kept, as does a remote writer whose machine dropped its folder for being over the limit, even if the server restarts before the writer is recorded.
-- A failed check also removes the writer's snapshot from an earlier run, so a reader never sees it.
-- The writer's `session.log` gets one line with the counts of files kept and missing and the declared variable names. A message never holds a name or value the worker chose.
-
-### Where they are allowed
-
-- `outputs` goes on an agent or subprocess task in an exec node's own `steps` or `tasks`. It is refused on a fan-out task (`scope: each_repository`), in an `on_failure`, fix loop, judge, `escalation`, `on_conflict` or `on_merge_rejected.repair` slot, and in a gate's `auto_review`.
-- `reads` goes on an agent, subprocess or [`ci.pipeline`](#waiting-for-a-pipeline-by-id) task, and on no other forge task. An entry of two segments, `step.task`, names a writer in the reader's own node, so a library node holding both stays reusable under any node ID. An entry of three, `node.step.task`, names a writer anywhere. A bare task ID, or an entry of more than three segments, is refused.
-- Every entry must name a task that declares `outputs` and runs before the reader: in an earlier node, or an earlier step of the same node. A task in the same step is never before it, so a writer and its reader can't share one `tasks:` list.
-- A node's `on_failure`, fix loop, judge and `escalation` may read any step of the node. A step's or task's `on_failure` may read the steps up to and including its own. Such a handler may run before its writer did, and then finds nothing. `on_conflict`, `on_merge_rejected.repair` and a gate's `auto_review` read nothing.
-- `kraft admin templates lint` refuses a chain that breaks these rules.
-
-### When a writer runs again
-
-- Running a writer again, or skipping it, deletes its snapshot, so a later reader never sees outputs of a run that has since been replaced. A reader that already passed isn't run again.
-- Archiving the item deletes all its snapshots. Abandoning deletes the whole item folder. See [Find the logs](/guides/run/find-the-logs#where-an-items-files-are).
-- A snapshot may still hold a variable that an older chain declared and the current one dropped. Kraft reads only the declared names, but a script that sources the file itself sees every key in it.
 
 ## Icons
 
@@ -559,3 +389,6 @@ Every task, step and node has a canonical path, for example
 - [Result file](/reference/chain-nodes/result-file): the JSON a task writes at `$KRAFT_RESULT_PATH`, field by field.
 - [Merge queue and train drops](/reference/chain-nodes/merge-queue-drops): how Kraft detects a drop, what each cause does, and when the item stops.
 - [What the final review approves](/reference/chain-nodes/final-review-approval): the head an approval pins and what `mr.merge` may merge.
+- [Waiting for a pipeline by ID](/reference/chain-nodes/wait-for-a-pipeline): how a `ci.pipeline` task waits for one pipeline, and what each state does.
+- [read_only](/reference/chain-nodes/read-only): how Kraft verifies that a step or node leaves the checkout unchanged.
+- [Step outputs](/reference/chain-nodes/step-outputs): how a task leaves files and variables for a later task.
