@@ -23,6 +23,7 @@ describe("Repos Config row formats", () => {
     ["targeted-and-plain", "src/** => just ci-test => just test-targeted; docs/** => true", { value: [{ paths: ["src/**"], command: "just ci-test", targeted_command: "just test-targeted" }, { paths: ["docs/**"], command: "true" }] }],
     ["no-arrow", "npm test", { error: '"npm test" is not paths => command.' }],
     ["empty-targeted", "a/** => x =>", { error: '"a/** => x =>" is not paths => command.' }],
+    ["bracket-path", "[slug]/**, [a-z]*.py => npm test", { value: [{ paths: ["[slug]/**", "[a-z]*.py"], command: "npm test" }] }],
     ["group", "[heavy] src/** => just ci-test => just test-targeted; docs/** => true", { value: [{ paths: ["src/**"], command: "just ci-test", targeted_command: "just test-targeted", concurrency_group: "heavy" }, { paths: ["docs/**"], command: "true" }] }],
   ])("reads test scopes as paths => command => targeted command: %s", (_id, text, parsed) => {
     // Strict: a scope without a targeted command has no such key, not an undefined one.

@@ -862,9 +862,7 @@ async def run_task(
     key = ids.session_ref(work_item_id, session_id)
     try:
         if link is not None:
-            waited = await link.take_waiting(
-                key, _said_waiting(db, work_item_id, kwargs), group=concurrency_group
-            )
+            waited = await link.take_waiting(key, _said_waiting(db, work_item_id, kwargs))
             if waited > 0.05:
                 kwargs["waited_s"] = waited
                 if (cap := kwargs.get("time_cap")) is not None:

@@ -11,6 +11,8 @@ import pytest
 from support.harness import entry_of
 from support.local_worker import ScriptedLink
 
+from kraft.api.deps import _PoisonedRepoEntry
+from kraft.config import ConfigError
 from kraft.executor import LaunchContext
 from kraft.remote import local_link
 from kraft.worker import reattach
@@ -152,14 +154,16 @@ async def test_an_adopted_local_session_holds_a_slot_until_it_exits(item, databa
 
 
 @pytest.mark.parametrize(
-    ("command", "held"),
+    ("command", "held", "readable"),
     [
-        pytest.param("just test-targeted", True, id="a-scope-of-the-group"),
-        pytest.param("just lint", False, id="a-scope-of-no-group"),
+        pytest.param("just test-targeted", True, True, id="a-scope-of-the-group"),
+        pytest.param("just lint", False, True, id="a-scope-of-no-group"),
+        # A repos.yaml that fails to load must not stop the restart: nothing is held.
+        pytest.param("just test-targeted", False, False, id="an-unreadable-repos-yaml"),
     ],
 )
 async def test_an_adopted_test_session_holds_its_concurrency_group_again(
-    item, database, run_dirs, command, held
+    item, database, run_dirs, command, held, readable
 ):
     entry = entry_of(
         {
@@ -174,6 +178,8 @@ async def test_an_adopted_test_session_holds_its_concurrency_group_again(
             ]
         }
     )
+    if not readable:
+        entry = _PoisonedRepoEntry(ConfigError("repos.yaml: broken"))
     link = local_link.current()
     with _sleeper(0.5) as (proc, started):
         await item.session("s1", IMPLEMENT, running=(proc.pid, started), command=command)

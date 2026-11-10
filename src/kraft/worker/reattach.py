@@ -733,11 +733,13 @@ def _concurrency_group(db, row: dict, launch_factory) -> str | None:
         ).fetchone()
     )
     try:
+        # Inside the try too: a repos.yaml that fails to load gives a poisoned entry whose
+        # every read raises, and a restart must still start (`deps.launch`).
         entry = launch_factory(repo[0]).repo_entry if repo else None
+        return entry.concurrency_group_of(row["command"]) if entry is not None else None
     except ConfigError as exc:
         logger.warning("repo of %s unreadable, its test group not held: %s", row["id"], exc)
         return None
-    return entry.concurrency_group_of(row["command"]) if entry is not None else None
 
 
 async def _guarded_adopt(

@@ -30,7 +30,8 @@ export const models = {
 };
 
 type Scope = { paths: string[]; command: string; targeted_command?: string; concurrency_group?: string };
-const GROUP = /^\[([a-z][a-z0-9_-]*)\]\s*/;
+// A space after the `]`: a path such as `[slug]/**` or `[a-z]*.py` is never read as a group.
+const GROUP = /^\[([a-z][a-z0-9_-]*)\]\s+/;
 /** `[heavy] a/**, b/** => pytest -q => pytest --lf; c/** => npm test` ↔ `Repo.test_scopes`: an
  *  optional `[group]` (the scope's `concurrency_group`), paths, the full command, and optionally
  *  the command that runs only what a change affects. The second arrow needs spaces around it, so
