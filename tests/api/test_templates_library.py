@@ -293,10 +293,12 @@ def _reviewed_chain(templates_dir, mode):
 
 
 @pytest.mark.parametrize(
-    "read_only",
+    ("read_only", "chain", "task"),
     [
         pytest.param(
             True,
+            "reviewed",
+            "spec_approval.auto_review",
             marks=pytest.mark.api_client(
                 edit_templates=partial(_reviewed_chain, mode="checks_first")
             ),
@@ -304,13 +306,24 @@ def _reviewed_chain(templates_dir, mode):
         ),
         pytest.param(
             False,
+            "reviewed",
+            "spec_approval.auto_review",
             marks=pytest.mark.api_client(edit_templates=partial(_reviewed_chain, mode=None)),
             id="decides",
         ),
+        pytest.param(
+            True,
+            "default",
+            "verification.review.code_review",
+            marks=pytest.mark.api_client(edit_templates=_demo_repo),
+            id="a-read-only-step",
+        ),
     ],
 )
-def test_the_steering_preview_shows_a_gate_reviewer_what_it_launches_with(client, read_only):
-    response = _preview(client, chain="reviewed", task="spec_approval.auto_review")
+def test_the_steering_preview_shows_a_gate_reviewer_what_it_launches_with(
+    client, read_only, chain, task
+):
+    response = _preview(client, chain=chain, task=task)
     assert response.status_code == 200, response.text
     contract = response.json()["sections"][0]["text"]
     told = ("Commit everything you change" in contract, "Kraft compares it after you" in contract)

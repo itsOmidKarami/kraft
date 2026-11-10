@@ -2563,6 +2563,7 @@ async def _launch_agent(
             cwd=worktree,
             repo_entry=launch.repo_entry if launch else None,
             review_package=package,
+            read_only=node.checks_read_only(task),
             bot_feedback=feedback,
             time_cap=time_cap,
             harness_id=harness_id,
