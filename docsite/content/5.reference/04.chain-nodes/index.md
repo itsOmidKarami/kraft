@@ -589,10 +589,16 @@ the plan read_only, the one a `tasks` plan becomes included.
   plan, or a step in it, may be read_only, and is then checked around its own
   tasks. A `fix_loop`, an `on_conflict` and an `on_merge_rejected` repair write
   by design, and refuse `read_only`.
+- **What the agent is told.** An agent task in a read_only step, or in one of a
+  read_only node's own steps, gets the read-only contract (change, write and
+  commit nothing, run no tests) instead of the one that says to run tests and
+  commit. A task in a handler of a read_only node doesn't, as the node's check
+  doesn't cover it.
 - **Sandboxed items.** In a [sandboxed](/concepts/vocabulary#sandbox) item, if the worktree gains a repository
   Kraft didn't create, Kraft runs no host git there and reports that repository
   as the change.
-- **Default.** Off. No shipped chain sets it. Setting it on both a node and its
+- **Default.** Off. The shipped chains set it on `verification.review` and
+  `review_feedback`. Setting it on both a node and its
   steps is allowed and redundant.
 
 ## Step outputs
