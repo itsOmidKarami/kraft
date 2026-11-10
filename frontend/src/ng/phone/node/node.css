@@ -27,6 +27,8 @@
 .ph-turn { display: flex; flex-direction: column; gap: 3px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
 .ph-turn p { margin: 0; }
 .ph-turn-head { display: flex; justify-content: space-between; gap: 8px; font-size: var(--fs-label); color: var(--text-muted); }
+.ph-turn-count { font-size: var(--fs-label); color: var(--text-muted); }
+.ph-turn-threads { margin: 0; padding: 0 0 0 16px; font-size: var(--fs-label); color: var(--text-sub); overflow-wrap: anywhere; }
 .ph-turn-who { font-size: var(--fs-label); color: var(--text-muted); }
 .ph-turn-text { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; font-size: var(--fs-meta); }
 .ph-subtasks { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; font-size: var(--fs-meta); }

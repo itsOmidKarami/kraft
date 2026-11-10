@@ -1,8 +1,7 @@
 import { useNavigate } from "react-router-dom";
-import { localTime } from "../../format";
-import type { GateRound, ReviewThread } from "../../types";
+import type { ReviewThread } from "../../types";
 import { ItemHeader } from "../item/header/ItemHeader";
-import { byWord, outcomeWord, reviewOutcomeWord, roundsOf, threadCountLine } from "../item/gateRounds";
+import { roundsOf } from "../item/gateRounds";
 import { openLimitEditor } from "../item/RaiseLimit";
 import { placeUrl } from "../item/url";
 import type { ItemDetail } from "../item/useItem";
@@ -12,29 +11,11 @@ import { Empty } from "../ui/Empty";
 import { Markdown } from "../ui/Markdown";
 import { LABEL_TONE, Quote } from "./Thread";
 import { rangeName, threadRange } from "./range";
+import { RoundSummary } from "./RoundSummary";
 import { LABEL_WORD } from "./sharedWords";
 import { useRoundThreads } from "./useReview";
 import "../item/item.css";
 import "./review.css";
-
-/** A round in a few lines: how it ended and who decided, the review that went with it (its outcome, its summary), and
- *  how many threads it holds. The desktop's round view and the phone's round screen both show it. */
-export function RoundSummary({ round }: { round: GateRound }) {
-  const who = byWord(round.by);
-  const ended = [outcomeWord(round), who, round.ended_at && localTime(round.ended_at)].filter(Boolean).join(" · ");
-  return (
-    <div className="rv-round-summary">
-      <p className="rv-round-ended">{ended}</p>
-      {round.review && (
-        <>
-          <p className="rv-round-outcome">Review: {reviewOutcomeWord(round.review.outcome)}</p>
-          {round.review.summary && <Markdown text={round.review.summary} />}
-        </>
-      )}
-      <p className="rv-round-count">{threadCountLine(round)}</p>
-    </div>
-  );
-}
 
 /** One thread, read-only: where it sits, its label and state, the lines it was made on, and its comments. */
 export function ThreadReadout({ thread }: { thread: ReviewThread }) {

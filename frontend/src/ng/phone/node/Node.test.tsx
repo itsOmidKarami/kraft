@@ -404,6 +404,20 @@ describe("the node screen (D)", () => {
     expect(where()).toBe("/work-items/w1/nodes/plan_approval");
   });
 
+  it("a review round's card shows its review, count and first threads in place of its note, and opens it in review", async () => {
+    const reviewed = round(1, {
+      outcome: "rejected", by: "human", note: "must fix: SECRET NOTE", sent_to: "plan",
+      review: { id: "rv", outcome: "request_changes", summary: "Two things.", head_sha: "h" },
+      threads: { total: 2, open: 1, by_label: { must_fix: 1, question: 1, nit: 0 } },
+      first_threads: [{ id: "t1", file_path: "a.py", start_line: 3, end_line: 3, label: "must_fix", state: "open", body: "fix x" }],
+    });
+    mount(item("needs_you", null, { gate_rounds: { plan_approval: [reviewed, round(2, { outcome: "pending", by: null, ended_at: null })] } }), "/work-items/w1/nodes/plan_approval?pass=1");
+    const card = await screen.findByLabelText("Round 1");
+    for (const text of ["changes requested", "Two things.", "2 threads · 1 must-fix · 1 question · 1 open", "a.py:3"]) expect(card).toHaveTextContent(text);
+    expect(card).not.toHaveTextContent("SECRET NOTE");
+    expect(within(card).getByRole("link", { name: "Open in review" })).toHaveAttribute("href", "/work-items/w1/review?gate=plan_approval&round=1");
+  });
+
   // The card previews the first paragraph, rendered; the sheet reads the whole note, rendered.
   const MD = "Use `git_scan` here, not **a walk**.\n\n- the second paragraph is a list";
   const withNote = (note: string) => ({ gate_rounds: { plan_approval: [round(1, { outcome: "rejected", note, sent_to: "plan" }), round(2)] } });

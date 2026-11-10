@@ -9,6 +9,7 @@ import { CHIP_TONE } from "../../graph/types";
 import { rejectTarget } from "../../item/graph";
 import { admits } from "../../item/status";
 import { useEvents } from "../../item/useEvents";
+import { roundsOf } from "../../item/gateRounds";
 import { useItem, type ItemDetail } from "../../item/useItem";
 import { useReason } from "../../ui/Reason";
 import { ADD_NOTE } from "../../ui/reasons";
@@ -18,7 +19,8 @@ import { parsePatch, type PatchFile } from "../../review/patch";
 import { rangeName, threadRange } from "../../review/range";
 import { targetLabel } from "../../review/model";
 import { readReview } from "../../review/url";
-import { useArtifact, useCompare, useShownHead, useThreads } from "../../review/useReview";
+import { RoundSummary } from "../../review/RoundSummary";
+import { useArtifact, useCompare, useRoundThreads, useShownHead, useThreads } from "../../review/useReview";
 import { Button } from "../../ui/Button";
 import { Markdown } from "../../ui/Markdown";
 import { Doc } from "../doc/Doc";
@@ -54,7 +56,32 @@ export function GateReviewRoute() {
       </>
     );
   if (loaded.state === "missing") return <ItemMissing />;
+  // `?gate=&round=`: one past round, read as it was; `decided()` is for the page of a gate that is not waiting.
+  const at = readReview(params, loaded.item);
+  if (at.round && at.gate) return <RoundScreen item={loaded.item} gate={at.gate} round={at.round} version={loaded.version} />;
   return <GateReview item={loaded.item} events={events} reload={loaded.reload} />;
+}
+
+/** One round of a gate on the phone: how it ended, its review, and each thread it holds, read-only. */
+function RoundScreen({ item, gate, round, version }: { item: ItemDetail; gate: string; round: number; version: string }) {
+  const threads = useRoundThreads(item.id, gate, round, version);
+  const found = roundsOf(item, gate).find((r) => r.n === round);
+  const missing = !found || (threads.state === "error" && threads.status === 404);
+  return (
+    <>
+      <ScreenHeader id={<>{capitalise(gateName(item.chain_definition.nodes, gate))} · round {round}</>} />
+      <div className="ph-content">
+        {missing ? <p className="ph-error" role="alert">{gate} has no round {round}.</p> : (
+          <>
+            <RoundSummary round={found} />
+            {threads.state === "loading" && <div className="ph-skeleton" aria-busy="true"><span /><span /></div>}
+            {threads.state === "error" && <p className="ph-error" role="alert">{threads.error}</p>}
+            {threads.state === "ready" && <section aria-label="Threads" className="ph-list">{threads.data.map((t) => <ThreadNote key={t.id} thread={t} />)}</section>}
+          </>
+        )}
+      </div>
+    </>
+  );
 }
 
 export function GateReview({ item, events, reload }: { item: ItemDetail; events: KraftEvent[]; reload?: () => Promise<unknown> }) {

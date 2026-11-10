@@ -1,7 +1,7 @@
 import { breakable } from "../../ui/breakable";
 import { ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import type { KraftEvent, WorkItemDocument } from "../../../types";
 import { lineCount } from "../../../format";
 import { NodeGlyph } from "../../graph/NodeGlyph";
@@ -18,7 +18,9 @@ import { LogLines } from "../log/LogLines";
 import { useLogs } from "../log/useLogs";
 import { PauseSheet } from "../item/PauseSheet";
 import { useDo } from "../item/useDo";
-import { byWord, gateState, newestOutcome, noteDoc, outcomeWord, roundShown, roundsOf } from "../../item/gateRounds";
+import { byWord, gateState, isReviewRound, newestOutcome, noteDoc, outcomeWord, reviewDoc, reviewOutcomeWord, roundShown, roundsOf, threadCountLine, threadWhere } from "../../item/gateRounds";
+import { roundReviewUrl } from "../../review/url";
+import { LABEL_WORD } from "../../review/sharedWords";
 import { nodeSub } from "../item/model";
 import { ConfirmSheet, ReadSheet, useSheet } from "../nav/Sheet";
 import { Markdown } from "../../ui/Markdown";
@@ -87,7 +89,10 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
   // A gate's passes are its rounds: the same `?pass=`, read from the server's rounds.
   const gateRounds = gate ? roundsOf(item, nodeId) : [];
   const round = gate ? roundShown(item, nodeId, place.pass) : undefined;
-  const roundNote = round?.note ? noteDoc(nodeId, round) : null;
+  // A finished review round shows its review where a note round shows its note: the pending round has no review yet.
+  const reviewed = !!round?.ended_at && isReviewRound(round);
+  const roundNote = round?.note && !reviewed ? noteDoc(nodeId, round) : null;
+  const roundReview = round && reviewed ? reviewDoc(nodeId, round) : null;
   const paths = stepsOf(api).steps;
   const escalations = escalationsIn(seen, nodeId);
   const openTask = (step: string, task: string) => navigate(placeUrl(item.id, { node: nodeId, sel: { kind: "task", node: nodeId, step, task }, round: place.round, pass: place.pass }));
@@ -148,7 +153,20 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
             {round.outcome !== "pending" && (
               <div className="ph-turn" aria-label={`Round ${round.n}`}>
                 <p className="ph-turn-head"><span>{outcomeWord(round)}{byWord(round.by) ? ` · ${byWord(round.by)}` : ""}{round.outcome === "rejected" && round.sent_to ? ` · sent to ${nameOf(item.chain_definition.nodes, round.sent_to)}` : ""}</span></p>
-                {round.note && <NotePreview className="ph-turn-text" note={round.note} buttonClass="ph-linkbtn" onRead={() => sheet.open("round-note")} />}
+                {round.note && !reviewed && <NotePreview className="ph-turn-text" note={round.note} buttonClass="ph-linkbtn" onRead={() => sheet.open("round-note")} />}
+                {reviewed && (
+                  <>
+                    {round.review && <p className="ph-turn-text">{reviewOutcomeWord(round.review.outcome)}</p>}
+                    {round.review?.summary && <NotePreview className="ph-turn-text" note={round.review.summary} label="Read the review" buttonClass="ph-linkbtn" onRead={() => sheet.open("round-review")} />}
+                    <p className="ph-turn-count">{threadCountLine(round)}</p>
+                    {round.first_threads.length > 0 && (
+                      <ul className="ph-turn-threads">
+                        {round.first_threads.map((t) => <li key={t.id}>{[threadWhere(t), t.label && LABEL_WORD[t.label], t.body].filter(Boolean).join(" · ")}</li>)}
+                      </ul>
+                    )}
+                    <Link className="ph-linkbtn" to={roundReviewUrl(item.id, nodeId, round.n)}>Open in review</Link>
+                  </>
+                )}
               </div>
             )}
           </>
@@ -275,6 +293,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
         )}
       </div>
       {(bar.secondary || bar.primary) && <ActionBar>{btn(bar.secondary, false)}{btn(bar.primary, true)}</ActionBar>}
+      {sheet.is("round-review") && roundReview && <ReadSheet title={roundReview.title} text={roundReview.by} onClose={sheet.close}><Markdown text={roundReview.content} /></ReadSheet>}
       {sheet.is("round-note") && roundNote && <ReadSheet title={roundNote.title} text={roundNote.by} onClose={sheet.close}><Markdown text={roundNote.content} /></ReadSheet>}
       {sheet.is("pause") && <PauseSheet item={item} node={nodeId} sheet={sheet} reload={reload} />}
       {sheet.is("skip") && (

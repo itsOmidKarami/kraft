@@ -55,6 +55,7 @@ const ALLOWED = [
   "review/finish",
   "review/patch",
   "review/range", // rangeName and threadRange: a thread's lines named as the desktop names them
+  "review/RoundSummary", // a gate round in a few lines (how it ended, its review, its thread count): one definition for the desktop's round view and the phone's
   "review/FinishReview", // useSubmit only: the one review submit the desktop sends
   "review/model",
   "templates/draft/useConfigDraft",
