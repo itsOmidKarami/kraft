@@ -7,8 +7,13 @@ from __future__ import annotations
 
 import re
 
+import pytest
+from support.api import _poll_events, _post_default
+from support.harness import connect_repo
+
 from kraft import update
-from kraft.api import app
+from kraft.api import api_router, app
+from kraft.api.schemas import WorkItemDetail, WorkItemList
 
 #: What a reader of the published API cannot follow: a private tracker id, a
 #: section of an unpublished design document, a design decision's number, or a
@@ -62,3 +67,25 @@ def test_the_two_stable_routes_are_tagged_stable():
         if "stable" in op.get("tags", [])
     ]
     assert sorted(ops) == ["GET /api/health", "POST /api/triggers"]
+
+
+@pytest.mark.parametrize(
+    "path, model",
+    [
+        pytest.param("/api/work-items", WorkItemList, id="list"),
+        pytest.param("/api/work-items/{id}", WorkItemDetail, id="detail"),
+    ],
+)
+def test_a_documented_response_shape_matches_the_real_answer(client, repo, path, model):
+    """The schema describes a route's answer without filtering it: the model sits under
+    `responses`, no route has a `response_model`, and a real answer validates against it."""
+    connect_repo(repo)
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    answer = client.get(path.replace("{id}", wid)).json()
+    model.model_validate(answer)
+    operation = app.openapi()["paths"][path.replace("{id}", "{wid}")]["get"]
+    ref = operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+    assert ref.endswith(f"/{model.__name__}")
+    route = next(r for r in api_router.routes if r.path == path.replace("{id}", "{wid}"))
+    assert route.response_model is None

@@ -14,6 +14,7 @@ from kraft import progress as progress_mod
 from kraft import slices as slice_plans
 from kraft.adapters import forge as forge_mod
 from kraft.api import api_router, deps
+from kraft.api.schemas import WorkItemDetail, WorkItemList
 from kraft.cap_levels import SCOPE_CAP_FIELDS
 from kraft.slices import SliceSplit, parse_slices
 from kraft.templates.forks import ChainPath
@@ -358,7 +359,7 @@ async def budget_today(request: Request):
     return {"spent_usd": spent_usd, "cap_usd": budget.daily_usd}
 
 
-@api_router.get("/work-items")
+@api_router.get("/work-items", responses={200: {"model": WorkItemList}})
 async def list_work_items(request: Request):
     """The board: every top-level work item with its status and current node. Archived items
     are left out unless `archived=true`, which lists only them; abandoned ones need
@@ -1473,7 +1474,7 @@ _ENDINGS = (
 )
 
 
-@api_router.get("/work-items/{wid}")
+@api_router.get("/work-items/{wid}", responses={200: {"model": WorkItemDetail}})
 async def get_work_item(wid: str, request: Request):
     """One work item: its status, chain, current node, pending gate, cost and links. The object
     a client reads most."""

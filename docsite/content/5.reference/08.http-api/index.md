@@ -100,7 +100,7 @@ These three paths need no login. Open `/docs` or `/redoc` in a browser to read t
 
 _Added in next_
 
-Every route has a summary, a description and a tag. A route with a typed body lists its fields. A route's tag is its group:
+Every route has a summary, a description and a tag. A route with a typed body lists its fields. `GET /api/work-items` and `GET /api/work-items/{id}` also describe their answers. The schema names the stable fields and allows others, so a client should ignore keys it doesn't know. A route's tag is its group:
 
 | Tag | Routes |
 |---|---|
