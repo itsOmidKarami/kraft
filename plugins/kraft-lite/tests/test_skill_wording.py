@@ -178,8 +178,8 @@ SAYS = {
         "gate-coverage-refusal-has-a-fix": (
             "A refusal that says the proposal does not cover the plan has a fix: put every "
             "plan task in a slice in the proposal, check it with `KL plan-slices --check "
-            ".kraft-lite/proposals/<chain-id>.json`, show the user what changed, and approve "
-            "again."
+            ".kraft-lite/proposals/<chain-id>.json`, and show the user the changed slicing. "
+            "That is a new decision: approve it with `--slices` only once they agree to it."
         ),
         "gate-refused-slices-asks": (
             "If it refuses, tell the user what it said and ask whether to approve unsliced."
