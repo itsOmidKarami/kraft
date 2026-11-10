@@ -26,7 +26,7 @@ from kraft.paths import RunDirs
 
 #: `rig` and `rig_offline`: a server and a machine in one process (`support.remote`).
 #: `support.local_worker`: the in-process local worker every test starts its sessions through.
-#: `support.redaction`: every test starts with no secret registered with `kraft.redact`.
+#: `support.redaction`: no secret registered with `kraft.redact`; `CLAUDECODE` unset.
 pytest_plugins = [
     f"support.{m}" for m in ("rig_fixtures", "local_worker", "redaction", "forge_probe", "basetemp")
 ]
@@ -39,13 +39,6 @@ _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 #: empty test fields are the same statement about verification, and they are
 #: here rather than inline so the three call sites below cannot drift apart.
 _INERT_REPO_ENTRY = {"setup_command": "", "test_command": None, "test_scopes": None}
-
-
-@pytest.fixture(autouse=True)
-def _not_inside_an_agents_shell(monkeypatch):
-    """`kraft` tags a call from a coding agent's shell (`CLAUDECODE` is set there), which would
-    flip any test that asserts a bare call is a person's. A test that needs the variable sets it."""
-    monkeypatch.delenv("CLAUDECODE", raising=False)
 
 
 @pytest.fixture(autouse=True)
