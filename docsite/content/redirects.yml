@@ -319,7 +319,7 @@
 /reference/configuration/repos#waiting-for-several-reviewers: /concepts/how-review-and-ci-waits-settle
 /reference/configuration/repos#sandbox: /reference/configuration/sandbox#the-sandbox-key
 /reference/configuration/forges#what-this-release-doesnt-do-yet: /reference/configuration/forges
-/reference/configuration/theme#palette-is-legacy: /reference/configuration/theme
+/reference/configuration/theme#palette-is-legacy: /reference/configuration/theme#a-legacy-palette-key
 /reference/configuration/workers#the-local-worker: /concepts/how-workers-and-machines-behave#the-local-worker
 /reference/configuration/workers#the-machines-own-limit: /concepts/how-workers-and-machines-behave#the-machines-own-limit
 /reference/configuration/workers#groups: /concepts/how-workers-and-machines-behave#groups
@@ -695,7 +695,7 @@
 /guides/day-to-day/first-run#step-3-first-work-item: /guides/day-to-day/first-run#_3-first-work-item
 /reference/configuration#notifyyaml: /reference/configuration/notify
 /reference/configuration#themeyaml: /reference/configuration/theme
-/reference/configuration#palette-is-legacy: /reference/configuration/theme
+/reference/configuration#palette-is-legacy: /reference/configuration/theme#a-legacy-palette-key
 /reference/configuration/sandbox/callbacks-and-limits: /reference/configuration/sandbox/callbacks
 /reference/configuration/sandbox/callbacks-and-limits#resource-limits: /reference/configuration/sandbox/resource-limits
 /reference/configuration/sandbox/callbacks-and-limits#memory-and-swap: /reference/configuration/sandbox/resource-limits#memory-and-swap
