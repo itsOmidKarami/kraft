@@ -153,74 +153,18 @@ the span.
 
 _Added in 2.3_
 
-`on_merge_rejected` goes on the exec node that asks the forge to merge: a node
-with an `mr.merge` task in its own steps. The shipped `default` chain sets it on
-`merge`:
-
-```yaml [config/chains/default.yaml]
-- id: merge
-  kind: exec
-  tasks:
-    - id: merge
-      extends: merge_mr
-  on_merge_rejected:
-    restart_from: merge_request_feedback
-    repair:
-      tasks:
-        - id: repair
-          extends: repair_merge_queue_failure
-```
-
-When the forge's merge train or merge queue drops the merge request after Kraft
-asked for the merge, Kraft repairs the branch, then re-runs the exec nodes from
-`restart_from` through this node: the [span](/concepts/vocabulary#span). Every
-approved gate in that range reopens. See
-[Merge queue and train drops](/reference/chain-nodes/merge-queue-drops).
+`on_merge_rejected` goes on the exec node with an `mr.merge` task in its own steps. When the forge's merge train or merge queue drops the merge request, Kraft repairs the branch and re-runs the exec nodes from `restart_from` through this node. What a drop is, the causes, the restart, the cap and the escalation are on [Merge queue and train drops](/reference/chain-nodes/merge-queue-drops); the shipped `default` chain's setting is there too.
 
 | Key | Type | Required | Default | Meaning |
 |---|---|---|---|---|
 | `restart_from` | string | yes | — | Names an exec node strictly before this one, never a gate or this node itself. When a `chain_finalized` gate comes before this node, it must name a node before that gate, so every rewind passes it. |
 | `repair` | mapping: `tasks` or `steps` | yes | — | The tasks or steps that fix the branch, written like an `on_failure` plan. The shipped `repair_merge_queue_failure` runs the `kraft:merge-queue-repair` skill on the `strong` [agent profile](/reference/harnesses/agent-profiles). |
 
-A node with `on_merge_rejected` can't also declare a `fix_loop`: only the
-repair answers a drop, because a fix cycle's commit would be merged by the next
-measure unseen.
+Kraft refuses at load:
 
-It may declare an `on_failure`, on the node or on one of its own steps or
-tasks, for a merge that fails for another reason than a drop, but only a
-[read_only](/reference/chain-nodes/read-only) one. Such a handler can wait, retry, comment or ask for
-approval again. Kraft then asks the forge to merge again in place, the head
-`final_review` approved.
-
-A handler that may commit is refused at load, including one a library
-component brings in. Mark the plan itself for a `tasks` plan; a `steps` plan
-marks the plan or every step:
-
-```yaml
-- id: merge
-  kind: exec
-  tasks:
-    - id: merge
-      extends: merge_mr
-  on_failure:
-    read_only: true
-    tasks:
-      - id: wait
-        extends: await_external_approval
-  on_merge_rejected:
-    restart_from: merge_request_feedback
-    repair:
-      tasks:
-        - id: repair
-          extends: repair_merge_queue_failure
-```
-
-An `on_base_changed` on this node, or on any node with an `mr.merge` task after
-the `chain_finalized` gate, must restart before that gate: a conflict
-resolution would otherwise be merged unseen.
-
-For the causes of a drop, the restart, the cap and what the escalation does,
-see [Merge queue and train drops](/reference/chain-nodes/merge-queue-drops).
+- A `fix_loop` on the same node.
+- An `on_failure` on the node, or on one of its steps or tasks, that isn't [read_only](/reference/chain-nodes/read-only), including one a library component brings in. A `tasks` plan marks the plan itself; a `steps` plan marks the plan or every step.
+- An `on_base_changed` on this node, or on any node with an `mr.merge` task after the `chain_finalized` gate, that doesn't restart before that gate.
 
 ## Step keys
 
