@@ -7,7 +7,7 @@ Part of the web UI; [`README.md`](README.md) is the getting-started.
 demo` serves it at <http://localhost:5174/demo/>, and `npm run build:demo`
 writes `dist-demo/`. The docs site has one per version, beside its pages, the
 way it has their docs: `main`'s at `/next/demo/` and a release's, built from
-its own tag, at `/demo/` (CONTRIBUTING.md, "Versions of the docs").
+its own tag, at `/demo/` (docs/writing-docs.md, "Versions of the docs").
 
 `demo/main.ts` builds the scenario and hands it to `mocks/mockApi.ts`, the same
 answers the contract suite gets. `demo/shim.ts` puts them under the page:

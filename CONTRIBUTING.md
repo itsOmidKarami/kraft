@@ -161,7 +161,7 @@ tools: [Agent tooling](docs/agent-tooling.md#the-dot-directories) lists each.
 just test       # backend tests affected by your change (testmon); --no-testmon for all
 just e2e        # Playwright (see frontend/e2e/README.md)
 just ui-contract # the SPA's behaviours and icon-only audit in a browser on a mocked API (frontend/e2e/contract/README.md)
-just demo-smoke # the dashboard demo boots, and every things-to-try Show me finds its target (frontend/README.md)
+just demo-smoke # the dashboard demo boots, and every things-to-try Show me finds its target (frontend/DEMO.md)
 just test-ui    # frontend typecheck and unit tests (see frontend/README.md for when the browser suites are required too)
 just test-vscode # VS Code extension: schemas current, typecheck, unit tests
 just intent     # check that every enforced-by pin in docs/intent/ still resolves
