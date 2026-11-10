@@ -390,19 +390,22 @@ def test_a_remote_server_that_is_not_there_says_so_without_advice_for_this_machi
     assert str(caught.value) == "no Kraft server at https://kraft.example:443"
 
 
-_DROPPED = ("AGENT", "AI_AGENT", "CURSOR_AGENT", "GEMINI_CLI", "CODEX_SANDBOX")
+_DROPPED = ("CLAUDECODE", "AGENT", "AI_AGENT", "CURSOR_AGENT", "GEMINI_CLI", "CODEX_SANDBOX")
 
 
 @pytest.fixture
 def plain_env(monkeypatch):
-    """No KRAFT_CLIENT/KRAFT_SESSION_ID and none of the dropped variables. `CLAUDECODE` is
-    already cleared for every test by the autouse fixture in `tests/conftest.py`."""
+    """No KRAFT_CLIENT/KRAFT_SESSION_ID and none of the dropped variables, `CLAUDECODE` among
+    them: an IDE's terminal sets it for a person. The autouse fixture in `support.agent_shell`
+    clears it for every test too."""
     for name in ("KRAFT_CLIENT", "KRAFT_SESSION_ID", *_DROPPED):
         monkeypatch.delenv(name, raising=False)
     return monkeypatch
 
 
-@pytest.mark.parametrize("variable", ["CLAUDECODE"], ids=["claudecode"])
+@pytest.mark.parametrize(
+    "variable", ["CLAUDE_CODE_CHILD_SESSION"], ids=["claude-code-child-session"]
+)
 def test_agent_shell_environments_tag_the_call(plain_env, variable):
     plain_env.setenv(variable, "1")
     assert client.transport.http().headers["X-Kraft-Client"] == "agent-shell"
@@ -410,7 +413,7 @@ def test_agent_shell_environments_tag_the_call(plain_env, variable):
 
 @pytest.mark.parametrize(("explicit", "sent"), [("cli", "cli"), ("mcp", "mcp")], ids=["cli", "mcp"])
 def test_an_explicit_kraft_client_outranks_shell_detection(plain_env, explicit, sent):
-    plain_env.setenv("CLAUDECODE", "1")
+    plain_env.setenv("CLAUDE_CODE_CHILD_SESSION", "1")
     plain_env.setenv("KRAFT_CLIENT", explicit)
     assert client.transport.http().headers["X-Kraft-Client"] == sent
 
@@ -427,7 +430,7 @@ def test_dropped_agent_variables_do_not_tag_the_call(plain_env, variable):
 
 def test_a_workers_session_id_is_sent_beside_shell_detection(plain_env):
     plain_env.setenv("KRAFT_SESSION_ID", "w1/s1")
-    plain_env.setenv("CLAUDECODE", "1")
+    plain_env.setenv("CLAUDE_CODE_CHILD_SESSION", "1")
     headers = client.transport.http().headers
     assert headers["X-Kraft-Session-Id"] == "w1/s1"
     assert headers["X-Kraft-Client"] == "agent-shell"

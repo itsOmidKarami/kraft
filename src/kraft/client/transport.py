@@ -142,13 +142,14 @@ def base_url() -> str:
 #: AGENT, AI_AGENT, CURSOR_AGENT, GEMINI_CLI and CODEX_SANDBOX were left out for want of one.
 AGENT_SHELL_VARIABLES = (
     (
-        "CLAUDECODE",
+        "CLAUDE_CODE_CHILD_SESSION",
         "Claude Code",
-        "code.claude.com/docs/en/env-vars: set (=1) in subprocesses Claude Code spawns (Bash "
-        "tool, hooks, tmux, stdio MCP servers) and, per the same page, by the IDE extensions in "
-        "their integrated terminals too, so a person's own call from one of those reads as an "
-        "agent's; they set KRAFT_CLIENT=cli. (CLAUDE_CODE_CHILD_SESSION, v2.1.172+, is set only "
-        "when Claude Code itself spawns the process, not by the IDE extensions.)",
+        "code.claude.com/docs/en/env-vars: set to 1 in subprocesses Claude Code spawns through "
+        "the Bash, PowerShell and Monitor tools, hook commands and status line commands, and "
+        "only by Claude Code itself, not by the IDE extensions. Needs Claude Code v2.1.172 or "
+        "later; an older one goes undetected and is recorded as a person, as before. Not "
+        "CLAUDECODE: the same page says the IDE extensions also set it in their integrated "
+        "terminals, where a person types, so it would record that person as an agent.",
     ),
 )
 

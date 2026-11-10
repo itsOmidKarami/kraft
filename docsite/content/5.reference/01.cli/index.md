@@ -164,10 +164,11 @@ A `kraft` command run from a coding agent's shell is recorded as an assistant's,
 refused the calls that are a person's, such as a node's `extra_prompt`. The command detects the
 shell from its environment and sends `X-Kraft-Client: agent-shell` with the call.
 
-Claude Code is the only agent detected, through the `CLAUDECODE` variable it sets in the commands
-it runs. Claude Code's IDE extensions also set it in their integrated terminals, so a call you
-type there reads as an assistant's too. Nothing else is detected yet: a harness is added only when
-its own documentation says it sets a variable, and only in the agent's commands.
+Claude Code is the only agent detected, through the `CLAUDE_CODE_CHILD_SESSION` variable it sets
+in the commands it runs. That needs Claude Code 2.1.172 or later: an older version isn't detected,
+and its calls are recorded as a person's. Claude Code's IDE extensions don't set it, so a call you
+type in an IDE's integrated terminal stays yours. Nothing else is detected yet: a harness is added
+only when its own documentation says it sets a variable, and only in the agent's commands.
 
 To be recorded as yourself in such a shell, set `KRAFT_CLIENT=cli` for the command:
 

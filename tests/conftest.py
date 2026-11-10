@@ -24,11 +24,11 @@ from kraft import client as kraft_client
 from kraft import db
 from kraft.paths import RunDirs
 
-#: `rig` and `rig_offline`: a server and a machine in one process (`support.remote`).
-#: `support.local_worker`: the in-process local worker every test starts its sessions through.
-#: `support.redaction`: no secret registered with `kraft.redact`; `CLAUDECODE` unset.
+#: `rig`, `rig_offline`: a server and a machine in one process. `local_worker`: the in-process
+#: worker every session runs in. `redaction`: no registered secret. `agent_shell`: outside one.
 pytest_plugins = [
-    f"support.{m}" for m in ("rig_fixtures", "local_worker", "redaction", "forge_probe", "basetemp")
+    f"support.{m}"
+    for m in ("rig_fixtures", "local_worker", "redaction", "agent_shell", "forge_probe", "basetemp")
 ]
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]

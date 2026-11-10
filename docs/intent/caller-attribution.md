@@ -6,7 +6,7 @@ agent's shell) or a Kraft worker.
 ## REQ shell-agent-gate-decision-is-the-assistants
 
 WHEN a gate is decided by a `kraft` call made from a coding agent's shell, the system SHALL record the decision as made by an assistant.
-enforced-by: tests/api/test_gates.py::test_a_gate_decision_records_its_caller[agent-shell-approve], tests/api/test_gates.py::test_a_gate_decision_records_its_caller[agent-shell-reject], tests/client/test_transport.py::test_agent_shell_environments_tag_the_call[claudecode]
+enforced-by: tests/api/test_gates.py::test_a_gate_decision_records_its_caller[agent-shell-approve], tests/api/test_gates.py::test_a_gate_decision_records_its_caller[agent-shell-reject], tests/client/test_transport.py::test_agent_shell_environments_tag_the_call[claude-code-child-session]
 origin: src/kraft/api/routes/gates.py §_decided_by
 
 ## REQ explicit-client-outranks-shell-detection
