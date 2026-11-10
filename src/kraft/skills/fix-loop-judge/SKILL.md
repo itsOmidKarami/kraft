@@ -51,9 +51,9 @@ reasoning; it is not evidence about whether the code moved.
 - The same tags recurring, or new ones as fast as old ones clear:
   `stop_needs_human`.
 - What is open is real but not worth another cycle: `stop_downgrade`. Kraft
-  ignores it when a test or a pipeline is red (a `critical` finding whose
-  message opens "<task> failed") and runs the cycle anyway, so pick between
-  the other two then.
+  ignores it when a test or a pipeline is red (a finding whose source, in
+  parentheses after its tag, is a test or CI task rather than a reviewer) and runs
+  the cycle anyway, so pick between the other two then.
 
 ## Reporting your decision
 
