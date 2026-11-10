@@ -30,9 +30,9 @@ Each command links to its entry.
 
 | I want to | Command |
 |---|---|
-| Connect a repo to Kraft | [`kraft repo connect`](/reference/cli/repo#connect-a-repo) |
+| Connect a repo to Kraft | [`kraft repo connect`](/reference/cli/repo#repo-connect) |
 | Check that a repo's setup and test commands work | [`kraft repo connect --verify`](/reference/cli/repo#verify-a-repos-commands) |
-| Stop tracking a repo | [`kraft repo disconnect`](/reference/cli/repo#disconnect-a-repo) |
+| Stop tracking a repo | [`kraft repo disconnect`](/reference/cli/repo#repo-disconnect) |
 | File a work item | [`kraft item create "title"`](/reference/cli/item#filing-a-work-item) |
 | File it with a spec or plan I wrote | [`kraft item create "title" --spec PATH --plan PATH`](/reference/cli/item#attach-a-spec-or-plan) |
 | File it and start it at once | [`kraft item create "title" --autostart`](/reference/cli/item#filing-a-work-item) |
@@ -52,8 +52,8 @@ Each command links to its entry.
 | See what happened to an item, in order | [`kraft view events`](/reference/cli/view#view-events) |
 | Watch the board live | [`kraft view watch`](/reference/cli/view#view-watch) |
 | Watch the board and act on it in a terminal UI | [`kraft console`](/reference/console) |
-| See the repos Kraft knows | [`kraft repo list`](/reference/cli/repo#what-repo-list-prints) |
-| Go to an item's worktree | [`kraft repo path`](/reference/cli/repo) or [`kraft repo open`](/reference/cli/repo) |
+| See the repos Kraft knows | [`kraft repo list`](/reference/cli/repo#repo-list) |
+| Go to an item's worktree | [`kraft repo path`](/reference/cli/repo#repo-path) or [`kraft repo open`](/reference/cli/repo#repo-open) |
 | See what the worktrees use, item by item | [`kraft view storage`](/reference/cli/view#view-storage) |
 
 ### At a gate

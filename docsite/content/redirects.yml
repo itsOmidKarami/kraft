@@ -518,6 +518,10 @@
 /project/whats-new#why-20-so-soon-after-10: /project/whats-new#kraft-20-a-place-to-work-not-just-an-engine
 /reference/cli/item#target-a-repo: /reference/cli/item#filing-a-work-item
 /reference/cli/repo#repo-settings: /reference/cli/repo#related
+/reference/cli/repo#commands: /reference/cli/repo#connected-repos
+/reference/cli/repo#connect-a-repo: /reference/cli/repo#repo-connect
+/reference/cli/repo#disconnect-a-repo: /reference/cli/repo#repo-disconnect
+/reference/cli/repo#take-a-repos-library: /reference/cli/repo#repo-library
 /reference/web-ui/board#keyboard: /reference/web-ui/sidebar-search-and-keyboard#keyboard-shortcuts
 /reference/cli/item#pause-and-resume: /reference/cli/item#item-pause
 /reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget: /reference/cli/item#item-approve
