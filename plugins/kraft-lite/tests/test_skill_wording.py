@@ -142,8 +142,12 @@ SAYS = {
         ),
     },
     ("gate", 1): {
+        "gate-passed-unchanged-is-reported": (
+            "printed `passed_unchanged`, the gate never blocked",
+            "Tell the user it passed, with that `rationale`, then invoke `kraft-lite:next`.",
+        ),
         "gate-chain-revision-restarts-through-start": (
-            "find the chain's source file from the frozen `.kraft-lite/chains/<chain-id>.json`: "
+            "Find the chain's source file from the frozen `.kraft-lite/chains/<chain-id>.json`: "
             "its `source` when that is a file path; otherwise the `path` that `python3 "
             '"$CLAUDE_PLUGIN_ROOT/kl.py" chains --available` lists for its `id`'
         ),
