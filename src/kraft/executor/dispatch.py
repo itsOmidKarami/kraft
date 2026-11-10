@@ -59,6 +59,7 @@ from kraft.executor.context import (
 from kraft.remote import launch as _remote_launch
 from kraft.remote import local_link as _local_link
 from kraft.remote import placement
+from kraft.remote import protocol as _remote_protocol
 from kraft.remote import runs as _remote_runs
 from kraft.store import _now as _now
 from kraft.templates import revision
@@ -983,6 +984,9 @@ async def _run_changed_test_scopes(
             "session_id": db.read(lambda c, w=common["work_item_id"]: store.new_session_id(c, w)),
         }
 
+        def abandon() -> bool:
+            return _item_paused(db, work_item_row["id"])
+
         async def go(on: str | None, claim, time_cap: _caps.Deadline | None) -> str:
             return await _subprocess.run_task(
                 db,
@@ -1010,28 +1014,35 @@ async def _run_changed_test_scopes(
                 placed_claim=claim,
                 post_resolve=no_recipe if Path(cmd[0]).name == "just" else None,
                 concurrency_group=group,
+                abandon=abandon,
                 **scope_common,
             )
 
-        if not _is_group(runner):
-            return await go(runner, None, time_cap)
+        try:
+            if not _is_group(runner):
+                return await go(runner, None, time_cap)
 
-        async def attempt(on, claim, waited_s):
-            return await go(on, claim, _remote_launch.extend(time_cap, waited_s))
+            async def attempt(on, claim, waited_s):
+                return await go(on, claim, _remote_launch.extend(time_cap, waited_s))
 
-        # Each scope places itself: one may run remote while the next runs locally.
-        return await _remote_launch.run_placed(
-            db,
-            work_item_row,
-            node.id,
-            task.path,
-            runner,
-            [repo_entry] if repo_entry is not None else [],
-            session_id=scope_common["session_id"],
-            resume=False,
-            attempt=attempt,
-            concurrency_group=group,
-        )
+            # Each scope places itself: one may run remote while the next runs locally.
+            return await _remote_launch.run_placed(
+                db,
+                work_item_row,
+                node.id,
+                task.path,
+                runner,
+                [repo_entry] if repo_entry is not None else [],
+                session_id=scope_common["session_id"],
+                resume=False,
+                attempt=attempt,
+                concurrency_group=group,
+                abandon=abandon,
+            )
+        except _remote_protocol.StepAbandoned:
+            # A queued scope's item was paused (a broken base cannot cancel the walk): SCOPE
+            # tier `stop`, so the round ends `paused` and `resume` runs the node again.
+            return "paused"
 
     # What the round picked, before any of it runs: a node's view draws the scopes still to
     # come beside the ones that have started. One per repository, in the order they run, an
@@ -1463,6 +1474,18 @@ def _reviewers(task: ForgeTask, node_id: str, row, launch: LaunchContext | None)
     )
 
 
+def _item_paused(db, work_item_id: str) -> bool:
+    """Whether the item reads `paused` right now. A broken base's pause
+    (`store.pause_for_broken_base`) cannot cancel the item's walk, so whatever is queued or
+    about to launch asks this."""
+    row = db.read(
+        lambda c: c.execute(
+            "SELECT status FROM work_items WHERE id = ?", (work_item_id,)
+        ).fetchone()
+    )
+    return row is not None and row["status"] == WorkItemStatus.PAUSED
+
+
 async def dispatch_node(
     db, run_dirs, task: ResolvedTask, node: ResolvedNode, work_item_row, worktree, **kw
 ) -> str:
@@ -1483,12 +1506,7 @@ async def dispatch_node(
     # one node, with nothing running for it to signal, this is what stops it.
     # Escalations and gate replies, which a paused item does run, have doors
     # of their own.
-    status = db.read(
-        lambda c: c.execute(
-            "SELECT status FROM work_items WHERE id = ?", (work_item_row["id"],)
-        ).fetchone()
-    )
-    if status is not None and status["status"] == WorkItemStatus.PAUSED:
+    if _item_paused(db, work_item_row["id"]):
         return "paused"
     since = db.read(
         lambda c: c.execute("SELECT COALESCE(MAX(rowid), 0) FROM worker_sessions").fetchone()[0]
