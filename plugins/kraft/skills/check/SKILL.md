@@ -10,9 +10,12 @@ connection error.
 
 # Checking a repo's Kraft config
 
-Run `kraft admin templates lint` and `kraft admin doctor`. Between them they
-carry the drift this skill exists to narrate. Doctor rows not listed here (the
-server, the MCP token) are `kraft:doctor`'s; say so rather than diagnosing them.
+Run `kraft admin templates lint` and `kraft admin doctor`. Lint asks the
+server: if it can't reach it, read doctor's `chains` row instead (it reads the
+files with no server, but skips the `policy.yaml` check) and hand the server to
+`kraft:doctor`. The server and MCP token rows are `kraft:doctor`'s. Any other
+row that warns or fails and isn't listed here (`moved keys`, `harnesses.yaml`,
+`profile:`, `add-ons`, ...): quote it verbatim with the fix its line names.
 
 - `lint` - every chain in `~/.kraft/config/chains/` that does not resolve
   against the library and the built-in `kraft-default` add-on, each with its reason: a reference to a component that
@@ -49,8 +52,8 @@ server, the MCP token) are `kraft:doctor`'s; say so rather than diagnosing them.
   checks a proposed `test_command`, then give it to the person to set in
   Settings › Repos.
 
-Translate each row's compact detail (`c1, c2 missing` style) into one line per
-chain or node, grouped under its own heading, so a human reads "these three
+Translate each row's compact detail (a `capabilities` row's `-> ` lines, say)
+into one line per chain or node, grouped under its own heading, so a human reads "these three
 things are stale" rather than a string they have to parse themselves.
 
 ## What doctor cannot check
@@ -62,8 +65,10 @@ a skill where `X` contains a `:`, first set aside what Kraft resolves itself:
 shows (an add-on's skill, read from its store; doctor and lint check those).
 What is left is a reference into this agent's own plugin system. Check each
 such `X` against the skills currently available to you (the list your own
-session already has). The Kraft server cannot answer this, by design; you can,
-because you are the agent that would have to load it.
+session already has), for the tasks whose agent profile runs this session's
+own harness. The Kraft server cannot answer this, by design; you can, because
+you are the agent that would have to load it. A task on another harness loads
+its skills from that harness's install: list it as "cannot tell from here".
 `kraft admin templates show ID --resolved` prints each task with the `skill:`
 it inherited, so read that rather than the raw files.
 
@@ -76,9 +81,11 @@ same library can be fully served on one machine and missing skills on another.
 Report-only until the human says to act. Then, for each item they pick:
 
 1. State the exact edit before making it - which line in
-   `~/.kraft/config/library.yaml` or the live chain file under `chains/`,
-   or which of `set_chain` / `set_node_overrides` /
-   `set_agent_overrides` for a per-item override instead of the shared file.
+   `~/.kraft/config/library.yaml` or the live chain file under `chains/`. The
+   per-item override tools (`set_chain`, `set_node_overrides`,
+   `set_agent_overrides`) only keep one item clear of the drift and never
+   clear a row: offer them only when the person asks for a one-item
+   workaround.
 2. Wait for confirmation.
 3. Apply it, then re-run `kraft admin templates lint` and `kraft admin doctor`
    and confirm the row that named the problem now reads clean. Report the
