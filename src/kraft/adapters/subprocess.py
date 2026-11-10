@@ -846,6 +846,7 @@ async def run_task(
     session_id: str,
     work_item_id: str,
     concurrency_group: str | None = None,
+    abandon: Callable[[], bool] | None = None,
     **kwargs,
 ) -> str:
     """`_run_task`, closing the session it wrote when whatever ends it -- a
@@ -854,8 +855,10 @@ async def run_task(
     lease (`store.folder_holder`) until a restart. A local session first takes one of
     the local worker's slots (`workers.yaml`'s `local: capacity:`), before it has a session row;
     what it holds, the slot and a machine's claim alike, is given back on every way out. A test
-    scope's `concurrency_group` waits there too, for any other session running the same group."""
-    from kraft.remote import local_link
+    scope's `concurrency_group` waits there too, for any other session running the same group.
+    `abandon` (a test scope's: its item is paused) ends a wait with `StepAbandoned`, taking
+    nothing, and is checked once more after the take, before the launch."""
+    from kraft.remote import local_link, protocol
 
     held = _Held()
     link = local_link.current() if kwargs.get("runner") in (None, "local") else None
@@ -863,12 +866,17 @@ async def run_task(
     try:
         if link is not None:
             waited = await link.take_waiting(
-                key, _said_waiting(db, work_item_id, kwargs), group=concurrency_group
+                key,
+                _said_waiting(db, work_item_id, kwargs),
+                group=concurrency_group,
+                abandon=abandon,
             )
             if waited > 0.05:
                 kwargs["waited_s"] = waited
                 if (cap := kwargs.get("time_cap")) is not None:
                     kwargs["time_cap"] = caps.Deadline(cap.at + waited, cap.hit)
+        if abandon is not None and abandon():
+            raise protocol.StepAbandoned()  # paused between the take and the launch
         try:
             return await _run_task(
                 db,
@@ -877,6 +885,7 @@ async def run_task(
                 work_item_id=work_item_id,
                 held=held,
                 concurrency_group=concurrency_group,
+                abandon=abandon,
                 **kwargs,
             )
         except BaseException as exc:
@@ -1032,6 +1041,8 @@ async def _run_task(
     waited_s: float = 0.0,
     #: A test scope's `concurrency_group`: held on the machine the step is placed on.
     concurrency_group: str | None = None,
+    #: A test scope's wait for a machine ends with `StepAbandoned` once this returns true.
+    abandon: Callable[[], bool] | None = None,
 ) -> str:
     held = held if held is not None else _Held()
     runner = None if runner == "local" else runner
@@ -1058,6 +1069,7 @@ async def _run_task(
             held=placed_claim,
             hook_point=hook_point,
             concurrency_group=concurrency_group,
+            abandon=abandon,
             needs=(
                 {
                     CODEX_HOOK: f"harness {codex_hook['harness']!r} cannot run Kraft's "

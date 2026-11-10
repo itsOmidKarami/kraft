@@ -7,7 +7,7 @@ from pathlib import Path
 import psutil
 import pytest
 
-from kraft.remote import local_link
+from kraft.remote import local_link, protocol
 
 from .test_subprocess import _cancelled, _row, _running, docker, run  # noqa: F401
 
@@ -161,6 +161,28 @@ async def test_a_session_held_back_by_the_local_worker_waits_and_starts_once_fre
     )
     assert len(waiting) == 1 and said in waiting[0]["payload"]
     assert link.take("w9/next", "heavy")  # the group is given back when the session ends
+
+
+async def test_a_session_waiting_for_the_local_worker_does_not_start_once_abandoned(
+    run,  # noqa: F811
+    database,
+    monkeypatch,
+):
+    link = local_link.current()
+    link.capacity = 1
+    gone = {"now": False}
+    real_take = link.take
+
+    def take(key, group=None):
+        got = real_take(key, group)
+        gone["now"] = gone["now"] or got  # the item is paused just as the slot is taken
+        return got
+
+    monkeypatch.setattr(link, "take", take)
+    with pytest.raises(protocol.StepAbandoned):
+        await run(["/bin/sh", "-c", "echo never"], "s1", abandon=lambda: gone["now"])
+    assert _row(database, "s1") is None  # no session row was written
+    assert link.free()  # the slot was given back
 
 
 @pytest.mark.parametrize("how", ["refused-spawn", "before-launch-raises"])
