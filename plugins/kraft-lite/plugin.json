@@ -1,5 +1,5 @@
 {
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "kraft-lite",
-  "description": "Run a Kraft chain in this session: ordered nodes, human gates, capped fix loops. No orchestrator."
+  "description": "Walk a Kraft chain from spec to merge request inside your coding-agent session. It stops for your approval at each decision and limits its repair attempts. No server to run."
 }
