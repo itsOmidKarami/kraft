@@ -19,13 +19,14 @@ Connecting and `--verify` both go through the server, so run `kraft admin
 health` first: it exits 1 when the server isn't up. If it fails, report that
 and stop - `kraft admin start --detach` (or the service) comes first.
 
-1. **Connect.** If `ensure_repo()` answers `already_connected: true`, the repo
-   keeps the commands it has: read them against the repo's docs, and any
-   correction goes to the person (below). Otherwise read how the repo says to
-   build and test itself before you connect it: its README, CONTRIBUTING, agent
-   instructions (`CLAUDE.md`, `AGENTS.md`) and CI config. Look for the command a
-   contributor is told to run, and any rule that the raw runner must not be
-   called directly.
+1. **Connect.** First learn whether the repo is already connected, without
+   calling `ensure_repo` (it saves as soon as it is called): `kraft repo list`
+   marks the repo you are in with `*`. If it is listed, the repo keeps the
+   commands it has: read them against the repo's docs, and any correction goes
+   to the person (below). Otherwise read how the repo says to build and test
+   itself before you connect it: its README, CONTRIBUTING, agent instructions
+   (`CLAUDE.md`, `AGENTS.md`) and CI config. Look for the command a contributor
+   is told to run, and any rule that the raw runner must not be called directly.
 
    `ensure_repo` saves as soon as it is called, and a second call with commands
    changes nothing, so decide before the first. If the docs name a test or setup
