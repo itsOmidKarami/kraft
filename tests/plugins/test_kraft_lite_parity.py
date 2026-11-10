@@ -142,6 +142,7 @@ EXTENDING = {
         remove: [external_approval]
         overrides:
           implementation.main.implement: {prompt: Build it.}
+          local_review: {artifact_required: true}
           verification.fix_loop.judge: {prompt: Be strict.}
           merge_request_feedback.on_failure.repair: {tasks: [{id: fix, extends: repair_mr_checks}]}
           merge.on_merge_rejected.repair.main.repair: {prompt: Fix the queue's failure.}
@@ -195,7 +196,16 @@ def _project_kraft(resolved) -> list:
     for n in resolved.nodes:
         if n.node.kind.value == "gate":
             node = n.node
-            out.append((n.id, "gate", node.artifact, node.reject_to, node.chain_finalized))
+            out.append(
+                (
+                    n.id,
+                    "gate",
+                    node.artifact,
+                    node.reject_to,
+                    node.chain_finalized,
+                    node.artifact_required,
+                )
+            )
             continue
         loop = n.node.fix_loop
         base = n.node.on_base_changed
@@ -233,7 +243,16 @@ def _project_lite(chain: dict) -> list:
     out = []
     for n in chain["nodes"]:
         if n["kind"] == "gate":
-            out.append((n["id"], "gate", n["artifact"], n["reject_to"], n["chain_finalized"]))
+            out.append(
+                (
+                    n["id"],
+                    "gate",
+                    n["artifact"],
+                    n["reject_to"],
+                    n["chain_finalized"],
+                    n["artifact_required"],
+                )
+            )
             continue
         loop, base, rejected = n["fix_loop"], n["on_base_changed"], n["on_merge_rejected"]
         out.append(

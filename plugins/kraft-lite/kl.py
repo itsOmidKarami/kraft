@@ -1624,6 +1624,7 @@ def _state(
             "artifact_path": _artifact(records, definition["artifact"]),
             "reject_to": definition["reject_to"],
             "chain_finalized": definition["chain_finalized"],
+            "artifact_required": definition.get("artifact_required", False),
             "slice_gate": node_id == getattr(_shape(chain), "slice_gate", None),
             "reviewer": _dispatcher(root)(reviewer) if reviewer else None,
             "review": label_value(node_record, REVIEWED_LABEL),

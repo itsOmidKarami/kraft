@@ -103,6 +103,7 @@ def test_state_reports_a_gate_node(walk, kl_cli, tmp_path):
         "artifact_path": "docs/spec.md",
         "reject_to": "spec",
         "chain_finalized": False,
+        "artifact_required": False,
         "slice_gate": False,
         "reviewer": None,
         "review": None,
