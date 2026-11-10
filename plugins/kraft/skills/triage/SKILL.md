@@ -22,12 +22,12 @@ kraft view events ID --type work_item_needs_human   # the figures: `capped`, `bu
 kraft view logs ID -n 60           # the tail of the session that stopped it; look for a login error
 ```
 
-`stop_reason`'s first words pick the row below; `stop.kind` says what sort of stop it is.
-`suggested_action` is Kraft's own proposal. A `budget` stop means a spend cap
-stopped it, and a `cap` stop whose reason names a time cap means that cap ran
-out: neither is a defect. A `cap` stop can also be a fix loop that spent its
-attempts (`capped`: `{cycles, attempts}`). `needs_context:` means an agent asked
-a question and nobody answered. Not every status is a stop. A pending gate
+`stop_reason`'s first words pick the row below; `stop.kind` says what sort of
+stop it is. `suggested_action` is Kraft's own proposal. A `budget` stop means a
+spend cap stopped it, and a `cap` stop whose reason names a time cap means that
+cap ran out: neither is a defect. A `cap` stop can also be a fix loop that spent
+its attempts (`capped`: `{cycles, attempts}`). `needs_context:` means an agent
+asked a question and nobody answered. Not every status is a stop. A pending gate
 (`pending_gate` set) is not: hand it to `kraft:review` to decide, or
 `kraft:gates` once decided. `waiting`, `queued`, `blocked`, `rate_limited` and
 `paused` aren't stops either, and a sliced parent reads `waiting` with no stop

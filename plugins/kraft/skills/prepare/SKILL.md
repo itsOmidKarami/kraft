@@ -47,11 +47,12 @@ design). If it didn't, size it yourself and say that you did:
   don't write a plan doc just to hand it straight to something that writes its
   own.
 
-**Explicit user override wins outright.** If the user already said "do this
-inline" or "hand this to Kraft," skip the inline/handoff verdict and honour that
-instead - still write the spec first. It replaces the verdict, not the parts
-call: if parts stand alone, send the message below for that and wait; if none
-do, act. A request to file it now, with no spec, is `kraft:handoff` alone.
+**Explicit user override wins outright.** If the user asked to file the work
+as it is and skip the spec, that's `kraft:handoff` alone, with no spec. If they
+already said "do this inline" or "hand this to Kraft," skip the inline/handoff
+verdict and honour that instead - still write the spec first. It replaces the
+verdict, not the parts call: if parts stand alone, send the message below for
+that and wait; if none do, act.
 
 **Then decide how independent parts are built.** Slices don't replace
 sub-agents. Sub-agents are the default, inline or inside one Kraft item: they
@@ -80,7 +81,8 @@ Cut a spec per part only after the go.
 Then send one message and stop: the verdict (inline or handoff), the parts
 call (sub-agents, slices or separate items, with names) and a one-line reason.
 Wait for the user to confirm or override it before acting: they know what a
-filed item costs them. Auto (step 4), or an override whose parts call needs no question, skips the wait.
+filed item costs them. Auto (step 4), or an override whose parts call needs no
+question, skips the wait.
 
 ## 3. Plan - only if the user explicitly asked for one
 

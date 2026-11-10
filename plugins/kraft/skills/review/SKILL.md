@@ -64,15 +64,16 @@ ones held up. See `kraft:gates`.
 
 Before `approve_gate`, `reject_gate`, `skip_work_item` or `submit_review`, the
 person has to have answered this gate in this conversation. Your recommendation
-isn't their answer, and neither is a general "go ahead" that predates the gate. An instruction that names this gate
-does count, even a conditional one ("approve it if it looks fine"): review
-first, act only if your own review meets the condition, and otherwise leave the
-gate pending and report what you found. A gate answered on your say-so has
-stopped meaning anything. Act through those MCP tools, not the `kraft item`
-verbs from a shell (`kraft:gates` says why). A chain revision gate also needs
-the `digest` `get_gate_artifact()` returned when you read the revision (`kraft
-view artifact ID --json` carries it), and the final review the `review_head`
-you noted in step 1: neither fetched now. See `kraft:gates`.
+isn't their answer, and neither is a general "go ahead" that predates the gate.
+An instruction that names this gate does count, even a conditional one
+("approve it if it looks fine"): review first, act only if your own review meets
+the condition, and otherwise leave the gate pending and report what you found. A
+gate answered on your say-so has stopped meaning anything. Act through those MCP
+tools, not the `kraft item` verbs from a shell (`kraft:gates` says why). A chain
+revision gate also needs the `digest` `get_gate_artifact()` returned when you
+read the revision (`kraft view artifact ID --json` carries it), and the final
+review the `review_head` you noted in step 1: neither fetched now. See
+`kraft:gates`.
 
 ## If you are a Kraft worker session
 
