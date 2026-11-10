@@ -23,7 +23,9 @@ read is a guess the implementer will trust.
 
 The note on the existing document, a person's or an automated reviewer's,
 leads your task instruction. Change what it objected to and leave the rest
-alone, rather than rewriting the whole thing to look new.
+alone, rather than rewriting the whole thing to look new. If you add, drop or
+move a task, renumber the headings and fix each `(task N)` reference and each
+`## Slices` number that moved.
 
 ## What the plan contains
 
@@ -36,19 +38,20 @@ reviewer could reject one task and approve its neighbour.
 
 Each task names:
 
-- the exact files it creates, modifies (with line numbers) and tests;
+- the exact files it creates, modifies (with line numbers, and the function
+  beside them: earlier tasks shift lines) and tests;
 - what it consumes from earlier tasks and what later tasks consume from it —
   exact names, exact types;
 - the failing test, written out in full;
 - the implementation, written out in full;
-- the command that runs the test, what it fails with before the
-  implementation, and what it prints once it passes.
+- the repo's own command that runs the test, narrowed to it, what it fails with
+  before the implementation, and what it prints once it passes.
 
-A shape to follow, with invented names:
+A shape to follow, with invented names and an invented test runner:
 
 ```
 ### Task 2: Reject expired tokens at login
-Files: modify `app/auth.py:40-62`; test `tests/test_auth.py`
+Files: modify `app/auth.py` `login()` (40-62); test `tests/test_auth.py`
 Consumes: `Token.expires_at: datetime` (task 1). Produces: `is_expired(token: Token) -> bool`
 Failing test: <the test, in full>
 Implementation: <the code, in full>
@@ -62,7 +65,11 @@ the shared helper or fixture the test uses, found by looking in the repo's test
 support, rather than writing out a copy of one. The repo's own testing guidance
 (its `CLAUDE.md`, `AGENTS.md` or CONTRIBUTING) says where they live. A task that
 keeps behaviour as it is (a rename, a move) names the existing test that covers
-it, passing before and after, and writes no new one.
+it, passing before and after, and writes no new one. A task with no behaviour to
+test (prose, config, generated files) names the check the repo already runs on it
+(build, linter, docs check) and what that prints, in place of a new test. For a
+mechanical sweep, give the exact command and the files it touches in place of the
+code in full.
 
 Write for an engineer who is a strong developer and knows nothing about this
 codebase. "Add appropriate error handling", "similar to task 3", "write tests
@@ -79,8 +86,8 @@ Slices don't replace sub-agents. Each slice becomes a child work item, with its 
 and branch, its own setup, its own implementer session and the nodes after it, and a join that
 replays its commits. Independent tasks that don't earn that overhead stay unsliced: the
 implementer builds them in one session and can hand them to sub-agents there, which share its
-worktree, need no setup or join, and run in parallel when dispatched together. Each task's
-`Consumes` line is how the implementer tells which tasks are independent, so keep it exact.
+worktree, need no setup or join, and run in parallel when dispatched together. Keep each
+task's `Consumes` line exact: it's what shows which tasks are independent.
 
 End the plan with a `## Slices` section only when both of these hold; otherwise write no
 section.
@@ -114,9 +121,10 @@ Walk the spec section by section and point at the task that implements each
 one. A section with no task is a gap: add the task. Then check that a name you
 used in a late task is spelled the same way as where you defined it. Last,
 check that every task has its `### Task N: title` heading and a test of its own
-(a failing one, or the existing one a behaviour-keeping task names): Kraft does
-not count a task without the heading, and a task without a test gives its
-reviewer nothing to run. Check that every path, line range and helper you named
-exists as written. If you wrote a `## Slices` section, check it against each
-rule above, and that no task is in two slices: Kraft doesn't use a section that
-breaks one, and the item then runs unsliced.
+(a failing one, the existing one a behaviour-keeping task names, or the repo's
+check for a task with no behaviour): Kraft does not count a task without the
+heading, and a task without a test gives its reviewer nothing to run. Check that
+every existing path, line range and helper you named exists as written. If you wrote a
+`## Slices` section, check it against each rule above, that each slice still
+names the tasks you meant, and that no task is in two slices: Kraft doesn't use a
+section that breaks one, and the item then runs unsliced.

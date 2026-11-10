@@ -1,17 +1,17 @@
 ---
 name: gate-review
-description: "Reviews the document a gate is about and reports a verdict, so a person only sees the gates that need one. Use as the method of a gate's `auto_review` task, which Kraft runs when the gate opens, before a person is asked."
+description: "Reviews the document a gate is about and reports a verdict: clear the gate, send it back, or hand it on with what you checked. Use as the method of a gate's `auto_review` task, which Kraft runs when the gate opens, before a person is asked."
 ---
 
 # Gate Review
 
 Your task instruction says whether you decide or check first; if you check
 first, "When you check first" below is your rule. Either way, a gate exists
-because someone decided this point deserves a person's attention. You are
-here so that a gate a person doesn't need stops reaching them, and one they do
-need arrives already read. You report; Kraft decides
-what your report means, and the API refuses a worker that tries to approve or
-reject the gate itself.
+because someone decided this point deserves a person's attention. A reviewer
+that decides is here so that a gate a person doesn't need stops reaching them;
+any reviewer, so that the one they do need arrives already read. You report;
+Kraft decides what your report means, and the API refuses a worker that tries to
+approve or reject the gate itself.
 
 ## The default is `undecided`
 
@@ -28,10 +28,9 @@ that you found nothing wrong with it.
 
 ## When you check first
 
-Your task instruction says which kind of reviewer you are. On a gate whose
-`auto_review_mode` is `checks_first` you are a first pass: you cannot approve,
-and a person decides after you whatever you report. There the default is
-`pass`, not `undecided`, and you report one of two verdicts:
+On a gate whose `auto_review_mode` is `checks_first` you are a first pass: you
+cannot approve, and a person decides after you whatever you report. There the
+default is `pass`, not `undecided`, and you report one of two verdicts:
 
 - `pass` hands the gate to the person. Report it whenever you are unsure: they
   read the work next anyway, and a rejection costs a full re-run of the node.
@@ -50,6 +49,13 @@ A gate's **id is whatever its chain calls it**, so do not match on names. The
 prompt tells you the gate id and the path of the document it is about; the
 document's *kind*, the file's name (`spec.md`, `plan.md`, `chain_revision.md`,
 `work_brief.md`, `review_brief.md`), tells you which question below is yours.
+
+Read the change with `kraft view diff` (or `git diff origin/<base>...HEAD`, where
+`<base>` is the repository's default branch unless the work item names another).
+With no document, read the local review's findings with `kraft view events --type
+findings_measured --json`. If `kraft` can't run, say in `concerns` what you
+couldn't read.
+
 - **A gate about a spec** — does the spec solve the problem in the brief, and is
   it a design a person would recognise as theirs? A spec that solves a
   *different* problem, however well, is a reject.
@@ -79,6 +85,9 @@ document's *kind*, the file's name (`spec.md`, `plan.md`, `chain_revision.md`,
   Judge from the brief and the local review's findings rather than redoing the
   review. When in doubt at all, report `undecided` (or `pass`, if you check
   first).
+- **A gate about any other kind of document** — all you have is the gate id and
+  the document's name. Judge whether it is complete, coherent and consistent with
+  the brief, and say in `concerns` that no question was written for this kind.
 
 ## Reporting
 

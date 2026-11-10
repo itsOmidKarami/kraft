@@ -37,17 +37,21 @@ reasoning; it is not evidence about whether the code moved.
   than one still chasing a `critical` security hole.
 - **An outage is not a stuck repair.** When your task instruction says CI was
   re-run for an infrastructure failure, a finding that recurs after that round
-  is an outage, not a repair that cannot land. Say so in `concerns`.
+  is an outage, not a repair that cannot land. Say so in `concerns` and stop
+  with `stop_needs_human`: a cycle can't clear an outage.
 - **Cost already spent vs cap remaining**, in attempts and in wall-clock: your
-  task instruction gives both. A loop three cycles in with two attempts
-  remaining, or most of its wall-clock gone, that is still finding new things
-  each round is close to where the cap would stop it anyway --
-  `stop_needs_human` there costs nothing the cap would not have cost a cycle
-  later, and saves the wasted cycle.
+  task instruction gives both. Take a loop with two attempts left, or most of its
+  wall-clock gone, that is still finding new things each round. The cap is about
+  to stop it anyway, so `stop_needs_human` there costs nothing the cap wouldn't
+  have cost a cycle later, and saves the wasted cycle.
 
 ## Choosing the verdict
 
-- Shrinking, or real progress on what is still open: `continue`.
+- With no trend yet (you are asked before the first cycle): `stop_needs_human`
+  when the repair's doubts say nothing can be fixed here, else `continue`.
+- Shrinking, or real progress on what is still open: `continue`. If one tag
+  survives while the total shrinks, go by its severity: `stop_needs_human` for a
+  `critical`, `stop_downgrade` for an `important` with nothing red.
 - The same tags recurring, or new ones as fast as old ones clear:
   `stop_needs_human`.
 - What is open is real but not worth another cycle: `stop_downgrade`. Kraft
@@ -61,9 +65,10 @@ Report the verdict, and the reasoning in `concerns`, exactly as your task
 instruction lays out. `concerns` is required for every verdict. On `continue`
 the next fix agent is handed it word for word; on `stop_needs_human` it is the
 stop reason a person reads; for `stop_downgrade` it is what a human reads at the
-review gate later. Name the tags and rounds you relied on, and say what the next
-cycle should do differently or why none will help: "tag 3f9a2c survived rounds
-1 to 3; the package shows no edit near it".
+review gate later. Name the tags and rounds you relied on, say in a few words what each
+finding is, and say what the next cycle should do differently or why none will
+help: "tag 3f9a2c (the unchecked empty list in `parse()`) survived rounds 1 to 3;
+the package shows no edit near it since your last session".
 
 When you are unsure, report `continue`, and say what you could not tell in
 `concerns`. A loop stopped early that would have converged in one more cycle

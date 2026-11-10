@@ -27,20 +27,21 @@ options differ in what the requester gets (behaviour, scope, cost) and neither
 the code nor the brief ranks them. How it is built is yours to decide.
 
 Do not stop for anything you can decide yourself. Pick the option a competent
-engineer on this codebase would pick, and say in the spec that you picked it
-and why.
+engineer on this codebase would pick, and list it in the opening with why.
 
 ## What the spec contains
 
+Open with two or three sentences: what changes, then the choices you made for
+the requester, listed in one place so a reviewer can overrule them. Then:
+
 - **The problem**, in the terms of this repo: what is broken or missing today,
-  with file and function names.
+  with file and function names, and what the brief asks for.
 - **The approach**, and the real alternatives you rejected, one sentence each
-  on why; say so if there was only one way. A reviewer disagreeing with the choice needs to see the alternatives to
-  say so.
+  on why; if there was only one way, say that. A reviewer who disagrees with the
+  choice needs the alternatives in front of them.
 - **Sections scaled to their complexity.** A component that is three lines gets
   a sentence. Do not pad.
-- **What is explicitly out of scope.** Half of what a reviewer rejects is scope
-  they did not expect.
+- **What is explicitly out of scope.** Reviewers reject scope they didn't expect.
 - **How it will be verified**: the tests that must exist, named.
 
 The spec holds the decisions the plan builds on: behaviour, interfaces, data
@@ -52,12 +53,13 @@ behaviour per requirement, in the tree's format and no broader than a test will
 enforce. Where no capability file covers the behaviour yet, propose a new one.
 
 Leave no "TBD", no "to be determined later", no section that describes what a
-decision will be about instead of making it. If you cannot resolve something,
-that is a `needs_context` stop, not a placeholder.
+decision will be about instead of making it. If it is one of the cases under
+Asking, stop with `needs_context`; otherwise decide, and list the decision in the
+opening. A placeholder is neither.
 
-Before you finish, check that every file and function you cite exists as
-written (grep for it), that each behaviour in the approach has a named test, and
-that no placeholder is left.
+Before you finish, check that every existing file and function you cite exists as
+written (grep for it) and that each new one is marked as new, that each behaviour
+in the approach has a named test, and that no placeholder is left.
 
 ## If you are revising
 

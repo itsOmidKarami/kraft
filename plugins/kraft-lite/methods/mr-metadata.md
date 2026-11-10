@@ -16,10 +16,12 @@ ellipsis, and a clipped title can fail a repo's title check.
 
 - `.gitlab/merge_request_templates/*.md`, `.github/PULL_REQUEST_TEMPLATE.md`
   (and `.github/PULL_REQUEST_TEMPLATE/*.md`; GitHub also takes
-  `pull_request_template.md` in any case, in the root, `docs/` or `.github/`):
-  if the project ships a template, fill *that*, section for section. Put the
-  four answers below under its sections; if none fits one, add it to the
-  closest section.
+  `pull_request_template.md` in any letter case, in the root, `docs/` or
+  `.github/`): if the project ships a template, fill *that*, section for section.
+  Put the answers listed under "What the description answers" under its sections;
+  if none fits one, add that answer to the closest section. Tick a checkbox only
+  for what you did or saw in this run; leave the rest unticked, and write N/A
+  under a section that doesn't apply.
 - Any pull-request rules file your instructions point you to.
 - `CONTRIBUTING.md` for stated title and description rules, **and for any
   label CI requires**. Some projects fail a merge request that carries no
@@ -27,24 +29,26 @@ ellipsis, and a clipped title can fail a repo's title check.
   does, you must pick one: its CONTRIBUTING, or the CI job that checks, is
   where the choices are written down. Pick by what the diff does against each
   label's definition there (`kraft view labels` carries descriptions), never
-  from habit: a wrong label mislabels what ships. If it states no label rule,
-  there is none to satisfy. The same goes for **a section the description must
-  carry**: a project can fail a merge request whose body lacks one (a
-  removed-tests list, a changelog), and a template may show it commented out,
-  which does not make it optional. Look in CONTRIBUTING, the whole template
-  (comments included) and the CI job that reads the body. If the repo ships a
-  checker for the body, run it on your draft before you finish.
-- What the project already does: `git log --oneline -30` for the title
-  pattern (Conventional Commits or not), `kraft view merged --limit 20` for how
-  merged ones are titled and labelled, and `kraft view labels` for the
-  project's existing label set.
+  from habit: a wrong label mislabels what ships. If the one it requires isn't in
+  that list, or none fits, leave it out, finish `done_with_concerns` and say so.
+  If it states no label rule, there is none to satisfy: add no label. The same
+  goes for **a section the description must carry**: a project can fail a merge
+  request whose body lacks one (a removed-tests list, a changelog), and a
+  template may show it commented out, which does not make it optional. Look in
+  CONTRIBUTING, the whole template (comments included) and the CI job that reads
+  the body. If the repo ships a checker for the body, run it on your draft before
+  you finish.
+- What the project already does: `git log --oneline -30` for the title pattern
+  (Conventional Commits or not), `kraft view merged --limit 20` for how merged
+  ones are titled and how a required label is spelled, and `kraft view labels`
+  for the project's existing label set.
 
 ## Then read the change, not the plan
 
-The diff against the base branch (`git diff <base>...HEAD`, where `<base>` is
-`git symbolic-ref refs/remotes/origin/HEAD` unless the work item names
-another, or `kraft view diff --stat`), the spec, the
-plan, and the local review findings. A description written from the spec
+The diff against the base branch (`git diff origin/<base>...HEAD`, where `<base>`
+is the branch the work goes into: the repo's default unless the work item names
+another; `kraft view diff` shows the same change), the spec, the plan, and the
+local review findings. A description written from the spec
 describes the change that was planned, not the one that was made.
 
 ## What the description answers, in this order
@@ -65,10 +69,11 @@ describes the change that was planned, not the one that was made.
 
 - Do not advocate for approval. You are not selling the change.
 - Do not restate the work item title as the description.
-- Do not invent a reviewer, an assignee or a label. Empty is correct unless the repo names
-  one, and a label that does not already exist in this project is a failed
-  API call, not a new label. `CODEOWNERS` is not a reviewer list: the forge
-  handles code owners itself, and a forge can refuse to ask a merge request's own author.
+- Do not invent a reviewer, an assignee or a label. Empty is correct unless the
+  repo names one. Use only labels in `kraft view labels`: GitHub refuses one the
+  project doesn't have, and GitLab creates it without a word. `CODEOWNERS` is not
+  a reviewer list: the forge handles code owners itself, and a forge can refuse to
+  ask a merge request's own author.
 - Three lines is a fine description for a three-line diff.
 - Scope deliberately left out belongs in the description -- it is most of
   what gets rejected.
@@ -84,4 +89,4 @@ describes the change that was planned, not the one that was made.
 Check that every label the project's rules require is in `labels` and exists in
 its label list, that every section they require is in the description (and the
 repo's body checker, if it has one, passes on it), and that the description describes
-`git diff <base>...HEAD`, the change that was made, not the plan.
+`git diff origin/<base>...HEAD`, the change that was made, not the plan.

@@ -23,7 +23,8 @@ Read, in this order:
   names. `findings_measured` is one round of the local tests and review: a
   review named in `unmeasured_tasks` did not run, and one with `dropped` wrote
   its findings wrongly, so neither found nothing. `scope_skipped` and
-  `node_skipped` are a person skipping a check. If `kraft` refuses the verb or
+  `node_skipped` are a person skipping a check, and `worker_session_exited`
+  carries a task's `concerns` about its own work. If `kraft` refuses the verb or
   cannot be run (a sandboxed worker with no network cannot reach Kraft at
   all), work from what your instructions carry and say in the brief which
   events you could not read.
@@ -37,8 +38,11 @@ Read, in this order:
   Kraft's own rebase left after the rejection) and what the repair committed after it
   (`git log -p <head_sha>..HEAD`).
 - The local review findings, including the ones ruled minor.
-- The diff itself. A brief written from the spec rather than from the diff
-  describes the change that was planned, not the one that was made.
+- The work item's spec and plan, if it has them, in your instructions or named
+  there by path: check their tasks against the diff.
+- The diff itself (`kraft view diff`, or `git diff origin/<base>...HEAD`). A
+  brief written from the spec rather than from the diff describes the change that
+  was planned, not the one that was made.
 
 ## What the brief contains
 
@@ -52,21 +56,26 @@ In this order, leaving out a conditional part when its condition doesn't hold:
 
 - **Merge train/queue rejection**, as its own section, whenever a drop
   is newer than the last `final_review` approval. The reviewer approved this
-  change once, it went to merge, and it came back: they need to know that
-  before anything else. Give the cause, the reason, the failed jobs, and what
+  change once, it went to merge, and it came back. Give the cause, the reason, the failed jobs, and what
   the repair commits changed, so they can review that change rather than
   re-read the whole one. A `conflict` drop that Kraft's own rebase cleared has
   no repair commit; say the branch was rebased onto the target and nothing
   else changed.
 - **What changed**, in the terms of this repo: files, functions, behaviour. Not
-  a restatement of the work item's title or description.
+  a restatement of the work item's title or description. Scope the reviewer
+  didn't expect is most of what gets rejected at this gate, so say which changes
+  the spec or plan did not ask for.
 - **What CI said**, plainly, including the job names. If the pipeline is red,
   say so in the first line — a brief that buries a failed pipeline is worse
-  than no brief, because it converts a human check into a rubber stamp.
+  than no brief, because it converts a human check into a rubber stamp. Take
+  CI's newest wait (after a merge-queue rewind it runs again, and the older one
+  is stale). Only a settled wait whose `result` isn't `failed` is green: a
+  timed-out, errored or superseded wait, or none recorded, is reported as
+  exactly that, never as passing.
 - **What the local review flagged**, including findings that did not burn a fix
   cycle. A minor finding nobody is shown is a silent discard. A review that
   didn't run, or whose findings were dropped, is reported as that, never as
-  clean.
+  clean. A check a person skipped is reported as skipped, never as passed.
 - **Review-bot feedback not acted on**, when your instructions point you at an
   agent's verdict on the automated reviewers' comments. A comment it declined
   was judged wrong, already handled, or not for this change, by an agent and not
@@ -76,8 +85,7 @@ In this order, leaving out a conditional part when its condition doesn't hold:
   merge until a person resolves it. Leave the section out when there is no
   verdict or it declined nothing.
 - **What was deliberately left out**, and why, when a plan task or something
-  the spec asks for has no change behind it. Scope the reviewer did not expect
-  is most of what gets rejected at this gate.
+  the spec asks for has no change behind it.
 - **What you are unsure about**, when there is something you could not read or
   check, or a task raised a concern about its own work. Doubts are information
   for the human, not an admission. Name them.

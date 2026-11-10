@@ -27,10 +27,13 @@ review" is not such a line. If you cannot name the evidence, leave it alone.
 
 ## Slicing is not yours
 
-When the plan has a valid `## Slices` section, Kraft adds the slicing entry to the change set
-itself, by fixed rules, and the person at the gate sees it beside your changes. Never write a
-`slice` key: a change set that has one is refused. You may still propose your own skips, adds
-and overrides beside it. Do not skip or move the implementing node to make room for a split.
+When the plan has a valid `## Slices` section, Kraft adds the slicing entry to the
+change set itself, by fixed rules, and the person at the gate sees it beside your
+changes. Never write a `slice` key: a change set that has one is refused. You may
+still propose your own skips, adds and overrides beside it. Do not skip or move the
+implementing node to make room for a split. Each slice runs the implementer on its
+own, so on a sliced plan count one slice's tasks, not the plan's, against
+`time_cap_minutes`.
 
 ## What you get
 
@@ -59,13 +62,13 @@ Three kinds of change, and nothing else. Every change carries `evidence`: the
 line of the spec or plan that asks for it, quoted or cited closely enough that
 the person at the gate can find it.
 
-- **`skip`** a node that has become pointless. Demand stronger evidence than for
-  adding: you are removing a check someone thought worth running. Never skip the
-  last verification of a change to executable code. A node that opens,
-  describes, syncs, readies or merges the merge request or waits on its checks,
-  a node marked `skippable: false`, a node another node restarts from, and a
-  node a gate rejects back to cannot be skipped; the proposal is refused if you
-  try.
+- **`skip`** a node that has become pointless. Hold yourself to stronger evidence
+  than for an add: you are removing a check someone thought worth running. Never
+  skip the last verification of a change to executable code. These cannot be
+  skipped, and the proposal is refused if you try: a node that opens, describes,
+  syncs, readies or merges the merge request or waits on its checks, a node marked
+  `skippable: false`, a node another node restarts from and a node a gate rejects
+  back to.
 - **`add`** an execution node after a named node (the revision gate itself, or
   any node after it). An added node is built **only from library components**:
   either `{"id": ..., "extends": "<library node>"}`, or
@@ -89,14 +92,16 @@ the person at the gate can find it.
 | Evidence in the spec or plan | Reasonable change |
 |---|---|
 | Touches authentication, sessions, tokens, secrets or permission checks | Add the library's security-review node if the library has one; otherwise say so in `rationale` |
-| A plan task is clearly heavier than the template assumed | Raise that task's `effort`, or its node's fix-loop `max_attempts` |
-| The plan's task count, at about 15-20 minutes per task, is more than the implementing task's `time_cap_minutes` holds | Raise that task's `time_cap_minutes` to fit, citing the plan's task count and the current cap: a capped run stops mid-plan and a person has to retry it. Measured on a nine-task plan, tasks took 4 to 41 minutes, about 17 on average, so round up. If the nodes you are given show no cap, say so in `rationale` rather than guess |
+| A plan task is clearly heavier than the template assumed | Raise a task's `effort` (only if it has no `profile`), or its node's fix-loop `max_attempts` |
+| The task count (a slice's, on a sliced plan), at about 15-20 minutes per task, is more than the implementing task's `time_cap_minutes` holds | Raise that task's `time_cap_minutes` to fit, citing the task count and the current cap: a capped run stops mid-plan and a person has to retry it. Measured on a nine-task plan, tasks took 4 to 41 minutes, about 17 on average, so round up |
 | The plan is docs-only, with no executable change | Skip a node that only runs tests, if the tail has one; never a node that holds the review |
 | A risk section names a failure mode the chain never checks, and the library has the check | Add it |
 
-If the task has a `profile`, an `effort` override replaces it whole, and the
-task runs the harness's default model instead of the profile's. Say so in
-`rationale`, or leave the effort alone.
+If the nodes you are given show no cap, say so in `rationale` rather than guess.
+The effort levels are `low`, `medium`, `high`, `xhigh` and `max`. On a task with a
+`profile`, an `effort` override replaces the profile whole, and the task runs the
+harness's default model instead of the profile's: leave the effort alone, or say so
+in `rationale`.
 
 Leave it alone when the chain differs from what you would have picked but
 nothing is wrong with it, when you want to reorder for tidiness, when the plan is

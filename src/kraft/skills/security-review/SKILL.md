@@ -62,8 +62,8 @@ Look for, in rough order of what actually bites:
 Out of scope: general correctness, which is the code review's where the chain
 has one, and advice that does not bind to this diff ("add rate limiting
 everywhere"). A defect that was already there, and that this diff neither
-touches nor relies on, isn't a finding: note it in your session summary. If the
-change is security-relevant but sound, say so in your session summary and emit
+touches nor relies on, isn't a finding: note it in `concerns` (see Output). If
+the change is security-relevant but sound, say so in your session summary and emit
 no findings.
 
 ## Severity
@@ -94,32 +94,36 @@ Write your findings into the JSON result file at `$KRAFT_RESULT_PATH`, as a
 
 ```
 { "severity": "critical" | "important" | "minor",
-  "message": "what is wrong and why, in one or two sentences",
+  "message": "the defect, the call or input that exploits it, and what that gets the caller",
   "file": "path/relative/to/repo.py",
   "line": 42,
-  "source_plugin": "security-review",
-  "same_as": "7a3f9c21e40b5d6e" }
+  "source_plugin": "security-review" }
 ```
+
+A `critical` always names the exploiting call. A real message reads like this:
+"`DELETE /items/{id}` checks ownership in the HTML route but not the JSON route
+added here: any signed-in user can delete another's item."
 
 `severity`, `message` and `source_plugin` are required — a finding missing any
 of the three, or with a `severity` outside the three values, is dropped by the
 parser without a word, so a review that writes them wrong reads downstream as a
 review that found nothing. `file` and `line` are optional, but name them when
 you know them; `line` is not part of a finding's identity.
-`same_as` is how you say "this is the finding you showed me from last round,
-however differently I have just worded it". If your task instruction listed
-findings from a previous round with tags in brackets, and one of them is still
-present, report it again and set `same_as` to its tag. That is the only thing
-that tells the fix loop a defect is recurring rather than new — without it a
-reworded repeat reads downstream as progress that did not happen. Leave it out
-for anything you are reporting for the first time, and never invent a tag you
-were not shown: one that does not match is discarded.
+
+If your task instruction listed findings from a previous round with tags, add
+`same_as` to a finding that is still present, set to its tag: it is the only thing
+that tells the fix loop a defect is recurring rather than new. Leave it out
+otherwise, and never invent a tag: one that doesn't match is discarded.
 
 Set `status` to `"done"` when you completed the review, whatever you found.
 Reserve `"failed"` for being unable to review at all — an unreadable diff, a
 missing package — and say which in your session summary: the result file has
 no field for the reason. A review that ran and found problems is `"done"` with
-those problems in `findings`; a clean one is `"done"` with `"findings": []`.
+those problems in `findings`; a clean one is `"done"` with `"findings": []`. A
+review that covered only part of the change, or that saw a pre-existing defect it
+left out, is `"done_with_concerns"`: name what you didn't cover, or what you saw,
+in `concerns`.
 
-Before you finish, read the file back: it parses, and every finding has
-`severity`, `message` and `source_plugin`.
+Before you finish, read the file back: it parses, every finding has `severity`,
+`message` and `source_plugin`, `severity` is one of the three, and `line` is a
+single number.

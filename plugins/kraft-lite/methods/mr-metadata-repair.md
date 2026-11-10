@@ -5,17 +5,19 @@ description: "Repairs a merge request's metadata, such as a missing or wrong lab
 
 # Repairing a merge request's metadata
 
-The merge request's CI wait just failed. Its diagnosis — the failed job's name
-and the tail of its trace — is already in the prompt above.
+The merge request's checks just failed. Its diagnosis — the failed job's name
+and the tail of its trace — is in the prompt above, unless no job failed and the
+branch no longer merges (see the last section).
 
 **Whether another pass follows is the chain's decision, not this skill's.** Fix
 what you can see and exit; the CI wait runs again after you and decides whether
 it worked. Do not apply a second guess in the same pass to hedge the first,
 and never push a commit or touch CI config to force a run.
 
-Act only when the trace names a label or a description section. When you
-leave something, whatever the reason, finish `done_with_concerns` and say why
-in `concerns`.
+Act only when the trace names a label or a description section. When you leave
+anything unfixed, whatever the reason, finish `done_with_concerns`, not `failed`,
+and say why in `concerns`: a fix loop, if the chain has one, reads your `concerns`
+as its diagnosis, and `failed` loses it.
 
 ## When the trace names a missing or wrong label
 
@@ -36,7 +38,8 @@ prefix with one it sets (`kind::a` gives way to `kind::b`); it can't remove an
 unscoped label, so if a stray one fails the check, say so. On GitLab it also
 starts a new pipeline, because `CI_MERGE_REQUEST_LABELS` is fixed when a
 pipeline starts; on GitHub the label edit re-runs workflows that trigger on
-`labeled`.
+`labeled`. If the tool refuses (on GitHub the label must already exist), finish
+`done_with_concerns` and name the label.
 
 ## When the trace names a missing or wrong description section
 
@@ -60,17 +63,11 @@ label, not a failing test. If no label or section would fix it, change nothing,
 end `done_with_concerns` and name the failed job and the cause in `concerns`. A
 chain with a fix loop takes it from there.
 
-## When the pipeline reports a merge conflict
+## When no failed job is named
 
-The CI wait already asks the forge itself whether this branch can merge and
-puts the answer in its own log line (`merge request is not mergeable:
-conflict`, or similar) — you do not need to re-derive that by hand. Do not
-check out another branch or attempt a local `git merge` to look for
-conflicts yourself: this worktree is the item's own, the next task after you
-resolves the merge request from whatever branch is checked out, and a merge
-left mid-conflict when your pass ends strands it there. If you need more than
-the log line gives you, use a read-only command that does not change
-what is checked out (`git merge-tree`, `git log`, `git diff
-origin/<base>...HEAD`) — and in any case there is nothing this task can
-do about a real conflict; say so in `concerns` and stop, the same as any
-other non-label failure.
+Suspect a conflict with the base: Kraft's own rebase has already failed. Don't
+check out another branch or run `git merge` to look: this worktree is the
+item's own, and a merge left mid-conflict when your pass ends strands the next
+task. If you need to read, use a command that changes nothing (`git merge-tree`,
+`git log`, `git diff origin/<base>...HEAD`). Nothing here can resolve a real
+conflict; say so in `concerns` and stop, the same as any other non-label failure.
