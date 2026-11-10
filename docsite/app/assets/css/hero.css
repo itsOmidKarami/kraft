@@ -172,12 +172,6 @@
   }
 }
 
-/* The overview video's link, under the install command. */
-.landing-home [data-slot='body'] > p {
-  margin-top: 0.75rem;
-  font-size: 0.9375rem;
-}
-
 /* One picture per layout: the whole board from a laptop up, the phone board
    below that, where the wide one would scroll sideways. A hidden lazy image
    isn't fetched. */

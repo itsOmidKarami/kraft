@@ -33,8 +33,6 @@ ui:
 uv tool install kraft-sdlc && kraft
 ```
 
-[Watch the 2-minute overview](https://youtu.be/VIDEO_ID){target="_blank"}
-
 #default
 :::landing-shot{.hero-shot .hero-shot--wide}
 ---
