@@ -44,8 +44,8 @@ implementer session and review, so it pays only when each part is large enough
 to be a work item of its own, the size of a pull request someone would review
 by itself. When the spec has independent parts that big, say so in the spec and
 in your judgment, so the plan slices them. Smaller independent parts stay in one
-item, or inline, and go to sub-agents, which share the worktree and start at
-once. When in doubt, recommend sub-agents.
+item, or inline, and go to sub-agents, which share the worktree and need no
+setup or join. When in doubt, recommend sub-agents.
 
 **Explicit user override wins outright.** If the user already said "do this
 inline" or "hand this to Kraft," skip judgment and honor that instead - still

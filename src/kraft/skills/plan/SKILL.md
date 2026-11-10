@@ -75,7 +75,8 @@ and branch, its own setup, its own implementer session and the nodes after it, a
 replays its commits. That overhead pays only when every slice is large enough to be a work item
 of its own: several tasks, the size of a pull request someone would review by itself. Smaller
 independent tasks stay unsliced: the implementer builds them in one session and can hand them to
-sub-agents there, which share its worktree, start at once and need no join. When in doubt, don't
+sub-agents there, which share its worktree, need no setup or join, and run in parallel when
+dispatched together. When in doubt, don't
 slice.
 
 When the plan is large, its parts don't depend on each other, and each part is that big, end it
