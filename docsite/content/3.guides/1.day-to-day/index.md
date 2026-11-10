@@ -7,8 +7,6 @@ description: Do the daily work of filing, reviewing and unsticking work items.
 
 _Added in 2.1_
 
-Each guide takes one task from start to finish.
-
 ## In this section
 
 - [The setup wizard on first start](/guides/day-to-day/first-run): connect your first repo with the setup steps the board shows when none is connected.

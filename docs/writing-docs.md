@@ -124,7 +124,7 @@ A change to one of these sources updates its page in the same pull request.
 | A `KRAFT_*` environment variable, or a variable passed to workers (`src/kraft/worker/env.py`) | `docsite/content/5.reference/03.configuration/11.environment-variables.md` |
 | A new event type (`events.append`), or the notification webhook (`src/kraft/notify.py`) | `docsite/content/5.reference/10.events.md` |
 | A stop reason (`store.mark_needs_human`) or a `kraft admin doctor` check | the topic page under `docsite/content/4.troubleshooting/` whose rows stand with it: `01.failed-tasks-and-fix-loops.md`, `02.launch-and-setup-stops.md`, `03.caps-budgets-and-waits.md`, `04.forge-stops.md`, `05.worktree-and-git-stops.md` (a git state of the worktree; an in-place checkout reason goes on `docsite/content/3.guides/4.run/12.run-items-in-place.md`), `06.sandbox-and-kit-stops.md` (a sandbox, Kit or workspace-member reason, and a doctor sandbox row) or `07.os-sandbox-refusals.md`; a stop with numbered steps gets an entry under its table on the same page, and its words go in the first column. A doctor check goes on `08.doctor-failures.md`, under the heading named as doctor prints the row |
-| `access.yaml` / remote-access behaviour | `docsite/content/3.guides/4.run/01.remote-access.md` (and `02.put-a-proxy-in-front-of-kraft.md` for the `Host` check behind a proxy), and `SECURITY.md` if it's security-relevant |
+| `access.yaml` / remote-access behaviour | `docsite/content/3.guides/4.run/01.remote-access.md` (and `02.put-a-proxy-in-front-of-kraft.md` for the `Host` check and the reverse-proxy way), and `SECURITY.md` if it's security-relevant |
 | A screen or its behaviour (`frontend/src/ng/`) | the pages that name it: see [Pages for a screen](#pages-for-a-screen) |
 
 ### Pages for a screen
@@ -136,8 +136,10 @@ A screen change updates the pages that show or name it:
   page, the review page, Templates and Settings, Analytics).
 - `docsite/content/3.guides/1.day-to-day/`: `2.first-run.md` (the setup
   wizard), `3.file-a-work-item.md` (the composer), `5.review-a-change.md` (the
-  review page) and `8.kraft-on-a-phone.md` (the phone).
-- `docsite/content/3.guides/4.run/01.remote-access.md`: Access.
+  review page) and `8.kraft-on-a-phone.md` (reaching the board from a phone; the phone
+  layout is `docsite/content/5.reference/00.web-ui/9.on-a-phone.md`).
+- `docsite/content/3.guides/4.run/01.remote-access.md` and
+  `02.put-a-proxy-in-front-of-kraft.md`: Access.
 - Any other page that names the screen or a button on it: `git grep` its label
   under `docsite/content/`.
 

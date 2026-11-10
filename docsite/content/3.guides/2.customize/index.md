@@ -7,8 +7,6 @@ description: Change the chain Kraft runs, and file work from a schedule or a web
 
 _Added in 2.1_
 
-Each guide takes one task from start to finish.
-
 ## In this section
 
 - [Write your own chain](/guides/customize/write-your-own-chain): add a lint node with an agent that fixes what it reports, a time cap, and no skipping.
