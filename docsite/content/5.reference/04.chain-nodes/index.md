@@ -91,7 +91,7 @@ An exec node declares `tasks` or `steps`, never both.
 |---|---|---|---|---|
 | `tasks` | list of tasks | one of `tasks` and `steps`, unless `extends` supplies it | — | Shorthand for one step named `main`. Its tasks are dispatched together, and the node is measured once all have settled. |
 | `steps` | list of steps | one of `tasks` and `steps`, unless `extends` supplies it | — | Steps that run in order. A later step isn't dispatched if an earlier one fails, and it sees what the earlier one left behind. |
-| `on_failure` | mapping: `tasks` or `steps` | no | unset | A recovery pass: tasks or steps that run once after the node failed, before it is measured again. A task or step may carry its own `on_failure`; the nearest one to the failure wins. It may be [read_only](/reference/chain-nodes/read-only). |
+| `on_failure` | mapping: `tasks` or `steps`, and `read_only` | no | unset | A recovery pass that runs once after the node failed, before it is measured again. The nearest `on_failure` to the failure wins, on the node, a step or a task. `read_only: true` makes the whole plan read-only; see [read_only](/reference/chain-nodes/read-only). |
 | `fix_loop` | [mapping](/reference/chain-nodes/fix-loop): `tasks` or `steps`, `judge`, `max_attempts` | no | unset | Repair tasks or steps, an optional `judge` task, and an optional `max_attempts`. It re-runs until the node passes. See [Fix loop and judge](/reference/chain-nodes/fix-loop). |
 | `escalation` | agent task | no | unset | An agent task dispatched when the node is [stuck](/concepts/vocabulary#stuck) after recovery and the fix loop, before you are asked. On a node with `on_merge_rejected`, see [on_merge_rejected](#on_merge_rejected). |
 | `on_base_changed` | [mapping](#on_base_changed) | no | unset | What to re-run when a rebase moves the base. See [on_base_changed](#on_base_changed). |
@@ -143,7 +143,7 @@ before the walk passes it again.
 | Key | Type | Required | Default | Meaning |
 |---|---|---|---|---|
 | `restart_from` | string | yes | — | Names this node or an earlier exec node, never a gate. On a node with an `mr.merge` task after a `chain_finalized` gate, it must name a node before that gate. |
-| `on_conflict` | mapping: `tasks` or `steps` | no | unset | Names the task or steps that resolve a conflicting rebase. |
+| `on_conflict` | mapping: `tasks` or `steps`, and `read_only` | no | unset | Names the task or steps that resolve a conflicting rebase. |
 
 If a retry or resume starts at a node that has its own `mr_rebase` task and an
 `on_base_changed`, that task does the rebase, and a changed base still re-runs
@@ -158,7 +158,7 @@ _Added in 2.3_
 | Key | Type | Required | Default | Meaning |
 |---|---|---|---|---|
 | `restart_from` | string | yes | — | Names an exec node strictly before this one, never a gate or this node itself. When a `chain_finalized` gate comes before this node, it must name a node before that gate, so every rewind passes it. |
-| `repair` | mapping: `tasks` or `steps` | yes | — | The tasks or steps that fix the branch, written like an `on_failure` plan. The shipped `repair_merge_queue_failure` runs the `kraft:merge-queue-repair` skill on the `strong` [agent profile](/reference/harnesses/agent-profiles). |
+| `repair` | mapping: `tasks` or `steps`, and `read_only` | yes | — | The tasks or steps that fix the branch, written like an `on_failure` plan. The shipped `repair_merge_queue_failure` runs the `kraft:merge-queue-repair` skill on the `strong` [agent profile](/reference/harnesses/agent-profiles). |
 
 Kraft refuses at load:
 
@@ -173,7 +173,7 @@ Kraft refuses at load:
 | `id` | string | yes | — | The step's name, unique in the node. |
 | `extends` | string | no | unset | The library step this one builds on. Its tasks come from the library step unless this step sets `tasks`, which replace them. |
 | `tasks` | list of tasks | yes, unless `extends` supplies it | — | The step's tasks, dispatched together. At least one. |
-| `on_failure` | mapping: `tasks` or `steps` | no | unset | A recovery pass for this step alone. |
+| `on_failure` | mapping: `tasks` or `steps`, and `read_only` | no | unset | A recovery pass for this step alone. |
 | `policy` | [mapping](/reference/configuration/policy#policy-fields) | no | unset | This step's policy layer. |
 | `skippable` | boolean | no | `true` | `false` refuses a skip of this step. |
 | `read_only` | boolean | no | `false` | `true` verifies the step's tasks leave the worktree as they found it. See [read_only](/reference/chain-nodes/read-only). |
@@ -192,7 +192,7 @@ Every task takes these keys, then the keys of its kind. A task takes no
 | `extends` | string | no | unset | The library task this one builds on. |
 | `scope` | `once` or `each_repository` | no | `once` | `each_repository` runs the task once per selected repository of a workspace item. `once` runs it once. |
 | `steering` | list of steering profile names | no | `[]` | Names of [steering profiles](/concepts/vocabulary#steering-profile) from the library's `steering` section. Only an agent task reads it. |
-| `on_failure` | mapping: `tasks` or `steps` | no | unset | A recovery pass for this task alone. Allowed only on a task in one of an exec node's own steps. |
+| `on_failure` | mapping: `tasks` or `steps`, and `read_only` | no | unset | A recovery pass for this task alone. Allowed only on a task in one of an exec node's own steps. |
 | `policy` | [mapping](/reference/configuration/policy#policy-fields) | no | unset | This task's own policy layer. See [What a task's policy does](#what-a-tasks-policy-does). |
 | `skippable` | boolean | no | `true` | `false` refuses a skip of this task. |
 | `icon` | string | no | unset | The [icon](#icons) the board draws for the task. Refused on a fix loop's `judge`, whose icon is fixed. |
