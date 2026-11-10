@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import shutil
+import stat
 import sys
 import tempfile
 import threading
@@ -184,6 +185,35 @@ def _forward_fake_agent_env_vars_into_worker_env(monkeypatch):
 def _e2e_binaries(item) -> set[str]:
     """The real CLIs an `e2e` test names: `@pytest.mark.e2e("bd")`."""
     return {name for mark in item.iter_markers("e2e") for name in mark.args}
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_sessionfinish(session):
+    """Leave pytest's keep-last-3 cleanup of old basetemps able to work
+    (Kraft-t7aeb). Before that cleanup runs, so it acts on both.
+
+    The add-on store's folders are read-only (`addons/fetch.write_store`), and
+    `rm -rf` or a plain `shutil.rmtree` cannot empty a read-only folder, so
+    this run's are made writable again. And a run killed before its end keeps
+    its basetemp's `.lock`, which pytest honours for three days: one whose
+    process is gone is dropped, so this run's cleanup removes that basetemp.
+    """
+    if hasattr(session.config, "workerinput"):
+        return  # the xdist controller does it, workers' folders included
+    basetemp = session.config._tmp_path_factory.getbasetemp()
+    for dirpath, _dirs, _files in os.walk(basetemp):
+        mode = os.lstat(dirpath).st_mode
+        if not mode & stat.S_IWUSR:
+            os.chmod(dirpath, mode | stat.S_IWUSR)
+    if not basetemp.parent.name.startswith("pytest-of-"):
+        return  # a --basetemp of the caller's: its siblings are not pytest's
+    for lock in [*basetemp.parent.glob("pytest-*/.lock"), *basetemp.parent.glob("garbage-*/.lock")]:
+        try:
+            os.kill(int(lock.read_text()), 0)
+        except ProcessLookupError:
+            lock.unlink(missing_ok=True)
+        except (OSError, ValueError):
+            pass  # alive, someone else's, or not a pid: pytest decides
 
 
 def pytest_collection_modifyitems(config, items):
