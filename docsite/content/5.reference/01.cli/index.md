@@ -22,6 +22,11 @@ You can also give the start of an ID instead of all of it: 4 characters or
 more, as long as no other item's ID starts the same way. A worker inside a
 network sandbox must still give its own item's whole ID.
 
+A work item's ID is 8 characters, such as `k7m2x9qa`; an item filed before IDs
+were shortened keeps its 32. A session's ID is 6 characters and unique only
+within its item, so outside it a session is written `<item>/<session>`, such as
+`k7m2x9qa/p3n8w2`; an older session keeps its 32.
+
 ## Find a verb by what you want to do
 
 Each command links to its entry.
