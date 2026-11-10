@@ -14,8 +14,8 @@ before working a red check.
 **In a Kraft worker** (`$KRAFT_WORK_ITEM_ID` set) there's no `gh` and no user
 to ask. Set a label with `kraft item mr-label`; where it isn't available (a
 sandboxed worker's `kraft` has no `mr-label`), name the label you need in your
-summary. Read a job's log with `kraft view jobs --pipeline P` and `kraft view
-job-log --pipeline P --job J`. Re-run a job with
+summary. Read a job's log with `kraft view jobs --pipeline P` and
+`kraft view job-log --pipeline P --job J`. Re-run a job with
 `kraft item rerun-ci --reason "..."` only for CI that failed outside the code
 (a download or runner failure before any check ran), once per attempt and only
 when your task prompt allows it. Leave a conflict with `main` to Kraft: report
