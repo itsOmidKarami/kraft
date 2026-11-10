@@ -83,9 +83,9 @@ section.
 - The slices don't use each other's work.
 - Every slice makes sense on its own: a coherent part with its own tests, which its own
   implement, verify and review loop can check. Think of it as a part you would file as its
-  own work item if it didn't have to land with the others, held to a lower floor than one. Task and
-  line counts are weak hints, not the test; a slice of one or two tasks almost never
-  qualifies.
+  own work item if it didn't have to land with the others, held to a lower floor than one.
+  Task and line counts are weak hints, not the test; a slice of one or two tasks almost
+  never qualifies.
 
 One bullet per slice:
 

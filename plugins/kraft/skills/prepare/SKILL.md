@@ -56,10 +56,10 @@ it inline with sub-agents, and say which parts would stand alone. Otherwise:
 - **Slices**, when the parts must land together, or are too small to be worth
   a merge request each. The same stands-alone test, held to a lower floor: each
   part earns its own loop but needn't be a whole pull request. One handed-off
-  item, which Kraft's plan splits into child
-  work items, built in parallel and joined into one merge request. Each child
-  has its own worktree, setup, implementer session and review. Name each part
-  in the spec, with what it covers, so the plan slices along them.
+  item, which Kraft's plan splits into child work items, built in parallel and
+  joined into one merge request. Each child has its own worktree, setup,
+  implementer session and review. Name each part in the spec, with what it
+  covers, so the plan slices along them.
 
 When in doubt, use sub-agents. State the sub-agents, slices or separate-items
 call in the same message as the inline/handoff judgment.
