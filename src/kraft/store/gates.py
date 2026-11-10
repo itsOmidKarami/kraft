@@ -9,8 +9,9 @@ from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store import chain
 from kraft.store._common import write_status
 from kraft.store.counters import reset_fix_loops
+from kraft.store.review import YOU, threads_for
 from kraft.store.work_items import checkout_holder, queue_work_item, set_steer
-from kraft.vocab import ChainEvent, GateEvent, WorkItemEvent
+from kraft.vocab import ChainEvent, GateEvent, ThreadLabel, ThreadState, WorkItemEvent
 from kraft.vocab.events import GATE_CLOSED
 from kraft.vocab.stop import StopKind
 
@@ -340,7 +341,9 @@ _ROUND_EVENTS = (*_GATE_EVENTS, WorkItemEvent.NEEDS_HUMAN, *GATE_CLOSED)
 _REVIEW_VERDICT = {"passed": "ready", "undecided": "undecided"}
 
 
-def gate_rounds(conn: sqlite3.Connection, work_item_id: str) -> dict[str, list[dict]]:
+def gate_rounds(
+    conn: sqlite3.Connection, work_item_id: str, *, with_contents: bool = True
+) -> dict[str, list[dict]]:
     """Every gate's rounds, oldest first, read from the events (one SQL read,
     filtered to the types below: the item detail polls it).
 
@@ -370,6 +373,10 @@ def gate_rounds(conn: sqlite3.Connection, work_item_id: str) -> dict[str, list[d
     `reviewOutcome` reads it in the UI: an ending `by: agent`, or a
     `gate_auto_review_skipped` with reason `passed` or `undecided`; the later
     wins.
+
+    With `with_contents` each round also carries its `review` and `threads`
+    (`_attach_round_contents`): what was submitted at the gate in the round's
+    window, `(previous round's ended_at, this round's ended_at]`.
     """
     rows = conn.execute(
         "SELECT type, payload, created_at FROM events WHERE work_item_id = ? "
@@ -442,6 +449,8 @@ def gate_rounds(conn: sqlite3.Connection, work_item_id: str) -> dict[str, list[d
             newest = (rounds.get(p.get("node_id")) or [None])[-1]
             if newest is not None and newest["outcome"] == "rejected":
                 newest["sent_to"] = None
+    if with_contents:
+        _attach_round_contents(conn, work_item_id, rounds)
     return rounds
 
 
@@ -456,4 +465,114 @@ def _round(n: int, requested_at: str | None) -> dict:
         "sent_to": None,
         "reopened": False,
         "reviewer": None,
+        "review": None,
+        "threads": _thread_counts([]),
+        "first_threads": [],
     }
+
+
+def _windows(rounds: list[dict]) -> list[tuple[str | None, str | None]]:
+    """Each round's window `(after, upto]` over a gate's rounds, oldest first:
+    `after` is the previous round's `ended_at` (None for the first), `upto` its
+    own (None while pending). The one place the rule lives: a review or thread
+    made between two rounds belongs to the later one, and `requested_at` plays
+    no part. Timestamps are ISO strings, so they compare as text."""
+    return [(rounds[i - 1]["ended_at"] if i else None, r["ended_at"]) for i, r in enumerate(rounds)]
+
+
+def _in_window(window: tuple[str | None, str | None], at: str) -> bool:
+    after, upto = window
+    return (after is None or at > after) and (upto is None or at <= upto)
+
+
+def _thread_counts(threads: list[dict]) -> dict:
+    by_label = {label.value: 0 for label in ThreadLabel}
+    for t in threads:
+        if t["label"] in by_label:
+            by_label[t["label"]] += 1
+    return {
+        "total": len(threads),
+        "open": sum(t["state"] != ThreadState.RESOLVED for t in threads),
+        "by_label": by_label,
+    }
+
+
+def _gate_thread_rows(conn: sqlite3.Connection, work_item_id: str) -> dict[str, list[dict]]:
+    """Every gate thread of the item that is no draft, by gate, oldest first:
+    one read, the first comment joined in."""
+    out: dict[str, list[dict]] = {}
+    for r in conn.execute(
+        "SELECT t.id, t.gate, t.file_path, t.start_line, t.end_line, t.label, t.state, "
+        "t.created_at, c.author, c.review_id, c.body FROM review_threads t "
+        "JOIN review_comments c ON c.id = (SELECT id FROM review_comments "
+        "WHERE thread_id = t.id ORDER BY created_at, rowid LIMIT 1) "
+        "WHERE t.work_item_id = ? AND t.gate IS NOT NULL ORDER BY t.created_at, t.rowid",
+        (work_item_id,),
+    ):
+        if r["author"] == YOU and r["review_id"] is None:
+            continue  # a draft, as store.review.is_draft_thread says
+        out.setdefault(r["gate"], []).append(
+            {
+                "id": r["id"],
+                "file_path": r["file_path"],
+                "start_line": r["start_line"],
+                "end_line": r["end_line"],
+                "label": r["label"],
+                "state": r["state"],
+                "body": r["body"].split("\n", 1)[0],
+                "created_at": r["created_at"],
+            }
+        )
+    return out
+
+
+def _round_threads(threads: list[dict]) -> tuple[dict, list[dict]]:
+    first = sorted(threads, key=lambda t: t["label"] != ThreadLabel.MUST_FIX)[:3]
+    shown = [{k: v for k, v in t.items() if k != "created_at"} for t in first]
+    return _thread_counts(threads), shown
+
+
+def _attach_round_contents(
+    conn: sqlite3.Connection, work_item_id: str, rounds: dict[str, list[dict]]
+) -> None:
+    """Give each round its `review` (the newest one submitted at the gate in its
+    window) and its `threads` / `first_threads`. Two reads for every gate."""
+    reviews: dict[str, list] = {}
+    for r in conn.execute(
+        "SELECT id, gate, outcome, summary, head_sha, submitted_at FROM reviews "
+        "WHERE work_item_id = ? AND gate IS NOT NULL ORDER BY submitted_at, rowid",
+        (work_item_id,),
+    ):
+        reviews.setdefault(r["gate"], []).append(r)
+    threads = _gate_thread_rows(conn, work_item_id)
+    for gate, rs in rounds.items():
+        for r, window in zip(rs, _windows(rs), strict=True):
+            made = [x for x in reviews.get(gate, ()) if _in_window(window, x["submitted_at"])]
+            if made:
+                newest = made[-1]
+                r["review"] = {
+                    "id": newest["id"],
+                    "outcome": newest["outcome"],
+                    "summary": newest["summary"] or "",
+                    "head_sha": newest["head_sha"],
+                }
+            r["threads"], r["first_threads"] = _round_threads(
+                [t for t in threads.get(gate, ()) if _in_window(window, t["created_at"])]
+            )
+
+
+def threads_in_round(
+    conn: sqlite3.Connection, work_item_id: str, gate: str, n: int
+) -> list[dict] | None:
+    """The non-draft threads round `n` of `gate` counts, in the shape
+    `threads_for` gives (comments, quote, state); None when the gate has no
+    round `n`."""
+    rounds = gate_rounds(conn, work_item_id, with_contents=False).get(gate, [])
+    if not 1 <= n <= len(rounds):
+        return None
+    window = _windows(rounds)[n - 1]
+    return [
+        t
+        for t in threads_for(conn, work_item_id, gate)
+        if not t["draft"] and _in_window(window, t["created_at"])
+    ]

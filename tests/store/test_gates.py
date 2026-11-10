@@ -233,3 +233,170 @@ async def test_a_gates_rounds(database, evs, expected):
 async def test_a_rounds_reviewer_verdict(database, evs, expected):
     found = await rounds_of(database, evs)
     assert [r["reviewer"] for r in found["g"]] == expected
+
+
+def at(minute: int) -> str:
+    return f"2026-11-10T10:{minute:02d}:00+00:00"
+
+
+def req_at(minute):
+    return (minute, REQ)
+
+
+def end_at(minute, event):
+    return (minute, event)
+
+
+async def seeded(database, evs, threads=(), reviews=(), drafts=()):
+    """Events, threads (minute, gate, label, state, body) and reviews (minute, gate,
+    outcome, summary) at chosen minutes. A gate-less review stamps the non-draft threads
+    as submitted; the draft threads come after it, so no review does."""
+    await mk_item(database)
+
+    def thread(c, spec):
+        minute, gate, label, state, body = spec
+        tid = store.create_thread(
+            c, wid="w1", gate=gate, anchor_sha="s", body=body, file_path="a.py",
+            start_line=3, end_line=4, side="new", label=label,
+        )  # fmt: skip
+        c.execute(
+            "UPDATE review_threads SET created_at = ?, state = ? WHERE id = ?",
+            (at(minute), state, tid),
+        )
+        c.execute(
+            "UPDATE review_comments SET created_at = ? WHERE thread_id = ?", (at(minute), tid)
+        )
+
+    def write(c):
+        for minute, (kind, payload) in evs:
+            events.append(c, "w1", kind, payload)
+            c.execute(
+                "UPDATE events SET created_at = ? WHERE seq = "
+                "(SELECT max(seq) FROM events WHERE work_item_id = 'w1')",
+                (at(minute),),
+            )
+        for spec in threads:
+            thread(c, spec)
+        store.record_review(
+            c, wid="w1", gate=None, outcome="comment", summary="", head_sha="h0", base_sha="b"
+        )
+        for minute, gate, outcome, summary in reviews:
+            rid = store.record_review(
+                c,
+                wid="w1",
+                gate=gate,
+                outcome=outcome,
+                summary=summary,
+                head_sha="h1",
+                base_sha="b",
+            )
+            c.execute("UPDATE reviews SET submitted_at = ? WHERE id = ?", (at(minute), rid))
+        for spec in drafts:
+            thread(c, spec)
+
+    await database.write(write)
+    return database.read(lambda c: store.gate_rounds(c, "w1"))["g"]
+
+
+def contents(r):
+    review = r["review"]
+    return (
+        review and (review["outcome"], review["summary"], review["head_sha"]),
+        r["threads"],
+        [t["body"] for t in r["first_threads"]],
+    )
+
+
+NONE = {"total": 0, "open": 0, "by_label": {"must_fix": 0, "question": 0, "nit": 0}}
+
+
+def counts(total, open_, must_fix=0, question=0, nit=0):
+    return {
+        "total": total,
+        "open": open_,
+        "by_label": {"must_fix": must_fix, "question": question, "nit": nit},
+    }
+
+
+@pytest.mark.parametrize(
+    ("evs", "threads", "reviews", "drafts", "expected"),
+    [
+        pytest.param(
+            [req_at(1), end_at(5, rejected()), req_at(6), end_at(9, approved())],
+            [
+                (3, "g", "must_fix", "open", "fix x\nsecond line"),
+                (4, "g", "question", "resolved", "why y"),
+                (7, "g", "nit", "open", "later"),
+            ],
+            [(5, "g", "request_changes", "two things")],
+            [],
+            [
+                (
+                    ("request_changes", "two things", "h1"),
+                    counts(2, 1, must_fix=1, question=1),
+                    ["fix x", "why y"],
+                ),
+                (None, counts(1, 1, nit=1), ["later"]),
+            ],
+            id="a-review-and-threads-belong-to-the-round-they-were-made-in",
+        ),
+        pytest.param(
+            [req_at(1), end_at(5, rejected()), req_at(8), end_at(9, approved())],
+            [(6, "g", "nit", "open", "n1")],
+            [(6, "g", "comment", "walk")],
+            [],
+            [
+                (None, NONE, []),
+                (("comment", "walk", "h1"), counts(1, 1, nit=1), ["n1"]),
+            ],
+            id="made-between-two-rounds-belongs-to-the-later",
+        ),
+        pytest.param(
+            [end_at(5, rejected(by="kraft", verdict="review_threads"))],
+            [(3, "g", "must_fix", "open", "m")],
+            [],
+            [],
+            [(None, counts(1, 1, must_fix=1), ["m"])],
+            id="a-round-with-no-request-still-has-a-window",
+        ),
+        pytest.param(
+            [req_at(1), end_at(5, approved())],
+            [(3, "other", "must_fix", "open", "o"), (3, None, "must_fix", "open", "n")],
+            [(3, "other", "approve", "o")],
+            [(3, "g", "must_fix", "open", "draft")],
+            [(None, NONE, [])],
+            id="drafts-and-other-gates-are-no-part-of-a-round",
+        ),
+        pytest.param(
+            [req_at(1), end_at(9, approved())],
+            [
+                (2, "g", "nit", "open", "n1"),
+                (3, "g", "question", "open", "q1"),
+                (4, "g", "must_fix", "open", "m1"),
+                (5, "g", "must_fix", "open", "m2"),
+                (6, "g", "nit", "open", "n2"),
+            ],
+            [(4, "g", "comment", "old"), (8, "g", "request_changes", "newest")],
+            [],
+            [
+                (
+                    ("request_changes", "newest", "h1"),
+                    counts(5, 5, must_fix=2, question=1, nit=2),
+                    ["m1", "m2", "n1"],
+                )
+            ],
+            id="first-three-are-must-fix-first-then-oldest-and-the-newest-review-wins",
+        ),
+        pytest.param(
+            [req_at(1), end_at(5, rejected()), req_at(6), end_at(9, approved())],
+            [(3, "g", "must_fix", "resolved", "m")],
+            [],
+            [],
+            [(None, counts(1, 0, must_fix=1), ["m"]), (None, NONE, [])],
+            id="a-thread-shows-its-state-now-on-the-round-it-was-opened-in",
+        ),
+    ],
+)
+async def test_a_rounds_review_and_threads(database, evs, threads, reviews, drafts, expected):
+    rounds = await seeded(database, evs, threads, reviews, drafts)
+    assert [contents(r) for r in rounds] == expected

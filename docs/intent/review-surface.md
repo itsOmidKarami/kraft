@@ -28,6 +28,15 @@ and the note it was decided with.
 enforced-by: tests/store/test_gates.py::test_a_gates_rounds[rejected-then-approved], tests/store/test_gates.py::test_a_gates_rounds[skip-ends-the-round], tests/store/test_gates.py::test_a_gates_rounds[skip-with-no-open-round], tests/store/test_gates.py::test_a_gates_rounds[completed-closes-a-pending-round], tests/store/test_gates.py::test_a_gates_rounds[unchanged-revision-has-no-request], tests/api/test_board.py::test_gate_rounds_reach_the_detail_payload
 origin: src/kraft/store/gates.py
 
+## REQ a-gate-round-reports-its-review-and-threads
+WHEN a person reads a work item, the system SHALL report with each gate round the
+newest review submitted at that gate after the previous round ended and up to
+the round's end, and the count, open count, per-label count and first three
+(must-fix first, then oldest) of the non-draft threads opened at that gate in
+the same window, so a review or thread belongs to exactly one round.
+enforced-by: tests/store/test_gates.py::test_a_rounds_review_and_threads[a-review-and-threads-belong-to-the-round-they-were-made-in], tests/store/test_gates.py::test_a_rounds_review_and_threads[made-between-two-rounds-belongs-to-the-later], tests/store/test_gates.py::test_a_rounds_review_and_threads[a-round-with-no-request-still-has-a-window], tests/store/test_gates.py::test_a_rounds_review_and_threads[drafts-and-other-gates-are-no-part-of-a-round], tests/store/test_gates.py::test_a_rounds_review_and_threads[first-three-are-must-fix-first-then-oldest-and-the-newest-review-wins], tests/store/test_gates.py::test_a_rounds_review_and_threads[a-thread-shows-its-state-now-on-the-round-it-was-opened-in]
+origin: src/kraft/store/gates.py
+
 ## REQ intake-copies-an-attachment
 WHEN intake accepts an attachment, the system SHALL copy it into Kraft's own
 storage.
