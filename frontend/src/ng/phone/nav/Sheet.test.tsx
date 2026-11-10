@@ -85,7 +85,8 @@ describe("the three shapes (A.5)", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     await userEvent.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(opener).toHaveFocus();
+    // Frame hands focus back in a passive effect cleanup, which React runs after the dialog is already gone from the DOM.
+    await waitFor(() => expect(opener).toHaveFocus());
   });
 });
 
