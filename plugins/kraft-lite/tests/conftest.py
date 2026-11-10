@@ -132,9 +132,13 @@ SLICE_PLAN = {
     "state_branch": "kraft-lite/state",
     "slices": [
         {"key": "a", "title": "Alpha", "tasks": [1, 2]},
-        {"key": "b", "title": "Beta", "tasks": [3], "after": ["a"]},
+        {"key": "b", "title": "Beta", "tasks": [3, 4, 5], "after": ["a"]},
     ],
 }
+
+
+#: The five tasks every plan `Walk.produce` writes holds: what a slicing must cover.
+_TASKS = "".join(f"### Task {n}: Step {n}\n" for n in range(1, 6))
 
 
 class Walk:
@@ -165,7 +169,7 @@ class Walk:
         recorded as its task would: the final gate is never approved without one."""
         for kind in {t["produces"] for s in state["steps"] for t in s["tasks"] if t["produces"]}:
             path = cwd / f"{kind}.md"
-            path.write_text(f"# The {kind}\n")
+            path.write_text(f"# The {kind}\n" + (_TASKS if kind == "plan" else ""))
             self.run(cwd, "produced", "--kind", kind, "--path", str(path))
 
     def to(self, cwd: Path, node: str) -> None:
