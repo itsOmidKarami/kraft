@@ -1,6 +1,6 @@
 ---
 name: prepare
-description: "Writes the spec for non-trivial work, then judges whether it runs inline in this session or is handed to Kraft. Use before starting work that needs a spec, or when unsure whether work belongs inline or in Kraft, or how to split it (sub-agents, slices or separate work items); kraft:handoff does the filing once that is decided."
+description: "Use before starting non-trivial work that needs a spec, when unsure whether it should run inline in this session or be handed to Kraft, or when deciding how to split it into sub-agents, slices or separate work items. Writes the spec first, then states that call; kraft:handoff does the filing once it is decided."
 ---
 
 # Preparing work
@@ -15,23 +15,23 @@ different one. If the skill isn't installed, say so and ask which to use instead
 Its own self-review and user-review gate cover "review the spec";
 don't add a second review pass on top of it.
 
+Stop when the spec is approved. If the spec skill then hands on to a plan
+skill (brainstorming invokes `superpowers:writing-plans`), don't follow it:
+come back to step 2, and step 3 decides whether a plan is written. If the spec
+skill splits the request into several independent projects, carry that split
+into step 2's separate-items call.
+
 ## 2. Judge
 
-Right after the spec, before touching a plan. Read the class (spike, bounded or
-architectural) off the spec. If the spec skill gave it no such classification,
-judge it yourself by those three classes and say that you did:
+Right after the spec, before touching a plan. Size the work by what the spec
+describes; the spec skill may already have said it (`superpowers:brainstorming`
+sizes work as a quick task, a small change, or a project with a written
+design). If it didn't, size it yourself and say that you did:
 
-- **Inline** - the spec came out spike- or bounded-classified. Go straight to
-  the normal dev workflow (TDD, etc.) in this session. No plan doc needed:
-  that's already bounded's own terminal state.
-  Two rules for the tests you write there: a fix adds a row, not a function
-  (find the test that already covers the behaviour and add a parametrized case
-  with a readable id; a new test function is for a new behaviour), and look in
-  the repo's shared test helpers and fixtures before writing one, since a
-  copied helper is a second place to keep current. The repo's own testing
-  guidance (its `CLAUDE.md`, `AGENTS.md` or CONTRIBUTING) says where they live.
-- **Handoff** - the spec came out architectural-classified, or the user already
-  said the work is too big for this session, needs gates, or spans sessions.
+- **Inline** - a quick task, a small change or a spike. Go straight to the
+  normal dev workflow (TDD, etc.) in this session, with no plan doc.
+- **Handoff** - a project with a written design, or the user already said the
+  work is too big for this session, needs gates, or spans sessions.
   Use `kraft:handoff` to file it, attaching the spec. Kraft's own chain plans it -
   don't write a plan doc just to hand it straight to something that writes its
   own.
@@ -46,9 +46,9 @@ sub-agents. Sub-agents are the default, inline or inside one Kraft item: they
 share the worktree and need no setup or join. A part earns more only when it
 makes sense on its own: a coherent piece with its own tests, which its own
 implement, verify and review loop can check without another part's code. Size
-is a weak hint, not the test. Parts that stand alone like that move an
-inline-classified item to a handoff, unless the user said "inline": then keep
-it inline with sub-agents, and say which parts would stand alone. Otherwise:
+is a weak hint, not the test. Parts that stand alone like that move work you
+judged inline to a handoff, unless the user said "inline": then keep it inline
+with sub-agents, and say which parts would stand alone. Otherwise:
 
 - **Separate work items**, when each part can merge on its own and is a full
   pull request in its own right. One `kraft:handoff` per part, each attaching
@@ -66,6 +66,13 @@ call in the same message as the inline/handoff judgment.
 
 Whether to confirm these calls before executing them is step 4's rule.
 
+**Tests for inline work.** A fix adds a row, not a function: find the test that
+already covers the behaviour and add a parametrized case with a readable id; a
+new test function is for a new behaviour. Look in the repo's shared test
+helpers and fixtures before writing one, since a copied helper is a second
+place to keep current. The repo's own testing guidance (its `CLAUDE.md`,
+`AGENTS.md` or CONTRIBUTING) says where they live.
+
 ## 3. Plan - only if the user explicitly asked for one
 
 A plan is bound to the code as it is right now; a spec isn't. A spec written
@@ -75,7 +82,7 @@ speculatively.
 If asked, run a plan skill - default `superpowers:writing-plans` - with its own
 review gate. Re-run the judgment above with the plan in hand (it sharpens the
 same inline/handoff call - e.g. a plan that turns out to be one small task can
-downgrade an architectural spec to inline), and attach the plan alongside the
+move a project-sized spec to inline), and attach the plan alongside the
 spec if handing off. If the parts are slices, end the plan with a `## Slices`
 section, one bullet per slice (`- **Slice 1: Parser.** Tasks 1-3.`), nothing
 but task numbers after "Tasks", two to six slices by default. A slice can't use

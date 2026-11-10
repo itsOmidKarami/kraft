@@ -110,4 +110,6 @@ one. A section with no task is a gap: add the task. Then check that a name you
 used in a late task is spelled the same way as where you defined it. Last,
 check that every task has its `### Task N: title` heading and a failing test of
 its own: Kraft does not count a task without the heading, and a task without a
-test gives its reviewer nothing to run.
+test gives its reviewer nothing to run. If you wrote a `## Slices` section, check
+each slice against both conditions above, and that every number it lists is a
+task heading of yours: a plan whose slices don't parse is refused at its gate.
