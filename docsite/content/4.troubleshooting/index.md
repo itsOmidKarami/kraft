@@ -32,7 +32,7 @@ A pending gate isn't a stop: it waits for `kraft item approve ID` or `kraft item
 - [Failed tasks and fix loops](/troubleshooting/failed-tasks-and-fix-loops): `task failed in node ...`, `needs_context: ...`, `... exhausted`, `stuck: ...`, a closed merge request, a crash and a parent that waits on its slices.
 - [Launch and setup stops](/troubleshooting/launch-and-setup-stops): `could not start ...`, `no setup_command declared ...` and `no user.name configured ...`, before any agent ran.
 - [Caps, budgets and waits](/troubleshooting/caps-budgets-and-waits): `budget cap reached`, `hit its time cap`, and an item that waits on CI, a review or a machine.
-- [Forge stops](/troubleshooting/forge-stops): a forge or git call that failed on a login, a rate limit, an unreachable host or a changed account.
+- [Forge stops](/troubleshooting/forge-stops): `cannot run: forge ...`, and a forge or git call that failed on a login, a rate limit, an unreachable host or a changed account.
 - [Worktree and git stops](/troubleshooting/worktree-and-git-stops): a rebase conflict, a worktree git won't rebase, or a branch someone else pushed to.
 - [Sandbox and Kit stops](/troubleshooting/sandbox-and-kit-stops): the memory-limit, Kit, workspace-member and nested-repository stops of a sandboxed item, and the sandbox rows of `kraft admin doctor`.
 - [A kind: os sandbox is refused](/troubleshooting/os-sandbox-refusals): a host that can't run bubblewrap or Seatbelt, or a command outside the sandbox's view.
