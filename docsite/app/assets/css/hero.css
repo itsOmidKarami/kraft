@@ -156,9 +156,10 @@
   max-width: 32ch;
 }
 
-/* On a phone the headline and lede are a size smaller and start higher, so
-   the board picture after the buttons shows on the first screen. */
-@media (max-width: 639px) {
+/* On a phone, upright or on its side, the headline and lede are a size
+   smaller and start higher, so more of the first screen is left for the
+   board picture after the buttons. */
+@media (max-width: 639px), (orientation: landscape) and (max-height: 500px) {
   .landing-home [data-slot='container'] {
     padding-top: 1.5rem;
   }
@@ -169,6 +170,13 @@
 
   .landing-home [data-slot='description'] {
     font-size: 1rem;
+  }
+}
+
+/* A touch screen gets buttons a finger can hit: 44px, the WCAG target size. */
+@media (pointer: coarse) {
+  .landing [data-slot='links'] a {
+    min-height: 2.75rem;
   }
 }
 
