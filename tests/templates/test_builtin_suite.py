@@ -104,3 +104,29 @@ def test_the_no_ci_chain_of_the_guide_resolves(tmp_path):
         "verification": [tm.TestSuite.TARGETED],
         "full_suite": [tm.TestSuite.FULL],
     }
+
+
+@pytest.mark.parametrize("opts_in", [False, True], ids=["shipped-default", "opted-in"])
+def test_a_chain_opts_into_the_rebase_conflict_resolver_by_naming_it(tmp_path, opts_in):
+    """`resolve_rebase_conflict` is on no shipped chain: only a chain that names
+    it under `on_base_changed.on_conflict` runs it."""
+    shutil.copytree(_CONFIG, tmp_path / "config")
+    root = tmp_path / "config"
+    chain = {"id": "rebase-resolver", "extends": "default"}
+    if opts_in:
+        handler = {"tasks": [{"id": "resolve", "extends": "resolve_rebase_conflict"}]}
+        chain["overrides"] = {
+            "merge_request_feedback": {"on_base_changed": {"on_conflict": handler}}
+        }
+    (root / "chains" / "rebase-resolver.yaml").write_text(yaml.safe_dump(chain))
+
+    resolved = TemplateLibrary.from_yaml_dir(root).resolve_chain("rebase-resolver")
+
+    feedback = next(n for n in resolved.nodes if n.id == "merge_request_feedback")
+    handler = feedback.node.on_base_changed.on_conflict
+    assert feedback.node.on_base_changed.restart_from == "verification"
+    if not opts_in:
+        assert handler is None
+        return
+    [task] = handler.tasks
+    assert (task.id, task.kind, task.profile) == ("resolve", tm.TaskKind.AGENT, "strong")

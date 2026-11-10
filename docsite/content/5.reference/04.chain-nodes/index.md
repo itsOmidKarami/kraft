@@ -143,11 +143,31 @@ before the walk passes it again.
 | Key | Type | Required | Default | Meaning |
 |---|---|---|---|---|
 | `restart_from` | string | yes | — | Names this node or an earlier exec node, never a gate. On a node with an `mr.merge` task after a `chain_finalized` gate, it must name a node before that gate. |
-| `on_conflict` | mapping: `tasks` or `steps`, and `read_only` | no | unset | Names the task or steps that resolve a conflicting rebase. |
+| `on_conflict` | mapping: `tasks` or `steps`, and `read_only` | no | unset | Names the task or steps that resolve a conflicting rebase. The library's `resolve_rebase_conflict` is one: [see below](#resolve-a-rebase-conflict-with-an-agent). |
 
 If a retry or resume starts at a node that has its own `mr_rebase` task and an
 `on_base_changed`, that task does the rebase, and a changed base still re-runs
 the span.
+
+### Resolve a rebase conflict with an agent
+
+_Added in next_
+
+The shipped library has the task `resolve_rebase_conflict`, and no shipped chain names it. Name it under `on_conflict` and a base that moves and conflicts while the item waits on CI goes to an agent first. It re-runs the rebase on the item's branch and resolves the conflict. Kraft then restarts the span, so verification runs again on the new base.
+
+```yaml [config/chains/my-chain.yaml]
+id: my-chain
+extends: default
+overrides:
+  merge_request_feedback:
+    on_base_changed:
+      on_conflict:
+        tasks:
+          - id: resolve
+            extends: resolve_rebase_conflict
+```
+
+If the agent reports `failed`, or ends without rebasing onto the new base, the item stops with a `conflict` stop and git's rebase output in its reason. A `needs_context` answer stops it with the agent's question.
 
 ## on_merge_rejected
 
