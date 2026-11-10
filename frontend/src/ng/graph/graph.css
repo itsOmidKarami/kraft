@@ -231,6 +231,15 @@
 .gateview-target:is(:hover, :focus-visible) { background: var(--surface-2); }
 .gateview-note { max-width: 380px; margin: 0; padding: 0 4px; background: var(--bg); text-align: center; font-size: var(--fs-label); line-height: 1.55; color: var(--text-muted); text-wrap: pretty; }
 .gateview-said { box-sizing: border-box; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%; max-width: 380px; padding: 8px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.gateview-review { box-sizing: border-box; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%; max-width: 380px; padding: 8px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: var(--fs-label); color: var(--text-sub); }
+.gateview-review-outcome { color: var(--text); font-weight: 600; }
+.gateview-review-summary { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.gateview-review-count { color: var(--text-muted); }
+.gateview-review-threads { display: flex; flex-direction: column; gap: 3px; width: 100%; margin: 0; padding: 0; list-style: none; }
+.gateview-review-threads li { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.gateview-review-where { flex: none; font-family: ui-monospace, Menlo, monospace; color: var(--text-muted); }
+.gateview-review-label { flex: none; color: var(--text-muted); }
+.gateview-review-body { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gateview-target.is-taken { border-style: solid; }
 .gateview-foot { position: absolute; bottom: 12px; }
 

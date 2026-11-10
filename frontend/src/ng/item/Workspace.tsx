@@ -248,7 +248,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
       {viewing && <ChainStrip nodes={graph.nodes} viewing={viewing.id} names onOpen={(node) => dispatch({ type: "focus", node })} onBack={() => dispatch({ type: "back" })} />}
       <div className="item-area" ref={areaRef}>
         {viewing?.kind === "gate" ? (
-          <GateView {...gateView(item, viewing, now, sel, { doc: () => setArtifact(true), reject: (to) => dispatch({ type: "focus", node: to }), read: (note, button) => { noteButton.current = button; setRoundNote(note); } }, place.pass)} right={reserve}
+          <GateView {...gateView(item, viewing, now, sel, { doc: () => setArtifact(true), reject: (to) => dispatch({ type: "focus", node: to }), read: (note, button) => { noteButton.current = button; setRoundNote(note); }, readReview: (doc, button) => { noteButton.current = button; setRoundNote(doc); } }, place.pass)} right={reserve}
             onRound={(n) => go({ ...place, pass: n })}
             onGate={() => pick({ kind: "node", node: viewing.id })}
             onReviewer={() => pick(reviewerSel(item, viewing))}

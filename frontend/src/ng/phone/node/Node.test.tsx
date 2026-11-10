@@ -373,7 +373,7 @@ describe("the node screen (D)", () => {
     if (message) expect(screen.getByText(message)).toBeInTheDocument();
   });
 
-  const round = (n: number, over = {}) => ({ n, requested_at: "2026-09-13T09:00:00Z", ended_at: "2026-09-13T09:05:00Z", outcome: "approved", by: "assistant", note: null, sent_to: null, reopened: false, reviewer: null, ...over });
+  const round = (n: number, over = {}) => ({ n, requested_at: "2026-09-13T09:00:00Z", ended_at: "2026-09-13T09:05:00Z", outcome: "approved", by: "assistant", note: null, sent_to: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [], ...over });
   // The skip is only in the server's rounds: the page's events (its newest hundred) have long dropped it.
   it("a skipped gate says it was skipped, not that it decides when reached (R14b-05)", async () => {
     mount(item("done", null, { gate_rounds: { plan_approval: [round(1, { outcome: "skipped", by: null })] } }), "/work-items/w1/nodes/plan_approval", { "GET /work-items/w1/events": [200, []] });

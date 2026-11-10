@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { MemoryRouter } from "react-router-dom";
 import { GateView } from "./GateView";
 
 const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "graph.css"), "utf-8");
@@ -148,5 +149,27 @@ describe("GateView", () => {
     render(<GateView gate={{ id: "approve_plan" }} reject={{ id: "plan", label: "plan", fixed: true }} />);
     expect(screen.getByText("fixed")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /reject/ })).toBeNull();
+  });
+});
+
+describe("GateView: a review round", () => {
+  const review = { outcome: "changes requested", summary: "Two things.", count: "2 threads · 1 must-fix · 1 open", threads: [{ id: "t1", where: "a.py:3", label: "must-fix", body: "fix x" }], href: "/work-items/w1/review?gate=g&round=1" };
+
+  it("shows the review, its count and first threads, and opens the round in review", () => {
+    render(<MemoryRouter><GateView gate={{ id: "g" }} review={review} /></MemoryRouter>);
+    const box = screen.getByRole("region", { name: "Review" });
+    for (const text of ["changes requested", "Two things.", "2 threads · 1 must-fix · 1 open", "a.py:3", "must-fix", "fix x"]) expect(box).toHaveTextContent(text);
+    expect(screen.getByRole("link", { name: "Open in review" })).toHaveAttribute("href", review.href);
+  });
+
+  it("reads the review's summary with its own label, the note's button keeping its words", async () => {
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(200);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(100);
+    const onRead = vi.fn();
+    render(<MemoryRouter><GateView gate={{ id: "g" }} review={{ ...review, onRead }} said={{ note: "n", at: "t", n: 1, onRead }} /></MemoryRouter>);
+    await userEvent.click(screen.getByRole("button", { name: "Read the review" }));
+    expect(onRead).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Read the note" })).toBeInTheDocument();
+    vi.restoreAllMocks();
   });
 });

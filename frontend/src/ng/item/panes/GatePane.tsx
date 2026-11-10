@@ -11,7 +11,7 @@ import { request } from "../../http";
 import { localTime } from "../../../format";
 import { act } from "../actions";
 import { TestsLine } from "../TestsLine";
-import { byWord, gateState, isPastRound, outcomeWord, roundShown, roundsOf } from "../gateRounds";
+import { byWord, gateState, isPastRound, isReviewRound, outcomeWord, roundShown, roundsOf, threadCountLine } from "../gateRounds";
 import { OUTCOME } from "../reviewOutcome";
 import { rejectTarget } from "../graph";
 import { totals, useDiffFiles } from "../Top";
@@ -99,6 +99,7 @@ export function GateBody({ item, version, gate, picked, onPick }: { item: ItemDe
                       {r.ended_at && <span className="ip-hist-at">{localTime(r.ended_at)}</span>}
                     </span>
                     <span className="ip-hist-what">{outcomeWord(r)}{by ? ` · ${by}` : ""}</span>
+                    {isReviewRound(r) && r.ended_at && <span className="ip-hist-what">{threadCountLine(r)}</span>}
                   </button>
                 </li>
               );

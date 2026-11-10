@@ -126,3 +126,28 @@ describe("gateView", () => {
     expect(gateView(asked(round(1, { reopened: true })), V1[1], 0, { kind: "chain" }, on).gate.state).toBe("todo");
   });
 });
+
+describe("gateView: a review round", () => {
+  const counts = (total: number, open: number, by_label: Partial<GateRound["threads"]["by_label"]>) => ({ total, open, by_label: { must_fix: 0, question: 0, nit: 0, ...by_label } });
+  const first = [
+    { id: "t1", file_path: "a.py", start_line: 3, end_line: 3, label: "must_fix", state: "open", body: "fix x" },
+    { id: "t2", file_path: "b.py", start_line: null, end_line: null, label: null, state: "resolved", body: "why y" },
+  ] as GateRound["first_threads"];
+  const reviewedRound = round(1, { outcome: "rejected", note: "SECRET NOTE", sent_to: "plan", review: { id: "rv", outcome: "request_changes", summary: "Two things.", head_sha: "h" }, threads: counts(2, 1, { must_fix: 1, question: 1 }), first_threads: first });
+
+  it("shows the review in place of the note", () => {
+    const v = gateView(asked(reviewedRound, round(2, { outcome: "pending", by: null, ended_at: null })), V1[1], 0, { kind: "chain" }, on, 1);
+    expect(v.said).toBeUndefined();
+    expect(v.review).toMatchObject({ outcome: "changes requested", summary: "Two things.", count: "2 threads · 1 must-fix · 1 question · 1 open", href: "/work-items/w1/review?gate=plan_approval&round=1" });
+    expect(v.review?.threads.map((t) => t.where)).toEqual(["a.py:3", "b.py"]);
+  });
+
+  it.each([
+    ["a note round keeps its note", round(1, { outcome: "rejected", note: "redo", sent_to: "plan" }), "redo"],
+    // The pending round holds the threads being made now, and has no review to show.
+    ["the pending round with threads has no review block", round(1, { outcome: "pending", by: null, ended_at: null, threads: counts(2, 2, { nit: 2 }) }), undefined],
+  ])("%s", (_name, r, said) => {
+    const v = gateView(asked(r), V1[1], 0, { kind: "chain" }, on);
+    expect([v.review, v.said?.note]).toEqual([undefined, said]);
+  });
+});

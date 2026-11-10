@@ -540,7 +540,7 @@ describe("⋮ (C.5)", () => {
 });
 
 describe("a gate in the chain reads its rounds, not the page's events (R15b-03)", () => {
-  const ended = (outcome: string, by: string | null) => ({ n: 1, requested_at: "t", ended_at: "t", outcome, by, note: null, sent_to: null, reopened: false, reviewer: null });
+  const ended = (outcome: string, by: string | null) => ({ n: 1, requested_at: "t", ended_at: "t", outcome, by, note: null, sent_to: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [] });
   it.each([
     ["skipped", ended("skipped", null), "skipped", "approved"],
     ["approved by you", ended("approved", "human"), "approved", "agent"],

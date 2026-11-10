@@ -196,6 +196,16 @@ describe("GateBody", () => {
     expect(rows[1]).toHaveTextContent("changes requested · assistant");
   });
 
+  it("says a review round's count in its History row, never its note", () => {
+    stubFetch({ "GET /work-items/w1/threads": [200, []] });
+    const reviewed = round(1, { outcome: "rejected", by: "human", note: "must fix: SECRET NOTE", sent_to: "plan", review: { id: "rv", outcome: "request_changes", summary: "s", head_sha: "h" }, threads: { total: 2, open: 1, by_label: { must_fix: 1, question: 1, nit: 0 } } });
+    render(<GateBody item={detail({ ...rounds(reviewed, round(2, { outcome: "pending", by: null, ended_at: null })), pending_gate: "plan_approval" })} version="1" gate={gate} />);
+    const row = screen.getByRole("button", { name: /^Round 1/ });
+    expect(row).toHaveTextContent("2 threads · 1 must-fix · 1 question · 1 open");
+    expect(row).not.toHaveTextContent("SECRET NOTE");
+    expect(screen.getByRole("button", { name: /^Round 2/ })).not.toHaveTextContent("thread");
+  });
+
   // It repeats the status line, until a round has ended.
   it.each([
     ["only a round that is waiting", rounds(round(1, { outcome: "pending", by: null, ended_at: null })), null],
