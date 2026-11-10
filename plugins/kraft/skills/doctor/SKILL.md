@@ -34,7 +34,7 @@ paused unless they were created with `--autostart`. If both checks pass, run
 |---|---|
 | Edited the template library, `policy.yaml` or `intake.yaml` | `kraft admin reload`: rereads from disk, no restart |
 | `server` fails | `kraft admin start --detach`: `restart` refuses when there is nothing to restart |
-| Server wedged, or `restart` warns it runs old code | `kraft admin restart`: stops, then starts it the way it was running |
+| Server wedged, or `restart` warns it runs old code | `kraft admin restart`: stops, then starts it the way it was running. A server running in a terminal is only stopped: `kraft admin start --detach`, or ask the person to run `kraft` there |
 | `version` says a newer release is available | `kraft admin update [--restart]` |
 | `mcp server` not `ok` | Install the Kraft plugin, or `kraft admin init` for a terminal-only setup; then doctor again |
 | A `repo <name>` row not `ok` | `kraft:onboard` |
@@ -45,10 +45,14 @@ paused unless they were created with `--autostart`. If both checks pass, run
 list --all --status=active` and name what it shows. A restart leaves a worktree
 item's local steps running, but ends the steps of an item that runs in place.
 Offer `--when-free` to wait for nothing to be running, and pass `-y` only once
-the person agrees. `update` also replaces the installed program.
+the person agrees. `update` also replaces the installed program, and a newer
+release can migrate the database with no way back: before it, point the person
+at the backup step in https://kraft-sdlc.dev/guides/run/upgrade-kraft.
 
 ## 3. Verify
 
 Run `kraft admin doctor` again and report the result. A fix that was not
-followed by a clean run is a guess. If a line still fails, stop and report it
-rather than trying a further command.
+followed by a clean run is a guess: clean is exit 0 with the row you fixed `ok`.
+A leftover `warn` (`version` can't reach the release feed, say) is reported, not
+chased. If a line still fails, stop and report it rather than trying a further
+command.

@@ -7,16 +7,20 @@ disable-model-invocation: true
 # Steward a Kraft pull request
 
 These are this repository's conventions for getting a pull request mergeable.
-`CONTRIBUTING.md` is the source of truth: where it disagrees with this file, it
-wins. Read `docs/ci.md`, "What CI checks", before working a red check.
+`CONTRIBUTING.md` and the docs pages it links are the source of truth: where
+they disagree with this file, they win. Read `docs/ci.md`, "What CI checks",
+before working a red check.
 
 **In a Kraft worker** (`$KRAFT_WORK_ITEM_ID` set) there's no `gh` and no user
 to ask. Set a label with `kraft item mr-label`; where it isn't available (a
 sandboxed worker's `kraft` has no `mr-label`), name the label you need in your
-summary. Re-run a job with
-`kraft item rerun-ci --reason "..."`, and leave a conflict with `main` to
-Kraft: report it, never merge in the worktree. What this file says to ask the
-user about, leave undone and say so in your summary.
+summary. Read a job's log with `kraft view jobs --pipeline P` and `kraft view
+job-log --pipeline P --job J`. Re-run a job with
+`kraft item rerun-ci --reason "..."` only for CI that failed outside the code
+(a download or runner failure before any check ran), once per attempt and only
+when your task prompt allows it. Leave a conflict with `main` to Kraft: report
+it, never merge in the worktree. What this file says to ask the user about,
+leave undone and say so in your summary.
 
 **Done** when `test`, both `kraft-lite` legs, `removals declared`,
 `release impact declared` and, when it ran, `docs` are green. `docs nudge`,
@@ -117,8 +121,8 @@ heading, never a version number.
 ## Ask the user first
 
 - Pushing a `kraft/<branch>-screenshots` branch for a pull request that changes
-  a screen. CONTRIBUTING.md, "A pull request that changes a screen", says what
-  it holds.
+  a screen. docs/maintainers.md, "A pull request that changes a screen", says
+  what it holds.
 - Any change to `.github/workflows/`, `RELEASING.md` or
   `.claude/skills/release/`, unless the pull request is about them.
 - Changing a label on a pull request you did not open.

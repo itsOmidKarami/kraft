@@ -1,6 +1,6 @@
 ---
 name: gates
-description: "Approves or rejects the gate a Kraft work item is waiting on (a spec, a plan, or the final review that merges the work), and files and submits review threads. Use when a person has made the call at a gate, said to request changes or ship it, or wants line comments sent; kraft:review helps decide first, kraft:steer pauses, resumes and redirects, and kraft:triage covers stopped items."
+description: "Approves, rejects or skips the gate a Kraft work item is waiting on (a spec, a plan, or the final review that merges the work), files and submits review threads, and starts a filed item. Use when a person has made the call at a gate, said to request changes or ship it, or wants line comments sent or a filed item started; kraft:review helps decide first, kraft:steer pauses, resumes and redirects a started item, and kraft:triage covers stopped items."
 ---
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
@@ -13,9 +13,14 @@ connection error.
 A gate is the person's decision. Before `approve_gate`, `reject_gate`,
 `skip_work_item` or `submit_review`, they have to have answered this gate in
 this conversation: an instruction that names it counts, even a conditional one
-(`kraft:review` says how to meet it). Your own recommendation, green CI or an
-earlier general "go ahead" doesn't. Approving a gate because it seemed obvious
-is how the gate stops meaning anything.
+(`kraft:review` says how to meet it), and so does a yes to your question that
+named it. With no gate pending, an instruction to send the review counts. Your
+own recommendation, green CI or an earlier general "go ahead" doesn't. Approving
+a gate because it seemed obvious is how the gate stops meaning anything.
+
+Decide through these MCP tools, not `kraft item approve`, `reject` or `review`
+from a shell: Kraft records who called, and a shell call is stored as the
+person's own decision.
 
 ## Approve or reject
 
@@ -24,19 +29,24 @@ the gate the person named before you call; if it isn't, tell them which one is
 pending rather than deciding it.
 
 - `approve_gate(gate=...)` - let the chain continue past that gate.
-  A chain revision gate also needs `approve_gate(digest=...)`, with the
-  `digest` that `get_gate_artifact()` returned alongside the revision the person
-  read. If the revision changed since, the approval is refused: show it again.
-  The final review (the gate that merges the work) needs
-  `approve_gate(head=...)` too, with the `head` that `get_work_item()` returned
-  as `review_head` when the person read the diff (`get_gate_artifact()` returns
-  it as `head`). Skipping that gate takes `skip_work_item(head=...)`, and
-  `submit_review` takes `head=` for an approve. If the branch moved since, the
-  call is refused: show the change again.
+  - A chain revision gate also needs `approve_gate(digest=...)`, with the
+    `digest` that `get_gate_artifact()` returned alongside the revision the
+    person read. If the revision changed since, the approval is refused: show it
+    again. `submit_review` can't carry a digest, so use `approve_gate` for it.
+  - The final review (the gate that merges the work) needs `head=` too, on
+    `approve_gate`, `skip_work_item` and an approving `submit_review`: the
+    `head` that `get_work_item()` returned as `review_head` when the person read
+    the diff (`get_gate_artifact()` returns it as `head`), not one fetched now.
+    If the branch moved since, the call is refused: show them the change again
+    and take their answer on it. Don't retry with the new head on the old
+    go-ahead.
 - `reject_gate(note="...")` - send the chain back to the node that can address
   the note; `node=` overrides where it re-enters, at or before the gate's own. The
   note is required, because a rejection with no reason strands whoever picks the
   work up next.
+- `skip_work_item(note=...)` - advance past the pending gate without approving
+  it. It takes no `gate=`, so check `pending_gate` first. It is the person's call
+  every time.
 
 ## Review threads
 
@@ -65,19 +75,19 @@ note. Threads work at any point in an item's life, gate or no gate:
 
 ## Starting a filed item
 
-A filed work item lands paused. `resume_work_item()` starts it for the first
-time, once the person asks. Pausing, resuming and steering a started item are
-`kraft:steer`'s.
+A filed work item lands paused. `resume_work_item(work_item_id=...)` starts it
+for the first time, once the person asks. Pausing, resuming and steering a
+started item are `kraft:steer`'s.
 
 ## Confirm it worked
 
-After any of these, call `get_work_item()` and check the status and current
-node moved as expected: an approved gate is no longer pending, a started item
-is active. Report what you see, not what you
-meant to cause.
+After any of these, read the status and `pending_gate` from the answer (after
+`submit_review`, call `get_work_item()`) and check they moved as expected: an
+approved gate is no longer pending, a started item reads active, queued or
+blocked. Report what you see, not what you meant to cause.
 
 ## If you are a Kraft worker session
 
-You cannot act on the work item that is running you - approve, reject, pause and
+You can't act on the work item that is running you: approve, reject, pause and
 resume against your own item are all refused. Report what you found and let the
 person decide.

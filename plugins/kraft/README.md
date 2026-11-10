@@ -86,7 +86,7 @@ without the slash (`kraft:board`).
 | `/kraft:review` | Read what a gate is about and recommend approve or reject, with reasons. |
 | `/kraft:steer` | Pause, resume or redirect a work item that is heading the wrong way. |
 | `/kraft:triage` | Find out why a work item stopped and route it. |
-| `/kraft:check` | Report where a repo's Kraft config has drifted from this version. |
+| `/kraft:check` | Report where Kraft's config on this machine has drifted from this version. |
 | `/kraft:doctor` | Diagnose and fix an unhealthy Kraft server. |
 
 What an agent files through the MCP tools lands paused: a person starts it from the board. Details, the MCP
