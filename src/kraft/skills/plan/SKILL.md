@@ -21,9 +21,9 @@ read is a guess the implementer will trust.
 
 ## If you are revising
 
-A human read the existing document and asked for changes; their note leads your
-task instruction. Change what they objected to and leave the rest alone, rather
-than rewriting the whole thing to look new.
+The note on the existing document, a person's or an automated reviewer's,
+leads your task instruction. Change what it objected to and leave the rest
+alone, rather than rewriting the whole thing to look new.
 
 ## What the plan contains
 
