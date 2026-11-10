@@ -22,7 +22,7 @@ type ThreadRow = { id: string; state: string; gate: string | null; node_id: stri
 
 /** The gate's pane (Decisions §5 Gate pane, §6 Gates): the change it decides
  *  on, open threads, what it decides on, where reject goes, its status, and its
- *  History: every round with who decided and the note. `picked` is the round
+ *  History: every round with who decided; the note is read from the canvas. `picked` is the round
  *  shown (undefined: the newest); a past one describes that round, not now. */
 export function GateBody({ item, version, gate, picked, onPick }: { item: ItemDetail; version: string; gate: ChainNode; picked?: number; onPick?: (n: number | undefined) => void }) {
   const past = isPastRound(item, gate.id, picked);
@@ -67,7 +67,7 @@ export function GateBody({ item, version, gate, picked, onPick }: { item: ItemDe
           <ul className="ip-notes">{concerns.map((c, i) => <li key={i}>{c}</li>)}</ul>
         </>
       )}
-      {/* The round's reviewer verdict. Kraft's note on it, such as the files it changed, which void its verdict, shows here; a reviewer's rejection is also the round's note, which History shows once. */}
+      {/* The round's reviewer verdict. Kraft's note on it, such as the files it changed, which void its verdict, shows here; a reviewer's rejection is also the round's note, which the canvas previews. */}
       {outcome && (
         <>
           <h3 className="ip-h">Reviewer: {OUTCOME[outcome.kind].word}</h3>
@@ -99,7 +99,6 @@ export function GateBody({ item, version, gate, picked, onPick }: { item: ItemDe
                       {r.ended_at && <span className="ip-hist-at">{localTime(r.ended_at)}</span>}
                     </span>
                     <span className="ip-hist-what">{outcomeWord(r)}{by ? ` · ${by}` : ""}</span>
-                    {r.note && <span className="ip-hist-note">{r.note}</span>}
                   </button>
                 </li>
               );

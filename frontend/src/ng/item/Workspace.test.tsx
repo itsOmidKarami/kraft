@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -48,6 +48,30 @@ describe("Workspace", () => {
     await userEvent.click(screen.getByRole("button", { name: "latest ↩" }));
     expect(where()).toBe("/work-items/w1/nodes/plan_approval");
     expect(document.querySelector(".gateview-said")).toBeNull();
+  });
+
+  // The canvas previews a round's note; the drawer holds it whole, and gives focus back to the button that opened it.
+  it("opens a round's whole note in the document drawer from Read the note, and returns focus to the button", async () => {
+    const note = "Cover the `invalidation` story.\n\nAlso say what a **blob_sha** change does mid-query.";
+    const round = (n: number, over = {}) => ({ n, requested_at: "2026-09-13T09:00:00Z", ended_at: "2026-09-13T09:05:00Z", outcome: "approved", by: "assistant", note: null, sent_to: null, reopened: false, reviewer: null, ...over });
+    const calls = stubFetch();
+    mount("/work-items/w1/nodes/plan_approval?pass=1", { gate_rounds: { plan_approval: [round(1, { outcome: "rejected", note, sent_to: "plan" }), round(2)] } } as never);
+    const preview = document.querySelector(".gateview-said")!;
+    expect(preview).toHaveTextContent("invalidation");
+    expect(preview).not.toHaveTextContent("blob_sha");
+    const before = calls.length;
+    const button = screen.getByRole("button", { name: "Read the note" });
+    // A press that leaves focus where it was (Safari does not focus a pressed button): the drawer is told where to return it.
+    fireEvent.click(button);
+    expect(button).not.toHaveFocus();
+    const drawer = await screen.findByRole("dialog", { name: "plan_approval · round 1 note" });
+    expect(drawer).toHaveTextContent(/changes requested · assistant · .+/);
+    expect(within(drawer).getByText("blob_sha").tagName).toBe("STRONG");
+    expect(within(drawer).getByText("invalidation").tagName).toBe("CODE");
+    expect(calls.length).toBe(before);
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "plan_approval · round 1 note" })).toBeNull();
+    expect(button).toHaveFocus();
   });
 
   describe("a gate pane's rounds", () => {

@@ -1,4 +1,3 @@
-import { useId, useLayoutEffect, useRef, useState } from "react";
 import { hint } from "../ui/Tooltip";
 import { FileText, NodeIcon } from "../icons";
 import { NodeGlyph } from "./NodeGlyph";
@@ -7,6 +6,7 @@ import "./graph.css";
 import { Badge } from "../ui/Badge";
 import type { Rounds } from "../item/nodeGraph";
 import { RoundPicker } from "./RoundPicker";
+import { NotePreview } from "../ui/NotePreview";
 
 type Reviewer = { id?: string; icon?: string; state?: GlyphState; running?: boolean; chip?: string; chipTone?: "green" | "red" | "amber"; sel?: boolean; mark?: "add" | "change"; prob?: boolean; mode?: "decides" | "checks_first" };
 type Props = {
@@ -18,8 +18,8 @@ type Props = {
   /** `taken`: the round shown sent work back to `id`, so the target is drawn solid; `fixed`: its reviewer repaired the worktree itself. */
   reject?: { id: string; label?: string; icon?: string; onClick?: () => void; taken?: boolean; fixed?: boolean };
   note?: string;
-  /** What the round shown was decided with: its note, under the message. */
-  said?: { note: string; at: string; n: number };
+  /** What the round shown was decided with: its note, under the message, as a short preview. `onRead` opens the whole note. */
+  said?: { note: string; at: string; n: number; onRead?: (button: HTMLElement) => void };
   /** The gate's rounds, when it has two or more, and the one picked (undefined: the newest). */
   rounds?: Rounds;
   onRound?: (n: number | undefined) => void;
@@ -31,33 +31,6 @@ type Props = {
   onGate?: () => void;
   onBackground?: () => void;
 };
-
-/** What the round shown was decided with, clipped at six lines. The only place a note shows whole: "Show all" opens it
- *  in place, and only a note that is clipped has the button. */
-function Said({ note, n }: { note: string; at: string; n: number }) {
-  const text = useRef<HTMLParagraphElement>(null);
-  const id = useId();
-  const [open, setOpen] = useState(false);
-  const [clipped, setClipped] = useState(false);
-  useLayoutEffect(() => {
-    const el = text.current;
-    if (!el || open) return;
-    const measure = () => setClipped(el.scrollHeight > el.clientHeight);
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const watch = new ResizeObserver(measure);
-    watch.observe(el);
-    return () => watch.disconnect();
-  }, [note, open]);
-  return (
-    <div className="gateview-said" data-round={n}>
-      <p ref={text} id={id} className={`gateview-said-text${open ? " is-open" : ""}`}>{note}</p>
-      {(clipped || open) && (
-        <button type="button" className="link-btn" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>{open ? "Show less" : "Show all"}</button>
-      )}
-    </div>
-  );
-}
 
 /** A gate's node view (GateView.dc.html): reviewer → line → you, the message,
  *  the document, and the reject branch. */
@@ -96,7 +69,7 @@ export function GateView({ gate, reviewer: r, message, doc, reject, note, said, 
         </div>
         <p className={`gateview-msg${message ? "" : " is-empty"}`}>{message ?? "No message yet."}</p>
         {doc && <button type="button" className="gateview-doc" onClick={doc.onClick} disabled={!doc.onClick}><FileText size={14} />{doc.label}</button>}
-        {said && <Said key={said.n} {...said} />}
+        {said && <NotePreview key={said.n} className="gateview-said" note={said.note} onRead={said.onRead} />}
         {reject && (
           <div className="gateview-reject">
             <span className="gateview-reject-line" aria-hidden="true" />

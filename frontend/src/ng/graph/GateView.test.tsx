@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
@@ -81,50 +81,57 @@ describe("GateView", () => {
 
   // The real note on 510ysadf was about 700 characters.
   const LONG = "The plan skips the invalidation story. Add a section on what happens when git_scan sees a blob_sha change mid-query. ".repeat(6).trim();
+  const TWO = "Use `git_scan` here, not **a walk**: see [the spec](https://example.test/spec).\n\n- the second paragraph is a list";
 
   describe("a round's note", () => {
-    // jsdom lays nothing out: say the text overflows its six lines while it is clipped.
+    // jsdom lays nothing out: say whether the text overflows its three lines.
     const overflow = (over: boolean) => {
-      vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) { return over && !this.classList.contains("is-open") ? 200 : 100; });
+      vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(over ? 200 : 100);
       vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(100);
     };
     afterEach(() => vi.restoreAllMocks());
 
-    it("is clipped, and Show all opens it in place and Show less closes it", async () => {
-      overflow(true);
-      render(<GateView gate={{ id: "approve_plan" }} message="Approve the plan." said={{ note: LONG, at: "t", n: 1 }} />);
-      expect(LONG.length).toBeGreaterThan(650);
-      const text = screen.getByText(LONG);
-      expect(text.tagName).toBe("P");
-      expect(text).not.toHaveClass("is-open");
-      const more = screen.getByRole("button", { name: "Show all" });
-      expect(more).toHaveAttribute("aria-expanded", "false");
-      await userEvent.click(more);
-      expect(text).toHaveClass("is-open");
-      expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute("aria-expanded", "true");
-      await userEvent.click(screen.getByRole("button", { name: "Show less" }));
-      expect(text).not.toHaveClass("is-open");
-      expect(screen.getByRole("button", { name: "Show all" })).toBeInTheDocument();
-    });
-
-    it("has no button when it fits, and starts clipped again on another round", async () => {
+    it("previews its first paragraph only, rendered as markdown", () => {
       overflow(false);
-      const { rerender } = render(<GateView gate={{ id: "approve_plan" }} said={{ note: "Short.", at: "t", n: 1 }} />);
-      expect(screen.queryByRole("button", { name: /Show/ })).toBeNull();
-      vi.restoreAllMocks();
-      overflow(true);
-      rerender(<GateView gate={{ id: "approve_plan" }} said={{ note: LONG, at: "t", n: 2 }} />);
-      await userEvent.click(screen.getByRole("button", { name: "Show all" }));
-      rerender(<GateView gate={{ id: "approve_plan" }} said={{ note: LONG, at: "t", n: 1 }} />);
-      expect(screen.getByRole("button", { name: "Show all" })).toBeInTheDocument();
+      render(<GateView gate={{ id: "approve_plan" }} said={{ note: TWO, at: "t", n: 1 }} />);
+      const preview = document.querySelector(".gateview-said .note-preview")!;
+      expect(preview.querySelector("code")).toHaveTextContent("git_scan");
+      expect(preview.querySelector("strong")).toHaveTextContent("a walk");
+      expect(within(preview as HTMLElement).getByRole("link", { name: "the spec" })).toHaveAttribute("href", "https://example.test/spec");
+      expect(preview).not.toHaveTextContent("second paragraph");
+      expect(preview).not.toHaveTextContent("`");
+      expect(preview).not.toHaveTextContent("**");
     });
 
-    // The clamp on the padded box shows half of a seventh line under the ellipsis: it is on the text.
-    it("clamps the text, not the padded box", () => {
-      const rule = (selector: string) => new RegExp(`(?:^|\\n)${selector.replace(".", "\\.")} \\{([^}]*)\\}`).exec(css)?.[1] ?? "";
-      expect(rule(".gateview-said-text")).toContain("-webkit-line-clamp: 6");
-      expect(rule(".gateview-said")).not.toContain("line-clamp");
-      expect(rule(".gateview-said")).toContain("padding");
+    // "Read the note" is for a note that has more than the preview shows.
+    it.each([
+      ["a second paragraph", TWO, false, true],
+      ["one paragraph the clip cuts", LONG, true, true],
+      ["one paragraph that fits", "Short.", false, false],
+    ])("has the Read the note button for %s: %s", async (_name, note, over, shown) => {
+      overflow(over);
+      const onRead = vi.fn();
+      render(<GateView gate={{ id: "approve_plan" }} said={{ note, at: "t", n: 1, onRead }} />);
+      const button = screen.queryByRole("button", { name: "Read the note" });
+      expect(button !== null).toBe(shown);
+      if (!button) return;
+      await userEvent.click(button);
+      expect(onRead).toHaveBeenCalledWith(button);
+    });
+
+    it("has no button, and nothing that opens in place, with nowhere to read it", () => {
+      overflow(true);
+      render(<GateView gate={{ id: "approve_plan" }} said={{ note: TWO, at: "t", n: 1 }} />);
+      expect(screen.queryByRole("button", { name: /Read the note|Show all|Show less/ })).toBeNull();
+    });
+
+    // The clamp is on the text, not on the padded box, which would show half of a fourth line under the ellipsis.
+    it("clamps the preview's text at three lines, not the padded box", () => {
+      const ui = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../ui/ui.css"), "utf-8");
+      const rule = (sheet: string, selector: string) => new RegExp(`(?:^|\\n)${selector.replace(".", "\\.")} \\{([^}]*)\\}`).exec(sheet)?.[1] ?? "";
+      expect(rule(ui, ".note-preview")).toContain("-webkit-line-clamp: 3");
+      expect(rule(css, ".gateview-said")).not.toContain("line-clamp");
+      expect(rule(css, ".gateview-said")).toContain("padding");
     });
   });
 

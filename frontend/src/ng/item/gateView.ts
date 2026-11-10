@@ -5,7 +5,7 @@ import type { Sel } from "../graph/usePaneSelection";
 import { nameOf } from "../board/rowText";
 import { rejectTarget } from "./graph";
 import { AUTO_REVIEW, sessionLook, sessionsOf } from "./nodeGraph";
-import { byWord, gateRoundList, gateState, isPastRound, newestOutcome, outcomeWord, roundShown } from "./gateRounds";
+import { byWord, gateRoundList, gateState, isPastRound, newestOutcome, noteDoc, outcomeWord, roundShown } from "./gateRounds";
 import { ENDED, gateMessage, materialized, nodeAt } from "./chainValues";
 import { cursorOf } from "./cursor";
 import { taskName } from "./paths";
@@ -27,7 +27,7 @@ export function reviewerSel(item: ItemDetail, gate: ChainNode): Sel {
  *  the document it decides on, and the reject branch. `picked` is the round
  *  the view shows (undefined: the newest): the gate is drawn as that round
  *  left it, with its note, and nothing of now (the document) on a past one. */
-export function gateView(item: ItemDetail, gate: ChainNode, now: number, sel: Sel, on: { doc: () => void; reject: (to: string) => void }, picked?: number): Pick<Props, "gate" | "reviewer" | "message" | "doc" | "reject" | "youSub" | "rounds" | "said"> {
+export function gateView(item: ItemDetail, gate: ChainNode, now: number, sel: Sel, on: { doc: () => void; reject: (to: string) => void; /** Open the round's whole note; the preview has no button without it. */ read?: (note: ReturnType<typeof noteDoc>, button: HTMLElement) => void }, picked?: number): Pick<Props, "gate" | "reviewer" | "message" | "doc" | "reject" | "youSub" | "rounds" | "said"> {
   const pending = item.pending_gate === gate.id;
   const round = roundShown(item, gate.id, picked);
   const past = isPastRound(item, gate.id, picked);
@@ -53,7 +53,7 @@ export function gateView(item: ItemDetail, gate: ChainNode, now: number, sel: Se
     reject: to ? { id: to, label: nameOf(nodes, to), onClick: () => on.reject(to), ...(sentTo && { taken: true }), ...(round?.outcome === "fixed" && { fixed: true }) } : undefined,
     youSub: past ? `${outcomeWord(round!)}${who ? ` · ${who}` : ""}` : pending ? "waiting" : round?.outcome === "skipped" ? "skipped" : standing.state === "done" ? (who ?? undefined) : newestOutcome(item, gate.id),
     rounds: gateRoundList(item, gate.id, picked),
-    said: round?.note && round.ended_at ? { note: round.note, at: round.ended_at, n: round.n } : undefined,
+    said: round?.note && round.ended_at ? { note: round.note, at: round.ended_at, n: round.n, onRead: on.read && ((button: HTMLElement) => on.read!(noteDoc(gate.id, round), button)) } : undefined,
   };
 }
 

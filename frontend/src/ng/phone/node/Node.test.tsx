@@ -399,9 +399,34 @@ describe("the node screen (D)", () => {
     expect(screen.queryByRole("group", { name: "Passes" })).toBeNull();
     const card = screen.getByLabelText("Round 1");
     expect(card).toHaveTextContent("changes requested · assistant · sent to plan");
-    expect(card).toHaveTextContent(NOTE);
+    expect(card).toHaveTextContent(NOTE.slice(0, 40));
     await userEvent.click(second);
     expect(where()).toBe("/work-items/w1/nodes/plan_approval");
+  });
+
+  // The card previews the first paragraph, rendered; the sheet reads the whole note, rendered.
+  const MD = "Use `git_scan` here, not **a walk**.\n\n- the second paragraph is a list";
+  const withNote = (note: string) => ({ gate_rounds: { plan_approval: [round(1, { outcome: "rejected", note, sent_to: "plan" }), round(2)] } });
+
+  it("a gate's round card previews the first paragraph as markdown, and Read the note opens the whole note in a sheet", async () => {
+    mount(item("running", null, withNote(MD)), "/work-items/w1/nodes/plan_approval?pass=1");
+    const card = await screen.findByLabelText("Round 1");
+    expect(card.querySelector("code")).toHaveTextContent("git_scan");
+    expect(card).not.toHaveTextContent("second paragraph");
+    expect(card).not.toHaveTextContent("**");
+    await userEvent.click(within(card).getByRole("button", { name: "Read the note" }));
+    const sheet = screen.getByRole("dialog", { name: "plan_approval · round 1 note" });
+    expect(sheet).toHaveTextContent(/changes requested · assistant · .+/);
+    expect(within(sheet).getByText("a walk").tagName).toBe("STRONG");
+    expect(within(sheet).getByRole("listitem")).toHaveTextContent("the second paragraph is a list");
+    await userEvent.click(within(sheet).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("a gate's round card has no Read the note for a note that is one short paragraph", async () => {
+    mount(item("running", null, withNote("Short.")), "/work-items/w1/nodes/plan_approval?pass=1");
+    expect(await screen.findByLabelText("Round 1")).toHaveTextContent("Short.");
+    expect(screen.queryByRole("button", { name: "Read the note" })).toBeNull();
   });
 
   it("a gate with one round has no row of rounds", async () => {

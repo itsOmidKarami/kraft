@@ -18,6 +18,22 @@ function Harness({ source }: { source: DocSource }) {
 }
 
 describe("DocViewer", () => {
+  // A gate round's note: the page holds the text, so there is nothing to ask the server for, to open or to copy.
+  it("shows a text source rendered, with who decided it, and sends no request", async () => {
+    const calls = stubFetch({});
+    render(<Harness source={{ kind: "text", title: "plan_approval · round 1 note", content: "Use `git_scan` here.\n\n- a **second** paragraph", by: "changes requested · assistant · 09:05" }} />);
+    await userEvent.click(screen.getByRole("button", { name: "open doc" }));
+    expect(screen.getByRole("dialog", { name: "plan_approval · round 1 note" })).toBeInTheDocument();
+    const body = document.querySelector(".dv-body")!;
+    expect(body.querySelector("code")).toHaveTextContent("git_scan");
+    expect(body.querySelector("li strong")).toHaveTextContent("second");
+    expect(body).not.toHaveTextContent("**");
+    expect(screen.getByText("changes requested · assistant · 09:05")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open in editor" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy path" })).toBeNull();
+    expect(calls).toEqual([]);
+  });
+
   // "System default" goes by name: null asks for the default, which KRAFT_EDITOR can make an editor (#502 review).
   it("opens the default editor from the one button, and the others from its menu", async () => {
     const calls = stubFetch({ ...WRITES, "GET /documents/d1": [200, doc], "GET /editors": [200, EDITORS] });

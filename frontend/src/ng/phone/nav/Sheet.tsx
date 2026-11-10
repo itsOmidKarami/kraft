@@ -92,6 +92,16 @@ export function ConfirmSheet({ title, text, confirm, cancel = "Cancel", onClose,
   );
 }
 
+/** Text to read: a title, who wrote it and the text itself, with one way out. It has no action to take. */
+export function ReadSheet({ title, text, onClose, children }: { title: string; text?: string; onClose: () => void; children: ReactNode }) {
+  return (
+    <Frame title={title} text={text} onClose={onClose}>
+      <div className="ph-sheet-read">{children}</div>
+      <Button className="ph-btn" onClick={onClose}>Close</Button>
+    </Frame>
+  );
+}
+
 export interface Option<T extends string = string> {
   value: T;
   label: string;

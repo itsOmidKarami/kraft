@@ -15,10 +15,13 @@ import { copyPath } from "../ui/copyPath";
 import { detailOf, request } from "../http";
 
 /** `produced`: the document a task wrote (its `produces: <kind>`), whether or not a gate is pending on it. */
-export type DocSource = { kind: "document"; id: string; by?: string } | { kind: "artifact"; workItemId: string; by?: string } | { kind: "produced"; workItemId: string; produces: string; by?: string } | { kind: "attachment"; workItemId: string; attachment: string };
+export type DocSource = { kind: "document"; id: string; by?: string } | { kind: "artifact"; workItemId: string; by?: string } | { kind: "produced"; workItemId: string; produces: string; by?: string } | { kind: "attachment"; workItemId: string; attachment: string }
+  /** Text the page already holds (a gate round's note): nothing to fetch, open or copy. */
+  | { kind: "text"; title: string; content: string; by?: string };
 
 const urlOf = (s: DocSource) =>
-  s.kind === "document" ? `/documents/${encodeURIComponent(s.id)}`
+  s.kind === "text" ? ""
+  : s.kind === "document" ? `/documents/${encodeURIComponent(s.id)}`
   : s.kind === "artifact" ? `/work-items/${encodeURIComponent(s.workItemId)}/artifact`
   : s.kind === "produced" ? `/work-items/${encodeURIComponent(s.workItemId)}/artifacts/${encodeURIComponent(s.produces)}`
   // A spec or plan attached at intake, read from Kraft's copy: before start nothing has indexed it.
@@ -76,12 +79,13 @@ export function DocViewer({ source, query, onClose, returnTo }: { source: DocSou
   const [matches, setMatches] = useState<Range[]>([]);
   const [at, setAt] = useState(0);
   useEffect(() => {
+    if (source.kind === "text") return setDoc({ title: source.title, path: "", content: source.content });
     request<Viewed>(urlOf(source)).then((r) => (r.status === 200 ? setDoc(r.body) : setError(detailOf(r.body))));
     // The `by` line is display only: a new label must not read the document again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlOf(source)]);
+  }, [urlOf(source), source.kind === "text" ? source.content : ""]);
   const open = async (editor: string) => {
-    if (source.kind === "attachment") return;
+    if (source.kind === "attachment" || source.kind === "text") return;
     const r = await request(source.kind === "document" ? `/documents/${encodeURIComponent(source.id)}/open` : `${urlOf(source)}/open`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ editor }) });
     setNote(r.status === 200 ? `Opened in ${editorName(editor)}.` : detailOf(r.body));
   };
@@ -102,11 +106,13 @@ export function DocViewer({ source, query, onClose, returnTo }: { source: DocSou
   const step = (by: number) => setAt((a) => (a + by + matches.length) % matches.length);
   const titleHit = !!(doc && query && termsOf(query)?.test(doc.title));
   // An attachment before the item starts is a copy Kraft holds: nothing on disk to open.
-  const openable = source.kind !== "attachment";
+  const openable = source.kind !== "attachment" && source.kind !== "text";
   // A session summary lives only in Kraft's index: no file to open or copy (it answers 409). A gate artifact is a file in the worktree.
   const hasFile = !!doc && doc.origin !== "event_ingest";
   const editors = useEditors(openable && hasFile);
   const by = source.kind === "attachment" ? undefined : source.by;
+  // A note says who decided it and when; every other document says where it was written.
+  const byLine = by && (source.kind === "text" ? by : `written by ${by}`);
   return createPortal(
     <div className="dv-scrim" {...backdropProps(onClose)}>
       <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className={`dv-drawer${full ? " is-full" : ""}`}>
@@ -116,8 +122,8 @@ export function DocViewer({ source, query, onClose, returnTo }: { source: DocSou
             <button type="button" className="dv-full" onClick={() => setFull(!full)}>{full ? "⤡ exit full screen" : "⤢ full screen"}</button>
             <IconButton label="Close" onClick={onClose}><X size={16} aria-hidden /></IconButton>
           </div>
-          {doc && <p className="dv-path is-mono">{doc.path}</p>}
-          {by && <p className="dv-by">written by {by}</p>}
+          {doc?.path && <p className="dv-path is-mono">{doc.path}</p>}
+          {byLine && <p className="dv-by">{byLine}</p>}
           {openable && doc && hasFile && (
             <div className="dv-actions">
               <OpenInEditor editors={editors} open={open} />

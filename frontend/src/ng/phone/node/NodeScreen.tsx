@@ -18,9 +18,11 @@ import { LogLines } from "../log/LogLines";
 import { useLogs } from "../log/useLogs";
 import { PauseSheet } from "../item/PauseSheet";
 import { useDo } from "../item/useDo";
-import { byWord, gateState, outcomeWord, roundShown, roundsOf } from "../../item/gateRounds";
+import { byWord, gateState, noteDoc, outcomeWord, roundShown, roundsOf } from "../../item/gateRounds";
 import { nodeSub } from "../item/model";
-import { ConfirmSheet, useSheet } from "../nav/Sheet";
+import { ConfirmSheet, ReadSheet, useSheet } from "../nav/Sheet";
+import { Markdown } from "../../ui/Markdown";
+import { NotePreview } from "../../ui/NotePreview";
 import { ScreenHeader } from "../nav/ScreenHeader";
 import { ActionBar, Block, Facts, TabStrip } from "../ui/Rows";
 import { fixLoopWords, nodeBar, overrideWords, plainName, reviewPath, wallWords, type NodeAct } from "./model";
@@ -82,6 +84,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
   // A gate's passes are its rounds: the same `?pass=`, read from the server's rounds.
   const gateRounds = gate ? roundsOf(item, nodeId) : [];
   const round = gate ? roundShown(item, nodeId, place.pass) : undefined;
+  const roundNote = round?.note ? noteDoc(nodeId, round) : null;
   const paths = stepsOf(api).steps;
   const escalations = escalationsIn(seen, nodeId);
   const openTask = (step: string, task: string) => navigate(placeUrl(item.id, { node: nodeId, sel: { kind: "task", node: nodeId, step, task }, round: place.round, pass: place.pass }));
@@ -139,7 +142,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
             </div>
             <div className="ph-turn" aria-label={`Round ${round.n}`}>
               <p className="ph-turn-head"><span>{outcomeWord(round)}{byWord(round.by) ? ` · ${byWord(round.by)}` : ""}{round.outcome === "rejected" && round.sent_to ? ` · sent to ${nameOf(item.chain_definition.nodes, round.sent_to)}` : ""}</span></p>
-              {round.note && <p className="ph-turn-text">{round.note}</p>}
+              {round.note && <NotePreview className="ph-turn-text" note={round.note} buttonClass="ph-linkbtn" onRead={() => sheet.open("round-note")} />}
             </div>
           </>
         )}
@@ -265,6 +268,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
         )}
       </div>
       {(bar.secondary || bar.primary) && <ActionBar>{btn(bar.secondary, false)}{btn(bar.primary, true)}</ActionBar>}
+      {sheet.is("round-note") && roundNote && <ReadSheet title={roundNote.title} text={roundNote.by} onClose={sheet.close}><Markdown text={roundNote.content} /></ReadSheet>}
       {sheet.is("pause") && <PauseSheet item={item} node={nodeId} sheet={sheet} reload={reload} />}
       {sheet.is("skip") && (
         <ConfirmSheet

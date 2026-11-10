@@ -1,3 +1,4 @@
+import { localTime } from "../../format";
 import type { GateRound } from "../../types";
 import { cursorOf } from "./cursor";
 import type { Rounds } from "./nodeGraph";
@@ -74,4 +75,21 @@ export function gateState(item: ItemDetail, gate: string): { state: "current" | 
     if (nodes.findIndex((n) => n.id === gate) < (cursorOf(nodes, item.current_node_id)?.index ?? -1)) return { state: "done", words: "passed" };
   }
   return { state: "todo", words: "not reached" };
+}
+
+/** A note's first paragraph: what a round's preview shows. A paragraph ends at a blank line. */
+export const firstParagraph = (note: string): string => note.trim().split(/\n\s*\n/)[0].trim();
+
+/** Whether the note has a paragraph after the preview's. A note that is one long paragraph is told by the layout, which
+ *  knows what three lines hold. */
+export const hasMoreParagraphs = (note: string): boolean => note.trim().split(/\n\s*\n/).length > 1;
+
+/** A round's whole note as a document, for the drawer and the phone's sheet: "<gate> · round N note", written by
+ *  "<outcome> · <who> · <time>". */
+export function noteDoc(gate: string, r: GateRound): { title: string; by: string; content: string } {
+  return {
+    title: `${gate} · round ${r.n} note`,
+    by: [outcomeWord(r), byWord(r.by), r.ended_at && localTime(r.ended_at)].filter(Boolean).join(" · "),
+    content: r.note ?? "",
+  };
 }

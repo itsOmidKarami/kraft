@@ -217,16 +217,19 @@ describe("GateBody", () => {
     expect(container.lastElementChild).toBe(container.querySelector(".ip-hist"));
   });
 
-  // The canvas holds the note whole; a row only marks that it is the one shown.
-  it("never opens a row: the picked row has the same clipped note and no extra text as the others", () => {
+  // The canvas previews the note and the drawer holds it whole; a row says when, what and who, and marks the one shown.
+  it("shows no note text in a row, and never opens one: the picked row is marked and the rest are the same", () => {
     stubFetch();
     const both = rounds(sentBack, round(2, { outcome: "rejected", by: "assistant", note: LONG, sent_to: "plan" }), round(3, { outcome: "pending", by: null, ended_at: null }));
     render(<GateBody item={detail(both)} version="1" gate={gate} picked={1} />);
     const [, second, first] = screen.getAllByRole("button", { name: /^Round/ });
     expect(first).toHaveAttribute("aria-current", "true");
     expect(second).not.toHaveAttribute("aria-current");
-    expect(first.querySelector(".ip-hist-note")?.className).toBe("ip-hist-note");
-    expect(first.querySelector(".ip-hist-note")?.className).toBe(second.querySelector(".ip-hist-note")?.className);
+    for (const row of [first, second]) {
+      expect(row).not.toHaveTextContent("invalidation");
+      expect(row.querySelectorAll("span:not(.ip-hist-head):not(.ip-hist-head *)")).toHaveLength(1);
+    }
+    expect(second).toHaveTextContent(/^Round 2.*changes requested · assistant$/);
     expect(first).not.toHaveAttribute("aria-expanded");
     expect(first.querySelectorAll("button, [aria-expanded]")).toHaveLength(0);
   });
@@ -250,13 +253,14 @@ describe("GateBody", () => {
     expect(screen.getByRole("button", { name: /^Round 1/ })).toHaveTextContent("approved · auto");
   });
 
-  it("a reviewer's own rejection shows its note once", () => {
+  // The reviewer's rejection is the round's note too: the canvas previews it, so the pane says it nowhere.
+  it("a reviewer's own rejection leaves its note to the canvas", () => {
     stubFetch();
     const note = "Task 3 has no test.";
     const item = detail(rounds(round(1, { outcome: "rejected", by: "agent", note, sent_to: "plan", reviewer: { kind: "reject", note } })));
     render(<GateBody item={item} version="1" gate={gate} />);
     expect(screen.getByText("Reviewer: reject")).toBeInTheDocument();
-    expect(screen.getAllByText(note)).toHaveLength(1);
+    expect(screen.queryByText(note)).toBeNull();
   });
 
   it("a past round shows that round's reviewer, not the newest's", () => {

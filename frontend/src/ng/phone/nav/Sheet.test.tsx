@@ -7,9 +7,9 @@ import { ChoiceSheet, ConfirmSheet, EditSheet, useSheet } from "./Sheet";
 
 afterEach(() => window.history.replaceState(null, "", "/"));
 
-describe("the three shapes (A.5)", () => {
-  it("exports exactly a confirm, a choice and an edit, so a fourth shape is a deliberate change", () => {
-    expect(Object.keys(sheets).sort()).toEqual(["ChoiceSheet", "ConfirmSheet", "EditSheet", "useSheet"]);
+describe("the sheet shapes (A.5)", () => {
+  it("exports exactly a confirm, a choice, an edit and a read, so a fifth shape is a deliberate change", () => {
+    expect(Object.keys(sheets).sort()).toEqual(["ChoiceSheet", "ConfirmSheet", "EditSheet", "ReadSheet", "useSheet"]);
   });
 
   it("has at most one primary action in each", () => {
