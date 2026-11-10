@@ -178,6 +178,7 @@ test_scopes:
 - **One name for everything heavy.** Two scopes that would overload the machine together share a group, across repositories too. Give two scopes different groups only when the machine can run one of each side by side.
 - **What the board says.** `waiting for test group heavy: 36djfdgg is running it`, naming the work item that holds it. The wait doesn't count against the step's time cap. A restart keeps the group held on the local worker by a session still running, as long as `repos.yaml` still reads and still names that session's command.
 - **Where it applies.** The local worker and every remote machine, each holding its own slot per group. Two machines of one runner group can each run one scope of the group at once; two scopes of it never run together on one machine. A scope on a group of machines goes to a member where its group is free, and when none is the board says `waiting for test group heavy is held on 2 machines`.
+- **Held only on the local worker.** A scope held back by the local worker alone still reads `waiting for a machine in <group>`.
 - **One holder.** The board names the work item and the machine when a single one holds it.
 - **After a restart.** A remote machine's group stays held by a step still running there. Steps started before the upgrade don't hold it.
 

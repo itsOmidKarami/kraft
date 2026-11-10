@@ -647,5 +647,10 @@ async def test_a_claim_rebuilt_from_machine_and_key_frees_the_group_a_refused_re
     assert hub.decide("home", _repos("kraft"), concurrency_group="heavy").machine == "home"
     hub.adopt("home", "a/2", "heavy")  # a run found after a restart
     assert "a is running it" in hub.decide("home", _repos("kraft"), concurrency_group="heavy").wait
+    hub.release(Claim("home", "a/2"))
+    hub.adopt("home", "pre:7", "heavy")  # a key that is no `<item>/<session>` still names itself
+    assert (
+        "pre:7 is running it" in hub.decide("home", _repos("kraft"), concurrency_group="heavy").wait
+    )
     await machine.close()
     await accepted

@@ -47,6 +47,7 @@ class Verdict:
     machine: str | None = None  # who would take it now
     wait: str | None = None  # "waiting for gpu-box" / "waiting for any machine allowed for kraft"
     refusal: str | None = None
+    group_held: bool = False  # `wait` is a test group another step holds, not a full machine
 
 
 def server_id(run_dir: Path) -> str:
@@ -456,11 +457,14 @@ class Hub:
         if held_group:
             if len(held_group) == 1:
                 holder = self._groups[held_group[0], concurrency_group]
-                item = ids.parse_session_ref(holder)[0]
+                try:
+                    item = ids.parse_session_ref(holder)[0] or holder
+                except ValueError:  # a key that is not `<item>/<session>`: name it as it is
+                    item = holder
                 who = f": {item} is running it on {held_group[0]}"
             else:
                 who = f" is held on {len(held_group)} machines"
-            return Verdict(wait=f"waiting for test group {concurrency_group}{who}")
+            return Verdict(wait=f"waiting for test group {concurrency_group}{who}", group_held=True)
         if named:
             if first is None:
                 return Verdict(wait=f"{wait_text} (offline: not connected yet)")

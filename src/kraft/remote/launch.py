@@ -186,14 +186,15 @@ class Placement:
             return True
         self.wait = f"waiting for {pinned}" if pinned else f"waiting for a machine in {self._group}"
         if self._concurrency_group and remote_ok:  # a held group is the reason worth saying
-            said = runs.hub.decide(
+            verdict = runs.hub.decide(
                 pinned or self._group,
                 self._repos,
                 pinned=pinned,
                 needs=needs,
                 concurrency_group=self._concurrency_group,
-            ).wait
-            self.wait = said if said and "test group" in said else self.wait
+            )
+            if verdict.group_held:
+                self.wait = verdict.wait
         return False
 
     def _mounts(self) -> list[str]:
