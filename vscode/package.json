@@ -1,7 +1,7 @@
 {
   "name": "kraft",
   "displayName": "Kraft",
-  "description": "Approve gates, review diffs and edit config for Kraft, the local orchestrator for your coding agent, without leaving VS Code.",
+  "description": "Approve gates, review diffs and edit config for Kraft, the local orchestrator for your coding agent, without leaving VS Code or an editor built on it, such as VSCodium or Cursor.",
   "version": "2.5.0",
   "publisher": "kraft-sdlc",
   "license": "Apache-2.0",

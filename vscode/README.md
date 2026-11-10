@@ -8,6 +8,8 @@ Codex and others), and adds what a single session can't: a process the agent
 can't skip, checks it doesn't grade itself on, and a person at the decisions
 that matter.
 
+Kraft for VS Code runs in VS Code and in VS Code-based editors such as VSCodium and the Cursor editor. Install it from the Marketplace for VS Code, or from Open VSX for the others.
+
 This extension brings those decisions into the editor. See what every work item
 is doing, approve or reject a gate, review a branch's diff with the review
 agents' findings on the lines they name, and edit Kraft's config with errors
