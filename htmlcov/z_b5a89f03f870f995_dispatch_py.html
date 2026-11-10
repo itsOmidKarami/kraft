@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_b5a89f03f870f995_entry_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.2">coverage.py v7.17.2</a>,
-            created at 2026-11-10 21:50 +0000
+            created at 2026-11-10 21:59 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -617,7 +617,7 @@
     <p class="run"><span class="n"><a id="t535" href="#t535">535</a></span><span class="t">    <span class="key">except</span> <span class="nam">TimeoutError</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t536" href="#t536">536</a></span><span class="t">        <span class="key">await</span> <span class="nam">_note_waiting</span><span class="op">(</span><span class="nam">db</span><span class="op">,</span> <span class="nam">row</span><span class="op">,</span> <span class="nam">node</span><span class="op">,</span> <span class="nam">task</span><span class="op">,</span> <span class="str">&quot;waiting for local&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t537" href="#t537">537</a></span><span class="t">        <span class="key">return</span> <span class="nam">WAITING</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t538" href="#t538">538</a></span><span class="t">    <span class="key">return</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t538" href="#t538">538</a></span><span class="t">    <span class="key">return</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t539" href="#t539">539</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t540" href="#t540">540</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t541" href="#t541">541</a></span><span class="t"><span class="key">async</span> <span class="key">def</span> <span class="nam">skipped_session</span><span class="op">(</span><span class="nam">db</span><span class="op">,</span> <span class="nam">run_dirs</span><span class="op">,</span> <span class="nam">common</span><span class="op">:</span> <span class="nam">dict</span><span class="op">,</span> <span class="nam">log</span><span class="op">:</span> <span class="nam">str</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="nam">str</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
@@ -2143,7 +2143,7 @@
     <p class="run"><span class="n"><a id="t2061" href="#t2061">2061</a></span><span class="t">    <span class="key">if</span> <span class="nam">inplace</span><span class="op">.</span><span class="nam">is_in_place</span><span class="op">(</span><span class="nam">work_item_row</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t2062" href="#t2062">2062</a></span><span class="t">        <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t2063" href="#t2063">2063</a></span><span class="t">            <span class="key">await</span> <span class="nam">inplace</span><span class="op">.</span><span class="nam">mark_task</span><span class="op">(</span><span class="nam">db</span><span class="op">,</span> <span class="nam">run_dirs</span><span class="op">,</span> <span class="nam">work_item_row</span><span class="op">,</span> <span class="nam">Path</span><span class="op">(</span><span class="nam">worktree</span><span class="op">)</span><span class="op">,</span> <span class="nam">node</span><span class="op">.</span><span class="nam">id</span><span class="op">,</span> <span class="nam">task</span><span class="op">.</span><span class="nam">path</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t2064" href="#t2064">2064</a></span><span class="t">        <span class="key">except</span> <span class="nam">inplace</span><span class="op">.</span><span class="nam">CheckoutRefused</span> <span class="key">as</span> <span class="nam">exc</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis show_mis"><span class="n"><a id="t2064" href="#t2064">2064</a></span><span class="t">        <span class="key">except</span> <span class="nam">inplace</span><span class="op">.</span><span class="nam">CheckoutRefused</span> <span class="key">as</span> <span class="nam">exc</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t2065" href="#t2065">2065</a></span><span class="t">            <span class="key">await</span> <span class="nam">config_error_session</span><span class="op">(</span><span class="nam">db</span><span class="op">,</span> <span class="nam">run_dirs</span><span class="op">,</span> <span class="nam">common</span><span class="op">,</span> <span class="fst">f&quot;</span><span class="op">{</span><span class="nam">exc</span><span class="op">}</span><span class="fst">\n</span><span class="fst">&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t2066" href="#t2066">2066</a></span><span class="t">            <span class="key">return</span> <span class="nam">CHECKOUT_REFUSED</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t2067" href="#t2067">2067</a></span><span class="t">    <span class="nam">cands</span> <span class="op">=</span> <span class="nam">_fallback</span><span class="op">.</span><span class="nam">candidates</span><span class="op">(</span><span class="nam">t</span><span class="op">,</span> <span class="nam">table</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
@@ -3853,7 +3853,7 @@
             <a class="nav" href="z_b5a89f03f870f995_entry_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.2">coverage.py v7.17.2</a>,
-            created at 2026-11-10 21:50 +0000
+            created at 2026-11-10 21:59 +0000
         </p>
     </div>
 </footer>
