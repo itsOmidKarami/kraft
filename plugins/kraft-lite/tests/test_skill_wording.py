@@ -415,7 +415,8 @@ SAYS = {
             'echo <the word after "Cut from:", as given> > <run>/<slice key>/base'
         ),
         "child-chain-id-to-every-verb-but-start": (
-            "Pass your child chain's `--chain-id <id>` to every verb but `start`"
+            "Pass your child chain's `--chain-id <id>` to every verb except `settings`, "
+            "`import`, `chains`, `detect`, `migrate` and `start`"
         ),
         "child-fresh-container-takes-the-remote-head": (
             "git checkout -B <your slice branch> origin/<your slice branch>"
