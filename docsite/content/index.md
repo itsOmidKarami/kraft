@@ -23,6 +23,7 @@ links:
     color: neutral
     size: lg
     target: _blank
+orientation: horizontal
 ui:
   root: landing landing-hero
   title: hero-mono
@@ -33,7 +34,33 @@ ui:
 uv tool install kraft-sdlc && kraft
 ```
 
+[Watch the 2-minute overview](https://youtu.be/VIDEO_ID){target="_blank"}
+
 #default
+:::landing-shot{.hero-shot .hero-shot--wide}
+---
+src: /assets/board.png
+alt: 'The Kraft board: seven work items under Needs you, each with its reason and one button such as Review, Retry, Raise cap or Answer'
+crop: 210 0 1230 560
+width: 1440
+---
+:::
+
+:::landing-shot{.hero-shot .hero-shot--phone}
+---
+src: /assets/mobile.png
+alt: 'The Kraft board on a phone: Needs you first, with an item waiting at approve final review and its Review button'
+crop: 0 0 390 400
+width: 390
+---
+:::
+::
+
+::u-page-section
+---
+ui:
+  root: landing landing-chain
+---
 :::stage-strip
 :::
 
@@ -44,6 +71,8 @@ Three things set it apart:
 - **A process the agent can't skip.** A chain like the one above is a file you can read and diff, so the agent doesn't decide the workflow fresh each time.
 - **Checks it doesn't grade itself on.** Kraft runs your tests in a node of its own, waits for your CI itself and has a separate reviewer or judge decide whether a fix is done.
 - **A person at the decisions that matter.** A gate stops the chain until a decision is recorded, and an agent's own calls to decide its gate are refused. Only a sandbox with a `network:` policy keeps an agent from deciding its own gates; no sandbox is set by default, and an unsandboxed agent runs as you. [Security](/project/security-in-depth#agents-and-gates) has the scope.
+
+It's for developers tired of babysitting a session. [When not to use Kraft](/get-started/why-kraft#when-not-to-use-kraft) says who it isn't for.
 ::
 
 ::u-page-section
@@ -133,6 +162,6 @@ Kraft runs on macOS and Linux. It needs git and Claude Code, and the `default` c
 
 #default
 :::p
-[Why Kraft](/get-started/why-kraft) · [Concepts](/concepts) · [Source on GitHub](https://github.com/itsOmidKarami/kraft){target="_blank"}, Apache-2.0 licensed; CONTRIBUTING.md covers getting a dev environment running.
+[Why Kraft](/get-started/why-kraft) · [Concepts](/concepts) · [Source on GitHub](https://github.com/itsOmidKarami/kraft){target="_blank"}, Apache-2.0 licensed and built in the open: the [starter issues](https://github.com/itsOmidKarami/kraft/issues/1131){target="_blank"} are a way in, and CONTRIBUTING.md covers getting a dev environment running.
 :::
 ::
