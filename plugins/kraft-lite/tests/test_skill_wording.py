@@ -86,6 +86,11 @@ SAYS = {
         ),
     },
     ("next", 2): {
+        "next-read-only-scope": (
+            "changes nothing: write, edit and commit nothing",
+            "run no test or command that writes",
+            "leave no file behind",
+        ),
         "next-exports-after-close": "export state after every `close`",
         "next-subprocess-without-a-shell": "run `command` as an argument list, without a shell",
         "next-records-what-a-task-produced": "`KL produced --kind <produces> --path <file>`",
