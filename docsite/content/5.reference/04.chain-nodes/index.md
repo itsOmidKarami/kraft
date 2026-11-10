@@ -69,7 +69,7 @@ uses when the key is absent, or `unset` when an absent key does nothing.
 | `remove` | list of node IDs | no | unset | With `extends`: the parent's nodes to drop, by ID. The final gate can't be one. _Added in 2.2_ |
 | `add` | list of `{after, node}` | no | unset | With `extends`: each entry an `after`, a parent node's ID, and a `node`, a complete node to put directly after it. _Added in 2.2_ |
 | `overrides` | mapping of canonical path to keys | no | unset | With `extends`: canonical path to the keys to merge onto that component, such as `implementation.main.implement: { profile: deep }`. _Added in 2.2_ |
-| `runner` | string | no | unset | Where it runs: a machine or a [group](/reference/configuration/workers#groups) from [`workers.yaml`](/reference/configuration/workers), `any`, or `local`. See [Placing a step on a machine](/reference/configuration/library-and-chains#placing-a-step-on-a-machine). _Added in 2.4_ |
+| `runner` | string | no | unset | Where it runs: a machine or a [group](/concepts/how-workers-and-machines-behave#groups) from [`workers.yaml`](/reference/configuration/workers), `any`, or `local`. See [Placing a step on a machine](/reference/configuration/library-and-chains#placing-a-step-on-a-machine). _Added in 2.4_ |
 
 ## Node keys
 

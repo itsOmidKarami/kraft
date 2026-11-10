@@ -21,7 +21,7 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 | `update.yaml` | Automatic updates, restarting when Kraft is free, and the hours Kraft may do either in. _Added in 2.3_ | The first save in Settings | [update.yaml](/reference/configuration/update) |
 | `workers.yaml` | The machines that may run work item steps, and how each connects. _Added in 2.4_ | `kraft admin worker`, or you | [workers.yaml](/reference/configuration/workers) |
 | `forges.yaml` | Named forge accounts: a host's forge and web address, so connect stops asking. _Added in 2.5_ | `kraft admin forge`, or you | [forges.yaml](/reference/configuration/forges) |
-| `machine.yaml` | On a machine, not the server: how many steps that machine runs at once. _Added in 2.4_ | You | [The machine's own limit](/reference/configuration/workers#the-machines-own-limit) |
+| `machine.yaml` | On a machine, not the server: how many steps that machine runs at once. _Added in 2.4_ | You | [The machine's own limit](/concepts/how-workers-and-machines-behave#the-machines-own-limit) |
 | `theme.yaml` | UI appearance. | The first save in Settings | [theme.yaml](/reference/configuration/theme) |
 | `sandbox.yaml` | Which container CLI runs [sandboxed](/concepts/vocabulary#sandbox) tasks, SELinux and an extra CA. | You | [sandbox.yaml](/reference/configuration/sandbox/sandbox-yaml) |
 | `detectors.yaml` | Your own conventions for the setup and test commands `kraft repo connect` proposes, layered on the shipped table. | You | [detectors.yaml](/reference/configuration/repos/detectors) |
