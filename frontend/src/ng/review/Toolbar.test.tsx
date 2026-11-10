@@ -8,7 +8,7 @@ import type { ReviewPlace } from "./url";
 
 const at = (n: number) => ({ n, sha: `s${n}`, base_sha: "b", at: "t" });
 const item = (o: Partial<WorkItem> = {}) => ({ attempts: [at(1), at(2), at(3)], last_review_sha: "h1", chain_definition: { nodes: [{ id: "implementation" }, { id: "local_review" }, { id: "verification" }] }, ...o }) as unknown as WorkItem;
-const place: ReviewPlace = { from: "base", to: "latest", nodes: null, file: null, gate: "final_review", doc: false };
+const place: ReviewPlace = { from: "base", to: "latest", nodes: null, file: null, gate: "final_review", doc: false, round: null };
 const file = (path: string, touched_by: string[]): CompareFile => ({ path, insertions: 1, deletions: 0, touched_by, viewed: false });
 const FILES = [file("a.py", ["implementation"]), file("b.py", ["implementation"]), file("c.toml", ["verification"])];
 

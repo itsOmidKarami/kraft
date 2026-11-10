@@ -12,6 +12,8 @@ export interface ReviewPlace {
   file: string | null;
   gate: string | null;
   doc: boolean;
+  /** `?round=N`: one past round of `gate`, read-only (`RoundReview`); null for the review itself. */
+  round: number | null;
 }
 
 type Defaults = Pick<WorkItem, "last_review_sha" | "head_sha" | "pending_gate" | "attempts">;
@@ -26,6 +28,8 @@ export function defaultFrom(item: Defaults): CompareTarget {
   return sha && sha !== item.head_sha && (item.attempts ?? []).some((a) => a.sha === sha) ? "last_review" : "base";
 }
 
+const positive = (v: string | null) => (v && /^[1-9]\d*$/.test(v) ? Number(v) : null);
+
 export function readReview(search: URLSearchParams, item: Defaults): ReviewPlace {
   const from = search.get("from");
   const to = search.get("to");
@@ -36,6 +40,7 @@ export function readReview(search: URLSearchParams, item: Defaults): ReviewPlace
     file: search.get("file") || null,
     gate: search.get("gate") || item.pending_gate || null,
     doc: search.get("doc") === "1",
+    round: positive(search.get("round")),
   };
 }
 
@@ -46,14 +51,19 @@ export function reviewUrl(id: string, p: ReviewPlace, item: Defaults): string {
   if (p.to !== "latest") q.set("to", p.to);
   if (p.nodes) q.set("nodes", p.nodes.join(","));
   if (p.file) q.set("file", p.file);
-  if (p.gate && p.gate !== item.pending_gate) q.set("gate", p.gate);
+  // A round is of a gate that may no longer be pending: the gate is then written though it is not the default.
+  if (p.gate && (p.gate !== item.pending_gate || p.round)) q.set("gate", p.gate);
   if (p.doc) q.set("doc", "1");
+  if (p.round) q.set("round", String(p.round));
   const s = q.toString();
   return `/work-items/${encodeURIComponent(id)}/review${s ? `?${s}` : ""}`;
 }
 
 /** A gate's review, its brief open beside the diff (the page shows it when the gate has one). */
 export const gateReviewUrl = (id: string, gate: string) => `/work-items/${encodeURIComponent(id)}/review?gate=${encodeURIComponent(gate)}&doc=1`;
+
+/** One round of a gate on the review page: its review and threads as they were, read-only. */
+export const roundReviewUrl = (id: string, gate: string, n: number) => `/work-items/${encodeURIComponent(id)}/review?gate=${encodeURIComponent(gate)}&round=${n}`;
 
 /** The place from the URL, and a setter that replaces it: moving around the
  *  review page is not history; entering and leaving it is (links push). */
