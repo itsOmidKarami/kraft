@@ -224,6 +224,14 @@ console-screenshot *args: _dev-home
     cd frontend && npx playwright install chromium
     {{dev_env}} uv run python dev/console_screenshot.py {{args}}
 
+# Re-record the README's loop (.github/assets/run.gif and run.mp4) in the web UI of a fresh
+# `just dev` (`just dev-reset` first); CHROMIUM=PATH uses a browser of your own
+[doc("Docs: re-record the README's GIF of one work item, filed to final review")]
+readme-gif *args: _dev-home
+    cd frontend && [ -d node_modules ] || npm ci
+    [ -n "${CHROMIUM:-}" ] || (cd frontend && npx playwright install chromium)
+    {{dev_env}} uv run python dev/readme_gif.py {{args}}
+
 # Throw the dev instance away (DB, logs, worktrees, seed repo, config)
 dev-reset:
     rm -rf .dev
