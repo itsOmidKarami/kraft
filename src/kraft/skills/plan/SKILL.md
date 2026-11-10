@@ -101,7 +101,7 @@ headings; a range takes `-`. Put nothing else with digits after the task list: K
 every number there as a task. Each slice starts from the same commit, so put shared groundwork
 (a helper two slices would both write, a schema both need) in tasks outside every slice; Kraft
 builds those first and tests them before any slice starts. Never write that one slice "comes
-after" another: that is refused. Use at least two slices, and at most six by default.
+after" another: Kraft won't use such a section. Use at least two slices, and at most six by default.
 
 ## Check your own plan before you finish
 
@@ -111,5 +111,6 @@ used in a late task is spelled the same way as where you defined it. Last,
 check that every task has its `### Task N: title` heading and a failing test of
 its own: Kraft does not count a task without the heading, and a task without a
 test gives its reviewer nothing to run. If you wrote a `## Slices` section, check
-each slice against both conditions above, and that every number it lists is a
-task heading of yours: a plan whose slices don't parse is refused at its gate.
+each slice against both conditions above, that every number it lists is a task
+heading of yours, and that no task is in two slices: Kraft doesn't use a section
+that breaks these, and the item then runs unsliced.
