@@ -7,7 +7,9 @@ description: Which of Kraft's HTTP routes are stable, which the pages here docum
 
 The Kraft server serves its board, and the JSON API behind it, on one port
 (`127.0.0.1:8765` by default). The `kraft` command and the MCP server are
-clients of that API. Two routes are stable. The pages here document the work-item routes a script plausibly calls, and [the schema](#the-schema) lists every route.
+clients of that API. Two routes are stable. The pages here document the work-item routes a script plausibly calls, and [the schema](#the-schema) lists every route: `/openapi.json`, with `/docs` and `/redoc` to read it.
+
+A script that must outlive a release calls the two stable routes, `kraft … --json` or the MCP server, not the board's routes.
 
 ## Stable routes
 
@@ -98,7 +100,7 @@ These three paths need no login. Open `/docs` or `/redoc` in a browser to read t
 
 _Added in next_
 
-Every route has a one-line summary, a description and a tag, and a route with a typed body lists the body's fields. A route's tag is its group:
+Every route has a summary, a description and a tag. A route with a typed body lists its fields. A route's tag is its group:
 
 | Tag | Routes |
 |---|---|
@@ -170,7 +172,8 @@ The routes answer with a small set of codes.
 | `409` | The item's state forbids the action: it has ended, isn't waiting at that gate, or a walk is already running. The `detail` says which. |
 | `422` | A field is refused. `detail` is one sentence naming it. |
 | `429` | Too many failed logins, or too many probes at once. |
-| `503` | A configuration file doesn't load, so Kraft refuses new work until it does. |
+| `502` | A call to the forge failed, or filing an item failed after its checks passed. `detail` carries the reason. |
+| `503` | A configuration file doesn't load, so Kraft refuses new work until it does. Approve, reject and retry also answer it while a restart is marked for when nothing is running. |
 
 What each [work item status](/reference/statuses) allows is in the `actions` field of [the work item object](/reference/http-api/work-item-object#the-actions-field).
 
