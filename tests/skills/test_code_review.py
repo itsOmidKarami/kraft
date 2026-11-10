@@ -15,6 +15,7 @@ import yaml
 
 from kraft.findings import SEVERITIES
 from kraft.policy import DEFAULT_LOOP_SEVERITIES
+from kraft.templates.library import TemplateLibrary
 
 SKILL = (
     Path(__file__).resolve().parents[2] / "src" / "kraft" / "skills" / "code-review" / "SKILL.md"
@@ -72,8 +73,6 @@ def test_it_names_no_legacy_hook_point(text):
 def test_the_seeded_review_step_is_read_only():
     """The reviewer's launch carries the commit-everything contract; a
     read_only step is what stops the item if a review writes after all."""
-    from kraft.templates.library import TemplateLibrary
-
     chain = TemplateLibrary.from_yaml_dir(LIBRARY.parent).resolve_chain("default")
     verification = next(n for n in chain.nodes if n.id == "verification")
     [review] = [s for s in verification.steps if s.id == "review"]
