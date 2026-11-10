@@ -36,8 +36,8 @@ Each command links to its entry.
 | File a work item | [`kraft item create "title"`](/reference/cli/item#filing-a-work-item) |
 | File it with a spec or plan I wrote | [`kraft item create "title" --spec PATH --plan PATH`](/reference/cli/item#attach-a-spec-or-plan) |
 | File it and start it at once | [`kraft item create "title" --autostart`](/reference/cli/item#filing-a-work-item) |
-| Revise a spec or plan before the item starts | [`kraft item set-attachments`](/reference/cli/item#change-an-items-setup) |
-| Switch the [chain](/concepts/vocabulary#chain) of an item that hasn't started | [`kraft item set-chain`](/reference/cli/item#change-an-items-setup) |
+| Revise a spec or plan before the item starts | [`kraft item set-attachments`](/reference/cli/item#item-set-attachments) |
+| Switch the [chain](/concepts/vocabulary#chain) of an item that hasn't started | [`kraft item set-chain`](/reference/cli/item#item-set-chain) |
 | Start an item that was filed paused | [`kraft item resume`](/reference/cli/item#item-resume) |
 
 ### Watching
@@ -65,13 +65,13 @@ Each command links to its entry.
 | Compare two attempts, or the change since my last review | [`kraft view compare`](/reference/cli/view#reviewing-threads-and-comparing-attempts) |
 | Approve | [`kraft item approve`](/reference/cli/item#item-approve) |
 | Reject, and say why | [`kraft item reject --note "why"`](/reference/cli/item#item-reject) |
-| Comment on a line of the change | [`kraft item comment`](/reference/cli/item#comment-on-a-change) |
-| Send my comments with an outcome | [`kraft item review`](/reference/cli/item#send-a-review) |
+| Comment on a line of the change | [`kraft item comment`](/reference/cli/item#item-comment) |
+| Send my comments with an outcome | [`kraft item review`](/reference/cli/item#item-review) |
 | Read the item's merge request, pipelines, job logs, merged requests or labels | [`kraft view mr`, `pipelines`, `jobs`, `job-log`, `merged`, `labels`](/reference/cli/view#reading-the-forge) _Added in 2.5_ |
 | List [review threads](/concepts/vocabulary#review-thread) | [`kraft view threads`](/reference/cli/view#reviewing-threads-and-comparing-attempts) |
-| Mark a thread resolved, or reopen it | [`kraft item resolve`, `kraft item reopen`](/reference/cli/item#reviewing-a-change) |
+| Mark a thread resolved, or reopen it | [`kraft item resolve`](/reference/cli/item#item-resolve), [`kraft item reopen`](/reference/cli/item#item-reopen) |
 | Pass a gate without running it | [`kraft item skip`](/reference/cli/item#item-skip) |
-| Label an item's merge request | [`kraft item mr-label`](/reference/cli/item#label-the-merge-request) |
+| Label an item's merge request | [`kraft item mr-label`](/reference/cli/item#item-mr-label) |
 
 ### When it stops
 
@@ -81,12 +81,12 @@ Each command links to its entry.
 | Run the stopped [node](/concepts/vocabulary#node) again | [`kraft item retry`](/reference/cli/item#item-retry) |
 | Redo one step or task, or the whole chain | [`kraft item retry --path PATH`, `--restart`](/reference/cli/item#item-retry) |
 | Give it more budget | [`kraft item raise-budget --usd N`](/reference/cli/item#raise-a-cap-that-stopped-an-item) |
-| Raise a time or token [cap](/concepts/vocabulary#cap) | [`kraft item set-policy`](/reference/cli/item#a-work-items-own-policy) |
+| Raise a time or token [cap](/concepts/vocabulary#cap) | [`kraft item set-policy`](/reference/cli/item#item-set-policy) |
 | Steer an agent that is paused | [`kraft item resume --steer "..."`](/reference/cli/item#item-resume) |
 | Pause a running item | [`kraft item pause`](/reference/cli/item#item-pause) |
 | Ask an agent to help with the stop | [`kraft item escalate --message "..."`](/reference/cli/item#item-escalate) |
 | Skip the node it stopped on | [`kraft item skip`](/reference/cli/item#item-skip) |
-| Pick another model or effort for it | [`kraft item set-overrides`](/reference/cli/item#set-item-wide-overrides), or [`kraft item set-node-override`](/reference/cli/item#one-nodes-agent-tasks) |
+| Pick another model or effort for it | [`kraft item set-overrides`](/reference/cli/item#item-set-overrides), or [`kraft item set-node-override`](/reference/cli/item#item-set-node-override) |
 | End it as done, or as cancelled | [`kraft item complete`](/reference/cli/item#item-complete), [`kraft item cancel`](/reference/cli/item#item-cancel) |
 | Drop it and delete its worktree | [`kraft item abandon --reason "..." --yes`](/reference/cli/item#item-abandon) |
 

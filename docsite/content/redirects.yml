@@ -523,6 +523,10 @@
 /reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget: /reference/cli/item#item-approve
 /reference/cli/item#when-resume-steer-is-refused: /reference/cli/item#item-resume
 /reference/cli/item#escalate-a-stopped-item: /reference/cli/item#item-escalate
+/reference/cli/item#comment-on-a-change: /reference/cli/item#item-comment
+/reference/cli/item#send-a-review: /reference/cli/item#item-review
+/reference/cli/item#set-item-wide-overrides: /reference/cli/item#item-set-overrides
+/reference/cli/item#one-nodes-agent-tasks: /reference/cli/item#item-set-node-override
 /reference/cli/admin#migrating-an-older-template-configuration: /guides/run/coming-from-1-4#a-0x-home
 /reference/web-ui/sidebar-search-and-keyboard#keyboard-and-layout: /reference/web-ui/sidebar-search-and-keyboard#keyboard-shortcuts
 /reference/web-ui/item-page#a-node-with-a-fix-loop: /reference/web-ui/fix-loops-and-test-scopes#a-node-with-a-fix-loop
