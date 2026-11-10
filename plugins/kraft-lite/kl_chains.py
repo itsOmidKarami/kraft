@@ -86,9 +86,9 @@ MODEL_KEYS = {
         {},
         read=(
             *("id", "kind", "tasks", "steps", "policy", "on_failure", "fix_loop"),
-            *("on_base_changed", "on_merge_rejected"),
+            *("on_base_changed", "on_merge_rejected", "read_only"),
         ),
-        read_past=("escalation", "icon", "read_only", "runner", "skippable"),
+        read_past=("escalation", "icon", "runner", "skippable"),
     ),
     "GateNode": _plus(
         {},
@@ -100,8 +100,8 @@ MODEL_KEYS = {
     ),
     "Step": _plus(
         {},
-        read=("id", "tasks"),
-        read_past=("icon", "policy", "read_only", "runner", "skippable"),
+        read=("id", "tasks", "read_only"),
+        read_past=("icon", "policy", "runner", "skippable"),
         refused=("on_failure",),
     ),
     "FixLoop": _plus({}, read=("judge", "max_attempts", "steps", "tasks")),
@@ -934,11 +934,15 @@ def _freeze(library: Library, chain_id: str, source: str, expanded: dict) -> dic
             frozen["command"] = shlex.split(raw["command"])
         return frozen
 
-    def steps(container: dict, prefix: str) -> list[dict]:
+    def steps(container: dict, prefix: str, plan_wide: bool = False) -> list[dict]:
+        # A recovery plan's `read_only` is each of its steps' (the `main` one a `tasks`
+        # shorthand became included), as `RecoveryPlan.resolve_steps` reads it.
         groups = container.get("steps") or [{"id": MAIN, "tasks": container["tasks"]}]
         return [
             {
                 "id": step["id"],
+                "read_only": step.get("read_only") is True
+                or (plan_wide and container.get("read_only") is True),
                 "tasks": [task(t, f"{prefix}.{step['id']}.{t['id']}") for t in step["tasks"]],
             }
             for step in groups
@@ -977,9 +981,12 @@ def _freeze(library: Library, chain_id: str, source: str, expanded: dict) -> dic
             {
                 "id": id,
                 "kind": "exec",
+                "read_only": node.get("read_only") is True,
                 "policy": {"max_attempts": cap} if cap is not None else None,
                 "steps": steps(node, id),
-                "on_failure": {"steps": steps(failure, f"{id}.on_failure")} if failure else None,
+                "on_failure": {"steps": steps(failure, f"{id}.on_failure", plan_wide=True)}
+                if failure
+                else None,
                 "fix_loop": {
                     "steps": steps(loop, f"{id}.fix_loop"),
                     "judge": task(loop["judge"], f"{id}.fix_loop.judge")

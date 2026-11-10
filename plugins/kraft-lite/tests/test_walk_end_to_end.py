@@ -68,6 +68,12 @@ def test_state_reports_steps_and_dispatch(walk, kl_cli, tmp_path):
     assert tests["source"] == "default:builtins.kraft.verify_changed_test_scopes"
     assert state["fix_loop"]["judge"]["path"] == "verification.fix_loop.judge"
     assert [s["id"] for s in state["fix_loop"]["steps"]] == ["main"]
+    # The node and each step carry Kraft's `read_only`: the review step is, the tests step is not.
+    assert [(s["id"], s["read_only"]) for s in state["steps"]] == [
+        ("tests", False),
+        ("review", True),
+    ]
+    assert state["read_only"] is False
     # Kraft's methods are named by path, never inlined: `state` dispatches every task.
     [review] = state["steps"][1]["tasks"]
     assert review["source"] == "default:agent (shipped method)"
@@ -84,6 +90,27 @@ def test_state_reports_steps_and_dispatch(walk, kl_cli, tmp_path):
     [tests] = kl_cli(tmp_path, "state")["steps"][0]["tasks"]
     assert (tests["kind"], tests["command"]) == ("subprocess", ["just", "test"])
     assert tests["source"] == "bindings:builtins.kraft.verify_changed_test_scopes"
+
+
+def test_state_reports_a_chain_frozen_before_read_only_as_not_read_only(walk, kl_cli, tmp_path):
+    """A frozen chain written before the key has none: `state` answers False, not a KeyError."""
+    walk.start(tmp_path)
+    walk.to(tmp_path, "verification")
+    [frozen] = (tmp_path / ".kraft-lite" / "chains").glob("*.json")
+    chain = json.loads(frozen.read_text())
+    for node in chain["nodes"]:
+        node.pop("read_only", None)
+        for step in node.get("steps") or ():
+            step.pop("read_only")
+    frozen.write_text(json.dumps(chain))
+
+    state = kl_cli(tmp_path, "state")
+
+    assert state["read_only"] is False
+    assert [(s["id"], s["read_only"]) for s in state["steps"]] == [
+        ("tests", False),
+        ("review", False),
+    ]
 
 
 def test_state_reports_a_gate_node(walk, kl_cli, tmp_path):
