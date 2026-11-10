@@ -86,8 +86,8 @@
   margin-top: 1.5rem;
 }
 
-/* A short list of points under a section's top part (what a session can't
-   do, in the hero; search and analytics, under the screenshots): columns
+/* A short list of points under a section's top part (the three promises,
+   after the chain; search and analytics, under the screenshots): columns
    separated by a rule, not cards. */
 .landing [data-slot='container'] > p {
   margin: 0 0 -1rem;
@@ -161,6 +161,22 @@
   /* Half the width, so a smaller headline keeps it to about five lines. */
   .landing-hero[data-orientation='horizontal'] [data-slot='title'] {
     font-size: clamp(2.125rem, 0.5rem + 2.4vw, 3rem);
+  }
+}
+
+/* On a phone the headline and lede are a size smaller and start higher, so
+   the board picture after the buttons shows on the first screen. */
+@media (max-width: 639px) {
+  .landing-hero[data-orientation='horizontal'] [data-slot='container'] {
+    padding-top: 1.5rem;
+  }
+
+  .landing-hero[data-orientation='horizontal'] [data-slot='title'] {
+    font-size: 1.75rem;
+  }
+
+  .landing-hero[data-orientation='horizontal'] [data-slot='description'] {
+    font-size: 1rem;
   }
 }
 
