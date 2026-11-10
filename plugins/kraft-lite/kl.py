@@ -32,6 +32,7 @@ import kl_bindings  # noqa: E402
 import kl_chains  # noqa: E402
 import kl_migrate  # noqa: E402
 import kl_shape  # noqa: E402
+import kl_slices  # noqa: E402
 
 #: bd stores a dependency as an object, not an id string. The fallback file uses
 #: the same shape on purpose: the promise that `bd import .kraft-lite/chain.jsonl`
@@ -1124,7 +1125,39 @@ def slices_for_gate(
         # Read only when the plan names no mode: a slices.json that cannot be read
         # has nothing to say to a plan that already decided.
         plan = dict(plan, mode=settings(root)["mode"])
-    return materialize_slices(plan, chain_id)
+    made = materialize_slices(plan, chain_id)
+    # A task in no slice is built by no child, and nothing after would notice.
+    text = _plan_text(root, _ours(records, chain_id), None)
+    if text is not None:
+        hole = kl_slices.coverage_refusal(text, plan["slices"])
+        if hole:
+            raise SystemExit(f"kraft-lite: the slice plan does not cover the plan: {hole}")
+    return made
+
+
+def _plan_text(root: Path, records: list[dict], path: Path | None) -> str | None:
+    """The text of `path`, else of the plan the chain recorded; None when it
+    recorded none. A recorded plan that cannot be read is refused."""
+    recorded = path or _artifact(records, "plan")
+    if recorded is None:
+        return None
+    try:
+        return (root / recorded).read_text()
+    except OSError as error:
+        raise SystemExit(f"kraft-lite: cannot read the plan {recorded}: {error}") from error
+
+
+def plan_slices(root: Path, records: list[dict], path: Path | None) -> dict:
+    """What `plan-slices` prints: the plan's `## Slices` section as a proposal's
+    `slices` list, null when it has none, or a `SystemExit` saying why the
+    section is refused."""
+    text = _plan_text(root, records, path)
+    if text is None:
+        raise SystemExit("kraft-lite: this chain recorded no plan: pass --plan PATH")
+    split = kl_slices.parse_slices(text)
+    if isinstance(split, str):
+        raise SystemExit(f"kraft-lite: the plan's ## Slices section is refused: {split}")
+    return {"slices": None if split is None else kl_slices.proposal_slices(split)}
 
 
 def _by_age(by_chain: dict[str, list[dict]]) -> list[str]:
@@ -2529,6 +2562,7 @@ VERBS: dict[str, frozenset[str]] = {
     "state": frozenset({"chain"}),
     "summary": frozenset({"chain"}),
     "slices": frozenset({"chain"}),
+    "plan-slices": frozenset({"chain"}),
     "slice-set": frozenset({"chain"}),
     "decide": frozenset({"chain", "log"}),
     "answer": frozenset({"chain", "log"}),
@@ -2579,6 +2613,8 @@ def build_parser() -> argparse.ArgumentParser:
     # The last gate rejects work that an earlier node produced: its own hook only
     # presents it. Without this the gate is approve-or-stall.
     reject.add_argument("--from-node", default=None)
+    # A plan file other than the one the chain recorded.
+    sub.add_parser("plan-slices").add_argument("--plan", type=Path, default=None)
     slice_set = sub.add_parser("slice-set")
     slice_set.add_argument("--slice", required=True)
     slice_set.add_argument("--status", default=None)
@@ -2736,6 +2772,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.verb == "slices":
         view = dict(slices_view(everything, resolved_id), shape=shape_view(chain, epic))
         print(json.dumps(view, indent=2))
+        return 0
+
+    if args.verb == "plan-slices":
+        print(json.dumps(plan_slices(root, records, args.plan), indent=2))
         return 0
 
     if args.verb == "slice-set":

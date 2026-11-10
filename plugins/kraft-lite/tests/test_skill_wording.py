@@ -245,7 +245,13 @@ SAYS = {
             "`KL gate`, then invoke `kraft-lite:gate`. It presents the gate's own artifact with "
             "the proposal beside it, and records the user's answer"
         ),
-        "controller-small-plan-heuristic": "few enough tasks for one session's context",
+        "controller-slices-what-stands-alone": (
+            "Slice only what stands alone: a part that uses no other part's work"
+        ),
+        "controller-groundwork-slice-first": (
+            "A task in no slice is groundwork: it prints a first `groundwork` slice that the "
+            "others come after."
+        ),
         "controller-unsliceable-chain-walks-unsliced": (
             "Unsliceable: tell the user its reason and draw nothing. At any other node: tell the "
             "user slicing comes at `shape.slice_gate`, and draw nothing now. In both, go on with "

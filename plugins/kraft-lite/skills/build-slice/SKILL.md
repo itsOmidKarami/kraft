@@ -1,6 +1,6 @@
 ---
 name: build-slice
-description: "Builds one slice of a sliced Kraft Lite run as a child session that answers to its controller, walking the child chain it starts from the controller's exported chain. Use when a controller's starting instructions name this skill, when a session is titled `<chain-id> <key>: <slice title>`, or when a controller tells a child that an earlier slice merged."
+description: "Builds one slice of a sliced Kraft Lite run as a child session that answers to its controller. Use when a controller's starting instructions name this skill, when a session is titled `<chain-id> <key>: <slice title>`, or when a controller or the harness tells a child to continue its slice, to rebase it, or that an earlier slice merged; the controller's side is `kraft-lite:run-slices`."
 ---
 
 # Building a slice as a child
@@ -34,16 +34,17 @@ Copy this and tick it off; the walk starts when all four are ticked.
 1. If `kraft-lite:next` is not installed, install the plugin through the harness;
    failing that, use `python3 <marketplace checkout>/plugins/kraft-lite/kl.py`,
    and read its skills as files.
-2. The spec and the plan arrive as messages marked `part i of n`, or as paths on
+2. `<run>` is
+   `$(git rev-parse --path-format=absolute --git-common-dir)/kraft-lite/<chain-id>`,
+   where `<chain-id>` is the controller's chain id, named in the **Slice** item of your
+   starting instructions: untracked, readable from any worktree, and the same
+   for every slice of the run, so slices sharing a repo write the same files.
+   The spec and the plan arrive as messages marked `part i of n`, or as paths on
    the controller's machine. Join the parts in numeric order; ask the controller
    for a missing one. Run `mkdir -p <run>/<slice key>` (it makes `<run>` too),
-   then write `<run>/spec.md` and `plan.md`, where `<run>` is
-   `$(git rev-parse --path-format=absolute --git-common-dir)/kraft-lite/<chain-id>`
-   and `<chain-id>` is the controller's chain id, named in the **Slice** item of your
-   starting instructions. Untracked, readable from any worktree, and the same
-   for every slice of the run, so slices sharing a repo write the same files.
-   Confirm with a `status`: parts joined, line count of each file, your plan
-   tasks by their headings.
+   then write `<run>/spec.md` and `plan.md`.
+   Confirm with a `status` message (section 3): parts joined, line count of each
+   file, your plan tasks by their headings.
 3. Record where your branch was cut, for section 5. The **Slice** item's line
    gives both: `Cut from: target at <sha>` from the target's tip, where `target`
    is the word itself, never a branch name, or `Cut from: <slice key> at <sha>`
@@ -73,10 +74,12 @@ Copy this and tick it off; the walk starts when all four are ticked.
    python3 "$CLAUDE_PLUGIN_ROOT/kl.py" state --chain-id <id>
    ```
 
-   `state` must show the child chain's first node (`implementation` on the
-   default chain), `open`; if not, the directory or id is wrong, so start no other
-   chain. A refused `start` goes to the controller as a `question` with the
-   refusal in full; never start with `--chain` instead.
+   `<id>` is the `chain_id` that `start` prints. `state` must show the child
+   chain's first node (`implementation` on the default chain), `open`; if not,
+   the checkout you ran it in or the id is wrong, so start no other chain. A
+   refused `start` goes to the controller as a `question` with the refusal in
+   full (a refused binding opens as section 2 says); never start with `--chain`
+   instead.
 5. Invoke `kraft-lite:next`. Pass your child chain's `--chain-id <id>` to every
    verb but `start`.
 
@@ -111,8 +114,9 @@ a `question` opening `For the user: configuration` that names the task, its
 binding and the refusal; it tells the user. You rebind nothing, substitute
 nothing, and put no question to the user.
 
-When the user speaks to you, reply with status only: where the slice is and what
-you asked the controller. Invite no answer, even one meant for the controller. An
+When the user speaks to you, reply with status only, from your own
+`state --chain-id <id>`, not `kraft-lite:status`, in one line: `Slice <key> is at
+<node>; I asked the controller <what>; meanwhile I <what>.` Invite no answer, even one meant for the controller. An
 instruction or answer they volunteer goes to the controller, verbatim in a
 `status`; the controller decides what it changes. When the user types
 `You may push to <branch>.` for a push you asked the controller about, that is
@@ -139,7 +143,8 @@ Try in this order, and read answers in the same order each time you wake:
    `.kraft-lite/messages/<chain-id>/<slice key>.jsonl` under the controller's
    checkout path in your starting instructions: `{"at", "from": "child", "kind",
    "body"}`, where `<chain-id>` is the controller's chain id, never your child chain's.
-3. A comment on your own draft PR, opened into the target at your first commit.
+3. A comment on your own draft PR into the target: open it at your first commit
+   if none is open (`mr.open_draft` later reports the one already open).
 
 `kind` is `question`, `status` or `done`; the controller answers with `answer`.
 Every message has these parts, in this order:
@@ -186,7 +191,8 @@ The target squash-merges, so an earlier slice's own commits never reach it.
 
 To rebase:
 
-1. Commit uncommitted work, or stash it and pop it after the rebase.
+1. Commit uncommitted work (a WIP commit). Never stash: the stash is shared by
+   every worktree of the repo, sibling slices included.
 2. `git fetch origin`, then check the fork. If either check fails, run no
    rebase: send the controller a `question` with both shas, and keep working.
    - `git merge-base --is-ancestor "$(cat <run>/<slice key>/fork)" HEAD` succeeds.
@@ -197,8 +203,11 @@ To rebase:
    force-pushed or deleted. Once it succeeds, record where you are now cut:
    `git rev-parse <onto> > <run>/<slice key>/fork`, and onto the target branch
    `echo target > <run>/<slice key>/base` (the word `target`). Onto a slice's
-   new tip, `base` keeps that slice's key.
-4. Re-run your scoped tests, then `git push --force-with-lease origin <your slice branch>`.
+   new tip, `base` keeps that slice's key. On a conflict in your own files,
+   resolve it. In a file another slice owns, `git rebase --abort`, send the
+   controller a `question`, and keep working. Never `git merge` or `-X` instead.
+4. Re-run your scoped tests; if they fail, fix and re-run before you push. Then
+   `git push --force-with-lease origin <your slice branch>`.
 5. Send a `status` with the new head, the test result, and the line
    `Cut from: target at <the new fork>`, or onto a slice's new tip
    `Cut from: <slice key> at <the new fork>`.
@@ -229,3 +238,7 @@ PR: <link>
 Deviations from the plan: <each, or "none">
 Look at first: <file or behaviour>
 ```
+
+Findings from the controller's review after `done`: fix them on your own
+branch, re-run the scoped tests, push, then send `done` again with the new head
+and what changed. Run no chain verb: the chain is finished.

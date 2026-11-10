@@ -1,6 +1,6 @@
 ---
 name: next
-description: "Runs the next node of a Kraft Lite chain from its recorded state. Use when continuing a chain: right after `kraft-lite:start`, after a gate answer, or in a new or cleared session. A chain blocked at a gate belongs to `kraft-lite:gate`; a read-only progress question belongs to `kraft-lite:status`."
+description: "Runs the next node of a Kraft Lite chain from its recorded state. Use when continuing a chain: right after `kraft-lite:start`, after `kraft-lite:gate` has recorded an answer, when the user says to carry on or that they merged a slice's PR, or in a new or cleared session. A chain blocked at a gate belongs to `kraft-lite:gate`; a read-only progress question belongs to `kraft-lite:status`; a slice's child starts with `kraft-lite:build-slice`."
 ---
 
 # Running the next node
@@ -11,7 +11,8 @@ it needs `python3` 3.10 or newer, and without one, tell the user and stop.
 This skill holds no state in the conversation: everything comes from `state`,
 so it survives a `/clear`. Below, `KL` is short for
 `python3 "$CLAUDE_PLUGIN_ROOT/kl.py"`, and every `KL` command carries
-`--chain-id <id>`. If a verb exits saying there is more than one unfinished
+`--chain-id <id>`. In a cleared session you have no id: take `chain_id` from
+`KL chains`, or from a bare `state` while one chain is unfinished. If a verb exits saying there is more than one unfinished
 chain, show the user the list it printed and ask which - do not pick. A verb
 that refuses with `Run: python3 kl.py migrate` means a run or registry from an
 older Kraft Lite: follow `kraft-lite:init`'s last section, `A pre-V1 directory:
@@ -21,15 +22,18 @@ migrate`, then go on with the new id it prints.
 
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" state --chain-id <id>
 
-You get `node`, `kind` (`exec` or `gate`), `status`, `note`, `attempt`, `cap`,
+You get `chain_id`, `node`, `kind` (`exec` or `gate`), `status`, `note`, `attempt`, `cap`,
 `steps`, `on_failure`, `on_failure_ran`, `fix_loop`, `on_base_changed`,
 `on_merge_rejected`, `gate` and `sliced`.
 
-- `status: unstarted` - there is no chain here. Invoke `kraft-lite:start`, or say
-  so if you were not asked to start one. Do not report this as finished.
+- `status: unstarted` - there is no chain here: tell the user so. Invoke
+  `kraft-lite:start` only if they asked to begin work, with the title they gave.
+  Do not report this as finished.
 - `status: done` - the chain is finished. Report what it cost (section 5) and stop.
 - `status: blocked` - a gate is waiting. Invoke `kraft-lite:gate`. Do not proceed.
 - `note` non-empty - the node was sent back. That note leads this attempt.
+- `sliced` null, as in most chains - `kind: exec` is section 2 and `kind: gate`
+  is section 4; skip the rest of this section.
 - `sliced` not null, `status` neither `done` nor `blocked` - `sliced.action` says
   what this node is:
   - `run_slices` - invoke `kraft-lite:run-slices`, which closes this node when every
@@ -46,7 +50,7 @@ You get `node`, `kind` (`exec` or `gate`), `status`, `note`, `attempt`, `cap`,
     failure.
   - `skip` - `KL close` with nothing run (`KL approve` on a gate node: `close`
     refuses one), then this skill again.
-  - `await_user_merges` - check the PR of each slice that `slices` does not show as
+  - `await_user_merges` - check the PR of each slice that `KL slices` does not show as
     `merged`. For each the user merged: `KL slice-set --slice <key> --status merged`,
     tell each slice cut from its branch or from the target to rebase onto the
     target, and archive its child, as `kraft-lite:run-slices` says after a merge,
@@ -58,7 +62,8 @@ You get `node`, `kind` (`exec` or `gate`), `status`, `note`, `attempt`, `cap`,
   - `run` - as in an unsliced chain, below.
 - Otherwise `kind: exec` is section 2 and `kind: gate` is section 4.
 
-In a sliced `feature` run, every task from the first build node on runs in a
+In a sliced `feature` run, every task from the first build node on (the
+`shape.first_build` that `KL slices` prints) runs in a
 worktree of the feature branch, never in the state branch's checkout: the rebase
 and the PR are made from the branch they run in. Make the worktree
 once, from origin's feature branch, where the slices merged:
@@ -114,12 +119,15 @@ PR's branch, then `KL restart --merge-rejected`: it reopens the walk from
 checks and the final gate are answered again before the merge runs. Then this
 skill again.
 
-Every step passed: `KL close`, then this skill again. In a sliced run (`sliced`
+Checks still running are neither a pass nor a failure: leave the node open,
+spend no `attempt`, run no `KL close`, and wait as below. Every step passed:
+`KL close`, then this skill again. In a sliced run (`sliced`
 not null), export state after every `close`, as `kraft-lite:run-slices`
 describes under State branch.
 
 Resuming replays a node from its first step: keep tasks idempotent, and stop and
-ask rather than run twice one that is not. The chain froze at `start` and cannot
+ask rather than run twice one that is not. Before replaying a task, check what
+it left: the branch, the PR, the merge. The chain froze at `start` and cannot
 be reordered, but `.kraft-lite/bindings.yaml` is read again at every `state`, so
 rebinding a task there is how a live chain is corrected.
 
