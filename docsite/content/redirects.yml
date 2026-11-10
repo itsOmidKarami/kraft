@@ -519,7 +519,9 @@
 /reference/cli/item#target-a-repo: /reference/cli/item#filing-a-work-item
 /reference/cli/repo#repo-settings: /reference/cli/repo#related
 /reference/web-ui/board#keyboard: /reference/web-ui/sidebar-search-and-keyboard#keyboard-shortcuts
-/reference/cli/item#pause-and-resume: /reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget
+/reference/cli/item#pause-and-resume: /reference/cli/item#item-pause
+/reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget: /reference/cli/item#item-approve
+/reference/cli/item#when-resume-steer-is-refused: /reference/cli/item#item-resume
 /reference/cli/admin#migrating-an-older-template-configuration: /guides/run/coming-from-1-4#a-0x-home
 /reference/web-ui/sidebar-search-and-keyboard#keyboard-and-layout: /reference/web-ui/sidebar-search-and-keyboard#keyboard-shortcuts
 /reference/web-ui/item-page#a-node-with-a-fix-loop: /reference/web-ui/fix-loops-and-test-scopes#a-node-with-a-fix-loop

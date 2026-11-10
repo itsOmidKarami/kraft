@@ -38,7 +38,7 @@ Each command links to its entry.
 | File it and start it at once | [`kraft item create "title" --autostart`](/reference/cli/item#filing-a-work-item) |
 | Revise a spec or plan before the item starts | [`kraft item set-attachments`](/reference/cli/item#change-an-items-setup) |
 | Switch the [chain](/concepts/vocabulary#chain) of an item that hasn't started | [`kraft item set-chain`](/reference/cli/item#change-an-items-setup) |
-| Start an item that was filed paused | [`kraft item resume`](/reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget) |
+| Start an item that was filed paused | [`kraft item resume`](/reference/cli/item#item-resume) |
 
 ### Watching
 
@@ -63,8 +63,8 @@ Each command links to its entry.
 | Read the document the [gate](/concepts/vocabulary#gate) is about | [`kraft view artifact`](/reference/cli/view#reviewing-before-you-approve) |
 | Read the change | [`kraft view diff`](/reference/cli/view#reviewing-before-you-approve) |
 | Compare two attempts, or the change since my last review | [`kraft view compare`](/reference/cli/view#reviewing-threads-and-comparing-attempts) |
-| Approve | [`kraft item approve`](/reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget) |
-| Reject, and say why | [`kraft item reject --note "why"`](/reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget) |
+| Approve | [`kraft item approve`](/reference/cli/item#item-approve) |
+| Reject, and say why | [`kraft item reject --note "why"`](/reference/cli/item#item-reject) |
 | Comment on a line of the change | [`kraft item comment`](/reference/cli/item#comment-on-a-change) |
 | Send my comments with an outcome | [`kraft item review`](/reference/cli/item#send-a-review) |
 | Read the item's merge request, pipelines, job logs, merged requests or labels | [`kraft view mr`, `pipelines`, `jobs`, `job-log`, `merged`, `labels`](/reference/cli/view#reading-the-forge) _Added in 2.5_ |
@@ -78,12 +78,12 @@ Each command links to its entry.
 | I want to | Command |
 |---|---|
 | See why it stopped | [`kraft view show`](/reference/cli/view#what-view-show-prints), then [`kraft view logs`](/reference/cli/view#read-a-sessions-log) |
-| Run the stopped [node](/concepts/vocabulary#node) again | [`kraft item retry`](/reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget) |
-| Redo one step or task, or the whole chain | [`kraft item retry --path PATH`, `--restart`](/reference/cli/item#addressing-work-by-path) |
+| Run the stopped [node](/concepts/vocabulary#node) again | [`kraft item retry`](/reference/cli/item#item-retry) |
+| Redo one step or task, or the whole chain | [`kraft item retry --path PATH`, `--restart`](/reference/cli/item#item-retry) |
 | Give it more budget | [`kraft item raise-budget --usd N`](/reference/cli/item#raise-a-cap-that-stopped-an-item) |
 | Raise a time or token [cap](/concepts/vocabulary#cap) | [`kraft item set-policy`](/reference/cli/item#a-work-items-own-policy) |
-| Steer an agent that is paused | [`kraft item resume --steer "..."`](/reference/cli/item#addressing-work-by-path) |
-| Pause a running item | [`kraft item pause`](/reference/cli/item#approve-reject-pause-resume-retry-raise-a-budget) |
+| Steer an agent that is paused | [`kraft item resume --steer "..."`](/reference/cli/item#item-resume) |
+| Pause a running item | [`kraft item pause`](/reference/cli/item#item-pause) |
 | Ask an agent to help with the stop | [`kraft item escalate --message "..."`](/reference/cli/item#escalate-a-stopped-item) |
 | Skip the node it stopped on | [`kraft item skip`](/reference/cli/item#skip-escalate-end-or-drop-an-item) |
 | Pick another model or effort for it | [`kraft item set-overrides`](/reference/cli/item#set-item-wide-overrides), or [`kraft item set-node-override`](/reference/cli/item#one-nodes-agent-tasks) |
