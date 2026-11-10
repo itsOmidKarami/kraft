@@ -81,9 +81,9 @@ def test_every_skill_invokes_the_helper_by_plugin_root(texts, name):
 
 
 def test_the_readme_describes_the_chain_it_actually_ships():
-    """The README counts nodes and gates. The chain is generated, so those
+    """The guide counts nodes and gates. The chain is generated, so those
     numbers drift the moment a node is added."""
-    readme = (PLUGIN / "README.md").read_text()
+    readme = (PLUGIN.parents[1] / "docsite/content/3.guides/5.kraft-lite.md").read_text()
     words = {
         "two": 2,
         "three": 3,
@@ -101,11 +101,11 @@ def test_the_readme_describes_the_chain_it_actually_ships():
         "nineteen": 19,
         "twenty": 20,
     }
-    nodes = re.search(r"`default` chain:\s+(\w+)\s+nodes", readme)
-    gates = re.search(r"(\w+)\s+of\s+them\s+gates", readme)
-    assert nodes and gates, "the README no longer states the counts this test guards"
-    assert words[nodes.group(1)] == len(CHAIN["nodes"])
-    assert words[gates.group(1)] == sum(node["kind"] == "gate" for node in CHAIN["nodes"])
+    nodes = re.search(r"`default`:\s+(\w+)\s+nodes", readme)
+    gates = re.search(r"(\w+)\s+are\s+gates", readme)
+    assert nodes and gates, "the guide no longer states the counts this test guards"
+    assert words[nodes.group(1).lower()] == len(CHAIN["nodes"])
+    assert words[gates.group(1).lower()] == sum(node["kind"] == "gate" for node in CHAIN["nodes"])
 
 
 def test_the_skills_distinguish_unstarted_from_done(texts):
