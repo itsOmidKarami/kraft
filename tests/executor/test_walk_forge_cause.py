@@ -42,12 +42,21 @@ class _RaisingForge:
 
 
 @pytest.mark.parametrize(
-    ("co_task", "env", "asked", "loop_opens", "reason_names", "reason_lacks", "conflicting"),
+    (
+        "co_task",
+        "env",
+        "asked",
+        "loop_opens",
+        "reason_names",
+        "reason_lacks",
+        "conflicting",
+        "fix_loop",
+    ),
     [
         # `on.mr.open` fails with nothing a worker commit could ever change: the
         # handler runs in the orchestrator, not the worktree. No fix cycle, no
         # loop counter bumped, and the reason names the in-process cause.
-        (None, {}, None, False, ["open [forge]", "Reinstall"], [], False),
+        (None, {}, None, False, ["open [forge]", "Reinstall"], [], False, True),
         # The CI wait's forced rebase hit a conflict: the forge task answered
         # `conflict`, which is the branch's to resolve, not the daemon's.
         (
@@ -58,6 +67,19 @@ class _RaisingForge:
             ["rebase conflict", "ci [forge]", "Could not apply de76ada", "worktree"],
             ["Reinstall", "daemon"],
             True,
+            True,
+        ),
+        # The same answer in a node with no fix loop stops as `failed`
+        # (`rebase-conflict-requires-explicit-handler`), with git's line in the reason.
+        (
+            None,
+            {},
+            None,
+            False,
+            ["task failed in node checks", "ci [forge]", "Could not apply de76ada"],
+            ["Reinstall", "daemon"],
+            True,
+            False,
         ),
         # A co-failing worker-fixable task alone justifies the cycle.
         (
@@ -68,6 +90,7 @@ class _RaisingForge:
             [],
             [],
             False,
+            True,
         ),
         # A co-task's real findings (a review, or the node's own red pipeline)
         # are not discarded by refusing the cycle.
@@ -79,6 +102,7 @@ class _RaisingForge:
             [],
             [],
             False,
+            True,
         ),
         # Ordering control (review finding): a question a fix agent already
         # asked reaches the human, even on a round whose re-measure looks
@@ -92,11 +116,13 @@ class _RaisingForge:
             ["needs_context: should I use library X or Y?"],
             ["Reinstall"],
             False,
+            True,
         ),
     ],
     ids=[
         "blind-failure-alone",
         "a-rebase-conflict-in-the-ci-wait",
+        "a-rebase-conflict-with-no-fix-loop",
         "beside-a-co-failing-subprocess",
         "beside-a-co-tasks-findings",
         "a-pending-question-outranks-it",
@@ -114,6 +140,7 @@ async def test_an_in_process_blind_failure_opens_no_fix_cycle_of_its_own(
     reason_names,
     reason_lacks,
     conflicting,
+    fix_loop,
 ):
     monkeypatch.setattr(_forge.run, "resolve", lambda name: _RaisingForge())
     for name, value in env.items():
@@ -131,7 +158,8 @@ async def test_an_in_process_blind_failure_opens_no_fix_cycle_of_its_own(
         monkeypatch.setattr(_forge.run._builtins, "mr_rebase_forced", conflicts)
         task = _forge_task("ci", "mr.ci")
     tasks = [task, *([co_task] if co_task else [])]
-    it = await item_on([_exec("checks", *tasks, fix_loop={"tasks": [_agent("repair")]})])
+    loop = {"fix_loop": {"tasks": [_agent("repair")]}} if fix_loop else {}
+    it = await item_on([_exec("checks", *tasks, **loop)])
     if conflicting:
         await fake.open_mr(
             repo=it.worktree, branch=store.branch_for(it.row()), base="main", title="t", body="b"
@@ -146,7 +174,7 @@ async def test_an_in_process_blind_failure_opens_no_fix_cycle_of_its_own(
         assert all(part in reason for part in reason_names), reason
         assert not any(part in reason for part in reason_lacks), reason
         expected_kind = (
-            "conflict"
+            ("conflict" if fix_loop else "failed")
             if conflicting
             else "question"
             if reason.startswith("needs_context:")
