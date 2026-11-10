@@ -50,6 +50,30 @@ describe("Workspace", () => {
     expect(document.querySelector(".gateview-said")).toBeNull();
   });
 
+  describe("a gate pane's rounds", () => {
+    const round = (n: number, over = {}) => ({ n, requested_at: "t", ended_at: "t", outcome: "approved", by: "assistant", note: null, sent_to: null, reopened: false, reviewer: null, ...over });
+    const waiting = {
+      pending_gate: "plan_approval", current_node_id: "plan_approval", display_status: "needs_you", gate_artifact: ".x/plan.md",
+      gate_rounds: { plan_approval: [round(1, { outcome: "rejected", note: "redo it", sent_to: "plan" }), round(2, { outcome: "pending", by: null, ended_at: null })] },
+    };
+
+    it.each([
+      ["the current, waiting round has it", "/work-items/w1/nodes/plan_approval", true],
+      ["a past round has no decision footer", "/work-items/w1/nodes/plan_approval?pass=1", false],
+    ])("%s", (_name, path, footer) => {
+      mount(path, waiting as never);
+      const pane = screen.getByRole("complementary", { name: "plan_approval pane" });
+      expect(within(pane).queryByRole("button", { name: "Approve" }) !== null).toBe(footer);
+      expect(within(pane).queryByRole("button", { name: "Request changes…" }) !== null).toBe(footer);
+    });
+
+    it("a History click from the chain overview opens the gate on that round", async () => {
+      mount("/work-items/w1?sel=plan_approval", waiting as never);
+      await userEvent.click(within(screen.getByRole("complementary", { name: "plan_approval pane" })).getByRole("button", { name: /^Round 1/ }));
+      expect(where()).toBe("/work-items/w1/nodes/plan_approval?pass=1");
+    });
+  });
+
   it("opens on the chain's pane, and a node click selects it in the URL", async () => {
     mount();
     expect(screen.getByRole("complementary", { name: "default pane" })).toBeInTheDocument();

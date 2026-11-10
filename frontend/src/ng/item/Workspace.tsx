@@ -208,6 +208,9 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   const pane = paneContent({
     item: shown, version, events, now, policy, graph: graph.nodes, sel, level: state.level, tab, reload, pick, editBudget, setEditBudget, docs, round, scope: place.scope,
     focus: (node) => dispatch({ type: "focus", node }),
+    pass: place.pass,
+    // A History row of a gate opens the gate's view on that round: from the chain overview too, which has no `?pass=` of its own.
+    setPass: (n) => go({ ...place, node: selNode, sel: selNode ? { kind: "node", node: selNode } : place.sel, pass: n }),
     attempt: place.attempt,
     setAttempt: (attempt) => go({ ...place, attempt }),
     agent: place.agent,

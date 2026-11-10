@@ -46,7 +46,7 @@ function turnWords(sessions: WorkerSession[], at: WorkerSession): string {
 }
 
 /** HH:MM in the viewer's time zone. */
-const localTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+export const localTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 
 export const fact = (k: string, v: React.ReactNode) => (v == null || v === "" ? null : <div key={k}><dt>{k}</dt><dd>{v}</dd></div>);
 

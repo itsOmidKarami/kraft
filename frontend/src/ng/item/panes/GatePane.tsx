@@ -2,7 +2,7 @@ import { REQUEST_CHANGES, sendsBack } from "../../review/finish";
 import { gateName, nameOf } from "../../board/rowText";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { ChainNode, KraftEvent } from "../../../types";
+import type { ChainNode } from "../../../types";
 import { FileText } from "../../icons";
 import { Button } from "../../ui/Button";
 import { useReason } from "../../ui/Reason";
@@ -10,8 +10,9 @@ import { ADD_NOTE } from "../../ui/reasons";
 import { request } from "../../http";
 import { act } from "../actions";
 import { TestsLine } from "../TestsLine";
-import { gateState } from "../gateRounds";
-import { OUTCOME, reviewOutcome } from "../reviewOutcome";
+import { byWord, gateState, isPastRound, outcomeWord, roundShown, roundsOf } from "../gateRounds";
+import { OUTCOME } from "../reviewOutcome";
+import { localTime } from "./TaskPane";
 import { rejectTarget } from "../graph";
 import { totals, useDiffFiles } from "../Top";
 import { runVersion, type ItemDetail } from "../useItem";
@@ -20,9 +21,13 @@ import { holdsText, isEscape, sendOnModEnter } from "../../keys";
 type ThreadRow = { id: string; state: string; gate: string | null; node_id: string | null; file_path: string | null; comments?: { body: string }[] };
 
 /** The gate's pane (Decisions §5 Gate pane, §6 Gates): the change it decides
- *  on, open threads, what it decides on, where reject goes, its status. */
-export function GateBody({ item, version, gate, events }: { item: ItemDetail; version: string; gate: ChainNode; events: KraftEvent[] }) {
-  const files = useDiffFiles(item.id, runVersion(item), item.worktree_exists === false);
+ *  on, open threads, what it decides on, where reject goes, its status, and its
+ *  History: every round with who decided and the note. `picked` is the round
+ *  shown (undefined: the newest); a past one describes that round, not now. */
+export function GateBody({ item, version, gate, picked, onPick }: { item: ItemDetail; version: string; gate: ChainNode; picked?: number; onPick?: (n: number | undefined) => void }) {
+  const past = isPastRound(item, gate.id, picked);
+  // A past round's files are not the gate's now: nothing is fetched for them.
+  const files = useDiffFiles(item.id, runVersion(item), item.worktree_exists === false || past);
   const [threads, setThreads] = useState<ThreadRow[]>([]);
   useEffect(() => {
     let live = true;
@@ -31,14 +36,17 @@ export function GateBody({ item, version, gate, events }: { item: ItemDetail; ve
   }, [item.id, version]);
   const open = threads.filter((t) => t.state !== "resolved");
   const pending = item.pending_gate === gate.id;
-  const outcome = reviewOutcome(events, gate.id);
+  const rounds = roundsOf(item, gate.id);
+  const round = roundShown(item, gate.id, picked);
+  const outcome = round?.reviewer ?? null;
   // The reviewer's own concern is usually its outcome's note, shown below.
   const concerns = (item.concerns ?? []).filter((c) => c.trim() !== outcome?.note);
-  const to = rejectTarget(item.chain_definition.nodes, gate.id);
+  const to = (round?.outcome === "rejected" && round.sent_to) || rejectTarget(item.chain_definition.nodes, gate.id);
   const t = files && totals(files);
+  const who = round && byWord(round.by);
   return (
     <>
-      {files && files.length > 0 && (
+      {!past && files && files.length > 0 && (
         <>
           <p className="ip-files-head">{files.length} {files.length === 1 ? "file" : "files"} <span className="item-add">+{t!.add}</span> <span className="item-del">−{t!.del}</span></p>
           <ul className="ip-files">
@@ -53,24 +61,51 @@ export function GateBody({ item, version, gate, events }: { item: ItemDetail; ve
           <ul className="ip-notes">{open.slice(0, 3).map((x) => <li key={x.id}>{x.comments?.[0]?.body ?? x.file_path ?? "a thread"}</li>)}</ul>
         </>
       )}
-      {pending && concerns.length > 0 && (
+      {pending && !past && concerns.length > 0 && (
         <>
           <h3 className="ip-h">Concerns · {concerns.length}</h3>
           <ul className="ip-notes">{concerns.map((c, i) => <li key={i}>{c}</li>)}</ul>
         </>
       )}
-      {/* Kraft's note on the reviewer's outcome, such as the files it changed, which void its verdict. */}
-      {outcome?.note && (
+      {/* The round's reviewer verdict. Kraft's note on it, such as the files it changed, which void its verdict, shows here; a reviewer's rejection is also the round's note, which History shows once. */}
+      {outcome && (
         <>
           <h3 className="ip-h">Reviewer: {OUTCOME[outcome.kind].word}</h3>
-          <p className="ip-review-note">{outcome.note}</p>
+          {outcome.note && outcome.note !== round?.note && <p className="ip-review-note">{outcome.note}</p>}
+        </>
+      )}
+      {rounds.length > 0 && (
+        <>
+          <h3 className="ip-h">History · {rounds.length} {rounds.length === 1 ? "round" : "rounds"}</h3>
+          <ul className="ip-hist">
+            {[...rounds].reverse().map((r) => {
+              const by = byWord(r.by);
+              const tone = ({ approved: "ok", fixed: "ok", skipped: "ok", rejected: "bad", closed: "bad", pending: "run" } as const)[r.outcome];
+              const shown = r.n === round?.n;
+              return (
+                <li key={r.n}>
+                  <button type="button" className="ip-hist-row" aria-current={shown ? "true" : undefined} onClick={() => onPick?.(r.n === rounds.length ? undefined : r.n)}>
+                    <span className="ip-hist-head">
+                      <span className={`round-dot is-${tone}`} aria-hidden="true" />
+                      <span className="ip-hist-n">Round {r.n}{r.n === rounds.length ? " · now" : ""}</span>
+                      {r.ended_at && <span className="ip-hist-at">{localTime(r.ended_at)}</span>}
+                    </span>
+                    <span className="ip-hist-what">{outcomeWord(r)}{by ? ` · ${by}` : ""}</span>
+                    {r.note && <span className={`ip-hist-note${shown ? " is-whole" : ""}`}>{r.note}</span>}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
         </>
       )}
       <dl className="item-facts ip-facts ip-gap">
-        {item.test_result && <div><dt>tests</dt><dd><TestsLine workItemId={item.id} result={item.test_result} /></dd></div>}
-        {item.gate_artifact && pending && <div><dt>decides on</dt><dd className="is-mono">{item.gate_artifact.split("/").pop()}</dd></div>}
+        {!past && item.test_result && <div><dt>tests</dt><dd><TestsLine workItemId={item.id} result={item.test_result} /></dd></div>}
+        {item.gate_artifact && pending && !past && <div><dt>decides on</dt><dd className="is-mono">{item.gate_artifact.split("/").pop()}</dd></div>}
+        {past && round && <div><dt>decided</dt><dd>{outcomeWord(round)}{who ? ` · ${who}` : ""}{round.ended_at ? ` · ${localTime(round.ended_at)}` : ""}</dd></div>}
+        {past && round?.requested_at && <div><dt>asked</dt><dd>{localTime(round.requested_at)}</dd></div>}
         {to && <div><dt>reject to</dt><dd>{nameOf(item.chain_definition.nodes, to)}</dd></div>}
-        <div><dt>status</dt><dd>{gateState(item, gate.id).words}</dd></div>
+        {!past && <div><dt>status</dt><dd>{gateState(item, gate.id).words}</dd></div>}
       </dl>
     </>
   );
