@@ -10,7 +10,12 @@ and the tail of its trace — is already in the prompt above.
 
 **Whether another pass follows is the chain's decision, not this skill's.** Fix
 what you can see and exit; the CI wait runs again after you and decides whether
-it worked. Do not apply a second guess in the same pass to hedge the first.
+it worked. Do not apply a second guess in the same pass to hedge the first,
+and never push a commit or touch CI config to force a run.
+
+Act only when the trace names a label or a description section. When you
+leave something, whatever the reason, finish `done_with_concerns` and say why
+in `concerns`.
 
 ## When the trace names a missing or wrong label
 
@@ -21,19 +26,22 @@ CONTRIBUTING or the job's own definition in its CI config says what they
 are. Pick the label from the diff this item made, not from habit — a wrong
 label mislabels what ships (a release label picks the version), which is
 worse than stopping to ask. If the diff does not make the choice obvious,
-leave it: reporting "I could not tell which of these labels this change
-takes" is correct output; a guess is not.
+leave it: "I could not tell which of these labels this change takes" in
+`concerns` is correct output; a guess is not.
 
 Apply your choice with the `set_mr_labels` tool of the `kraft` MCP server
 (`kraft item mr-label <label>...` from the shell works the same way) — not
-`glab`/`gh` directly. It re-creates the pipeline too: `CI_MERGE_REQUEST_LABELS`
-is fixed when a pipeline starts, so a label applied after the fact needs a new
-pipeline to be seen at all, and this is what makes that happen.
+`glab`/`gh` directly. It adds labels, and removes only those sharing a scope
+prefix with one it sets (`kind::a` gives way to `kind::b`); it can't remove an
+unscoped label, so if a stray one fails the check, say so. On GitLab it also
+starts a new pipeline, because `CI_MERGE_REQUEST_LABELS` is fixed when a
+pipeline starts; on GitHub the label edit re-runs workflows that trigger on
+`labeled`.
 
 ## When the trace names a missing or wrong description section
 
 A job that reads the merge request's description (for example `missing
-section: ## Removed tests`) is fixed in the item's `mr_meta` document, whose
+section: ## Testing`) is fixed in the item's `mr_meta` document, whose
 path is in the documents list above. Edit that file, not the live description:
 Kraft rebuilds the description from it on every sync, so an edit anywhere else
 is reverted. Keep its front matter, change only the body, and take the
@@ -43,16 +51,14 @@ from guesswork; if you cannot tell what it should say, leave it. The `sync`
 step after you writes the description to the forge and starts the failed
 checks again (on GitLab as a new pipeline). A check that reads the description
 when it runs sees the fix; one that reads it from its triggering event does
-only if it re-runs on edits. If neither works the item stops for a person, as
-before: do not push a commit or touch CI config to force a run.
+only if it re-runs on edits.
 
 ## When the trace names something else
 
 This task exists for MR-metadata problems, not code problems — a missing
-label, not a failing test. If the pipeline is red for a reason no label can
-fix, do nothing: the CI wait runs again after you, fails the same way, and once
-the chain's repair attempts are spent the item stops for a human with the same
-diagnosis you would only be repeating.
+label, not a failing test. If no label or section would fix it, change nothing,
+end `done_with_concerns` and name the failed job and the cause in `concerns`. A
+chain with a fix loop takes it from there.
 
 ## When the pipeline reports a merge conflict
 
@@ -66,5 +72,5 @@ left mid-conflict when your pass ends strands it there. If you need more than
 the log line gives you, use a read-only command that does not change
 what is checked out (`git merge-tree`, `git log`, `git diff
 origin/<base>...HEAD`) — and in any case there is nothing this task can
-do about a real conflict; say so and stop, the same as any other
-non-label failure.
+do about a real conflict; say so in `concerns` and stop, the same as any
+other non-label failure.
