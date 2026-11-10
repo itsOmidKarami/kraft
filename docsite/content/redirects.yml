@@ -526,8 +526,9 @@
 /reference/harnesses/agent-profiles#shipped-profiles: /reference/harnesses/agent-profiles#shipped-agent-profiles
 /guides/run/upgrade-kraft#upgrading-from-14: /guides/run/upgrade-from-1-4#update-from-14
 /get-started/install#upgrading: /guides/run/upgrade-kraft
-/get-started/install#where-state-lives: /get-started/install#uninstall-and-where-state-lives
-/get-started/install#uninstall: /get-started/install#uninstall-and-where-state-lives
+/get-started/install#where-state-lives: /get-started/faq#how-do-i-uninstall-kraft
+/get-started/install#uninstall: /get-started/faq#how-do-i-uninstall-kraft
+/get-started/install#uninstall-and-where-state-lives: /get-started/faq#how-do-i-uninstall-kraft
 /guides/kraft-lite#slash-commands: /guides/kraft-lite#run-your-first-chain
 /guides/harnesses/worker-kit#_5-check-it: /guides/harnesses/worker-kit#check-it-worked
 /guides/day-to-day/review-a-change#gates-dont-ask-twice: /guides/day-to-day/review-a-change#a-gate-with-a-must-fix-doesnt-open
@@ -685,3 +686,9 @@
 /reference/web-ui/cap-stops-and-raises#budget-stops-and-what-the-interface-offers: /guides/day-to-day/raise-a-cap#which-stop-offers-what
 /reference/web-ui/cap-stops-and-raises#raising-a-time-or-attempts-cap-from-the-command-line: /guides/day-to-day/raise-a-cap#what-limits-a-raise
 /reference/web-ui/cap-stops-and-raises#raising-a-budget-from-the-command-line: /guides/day-to-day/raise-a-cap#raise-the-cap-and-retry
+/get-started/first-work-item#_3-file-your-first-work-item: /get-started/first-work-item#_3-file-a-work-item-on-a-chain-with-a-gate
+/get-started/first-work-item#_4-start-it-and-watch: /get-started/first-work-item#_4-review-the-chain-then-start-it
+/get-started/first-work-item#_5-where-is-my-change: /get-started/first-work-item#_6-where-is-my-change
+/get-started/why-kraft#what-your-agent-cant-do-on-its-own: /get-started/why-kraft#what-kraft-adds
+/get-started/why-kraft#an-interactive-session: /get-started/why-kraft
+/get-started/the-real-chain#the-chain-you-are-about-to-run: /get-started/the-real-chain#the-whole-chain
