@@ -1,4 +1,4 @@
-/** W9's config-draft answers, field for field (docs: /reference/http-api/drafts). */
+/** W9's config-draft answers, field for field (docs: /reference/http-api#the-schema). */
 
 import type { Addon } from "../../../types";
 import type { Choice } from "../../ui/Combobox";
