@@ -2,13 +2,13 @@ import type { ChainNode as ApiNode, ItemAction, KraftEvent } from "../../../type
 import type { ChainNode } from "../../graph/layout";
 import { nameOf } from "../../board/rowText";
 import { rejectTarget } from "../../item/graph";
-import { gateSkipped } from "../../item/events";
+import { gateState, isPastRound, outcomeWord, roundShown } from "../../item/gateRounds";
 import type { ItemDetail } from "../../item/useItem";
 import { admits, retryable, skippable, slicesUnjoined } from "../../item/status";
 import { attemptsAt, capAt, materialized } from "../../item/chainValues";
 import { passOf } from "../../item/nodeGraph";
 import { taskName } from "../../item/paths";
-import { OUTCOME, reviewOutcome } from "../../item/reviewOutcome";
+import { OUTCOME } from "../../item/reviewOutcome";
 import { CHIP_TONE } from "../../graph/types";
 import { elapsed, nodeRunSpan } from "../../../format";
 
@@ -64,17 +64,24 @@ export interface PathRow {
   chip?: { word: string; tone: "ok" | "bad" | "warn" };
 }
 
-/** A gate's review path (prototype `flow`): the agent reviewer when the gate has one, you, and where a rejection goes. The verdict is the agent's own event, never invented. */
-export function reviewPath(item: ItemDetail, gate: ApiNode, events: KraftEvent[]): PathRow[] {
-  const outcome = reviewOutcome(events, gate.id);
+/** A gate's review path (prototype `flow`): the agent reviewer when the gate has one, you, and where a rejection goes. The verdict is the agent's own event, never invented. It reads the round shown (`picked`, else the newest) from the server's rounds, not from the page's events. */
+export function reviewPath(item: ItemDetail, gate: ApiNode, picked?: number): PathRow[] {
+  const round = roundShown(item, gate.id, picked);
+  const outcome = round?.reviewer;
   const target = rejectTarget(item.chain_definition.nodes, gate.id);
-  const waiting = item.pending_gate === gate.id;
-  const decided = [...events].reverse().find((e) => e.type === "gate_approved" && (e.payload.gate ?? e.node_id) === gate.id && e.payload.by !== "agent");
+  const standing = gateState(item, gate.id);
+  const decided = round && round.outcome === "approved" && round.by !== "agent" && (isPastRound(item, gate.id, picked) || standing.state === "done");
+  const you = isPastRound(item, gate.id, picked) && round
+    ? outcomeWord(round)
+    : standing.state === "current" ? "waiting for your decision"
+    : standing.words === "skipped" ? "skipped, no decision needed"
+    : decided ? "approved"
+    : "decides when the chain reaches it";
   return [
     ...(gate.auto_escalate
       ? [{ title: "auto_review", text: "An agent reads it before you do. A decision you make meanwhile wins.", ...(outcome && { chip: { word: OUTCOME[outcome.kind].word, tone: CHIP_TONE[OUTCOME[outcome.kind].tone] } }) }]
       : []),
-    { title: "you", text: decided ? "approved" : waiting ? "waiting for your decision" : gateSkipped(events, gate.id) ? "skipped, no decision needed" : "decides when the chain reaches it" },
+    { title: "you", text: you },
     { title: "on reject", text: target ? `Goes back to ${nameOf(item.chain_definition.nodes, target)} with your note.` : "Reopens the gate with your note." },
   ];
 }

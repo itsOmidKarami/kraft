@@ -17,7 +17,7 @@ import { LogLines } from "../log/LogLines";
 import { useLogs } from "../log/useLogs";
 import { PauseSheet } from "../item/PauseSheet";
 import { useDo } from "../item/useDo";
-import { gateSkipped } from "../../item/events";
+import { byWord, gateState, outcomeWord, roundShown, roundsOf } from "../../item/gateRounds";
 import { nodeSub } from "../item/model";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { ScreenHeader } from "../nav/ScreenHeader";
@@ -66,7 +66,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
   const graph = drawnOf(nodes, nodeId)!;
   const gate = api.kind === "gate";
   const kindWords = gate ? "gate" : api.kind === "group" ? "group node" : "exec node";
-  const sub = nodeSub(graph, gate && gateSkipped(events, nodeId));
+  const sub = nodeSub(graph, gate && gateState(item, nodeId).words === "skipped");
   const tab = (TABS.some((t) => t.id === place.tab) ? place.tab : "overview") as NodeTab;
   const bar = nodeBar(item, api, graph);
   const message = gate ? gateMessage(materialized(item), nodeId) : undefined;
@@ -78,6 +78,9 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
   // The round in the URL, as the desktop canvas has its picker: every task, the repair and the judge follow it.
   const { steps, side, loop, onFailure, rounds } = useMemo(() => nodeGraph(seen, api, now, events, place.round), [seen, api, now, events, place.round]);
   const passes = passList(item, nodeId, place.pass);
+  // A gate's passes are its rounds: the same `?pass=`, read from the server's rounds.
+  const gateRounds = gate ? roundsOf(item, nodeId) : [];
+  const round = gate ? roundShown(item, nodeId, place.pass) : undefined;
   const paths = stepsOf(api).steps;
   const escalations = escalationsIn(seen, nodeId);
   const openTask = (step: string, task: string) => navigate(placeUrl(item.id, { node: nodeId, sel: { kind: "task", node: nodeId, step, task }, round: place.round, pass: place.pass }));
@@ -124,6 +127,21 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
             ))}
           </div>
         )}
+        {gateRounds.length > 1 && round && (tab === "overview" || tab === "log") && (
+          <>
+            <div className="ph-attempts ph-is-wrap" role="group" aria-label="Rounds of this gate">
+              {gateRounds.map((r) => (
+                <button key={r.n} type="button" className={`ph-attempt${r.n === round.n ? " ph-is-on" : ""}`} aria-pressed={r.n === round.n} onClick={() => setPlace({ pass: r.n === gateRounds.length ? undefined : r.n })}>
+                  round {r.n} · {outcomeWord(r)}
+                </button>
+              ))}
+            </div>
+            <div className="ph-turn" aria-label={`Round ${round.n}`}>
+              <p className="ph-turn-head"><span>{outcomeWord(round)}{byWord(round.by) ? ` · ${byWord(round.by)}` : ""}{round.outcome === "rejected" && round.sent_to ? ` · sent to ${nameOf(item.chain_definition.nodes, round.sent_to)}` : ""}</span></p>
+              {round.note && <p className="ph-turn-text">{round.note}</p>}
+            </div>
+          </>
+        )}
         {rounds && rounds.rows.length > 1 && (tab === "overview" || tab === "log") && (
           <div className="ph-attempts" role="group" aria-label={FIX_LOOP_ROUNDS}>
             {rounds.rows.map((r) => (
@@ -155,7 +173,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
             {gate && (
               <Block title="Review path">
                 <ol className="ph-path">
-                  {reviewPath(item, api, events).map((r) => (
+                  {reviewPath(item, api, place.pass).map((r) => (
                     <li key={r.title} className="ph-path-step">
                       <span className="ph-path-title">{r.title}{r.chip && <Badge tone={r.chip.tone}>{r.chip.word}</Badge>}</span>
                       <span className="ph-path-text">{r.text}</span>
