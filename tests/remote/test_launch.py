@@ -11,10 +11,10 @@ from support.chain_builders import v1_node
 from support.harness import v1_chain
 from support.remote import Peer, attach
 
-from kraft import store
+from kraft import caps, store
 from kraft.remote import launch, local_link, protocol, registry
 from kraft.remote import runs as runs_mod
-from kraft.remote.hub import Hub
+from kraft.remote.hub import Claim, Hub
 from kraft.remote.runs import Reserved, Runs
 
 
@@ -145,6 +145,101 @@ async def test_the_local_worker_is_full_to_a_scope_whose_group_runs_there(world,
     async with _placed(world, concurrency_group=group) as p:
         assert (p.held_local == "w/1") is local
         assert local or p.wait == "waiting for a machine in gpu"
+
+
+async def test_a_test_group_goes_to_another_member_and_a_refusing_member_never_holds_it(world):
+    world.refuse.add("a")
+    async with _placed(world, "w/1", concurrency_group="heavy") as first:
+        assert first.held.machine == "b"
+        assert ("a", "heavy") not in world.hub._groups  # the refused reserve gave it back
+    assert not world.hub._groups  # and the exit gave back b's
+
+
+async def test_a_member_running_the_test_group_is_passed_over_for_the_next(world):
+    world.hub.adopt("a", "other/1", "heavy")  # a has a slot of its own free: only the group holds
+    world.hub.apply(_workers(a={"capacity": 2}, b={}))
+    async with _placed(world, "w/1", concurrency_group="heavy") as p:
+        assert p.held.machine == "b"
+    async with _placed(world, "w/2") as p:  # no group: a is as good as any
+        assert p.held.machine == "a"
+
+
+def _said(world):
+    rows = world.db.read(
+        lambda c: c.execute(
+            "SELECT payload FROM events WHERE type = 'remote_step_waiting'"
+        ).fetchall()
+    )
+    return [r["payload"] for r in rows]
+
+
+async def test_a_step_that_cannot_park_says_a_held_group_and_waits_for_it(world):
+    world.hub.apply(_workers(a={"capacity": 2}, b={"capacity": 2}))
+    world.hub.adopt("a", "other/1", "heavy")
+    world.hub.adopt("b", "other/2", "heavy")
+    local_link.current().take("other/3")  # the local worker is full too
+    waiter = asyncio.create_task(
+        _placed(world, "w/2", can_park=False, concurrency_group="heavy").__aenter__()
+    )
+    await asyncio.sleep(0.1)
+    assert not waiter.done()
+    assert "waiting for test group heavy is held on 2 machines" in _said(world)[0]
+    world.hub.release(Claim("a", "other/1"))
+    placement = await asyncio.wait_for(waiter, 2)
+    assert placement.held.machine == "a"
+    placement.release()
+
+
+async def test_a_named_machine_says_what_it_waits_for_and_the_wait_is_not_the_steps_time(world):
+    world.hub.apply(_workers(a={"capacity": 2}, b={}))  # a slot is free: only the group holds it
+    world.hub.adopt("a", "other/1", "heavy")
+    cap = caps.Deadline(1000.0, caps.Hit("", "timeout", 1, 60.0))
+    waiter = asyncio.create_task(
+        launch.claim(
+            world.db,
+            work_item_id=world.row["id"],
+            session_id="s1",
+            node_id="build",
+            hook_point="build.main.t",
+            runner="a",
+            repo_entry=None,
+            time_cap=cap,
+            concurrency_group="heavy",
+        )
+    )
+    await asyncio.sleep(0.7)
+    assert not waiter.done()
+    assert "waiting for test group heavy: other is running it on a" in _said(world)[0]
+    world.hub.release(Claim("a", "other/1"))
+    got, refusal, moved = await asyncio.wait_for(waiter, 2)
+    assert got.machine == "a" and refusal is None and moved.at > cap.at
+
+
+async def test_run_task_hands_its_test_group_to_the_claim(world, monkeypatch):
+    seen = {}
+
+    async def claim(*a, **kw):
+        seen.update(kw)
+        return None, "stop here", kw["time_cap"]
+
+    monkeypatch.setattr(launch, "claim", claim)
+    from kraft.adapters import subprocess as sp
+
+    with pytest.raises(Exception):  # noqa: B017, PT011 -- only the claim's kwargs matter
+        await sp.run_task(
+            world.db,
+            None,
+            work_item_id=world.row["id"],
+            session_id="s1",
+            node_id="build",
+            hook_point="build.main.t",
+            cmd=["true"],
+            cwd=".",
+            runner="a",
+            repo_entry=None,
+            concurrency_group="heavy",
+        )
+    assert seen["concurrency_group"] == "heavy"
 
 
 async def test_two_placements_never_take_one_free_slot(world):

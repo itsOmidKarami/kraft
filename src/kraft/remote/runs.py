@@ -229,6 +229,7 @@ class Runs:
                 {
                     "spec": run.spec.to_frame(),
                     "machine": run.claim.machine,
+                    "concurrency_group": run.claim.group,  # held again by `recover`
                     "pushed": run.pushed,
                     "entries": [{"path": str(e.path), "rw": e.rw} for e in run.entries],
                 }
@@ -556,7 +557,7 @@ class Runs:
             return None
         run = Run(
             JobSpec.from_frame(saved["spec"]),
-            self.hub.adopt(saved["machine"], key),
+            self.hub.adopt(saved["machine"], key, saved.get("concurrency_group")),
             [files.Entry(Path(e["path"]), e["rw"]) for e in saved["entries"]],
             folder / "remote.log",
             folder,

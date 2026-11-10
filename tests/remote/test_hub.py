@@ -12,7 +12,7 @@ from support.remote import Peer, attach, memory_pair, until
 from support.stub_ssh import stub_ssh
 
 from kraft.remote import protocol, registry
-from kraft.remote.hub import FULL_RETRY_S, Hub, Verdict
+from kraft.remote.hub import FULL_RETRY_S, Claim, Hub, Verdict
 
 TOKEN = "kwt_secret"
 
@@ -605,3 +605,47 @@ async def test_applying_workers_yaml_hands_the_local_workers_enabled_to_its_link
     hub = Hub("2.3.0")
     hub.apply(registry.WorkersFile.model_validate({"local": local} if local is not None else {}))
     assert local_link.current().enabled is enabled
+
+
+_OTHER = "kwt_other"
+
+
+def _two_machines():
+    return _file(
+        work={"token_sha256": registry.hash_token(_OTHER), "capacity": 2, "repos": ["kraft"]}
+    )
+
+
+async def test_a_test_group_runs_one_at_a_time_on_a_machine_but_each_machine_may_run_one():
+    hub = Hub("2.3.0")
+    hub.apply(_two_machines())
+    machines = [await _dial(hub), await _dial(hub, _OTHER)]
+    repos = _repos("kraft")
+    first = await hub.claim("any", repos, "a/1", group="heavy", poll_s=0.01)
+    second = await hub.claim("any", repos, "b/1", group="heavy", poll_s=0.01)
+    assert {first.machine, second.machine} == {"home", "work"}  # one per machine
+    assert hub.decide("any", repos, concurrency_group="heavy").wait == (
+        "waiting for test group heavy is held on 2 machines"
+    )
+    assert hub.decide("any", repos, concurrency_group="light").machine  # another group
+    assert hub.decide("any", repos).machine  # no group: neither waits nor makes wait
+    named = hub.decide(first.machine, repos, concurrency_group="heavy").wait
+    assert named == f"waiting for test group heavy: a is running it on {first.machine}"
+    hub.release(first)
+    assert hub.decide(first.machine, repos, concurrency_group="heavy").machine == first.machine
+    for machine, _w, accepted in machines:
+        await machine.close()
+        await accepted
+
+
+async def test_a_claim_rebuilt_from_machine_and_key_frees_the_group_a_refused_reserve_held():
+    hub = Hub("2.3.0")
+    hub.apply(_file())
+    machine, _w, accepted = await _dial(hub)
+    await hub.claim("home", _repos("kraft"), "a/1", group="heavy", poll_s=0.01)
+    hub.release(Claim("home", "a/1"))  # as `Placement._reserved` gives it back
+    assert hub.decide("home", _repos("kraft"), concurrency_group="heavy").machine == "home"
+    hub.adopt("home", "a/2", "heavy")  # a run found after a restart
+    assert "a is running it" in hub.decide("home", _repos("kraft"), concurrency_group="heavy").wait
+    await machine.close()
+    await accepted

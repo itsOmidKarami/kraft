@@ -871,7 +871,13 @@ async def run_task(
                     kwargs["time_cap"] = caps.Deadline(cap.at + waited, cap.hit)
         try:
             return await _run_task(
-                db, run_dirs, session_id=session_id, work_item_id=work_item_id, held=held, **kwargs
+                db,
+                run_dirs,
+                session_id=session_id,
+                work_item_id=work_item_id,
+                held=held,
+                concurrency_group=concurrency_group,
+                **kwargs,
             )
         except BaseException as exc:
             if asyncio.get_running_loop() in _STOPPING:
@@ -1024,6 +1030,8 @@ async def _run_task(
     placed_claim: Claim | None = None,
     #: Seconds `run_task` waited for a local slot: the log's first line says so.
     waited_s: float = 0.0,
+    #: A test scope's `concurrency_group`: held on the machine the step is placed on.
+    concurrency_group: str | None = None,
 ) -> str:
     held = held if held is not None else _Held()
     runner = None if runner == "local" else runner
@@ -1048,6 +1056,8 @@ async def _run_task(
             repo_entry=repo_entry,
             time_cap=time_cap,
             held=placed_claim,
+            hook_point=hook_point,
+            concurrency_group=concurrency_group,
             needs=(
                 {
                     CODEX_HOOK: f"harness {codex_hook['harness']!r} cannot run Kraft's "

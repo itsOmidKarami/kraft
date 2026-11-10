@@ -157,7 +157,13 @@ class Placement:
             while True:
                 try:
                     got = await runs.hub.claim(
-                        runner, self._repos, self._key, needs=needs, wait=False, exclude=exclude
+                        runner,
+                        self._repos,
+                        self._key,
+                        needs=needs,
+                        wait=False,
+                        exclude=exclude,
+                        group=self._concurrency_group,
                     )
                 except PlacementRefused as exc:
                     if not local_ok:
@@ -179,6 +185,15 @@ class Placement:
             self.held_local, self.runner = self._key, placement.LOCAL
             return True
         self.wait = f"waiting for {pinned}" if pinned else f"waiting for a machine in {self._group}"
+        if self._concurrency_group and remote_ok:  # a held group is the reason worth saying
+            said = runs.hub.decide(
+                pinned or self._group,
+                self._repos,
+                pinned=pinned,
+                needs=needs,
+                concurrency_group=self._concurrency_group,
+            ).wait
+            self.wait = said if said and "test group" in said else self.wait
         return False
 
     def _mounts(self) -> list[str]:
@@ -311,6 +326,8 @@ async def claim(
     time_cap,
     needs: Mapping[str, str] | Collection[str] = (),
     held: Claim | None = None,
+    hook_point: str = "",
+    concurrency_group: str | None = None,
 ):
     """`(claim, refusal, time_cap)`. `held` is a slot `placed` already took and reserved: it is
     returned as it is. A refusal is text for the session's log; a wait is a
@@ -350,7 +367,15 @@ async def claim(
     try:
         while True:
             try:
-                got = await runs.hub.claim(runner, repos, key, pinned=pinned, needs=needs)
+                got = await runs.hub.claim(
+                    runner,
+                    repos,
+                    key,
+                    pinned=pinned,
+                    needs=needs,
+                    group=concurrency_group,
+                    on_wait=lambda text: _note(db, work_item_id, node_id, hook_point, text),
+                )
             except PlacementRefused as exc:
                 return None, str(exc), time_cap
             if protocol.RESERVE not in runs.hub.caps(got.machine):

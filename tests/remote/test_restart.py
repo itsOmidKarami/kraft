@@ -43,3 +43,19 @@ async def test_a_step_survives_the_server_restarting_and_its_log_is_whole(rig, t
 
 async def test_a_step_the_server_cannot_recover_is_told_so(rig):
     assert await rig.runs.recover(rig.wid, "never-launched") is None
+
+
+async def test_a_test_group_a_step_held_before_the_restart_is_held_again(rig):
+    run = await rig.run([sys.executable, "-c", "import time; time.sleep(2)"], group="heavy")
+    await _row(rig)
+    while not (run.folder / "remote-run.json").exists():
+        await asyncio.sleep(0.05)
+    await rig.restart_server()
+    assert (
+        rig.hub.decide("gpu", [], concurrency_group="heavy").machine == "gpu"
+    )  # nothing recovered yet
+    assert await rig.runs.recover(rig.wid, "s1") is not None
+    assert rig.hub.decide("gpu", [], concurrency_group="heavy").wait.startswith(
+        "waiting for test group heavy"
+    )
+    assert rig.hub.decide("gpu", [], concurrency_group="light").machine == "gpu"

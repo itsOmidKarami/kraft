@@ -5,15 +5,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import logging
 import secrets
 import time
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from kraft import caps
+from kraft import caps, ids
 from kraft.config import RepoEntry
 from kraft.remote import lfs, local_link, placement, protocol, registry
 from kraft.remote.transport import FRAME_LIMIT, StreamTransport
@@ -33,6 +34,8 @@ class Claim:
 
     machine: str
     key: str  # "<work item id>/<session id>"
+    #: The test scope's `concurrency_group` the step holds on `machine`, if any.
+    group: str | None = None
 
 
 class PlacementRefused(Exception):
@@ -103,6 +106,8 @@ class Hub:
         self._entries: dict[str, _Entry] = {}
         self._background: set[asyncio.Task] = set()
         self._claims: dict[str, set[str]] = {}  # machine -> claim keys
+        #: (machine, test scope `concurrency_group`) -> the claim key running it: one at a time.
+        self._groups: dict[tuple[str, str], str] = {}
         self.runs = None  # set by the app: remote.runs.Runs
 
     # ── configuration ──
@@ -369,12 +374,14 @@ class Hub:
         pinned: str | None = None,
         needs: Mapping[str, str] | Collection[str] = (),
         exclude: Collection[str] = (),
+        concurrency_group: str | None = None,
     ) -> Verdict:
         """Who would take a step placed on `runner` now, or why it waits or is refused. `pinned`
         is the machine a resumed session must go back to. `needs` are caps the machine must list
         (a mapping gives each one's words for a refusal). A group is looked at as `any` is, over
         its remote members: the local worker is not the hub's to give (`launch.placed`).
-        `exclude` leaves out machines that already turned this step away."""
+        `exclude` leaves out machines that already turned this step away. `concurrency_group`: a
+        test scope's; a machine where another step runs it is skipped."""
         if any(lfs.uses_lfs(r.path) for r in repos):
             needs = {
                 **({c: "" for c in needs} if not isinstance(needs, Mapping) else needs),
@@ -439,9 +446,21 @@ class Hub:
                 refusal=f"{what or 'this step needs a capability of the machine'}: "
                 f"machine {n!r} runs a Kraft without {cap!r}; update Kraft on that machine"
             )
+        held_group: list[str] = []
         for n in names:
             if n not in exclude and self._has_slot(n, needs):
+                if concurrency_group and (n, concurrency_group) in self._groups:
+                    held_group.append(n)
+                    continue
                 return Verdict(machine=n)
+        if held_group:
+            if len(held_group) == 1:
+                holder = self._groups[held_group[0], concurrency_group]
+                item = ids.parse_session_ref(holder)[0]
+                who = f": {item} is running it on {held_group[0]}"
+            else:
+                who = f" is held on {len(held_group)} machines"
+            return Verdict(wait=f"waiting for test group {concurrency_group}{who}")
         if named:
             if first is None:
                 return Verdict(wait=f"{wait_text} (offline: not connected yet)")
@@ -460,10 +479,11 @@ class Hub:
         *,
         pinned: str | None = None,
         needs: Mapping[str, str] | Collection[str] = (),
-        on_wait: Callable[[str], None] | None = None,
+        on_wait: Callable[[str], Awaitable[None] | None] | None = None,
         poll_s: float = 0.5,
         wait: bool = True,
         exclude: Collection[str] = (),
+        group: str | None = None,
     ) -> Claim | None:
         """A slot for `key`, waiting (and saying so through `on_wait`, once per reason) until a
         machine can take it; with `wait=False`, None when none can now. Raises
@@ -471,23 +491,33 @@ class Hub:
         while it waits."""
         said = None
         while True:
-            v = self.decide(runner, repos, pinned=pinned, needs=needs, exclude=exclude)
+            v = self.decide(
+                runner,
+                repos,
+                pinned=pinned,
+                needs=needs,
+                exclude=exclude,
+                concurrency_group=group,
+            )
             if v.refusal:
                 raise PlacementRefused(v.refusal)
             if v.machine:
-                self._claims.setdefault(v.machine, set()).add(key)
-                return Claim(v.machine, key)
+                return self.adopt(v.machine, key, group)
             if not wait:
                 return None
             if on_wait is not None and v.wait != said:
-                on_wait(v.wait)
+                if inspect.isawaitable(done := on_wait(v.wait)):
+                    await done
                 said = v.wait
             await asyncio.sleep(poll_s)
 
-    def adopt(self, machine: str, key: str) -> Claim:
-        """A slot for a run already running before a restart: taken whatever the capacity says."""
+    def adopt(self, machine: str, key: str, group: str | None = None) -> Claim:
+        """A slot for a run already running before a restart: taken whatever the capacity says,
+        and holding `group` (a test scope's `concurrency_group`) on `machine` again."""
         self._claims.setdefault(machine, set()).add(key)
-        return Claim(machine, key)
+        if group:
+            self._groups[machine, group] = key
+        return Claim(machine, key, group)
 
     def online_names(self) -> list[str]:
         return sorted(n for n, e in self._entries.items() if e.online)
@@ -497,6 +527,11 @@ class Hub:
 
     def release(self, claim: Claim) -> None:
         self._claims.get(claim.machine, set()).discard(claim.key)
+        # By key, not `claim.group`: a claim rebuilt from machine and key frees it too
+        for held in [
+            g for g, k in self._groups.items() if g[0] == claim.machine and k == claim.key
+        ]:
+            del self._groups[held]
         if (entry := self._entries.get(claim.machine)) is not None:
             entry.full_until = None  # a slot is free: worth asking again
 
