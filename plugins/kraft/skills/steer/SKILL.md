@@ -27,6 +27,7 @@ check whether the plan repeats the old wording, then confirm the stored copy
 with `kraft view docs ID --attachment spec` (or `plan`; `get_attachment` over
 MCP). Once the item has started the call answers 409: its worktree already
 holds the documents, committed on its branch, and steering is the only route.
+To start it once the documents are right, use `kraft:gates`.
 
 ## Started: stop, then restart with a steer
 

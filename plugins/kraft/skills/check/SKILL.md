@@ -45,9 +45,9 @@ The config directory is `$KRAFT_HOME/config` (default `~/.kraft/config`).
   - `maxima:` clamping built-in tasks: report it; the person raises the
     ceiling in `policy.yaml` or accepts it.
 - `agent: <profile>` (doctor) - a harness profile some chain selects whose
-  executable isn't on PATH, or which `harnesses.yaml` doesn't declare. Install
-  the CLI, then `kraft admin restart`: a pass here is doctor's own PATH, not
-  the service's.
+  executable isn't on PATH, or which `harnesses.yaml` doesn't declare. The
+  person installs the CLI; restarting Kraft afterwards is `kraft:doctor`'s job.
+  A pass here is doctor's own PATH, not the service's.
 - `capabilities` (doctor) - capabilities this Kraft has that the operator's
   seeded settings files predate. None ship today, so the row reads up to date.
   `config/` is seeded once and never overwritten, so when a release does ship

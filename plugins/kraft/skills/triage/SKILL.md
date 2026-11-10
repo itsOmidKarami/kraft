@@ -22,7 +22,7 @@ kraft view events ID --type work_item_needs_human   # the figures: `capped`, `bu
 kraft view logs ID -n 60           # the tail of the session that stopped it; look for a login error
 ```
 
-`stop.kind` says which row below, and `stop_reason` is the cause.
+`stop_reason`'s first words pick the row below; `stop.kind` says what sort of stop it is.
 `suggested_action` is Kraft's own proposal. A `budget` stop means a spend cap
 stopped it, and a `cap` stop whose reason names a time cap means that cap ran
 out: neither is a defect. A `cap` stop can also be a fix loop that spent its

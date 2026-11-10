@@ -80,7 +80,7 @@ Cut a spec per part only after the go.
 Then send one message and stop: the verdict (inline or handoff), the parts
 call (sub-agents, slices or separate items, with names) and a one-line reason.
 Wait for the user to confirm or override it before acting: they know what a
-filed item costs them. Auto (step 4) is the only way to skip the wait.
+filed item costs them. Auto (step 4), or an override whose parts call needs no question, skips the wait.
 
 ## 3. Plan - only if the user explicitly asked for one
 

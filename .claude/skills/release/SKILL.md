@@ -31,8 +31,8 @@ versions, or `_Added in next_` notes. The release writes them.
 3. Any fix that changes code, unless they have already said "fix what you find".
 4. Anything after a real run that did not conclude `success`: no rerun, no
    publishing by hand, no yanking.
-5. Calling a Phase 3 finding non-blocking: report it with your view and wait for
-   the ruling.
+5. Treating a Phase 3 finding as not blocking the release: report it with your
+   view and wait for their ruling.
 
 An rc run needs no extra confirmation once they have asked for one, unless its
 dry run plans a version they would not expect (a major, or a number other than
