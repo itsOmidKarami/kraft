@@ -447,3 +447,28 @@ async def test_a_concurrency_group_runs_one_scope_at_a_time_whatever_the_capacit
     assert not row.take("w4/new", "heavy")
     row.release("w3/kept")
     assert row.take("w4/new", "heavy")
+
+
+@pytest.mark.parametrize(
+    ("hold", "group"),
+    [
+        pytest.param(
+            lambda row: (setattr(row, "capacity", 1), row.take("w1/a")), None, id="capacity-full"
+        ),
+        pytest.param(lambda row: row.take("w1/a", "heavy"), "heavy", id="group-held"),
+    ],
+)
+async def test_a_waiting_take_stands_down_when_abandoned(hold, group):
+    row = local_link._Row()
+    hold(row)
+    gone = {"now": False}
+    waiter = asyncio.create_task(
+        row.take_waiting("w2/b", None, poll_s=0.01, group=group, abandon=lambda: gone["now"])
+    )
+    await asyncio.sleep(0.1)
+    assert not waiter.done()  # still waiting while the item is not paused
+    gone["now"] = True
+    row.release("w1/a")  # the slot frees in the same step the item is paused: no await between
+    with pytest.raises(protocol.StepAbandoned):
+        await asyncio.wait_for(waiter, 1)
+    assert row._held == set() and row._groups == {}  # it took nothing

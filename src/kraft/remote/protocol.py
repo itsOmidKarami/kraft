@@ -98,6 +98,10 @@ class Refused(Exception):
         )
 
 
+class StepAbandoned(Exception):
+    """A step waiting for a slot was called off because its work item is paused; it took nothing."""
+
+
 class Transport(Protocol):
     async def send(self, frame: dict) -> None: ...
     async def recv(self) -> dict: ...

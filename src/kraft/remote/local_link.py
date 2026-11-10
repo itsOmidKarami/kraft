@@ -231,11 +231,17 @@ class _Row:
         on_wait: Callable[[str], Awaitable[None]] | None = None,
         poll_s: float = 0.5,
         group: str | None = None,
+        abandon: Callable[[], bool] | None = None,
     ) -> float:
         """`take`, waiting for a slot (said once through `on_wait`); the seconds it waited.
-        Cancelling the wait takes nothing."""
+        Cancelling the wait takes nothing. It raises `StepAbandoned` once `abandon()` is true,
+        taking nothing: the check comes before each take with no await between."""
         began, said = time.monotonic(), None
-        while not self.take(key, group):
+        while True:
+            if abandon is not None and abandon():
+                raise protocol.StepAbandoned()
+            if self.take(key, group):
+                return time.monotonic() - began
             if not self.enabled:
                 text = "waiting for local (disabled)"
             elif holder := self.group_holder(group, key):
@@ -247,7 +253,6 @@ class _Row:
                 await on_wait(text)
                 said = text
             await asyncio.sleep(poll_s)
-        return time.monotonic() - began
 
     def release(self, key: str) -> None:
         self._held.discard(key)
