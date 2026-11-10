@@ -65,7 +65,8 @@ Say the phase and the next node, then by status:
   there. `kraft:review` helps them decide, `kraft:gates` records it.
 - `needs_human` with no gate: it has stopped; `kraft:triage` finds out why.
 - `paused`, `queued` or `blocked`: not running, and not a fault; say which
-  (`dependencies` names what a blocked item waits on). `kraft:gates` starts a
-  filed item, `kraft:steer` resumes a paused one.
+  (`dependencies` names what a blocked item waits on; dropping one with `kraft
+  item unblock` is the person's call). `kraft:gates` starts a filed item,
+  `kraft:steer` resumes a paused one.
 - `waiting` or `rate_limited`: Kraft is holding it, and ends the wait itself.
 - `completed` or `abandoned`: say so.

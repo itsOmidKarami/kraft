@@ -20,8 +20,9 @@ kraft admin health     # exit 1 when degraded
 kraft admin doctor     # every check at once; exit 1 on any
 ```
 
-Run both and report every `FAIL` and `warn` row verbatim. Paraphrasing loses
-the check name, and the check name is what the fix is keyed on.
+Run both and report every `FAIL` and `warn` row, and the `version` row,
+verbatim. Paraphrasing loses the check name, and the check name is what the
+fix is keyed on.
 
 "Nothing is being picked up" is not always a health failure: Kraft files items
 paused unless they were created with `--autostart`. If both checks pass, run
