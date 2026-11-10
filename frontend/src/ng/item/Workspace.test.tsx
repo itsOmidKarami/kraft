@@ -67,6 +67,12 @@ describe("Workspace", () => {
       expect(within(pane).queryByRole("button", { name: "Request changes…" }) !== null).toBe(footer);
     });
 
+    it("a gate the newest round of which a person sent back, and which isn't waiting, says so in the pane's subtitle", () => {
+      const sentBack = { current_node_id: "plan", gate_rounds: { plan_approval: [round(1, { outcome: "rejected", by: "human", note: "redo it", sent_to: "plan" })] } };
+      mount("/work-items/w1/nodes/plan_approval", sentBack as never);
+      expect(within(screen.getByRole("complementary", { name: "plan_approval pane" })).getByText("gate node · changes requested · you")).toBeInTheDocument();
+    });
+
     it("a History click from the chain overview opens the gate on that round", async () => {
       mount("/work-items/w1?sel=plan_approval", waiting as never);
       await userEvent.click(within(screen.getByRole("complementary", { name: "plan_approval pane" })).getByRole("button", { name: /^Round 1/ }));
