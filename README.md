@@ -40,11 +40,8 @@ says who it isn't for.
   done.
 - **A person at the decisions.** A *gate* is a node where the chain stops for
   you. Read what the agent wrote, then approve it or request changes with a note
-  that re-runs the node that wrote it. Kraft's server refuses an agent that
-  tries to start past a gate or approve its own work. With a sandbox that sets a
-  `network:` policy, that refusal is a boundary the agent can't get around;
-  [Security](https://kraft-sdlc.dev/project/security#agents-and-gates) has the
-  scope.
+  that re-runs the node that wrote it. A gate stops the chain until a decision is recorded, and an agent's own calls to decide its gate are refused. Only a sandbox with a `network:` policy keeps an agent from deciding its own gates; no sandbox is set by default, and an unsandboxed agent runs as you. [Security](https://kraft-sdlc.dev/project/security#agents-and-gates)
+  has the scope.
 - **Capped retries and spend.** Attempts, time and dollars are bounded. A capped
   item stops and hands you the full trace.
 - **Your checkout stays as you left it.** Each item runs on its own branch in
@@ -79,8 +76,7 @@ clears gates beside your code.
   request on GitHub or GitLab.
 
 Kraft is free and Apache-2.0 licensed. Your agent provider bills the sessions
-Kraft runs. The shipped policy caps spend at $10 per work item and $50 per day,
-and a cap can be passed by the cost of the task already running. See
+Kraft runs, and the shipped policy caps spend per work item and per day: see
 [Caps and budgets](https://kraft-sdlc.dev/concepts/caps-and-budgets).
 
 ## Install and run
@@ -129,11 +125,8 @@ updating and uninstalling. Coming from 1.4? Read
 - [Why Kraft](https://kraft-sdlc.dev/get-started/why-kraft): what it does that a session, a loop or a skill doesn't.
 - [Concepts](https://kraft-sdlc.dev/concepts/vocabulary): work items, chains, nodes, gates, caps.
 - [CLI reference](https://kraft-sdlc.dev/reference/cli): every `kraft` verb.
-- [Configuration](https://kraft-sdlc.dev/reference/configuration): `repos.yaml`, `policy.yaml`, `access.yaml` and `$KRAFT_HOME`.
-- [Remote access](https://kraft-sdlc.dev/guides/run/remote-access): the board from a phone or another machine.
-- [Analytics](https://kraft-sdlc.dev/reference/web-ui/analytics): lead time and cost by node and by repo.
 - [Security](https://kraft-sdlc.dev/project/security): the threat model; report vulnerabilities as [SECURITY.md](https://github.com/itsOmidKarami/kraft/blob/main/SECURITY.md) describes.
-- [Discussions](https://github.com/itsOmidKarami/kraft/discussions) for questions and ideas, and [Start here](https://github.com/itsOmidKarami/kraft/issues/1131) for a first contribution.
+- [Discussions](https://github.com/itsOmidKarami/kraft/discussions): questions and ideas.
 
 The [releases](https://github.com/itsOmidKarami/kraft/releases) page says what
 each version adds. Kraft is young: expect rough edges and frequent releases, and
