@@ -40,6 +40,16 @@ describe("Workspace", () => {
     expect(screen.getByRole("complementary", { name: "auto_review pane" })).toBeInTheDocument();
   });
 
+  it("opens a gate on the round the URL names, with its note, and 'latest ↩' goes back to the newest", async () => {
+    const round = (n: number, over = {}) => ({ n, requested_at: "t", ended_at: "t", outcome: "approved", by: "assistant", note: null, sent_to: null, reopened: false, reviewer: null, ...over });
+    const gate_rounds = { plan_approval: [round(1, { outcome: "rejected", note: "Cover the invalidation story", sent_to: "plan" }), round(2)] };
+    mount("/work-items/w1/nodes/plan_approval?pass=1", { gate_rounds } as never);
+    expect(document.querySelector(".gateview-said")).toHaveTextContent("Cover the invalidation story");
+    await userEvent.click(screen.getByRole("button", { name: "latest ↩" }));
+    expect(where()).toBe("/work-items/w1/nodes/plan_approval");
+    expect(document.querySelector(".gateview-said")).toBeNull();
+  });
+
   it("opens on the chain's pane, and a node click selects it in the URL", async () => {
     mount();
     expect(screen.getByRole("complementary", { name: "default pane" })).toBeInTheDocument();

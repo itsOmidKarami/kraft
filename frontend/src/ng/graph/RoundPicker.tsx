@@ -2,16 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { Popover } from "../ui/Popover";
 import type { Rounds } from "../item/nodeGraph";
 import "./graph.css";
-import { FIX_LOOP_ROUNDS } from "./sharedWords";
+import { FIX_LOOP_ROUNDS, GATE_ROUNDS } from "./sharedWords";
 
-type Props = { rounds: Rounds; onPick: (round: number | undefined) => void; /** The node's passes, not a fix loop's rounds. */ pass?: boolean };
+type Props = { rounds: Rounds; onPick: (round: number | undefined) => void; /** The node's passes, not a fix loop's rounds. */ pass?: boolean; /** A gate's rounds: a fix loop's words with their own menu head (no limit). */ gate?: boolean };
 
 /** Which fix-loop round the canvas shows, beside the zoom: a button naming it, a `latest ↩` while an
  *  older one is picked, and a list of the rounds, newest first, that opens upward (the control sits
  *  at the foot of the canvas). The same for the node's passes, which have no dot and no limit. */
-export function RoundPicker({ rounds: { rows, selected, latest, total }, onPick, pass }: Props) {
+export function RoundPicker({ rounds: { rows, selected, latest, total }, onPick, pass, gate }: Props) {
   const word = pass ? "pass" : "round";
-  const head = pass ? "Passes of this node" : FIX_LOOP_ROUNDS;
+  const head = gate ? GATE_ROUNDS : pass ? "Passes of this node" : FIX_LOOP_ROUNDS;
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const refs = useRef<Record<number, HTMLButtonElement | null>>({});

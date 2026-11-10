@@ -4,6 +4,8 @@ import { NodeGlyph } from "./NodeGlyph";
 import { accessibleName, CHIP_TONE, type GlyphState } from "./types";
 import "./graph.css";
 import { Badge } from "../ui/Badge";
+import type { Rounds } from "../item/nodeGraph";
+import { RoundPicker } from "./RoundPicker";
 
 type Reviewer = { id?: string; icon?: string; state?: GlyphState; running?: boolean; chip?: string; chipTone?: "green" | "red" | "amber"; sel?: boolean; mark?: "add" | "change"; prob?: boolean; mode?: "decides" | "checks_first" };
 type Props = {
@@ -12,8 +14,14 @@ type Props = {
   reviewer?: Reviewer;
   message?: string;
   doc?: { label: string; onClick?: () => void };
-  reject?: { id: string; label?: string; icon?: string; onClick?: () => void };
+  /** `taken`: the round shown sent work back to `id`, so the target is drawn solid; `fixed`: its reviewer repaired the worktree itself. */
+  reject?: { id: string; label?: string; icon?: string; onClick?: () => void; taken?: boolean; fixed?: boolean };
   note?: string;
+  /** What the round shown was decided with: its note, under the message. */
+  said?: { note: string; at: string; n: number };
+  /** The gate's rounds, when it has two or more, and the one picked (undefined: the newest). */
+  rounds?: Rounds;
+  onRound?: (n: number | undefined) => void;
   youSub?: string;
   /** Px the docked pane takes on the right. */
   right?: number;
@@ -25,7 +33,7 @@ type Props = {
 
 /** A gate's node view (GateView.dc.html): reviewer → line → you, the message,
  *  the document, and the reject branch. */
-export function GateView({ gate, reviewer: r, message, doc, reject, note, youSub, right = 0, onAdd, onReviewer, onGate, onBackground }: Props) {
+export function GateView({ gate, reviewer: r, message, doc, reject, note, said, rounds, onRound, youSub, right = 0, onAdd, onReviewer, onGate, onBackground }: Props) {
   const ran = r && (r.state === "done" || r.state === "current");
   const gateLabel = r || onAdd ? "you" : gate.id;
   return (
@@ -60,15 +68,19 @@ export function GateView({ gate, reviewer: r, message, doc, reject, note, youSub
         </div>
         <p className={`gateview-msg${message ? "" : " is-empty"}`}>{message ?? "No message yet."}</p>
         {doc && <button type="button" className="gateview-doc" onClick={doc.onClick} disabled={!doc.onClick}><FileText size={14} />{doc.label}</button>}
+        {said && <p className="gateview-said" data-round={said.n}>{said.note}</p>}
         {reject && (
           <div className="gateview-reject">
             <span className="gateview-reject-line" aria-hidden="true" />
-            <span className="gateview-reject-word" aria-hidden="true">reject</span>
-            <button type="button" className="gateview-target" aria-label={`reject to ${reject.label ?? reject.id}`} {...hint("Open the target node")} onClick={reject.onClick}><NodeIcon name={reject.icon} size={14} />{reject.label ?? reject.id}</button>
+            <span className="gateview-reject-word" aria-hidden="true">{reject.fixed ? "fixed" : reject.taken ? "rejected to" : "reject"}</span>
+            {!reject.fixed && (
+              <button type="button" className={`gateview-target${reject.taken ? " is-taken" : ""}`} aria-label={`${reject.taken ? "rejected" : "reject"} to ${reject.label ?? reject.id}`} {...hint("Open the target node")} onClick={reject.onClick}><NodeIcon name={reject.icon} size={14} />{reject.label ?? reject.id}</button>
+            )}
           </div>
         )}
         {note && <p className="gateview-note">{note}</p>}
       </div>
+      {rounds && onRound && <div className="gateview-foot" style={{ right: 12 }}><RoundPicker rounds={rounds} onPick={onRound} gate /></div>}
     </div>
   );
 }

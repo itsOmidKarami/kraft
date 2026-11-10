@@ -19,12 +19,6 @@ import { holdsText, isEscape, sendOnModEnter } from "../../keys";
 
 type ThreadRow = { id: string; state: string; gate: string | null; node_id: string | null; file_path: string | null; comments?: { body: string }[] };
 
-/** Who decided a passed gate and when, from its last gate_approved. */
-export function gateDecision(events: KraftEvent[], gate: string) {
-  const e = [...events].reverse().find((x) => x.type === "gate_approved" && (x.payload.gate ?? x.node_id) === gate);
-  return e ? { by: e.payload.by === "agent" || e.payload.by === "kraft" ? "auto" : "you", at: e.created_at } : null;
-}
-
 /** The gate's pane (Decisions §5 Gate pane, §6 Gates): the change it decides
  *  on, open threads, what it decides on, where reject goes, its status. */
 export function GateBody({ item, version, gate, events }: { item: ItemDetail; version: string; gate: ChainNode; events: KraftEvent[] }) {
