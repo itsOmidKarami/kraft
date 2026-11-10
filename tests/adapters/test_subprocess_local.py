@@ -117,16 +117,41 @@ async def test_a_session_beyond_the_local_limit_waits_with_no_row_and_says_how_l
     assert moved.at - cap.at >= 0.5 and moved.hit == cap.hit and seen[-1]["waited_s"] >= 0.5
 
 
-async def test_a_session_waits_for_a_disabled_local_worker_and_starts_once_it_is_enabled(
+def _disable(link):
+    link.enabled = False
+    return lambda: setattr(link, "enabled", True)
+
+
+def _hold_heavy(link):
+    link.take("w0/other", "heavy")  # another session runs the group
+    return lambda: link.release("w0/other")
+
+
+@pytest.mark.parametrize(
+    ("hold", "kw", "said"),
+    [
+        pytest.param(_disable, {}, "waiting for local (disabled)", id="disabled"),
+        pytest.param(
+            _hold_heavy,
+            {"concurrency_group": "heavy"},
+            "waiting for test group heavy: w0 is running it",
+            id="concurrency-group",
+        ),
+    ],
+)
+async def test_a_session_held_back_by_the_local_worker_waits_and_starts_once_freed(
     run,  # noqa: F811
     database,
+    hold,
+    kw,
+    said,
 ):
     link = local_link.current()
-    link.enabled = False
-    waiter = asyncio.create_task(run(["/bin/sh", "-c", "echo after"], "s1"))
+    free = hold(link)
+    waiter = asyncio.create_task(run(["/bin/sh", "-c", "echo after"], "s1", **kw))
     await asyncio.sleep(0.7)
     assert _row(database, "s1") is None and not waiter.done()  # no session row while it waits
-    link.enabled = True
+    free()
     status, _ = await asyncio.wait_for(waiter, 10)
     assert status == "done"
     waiting = database.read(
@@ -134,7 +159,8 @@ async def test_a_session_waits_for_a_disabled_local_worker_and_starts_once_it_is
             "SELECT payload FROM events WHERE type = 'remote_step_waiting'"
         ).fetchall()
     )
-    assert len(waiting) == 1 and "waiting for local (disabled)" in waiting[0]["payload"]
+    assert len(waiting) == 1 and said in waiting[0]["payload"]
+    assert link.take("w9/next", "heavy")  # the group is given back when the session ends
 
 
 @pytest.mark.parametrize("how", ["refused-spawn", "before-launch-raises"])

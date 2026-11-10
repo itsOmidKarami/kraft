@@ -437,7 +437,8 @@ async def test_a_concurrency_group_runs_one_scope_at_a_time_whatever_the_capacit
         said.append(text)
 
     waiter = asyncio.create_task(row.take_waiting("w2/b", on_wait, poll_s=0.01, group="heavy"))
-    await asyncio.sleep(0.1)
+    while not said:
+        await asyncio.sleep(0.01)
     assert said == ["waiting for test group heavy: w1 is running it"] and not waiter.done()
     row.release("w1/a")
     await asyncio.wait_for(waiter, 1)
