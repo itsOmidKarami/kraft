@@ -206,7 +206,7 @@ With no match, the task runs on its default:
 
 - An **agent** task runs its `skill` if that is installed in this harness.
   Else, when the skill is one of [Kraft's methods](#krafts-methods), it runs
-  its `prompt` with that method appended, and otherwise its `prompt` alone.
+  its `prompt` and that method, and otherwise its `prompt` alone.
 - A **subprocess** task runs its `command`, split like a shell and run
   without one, as Kraft runs it. A command Lite can't split, such as one
   with an unclosed quote, stops `start`.
@@ -234,14 +234,15 @@ Lite ships the methods a Kraft worker follows, in `methods/`: one file per
 `kraft:<name>` skill the library names (`kraft:spec`, `kraft:plan`,
 `kraft:code-review`, `kraft:fix-loop-judge` and the rest), copied unchanged
 from Kraft. A task whose `skill` is `kraft:<name>`, or a bare `<name>`, that
-isn't installed here gets its `prompt`, its `steering`, then the method under
-a `## Method` heading, and its `source` ends `(shipped method)`. A binding for
+isn't installed here gets its `prompt`, its `steering`, then a `## Method`
+section telling the agent to read that method's file and follow it. Its
+`source` ends `(shipped method)`. A binding for
 the task still wins. A `kind: skill` binding gets the method only when its own
 skill is a Kraft method that isn't installed. `kraft:review-feedback` stays
 skipped, as above.
 
-The method text names things only a Kraft worker has. A line before it tells
-the agent how to read them here:
+The method text names things only a Kraft worker has. The `## Method` section
+tells the agent how to read them here:
 
 - A result file (`$KRAFT_RESULT_PATH`) and its `status`: the agent reports the
   same fields in its reply. A review's `findings` are what a step fails on.

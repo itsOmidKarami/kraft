@@ -159,11 +159,15 @@ SHIPPED_METHOD = " (shipped method)"
 
 #: Kraft's worker methods, `<name>.md` for Kraft's `skills/<name>/SKILL.md`,
 #: copied byte for byte by `just kraft-lite-config`. A `kraft:<name>` or bare
-#: `<name>` skill not installed here runs its prompt with the method appended
-#: under `## Method`, as Kraft injects it, not the prompt alone.
+#: `<name>` skill not installed here runs its prompt with a `## Method` section
+#: naming the file to follow, not the prompt alone. A path, not the text:
+#: `state` dispatches every task of a node, and the text is 3-8 KB a method.
 METHODS = Path(__file__).parent / "methods"
 
-#: Said before the method text: it is written for a Kraft worker, and these
+#: Shipped methods that were renamed, old name to new, as Kraft's `skill.RENAMED`.
+RENAMED = {"mr-checks-repair": "mr-metadata-repair"}
+
+#: Said before the method's path: it is written for a Kraft worker, and these
 #: are the things a Kraft worker has that this session does not.
 METHOD_NOTE = (
     "This method is Kraft's, written for a Kraft worker; no Kraft server runs here. Where "
@@ -293,8 +297,8 @@ def dispatch(
     """What to do for `task`: the first matching rule, as a dispatch record.
 
     `installed` says whether a skill is available in this harness; a skill that
-    is not falls back to its prompt, with Kraft's method for it when Lite ships
-    one (`shipped_method`). `first_build` is set only in a child
+    is not falls back to its prompt, naming Kraft's method for it when Lite
+    ships one (`shipped_method`). `first_build` is set only in a child
     walking a slice: its chain's first build node, and it turns the slice
     layer on. `task_kind`, `ref` and `target` are the task's own, whatever ran
     it: the walk keys Kraft's rules for builtin and forge tasks on them, never
@@ -310,7 +314,7 @@ def dispatch(
         method = shipped_method(skill)
         kind, source = "prompt", source + (SHIPPED_METHOD if method else SKILL_MISSING)
     if kind in ("skill", "prompt"):
-        method = method and f"## Method\n\n{METHOD_NOTE}\n\n{method}"
+        method = method and f"## Method\n\nRead {method} and follow it.\n\n{METHOD_NOTE}"
         parts = [prompt, *(task.get("steering") or ()), method]
         prompt = "\n\n".join(filter(None, parts)) or None
     return {
@@ -394,12 +398,13 @@ def _default(task: dict) -> tuple[dict, str]:
 
 
 def shipped_method(skill: str | None) -> str | None:
-    """The text of the Kraft method `skill` names, or None when Lite ships none."""
+    """The absolute path of the Kraft method `skill` names, or None when Lite ships none."""
     name = (skill or "").removeprefix("kraft:")
+    name = RENAMED.get(name, name)
     # Only a name the directory lists: a skill value never becomes a path of its own.
     if name not in {p.stem for p in METHODS.glob("*.md")}:
         return None
-    return (METHODS / f"{name}.md").read_text(encoding="utf-8")
+    return str((METHODS / f"{name}.md").resolve())
 
 
 def _fields(task: dict) -> dict:
