@@ -344,6 +344,11 @@ async def test_changed_test_scopes_report_one_aggregate_result(item_on):
             id="no-recipe",
         ),
         pytest.param("FAILED tests/test_x.py::test_y", "task failed in node verify", id="red-test"),
+        pytest.param(
+            "FAILED: error: Justfile does not contain recipe `vale`.",
+            "task failed in node verify",
+            id="quoted-mid-line",
+        ),
     ],
 )
 async def test_a_just_scope_whose_recipe_the_base_lacks_stops_as_config(
