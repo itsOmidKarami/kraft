@@ -351,6 +351,20 @@ tasks:
       Never drop the -x line, never skip a commit, never abort. If you cannot
       resolve it, stop and say why: a person takes it from there.
 
+  # Opt-in `on_base_changed.on_conflict` handler: the base moved and Kraft's own
+  # rebase conflicted while the item waited on CI. The note it is sent with
+  # names the branch, both bases, what landed upstream and the rebase to re-run.
+  # No chain of ours names it; a chain that wants it says so.
+  resolve_rebase_conflict:
+    kind: agent
+    harness: claude
+    profile: strong
+    prompt: >-
+      Re-run the rebase the note names and resolve each conflict so both this
+      branch's work and what landed upstream survive. Finish the rebase and
+      leave the branch on the new base. If you cannot resolve it, report
+      status: failed and say why: a person takes it from there.
+
   strict_judge:
     kind: agent
     harness: claude
