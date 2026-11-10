@@ -3,11 +3,10 @@
 
 import json
 import signal
-import subprocess
 
 import pytest
 from pydantic import ValidationError
-from support.acp import client_argv, client_env, fake_gate, recorded, run_inprocess, spec
+from support.acp import client_process, fake_gate, recorded, run_inprocess
 from support.acp import events as _events
 
 from kraft.acp import log
@@ -182,23 +181,19 @@ def test_a_pause_that_lands_as_a_rejected_turn_ends_is_not_continued_past(tmp_pa
 
 def test_a_pause_during_a_continuation_still_ends_130(tmp_path):
     # No gate in a bare subprocess: every ask is rejected (fail-closed), which ends the turn.
-    env = client_env(
+    calls = json.dumps([{"id": "c1", "name": "shell", "kind": "execute"}])
+    with client_process(
         tmp_path,
         "ask_all,end_on_reject,slow_continue",
-        KRAFT_FAKE_ACP_CALLS=json.dumps([{"id": "c1", "name": "shell", "kind": "execute"}]),
-    )
-    proc = subprocess.Popen(
-        client_argv(spec(tmp_path, policy=True, tool_names=TOOLS)),
-        stdout=subprocess.PIPE,
-        text=True,
-        env=env,
-        cwd=tmp_path,
-    )
-    for line in proc.stdout:  # the second prompt is out: the continuation is under way
-        if (rec := next(log.records([line]), None)) and rec.get("event") == "continuing":
-            break
-    proc.send_signal(signal.SIGINT)
-    proc.communicate(timeout=30)
+        env={"KRAFT_FAKE_ACP_CALLS": calls},
+        policy=True,
+        tool_names=TOOLS,
+    ) as proc:
+        for line in proc.stdout:  # the second prompt is out: the continuation is under way
+            if (rec := next(log.records([line]), None)) and rec.get("event") == "continuing":
+                break
+        proc.send_signal(signal.SIGINT)
+        proc.communicate(timeout=30)
     assert proc.returncode == 130 and len(_prompts(tmp_path)) == 2
 
 

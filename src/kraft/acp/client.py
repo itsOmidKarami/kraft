@@ -19,6 +19,9 @@ from kraft.acp import log, tools, wire
 from kraft.acp.spec import LaunchSpec
 
 CONFIG_ERROR_EXIT = 78  # EX_CONFIG; `agent._resolve_status` reads the logged event, not this
+#: Set in the agent's environment: a client that finds it in its own was spawned as an agent (its
+#: agent argv is a Kraft ACP client), and would spawn itself without end.
+CLIENT_ENV = "KRAFT_ACP_CLIENT"
 POLICY_VIOLATION_EXIT = 77  # EX_NOPERM; `agent._resolve_status` reads the logged event, not this
 SETTLE_S = 6.0  # a backstop check in flight may wait the gate's 5 s timeout
 INTERRUPTED_EXIT = 130  # what a shell reports for SIGINT: a pause
@@ -721,6 +724,8 @@ class Client:
 
     async def run(self) -> int:
         self.emit(log.event("starting", agent=self.spec.logged_agent_argv or self.spec.agent_argv))
+        if os.environ.get(CLIENT_ENV):
+            return self.fail("the agent argv is itself a Kraft ACP client", config=True)
         if not self.spec.agent_argv:
             return self.fail("the launch names no agent command", config=True)
         try:
@@ -728,7 +733,7 @@ class Client:
                 with suppress(OSError):
                     Path(self.spec.started_marker).write_text("1")
             # the client's own environment, plus the entry's asking switch, for the agent only
-            env = {**os.environ, **self.spec.agent_env} if self.spec.agent_env else None
+            env = {**os.environ, **self.spec.agent_env, CLIENT_ENV: "1"}
             self.proc = await asyncio.create_subprocess_exec(
                 *self.spec.agent_argv,
                 stdin=asyncio.subprocess.PIPE,

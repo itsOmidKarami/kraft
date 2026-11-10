@@ -4,7 +4,6 @@ import io
 import json
 import os
 import signal
-import subprocess
 import sys
 import time
 from types import SimpleNamespace
@@ -13,7 +12,7 @@ import pytest
 from support.acp import (
     agent_argv,
     client_argv,
-    client_env,
+    client_process,
     recorded,
     run_client,
     spec,
@@ -46,6 +45,29 @@ def test_the_client_marks_that_it_got_as_far_as_spawning(tmp_path, fields, marke
     marker = tmp_path / "acp-started"
     run_client(tmp_path, started_marker=str(marker), **fields)
     assert marker.exists() is marked
+
+
+@pytest.mark.parametrize(
+    "nested", [False, True], ids=["marker-in-its-environment", "agent-is-a-client"]
+)
+def test_a_client_that_is_its_own_agent_refuses_instead_of_spawning_itself(tmp_path, nested):
+    # Wrapping the client's own command instead of the agent's argv makes the agent a client: the
+    # inner one finds the marker the outer set for its agent, and stops there.
+    from kraft.acp.client import CLIENT_ENV
+
+    inner_result = tmp_path / "inner-result.json"
+    if nested:
+        inner = spec(tmp_path, at=tmp_path / "inner.json", result_path=str(inner_result))
+        done, _ = run_client(tmp_path, agent_argv=client_argv(inner))
+    else:
+        done, _ = run_client(tmp_path, env={CLIENT_ENV: "1"})
+    failed = inner_result if nested else tmp_path / "result.json"
+    assert json.loads(failed.read_text()) == {
+        "status": "failed",
+        "error": "the agent argv is itself a Kraft ACP client",
+    }
+    assert done.returncode == 78
+    assert not recorded(tmp_path)  # no agent ever started
 
 
 def test_the_log_records_the_agent_argv_as_it_was_before_a_sandbox_wrapped_it(tmp_path):
@@ -243,14 +265,7 @@ def test_an_agent_that_will_not_exit_is_ended_within_the_grace_and_the_ladder(
 ):
     pidfile = tmp_path / "agent.pid"
     started = time.monotonic()
-    done = subprocess.run(
-        client_argv(spec(tmp_path, grace_s=1.0)),
-        capture_output=True,
-        text=True,
-        timeout=60,
-        env=client_env(tmp_path, flags, KRAFT_FAKE_ACP_PIDFILE=str(pidfile)),
-        cwd=tmp_path,
-    )
+    done, _ = run_client(tmp_path, flags, grace_s=1.0, env={"KRAFT_FAKE_ACP_PIDFILE": str(pidfile)})
     elapsed = time.monotonic() - started
     assert done.returncode == 0, done.stderr
     # `ceiling_s` is grace + the terminate wait (+ the kill); `+ 8` is interpreter start-up margin
@@ -261,13 +276,8 @@ def test_an_agent_that_will_not_exit_is_ended_within_the_grace_and_the_ladder(
 
 def test_the_client_never_imports_the_server(tmp_path):
     # It sits on every ACP session's critical path: the FastAPI app stays out of it.
-    done = subprocess.run(
-        [sys.executable, "-X", "importtime", *client_argv(spec(tmp_path))[1:]],
-        capture_output=True,
-        text=True,
-        env=client_env(tmp_path),
-        timeout=60,
-        cwd=tmp_path,
+    done, _ = run_client(
+        tmp_path, argv=[sys.executable, "-X", "importtime", *client_argv(spec(tmp_path))[1:]]
     )
     assert done.returncode == 0, done.stderr
     imported = {line.rsplit("|", 1)[-1].strip() for line in done.stderr.splitlines()}
@@ -355,16 +365,10 @@ def _until_prompting(proc):
 
 
 def test_sigint_becomes_session_cancel_and_the_usage_still_lands(tmp_path):
-    proc = subprocess.Popen(
-        client_argv(spec(tmp_path)),
-        stdout=subprocess.PIPE,
-        text=True,
-        env=client_env(tmp_path, "slow"),
-        cwd=tmp_path,
-    )
-    _until_prompting(proc)
-    proc.send_signal(signal.SIGINT)  # the client only: the fake ignores SIGINT itself
-    rest, _ = proc.communicate(timeout=30)
+    with client_process(tmp_path, "slow") as proc:
+        _until_prompting(proc)
+        proc.send_signal(signal.SIGINT)  # the client only: the fake ignores SIGINT itself
+        rest, _ = proc.communicate(timeout=30)
     recs = list(log.records(rest.splitlines()))
     assert "session/cancel" in [m.get("method") for m in recorded(tmp_path)]
     assert _events(recs, "stop")[0]["stop_reason"] == "cancelled"
@@ -374,16 +378,10 @@ def test_sigint_becomes_session_cancel_and_the_usage_still_lands(tmp_path):
 
 def test_a_sigint_during_the_handshake_starts_no_turn(tmp_path):
     # `slow_init` holds the initialize answer a second: the pause lands before any prompt.
-    proc = subprocess.Popen(
-        client_argv(spec(tmp_path)),
-        stdout=subprocess.PIPE,
-        text=True,
-        env=client_env(tmp_path, "slow_init"),
-        cwd=tmp_path,
-    )
-    _until(proc, lambda rec: rec.get("dir") == "to_agent")  # initialize is out; handlers are set
-    proc.send_signal(signal.SIGINT)
-    rest, _ = proc.communicate(timeout=30)
+    with client_process(tmp_path, "slow_init") as proc:
+        _until(proc, lambda rec: rec.get("dir") == "to_agent")  # initialize is out; handlers set
+        proc.send_signal(signal.SIGINT)
+        rest, _ = proc.communicate(timeout=30)
     assert proc.returncode == 130
     assert "session/prompt" not in [m.get("method") for m in recorded(tmp_path)]
     assert not (tmp_path / "result.json").exists()  # a pause is not a failed result
@@ -393,16 +391,10 @@ def test_a_sigint_during_the_handshake_starts_no_turn(tmp_path):
 def test_a_late_answer_after_the_cancel_wait_is_dropped_not_a_reader_failure(tmp_path):
     # `late` answers the cancel a second after the client stopped waiting (0.3s): the answer
     # reaches a future the timeout cancelled.
-    proc = subprocess.Popen(
-        client_argv(spec(tmp_path, cancel_wait_s=0.3)),
-        stdout=subprocess.PIPE,
-        text=True,
-        env=client_env(tmp_path, "slow,late"),
-        cwd=tmp_path,
-    )
-    _until_prompting(proc)
-    proc.send_signal(signal.SIGINT)
-    rest, _ = proc.communicate(timeout=30)
+    with client_process(tmp_path, "slow,late", cancel_wait_s=0.3) as proc:
+        _until_prompting(proc)
+        proc.send_signal(signal.SIGINT)
+        rest, _ = proc.communicate(timeout=30)
     recs = list(log.records(rest.splitlines()))
     assert proc.returncode == 130
     assert _events(recs, "cancel_timeout")
@@ -450,28 +442,18 @@ def test_a_group_sigint_ends_the_client_130_whatever_the_agent_exits_with(tmp_pa
     # Kraft's pause signals the whole group: the fake exits on that SIGINT, with code 130 or 0.
     # The client's own SIGINT takes the cancel path here, so this proves the group signal ends 130
     # against a real process; the agent_exit race itself is pinned by the unit rows above.
-    proc = subprocess.Popen(
-        client_argv(spec(tmp_path)),
-        stdout=subprocess.PIPE,
-        text=True,
-        env=client_env(tmp_path, flags),
-        cwd=tmp_path,
-        start_new_session=True,
-    )
-    _until_prompting(proc)
-    os.killpg(proc.pid, signal.SIGINT)
-    proc.communicate(timeout=30)
+    with client_process(tmp_path, flags) as proc:
+        _until_prompting(proc)
+        os.killpg(proc.pid, signal.SIGINT)
+        proc.communicate(timeout=30)
     assert proc.returncode == 130
 
 
 def test_sigterm_is_forwarded_to_the_agent_and_its_code_is_the_clients(tmp_path):
     mark = tmp_path / "term-mark"
-    env = client_env(tmp_path, "slow,term", KRAFT_FAKE_ACP_TERM_MARK=str(mark))
-    proc = subprocess.Popen(
-        client_argv(spec(tmp_path)), stdout=subprocess.PIPE, text=True, env=env, cwd=tmp_path
-    )
-    _until_prompting(proc)
-    proc.send_signal(signal.SIGTERM)
-    proc.communicate(timeout=30)
+    with client_process(tmp_path, "slow,term", env={"KRAFT_FAKE_ACP_TERM_MARK": str(mark)}) as proc:
+        _until_prompting(proc)
+        proc.send_signal(signal.SIGTERM)
+        proc.communicate(timeout=30)
     assert mark.exists()
     assert proc.returncode == 143

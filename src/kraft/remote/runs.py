@@ -141,6 +141,16 @@ class Runs:
                 return
             except protocol.Closed:
                 await self.hub.wait_online(run.claim.machine)
+                # It may be back as an older Kraft: one that ignores `acp` runs the bare agent argv
+                # with no client, so no gate and no asks.
+                if run.spec.acp is not None and protocol.ACP_CLIENT not in self.hub.caps(machine):
+                    reason = (
+                        f"this step runs an ACP agent, which needs a machine whose Kraft has the "
+                        f"ACP client: machine {machine!r} came back as a Kraft with no ACP "
+                        f"client; update Kraft on that machine"
+                    )
+                    await self._reject(run, {"outcome": "config_error", "reason": reason})
+                    return
 
     async def _ask(self, machine: str, frame: dict, *, timeout: float = 30) -> dict:
         fut = asyncio.get_running_loop().create_future()

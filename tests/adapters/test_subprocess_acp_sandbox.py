@@ -57,6 +57,8 @@ async def test_only_the_agent_is_wrapped_and_the_client_stays_the_command(
     wrapped = acp_launch.read_spec(path).agent_argv
     # What `Remote.wrap` returned: its own prefix, then the agent exactly as the spec named it.
     assert wrapped[0] == "env" and wrapped[2:] == acp_support.agent_argv()
+    # Wrapping the client's own command would make the agent a client that spawns itself.
+    assert "acp-client" not in " ".join(wrapped)
     assert len(backend.wrapped_env) == 1 and backend.wrap_kw[0]["acp"] is True
     row = database.read(
         lambda c: c.execute("SELECT command FROM worker_sessions WHERE id = 's1'").fetchone()
@@ -65,11 +67,20 @@ async def test_only_the_agent_is_wrapped_and_the_client_stays_the_command(
     assert status == "done", files.log.read_text()
 
 
-async def test_the_probe_targets_the_agent_not_the_client(database, run_dirs, tmp_path, backend):
+@pytest.mark.parametrize("wrapped_before", [False, True], ids=["fresh", "spec-already-wrapped"])
+async def test_the_probe_targets_the_agent_not_the_client(
+    database, run_dirs, tmp_path, backend, wrapped_before
+):
     agent = tmp_path / "agent-bin"
     agent.symlink_to(acp_support.agent_argv()[0])
-    await _run(database, run_dirs, tmp_path, agent_argv=[str(agent), str(acp_support.FAKE)])
+    argv = [str(agent), str(acp_support.FAKE)]
+    # A second wrap of the same spec starts from the agent, not from the argv the first left.
+    fields = {"agent_argv": argv}
+    if wrapped_before:
+        fields = {"agent_argv": ["env", "K=V", *argv], "logged_agent_argv": argv}
+    _, path, _ = await _run(database, run_dirs, tmp_path, **fields)
     assert backend.probed == str(agent)
+    assert backend.wrapped_env and acp_launch.read_spec(path).agent_argv[2:] == argv
 
 
 async def test_the_entrys_asking_switch_crosses_into_the_sandbox(
@@ -80,21 +91,27 @@ async def test_the_entrys_asking_switch_crosses_into_the_sandbox(
 
 
 @pytest.mark.parametrize(
-    ("fields", "marker_first", "want"),
+    ("fields", "marker_first", "spec_gone", "want"),
     [
-        ({"agent_argv": []}, False, "failed"),
-        ({}, True, "config_error"),
-        ({"agent_argv": []}, True, "failed"),
+        ({"agent_argv": []}, False, False, "failed"),
+        ({}, True, False, "config_error"),
+        ({"agent_argv": []}, True, False, "failed"),
+        ({}, True, True, "config_error"),
     ],
-    ids=["client-failed-first", "sandbox-never-started", "stale-marker-is-ignored"],
+    ids=["client-failed-first", "sandbox-never-started", "stale-marker-is-ignored", "spec-gone"],
 )
 async def test_a_client_that_fails_before_spawning_is_not_a_sandbox_that_never_started(
-    database, run_dirs, tmp_path, backend, fields, marker_first, want
+    database, run_dirs, tmp_path, backend, fields, marker_first, spec_gone, want
 ):
     backend.never_started = True  # what `launch_failed` makes of the exit in every row
     if "agent_argv" not in fields:
-        # a wrapped command that exits 1 after the client wrote the marker
-        backend.wrap = lambda cmd, *a, **kw: ["sh", "-c", "exit 1"]
+        # a wrapped command that exits 1 after the client wrote the marker; the late status check
+        # reads the spec it read at entry, so one gone (or unreadable) by then is no exception
+        spec_file = item_paths.session_files(run_dirs, "w1", "s1").instruction.with_name(
+            "acp-launch.json"
+        )
+        gone = f"rm -f {spec_file}; " if spec_gone else ""
+        backend.wrap = lambda cmd, *a, **kw: ["sh", "-c", f"{gone}exit 1"]
     if marker_first and fields:
         files = item_paths.session_files(run_dirs, "w1", "s1")
         files.folder.mkdir(parents=True, exist_ok=True)

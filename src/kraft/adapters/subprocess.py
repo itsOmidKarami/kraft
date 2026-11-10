@@ -1089,6 +1089,8 @@ async def _run_task(
     #: An ACP launch: the backend wraps the agent's argv inside the spec, never the client `cmd`.
     acp_spec = Path(cmd[-1]) if reader == "acp" else None
     agent = _acp.read_spec(acp_spec) if acp_spec is not None else None
+    # What the agent is, never what an earlier wrap of this same spec left in the file.
+    agent_argv = (agent.logged_agent_argv or agent.agent_argv) if agent else []
 
     await db.write(
         lambda c: store.create_session(
@@ -1260,7 +1262,7 @@ async def _run_task(
             return "config_error"
         # An empty `agent_argv` has nothing to probe: it goes on to the client, which fails it as
         # its own config_error.
-        target = (agent.agent_argv[:1] or [cmd[0]])[0] if agent else cmd[0]
+        target = (agent_argv[:1] or [cmd[0]])[0] if agent else cmd[0]
         if problem := await backend.probe(
             sandbox,
             target,
@@ -1346,10 +1348,10 @@ async def _run_task(
             # Off the loop: `kind: os` walks the mounted trees for credential files.
             wrapped = (
                 None
-                if agent and not agent.agent_argv
+                if agent and not agent_argv
                 else await asyncio.to_thread(
                     backend.wrap,
-                    agent.agent_argv if agent else cmd,
+                    agent_argv if agent else cmd,
                     root,
                     sandbox,
                     results,
@@ -1445,7 +1447,7 @@ async def _run_task(
                         node_id=node_id,
                         hook_point=hook_point,
                         # An ACP step ships the agent's own argv: the machine builds the client's.
-                        cmd=agent.agent_argv if agent else cmd,
+                        cmd=agent_argv if agent else cmd,
                         cwd=cwd,
                         env={**(env or {}), "KRAFT_RESULT_PATH": str(result_path)},
                         repo_entry=repo_entry,
@@ -1813,7 +1815,7 @@ async def _run_task(
         and status == "failed"
         # An ACP client that failed before it ran the sandbox command never started a sandbox
         # either: its early exit is its own failure.
-        and (acp_spec is None or _acp.read_spec(acp_spec).started_marker_exists())
+        and (agent is None or agent.started_marker_exists())
         and backend.launch_failed(cidfile, returncode)
     ):
         status = "config_error"

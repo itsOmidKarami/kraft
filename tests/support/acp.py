@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 import subprocess
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 from kraft import harness
 from kraft.acp import log
+from kraft.acp.client import CLIENT_ENV
 from support.server import child_env
 
 FAKE = Path(__file__).resolve().parents[2] / "fixtures" / "fake_acp_agent.py"
@@ -42,32 +47,70 @@ def client_argv(spec_path: Path) -> list[str]:
 
 
 def client_env(tmp_path: Path, flags: str = "", **extra: str) -> dict:
-    return child_env(
+    env = child_env(
         {
             "HOME": str(tmp_path),
             "KRAFT_HOME": str(tmp_path / "k"),
             "KRAFT_FAKE_ACP": flags,
             "KRAFT_FAKE_ACP_RECORD": str(tmp_path / "rec"),
             "KRAFT_RESULT_PATH": str(tmp_path / "result.json"),
-            **extra,
         }
     )
+    # A test run under an ACP agent inherits the recursion marker: it is not this client's.
+    env.pop(CLIENT_ENV, None)
+    return {**env, **extra}
+
+
+@contextmanager
+def client_process(
+    tmp_path: Path,
+    flags: str = "",
+    *,
+    argv: list[str] | None = None,
+    stderr: int | None = None,
+    env: dict[str, str] | None = None,
+    **fields,
+) -> Iterator[subprocess.Popen]:
+    """Kraft's client as a child, in a session of its own, and its whole process group killed on the
+    way out, a timeout included: `subprocess.run(timeout=)` kills only the direct child, and a
+    client that spawned itself (or its agent) would outlive the test. Every test that starts the
+    client does it here."""
+    proc = subprocess.Popen(
+        argv or client_argv(spec(tmp_path, **fields)),
+        stdout=subprocess.PIPE,
+        stderr=stderr,
+        text=True,
+        env=client_env(tmp_path, flags, **(env or {})),
+        cwd=tmp_path,
+        start_new_session=True,
+    )
+    try:
+        yield proc
+    finally:
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()
+        if proc.stdout:
+            proc.stdout.close()
 
 
 def run_client(
-    tmp_path: Path, flags: str = "", *, timeout: int = 60, env: dict | None = None, **fields
+    tmp_path: Path,
+    flags: str = "",
+    *,
+    timeout: int = 60,
+    argv: list[str] | None = None,
+    env: dict[str, str] | None = None,
+    **fields,
 ):
     """Run the client to completion; `(CompletedProcess, [log records])`. `env` is set on the
     child on top of `client_env`'s: a real agent that needs the operator's login passes
     `env={"HOME": str(Path.home())}`."""
-    done = subprocess.run(
-        client_argv(spec(tmp_path, **fields)),
-        capture_output=True,
-        text=True,
-        env=client_env(tmp_path, flags, **(env or {})),
-        timeout=timeout,
-        cwd=tmp_path,
-    )
+    with client_process(
+        tmp_path, flags, argv=argv, stderr=subprocess.PIPE, env=env, **fields
+    ) as proc:
+        out, err = proc.communicate(timeout=timeout)
+    done = subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
     return done, list(log.records(done.stdout.splitlines()))
 
 
@@ -120,6 +163,7 @@ def run_inprocess(
     from kraft.acp.client import Client
     from kraft.acp.spec import LaunchSpec
 
+    monkeypatch.delenv(CLIENT_ENV, raising=False)
     for k, v in {
         "KRAFT_FAKE_ACP": flags,
         "KRAFT_FAKE_ACP_RECORD": str(tmp_path / "rec"),

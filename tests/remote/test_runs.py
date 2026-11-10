@@ -8,6 +8,7 @@ import pytest
 from support.harness import commit_all, git, write
 from support.remote import (
     LFS_ATTRIBUTES,
+    attach,
     fake_git_lfs,
     lfs_pointer,
     lfs_script,
@@ -16,7 +17,7 @@ from support.remote import (
     workers_file,
 )
 
-from kraft.remote import blobs, lfs
+from kraft.remote import blobs, lfs, protocol
 from kraft.remote import runs as runs_mod
 from kraft.remote.runs import REMOTE_GAVE_UP
 from kraft.remote.workdir import Copy
@@ -622,3 +623,36 @@ async def test_a_step_of_an_lfs_repo_given_a_machine_without_git_lfs_ends_as_a_c
     run = await rig.done(await rig.run([sys.executable, "-c", "print('ok')"]))
     assert run.exit_code == runs_mod.REMOTE_CONFIG_ERROR
     assert "has no git-lfs" in run.spool.read_text()
+
+
+@pytest.mark.parametrize(
+    ("caps", "refused"),
+    [(protocol.CAPS - {protocol.ACP_CLIENT}, True), (protocol.CAPS, False)],
+    ids=["came-back-without-the-client", "came-back-with-it"],
+)
+async def test_an_acp_step_is_not_resent_to_a_machine_that_came_back_without_the_client(
+    rig, monkeypatch, caps, refused
+):
+    # An older Kraft ignores `acp` and would run the bare agent argv: no gate, no asks.
+    sent = []
+    first = True
+
+    async def send(run):
+        nonlocal first
+        if first:  # the machine drops as the job goes out
+            first = False
+            await rig.disconnect()
+            raise protocol.Closed("gone")
+        sent.append(run.spec.key)
+
+    monkeypatch.setattr(rig.runs, "_send_job", send)
+    run = await rig.run([sys.executable, "-c", "pass"], acp={"spec": "acp-launch.json"})
+    await asyncio.sleep(0.05)
+    await attach(rig.hub, rig.machine, caps=caps)
+    if refused:
+        await rig.done(run)
+        assert run.exit_code == runs_mod.REMOTE_CONFIG_ERROR
+        assert "machine 'gpu'" in run.spool.read_text() and "ACP client" in run.spool.read_text()
+    else:
+        await until(lambda: sent, 10)
+    assert bool(sent) is not refused

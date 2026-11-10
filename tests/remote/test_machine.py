@@ -485,10 +485,12 @@ async def _sandboxed_job(tmp_path, short_run, monkeypatch, argv, backend=None, *
 
 
 @pytest.mark.parametrize(
-    ("acp", "gets_the_gate"), [(True, True), (False, False)], ids=["acp-job", "plain-sandboxed-job"]
+    ("acp", "sandboxed", "gets_the_gate"),
+    [(True, True, True), (False, True, False), (True, False, True)],
+    ids=["acp-job", "plain-sandboxed-job", "unsandboxed-acp-job"],
 )
 async def test_a_sandboxed_job_gets_the_gate_address_only_when_it_is_an_acp_step(
-    tmp_path, short_run, monkeypatch, acp, gets_the_gate
+    tmp_path, short_run, monkeypatch, acp, sandboxed, gets_the_gate
 ):
     from support.acp import agent_argv
     from support.acp import spec as acp_spec
@@ -507,9 +509,12 @@ async def test_a_sandboxed_job_gets_the_gate_address_only_when_it_is_an_acp_step
         shipped.parent.mkdir(parents=True)
         acp_spec(tmp_path, at=shipped, cwd=str(tmp_path / "server"))
         job = {"acp": {"spec": str(tmp_path / "run/items/w1/acp-launch.json")}}
-    fake, machine, task, t = await _sandboxed_job(
-        tmp_path, short_run, monkeypatch, agent_argv(), **job
-    )
+    if sandboxed:
+        _, machine, task, t = await _sandboxed_job(
+            tmp_path, short_run, monkeypatch, agent_argv(), **job
+        )
+    else:  # no sandbox: the forwarder is the worker's own route to Kraft, ACP or not
+        machine, task, t, _ = await _job(tmp_path, agent_argv(), job=job)
     await _frames_until(t, "finished")
     assert [bool(e.get("KRAFT_PORT")) for e in seen] == [gets_the_gate]
     assert not gets_the_gate or seen[0]["KRAFT_HOST"] == "127.0.0.1"

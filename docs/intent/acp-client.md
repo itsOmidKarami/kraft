@@ -189,7 +189,7 @@ origin: src/kraft/acp/client.py
 
 ## REQ acp-launch-in-a-sandbox-wraps-only-the-agent
 WHEN an ACP launch runs in a sandbox, the system SHALL wrap only the agent's argv in the sandbox and run the client outside it.
-enforced-by: tests/adapters/test_subprocess_acp_sandbox.py::test_only_the_agent_is_wrapped_and_the_client_stays_the_command, tests/adapters/test_subprocess_acp_sandbox.py::test_the_probe_targets_the_agent_not_the_client
+enforced-by: tests/adapters/test_subprocess_acp_sandbox.py::test_only_the_agent_is_wrapped_and_the_client_stays_the_command, tests/adapters/test_subprocess_acp_sandbox.py::test_the_probe_targets_the_agent_not_the_client[fresh], tests/adapters/test_subprocess_acp_sandbox.py::test_the_probe_targets_the_agent_not_the_client[spec-already-wrapped]
 origin: src/kraft/adapters/subprocess.py
 
 ## REQ acp-docker-attaches-stdin-without-a-tty
@@ -209,10 +209,25 @@ origin: src/kraft/adapters/subprocess.py
 
 ## REQ acp-client-early-failure-is-not-a-sandbox-that-never-started
 IF the client fails before it runs the sandbox command, THEN the system SHALL read the exit as the client's own failure and SHALL NOT read it as a sandbox that never started.
-enforced-by: tests/acp/test_client.py::test_the_client_marks_that_it_got_as_far_as_spawning[written-before-the-agent-spawns], tests/acp/test_client.py::test_the_client_marks_that_it_got_as_far_as_spawning[not-written-when-the-client-fails-first], tests/adapters/test_subprocess_acp_sandbox.py::test_a_client_that_fails_before_spawning_is_not_a_sandbox_that_never_started[client-failed-first], tests/adapters/test_subprocess_acp_sandbox.py::test_a_client_that_fails_before_spawning_is_not_a_sandbox_that_never_started[sandbox-never-started], tests/adapters/test_subprocess_acp_sandbox.py::test_a_client_that_fails_before_spawning_is_not_a_sandbox_that_never_started[stale-marker-is-ignored], tests/remote/test_sandboxed.py::test_a_client_that_died_before_spawning_is_not_a_sandbox_that_never_started[client-died-before-spawning], tests/remote/test_sandboxed.py::test_a_client_that_died_before_spawning_is_not_a_sandbox_that_never_started[sandbox-never-started]
+enforced-by: tests/acp/test_client.py::test_the_client_marks_that_it_got_as_far_as_spawning[written-before-the-agent-spawns], tests/acp/test_client.py::test_the_client_marks_that_it_got_as_far_as_spawning[not-written-when-the-client-fails-first], tests/adapters/test_subprocess_acp_sandbox.py::test_a_client_that_fails_before_spawning_is_not_a_sandbox_that_never_started[client-failed-first], tests/adapters/test_subprocess_acp_sandbox.py::test_a_client_that_fails_before_spawning_is_not_a_sandbox_that_never_started[sandbox-never-started], tests/adapters/test_subprocess_acp_sandbox.py::test_a_client_that_fails_before_spawning_is_not_a_sandbox_that_never_started[stale-marker-is-ignored], tests/adapters/test_subprocess_acp_sandbox.py::test_a_client_that_fails_before_spawning_is_not_a_sandbox_that_never_started[spec-gone], tests/remote/test_sandboxed.py::test_a_client_that_died_before_spawning_is_not_a_sandbox_that_never_started[client-died-before-spawning], tests/remote/test_sandboxed.py::test_a_client_that_died_before_spawning_is_not_a_sandbox_that_never_started[sandbox-never-started]
 origin: src/kraft/adapters/subprocess.py
 
 ## REQ acp-session-log-never-holds-the-wrapped-agent-argv
 The system SHALL NOT write the argv a sandbox wrapped an ACP agent in to the session log: it carries env literals, a proxy URL's token among them.
 enforced-by: tests/acp/test_client.py::test_the_log_records_the_agent_argv_as_it_was_before_a_sandbox_wrapped_it, tests/adapters/test_subprocess_acp_sandbox.py::test_a_wrapped_launch_leaves_no_env_literal_in_the_session_log
 origin: src/kraft/acp/client.py
+
+## REQ acp-client-refuses-to-be-its-own-agent
+WHEN the client finds in its own environment the marker it sets for its agent, it SHALL log a `config_error` that the agent argv is itself a Kraft ACP client, write the failed result and exit 78, and SHALL NOT spawn anything: a client wrapped in place of its agent would otherwise spawn itself without end.
+enforced-by: tests/acp/test_client.py::test_a_client_that_is_its_own_agent_refuses_instead_of_spawning_itself[marker-in-its-environment], tests/acp/test_client.py::test_a_client_that_is_its_own_agent_refuses_instead_of_spawning_itself[agent-is-a-client], tests/adapters/test_subprocess_acp_sandbox.py::test_only_the_agent_is_wrapped_and_the_client_stays_the_command
+origin: src/kraft/acp/client.py
+
+## REQ acp-step-is-not-resent-to-a-machine-that-lost-the-client
+WHEN a machine comes back after the connection dropped and lists no `acp_client` cap, the system SHALL fail an ACP step it would have sent again as a `config_error` naming the machine, and SHALL NOT send it: an older Kraft ignores the `acp` field and runs the bare agent argv with no gate and no asks.
+enforced-by: tests/remote/test_runs.py::test_an_acp_step_is_not_resent_to_a_machine_that_came_back_without_the_client[came-back-without-the-client], tests/remote/test_runs.py::test_an_acp_step_is_not_resent_to_a_machine_that_came_back_without_the_client[came-back-with-it]
+origin: src/kraft/remote/runs.py
+
+## REQ acp-launch-spec-is-private-to-the-host
+The system SHALL keep the launch spec file, which holds the agent's argv as a sandbox wrapped it (env literals among them, a proxy URL's credentials too), at `0600` in the session's own folder, which is written by the host and never mounted into a sandbox; the argv the log shows is the one before the wrap. The copy shipped to a machine holds the argv before any wrap, so it carries no env literal from a sandbox; the machine writes its own `0600` copy, with the wrapped argv, in the job's folder on that machine, and the shipped one travels only in the job's file archive over the machine's authenticated connection and is not given a mode of its own there.
+enforced-by: tests/acp/test_launch.py::test_the_launch_spec_names_a_marker_and_a_sandbox_rewrite_keeps_the_unwrapped_argv, tests/remote/test_jobs.py::test_an_acp_step_runs_the_machines_own_client_over_a_spec_with_the_machines_paths
+origin: src/kraft/acp/launch.py
