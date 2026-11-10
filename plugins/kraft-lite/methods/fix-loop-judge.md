@@ -50,8 +50,9 @@ reasoning; it is not evidence about whether the code moved.
 - With no trend yet (you are asked before the first cycle): `stop_needs_human`
   when the repair's doubts say nothing can be fixed here, else `continue`.
 - Shrinking, or real progress on what is still open: `continue`. If one tag
-  survives while the total shrinks, go by its severity: `stop_needs_human` for a
-  `critical`, `stop_downgrade` for an `important` with nothing red.
+  survives two or more rounds after a cycle targeted it while the total shrinks,
+  go by its severity: `stop_needs_human` for a `critical`, `stop_downgrade` for
+  an `important` with nothing red.
 - The same tags recurring, or new ones as fast as old ones clear:
   `stop_needs_human`.
 - What is open is real but not worth another cycle: `stop_downgrade`. Kraft

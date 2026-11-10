@@ -44,15 +44,14 @@ view` call. Without `--repo` they read the root repository.
 A log names the failing test or check far more precisely than a job name
 does; read it before you change anything.
 
-Then reproduce it where you can. Fetch `origin/<base>` again (it may have moved)
-and, if the branch isn't on it, rebase the way the prompt's rebase step says
-(`git rebase origin/<base>` if it gave none). That is as near as you can get to
-what the train or queue merged. Run the failing job's command in this worktree
-(in the member's checkout when the prompt names one). Never merge `origin/<base>`
-into the branch or check out another branch there. A failure you reproduced is a
-failure you can confirm you fixed. One you couldn't reproduce (a job that needs a
-service or a secret only the forge has) you fix from the log alone; say so in
-your report.
+Then reproduce it where you can. Rebase only when the prompt has a rebase step,
+and the way it says; otherwise leave the branch where Kraft put it. That is as
+near as you can get to what the train or queue merged. Run the failing job's
+command in this worktree (in the member's checkout when the prompt names one).
+Never merge `origin/<base>` into the branch or check out another branch there. A
+failure you reproduced is a failure you can confirm you fixed. One you couldn't
+reproduce (a job that needs a service or a secret only the forge has) you fix from
+the log alone; say so in your report.
 
 ## Fix the code, not the pipeline
 

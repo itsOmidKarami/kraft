@@ -65,9 +65,10 @@ chain with a fix loop takes it from there.
 
 ## When no failed job is named
 
-Suspect a conflict with the base: Kraft's own rebase has already failed. Don't
-check out another branch or run `git merge` to look: this worktree is the
-item's own, and a merge left mid-conflict when your pass ends strands the next
-task. If you need to read, use a command that changes nothing (`git merge-tree`,
-`git log`, `git diff origin/<base>...HEAD`). Nothing here can resolve a real
+Suspect a conflict with the base: the CI wait asks the forge whether this branch
+can merge and logs the answer (`merge request is not mergeable: conflict`, or
+similar). Don't check out another branch or run `git merge` to look: this worktree
+is the item's own, and a merge left mid-conflict when your pass ends strands the
+next task. If you need to read, use a command that changes nothing (`git
+merge-tree`, `git log`, `git diff origin/<base>...HEAD`). Nothing here can resolve a real
 conflict; say so in `concerns` and stop, the same as any other non-label failure.
