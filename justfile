@@ -270,7 +270,9 @@ kraft-lite-config:
 # State lands in ~/.kraft, seeded from config/ on first run.
 [doc("Install `kraft` as a real command; state in ~/.kraft")]
 install: bundle
-    uv tool install --from . kraft-sdlc --force
+    # The Python in .python-version, not uv's newest: 3.15.2 deadlocks in
+    # subprocess.run(input=...), which the server calls (Kraft-awhtu).
+    uv tool install --python "$(cat .python-version)" --from . kraft-sdlc --force
     @echo "installed. run: kraft"
     @grep -q "register-python-argcomplete kraft" ~/.zshrc 2>/dev/null || echo 'tip: add eval "$(register-python-argcomplete kraft)" to ~/.zshrc for tab completion'
 
