@@ -190,27 +190,12 @@ def test_default_ref(tmp_path, repo_chains, expected):
 
 
 #: The bundled `default` chain's nodes, in order.
-DEFAULT_IDS = [
-    "spec",
-    "spec_approval",
-    "plan",
-    "plan_approval",
-    "chain_revision",
-    "chain_revision_approval",
-    "implementation",
-    "verification",
-    "work_brief",
-    "local_review",
-    "describe_merge_request",
-    "draft_merge_request",
-    "merge_request_feedback",
-    "work_item_summary",
-    "final_review",
-    "mark_ready",
-    "external_approval",
-    "merge",
-    "post_merge_ci",
-]
+DEFAULT_IDS = """
+    spec spec_approval plan plan_approval chain_revision chain_revision_approval
+    implementation verification work_brief local_review describe_merge_request
+    draft_merge_request merge_request_feedback work_item_summary final_review
+    mark_ready external_approval merge post_merge_ci
+""".split()
 
 
 def test_resolve_bundled_default(tmp_path):
@@ -457,6 +442,16 @@ def _rejecting(rejected: str, before: str = "", tasks: str = MERGE_TASK, extra: 
             {"c": _task_chain("{id: t, extends: worker, steering: ['team:tidy']}")},
             "add-on references are not supported by Kraft Lite, except kraft-default: team:tidy",
             id="addon_steering_refused",
+        ),
+        pytest.param(
+            {"c": _task_chain("{id: t, kind: builtin, ref: kraft.mr_rebase, suite: all}")},
+            "a.main.t.suite: must be one of",
+            id="suite_unknown",
+        ),
+        pytest.param(
+            {"c": _task_chain("{id: t, extends: worker, suite: full}")},
+            "a.main.t.suite: only kraft.verify_changed_test_scopes takes a suite",
+            id="suite_on_an_agent_task",
         ),
         pytest.param(
             {"c": _task_chain("{id: t, kind: builtin, ref: kraft.nope}")},

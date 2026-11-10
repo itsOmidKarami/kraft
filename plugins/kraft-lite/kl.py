@@ -1553,6 +1553,7 @@ STATE_KEYS = (
     "on_base_changed",
     "on_merge_rejected",
     "gate",
+    "produced",
 )
 #: The lines `state` reports as the node's note: why it was sent back.
 RESTART_PREFIX = "Base changed: "
@@ -1587,6 +1588,16 @@ def _state(
         on_failure_ran=False,
         attempt=0,
         note="",
+        # Every document the run produced, newest of each kind: a later task reads it.
+        produced={
+            kind: _artifact(records, kind)
+            for kind in sorted(
+                label[len(ARTIFACT_LABEL) :].partition("=")[0]
+                for record in records
+                for label in record.get("labels", [])
+                if label.startswith(ARTIFACT_LABEL)
+            )
+        },
     )
     if node_record is None:
         # "done" and "never started" are different answers. Reporting both as

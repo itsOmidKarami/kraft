@@ -51,6 +51,24 @@ TASK_KEYS = (
     "ref",
     "target",
     "command",
+    "suite",
+)
+#: What the verify task's `suite` may be (`kraft.templates.models.TestSuite`):
+#: the scope's targeted command where it has one, or always its full one.
+SUITES = ("targeted", "full")
+#: Every other key of Kraft's node, step and task models, by what Lite does
+#: with it. A key Kraft adds that none of these names fails the parity test.
+WALKED = (
+    *("steering", "tasks", "steps", "on_failure", "fix_loop", "judge", "max_attempts"),
+    *("on_base_changed", "on_merge_rejected", "message", "artifact", "artifact_required"),
+    *("reject_to", "auto_review", "auto_review_mode"),
+)
+REFUSED = ("outputs", "reads")  # and a step's or a task's own `on_failure`
+#: Run without: Lite cannot enforce them in one session. Of `policy`, only a
+#: node's `max_attempts` counts, as its fix loop's cap.
+READ_PAST = (
+    *("policy", "wait", "scope", "execution", "harness", "fallback", "inputs", "skippable"),
+    *("read_only", "icon", "timeout", "escalation", "runner", "reviewers", "pipeline"),
 )
 #: The keys an extending chain edits its parent with, and what an override may not set.
 EDIT_KEYS = ("remove", "add", "overrides")
@@ -813,6 +831,11 @@ class _Validator:
             raise self.fail(
                 path, f"unknown builtin ref {task.get('ref')!r}; known: {list(BUILTIN_REFS)}"
             )
+        suite = task.get("suite", SUITES[0])
+        if suite not in SUITES:
+            raise self.fail(f"{path}.suite", f"must be one of {list(SUITES)}, not {suite!r}")
+        if suite != SUITES[0] and task.get("ref") != BUILTIN_REFS[0]:
+            raise self.fail(f"{path}.suite", f"only {BUILTIN_REFS[0]} takes a suite")
         if kind == "forge" and task.get("target") == "ci.pipeline":
             raise self.fail(path, f"a ci.pipeline task {UNSUPPORTED}")
         if kind == "forge" and task.get("target") not in FORGE_TARGETS:

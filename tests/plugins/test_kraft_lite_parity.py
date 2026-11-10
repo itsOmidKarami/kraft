@@ -17,6 +17,7 @@ import pytest
 import yaml
 
 from kraft.addons import builtin, load
+from kraft.templates import models
 from kraft.templates.library import TemplateLibrary
 
 REPO = Path(__file__).resolve().parents[2]
@@ -146,7 +147,10 @@ EXTENDING = {
           merge.on_merge_rejected.repair.main.repair: {prompt: Fix the queue's failure.}
         add:
           - after: work_brief
-            node: {id: lint, kind: exec, tasks: [{id: run, extends: verify_changed_scopes}]}
+            node:
+              id: lint
+              kind: exec
+              tasks: [{id: run, extends: verify_changed_scopes, suite: full}]
           - after: local_review
             node:
               id: typecheck
@@ -176,7 +180,10 @@ def _project_kraft(resolved) -> list:
             t.path,
             t.task.kind.value,
             *(getattr(t.task, key, None) for key in ("skill", "prompt", "produces")),
-            *(getattr(getattr(t.task, key, None), "value", None) for key in ("ref", "target")),
+            *(
+                getattr(getattr(t.task, key, None), "value", None)
+                for key in ("ref", "target", "suite")
+            ),
             # What Kraft runs (`executor.dispatch`): the string split like a shell.
             shlex.split(command) if command is not None else None,
         )
@@ -215,10 +222,10 @@ def _project_lite(chain: dict) -> list:
     """`kl_chains.resolve`'s answer, reduced the same way."""
 
     def task(t):
-        return tuple(
-            t[key]
-            for key in ("path", "kind", "skill", "prompt", "produces", "ref", "target", "command")
-        )
+        keys = ("path", "kind", "skill", "prompt", "produces", "ref", "target")
+        # Kraft's model writes the default `suite` onto every builtin task; Lite leaves it unset.
+        suite = t["suite"] or ("targeted" if t["kind"] == "builtin" else None)
+        return (*(t[key] for key in keys), suite, t["command"])
 
     def steps(group):
         return [(s["id"], [task(t) for t in s["tasks"]]) for s in group]
@@ -268,6 +275,35 @@ def test_resolution_matches_kraft(kl_modules, tmp_path, monkeypatch, chain):
 
     assert lite["source"] == ("bundled" if not env else "user")
     assert _project_lite(lite) == kraft
+
+
+def test_lite_knows_every_key_of_kraft_template_models(kl_modules):
+    """A key Kraft's chain models gain is one Lite reads, reads past or refuses
+    on purpose, never one it drops unseen; and the names Lite copied of
+    Kraft's enums and handler models still match them."""
+    _, kl_chains = kl_modules
+    known = {
+        *kl_chains.TASK_KEYS,
+        *kl_chains.IDENTITY,
+        *kl_chains.WALKED,
+        *kl_chains.REFUSED,
+        *kl_chains.READ_PAST,
+    }
+    for model in (
+        *(models.AgentTask, models.ForgeTask, models.BuiltinTask, models.SubprocessTask),
+        *(models.ExecNode, models.GateNode, models.Step, models.FixLoop),
+    ):
+        assert set(model.model_fields) <= known, model.__name__
+
+    assert kl_chains.BUILTIN_REFS == tuple(models.BuiltinAction)
+    assert kl_chains.FORGE_TARGETS == tuple(
+        a for a in models.ForgeAction if a is not models.ForgeAction.CI_PIPELINE
+    )
+    assert kl_chains.SUITES == tuple(models.TestSuite)
+    assert kl_chains.HANDLER_KEYS == {
+        "on_base_changed": tuple(models.BaseChangePolicy.model_fields),
+        "on_merge_rejected": tuple(models.MergeRejectionPolicy.model_fields),
+    }
 
 
 #: A chain of your own over the built-in add-on, a node of yours from one of its components.

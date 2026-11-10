@@ -96,6 +96,7 @@ def test_state_reports_a_gate_node(walk, kl_cli, tmp_path):
     state = kl_cli(tmp_path, "state")
 
     assert (state["node"], state["kind"], state["steps"]) == ("spec_approval", "gate", [])
+    assert state["produced"] == {"spec": "docs/spec.md"}, "the newest of each kind, for any task"
     assert state["gate"] == {
         "message": "Review and approve the specification.",
         "artifact": "spec",
