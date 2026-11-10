@@ -1,6 +1,6 @@
 ---
 name: init
-description: "Writes `.kraft-lite/bindings.yaml`, which binds a Kraft Lite chain's tasks to installed skills, instructions, or the repo's own test and CI commands where the defaults do not fit. Use when setting up Kraft Lite in a repo, when its bindings are stale, or when the repo still has a pre-V1 `.kraft-lite/registry.yaml` or a run a Kraft Lite verb says to `migrate`."
+description: "Writes `.kraft-lite/bindings.yaml`, which binds a Kraft Lite chain's tasks to installed skills, instructions, or the repo's own test and CI commands where the defaults do not fit. Use when setting up Kraft Lite in a repo, when its bindings are stale, when a task should run a different skill or command, or when the repo still has a pre-V1 `.kraft-lite/registry.yaml` or a Kraft Lite verb refuses with `Run: python3 kl.py migrate`; starting work is `kraft-lite:start`, which needs no bindings."
 ---
 
 # Setting up Kraft Lite in this repo
@@ -34,9 +34,10 @@ Write `.kraft-lite/bindings.yaml` from `proposed` plus the user's choices:
 - Never write a command detect did not report: a binding that cannot run here
   reads as finished until the node fails. A `null` `test_command` or `ci_command`
   leaves that task on its default.
-- Every `skill` entry gets a `prompt` sibling (the one `proposed` gives, or one
-  line on the task's job). It is required - `start` refuses the file without it -
-  and it is what runs when the skill is missing.
+- Each entry has a `kind` and the keys it needs, or `start` refuses the file:
+  `skill` takes `skill` and `prompt` (the one `proposed` gives, or one line on
+  the task's job), which runs when the skill is missing; `prompt` takes
+  `prompt`; `subprocess` takes `command`, a list; `skip` takes `why`.
 
       tasks:
         spec_author:
@@ -52,13 +53,14 @@ Write `.kraft-lite/bindings.yaml` from `proposed` plus the user's choices:
           kind: subprocess
           command: [gh, pr, checks]
 
-If `.kraft-lite/bindings.yaml` already exists, build the new one, show the user
-a diff against it, and ask; do not overwrite one they have edited. Where it holds
-a different command than detect printed, the user's edit wins: leave it, let
-the diff show the difference, and let the user choose. `start` refuses a file it
-cannot use and names the entry, but catching a gap now is cheaper.
+If `.kraft-lite/bindings.yaml` already exists, start from its entries: add the
+`proposed` ones for tasks it doesn't bind, and ask only about those. Where it
+holds a different command than detect printed, keep theirs. Show the user a diff
+against it, and ask before you write; don't overwrite one they've edited.
 
-Then print the path and say it is meant to be edited and committed. Tell the user
+## Finish
+
+Print the path and say it is meant to be edited and committed. Tell the user
 to add `.kraft-lite/decisions/`, `.kraft-lite/messages/`, `.kraft-lite/proposals/`
 and `.kraft-lite/reviews/` to `.gitignore`: a sliced run writes its decisions log,
 messages and proposals there, and a gate's reviewer its reports, and they are not
@@ -71,13 +73,17 @@ goes there too, or is deleted. `bindings.yaml` stays committed, and so does
 A directory is an older Kraft Lite's when it has `.kraft-lite/registry.yaml` and
 no `.kraft-lite/bindings.yaml`, or when a verb refuses with
 `Run: python3 kl.py migrate`. Write no bindings by hand: run
-`python3 "$CLAUDE_PLUGIN_ROOT/kl.py" migrate`. It prints `bindings` - what it
-wrote to `bindings.yaml` from the registry, with `dropped`, the hooks no V1 task
-replaces; `{}` when there was no registry, so no file was written - and
-`chains`, each unfinished run's old id (`from`) and new one (`to`), which every
-later verb takes. Report each, say a written `bindings.yaml` is to be committed
-and the registry is now `registry.yaml.migrated`, then go straight to the
-setup's last paragraph above, the one starting `Then print the path`. A run that finished before V1 needs no
+`python3 "$CLAUDE_PLUGIN_ROOT/kl.py" migrate`. It prints:
+
+- `bindings`: what it wrote to `bindings.yaml` from the registry; `{}` when
+  there was no registry, so no file was written.
+- `dropped`: hooks it left out, because no V1 task serves them or they repeat
+  a default. Report them; there's nothing to do.
+- `chains`: each unfinished run's old id (`from`) and new one (`to`), which
+  every later verb takes.
+
+Report each, say a written `bindings.yaml` is to be committed and the registry
+is now `registry.yaml.migrated`, then go to Finish. A run that finished before V1 needs no
 migrate: `state` says `done`; its `summary`, `export` and other reports need the
 previous Kraft Lite, and `kl.py` refuses every chain verb but `state` for it.
 
@@ -91,9 +97,9 @@ way on: follow it.
   closes the run's open records, labelled `kraft-abandoned`, and keeps them -
   and run nothing until they choose. Then run `migrate` again. `--abandon`
   refuses an id that is not an unfinished pre-V1 run.
-- Registry hooks no V1 task replaces: take each out of the registry, run
-  `migrate`, then bind it in `bindings.yaml` by hand, under the task the user
-  says it serves.
+- A registry hook migrate doesn't know (the refusal names it): take it out of
+  the registry, run `migrate`, then bind it in `bindings.yaml` by hand, under
+  the task the user says it serves.
 - A registry Lite cannot read (named with its file and line), one that is not a
   mapping of hooks, or an entry that would make a bindings file Lite refuses,
   such as a `skill` with no `prompt`: correct it in the registry, run `migrate`

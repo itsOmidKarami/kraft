@@ -39,6 +39,9 @@ SAYS = {
     ("start", 0): {
         "start-lists-available-chains": 'kl.py" chains --available',
         "start-chain-file-path": "a chain file path (`.yaml`, or with a `/`)",
+        "start-reports-unused-bindings-and-goes-on": (
+            "Name each to the user; don't edit `bindings.yaml` or start again, and go on."
+        ),
     },
     ("next", 0): {
         "next-pre-v1-refusal-migrates": (
