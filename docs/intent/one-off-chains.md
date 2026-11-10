@@ -20,7 +20,7 @@ The system SHALL record an approval of a one-off chain's custom content only fro
 a caller it reads as a person, and SHALL refuse one from a Kraft worker or an
 MCP session.
 enforced-by: tests/api/test_one_off_approval.py::test_approve[mcp], tests/api/test_one_off_intake.py::test_create_approval[mcp]
-origin: src/kraft/api/routes/one_off.py §approve_one_off -- the same `gates._decided_by` read that guards `autostart`. A local shell reads as a person too, so this stops sessions and workers, not a determined agent in a shell.
+origin: src/kraft/api/routes/one_off.py §approve_one_off -- the same `gates._decided_by` read that guards `autostart`. A shell the `kraft` command detects as a coding agent's reads as an assistant too; a shell it does not detect, or one that sets `KRAFT_CLIENT=cli`, reads as a person, so this stops sessions, workers and detected agent shells, not a determined agent.
 
 ## REQ one-off-approval-binds-the-digest-shown
 
@@ -59,7 +59,7 @@ override's `extra_prompt`, a retry's change to a task beyond its model and
 effort, and the writing or applying of an item's chain draft, and SHALL refuse
 each from a Kraft worker or an MCP session, whether or not the item has started.
 enforced-by: tests/api/test_work_items_node_overrides.py::test_a_node_extra_prompt_is_a_persons_to_set[create-assistant], tests/api/test_work_items_node_overrides.py::test_a_node_extra_prompt_is_a_persons_to_set[patch-worker], tests/api/test_retry_paths.py::test_a_retry_that_changes_more_than_a_tasks_model_is_a_persons[escalation-prompt], tests/api/test_retry_paths.py::test_a_retry_that_changes_more_than_a_tasks_model_is_a_persons[assistant-prompt], tests/api/test_item_drafts.py::test_an_items_chain_draft_is_a_persons_to_write_and_apply[assistant-writes-a-prompt], tests/api/test_item_drafts.py::test_an_items_chain_draft_is_a_persons_to_write_and_apply[worker-applies-a-persons-added-node-to-a-started-item]
-origin: src/kraft/api/routes/lifecycle.py §_retry, src/kraft/api/routes/work_items.py §_refuse_agent_extra_prompt, src/kraft/api/routes/drafts.py §_person_only -- each door reads `gates._decided_by`, as approving a one-off chain does. Refused rather than held for review: the one-off review covers only an item that has not started, and none of Kraft's own agent flows sends text through these doors. A local shell reads as a person, so this stops sessions and workers, not a determined agent in a shell.
+origin: src/kraft/api/routes/lifecycle.py §_retry, src/kraft/api/routes/work_items.py §_refuse_agent_extra_prompt, src/kraft/api/routes/drafts.py §_person_only -- each door reads `gates._decided_by`, as approving a one-off chain does. Refused rather than held for review: the one-off review covers only an item that has not started, and none of Kraft's own agent flows sends text through these doors. A shell the `kraft` command detects as a coding agent's reads as an assistant too; a shell it does not detect, or one that sets `KRAFT_CLIENT=cli`, reads as a person, so this stops sessions, workers and detected agent shells, not a determined agent.
 
 ## REQ agent-chosen-repo-commands-wait-for-a-person
 
