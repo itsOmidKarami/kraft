@@ -121,6 +121,8 @@ class TestScope(BaseModel):
     paths: list[StrictStr] = Field(min_length=1)
     command: StrictStr = Field(min_length=1)
     targeted_command: StrictStr | None = Field(default=None, min_length=1)
+    #: Scopes naming the same group run one at a time on the local worker.
+    concurrency_group: Identifier | None = None
 
 
 class Verification(BaseModel):

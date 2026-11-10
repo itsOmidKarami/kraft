@@ -21,7 +21,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from kraft import item_paths
+from kraft import ids, item_paths
 from kraft.proc_identity import identity_ok, pid_alive
 from kraft.remote import local_serve, protocol
 from kraft.remote.local_jobs import LocalJobs, SpawnRefused
@@ -183,6 +183,8 @@ class _Row:
         self.groups: list[str] = []  # `workers.yaml`'s `local: groups:`
         self.enabled = True  # `workers.yaml`'s `local: enabled:`; False: no new session starts
         self._held: set[str] = set()  # the session keys that hold one of the slots
+        #: A test scope's `concurrency_group` -> the session key running it: one at a time.
+        self._groups: dict[str, str] = {}
         self.since: str | None = None
         self._up = asyncio.Event()
         if connected:
@@ -205,14 +207,22 @@ class _Row:
             return False
         return self.capacity is None or len(self._held) < self.capacity
 
-    def take(self, key: str) -> bool:
-        """A slot for `key`, if one is free. Already holding one is a success. Nothing awaits
-        between the check and the add, so two sessions cannot both take the last slot."""
+    def group_holder(self, group: str | None, key: str) -> str | None:
+        """The session key running `group` when it is not `key`: the one `key` waits for."""
+        holder = self._groups.get(group) if group else None
+        return holder if holder != key else None
+
+    def take(self, key: str, group: str | None = None) -> bool:
+        """A slot for `key`, if one is free and no other session runs `group` (a test scope's
+        `concurrency_group`). Already holding one is a success. Nothing awaits between the check
+        and the add, so two sessions cannot both take the last slot."""
         if key in self._held:
             return True
-        if not self.free():
+        if not self.free() or self.group_holder(group, key):
             return False
         self._held.add(key)
+        if group:
+            self._groups[group] = key
         return True
 
     async def take_waiting(
@@ -220,16 +230,19 @@ class _Row:
         key: str,
         on_wait: Callable[[str], Awaitable[None]] | None = None,
         poll_s: float = 0.5,
+        group: str | None = None,
     ) -> float:
         """`take`, waiting for a slot (said once through `on_wait`); the seconds it waited.
         Cancelling the wait takes nothing."""
         began, said = time.monotonic(), None
-        while not self.take(key):
-            text = (
-                f"waiting for local ({len(self._held)} of {self.capacity} running)"
-                if self.enabled
-                else "waiting for local (disabled)"
-            )
+        while not self.take(key, group):
+            if not self.enabled:
+                text = "waiting for local (disabled)"
+            elif holder := self.group_holder(group, key):
+                item = ids.parse_session_ref(holder)[0] or holder
+                text = f"waiting for test group {group}: {item} is running it"
+            else:
+                text = f"waiting for local ({len(self._held)} of {self.capacity} running)"
             if on_wait is not None and text != said:
                 await on_wait(text)
                 said = text
@@ -238,10 +251,15 @@ class _Row:
 
     def release(self, key: str) -> None:
         self._held.discard(key)
+        for group in [g for g, k in self._groups.items() if k == key]:
+            del self._groups[group]
 
-    def adopt(self, key: str) -> None:
-        """A slot for a session running before a restart: counted whatever the limit says."""
+    def adopt(self, key: str, group: str | None = None) -> None:
+        """A slot for a session running before a restart: counted whatever the limit says, and
+        holding `group` again so the next scope of that group still waits for it."""
         self._held.add(key)
+        if group:
+            self._groups[group] = key
 
     def snapshot_row(self, running: int) -> dict:
         return {

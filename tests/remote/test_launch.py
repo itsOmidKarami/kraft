@@ -69,7 +69,7 @@ async def world(database, run_dirs, item_on, repo):
     await hub.close()
 
 
-def _placed(w, key="w/1", *, can_park=True, resume=False, needs=()):
+def _placed(w, key="w/1", *, can_park=True, resume=False, needs=(), concurrency_group=None):
     return launch.placed(
         w.db,
         w.row,
@@ -81,6 +81,7 @@ def _placed(w, key="w/1", *, can_park=True, resume=False, needs=()):
         resume=resume,
         can_park=can_park,
         needs=needs,
+        concurrency_group=concurrency_group,
     )
 
 
@@ -130,6 +131,20 @@ async def test_the_local_worker_is_taken_when_every_remote_member_is_busy_or_ref
         assert (p.runner, p.held, p.held_local) == ("local", None, "w/1")
         assert link.free() is False  # its one slot is taken
     assert link.free()
+
+
+@pytest.mark.parametrize(
+    ("group", "local"),
+    [pytest.param("heavy", False, id="same"), pytest.param("light", True, id="other")],
+)
+async def test_the_local_worker_is_full_to_a_scope_whose_group_runs_there(world, group, local):
+    world.refuse.update({"a", "b"})
+    link = local_link.current()
+    link.capacity = 2  # a slot is free: only the group can hold the step back
+    link.take("other/1", "heavy")
+    async with _placed(world, concurrency_group=group) as p:
+        assert (p.held_local == "w/1") is local
+        assert local or p.wait == "waiting for a machine in gpu"
 
 
 async def test_two_placements_never_take_one_free_slot(world):

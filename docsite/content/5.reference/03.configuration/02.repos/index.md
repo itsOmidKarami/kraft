@@ -64,7 +64,7 @@ No key on an entry passes silently. A key within two edits of a field below (`au
 |---|---|---|---|
 | `setup_command` | string | `null` | Runs in every new [worktree](/concepts/vocabulary#worktree) before any node starts. Unset, the file still loads, but the repo's next work item stops before its first task. See [`setup_command`](#setup_command). |
 | `test_command` | string | `null` | The command CI actually runs for this repo: what the changed-test-scope verification runs, as one scope over every path. See [`test_command`](#test_command). |
-| `test_scopes` | list of `{paths, command, targeted_command}` | `null` | A monorepo's per-directory test commands. Each `paths` is a non-empty list and each `command` a non-empty string. `targeted_command` is optional; see [`targeted_command`](#targeted_command). _Added in 2.4_ |
+| `test_scopes` | list of `{paths, command, targeted_command, concurrency_group}` | `null` | A monorepo's per-directory test commands. Each `paths` is a non-empty list and each `command` a non-empty string. See [`targeted_command`](#targeted_command) and [`concurrency_group`](#concurrency_group). _Added in 2.4_ |
 | `areas` | mapping of ID to area | `{}` | Path-scoped contexts inside this repo: `{paths: [...], setup: "...", verification: {test_scopes: [...]}}`. See [`areas`](#areas). |
 | `intent_dir` | string, a relative path | `null` | Where the repo's intent tree lives, relative to its root. When set, every agent in the repo is told to follow it. Kraft doesn't run the tree's check: add it to the repo's `test_scopes` yourself. |
 | `local_files` | list of strings | `[]` | Files to copy into every new worktree, for ones `git worktree add` can't carry: relative paths, no globs or directories, covered by the worktree's `.gitignore`. Anything else is refused, and named in the `worktree_prepared` event (`kraft view events`). |
@@ -160,6 +160,26 @@ Loading refuses an entry where a command string could name two scopes, because s
 - a `targeted_command` equal to another scope's `command`, to another scope's `targeted_command`, or to an area's `setup`.
 
 Commands compare after shell splitting, so `just  test` and `just test` are one string.
+
+#### `concurrency_group`
+_Added in next_
+
+Scopes that name the same group run one at a time on the local worker. While one runs, another scope of that group waits for it to finish, whichever work item or repository it belongs to: what runs short is the machine's CPUs. A scope without a group never waits for one and never makes another wait.
+
+```yaml
+test_scopes:
+  - paths: ['src/**', 'tests/**']
+    command: just ci-test
+    targeted_command: just test-targeted
+    concurrency_group: heavy
+```
+
+- **When to set it.** On a scope whose command fills the machine by itself: a test runner that starts a worker per CPU, a browser suite, a full build, a command that starts servers and waits for them. Leave lint, type checks and single test files out. The sign that a scope needs one is a failure that appears only when two items verify at once and passes on a retry with no change.
+- **One name for everything heavy.** Two scopes that would overload the machine together share a group, across repositories too. Give two scopes different groups only when the machine can run one of each side by side.
+- **What the board says.** `waiting for test group heavy: 36djfdgg is running it`, naming the work item that holds it. The wait doesn't count against the step's time cap, and a restart keeps the group held by the session that had it.
+- **Where it applies.** The local worker. A scope on a group of machines goes to another member while its group runs locally. A remote machine holds no group.
+
+A name is lowercase letters, digits, `-` and `_`, starting with a letter. Scopes with the same `command` must name the same group. In Settings, a scope with a group starts with it in brackets: `[heavy] src/** => just ci-test => just test-targeted`.
 
 ### `areas`
 

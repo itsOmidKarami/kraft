@@ -27,7 +27,12 @@ _WEB_AREA = {
         "setup": "true",
         "verification": {
             "test_scopes": [
-                {"paths": ["web/**"], "command": "web-test", "targeted_command": "web-targeted"}
+                {
+                    "paths": ["web/**"],
+                    "command": "web-test",
+                    "targeted_command": "web-targeted",
+                    "concurrency_group": "heavy",
+                }
             ]
         },
     }
@@ -35,7 +40,7 @@ _WEB_AREA = {
 
 
 @pytest.mark.parametrize(
-    ("fields", "targeted", "area"),
+    ("fields", "targeted", "area", "group"),
     [
         pytest.param(
             {
@@ -49,16 +54,17 @@ _WEB_AREA = {
             },
             ["just", "test-targeted"],
             None,
+            None,
             id="repo-scope",
         ),
-        pytest.param({"areas": _WEB_AREA}, ["web-targeted"], "web", id="area-scope"),
-        pytest.param({"test_command": "just ci-test"}, None, None, id="bare-test-command"),
+        pytest.param({"areas": _WEB_AREA}, ["web-targeted"], "web", "heavy", id="area-scope"),
+        pytest.param({"test_command": "just ci-test"}, None, None, None, id="bare-test-command"),
     ],
 )
-def test_the_scope_table_carries_each_scopes_targeted_command(fields, targeted, area):
+def test_the_scope_table_carries_each_scopes_targeted_command(fields, targeted, area, group):
     [scope] = dispatch._scope_table(entry_of(fields))
 
-    assert (scope["targeted_cmd"], scope["area"]) == (targeted, area)
+    assert (scope["targeted_cmd"], scope["area"], scope["group"]) == (targeted, area, group)
 
 
 async def _diff(item_on, repo, change):
@@ -140,14 +146,22 @@ _FULL = {**_BUILTIN, "suite": "full"}
     ],
 )
 async def test_a_scope_runs_its_targeted_command_in_place_of_the_full_one(
-    item_on, tmp_path, task, changed, has_targeted, ran, reason
+    item_on, tmp_path, monkeypatch, task, changed, has_targeted, ran, reason
 ):
-    scope = _scope(tmp_path, targeted=has_targeted)
+    scope = {**_scope(tmp_path, targeted=has_targeted), "concurrency_group": "heavy"}
     full = _joined(scope["command"])
+    groups, run_task = [], dispatch._subprocess.run_task
+
+    async def spy(*args, concurrency_group=None, **kwargs):
+        groups.append(concurrency_group)
+        return await run_task(*args, concurrency_group=concurrency_group, **kwargs)
+
+    monkeypatch.setattr(dispatch._subprocess, "run_task", spy)
 
     status, it = await _dispatch(item_on, test_scopes=[scope], task=task, changed=changed)
 
     assert status == "done"
+    assert groups == ["heavy"]  # the scope's group goes with whichever command runs
     assert (tmp_path / "LOG").read_text().split() == [ran]
     expected = _joined(scope["targeted_command"]) if ran == "targeted" else full
     assert [s["command"] for s in it.sessions()] == [expected]

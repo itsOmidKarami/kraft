@@ -839,13 +839,22 @@ class _Held:
     claim = None
 
 
-async def run_task(db, run_dirs, *, session_id: str, work_item_id: str, **kwargs) -> str:
+async def run_task(
+    db,
+    run_dirs,
+    *,
+    session_id: str,
+    work_item_id: str,
+    concurrency_group: str | None = None,
+    **kwargs,
+) -> str:
     """`_run_task`, closing the session it wrote when whatever ends it -- a
     cancel, most often a co-task's failure or a stop -- comes before the
     launch: an in-place item's row left `pending` would hold its checkout's
     lease (`store.folder_holder`) until a restart. A local session first takes one of
     the local worker's slots (`workers.yaml`'s `local: capacity:`), before it has a session row;
-    what it holds, the slot and a machine's claim alike, is given back on every way out."""
+    what it holds, the slot and a machine's claim alike, is given back on every way out. A test
+    scope's `concurrency_group` waits there too, for any other session running the same group."""
     from kraft.remote import local_link
 
     held = _Held()
@@ -853,7 +862,9 @@ async def run_task(db, run_dirs, *, session_id: str, work_item_id: str, **kwargs
     key = ids.session_ref(work_item_id, session_id)
     try:
         if link is not None:
-            waited = await link.take_waiting(key, _said_waiting(db, work_item_id, kwargs))
+            waited = await link.take_waiting(
+                key, _said_waiting(db, work_item_id, kwargs), group=concurrency_group
+            )
             if waited > 0.05:
                 kwargs["waited_s"] = waited
                 if (cap := kwargs.get("time_cap")) is not None:

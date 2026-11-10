@@ -58,9 +58,12 @@ class Placement:
         resume: bool,
         can_park: bool,
         pin_node: bool = False,
+        concurrency_group: str | None = None,
     ) -> None:
         self._db, self._row, self._node_id, self._hook_point = db, row, node_id, hook_point
         self._pin_node = pin_node
+        #: A test scope's group: the local worker counts as full while another session runs it.
+        self._concurrency_group = concurrency_group
         self._group, self._repos, self._key = group, list(repos), session_key
         self._resume, self._can_park = resume, can_park
         self.runner = group
@@ -167,7 +170,12 @@ class Placement:
                     self.held, self.runner = got, runner if pinned else self._group
                     return True
                 exclude.add(got.machine)
-        if local_ok and link is not None and link.connected and link.take(self._key):
+        if (
+            local_ok
+            and link is not None
+            and link.connected
+            and link.take(self._key, self._concurrency_group)
+        ):
             self.held_local, self.runner = self._key, placement.LOCAL
             return True
         self.wait = f"waiting for {pinned}" if pinned else f"waiting for a machine in {self._group}"
@@ -232,6 +240,7 @@ async def placed(
     can_park: bool,
     needs: Mapping[str, str] | Collection[str] = frozenset(),
     pin_node: bool = False,
+    concurrency_group: str | None = None,
 ) -> AsyncIterator[Placement]:
     """Place a step whose `runner` is a group around its launch, and give back whatever the
     launch did not take over, however it ends. See `Placement`. `pin_node`: a resumed step goes
@@ -239,6 +248,7 @@ async def placed(
     p = Placement(
         db, row, node_id, hook_point, runner, repos,
         session_key=session_key, resume=resume, can_park=can_park, pin_node=pin_node,
+        concurrency_group=concurrency_group,
     )  # fmt: skip
     try:
         await p.choose(needs)
@@ -271,6 +281,7 @@ async def run_placed(
     resume: bool,
     attempt,
     pin_node: bool = False,
+    concurrency_group: str | None = None,
 ):
     """`await attempt(runner, claim, waited_s)` for a launch that cannot park (an escalation turn,
     a review): placed on a group's member first when `runner` names a group, and placed again
@@ -280,7 +291,7 @@ async def run_placed(
     async with placed(
         db, row, node_id, hook_point, runner, repos,
         session_key=ids.session_ref(row["id"], session_id),
-        resume=resume, can_park=False, pin_node=pin_node,
+        resume=resume, can_park=False, pin_node=pin_node, concurrency_group=concurrency_group,
     ) as p:  # fmt: skip
         while True:
             try:

@@ -240,8 +240,9 @@ def _last_own_round_head(
 
 def _scope_table(repo_entry: RepoEntry | None) -> list[dict]:
     """The repository's test scopes as verify runs them, before any selection:
-    `{paths, cmd, targeted_cmd, area, setup}` each, the commands and `setup`
-    split into argv; `targeted_cmd` is None for a scope that declares none."""
+    `{paths, cmd, targeted_cmd, area, setup, group}` each, the commands and `setup`
+    split into argv; `targeted_cmd` is None for a scope that declares none, and
+    `group` its `concurrency_group`, or None."""
     if repo_entry is None:
         return []
     repo_scopes = [s.model_dump() for s in repo_entry.test_scopes or ()]
@@ -266,6 +267,7 @@ def _scope_table(repo_entry: RepoEntry | None) -> list[dict]:
             else None,
             "area": s.get("area"),
             "setup": shlex.split(s["setup"]) if s.get("setup") else None,
+            "group": s.get("concurrency_group"),
         }
         for s in [*repo_scopes, *area_scopes]
     ]
@@ -975,7 +977,7 @@ async def _run_changed_test_scopes(
         changed_files.parent.mkdir(parents=True, exist_ok=True)
         changed_files.write_text("".join(f"{p}\n" for p in paths or ()), encoding="utf-8")
 
-    async def _run(cmd: list[str], targeted: bool = False) -> str:
+    async def _run(cmd: list[str], targeted: bool = False, group: str | None = None) -> str:
         scope_common = {
             **common,
             "session_id": db.read(lambda c, w=common["work_item_id"]: store.new_session_id(c, w)),
@@ -1007,6 +1009,7 @@ async def _run_changed_test_scopes(
                 runner=on,
                 placed_claim=claim,
                 post_resolve=no_recipe if Path(cmd[0]).name == "just" else None,
+                concurrency_group=group,
                 **scope_common,
             )
 
@@ -1027,6 +1030,7 @@ async def _run_changed_test_scopes(
             session_id=scope_common["session_id"],
             resume=False,
             attempt=attempt,
+            concurrency_group=group,
         )
 
     # What the round picked, before any of it runs: a node's view draws the scopes still to
@@ -1063,7 +1067,9 @@ async def _run_changed_test_scopes(
             if ready != "done":
                 return ready
         identity = shlex.join(scope["cmd"])
-        return await _run(picks.get(identity, scope["cmd"]), targeted=identity in picks)
+        return await _run(
+            picks.get(identity, scope["cmd"]), targeted=identity in picks, group=scope.get("group")
+        )
 
     if execution is ExecutionMode.PARALLEL:
         results = list(await asyncio.gather(*(_scope(s) for s in to_run)))

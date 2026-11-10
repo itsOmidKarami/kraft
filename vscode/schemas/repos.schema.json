@@ -820,6 +820,19 @@
           "title": "Command",
           "type": "string"
         },
+        "concurrency_group": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Concurrency Group"
+        },
         "paths": {
           "items": {
             "type": "string"

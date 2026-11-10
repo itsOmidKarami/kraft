@@ -91,6 +91,16 @@ def _area(**scope) -> dict:
             "another scope's command",
             id="equals-the-bare-test-commands",
         ),
+        pytest.param(
+            {"test_scopes": [{**_S, "concurrency_group": "heavy"}, {**_S, "paths": ["b/**"]}]},
+            "must share their concurrency_group",
+            id="shared-command-group-differs",
+        ),
+        pytest.param(
+            {"test_scopes": [{**_S, "concurrency_group": "Heavy Tests"}]},
+            "should match pattern",
+            id="group-not-an-identifier",
+        ),
     ],
 )
 def test_an_entry_whose_commands_could_name_two_scopes_is_refused(fields, match):
@@ -115,6 +125,26 @@ def test_a_table_of_distinct_commands_loads(fields):
     if "areas" in fields:
         area_scope = entry.areas["web"]["verification"]["test_scopes"][0]
         assert area_scope["targeted_command"] == "web-targeted"
+
+
+@pytest.mark.parametrize(
+    ("command", "group"),
+    [
+        pytest.param("just  ci-test", "heavy", id="full-command-normalized"),
+        pytest.param("just test-targeted", "heavy", id="targeted-command"),
+        pytest.param("web-test", "ui", id="area-scope"),
+        pytest.param("claude -p", None, id="no-scope"),
+    ],
+)
+def test_a_sessions_command_finds_its_scopes_concurrency_group(command, group):
+    entry = entry_of(
+        {
+            "test_scopes": [{**_S, "concurrency_group": "heavy"}],
+            "areas": _area(concurrency_group="ui"),
+        }
+    )
+
+    assert entry.concurrency_group_of(command) == group
 
 
 def test_a_scope_without_one_is_saved_without_the_key():

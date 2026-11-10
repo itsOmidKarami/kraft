@@ -7,6 +7,8 @@ export interface TestScope {
   command: string;
   /** Runs in place of `command` in verification, and only the tests the change affects. */
   targeted_command?: string;
+  /** Scopes naming the same group run one at a time on the local worker. */
+  concurrency_group?: string;
 }
 
 export interface Repo {

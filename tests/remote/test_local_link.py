@@ -424,3 +424,25 @@ async def test_a_disabled_local_worker_takes_no_session_and_one_waits_saying_so_
     row.enabled = True
     await asyncio.wait_for(waiter, 1)
     assert row._held == {"w/a"}
+
+
+async def test_a_concurrency_group_runs_one_scope_at_a_time_whatever_the_capacity():
+    row = local_link._Row()  # no capacity limit: only the group holds anything back
+    assert row.take("w1/a", "heavy") and row.take("w1/a", "heavy")  # holding it is a success
+    assert not row.take("w2/b", "heavy")
+    assert row.take("w2/c", "light") and row.take("w2/d")  # another group, or none, runs beside
+    said = []
+
+    async def on_wait(text):
+        said.append(text)
+
+    waiter = asyncio.create_task(row.take_waiting("w2/b", on_wait, poll_s=0.01, group="heavy"))
+    await asyncio.sleep(0.1)
+    assert said == ["waiting for test group heavy: w1 is running it"] and not waiter.done()
+    row.release("w1/a")
+    await asyncio.wait_for(waiter, 1)
+    row.release("w2/b")
+    row.adopt("w3/kept", "heavy")  # a session running before a restart holds its group again
+    assert not row.take("w4/new", "heavy")
+    row.release("w3/kept")
+    assert row.take("w4/new", "heavy")
