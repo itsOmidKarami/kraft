@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>Coverage for src/kraft/slices.py: 98%</title>
+    <title>Coverage for src/kraft/slices.py: 100%</title>
     <link rel="icon" sizes="32x32" href="favicon_32_cb_c827f16f.png">
     <link rel="stylesheet" href="style_cb_4667309f.css" type="text/css">
     <script src="coverage_html_cb_54cfdca1.js" defer></script>
@@ -12,7 +12,7 @@
     <div class="content">
         <h1>
             <span class="text">Coverage for </span><b>src<span class="sep">/</span>kraft<span class="sep">/</span>slices.py</b>:
-            <span class="pc_cov">98%</span>
+            <span class="pc_cov">100%</span>
         </h1>
         <aside id="help_panel_wrapper">
             <input id="help_panel_state" type="checkbox">
@@ -55,8 +55,8 @@
         </aside>
         <h2>
             <span class="text">122 statements &nbsp;</span>
-            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">119<span class="text"> run</span></button>
-            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">3<span class="text"> missing</span></button>
+            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">122<span class="text"> run</span></button>
+            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">0<span class="text"> missing</span></button>
             <button type="button" class="exc show_exc button_toggle_exc" value="exc" data-shortcut="x" title="Toggle lines excluded">0<span class="text"> excluded</span></button>
         </h2>
         <p class="text">
@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_323e79e8bb4dca6e_slices_docs_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.2">coverage.py v7.17.2</a>,
-            created at 2026-11-10 17:48 +0000
+            created at 2026-11-10 18:00 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -149,7 +149,7 @@
     <p class="run"><span class="n"><a id="t67" href="#t67">67</a></span><span class="t">        <span class="nam">low</span> <span class="op">=</span> <span class="nam">int</span><span class="op">(</span><span class="nam">m</span><span class="op">[</span><span class="num">1</span><span class="op">]</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t68" href="#t68">68</a></span><span class="t">        <span class="nam">high</span> <span class="op">=</span> <span class="nam">int</span><span class="op">(</span><span class="nam">m</span><span class="op">[</span><span class="num">2</span><span class="op">]</span><span class="op">)</span> <span class="key">if</span> <span class="nam">m</span><span class="op">[</span><span class="num">2</span><span class="op">]</span> <span class="key">else</span> <span class="nam">low</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t69" href="#t69">69</a></span><span class="t">        <span class="key">if</span> <span class="nam">high</span> <span class="op">&lt;</span> <span class="nam">low</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t70" href="#t70">70</a></span><span class="t">            <span class="key">return</span> <span class="fst">f&quot;</span><span class="fst">the range </span><span class="op">{</span><span class="nam">m</span><span class="op">[</span><span class="num">0</span><span class="op">]</span><span class="op">.</span><span class="nam">strip</span><span class="op">(</span><span class="op">)</span><span class="op">}</span><span class="fst"> runs backwards</span><span class="fst">&quot;</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t70" href="#t70">70</a></span><span class="t">            <span class="key">return</span> <span class="fst">f&quot;</span><span class="fst">the range </span><span class="op">{</span><span class="nam">m</span><span class="op">[</span><span class="num">0</span><span class="op">]</span><span class="op">.</span><span class="nam">strip</span><span class="op">(</span><span class="op">)</span><span class="op">}</span><span class="fst"> runs backwards</span><span class="fst">&quot;</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t71" href="#t71">71</a></span><span class="t">        <span class="nam">numbers</span><span class="op">.</span><span class="nam">extend</span><span class="op">(</span><span class="nam">range</span><span class="op">(</span><span class="nam">low</span><span class="op">,</span> <span class="nam">high</span> <span class="op">+</span> <span class="num">1</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t72" href="#t72">72</a></span><span class="t">    <span class="key">return</span> <span class="nam">numbers</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t73" href="#t73">73</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
@@ -168,7 +168,7 @@
     <p class="run"><span class="n"><a id="t86" href="#t86">86</a></span><span class="t">            <span class="key">continue</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t87" href="#t87">87</a></span><span class="t">        <span class="nam">m</span> <span class="op">=</span> <span class="nam">_SLICE_BOLD</span><span class="op">.</span><span class="nam">match</span><span class="op">(</span><span class="nam">bullet</span><span class="op">[</span><span class="num">1</span><span class="op">]</span><span class="op">.</span><span class="nam">strip</span><span class="op">(</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t88" href="#t88">88</a></span><span class="t">        <span class="key">if</span> <span class="nam">m</span> <span class="key">is</span> <span class="key">None</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t89" href="#t89">89</a></span><span class="t">            <span class="key">return</span> <span class="nam">SliceRefusal</span><span class="op">(</span><span class="fst">f&quot;</span><span class="fst">not a slice bullet: </span><span class="op">{</span><span class="nam">bullet</span><span class="op">[</span><span class="num">1</span><span class="op">]</span><span class="op">.</span><span class="nam">strip</span><span class="op">(</span><span class="op">)</span><span class="op">[</span><span class="op">:</span><span class="num">60</span><span class="op">]</span><span class="op">!</span><span class="nam">r</span><span class="op">}</span><span class="fst">&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t89" href="#t89">89</a></span><span class="t">            <span class="key">return</span> <span class="nam">SliceRefusal</span><span class="op">(</span><span class="fst">f&quot;</span><span class="fst">not a slice bullet: </span><span class="op">{</span><span class="nam">bullet</span><span class="op">[</span><span class="num">1</span><span class="op">]</span><span class="op">.</span><span class="nam">strip</span><span class="op">(</span><span class="op">)</span><span class="op">[</span><span class="op">:</span><span class="num">60</span><span class="op">]</span><span class="op">!</span><span class="nam">r</span><span class="op">}</span><span class="fst">&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t90" href="#t90">90</a></span><span class="t">        <span class="nam">key</span><span class="op">,</span> <span class="nam">title</span><span class="op">,</span> <span class="nam">rest</span> <span class="op">=</span> <span class="nam">int</span><span class="op">(</span><span class="nam">m</span><span class="op">[</span><span class="num">1</span><span class="op">]</span><span class="op">)</span><span class="op">,</span> <span class="op">(</span><span class="nam">m</span><span class="op">[</span><span class="num">2</span><span class="op">]</span> <span class="key">or</span> <span class="str">&quot;&quot;</span><span class="op">)</span><span class="op">.</span><span class="nam">strip</span><span class="op">(</span><span class="op">)</span><span class="op">.</span><span class="nam">rstrip</span><span class="op">(</span><span class="str">&quot;.&quot;</span><span class="op">)</span><span class="op">.</span><span class="nam">strip</span><span class="op">(</span><span class="op">)</span><span class="op">,</span> <span class="nam">m</span><span class="op">[</span><span class="num">3</span><span class="op">]</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t91" href="#t91">91</a></span><span class="t">        <span class="key">if</span> <span class="key">not</span> <span class="nam">title</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t92" href="#t92">92</a></span><span class="t">            <span class="key">return</span> <span class="nam">SliceRefusal</span><span class="op">(</span><span class="fst">f&quot;</span><span class="fst">slice </span><span class="op">{</span><span class="nam">key</span><span class="op">}</span><span class="fst"> has no title</span><span class="fst">&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
@@ -176,7 +176,7 @@
     <p class="run"><span class="n"><a id="t94" href="#t94">94</a></span><span class="t">            <span class="key">return</span> <span class="nam">SliceRefusal</span><span class="op">(</span><span class="fst">f&quot;</span><span class="fst">slice </span><span class="op">{</span><span class="nam">key</span><span class="op">}</span><span class="fst"> comes after another; slices run in parallel</span><span class="fst">&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t95" href="#t95">95</a></span><span class="t">        <span class="nam">numbers</span> <span class="op">=</span> <span class="nam">_task_numbers</span><span class="op">(</span><span class="nam">rest</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t96" href="#t96">96</a></span><span class="t">        <span class="key">if</span> <span class="nam">isinstance</span><span class="op">(</span><span class="nam">numbers</span><span class="op">,</span> <span class="nam">str</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t97" href="#t97">97</a></span><span class="t">            <span class="key">return</span> <span class="nam">SliceRefusal</span><span class="op">(</span><span class="fst">f&quot;</span><span class="fst">slice </span><span class="op">{</span><span class="nam">key</span><span class="op">}</span><span class="fst">: </span><span class="op">{</span><span class="nam">numbers</span><span class="op">}</span><span class="fst">&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t97" href="#t97">97</a></span><span class="t">            <span class="key">return</span> <span class="nam">SliceRefusal</span><span class="op">(</span><span class="fst">f&quot;</span><span class="fst">slice </span><span class="op">{</span><span class="nam">key</span><span class="op">}</span><span class="fst">: </span><span class="op">{</span><span class="nam">numbers</span><span class="op">}</span><span class="fst">&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t98" href="#t98">98</a></span><span class="t">        <span class="key">if</span> <span class="key">not</span> <span class="nam">numbers</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t99" href="#t99">99</a></span><span class="t">            <span class="key">return</span> <span class="nam">SliceRefusal</span><span class="op">(</span><span class="fst">f&quot;</span><span class="fst">slice </span><span class="op">{</span><span class="nam">key</span><span class="op">}</span><span class="fst"> is empty: it names no task</span><span class="fst">&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t100" href="#t100">100</a></span><span class="t">        <span class="nam">parsed</span><span class="op">.</span><span class="nam">append</span><span class="op">(</span><span class="op">(</span><span class="nam">key</span><span class="op">,</span> <span class="nam">title</span><span class="op">,</span> <span class="nam">numbers</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
@@ -289,7 +289,7 @@
             <a class="nav" href="z_323e79e8bb4dca6e_slices_docs_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.2">coverage.py v7.17.2</a>,
-            created at 2026-11-10 17:48 +0000
+            created at 2026-11-10 18:00 +0000
         </p>
     </div>
 </footer>
