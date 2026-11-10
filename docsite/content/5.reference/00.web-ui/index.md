@@ -30,3 +30,4 @@ with a **Show me** that takes you to where it is done.
 - [Templates](/reference/web-ui/templates): the Chains and Library screens, and the marks on content that extends, comes from an add-on or is read-only.
 - [Settings](/reference/web-ui/settings): each screen that edits Kraft's setup, and whether a change saves at once or waits for a restart.
 - [Analytics](/reference/web-ui/analytics): the filters, the overview figures, the weekly merge chart and the node, repo and stop tables, with what each number counts.
+- [On a phone](/reference/web-ui/on-a-phone): the phone layout, its bottom bar, the board's cards and the buttons on a stopped item.

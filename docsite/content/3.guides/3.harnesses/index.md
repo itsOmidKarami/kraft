@@ -7,8 +7,6 @@ description: Choose which agent CLI runs a task, and give it what it needs to ru
 
 _Added in 2.1_
 
-Each guide takes one task from start to finish.
-
 ## In this section
 
 - [Switch a task to another harness](/guides/harnesses/switch-harness): run agent tasks on Codex or another CLI instead of Claude Code.

@@ -46,6 +46,9 @@ def tt():
         (["addons/a/library.yaml"], False),
         ([".kraft/collection.json"], False),
         (["plugins/kraft/skills/a/SKILL.md"], True),
+        (["plugins/kraft-lite/skills/gate/SKILL.md"], True),
+        (["plugins/kraft-lite/evals/gate.json"], True),
+        (["plugins/kraft-lite/kl.py"], False),
         (["docsite/content/a.md"], False),
         (["docs/café.md"], False),
         (None, True),
@@ -65,6 +68,9 @@ def tt():
         "kraft-collection-addon",
         "kraft-collection-manifest",
         "skill",
+        "kraft-lite-skill",
+        "kraft-lite-eval",
+        "kraft-lite-python",
         "a-docs-page",
         "a-non-ascii-path",
         "no-list-at-all",
@@ -120,6 +126,8 @@ def test_the_blind_command_lists_what_just_test_warns_about(tt, monkeypatch, cap
         "tests/support/remote.py",
         "tests/support/stub.txt",
         "tests/support/fake_reviewer.py",
+        "plugins/kraft-lite/skills/x/SKILL.md",
+        "plugins/kraft-lite/kl.py",
         "docs/intent/x.md",
         "README.md",
     ]
@@ -129,6 +137,7 @@ def test_the_blind_command_lists_what_just_test_warns_about(tt, monkeypatch, cap
         "src/kraft/b.txt",
         "tests/support/stub.txt",
         "tests/support/fake_reviewer.py",
+        "plugins/kraft-lite/skills/x/SKILL.md",
         "docs/intent/x.md",
     ]
 
@@ -200,6 +209,9 @@ _SHIM = "src/kraft/worker/bin/kraft"
 _POLICY = "config/policy.yaml"
 _SKILL = "plugins/kraft/skills/board/SKILL.md"
 _METHOD = "src/kraft/skills/plan/SKILL.md"
+_LITE_SKILL = "plugins/kraft-lite/skills/gate/SKILL.md"
+_LITE_METHOD = "plugins/kraft-lite/methods/plan.md"
+_LITE_EVAL = "plugins/kraft-lite/evals/gate.json"
 
 
 @pytest.mark.parametrize(
@@ -229,6 +241,11 @@ _METHOD = "src/kraft/skills/plan/SKILL.md"
         (_SKILL, None, "---\nname: board\n---\n", None),
         (_METHOD, "---\nname: plan\n---\n", "---\nname: plan\n---\nMore.\n", "edit"),
         (_METHOD, None, "---\nname: plan\n---\n", None),
+        (_LITE_SKILL, "---\nname: gate\n---\n", "---\nname: gate\n---\nMore.\n", "edit"),
+        (_LITE_METHOD, "a\n", "b\n", "edit"),
+        (_LITE_EVAL, "[]\n", "[1]\n", "edit"),
+        (_LITE_SKILL, None, "---\nname: gate\n---\n", None),
+        (_LITE_SKILL, "---\nname: gate\n---\n", None, None),
     ],
     ids=[
         "comment-added-to-config-yaml",
@@ -251,6 +268,11 @@ _METHOD = "src/kraft/skills/plan/SKILL.md"
         "plugin-skill-added",
         "kraft-skill-edited",
         "kraft-skill-added",
+        "kraft-lite-skill-edited",
+        "kraft-lite-method-edited",
+        "kraft-lite-eval-edited",
+        "kraft-lite-skill-added",
+        "kraft-lite-skill-deleted",
     ],
 )
 def test_a_blind_change_with_known_readers_adds_them_instead_of_the_full_suite(
@@ -281,6 +303,13 @@ def test_a_blind_change_with_known_readers_adds_them_instead_of_the_full_suite(
         assert {"tests/cli/test_admin.py", "tests/api/test_skip.py"} <= set(expected)
     elif adds == "edit":
         expected = next(t for prefix, t in tt.EDIT_TESTS if path.startswith(prefix))
+        if path.startswith("plugins/kraft-lite"):
+            assert expected == (
+                "plugins/kraft-lite/tests",
+                "tests/plugins/test_kraft_lite_parity.py",
+            )
+        if path == _METHOD:
+            assert "tests/plugins/test_kraft_lite_parity.py" in expected
     else:
         expected = adds
     named = plan.steps[0].argv

@@ -105,7 +105,7 @@ alt: 'The board at a 390px phone viewport: an item waiting at approve final revi
 crop: 0 212 390 430
 width: 390
 ---
-**On your phone.** The same board at the same address, laid out for a phone. Open a gate's review from the card's one button, and answer a question or retry a stopped item from its page. [The phone layout](/guides/day-to-day/kraft-on-a-phone) · [Reach it from your phone](/guides/run/remote-access)
+**On your phone.** The same board at the same address, laid out for a phone. Open a gate's review from the card's one button, and answer a question or retry a stopped item from its page. [The phone layout](/reference/web-ui/on-a-phone) · [Reach it from your phone](/guides/day-to-day/kraft-on-a-phone)
 :::::
 ::::
 

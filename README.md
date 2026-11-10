@@ -61,6 +61,11 @@ one session, with no server. [Add-ons](https://kraft-sdlc.dev/guides/customize/s
 share chains, and the [VS Code extension](https://kraft-sdlc.dev/guides/day-to-day/vscode)
 clears gates beside your code.
 
+The extension runs in VS Code and editors built on it, such as Cursor and
+VSCodium: install it from the
+[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=kraft-sdlc.kraft)
+or [Open VSX](https://open-vsx.org/extension/kraft-sdlc/kraft).
+
 ## Requirements
 
 - **macOS or Linux.** Windows isn't supported, and WSL is untested.

@@ -658,7 +658,7 @@ When the writer ends `done` or `failed`, Kraft checks everything first. Only the
 ### When a writer runs again
 
 - Running a writer again, or skipping it, deletes its snapshot, so a later reader never sees outputs of a run that has since been replaced. A reader that already passed isn't run again.
-- Archiving the item deletes all its snapshots. Abandoning deletes the whole item folder. See [Logs and disk space](/guides/run/logs-and-disk-space#where-an-items-files-are).
+- Archiving the item deletes all its snapshots. Abandoning deletes the whole item folder. See [Find the logs](/guides/run/find-the-logs#where-an-items-files-are).
 - A snapshot may still hold a variable that an older chain declared and the current one dropped. Kraft reads only the declared names, but a script that sources the file itself sees every key in it.
 
 ## Icons
