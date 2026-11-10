@@ -39,114 +39,37 @@ starts Kraft in the background with `kraft admin start --detach`.
 
 ![The Kraft board in the sidebar: each item's title, then why it is there, such as "approve spec" or "failed at implementation", with a coloured icon per state](media/screenshot-board.png)
 
-The Kraft view in the activity bar lists every work item, grouped as in the web
-UI, with a badge counting the ones waiting on you. Each row shows the item's
-title, then why it is there ("approve spec", "agent asks: …", "failed at
-implementation"), with an icon whose colour tells a gate from a failure. It
-shows the repos open in the window; the filter button shows every repo.
-Right-click an item to pause, resume, retry, skip, escalate, cancel or archive
-it, or open the **Open** submenu for its worktree, its merge request, its spec
-and plan, the worker log or the web UI. Hover a row for its ID and the full
-reason.
-
-The status bar item `Kraft` shows a bell and the count on a warning background
-while anything waits on you, and a check mark when nothing does. Select it for
-the log, the web UI and Retry Now.
+The Kraft view in the activity bar lists every work item, grouped as in the web UI, with a badge counting the ones waiting on you. Each row shows the item's title, then why it is there ("approve spec", "agent asks: …", "failed at implementation"). Right-click an item to pause, resume, retry, skip, escalate, cancel or archive it, or to open its worktree, merge request, spec and plan, worker log or the web UI.
 
 ## Gates
 
 ![A notification naming the work item and its gate, "Design the caching layer: approve spec", with Open and Reject…](media/screenshot-gate-notification.png)
 
-When a gate opens, a notification offers **Open** and **Reject…**; read-only, it
-offers Open only. Open shows the gate's document as a rendered Markdown
-preview, with Approve and Reject in its tab's title bar: you approve a document
-once you have read it. Approving says what was approved ("Approved: title ·
-approve spec"), and asks first when the gate merges or pushes, from Approve
-or from Submit Review. Several notifications at once become one ("3 items need
-you") with a Next Gate button. A reject asks for
-a reason, which goes to the agent.
-
-**Kraft: Next Gate** in the Command Palette opens the gate document directly when
-one gate waits, and with several lists them, longest-waiting first, so a queue of
-gates goes by without the mouse.
-
-Default keys (`Cmd+Alt+K` on macOS), each chord starting `Ctrl+Alt+K`:
-
-| Key | Does |
-|---|---|
-| `Ctrl+Alt+K N` | Next Gate |
-| `Ctrl+Alt+K A` | Approve, on a gate document |
-| `Ctrl+Alt+K R` | Reject…, on a gate document |
-| `Ctrl+Alt+K S` | Submit Review |
+When a gate opens, a notification offers **Open** and **Reject…**. Open shows the gate's document as a rendered Markdown preview, with Approve and Reject in its tab's title bar: you approve a document once you have read it. A reject asks for a reason, which goes to the agent. **Kraft: Next Gate** in the Command Palette opens the longest-waiting gate, so a queue of gates goes by from the keyboard (`Ctrl+Alt+K N`, or `Cmd+Alt+K N` on macOS).
 
 ## Review
 
 ![A work item's branch in the multi-file diff editor, with review findings marked on their lines and listed in the Problems panel](media/screenshot-review.png)
 
-Run **Review Changes** from an item's menu on the board, or from a gate
-document's title bar, to open its branch in the multi-file diff editor. Findings from the review agents show on the lines they
-name, as a coloured bar with the message beside the line, and in the Problems panel.
-
-Comments are Kraft's review threads, the same ones the web UI's review and
-`kraft view threads` show, with their label, lines and side. Every comment is a
-draft until you submit a review, wherever it was written. Edit or delete your
-drafts, and resolve or reopen a submitted thread, from its title bar. A draft
-must-fix thread blocks Approve.
-
-**Submit Review** asks for the outcome and an optional note. At a gate it offers
-Request changes, Comment or Approve; with no gate, Request changes only, which
-a paused item queues until you resume it. Request changes asks where the work
-restarts. Approve with a must-fix thread open lists the threads that block it.
-Approving with drafts asks to send them with the approval. **Discard Review
-Comments** deletes every draft on the item, the web UI's and the CLI's
-included. Both show on an item with draft comments that is at a gate or stopped
-on you (paused, failed or out of budget), and on any other item once its review
-is open.
+Run **Review Changes** from an item's menu to open its branch in the multi-file diff editor. The review agents' findings show on the lines they name and in the Problems panel. Comment on any line, then run **Submit Review** to request changes, comment or approve. Your comments are Kraft's review threads, the same ones the web UI shows.
 
 ## Config
 
 ![policy.yaml with an unknown severity flagged by the running Kraft](media/screenshot-config.png)
 
-The gear on the board's title bar, **Open Config…**, lists Kraft's config files
-and chains with a line on what each holds, and opens the one you pick. It also
-offers `sandbox.yaml` and `detectors.yaml` before they exist: saving creates them.
-
-Kraft's config files under `$KRAFT_HOME/config` (`policy.yaml`,
-`harnesses.yaml`, `chains/*.yaml` and the rest) are checked by the running
-Kraft as you edit, with the line at fault flagged. With
-[Red Hat YAML](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml)
-installed they also get completion from Kraft's JSON Schemas. On a chain file,
-**Show Resolved Chain** previews the chain after inheritance. On save, the
-extension offers to reload Kraft, or to restart it for files Kraft reads only at
-startup.
+Kraft's config files under `$KRAFT_HOME/config` (`policy.yaml`, `chains/*.yaml` and the rest) are checked by the running Kraft as you edit, with the line at fault flagged. With [Red Hat YAML](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml) installed they also get completion from Kraft's JSON Schemas. The gear on the board's title bar, **Open Config…**, lists the files and opens the one you pick.
 
 ## Requirements
 
-- Kraft running, on this machine (`kraft`, or `kraft admin start`) or on another
-  one you sign in to, on the extension's major release and at least its minor:
-  the 2.0 extension needs Kraft 2.0 or a later 2.x. Against any other Kraft the extension turns
-  read-only: the board still updates, every action is disabled, and the status
-  bar's tooltip says whether to update Kraft or the extension.
-- A trusted workspace to act. In Restricted Mode the board, gate documents and
-  diffs are read-only, and config checks wait until you trust the workspace.
-- [Red Hat YAML](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml)
-  for completion in config files. The extension offers it once if it is missing.
+Kraft running on this machine or on one you sign in to, on the extension's major release and at least its minor, and a trusted workspace to act. Otherwise the extension is read-only: see [the version rule and Restricted Mode](https://kraft-sdlc.dev/reference/vscode-extension#if-the-extension-is-read-only).
 
 ## Settings
 
-- `kraft.url`: where Kraft listens. Empty reads `KRAFT_HOST` and `KRAFT_PORT`,
-  then `bind` and `port` from `$KRAFT_HOME/config/access.yaml`. Set it in your
-  user or Remote settings only: a workspace's settings can't change it.
-- `kraft.path`: the `kraft` binary **Start Kraft** runs, and the restart a
-  config change offers. Empty runs `kraft` on your `PATH`; a leading `~` means
-  your home folder. Set it in your user or Remote settings only.
-- `kraft.notifications`: `all`, `gates` or `off`, which states raise a
-  notification. `gates` announces only gates; `all` also announces an item that
-  stopped and needs you.
+`kraft.url`, `kraft.path` and `kraft.notifications`: see [the settings table](https://kraft-sdlc.dev/reference/vscode-extension#settings).
 
 ## Learn more
 
-- [Kraft for VS Code](https://kraft-sdlc.dev/guides/vscode), the guide to this extension
+- [Kraft for VS Code](https://kraft-sdlc.dev/guides/day-to-day/vscode): the guide, from install to a cleared gate
+- [Reference](https://kraft-sdlc.dev/reference/vscode-extension): keys, settings, row buttons, search and the status bar
 - [Why Kraft](https://kraft-sdlc.dev/get-started/why-kraft): what it does that a session, a loop or a skill doesn't
-- [Documentation](https://kraft-sdlc.dev/)
 - [GitHub](https://github.com/itsOmidKarami/kraft): source, releases and issues

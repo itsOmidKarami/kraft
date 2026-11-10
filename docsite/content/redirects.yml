@@ -615,7 +615,7 @@
 /guides/day-to-day/vscode#in-restricted-mode: /reference/vscode-extension#in-restricted-mode
 /guides/day-to-day/vscode#if-the-extension-is-read-only: /reference/vscode-extension#if-the-extension-is-read-only
 /guides/day-to-day/vscode#an-extension-newer-than-kraft: /reference/vscode-extension#an-extension-newer-than-kraft
-/guides/day-to-day/vscode#an-extension-older-than-kraft: /reference/vscode-extension#an-extension-older-than-kraft
+/guides/day-to-day/vscode#an-extension-older-than-kraft: /reference/vscode-extension#if-the-extension-is-read-only
 /guides/day-to-day/review-a-change#before-you-start: /guides/day-to-day/review-a-change#approve-a-gate
 /guides/day-to-day/review-a-change#check-it-worked: /guides/day-to-day/review-a-change#check-a-sent-review
 /guides/customize/share-chains-with-addons#publish-a-collection: /guides/customize/publish-an-add-on#publish-a-collection
@@ -704,3 +704,8 @@
 /guides/kraft-lite#verbs-for-slices: /reference/kraft-lite#slice-verbs
 /guides/kraft-lite#moving-an-older-directory: /reference/kraft-lite#move-an-older-directory
 /guides/kraft-lite#what-lite-doesnt-do: /guides/kraft-lite
+/guides/day-to-day/vscode#act-on-several-items: /reference/vscode-extension#act-on-several-items
+/guides/day-to-day/vscode#row-buttons: /reference/vscode-extension#row-buttons
+/guides/day-to-day/vscode#open-the-merge-request-spec-or-plan: /reference/vscode-extension#open-the-merge-request-spec-or-plan
+/guides/day-to-day/vscode#keyboard-shortcuts: /reference/vscode-extension#keyboard-shortcuts
+/guides/day-to-day/vscode#search: /reference/vscode-extension#search
