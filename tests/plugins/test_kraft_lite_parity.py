@@ -87,18 +87,33 @@ LIBRARY_FILES = {
 }
 
 
-def test_the_bundled_library_is_the_packaged_one():
-    expected = {"library.yaml"} | {"chains/" + p.name for p in (CONFIG / "chains").glob("*.yaml")}
+@pytest.mark.parametrize(
+    ("bundle", "sources"),
+    [
+        pytest.param(
+            "config",
+            {"library.yaml": CONFIG / "library.yaml"}
+            | {"chains/" + p.name: p for p in (CONFIG / "chains").glob("*.yaml")},
+            id="library",
+        ),
+        pytest.param(
+            "methods",
+            {p.parent.name + ".md": p for p in (REPO / "src/kraft/skills").glob("*/SKILL.md")},
+            id="worker_methods",
+        ),
+    ],
+)
+def test_the_bundled_copy_is_the_packaged_one(bundle, sources):
     bundled = {
-        p.relative_to(PLUGIN / "config").as_posix()
-        for p in (PLUGIN / "config").rglob("*")
+        p.relative_to(PLUGIN / bundle).as_posix()
+        for p in (PLUGIN / bundle).rglob("*")
         if p.is_file()
     }
 
-    assert bundled == expected, "run: just kraft-lite-config"
-    for rel in sorted(expected):
-        assert (PLUGIN / "config" / rel).read_bytes() == (CONFIG / rel).read_bytes(), (
-            f"{rel} differs; run: just kraft-lite-config"
+    assert bundled == set(sources), "run: just kraft-lite-config"
+    for rel, source in sorted(sources.items()):
+        assert (PLUGIN / bundle / rel).read_bytes() == source.read_bytes(), (
+            f"{bundle}/{rel} differs; run: just kraft-lite-config"
         )
 
 

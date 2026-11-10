@@ -261,10 +261,13 @@ bundle:
     rm -rf src/kraft/_bundled/config/.kraft
 
 # Refresh Kraft Lite's bundled copy of the packaged library (library.yaml and
-# chains/). tests/plugins/test_kraft_lite_parity.py fails until this is run.
-[doc("Copy the packaged library into plugins/kraft-lite/config")]
+# chains/) and of the worker methods (methods/<name>.md, one per
+# src/kraft/skills/<name>/SKILL.md; flat, so no harness loads them as skills).
+# tests/plugins/test_kraft_lite_parity.py fails until this is run.
+[doc("Copy the packaged library and worker methods into plugins/kraft-lite")]
 kraft-lite-config:
     rm -rf plugins/kraft-lite/config && mkdir -p plugins/kraft-lite/config/chains && cp config/library.yaml plugins/kraft-lite/config/ && cp config/chains/*.yaml plugins/kraft-lite/config/chains/
+    rm -rf plugins/kraft-lite/methods && mkdir -p plugins/kraft-lite/methods && for d in src/kraft/skills/*/; do cp "$d/SKILL.md" "plugins/kraft-lite/methods/$(basename "$d").md"; done
 
 # Install `kraft` as a real command (then just run `kraft` from anywhere).
 # State lands in ~/.kraft, seeded from config/ on first run.

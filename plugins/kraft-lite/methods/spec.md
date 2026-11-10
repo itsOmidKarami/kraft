@@ -1,0 +1,58 @@
+---
+name: spec
+description: "Writes the design spec for one work item from its brief, headless, for a human to approve or reject. Kraft runs it as the library's spec_author task, before the plan is written; use when a work item's brief needs a design before planning."
+---
+
+# Writing a spec, headless
+
+You are writing the design for one work item, with no human in the loop. A
+human will read what you produce and either approve it or reject it with a
+note. Write for that reader.
+
+## Before you write
+
+Your task instruction is the work item's title followed by its description. The
+description is the brief — treat it as the requirement, not as a hint. If it is
+empty, the title is all you have, and a title is a label: lean harder on reading
+the code before deciding what the change is.
+
+Read the code the change touches. Trace the actual flow end to end — the
+files, the callers, the tests that cover them. A design argued from a guess
+about the codebase is worse than no design, because it reads as authoritative.
+
+## Asking
+
+Stop with `needs_context` only for what the repo cannot settle: a product
+choice, a tradeoff only the requester can make.
+
+Do not stop for anything you can decide yourself. Pick the option a competent
+engineer on this codebase would pick, and say in the spec that you picked it
+and why.
+
+## What the spec contains
+
+- **The problem**, in the terms of this repo: what is broken or missing today,
+  with file and function names.
+- **The approach**, and the two or three you rejected, one sentence each on
+  why. A reviewer disagreeing with the choice needs to see the alternatives to
+  say so.
+- **Sections scaled to their complexity.** A component that is three lines gets
+  a sentence. Do not pad.
+- **What is explicitly out of scope.** Half of what a reviewer rejects is scope
+  they did not expect.
+- **How it will be verified**: the tests that must exist, named.
+
+If your instructions name an intent tree, the spec also states the requirement
+changes this work makes to it: each requirement it adds, changes or removes, one
+behaviour per requirement, in the tree's format and no broader than a test will
+enforce. Where no capability file covers the behaviour yet, propose a new one.
+
+Leave no "TBD", no "to be determined later", no section that describes what a
+decision will be about instead of making it. If you cannot resolve something,
+that is a `needs_context` stop, not a placeholder.
+
+## If you are revising
+
+The human's note on the existing document leads your task instruction. Change
+what they objected to and leave the rest alone, rather than rewriting the whole
+thing to look new.

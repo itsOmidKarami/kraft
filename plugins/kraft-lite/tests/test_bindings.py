@@ -177,6 +177,42 @@ def skill(name: str, text: str = "fallback") -> dict:
             id="skill_binding_missing_falls_back",
         ),
         pytest.param(
+            task(skill="kraft:code-review", prompt="Review it.", steering=["Be brief."]),
+            {},
+            lambda name: False,
+            None,
+            {
+                "kind": "prompt",
+                "skill": None,
+                "prompt": "Review it.\n\nBe brief.\n\n## Method\n\n"
+                + kl_bindings.METHOD_NOTE
+                + "\n\n"
+                + (kl_bindings.METHODS / "code-review.md").read_text(),
+                "source": "default:agent (shipped method)",
+            },
+            id="kraft_method_not_installed_runs_the_shipped_method",
+        ),
+        pytest.param(
+            task(skill="plan", prompt="Plan it."),
+            {},
+            lambda name: False,
+            None,
+            {"source": "default:agent (shipped method)"},
+            id="bare_method_name_runs_the_shipped_method",
+        ),
+        pytest.param(
+            task(skill="kraft:code-review", components=["code_review"]),
+            {"tasks": {"code_review": prompt("Review it my way.")}},
+            lambda name: False,
+            None,
+            {
+                "kind": "prompt",
+                "prompt": "Review it my way.",
+                "source": "bindings:tasks.code_review",
+            },
+            id="binding_beats_the_shipped_method",
+        ),
+        pytest.param(
             # As `kl_chains` freezes `command: sh -c 'npm run lint && npx tsc --noEmit'`.
             task(kind="subprocess", command=["sh", "-c", "npm run lint && npx tsc --noEmit"]),
             {},

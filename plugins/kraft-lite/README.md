@@ -83,8 +83,9 @@ merge request, checking it, review by a person, merge and a check of the merged
 branch's CI, five of them gates where a human decides. Two nodes,
 `verification` and `merge_request_feedback`, carry a fix loop; a node past its
 cap stops the chain and escalates to you. Lite supplies the order, the gates
-and the caps, and calls whatever you already use for each task: it doesn't
-supply a spec writer or a planner.
+and the caps, and calls whatever you already use for each task. A task with
+nothing of yours to run follows Kraft's own method for it, the spec writer and
+the planner included: see [Kraft's methods](#krafts-methods).
 
 ## Where chains come from
 
@@ -203,8 +204,9 @@ slice defaults, then in the top-level sections.
 
 With no match, the task runs on its default:
 
-- An **agent** task runs its `skill` if that is installed in this harness,
-  else its `prompt`.
+- An **agent** task runs its `skill` if that is installed in this harness.
+  Else, when the skill is one of [Kraft's methods](#krafts-methods), it runs
+  its `prompt` with that method appended, and otherwise its `prompt` alone.
 - A **subprocess** task runs its `command`, split like a shell and run
   without one, as Kraft runs it. A command Lite can't split, such as one
   with an unclosed quote, stops `start`.
@@ -225,6 +227,35 @@ stop `start`, since it may be meant for another chain. `start` lists it under
 `unused_bindings` instead, as `tasks.<key>`, or `slice.tasks.<key>` for a
 `slice:` key that names no task a slice runs. A misspelt key would
 otherwise leave its task on the default without a word.
+
+## Kraft's methods
+
+Lite ships the methods a Kraft worker follows, in `methods/`: one file per
+`kraft:<name>` skill the library names (`kraft:spec`, `kraft:plan`,
+`kraft:code-review`, `kraft:fix-loop-judge` and the rest), copied unchanged
+from Kraft. A task whose `skill` is `kraft:<name>`, or a bare `<name>`, that
+isn't installed here gets its `prompt`, its `steering`, then the method under
+a `## Method` heading, and its `source` ends `(shipped method)`. A binding for
+the task still wins. A `kind: skill` binding gets the method only when its own
+skill is a Kraft method that isn't installed. `kraft:review-feedback` stays
+skipped, as above.
+
+The method text names things only a Kraft worker has. A line before it tells
+the agent how to read them here:
+
+- A result file (`$KRAFT_RESULT_PATH`) and its `status`: the agent reports the
+  same fields in its reply. A review's `findings` are what a step fails on.
+- A review package (`$KRAFT_REVIEW_PACKAGE`): the branch's diff against its
+  base. Lite gives no fingerprints, so `same_as` tags and the judge's
+  fingerprint trend are absent.
+- `kraft view` and `kraft item` commands (events, merged merge requests,
+  labels, pipelines, job logs, `mr-label`): git and the forge's own CLI
+  instead. Lite keeps no event log, so `kraft:work-brief` and
+  `kraft:review-brief` work from git history and the chain's state.
+- `needs_context`: the agent stops and asks you.
+- `kraft:chain-review` lists components with `kraft admin templates library`,
+  which needs Kraft installed, and Lite can't apply a revision anyway (see
+  [Gates](#gates)).
 
 ## What Lite reads past, and what it refuses
 
