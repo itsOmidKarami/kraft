@@ -101,6 +101,10 @@ pull request.
   folder disagree. Number prefixes in one folder all have the same number of
   digits (`01.` to `10.`), because the sidebar sorts by name.
 
+## Which page a change updates
+
+A change to one of these sources updates its page in the same pull request.
+
 | Source | Docs page |
 |---|---|
 | A `kraft` subcommand or flag (`src/kraft/cli/*.py`) | `docsite/content/5.reference/01.cli/` |
@@ -143,7 +147,7 @@ or `just vscode-screenshots`.
 [`frontend/SCREENSHOTS.md`](../frontend/SCREENSHOTS.md#retaking-the-screenshots-in-githubassets)
 has the details.
 
-### Before you push
+## Before you push
 
 Run `npm ci && npx nuxt generate` in `docsite/` before you push. It fails on
 a page that doesn't parse, but a link to a page or heading that no longer

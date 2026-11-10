@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 These are this repository's conventions for getting a pull request mergeable.
 `CONTRIBUTING.md` is the source of truth: where it disagrees with this file, it
-wins. Read its "What CI checks" table before working a red check.
+wins. Read `docs/ci.md`, "What CI checks", before working a red check.
 
 ## Before every push
 
@@ -50,7 +50,7 @@ on one Python version only: `just test-py 3.12` (or `3.13`, `3.14`, `3.15`).
   `vscode/package-lock.json`).
 - The opposite rule for add-ons: a change to `addons/<name>/` raises that
   add-on's `version` in `addons/<name>/.kraft/addon.json`, in the same pull
-  request (CONTRIBUTING.md, "Kraft's own collection", says by how much).
+  request (docs/maintainers.md, "Kraft's own collection", says by how much).
   `kraft-default` (`config/`) ships with Kraft and takes Kraft's version, so a
   `config/` change needs no raise.
 
@@ -75,21 +75,21 @@ merged: cut a fresh one from `origin/main` (CONTRIBUTING.md, "Branch hygiene").
   `uv run python dev/check_removals.py origin/main BODY.md`. Editing the body
   starts no run: re-run the failed `removals declared` job afterwards.
 - **`lint`**: `just fix` covers ruff. A `dev/check_docs_*.py` failure names the
-  page and the rule; CONTRIBUTING.md's "User-facing docs" explains each. A
+  page and the rule; docs/writing-docs.md's "Which page a change updates" explains each. A
   `check_addon_versions.py` failure means an add-on changed without its
   `version` raised (above).
 - **An intent pin** (`python -m kraft.intent` in the first test shard):
   repoint it with `just intent-repoint OLD NEW`.
 - **`e2e (real CLIs)`, `playwright`, `ui contract`**: real failures as often as
-  not. Reproduce with the command in CONTRIBUTING.md's table before calling
+  not. Reproduce with the command in docs/ci.md's table before calling
   one a flake. `e2e (macOS sandbox, …)` is in the `test` gate too and cannot
   be reproduced on Linux: read its log and fix from that.
 - **`docs tests`**: a docs-only pull request's stand-in for the unit tier. It
-  runs the unit test files that name a docs path; CONTRIBUTING.md's table says
+  runs the unit test files that name a docs path; docs/ci.md's table says
   how to find them.
 - **`docs nudge`, `tests nudge`**: comments, never failures. A docs nudge saying
   source moved without its docs page is usually right: update the page in this
-  pull request (CONTRIBUTING.md, "User-facing docs"). A tests nudge is
+  pull request (docs/writing-docs.md, "Page rules"). A tests nudge is
   information; act on it only if it names a test you deleted without declaring.
 - **`test report`, `codeql`**: `test report` only reports. Treat a `codeql`
   alert like a security review finding.
