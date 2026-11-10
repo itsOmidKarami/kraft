@@ -14,7 +14,7 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 | `repos.yaml` | Connected repos: setup command, env, steering, workspaces and the `sandbox` field ([Sandboxed workers](/reference/configuration/sandbox)). | Seeded, empty | [repos.yaml](/reference/configuration/repos) |
 | `policy.yaml` | Caps, budget, concurrency, archiving, defaults and maxima. | Seeded | [policy.yaml](/reference/configuration/policy) |
 | `library.yaml` and `chains/*.yaml` | The templates: reusable components and the chains built from them, copied onto each [work item](/concepts/vocabulary#work-item) at intake. | Seeded: the `default` and `quick-task` chains | [Library and chains](/reference/configuration/library-and-chains) |
-| `harnesses.yaml` | [Harness profiles](/concepts/vocabulary#harness-profile) and [agent profiles](/concepts/vocabulary#agent-profile). | Seeded | [harnesses.yaml](/reference/configuration/harnesses-file) |
+| `harnesses.yaml` | [Harness profiles](/concepts/vocabulary#harness-profile) and [agent profiles](/concepts/vocabulary#agent-profile). | Seeded | [Harness profiles](/reference/harnesses/harness-files#harness-profiles) and [Agent profiles](/reference/harnesses/agent-profiles) |
 | `access.yaml` | Bind address, password, remote access. | The first save in Settings | [access.yaml](/reference/configuration/access) |
 | `intake.yaml` | Autonomous pickup of issues, and schedules. | Seeded | [intake.yaml](/reference/configuration/intake) |
 | `notify.yaml` | The notification webhook. | The first save in Settings | [notify.yaml](/reference/configuration/notify) |
@@ -49,7 +49,6 @@ Three commands check and reload the files:
 - [repos.yaml](/reference/configuration/repos): every field in `repos.yaml`, and the pages for how connect proposes commands, `detectors.yaml` and workspaces.
 - [policy.yaml](/reference/configuration/policy): every field in `policy.yaml`: caps, budget, concurrency, archiving, defaults and maxima.
 - [Library and chains](/reference/configuration/library-and-chains): the sections of `library.yaml`, and how `chains/*.yaml` files compose them into chains.
-- [harnesses.yaml](/reference/configuration/harnesses-file): every field in `harnesses.yaml`, for harness profiles and agent profiles.
 - [access.yaml](/reference/configuration/access): every field in `access.yaml`: bind address, port, password, session expiry and allowed hosts.
 - [intake.yaml](/reference/configuration/intake): every field in `intake.yaml`: autonomous pickup from beads, and cron schedules.
 - [notify.yaml](/reference/configuration/notify): every field in `notify.yaml`: the notification webhook and the events that post to it.
@@ -61,3 +60,8 @@ Three commands check and reload the files:
 - [update.yaml](/reference/configuration/update): every field in `update.yaml`: automatic updates, restarting when Kraft is free, the channel and the allowed hours.
 - [workers.yaml](/reference/configuration/workers): every field in `workers.yaml`: the machines that may run steps, how each connects, and why one is offline.
 - [forges.yaml](/reference/configuration/forges): every field in `forges.yaml`: the named forge accounts, which one a repo uses, and what isn't there yet.
+
+## Related
+<!-- not new: the harnesses.yaml link moved here from In this section -->
+
+- [Agent harnesses](/reference/harnesses): the fields of `harnesses.yaml`, for harness profiles and agent profiles, and the harnesses they configure.

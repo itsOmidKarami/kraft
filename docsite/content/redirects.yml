@@ -58,6 +58,13 @@
 /guides/harnesses/adding-a-harness#verify-1: /guides/harnesses/give-a-worker-its-login#check-it-worked
 /guides/harnesses/worker-kit#changing-the-kit: /guides/harnesses/worker-kit#change-the-kit
 /reference/harnesses#capabilities-not-flags: /reference/harnesses/harness-files#capabilities
+/reference/configuration/harnesses-file: /reference/harnesses/harness-files#harness-profiles
+/reference/configuration/harnesses-file#harnesses-harness-profiles: /reference/harnesses/harness-files#harness-profiles
+/reference/configuration/harnesses-file#a-harnesss-access: /reference/harnesses/harness-files#a-harnesss-access
+/reference/configuration/harnesses-file#names-from-the-package: /reference/harnesses/harness-files#names-from-the-package
+/reference/configuration/harnesses-file#defaults: /reference/harnesses/harness-files#defaults
+/reference/configuration/harnesses-file#inspect-and-edit: /reference/harnesses/harness-files#inspect-and-edit
+/reference/configuration/harnesses-file#profiles-agent-profiles: /reference/harnesses/agent-profiles
 /reference/harnesses#amp: /reference/harnesses#amp-details
 /reference/harnesses#cursor: /reference/harnesses#cursor-details
 /reference/permissions#configuring-the-gate: /reference/configuration/policy#policy-fields
