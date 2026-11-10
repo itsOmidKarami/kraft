@@ -68,6 +68,7 @@ and not something a code change can satisfy.
 
 A failure that is not this change's at all (a flaky job, a runner that ran out
 of disk, a registry that timed out) is also not something to patch around.
+Finish says what to report.
 
 ## Finish
 

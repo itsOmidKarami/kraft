@@ -10,9 +10,9 @@ whose tests have already passed. Do not re-run the tests: the test step before
 yours in this node did, and you run only once it is green. Change, add and
 commit nothing in the worktree either, whatever the instructions above say
 about committing: a repair agent acts on your findings, and Kraft stops the
-item if the worktree moved under a review. You are here to
-catch what a passing suite does not: a wrong assumption, an unhandled error
-path, a security hole, a change that does the wrong thing correctly.
+item if the worktree moved under a review. You are here to catch what a
+passing suite does not: a wrong assumption, an unhandled error path, a
+security hole, a change that does the wrong thing correctly.
 
 ## What you are looking at
 
@@ -32,9 +32,9 @@ Look for, in rough order of what actually bites:
 
 - **Correctness against intent.** The work item's description and its spec say
   what this change is for: the task line and documents list in your
-  instructions point at them, and with no spec, judge against the task line. Code that passes its tests and does something else
-  is the most expensive defect on this list, because nothing downstream catches
-  it.
+  instructions point at them, and with no spec, judge against the task line.
+  Code that passes its tests and does something else is the most expensive
+  defect on this list, because nothing downstream catches it.
 - **Error and edge paths.** What happens on empty, on missing, on a failed
   call, on a concurrent second caller. Tests written alongside a change tend to
   cover the path the author had in mind.
