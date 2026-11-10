@@ -476,6 +476,7 @@ nodes:
           - id: test_changed_scopes
             extends: verify_changed_scopes
       - id: review
+        read_only: true
         tasks:
           - id: code_review
             extends: code_review
