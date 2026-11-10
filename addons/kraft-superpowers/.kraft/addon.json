@@ -1,7 +1,7 @@
 {
   "$schema": "https://kraft-sdlc.dev/schemas/addon.schema.json",
   "name": "kraft-superpowers",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Kraft's chains, with superpowers' methods for the spec, plan, implementation, repairs and review feedback",
   "requires": {
     "kraft": "2.6",
