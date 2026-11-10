@@ -9,15 +9,15 @@ Kraft's web UI is the server's own page: start `kraft` and open `http://127.0.0.
 here too. Four verbs are CLI-only for a person: `kraft item abandon`,
 `kraft item set-attachments`, `kraft item mr-label` and `kraft item set-chain`.
 
-These pages name each screen, what it is for, and the buttons on it. To look
+These pages say what each screen is for, what its less obvious controls do and what its states mean. To look
 around before you install, open [the demo](/demo/): this web UI on sample
 data, running in your browser with no server and no agents. Running and
 waiting items move along their chains on their own, and stop at each gate for
 you to answer. What you do there changes the items until you reload the page,
 and nothing is saved.
 
-Its corner badge opens five things to try, each with a Show me that takes you
-to where it is done.
+The demo's corner badge, **About this demo**, opens five things to try, each
+with a **Show me** that takes you to where it is done.
 
 ## In this section
 
@@ -27,6 +27,6 @@ to where it is done.
 - [Fix loops and test scopes](/reference/web-ui/fix-loops-and-test-scopes): a node's own view of a fix loop's rounds, and a changed-test-scope task's frame and chips.
 - [Config before an item starts](/reference/web-ui/config-before-start): where each Config value comes from, and the draft that **Start** asks about.
 - [The review page](/reference/web-ui/review-page): an item's diff with Compare, Viewed marks, line comments and the Finish review dialog.
-- [Templates and Settings](/reference/web-ui/templates-and-settings): the Chains and Library screens, and each Settings screen that edits Kraft's setup.
-- [Analytics](/reference/web-ui/analytics): the Repo and Chain filters, the overview figures, the weekly merge chart and the node, repo and stop tables, with what each number counts.
-- [Cap stops and raises](/reference/web-ui/cap-stops-and-raises): for each cap that can stop an item, what the interface and the command line offer to raise it.
+- [Templates](/reference/web-ui/templates): the Chains and Library screens, and the marks on content that extends, comes from an add-on or is read-only.
+- [Settings](/reference/web-ui/settings): each screen that edits Kraft's setup, and whether a change saves at once or waits for a restart.
+- [Analytics](/reference/web-ui/analytics): the filters, the overview figures, the weekly merge chart and the node, repo and stop tables, with what each number counts.
