@@ -22,9 +22,9 @@ class OneOffSummary(_Shape):
     """What a one-off chain item's own chain adds to the chain it extends."""
 
     extends: str | None = None
-    custom: bool | None = None
+    custom: int | None = None
     needs_review: bool | None = None
-    approval: str | None = None
+    approval: dict[str, Any] | None = None
 
 
 class MrRef(_Shape):
@@ -35,7 +35,7 @@ class MrRef(_Shape):
 class Stop(_Shape):
     """Why a `needs_human`, `waiting` or `rate_limited` item stopped."""
 
-    kind: str
+    kind: str | None = None
     node: str | None = None
     reason: str | None = None
 

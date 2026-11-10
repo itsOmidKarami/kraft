@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 
 import pytest
-from support.api import CUSTOM_ONE_OFF, _in_state, _one_off, _poll_events, _post_default
+from support.api import CUSTOM_ONE_OFF, _approve, _in_state, _one_off, _poll_events, _post_default
 from support.harness import connect_repo
 
 from kraft import update
@@ -73,6 +73,23 @@ def test_the_two_stable_routes_are_tagged_stable():
     assert sorted(ops) == ["GET /api/health", "POST /api/triggers"]
 
 
+#: Two custom parts, so `custom` (a count) is above 1 and a bool would not hold it.
+TWO_CUSTOM = (
+    CUSTOM_ONE_OFF
+    + """\
+  - after: verification
+    node:
+      id: k7
+      kind: exec
+      tasks:
+        - id: run
+          kind: agent
+          harness: claude
+          prompt: run k7
+"""
+)
+
+
 def _gate(client, repo):
     wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")
@@ -87,20 +104,38 @@ def _gate(client, repo):
     ],
 )
 @pytest.mark.parametrize(
-    "file",
+    "file, filled",
     [
-        pytest.param(_gate, id="at-a-gate"),
-        pytest.param(lambda c, r: _one_off(c, r, CUSTOM_ONE_OFF), id="one-off"),
-        pytest.param(lambda c, r: _in_state(c, r, DOORS["states"]["stuck"]), id="stopped-with-mr"),
+        pytest.param(_gate, lambda row: True, id="at-a-gate"),
+        pytest.param(
+            lambda c, r: _one_off(c, r, CUSTOM_ONE_OFF),
+            lambda row: row["one_off"]["custom"] == 1,
+            id="one-off",
+        ),
+        pytest.param(
+            lambda c, r: (w := _one_off(c, r, TWO_CUSTOM), _approve(c, w))[0],
+            lambda row: row["one_off"]["approval"]["digest"] and row["one_off"]["custom"] > 1,
+            id="approved-one-off",
+        ),
+        pytest.param(
+            lambda c, r: _in_state(c, r, DOORS["states"]["stuck"]),
+            lambda row: row["mr_ref"] and row["stop"]["kind"],
+            id="stopped-with-mr",
+        ),
     ],
 )
-def test_a_documented_response_shape_matches_the_real_answer(client, repo, path, model, file):
+def test_a_documented_response_shape_matches_the_real_answer(
+    client, repo, path, model, file, filled
+):
     """The schema describes a route's answer without filtering it: the model sits under
     `responses`, no route has a `response_model`, and a real answer validates against it."""
     connect_repo(repo)
     wid = file(client, repo)
     answer = client.get(path.replace("{id}", wid)).json()
     model.model_validate(answer)
+    assert filled(
+        answer["items"][0] if "items" in answer else answer
+    )  # the row fills what it is for
     operation = app.openapi()["paths"][path.replace("{id}", "{wid}")]["get"]
     ref = operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
     assert ref.endswith(f"/{model.__name__}")
