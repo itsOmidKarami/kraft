@@ -37,11 +37,13 @@ missing is a review to run again.
 
 Then show the user what the gate is about: `gate.message`, and the file at
 `gate.artifact_path`, the newest file of kind `gate.artifact` the run produced.
-With no `gate.artifact`, present the worktree and its diff; with only
-`gate.artifact_path` null, find the file and say so. At the final gate
+With no `gate.artifact`, present the worktree and its diff; with `gate.artifact`
+set but `gate.artifact_path` null, find the file and say so. At the final gate
 (`gate.chain_finalized`), or one with `gate.artifact_required`, `approve`
-refuses with no file on record: offer to send it back to the node that writes
-it (section 2). At the slice gate
+refuses with no file on record. A plain `reject` would land on `gate.reject_to`,
+so offer `reject --from-node <node>` instead, naming the node whose task
+`produces` `gate.artifact` in `.kraft-lite/chains/<chain-id>.json` (section 2).
+At the slice gate
 (`gate.slice_gate` true), show the slicing proposal beside it; with no
 proposal file, say no slicing is proposed, so an approval builds the plan in
 one session. A gate answered without the artifact in front of the user has
