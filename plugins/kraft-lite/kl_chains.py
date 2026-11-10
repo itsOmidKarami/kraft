@@ -724,6 +724,8 @@ class _Validator:
                     if review.get("kind") != "agent":
                         raise self.fail(f"{id}.auto_review", "must be an agent task")
                     self.task(review, f"{id}.auto_review")
+                if node.get("artifact_required") and node.get("artifact") is None:
+                    raise self.fail(id, "artifact_required needs an artifact")
                 target = node.get("reject_to")
                 if target is not None and seen.get(target) != "exec":
                     raise self.fail(id, f"reject_to {target!r} must name an earlier execution node")
@@ -895,7 +897,8 @@ def _freeze(library: Library, chain_id: str, source: str, expanded: dict) -> dic
                     "artifact": node.get("artifact"),
                     "reject_to": node.get("reject_to"),
                     "chain_finalized": node.get("chain_finalized") is True,
-                    # Optional keys: a chain frozen before them has neither.
+                    # Optional keys: a chain frozen before them has none.
+                    "artifact_required": node.get("artifact_required") is True,
                     "auto_review": task(node["auto_review"], f"{id}.auto_review")
                     if isinstance(node.get("auto_review"), dict)
                     else None,

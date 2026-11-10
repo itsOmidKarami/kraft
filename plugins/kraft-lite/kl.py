@@ -2329,6 +2329,76 @@ def _refuse_unless_gate(definition: dict, node_id: str) -> None:
         )
 
 
+#: The document kind a chain revision gate presents, and how Kraft reads one:
+#: optional front matter, then one fenced JSON change set and nothing else.
+CHAIN_REVISION = "chain_revision"
+FRONT_MATTER = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
+REVISION_BODY = re.compile(r"\A\s*```json\n(.*)\n```\s*\Z", re.DOTALL)
+#: A change set's changes, each empty when it proposes none.
+REVISION_CHANGES = {"skip": [], "add": [], "overrides": {}}
+#: The line a gate that passed without asking keeps, with the proposal's rationale.
+UNCHANGED_PREFIX = "Passed unchanged: "
+
+
+def unchanged_revision(path: Path) -> str | None:
+    """The rationale of the change set at `path` when it proposes no change,
+    else None, as Kraft's `revision.unchanged`: a file that does not read as a
+    change set, or proposes anything, goes to a person."""
+    try:
+        text = path.read_text()
+    except (OSError, UnicodeDecodeError):
+        return None
+    match = REVISION_BODY.match(FRONT_MATTER.sub("", text, count=1))
+    try:
+        data = json.loads(match[1]) if match else None
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or set(data) - {"rationale", *REVISION_CHANGES}:
+        return None
+    if any(data.get(key, empty) != empty for key, empty in REVISION_CHANGES.items()):
+        return None
+    rationale = data.get("rationale")
+    return rationale if isinstance(rationale, str) and rationale else None
+
+
+def _unchanged_rationale(
+    root: Path, records: list[dict], definition: dict, chain_id: str | None
+) -> str | None:
+    """Why the gate passes without asking anyone, as Kraft's does: it presents a
+    chain revision that proposes no change, and no slicing proposal waits for
+    it (a plan that slices is a change Kraft asks about)."""
+    if definition["artifact"] != CHAIN_REVISION:
+        return None
+    if (root / STATE_DIR / "proposals" / f"{chain_id}.json").exists():
+        return None
+    path = _document(root, records, CHAIN_REVISION)
+    return unchanged_revision(root / path) if path else None
+
+
+def _document(root: Path, records: list[dict], kind: str | None) -> str | None:
+    """The newest recorded file of `kind` (`_artifact`) when it is still on disk."""
+    path = _artifact(records, kind)
+    return path if path is not None and (root / path).is_file() else None
+
+
+def _refuse_without_its_document(
+    root: Path, records: list[dict], definition: dict, node_id: str
+) -> None:
+    """As Kraft's approve: the final gate, or one with `artifact_required`, is
+    never approved with no document to read."""
+    if definition["chain_finalized"]:
+        what = "the final review document"
+    elif definition.get("artifact_required"):
+        what = f"the required document {definition['artifact']!r}"
+    else:
+        return
+    if _document(root, records, definition["artifact"]) is None:
+        raise SystemExit(
+            f"kraft-lite: {node_id}: {what} is missing; the node that owed it did not write "
+            "one. Reject with --from-node <that node> to run it again"
+        )
+
+
 def _exec_before(chain: dict, node_id: str) -> str:
     """The nearest exec node before `node_id`: where a gate with no `reject_to`
     sends its rejection."""
@@ -2642,6 +2712,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(_slice_set(store, everything, resolved_id, args), indent=2))
         return 0
 
+    if args.verb == "approve" and definition["kind"] == "gate":
+        _refuse_without_its_document(root, records, definition, node_id)
     if args.verb == "approve" and args.slices is not None:
         made = slices_for_gate(everything, node_record, resolved_id, args.slices, root, chain)
         store.write([bank_wait(dict(node_record, status="closed")), *made])
@@ -2654,7 +2726,17 @@ def main(argv: list[str] | None = None) -> int:
         store.write([bank_wait(dict(node_record, status="closed"))])
     elif args.verb == "gate":
         _refuse_unless_gate(definition, node_id)
-        store.write([open_gate(dict(node_record, status="blocked"), node_id)])
+        passed = _unchanged_rationale(root, records, definition, resolved_id)
+        if passed is None:
+            store.write([open_gate(dict(node_record, status="blocked"), node_id)])
+        else:
+            _refuse_close_before_slices(everything, resolved_id, node_record, chain)
+            description = f"{node_record.get('description', '')}\n{UNCHANGED_PREFIX}{passed}"
+            store.write([dict(node_record, status="closed", description=description)])
+            state = _state(root, chain, store.load(), resolved_id)
+            state["passed_unchanged"] = {"node": node_id, "rationale": passed}
+            print(json.dumps(state, indent=2))
+            return 0
     elif args.verb == "reject" and (args.from_node or definition["kind"] == "gate"):
         target = args.from_node or definition["reject_to"] or _exec_before(chain, node_id)
         tail = rewind(records, target, args.note)
