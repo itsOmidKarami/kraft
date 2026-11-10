@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Collection, Sequence
 
@@ -10,6 +11,8 @@ from kraft.store._common import write_status
 from kraft.store.counters import reset_fix_loops
 from kraft.store.work_items import checkout_holder, queue_work_item, set_steer
 from kraft.vocab import ChainEvent, GateEvent, WorkItemEvent
+from kraft.vocab.events import GATE_CLOSED
+from kraft.vocab.stop import StopKind
 
 
 def request_gate(conn: sqlite3.Connection, work_item_id, node_id, gate) -> None:
@@ -315,3 +318,140 @@ def last_rejection(conn: sqlite3.Connection, work_item_id: str) -> dict | None:
         if e["type"] in _REJECTION_SPENT:
             return None
     return None
+
+
+#: The events that name a gate in their `payload.gate`, and so are read only
+#: with one.
+_GATE_EVENTS = (
+    GateEvent.REQUESTED,
+    GateEvent.APPROVED,
+    GateEvent.REJECTED,
+    GateEvent.REOPENED,
+    GateEvent.AUTO_REVIEW_SKIPPED,
+    ChainEvent.NODE_SKIPPED,
+)
+
+#: The events `gate_rounds` reads. `GATE_CLOSED` brings the item-level endings
+#: (`work_item_completed`, `work_item_abandoned`) along with the rest it lists.
+_ROUND_EVENTS = (*_GATE_EVENTS, WorkItemEvent.NEEDS_HUMAN, *GATE_CLOSED)
+
+#: Reasons of a `gate_auto_review_skipped` that are a reviewer's verdict; any
+#: other (`unreviewable`, `profile_fallback`, `budget`, `checkout`) is not.
+_REVIEW_VERDICT = {"passed": "ready", "undecided": "undecided"}
+
+
+def gate_rounds(conn: sqlite3.Connection, work_item_id: str) -> dict[str, list[dict]]:
+    """Every gate's rounds, oldest first, read from the events (one SQL read,
+    filtered to the types below: the item detail polls it).
+
+    A round is one time the chain reached a gate and something ended it. It
+    opens at a `gate_requested` and ends at the first of a `gate_approved`,
+    `gate_rejected` or `node_skipped` that names the gate in `payload.gate`
+    (never the event's `node_id` column: a rejection stores its re-entry node
+    there, and a skip of a node with no gate carries `gate: null` and is no
+    round), or an item-level ending (`work_item_completed`, `work_item_abandoned`:
+    outcome `closed`, for every round still open). A round with no ending yet is
+    `pending`.
+
+    A `gate_requested` while the gate's round is still open (a restart asking
+    again) is the same round: `requested_at` is the first ask. An ending with
+    no open round is a round of its own, `requested_at` None. Three real paths
+    write one: `pass_unchanged_revision` (a chain revision that changes
+    nothing, approved by `kraft`), `bounce_on_feedback` (a review-thread bounce
+    rejects before the gate is asked), and a skip of a gate whose round already
+    ended (after the reject cap left the item on it).
+
+    `gate_reopened` ends and starts nothing: it marks the gate's newest ended
+    round `reopened`. A rejection that breached the reject cap sent nothing
+    back: the `work_item_needs_human` of `kind` cap on the gate that follows it
+    sets `sent_to` None. `reviewer` is the round's own auto-review outcome, as
+    `reviewOutcome` reads it in the UI: an ending `by: agent`, or a
+    `gate_auto_review_skipped` with reason `passed` or `undecided`; the later
+    wins.
+    """
+    rows = conn.execute(
+        "SELECT type, payload, created_at FROM events WHERE work_item_id = ? "
+        f"AND type IN ({', '.join('?' * len(_ROUND_EVENTS))}) "
+        "AND (type != ? OR json_extract(payload, '$.gate') IS NOT NULL) "
+        "AND (type != ? OR json_extract(payload, '$.kind') = ?) ORDER BY seq",
+        (
+            work_item_id,
+            *_ROUND_EVENTS,
+            ChainEvent.NODE_SKIPPED,
+            WorkItemEvent.NEEDS_HUMAN,
+            StopKind.CAP.value,
+        ),
+    ).fetchall()
+    rounds: dict[str, list[dict]] = {}
+    opened: dict[str, dict] = {}  # gate -> its round with no ending yet
+
+    def end(gate: str, at: str, outcome: str, **ending) -> dict:
+        r = opened.pop(gate, None)
+        if r is None:
+            r = _round(len(rounds.setdefault(gate, [])) + 1, None)
+            rounds[gate].append(r)
+        r.update(ended_at=at, outcome=outcome, **ending)
+        return r
+
+    for row in rows:
+        kind, at, p = row["type"], row["created_at"], json.loads(row["payload"])
+        gate = p.get("gate")
+        if not gate and kind in _GATE_EVENTS:
+            continue
+        if kind == GateEvent.REQUESTED:
+            if gate not in opened:
+                r = _round(len(rounds.setdefault(gate, [])) + 1, at)
+                rounds[gate].append(r)
+                opened[gate] = r
+        elif kind in (GateEvent.APPROVED, GateEvent.REJECTED):
+            rejected = kind == GateEvent.REJECTED
+            outcome = (
+                ("fixed" if p.get("verdict") == "fixed" else "rejected") if rejected else "approved"
+            )
+            r = end(
+                gate,
+                at,
+                outcome,
+                by=p.get("by"),
+                note=p.get("note") if rejected else None,
+                sent_to=p.get("node") if rejected else None,
+            )
+            if p.get("by") == "agent":
+                note = p.get("note") or p.get("reason") or p.get("summary") or ""
+                r["reviewer"] = {
+                    "kind": "reject" if rejected else "approve",
+                    "note": str(note).strip(),
+                }
+        elif kind == ChainEvent.NODE_SKIPPED:
+            end(gate, at, "skipped", note=p.get("note"))
+        elif kind in GATE_CLOSED:
+            for g in list(opened):
+                end(g, at, "closed")
+        elif kind == GateEvent.REOPENED:
+            if rounds.get(gate) and gate not in opened:
+                rounds[gate][-1]["reopened"] = True
+        elif kind == GateEvent.AUTO_REVIEW_SKIPPED:
+            if gate in opened and p.get("reason") in _REVIEW_VERDICT:
+                opened[gate]["reviewer"] = {
+                    "kind": _REVIEW_VERDICT[p["reason"]],
+                    "note": str(p.get("note") or "").strip(),
+                }
+        elif kind == WorkItemEvent.NEEDS_HUMAN:  # only the cap's, by the query
+            newest = (rounds.get(p.get("node_id")) or [None])[-1]
+            if newest is not None and newest["outcome"] == "rejected":
+                newest["sent_to"] = None
+    return rounds
+
+
+def _round(n: int, requested_at: str | None) -> dict:
+    return {
+        "n": n,
+        "requested_at": requested_at,
+        "ended_at": None,
+        "outcome": "pending",
+        "by": None,
+        "note": None,
+        "sent_to": None,
+        "reopened": False,
+        "reviewer": None,
+    }
