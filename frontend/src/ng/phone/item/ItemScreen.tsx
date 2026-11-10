@@ -176,7 +176,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
             )}
           </section>
         )}
-        <ChainList item={item} events={events} now={now} />
+        <ChainList item={item} now={now} />
         {session && lines && lines.length > 0 && !ended && (
           <Block
             title="Log"

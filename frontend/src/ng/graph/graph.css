@@ -230,7 +230,10 @@
 .gateview-target { display: flex; align-items: center; gap: 7px; padding: 6px 10px; border-radius: 8px; border: 1px dashed var(--bad); background: var(--bg); font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-sub); cursor: pointer; }
 .gateview-target:is(:hover, :focus-visible) { background: var(--surface-2); }
 .gateview-note { max-width: 380px; margin: 0; padding: 0 4px; background: var(--bg); text-align: center; font-size: var(--fs-label); line-height: 1.55; color: var(--text-muted); text-wrap: pretty; }
-.gateview-said { box-sizing: border-box; width: 100%; max-width: 380px; margin: 0; padding: 8px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: var(--fs-meta); line-height: 1.55; color: var(--text); white-space: pre-line; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; line-clamp: 6; overflow: hidden; }
+.gateview-said { box-sizing: border-box; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%; max-width: 380px; padding: 8px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+/* The clamp sits on the text, not on the padded box: a box clips at its padding edge and shows half of a seventh line. */
+.gateview-said-text { margin: 0; font-size: var(--fs-meta); line-height: 1.55; color: var(--text); white-space: pre-line; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; line-clamp: 6; overflow: hidden; }
+.gateview-said-text.is-open { display: block; }
 .gateview-target.is-taken { border-style: solid; }
 .gateview-foot { position: absolute; bottom: 12px; }
 

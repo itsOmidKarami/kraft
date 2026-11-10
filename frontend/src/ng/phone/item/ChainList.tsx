@@ -2,22 +2,21 @@ import { nameOf } from "../../board/rowText";
 import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { KraftEvent } from "../../../types";
 import { NodeGlyph } from "../../graph/NodeGlyph";
 import { chainGraph } from "../../item/graph";
 import { placeUrl } from "../../item/url";
 import type { ItemDetail } from "../../item/useItem";
 import { Block } from "../ui/Rows";
-import { gateSkipped } from "../../item/events";
+import { gateState } from "../../item/gateRounds";
 import { nodeSub } from "./model";
 import { Badge } from "../ui/Badge";
 
 /** The vertical chain (W17 brief C.3): `N of M nodes`, a tick strip, the done
  *  nodes collapsed behind `N done`, then a 56px row per remaining node. */
-export function ChainList({ item, events, now }: { item: ItemDetail; events: KraftEvent[]; now: number }) {
+export function ChainList({ item, now }: { item: ItemDetail; now: number }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const { nodes } = chainGraph(item, events, now);
+  const { nodes } = chainGraph(item, now);
   const done = nodes.filter((n) => n.state === "done");
   const shown = open ? nodes : nodes.filter((n) => n.state !== "done");
   return (
@@ -33,7 +32,7 @@ export function ChainList({ item, events, now }: { item: ItemDetail; events: Kra
           </button>
         )}
         {shown.map((n) => {
-          const sub = nodeSub(n, n.kind === "gate" && gateSkipped(events, n.id));
+          const sub = nodeSub(n, n.kind === "gate" && gateState(item, n.id).words === "skipped");
           return (
             <button key={n.id} type="button" className="ph-row ph-node-row" onClick={() => navigate(placeUrl(item.id, { node: n.id, sel: { kind: "node", node: n.id } }))}>
               <NodeGlyph kind={n.kind} size="sm" state={n.state} icon={n.icon} running={n.running} paused={n.paused} capped={n.capped} attempt={n.attempt} attemptStopped={n.attemptStopped} esc={n.esc} />

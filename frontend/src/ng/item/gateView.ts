@@ -5,7 +5,7 @@ import type { Sel } from "../graph/usePaneSelection";
 import { nameOf } from "../board/rowText";
 import { rejectTarget } from "./graph";
 import { AUTO_REVIEW, sessionLook, sessionsOf } from "./nodeGraph";
-import { byWord, gateRoundList, gateState, isPastRound, outcomeWord, roundShown } from "./gateRounds";
+import { byWord, gateRoundList, gateState, isPastRound, newestOutcome, outcomeWord, roundShown } from "./gateRounds";
 import { ENDED, gateMessage, materialized, nodeAt } from "./chainValues";
 import { cursorOf } from "./cursor";
 import { taskName } from "./paths";
@@ -51,7 +51,7 @@ export function gateView(item: ItemDetail, gate: ChainNode, now: number, sel: Se
     message: gateMessage(frozen, gate.id),
     doc: pending && !past && item.gate_artifact ? { label: item.gate_artifact.split("/").pop()!, onClick: on.doc } : undefined,
     reject: to ? { id: to, label: nameOf(nodes, to), onClick: () => on.reject(to), ...(sentTo && { taken: true }), ...(round?.outcome === "fixed" && { fixed: true }) } : undefined,
-    youSub: past ? `${outcomeWord(round!)}${who ? ` · ${who}` : ""}` : pending ? "waiting" : round?.outcome === "skipped" ? "skipped" : standing.state === "done" ? (who ?? undefined) : undefined,
+    youSub: past ? `${outcomeWord(round!)}${who ? ` · ${who}` : ""}` : pending ? "waiting" : round?.outcome === "skipped" ? "skipped" : standing.state === "done" ? (who ?? undefined) : newestOutcome(item, gate.id),
     rounds: gateRoundList(item, gate.id, picked),
     said: round?.note && round.ended_at ? { note: round.note, at: round.ended_at, n: round.n } : undefined,
   };

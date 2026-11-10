@@ -179,34 +179,56 @@ describe("GateBody", () => {
   const sentBack = round(1, { outcome: "rejected", by: "assistant", note: LONG, sent_to: "plan" });
   const twice = rounds(sentBack, round(2, { by: "assistant" }));
 
-  it("lists every round newest first, with who decided and the note", () => {
+  const waiting = rounds(sentBack, round(2, { outcome: "pending", by: null, ended_at: null }));
+  const historyHead = () => screen.queryByRole("heading", { name: /^History/ });
+
+  // "now" is for a round still waiting: an ended newest round is not "now".
+  it.each([
+    ["the newest still waiting is now", waiting, ["Round 2 · now", "Round 1"]],
+    ["an ended newest is not", twice, ["Round 2", "Round 1"]],
+  ])("lists every round newest first: %s", (_name, over, labels) => {
     stubFetch();
-    render(<GateBody item={detail(twice)} version="1" gate={gate} />);
+    render(<GateBody item={detail(over)} version="1" gate={gate} />);
     expect(screen.getByRole("heading", { name: "History · 2 rounds" })).toBeInTheDocument();
     const rows = screen.getAllByRole("button", { name: /^Round/ });
-    expect(rows.map((r) => r.querySelector(".ip-hist-n")?.textContent)).toEqual(["Round 2 · now", "Round 1"]);
-    expect(rows[0]).toHaveTextContent("approved · assistant");
+    expect(rows.map((r) => r.querySelector(".ip-hist-n")?.textContent)).toEqual(labels);
+    expect(rows[0]).toHaveTextContent(over === waiting ? "waiting" : "approved · assistant");
     expect(rows[1]).toHaveTextContent("changes requested · assistant");
-    // The long note is there whole (the row clips it to three lines in CSS), wrapped in the row, not scrolled sideways.
-    expect(LONG.length).toBeGreaterThan(650);
-    expect(rows[1]).toHaveTextContent(LONG);
   });
 
-  it("a gate with one round still has History", () => {
+  // It repeats the status line, until a round has ended.
+  it.each([
+    ["only a round that is waiting", rounds(round(1, { outcome: "pending", by: null, ended_at: null })), null],
+    ["one round that ended", rounds(round(1, { by: "agent" })), "History · 1 round"],
+    ["an ended round and a waiting one", waiting, "History · 2 rounds"],
+  ])("History with %s", (_name, over, heading) => {
     stubFetch();
-    render(<GateBody item={detail(rounds(round(1, { by: "agent" })))} version="1" gate={gate} />);
-    expect(screen.getByRole("heading", { name: "History · 1 round" })).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /^Round/ })).toHaveLength(1);
-    expect(screen.getByRole("button", { name: /^Round 1/ })).toHaveTextContent("approved · auto");
+    render(<GateBody item={detail({ ...over, pending_gate: "plan_approval" })} version="1" gate={gate} />);
+    if (heading === null) return expect(historyHead()).toBeNull();
+    expect(historyHead()).toHaveTextContent(heading);
   });
 
-  it("marks the round shown, and whole only that one's note", () => {
+  // It grows with every round, so the facts above it must not move down.
+  it("puts History after the facts, at the end of the body", () => {
     stubFetch();
-    render(<GateBody item={detail(twice)} version="1" gate={gate} picked={1} />);
-    const [now, first] = screen.getAllByRole("button", { name: /^Round/ });
+    const { container } = render(<GateBody item={detail({ ...waiting, pending_gate: "plan_approval", gate_artifact: ".x/p.md" })} version="1" gate={gate} />);
+    const facts = container.querySelector("dl")!;
+    expect(facts.compareDocumentPosition(historyHead()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(container.lastElementChild).toBe(container.querySelector(".ip-hist"));
+  });
+
+  // The canvas holds the note whole; a row only marks that it is the one shown.
+  it("never opens a row: the picked row has the same clipped note and no extra text as the others", () => {
+    stubFetch();
+    const both = rounds(sentBack, round(2, { outcome: "rejected", by: "assistant", note: LONG, sent_to: "plan" }), round(3, { outcome: "pending", by: null, ended_at: null }));
+    render(<GateBody item={detail(both)} version="1" gate={gate} picked={1} />);
+    const [, second, first] = screen.getAllByRole("button", { name: /^Round/ });
     expect(first).toHaveAttribute("aria-current", "true");
-    expect(now).not.toHaveAttribute("aria-current");
-    expect(first.querySelector(".ip-hist-note")).toHaveClass("is-whole");
+    expect(second).not.toHaveAttribute("aria-current");
+    expect(first.querySelector(".ip-hist-note")?.className).toBe("ip-hist-note");
+    expect(first.querySelector(".ip-hist-note")?.className).toBe(second.querySelector(".ip-hist-note")?.className);
+    expect(first).not.toHaveAttribute("aria-expanded");
+    expect(first.querySelectorAll("button, [aria-expanded]")).toHaveLength(0);
   });
 
   it("clicking a row picks its round, and the newest round picks none", async () => {

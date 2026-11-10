@@ -539,13 +539,19 @@ describe("⋮ (C.5)", () => {
   });
 });
 
-describe("a skipped gate in the chain (R15b-03)", () => {
-  it("reads skipped in its row, not approved", async () => {
-    const skipped = { seq: 3, work_item_id: "w1", type: "node_skipped", node_id: "plan_approval", payload: { node_id: "plan_approval", gate: "plan_approval" }, created_at: "2026-09-13T09:00:00Z" };
-    mount(item("running"), "/work-items/w1", { "GET /work-items/w1/events": [200, [skipped]] });
+describe("a gate in the chain reads its rounds, not the page's events (R15b-03)", () => {
+  const ended = (outcome: string, by: string | null) => ({ n: 1, requested_at: "t", ended_at: "t", outcome, by, note: null, sent_to: null, reopened: false, reviewer: null });
+  it.each([
+    ["skipped", ended("skipped", null), "skipped", "approved"],
+    ["approved by you", ended("approved", "human"), "approved", "agent"],
+    ["approved by the assistant, not by an agent", ended("approved", "assistant"), "approved", "agent"],
+    ["approved by an agent", ended("approved", "agent"), "approved by an agent", "skipped"],
+  ])("reads %s in its row", async (_, round, words, not) => {
+    mount(item("running", null, { gate_rounds: { plan_approval: [round] } }), "/work-items/w1");
     await userEvent.click(await screen.findByRole("button", { name: "2 done" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: /approve plan/ })).toHaveTextContent("skipped"));
-    expect(screen.getByRole("button", { name: /approve plan/ })).not.toHaveTextContent("approved");
+    const row = await screen.findByRole("button", { name: /approve plan/ });
+    expect(row).toHaveTextContent(words);
+    expect(row).not.toHaveTextContent(not);
   });
 });
 

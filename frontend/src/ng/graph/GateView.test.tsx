@@ -1,7 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { GateView } from "./GateView";
+
+const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "graph.css"), "utf-8");
 
 describe("GateView", () => {
   it("labels the diamond 'you' after a reviewer, and every part is a button", async () => {
@@ -74,12 +79,53 @@ describe("GateView", () => {
     expect(onRound).toHaveBeenLastCalledWith(undefined);
   });
 
-  it("shows a round's note under the message, however long, wrapped", () => {
-    // The real note on 510ysadf was about 700 characters.
-    const note = "The plan skips the invalidation story. Add a section on what happens when git_scan sees a blob_sha change mid-query. ".repeat(6).trim();
-    render(<GateView gate={{ id: "approve_plan" }} message="Approve the plan." said={{ note, at: "t", n: 1 }} />);
-    expect(note.length).toBeGreaterThan(650);
-    expect(document.querySelector(".gateview-said")).toHaveTextContent(note);
+  // The real note on 510ysadf was about 700 characters.
+  const LONG = "The plan skips the invalidation story. Add a section on what happens when git_scan sees a blob_sha change mid-query. ".repeat(6).trim();
+
+  describe("a round's note", () => {
+    // jsdom lays nothing out: say the text overflows its six lines while it is clipped.
+    const overflow = (over: boolean) => {
+      vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) { return over && !this.classList.contains("is-open") ? 200 : 100; });
+      vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(100);
+    };
+    afterEach(() => vi.restoreAllMocks());
+
+    it("is clipped, and Show all opens it in place and Show less closes it", async () => {
+      overflow(true);
+      render(<GateView gate={{ id: "approve_plan" }} message="Approve the plan." said={{ note: LONG, at: "t", n: 1 }} />);
+      expect(LONG.length).toBeGreaterThan(650);
+      const text = screen.getByText(LONG);
+      expect(text.tagName).toBe("P");
+      expect(text).not.toHaveClass("is-open");
+      const more = screen.getByRole("button", { name: "Show all" });
+      expect(more).toHaveAttribute("aria-expanded", "false");
+      await userEvent.click(more);
+      expect(text).toHaveClass("is-open");
+      expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute("aria-expanded", "true");
+      await userEvent.click(screen.getByRole("button", { name: "Show less" }));
+      expect(text).not.toHaveClass("is-open");
+      expect(screen.getByRole("button", { name: "Show all" })).toBeInTheDocument();
+    });
+
+    it("has no button when it fits, and starts clipped again on another round", async () => {
+      overflow(false);
+      const { rerender } = render(<GateView gate={{ id: "approve_plan" }} said={{ note: "Short.", at: "t", n: 1 }} />);
+      expect(screen.queryByRole("button", { name: /Show/ })).toBeNull();
+      vi.restoreAllMocks();
+      overflow(true);
+      rerender(<GateView gate={{ id: "approve_plan" }} said={{ note: LONG, at: "t", n: 2 }} />);
+      await userEvent.click(screen.getByRole("button", { name: "Show all" }));
+      rerender(<GateView gate={{ id: "approve_plan" }} said={{ note: LONG, at: "t", n: 1 }} />);
+      expect(screen.getByRole("button", { name: "Show all" })).toBeInTheDocument();
+    });
+
+    // The clamp on the padded box shows half of a seventh line under the ellipsis: it is on the text.
+    it("clamps the text, not the padded box", () => {
+      const rule = (selector: string) => new RegExp(`(?:^|\\n)${selector.replace(".", "\\.")} \\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+      expect(rule(".gateview-said-text")).toContain("-webkit-line-clamp: 6");
+      expect(rule(".gateview-said")).not.toContain("line-clamp");
+      expect(rule(".gateview-said")).toContain("padding");
+    });
   });
 
   it.each([

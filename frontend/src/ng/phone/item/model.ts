@@ -269,7 +269,7 @@ export function kebabOf(item: ItemDetail): Act[] {
   return out;
 }
 
-/** A chain row's words under its id (the prototype's `sub`). `skipped`: a gate that was skipped, not decided (`gateSkipped`), which no one approved. */
+/** A chain row's words under its id (the prototype's `sub`). `skipped`: a gate that was skipped, not decided (`gateState`), which no one approved. */
 export function nodeSub(n: ChainNode, skipped = false): { text: string; tone: "warn" | "info" | "bad" | "muted" } {
   const gate = n.kind === "gate";
   switch (n.state) {

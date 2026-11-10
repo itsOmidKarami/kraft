@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GateRound } from "../../types";
-import { byWord, gateRoundList, gateState, isPastRound, outcomeWord, roundShown } from "./gateRounds";
+import { byWord, gateRoundList, gateState, isPastRound, newestOutcome, outcomeWord, roundShown } from "./gateRounds";
 import { detail, SLICED } from "./testkit";
 import type { ItemDetail } from "./useItem";
 
@@ -103,5 +103,19 @@ describe("isPastRound", () => {
     ["a stale pick, which shows the newest", 5, false],
   ])("%s", (_name, picked, past) => {
     expect(isPastRound(withRounds([rejected, approved]), "plan_approval", picked)).toBe(past);
+  });
+});
+
+// The pane's subtitle and the diamond's badge say this for a gate that is neither waiting nor passed.
+describe("newestOutcome", () => {
+  it.each<[string, GateRound[], Partial<ItemDetail>, string | undefined]>([
+    ["sent work back", [round(1, { by: "human" }), round(2, { outcome: "rejected", by: "human" })], {}, "changes requested · you"],
+    ["closed, naming no one", [round(1, { outcome: "closed", by: null })], {}, "closed"],
+    ["approved then reopened", [round(1, { reopened: true })], {}, "approved · assistant"],
+    ["passed: its state says that", [round(1)], {}, undefined],
+    ["waiting", [round(1, { outcome: "rejected", by: "human" })], { pending_gate: "plan_approval" }, undefined],
+    ["no round", [], {}, undefined],
+  ])("%s", (_name, rounds, over, words) => {
+    expect(newestOutcome(withRounds(rounds, over), "plan_approval")).toBe(words);
   });
 });

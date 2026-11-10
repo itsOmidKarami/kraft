@@ -162,11 +162,11 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   const reviewMarks = useOneOffMarks((m) => m.marks);
   const marks = useMemo(() => ({ view: draft?.draft.view ?? null, pending: draft?.draft.pending ?? null, own: new Set(raw.chain_definition.nodes.map((n) => n.id)) }), [draft?.draft.view, draft?.draft.pending, raw]);
   const graph = useMemo(() => {
-    const g = chainGraph(item, events, now);
+    const g = chainGraph(item, now);
     const marked = draft ? { ...g, nodes: markNodes(g.nodes, marks) } : g;
     // While the one-off review is open: the nodes it is about.
     return Object.keys(reviewMarks).length ? { ...marked, nodes: marked.nodes.map((n) => (reviewMarks[n.id] ? { ...n, mark: reviewMarks[n.id] } : n)) } : marked;
-  }, [item, events, now, draft, marks, reviewMarks]);
+  }, [item, now, draft, marks, reviewMarks]);
   const selectedNode = place.sel.kind === "chain" ? undefined : place.sel.node;
   const reserve = size.overlay ? 0 : pane_.open ? size.width : 40;
   const cover = size.overlay && pane_.open ? size.width : 0;

@@ -261,7 +261,7 @@ const NODE_DOOR: Record<NodeActId, Door> = { pause: "pause", resume: "resume", s
  *  footer (the same main), a path's footer, the phone's bar, ⋮ sheet and node bar. */
 function offered(item: ItemDetail): [string, Door][] {
   const hs = headerState(item);
-  const graph = chainGraph(item, []).nodes;
+  const graph = chainGraph(item).nodes;
   const p = pairOf(item);
   const phone = PHONE_DOOR(item);
   return [

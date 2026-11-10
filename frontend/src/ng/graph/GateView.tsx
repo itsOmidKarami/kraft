@@ -1,3 +1,4 @@
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { hint } from "../ui/Tooltip";
 import { FileText, NodeIcon } from "../icons";
 import { NodeGlyph } from "./NodeGlyph";
@@ -30,6 +31,33 @@ type Props = {
   onGate?: () => void;
   onBackground?: () => void;
 };
+
+/** What the round shown was decided with, clipped at six lines. The only place a note shows whole: "Show all" opens it
+ *  in place, and only a note that is clipped has the button. */
+function Said({ note, n }: { note: string; at: string; n: number }) {
+  const text = useRef<HTMLParagraphElement>(null);
+  const id = useId();
+  const [open, setOpen] = useState(false);
+  const [clipped, setClipped] = useState(false);
+  useLayoutEffect(() => {
+    const el = text.current;
+    if (!el || open) return;
+    const measure = () => setClipped(el.scrollHeight > el.clientHeight);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(measure);
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, [note, open]);
+  return (
+    <div className="gateview-said" data-round={n}>
+      <p ref={text} id={id} className={`gateview-said-text${open ? " is-open" : ""}`}>{note}</p>
+      {(clipped || open) && (
+        <button type="button" className="link-btn" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>{open ? "Show less" : "Show all"}</button>
+      )}
+    </div>
+  );
+}
 
 /** A gate's node view (GateView.dc.html): reviewer → line → you, the message,
  *  the document, and the reject branch. */
@@ -68,7 +96,7 @@ export function GateView({ gate, reviewer: r, message, doc, reject, note, said, 
         </div>
         <p className={`gateview-msg${message ? "" : " is-empty"}`}>{message ?? "No message yet."}</p>
         {doc && <button type="button" className="gateview-doc" onClick={doc.onClick} disabled={!doc.onClick}><FileText size={14} />{doc.label}</button>}
-        {said && <p className="gateview-said" data-round={said.n}>{said.note}</p>}
+        {said && <Said key={said.n} {...said} />}
         {reject && (
           <div className="gateview-reject">
             <span className="gateview-reject-line" aria-hidden="true" />

@@ -233,7 +233,7 @@ describe("the failed card's cause (R15b-01)", () => {
 });
 
 describe("nodeSub: a chain row's words", () => {
-  const graph = (i: ReturnType<typeof detail>) => chainGraph(i, [], Date.parse("2026-09-13T10:00:00Z")).nodes;
+  const graph = (i: ReturnType<typeof detail>) => chainGraph(i, Date.parse("2026-09-13T10:00:00Z")).nodes;
   // R15b-03: a gate skipped with `kraft item skip` was never approved, here as in its review path.
   it.each([
     ["approved by you reads approved", false, "approved"],

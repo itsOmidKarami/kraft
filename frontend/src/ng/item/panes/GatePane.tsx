@@ -8,11 +8,11 @@ import { Button } from "../../ui/Button";
 import { useReason } from "../../ui/Reason";
 import { ADD_NOTE } from "../../ui/reasons";
 import { request } from "../../http";
+import { localTime } from "../../../format";
 import { act } from "../actions";
 import { TestsLine } from "../TestsLine";
 import { byWord, gateState, isPastRound, outcomeWord, roundShown, roundsOf } from "../gateRounds";
 import { OUTCOME } from "../reviewOutcome";
-import { localTime } from "./TaskPane";
 import { rejectTarget } from "../graph";
 import { totals, useDiffFiles } from "../Top";
 import { runVersion, type ItemDetail } from "../useItem";
@@ -74,7 +74,15 @@ export function GateBody({ item, version, gate, picked, onPick }: { item: ItemDe
           {outcome.note && outcome.note !== round?.note && <p className="ip-review-note">{outcome.note}</p>}
         </>
       )}
-      {rounds.length > 0 && (
+      <dl className="item-facts ip-facts ip-gap">
+        {!past && item.test_result && <div><dt>tests</dt><dd><TestsLine workItemId={item.id} result={item.test_result} /></dd></div>}
+        {item.gate_artifact && pending && !past && <div><dt>decides on</dt><dd className="is-mono">{item.gate_artifact.split("/").pop()}</dd></div>}
+        {past && round && <div><dt>decided</dt><dd>{outcomeWord(round)}{who ? ` · ${who}` : ""}{round.ended_at ? ` · ${localTime(round.ended_at)}` : ""}</dd></div>}
+        {past && round?.requested_at && <div><dt>asked</dt><dd>{localTime(round.requested_at)}</dd></div>}
+        {to && <div><dt>reject to</dt><dd>{nameOf(item.chain_definition.nodes, to)}</dd></div>}
+        {!past && <div><dt>status</dt><dd>{gateState(item, gate.id).words}</dd></div>}
+      </dl>
+      {rounds.some((r) => r.outcome !== "pending") && (
         <>
           <h3 className="ip-h">History · {rounds.length} {rounds.length === 1 ? "round" : "rounds"}</h3>
           <ul className="ip-hist">
@@ -87,11 +95,11 @@ export function GateBody({ item, version, gate, picked, onPick }: { item: ItemDe
                   <button type="button" className="ip-hist-row" aria-current={shown ? "true" : undefined} onClick={() => onPick?.(r.n === rounds.length ? undefined : r.n)}>
                     <span className="ip-hist-head">
                       <span className={`round-dot is-${tone}`} aria-hidden="true" />
-                      <span className="ip-hist-n">Round {r.n}{r.n === rounds.length ? " · now" : ""}</span>
+                      <span className="ip-hist-n">Round {r.n}{r.outcome === "pending" ? " · now" : ""}</span>
                       {r.ended_at && <span className="ip-hist-at">{localTime(r.ended_at)}</span>}
                     </span>
                     <span className="ip-hist-what">{outcomeWord(r)}{by ? ` · ${by}` : ""}</span>
-                    {r.note && <span className={`ip-hist-note${shown ? " is-whole" : ""}`}>{r.note}</span>}
+                    {r.note && <span className="ip-hist-note">{r.note}</span>}
                   </button>
                 </li>
               );
@@ -99,14 +107,6 @@ export function GateBody({ item, version, gate, picked, onPick }: { item: ItemDe
           </ul>
         </>
       )}
-      <dl className="item-facts ip-facts ip-gap">
-        {!past && item.test_result && <div><dt>tests</dt><dd><TestsLine workItemId={item.id} result={item.test_result} /></dd></div>}
-        {item.gate_artifact && pending && !past && <div><dt>decides on</dt><dd className="is-mono">{item.gate_artifact.split("/").pop()}</dd></div>}
-        {past && round && <div><dt>decided</dt><dd>{outcomeWord(round)}{who ? ` · ${who}` : ""}{round.ended_at ? ` · ${localTime(round.ended_at)}` : ""}</dd></div>}
-        {past && round?.requested_at && <div><dt>asked</dt><dd>{localTime(round.requested_at)}</dd></div>}
-        {to && <div><dt>reject to</dt><dd>{nameOf(item.chain_definition.nodes, to)}</dd></div>}
-        {!past && <div><dt>status</dt><dd>{gateState(item, gate.id).words}</dd></div>}
-      </dl>
     </>
   );
 }

@@ -11,7 +11,7 @@ const kid = (key: number, display_status: string): SliceChild => ({ id: `c${key}
 const summary = (done: number, needs_you: number) => ({ done, needs_you, paused: 0, running: 0, queued: 0, dropped: 0, total: 2 });
 /** A parent on `SLICED`, standing at `current`, its group in `phase`. */
 const at = (current: string, phase: NonNullable<ItemDetail["group"]>["phase"], over: Partial<ItemDetail> = {}) => sliced(current, { group: { ...SPLIT, phase }, ...over });
-const drawn = (item: ItemDetail) => chainGraph(item, [], NOW).nodes;
+const drawn = (item: ItemDetail) => chainGraph(item, NOW).nodes;
 const view = (item: ItemDetail) => groupSteps(item, drawnOf(drawn(item), "slices")).map((st) => [st.id, st.tasks.map((t) => [t.label ?? t.id, t.state, t.meta])]);
 
 const forked = { children: [kid(1, "done"), kid(2, "needs_you")], slices: summary(1, 1) };

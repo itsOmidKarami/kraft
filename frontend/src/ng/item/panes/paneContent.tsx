@@ -14,7 +14,7 @@ import { findNode } from "../cursor";
 import { drawnOf } from "../graph";
 import { PHASE_WORDS } from "../groupView";
 import { stepsOf, taskName } from "../paths";
-import { isPastRound } from "../gateRounds";
+import { isPastRound, newestOutcome } from "../gateRounds";
 import type { ItemDetail } from "../useItem";
 import { ChainConfig, ChainOverview } from "./ChainPane";
 import { GroupOverview, NodeConfig, NodeOverview } from "./NodePane";
@@ -120,7 +120,7 @@ export function paneContent(a: PaneArgs): PaneContent {
       crumbs: [toChain],
       gate: true,
       title: node.id,
-      sub: `gate node · ${pending ? "waiting for you" : stateWord(a.graph.find((g) => g.id === node.id)?.state)}`,
+      sub: `gate node · ${pending ? "waiting for you" : newestOutcome(item, node.id) ?? stateWord(a.graph.find((g) => g.id === node.id)?.state)}`,
       body: <GateBody item={item} version={a.version} gate={node} picked={a.pass} onPick={a.setPass} />,
       footer: pending && !isPastRound(item, node.id, a.pass) ? <GateFooter item={item} gate={node} reload={a.reload} onRead={a.onArtifact} /> : undefined,
     };

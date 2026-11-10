@@ -348,8 +348,10 @@ def gate_rounds(conn: sqlite3.Connection, work_item_id: str) -> dict[str, list[d
     opens at a `gate_requested` and ends at the first of a `gate_approved`,
     `gate_rejected` or `node_skipped` that names the gate in `payload.gate`
     (never the event's `node_id` column: a rejection stores its re-entry node
-    there, and a skip of a node with no gate carries `gate: null` and is no
-    round), or an item-level ending (`work_item_completed`, `work_item_abandoned`:
+    there; a skip of a node with no gate carries `gate: null` and is no round,
+    unless its `node_id` is a gate that already has rounds: after the reject
+    cap `pending_gate` is None, so the skip of that gate carries `gate: null`
+    too), or an item-level ending (`work_item_completed`, `work_item_abandoned`:
     outcome `closed`, for every round still open). A round with no ending yet is
     `pending`.
 
@@ -372,12 +374,10 @@ def gate_rounds(conn: sqlite3.Connection, work_item_id: str) -> dict[str, list[d
     rows = conn.execute(
         "SELECT type, payload, created_at FROM events WHERE work_item_id = ? "
         f"AND type IN ({', '.join('?' * len(_ROUND_EVENTS))}) "
-        "AND (type != ? OR json_extract(payload, '$.gate') IS NOT NULL) "
         "AND (type != ? OR json_extract(payload, '$.kind') = ?) ORDER BY seq",
         (
             work_item_id,
             *_ROUND_EVENTS,
-            ChainEvent.NODE_SKIPPED,
             WorkItemEvent.NEEDS_HUMAN,
             StopKind.CAP.value,
         ),
@@ -396,6 +396,8 @@ def gate_rounds(conn: sqlite3.Connection, work_item_id: str) -> dict[str, list[d
     for row in rows:
         kind, at, p = row["type"], row["created_at"], json.loads(row["payload"])
         gate = p.get("gate")
+        if kind == ChainEvent.NODE_SKIPPED and not gate and p.get("node_id") in rounds:
+            gate = p["node_id"]  # a skip after the reject cap names no gate, only the node
         if not gate and kind in _GATE_EVENTS:
             continue
         if kind == GateEvent.REQUESTED:

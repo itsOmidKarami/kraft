@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { KraftEvent, WorkerSession } from "../../types";
+import type { GateRound, WorkerSession } from "../../types";
 import { tone } from "../graph/Minimap";
 import { accessibleName } from "../graph/types";
 import { chainGraph, rejectTarget } from "./graph";
@@ -7,12 +7,12 @@ import { detail, FROZEN, SCOPE_PATH, scopeChain, SLICED, sliced, V1 } from "./te
 
 const NOW = Date.parse("2026-09-13T10:10:00Z");
 const sess = (node_id: string, over: Partial<WorkerSession> = {}) => ({ id: `${node_id}${over.attempt ?? 1}${over.hook_point ?? ""}`, node_id, hook_point: `${node_id}.x.y`, status: "done", attempt: 1, round: 0, created_at: over.started_at ?? "2026-09-13T09:00:00Z", started_at: "2026-09-13T09:00:00Z", ...over }) as WorkerSession;
-const approved = (gate: string, by: string): KraftEvent => ({ seq: 1, work_item_id: "w1", type: "gate_approved", payload: { gate, by }, node_id: gate, created_at: "t" });
+const round = (outcome: GateRound["outcome"], by: GateRound["by"]): GateRound => ({ n: 1, requested_at: "t", ended_at: "t", outcome, by, note: null, sent_to: null, reopened: false, reviewer: null });
 
 describe("chainGraph", () => {
   it("names the node a rebase bounces to, not its id", () => {
     const item = detail({ chain_definition: { nodes: V1.map((n) => (n.id === "verification" ? { ...n, rebase_bounce_to: "merge_request" } : n)) } as never });
-    expect(chainGraph(item, [], NOW).arcs(undefined).find((a) => a.kind === "rebase")).toMatchObject({ label: "rebase → merge request" });
+    expect(chainGraph(item, NOW).arcs(undefined).find((a) => a.kind === "rebase")).toMatchObject({ label: "rebase → merge request" });
   });
 
   it("marks done, current and not started from the current node, with durations and who passed each gate", () => {
@@ -20,8 +20,9 @@ describe("chainGraph", () => {
       worker_sessions: [sess("plan"), sess("verification", { attempt: 2, round: 1, status: "running", started_at: "2026-09-13T10:07:00Z" }), sess("verification", { started_at: "2026-09-13T09:30:00Z" })],
       usage: { total: {} as never, by_node: [{ node: "plan", wall_ms: 6 * 60_000 } as never] },
       summary: { nodes_done: 2, nodes_total: 4, gates_passed: 1, step: { index: 2, count: 2 } },
+      gate_rounds: { plan_approval: [round("approved", "human")] },
     });
-    const { nodes } = chainGraph(item, [approved("plan_approval", "human")], NOW);
+    const { nodes } = chainGraph(item, NOW);
     expect(nodes.map((n) => [n.id, n.state, n.meta ?? n.sub ?? null])).toEqual([
       ["plan", "done", "6m"],
       ["plan_approval", "done", "you"],
@@ -31,7 +32,19 @@ describe("chainGraph", () => {
     ]);
     expect(nodes[2]).toMatchObject({ running: true, attempt: 2, kind: "exec" });
     expect(nodes[1].kind).toBe("gate");
-    expect(chainGraph(item, [approved("plan_approval", "agent")], NOW).nodes[1].meta).toBe("auto");
+  });
+
+  // The server's rounds, not the page's window of events, and one set of words: an assistant is not "you".
+  it.each([
+    ["a person", round("approved", "human"), "you"],
+    ["the assistant", round("approved", "assistant"), "assistant"],
+    ["an agent reviewer", round("approved", "agent"), "auto"],
+    ["a fix by the reviewer", round("fixed", "agent"), "auto"],
+    ["no one, when the gate was skipped", round("skipped", null), undefined],
+    ["no one, when it sent work back", round("rejected", "human"), undefined],
+  ])("names who passed a gate: %s", (_, r, want) => {
+    const item = detail({ summary: { nodes_done: 2, nodes_total: 4, gates_passed: 1, step: { index: 2, count: 2 } }, gate_rounds: { plan_approval: [round("rejected", "human"), r] } });
+    expect(chainGraph(item, NOW).nodes[1].meta).toBe(want);
   });
 
   // The changed-test-scope task's sessions are its scopes: four rounds of several scopes each ran it four times, not 26.
@@ -42,7 +55,7 @@ describe("chainGraph", () => {
     const at = (round: number, k: number, attempt: number) => sess("verification", { id: `s${round}-${k}`, hook_point: path, round, attempt, started_at: `2026-09-13T09:${10 + round * 3 + k}:00Z` } as never);
     const runs = [at(0, 0, 1), at(0, 1, 2), at(0, 2, 3), at(1, 0, 4), at(-1, 1, 5), at(2, 0, 6), at(2, 1, 7)];
     const item = detail({ materialized_chain: scopeChain(), worker_sessions: path === SCOPE_PATH ? runs : [1, 2, 3, 4].map((a) => at(a - 1, 0, a)) });
-    expect(chainGraph(item, [], NOW).nodes[2].attempt).toBe(times);
+    expect(chainGraph(item, NOW).nodes[2].attempt).toBe(times);
   });
 
   // R12b-09: the accessible name said "running" for every one of these but the running row.
@@ -61,7 +74,7 @@ describe("chainGraph", () => {
     ["queued", null, { state: "current", running: false, subTone: "muted" }, "verification, node, queued"],
   ])("draws the current node of a %s item, and names it so", (display_status, stop, want, name) => {
     const item = detail({ display_status: display_status as never, stop: stop && ({ resume_at: null, reason: null, ...stop } as never) });
-    const node = chainGraph(item, [], NOW).nodes[2];
+    const node = chainGraph(item, NOW).nodes[2];
     expect(node).toMatchObject(want);
     expect(accessibleName(node, "node")).toBe(name);
   });
@@ -69,17 +82,17 @@ describe("chainGraph", () => {
   // The chain strip over the canvas: running breathes blue, escalated is amber with needs-you, waiting and paused are neither.
   it.each([["running", "running", null], ["escalated", "amber", null], ["waiting", "current", { kind: "wait" }], ["paused", "current", null]])("draws a %s item's node in the chain strip as %s", (display_status, want, stop) => {
     const item = detail({ display_status: display_status as never, stop: stop && ({ node: "verification", resume_at: null, reason: null, ...stop } as never) });
-    expect(tone(chainGraph(item, [], NOW).nodes[2])).toBe(want);
+    expect(tone(chainGraph(item, NOW).nodes[2])).toBe(want);
   });
 
   it("draws each node's glyph by its tasks' kind, from the frozen chain (WI-3): mixed kinds draw none", () => {
-    const { nodes } = chainGraph(detail({ materialized_chain: FROZEN }), [], NOW);
+    const { nodes } = chainGraph(detail({ materialized_chain: FROZEN }), NOW);
     expect(nodes.map((n) => [n.id, n.taskKind])).toEqual([["plan", "agent"], ["plan_approval", undefined], ["verification", undefined], ["merge_request", "builtin"]]);
   });
 
   it("draws a gate waiting for you as the current gate (the amber diamond)", () => {
     const item = detail({ current_node_id: "plan_approval", display_status: "needs_you", stop: { kind: "gate", node: "plan_approval", resume_at: null, reason: null } });
-    const gate = chainGraph(item, [], NOW).nodes[1];
+    const gate = chainGraph(item, NOW).nodes[1];
     expect(gate).toMatchObject({ kind: "gate", state: "current", sub: "needs you", needs: true });
     expect(accessibleName(gate, "gate")).toBe("plan_approval, gate, needs you");
   });
@@ -87,11 +100,11 @@ describe("chainGraph", () => {
   it("hides the escalation badge on a capped node, shows it elsewhere", () => {
     const esc = sess("verification", { hook_point: "escalation" });
     const capped = detail({ display_status: "needs_you", stop: { kind: "cap", node: "verification", resume_at: null, reason: null }, worker_sessions: [esc] });
-    expect(chainGraph(capped, [], NOW).nodes[2].esc).toBe(false);
-    expect(chainGraph(detail({ worker_sessions: [esc] }), [], NOW).nodes[2].esc).toBe(true);
+    expect(chainGraph(capped, NOW).nodes[2].esc).toBe(false);
+    expect(chainGraph(detail({ worker_sessions: [esc] }), NOW).nodes[2].esc).toBe(true);
     // One that answered an earlier pass's stop is that pass's: the pass the node is on now never escalated.
     const later = sess("verification", { attempt: 2, pass: 2 });
-    expect(chainGraph(detail({ worker_sessions: [{ ...esc, pass: 1 }, later] }), [], NOW).nodes[2].esc).toBe(false);
+    expect(chainGraph(detail({ worker_sessions: [{ ...esc, pass: 1 }, later] }), NOW).nodes[2].esc).toBe(false);
   });
 
   // A parent inside its group stands at `slices.<node>`: the nodes before the group done, the group current, its body
@@ -101,27 +114,27 @@ describe("chainGraph", () => {
     ["on a later body node", "slices.verification", ["done", "current"]],
     ["on a body node's task", "slices.verification.run.work", ["done", "current"]],
   ])("draws a sliced item %s", (_, current, inner) => {
-    const { nodes } = chainGraph(sliced(current), [], NOW);
+    const { nodes } = chainGraph(sliced(current), NOW);
     expect(nodes.map((n) => [n.id, n.state])).toEqual([["plan", "done"], ["plan_approval", "done"], ["slices", "current"], ["local_review", "todo"], ["merge_request", "todo"]]);
     expect(nodes[2].body?.map((b) => [b.id, b.state])).toEqual([["slices.implementation", inner[0]], ["slices.verification", inner[1]]]);
     expect(nodes[2].body?.[inner.indexOf("current")]).toMatchObject({ running: true });
   });
 
   it("finishes every node of a done item", () => {
-    expect(chainGraph(detail({ display_status: "done", current_node_id: null }), [], NOW).nodes.every((n) => n.state === "done")).toBe(true);
+    expect(chainGraph(detail({ display_status: "done", current_node_id: null }), NOW).nodes.every((n) => n.state === "done")).toBe(true);
   });
 
   it("draws the fix-loop arc once a round has run, red when capped, and the reject arc only while its gate is selected", () => {
     const nodes = V1.map((n) => (n.id === "verification" ? { ...n, fix_loop: "f" } : n));
     const base = { chain_definition: { template_id: "d", nodes }, worker_sessions: [sess("verification", { round: 1 })] };
-    expect(chainGraph(detail(base), [], NOW).arcs()).toEqual([{ kind: "loop", node: "verification", tone: "active", label: "round 2" }]);
+    expect(chainGraph(detail(base), NOW).arcs()).toEqual([{ kind: "loop", node: "verification", tone: "active", label: "round 2" }]);
     const capped = detail({ ...base, display_status: "needs_you", stop: { kind: "cap", node: "verification", resume_at: null, reason: null } });
-    expect(chainGraph(capped, [], NOW).arcs()[0]).toMatchObject({ tone: "red" });
-    expect(chainGraph(detail(base), [], NOW).arcs("plan_approval")).toContainEqual({ kind: "reject", from: "plan_approval", to: "plan" });
+    expect(chainGraph(capped, NOW).arcs()[0]).toMatchObject({ tone: "red" });
+    expect(chainGraph(detail(base), NOW).arcs("plan_approval")).toContainEqual({ kind: "reject", from: "plan_approval", to: "plan" });
     // An exec node has no reject arc, even with an exec node before it.
-    expect(chainGraph(detail(base), [], NOW).arcs("verification").some((a) => a.kind === "reject")).toBe(false);
+    expect(chainGraph(detail(base), NOW).arcs("verification").some((a) => a.kind === "reject")).toBe(false);
     // A fix-loop node that has not looped yet draws no arc.
-    expect(chainGraph(detail({ ...base, worker_sessions: [sess("verification")] }), [], NOW).arcs()).toEqual([]);
+    expect(chainGraph(detail({ ...base, worker_sessions: [sess("verification")] }), NOW).arcs()).toEqual([]);
   });
 });
 
@@ -135,9 +148,9 @@ describe("rejectTarget", () => {
 
   it("finds a group before a gate, as the server's preceding_exec_node does, and the arc bounces to the group", () => {
     expect(rejectTarget(SLICED, "local_review")).toBe("slices");
-    expect(chainGraph(sliced("local_review"), [], NOW).arcs("local_review")).toContainEqual({ kind: "reject", from: "local_review", to: "slices" });
+    expect(chainGraph(sliced("local_review"), NOW).arcs("local_review")).toContainEqual({ kind: "reject", from: "local_review", to: "slices" });
     // A reject_to naming a body node draws to the group that holds it.
     const named = SLICED.map((n) => (n.id === "local_review" ? { ...n, reject_to: "slices.implementation" } : n));
-    expect(chainGraph(sliced("local_review", { chain_definition: { template_id: "d", nodes: named } }), [], NOW).arcs("local_review")).toContainEqual({ kind: "reject", from: "local_review", to: "slices" });
+    expect(chainGraph(sliced("local_review", { chain_definition: { template_id: "d", nodes: named } }), NOW).arcs("local_review")).toContainEqual({ kind: "reject", from: "local_review", to: "slices" });
   });
 });

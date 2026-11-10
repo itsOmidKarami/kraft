@@ -258,6 +258,9 @@ export function clock(iso: string): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+/** HH:MM in the viewer's time zone. */
+export const localTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+
 /** A session's or a rollup's token columns, as the API sends them. */
 export interface TokenUse {
   tokens_in?: number | null;

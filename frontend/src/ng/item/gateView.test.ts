@@ -89,6 +89,10 @@ describe("gateView", () => {
     ["a cap breach sent nothing back", 1, [round(1, { outcome: "rejected", note: "n", sent_to: null }), round(2)], { state: "failed", said: "n", taken: undefined, target: "plan" }],
     ["a fixed round repaired the worktree", 1, [round(1, { outcome: "fixed", by: "agent" }), round(2)], { state: "done", youSub: "fixed · auto", fixed: true, taken: undefined }],
     ["a stale pick shows the newest", 5, twice, { state: "done", said: undefined }],
+    // Not pending and not passed: the badge says how the newest round ended, not that the gate "decides".
+    ["the newest sent work back: the badge says so, with its note", undefined, [round(1, { by: "human" }), round(2, { outcome: "rejected", by: "human", note: "redo", sent_to: "plan" })], { state: "todo", youSub: "changes requested · you", said: "redo", taken: true }],
+    ["the newest closed with the item", undefined, [round(1, { outcome: "closed", by: null })], { state: "todo", youSub: "closed" }],
+    ["the newest approved, then the gate reopened", undefined, [round(1, { reopened: true })], { state: "todo", youSub: "approved · assistant" }],
   ])("a gate with rounds: %s", (_name, picked, rounds, want) => {
     const v = gateView(asked(...rounds), V1[1], 0, { kind: "chain" }, on, picked);
     expect(v.gate.state).toBe(want.state);
@@ -97,7 +101,7 @@ describe("gateView", () => {
     if ("taken" in want) expect(v.reject?.taken).toBe(want.taken);
     if ("fixed" in want) expect(v.reject?.fixed).toBe(want.fixed);
     if ("target" in want) expect(v.reject?.id).toBe(want.target);
-    expect(v.rounds?.selected).toBe(picked && picked <= 2 ? picked : 2);
+    expect(v.rounds?.selected).toBe(rounds.length < 2 ? undefined : picked && picked <= 2 ? picked : 2);
   });
 
   it("sends a round's work back to where it went, not where the gate would reject to now", () => {

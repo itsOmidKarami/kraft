@@ -25,7 +25,7 @@ oldest first, from the item's whole event log rather than a window of it: one
 round for each time the chain reached the gate and something ended it by an
 approval, a rejection, a skip or the item's end, with how it ended, who decided
 and the note it was decided with.
-enforced-by: tests/store/test_gates.py::test_a_gates_rounds[rejected-then-approved], tests/store/test_gates.py::test_a_gates_rounds[skip-ends-the-round], tests/store/test_gates.py::test_a_gates_rounds[completed-closes-a-pending-round], tests/store/test_gates.py::test_a_gates_rounds[unchanged-revision-has-no-request], tests/api/test_board.py::test_gate_rounds_reach_the_detail_payload
+enforced-by: tests/store/test_gates.py::test_a_gates_rounds[rejected-then-approved], tests/store/test_gates.py::test_a_gates_rounds[skip-ends-the-round], tests/store/test_gates.py::test_a_gates_rounds[skip-with-no-open-round], tests/store/test_gates.py::test_a_gates_rounds[completed-closes-a-pending-round], tests/store/test_gates.py::test_a_gates_rounds[unchanged-revision-has-no-request], tests/api/test_board.py::test_gate_rounds_reach_the_detail_payload
 origin: src/kraft/store/gates.py
 
 ## REQ intake-copies-an-attachment

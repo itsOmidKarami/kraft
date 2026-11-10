@@ -232,7 +232,7 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 .ip-files .is-mono { overflow-wrap: anywhere; }
 .ip-notes { margin: 0; padding-left: 16px; font-size: var(--fs-meta); color: var(--text); }
 .ip-review-note { margin: 0; font-size: var(--fs-meta); color: var(--text); white-space: pre-line; overflow-wrap: anywhere; }
-/* A gate's History: a button per round, newest first, the round shown marked. */
+/* A gate's History: a button per round, newest first, the round shown marked. A row never opens: the canvas holds the whole note. */
 .ip-hist { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .ip-hist-row { display: flex; flex-direction: column; gap: 3px; width: 100%; box-sizing: border-box; margin: 0; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: var(--fs-meta); text-align: left; cursor: pointer; }
 .ip-hist-row:is(:hover, :focus-visible) { background: var(--surface-2); }
@@ -242,8 +242,7 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 .ip-hist-n { color: var(--text); font-weight: 500; }
 .ip-hist-at { margin-left: auto; font: var(--fs-label) ui-monospace, Menlo, monospace; color: var(--text-muted); }
 .ip-hist-what { color: var(--text-sub); }
-.ip-hist-note { color: var(--text); white-space: pre-line; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
-.ip-hist-note.is-whole { display: block; }
+.ip-hist-note { color: var(--text); white-space: pre-line; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 
 /* Document viewer (prototype lines 278–283): a full-height drawer on the right over a scrim. */
 .dv-scrim { position: fixed; inset: 0; z-index: 60; background: var(--scrim); }

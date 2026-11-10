@@ -694,7 +694,7 @@ export function artifactFor(item: any, variant: Variant) {
 
 /** `store.gate_rounds`, ported for the event types the mock writes: a round opens at a `gate_requested` (a repeat while
  *  one is open is the same round), and ends at the gate's approval, rejection or skip (`payload.gate`; a skip with no
- *  gate is none), or at the item's end. An ending with no open round is a round of its own. */
+ *  gate is none, unless its node is a gate with rounds), or at the item's end. An ending with no open round is a round of its own. */
 export function gateRoundsOf(events: Ev[]): Record<string, GateRound[]> {
   const rounds: Record<string, GateRound[]> = {};
   const open: Record<string, GateRound> = {};
@@ -711,7 +711,8 @@ export function gateRoundsOf(events: Ev[]): Record<string, GateRound[]> {
   };
   for (const e of events) {
     const p = e.payload as Record<string, any>;
-    const gate: string | undefined = p.gate ?? undefined;
+    // A skip after the reject cap names no gate, only the node: it is the gate's when that already has rounds.
+    const gate: string | undefined = p.gate ?? (e.type === "node_skipped" && rounds[p.node_id] ? p.node_id : undefined);
     if (e.type === "gate_requested" && gate) {
       if (!open[gate]) open[gate] = round(gate, e.created_at);
     } else if ((e.type === "gate_approved" || e.type === "gate_rejected") && gate) {

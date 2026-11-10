@@ -68,7 +68,7 @@ const twice = () => {
 describe("nodeBar (D.6): one pair by node state, never Retry while it runs", () => {
   const bar = (it: ReturnType<typeof detail>, id: string) => {
     const api = it.chain_definition.nodes.find((n) => n.id === id)!;
-    const g = chainGraph(it, [], Date.parse("2026-09-13T10:00:00Z")).nodes.find((n) => n.id === id)!;
+    const g = chainGraph(it, Date.parse("2026-09-13T10:00:00Z")).nodes.find((n) => n.id === id)!;
     const b = nodeBar(it, api, g);
     return [b.secondary?.id ?? null, b.primary?.id ?? null];
   };

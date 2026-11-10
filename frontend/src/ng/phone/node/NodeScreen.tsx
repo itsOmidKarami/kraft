@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import type { KraftEvent, WorkItemDocument } from "../../../types";
 import { lineCount } from "../../../format";
 import { NodeGlyph } from "../../graph/NodeGlyph";
+import { GATE_ROUNDS } from "../../graph/sharedWords";
 import { act } from "../../item/actions";
 import { chainGraph, drawnOf, rejectTarget } from "../../item/graph";
 import { escalationsIn, ESCALATION, FIX_LOOP, nodeGraph, passList, passOf, stateWord } from "../../item/nodeGraph";
@@ -62,7 +63,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
   const { busy, run } = useDo(reload);
   const name = nameOf(item.chain_definition.nodes, nodeId);
   const api = findNode(item.chain_definition.nodes, nodeId)!;
-  const { nodes } = useMemo(() => chainGraph(item, events, now), [item, events, now]);
+  const { nodes } = useMemo(() => chainGraph(item, now), [item, now]);
   const graph = drawnOf(nodes, nodeId)!;
   const gate = api.kind === "gate";
   const kindWords = gate ? "gate" : api.kind === "group" ? "group node" : "exec node";
@@ -129,7 +130,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
         )}
         {gateRounds.length > 1 && round && (tab === "overview" || tab === "log") && (
           <>
-            <div className="ph-attempts ph-is-wrap" role="group" aria-label="Rounds of this gate">
+            <div className="ph-attempts ph-is-wrap" role="group" aria-label={GATE_ROUNDS}>
               {gateRounds.map((r) => (
                 <button key={r.n} type="button" className={`ph-attempt${r.n === round.n ? " ph-is-on" : ""}`} aria-pressed={r.n === round.n} onClick={() => setPlace({ pass: r.n === gateRounds.length ? undefined : r.n })}>
                   round {r.n} · {outcomeWord(r)}

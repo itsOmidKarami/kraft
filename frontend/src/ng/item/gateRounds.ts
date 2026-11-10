@@ -31,6 +31,15 @@ export function byWord(by: GateRound["by"]): string | null {
 export const outcomeWord = (r: GateRound): string =>
   ({ approved: "approved", rejected: "changes requested", fixed: "fixed", skipped: "skipped", closed: "closed", pending: "waiting" })[r.outcome];
 
+/** What the newest round came to, for a gate that is not pending and not passed: "changes requested · you". Undefined
+ *  while it waits, once it is passed (its state says that), and for a gate with no round. */
+export function newestOutcome(item: ItemDetail, gate: string): string | undefined {
+  const newest = roundsOf(item, gate).at(-1);
+  if (!newest || item.pending_gate === gate || gateState(item, gate).state === "done") return undefined;
+  const who = byWord(newest.by);
+  return `${outcomeWord(newest)}${who ? ` · ${who}` : ""}`;
+}
+
 /** The picker's rows, one per round; undefined below two rounds, where there is nothing to step through. */
 export function gateRoundList(item: ItemDetail, gate: string, picked?: number): Rounds | undefined {
   const all = roundsOf(item, gate);
