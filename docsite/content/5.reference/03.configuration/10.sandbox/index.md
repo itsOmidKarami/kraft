@@ -5,7 +5,7 @@ navigation:
 description: The sandbox key of repos.yaml, what reaches a sandboxed worker's container, and how its home, credentials, image and tool policy are handled.
 ---
 
-A repository's [`sandbox`](/reference/configuration/repos#sandbox) setting runs its [workers](/concepts/vocabulary#worker) in a container. This page lists the keys of that setting and what reaches the container from the host. The other pages in this section cover each part in turn.
+A repository's `sandbox` setting in [repos.yaml](/reference/configuration/repos) runs its [workers](/concepts/vocabulary#worker) in a container. This page lists the keys of that setting and what reaches the container from the host. The other pages in this section cover each part in turn.
 
 ```yaml [config/repos.yaml]
 repos:
