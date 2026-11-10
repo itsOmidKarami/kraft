@@ -400,6 +400,12 @@ class RepoEntry(BaseModel):
     #: waiting on checks that never come (Kraft-9efnk.12). Opt-in: an absent
     #: key waits, as before.
     ci_checks: bool = True
+    #: Failed-job name globs (`fnmatch`, case-insensitive) that are publish
+    #: jobs, such as a deploy to Pages. A red post-merge pipeline whose every
+    #: failed job matches still files the follow-up bead but pauses no item
+    #: (`merge_watch`). Opt-in: an absent key or `[]` means no job is a
+    #: publish job, so any red post-merge pipeline pauses items as before.
+    post_merge_publish_jobs: list[Annotated[str, Field(min_length=1)]] = []
     #: Take changes to this repository's accepted repo library without a
     #: person, when nothing but text changed (`addons.repo_library.check_all`).
     #: Never a first load.

@@ -436,6 +436,7 @@
       "models": "_",
       "path": "_",
       "policy": "_",
+      "post_merge_publish_jobs": [],
       "project": "_",
       "sandbox": "_",
       "setup_command": "_",

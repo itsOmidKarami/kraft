@@ -77,6 +77,11 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         # Ruling 212: an absent `enabled` is enabled, not disabled.
         ({}, {"enabled": True}),
         ({"enabled": False}, {"enabled": False}),
+        ({}, {"post_merge_publish_jobs": []}),
+        (
+            {"post_merge_publish_jobs": ["deploy", "deploy-*"]},
+            {"post_merge_publish_jobs": ["deploy", "deploy-*"]},
+        ),
         ({}, {"name": None, "default_chain": None}),
         (
             {"name": "r", "default_chain": "quick"},
@@ -111,6 +116,8 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         "keeps-an-intent-dir",
         "an-absent-enabled-is-enabled",
         "keeps-an-explicit-enabled-false",
+        "post-merge-publish-jobs-default-to-empty",
+        "keeps-post-merge-publish-jobs",
         "name-and-default-chain-default-to-none",
         "keeps-a-declared-name-and-default-chain",
     ],

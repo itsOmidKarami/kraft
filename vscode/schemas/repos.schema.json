@@ -288,6 +288,15 @@
           ],
           "default": null
         },
+        "post_merge_publish_jobs": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Post Merge Publish Jobs",
+          "type": "array"
+        },
         "project": {
           "anyOf": [
             {
