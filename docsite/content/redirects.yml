@@ -448,6 +448,9 @@
 /guides/run/remote-access#choose-a-bind: /guides/run/remote-access#choose-a-way
 /guides/run/remote-access#a-proxy-in-front-of-a-loopback-bind: /guides/run/put-a-proxy-in-front-of-kraft
 /guides/run/remote-access#send-host-localhost-from-the-proxy: /guides/run/put-a-proxy-in-front-of-kraft#send-host-localhost-from-the-proxy
+/guides/run/remote-access#rotate-the-token: /guides/run/rotate-the-token
+/guides/run/remote-access#use-the-console-from-another-machine: /guides/run/use-the-console-from-another-machine
+/guides/run/remote-access#let-another-machine-connect: /guides/run/run-a-step-on-another-machine#register-the-machine
 /reference/cli/admin#the-sandbox-row: /troubleshooting/sandbox-and-kit-stops#sandbox-repo
 /reference/cli/admin#a-repository-whose-sandbox-is-a-kit: /troubleshooting/sandbox-and-kit-stops#sandbox-repo
 /reference/triggers#a-cron-kraft-cannot-run: /reference/configuration/intake#when-the-file-doesnt-load

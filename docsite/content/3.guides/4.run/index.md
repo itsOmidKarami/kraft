@@ -20,5 +20,7 @@ Each guide takes one task from start to finish.
 - [Upgrade Kraft](/guides/run/upgrade-kraft): back up, upgrade and check an installed Kraft, and pin a version.
 - [Move onto kraft-default](/guides/run/upgrade-your-configuration): replace the full copies of Kraft's chains in an older home with chains that extend the built-in, keeping your edits.
 - [Coming from 1.4](/guides/run/coming-from-1-4): update from 1.4, act on the changes that need it, go back to 1.4, and move from a release candidate or a 0.x home.
+- [Rotate the token](/guides/run/rotate-the-token): replace the MCP token or the trigger token, restart and check the new files.
 - [Run items in your own checkout](/guides/run/run-items-in-place): let a repo's work items run in its own checkout instead of a worktree each, and clear a `checkout` stop.
 - [Run a step on another machine](/guides/run/run-a-step-on-another-machine): register a machine, place a node on it, override the placement for one item, and see what comes back.
+- [Use the console from another machine](/guides/run/use-the-console-from-another-machine): open the terminal UI against a Kraft on another machine and sign in once.
