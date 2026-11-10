@@ -5,10 +5,21 @@ for it is `kraft.waits`' -- nothing here sleeps.
 
 from __future__ import annotations
 
+import fnmatch
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from kraft.adapters.forge.models import MR, CIStatus, Forge
+
+
+def is_publish_job(job_name: str, patterns: Sequence[str]) -> bool:
+    """Whether `job_name` matches one of a repo's `post_merge_publish_jobs`
+    globs. Case-insensitive; a `workflow / job` name is also tried by its last
+    segment, because GitHub reports some check names that way."""
+    name = job_name.lower()
+    candidates = {name, name.rsplit(" / ", 1)[-1]}
+    return any(fnmatch.fnmatchcase(c, p.lower()) for c in candidates for p in patterns)
 
 
 async def render_ci(
