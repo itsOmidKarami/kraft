@@ -97,7 +97,7 @@ def build(content: Path) -> tuple[str | None, dict[str, str]]:
         "_Added in next_",
         "",
         f"These docs are for unreleased main. {count} page{'s' if count != 1 else ''} below "
-        "carry something the latest release does not have. The list is built from the "
+        "carry something the latest release doesn't have. The list is built from the "
         'docs\' own "Added in next" notes, so it is as current as the pages.',
         "",
     ]
