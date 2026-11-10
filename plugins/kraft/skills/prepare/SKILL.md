@@ -43,20 +43,23 @@ below.
 
 **Then decide how independent parts are built.** Slices don't replace
 sub-agents. Sub-agents are the default, inline or inside one Kraft item: they
-share the worktree and need no setup or join. A part earns more only when it's
-a pull request's worth of work on its own: roughly 500 changed lines or more.
-Parts that big move an inline-classified item to a handoff, unless the user
-said "inline": then keep it inline with sub-agents, and say the parts are that
-big. Otherwise:
+share the worktree and need no setup or join. A part earns more only when it
+makes sense on its own: a coherent piece with its own tests, which its own
+implement, verify and review loop can check without another part's code. Task
+and line counts are weak hints, not the test; a part of one or two tasks almost
+never qualifies. Parts like that move an inline-classified item to a handoff,
+unless the user said "inline": then keep it inline with sub-agents, and say
+which parts would stand alone. Otherwise:
 
-- **Slices**, when those parts must land together. One handed-off item, which
-  Kraft's plan splits into child work items, built in parallel and joined into
-  one merge request. Each child has its own worktree, setup, implementer session
-  and review, overhead that only a part this size repays. Name each part in the
-  spec, with what it covers, so the plan slices along them.
-- **Separate work items**, when each part can merge on its own. One
-  `kraft:handoff` per part, each attaching a spec for that part only, each its
-  own merge request.
+- **Separate work items**, when each part can merge on its own and is a full
+  pull request in its own right. One `kraft:handoff` per part, each attaching
+  a spec for that part only, each its own merge request.
+- **Slices**, when the parts must land together. The same test with a lower
+  floor: each part still stands alone and earns its own loop, but needn't be a
+  whole pull request. One handed-off item, which Kraft's plan splits into child
+  work items, built in parallel and joined into one merge request. Each child
+  has its own worktree, setup, implementer session and review. Name each part
+  in the spec, with what it covers, so the plan slices along them.
 
 When in doubt, use sub-agents. State the sub-agents, slices or separate-items
 call in the same message as the inline/handoff judgment.
