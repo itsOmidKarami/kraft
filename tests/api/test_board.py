@@ -708,7 +708,7 @@ def test_a_v1_item_lists_and_renders_its_chain_nodes(client, repo):
             ["verification.tests.test_changed_scopes"],
             ["verification.review.code_review"],
         ]
-        assert nodes[1]["auto_escalate"] is False
+        assert nodes[1]["auto_escalate"] is True
         assert payload["chain_definition"]["template_id"] == "default"
 
     # And the third door: `POST /work-items`' own 201 body, which only

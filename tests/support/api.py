@@ -356,6 +356,8 @@ def _post_default(client, repo):
             "repo": str(repo),
             "chain_template": "default",
             "autostart": True,
+            # The default chain's gates have a reviewer; these tests act at the gate.
+            "auto_gate": False,
         },
     ).json()["id"]
 

@@ -75,16 +75,16 @@ async def test_add_task_gives_a_gate_a_reviewer_that_extends_a_library_task(st):
     """Kraft-67yp8. Mutate: restore the refusal in `add_task`, or drop the
     `auto_review` expansion in `_Resolution._node`, and this fails. Its mode
     comes in the same request and goes with it: drop that line in `remove`."""
+    bare = ("remove", {"path": "spec_approval.auto_review"})  # the shipped gate has one
     add = ("add_task", {"slot": "auto_review", "node": "spec_approval", "extends": "code_review"})
-    r = apply(st, add)
-    assert r.answers == [{"path": "spec_approval.auto_review"}]
+    r = apply(st, bare, add)
+    assert r.answers[-1] == {"path": "spec_approval.auto_review"}
     assert r.nodes["spec_approval"]["auto_review"] == {"id": "reviewer", "extends": "code_review"}
-    assert r.problems == []
-    assert "spec_approval.auto_review" in r.paths
-    add = (add, *fields("spec_approval", ("auto_review_mode", "checks_first")))
+    assert r.problems == [] and "spec_approval.auto_review" in r.paths
+    add = (bare, add, *fields("spec_approval", ("auto_review_mode", "checks_first")))
     assert apply(st, *add).nodes["spec_approval"]["auto_review_mode"] == "checks_first"
-    removed = apply(st, *add, ("remove", {"path": "spec_approval.auto_review"}))
-    assert removed.nodes["spec_approval"] == {k: v for k, v in GATE.items() if "review" not in k}
+    removed = apply(st, *add, bare).nodes["spec_approval"]
+    assert removed == {k: v for k, v in GATE.items() if "review" not in k}
 
 
 @pytest.mark.parametrize(

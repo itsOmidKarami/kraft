@@ -7,7 +7,7 @@ import time
 
 import httpx
 import pytest
-from support.api import _poll_events, _poll_node_started, _wait_for_status
+from support.api import _poll_events, _poll_node_started, _post_default, _wait_for_status
 
 
 def test_skip_is_refused_on_an_item_that_has_not_started(client, repo):
@@ -73,10 +73,7 @@ def test_skip_bypasses_a_pending_gate_without_approving_it(client, repo, monkeyp
     Skip must reach `plan` without a `gate_approved` event — approval means
     the artifact was ingested, and skip never ingests one."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    wid = client.post(
-        "/api/work-items",
-        json={"autostart": True, "title": "t", "repo": str(repo), "chain_template": "default"},
-    ).json()["id"]
+    wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")
     item = client.get(f"/api/work-items/{wid}").json()
     assert item["pending_gate"] == "spec_approval"
@@ -132,10 +129,7 @@ def test_two_concurrent_skips_produce_one_advance_and_one_409(client, repo, monk
     """Kraft-qx1q / one-walk-per-item: two callers racing `/skip` on the same
     item must produce exactly one advance and one 409."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    wid = client.post(
-        "/api/work-items",
-        json={"autostart": True, "title": "t", "repo": str(repo), "chain_template": "default"},
-    ).json()["id"]
+    wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")
     item = client.get(f"/api/work-items/{wid}").json()
     assert item["pending_gate"] == "spec_approval"
@@ -167,10 +161,7 @@ def test_skip_refuses_and_writes_nothing_when_a_walk_is_still_live_at_a_stop(
     from kraft.api import deps
 
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    wid = client.post(
-        "/api/work-items",
-        json={"autostart": True, "title": "t", "repo": str(repo), "chain_template": "default"},
-    ).json()["id"]
+    wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")
     item = client.get(f"/api/work-items/{wid}").json()
     assert item["pending_gate"] == "spec_approval"

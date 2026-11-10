@@ -557,13 +557,35 @@ _FEEDBACK_REPAIR = next(
     i for i, row in enumerate(BEFORE) if row[1].endswith("on_failure.repair.repair_feedback")
 )
 
-#: What the shipped library launches: `BEFORE`, with `SINCE` and the triage in chain order.
+#: The default chain's gate reviewers, each after the node its gate decides on.
+GATE_AFTER = {
+    "spec.main.author": "spec_approval",
+    "plan.main.author": "plan_approval",
+    "chain_revision.main.revise": "chain_revision_approval",
+    "work_brief.main.author": "local_review",
+    "work_item_summary.main.author": "final_review",
+}
+
+
+def _and_its_reviewer(row: tuple) -> list[tuple]:
+    gate = GATE_AFTER.get(row[1]) if row[0] == "default" else None
+    return (
+        [row, ("default", f"{gate}.auto_review", "claude", "sonnet", None, None)] if gate else [row]
+    )
+
+
+#: What the shipped library launches: `BEFORE`, with `SINCE`, the triage and the
+#: gate reviewers in chain order.
 SHIPPED_LAUNCHES = [
-    *BEFORE[:_FEEDBACK_REPAIR],
-    TRIAGE,
-    *BEFORE[_FEEDBACK_REPAIR:-1],
-    *SINCE,
-    BEFORE[-1],
+    launch
+    for row in [
+        *BEFORE[:_FEEDBACK_REPAIR],
+        TRIAGE,
+        *BEFORE[_FEEDBACK_REPAIR:-1],
+        *SINCE,
+        BEFORE[-1],
+    ]
+    for launch in _and_its_reviewer(row)
 ]
 
 
