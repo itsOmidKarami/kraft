@@ -516,8 +516,9 @@ def _in_process_causes(db, work_item_id: str, node: ResolvedNode, failed: list) 
         c
         for t in failed
         if _in_process(t)
-        # A forge task that answered `conflict` left that session, not a failed one,
-        # and its log carries git's `rebase onto <base> failed:` line.
+        # Only when the task has no `failed` session: a forge task that answered
+        # `conflict` left that session instead, and its log carries git's
+        # `rebase onto <base> failed:` line.
         and (
             c := _task_cause(db, work_item_id, node, t, "failed")
             or _task_cause(db, work_item_id, node, t, CONFLICT)
