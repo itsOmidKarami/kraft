@@ -71,6 +71,13 @@ def problems(root: Path, base: str) -> list[str]:
         except fetch.AddonRefused as exc:
             found.append(f"{entry['name']}: Kraft refuses it as it is now: {exc}")
             continue
+        # CI's clone is blobless and `fetch` never fetches lazily, so a changed
+        # file's base copy is missing until something fetches it: this does.
+        subprocess.run(
+            ["git", "-C", str(root), "archive", base, "--", source.removeprefix("./")],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         try:
             then = fetch.extract_git(git_dir, base, source).files
         except fetch.FetchError:
