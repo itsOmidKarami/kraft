@@ -1,6 +1,6 @@
 ---
 name: steward
-description: Kraft's own rules for driving a pull request on itsOmidKarami/kraft to green - which checks to run before a push, how to regenerate generated files and lockfiles, how to answer each CI job, and what the description and labels must carry. Read by Claude Code sessions that drive or babysit a Kraft pull request; not for writing the change itself.
+description: Kraft's own rules for driving a pull request on itsOmidKarami/kraft to green - which checks to run before a push, how to regenerate generated files and lockfiles, how to answer each CI job, and what the description and labels must carry. Read by Claude Code sessions that drive or babysit a Kraft pull request, or a Kraft worker; not for writing the change itself.
 disable-model-invocation: true
 ---
 
@@ -10,6 +10,18 @@ These are this repository's conventions for getting a pull request mergeable.
 `CONTRIBUTING.md` is the source of truth: where it disagrees with this file, it
 wins. Read its "What CI checks" table before working a red check.
 
+**In a Kraft worker** (`$KRAFT_WORK_ITEM_ID` set) there's no `gh` and no user
+to ask. Set a label with `kraft item mr-label`; where it isn't available (a
+sandboxed worker's `kraft` has no `mr-label`), name the label you need in your
+summary. Re-run a job with
+`kraft item rerun-ci --reason "..."`, and leave a conflict with `main` to
+Kraft: report it, never merge in the worktree. What this file says to ask the
+user about, leave undone and say so in your summary.
+
+**Done** when `test`, both `kraft-lite` legs, `removals declared`,
+`release impact declared` and, when it ran, `docs` are green. `docs nudge`,
+`tests nudge` and `test report` never count.
+
 ## Before every push
 
 Run what the change touches, from the repo root. Run `just setup` first in a
@@ -18,7 +30,7 @@ fresh checkout.
 | The diff touches | Run |
 |---|---|
 | anything | `just ci-checks` (CI's whole `lint` job, plus the intent check) |
-| `src/`, `tests/`, `config/` | `just test` on the changed area (`just test tests/<pkg> -n auto`) |
+| `src/`, `tests/`, `config/`, skills, fixtures | `just test-targeted` (testmon can't see `config/`, packaged skills or fixtures, so it adds the tests that read them, or runs the full suite); `just test tests/<pkg> -n auto` is the quick loop |
 | `frontend/` | `just test-ui` |
 | `vscode/` or a config model | `just test-vscode` |
 | `plugins/kraft-lite/` | CI's own command: `uv run --python 3.10 --no-project --with pytest pytest plugins/kraft-lite/tests -q` |
@@ -71,7 +83,8 @@ merged: cut a fresh one from `origin/main` (CONTRIBUTING.md, "Branch hygiene").
   `notes::highlight`; that is the maintainer's call.
 - **`removals declared`**: the description is missing a `## Removed tests` or
   `## Removed requirements` line for something the diff deletes or renames.
-  Fix the description, not the code. Check it locally with
+  Fix the description, not the code, and declare only removals the change
+  means to make: a red test is fixed, not deleted. Check it locally with
   `uv run python dev/check_removals.py origin/main BODY.md`. Editing the body
   starts no run: re-run the failed `removals declared` job afterwards.
 - **`lint`**: `just fix` covers ruff. A `dev/check_docs_*.py` failure names the
