@@ -568,6 +568,8 @@
 /guides#run-the-server: /guides/run
 /guides#without-a-server: /guides/kraft-lite
 /guides/day-to-day/review-a-change#in-the-web-ui: /guides/day-to-day/review-a-change#comment-and-finish-a-review-in-the-web-ui
+/guides/day-to-day/review-a-change#approve-or-reject-in-the-web-ui: /guides/day-to-day/review-a-change#decide-in-the-web-ui
+/guides/day-to-day/review-a-change#approve-or-reject-from-the-cli: /guides/day-to-day/review-a-change#decide-from-the-cli
 /guides/day-to-day/review-a-change#drafts-and-sending: /guides/day-to-day/review-a-change#comment-and-send-a-review-from-the-cli
 /guides/day-to-day/review-a-change#must-fix: /guides/day-to-day/review-a-change#block-approval-with-a-must-fix
 /guides/day-to-day/review-a-change#commenting-while-it-runs: /guides/day-to-day/review-a-change#comment-while-it-runs
