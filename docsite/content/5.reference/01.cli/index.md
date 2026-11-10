@@ -96,17 +96,17 @@ Each command links to its entry.
 |---|---|
 | Archive finished items and free their worktrees | [`kraft item archive`](/reference/cli/item#item-archive) |
 | Bring an archived item back under Done | [`kraft item restore`](/reference/cli/item#item-restore) |
-| Check that the server is up | [`kraft admin health`](/reference/cli/admin#what-health-prints) |
-| Check the whole install | [`kraft admin doctor`](/reference/cli/admin#what-doctor-checks) |
-| Start, stop or restart the server | [`kraft admin start`, `stop`, `restart`](/reference/cli/admin#run-the-server) |
-| Run Kraft as a service | [`kraft admin install-service`](/reference/cli/admin) |
-| Install the newest release | [`kraft admin update`](/reference/cli/admin#update-kraft) |
-| Reread the templates and [policy](/concepts/vocabulary#policy) after editing them | [`kraft admin reload`](/reference/cli/admin#reload-the-configuration) |
-| Check my chains | [`kraft admin templates lint`](/reference/cli/admin#lint-the-templates) |
-| Read a chain or a [library](/concepts/vocabulary#library) component | [`kraft admin templates show`, `templates library`](/reference/cli/admin#show-a-chain) |
-| See the [harness profiles](/concepts/vocabulary#harness-profile) and what selects each | [`kraft admin harnesses`](/reference/cli/admin) |
-| Rescan documents into the search index | [`kraft admin reindex`](/reference/cli/admin) |
-| Register Kraft with an agent | [`kraft admin init`](/reference/cli/admin) |
+| Check that the server is up | [`kraft admin health`](/reference/cli/server#what-health-prints) |
+| Check the whole install | [`kraft admin doctor`](/reference/cli/server#what-doctor-checks) |
+| Start, stop or restart the server | [`kraft admin start`, `stop`, `restart`](/reference/cli/server#run-the-server) |
+| Run Kraft as a service | [`kraft admin install-service`](/reference/cli/server) |
+| Install the newest release | [`kraft admin update`](/reference/cli/server#update-kraft) |
+| Reread the templates and [policy](/concepts/vocabulary#policy) after editing them | [`kraft admin reload`](/reference/cli/server#reload-the-configuration) |
+| Check my chains | [`kraft admin templates lint`](/reference/cli/server#lint-the-templates) |
+| Read a chain or a [library](/concepts/vocabulary#library) component | [`kraft admin templates show`, `templates library`](/reference/cli/server#show-a-chain) |
+| See the [harness profiles](/concepts/vocabulary#harness-profile) and what selects each | [`kraft admin harnesses`](/reference/cli/server) |
+| Rescan documents into the search index | [`kraft admin reindex`](/reference/cli/server) |
+| Register Kraft with an agent | [`kraft admin init`](/reference/cli/server) |
 
 `kraft item progress` and `kraft item reply` are [called by a worker](/reference/cli/item#verbs-a-worker-calls), not by you.
 
@@ -148,7 +148,7 @@ These verbs don't print the payload:
 
 The item itself is in `--json`, or in `kraft view show`.
 
-The reads you script against print as follows: [`view list`](/reference/cli/view#what-view-list-prints), [`view show`](/reference/cli/view#what-view-show-prints), [`repo list`](/reference/cli/repo#what-repo-list-prints), [`admin health`](/reference/cli/admin#what-health-prints), [`admin doctor`](/reference/cli/admin#what-doctor-checks) and [`item create`](/reference/cli/item#what-create-prints). With `--json`, all but `item create` print the API's own answer: see the [HTTP API](/reference/http-api) pages.
+The reads you script against print as follows: [`view list`](/reference/cli/view#what-view-list-prints), [`view show`](/reference/cli/view#what-view-show-prints), [`repo list`](/reference/cli/repo#what-repo-list-prints), [`admin health`](/reference/cli/server#what-health-prints), [`admin doctor`](/reference/cli/server#what-doctor-checks) and [`item create`](/reference/cli/item#what-create-prints). With `--json`, all but `item create` print the API's own answer: see the [HTTP API](/reference/http-api) pages.
 
 `kraft view logs --json` and `kraft view events -f --json` print NDJSON, one
 object per line, because a stream has no end on which to close an array.
@@ -165,4 +165,7 @@ in any shell `argcomplete` supports. Register it by adding
 - [Item verbs](/reference/cli/item): file, approve, reject, pause, unblock, resume, retry, skip, escalate and set policy on a work item.
 - [View verbs](/reference/cli/view): read the board, follow a running item, and review its diff and documents.
 - [Repo verbs](/reference/cli/repo): connect repositories and reach their worktrees.
-- [Admin verbs](/reference/cli/admin): run, check, update and configure this machine's server.
+- [Server verbs](/reference/cli/server): start, stop, restart, update, reload, check and inspect the server.
+- [Add-on verbs](/reference/cli/addon): collections, install, update, validate.
+- [Machine verbs](/reference/cli/worker): register and run machines.
+- [Forge verbs](/reference/cli/forge): name, edit, test forge accounts.
