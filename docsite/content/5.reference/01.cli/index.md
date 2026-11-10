@@ -80,7 +80,7 @@ Each command links to its entry.
 | See why it stopped | [`kraft view show`](/reference/cli/view#what-view-show-prints), then [`kraft view logs`](/reference/cli/view#view-logs) |
 | Run the stopped [node](/concepts/vocabulary#node) again | [`kraft item retry`](/reference/cli/item#item-retry) |
 | Redo one step or task, or the whole chain | [`kraft item retry --path PATH`, `--restart`](/reference/cli/item#item-retry) |
-| Give it more budget | [`kraft item raise-budget --usd N`](/reference/cli/item#raise-a-cap-that-stopped-an-item) |
+| Give it more budget | [`kraft item raise-budget --usd N`](/reference/cli/item#item-raise-budget) |
 | Raise a time or token [cap](/concepts/vocabulary#cap) | [`kraft item set-policy`](/reference/cli/item#item-set-policy) |
 | Steer an agent that is paused | [`kraft item resume --steer "..."`](/reference/cli/item#item-resume) |
 | Pause a running item | [`kraft item pause`](/reference/cli/item#item-pause) |

@@ -416,6 +416,7 @@
 /concepts/vocabulary#classifier-mode: /reference/harnesses/unattended-runs
 /concepts/permission-gate#why-an-escalation-gets-git-grants-by-default: /concepts/permission-gate#why-grants-are-names-not-command-patterns
 /reference/http-api#other-routes: /reference/http-api#in-this-section
+/reference/cli/item#raise-a-cap-that-stopped-an-item: /reference/cli/item#item-raise-budget
 /reference/cli/item#less-common-item-verbs: /reference/cli/item#skip-escalate-end-or-drop-an-item
 /reference/cli/admin#verb-details: /reference/cli/server#run-the-server
 /reference/cli/admin: /reference/cli/server
