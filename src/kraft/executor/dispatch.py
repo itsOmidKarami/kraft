@@ -5,6 +5,7 @@ import contextlib
 import fnmatch
 import json
 import logging
+import re
 import shlex
 import sqlite3
 import stat
@@ -386,6 +387,37 @@ async def config_error_session(db, run_dirs, common: dict, log: str) -> str:
         status=CONFIG_ERROR,
         log=log,
     )
+
+
+#: `just`'s own error for a recipe its justfile lacks, as it starts a line of its stderr.
+_NO_RECIPE = re.compile(r"^error: justfile does not contain recipe `([^`]+)`", re.I | re.M)
+#: The line Kraft appends naming it, which the stop then reads as its cause.
+NO_RECIPE_LINE = "kraft: no just recipe"
+
+
+def _no_recipe(task_path: str, base: str) -> Callable[[str, Path, int], str]:
+    """`post_resolve` for a `just` test scope: a recipe the item's justfile
+    lacks is configuration, not a test failure (Kraft-3y2o1). A repair session
+    cannot add a recipe the scope's base never had, so the scope ends
+    `config_error` and the item stops naming the recipe and its base."""
+
+    def resolve(status: str, log_path: Path, _returncode: int) -> str:
+        if status != "failed":
+            return status
+        with open(log_path, "rb") as fh:
+            fh.seek(max(0, fh.seek(0, 2) - 65536))
+            found = _NO_RECIPE.search(fh.read().decode(errors="replace"))
+        if found is None:
+            return status
+        with open(log_path, "a") as fh:
+            fh.write(
+                f"\n{NO_RECIPE_LINE} `{found[1]}` in this item's justfile (its base is {base}): "
+                "rebase it onto a base that has the recipe, "
+                "or change the test scope in repos.yaml\n"
+            )
+        return CONFIG_ERROR
+
+    return resolve
 
 
 def _is_group(runner: str | None) -> bool:
@@ -928,6 +960,16 @@ async def _run_changed_test_scopes(
                     "passed to it as an argument and the rest never runs; write it as "
                     "sh -c '...' in repos.yaml\n",
                 )
+    no_recipe = None
+    commands = (a for s in to_run for a in (s["setup"], s["cmd"], s["targeted_cmd"]))
+    if any(a and Path(a[0]).name == "just" for a in commands):
+        branch = await _builtins.base_branch(
+            db,
+            work_item_row["id"],
+            Path(worktree) if member else Path(work_item_row["repo"]),
+            member=member,
+        )
+        no_recipe = _no_recipe(task.path, branch)
     changed_files = item_paths.changed_files(run_dirs, work_item_row["id"], node.id, task.path)
     if picks:
         changed_files.parent.mkdir(parents=True, exist_ok=True)
@@ -964,6 +1006,7 @@ async def _run_changed_test_scopes(
                 time_cap=time_cap,
                 runner=on,
                 placed_claim=claim,
+                post_resolve=no_recipe if Path(cmd[0]).name == "just" else None,
                 **scope_common,
             )
 

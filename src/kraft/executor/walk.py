@@ -429,8 +429,9 @@ def _task_cause(
     text = _task_log(db, work_item_id, node, task, status)
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     # The line Kraft appends after the task's own output when the sandbox's
-    # memory limit killed it is the cause; the task's first line is not.
-    own = [ln for ln in lines[1:] if ln.startswith(_subprocess.OOM_LINE)]
+    # memory limit killed it, or a `just` scope's recipe is missing, is the
+    # cause; the task's first line is not.
+    own = [ln for ln in lines[1:] if ln.startswith((_subprocess.OOM_LINE, dispatch.NO_RECIPE_LINE))]
     line = own[-1] if own else next(iter(lines), "")
     return line if len(line) <= _STOP_CAUSE_MAX else line[: _STOP_CAUSE_MAX - 1] + "…"
 
