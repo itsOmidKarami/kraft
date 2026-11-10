@@ -63,6 +63,9 @@ BLIND: tuple[tuple[str, bool], ...] = (
     # Copied into a repo and run by its own test command.
     ("tests/support/sample_repo", False),
     ("plugins/kraft/skills", False),
+    # kraft-lite's skills, methods, evals, bundled config and manifests are read
+    # by its own tests; its `.py` is imported in-process, which testmon traces.
+    ("plugins/kraft-lite", True),
 )
 
 #: A blind file whose readers are known, so an edit to it adds them rather than
@@ -85,10 +88,16 @@ EDIT_TESTS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "tests/test_plugin_docs_surface.py",
         ),
     ),
+    # kraft-lite: the readers span subtrees (the parity test reads skills/run-slices,
+    # config and methods; `conftest.texts` globs every skill), and the whole plugin
+    # suite plus the parity file runs in seconds, so the whole directory is named.
+    ("plugins/kraft-lite", ("plugins/kraft-lite/tests", "tests/plugins/test_kraft_lite_parity.py")),
     # Kraft's own skills: read for their wording and examples, and as the
     # method of every agent launch. That reaches nearly every test that walks a
     # chain, but only the fake agents read it there, and they skip a method
     # (tests/test_fake_claude.py), so these are the tests that read its text.
+    # methods/ and config/ under plugins/kraft-lite are generated copies; the
+    # parity test fails when they differ.
     (
         "src/kraft/skills",
         (
@@ -97,6 +106,7 @@ EDIT_TESTS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "tests/adapters/test_agent.py",
             "tests/addons/test_pins.py",
             "tests/templates/test_library.py",
+            "tests/plugins/test_kraft_lite_parity.py",
         ),
     ),
 )
