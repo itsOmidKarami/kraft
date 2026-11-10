@@ -18,8 +18,31 @@ class _Shape(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class OneOffSummary(_Shape):
+    """What a one-off chain item's own chain adds to the chain it extends."""
+
+    extends: str | None = None
+    custom: bool | None = None
+    needs_review: bool | None = None
+    approval: str | None = None
+
+
+class MrRef(_Shape):
+    number: int | str | None = None
+    url: str | None = None
+
+
+class Stop(_Shape):
+    """Why a `needs_human`, `waiting` or `rate_limited` item stopped."""
+
+    kind: str
+    node: str | None = None
+    reason: str | None = None
+
+
 class WorkItemRow(_Shape):
-    """The keys a list row and the detail object share."""
+    """The keys the documented list row and detail object share. A few of the
+    board's own keys (`children`, `slices`, `in_place` and others) are left out."""
 
     id: str
     title: str
@@ -38,10 +61,10 @@ class WorkItemRow(_Shape):
     archived_by: str | None = None
     attachments: list[dict[str, Any]] = []
     pending_gate: str | None = None
-    one_off: bool | None = None
-    stop: dict[str, Any] | None = None
+    one_off: OneOffSummary | None = None
+    stop: Stop | None = None
     step: dict[str, Any] | None = None
-    mr_ref: dict[str, Any] | None = None
+    mr_ref: MrRef | None = None
     actions: list[str] = []
     worktree_exists: bool | None = None
 

@@ -5,15 +5,19 @@ maintainer can follow."""
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 
 import pytest
-from support.api import _poll_events, _post_default
+from support.api import CUSTOM_ONE_OFF, _in_state, _one_off, _poll_events, _post_default
 from support.harness import connect_repo
 
 from kraft import update
 from kraft.api import api_router, app
 from kraft.api.schemas import WorkItemDetail, WorkItemList
+
+DOORS = json.loads((Path(__file__).parent / "lifecycle_doors.json").read_text())
 
 #: What a reader of the published API cannot follow: a private tracker id, a
 #: section of an unpublished design document, a design decision's number, or a
@@ -69,6 +73,12 @@ def test_the_two_stable_routes_are_tagged_stable():
     assert sorted(ops) == ["GET /api/health", "POST /api/triggers"]
 
 
+def _gate(client, repo):
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    return wid
+
+
 @pytest.mark.parametrize(
     "path, model",
     [
@@ -76,12 +86,19 @@ def test_the_two_stable_routes_are_tagged_stable():
         pytest.param("/api/work-items/{id}", WorkItemDetail, id="detail"),
     ],
 )
-def test_a_documented_response_shape_matches_the_real_answer(client, repo, path, model):
+@pytest.mark.parametrize(
+    "file",
+    [
+        pytest.param(_gate, id="at-a-gate"),
+        pytest.param(lambda c, r: _one_off(c, r, CUSTOM_ONE_OFF), id="one-off"),
+        pytest.param(lambda c, r: _in_state(c, r, DOORS["states"]["stuck"]), id="stopped-with-mr"),
+    ],
+)
+def test_a_documented_response_shape_matches_the_real_answer(client, repo, path, model, file):
     """The schema describes a route's answer without filtering it: the model sits under
     `responses`, no route has a `response_model`, and a real answer validates against it."""
     connect_repo(repo)
-    wid = _post_default(client, repo)
-    _poll_events(client, wid, "gate_requested")
+    wid = file(client, repo)
     answer = client.get(path.replace("{id}", wid)).json()
     model.model_validate(answer)
     operation = app.openapi()["paths"][path.replace("{id}", "{wid}")]["get"]
