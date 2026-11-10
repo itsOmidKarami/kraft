@@ -223,11 +223,18 @@ def test_abandon_in_place_stops_krafts_own_session_and_nothing_of_the_persons(cl
     from kraft import store
 
     wid = _paused(client, repo, in_place=True)
-    sleep = [sys.executable, "-c", "import time; print(flush=True); time.sleep(60)"]
+    # Exits from its own SIGINT handler, installed before it reports ready: a KeyboardInterrupt
+    # can be swallowed by whatever Python code it lands in, and a SIGINT ignored by the parent
+    # would be inherited, either of which leaves it sleeping past the wait (Kraft-8uk49).
+    sleep = [
+        sys.executable,
+        "-c",
+        "import os, signal, time; signal.signal(signal.SIGINT, lambda *_: os._exit(130)); "
+        "print(flush=True); time.sleep(60)",
+    ]
     agent = subprocess.Popen(sleep, cwd=repo, start_new_session=True, stdout=subprocess.PIPE)
     theirs = subprocess.Popen(sleep, cwd=repo, start_new_session=True)
-    # Started, not starting: a SIGINT that lands while Python is still importing can be
-    # swallowed ("Exception ignored while calling weakref callback") and leave it sleeping.
+    # Started, not starting: the handler is installed once it has printed.
     agent.stdout.readline()
     conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
     conn.row_factory = sqlite3.Row

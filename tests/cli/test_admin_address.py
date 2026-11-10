@@ -183,18 +183,23 @@ def test_a_start_listens_on_every_address_its_host_names(monkeypatch, host, foun
             monkeypatch.setattr(cli.admin.socket, "getaddrinfo", lambda *a, **k: found)
         if isinstance(want, str):
             logged = []
+            opened = []
+
+            # Not a re-bind: a released port is up for grabs by another worker (Kraft-go20z).
+            class _Recorded(socket.socket):
+                def __init__(self, *a, **k):
+                    super().__init__(*a, **k)
+                    opened.append(self)
+
+            monkeypatch.setattr(cli.admin.socket, "socket", _Recorded)
             monkeypatch.setattr(logging.getLogger("uvicorn.error"), "error", logged.append)
             with pytest.raises(SystemExit) as stopped:
                 cli.admin._listen(host, 0, backlog=8)
             assert stopped.value.code == 3
             assert want in str(logged[0])
-            if bound_first is not None:
-                with socket.socket() as again:  # what it bound first was closed
-                    # As `_listen` binds: without it, another test's TIME_WAIT on
-                    # this port refuses the bind (Kraft-go20z). A listener left
-                    # open still does.
-                    again.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                    again.bind(bound_first)
+            if bound_first is not None:  # what it bound first was closed
+                assert opened
+                assert all(sock.fileno() == -1 for sock in opened)
             return
         sockets = cli.admin._listen(host, 0, backlog=8)
     try:

@@ -443,14 +443,17 @@ async def test_cancelling_run_task_reaps_the_leader_instead_of_paying_the_grace(
     as a live group member, so `_kill_group` waited out the whole grace -- 10s
     per cancel in CI -- while macOS passed. Both halves are asserted so this
     fails for the real reason on either platform."""
-    task = asyncio.create_task(run(["sleep", "30"], "s-cancel", group_kill_grace=30.0))
+    # A grace far past any load-stretched cancel: paying it is then unmistakable, and half of
+    # it is the margin (a tight wall-clock bound flaked under parallel load, Kraft-4fi4v).
+    grace = 100.0
+    task = asyncio.create_task(run(["sleep", "30"], "s-cancel", group_kill_grace=grace))
     pid = (await _running(database, "s-cancel"))["pid"]
 
     start = time.monotonic()
     await _cancelled(task)
     elapsed = time.monotonic() - start
 
-    assert elapsed < 15.0, f"cancel paid the grace ({elapsed:.1f}s)"  # healthy <2.1s, bug 30s
+    assert elapsed < grace / 2, f"cancel paid the grace ({elapsed:.1f}s)"
     try:
         leftover = psutil.Process(pid).status()
     except psutil.NoSuchProcess:

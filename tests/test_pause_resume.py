@@ -95,6 +95,9 @@ def test_pause_then_resume_with_a_steer_relaunches_the_task(
 
     wid = _started(client, {"repo": str(repo), "title": "pause me", "chain_template": "quick-task"})
     session = _running_agent(client, wid)
+    # The row reads running before the agent's script has logged its argv; paused
+    # earlier, the first launch logs nothing and the relaunch reads as record 0 (Kraft-tgtn6).
+    _wait(lambda: argvs.exists() and "\x00\n" in argvs.read_text(), "the first launch's argv")
 
     r = client.post(f"/api/work-items/{wid}/pause", json={})
     assert r.status_code == 200
