@@ -45,11 +45,11 @@ below.
 sub-agents. Sub-agents are the default, inline or inside one Kraft item: they
 share the worktree and need no setup or join. A part earns more only when it
 makes sense on its own: a coherent piece with its own tests, which its own
-implement, verify and review loop can check without another part's code. Task
-and line counts are weak hints, not the test; a part of one or two tasks almost
-never qualifies. Parts like that move an inline-classified item to a handoff,
-unless the user said "inline": then keep it inline with sub-agents, and say
-which parts would stand alone. Otherwise:
+implement, verify and review loop can check without another part's code. Size
+is a weak hint, not the test; a part you can describe in one sentence almost
+never qualifies. Parts that stand alone like that move an inline-classified
+item to a handoff, unless the user said "inline": then keep it inline with
+sub-agents, and say which parts would stand alone. Otherwise:
 
 - **Separate work items**, when each part can merge on its own and is a full
   pull request in its own right. One `kraft:handoff` per part, each attaching
