@@ -9,6 +9,7 @@ _Added in 2.1_
 
 ## In this section
 
+- [Split work into slices](/guides/day-to-day/split-work-into-slices): split a large plan into slices that several agents build at once, and follow the join.
 - [The setup wizard on first start](/guides/day-to-day/first-run): connect your first repo with the setup steps the board shows when none is connected.
 - [File a work item](/guides/day-to-day/file-a-work-item): file a work item from the board's composer or the full new-item page.
 - [Use Kraft from your agent](/guides/day-to-day/agent-integration): drive Kraft with `/kraft:*` slash commands from a coding agent.
