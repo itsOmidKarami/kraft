@@ -463,6 +463,8 @@
 /reference/cli/worker#run-the-machines-side: /reference/cli/worker#admin-worker-serve
 /reference/cli/forge#commands: /reference/cli/forge#verbs-at-a-glance
 /reference/cli/forge#add-edit-list-remove-and-test-an-account: /reference/cli/forge#admin-forge-add
+/reference/console#running-work: /reference/console#the-board
+/reference/console#small-windows: /reference/console#open-it
 /reference/cli/admin#verbs-at-a-glance: /reference/cli/server#verbs-at-a-glance
 /reference/web-ui/board#raise-cap-on-a-row: /guides/day-to-day/raise-a-cap#which-stop-offers-what
 /reference/web-ui/board#raise-budget-on-a-row: /guides/day-to-day/raise-a-cap#which-stop-offers-what
