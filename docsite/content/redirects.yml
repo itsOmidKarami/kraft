@@ -192,7 +192,7 @@
 /guides/day-to-day/the-board#library: /reference/web-ui/templates#library
 /guides/day-to-day/the-board#settings: /reference/web-ui/settings
 /guides/day-to-day/the-board#a-repos-fields: /reference/web-ui/settings#a-repos-fields
-/guides/day-to-day/the-board#on-a-phone: /guides/day-to-day/kraft-on-a-phone#the-layout
+/guides/day-to-day/the-board#on-a-phone: /reference/web-ui/on-a-phone#the-layout
 /guides/run/remote-access#on-the-phone: /guides/day-to-day/kraft-on-a-phone
 /guides/the-board#the-first-run: /guides/day-to-day/first-run
 /guides/the-board#the-board: /reference/web-ui/board
@@ -218,7 +218,7 @@
 /guides/the-board#library: /reference/web-ui/templates#library
 /guides/the-board#settings: /reference/web-ui/settings
 /guides/the-board#a-repos-fields: /reference/web-ui/settings#a-repos-fields
-/guides/the-board#on-a-phone: /guides/day-to-day/kraft-on-a-phone#the-layout
+/guides/the-board#on-a-phone: /reference/web-ui/on-a-phone#the-layout
 /guides/remote-access#on-the-phone: /guides/day-to-day/kraft-on-a-phone
 
 /guides/kraft-lite#reading-the-yaml: /reference/kraft-lite#reading-the-yaml
@@ -420,7 +420,14 @@
 /reference/cli/admin#verb-details: /reference/cli/admin#run-the-server
 /reference/web-ui/board#raise-cap-on-a-row: /guides/day-to-day/raise-a-cap#which-stop-offers-what
 /reference/web-ui/board#raise-budget-on-a-row: /guides/day-to-day/raise-a-cap#which-stop-offers-what
-/guides/day-to-day/kraft-on-a-phone#on-a-phone: /guides/day-to-day/kraft-on-a-phone#the-layout
+/guides/day-to-day/kraft-on-a-phone#on-a-phone: /reference/web-ui/on-a-phone#the-layout
+/guides/day-to-day/kraft-on-a-phone#the-layout: /reference/web-ui/on-a-phone#the-layout
+/guides/day-to-day/kraft-on-a-phone#the-board-on-a-phone: /reference/web-ui/on-a-phone#the-board-on-a-phone
+/guides/day-to-day/kraft-on-a-phone#an-item-on-a-phone: /reference/web-ui/on-a-phone#an-item-on-a-phone
+/guides/day-to-day/kraft-on-a-phone#sub-agents: /reference/web-ui/on-a-phone#sub-agents
+/guides/day-to-day/kraft-on-a-phone#the-bar-on-a-stopped-item: /reference/web-ui/on-a-phone#the-bar-on-a-stopped-item
+/guides/day-to-day/kraft-on-a-phone#approve-a-one-off-chain: /reference/web-ui/on-a-phone#approve-a-one-off-chain
+/guides/day-to-day/kraft-on-a-phone#forge-accounts: /reference/web-ui/on-a-phone#forge-accounts
 /guides/day-to-day/kraft-on-a-phone#on-the-phone: /guides/day-to-day/kraft-on-a-phone
 /guides/day-to-day/agent-integration#without-the-kraft-server: /guides/day-to-day/agent-integration#next-steps
 /guides/day-to-day/vscode#version-compatibility: /reference/vscode-extension#if-the-extension-is-read-only
