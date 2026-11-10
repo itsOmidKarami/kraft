@@ -429,6 +429,27 @@ describe("the node screen (D)", () => {
     expect(screen.queryByRole("button", { name: "Read the note" })).toBeNull();
   });
 
+  // A gate's one ended round: the decision and the note show with no row of rounds, and the subtitle says what it came to.
+  const sentBack = { gate_rounds: { plan_approval: [round(1, { outcome: "rejected", by: "human", note: "Cover the cache story.", sent_to: "plan" })] } };
+  it("a gate with one rejected round shows the decision card and its note", async () => {
+    mount(item("running", null, sentBack), "/work-items/w1/nodes/plan_approval");
+    const card = await screen.findByLabelText("Round 1");
+    expect(card).toHaveTextContent("changes requested · you");
+    expect(card).toHaveTextContent("Cover the cache story.");
+    expect(screen.queryByRole("group", { name: "Rounds of this gate" })).toBeNull();
+  });
+
+  it("a gate with one rejected round has a subtitle that says what it came to", async () => {
+    mount(item("running", null, sentBack), "/work-items/w1/nodes/plan_approval");
+    expect(await screen.findAllByText("gate · changes requested · you")).toHaveLength(2);
+  });
+
+  it("a gate whose only round is pending shows no decision card", async () => {
+    mount(item("needs_you", stop("gate", { node: "plan_approval" }), { current_node_id: "plan_approval", pending_gate: "plan_approval", worker_sessions: [], gate_rounds: { plan_approval: [round(1, { outcome: "pending", by: null, ended_at: null })] } }), "/work-items/w1/nodes/plan_approval");
+    await screen.findAllByText("gate · waiting for you", { exact: false });
+    expect(screen.queryByLabelText("Round 1")).toBeNull();
+  });
+
   it("a gate with one round has no row of rounds", async () => {
     mount(item("running", null, { gate_rounds: { plan_approval: [round(1)] } }), "/work-items/w1/nodes/plan_approval");
     await screen.findByRole("heading", { level: 1, name: "plan_approval" });

@@ -18,7 +18,7 @@ import { LogLines } from "../log/LogLines";
 import { useLogs } from "../log/useLogs";
 import { PauseSheet } from "../item/PauseSheet";
 import { useDo } from "../item/useDo";
-import { byWord, gateState, noteDoc, outcomeWord, roundShown, roundsOf } from "../../item/gateRounds";
+import { byWord, gateState, newestOutcome, noteDoc, outcomeWord, roundShown, roundsOf } from "../../item/gateRounds";
 import { nodeSub } from "../item/model";
 import { ConfirmSheet, ReadSheet, useSheet } from "../nav/Sheet";
 import { Markdown } from "../../ui/Markdown";
@@ -69,7 +69,10 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
   const graph = drawnOf(nodes, nodeId)!;
   const gate = api.kind === "gate";
   const kindWords = gate ? "gate" : api.kind === "group" ? "group node" : "exec node";
-  const sub = nodeSub(graph, gate && gateState(item, nodeId).words === "skipped");
+  // A gate sent back says what it came to ("changes requested · you"), as the desktop's pane does; else today's words.
+  const outcome = gate ? newestOutcome(item, nodeId) : undefined;
+  const base = nodeSub(graph, gate && gateState(item, nodeId).words === "skipped");
+  const sub = outcome ? { ...base, text: outcome } : base;
   const tab = (TABS.some((t) => t.id === place.tab) ? place.tab : "overview") as NodeTab;
   const bar = nodeBar(item, api, graph);
   const message = gate ? gateMessage(materialized(item), nodeId) : undefined;
@@ -131,19 +134,23 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
             ))}
           </div>
         )}
-        {gateRounds.length > 1 && round && (tab === "overview" || tab === "log") && (
+        {gate && round && (tab === "overview" || tab === "log") && (
           <>
-            <div className="ph-attempts ph-is-wrap" role="group" aria-label={GATE_ROUNDS}>
-              {gateRounds.map((r) => (
-                <button key={r.n} type="button" className={`ph-attempt${r.n === round.n ? " ph-is-on" : ""}`} aria-pressed={r.n === round.n} onClick={() => setPlace({ pass: r.n === gateRounds.length ? undefined : r.n })}>
-                  round {r.n} · {outcomeWord(r)}
-                </button>
-              ))}
-            </div>
-            <div className="ph-turn" aria-label={`Round ${round.n}`}>
-              <p className="ph-turn-head"><span>{outcomeWord(round)}{byWord(round.by) ? ` · ${byWord(round.by)}` : ""}{round.outcome === "rejected" && round.sent_to ? ` · sent to ${nameOf(item.chain_definition.nodes, round.sent_to)}` : ""}</span></p>
-              {round.note && <NotePreview className="ph-turn-text" note={round.note} buttonClass="ph-linkbtn" onRead={() => sheet.open("round-note")} />}
-            </div>
+            {gateRounds.length > 1 && (
+              <div className="ph-attempts ph-is-wrap" role="group" aria-label={GATE_ROUNDS}>
+                {gateRounds.map((r) => (
+                  <button key={r.n} type="button" className={`ph-attempt${r.n === round.n ? " ph-is-on" : ""}`} aria-pressed={r.n === round.n} onClick={() => setPlace({ pass: r.n === gateRounds.length ? undefined : r.n })}>
+                    round {r.n} · {outcomeWord(r)}
+                  </button>
+                ))}
+              </div>
+            )}
+            {round.outcome !== "pending" && (
+              <div className="ph-turn" aria-label={`Round ${round.n}`}>
+                <p className="ph-turn-head"><span>{outcomeWord(round)}{byWord(round.by) ? ` · ${byWord(round.by)}` : ""}{round.outcome === "rejected" && round.sent_to ? ` · sent to ${nameOf(item.chain_definition.nodes, round.sent_to)}` : ""}</span></p>
+                {round.note && <NotePreview className="ph-turn-text" note={round.note} buttonClass="ph-linkbtn" onRead={() => sheet.open("round-note")} />}
+              </div>
+            )}
           </>
         )}
         {rounds && rounds.rows.length > 1 && (tab === "overview" || tab === "log") && (
