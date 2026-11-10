@@ -36,7 +36,7 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 - **Editing.** The **Templates** screens edit `library.yaml` and `chains/`. **Settings** edits the rest, except `sandbox.yaml`, `detectors.yaml`, `harnesses/` and the add-on files and locks, which no screen edits. Editing any file by hand is equally supported.
 - **Moving it.** `KRAFT_HOME` and `KRAFT_CONFIG_DIR` move the directory; see [Environment variables](/reference/configuration/environment-variables).
 - **Validation.** Kraft validates each file when it loads it, and reports a file that fails with the offending key named. Chain rules such as `extends` and `reject_to` are in [Chain file keys](/reference/chain-nodes).
-- **An old directory.** Before 2.0, the directory was `templates/`; see [Coming from 1.4](/guides/run/coming-from-1-4#config-directory-and-files). A home still in the 0.x template format (a `registry.yaml`, hook names or `gate_after`) is refused until you run `kraft admin update`; see [Migrating a home from 0.x](/guides/run/coming-from-1-4#a-0x-home).
+- **An old directory.** An older home has `templates/` in its place; see [Coming from 1.4](/guides/run/coming-from-1-4#config-directory-and-files). A home still in the 0.x template format (a `registry.yaml`, hook names or `gate_after`) is refused until you run `kraft admin update`; see [Migrating a home from 0.x](/guides/run/coming-from-1-4#a-0x-home).
 
 Three commands check and reload the files:
 
@@ -59,7 +59,7 @@ Three commands check and reload the files:
 - [Repo libraries](/reference/configuration/repo-libraries): a repository's own `.kraft/` library, where it is read from, how a person accepts it, and `repo-libraries.lock`.
 - [update.yaml](/reference/configuration/update): every field in `update.yaml`: automatic updates, restarting when Kraft is free, the channel and the allowed hours.
 - [workers.yaml](/reference/configuration/workers): every field in `workers.yaml`: the machines that may run steps, how each connects, and why one is offline.
-- [forges.yaml](/reference/configuration/forges): every field in `forges.yaml`: the named forge accounts, which one a repo uses, and what isn't there yet.
+- [forges.yaml](/reference/configuration/forges): every field in `forges.yaml`: the named forge accounts, and which one a repo uses.
 
 ## Related
 <!-- not new: the harnesses.yaml link moved here from In this section -->

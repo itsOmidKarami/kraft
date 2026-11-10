@@ -44,6 +44,6 @@ A pending gate isn't a stop: it waits for `kraft item approve ID` or `kraft item
 ## Other places to look
 <!-- not new: the last rows of the Find your problem table -->
 
-- A page that isn't where you left it, or a theme that looks different, after an upgrade from 1.4: [The interface](/guides/run/coming-from-1-4#the-interface) says old addresses still open the right page, and [`palette` is legacy](/reference/configuration/theme#palette-is-legacy) says what became of your theme.
+- A page that isn't where you left it, or a theme that looks different, after an upgrade from 1.4: [The interface](/guides/run/coming-from-1-4#the-interface) says old addresses still open the right page, and [`theme.yaml`](/reference/configuration/theme) says how an old `palette` key loads.
 - A question about [forges](/concepts/vocabulary#forge), [harnesses](/concepts/vocabulary#harness), cost, platforms, specs, sharing chains with add-ons, Kraft Lite or the permission gate: the [FAQ](/get-started/faq).
 - None of these matches: [Getting help](/project/status-and-support#getting-help).

@@ -318,6 +318,8 @@
 /reference/configuration/repos#sandboxed-workers: /reference/configuration/sandbox
 /reference/configuration/repos#waiting-for-several-reviewers: /concepts/how-review-and-ci-waits-settle
 /reference/configuration/repos#sandbox: /reference/configuration/sandbox#the-sandbox-key
+/reference/configuration/forges#what-this-release-doesnt-do-yet: /reference/configuration/forges
+/reference/configuration/theme#palette-is-legacy: /reference/configuration/theme
 /reference/configuration/workers#the-local-worker: /concepts/how-workers-and-machines-behave#the-local-worker
 /reference/configuration/workers#the-machines-own-limit: /concepts/how-workers-and-machines-behave#the-machines-own-limit
 /reference/configuration/workers#groups: /concepts/how-workers-and-machines-behave#groups
@@ -563,7 +565,7 @@
 /guides/run/upgrade-kraft#if-you-used-14s-update-anyway: /guides/run/coming-from-1-4#if-you-used-14s-update-anyway
 /guides/run/upgrade-kraft#what-changed: /guides/run/coming-from-1-4#changes-that-need-action
 /guides/run/upgrade-kraft#where-the-pages-moved: /guides/run/coming-from-1-4#the-interface
-/guides/run/upgrade-kraft#your-theme: /reference/configuration/theme#palette-is-legacy
+/guides/run/upgrade-kraft#your-theme: /reference/configuration/theme
 /guides/run/upgrade-kraft#upgrading-from-a-150-release-candidate: /guides/run/coming-from-1-4#a-150-release-candidate
 /guides/run/upgrade-kraft#upgrading-from-older-releases: /guides/run/coming-from-1-4#from-a-release-candidate-or-0x
 /guides/run/upgrade-kraft#network-access: /guides/run/coming-from-1-4#network-access
@@ -693,7 +695,7 @@
 /guides/day-to-day/first-run#step-3-first-work-item: /guides/day-to-day/first-run#_3-first-work-item
 /reference/configuration#notifyyaml: /reference/configuration/notify
 /reference/configuration#themeyaml: /reference/configuration/theme
-/reference/configuration#palette-is-legacy: /reference/configuration/theme#palette-is-legacy
+/reference/configuration#palette-is-legacy: /reference/configuration/theme
 /reference/configuration/sandbox/callbacks-and-limits: /reference/configuration/sandbox/callbacks
 /reference/configuration/sandbox/callbacks-and-limits#resource-limits: /reference/configuration/sandbox/resource-limits
 /reference/configuration/sandbox/callbacks-and-limits#memory-and-swap: /reference/configuration/sandbox/resource-limits#memory-and-swap
@@ -778,7 +780,7 @@
 /guides/run/upgrade-from-1-4#permission-hooks: /guides/run/coming-from-1-4#the-interface
 /guides/run/upgrade-from-1-4#the-interface: /guides/run/coming-from-1-4#the-interface
 /guides/run/upgrade-from-1-4#where-the-pages-moved: /guides/run/coming-from-1-4#the-interface
-/guides/run/upgrade-from-1-4#your-theme: /reference/configuration/theme#palette-is-legacy
+/guides/run/upgrade-from-1-4#your-theme: /reference/configuration/theme
 /guides/day-to-day/raise-a-cap#which-cap-stopped-the-item: /guides/day-to-day/raise-a-cap#which-stop-offers-what
 /guides/day-to-day/raise-a-cap#raising-a-cap-in-the-interface: /guides/day-to-day/raise-a-cap#which-stop-offers-what
 /guides/day-to-day/raise-a-cap#a-dollar-stop-in-the-interface: /guides/day-to-day/raise-a-cap#which-stop-offers-what
@@ -1038,6 +1040,6 @@
 /reference/changes-from-1-4#permission-hooks: /guides/run/coming-from-1-4#the-interface
 /reference/changes-from-1-4#the-interface: /guides/run/coming-from-1-4#the-interface
 /reference/changes-from-1-4#where-the-pages-moved: /guides/run/coming-from-1-4#the-interface
-/reference/changes-from-1-4#your-theme: /reference/configuration/theme#palette-is-legacy
+/reference/changes-from-1-4#your-theme: /reference/configuration/theme
 /reference/changes-from-1-4#related: /guides/run/coming-from-1-4#next-steps
 /guides/run/upgrade-kraft#roll-back-to-an-earlier-2x-release: /guides/run/back-up-and-restore#roll-back-to-an-earlier-2x-release
