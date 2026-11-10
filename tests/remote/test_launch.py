@@ -69,7 +69,9 @@ async def world(database, run_dirs, item_on, repo):
     await hub.close()
 
 
-def _placed(w, key="w/1", *, can_park=True, resume=False, needs=(), concurrency_group=None):
+def _placed(
+    w, key="w/1", *, can_park=True, resume=False, needs=(), concurrency_group=None, abandon=None
+):
     return launch.placed(
         w.db,
         w.row,
@@ -82,6 +84,7 @@ def _placed(w, key="w/1", *, can_park=True, resume=False, needs=(), concurrency_
         can_park=can_park,
         needs=needs,
         concurrency_group=concurrency_group,
+        abandon=abandon,
     )
 
 
@@ -213,6 +216,50 @@ async def test_a_named_machine_says_what_it_waits_for_and_the_wait_is_not_the_st
     world.hub.release(Claim("a", "other/1"))
     got, refusal, moved = await asyncio.wait_for(waiter, 2)
     assert got.machine == "a" and refusal is None and moved.at > cap.at
+
+
+async def test_an_abandoned_placement_gives_back_what_it_held(world):
+    world.hub.apply(_workers(a={"capacity": 2}, b={"capacity": 2}))
+    world.hub.adopt("a", "other/1", "heavy")
+    world.hub.adopt("b", "other/2", "heavy")
+    local_link.current().take("other/3")  # the local worker is full too
+    gone = {"now": False}
+    waiter = asyncio.create_task(
+        _placed(
+            world, "w/2", can_park=False, concurrency_group="heavy", abandon=lambda: gone["now"]
+        ).__aenter__()
+    )
+    await asyncio.sleep(0.1)
+    assert not waiter.done()
+    gone["now"] = True
+    world.hub.release(Claim("a", "other/1"))  # a slot and the group free in the same step
+    with pytest.raises(protocol.StepAbandoned):
+        await asyncio.wait_for(waiter, 2)
+    assert world.hub.slots_used("a") == 0 and world.reserved == []  # the free slot was not taken
+
+    world.hub.adopt("a", "other/4", "heavy")  # a named machine: `launch.claim` waits in the hub
+    named = asyncio.create_task(
+        launch.claim(
+            world.db,
+            work_item_id=world.row["id"],
+            session_id="s1",
+            node_id="build",
+            hook_point="build.main.t",
+            runner="a",
+            repo_entry=None,
+            time_cap=None,
+            concurrency_group="heavy",
+            abandon=lambda: gone["now"],
+        )
+    )
+    gone["now"] = False
+    await asyncio.sleep(0.7)  # past the hub's 0.5 s poll
+    assert not named.done()
+    gone["now"] = True
+    world.hub.release(Claim("a", "other/4"))
+    with pytest.raises(protocol.StepAbandoned):
+        await asyncio.wait_for(named, 3)
+    assert world.hub.slots_used("a") == 0
 
 
 async def test_run_task_hands_its_test_group_to_the_claim(world, monkeypatch):

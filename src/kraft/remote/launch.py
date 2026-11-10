@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import subprocess
-from collections.abc import AsyncIterator, Collection, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Collection, Mapping, Sequence
 from dataclasses import asdict
 
 from kraft import caps, events, ids, store
@@ -59,11 +59,14 @@ class Placement:
         can_park: bool,
         pin_node: bool = False,
         concurrency_group: str | None = None,
+        abandon: Callable[[], bool] | None = None,
     ) -> None:
         self._db, self._row, self._node_id, self._hook_point = db, row, node_id, hook_point
         self._pin_node = pin_node
         #: A test scope's group: the local worker counts as full while another session runs it.
         self._concurrency_group = concurrency_group
+        #: True once the step is called off (its item is paused): `choose` raises `StepAbandoned`.
+        self._abandon = abandon
         self._group, self._repos, self._key = group, list(repos), session_key
         self._resume, self._can_park = resume, can_park
         self.runner = group
@@ -100,6 +103,8 @@ class Placement:
         try:
             while True:
                 self.wait = self.refusal = None
+                if self._abandon is not None and self._abandon():
+                    raise protocol.StepAbandoned()
                 if await self._try(runs, needs):
                     break
                 if self.refusal or (self._can_park and self.wait):
@@ -257,6 +262,7 @@ async def placed(
     needs: Mapping[str, str] | Collection[str] = frozenset(),
     pin_node: bool = False,
     concurrency_group: str | None = None,
+    abandon: Callable[[], bool] | None = None,
 ) -> AsyncIterator[Placement]:
     """Place a step whose `runner` is a group around its launch, and give back whatever the
     launch did not take over, however it ends. See `Placement`. `pin_node`: a resumed step goes
@@ -264,7 +270,7 @@ async def placed(
     p = Placement(
         db, row, node_id, hook_point, runner, repos,
         session_key=session_key, resume=resume, can_park=can_park, pin_node=pin_node,
-        concurrency_group=concurrency_group,
+        concurrency_group=concurrency_group, abandon=abandon,
     )  # fmt: skip
     try:
         await p.choose(needs)
@@ -298,6 +304,7 @@ async def run_placed(
     attempt,
     pin_node: bool = False,
     concurrency_group: str | None = None,
+    abandon: Callable[[], bool] | None = None,
 ):
     """`await attempt(runner, claim, waited_s)` for a launch that cannot park (an escalation turn,
     a review): placed on a group's member first when `runner` names a group, and placed again
@@ -308,6 +315,7 @@ async def run_placed(
         db, row, node_id, hook_point, runner, repos,
         session_key=ids.session_ref(row["id"], session_id),
         resume=resume, can_park=False, pin_node=pin_node, concurrency_group=concurrency_group,
+        abandon=abandon,
     ) as p:  # fmt: skip
         while True:
             try:
@@ -329,6 +337,7 @@ async def claim(
     held: Claim | None = None,
     hook_point: str = "",
     concurrency_group: str | None = None,
+    abandon: Callable[[], bool] | None = None,
 ):
     """`(claim, refusal, time_cap)`. `held` is a slot `placed` already took and reserved: it is
     returned as it is. A refusal is text for the session's log; a wait is a
@@ -375,6 +384,7 @@ async def claim(
                     pinned=pinned,
                     needs=needs,
                     group=concurrency_group,
+                    abandon=abandon,
                     on_wait=lambda text: _note(db, work_item_id, node_id, hook_point, text),
                 )
             except PlacementRefused as exc:
