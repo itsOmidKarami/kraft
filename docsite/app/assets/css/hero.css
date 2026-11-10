@@ -144,50 +144,43 @@
   color: var(--ui-text-muted);
 }
 
-/* The two-column hero (orientation: horizontal): the pitch on the left and a
-   picture of the product on the right from a laptop up; on a phone the
-   picture follows the buttons, so the first screen isn't all text. Scoped to
-   the orientation so the release docs' older one-column hero is unchanged. */
-.landing-hero[data-orientation='horizontal'] [data-slot='container'] {
-  column-gap: 3rem;
+/* The home page's hero (`landing-home`): a picture of the board follows the
+   buttons, so the first screen shows the product and not only text. The
+   release docs' older hero doesn't carry the class and is unchanged. */
+.landing-home [data-slot='container'] {
+  padding-top: 2rem;
 }
 
-@media (min-width: 1024px) {
-  .landing-hero[data-orientation='horizontal'] [data-slot='container'] {
-    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-    align-items: center;
-  }
-
-  /* Half the width, so a smaller headline keeps it to about five lines. */
-  .landing-hero[data-orientation='horizontal'] [data-slot='title'] {
-    font-size: clamp(2.125rem, 0.5rem + 2.4vw, 3rem);
-  }
+/* A wider measure keeps the long headline to three lines from a laptop up. */
+.landing-home [data-slot='title'] {
+  max-width: 32ch;
 }
 
 /* On a phone the headline and lede are a size smaller and start higher, so
    the board picture after the buttons shows on the first screen. */
 @media (max-width: 639px) {
-  .landing-hero[data-orientation='horizontal'] [data-slot='container'] {
+  .landing-home [data-slot='container'] {
     padding-top: 1.5rem;
   }
 
-  .landing-hero[data-orientation='horizontal'] [data-slot='title'] {
+  .landing-home [data-slot='title'] {
     font-size: 1.75rem;
   }
 
-  .landing-hero[data-orientation='horizontal'] [data-slot='description'] {
+  .landing-home [data-slot='description'] {
     font-size: 1rem;
   }
 }
 
 /* The overview video's link, under the install command. */
-.landing-hero [data-slot='body'] > p {
+.landing-home [data-slot='body'] > p {
   margin-top: 0.75rem;
   font-size: 0.9375rem;
 }
 
-/* One picture per layout: the desktop board beside the pitch, the phone
-   board under it. A hidden lazy image isn't fetched. */
+/* One picture per layout: the whole board from a laptop up, the phone board
+   below that, where the wide one would scroll sideways. A hidden lazy image
+   isn't fetched. */
 .hero-shot--phone {
   max-width: 24rem;
 }

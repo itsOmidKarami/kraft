@@ -23,9 +23,8 @@ links:
     color: neutral
     size: lg
     target: _blank
-orientation: horizontal
 ui:
-  root: landing landing-hero
+  root: landing landing-hero landing-home
   title: hero-mono
 ---
 
@@ -40,10 +39,11 @@ uv tool install kraft-sdlc && kraft
 :::landing-shot{.hero-shot .hero-shot--wide}
 ---
 src: /assets/board.png
-alt: 'The Kraft board: seven work items under Needs you, each with its reason and one button such as Review, Retry, Raise cap or Answer'
-crop: 210 0 1230 560
+alt: 'The Kraft board: work items grouped by status with Needs you first, each with one button such as Review, Retry or Raise cap, and Running below'
+crop: 210 0 1230 688
 width: 1440
 ---
+**The board.** Work items grouped by what needs you, what is running, and what is done, redrawn live as agents work. [Tour the web UI](/reference/web-ui/board)
 :::
 
 :::landing-shot{.hero-shot .hero-shot--phone}
@@ -53,6 +53,7 @@ alt: 'The Kraft board on a phone: Needs you first, with an item waiting at appro
 crop: 0 0 390 400
 width: 390
 ---
+**The board.** Work items grouped by what needs you, what is running, and what is done, redrawn live as agents work. [Tour the web UI](/reference/web-ui/board)
 :::
 ::
 
@@ -73,28 +74,6 @@ Three things set it apart:
 - **A person at the decisions that matter.** A gate stops the chain until a decision is recorded, and an agent's own calls to decide its gate are refused. Only a sandbox with a `network:` policy keeps an agent from deciding its own gates; no sandbox is set by default, and an unsandboxed agent runs as you. [Security](/project/security-in-depth#agents-and-gates) has the scope.
 
 It's for developers tired of babysitting a session. [When not to use Kraft](/get-started/why-kraft#when-not-to-use-kraft) says who it isn't for.
-::
-
-::u-page-section
----
-title: The board
-description: Work items grouped by what needs you, what is running, and what is done, redrawn live as agents work.
-links:
-  - label: Tour the web UI
-    to: /reference/web-ui/board
-    color: neutral
-    variant: outline
-ui:
-  root: landing
----
-:::landing-shot
----
-src: /assets/board.png
-alt: 'The Kraft board: work items grouped by status with Needs you first, each with one button such as Review, Retry or Raise cap, and Running below'
-crop: 210 0 1230 688
-width: 1440
----
-:::
 ::
 
 ::u-page-section
