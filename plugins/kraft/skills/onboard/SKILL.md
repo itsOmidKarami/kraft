@@ -48,12 +48,13 @@ and stop - `kraft admin start --detach` (or the service) comes first.
 
    `ensure_repo` saves as soon as it is called. With Kraft's own proposal the
    repo is saved enabled when it found a test command (disabled when it found
-   none), so the person sees those commands only through you.
-   Commands you pass save it disabled (the answer's `held` says so): they run
-   for every work item, so you cannot file work on it until the person has
-   read them in Settings › Repos and enabled it there. Either way, show them what was saved, each command with
-   its source, and the candidates it passed over, then ask them to confirm
-   or correct it before the first work item. Say which you chose and why.
+   none), so the person sees those commands only through you. Commands you pass
+   save it disabled (the answer's `held` says so): they run for every work item,
+   so you cannot file work on it until the person has read them in Settings ›
+   Repos and enabled it there. Either way, show them what was saved, each
+   command with its source, and the candidates it passed over, then ask them to
+   confirm or correct it before the first work item. Say which you chose and
+   why.
 
    An empty command means "deliberately nothing", not an oversight:
    - A repo with nothing to prepare declares `setup_command: ""`. A repo with no
@@ -143,20 +144,21 @@ and stop - `kraft admin start --detach` (or the service) comes first.
    Do not put a directory or a glob in `local_files`; it takes literal file
    paths, and the list is validated on load.
 
-4. **Narrow the tests (only with a test-selection tool).** Verification runs a scope's `command`, normally the
-   whole suite, in its first round and in every repair round. A repo whose
-   tooling can pick the tests a change affects can let verification run only
-   those, and leave the full suite to the merge request's CI.
+4. **Narrow the tests (only with a test-selection tool).** Verification runs a
+   scope's `command`, normally the whole suite, in its first round and in every
+   repair round. A repo whose tooling can pick the tests a change affects can
+   let verification run only those, and leave the full suite to the merge
+   request's CI.
 
    - **Find the tool.** Look for what the repo already uses to pick tests:
      pytest-testmon, `jest --findRelatedTests`, `nx affected`, Go's package
      graph, Bazel. For each test scope, propose a `targeted_command` beside its
      `command`, as YAML for the person to save in Settings › Repos: it's a
-     command, so it's theirs, and so is `carry`. Kraft gives it `KRAFT_TEST_BASE` (the branch's base commit) and
-     `KRAFT_CHANGED_FILES` (the path of a file listing the changed paths, one
-     per line). It must run more, never less, when it cannot see a change: a
-     YAML or a generated file is invisible to testmon, so the command runs the
-     full suite for one.
+     command, so it's theirs, and so is `carry`. Kraft gives it
+     `KRAFT_TEST_BASE` (the branch's base commit) and `KRAFT_CHANGED_FILES` (the
+     path of a file listing the changed paths, one per line). It must run more,
+     never less, when it cannot see a change: a YAML or a generated file is
+     invisible to testmon, so the command runs the full suite for one.
    - **`carry`.** Only for a tool whose state lives in files: testmon's
      `.testmondata` and `.testmondata-wal` (a single-process run leaves the
      WAL, an xdist run does not). Only state that is safe when stale: the tool
@@ -191,10 +193,11 @@ and stop - `kraft admin start --detach` (or the service) comes first.
      a scratch worktree.
    - **No such tool:** say so, and leave both fields out.
 
-   Once they've saved it, finish with `kraft repo connect --verify`. It seeds the carried files as a
-   work item would, runs the targeted command against the changes of `HEAD^1`
-   (a repo with a single commit skips that run and says so), and lists each
-   carried file with where it came from and whether git ignores it.
+   Once they've saved it, finish with `kraft repo connect --verify`. It seeds
+   the carried files as a work item would, runs the targeted command against the
+   changes of `HEAD^1` (a repo with a single commit skips that run and says so),
+   and lists each carried file with where it came from and whether git ignores
+   it.
 
 5. **Verify.** Run `kraft admin doctor` - confirm `mcp server` and the
    `repo <name>` row both read `ok`. If either doesn't, stop and report the

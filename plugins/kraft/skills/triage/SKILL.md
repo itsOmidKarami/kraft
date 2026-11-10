@@ -41,7 +41,7 @@ attempts on the same failing test, so it is a failed task: retry with a steer."
 | `stuck:` or `judge:` | `escalate_work_item(message=...)` (CLI `kraft item escalate ID --message`), or `retry` with a steer |
 | An agent asked a question | `resume_work_item(steer=<the answer>)` (CLI `kraft item resume ID --steer`) |
 | Dollar cap | a person raises it: `raise_budget` (CLI `kraft item raise-budget`) raises it and retries |
-| Time cap | a person raises it: `set_work_item_policy(policy={"time_cap_minutes": N})` (CLI `kraft item set-policy ID --policy time_cap_minutes=N`), then `retry` |
+| Time cap | a person raises it: `set_work_item_policy(policy={"time_cap_minutes": N})` (CLI `kraft item set-policy ID --policy time_cap_minutes=N`), then `retry`. The call replaces the item's whole override, so send its existing `policy_override` fields too. A total time cap is `total_time_cap_minutes` |
 | `rate_limit retries exhausted` | wait for the limit to reset, then `retry` |
 | Config or install problem (missing skill, unresolved chain) | `kraft:check`, or `kraft:doctor` if the server itself is unwell |
 | Anything else (a conflict, a closed merge request, a forge login) | the reason's entry at https://kraft-sdlc.dev/troubleshooting/why-did-my-item-stop |

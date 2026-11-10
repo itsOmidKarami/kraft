@@ -45,9 +45,9 @@ A rejection needs a note, and the note is an instruction for whoever redoes the
 work. Draft it as one. When the reasons are about specific lines, draft them as
 review threads instead (`add_review_comment`, one per finding, labelled
 `must_fix`, `question` or `nit`; nothing is sent yet) and, once the person
-agrees (step 3), send them with `submit_review(outcome="request_changes")`: each thread is answered and
-resolved on its own, and a later review can check which ones held up. See
-`kraft:gates`.
+agrees (step 3), send them with `submit_review(outcome="request_changes")`: each
+thread is answered and resolved on its own, and a later review can check which
+ones held up. See `kraft:gates`.
 
 ## 3. Ask, then act
 

@@ -65,11 +65,12 @@ Kraft copies an attached document at intake, so editing your file afterwards
 changes nothing. To revise one before the item starts, `kraft:steer` re-attaches
 it rather than filing again.
 
-Before attaching a plan, skim it for a full-test-suite step (e.g. "run the
-full test suite" / "run all tests" as a task, not a task's own targeted test).
-The chain's verification node already runs the repo's tests after
-implementation, with its own fix loop, so a plan step doing the same is redundant. If you see one, mention
-to the user that it's not advised and offer to strip it before attaching.
+Before attaching a plan, skim it for a full-test-suite step (e.g. "run the full
+test suite" / "run all tests" as a task, not a task's own targeted test). The
+chain's verification node already runs the repo's tests after implementation,
+with its own fix loop, so a plan step doing the same is redundant. If you see
+one, mention to the user that it's not advised and offer to strip it before
+attaching.
 
 ## Confirm it landed
 

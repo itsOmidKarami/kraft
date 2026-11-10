@@ -12,9 +12,10 @@ it should run.
 
 Before writing one, `search(q)` for the area: the decision may already be in
 another repo's spec or plan (`kraft:board` says how). Then run a spec skill -
-default `superpowers:brainstorming` - unless the user named a different one. If the skill isn't installed, say so and ask which to use instead.
-Its own review and approval (brainstorming's builder check and approval gate)
-cover "review the spec"; don't add a second review pass on top of it.
+default `superpowers:brainstorming` - unless the user named a different one. If
+the skill isn't installed, say so and ask which to use instead. Its own review
+and approval (brainstorming's builder check and approval gate) cover "review the
+spec"; don't add a second review pass on top of it.
 
 Stop when the spec is approved. If the spec skill then hands on to a plan
 skill (brainstorming invokes `superpowers:writing-plans`), don't follow it:
@@ -88,15 +89,15 @@ today is still good in two days, a plan might not be - so don't produce one
 speculatively.
 
 If asked, run a plan skill - default `superpowers:writing-plans` - with its own
-review gate. On a handoff, skip its execution-method question and its
-hand-on: the plan is attached, not executed here. Re-run the judgement above
-with the plan in hand (it sharpens the same inline/handoff call - e.g. a plan
-that turns out to be one small task can move a project-sized spec to inline),
-and attach the plan alongside the spec if handing off. If the parts are slices, end the plan with a `## Slices`
-section, one bullet per slice (`- **Slice 1: Parser.** Tasks 1-3.`), nothing
-but task numbers after "Tasks", two to six slices by default. A slice can't use
-another's work, a task belongs to one slice at most, and tasks two slices share
-stay outside every slice: Kraft builds those first.
+review gate. On a handoff, skip its execution-method question and its hand-on:
+the plan is attached, not executed here. Re-run the judgement above with the
+plan in hand (it sharpens the same inline/handoff call - e.g. a plan that turns
+out to be one small task can move a project-sized spec to inline), and attach
+the plan alongside the spec if handing off. If the parts are slices, end the
+plan with a `## Slices` section, one bullet per slice (`- **Slice 1: Parser.**
+Tasks 1-3.`), nothing but task numbers after "Tasks", two to six slices by
+default. A slice can't use another's work, a task belongs to one slice at most,
+and tasks two slices share stay outside every slice: Kraft builds those first.
 
 **Do not put a full-test-suite run in the plan.** A plan headed for Kraft runs
 under a chain whose verification node already runs the suite (and local review)
