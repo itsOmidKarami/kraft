@@ -55,8 +55,8 @@
         </aside>
         <h2>
             <span class="text">514 statements &nbsp;</span>
-            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">478<span class="text"> run</span></button>
-            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">36<span class="text"> missing</span></button>
+            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">480<span class="text"> run</span></button>
+            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">34<span class="text"> missing</span></button>
             <button type="button" class="exc show_exc button_toggle_exc" value="exc" data-shortcut="x" title="Toggle lines excluded">3<span class="text"> excluded</span></button>
         </h2>
         <p class="text">
@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_fa5ad71588b883ea_manifest_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.2">coverage.py v7.17.2</a>,
-            created at 2026-11-10 22:33 +0000
+            created at 2026-11-10 22:48 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -541,8 +541,8 @@
     <p class="run"><span class="n"><a id="t459" href="#t459">459</a></span><span class="t">    <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t460" href="#t460">460</a></span><span class="t">        <span class="nam">lock</span> <span class="op">=</span> <span class="nam">RepoLibrariesLock</span><span class="op">.</span><span class="nam">load</span><span class="op">(</span><span class="nam">config_dir</span> <span class="op">/</span> <span class="nam">RepoLibrariesLock</span><span class="op">.</span><span class="nam">FILE</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t461" href="#t461">461</a></span><span class="t">        <span class="nam">entries</span> <span class="op">=</span> <span class="nam">read_yaml</span><span class="op">(</span><span class="nam">config_dir</span> <span class="op">/</span> <span class="str">&quot;repos.yaml&quot;</span><span class="op">,</span> <span class="op">{</span><span class="op">}</span><span class="op">)</span><span class="op">.</span><span class="nam">get</span><span class="op">(</span><span class="str">&quot;repos&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t462" href="#t462">462</a></span><span class="t">    <span class="key">except</span> <span class="nam">ConfigError</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t463" href="#t463">463</a></span><span class="t">        <span class="key">return</span> <span class="op">[</span><span class="op">]</span>  <span class="com"># `config_problem`, or repos.yaml&#x27;s own check, says why</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t462" href="#t462">462</a></span><span class="t">    <span class="key">except</span> <span class="nam">ConfigError</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t463" href="#t463">463</a></span><span class="t">        <span class="key">return</span> <span class="op">[</span><span class="op">]</span>  <span class="com"># `config_problem`, or repos.yaml&#x27;s own check, says why</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t464" href="#t464">464</a></span><span class="t">    <span class="nam">connected</span> <span class="op">=</span> <span class="op">{</span><span class="nam">e</span><span class="op">.</span><span class="nam">get</span><span class="op">(</span><span class="str">&quot;id&quot;</span><span class="op">)</span> <span class="key">for</span> <span class="nam">e</span> <span class="key">in</span> <span class="nam">entries</span> <span class="key">or</span> <span class="op">(</span><span class="op">)</span> <span class="key">if</span> <span class="nam">isinstance</span><span class="op">(</span><span class="nam">e</span><span class="op">,</span> <span class="nam">dict</span><span class="op">)</span><span class="op">}</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t465" href="#t465">465</a></span><span class="t">    <span class="nam">out</span> <span class="op">=</span> <span class="op">[</span><span class="op">]</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t466" href="#t466">466</a></span><span class="t">    <span class="key">for</span> <span class="nam">repo_id</span><span class="op">,</span> <span class="nam">locked</span> <span class="key">in</span> <span class="nam">lock</span><span class="op">.</span><span class="nam">repos</span><span class="op">.</span><span class="nam">items</span><span class="op">(</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
@@ -1174,7 +1174,7 @@
             <a class="nav" href="z_fa5ad71588b883ea_manifest_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.2">coverage.py v7.17.2</a>,
-            created at 2026-11-10 22:33 +0000
+            created at 2026-11-10 22:48 +0000
         </p>
     </div>
 </footer>
