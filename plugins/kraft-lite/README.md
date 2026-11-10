@@ -7,7 +7,7 @@ Run a Kraft chain inside your coding-agent session, with no server to start. [Kr
 | | Pick it when |
 |---|---|
 | **Kraft Lite** | You want the chain's order, gates and caps in the session you are already in, with nothing to install but a plugin. |
-| **[Kraft](https://kraft-sdlc.dev/)** | Work should run while you are away, wait on CI, stay under a spend cap, or show on a web board. |
+| **[Kraft](https://kraft-sdlc.dev/)** | Work should run while you are away, wait on CI, stay under a spend cap, show on a web board or be searched across repos. |
 
 Both read the same chain files.
 
