@@ -116,66 +116,9 @@ A recovery that concludes no repair can help reports `failed` with a
 | `auto_review` | mapping | none | An agent task that may report a verdict first. It takes no `fallback`, and may `extends` a library task. See [Add a security review or a gate reviewer](/guides/customize/add-review-agents). |
 | `auto_review_mode` | string | `decides` | What the `auto_review` verdict may do: `decides` (approve, reject or fix) or `checks_first` (reject, or hand the gate to you; never approve). Does nothing on a gate with no `auto_review`. See [What the reviewer can decide](/guides/customize/add-review-agents#what-the-reviewer-can-decide). _Added in 2.5_ |
 | `runner` | string | unset | Where the gate's automated review runs: a machine or a [group](/reference/configuration/workers#groups) from [`workers.yaml`](/reference/configuration/workers), `any`, or `local`. See [Placing a step on a machine](/reference/configuration/library-and-chains#placing-a-step-on-a-machine). _Added in 2.4_ |
-| `chain_finalized` | boolean | `false` | `true` marks the final review. A `chain_finalized` gate always requires its document, whether or not it sets `artifact_required`. Its approval decides what a later `mr.merge` may merge: see [What the final review approves](#what-the-final-review-approves). |
+| `chain_finalized` | boolean | `false` | `true` marks the final review. A `chain_finalized` gate always requires its document, whether or not it sets `artifact_required`. Its approval decides what a later `mr.merge` may merge: see [What the final review approves](/reference/chain-nodes/final-review-approval). |
 
 A gate takes no `icon`.
-
-### What the final review approves
-
-_Added in 2.3_
-
-Approving the chain's first `chain_finalized` gate records the branch tip it
-approves, in every checkout a merge could push: the item's own, and each
-workspace member not merged yet. Skipping that gate records the tips it passes
-the same way. They are on the `gate_approved` (or `node_skipped`) event, as
-`tips`.
-
-The approval names the head you were shown. The item page serves it as
-`review_head` (`kraft view show` prints it as `head`), and `kraft item approve
---head`, `kraft item skip --head` and `kraft item review ... approve --head`
-send it back. Without it the approval is refused with a `409`, and so is one
-whose head is no longer the branch's: look again.
-
-The web UI sends the head of the diff it showed.
-
-Right before an `mr.merge` task asks the forge to merge, or to queue the merge
-request again after a merge train's own runners failed, it reads the tip it
-would push. When that isn't the approved one, it merges nothing and pushes
-nothing, records `merge_refused_unreviewed`, and the item stops for you:
-
-- On a node with [on_merge_rejected](#on_merge_rejected), Kraft holds the item
-  at `restart_from`, with the gates from there to the merge reopened.
-- On any other node, it holds the item at the `chain_finalized` gate,
-  reopened.
-
-A retry from there walks back through the final review, which sees the new
-code. This holds whatever changed the branch: an agent, an escalation, a
-commit of yours, or anything else.
-
-The merge call names the head too (`gh pr merge --match-head-commit`, `glab mr
-merge --sha`), so the forge itself refuses any other head, however long after
-the call it would have merged. A commit that reaches the merge request on the
-forge is held the same way, with `merge_refused_unreviewed`.
-
-If the commit landed before Kraft pushed, or the forge refuses the head, Kraft
-fetches it into the item's branch when that is a fast-forward and the worktree
-is clean (never for an in-place item). The reopened final review then shows it.
-
-A merge still open when Kraft finds the forge's head moved is cancelled first.
-One that has already landed can't be undone: the item stops for you with
-`merge_landed_unreviewed`, and `kraft item complete` or `kraft item skip` on the
-merge node ends the stop.
-
-Kraft's own changes to the approved head carry the approval over, recorded as
-`reviewed_head_repinned`: a rebase onto the base branch that needs no conflict
-resolved, with no agent involved (the merge's own forced rebase, an
-`mr_rebase` task, the rebase on approval, resume or retry), and a workspace
-root's commit that points it at its merged members. A rebase that needed a
-conflict resolved, or that rebased a head nobody approved, carries nothing
-over.
-
-An item whose final gate was approved before this check existed, or whose
-chain has no `chain_finalized` gate, merges without it.
 
 ## on_base_changed
 
@@ -230,9 +173,8 @@ with an `mr.merge` task in its own steps. The shipped `default` chain sets it on
 When the forge's merge train or merge queue drops the merge request after Kraft
 asked for the merge, Kraft repairs the branch, then re-runs the exec nodes from
 `restart_from` through this node: the [span](/concepts/vocabulary#span). Every
-approved gate in that range reopens, and needs approving again. In the shipped
-chain that is `final_review`, so you see the repaired code before it goes back
-onto the train.
+approved gate in that range reopens. See
+[Merge queue and train drops](/reference/chain-nodes/merge-queue-drops).
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
@@ -272,124 +214,12 @@ marks the plan or every step:
           extends: repair_merge_queue_failure
 ```
 
-If a read_only handler changes the worktree all the same, the item stops with
-`read_only_violated`, held at `restart_from` with the span's gates reopened, so
-no retry merges the change unseen.
-
-**Escalation.** A commit made while the item is stopped on this node is never
-merged in place, whether its `escalation` task made it or an escalation agent
-did, Kraft's automatic one or one you sent. Kraft holds the item at
-`restart_from` with the span's gates reopened, the way it does after a
-repair's commit.
-
-A successful `escalation` task that committed rewinds the chain there, under
-the same cap, instead of re-running the node; one that changed nothing re-runs
-it. A tip Kraft can't read, before the escalation or after it, counts as a
-change. An escalation agent's own `kraft item retry` of this node, or of any
-node after `restart_from`, restarts at `restart_from`; one it names at or
-before `restart_from` already passes the gates again, and runs as named.
-
 An `on_base_changed` on this node, or on any node with an `mr.merge` task after
 the `chain_finalized` gate, must restart before that gate: a conflict
 resolution would otherwise be merged unseen.
 
-Without `on_merge_rejected`, a drop stops the item at once, with the forge's
-reason in the stop, even when the drop comes on the re-measure after the
-node's `on_failure`. No `on_failure` or fix loop on the node runs for it, and
-no escalation agent is sent to the stop: Kraft never re-queues a merge request
-on its own.
-
-### Merge trains and merge queues
-
-A **GitLab merge train** or **GitHub merge queue** doesn't merge a merge
-request when asked. It queues it, then runs a further pipeline on the merge
-request combined with the target branch and everything ahead of it. That
-pipeline can fail after the merge request's own pipeline went green, because the
-target moved or because it runs tests the merge request pipeline doesn't.
-
-**Detection.** Kraft reads from the forge, each time the `merge` node runs,
-whether the target branch merges through a train or queue. There is no setting
-to turn on. A repository without one waits for the merge exactly as before.
-
-- GitLab: the project must have both `merge_trains_enabled` and
-  `merge_pipelines_enabled`. A project that doesn't report them, or a read the
-  forge refuses (403 or 404), counts as having no train.
-- GitLab, queueing: on a train project Kraft adds the merge request through the
-  merge-train API with the reviewed commit's sha, so it never merges a head
-  nobody reviewed. Only when the project read says there is no train does Kraft
-  merge with `glab mr merge`.
-- GitLab, a failed project read: a read that fails any other way, such as a 5xx,
-  a timeout or an answer that isn't the project, fails the merge as a failed
-  `glab mr merge` would. On GitLab before 19.1 `glab mr merge` can merge
-  without going through the train.
-- GitHub: the target branch has a merge queue. Kraft blames only a failed
-  merge-group run created after the merge request's latest enqueue, so a failure
-  from an earlier drop is never held against the current head. When there is
-  no such run, for example because the checks don't run on GitHub Actions, a
-  removal reason that names failed or timed-out checks or CI counts as `code`,
-  and that reason is what the repair is given.
-
-A read of the train or queue that fails says nothing about the merge, so Kraft
-keeps waiting and notes it in the log. A drop is noticed on the next poll of the
-merge wait. When the forge hasn't yet written why (no GitLab system note, no
-GitHub removal event for this entry), Kraft keeps waiting and reads it again on
-the next poll, up to the merge wait's own timeout.
-
-**The drop.** Each drop is recorded as a `merge_queue_dropped` event with its
-cause, the forge's reason, the failed jobs and the head. See the
-[events](/reference/events). The cause is one of five:
-
-| Cause | What it means | What Kraft does |
-|---|---|---|
-| `code` | The train or queue jobs failed. | Rebases the branch onto the target as it is now, hands the failed jobs and their log tails to the `repair`, then restarts. |
-| `conflict` | The merge request no longer merges cleanly with the target. | Rebases the branch. A clean rebase restarts with no agent. A rebase that conflicts goes to the `repair` to resolve, then Kraft restarts. |
-| `not_added` | GitLab only: the merge request never reached the train, because its own checks failed while it waited to be added. | Treated as `code`. |
-| `infra` | The train or queue's own runners failed. | Asks the forge to queue the same head again, with no agent and no restart, up to 2 times. Then it stops for you. |
-| `other` | A person took it off the train or queue, or the forge's reason can't be read. | Stops for you. Kraft never re-queues what a person removed, and no repair, recovery or escalation agent runs for it. |
-
-**The restart.** After the repair commits, or after a clean conflict rebase,
-Kraft reopens the approved gates in the span, gives the span's fix loops a
-fresh count and re-runs from `restart_from`. The head goes through the merge
-request's pipeline and your final review again, and is then queued again.
-
-The next agent is told why in a note. The review brief opens with a "Merge
-train/queue rejection" section giving the cause, the reason, the failed jobs and
-what the repair changed.
-
-**What stops the item.** The repair must commit: a head the train already
-rejected would only be rejected again, so a repair that commits nothing, fails
-or asks a question stops for you.
-
-When a repair had already committed before it
-stopped, whether it asked, failed, was paused or ran out of budget, the item is
-held at `restart_from` with the span's gates reopened. A commit counts on the
-item's branch in its own checkout or in any workspace member still to merge,
-not only in the one whose merge request was dropped.
-
-A repair that stopped before committing leaves the item on the merge node.
-Whatever brings it back there, a resume, the rate-limit retry or your
-`kraft item retry`, runs the repair again, with your steer, and never queues
-the head the train rejected.
-
-Only a retry from the chain's `chain_finalized` gate (or, with none, the last
-gate before the merge node), or from a node before it, goes through that gate
-and then queues the head again. A retry from a node after it, a later gate
-included, repairs again.
-
-The same goes for a Kraft restart while the repair works or the restart is
-under way: if a repair had started or the branch moved, the resume holds the
-item there and stops for you. A retry then walks back through `final_review`,
-and the commit is never merged unseen.
-
-**The cap.** Rewinds are counted under `<node>.on_merge_rejected`: 3 attempts
-over 7 days unless `policy.yaml` names that key under `loops:`. See
-[Loop keys](/reference/configuration/policy#loop-keys). Kraft checks it before
-the repair agent runs, and at the cap the item stops with the kind `cap`,
-without running an agent. A retry from a person resets it.
-
-**Skipping a node.** When `kraft item create --skip-nodes` skips the node that
-`restart_from` names, it moves to the nearest earlier exec node that is kept. If
-none is left, the policy is dropped.
+For the causes of a drop, the restart, the cap and what the escalation does,
+see [Merge queue and train drops](/reference/chain-nodes/merge-queue-drops).
 
 ## Step keys
 
@@ -727,3 +557,5 @@ Every task, step and node has a canonical path, for example
 - [Subprocess tasks](/reference/chain-nodes/subprocess-tasks): what Kraft passes a command, and how its exit code becomes a status.
 - [Fix loop and judge](/reference/chain-nodes/fix-loop): when a fix loop opens, what each cycle does, and what the judge's verdicts mean.
 - [Result file](/reference/chain-nodes/result-file): the JSON a task writes at `$KRAFT_RESULT_PATH`, field by field.
+- [Merge queue and train drops](/reference/chain-nodes/merge-queue-drops): how Kraft detects a drop, what each cause does, and when the item stops.
+- [What the final review approves](/reference/chain-nodes/final-review-approval): the head an approval pins and what `mr.merge` may merge.

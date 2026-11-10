@@ -487,6 +487,8 @@
 /reference/triggers#pre-20-triggers-with-a-bad-cron: /reference/triggers#when-a-schedule-fires
 /reference/triggers#an-intakeyaml-with-a-cron-kraft-cant-run: /reference/configuration/intake#when-the-file-doesnt-load
 /reference/chain-nodes#other-task-kinds: /reference/chain-nodes#subprocess-task-keys
+/reference/chain-nodes#what-the-final-review-approves: /reference/chain-nodes/final-review-approval
+/reference/chain-nodes#merge-trains-and-merge-queues: /reference/chain-nodes/merge-queue-drops
 /reference/chain-nodes/result-file#example: /reference/chain-nodes/result-file#examples
 /guides/customize/write-your-own-chain#verify: /guides/customize/write-your-own-chain#check-it-worked
 /guides/customize/write-your-own-chain#how-the-lint-node-runs: /guides/customize/write-your-own-chain#_1-add-the-tasks-to-the-library
