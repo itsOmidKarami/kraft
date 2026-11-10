@@ -91,10 +91,11 @@ where they name one, not the strongest by default). Run each task by its `kind`:
 - `subprocess` - run `command` as an argument list, without a shell; show its output.
 - `skip` - run nothing; say the task was skipped, and its `why`.
 
-A step with `read_only: true`, or any step of a node whose `read_only` is true,
-changes nothing: write, edit and commit nothing, run no test or command that
-writes, leave no file behind. Kraft Lite does not check this: the rule is yours
-to keep.
+A step with `read_only: true`, or any step in `steps` when the node's own
+`read_only` is true, changes nothing: write, edit and commit nothing, run no
+test or command that writes, leave no file behind. The node's flag doesn't reach
+its `on_failure` or `fix_loop` steps, which repair. Kraft Lite does not check
+this: the rule is yours to keep.
 
 After a task with `produces`, record the file it wrote before anything else:
 `KL produced --kind <produces> --path <file>`, `<file>` being the absolute path
