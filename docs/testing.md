@@ -260,14 +260,15 @@ when `NEW` doesn't collect.
   `.md`, `fixtures/fake-claude.sh`, the `tests/support/` files no test
   imports (the sample repo, the fake agents and reviewer, the non-Python
   files; the rest is imported in-process, so testmon traces it), `config/`,
-  `docs/intent/`. When one of those differs from
+  `docs/intent/`, `plugins/kraft-lite` (its skills, methods, evals, bundled config and
+  manifests; its `.py` is traced). When one of those differs from
   the merge base with `origin/main` (committed on the branch or not),
   `just test <paths>` names the files and runs the paths with `--no-testmon`;
   a bare `just test` only warns, since its fallback would be the whole suite.
   `src/kraft/_bundled` is built from `config/` and `plugins/kraft/skills`,
   which are watched in its place. Environment variables are the same blind
   spot and aren't watched. `just test-targeted`, which verification runs,
-  runs the full suite for these, with three exceptions that add named tests
+  runs the full suite for these, with four exceptions that add named tests
   instead (`dev/targeted_tests.py` lists them): `docs/intent/` runs
   `tests/test_intent_origins.py` and the intent check; a YAML or JSON file
   under `config/` (or `src/kraft/detectors.yaml`, `src/kraft/prices.json`)
@@ -275,7 +276,9 @@ when `NEW` doesn't collect.
   equal data at both ends, runs the tests that read that text; and an
   edit (not an add or delete) to `src/kraft/console/kraft.tcss`,
   `plugins/kraft/skills` or `src/kraft/skills` runs the tests that read those
-  (the fake agents skip a skill's method, so its text steers no other test). It runs on your
+  (the fake agents skip a skill's method, so its text steers no other test). An edit to a
+  non-Python file under `plugins/kraft-lite` runs that plugin's tests and the bundle parity
+  test, and so does an edit under `src/kraft/skills`, whose methods the plugin copies. It runs on your
   logical CPUs plus two workers, as `just test` does; `KRAFT_TEST_WORKERS`
   sets another count (for a Kraft worker, in the repo's `repos.yaml` `env:`).
   Those lists come from tracing readers; `just check-targeted-maps` checks
