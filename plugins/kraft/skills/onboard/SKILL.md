@@ -23,12 +23,12 @@ and stop - `kraft admin start --detach` (or the service) comes first.
    calling `ensure_repo` (it saves as soon as it is called): `kraft repo list`
    marks the repo you are in with `*`. If it is listed, the repo keeps the
    commands it has: read them (`kraft repo list --json` carries each repo's
-   `test_command` and `setup_command`) against the repo's docs, and any
-   correction goes to the person (below). Otherwise read how the repo says to
-   build and test itself before you connect it: its README, CONTRIBUTING, agent
-   instructions (`CLAUDE.md`, `AGENTS.md`) and CI config. Look for the command
-   a contributor is told to run, and any rule that the raw runner must not be
-   called directly.
+   `test_command`, or its `test_scopes`, and `setup_command`) against the
+   repo's docs, and any correction goes to the person (below). Otherwise read
+   how the repo says to build and test itself before you connect it: its
+   README, CONTRIBUTING, agent instructions (`CLAUDE.md`, `AGENTS.md`) and CI
+   config. Look for the command a contributor is told to run, and any rule that
+   the raw runner must not be called directly.
 
    `ensure_repo` saves as soon as it is called, and a second call with commands
    changes nothing, so decide before the first. If the docs name a test or setup
