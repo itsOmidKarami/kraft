@@ -12,7 +12,7 @@ Kraft, then run [your first work item](/get-started/first-work-item) to its gate
 it [the real chain](/get-started/the-real-chain) through its gates to a merged
 merge request. If something goes wrong, see
 [Troubleshooting](/troubleshooting). To upgrade from 1.4, see
-[Upgrade from 1.4](/guides/run/upgrade-from-1-4), and
+[Coming from 1.4](/guides/run/coming-from-1-4), and
 [What's new](/project/whats-new) for what each release brings.
 
 ## In this section
