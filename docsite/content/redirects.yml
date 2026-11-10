@@ -420,7 +420,10 @@
 /concepts/vocabulary#cap-and-wait: /concepts/vocabulary#cap
 /concepts/vocabulary#the-library-and-reuse: /concepts/vocabulary#library
 /concepts/caps-and-budgets#raising-a-cap-on-a-stuck-item: /guides/day-to-day/raise-a-cap
-/concepts/caps-and-budgets#background-jobs: /concepts/caps-and-budgets#the-shipped-implementer-cap
+/concepts/caps-and-budgets#background-jobs: /reference/configuration/policy#the-shipped-implementer-cap
+/concepts/caps-and-budgets#the-default-caps: /reference/configuration/policy#the-default-caps
+/concepts/caps-and-budgets#the-shipped-implementer-cap: /reference/configuration/policy#the-shipped-implementer-cap
+/concepts/caps-and-budgets#which-one-the-interface-shows: /concepts/caps-and-budgets#the-items-own-dollar-cap
 /concepts/how-a-work-item-runs#where-to-go-next: /concepts/how-a-work-item-runs#related
 /concepts/vocabulary#where-to-go-next: /concepts/vocabulary#related
 /project/security#network-and-browser: /project/security-in-depth#network-and-browser
@@ -753,7 +756,7 @@
 /guides/day-to-day/raise-a-cap#the-two-dollar-caps: /concepts/caps-and-budgets#the-two-dollar-caps
 /guides/day-to-day/raise-a-cap#the-per-scope-cap: /concepts/caps-and-budgets#the-per-scope-cap
 /guides/day-to-day/raise-a-cap#the-items-own-dollar-cap: /concepts/caps-and-budgets#the-items-own-dollar-cap
-/guides/day-to-day/raise-a-cap#which-one-the-interface-shows: /concepts/caps-and-budgets#which-one-the-interface-shows
+/guides/day-to-day/raise-a-cap#which-one-the-interface-shows: /concepts/caps-and-budgets#the-items-own-dollar-cap
 /guides/day-to-day/raise-a-cap#check-it-worked: /guides/day-to-day/raise-a-cap#raise-the-cap-and-retry
 /guides/day-to-day/vscode#which-items-the-board-shows: /reference/vscode-extension#which-items-the-board-shows
 /guides/day-to-day/vscode#settings: /reference/vscode-extension#settings
