@@ -42,7 +42,7 @@ Kraft needs Claude Code installed and signed in. The shipped chains run every ag
 It adds what a single session can't:
 
 - **A process the agent can't skip.** A chain like the one above is a file you can read and diff; the agent doesn't decide the workflow fresh each time.
-- **Checks it doesn't grade itself on.** Kraft runs your tests in a node of its own, waits for your CI itself, and has a separate reviewer or judge decide whether a fix is done.
+- **Checks it doesn't grade itself on.** Kraft runs your tests in a node of its own, waits for your CI itself and has a separate reviewer or judge decide whether a fix is done.
 - **A person at the decisions that matter.** You approve a spec, a plan or a merge request. Hand it a spec and walk away; retries and spend are capped.
 ::
 
@@ -108,7 +108,7 @@ width: 390
 ::::
 
 - **Search, ⌘K.** Full-text search, with optional vector search, across work items, pending actions and linked documents.
-- **Analytics.** See where lead time and cost go, by node and by repo, over the last 8 weeks (on a phone, the last 7, 30 or 90 days). [The Analytics screen](/reference/web-ui/analytics)
+- **Analytics.** See where lead time and cost go, by node and by repo, over the last 8 weeks by default (7 days, 30 days, 8 weeks and 90 days on desktop and phone alike). [The Analytics screen](/reference/web-ui/analytics)
 ::
 
 ::u-page-section

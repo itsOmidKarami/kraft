@@ -3,7 +3,7 @@
 A [Kraft](https://kraft-sdlc.dev) add-on: Kraft's shipped chains, `default` and
 `quick-task`, with the methods of the
 [superpowers](https://github.com/obra/superpowers) plugin on the tasks that write
-the spec and the plan, implement, and repair.
+the spec and the plan, implement and repair.
 
 ```bash
 kraft admin addon collection add itsOmidKarami/kraft

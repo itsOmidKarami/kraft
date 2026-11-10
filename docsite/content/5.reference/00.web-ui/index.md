@@ -28,5 +28,5 @@ to where it is done.
 - [Config before an item starts](/reference/web-ui/config-before-start): where each Config value comes from, and the draft that **Start** asks about.
 - [The review page](/reference/web-ui/review-page): an item's diff with Compare, Viewed marks, line comments and the Finish review dialog.
 - [Templates and Settings](/reference/web-ui/templates-and-settings): the Chains and Library screens, and each Settings screen that edits Kraft's setup.
-- [Analytics](/reference/web-ui/analytics): the Repo and Chain filters, the overview figures, the weekly merge chart, and the node, repo and stop tables, with what each number counts.
+- [Analytics](/reference/web-ui/analytics): the Repo and Chain filters, the overview figures, the weekly merge chart and the node, repo and stop tables, with what each number counts.
 - [Cap stops and raises](/reference/web-ui/cap-stops-and-raises): for each cap that can stop an item, what the interface and the command line offer to raise it.

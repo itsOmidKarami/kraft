@@ -1,6 +1,6 @@
 """`dev/check_docs_shell.py`: no comment in a shell block of the docs.
 
-CI's lint job runs it over `docsite/content/`. These pin the rule itself, so a
+CI's lint job runs it over `docsite/content/` and the READMEs. These pin the rule itself, so a
 loosened one cannot turn that step into a pass that checks nothing.
 """
 
@@ -91,10 +91,18 @@ def test_a_comment_in_a_shell_block_is_reported(cs, tmp_path, body):
     assert "move it to the sentence above the block" in problems[0]
 
 
+@pytest.mark.parametrize("name", ["README.md", "vscode/README.md"])
+def test_a_readme_is_read_like_a_page(cs, tmp_path, name):
+    readme = write(tmp_path / "root", name, "```bash\ncp a b # note\n```\n")
+    problems = cs.problems(tmp_path / "docs", [readme])
+    assert len(problems) == 1
+    assert "move it to the sentence above the block" in problems[0]
+
+
 def test_the_report_names_the_line(cs, tmp_path):
     problems = _problems(cs, tmp_path, "```bash\ncp a b\ncp c d # note\n```")
     assert problems[0].startswith("1.page.md:5: ")
 
 
 def test_the_docs_pass(cs):
-    assert cs.problems(cs.CONTENT) == []
+    assert cs.problems(cs.CONTENT, cs.READMES) == []

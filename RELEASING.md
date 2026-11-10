@@ -290,7 +290,7 @@ pull request merges.
 Run the workflow with **dry run** ticked first. The summary page must show the
 version you expect and the notes you expect. After a real run, confirm that the
 new `vX.Y.Z` tag and GitHub Release exist, the wheel is attached, the version is
-on [PyPI](https://pypi.org/project/kraft-sdlc/), and the stamping pull request
+on [PyPI](https://pypi.org/project/kraft-sdlc/) and the stamping pull request
 for the plugin manifests has merged. The checks under
 [What a stable run publishes](#what-a-stable-run-publishes) cover the other
 targets, one line each.

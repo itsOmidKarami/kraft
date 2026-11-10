@@ -1,8 +1,9 @@
 # Architecture
 
-Kraft is one FastAPI process. It serves the SPA and the API, walks each work
-item's chain, and spawns an agent CLI or a command for each task in the item's
-git worktree. Its state is two SQLite databases under `$KRAFT_HOME/run/`:
+Kraft is one FastAPI process and a local worker beside it. The server serves
+the SPA and the API and walks each work item's chain; the local worker starts
+the agent CLI or the command for each local task in the item's git worktree.
+Its state is two SQLite databases under `$KRAFT_HOME/run/`:
 `orchestrator.db`, the record of every work item, and `index.db`, a search
 index that Kraft can rebuild at any time.
 

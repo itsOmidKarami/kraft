@@ -325,7 +325,7 @@ just test tests/cli/test_service.py -k systemd
 ```
 
 See [`docs/testing.md`](docs/testing.md) for the shape a test should take: the
-two tiers, the shared fixtures, and the mutate-then-confirm-it-fails procedure
+two tiers, the shared fixtures and the mutate-then-confirm-it-fails procedure
 that is the only thing that actually proves a test pins something.
 `just check-tests` enforces what of that can be checked mechanically.
 [`docs/intent/README.md`](docs/intent/README.md) explains the intent tree and
@@ -368,7 +368,7 @@ verification runs it.
 | `codeql` | GitHub's static analysis | nothing to run |
 
 **Removed tests.** If your pull request deletes a test function, a frontend
-test file, or an intent `## REQ` heading, list each one in its description,
+test file or an intent `## REQ` heading, list each one in its description,
 or `removals declared` fails:
 
 ```markdown
@@ -626,7 +626,7 @@ Run `npm ci && npx nuxt generate` in `docsite/` before you push. It fails on
 a page that doesn't parse, but a link to a page or heading that no longer
 exists renders instead of failing the build. The docs workflow catches those:
 on a pull request it runs [lychee](https://lychee.cli.rs) over the built
-pages and their Markdown, and fails on a broken internal link, a missing anchor, or an external
+pages and their Markdown, and fails on a broken internal link, a missing anchor or an external
 link that doesn't answer. Nothing catches "this paragraph no longer describes the
 code", and `docs/intent/`'s `enforced-by:` pinning doesn't either. Read the
 page you're touching, not just the code.
@@ -650,9 +650,9 @@ rules live in `.vale/styles/Kraft/`:
   starts with `So`, no spaces around a dash, no `very`.
 
 `just vale` covers `docsite/content`, the README, the VS Code extension's
-README (its Marketplace page) and the contributor docs
-(`vale_paths` in the justfile, which CI's step repeats), not `docs/intent/` or an
-add-on's README. Inline code, fenced code and a component's YAML props are
+README (its Marketplace page), the Kraft, Kraft Lite and kraft-superpowers
+READMEs and the contributor docs (`vale_paths` in the justfile, which CI's step
+repeats), not `docs/intent/`. Inline code, fenced code and a component's YAML props are
 skipped.
 
 Where the text quotes something exactly, such as a label the app spells its

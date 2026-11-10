@@ -130,11 +130,15 @@ it by the cost of the task already running. In testing, a small fix on the
 
 ## Install
 
-Install Kraft with `uv`, or with Homebrew on macOS:
+Install Kraft with `uv`:
 
 ```bash
 uv tool install kraft-sdlc
-# or
+```
+
+Or, on macOS, with Homebrew:
+
+```bash
 brew tap itsOmidKarami/kraft && brew install kraft
 ```
 
@@ -151,11 +155,13 @@ If you drive Kraft from one of them, install the Claude Code plugin (or run
 `kraft admin init`) as well: the shipped chains run their workers on Claude
 Code.
 
-Start the server and leave it running in its own terminal:
+Start the server and leave it running in its own terminal. It listens on
+`http://127.0.0.1:8765`. In another terminal, `kraft --version` confirms what
+you installed:
 
 ```bash
-kraft              # http://127.0.0.1:8765
-kraft --version    # in another terminal: confirms what you installed
+kraft
+kraft --version
 ```
 
 Then open a Claude Code session in your repo, run this and follow what it
@@ -174,7 +180,7 @@ and Cursor (publisher `kraft-sdlc` on both). You can also download
 [GitHub release](https://github.com/itsOmidKarami/kraft/releases/latest) and run
 `code --install-extension kraft-<version>.vsix`.
 
-Every install path, connecting your agent, and updating are in the
+Every install path, connecting your agent and updating are in the
 [install guide](https://kraft-sdlc.dev/get-started/install). Coming
 from 1.4? Update with `uv tool install`, not `kraft admin update`: see
 [Upgrading from 1.4](https://kraft-sdlc.dev/guides/run/upgrade-from-1-4#update-from-14).

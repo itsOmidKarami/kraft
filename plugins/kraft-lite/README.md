@@ -26,7 +26,7 @@ moving.
 
 The plugin name namespaces the commands as `/kraft-lite:*`. Update with
 `claude plugin update kraft-lite`. It needs Python 3.10 or newer and nothing
-else — no pip install, no dependencies. CI tests both ends of that range.
+else: no pip install, no dependencies. CI tests both ends of that range.
 
 Add `--scope project` to either command to keep it to one repo. The plugin
 version follows Kraft's release tag. To check the install, run
@@ -39,7 +39,7 @@ Gemini CLI (`gemini-extension.json`) and Antigravity (`plugin.json`). Amp and
 OpenCode load the skills from a folder. On Gemini CLI, Antigravity, Amp and
 OpenCode, two things differ from Claude Code:
 
-- Skills are not namespaced. `/kraft-lite:next` is the skill `next`, and where a
+- Skills aren't namespaced. `/kraft-lite:next` is the skill `next`, and where a
   skill's text says `kraft-lite:<name>`, the agent uses `<name>`.
 - There is no plugin-root variable, so each skill finds `kl.py` two directories
   above its own file. Keep the plugin folder whole: a copy of `skills/` alone
@@ -50,11 +50,11 @@ Each install reads a local clone of the Kraft repository, `<kraft>` below
 
 - **Gemini CLI.** `gemini extensions install <kraft>/plugins/kraft-lite`, then
   restart the CLI; `gemini skills list` lists the skills. To update, pull the
-  clone, then run `gemini extensions update kraft-lite`. Installing from the GitHub URL is not
+  clone, then run `gemini extensions update kraft-lite`. Installing from the GitHub URL isn't
   covered: the extension sits in a subfolder of the repository.
 - **Antigravity.** `agy plugin install <kraft>/plugins/kraft-lite`; `agy plugin list`
   shows it, and each skill is a slash command by its own name (`/next`). That
-  the install copies `kl.py` along with the skills is not checked yet.
+  the install copies `kl.py` along with the skills isn't checked yet.
 - **Amp.** In `~/.config/amp/settings.json`, or a repo's `.amp/settings.json`:
   `{ "amp.skills.path": "<kraft>/plugins/kraft-lite/skills" }`. `amp skills list`
   lists them. Pull the clone to update.
@@ -68,10 +68,10 @@ built-in `/init`, and your own or a workspace's skills override an extension's.
 Amp searches `~/.claude/plugins/cache/` before `amp.skills.path`, so a Claude
 Code install of Lite there is the one Amp finds.
 
-## What is fixed and what is not
+## What is fixed and what isn't
 
-A chain freezes when it starts, resolved: its nodes cannot be reordered, added
-to or removed, and editing the chain file later does not retarget a run in
+A chain freezes when it starts, resolved: its nodes can't be reordered, added
+to or removed, and editing the chain file later doesn't retarget a run in
 flight. A verb that meets a node missing from the frozen chain fails rather
 than guessing. The bindings are the opposite - `.kraft-lite/bindings.yaml` is
 read again on every dispatch, so rebinding a task is how a chain already in
@@ -82,8 +82,8 @@ nodes from spec and plan through implementation and verification to opening a
 merge request, checking it, review by a person, merge and a check of the merged
 branch's CI, five of them gates where a human decides. Two nodes,
 `verification` and `merge_request_feedback`, carry a fix loop; a node past its
-cap stops the chain and escalates to you. Lite supplies the order, the gates,
-and the caps, and calls whatever you already use for each task: it does not
+cap stops the chain and escalates to you. Lite supplies the order, the gates
+and the caps, and calls whatever you already use for each task: it doesn't
 supply a spec writer or a planner.
 
 ## Where chains come from
@@ -97,7 +97,7 @@ chain that extends another chain. A chain comes from one of four places:
    bundled one, except for a file in `.kraft/chains/`: that is a repo chain,
    run as its `repo:<id>`.
 2. **The repo library.** The `.kraft/` folder at the repo root, addressed as
-   `repo:<id>`, for example `repo:ship`. Lite has no repo id of its own, so
+   `repo:<id>`, for example `repo:ship`. Lite has no repo ID of its own, so
    `repo:` stands for this repo. Inside that library a bare name means its
    own entry, as in Kraft.
 3. **Your library.** The directory Kraft reads its configuration from:
@@ -118,7 +118,7 @@ counts at your next `start`, committed or not. See
 
 With no `--chain`, `start` runs `repo:default` when the repo library has a
 `chains/default.yaml`, and `default` otherwise. `kl.py chains --available`
-lists every chain id Lite can see, with the library it came from and its
+lists every chain ID Lite can see, with the library it came from and its
 file. A reference to an add-on's chain, such as `acme:ship`, is refused by
 name: Lite loads no add-ons.
 
@@ -129,7 +129,7 @@ Lite needs nothing installed. When PyYAML is importable it reads with
 for the subset Kraft's own files are written in: block and flow collections,
 plain and quoted scalars, `|` and `>` block scalars, and comments.
 
-The built-in reader refuses what it cannot be sure to read as PyYAML would,
+The built-in reader refuses what it can't be sure to read as PyYAML would,
 and names the file and line: anchors, aliases, tags, merge keys (`<<`), more
 than one document, complex keys, multi-line quoted scalars, and plain
 scalars PyYAML would read as a timestamp. Quote the value, or install PyYAML.
@@ -183,7 +183,7 @@ slice:
 An entry has a `kind`:
 
 - `skill`: invoke `skill`. It needs a `prompt` too, which runs instead if the
-  skill is not installed, so a renamed skill degrades to an instruction.
+  skill isn't installed, so a renamed skill degrades to an instruction.
 - `prompt`: follow the `prompt`.
 - `subprocess`: run `command`, a list of arguments, with no shell.
 - `skip`: run nothing. It needs a `why`, which is shown when the task is
@@ -201,28 +201,28 @@ With no match, the task runs on its default:
 - An **agent** task runs its `skill` if that is installed in this harness,
   else its `prompt`.
 - A **subprocess** task runs its `command`, split like a shell and run
-  without one, as Kraft runs it. A command Lite cannot split, such as one
+  without one, as Kraft runs it. A command Lite can't split, such as one
   with an unclosed quote, stops `start`.
 - A **builtin** or **forge** task runs an instruction Lite carries for every
   ref and target Kraft allows, written for this repo's forge.
 
 Every task that runs a skill or a prompt, bound or default, gets the task's
 `steering` text appended. Its `profile`, `model` and `effort` reach the
-session as hints for choosing a subagent's model.
+session as hints for choosing a sub-agent's model.
 
 `start` works out the instruction for every task before it writes anything, so
-a bindings file Lite cannot use, or a task with no instruction, stops `start`
+a bindings file Lite can't use, or a task with no instruction, stops `start`
 and names the entry. The file is read again on every dispatch.
 
-A `tasks` key that names no task of the chain, by path or component, does not
+A `tasks` key that names no task of the chain, by path or component, doesn't
 stop `start`, since it may be meant for another chain. `start` lists it under
 `unused_bindings` instead, as `tasks.<key>`, or `slice.tasks.<key>` for a
-`slice:` key that names no task a slice runs. A misspelled key would
+`slice:` key that names no task a slice runs. A misspelt key would
 otherwise leave its task on the default without a word.
 
 ## What Lite reads past, and what it refuses
 
-Lite runs inside one session, so it cannot enforce a budget, a time cap, an
+Lite runs inside one session, so it can't enforce a budget, a time cap, an
 allowed-tools list, a sandbox or a harness choice. It reads past `policy`
 (all but a node's `max_attempts`, which caps its fix loop), `wait`, `scope`, `execution`, `harness`, `inputs`, `skippable`, `read_only`,
 `icon`, `timeout`, `artifact_required`, `escalation`, and a gate's
@@ -230,17 +230,17 @@ allowed-tools list, a sandbox or a harness choice. It reads past `policy`
 for a fix loop past its cap.
 
 A gate whose reviewer checks first (`auto_review_mode: checks_first`) runs that
-reviewer before the gate reaches you, in a subagent that may not change files.
+reviewer before the gate reaches you, in a sub-agent that may not change files.
 On a `reject` it sends the work back with the reviewer's note; otherwise you get
 the gate with that note first. The reviewer never approves. A reviewer that
 `decides` (the default) is read past: in Lite it would be your own session
 approving its own gate.
 
-Lite stops, naming the file and the key, at what it cannot walk without
+Lite stops, naming the file and the key, at what it can't walk without
 changing what the chain means: a reference to an add-on, a step's or a
 task's own `on_failure`, and `on_conflict` under `on_base_changed`. It also
 refuses the cases Kraft refuses, such as an unknown builtin ref or forge
-target, or a key `on_base_changed` or `on_merge_rejected` does not have.
+target, or a key `on_base_changed` or `on_merge_rejected` doesn't have.
 
 Lite checks what it needs to walk a chain, not everything Kraft would.
 Before relying on a chain you wrote, run
@@ -275,7 +275,7 @@ A node that fails goes through its fix loop, in Kraft's order:
    step.
 
 A step that moved the branch's base, such as a rebase or sync that did work,
-has not failed. If the node has `on_base_changed`, `kl.py restart` reopens
+hasn't failed. If the node has `on_base_changed`, `kl.py restart` reopens
 the walk at its `restart_from` node and every node through this one, with
 their attempts reset. A node restarts at most three times.
 
@@ -295,14 +295,14 @@ rejection reopens the node the gate's `reject_to` names, else the nearest exec
 node before it, and every node after that, carrying your note. `reject
 --from-node` lands the rejection on another node.
 
-A gate on a `chain_revision` artifact is the one case Lite cannot finish: it
-cannot apply a change set to a running chain. If the proposal changes
+A gate on a `chain_revision` artifact is the one case Lite can't finish: it
+can't apply a change set to a running chain. If the proposal changes
 anything, Lite says so and offers two ways on: approve without the change, or
 stop and start again on an edited copy of the chain's file.
 
 That file is the frozen chain's `source` when it is a path, else the one `kl.py chains --available`
-lists for its id; a `repo:` chain's copy goes in `.kraft/chains/` under a new
-id. The new run passes the approved spec and plan with `--spec` and `--plan`,
+lists for its ID; a `repo:` chain's copy goes in `.kraft/chains/` under a new
+ID. The new run passes the approved spec and plan with `--spec` and `--plan`,
 so it starts at the chain revision.
 
 ### What `state` reports
@@ -332,26 +332,26 @@ named a dropped node moves to the nearest kept exec node before it, else the
 first one kept.
 
 Lite records the path, relative to the repo when the file is inside it, and
-does not copy the file. The gates that remain present it as that kind's
+doesn't copy the file. The gates that remain present it as that kind's
 artifact. With neither flag, the chain writes both documents itself.
 
 ## State
 
-`bd` when the repo has it, otherwise `.kraft-lite/chain.jsonl` — the same
+`bd` when the repo has it, otherwise `.kraft-lite/chain.jsonl`, the same
 `bd export` format either way, so adopting `bd` later is `bd import`, not a
 migration.
 
 `/kraft-lite:status` lists what is in the directory; `kl.py chains` is the verb
 behind it. `kl.py summary` reports one run back: per-node times split into
-work and waiting at a gate, attempts against their caps, gates answered, and
+work and waiting at a gate, attempts against their caps, gates answered and
 rejection notes. To make that possible, every write also records the wall-clock
 time it happened, the seconds already spent waiting at a gate, and the attempts
 already spent, because a later write would otherwise overwrite each one. It
-counts no tokens and no money — Lite runs inside your session and never sees
+counts no tokens and no money, because Lite runs inside your session and never sees
 them.
 
 A directory can hold several chains. Every `kl.py` verb that reads or writes a chain takes `--chain-id <id>`; with one
-unfinished chain the flag is optional, and with two or more it is required —
+unfinished chain the flag is optional, and with two or more it is required:
 Lite refuses to guess which run a gate belongs to. Each run's frozen chain lives in
 `.kraft-lite/chains/<chain-id>.json`, one per run, so two runs can walk
 different chains side by side.
@@ -373,7 +373,7 @@ run in parallel, and gives each helper or fixture that two slices would create
 one owner.
 
 The proposal is shown at the slice gate, and your answer is the
-approval. A small plan is not sliced: the controller says so, and the chain
+approval. A small plan isn't sliced: the controller says so, and the chain
 continues as one. Slicing is accepted only at that gate. A rejection leaves no
 slice behind.
 
@@ -396,7 +396,7 @@ chain you wrote slices as the default does. `state` marks the slice gate, and
 - The **first build node** is the first exec node none of whose tasks
   produces a document. When a node produces the `plan`, or a gate presents
   it, it is the first such node after the last of them, so a check node before
-  the plan, or between the plan and its gate, is not it. In the default chain,
+  the plan, or between the plan and its gate, isn't it. In the default chain,
   `implementation`.
 - The **slice gate** is the last gate before the first build node, and is
   never the `chain_finalized` gate. In the default chain,
@@ -431,34 +431,34 @@ names a dropped node moves to the nearest kept exec node before it, else to
 the child chain's first node.
 
 The child's `slice:` bindings win over everything else. Without them, the
-agent tasks of the first build node run the subagent-driven skill, whatever
+agent tasks of the first build node run the sub-agent-driven skill, whatever
 component they extend. The changed-scope tests run only the paths the slice
 touches, and the merge request's automated review is skipped, because the
 controller's review is that review. CI runs the full suite.
 
 Where Lite would stop for you, the child asks the controller, never you. The
-controller answers, reviews each child's pull request, merges, archives the
-finished child, and keeps the run's state. Every subagent and child gets a
+controller answers, reviews each child's merge request, merges, archives the
+finished child, and keeps the run's state. Every sub-agent and child gets a
 model set on purpose: the cheapest for reading and relaying, the middle for
-implementation and child sessions, the strongest for reviews and judgment calls.
+implementation and child sessions, the strongest for reviews and judgement calls.
 
-The controller does not start a child until you have finished giving
+The controller doesn't start a child until you have finished giving
 instructions for the run. Say "go" when you have.
 
-### Two pull request modes
+### Two merge request modes
 
-The default is the **feature** mode. Each slice opens its pull request into a
+The default is the **feature** mode. Each slice opens its merge request into a
 feature branch, and the controller reviews it and merges it there on green CI.
-When every slice is in, the controller opens the pull request from the feature
+When every slice is in, the controller opens the merge request from the feature
 branch to `main`, and its review covers how the slices fit together. You approve
 and merge that one.
 
 Before the MR node, an exec node that produces nothing, such as `verification`
 in the default chain, runs only its changed-scope tests over the feature
-branch's diff, where CI cannot cover it. Every other node runs as in an
+branch's diff, where CI can't cover it. Every other node runs as in an
 unsliced chain, and you answer its gates.
 
-In the **main** mode, each slice opens its own pull request to `main`. The
+In the **main** mode, each slice opens its own merge request to `main`. The
 controller reviews it and reports, and you merge it.
 
 A slice is merged only once you merge it. A slice after exactly one other need
@@ -469,7 +469,7 @@ all, then starts from `main`.
 
 In the main mode, every node after the first build node closes with nothing
 to do, as there is no single merge to watch. Two kinds wait until you have
-merged every slice pull request: the `chain_finalized` gate, and a node that
+merged every slice merge request: the `chain_finalized` gate, and a node that
 merges a merge request (`final_review` and `merge` in the default chain).
 
 Set the mode in `.kraft-lite/slices.json`, or say so when the run starts.
@@ -482,8 +482,8 @@ These are the defaults:
 |---|---|---|
 | A plan question a child raises | `plan_question` | controller |
 | Its review verdict on a slice | `slice_review` | controller |
-| Approving and merging a slice pull request into the feature branch | `merge_slice` | controller |
-| The pull request from the feature branch to `main` | `merge_main` | user |
+| Approving and merging a slice merge request into the feature branch | `merge_slice` | controller |
+| The merge request from the feature branch to `main` | `merge_main` | user |
 | A push outside the child's own slice branch | `push_outside_branch` | user |
 
 Change any of them for one run by saying so when it starts, or as a standing
@@ -505,15 +505,15 @@ the work wraps up, while a call is still cheap to overturn. The log is
 `.kraft-lite/decisions/<chain-id>.jsonl`.
 
 The controller may hold a critical question, or one that is costly to undo, for
-you. The child keeps working on whatever does not depend on it. Silence is never
+you. The child keeps working on whatever doesn't depend on it. Silence is never
 an answer: a held question stays at the top of every status until you answer
-it. A decision that is only yours, such as a push the child was not given, is
+it. A decision that is only yours, such as a push the child wasn't given, is
 passed up to you with the words to type and the session to type them in.
 
 ### The state branch
 
-`.kraft-lite/` is not in git, and a cloud container comes back as a fresh clone.
-So after every change the controller exports the run to a branch of its own and
+`.kraft-lite/` isn't in git, and a cloud container comes back as a fresh clone.
+After every change the controller exports the run to a branch of its own and
 pushes it. The export is the feature chain's and the slices' records, its
 frozen chain (`chain.json`) and the decisions log. A resumed controller imports
 it before it writes anything. An export made by an older Kraft Lite has no
@@ -536,11 +536,11 @@ Slices need four abilities from the harness: start a child session, message it,
 be messaged by it, and archive it. The controller also needs a way to check in
 later. The guides in `skills/run-slices/references/` map them to the tools of
 Claude Code, Codex, Cursor, Gemini CLI, Antigravity, Amp and OpenCode, and mark
-the ones they could not confirm.
+the ones they couldn't confirm.
 
 Where a harness lacks an ability, there is a fallback. A child on the same
 machine writes to a file under `.kraft-lite/messages/`. A child on another
-machine comments on its own draft pull request. A controller that cannot be
+machine comments on its own draft merge request. A controller that can't be
 woken says so, and you run `/kraft-lite:run-slices` to continue the run.
 
 On a harness with no guide, or for an ability its guide marks unconfirmed,
@@ -556,14 +556,14 @@ it found, and offers the file as a guide to ship.
 If the harness can't start a session at all, the controller walks the slices
 itself, one after another, and the run goes on.
 
-A cloud child cannot message a controller on another machine. For a local
-controller with cloud children, pull request comments are the channel.
+A cloud child can't message a controller on another machine. For a local
+controller with cloud children, merge request comments are the channel.
 
 ### Verbs for slices
 
 The skills run these. `kl.py state` also reports `sliced` once a run is sliced.
 `slices` reports `shape`, the slice gate, first build node and MR node it found,
-or why the chain cannot be sliced.
+or why the chain can't be sliced.
 
 | Verb | What it does |
 |---|---|
@@ -573,9 +573,9 @@ or why the chain cannot be sliced.
 | `slice-set --slice KEY` | Sets `--status`, `--session`, `--branch` or `--fork`. Statuses: `waiting`, `starting`, `running`, `in_review`, `ready_to_merge`, `merged`. The last slice merged closes the run. A call that changes nothing writes nothing. |
 | `settings` | Prints the mode and the rights in effect. |
 | `decide` | Logs a decision, under a slice with `--slice KEY`, which must name one of the run's slices. With `--held`, holds the question for you. |
-| `answer --decision ID --answer TEXT` | Records your answer to a held question. A decision that is not held is refused. |
+| `answer --decision ID --answer TEXT` | Records your answer to a held question. A decision that isn't held is refused. |
 | `decisions` | Lists the log. `--held` shows held questions, `--unreported` what is new or newly answered since the last report, and `--mark` marks those reported. |
-| `export --to DIR`, `import --from DIR` | Copy a run to the state branch's checkout, and back. An import never overwrites a newer local record or decision: it keeps the copy written more times, so a clock that runs behind cannot keep a stale one. |
+| `export --to DIR`, `import --from DIR` | Copy a run to the state branch's checkout, and back. An import never overwrites a newer local record or decision: it keeps the copy written more times, so a clock that runs behind can't keep a stale one. |
 
 `slices` gives each slice's status, what it comes after, its session and
 branch, and `cut_from`, the slice it was cut early from. `ready` lists those
@@ -594,31 +594,31 @@ branch merges after that one.
 A slice that goes back from review to work, or records a new `--fork`, flags
 each slice cut early from it in `base_moved`, and each cut early from those,
 until each records the fork of its rebase with `--fork`. `slice-set` refuses
-a `--fork` that is not 4 to 64 hex digits, a `--branch` that is not a good
+a `--fork` that isn't 4 to 64 hex digits, a `--branch` that isn't a good
 branch name (below), and a `--session` that is empty or holds whitespace.
 
 `close` refuses to close a sliced run's first build node until every slice is
 done: merged, or in `main` mode merged or ready to merge. In `main` mode,
 `close` on an exec node and `approve` on a gate refuse to close a node that
 waits for your merges until every slice is merged. The refusal names the
-slices that are not.
+slices that aren't.
 
 `import` refuses a directory with no `records.jsonl`, naming the path, and a
-chain id that `start` would not mint (`kl-` and 8 of `0-9a-f`), before it reads
-or writes a file. It refuses an export holding a record that is not its
-chain's epic, node, run or slice under the id it was minted with, naming each,
-and a line it cannot read, naming the file and line, and writes nothing.
+chain ID that `start` wouldn't mint (`kl-` and 8 of `0-9a-f`), before it reads
+or writes a file. It refuses an export holding a record that isn't its
+chain's epic, node, run or slice under the ID it was minted with (naming each), or a line it can't read (naming the file and
+line), and writes nothing.
 
 `import` ranks decisions as it ranks records, comparing stamps as times, so a
 held copy never takes back an answer given where the clock runs behind.
 
 `approve --slices` also refuses a task listed twice in one slice, a slice
-named twice in one `after`, and a key that is not 1 to 40 lowercase letters,
+named twice in one `after`, and a key that isn't 1 to 40 lowercase letters,
 digits, `-` and `_`, starting with a letter or digit. It refuses a key the
-plan or a slice does not take, naming it, so a misspelt `after` is not
+plan or a slice doesn't take, naming it, so a misspelt `after` isn't
 dropped.
 
-A bad branch is one that is not a string, holds whitespace, starts with `-`,
+A bad branch is one that isn't a string, holds whitespace, starts with `-`,
 or is one git refuses (`..`, a part starting with `.`, an ending of `/`, `.` or
 `.lock`, or any of `~^:?*[\`), a feature branch that is also the state branch,
 or any feature branch in `main` mode, which has none.
@@ -642,9 +642,9 @@ old format, refuses with one line telling you to run `migrate`. Only `chains`, `
 - **The registry becomes `bindings.yaml`.** Each hook maps to the task, ref or
   target that now does its job (the table below). A binding that says what
   the default already says is dropped, and so is a hook V1 has no task for.
-  The command lists what it dropped. Comments are not carried. The old file is
+  The command lists what it dropped. Comments aren't carried. The old file is
   renamed `registry.yaml.migrated`: add it to `.gitignore`, or delete it.
-- **Each unfinished run moves to a new id** on Kraft's bundled `default`, not a
+- **Each unfinished run moves to a new ID** on Kraft's bundled `default`, not a
   `default` from your library or the repo's. Closed nodes stay closed, and
   the node the run was at keeps its attempts and note. The old run is closed
   and labelled `kraft-migrated-to:<new id>`.
@@ -692,8 +692,8 @@ python3 "$CLAUDE_PLUGIN_ROOT/kl.py" migrate --abandon <chain-id>
 ```
 
 `--abandon` closes the run's open records, each labelled `kraft-abandoned`,
-and deletes nothing: the records and the frozen chain stay. It refuses an id
-that is not an unfinished run in the old format.
+and deletes nothing: the records and the frozen chain stay. It refuses an ID
+that isn't an unfinished run in the old format.
 
 A run that finished in the old format has nothing to move, and blocks
 nothing. `state` reports it `done` and `chains` lists it, but every other
@@ -707,7 +707,7 @@ move, it reports nothing moved.
 A state export written before this change holds no `chain.json`, and `import`
 refuses it, saying it came from an older Kraft Lite.
 
-## What it does not do
+## What it doesn't do
 
 Unattended execution, a web board, waiting on CI while you are away, spend caps,
 cross-repo search. Lite is the attended case: the chain is in front of you,
@@ -718,7 +718,7 @@ piece of software.
 
 Slices spread one plan over several sessions, so a large plan no longer has to
 fit in one session. Someone still starts the run, and wakes the controller where
-its harness cannot.
+its harness can't.
 
 ## Tests
 
@@ -730,9 +730,9 @@ plugins/kraft-lite/tests`.
 
 This plugin lives in `plugins/kraft-lite/` in the
 [Kraft](https://github.com/itsOmidKarami/kraft) monorepo, the same repository
-`kraft` itself ships from. Open a normal pull request there — see the root
+`kraft` itself ships from. Open a normal <!-- vale Kraft.MergeRequest = NO -->pull request<!-- vale Kraft.MergeRequest = YES --> there; see the root
 [CONTRIBUTING.md](../../CONTRIBUTING.md) for tests, the release-label
-convention, and how a merge becomes a release.
+convention and how a merge becomes a release.
 
 ## License
 

@@ -78,7 +78,7 @@ without the slash (`kraft:board`).
 | Skill | Use it to |
 |---|---|
 | `/kraft:onboard` | Connect a repo and verify the setup matches what the repo contains. |
-| `/kraft:board` | See what is running, blocked, or waiting on a person, or search specs and plans. |
+| `/kraft:board` | See what is running, blocked or waiting on a person, or search specs and plans. |
 | `/kraft:prepare` | Write a spec, then decide whether the work runs inline or in Kraft. |
 | `/kraft:handoff` | File work with Kraft, with any agreed spec and plan attached. It lands paused. |
 | `/kraft:status` | Report where a work item has got to, or watch it until it ends. |

@@ -487,7 +487,7 @@
 /guides/run/upgrade-from-1-4#migrating-a-home-from-0x: /guides/run/upgrade-from-0-x-or-a-release-candidate#migrating-a-home-from-0x
 /troubleshooting/why-did-my-item-stop#git-identity-and-worktree-setup: /troubleshooting/why-did-my-item-stop#setting-up-the-worktree
 /troubleshooting/why-did-my-item-stop#git-and-the-worktree: /troubleshooting/why-did-my-item-stop#git-state-of-the-worktree
-/project/contributing#cut-a-release-maintainers: /project/contributing#contribute-a-change
+/project/contributing#cut-a-release-maintainers: /project/contributing
 /project/contributing#related: /project/contributing#next-steps
 /project/whats-new#looking-ahead: /project/whats-new
 /project/whats-new#what-needs-action-when-you-upgrade-from-14: /guides/run/upgrade-from-1-4
