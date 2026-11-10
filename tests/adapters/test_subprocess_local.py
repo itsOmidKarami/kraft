@@ -57,7 +57,7 @@ async def test_escalation_launch_waits_for_the_worker(run, database):  # noqa: F
 
     link = local_link.current()
     link.set_connected(False)
-    hit = caps.Hit("on.test.run", "time_cap", 1, 0.0)
+    hit = caps.Hit("on.test.run", "time_cap_minutes", 1, 0.0)
     cap = caps.Deadline(caps.monotonic() + 0.5, hit)
     task = asyncio.create_task(run(["/bin/sh", "-c", "sleep 0.2; echo after"], time_cap=cap))
     await asyncio.sleep(0.6)
