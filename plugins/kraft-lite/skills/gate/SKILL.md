@@ -84,12 +84,16 @@ on as frozen; or stop and start again on an edited copy. For that:
 
 Run `gate.reviewer` by its `kind`, as `kraft-lite:next` runs a task, in a
 subagent with the model its `hints` name, so it reads the work fresh. Its
-instruction: the gate's id, `gate.message`, the document it is about (the file
-section 1 finds; with no `gate.artifact`, the worktree and the diff), and that it
-checks before the user and cannot approve. It must not change, write or commit
-any file. It reports one verdict with its `concerns`: `pass` hands the gate to
-the user, the default whenever it is unsure; `reject` only for a concrete defect,
-its `concerns` written as an instruction for whoever redoes the work.
+instruction is the reviewer's own `prompt` (it names the method to read), then
+the gate's id, `gate.message`, the document it is about (the file section 1
+finds; with no `gate.artifact`, the worktree and the diff), and that it checks
+before the user and can't approve. It must not change, write or commit any file.
+It reports one verdict with its `concerns`: `pass` hands the gate to the user,
+the default whenever it is unsure; `reject` only for a concrete defect, its
+`concerns` written as an instruction for whoever redoes the work. With no way to
+run a subagent here, or none that returns a verdict, don't review in this
+session, which has seen the work and can edit it: that is an ignored verdict,
+so tell the user, then record it as this section's last paragraph says.
 
 Before it runs, note `git status --porcelain`, `git rev-parse HEAD` and a
 checksum of the gate's document, and compare them after. Then:

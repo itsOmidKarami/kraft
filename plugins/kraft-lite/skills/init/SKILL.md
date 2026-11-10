@@ -31,9 +31,11 @@ Write `.kraft-lite/bindings.yaml` from `proposed` plus the user's choices:
   one message listing them all with their candidates - not one question per
   task - and write nothing for them until they answer.
 - A task with no candidate gets no entry.
-- Never write a command detect did not report: a binding that cannot run here
-  reads as finished until the node fails. A `null` `test_command` or `ci_command`
-  leaves that task on its default.
+- Write only a command detect reported or the user gave you, never one you
+  inferred: a binding that can't run here reads as finished until the node fails.
+  A skill the user names that `candidates` doesn't list isn't installed here, so
+  its `prompt` runs instead: say so before you write it. A `null` `test_command`
+  or `ci_command` leaves that task on its default.
 - Each entry has a `kind` and the keys it needs, or `start` refuses the file:
   `skill` takes `skill` and `prompt` (the one `proposed` gives, or one line on
   the task's job), which runs when the skill is missing; `prompt` takes
@@ -54,9 +56,11 @@ Write `.kraft-lite/bindings.yaml` from `proposed` plus the user's choices:
           command: [gh, pr, checks]
 
 If `.kraft-lite/bindings.yaml` already exists, start from its entries: add the
-`proposed` ones for tasks it doesn't bind, and ask only about those. Where it
-holds a different command than detect printed, keep theirs. Show the user a diff
-against it, and ask before you write; don't overwrite one they've edited.
+`proposed` ones for tasks it doesn't bind, and ask only about the unbound tasks
+that need a choice (the first bullet above). With nothing to add, say so and
+write nothing. Where it holds a different command than detect printed, keep
+theirs. Show the user a diff against it, and ask before you write; don't
+overwrite one they've edited.
 
 ## Finish
 
@@ -64,9 +68,11 @@ Print the path and say it is meant to be edited and committed. Tell the user
 to add `.kraft-lite/decisions/`, `.kraft-lite/messages/`, `.kraft-lite/proposals/`
 and `.kraft-lite/reviews/` to `.gitignore`: a sliced run writes its decisions log,
 messages and proposals there, and a gate's reviewer its reports, and they are not
-for the repo. After a migrate, `.kraft-lite/registry.yaml.migrated`
-goes there too, or is deleted. `bindings.yaml` stays committed, and so does
-`.kraft-lite/harnesses/`, what a sliced run learned about a harness's tools.
+for the repo. Nor is a chain's run state: `.kraft-lite/chains/`, the frozen
+chains, and with no `bd`, `.kraft-lite/chain.jsonl`. After a migrate,
+`.kraft-lite/registry.yaml.migrated` goes there too, or is deleted.
+`bindings.yaml` stays committed, and so does `.kraft-lite/harnesses/`, what a
+sliced run learned about a harness's tools.
 
 ## A pre-V1 directory: migrate
 
@@ -95,8 +101,9 @@ way on: follow it.
   the two ways on it names - finish that run on the previous Kraft Lite version,
   or `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" migrate --abandon <chain-id>`, which
   closes the run's open records, labelled `kraft-abandoned`, and keeps them -
-  and run nothing until they choose. Then run `migrate` again. `--abandon`
-  refuses an id that is not an unfinished pre-V1 run.
+  and run nothing until they choose. After an abandon, run `migrate` again; after
+  the other choice, stop: the run must finish first. `--abandon` refuses an id
+  that is not an unfinished pre-V1 run.
 - A registry hook migrate doesn't know (the refusal names it): take it out of
   the registry, run `migrate`, then bind it in `bindings.yaml` by hand, under
   the task the user says it serves.

@@ -10,10 +10,11 @@ it needs `python3` 3.10 or newer, and without one, tell the user and stop.
 
 This skill holds no state in the conversation: everything comes from `state`,
 so it survives a `/clear`. Below, `KL` is short for
-`python3 "$CLAUDE_PLUGIN_ROOT/kl.py"`, and every `KL` command carries
-`--chain-id <id>`. In a cleared session you have no id: take `chain_id` from
-`KL chains`, or from a bare `state` while one chain is unfinished. If a verb exits saying there is more than one unfinished
-chain, show the user the list it printed and ask which - do not pick. A verb
+`python3 "$CLAUDE_PLUGIN_ROOT/kl.py"`, and every `KL` command except `chains`
+and `migrate` carries `--chain-id <id>`. In a cleared session you have no id:
+take `chain_id` from `KL chains`, or from a bare `state` while one chain is
+unfinished. If a verb exits saying there is more than one unfinished chain,
+show the user the list it printed and ask which - don't pick. A verb
 that refuses with `Run: python3 kl.py migrate` means a run or registry from an
 older Kraft Lite: follow `kraft-lite:init`'s last section, `A pre-V1 directory:
 migrate`, then go on with the new id it prints.
@@ -31,7 +32,6 @@ You get `chain_id`, `node`, `kind` (`exec` or `gate`), `status`, `note`, `attemp
   Do not report this as finished.
 - `status: done` - the chain is finished. Report what it cost (section 5) and stop.
 - `status: blocked` - a gate is waiting. Invoke `kraft-lite:gate`. Do not proceed.
-- `note` non-empty - the node was sent back. That note leads this attempt.
 - `sliced` null, as in most chains - `kind: exec` is section 2 and `kind: gate`
   is section 4; skip the rest of this section.
 - `sliced` not null, `status` neither `done` nor `blocked` - `sliced.action` says
@@ -60,7 +60,6 @@ You get `chain_id`, `node`, `kind` (`exec` or `gate`), `status`, `note`, `attemp
     merged, `KL close` (`KL approve` on a gate node), then this skill again. Never
     open this node's gate or ask anyone to approve it: the user's merges are the answer.
   - `run` - as in an unsliced chain, below.
-- Otherwise `kind: exec` is section 2 and `kind: gate` is section 4.
 
 In a sliced `feature` run, every task from the first build node on (the
 `shape.first_build` that `KL slices` prints) runs in a
@@ -87,9 +86,16 @@ where they name one, not the strongest by default). Run each task by its `kind`:
 
 - `skill` - invoke `skill`, with `prompt` as the instruction.
 - `prompt` - follow `prompt`. A `source` ending `(skill missing)` means the bound
-  skill is not installed here: say you fell back.
+  skill is not installed here, and Lite ships no method for it: say you fell back.
+  One ending `(shipped method)` means the skill is missing too, but `prompt` ends
+  with a `## Method` section naming a file: read that file and follow it as the
+  task's method.
 - `subprocess` - run `command` as an argument list, without a shell; show its output.
 - `skip` - run nothing; say the task was skipped, and its `why`.
+
+A non-empty `note` means the node was sent back (a rejection, a base change or a
+merge drop), and `state` doesn't put it in any task's `prompt`. Give it to every
+`skill` and `prompt` task as the first thing in its instruction.
 
 A step with `read_only: true`, or any step in `steps` when the node's own
 `read_only` is true, changes nothing: write, edit and commit nothing, run no
@@ -148,14 +154,17 @@ rebinding a task there is how a live chain is corrected.
    whole node again from its first step.
 3. `fix_loop` null: stop and report. A node with no fix loop has no retry budget.
 4. `KL attempt`. When it prints `attempt` 2 or more and `fix_loop.judge` is set,
-   run the judge first, with every attempt's findings and the attempts used of
-   `cap`. It rules: stop for the user (stop, with its reasoning); finish with
-   findings, when no task failed outright (`KL close`, report the findings left);
-   or continue.
+   run the judge first, with every attempt's findings and `attempt` against
+   `cap`. It returns `continue`, `stop_needs_human` or `stop_downgrade`, with
+   `concerns`. On `stop_needs_human`, stop for the user with its `concerns`. On
+   `stop_downgrade`, finish with findings when no task failed outright (`KL close`,
+   report the findings left). On `continue`, step 6 hands its `concerns` to the
+   repair. No verdict buys a cycle past the cap: step 5 still applies.
 5. `over_cap: true` - stop the chain and escalate: show the user every attempt's
    output, not a summary. A cap that is hit is a failure they need the traces for.
-6. Run `fix_loop.steps` as in section 2, with what failed and the findings as
-   their input, then the whole node again from its first step - not the chain.
+6. Run `fix_loop.steps` as in section 2, with what failed, the findings and the
+   judge's `concerns` (when it ran) as their input, then the whole node again
+   from its first step - not the chain.
 
 ## 4. A gate node
 

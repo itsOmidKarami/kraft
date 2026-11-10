@@ -18,10 +18,10 @@ That gives each chain's id, title, status and current node. Report all of them. 
 status that silently covers one of two chains is worse than no status, and `state`
 alone cannot see the others. A chain with `status: done` gets one line (id, title,
 done); give its `state` and `summary` only when the user asks about it. If
-`chains` prints `[]`, no chain exists here yet: say so (`kraft-lite:start` begins
-one), not that nothing runs.
+`chains` prints `[]` (a bare `state` says `status: unstarted`), no chain exists
+here yet: say so (`kraft-lite:start` begins one), not that nothing runs.
 
-Then, for each chain:
+Then, for each chain that isn't `done`:
 
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" state --chain-id <id>
 
@@ -32,7 +32,6 @@ against `cap` if there is one. For a gate node, `gate.message`, the file at
 `gate.artifact_path`, and that a rejection goes back to `gate.reject_to`.
 If `gate.reviewer` is set and `gate.review` is null, its reviewer checks it before
 the user does. A non-empty `note` means the node was sent back: quote it.
-`status: unstarted` means no chain exists here yet: say that, not that nothing runs.
 
 An illustration, not a template: "`Add export` is at `plan_approval`, a gate,
 blocked: review and approve the plan, `docs/plan.md`; a rejection goes back to
@@ -51,15 +50,16 @@ wait on the user, and stay at the top until answered. A slice's `after` slices n
 yet merged are what it waits on; one in `ready` is ready to start, and one in
 `early` may start from the branch of the one slice it comes after, once the
 controller's review of that slice found nothing or only small things. Then
-what starts or merges next, the decisions since the last report, and what the
-user needs to do.
-A held question is also in the `--unreported` list: report it once, under held.
-A held push is answered in that slice's own session, where the user types
-`You may push to <branch>.`; any other held question, to the controller. The
-shape, in this order:
+what starts or merges next (in `main` mode, a slice `ready to merge` is the
+user's to merge), the decisions since the last report, and what the user needs
+to do. Leave out a heading with nothing under it. A held question is also in the
+`--unreported` list: report it once, under held. A held push is answered in that
+slice's own session, where the user types `You may push to <branch>.`; any other
+held question, to the controller. The shape, in this order:
 
     Held for you (first, every time until answered):
     - <slice>: <question> - <why held>. To answer: <exact words, and where>
+    Where: <chain> at <node> (<kind>, open or blocked), state in <backend>
     Slices:
     - <key> <title>: waiting on <keys> | ready to start | can start early from <key> | starting | running (<session>) | in review | ready to merge | merged
     - rebase pending: <key> onto <its cut_from> (each key in `base_moved`)
@@ -68,7 +68,7 @@ shape, in this order:
     - <slice>: <question> -> <answer> (<why>)
     Needs from you: <each action, with the session and the words>
 
-For a chain that has finished - or when the user asks what a run has cost so far:
+When the user asks about a finished chain, or what a run has cost so far:
 
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" summary --chain-id <id>
 

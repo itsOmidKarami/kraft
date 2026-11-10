@@ -8,12 +8,14 @@ description: "Creates a new Kraft Lite chain for the work and hands it to the fi
 If `$CLAUDE_PLUGIN_ROOT` is unset, `kl.py` is two directories above this file;
 it needs `python3` 3.10 or newer, and without one, tell the user and stop.
 
-Run `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" chains` first. `start` never checks for
-an existing chain and will create a second one beside it, so if one is not
-`done`, ask the user whether they mean to continue it (`kraft-lite:next`).
-Before asking, run `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" state --chain-id <id>` on
-it: a `Run: python3 kl.py migrate` refusal means migrate first (below), then ask
-with the new id it prints.
+Run `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" chains` first. `start` doesn't check for
+an existing V1 chain and will create a second one beside it, so if one is not
+`done`, ask the user whether they mean to continue it (`kraft-lite:next`). Skip
+that question when `kraft-lite:gate` handed you this start for a chain revision:
+the user already chose to start beside the old chain. Before asking, run
+`python3 "$CLAUDE_PLUGIN_ROOT/kl.py" state --chain-id <id>` on it: a
+`Run: python3 kl.py migrate` refusal means migrate first (below), then ask with
+the new id it prints.
 
 If `.kraft-lite/registry.yaml` exists with no `.kraft-lite/bindings.yaml`, or a
 verb refuses with `Run: python3 kl.py migrate`, this directory is from an older
@@ -33,8 +35,10 @@ is wrong for good.
 - `--spec <path>` and `--plan <path>` hand over documents the user already has:
   the chain skips the nodes that would write them and the gates that approve them.
 
-If `start` refuses, it says why and wrote nothing: fix what it names, or ask the
-user. Never run it again with a flag dropped to get past the refusal.
+If `start` refuses, it says why and wrote nothing. For a missing file or an
+unknown chain id, ask the user for the right one. For a bindings refusal, tell
+the user what it names: `bindings.yaml` is theirs to change. Never run it again
+with a flag dropped to get past the refusal.
 
 It prints, for example,
 `{"chain_id": "<id>", "backend": "jsonl", "chain": "default", "source": "bundled", "unused_bindings": []}`:

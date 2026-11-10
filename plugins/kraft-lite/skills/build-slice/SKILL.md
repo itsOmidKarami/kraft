@@ -81,7 +81,9 @@ Copy this and tick it off; the walk starts when all four are ticked.
    full (a refused binding opens as section 2 says); never start with `--chain`
    instead.
 5. Invoke `kraft-lite:next`. Pass your child chain's `--chain-id <id>` to every
-   verb but `start`.
+   verb but `start`. On every wake-up, restore or compaction, read the id from
+   `<run>/<slice key>/chain` before you invoke it: `next`'s advice to take the id
+   from `chains`, or to put the choice of chain to the user, isn't for a child.
 
 ### A fresh container
 
@@ -159,7 +161,13 @@ Every message has these parts, in this order:
 When `attempt` prints `over_cap: true`, stop the loop and send a `question` whose
 evidence is every attempt's output in full. Run no further repair, no further
 `attempt`, no `close` until the controller answers; then follow its steer. It
-re-steers you once or holds the question for the user.
+re-steers you once or holds the question for the user. After a re-steer, run the
+repair it names: `attempt` still prints `over_cap: true`, and that alone is no
+reason to stop again. Stop only if the steered round fails, and send that round's
+output as a new `question`. `close` stays barred: the node has not passed.
+
+When no work is left that doesn't wait on an answer, arm the wake-up as section 4
+says and end the turn. Don't poll the controller or put a question to the user.
 
 ## 4. CI
 

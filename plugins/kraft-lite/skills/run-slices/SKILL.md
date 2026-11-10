@@ -9,12 +9,13 @@ If `$CLAUDE_PLUGIN_ROOT` is unset, `kl.py` is two directories above this file;
 it needs `python3` 3.10 or newer, and without one, tell the user and stop.
 
 You are the **controller**. Each **slice** is a part of the plan that stands
-alone (section 1), built by a **child** session that walks the **child chain** (the nodes `kl.py` gives a
-child from this run's frozen chain, as `kraft-lite:build-slice` lists them).
-Children report to you; you answer them, review and merge their work into the
-**feature branch**, and keep the run's truth in `.kraft-lite/`, copied to the
-**state branch** after every change. Your conversation is not state: after a
-compaction or a restart, read `state`, `slices` and `decisions` again.
+alone (section 1), built by a **child** session. The child walks the **child
+chain**: the nodes `kl.py` gives it from this run's frozen chain, as
+`kraft-lite:build-slice` lists them. Children report to you; you answer them,
+review and merge their work into the **feature branch**, and keep the run's
+truth in `.kraft-lite/`, copied to the **state branch** after every change. Your
+conversation is not state: after a compaction or a restart, read `state`,
+`slices` and `decisions` again.
 
 In prose and checklists below, `KL` is short for
 `python3 "$CLAUDE_PLUGIN_ROOT/kl.py"`, and a `KL` command carries `--chain-id <id>`
@@ -45,8 +46,10 @@ the user slicing comes at `shape.slice_gate`, and draw nothing now. In both, go
 on with `kraft-lite:next`, so each gate gets `kraft-lite:gate`'s own question.
 
 Slice only what stands alone: a part that uses no other part's work and is
-coherent enough for its own tests and its own build, verify and review loop. A
-slice of one or two tasks almost never qualifies, and six slices are plenty.
+coherent enough for its own tests and its own build, verify and review loop.
+Groundwork and `after` order the parts that must come first; a part that needs a
+sibling's work with no `after` doesn't stand alone. A slice of one or two tasks
+almost never qualifies, and six slices are plenty.
 Smaller independent tasks run as subagents in one session, which is the default;
 a strained context is a reason to look for such parts, not a reason to slice. A
 plan whose parts don't stand alone is not sliced: say so, delete any
@@ -62,10 +65,10 @@ and invoke `kraft-lite:gate`; the chain continues as one.
 2. Draw the proposal: each slice's tasks, what it comes after, which slices run
    in parallel, and one owning slice for every shared helper, fixture or file
    two slices would both create. The other slice waits for it or uses it from
-   the owner's branch. Every plan task is in exactly one slice. Independent slices are the
-   default. `after` (in a plan, a last sentence `Comes after slice 1.`) is Lite's
-   own, for a slice built on another's merged work: Kraft can't slice a plan
-   that uses it.
+   the owner's branch. Every plan task is in exactly one slice. Independent
+   slices are the default. `after` (in a plan, a last sentence
+   `Comes after slice 1.`) is Lite's own, for a slice built on another's merged
+   work: Kraft can't slice a plan that uses it.
 3. Add the mode: the user's words for this run if they named one, logged with
    `KL decide --question "Mode for this run" --answer "<their words>" --why "set by the user"`,
    else the mode `KL settings` prints. Add the feature branch (`feature` mode: a
@@ -196,11 +199,15 @@ the user's merges. When the user merges a slice, the steps after a merge
 
 Before any other write and before starting anything:
 
-1. Fetch the state branch, `KL import --from <state-checkout>/kraft-lite-state`,
-   then `KL chains` for the chain id. An empty `chains` before the import is a
-   missing import: never `start` a new chain. An import refused as exported by
-   an older Kraft Lite is a run from before V1 chains: tell the user it must be
-   finished on the previous Kraft Lite version, and write nothing.
+1. Find the state checkout (section 7): in a cloud session, this checkout;
+   locally, the worktree of the `-state` branch in `git worktree list`, and with
+   none, ask the user and write nothing. Fetch the state branch,
+   `KL import --from <state-checkout>/kraft-lite-state`, then `KL chains` for
+   the chain id; with several unfinished chains, ask which. An empty `chains`
+   before the import is a missing import: never `start` a new chain. An import
+   refused as exported by an older Kraft Lite is a run from before V1 chains:
+   tell the user it must be finished on the previous Kraft Lite version, and
+   write nothing.
 2. `KL slices`. For every `starting` or `running` slice, and every `waiting`
    one in `ready` or `early`, find its session, in the ways the guide
    confirms: the recorded session id; a session whose title or name carries
@@ -228,7 +235,7 @@ inside a turn. Every check-in:
 ```
 - [ ] `KL state` and `KL slices`. Past the first build node: invoke `kraft-lite:next`, which records the user's merges, and skip to the last line. A non-empty `base_moved`: the rebase in section 6.
 - [ ] Read messages, then `.kraft-lite/messages/<chain-id>/`, then each slice PR's comments.
-- [ ] Per running child: its status summary (fields in the guide), and `git fetch` + `git log` of its branch. Never its full transcript.
+- [ ] Per running child: its status summary where the guide has one, else `git fetch` + `git log` of its branch. Never its full transcript (it overflows your context).
 - [ ] A child shown as blocked: find out on what (often its own subagents) before telling the user anything.
 - [ ] `main` mode: each `ready_to_merge` slice's PR. One the user merged takes the steps after a merge (section 6).
 - [ ] Answer every question (below). Export state.
@@ -366,7 +373,9 @@ delete; when `kraft-lite:next` reports the chain done, the state branch too. In
 With no guide for this harness, or an ability its guide marks unconfirmed,
 follow [discover.md](references/discover.md) first. With no way to start a child
 even then: say so, and walk the slices here, one after another, in `ready`
-order, with the same review, merge and state steps.
+order, with the same review, merge and state steps. Build each as its child
+would: follow `kraft-lite:build-slice` on the slice's own branch, with this
+session as its controller, so every question it would send is yours to answer.
 
 ## 11. Models
 
