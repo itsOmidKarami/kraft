@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { KraftEvent } from "../../../types";
+import type { GateRound, KraftEvent } from "../../../types";
 import { acceptWrites, detail, holdFetch, SLICED, stubFetch, V1 } from "../testkit";
 import type { ItemDetail } from "../useItem";
 import { GateBody, GateFooter } from "./GatePane";
@@ -14,7 +14,9 @@ const WRITES = acceptWrites("POST /work-items/w1/gates/plan_approval/approve", "
 afterEach(() => vi.unstubAllGlobals());
 const gate = V1[1];
 const pending = detail({ current_node_id: "plan_approval", pending_gate: "plan_approval", gate_artifact: ".engineering/plans/p.md", display_status: "needs_you" });
-const approved = (by: string): KraftEvent => ({ seq: 1, work_item_id: "w1", type: "gate_approved", payload: { gate: "plan_approval", by }, node_id: "plan_approval", created_at: "t" });
+/** A round of plan_approval, as the server reads it from the events. */
+const round = (n: number, over: Partial<GateRound> = {}): GateRound => ({ n, requested_at: "t", ended_at: "t", outcome: "approved", by: "human", note: null, sent_to: null, reopened: false, reviewer: null, ...over });
+const rounds = (...rs: GateRound[]) => ({ gate_rounds: { plan_approval: rs } });
 
 let where = "";
 const Where = () => {
@@ -127,7 +129,7 @@ describe("GateFooter", () => {
 describe("GateBody", () => {
   it("says who passed a gate, and what a pending one decides on", async () => {
     stubFetch();
-    const { unmount } = render(<GateBody item={detail()} version="1" gate={gate} events={[approved("agent")]} />);
+    const { unmount } = render(<GateBody item={detail(rounds(round(1, { by: "agent" })))} version="1" gate={gate} events={[]} />);
     expect(screen.getByText("passed · auto")).toBeInTheDocument();
     expect(screen.queryByText("decides on")).toBeNull();
     unmount();
@@ -143,16 +145,16 @@ describe("GateBody", () => {
   });
 
   // R14b-05: a skipped gate on a finished item was "not reached", though the item had passed it.
-  const skip = (gate_: string): KraftEvent => ({ seq: 3, work_item_id: "w1", type: "node_skipped", payload: { node_id: gate_, gate: gate_ }, node_id: gate_, created_at: "t" });
+  const skipped = round(1, { outcome: "skipped", by: null });
   it.each([
-    ["skipped", [skip("plan_approval")], "skipped"],
-    ["skipped, then decided on a retry", [skip("plan_approval"), approved("human")], "passed · you"],
-    ["another gate's skip", [skip("final_review")], "not reached"],
+    ["skipped", rounds(skipped), "skipped"],
+    ["skipped, then decided on a retry", rounds(skipped, round(2)), "passed · you"],
+    ["another gate's skip", { gate_rounds: { final_review: [skipped] } }, "not reached"],
     // A run inside a later group stands at `slices.<node>`: the gate before it is behind it.
-    ["behind a run inside a group", [], "passed", { display_status: "running", chain_definition: { template_id: "d", nodes: SLICED }, current_node_id: "slices.implementation" }],
-  ] as [string, KraftEvent[], string, Partial<ItemDetail>?][])("a gate that is %s", (_n, events, status, over) => {
+    ["behind a run inside a group", { display_status: "running", chain_definition: { template_id: "d", nodes: SLICED }, current_node_id: "slices.implementation" }, "passed"],
+  ] as [string, Partial<ItemDetail>, string][])("a gate that is %s", (_n, over, status) => {
     stubFetch();
-    render(<GateBody item={detail({ display_status: "done", current_node_id: null, ...over })} version="1" gate={gate} events={events} />);
+    render(<GateBody item={detail({ display_status: "done", current_node_id: null, ...over })} version="1" gate={gate} events={[]} />);
     expect(screen.getByText("status").nextElementSibling).toHaveTextContent(status);
   });
 

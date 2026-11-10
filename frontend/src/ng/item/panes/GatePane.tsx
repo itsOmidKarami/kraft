@@ -10,10 +10,9 @@ import { ADD_NOTE } from "../../ui/reasons";
 import { request } from "../../http";
 import { act } from "../actions";
 import { TestsLine } from "../TestsLine";
-import { gateSkipped } from "../events";
+import { gateState } from "../gateRounds";
 import { OUTCOME, reviewOutcome } from "../reviewOutcome";
 import { rejectTarget } from "../graph";
-import { cursorOf } from "../cursor";
 import { totals, useDiffFiles } from "../Top";
 import { runVersion, type ItemDetail } from "../useItem";
 import { holdsText, isEscape, sendOnModEnter } from "../../keys";
@@ -38,7 +37,6 @@ export function GateBody({ item, version, gate, events }: { item: ItemDetail; ve
   }, [item.id, version]);
   const open = threads.filter((t) => t.state !== "resolved");
   const pending = item.pending_gate === gate.id;
-  const decided = gateDecision(events, gate.id);
   const outcome = reviewOutcome(events, gate.id);
   // The reviewer's own concern is usually its outcome's note, shown below.
   const concerns = (item.concerns ?? []).filter((c) => c.trim() !== outcome?.note);
@@ -78,7 +76,7 @@ export function GateBody({ item, version, gate, events }: { item: ItemDetail; ve
         {item.test_result && <div><dt>tests</dt><dd><TestsLine workItemId={item.id} result={item.test_result} /></dd></div>}
         {item.gate_artifact && pending && <div><dt>decides on</dt><dd className="is-mono">{item.gate_artifact.split("/").pop()}</dd></div>}
         {to && <div><dt>reject to</dt><dd>{nameOf(item.chain_definition.nodes, to)}</dd></div>}
-        <div><dt>status</dt><dd>{pending ? "waiting for you" : decided ? `passed · ${decided.by}` : gateSkipped(events, gate.id) ? "skipped" : item.chain_definition.nodes.findIndex((n) => n.id === gate.id) < (cursorOf(item.chain_definition.nodes, item.current_node_id)?.index ?? -1) ? "passed" : "not reached"}</dd></div>
+        <div><dt>status</dt><dd>{gateState(item, gate.id).words}</dd></div>
       </dl>
     </>
   );
