@@ -10,14 +10,14 @@ it needs `python3` 3.10 or newer, and without one, tell the user and stop.
 
 This skill holds no state in the conversation: everything comes from `state`,
 so it survives a `/clear`. Below, `KL` is short for
-`python3 "$CLAUDE_PLUGIN_ROOT/kl.py"`, and every `KL` command except `chains`
-and `migrate` carries `--chain-id <id>`. In a cleared session you have no id:
-take `chain_id` from `KL chains`, or from a bare `state` while one chain is
-unfinished. If a verb exits saying there is more than one unfinished chain,
-show the user the list it printed and ask which - don't pick. A verb
-that refuses with `Run: python3 kl.py migrate` means a run or registry from an
-older Kraft Lite: follow `kraft-lite:init`'s last section, `A pre-V1 directory:
-migrate`, then go on with the new id it prints.
+`python3 "$CLAUDE_PLUGIN_ROOT/kl.py"`, and every `KL` command except `settings`,
+`import`, `chains`, `detect`, `migrate` and `start` carries `--chain-id <id>`.
+In a cleared session you have no id: take `chain_id` from `KL chains`, or from
+a bare `state` while one chain is unfinished. If a verb exits saying there is
+more than one unfinished chain, show the user the list it printed and ask
+which - don't pick. A verb that refuses with `Run: python3 kl.py migrate` means
+a run or registry from an older Kraft Lite: follow `kraft-lite:init`'s last
+section, `A pre-V1 directory: migrate`, then go on with the new id it prints.
 
 ## 1. Read the state
 
