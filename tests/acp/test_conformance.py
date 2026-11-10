@@ -86,7 +86,8 @@ def session(calls, *, asked=(), tokens=True, cost=True, stop="end_turn"):
         "stopReason": stop,
         **({"usage": {"inputTokens": 5, "outputTokens": 2}} if tokens else {}),
     }
-    out.append(from_agent({"id": 3, "result": result}))
+    if stop is not None:  # None: the log is cut off before the prompt's result
+        out.append(from_agent({"id": 3, "result": result}))
     return out
 
 
@@ -169,8 +170,12 @@ def test_the_probe_judges_reported_usage_by_the_entry(reports, tokens, cost, mis
 
 @pytest.mark.parametrize(
     ("stop", "exit_code", "where", "text"),
-    [("refusal", 0, "mismatches", "stopReason"), ("end_turn", 3, "problems", "exited 3")],
-    ids=["refusal", "client-exit"],
+    [
+        ("refusal", 0, "mismatches", "stopReason"),
+        ("end_turn", 3, "problems", "exited 3"),
+        (None, 0, "problems", "no stopReason"),
+    ],
+    ids=["refusal", "client-exit", "log-cut-off-before-the-result"],
 )
 def test_a_turn_that_did_not_end_cleanly_is_reported(stop, exit_code, where, text):
     got = conformance.analyze(
@@ -263,7 +268,9 @@ def test_a_probe_session_that_never_ends_is_one_problem_not_a_hang_or_phantom_mi
 
 def test_cancelling_the_probe_kills_the_client_and_the_agent(monkeypatch):
     """Ctrl-C reaches asyncio.run as a cancellation; the client runs in its own session, so the
-    terminal's SIGINT never reaches it and `run` must kill its process group itself."""
+    terminal's SIGINT never reaches it and `run` must kill its process group itself. The agent
+    outlives its client (`outlive`: it ignores SIGTERM and stdin EOF), so a kill of the client
+    alone leaves it running and this test fails."""
     started = []
     real = asyncio.create_subprocess_exec
 
@@ -272,7 +279,7 @@ def test_cancelling_the_probe_kills_the_client_and_the_agent(monkeypatch):
         return started[-1]
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", spy)
-    monkeypatch.setenv("KRAFT_FAKE_ACP", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_ACP", "slow,outlive")
     monkeypatch.setenv("KRAFT_FAKE_ACP_CALLS", json.dumps(PROBE_CALLS))
 
     def alive(pid):
@@ -293,7 +300,7 @@ def test_cancelling_the_probe_kills_the_client_and_the_agent(monkeypatch):
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
-            for _ in range(100):
+            for _ in range(50):
                 if not alive(pid):
                     return
                 await asyncio.sleep(0.1)

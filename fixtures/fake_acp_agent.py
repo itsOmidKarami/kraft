@@ -8,14 +8,16 @@ of flags (see `tests/acp/test_client.py` and `tests/support/acp.py`):
   ask fs stray long replay no_cost no_usage no_resume no_load no_system_prompt slow term die
   refuse_config noresult auth die_after_init hang deaf die_on_int exit_on_int kill noisy late
   slow_init mute badreq die_stderr ask_all only_always end_on_reject mode_option refuse_mode
-  slow_continue
+  slow_continue outlive
 
 `ask_all`: the agent asks before every scripted tool call (as if `asks_everything` had been
 applied); the same switch is `FAKE_ACP_ASK_ALL=1` in the environment. `only_always`: an ask
 offers only an `allow_always` option. `end_on_reject`: a rejected ask ends the turn `cancelled`
 (OpenCode does); the calls after it wait, and the next `session/prompt` runs them, so a client
 that continues the conversation sees the task finish. `slow_continue`: from the second prompt on,
-the turn waits for `session/cancel` as `slow` does.
+the turn waits for `session/cancel` as `slow` does. `outlive` (with `slow`): when stdin closes the
+agent ignores SIGTERM and sleeps two minutes instead of finishing, as an agent that outlives its
+client does; only a kill of the whole process group stops it.
 `mode_option`: the session offers a `mode` config option (`default` makes the agent ask);
 `refuse_mode`: `session/set_mode` fails. `KRAFT_FAKE_ACP_CALLS` is a JSON list of scripted tool
 calls, see `run_calls`.
@@ -385,6 +387,10 @@ def prompt(id_, params: dict) -> None:
         while (msg := read()) is not None:
             if msg.get("method") == "session/cancel":
                 break
+        else:
+            if "outlive" in FLAGS:  # stdin closed: the client is gone, and this agent stays
+                signal.signal(signal.SIGTERM, signal.SIG_IGN)
+                time.sleep(120)
         if "late" in FLAGS:  # answers the cancel after the client has stopped waiting
             time.sleep(1.0)
         stop = "cancelled"

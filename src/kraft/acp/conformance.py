@@ -110,7 +110,12 @@ def analyze(lines: Iterable[str], h, *, exit_code: int = 0) -> Report:
     notes: list[str] = []
     if exit_code:
         problems.append(f"the client exited {exit_code}")
-    if stop is not None and stop != "end_turn":
+    if stop is None:
+        if not problems:  # a log cut off before the prompt's result is not a clean session
+            problems.append(
+                "the session sent no stopReason: its log ends before the prompt's result"
+            )
+    elif stop != "end_turn":
         mismatches.append(f"the turn ended with stopReason {stop!r}, not 'end_turn'")
     for label, names in STEPS:
         done = [c for c in calls if set(c.kraft) & set(names)]
@@ -231,13 +236,12 @@ async def run(
         except TimeoutError:
             timed_out = True
         finally:
-            if (
-                proc.returncode is None
-            ):  # timed out, cancelled or interrupted: leave nothing running
-                with contextlib.suppress(ProcessLookupError):
-                    os.killpg(proc.pid, signal.SIGKILL)
-                # Reap the group leader: a zombie leader keeps its group "alive" on macOS.
-                await proc.wait()
+            # Whatever ended the session (timeout, cancel, interrupt or the client exiting on its
+            # own) leave nothing running: the agent or a grandchild can outlive the client.
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            # Reap the group leader: a zombie leader keeps its group "alive" on macOS.
+            await proc.wait()
         if timed_out:
             # Only the timeout is a finding: the steps the agent did not get to are not mismatches.
             seen = analyze(lines, h)
