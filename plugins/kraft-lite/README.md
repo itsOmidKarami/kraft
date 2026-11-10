@@ -30,7 +30,7 @@ Add `--scope project` to either command to keep it to one repo. Update with `cla
 4. At a gate, run `/kraft-lite:gate` to read what needs deciding, then approve or reject.
 5. Run `/kraft-lite:status` at any time to see the live node and the fix attempts spent.
 
-`/kraft-lite:init` is optional. Run it once per repo to write a `.kraft-lite/bindings.yaml` that binds a task to your own skill, instruction or test command.
+`/kraft-lite:init` is optional. Run it once per repo to write a `.kraft-lite/bindings.yaml` that binds a task to your own skill, instruction or test command. A task you leave unbound follows [Kraft's own method](https://kraft-sdlc.dev/reference/kraft-lite#krafts-methods) for it, the spec writer and the planner included.
 
 ## Commands
 

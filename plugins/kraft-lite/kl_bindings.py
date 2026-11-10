@@ -155,6 +155,28 @@ IMPLEMENTER = "implementer"
 HANDLERS = ("on_failure", "fix_loop", "escalation", "on_merge_rejected")
 
 SKILL_MISSING = " (skill missing)"
+SHIPPED_METHOD = " (shipped method)"
+
+#: Kraft's worker methods, `<name>.md` for Kraft's `skills/<name>/SKILL.md`,
+#: copied byte for byte by `just kraft-lite-config`. A `kraft:<name>` or bare
+#: `<name>` skill not installed here runs its prompt with a `## Method` section
+#: naming the file to follow, not the prompt alone. A path, not the text:
+#: `state` dispatches every task of a node, and the text is 3-8 KB a method.
+METHODS = Path(__file__).parent / "methods"
+
+#: Shipped methods that were renamed, old name to new, as Kraft's `skill.RENAMED`.
+RENAMED = {"mr-checks-repair": "mr-metadata-repair"}
+
+#: Said before the method's path: it is written for a Kraft worker, and these
+#: are the things a Kraft worker has that this session does not.
+METHOD_NOTE = (
+    "This method is Kraft's, written for a Kraft worker; no Kraft server runs here. Where "
+    "it says to write a result file (`$KRAFT_RESULT_PATH`) with a `status`, report the same "
+    "fields in your reply instead. A review package is the branch's diff against its base. "
+    "Where it names another `$KRAFT_*` file or a `kraft` command, get the same facts from git "
+    "and the forge's own CLI, or do without. Where it says to stop with `needs_context`, stop "
+    "and ask the user."
+)
 
 
 class BindingError(SystemExit):
@@ -275,21 +297,26 @@ def dispatch(
     """What to do for `task`: the first matching rule, as a dispatch record.
 
     `installed` says whether a skill is available in this harness; a skill that
-    is not falls back to its prompt. `first_build` is set only in a child
+    is not falls back to its prompt, naming Kraft's method for it when Lite
+    ships one (`shipped_method`). `first_build` is set only in a child
     walking a slice: its chain's first build node, and it turns the slice
     layer on. `task_kind`, `ref` and `target` are the task's own, whatever ran
     it: the walk keys Kraft's rules for builtin and forge tasks on them, never
     on `source`, which a path binding hides."""
     chosen = _choose(task, bindings, first_build)
     if chosen is None:
-        chosen = _default(task, installed)
+        chosen = _default(task)
     entry, source = chosen
     kind = entry["kind"]
     skill, prompt = entry.get("skill"), entry.get("prompt")
+    method = None
     if kind == "skill" and not installed(skill):
-        kind, skill, source = "prompt", None, source + SKILL_MISSING
+        method = shipped_method(skill)
+        kind, source = "prompt", source + (SHIPPED_METHOD if method else SKILL_MISSING)
     if kind in ("skill", "prompt"):
-        prompt = "\n\n".join(filter(None, [prompt, *(task.get("steering") or ())])) or None
+        method = method and f"## Method\n\nRead {method} and follow it.\n\n{METHOD_NOTE}"
+        parts = [prompt, *(task.get("steering") or ()), method]
+        prompt = "\n\n".join(filter(None, parts)) or None
     return {
         "path": task["path"],
         "kind": kind,
@@ -348,15 +375,13 @@ def _keys(task: dict) -> list[tuple[str, str]]:
     return keys
 
 
-def _default(task: dict, installed: Callable[[str], bool]) -> tuple[dict, str]:
+def _default(task: dict) -> tuple[dict, str]:
     kind = task.get("kind")
     if kind == "agent":
         skill = task.get("skill")
         if skill in SKILL_DEFAULTS:
             return SKILL_DEFAULTS[skill], f"default:skills.{skill}"
-        if skill and not installed(skill):
-            # Said in the source, as for a bound skill, so the walk can say it fell back.
-            return {"kind": "prompt", **_fields(task)}, "default:agent" + SKILL_MISSING
+        # A skill not installed here falls back in `dispatch`, as a bound one does.
         return {"kind": "skill" if skill else "prompt", **_fields(task)}, "default:agent"
     if kind == "subprocess":
         return {"kind": "subprocess", "command": task.get("command") or []}, "default:subprocess"
@@ -370,6 +395,16 @@ def _default(task: dict, installed: Callable[[str], bool]) -> tuple[dict, str]:
     if name not in table:
         raise BindingError(f"{task['path']}: no default for {kind} {name!r}")
     return table[name], f"default:{section}.{name}"
+
+
+def shipped_method(skill: str | None) -> str | None:
+    """The absolute path of the Kraft method `skill` names, or None when Lite ships none."""
+    name = (skill or "").removeprefix("kraft:")
+    name = RENAMED.get(name, name)
+    # Only a name the directory lists: a skill value never becomes a path of its own.
+    if name not in {p.stem for p in METHODS.glob("*.md")}:
+        return None
+    return str((METHODS / f"{name}.md").resolve())
 
 
 def _fields(task: dict) -> dict:

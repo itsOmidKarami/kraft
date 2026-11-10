@@ -177,6 +177,64 @@ def skill(name: str, text: str = "fallback") -> dict:
             id="skill_binding_missing_falls_back",
         ),
         pytest.param(
+            task(skill="kraft:code-review", prompt="Review it.", steering=["Be brief."]),
+            {},
+            lambda name: False,
+            None,
+            {
+                "kind": "prompt",
+                "skill": None,
+                "prompt": "Review it.\n\nBe brief.\n\n## Method\n\nRead "
+                + str((kl_bindings.METHODS / "code-review.md").resolve())
+                + " and follow it.\n\n"
+                + kl_bindings.METHOD_NOTE,
+                "source": "default:agent (shipped method)",
+            },
+            id="kraft_method_not_installed_runs_the_shipped_method",
+        ),
+        pytest.param(
+            task(skill="kraft:code-review", prompt="Review it."),
+            {},
+            lambda name: True,
+            None,
+            {"kind": "skill", "skill": "kraft:code-review", "prompt": "Review it."},
+            id="installed_kraft_method_runs_as_a_skill",
+        ),
+        pytest.param(
+            task(skill="plan", prompt="Plan it."),
+            {},
+            lambda name: False,
+            None,
+            {"source": "default:agent (shipped method)"},
+            id="bare_method_name_runs_the_shipped_method",
+        ),
+        pytest.param(
+            task(skill="kraft:mr-checks-repair", prompt="Repair it."),
+            {},
+            lambda name: False,
+            None,
+            {
+                "prompt": "Repair it.\n\n## Method\n\nRead "
+                + str((kl_bindings.METHODS / "mr-metadata-repair.md").resolve())
+                + " and follow it.\n\n"
+                + kl_bindings.METHOD_NOTE,
+                "source": "default:agent (shipped method)",
+            },
+            id="renamed_method_runs_under_its_new_name",
+        ),
+        pytest.param(
+            task(skill="kraft:code-review", components=["code_review"]),
+            {"tasks": {"code_review": prompt("Review it my way.")}},
+            lambda name: False,
+            None,
+            {
+                "kind": "prompt",
+                "prompt": "Review it my way.",
+                "source": "bindings:tasks.code_review",
+            },
+            id="binding_beats_the_shipped_method",
+        ),
+        pytest.param(
             # As `kl_chains` freezes `command: sh -c 'npm run lint && npx tsc --noEmit'`.
             task(kind="subprocess", command=["sh", "-c", "npm run lint && npx tsc --noEmit"]),
             {},

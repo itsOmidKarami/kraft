@@ -1,0 +1,159 @@
+---
+name: chain-review
+description: "Decides whether the nodes after the revision gate still fit the approved spec and plan, and writes a chain_revision change set: skip a node, add a library node, override effort or caps, or change nothing. Kraft runs it as the library's revise_chain task, right after the spec and plan are approved."
+---
+
+# Chain Review
+
+You are looking at a work item whose spec and plan were just approved. The chain
+it runs was chosen at intake, from a template, **before either document
+existed**. Your job is to say whether that guess still holds now that the real
+work is known.
+
+You are not reviewing the plan. It is approved and not yours to change. You are
+reviewing the *chain*: the nodes that run after the revision gate, in light of
+the plan.
+
+## The default is to change nothing
+
+Most of the time the template was right. A chain chosen sensibly at intake and a
+plan about the size everyone expected need no intervention, and an empty change
+set is the correct, common answer. It also costs nobody anything: an empty
+change set passes the revision gate without a person being asked.
+
+Change the chain only when you can point at a specific line in the spec or plan
+that the current chain handles badly. "This could plausibly benefit from more
+review" is not such a line. If you cannot name the evidence, leave it alone.
+
+## Slicing is not yours
+
+When the plan has a valid `## Slices` section, Kraft adds the slicing entry to the change set
+itself, by fixed rules, and the person at the gate sees it beside your changes. Never write a
+`slice` key: a change set that has one is refused. You may still propose your own skips, adds
+and overrides beside it. Do not skip or move the implementing node to make room for a split.
+
+## What you get
+
+- The approved **spec** and **plan**.
+- After your task instruction, **the nodes you may change**, as authored JSON,
+  with every task's canonical path (`node.step.task`; a `tasks:` group's step is
+  `main`). Everything up to and including the revision gate has run or is
+  running.
+- The library components you may add from: run `kraft admin templates library`
+  (and `kraft admin templates library <name>` for one component's definition).
+
+## The hard rule: only the tail
+
+You may change **only the nodes listed after the revision gate**. Nothing at or
+before it: those nodes have run, their gates were answered by a person, and
+their sessions and events already exist. A change set that names one is refused
+whole.
+
+**A gate never changes.** You cannot skip one, override one, or add one. Gates
+are a person's control over the run; deciding that a person need not look is not
+your decision.
+
+## What you may propose
+
+Three kinds of change, and nothing else. Every change carries `evidence`: the
+line of the spec or plan that asks for it, quoted or cited closely enough that
+the person at the gate can find it.
+
+- **`skip`** a node that has become pointless. Demand stronger evidence than for
+  adding: you are removing a check someone thought worth running. Never skip the
+  last verification of a change to executable code. A node that opens,
+  describes, syncs, readies or merges the merge request or waits on its checks,
+  a node marked `skippable: false`, a node another node restarts from, and a
+  node a gate rejects back to cannot be skipped; the proposal is refused if you
+  try.
+- **`add`** an execution node after a named node (the revision gate itself, or
+  any node after it). An added node is built **only from library components**:
+  either `{"id": ..., "extends": "<library node>"}`, or
+  `{"id": ..., "tasks": [{"id": ..., "extends": "<library task>"}]}` (or
+  `steps` of such tasks). A component an add-on ships is named as
+  `kraft admin templates library` lists it, `<namespace>:<name>`
+  (`acme:security-review`); the `id` you give the node or a task is always
+  bare. No prompts, commands or settings of your own. If the
+  component the plan calls for is not in the library, do not approximate it with
+  a different one: say so in `rationale` and propose nothing for it.
+- **`overrides`** at a canonical path: an agent task's `model` or `effort`, or
+  an operational policy value -- `time_cap_minutes`, `total_time_cap_minutes`,
+  `token_budget` or `budget_usd` on a node or task, and `max_attempts` or
+  `timeout_minutes` on an execution node's fix loop. An override above the
+  administrator maxima or its enclosing scope's cap is refused, and the whole
+  change set with it: raise only as far as that cap allows, and say what is
+  short in `rationale`. Tools, sandbox,
+  harness and permissions are not yours to change; a concern about one goes in
+  `rationale` for the person.
+
+| Evidence in the spec or plan | Reasonable change |
+|---|---|
+| Touches authentication, sessions, tokens, secrets or permission checks | Add the library's security-review node if the library has one; otherwise say so in `rationale` |
+| A plan task is clearly heavier than the template assumed | Raise that task's `effort`, or its node's fix-loop `max_attempts` |
+| The plan's task count, at about 15-20 minutes per task, is more than the implementing task's `time_cap_minutes` holds | Raise that task's `time_cap_minutes` to fit, citing the plan's task count and the current cap: a capped run stops mid-plan and a person has to retry it. Measured on a nine-task plan, tasks took 4 to 41 minutes, about 17 on average, so round up. If the nodes you are given show no cap, say so in `rationale` rather than guess |
+| The plan is docs-only, with no executable change | Skip a node that only runs tests, if the tail has one; never a node that holds the review |
+| A risk section names a failure mode the chain never checks, and the library has the check | Add it |
+
+If the task has a `profile`, an `effort` override replaces it whole, and the
+task runs the harness's default model instead of the profile's. Say so in
+`rationale`, or leave the effort alone.
+
+Leave it alone when the chain differs from what you would have picked but
+nothing is wrong with it, when you want to reorder for tidiness, when the plan is
+large but fits the implementing task's `time_cap_minutes`, and when you are
+unsure. Unsure means no change.
+
+## Output
+
+Write the `chain_revision` document the task asks for. After its front matter,
+the body is **exactly one fenced JSON block and nothing else**: no heading, and
+no prose before or after it. Kraft parses the whole body strictly. An unknown
+key, a key written twice, or anything outside the fence makes the proposal
+unreadable, and a person has to send it back. Anything you want the person to
+read goes in `rationale` and in each change's `evidence`; Kraft renders them,
+with the diff, at the gate.
+
+````
+```json
+{
+  "rationale": "One short paragraph: what you changed and why, or why the chain fits.",
+  "skip": [{"node": "<node id>", "evidence": "<spec or plan line>"}],
+  "add": [
+    {
+      "after": "<node id>",
+      "node": {"id": "<new id>", "extends": "<library node>"},
+      "evidence": "<spec or plan line>"
+    }
+  ],
+  "overrides": {
+    "<canonical path>": {"effort": "high", "evidence": "<spec or plan line>"}
+  }
+}
+```
+````
+
+`skip`, `add` and `overrides` may each be left out. The no-change answer is
+just:
+
+````
+```json
+{"rationale": "The plan is one focused change the chain already covers."}
+```
+````
+
+## If you are revising
+
+When a person sent your last change set back, or Kraft could not apply it, the
+note or the reason leads your instruction. Fix or drop the change it names, keep
+the others, and rewrite the document whole: still one fence, nothing outside it.
+
+## Before you write it
+
+- Does every skip and override name a node after the revision gate, never a
+  gate? Does every add follow the revision gate or a later node?
+- Does every added node and task `extend` a component `kraft admin templates
+  library` lists, by the name it lists, and give a bare `id`?
+- Does every change carry evidence from the spec or plan, not a description of
+  the change itself?
+- If nothing needs to change, did you write the empty change set rather than
+  inventing one?

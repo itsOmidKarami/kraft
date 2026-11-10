@@ -68,6 +68,13 @@ def test_state_reports_steps_and_dispatch(walk, kl_cli, tmp_path):
     assert tests["source"] == "default:builtins.kraft.verify_changed_test_scopes"
     assert state["fix_loop"]["judge"]["path"] == "verification.fix_loop.judge"
     assert [s["id"] for s in state["fix_loop"]["steps"]] == ["main"]
+    # Kraft's methods are named by path, never inlined: `state` dispatches every task.
+    [review] = state["steps"][1]["tasks"]
+    assert review["source"] == "default:agent (shipped method)"
+    assert str((PLUGIN / "methods" / "code-review.md").resolve()) in review["prompt"]
+    for name in ("code-review", "fix-loop-judge"):
+        body = (PLUGIN / "methods" / f"{name}.md").read_text().split("\n# ", 1)[1]
+        assert json.dumps(body)[1:-1] not in json.dumps(state)  # both JSON-escaped
 
     bindings = tmp_path / ".kraft-lite" / "bindings.yaml"
     bindings.write_text(

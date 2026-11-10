@@ -1,0 +1,87 @@
+---
+name: merge-queue-repair
+description: "Repairs what made a merge train (GitLab) or merge queue (GitHub) reject a merge request that had passed its own pipeline: reproduces the failure against the target branch as it is now and fixes the code. Kraft runs it as the on_merge_rejected repair of the merge node, after the forge dropped the merge request from its train or queue; Kraft then sends the item back through the merge request's checks and its final review."
+---
+
+# Repairing a merge train or merge queue rejection
+
+The merge request was approved and queued. Usually it had passed its own
+pipeline, and the merge train or merge queue then ran its own pipeline on it,
+merged into the target branch as it is now (and on GitLab, after the merge
+requests ahead of it in the train), and that pipeline failed. The prompt above
+says when it was otherwise: the merge request never reached the train because
+its own pipeline failed while it waited, or it no longer merges cleanly with
+the target. Why, which pipeline and which jobs are already in the prompt.
+
+So the failure comes from one or both of:
+
+- **The target branch as it is now.** Something landed on it after this
+  branch was tested: a renamed function, a changed fixture, a new lint rule, a
+  test that now collides with yours. Your branch is fine against the base it
+  was tested on and broken against the one it would land on.
+- **Jobs that run only on the train or queue.** Some projects run a heavier
+  suite, or a different one, only for the merge pipeline. This branch's own
+  pipeline never ran them, so they are seeing this change for the first time.
+
+## Find out which
+
+If the prompt tells you to rebase this branch first, do that and resolve any
+conflict before anything else: the rest of this method assumes the branch
+already sits on the target.
+
+Read the failed jobs the prompt names, then their logs. `kraft view
+pipelines` lists this merge request's pipelines; the train's has kind `train`
+(GitLab) and the merge queue's `merge_group` (GitHub). `kraft view jobs
+--pipeline <id>` lists its jobs and `kraft view job-log --pipeline <id> --job
+<job-id>` prints one job's log tail (`-n` for more lines). When the prompt
+links to a pipeline (`.../pipelines/<id>`) or a run (`.../actions/runs/<id>`),
+that number is the `--pipeline` value.
+
+In a workspace item a failure names its repository (`[name] ...` in the log);
+for a member, add `--repo <its folder, relative to the worktree root>` to each
+`kraft view` call. Without `--repo` they read the root repository.
+
+A log names the failing test or check far more precisely than a job name
+does; read it before you change anything.
+
+Then reproduce it where you can. Once the branch sits on the target it already
+is what the train or queue merged, so fetch `origin/<base>` again (it may have
+moved), make sure the branch sits on it, and run the failing job's command
+where the prompt says to work. Never merge `origin/<base>` into the branch or
+check out another branch there. A failure you
+reproduced is a failure you can confirm you fixed. One you could not reproduce
+(a job that needs a service or a secret only the forge has) you fix from the
+log alone; say so in your report.
+
+## Fix the code, not the pipeline
+
+The train's or queue's jobs are the project's own definition of what may land.
+Fix the code so it passes them: adapt to what changed on the target branch,
+fix the test that collides, satisfy the check that only runs there. Do not
+edit the CI configuration to skip, relax or remove a job, and do not mark a
+test as skipped or expected to fail to get past it.
+
+The one exception is a train-only or queue-only job that is itself wrong: it
+fails on the target branch alone, with no change of yours in it, or it tests
+something this project no longer has. That is not yours to fix by editing it
+and not something a code change can satisfy.
+
+A failure that is not this change's at all (a flaky job, a runner that ran out
+of disk, a registry that timed out) is also not something to patch around.
+Finish says what to report.
+
+## Finish
+
+Run the command that reproduced the failure again on the fixed branch; if it
+still fails, keep going. Then commit your fix on this branch, and say in your
+report what you ran and what it printed, or that you could not reproduce it.
+
+When there is nothing in the code to fix, commit nothing and stop with
+`needs_context`, naming the job and the log line that shows why. A repair that
+commits nothing stops the item for a person, since the train would only reject
+the same head again; that is the right outcome here.
+
+Never push, never merge, and never put the merge request back on the train or
+in the queue yourself. Kraft does all three: after your commit it sends the
+item back through the merge request's own checks and its final review, and only
+then queues it again.
