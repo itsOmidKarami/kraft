@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { GateRound } from "../../types";
-import { byWord, gateRoundList, gateState, isPastRound, newestOutcome, outcomeWord, roundShown } from "./gateRounds";
+import { byWord, gateRoundList, gateState, isPastRound, isReviewRound, newestOutcome, outcomeWord, reviewDoc, reviewOutcomeWord, roundShown, threadCountLine, threadWhere } from "./gateRounds";
 import { detail, SLICED } from "./testkit";
 import type { ItemDetail } from "./useItem";
 
+const NO_THREADS = { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } };
 const round = (n: number, over: Partial<GateRound> = {}): GateRound => ({
-  n, requested_at: "t", ended_at: "t", outcome: "approved", by: "assistant", note: null, sent_to: null, reopened: false, reviewer: null, ...over,
+  n, requested_at: "t", ended_at: "t", outcome: "approved", by: "assistant", note: null, sent_to: null, reopened: false, reviewer: null,
+  review: null, threads: NO_THREADS, first_threads: [], ...over,
 });
+const REVIEW = { id: "rv", outcome: "request_changes", summary: "Two things.", head_sha: "h" } as const;
+const counted = (total: number, open: number, by_label: Partial<typeof NO_THREADS.by_label>) =>
+  round(1, { threads: { total, open, by_label: { ...NO_THREADS.by_label, ...by_label } } });
 const rejected = round(1, { outcome: "rejected", note: "redo task 3", sent_to: "plan" });
 const approved = round(2);
 const withRounds = (rounds: GateRound[], over: Partial<ItemDetail> = {}) => detail({ gate_rounds: { plan_approval: rounds }, ...over });
@@ -117,5 +122,48 @@ describe("newestOutcome", () => {
     ["no round", [], {}, undefined],
   ])("%s", (_name, rounds, over, words) => {
     expect(newestOutcome(withRounds(rounds, over), "plan_approval")).toBe(words);
+  });
+});
+
+describe("isReviewRound", () => {
+  it.each([
+    ["a note round", round(1), false],
+    ["a round with a review", round(1, { review: REVIEW }), true],
+    ["a round with threads and no review", counted(1, 1, { nit: 1 }), true],
+  ])("%s", (_name, r, expected) => {
+    expect(isReviewRound(r)).toBe(expected);
+  });
+});
+
+describe("threadCountLine", () => {
+  it.each([
+    ["labels then open", counted(3, 1, { must_fix: 2, question: 1 }), "3 threads · 2 must-fix · 1 question · 1 open"],
+    ["one nit, none open", counted(1, 0, { nit: 1 }), "1 thread · 1 nit"],
+    ["two nits open", counted(2, 2, { nit: 2 }), "2 threads · 2 nits · 2 open"],
+    ["an unlabelled thread counts in the total only", counted(2, 0, { must_fix: 1 }), "2 threads · 1 must-fix"],
+    ["none", counted(0, 0, {}), "No threads"],
+  ])("%s", (_name, r, line) => {
+    expect(threadCountLine(r)).toBe(line);
+  });
+});
+
+describe("threadWhere", () => {
+  it.each([
+    ["a range", { file_path: "a/b.py", start_line: 3, end_line: 5 }, "a/b.py:3–5"],
+    ["one line", { file_path: "a/b.py", start_line: 3, end_line: 3 }, "a/b.py:3"],
+    ["no lines", { file_path: "a/b.py", start_line: null, end_line: null }, "a/b.py"],
+    ["no file", { file_path: null, start_line: null, end_line: null }, "whole change"],
+  ])("%s", (_name, t, where) => {
+    expect(threadWhere({ id: "t", label: null, state: "open", body: "b", ...t })).toBe(where);
+  });
+});
+
+describe("the review's words", () => {
+  it("says changes requested", () => {
+    expect(reviewOutcomeWord("request_changes")).toBe("changes requested");
+  });
+  it("makes a document of the summary", () => {
+    const doc = reviewDoc("final_review", round(2, { review: REVIEW, by: "human", ended_at: null }));
+    expect([doc.title, doc.content, doc.by]).toEqual(["final_review · round 2 review", "Two things.", "changes requested · you"]);
   });
 });

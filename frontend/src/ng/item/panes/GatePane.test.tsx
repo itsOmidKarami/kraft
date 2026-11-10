@@ -15,7 +15,7 @@ afterEach(() => vi.unstubAllGlobals());
 const gate = V1[1];
 const pending = detail({ current_node_id: "plan_approval", pending_gate: "plan_approval", gate_artifact: ".engineering/plans/p.md", display_status: "needs_you" });
 /** A round of plan_approval, as the server reads it from the events. */
-const round = (n: number, over: Partial<GateRound> = {}): GateRound => ({ n, requested_at: "t", ended_at: "t", outcome: "approved", by: "human", note: null, sent_to: null, reopened: false, reviewer: null, ...over });
+const round = (n: number, over: Partial<GateRound> = {}): GateRound => ({ n, requested_at: "t", ended_at: "t", outcome: "approved", by: "human", note: null, sent_to: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [], ...over });
 const rounds = (...rs: GateRound[]) => ({ gate_rounds: { plan_approval: rs } });
 
 let where = "";

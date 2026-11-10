@@ -6,7 +6,7 @@ import { detail, SLICED, V1 } from "./testkit";
 const reviewed: ChainNode = { id: "final_review", kind: "gate", gate_after: null, tasks: ["final_review.review.auto_review"], steps: [["final_review.review.auto_review"]], reject_to: null };
 const nodes = [...V1, reviewed];
 const on = { doc: vi.fn(), reject: vi.fn() };
-const round = (n: number, over: Partial<GateRound> = {}): GateRound => ({ n, requested_at: "t", ended_at: "t", outcome: "approved", by: "assistant", note: null, sent_to: null, reopened: false, reviewer: null, ...over });
+const round = (n: number, over: Partial<GateRound> = {}): GateRound => ({ n, requested_at: "t", ended_at: "t", outcome: "approved", by: "assistant", note: null, sent_to: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [], ...over });
 // plan_approval asked, sent back to plan with a note, asked again, approved: what 510ysadf did.
 const NOTE = "The plan skips the invalidation story. ".repeat(18).trim();
 const twice = [round(1, { outcome: "rejected", note: NOTE, sent_to: "plan" }), round(2)];

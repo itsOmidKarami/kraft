@@ -1,5 +1,5 @@
 import type { RepoRow } from "./settings";
-import type { DisplayStatus, EventType, GroupPhase, ItemAction, SessionStatus, StopKind, WorkItemStatus } from "./vocab.generated";
+import type { DisplayStatus, EventType, GroupPhase, ItemAction, ReviewOutcome, SessionStatus, StopKind, ThreadLabel, ThreadState, WorkItemStatus } from "./vocab.generated";
 
 export interface ChainNode {
   id: string;
@@ -582,6 +582,17 @@ export interface WorkerSession {
   session_summary_ref?: string | null;
 }
 
+/** A review thread as a round lists it: the first line of its first comment (`store.gate_rounds`, `first_threads`). */
+export interface RoundThread {
+  id: string;
+  file_path: string | null;
+  start_line: number | null;
+  end_line: number | null;
+  label: ThreadLabel | null;
+  state: ThreadState;
+  body: string;
+}
+
 /** One time the chain reached a gate and something ended it (`store.gate_rounds`). `requested_at` is null for an
  *  ending the gate was never asked for (an unchanged chain revision, a review-thread bounce). */
 export interface GateRound {
@@ -595,6 +606,13 @@ export interface GateRound {
   sent_to: string | null;
   reopened: boolean;
   reviewer: { kind: "approve" | "reject" | "ready" | "undecided"; note: string } | null;
+  /** The newest review submitted at this gate in the round's window (after the previous round ended, up to this one's
+   *  end); null when there was none. */
+  review: { id: string; outcome: ReviewOutcome; summary: string; head_sha: string | null } | null;
+  /** The non-draft threads opened at this gate in the same window; an unlabelled one counts in `total` only. */
+  threads: { total: number; open: number; by_label: Record<"must_fix" | "question" | "nit", number> };
+  /** Up to three of them, must-fix first, then oldest. */
+  first_threads: RoundThread[];
 }
 
 export interface KraftEvent {

@@ -700,7 +700,7 @@ export function gateRoundsOf(events: Ev[]): Record<string, GateRound[]> {
   const open: Record<string, GateRound> = {};
   const round = (gate: string, at: string | null): GateRound => {
     const list = (rounds[gate] ??= []);
-    const r: GateRound = { n: list.length + 1, requested_at: at, ended_at: null, outcome: "pending", by: null, note: null, sent_to: null, reopened: false, reviewer: null };
+    const r: GateRound = { n: list.length + 1, requested_at: at, ended_at: null, outcome: "pending", by: null, note: null, sent_to: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [] };
     list.push(r);
     return r;
   };
