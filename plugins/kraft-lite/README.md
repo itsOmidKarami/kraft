@@ -236,10 +236,9 @@ Lite ships the methods a Kraft worker follows, in `methods/`: one file per
 from Kraft. A task whose `skill` is `kraft:<name>`, or a bare `<name>`, that
 isn't installed here gets its `prompt`, its `steering`, then a `## Method`
 section telling the agent to read that method's file and follow it. Its
-`source` ends `(shipped method)`. A binding for
-the task still wins. A `kind: skill` binding gets the method only when its own
-skill is a Kraft method that isn't installed. `kraft:review-feedback` stays
-skipped, as above.
+`source` ends `(shipped method)`. A binding for the task still wins. A
+`kind: skill` binding gets the method only when its own skill is a Kraft
+method that isn't installed. `kraft:review-feedback` stays skipped, as above.
 
 The method text names things only a Kraft worker has. The `## Method` section
 tells the agent how to read them here:

@@ -9,19 +9,26 @@ Kraft is about to open a merge request from your branch. Everything you write
 here becomes the merge request itself: its title, its labels, who it asks to
 review, and the description a reviewer reads before they read anything else. Nobody
 rewrites the title or description after you: write it for the reviewer, not for Kraft.
+The title is one line of at most 72 characters: Kraft cuts a longer one with an
+ellipsis, and a clipped title can fail a repo's title check.
 
 ## Read the repo's conventions first, and obey them over anything here
 
 - `.gitlab/merge_request_templates/*.md`, `.github/PULL_REQUEST_TEMPLATE.md`
-  (and `.github/PULL_REQUEST_TEMPLATE/*.md`): if the project ships a template,
-  fill *that*, section for section, rather than this skill's own headings
-  below.
+  (and `.github/PULL_REQUEST_TEMPLATE/*.md`; GitHub also takes
+  `pull_request_template.md` in any case, in the root, `docs/` or `.github/`):
+  if the project ships a template, fill *that*, section for section. Put the
+  four answers below under its sections; if none fits one, add it to the
+  closest section.
+- Any pull-request rules file your instructions point you to.
 - `CONTRIBUTING.md` for stated title and description rules, **and for any
   label CI requires**. Some projects fail a merge request that carries no
   label of a given kind (a release or change-type label, say). If this one
   does, you must pick one: its CONTRIBUTING, or the CI job that checks, is
-  where the choices are written down. If it states no label rule, there is
-  none to satisfy. The same goes for **a section the description must
+  where the choices are written down. Pick by what the diff does against each
+  label's definition there (`kraft view labels` carries descriptions), never
+  from habit: a wrong label mislabels what ships. If it states no label rule,
+  there is none to satisfy. The same goes for **a section the description must
   carry**: a project can fail a merge request whose body lacks one (a
   removed-tests list, a changelog), and a template may show it commented out,
   which does not make it optional. Look in CONTRIBUTING, the whole template
@@ -34,7 +41,9 @@ rewrites the title or description after you: write it for the reviewer, not for 
 
 ## Then read the change, not the plan
 
-The diff against the base branch (`git diff <base>...HEAD`), the spec, the
+The diff against the base branch (`git diff <base>...HEAD`, where `<base>` is
+`git symbolic-ref refs/remotes/origin/HEAD` unless the work item names
+another, or `kraft view diff --stat`), the spec, the
 plan, and the local review findings. A description written from the spec
 describes the change that was planned, not the one that was made.
 
@@ -48,19 +57,18 @@ describes the change that was planned, not the one that was made.
 - **How** -- the approach, and the alternatives rejected, if a reviewer would
   otherwise ask "why not X".
 - **Evidence** -- the commands run and what they printed. Test counts, lint,
-  typecheck. Not "tests pass".
+  typecheck. Not "tests pass". Quote results you saw in this item's documents
+  or logs, or from a command you ran now; a reviewer trusts this block, so
+  never write a result you didn't see.
 
 ## Rules
 
 - Do not advocate for approval. You are not selling the change.
 - Do not restate the work item title as the description.
-- Do not invent a reviewer or a label. Empty is correct unless the repo names
+- Do not invent a reviewer, an assignee or a label. Empty is correct unless the repo names
   one, and a label that does not already exist in this project is a failed
   API call, not a new label. `CODEOWNERS` is not a reviewer list: the forge
   handles code owners itself, and a forge can refuse to ask a merge request's own author.
-- A label or description section the project's rules require is not optional:
-  every label goes in `labels` and every section in the description, or the
-  merge request fails CI before anyone reads it.
 - Three lines is a fine description for a three-line diff.
 - Scope deliberately left out belongs in the description -- it is most of
   what gets rejected.
