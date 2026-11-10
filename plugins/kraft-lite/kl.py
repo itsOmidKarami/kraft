@@ -2900,13 +2900,14 @@ TASK_KEYWORDS: dict[str, tuple[str, ...]] = {
     "implementer": ("test-driven", "tdd", "implement"),
     "code_review": ("review",),
     "gate_reviewer": ("gate-review",),
-    # No candidates: the repair tasks, the join's conflict resolver and the judge
+    # No candidates: the repair tasks, the conflict resolvers and the judge
     # act on what Kraft reported, not on anything an installed skill is for.
     "repair_verification": (),
     "repair_mr_feedback": (),
     "repair_mr_checks": (),
     "repair_merge_queue_failure": (),
     "resolve_join_conflict": (),
+    "resolve_rebase_conflict": (),
     "triage_review_feedback": (),
     "strict_judge": (),
     "write_work_brief": ("brief",),
