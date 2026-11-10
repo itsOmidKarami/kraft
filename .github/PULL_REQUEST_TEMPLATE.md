@@ -1,4 +1,4 @@
-<!-- What this changes, and why -- the diff already shows what moved. A new docs page, section or CLI verb also carries `_Added in next_` under its heading (CONTRIBUTING.md, "User-facing docs"). -->
+<!-- What this changes, and why -- the diff already shows what moved. A new docs page, section or CLI verb also carries `_Added in next_` under its heading (docs/writing-docs.md, "Page rules"). -->
 
 
 

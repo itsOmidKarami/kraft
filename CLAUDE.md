@@ -216,7 +216,7 @@ under a heading or at a cell's end. A heading that is an old one under a new
 name gets `<!-- renamed from: Old heading -->` instead, and text newly written
 about something the latest release already shipped gets `<!-- not new: why -->`.
 `dev/check_docs_added_in.py` fails `lint` on a new heading with neither.
-CONTRIBUTING.md's "User-facing docs" has the details.
+docs/writing-docs.md's "Page rules" has the details.
 
 ### The test tree mirrors the source tree
 
