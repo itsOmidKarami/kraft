@@ -264,6 +264,11 @@ _ELSEWHERE = httpx.Response(200, json={"run_dir": "/elsewhere"})
             httpx.Response(500, text="Internal Server Error"),
         ),
         (
+            lambda: client.update_repo("/r", {}),
+            client.Failure.BAD_RESPONSE,
+            httpx.Response(200, text="<html>proxy</html>"),
+        ),
+        (
             lambda: client.pause(work_item_id="w1"),
             client.Failure.BAD_RESPONSE,
             httpx.Response(200, text="<html>proxy</html>"),
@@ -279,6 +284,7 @@ _ELSEWHERE = httpx.Response(200, json={"run_dir": "/elsewhere"})
         "blank-note",
         "no-item",
         "text-500",
+        "text-200-patch",
         "text-200-post",
         "update-not-object",
     ],
