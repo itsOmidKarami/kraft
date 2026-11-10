@@ -425,6 +425,7 @@ def _one_off_approval(request: Request, body: NewWorkItem, record: dict) -> dict
 
 @api_router.post("/work-items", status_code=201)
 async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = False):
+    """File a work item. It is created paused unless `autostart` is set."""
     st = request.app.state
     if st.invalid_policy:
         # Spec §9: a malformed policy.yaml makes the process refuse work, same
@@ -1312,6 +1313,7 @@ _CHAIN_FIXED = store.STARTING_REFUSAL
 
 @api_router.patch("/work-items/{wid}")
 async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
+    """Revise a work item that has not started: its title, description, chain or attachments."""
     st = request.app.state
     # The fields `kraft` guards with `_forbid_self_action`, plus the budget: a
     # worker raising its own dollar cap is the same self-action. Title and

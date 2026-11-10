@@ -15,6 +15,8 @@ Nothing outside this package imports anything from here except `app` --
 
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -92,6 +94,37 @@ from kraft.api.routes import (  # noqa: E402,F401
     work_items,
     workers,
 )
+
+#: The docs' groups, first match wins: what Swagger UI and ReDoc fold the schema
+#: into. `stable` also marks the two routes that keep their shape between minor
+#: releases (docs: reference/http-api).
+_TAGS = (
+    (r"POST /triggers|GET /health", ("stable",)),
+    (
+        r"\w+ /work-items/\{wid\}/(gates|pause|resume|retry|skip|steer|unblock|progress|"
+        r"escalate|complete|cancel|abandon|archive|restore|budget|ci-rerun|mr-labels|reopen-mr|"
+        r"open-worktree|sandbox-from-config)|POST /work-items/bulk",
+        ("gates and run control",),
+    ),
+    (r"\w+ /(work-items/\{wid\}/(threads|review)|threads|comments)", ("review",)),
+    (r"\w+ /work-items/\{wid\}/forge", ("forge reads",)),
+    (r"\w+ /(work-items/\{wid\}/sessions|worker-sessions)", ("worker sessions",)),
+    (r"\w+ /(work-items/\{wid\}/(draft|one-off)|drafts|one-off-chain)", ("drafts",)),
+    (r"\w+ /(work-items|budget)", ("work items",)),
+    (r"\w+ /(repos|forges|workers)", ("repos, forges and workers",)),
+    (r"\w+ /(templates|kraft-default)", ("chains",)),
+    (r"\w+ /harnesses", ("harnesses",)),
+    (r"\w+ /(policy|theme|intake|access|notify|update/settings)", ("settings",)),
+    (r"\w+ /(search|beads|documents|editors|analytics|index)", ("search and analytics",)),
+    (r"\w+ /(login|logout|sessions)", ("auth",)),
+    (r".*", ("server",)),
+)
+for _route in api_router.routes:
+    if getattr(_route, "include_in_schema", False):
+        _key = f"{min(_route.methods)} {_route.path.removeprefix('/api')}"
+        _route.tags = list(next(t for rx, t in _TAGS if re.match(rx, _key)))
+        if _route.tags == ["stable"]:  # the two stable routes are also filed under what they do
+            _route.tags.append("work items" if "triggers" in _route.path else "server")
 
 app.include_router(api_router)
 app.get(apidocs.SWAGGER_PATH, include_in_schema=False)(apidocs.swagger)

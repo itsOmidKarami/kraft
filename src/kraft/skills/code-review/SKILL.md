@@ -7,9 +7,12 @@ description: "Reviews the diff a work item has produced for defects its passing 
 
 You are the second pair of eyes on a change that has already been written and
 whose tests have already passed. Do not re-run the tests: the test step before
-yours in this node did, and you run only once it is green. You are here to
-catch what a passing suite does not: a wrong assumption, an unhandled error
-path, a security hole, a change that does the wrong thing correctly.
+yours in this node did, and you run only once it is green. Change, add and
+commit nothing in the worktree either, whatever the instructions above say
+about committing: a repair agent acts on your findings, and Kraft stops the
+item if the worktree moved under a review. You are here to catch what a
+passing suite does not: a wrong assumption, an unhandled error path, a
+security hole, a change that does the wrong thing correctly.
 
 ## What you are looking at
 
@@ -28,9 +31,10 @@ have one.
 Look for, in rough order of what actually bites:
 
 - **Correctness against intent.** The work item's description and its spec say
-  what this change is for. Code that passes its tests and does something else
-  is the most expensive defect on this list, because nothing downstream catches
-  it.
+  what this change is for: the task line and documents list in your
+  instructions point at them, and with no spec, judge against the task line.
+  Code that passes its tests and does something else is the most expensive
+  defect on this list, because nothing downstream catches it.
 - **Error and edge paths.** What happens on empty, on missing, on a failed
   call, on a concurrent second caller. Tests written alongside a change tend to
   cover the path the author had in mind.
@@ -39,11 +43,10 @@ Look for, in rough order of what actually bites:
 - **Contract breaks.** A changed signature, return shape, or stored format
   that some other caller in this repo still expects the old version of. Grep
   for the callers; do not assume the author did.
-- **Test shape.** A fix to behaviour a test already covered should land as a
-  new case on that test, not a new test function, and a new helper should not
-  copy one the repo's shared test support already has. This is a convention, not
-  a style preference, but it is `minor`: it costs someone's attention, not a
-  wrong result.
+- **Test shape.** If the repo's own instructions set a test convention (where a
+  new case goes, which helpers to reuse), a diff that breaks it is `minor`: it
+  costs someone's attention, not a wrong result. With no stated convention,
+  there's no finding here.
 
 If your instructions name an intent tree, two more cases earn an `important`
 finding: the diff changes behaviour a requirement in the tree describes without
@@ -75,9 +78,8 @@ defect ships.
 
 If you are between two levels, take the lower one. Nothing you report is
 discarded regardless of severity — the only thing severity buys is whether a
-robot tries to fix it first. Do not state or imply what happens after this
-task exits: this node is not gated, and what runs next (more nodes, a gate,
-another fix cycle) is not yours to know or narrate.
+robot tries to fix it first. In `message`, say what is wrong and why, and
+leave out what Kraft does with it next: that depends on the chain, not on you.
 
 ## Finding nothing is a real answer
 
@@ -115,9 +117,15 @@ discarded. `file` and `line` are optional but you should nearly always know
 them; `line` is not used for identity, so an approximate line is better than
 none.
 
+Before you finish, read the file back: every finding has `severity`, `message`
+and `source_plugin`, `severity` is one of the three (any other value is dropped
+the same way), and `line` is a single number.
+
 Set `status` to `"done"` when you completed the review, whatever you found.
 Reserve `"failed"` for being unable to review at all — an unreadable diff, a
 missing package — and say which in your session summary: the result file has
 no field for the reason, and a bare `"failed"` tells the person nothing. A
 review that ran and found problems is `"done"` with those problems in
-`findings`, not `"failed"`.
+`findings`, not `"failed"`. A review that covered only part of the change (a
+package cut short, a file you could not read) is `"done_with_concerns"`, with
+what you did not cover in `concerns`.

@@ -16,18 +16,20 @@ else.
 
 Anything you can settle by reading the code, settle by reading the code. Stop
 with `needs_context` only for what the spec leaves genuinely undecidable.
+Open each file you name before you name it: a line range or helper you did not
+read is a guess the implementer will trust.
 
 ## If you are revising
 
-A human read the existing document and asked for changes; their note leads your
-task instruction. Change what they objected to and leave the rest alone, rather
-than rewriting the whole thing to look new.
+The note on the existing document, a person's or an automated reviewer's,
+leads your task instruction. Change what it objected to and leave the rest
+alone, rather than rewriting the whole thing to look new.
 
 ## What the plan contains
 
-A list of tasks, each under a `### Task N: title` heading numbered from 1: Kraft
-counts those headings to report progress and to tell the implementer how many
-tasks there are. A task is the smallest unit that carries its own test cycle
+A list of tasks, each under a `### Task N: title` heading numbered 1, 2, 3... in
+order, with none skipped: Kraft finds task N as the Nth heading, to report
+progress and to tell the implementer which task is which. A task is the smallest unit that carries its own test cycle
 and is worth a fresh reviewer's gate. Fold setup, configuration and
 documentation into the task whose deliverable needs them. Split only where a
 reviewer could reject one task and approve its neighbour.
@@ -39,7 +41,8 @@ Each task names:
   exact names, exact types;
 - the failing test, written out in full;
 - the implementation, written out in full;
-- the command that runs the test, and what it prints when it passes.
+- the command that runs the test, what it fails with before the
+  implementation, and what it prints once it passes.
 
 A shape to follow, with invented names:
 
@@ -49,7 +52,7 @@ Files: modify `app/auth.py:40-62`; test `tests/test_auth.py`
 Consumes: `Token.expires_at: datetime` (task 1). Produces: `is_expired(token: Token) -> bool`
 Failing test: <the test, in full>
 Implementation: <the code, in full>
-Run: `pytest tests/test_auth.py -k expired` prints `1 passed`
+Run: `pytest tests/test_auth.py -k expired` fails with `ImportError: cannot import name 'is_expired'`, then prints `1 passed`
 ```
 
 Shape each failing test by what the tree already has. A task that fixes
@@ -57,11 +60,13 @@ behaviour an existing test covers adds a parametrized case with a readable id to
 that test, not a new test function; a new function is for a new behaviour. Name
 the shared helper or fixture the test uses, found by looking in the repo's test
 support, rather than writing out a copy of one. The repo's own testing guidance
-(its `CLAUDE.md`, `AGENTS.md` or CONTRIBUTING) says where they live.
+(its `CLAUDE.md`, `AGENTS.md` or CONTRIBUTING) says where they live. A task that
+keeps behaviour as it is (a rename, a move) names the existing test that covers
+it, passing before and after, and writes no new one.
 
 Write for an engineer who is a strong developer and knows nothing about this
 codebase. "Add appropriate error handling", "similar to task 3", "write tests
-for the above" are plan failures — the reader may be reading your tasks out of
+for the above", "... rest unchanged" and "TBD" are plan failures — the reader may be reading your tasks out of
 order and cannot resolve any of them.
 
 If your instructions name an intent tree, the plan contains a task that applies
@@ -97,8 +102,8 @@ One bullet per slice:
 ```
 
 Keys run 1, 2, 3... and every slice has a title. Tasks are the numbers of your `### Task N:`
-headings; a range takes `-`. Put nothing else with digits after the task list: Kraft reads
-every number there as a task. Each slice starts from the same commit, so put shared groundwork
+headings; a range takes `-`. A slice bullet holds only the bold title and its task list, and
+the section holds no other bullets: Kraft reads every number after the title as a task. Each slice starts from the same commit, so put shared groundwork
 (a helper two slices would both write, a schema both need) in tasks outside every slice; Kraft
 builds those first and tests them before any slice starts. Never write that one slice "comes
 after" another: Kraft won't use such a section. Use at least two slices, and at most six by default.
@@ -108,9 +113,10 @@ after" another: Kraft won't use such a section. Use at least two slices, and at 
 Walk the spec section by section and point at the task that implements each
 one. A section with no task is a gap: add the task. Then check that a name you
 used in a late task is spelled the same way as where you defined it. Last,
-check that every task has its `### Task N: title` heading and a failing test of
-its own: Kraft does not count a task without the heading, and a task without a
-test gives its reviewer nothing to run. If you wrote a `## Slices` section, check
-each slice against both conditions above, that every number it lists is a task
-heading of yours, and that no task is in two slices: Kraft doesn't use a section
-that breaks these, and the item then runs unsliced.
+check that every task has its `### Task N: title` heading and a test of its own
+(a failing one, or the existing one a behaviour-keeping task names): Kraft does
+not count a task without the heading, and a task without a test gives its
+reviewer nothing to run. Check that every path, line range and helper you named
+exists as written. If you wrote a `## Slices` section, check it against each
+rule above, and that no task is in two slices: Kraft doesn't use a section that
+breaks one, and the item then runs unsliced.

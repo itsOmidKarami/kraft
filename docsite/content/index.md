@@ -1,12 +1,12 @@
 ---
-title: Run your coding agent from spec to merge request
+title: Run your coding agent from spec to merge request, stopping only when a decision is yours
 description: 'A local orchestrator that takes your coding agent from spec to merge request, stopping only when a decision is yours.'
 ---
 
 ::u-page-hero
 ---
-title: 'Run your coding agent from spec to merge request.'
-description: "A local orchestrator. Kraft isn't another coding agent: it runs Claude Code, the one you may already use, and stops only when a decision is yours."
+title: 'Run your coding agent from spec to merge request, stopping only when a decision is yours.'
+description: "A local orchestrator. Kraft isn't another coding agent: it runs Claude Code, the one you already use, and adds the process, the checks and the approvals a single session can't."
 links:
   - label: Get started
     to: /get-started/install
@@ -37,13 +37,13 @@ uv tool install kraft-sdlc && kraft
 :::stage-strip
 :::
 
-Kraft needs Claude Code installed and signed in. The shipped chains run every agent task on it, and another agent CLI works as a [harness](/reference/harnesses) after a chain edit.
+Kraft needs Claude Code installed and signed in. The shipped chains run every agent task on it; [other agents](/reference/harnesses) take over a task after a chain edit.
 
-It adds what a single session can't:
+Three things set it apart:
 
-- **A process the agent can't skip.** A chain like the one above is a file you can read and diff; the agent doesn't decide the workflow fresh each time.
+- **A process the agent can't skip.** A chain like the one above is a file you can read and diff, so the agent doesn't decide the workflow fresh each time.
 - **Checks it doesn't grade itself on.** Kraft runs your tests in a node of its own, waits for your CI itself and has a separate reviewer or judge decide whether a fix is done.
-- **A person at the decisions that matter.** You approve a spec, a plan or a merge request. Hand it a spec and walk away; retries and spend are capped.
+- **A person at the decisions that matter.** A gate stops the chain until a decision is recorded, and an agent's own calls to decide its gate are refused. Only a sandbox with a `network:` policy keeps an agent from deciding its own gates; no sandbox is set by default, and an unsandboxed agent runs as you. [Security](/project/security#agents-and-gates) has the scope.
 ::
 
 ::u-page-section
@@ -61,7 +61,7 @@ ui:
 :::landing-shot
 ---
 src: /assets/board.png
-alt: 'The Kraft board in the dark Ink look with a violet accent: filters for chain, gate and stop reason above work items grouped by status, Needs you first with each item''s one button (Review at a gate, Retry, Raise cap, Answer, Resume and Raise budget on the stopped ones), and Running below it, with a Select all link on every group and a ? shortcuts button in the toolbar'
+alt: 'The Kraft board: work items grouped by status with Needs you first, each with one button such as Review, Retry or Raise cap, and Running below'
 crop: 210 0 1230 688
 width: 1440
 ---

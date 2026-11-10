@@ -107,6 +107,7 @@ def _library_view(st, library: TemplateLibrary) -> dict:
 
 @api_router.get("/templates/library")
 async def get_library(request: Request):
+    """The template library's components."""
     st = request.app.state
     return _library_view(st, deps.library_or_503(st))
 
@@ -518,6 +519,7 @@ class PolicyBody(BaseModel):
 
 @api_router.get("/policy")
 async def get_policy(request: Request):
+    """The policy file: budgets and rules that apply to every item."""
     st = request.app.state
     data = config_mod.read_yaml(st.templates_dir / "policy.yaml", {"loops": {}, "default": {}})
     # The loaded value, not the file's: it is the one the slots are counted against.
@@ -591,6 +593,7 @@ async def put_policy(body: PolicyBody, request: Request):
 
 @api_router.get("/theme")
 async def get_theme(request: Request):
+    """The board's colour theme settings."""
     st = request.app.state
     return config_mod.Theme.load(st.templates_dir / "theme.yaml").effective()
 
@@ -640,12 +643,14 @@ class UpdateBody(BaseModel):
 
 @api_router.get("/update/settings")
 async def get_update_settings(request: Request):
+    """How and when this server checks for and installs updates."""
     st = request.app.state
     return config_mod.Update.load(st.templates_dir / "update.yaml").model_dump()
 
 
 @api_router.put("/update/settings")
 async def put_update_settings(body: UpdateBody, request: Request):
+    """Save the update settings."""
     st = request.app.state
     path = st.templates_dir / "update.yaml"
     # A file that does not load answers 422 (`_bad_config_file`): a save never
@@ -804,6 +809,7 @@ def lan_hosts() -> list[str]:
 
 @api_router.get("/access")
 async def get_access(request: Request):
+    """Who may reach this server: the bind address, tokens and trusted networks."""
     access = request.app.state.access
     return {
         "bind": access["bind"],
@@ -818,6 +824,7 @@ async def get_access(request: Request):
 
 @api_router.put("/access")
 async def put_access(body: AccessBody, request: Request):
+    """Save the access settings; some apply only after a restart."""
     st = request.app.state
     access = dict(st.access)
     if body.bind is not None:
@@ -881,6 +888,7 @@ async def get_notify(request: Request):
     # next PUT or a restart. That is a knowing divergence from this module's
     # docstring claim that a hand edit and a UI edit are the same operation;
     # closing it means a file watcher, which this task does not build.
+    """Where Kraft sends notifications, and which events send one."""
     st = request.app.state
     return _notify_view(
         config_mod.Notify.load(st.templates_dir / "notify.yaml").model_dump(), st.notifier.last_test
@@ -889,6 +897,7 @@ async def get_notify(request: Request):
 
 @api_router.put("/notify")
 async def put_notify(body: NotifyBody, request: Request):
+    """Save the notification settings."""
     st = request.app.state
     path = st.templates_dir / "notify.yaml"
     cfg = config_mod.Notify.load(path).model_dump()
@@ -922,6 +931,7 @@ async def put_notify(body: NotifyBody, request: Request):
 
 @api_router.post("/notify/test")
 async def notify_test(request: Request):
+    """Send a test notification to the configured destination."""
     st = request.app.state
     try:
         return await st.notifier.send_test()

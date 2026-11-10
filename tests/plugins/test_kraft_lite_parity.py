@@ -16,6 +16,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from kraft.addons import builtin, load
+from kraft.templates import models
 from kraft.templates.library import TemplateLibrary
 
 REPO = Path(__file__).resolve().parents[2]
@@ -140,12 +142,16 @@ EXTENDING = {
         remove: [external_approval]
         overrides:
           implementation.main.implement: {prompt: Build it.}
+          local_review: {artifact_required: true}
           verification.fix_loop.judge: {prompt: Be strict.}
           merge_request_feedback.on_failure.repair: {tasks: [{id: fix, extends: repair_mr_checks}]}
           merge.on_merge_rejected.repair.main.repair: {prompt: Fix the queue's failure.}
         add:
           - after: work_brief
-            node: {id: lint, kind: exec, tasks: [{id: run, extends: verify_changed_scopes}]}
+            node:
+              id: lint
+              kind: exec
+              tasks: [{id: run, extends: verify_changed_scopes, suite: full}]
           - after: local_review
             node:
               id: typecheck
@@ -175,7 +181,10 @@ def _project_kraft(resolved) -> list:
             t.path,
             t.task.kind.value,
             *(getattr(t.task, key, None) for key in ("skill", "prompt", "produces")),
-            *(getattr(getattr(t.task, key, None), "value", None) for key in ("ref", "target")),
+            *(
+                getattr(getattr(t.task, key, None), "value", None)
+                for key in ("ref", "target", "suite")
+            ),
             # What Kraft runs (`executor.dispatch`): the string split like a shell.
             shlex.split(command) if command is not None else None,
         )
@@ -187,7 +196,16 @@ def _project_kraft(resolved) -> list:
     for n in resolved.nodes:
         if n.node.kind.value == "gate":
             node = n.node
-            out.append((n.id, "gate", node.artifact, node.reject_to, node.chain_finalized))
+            out.append(
+                (
+                    n.id,
+                    "gate",
+                    node.artifact,
+                    node.reject_to,
+                    node.chain_finalized,
+                    node.artifact_required,
+                )
+            )
             continue
         loop = n.node.fix_loop
         base = n.node.on_base_changed
@@ -214,10 +232,10 @@ def _project_lite(chain: dict) -> list:
     """`kl_chains.resolve`'s answer, reduced the same way."""
 
     def task(t):
-        return tuple(
-            t[key]
-            for key in ("path", "kind", "skill", "prompt", "produces", "ref", "target", "command")
-        )
+        keys = ("path", "kind", "skill", "prompt", "produces", "ref", "target")
+        # Kraft's model writes the default `suite` onto every builtin task; Lite leaves it unset.
+        suite = t["suite"] or ("targeted" if t["kind"] == "builtin" else None)
+        return (*(t[key] for key in keys), suite, t["command"])
 
     def steps(group):
         return [(s["id"], [task(t) for t in s["tasks"]]) for s in group]
@@ -225,7 +243,16 @@ def _project_lite(chain: dict) -> list:
     out = []
     for n in chain["nodes"]:
         if n["kind"] == "gate":
-            out.append((n["id"], "gate", n["artifact"], n["reject_to"], n["chain_finalized"]))
+            out.append(
+                (
+                    n["id"],
+                    "gate",
+                    n["artifact"],
+                    n["reject_to"],
+                    n["chain_finalized"],
+                    n["artifact_required"],
+                )
+            )
             continue
         loop, base, rejected = n["fix_loop"], n["on_base_changed"], n["on_merge_rejected"]
         out.append(
@@ -266,4 +293,61 @@ def test_resolution_matches_kraft(kl_modules, tmp_path, monkeypatch, chain):
     lite = kl_chains.resolve(tmp_path, env, chain)
 
     assert lite["source"] == ("bundled" if not env else "user")
+    assert _project_lite(lite) == kraft
+
+
+def test_lite_knows_every_key_of_kraft_template_models(kl_modules):
+    """A key Kraft's chain models gain is one Lite reads, reads past or refuses
+    on purpose, never one it drops unseen; and the names Lite copied of
+    Kraft's enums and handler models still match them."""
+    _, kl_chains = kl_modules
+    for name, keys in kl_chains.MODEL_KEYS.items():
+        declared = [key for group in keys.values() for key in group]
+        assert len(declared) == len(set(declared)), f"{name}: a key in two groups"
+        assert set(declared) == set(getattr(models, name).model_fields), name
+    assert set(kl_chains.MODEL_KEYS) == {
+        *("AgentTask", "ForgeTask", "BuiltinTask", "SubprocessTask"),
+        *("ExecNode", "GateNode", "Step", "FixLoop"),
+    }
+
+    assert kl_chains.BUILTIN_REFS == tuple(models.BuiltinAction)
+    assert kl_chains.FORGE_TARGETS == tuple(
+        a for a in models.ForgeAction if a is not models.ForgeAction.CI_PIPELINE
+    )
+    assert kl_chains.SUITES == tuple(models.TestSuite)
+    assert kl_chains.HANDLER_KEYS == {
+        "on_base_changed": tuple(models.BaseChangePolicy.model_fields),
+        "on_merge_rejected": tuple(models.MergeRejectionPolicy.model_fields),
+    }
+
+
+#: A chain of your own over the built-in add-on, a node of yours from one of its components.
+OVER_THE_BUILTIN = """\
+    extends: kraft-default:default
+    remove: [external_approval]
+    add:
+      - after: work_brief
+        node:
+          id: lint
+          kind: exec
+          tasks: [{id: run, extends: kraft-default:verify_changed_scopes}]
+    """
+
+
+@pytest.mark.parametrize("chain", ["default", "quick-task", "ship"])
+def test_a_seeded_home_resolves_as_kraft_resolves_it(kl_modules, tmp_path, monkeypatch, chain):
+    """A home Kraft seeds today is thin chains over its built-in add-on, which
+    is the library Lite bundles: Lite reads it, as the README says it reads the
+    same files Kraft reads."""
+    _, kl_chains = kl_modules
+    monkeypatch.setattr(builtin, "source_dir", lambda: CONFIG)
+    home = tmp_path / "config"
+    builtin.write_thin_seed(home)
+    (home / "chains" / "ship.yaml").write_text(textwrap.dedent(OVER_THE_BUILTIN))
+    addons = load.installed(home, tmp_path / "run" / "addons")
+
+    library = TemplateLibrary.from_yaml_dir(home, skills_dir=None, addons=addons)
+    kraft = _project_kraft(library.resolve_chain(chain))
+    lite = kl_chains.resolve(tmp_path, {"KRAFT_CONFIG_DIR": str(home)}, chain)
+
     assert _project_lite(lite) == kraft

@@ -1350,6 +1350,8 @@ def steerable(st, row) -> bool:
 
 @api_router.post("/work-items/{wid}/steer")
 async def steer_work_item(wid: str, body: Steer, request: Request):
+    """Send a note to the agent of a paused item or one that needs context, so its next run
+    reads it."""
     st = request.app.state
     row = deps._live_work_item_row(st, wid)
     if row["status"] not in admitting(Verb.STEER) or (

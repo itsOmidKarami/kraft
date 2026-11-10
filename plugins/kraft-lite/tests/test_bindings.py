@@ -207,6 +207,14 @@ def skill(name: str, text: str = "fallback") -> dict:
             id="builtin_default",
         ),
         pytest.param(
+            task(kind="builtin", ref="kraft.verify_changed_test_scopes", suite="full"),
+            {},
+            lambda name: True,
+            None,
+            {"prompt": kl_bindings.FULL_SUITE["prompt"]},
+            id="builtin_default_full_suite",
+        ),
+        pytest.param(
             task(kind="forge", target="mr.merge"),
             {},
             lambda name: True,
@@ -388,6 +396,9 @@ def test_dispatch(chain_task, bindings, installed, first_build, expect):
 def test_every_kraft_ref_and_target_has_a_default():
     assert set(kl_bindings.BUILTIN_DEFAULTS) == set(kl_chains.BUILTIN_REFS)
     assert set(kl_bindings.FORGE_DEFAULTS) == set(kl_chains.FORGE_TARGETS)
+    # Kraft's forge adapter reads the MR's title, body and labels from it.
+    for target in ("mr.open_draft", "mr.sync"):
+        assert "`produced.mr_meta`" in kl_bindings.FORGE_DEFAULTS[target]["prompt"], target
     for entry in (
         *kl_bindings.BUILTIN_DEFAULTS.values(),
         *kl_bindings.FORGE_DEFAULTS.values(),

@@ -437,6 +437,7 @@ async def _check_library(st, path: str) -> tuple[list[dict], dict, repo_library.
 # is never read as a parameter.
 @api_router.get("/repos/library")
 async def repo_library_review(request: Request, path: str):
+    """What the repo's `.kraft/` library would add or change, for review before it is taken."""
     _repos, entry, found = await _check_library(request.app.state, path)
     return _library_view(entry, found)
 
@@ -455,6 +456,7 @@ async def repo_files(request: Request, path: str):
 
 @api_router.post("/repos/library")
 async def repo_library_accept(body: LibraryAccept, request: Request, path: str):
+    """Take the repo's `.kraft/` library as reviewed."""
     st = request.app.state
     if getattr(st, "connecting", None) is None:
         st.connecting = asyncio.Lock()
@@ -491,6 +493,7 @@ async def silent_reviewers(request: Request):
 
 @api_router.get("/repos")
 async def list_repos(request: Request):
+    """The connected repositories with their settings."""
     st = request.app.state
     # No steering validation on the read path (config.load_repos): a profile
     # removed out from under an entry must not 422 the screen that would let
@@ -591,6 +594,8 @@ _FORGE_ACCOUNT_REFUSED = (
 
 @api_router.post("/repos", status_code=201)
 async def add_repo(body: RepoBody, request: Request):
+    """Connect a repository, optionally with test and setup commands, a forge account and a
+    verification run."""
     st = request.app.state
     # #1198: commands an agent chose run in every worktree, so a person turns them on.
     chose = body.test_command is not None or body.setup_command or body.test_scopes
@@ -811,6 +816,7 @@ def _refuse_enable_without_test_command(entry: dict) -> None:
 
 @api_router.patch("/repos")
 async def update_repo(body: RepoPatch, request: Request, path: str):
+    """Change a connected repo's settings; only the fields given change."""
     st = request.app.state
     repos, entry = _editable_repos(st, path)
     if entry is None:
@@ -867,6 +873,7 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
 
 @api_router.delete("/repos", status_code=204)
 async def remove_repo(request: Request, path: str):
+    """Disconnect a repository."""
     st = request.app.state
     repos, entry = _editable_repos(st, path)
     if entry is None:

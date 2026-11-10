@@ -72,15 +72,17 @@ the person at the gate can find it.
   `{"id": ..., "tasks": [{"id": ..., "extends": "<library task>"}]}` (or
   `steps` of such tasks). A component an add-on ships is named as
   `kraft admin templates library` lists it, `<namespace>:<name>`
-  (`release:security-review`); the `id` you give the node or a task is always
+  (`acme:security-review`); the `id` you give the node or a task is always
   bare. No prompts, commands or settings of your own. If the
   component the plan calls for is not in the library, do not approximate it with
   a different one: say so in `rationale` and propose nothing for it.
 - **`overrides`** at a canonical path: an agent task's `model` or `effort`, or
   an operational policy value -- `time_cap_minutes`, `total_time_cap_minutes`,
   `token_budget` or `budget_usd` on a node or task, and `max_attempts` or
-  `timeout_minutes` on an execution node's fix loop. Kraft holds each within the
-  administrator maxima and under its enclosing scope's cap. Tools, sandbox,
+  `timeout_minutes` on an execution node's fix loop. An override above the
+  administrator maxima or its enclosing scope's cap is refused, and the whole
+  change set with it: raise only as far as that cap allows, and say what is
+  short in `rationale`. Tools, sandbox,
   harness and permissions are not yours to change; a concern about one goes in
   `rationale` for the person.
 
@@ -88,21 +90,18 @@ the person at the gate can find it.
 |---|---|
 | Touches authentication, sessions, tokens, secrets or permission checks | Add the library's security-review node if the library has one; otherwise say so in `rationale` |
 | A plan task is clearly heavier than the template assumed | Raise that task's `effort`, or its node's fix-loop `max_attempts` |
-| The plan's task count, at about 15-20 minutes per task, is more than the implementing task's `time_cap_minutes` holds | Raise that task's `time_cap_minutes` to fit, citing the plan's task count and the current cap |
+| The plan's task count, at about 15-20 minutes per task, is more than the implementing task's `time_cap_minutes` holds | Raise that task's `time_cap_minutes` to fit, citing the plan's task count and the current cap: a capped run stops mid-plan and a person has to retry it. Measured on a nine-task plan, tasks took 4 to 41 minutes, about 17 on average, so round up. If the nodes you are given show no cap, say so in `rationale` rather than guess |
 | The plan is docs-only, with no executable change | Skip a node that only runs tests, if the tail has one; never a node that holds the review |
 | A risk section names a failure mode the chain never checks, and the library has the check | Add it |
 
+If the task has a `profile`, an `effort` override replaces it whole, and the
+task runs the harness's default model instead of the profile's. Say so in
+`rationale`, or leave the effort alone.
+
 Leave it alone when the chain differs from what you would have picked but
 nothing is wrong with it, when you want to reorder for tidiness, when the plan is
-merely large, and when you are unsure. Unsure means no change.
-
-"Merely large" does not cover a time cap. A plan's size alone is no reason to
-add review or raise effort, but a task count the implementing task cannot finish
-inside its `time_cap_minutes` is concrete evidence: the cap stops the run
-mid-plan, a person has to retry it, and the plan was already there to count.
-Read the cap from the nodes you are given. Measured on a nine-task plan, tasks
-took 4 to 41 minutes each, about 17 on average, so budget roughly 15-20 minutes
-a task and round up.
+large but fits the implementing task's `time_cap_minutes`, and when you are
+unsure. Unsure means no change.
 
 ## Output
 
@@ -142,9 +141,16 @@ just:
 ```
 ````
 
+## If you are revising
+
+When a person sent your last change set back, or Kraft could not apply it, the
+note or the reason leads your instruction. Fix or drop the change it names, keep
+the others, and rewrite the document whole: still one fence, nothing outside it.
+
 ## Before you write it
 
-- Does every change name a node after the revision gate, and no gate?
+- Does every skip and override name a node after the revision gate, never a
+  gate? Does every add follow the revision gate or a later node?
 - Does every added node and task `extend` a component `kraft admin templates
   library` lists, by the name it lists, and give a bare `id`?
 - Does every change carry evidence from the spec or plan, not a description of
