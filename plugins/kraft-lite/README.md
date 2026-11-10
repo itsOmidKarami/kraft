@@ -103,12 +103,15 @@ chain that extends another chain. A chain comes from one of four places:
 3. **Your library.** The directory Kraft reads its configuration from:
    `$KRAFT_CONFIG_DIR` when set (or its 1.x name `$KRAFT_TEMPLATES_DIR`), else
    `$KRAFT_HOME/config`, else `~/.kraft/config`. The first one set is the one,
-   even without a `library.yaml` in it: Kraft seeds that directory from its
-   packaged library, so Lite reads the bundled one, as step 4. Your library
-   replaces the bundled library wholesale, with no layering, as it does in
-   Kraft. A bare name such as `default` means an entry here.
+   even without a `library.yaml` in it: Lite then reads the bundled one, as
+   step 4. Your library replaces the bundled library wholesale, with no
+   layering, as it does in Kraft. A bare name such as `default` means an entry
+   here, and `kraft-default:<name>` means the bundled entry.
 4. **The bundled library.** A copy of Kraft's packaged `config/library.yaml`
    and `config/chains/`, shipped with the plugin and kept identical by a test.
+   It is Kraft's built-in add-on, `kraft-default`. Kraft seeds a new home with
+   a `chains/default.yaml` that is only `extends: kraft-default:default` (and
+   the same for `quick-task`), so a stock home runs the bundled chains.
 
 A repo library differs from Kraft's in two ways. Lite reads the working tree,
 not the default branch's commit, and there is no acceptance step, because you
@@ -119,8 +122,10 @@ counts at your next `start`, committed or not. See
 With no `--chain`, `start` runs `repo:default` when the repo library has a
 `chains/default.yaml`, and `default` otherwise. `kl.py chains --available`
 lists every chain ID Lite can see, with the library it came from and its
-file. A reference to an add-on's chain, such as `acme:ship`, is refused by
-name: Lite loads no add-ons.
+file. A reference to any other add-on, such as `acme:ship`, is refused by
+name: Lite loads no add-ons. A repo library can't name `kraft-default:`
+either, since Kraft's lists the add-ons it builds on and Lite reads no such
+list.
 
 ### Reading the YAML
 
@@ -237,7 +242,8 @@ the gate with that note first. The reviewer never approves. A reviewer that
 approving its own gate.
 
 Lite stops, naming the file and the key, at what it can't walk without
-changing what the chain means: a reference to an add-on, a step's or a
+changing what the chain means: a reference to an add-on other than
+`kraft-default`, a step's or a
 task's own `on_failure`, and `on_conflict` under `on_base_changed`. It also
 refuses the cases Kraft refuses, such as an unknown builtin ref or forge
 target, or a key `on_base_changed` or `on_merge_rejected` doesn't have.

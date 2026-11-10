@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from kraft.addons import builtin, load
 from kraft.templates.library import TemplateLibrary
 
 REPO = Path(__file__).resolve().parents[2]
@@ -266,4 +267,36 @@ def test_resolution_matches_kraft(kl_modules, tmp_path, monkeypatch, chain):
     lite = kl_chains.resolve(tmp_path, env, chain)
 
     assert lite["source"] == ("bundled" if not env else "user")
+    assert _project_lite(lite) == kraft
+
+
+#: A chain of your own over the built-in add-on, a node of yours from one of its components.
+OVER_THE_BUILTIN = """\
+    extends: kraft-default:default
+    remove: [external_approval]
+    add:
+      - after: work_brief
+        node:
+          id: lint
+          kind: exec
+          tasks: [{id: run, extends: kraft-default:verify_changed_scopes}]
+    """
+
+
+@pytest.mark.parametrize("chain", ["default", "quick-task", "ship"])
+def test_a_seeded_home_resolves_as_kraft_resolves_it(kl_modules, tmp_path, monkeypatch, chain):
+    """A home Kraft seeds today is thin chains over its built-in add-on, which
+    is the library Lite bundles: Lite reads it, as the README says it reads the
+    same files Kraft reads."""
+    _, kl_chains = kl_modules
+    monkeypatch.setattr(builtin, "source_dir", lambda: CONFIG)
+    home = tmp_path / "config"
+    builtin.write_thin_seed(home)
+    (home / "chains" / "ship.yaml").write_text(textwrap.dedent(OVER_THE_BUILTIN))
+    addons = load.installed(home, tmp_path / "run" / "addons")
+
+    library = TemplateLibrary.from_yaml_dir(home, skills_dir=None, addons=addons)
+    kraft = _project_kraft(library.resolve_chain(chain))
+    lite = kl_chains.resolve(tmp_path, {"KRAFT_CONFIG_DIR": str(home)}, chain)
+
     assert _project_lite(lite) == kraft

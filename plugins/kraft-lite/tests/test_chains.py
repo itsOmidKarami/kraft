@@ -152,6 +152,58 @@ def test_lookup(tmp_path, layout, instance, source):
             kl_chains.resolve(root, env, "quick-task")
 
 
+#: What Kraft seeds a new home with (`kraft.addons.builtin.write_thin_seed`),
+#: comments dropped; the parity test writes Kraft's own.
+THIN_SEED = "id: {id}\nextends: kraft-default:{id}\n"
+
+
+@pytest.mark.parametrize(
+    ("chains", "ref", "like"),
+    [
+        pytest.param({}, "default", "default", id="thin_default"),
+        pytest.param({}, "quick-task", "quick-task", id="thin_quick_task"),
+        pytest.param({}, "kraft-default:quick-task", "quick-task", id="the_builtin_by_name"),
+        # Your own chain, written out over the built-in components: quick-task again.
+        pytest.param(
+            {
+                "mine": """\
+                    nodes:
+                      - id: implementation
+                        kind: exec
+                        tasks: [{id: implement, extends: kraft-default:implementer}]
+                      - id: verify
+                        kind: exec
+                        tasks:
+                          - {id: test_changed_scopes, extends: kraft-default:verify_changed_scopes}
+                    """
+            },
+            "mine",
+            "quick-task",
+            id="own_chain_over_builtin_components",
+        ),
+    ],
+)
+def test_a_stock_kraft_home_resolves_through_the_bundled_library(tmp_path, chains, ref, like):
+    """A home seeded since Kraft's built-in add-on holds thin chains over
+    `kraft-default`, which is the library Lite bundles: each resolves to the
+    bundled chain, bare component names included, so bindings bind it alike."""
+    seed = {id: THIN_SEED.format(id=id) for id in ("default", "quick-task")}
+    lib = write_library(tmp_path / "config", "tasks: {}\n", {**seed, **chains})
+
+    chain = kl_chains.resolve(tmp_path, {"KRAFT_CONFIG_DIR": str(lib)}, ref)
+
+    assert (chain["id"], chain["source"]) == (ref, "user")
+    assert chain["nodes"] == kl_chains.resolve_bundled(like)["nodes"]
+    assert "kraft-default:quick-task" not in {e["id"] for e in kl_chains.available(tmp_path, {})}
+
+
+def test_a_repo_library_cannot_name_the_builtin(tmp_path):
+    write_library(tmp_path / ".kraft", "", {"ship": "extends: kraft-default:default\n"})
+
+    with pytest.raises(kl_chains.ChainError, match="a repo library's kraft-default:default"):
+        kl_chains.resolve(tmp_path, {"KRAFT_CONFIG_DIR": str(tmp_path / "none")}, "repo:ship")
+
+
 @pytest.mark.parametrize(
     ("repo_chains", "expected"),
     [
@@ -429,12 +481,12 @@ def _rejecting(rejected: str, before: str = "", tasks: str = MERGE_TASK, extra: 
         ),
         pytest.param(
             {"c": "extends: team:base\n"},
-            "add-on references are not supported by Kraft Lite: team:base",
+            "add-on references are not supported by Kraft Lite, except kraft-default: team:base",
             id="addon_reference_refused",
         ),
         pytest.param(
             {"c": _task_chain("{id: t, extends: worker, steering: ['team:tidy']}")},
-            "add-on references are not supported by Kraft Lite: team:tidy",
+            "add-on references are not supported by Kraft Lite, except kraft-default: team:tidy",
             id="addon_steering_refused",
         ),
         pytest.param(

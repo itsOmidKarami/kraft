@@ -4,7 +4,9 @@ Stdlib only, like `kl.py`. Where a chain comes from follows Kraft's precedence:
 the repo library in `<root>/.kraft/` (its own namespace, `repo:<id>` outside
 it), else the user's library (`$KRAFT_CONFIG_DIR`, `$KRAFT_TEMPLATES_DIR`,
 `$KRAFT_HOME/config`, `~/.kraft/config`, whichever holds `library.yaml`), else
-the packaged library bundled beside this file. `resolve` expands `extends` as
+the packaged library bundled beside this file. That packaged library is Kraft's
+built-in add-on `kraft-default`, so outside a repo library `kraft-default:<name>`
+names the bundled entry. `resolve` expands `extends` as
 `kraft.templates.library._Resolution` and `kraft.templates.extension` do and
 returns the chain in Kraft Lite's frozen, JSON-ready shape, every task at the
 canonical path Kraft gives it (`implementation.main.implement`).
@@ -15,7 +17,7 @@ from __future__ import annotations
 import copy
 import shlex
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import kl_shape
@@ -58,6 +60,11 @@ ROUTES = (("profile",), ("model", "effort"))
 #: In the repo library, `library:<name>` is its own entry, as a bare name is.
 OWN = "library"
 REPO = "repo:"
+#: The add-on Kraft's packaged library is, and the only one Lite resolves: a
+#: stock Kraft home holds thin chains that `extends: kraft-default:<id>`.
+BUILTIN = "kraft-default"
+#: What a reference to any other add-on is told.
+NO_ADDONS = f"add-on references are not supported by Kraft Lite, except {BUILTIN}:"
 MAIN = "main"
 #: The keys of the handlers Lite walks by name, as Kraft's `BaseChangePolicy`
 #: and `MergeRejectionPolicy` declare them.
@@ -157,9 +164,49 @@ def libraries(root: Path, env: Mapping[str, str]) -> tuple[Library | None, Libra
     has_repo = (repo_dir / "library.yaml").is_file() or (repo_dir / "chains").is_dir()
     repo = _load("repo", repo_dir) if has_repo else None
     user = config_dir(env)
-    if (user / "library.yaml").is_file():
-        return repo, _load("user", user)
-    return repo, bundled_library()
+    bundled = bundled_library()
+    instance = _load("user", user) if (user / "library.yaml").is_file() else bundled
+    return repo, _with_builtin(instance, bundled)
+
+
+def _qualified(name: str) -> str:
+    """A bundled library reference as Kraft's `addons.load.qualify` writes it:
+    a bare name is `kraft-default:<name>`; a qualified one stays as written."""
+    return name if ":" in name else f"{BUILTIN}:{name}"
+
+
+def _qualify(data: object) -> object:
+    """Bundled YAML with its own `extends` and `steering` references qualified,
+    so it means the same served beside another library."""
+    if isinstance(data, list):
+        return [_qualify(item) for item in data]
+    if not isinstance(data, dict):
+        return data
+    out = {}
+    for key, value in data.items():
+        if key == "extends" and isinstance(value, str):
+            out[key] = _qualified(value)
+        elif key == "steering" and isinstance(value, list):
+            out[key] = [_qualified(v) if isinstance(v, str) else v for v in value]
+        else:
+            out[key] = _qualify(value)
+    return out
+
+
+def _with_builtin(library: Library, bundled: Library) -> Library:
+    """`library` with every bundled entry beside its own as `kraft-default:<name>`,
+    as Kraft serves its built-in add-on beside a home's library."""
+
+    def beside(mine: dict, builtin: dict, body=_qualify) -> dict:
+        return {**mine, **{f"{BUILTIN}:{name}": body(v) for name, v in builtin.items()}}
+
+    return replace(
+        library,
+        components={s: beside(library.components[s], bundled.components[s]) for s in SECTIONS},
+        steering=beside(library.steering, bundled.steering, str),
+        chains=beside(library.chains, bundled.chains),
+        files=beside(library.files, bundled.files, Path),
+    )
 
 
 def available(root: Path, env: Mapping[str, str]) -> list[dict]:
@@ -171,6 +218,7 @@ def available(root: Path, env: Mapping[str, str]) -> list[dict]:
             found += [
                 {"id": prefix + id, "source": library.name, "path": str(library.files[id])}
                 for id in library.chains
+                if not id.startswith(f"{BUILTIN}:")  # the bundled chains, under a second name
             ]
     return found
 
@@ -204,8 +252,8 @@ def resolve(
         library, id = repo, ref[len(REPO) :]
         if library is None:
             raise ChainError(f"no repo library in {Path(root) / '.kraft'} for chain {ref!r}")
-    elif ":" in ref:
-        raise ChainError(f"add-on references are not supported by Kraft Lite: {ref}")
+    elif ":" in ref and not ref.startswith(f"{BUILTIN}:"):
+        raise ChainError(f"{NO_ADDONS} {ref}")
     else:
         library, id = instance, ref
     if id not in library.chains:
@@ -305,7 +353,12 @@ class _Resolver:
             return name
         if self.library.name == "repo" and qualifier == OWN:
             return bare
-        raise self.fail(where, f"add-on references are not supported by Kraft Lite: {name}")
+        if qualifier == BUILTIN:
+            if self.library.name != "repo":
+                return name
+            # Kraft's repo library lists the add-ons it builds on; Lite reads no such list.
+            raise self.fail(where, f"a repo library's {name} {UNSUPPORTED}")
+        raise self.fail(where, f"{NO_ADDONS} {name}")
 
     # A chain, and a chain that extends a chain.
 
@@ -809,7 +862,8 @@ def _freeze(library: Library, chain_id: str, source: str, expanded: dict) -> dic
             "id": raw["id"],
             "path": path,
             "kind": raw["kind"],
-            "components": list(raw.get(_COMPONENTS, [])),
+            # Bare, so a binding keyed `tasks.implementer` binds a stock home's too.
+            "components": [name.removeprefix(f"{BUILTIN}:") for name in raw.get(_COMPONENTS, [])],
             **{key: raw.get(key) for key in TASK_KEYS},
             "steering": [library.steering[name] for name in raw.get("steering") or ()],
         }
