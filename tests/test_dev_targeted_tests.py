@@ -358,3 +358,64 @@ def test_the_worker_count_is_the_machines_else_cpus_plus_two(
     monkeypatch.setattr(tt.os, "cpu_count", lambda: cpus)
     env = {} if given is None else {"KRAFT_TEST_WORKERS": given}
     assert tt.workers(env) == expected
+
+
+_ACP = "fixtures/fake_acp_agent.py"
+
+
+@pytest.mark.parametrize(
+    ("path", "files", "adds"),
+    [
+        (
+            _ACP,
+            {"tests/adapters/test_acp.py": "AGENT = 'fake_acp_agent.py'"},
+            ["tests/adapters/test_acp.py"],
+        ),
+        (_ACP, {"tests/test_acp.py": "import fake_acp_agent"}, ["tests/test_acp.py"]),
+        (_ACP, {"tests/test_other.py": "x = 1"}, []),
+        (_ACP, {"README.md": "fake_acp_agent.py", "justfile": "run fake_acp_agent.py"}, []),
+        (_ACP, {"tests/support/acp.py": "NAME = 'fake_acp_agent.py'"}, None),
+        (_ACP, {"src/kraft/doctor.py": "# fake_acp_agent.py"}, None),
+        (
+            _ACP,
+            {"tests/test_acp.py": "'fake_acp_agent'", "tests/support/x.py": "fake_acp_agent"},
+            None,
+        ),
+        ("fixtures/fake_acp_agent.sh", {}, None),
+        ("fixtures/bin/fake_acp_agent.py", {}, None),
+    ],
+    ids=[
+        "named-by-a-test",
+        "imported-by-a-test",
+        "named-by-none",
+        "named-only-in-docs-and-the-justfile",
+        "named-by-a-support-helper",
+        "named-in-src",
+        "one-non-test-reader-is-enough",
+        "not-python",
+        "not-directly-under-fixtures",
+    ],
+)
+def test_a_fixture_script_adds_the_tests_that_name_it_instead_of_the_full_suite(
+    tt, tmp_path, path, files, adds
+):
+    repo = make_repo(tmp_path)
+    base = commit_all(repo, "base")
+    write(repo, path, "print(1)\n")
+    for name, text in files.items():
+        write(repo, name, text)
+    plan = tt.plan([path], base, repo)
+    if adds is None:
+        assert path in plan.reason
+        return
+    assert plan.reason is None
+    named = plan.steps[0].argv
+    assert named[3 + len(tt.GENERATED_TESTS) : named.index("--no-testmon")] == adds
+
+
+def test_a_deleted_fixture_script_stays_blind(tt, tmp_path):
+    repo = make_repo(tmp_path)
+    write(repo, _ACP, "print(1)\n")
+    base = commit_all(repo, "base")
+    (repo / _ACP).unlink()
+    assert _ACP in tt.plan([_ACP], base, repo).reason

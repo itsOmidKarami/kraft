@@ -24,6 +24,9 @@ neither, the path stays blind):
 - an edit to a file under `EDIT_TESTS`, which adds the tests listed for it. A
   file added or deleted there stays blind: a reader that globs the tree, or
   names each file, is not something an edit's list can promise to cover.
+- a Python script directly under `fixtures/` (`fixture_readers`), added or
+  edited: the tests that name it, which are all the tests that can run it,
+  because nothing globs `fixtures/`. This needs no base.
 - a YAML or JSON file whose change is comments and blank lines only
   (`comments_only`), which adds `COMMENT_TESTS` for its tree.
 
@@ -251,6 +254,37 @@ def _code_lines(text: str) -> list[str]:
     ]
 
 
+def fixture_readers(path: str, cwd: Path) -> list[str] | None:
+    """The tests that name a script directly under `fixtures/`, or None when the
+    path is not one or something that is not a test names it. Nothing globs
+    `fixtures/` (every reader spells out `fake-claude.sh`), so a script is run
+    only by a path that names it; the stem is searched, for an `import` too.
+    A name in a support helper, `src` or config is a reader whose own users
+    cannot be listed, so it stays blind. Shortcut: a name built at run time
+    (`f"fake_{kind}_agent.py"`) is not found; CI's full suite still runs it."""
+    directory, _, name = path.rpartition("/")
+    if directory != "fixtures" or not name.endswith(".py") or not (cwd / path).is_file():
+        return None
+    hits = _git(
+        cwd,
+        "grep",
+        "--untracked",
+        "-l",
+        "-F",
+        "-e",
+        name[:-3],
+        "--",
+        ".",
+        f":(exclude){path}",
+        ":(exclude,glob)**/*.md",
+        ":(exclude,glob)justfile",
+    )
+    found = (hits or "").splitlines()
+    if any(not (h.startswith("tests/") and Path(h).name.startswith("test_")) for h in found):
+        return None
+    return found
+
+
 def comments_only(path: str, base: str, cwd: Path) -> bool:
     """Whether a YAML or JSON file changed in nothing but whole-line comments
     and blank lines since `base`. Both checks: the lines alone would take a `#`
@@ -333,6 +367,8 @@ def plan(
             known += mapped
         elif base is not None and comments_only(path, base, cwd):
             known += _tests_for(path, COMMENT_TESTS)
+        elif (readers := fixture_readers(path, cwd)) is not None:
+            known += readers
         else:
             blind.append(path)
     if blind:
