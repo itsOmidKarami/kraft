@@ -1902,6 +1902,9 @@ async def _dispatch_task_in(
             forges_error=forges_error,
             reviewers=_reviewers(t, node.id, work_item_row, launch),
             ci_checks=launch.repo_entry.ci_checks if launch and launch.repo_entry else True,
+            post_merge_publish_jobs=(
+                launch.repo_entry.post_merge_publish_jobs if launch and launch.repo_entry else ()
+            ),
             # The item's folder: for a worktree item, not the repo, whose
             # checkout is on whatever the human has. Every forge call names
             # the branch, so an in-place item's folder serves as well.

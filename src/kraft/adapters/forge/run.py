@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -1279,6 +1279,9 @@ async def _run_one(
     reviewers: Reviewers = (),
     #: The repository's `ci_checks:`; False skips both CI waits.
     ci_checks: bool = True,
+    #: The repository's `post_merge_publish_jobs:` globs; `merge_watch` pauses
+    #: no item when every failed job matches one.
+    post_merge_publish_jobs: Sequence[str] = (),
     merge_requested: bool = False,
     #: This repo's `work_item_repos` row, for a multi-repo item: `open_mr`
     #: records the merge request it opened or reused there (Kraft-mjsf).
@@ -2129,7 +2132,9 @@ async def _run_one(
                     # this item's own code to fix loop over (Kraft-43kw). File
                     # what a human needs, warn whoever else is sitting on the
                     # break, and still report "done" -- this node's job is
-                    # reporting what happened to the branch, not fixing it.
+                    # reporting what happened to the branch, not fixing it. A
+                    # red with only publish jobs failed files the bead and
+                    # pauses nothing.
                     job = ci_status.failed_jobs[0] if ci_status.failed_jobs else None
                     trace = (
                         "\n\n".join(
@@ -2137,9 +2142,14 @@ async def _run_one(
                         )
                         or log
                     )
-                    title = (
-                        f"post-merge pipeline broke on {base}: {job.name if job else 'unknown job'}"
-                    )[: beads.MAX_TITLE]
+                    publish_only = bool(ci_status.failed_jobs) and all(
+                        ci.is_publish_job(j.name, post_merge_publish_jobs)
+                        for j in ci_status.failed_jobs
+                    )
+                    what = "publish failed" if publish_only else "pipeline broke"
+                    title = (f"post-merge {what} on {base}: {job.name if job else 'unknown job'}")[
+                        : beads.MAX_TITLE
+                    ]
                     info = db.read(
                         lambda c: c.execute(
                             "SELECT bead_cwd FROM work_items WHERE id = ?", (work_item_id,)
@@ -2160,24 +2170,29 @@ async def _run_one(
                         logger.warning(
                             "merge_watch: follow-up bead not filed for %r: %r", title, exc
                         )
-                    broken = db.read(
-                        lambda c: [
-                            r["id"]
-                            for r in c.execute(
-                                # `waiting` as well as `active` (gate review):
-                                # an item parked on its own pipeline sits on
-                                # this same broken commit and is the one most
-                                # likely to re-discover the break in its own
-                                # fix loop -- exactly what this warning
-                                # exists to prevent. No other status can
-                                # usefully be warned: `paused`/`needs_human`
-                                # are already stopped, and a completed item
-                                # has nothing left to rebase.
-                                f"SELECT id FROM work_items WHERE status IN ({in_list(RUNNING)}) "
-                                "AND base_ref = ? AND id != ?",
-                                (head_sha, work_item_id),
-                            ).fetchall()
-                        ]
+                    broken = (
+                        []
+                        if publish_only
+                        else db.read(
+                            lambda c: [
+                                r["id"]
+                                for r in c.execute(
+                                    # `waiting` as well as `active` (gate review):
+                                    # an item parked on its own pipeline sits on
+                                    # this same broken commit and is the one most
+                                    # likely to re-discover the break in its own
+                                    # fix loop -- exactly what this warning
+                                    # exists to prevent. No other status can
+                                    # usefully be warned: `paused`/`needs_human`
+                                    # are already stopped, and a completed item
+                                    # has nothing left to rebase.
+                                    "SELECT id FROM work_items "
+                                    f"WHERE status IN ({in_list(RUNNING)}) "
+                                    "AND base_ref = ? AND id != ?",
+                                    (head_sha, work_item_id),
+                                ).fetchall()
+                            ]
+                        )
                     )
                     for other_id in broken:
                         stopped = await db.write(
@@ -2190,7 +2205,15 @@ async def _run_one(
 
                         for s in stopped:
                             reattach.interrupt_group(s["pid"], started=s["pid_start_time"])
-                    log += f"filed {follow_up or '(no bead filed)'}, paused {len(broken)} item(s)\n"
+                    if publish_only:
+                        names = ", ".join(j.name for j in ci_status.failed_jobs)
+                        log += (
+                            f"filed {follow_up or '(no bead filed)'}, paused 0 item(s): "
+                            f"only publish job(s) failed ({names})\n"
+                        )
+                    else:
+                        filed = follow_up or "(no bead filed)"
+                        log += f"filed {filed}, paused {len(broken)} item(s)\n"
                     status = "done"
         case _:
             # A target with no handler is a configuration limit, not a bug in
@@ -2326,6 +2349,8 @@ async def run_task(
     reviewers: Reviewers = (),
     #: The repository's `ci_checks:`. Read by `mr.ci` and `mr.post_merge_ci`.
     ci_checks: bool = True,
+    #: The repository's `post_merge_publish_jobs:`. Read by `mr.post_merge_ci`.
+    post_merge_publish_jobs: Sequence[str] = (),
     head_sha: str | None = None,
     #: Whether this node declares `on_base_changed` -- see `_run_one`'s
     #: docstring. Defaults to False,
@@ -2641,6 +2666,7 @@ async def run_task(
                     has_rebase_bounce=has_rebase_bounce,
                     reviewers=reviewers,
                     ci_checks=ci_checks,
+                    post_merge_publish_jobs=post_merge_publish_jobs,
                     merge_requested=requested,
                     check_clean=check_clean,
                     repo_row_id=row_id,
