@@ -774,17 +774,3 @@ def test_a_worker_s_own_session_id_outranks_how_it_connected(client, repo):
     assert r.status_code == 200, r.text
     evts = client.get(f"/api/work-items/{wid}/events").json()
     assert [e for e in evts if e["type"] == "gate_approved"][-1]["payload"]["by"] == "agent"
-
-
-def test_the_mcp_transport_announces_itself_and_the_bare_cli_does_not(monkeypatch):
-    """The bearer token cannot be the discriminator -- transport attaches it to
-    every CLI call too, so a human typing `kraft item approve` would read as an
-    agent. This header is what separates them."""
-    from kraft.client import transport
-
-    monkeypatch.delenv("KRAFT_CLIENT", raising=False)
-    monkeypatch.delenv("KRAFT_SESSION_ID", raising=False)
-    assert "X-Kraft-Client" not in transport.http().headers
-
-    monkeypatch.setenv("KRAFT_CLIENT", "mcp")
-    assert transport.http().headers["X-Kraft-Client"] == "mcp"

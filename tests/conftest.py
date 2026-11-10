@@ -42,6 +42,13 @@ _INERT_REPO_ENTRY = {"setup_command": "", "test_command": None, "test_scopes": N
 
 
 @pytest.fixture(autouse=True)
+def _not_inside_an_agents_shell(monkeypatch):
+    """`kraft` tags a call from a coding agent's shell (`CLAUDECODE` is set there), which would
+    flip any test that asserts a bare call is a person's. A test that needs the variable sets it."""
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _default_setup_command_for_tests_without_a_launch_context(monkeypatch):
     """`setup_command` has no default (Kraft-kji8w): `ensure_worktree` now
     raises for a bare `repo_entry=None`, which is what every executor test in
