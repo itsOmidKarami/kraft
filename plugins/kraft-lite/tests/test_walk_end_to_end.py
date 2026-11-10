@@ -104,6 +104,8 @@ def test_state_reports_a_gate_node(walk, kl_cli, tmp_path):
 
     assert (state["node"], state["kind"], state["steps"]) == ("spec_approval", "gate", [])
     assert state["produced"] == {"spec": "docs/spec.md"}, "the newest of each kind, for any task"
+    # The shipped default chain checks first at every gate.
+    assert state["gate"].pop("reviewer")["path"] == "spec_approval.auto_review"
     assert state["gate"] == {
         "message": "Review and approve the specification.",
         "artifact": "spec",
@@ -112,7 +114,6 @@ def test_state_reports_a_gate_node(walk, kl_cli, tmp_path):
         "chain_finalized": False,
         "artifact_required": False,
         "slice_gate": False,
-        "reviewer": None,
         "review": None,
     }
     [spec] = [r for r in stored(tmp_path).values() if r["title"] == "spec"]

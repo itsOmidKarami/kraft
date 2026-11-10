@@ -577,6 +577,10 @@ nodes:
     message: Review and approve the specification.
     artifact: spec
     reject_to: spec
+    auto_review_mode: checks_first
+    auto_review:
+      id: auto_review
+      extends: gate_reviewer
 
   - id: plan
     kind: exec
@@ -589,6 +593,10 @@ nodes:
     message: Review and approve the implementation plan.
     artifact: plan
     reject_to: plan
+    auto_review_mode: checks_first
+    auto_review:
+      id: auto_review
+      extends: gate_reviewer
 
   # The chain was chosen at intake, before the spec and plan
   # existed. Now both are approved, one agent reads them against the nodes
@@ -605,6 +613,10 @@ nodes:
     message: Review the proposed change to the rest of this chain.
     artifact: chain_revision
     reject_to: chain_revision
+    auto_review_mode: checks_first
+    auto_review:
+      id: auto_review
+      extends: gate_reviewer
 
   - id: implementation
     extends: implementation
@@ -623,6 +635,10 @@ nodes:
     message: Approve creating a draft merge request.
     artifact: work_brief
     reject_to: implementation
+    auto_review_mode: checks_first
+    auto_review:
+      id: auto_review
+      extends: gate_reviewer
 
   # Its own node, not a task before `open`: a node wholly produces one kind or
   # declares none, and `open` produces nothing.
@@ -664,6 +680,10 @@ nodes:
     message: Review the complete work item and merge-request summary.
     artifact: review_brief
     reject_to: implementation
+    auto_review_mode: checks_first
+    auto_review:
+      id: auto_review
+      extends: gate_reviewer
 
   - id: mark_ready
     kind: exec

@@ -83,10 +83,8 @@ async def test_add_task_gives_a_gate_a_reviewer_that_extends_a_library_task(st):
     assert "spec_approval.auto_review" in r.paths
     add = (add, *fields("spec_approval", ("auto_review_mode", "checks_first")))
     assert apply(st, *add).nodes["spec_approval"]["auto_review_mode"] == "checks_first"
-    assert (
-        apply(st, *add, ("remove", {"path": "spec_approval.auto_review"})).nodes["spec_approval"]
-        == GATE
-    )
+    removed = apply(st, *add, ("remove", {"path": "spec_approval.auto_review"}))
+    assert removed.nodes["spec_approval"] == {k: v for k, v in GATE.items() if "review" not in k}
 
 
 @pytest.mark.parametrize(
@@ -356,6 +354,8 @@ GATE = {
     "message": "Review and approve the specification.",
     "artifact": "spec",
     "reject_to": "spec",
+    "auto_review_mode": "checks_first",
+    "auto_review": {"id": "auto_review", "extends": "gate_reviewer"},
 }
 
 

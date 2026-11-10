@@ -92,6 +92,7 @@ def test_every_task_in_the_chain_gets_a_key_even_with_nothing_installed(tmp_path
     monkeypatch.setattr(kl, "SKILL_ROOTS", (Path(".claude") / "skills",))
     chain = kl_chains.resolve(tmp_path, {}, "default")
     tasks = [t for n in chain["nodes"] if n["kind"] == "exec" for t in _chain_tasks(n)]
+    tasks += [n["auto_review"] for n in chain["nodes"] if n["kind"] == "gate" and n["auto_review"]]
     found = kl.detect(tmp_path)["candidates"]
     assert set(found["tasks"]) == {t["components"][0] for t in tasks if t["kind"] == "agent"}
     assert set(found["builtins"]) == {t["ref"] for t in tasks if t["kind"] == "builtin"}
