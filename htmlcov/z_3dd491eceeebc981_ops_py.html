@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>Coverage for src/kraft/drafts/ops.py: 91%</title>
+    <title>Coverage for src/kraft/drafts/ops.py: 92%</title>
     <link rel="icon" sizes="32x32" href="favicon_32_cb_c827f16f.png">
     <link rel="stylesheet" href="style_cb_4667309f.css" type="text/css">
     <script src="coverage_html_cb_54cfdca1.js" defer></script>
@@ -12,7 +12,7 @@
     <div class="content">
         <h1>
             <span class="text">Coverage for </span><b>src<span class="sep">/</span>kraft<span class="sep">/</span>drafts<span class="sep">/</span>ops.py</b>:
-            <span class="pc_cov">91%</span>
+            <span class="pc_cov">92%</span>
         </h1>
         <aside id="help_panel_wrapper">
             <input id="help_panel_state" type="checkbox">
@@ -55,8 +55,8 @@
         </aside>
         <h2>
             <span class="text">852 statements &nbsp;</span>
-            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">779<span class="text"> run</span></button>
-            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">73<span class="text"> missing</span></button>
+            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">780<span class="text"> run</span></button>
+            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">72<span class="text"> missing</span></button>
             <button type="button" class="exc show_exc button_toggle_exc" value="exc" data-shortcut="x" title="Toggle lines excluded">0<span class="text"> excluded</span></button>
         </h2>
         <p class="text">
@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_3dd491eceeebc981_policy_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.2">coverage.py v7.17.2</a>,
-            created at 2026-11-10 22:06 +0000
+            created at 2026-11-10 22:33 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -594,7 +594,7 @@
     <p class="run"><span class="n"><a id="t512" href="#t512">512</a></span><span class="t">        <span class="key">if</span> <span class="nam">isinstance</span><span class="op">(</span><span class="nam">escalation</span> <span class="op">:=</span> <span class="nam">n</span><span class="op">.</span><span class="nam">get</span><span class="op">(</span><span class="str">&quot;escalation&quot;</span><span class="op">)</span><span class="op">,</span> <span class="nam">dict</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t513" href="#t513">513</a></span><span class="t">            <span class="nam">task</span><span class="op">(</span><span class="nam">escalation</span><span class="op">,</span> <span class="nam">_join</span><span class="op">(</span><span class="nam">path</span><span class="op">,</span> <span class="str">&quot;escalation&quot;</span><span class="op">,</span> <span class="nam">_id</span><span class="op">(</span><span class="nam">escalation</span><span class="op">)</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t514" href="#t514">514</a></span><span class="t">        <span class="key">if</span> <span class="nam">isinstance</span><span class="op">(</span><span class="nam">n</span><span class="op">.</span><span class="nam">get</span><span class="op">(</span><span class="nam">AUTO_REVIEW_SEGMENT</span><span class="op">)</span><span class="op">,</span> <span class="nam">dict</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t515" href="#t515">515</a></span><span class="t">            <span class="nam">task</span><span class="op">(</span><span class="nam">n</span><span class="op">[</span><span class="nam">AUTO_REVIEW_SEGMENT</span><span class="op">]</span><span class="op">,</span> <span class="nam">_join</span><span class="op">(</span><span class="nam">path</span><span class="op">,</span> <span class="nam">AUTO_REVIEW_SEGMENT</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t515" href="#t515">515</a></span><span class="t">            <span class="nam">task</span><span class="op">(</span><span class="nam">n</span><span class="op">[</span><span class="nam">AUTO_REVIEW_SEGMENT</span><span class="op">]</span><span class="op">,</span> <span class="nam">_join</span><span class="op">(</span><span class="nam">path</span><span class="op">,</span> <span class="nam">AUTO_REVIEW_SEGMENT</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t516" href="#t516">516</a></span><span class="t">        <span class="key">if</span> <span class="nam">isinstance</span><span class="op">(</span><span class="nam">base_change</span> <span class="op">:=</span> <span class="nam">n</span><span class="op">.</span><span class="nam">get</span><span class="op">(</span><span class="str">&quot;on_base_changed&quot;</span><span class="op">)</span><span class="op">,</span> <span class="nam">dict</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t517" href="#t517">517</a></span><span class="t">            <span class="nam">shape</span><span class="op">(</span><span class="nam">base_change</span><span class="op">.</span><span class="nam">get</span><span class="op">(</span><span class="str">&quot;on_conflict&quot;</span><span class="op">)</span><span class="op">,</span> <span class="nam">_join</span><span class="op">(</span><span class="nam">path</span><span class="op">,</span> <span class="str">&quot;on_base_changed&quot;</span><span class="op">,</span> <span class="str">&quot;on_conflict&quot;</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t518" href="#t518">518</a></span><span class="t">        <span class="key">if</span> <span class="nam">isinstance</span><span class="op">(</span><span class="nam">rejected</span> <span class="op">:=</span> <span class="nam">n</span><span class="op">.</span><span class="nam">get</span><span class="op">(</span><span class="str">&quot;on_merge_rejected&quot;</span><span class="op">)</span><span class="op">,</span> <span class="nam">dict</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
@@ -1407,7 +1407,7 @@
             <a class="nav" href="z_3dd491eceeebc981_policy_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.2">coverage.py v7.17.2</a>,
-            created at 2026-11-10 22:06 +0000
+            created at 2026-11-10 22:33 +0000
         </p>
     </div>
 </footer>
