@@ -16,6 +16,7 @@ from support.api import (
     _poll_events,
     _post_default,
     _set_status,
+    assert_refusal_hides_the_override,
 )
 
 from kraft import store
@@ -388,6 +389,7 @@ _MCP = {"x-kraft-client": "mcp"}
     [
         ("escalation", {"prompt": "do this instead"}, 403),
         ("mcp", {"prompt": "do this instead"}, 403),
+        ("shell-agent", {"prompt": "do this instead"}, 403),
         ("other-worker", {"prompt": "do this instead"}, 403),
         ("mcp", {"effort": "low", "prompt": "and this"}, 403),
         ("mcp", {"effort": "low", "model": "claude-opus-4-1"}, 200),
@@ -397,6 +399,7 @@ _MCP = {"x-kraft-client": "mcp"}
     ids=[
         "escalation-prompt",
         "assistant-prompt",
+        "shell-agent-prompt",
         "another-items-worker-prompt",
         "assistant-effort-and-prompt",
         "assistant-model-and-effort",
@@ -414,6 +417,7 @@ def test_a_retry_that_changes_more_than_a_tasks_model_is_a_persons(
     headers = {
         "escalation": lambda: _escalation_running(wid),
         "mcp": lambda: _MCP,
+        "shell-agent": lambda: {"x-kraft-client": "agent-shell"},
         "other-worker": lambda: {"x-kraft-session-id": "w-other/abc123"},
         "person": dict,
     }[caller]()
@@ -426,6 +430,8 @@ def test_a_retry_that_changes_more_than_a_tasks_model_is_a_persons(
 
     assert r.status_code == status, r.text
     if status == 403:
+        if caller == "shell-agent":
+            assert_refusal_hides_the_override(r)
         assert "changing a task's prompt is a person's call" in r.json()["detail"]
         assert _forks(client, wid)[0] == []
         assert _self_retry_requests(client, wid) == []
