@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -197,22 +198,25 @@ def pytest_sessionfinish(session):
     this run's are made writable again. And a run killed before its end keeps
     its basetemp's `.lock`, which pytest honours for three days: one whose
     process is gone is dropped, so this run's cleanup removes that basetemp.
+    Best effort: nothing here may fail a session.
     """
-    if hasattr(session.config, "workerinput"):
-        return  # the xdist controller does it, workers' folders included
-    basetemp = session.config._tmp_path_factory.getbasetemp()
+    basetemp = session.config._tmp_path_factory._basetemp
+    if basetemp is None or hasattr(session.config, "workerinput"):
+        return  # none made; or an xdist worker, whose folders the controller does
     for dirpath, _dirs, _files in os.walk(basetemp):
         mode = os.lstat(dirpath).st_mode
         if not mode & stat.S_IWUSR:
-            os.chmod(dirpath, mode | stat.S_IWUSR)
+            with contextlib.suppress(OSError):
+                os.chmod(dirpath, mode | stat.S_IWUSR)
     if not basetemp.parent.name.startswith("pytest-of-"):
         return  # a --basetemp of the caller's: its siblings are not pytest's
     for lock in [*basetemp.parent.glob("pytest-*/.lock"), *basetemp.parent.glob("garbage-*/.lock")]:
         try:
             os.kill(int(lock.read_text()), 0)
         except ProcessLookupError:
-            lock.unlink(missing_ok=True)
-        except (OSError, ValueError):
+            with contextlib.suppress(OSError):
+                lock.unlink()
+        except (OSError, ValueError, OverflowError):
             pass  # alive, someone else's, or not a pid: pytest decides
 
 
