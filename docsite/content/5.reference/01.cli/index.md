@@ -44,31 +44,31 @@ Each command links to its entry.
 
 | I want to | Command |
 |---|---|
-| See the board | [`kraft view list`](/reference/cli/view#reading-the-board) |
+| See the board | [`kraft view list`](/reference/cli/view#view-list) |
 | See where one item stands | [`kraft view show`](/reference/cli/view#what-view-show-prints) |
-| Find a spec, plan or summary | [`kraft view search "query"`](/reference/cli/view#reading-the-board) |
-| List an item's specs, plans and summaries, or read one | [`kraft view docs`, `kraft view doc ID`](/reference/cli/view#reviewing-before-you-approve) |
-| Follow the agent's log | [`kraft view logs -f`](/reference/cli/view#read-a-sessions-log) |
-| See what happened to an item, in order | [`kraft view events`](/reference/cli/view#following-a-running-item) |
-| Watch the board live | [`kraft view watch`](/reference/cli/view#following-a-running-item) |
+| Find a spec, plan or summary | [`kraft view search "query"`](/reference/cli/view#view-search) |
+| List an item's specs, plans and summaries, or read one | [`kraft view docs`](/reference/cli/view#view-docs), [`kraft view doc ID`](/reference/cli/view#view-doc) |
+| Follow the agent's log | [`kraft view logs -f`](/reference/cli/view#view-logs) |
+| See what happened to an item, in order | [`kraft view events`](/reference/cli/view#view-events) |
+| Watch the board live | [`kraft view watch`](/reference/cli/view#view-watch) |
 | Watch the board and act on it in a terminal UI | [`kraft console`](/reference/console) |
 | See the repos Kraft knows | [`kraft repo list`](/reference/cli/repo#what-repo-list-prints) |
 | Go to an item's worktree | [`kraft repo path`](/reference/cli/repo) or [`kraft repo open`](/reference/cli/repo) |
-| See what the worktrees use, item by item | [`kraft view storage`](/reference/cli/view#worktree-disk-use) |
+| See what the worktrees use, item by item | [`kraft view storage`](/reference/cli/view#view-storage) |
 
 ### At a gate
 
 | I want to | Command |
 |---|---|
-| Read the document the [gate](/concepts/vocabulary#gate) is about | [`kraft view artifact`](/reference/cli/view#reviewing-before-you-approve) |
-| Read the change | [`kraft view diff`](/reference/cli/view#reviewing-before-you-approve) |
-| Compare two attempts, or the change since my last review | [`kraft view compare`](/reference/cli/view#reviewing-threads-and-comparing-attempts) |
+| Read the document the [gate](/concepts/vocabulary#gate) is about | [`kraft view artifact`](/reference/cli/view#view-artifact) |
+| Read the change | [`kraft view diff`](/reference/cli/view#view-diff) |
+| Compare two attempts, or the change since my last review | [`kraft view compare`](/reference/cli/view#view-compare) |
 | Approve | [`kraft item approve`](/reference/cli/item#item-approve) |
 | Reject, and say why | [`kraft item reject --note "why"`](/reference/cli/item#item-reject) |
 | Comment on a line of the change | [`kraft item comment`](/reference/cli/item#item-comment) |
 | Send my comments with an outcome | [`kraft item review`](/reference/cli/item#item-review) |
 | Read the item's merge request, pipelines, job logs, merged requests or labels | [`kraft view mr`, `pipelines`, `jobs`, `job-log`, `merged`, `labels`](/reference/cli/view#reading-the-forge) _Added in 2.5_ |
-| List [review threads](/concepts/vocabulary#review-thread) | [`kraft view threads`](/reference/cli/view#reviewing-threads-and-comparing-attempts) |
+| List [review threads](/concepts/vocabulary#review-thread) | [`kraft view threads`](/reference/cli/view#view-threads) |
 | Mark a thread resolved, or reopen it | [`kraft item resolve`](/reference/cli/item#item-resolve), [`kraft item reopen`](/reference/cli/item#item-reopen) |
 | Pass a gate without running it | [`kraft item skip`](/reference/cli/item#item-skip) |
 | Label an item's merge request | [`kraft item mr-label`](/reference/cli/item#item-mr-label) |
@@ -77,7 +77,7 @@ Each command links to its entry.
 
 | I want to | Command |
 |---|---|
-| See why it stopped | [`kraft view show`](/reference/cli/view#what-view-show-prints), then [`kraft view logs`](/reference/cli/view#read-a-sessions-log) |
+| See why it stopped | [`kraft view show`](/reference/cli/view#what-view-show-prints), then [`kraft view logs`](/reference/cli/view#view-logs) |
 | Run the stopped [node](/concepts/vocabulary#node) again | [`kraft item retry`](/reference/cli/item#item-retry) |
 | Redo one step or task, or the whole chain | [`kraft item retry --path PATH`, `--restart`](/reference/cli/item#item-retry) |
 | Give it more budget | [`kraft item raise-budget --usd N`](/reference/cli/item#raise-a-cap-that-stopped-an-item) |

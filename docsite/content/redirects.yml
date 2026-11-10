@@ -527,6 +527,11 @@
 /reference/cli/item#send-a-review: /reference/cli/item#item-review
 /reference/cli/item#set-item-wide-overrides: /reference/cli/item#item-set-overrides
 /reference/cli/item#one-nodes-agent-tasks: /reference/cli/item#item-set-node-override
+/reference/cli/view#read-a-sessions-log: /reference/cli/view#view-logs
+/reference/cli/view#list-an-items-documents: /reference/cli/view#view-docs
+/reference/cli/view#read-one-document: /reference/cli/view#view-doc
+/reference/cli/view#list-review-threads: /reference/cli/view#view-threads
+/reference/cli/view#compare-two-review-targets: /reference/cli/view#view-compare
 /reference/cli/admin#migrating-an-older-template-configuration: /guides/run/coming-from-1-4#a-0x-home
 /reference/web-ui/sidebar-search-and-keyboard#keyboard-and-layout: /reference/web-ui/sidebar-search-and-keyboard#keyboard-shortcuts
 /reference/web-ui/item-page#a-node-with-a-fix-loop: /reference/web-ui/fix-loops-and-test-scopes#a-node-with-a-fix-loop
