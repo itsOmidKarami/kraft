@@ -7,12 +7,14 @@ description: Which of Kraft's HTTP routes are stable, which the pages here docum
 
 The Kraft server serves its board, and the JSON API behind it, on one port
 (`127.0.0.1:8765` by default). The `kraft` command and the MCP server are
-clients of that API. The pages in this section document part of it: see [Routes the pages document](#routes-the-pages-document). [`/openapi.json`](#the-schema) lists every HTTP route.
+clients of that API. Two routes are stable. The pages here document the work-item routes a script plausibly calls, and [the schema](#the-schema) lists every route: `/openapi.json`, with `/docs` and `/redoc` to read it.
+
+A script that must outlive a release calls the two stable routes, `kraft … --json` or the MCP server, not the board's routes.
 
 ## Stable routes
 
 Only two routes are meant for other programs, and only these keep their shape
-between minor releases. See
+between minor releases. The schema tags them `stable`. See
 [Versioning and stability](/project/status-and-support#versioning-and-stability).
 Who may call them is under [Who may call](#who-may-call).
 
@@ -43,7 +45,7 @@ The answer carries:
 | `installed` | The version installed on disk, which differs until a restart finishes an update. |
 | `reattach_summary` | What startup found of agent sessions that were running: `scanned`, `adopted`, `resolved_from_file`, `unknown` and `resumed_work_items`. Each `adopted`, `resolved_from_file` and `unknown` entry is `<work item id>/<session id>`, since a session ID is unique only within its work item. |
 | `index` | The search index: `last_scan_at`, `repos_scanned`, `documents`, and the state of `embeddings`. |
-| `kraft_default` | `{signature, count}`: a short hash of the lines the `kraft-default` row of `kraft admin doctor` shows, and how many; `{signature: null, count: 0}` when none. The lines are on [`GET /api/kraft-default`](/reference/http-api/repos-chains-harnesses-and-server#get-apikraft-default). _Added in next_ |
+| `kraft_default` | `{signature, count}`: a short hash of the lines the `kraft-default` row of `kraft admin doctor` shows, and how many; `{signature: null, count: 0}` when none. The lines are on `GET /api/kraft-default`. _Added in next_ |
 | `session_expiry_days` | How long a login lasts, which the login screen shows. |
 
 An add-on that is installed and didn't load is under `invalid_templates`, as `add-on <id>` with the reason, and `status` is `degraded`. A held or failed entry of `addon_updates` leaves `status` as it is.
@@ -79,7 +81,7 @@ A browser opening a page (a `GET` outside `/api` with an HTML `Accept`) gets the
 
 ## The schema
 
-FastAPI generates a schema of every HTTP route:
+FastAPI generates a schema of every HTTP route, including the ones these pages leave out:
 
 | Path | What it serves |
 |---|---|
@@ -88,20 +90,38 @@ FastAPI generates a schema of every HTTP route:
 | `/redoc` | ReDoc for that schema. |
 
 ```bash
-curl -s http://127.0.0.1:8765/openapi.json | jq '.paths | keys'
+curl -s http://127.0.0.1:8765/openapi.json | jq '.paths | keys | length'
+curl -s http://127.0.0.1:8765/openapi.json | jq '[.paths[][] | select(.tags | index("stable")) | .summary]'
 ```
 
-These three paths need no login. Open `/docs` or `/redoc` in a browser to read
-the API there.
+These three paths need no login. Open `/docs` or `/redoc` in a browser to read the API there. Both pages load their scripts from a public CDN, jsdelivr, each pinned to one exact release that your browser refuses unless it matches the hash Kraft ships. Nothing else on either page comes from another site. On a machine without internet access, load `/openapi.json` into your own OpenAPI viewer.
 
-Both pages load their scripts from a public CDN, jsdelivr. Each
-script is pinned to one exact release, and your browser refuses it unless it
-matches the hash Kraft ships. Nothing else on either page comes from another
-site: their policy lets an image load only from Kraft itself or inline, so
-ReDoc's "Redocly" logo isn't fetched.
+### What the schema covers
 
-On a machine without internet access,
-load `/openapi.json` into your own OpenAPI viewer.
+_Added in next_
+
+Every route has a summary, a description and a tag. A route with a typed body lists its fields. A route's tag is its group:
+
+| Tag | Routes |
+|---|---|
+| `stable` | The two stable routes, which also carry their own group's tag. |
+| `work items` | Filing, reading, changing, events, diff, documents and attachments. |
+| `gates and run control` | Gates, pause, resume, skip, escalate, end, archive, retry and the routes a worker calls. |
+| `review` | Review threads, their comments and submitting a review. |
+| `forge reads` | An item's merge request, pipelines, jobs, job logs, merged requests and labels. |
+| `worker sessions` | Session logs, sub-agents and permission asks. |
+| `drafts` | The Templates and Settings editors' drafts and their ops, and an item's own draft. |
+| `repos, forges and workers` | Repos, forge accounts and worker machines. |
+| `chains` | Chain templates, the library and the config checks. |
+| `harnesses` | Harness profiles and providers. |
+| `settings` | Policy, theme, intake, access, notifications and update settings. |
+| `search and analytics` | Search, the index, indexed documents, editors and analytics. |
+| `auth` | Login, logout and the browser sessions. |
+| `server` | Health, applying saved changes, updates and storage. |
+
+The schema doesn't describe response shapes, which the routes build by hand: [The work item object](/reference/http-api/work-item-object) does that for the one a client reads. The `/api/ws/events` WebSocket isn't an HTTP route, so the schema omits it. [Events](/reference/events#ws-apiwsevents) describes it.
+
+The drafts routes and their ops are the Templates and Settings editors' own protocol. Read their schema entries to see what an editor sends, but expect them to change in any release.
 
 ## Work item IDs in a path
 
@@ -126,248 +146,39 @@ whole ID.
 
 ## Session IDs in a path
 
-A session ID is unique only within its work item, so a session's routes are
-under its item:
+A session ID is unique only within its work item, so a session's routes are under its item, as `/api/work-items/{id}/sessions/{session}/...`. `{id}` may be the start of the item's ID, as above. `{session}` is always the whole session ID. A session of another item answers `404 unknown session`.
 
-| Route | What it does |
+```bash
+curl -s "http://127.0.0.1:8765/api/work-items/k3f9/sessions/$SESSION/log?format=jsonl&follow=1"
+```
+
+`log` serves the session's log as plain text, `?format=text` for the same without colour codes, or `?format=jsonl` for lines, with `&follow=1` to stream them until the session stops. The older `/api/worker-sessions/{session}/...` routes still answer for a session ID that exactly one session has, for a client built before session IDs were per item.
+
+A worker's own session travels in the `X-Kraft-Session-Id` header as `<work item id>/<session id>`, from [`KRAFT_SESSION_ID`](/reference/configuration/environment-variables#kraft_session_id). Any other value answers `400`, apart from a bare 32-character ID from a session of an older Kraft.
+
+## Status codes
+
+_Added in next_
+
+The routes answer with a small set of codes.
+
+| Status | Meaning |
 |---|---|
-| `GET /api/work-items/{id}/sessions/{session}/log` | The session's log: plain text, `?format=text` for the same without colour codes, or `?format=jsonl` for lines, with `&follow=1` to stream them until the session stops. The jsonl answer, not the stream, also carries a `subagents` list. _Added in next_ |
-| `GET /api/work-items/{id}/sessions/{session}/subagents` | The Claude Code sub-agents the session's log shows, each with its status, tokens, tool uses, time, last tool and the start of its answer; one still running when its session ended reads `cut_off`. _Added in next_ |
-| `GET /api/work-items/{id}/sessions/{session}/subagents/{agent}` | One sub-agent, with its whole prompt and answer. _Added in next_ |
-| `POST /api/work-items/{id}/sessions/{session}/permission` | A worker's [permission](/reference/permissions) ask. |
-| `POST /api/work-items/{id}/sessions/{session}/permission-hook` | A sandboxed worker's permission hook. |
+| `200`, `201`, `204` | Done. `201` follows a create, `204` a delete with nothing to say. |
+| `202` | Accepted, and not yet done, as for a restart. |
+| `400` | The request is malformed for what the route can read. |
+| `401`, `403` | No valid credentials, or a caller the route refuses: see [Refusals](#refusals). A `403` also answers an agent's call to a person's action, such as approving a gate. |
+| `404` | No such item, repo or session. A work item ID prefix that matches nothing answers `404` too. |
+| `409` | The item's state forbids the action: it has ended, isn't waiting at that gate, or a walk is already running. The `detail` says which. |
+| `422` | A field is refused. `detail` is one sentence naming it. |
+| `429` | Too many failed logins, or too many probes at once. |
+| `502` | A call to the forge failed, or filing an item failed after its checks passed. `detail` carries the reason. |
+| `503` | A configuration file doesn't load, so Kraft refuses new work until it does. Approve, reject and retry also answer it while a restart is marked for when nothing is running. |
 
-`{id}` may be the start of the item's ID, as above. `{session}` is always the
-whole session ID. A session of another item answers `404 unknown session`.
-
-The older routes, `/api/worker-sessions/{session}/log`, `/permission` and
-`/permission-hook`, still answer, for a client built before session IDs were
-per item. Given an ID exactly one session has, every ID from before then and
-most since, they answer as the route under its item does. Given one that no
-session or more than one session has, they answer `404`, ending
-`use /work-items/{wid}/sessions/{sid}`.
-
-A worker's own session travels in the `X-Kraft-Session-Id` header as
-`<work item id>/<session id>`, from [`KRAFT_SESSION_ID`](/reference/configuration/environment-variables#kraft_session_id).
-A bare ID is a session from before then, so it is accepted only at that
-session's 32 characters. Any other value, a bare 6-character session ID
-included, answers `400`. A sandboxed worker's channel admits only its own session's
-`permission` and `permission-hook` routes, by both whole IDs. It admits the
-older routes only for a session from before then, by its whole 32-character ID.
-
-## Routes the pages document
-
-The pages in this section document the board's routes for work items, repos, chains, harnesses, settings, drafts and the server's own state, and the `/api/ws/events` WebSocket. They don't document every route. [`/openapi.json`](#the-schema) lists every HTTP route, but not the WebSocket, which is only described under [Events](/reference/events#ws-apiwsevents). The pages leave out these groups, which the board uses and a script rarely needs:
-
-- review threads and their comments;
-- login and logout, and the browser sessions;
-- search, the index rescan, and reading one indexed document;
-- worker session logs and permission asks;
-- analytics;
-- reading and saving the theme, access, notify and intake settings, sending a test notification, saving the library, reading and saving a chain's file, and the checks that run on them;
-- reading one harness provider's Settings view, and reading and saving one harness profile's.
-
-A route listed here is written in full: its method and its path with the `/api` prefix, as in `POST /api/work-items`. That is how the route appears in `/openapi.json` and in a request. A route that is in none of the tables below, nor in the [stable routes](#stable-routes), has no entry.
-
-The pages can change in any release. A script that must keep working calls the [stable routes](#stable-routes), or the `kraft` command with `--json`. Each table below links a route to its entry.
-
-### Work items
-
-| Route | What it does |
-|---|---|
-| [`POST /api/work-items`](/reference/http-api/work-items#post-apiwork-items) | Files a work item, paused unless the body starts it. |
-| [`GET /api/work-items/{id}/forge/...`](/reference/http-api/work-items#forge-reads) | Reads the item's merge request, pipelines, jobs, job logs, merged requests and labels. _Added in 2.5_ |
-| [`POST /api/work-items/{id}/duplicate`](/reference/http-api/work-items#post-apiwork-itemsidduplicate) | Files a fresh paused item from an existing one. |
-| [`GET /api/work-items`](/reference/http-api/work-items#get-apiwork-items) | Lists the items on the board. |
-| [`GET /api/work-items/{id}`](/reference/http-api/work-items#get-apiwork-itemsid) | Answers one item in full. |
-| [`PATCH /api/work-items/{id}`](/reference/http-api/work-items#patch-apiwork-itemsid) | Changes an item's title, description, chain, overrides, budget, policy or attachments. |
-| [`POST /api/work-items/bulk`](/reference/http-api/work-items#post-apiwork-itemsbulk) | Pauses, cancels, archives or restores several items. |
-| [`POST /api/work-items?dry_run=1`](/reference/http-api/budget-and-events#post-apiwork-itemsdry_run1) | Runs every check of a create and files nothing. |
-
-### Gates
-
-| Route | What it does |
-|---|---|
-| [`POST /api/work-items/{id}/gates/{gate}/approve`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidgatesgateapprove) | Approves the pending gate and starts the chain again. |
-| [`POST /api/work-items/{id}/gates/{gate}/reject`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidgatesgatereject) | Rejects the pending gate and sends the chain back to work. |
-
-### Run control
-
-| Route | What it does |
-|---|---|
-| [`POST /api/work-items/{id}/pause`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidpause) | Stops a running item and ends its sessions. |
-| [`POST /api/work-items/{id}/steer`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidsteer) | Stores a note for the next agent launch of a paused item. |
-| [`POST /api/work-items/{id}/resume`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidresume) | Starts a paused item, with a note if you give one. |
-| [`POST /api/work-items/{id}/skip`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidskip) | Advances past the current node or gate without running it. |
-| [`POST /api/work-items/{id}/escalate`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidescalate) | Sends a message to an agent that helps with a stopped item. |
-| [`POST /api/work-items/{id}/escalate/stop`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidescalatestop) | Ends the running escalation turn. |
-| [`POST /api/work-items/{id}/retry`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidretry) | Re-runs the node an item stopped on. |
-| [`POST /api/work-items/{id}/reopen-mr`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidreopen-mr) | Reopens a merge request closed on the forge, then retries. |
-| [`POST /api/work-items/{id}/progress`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidprogress) | Records that a worker started a plan task. |
-| [`POST /api/work-items/{id}/mr-labels`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidmr-labels) | Labels the item's merge request. |
-| [`POST /api/work-items/{id}/ci-rerun`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidci-rerun) | Re-runs the CI jobs that failed outside the code. _Added in next_ |
-
-### Ending
-
-| Route | What it does |
-|---|---|
-| [`GET /api/work-items/{id}/cancel-preview`](/reference/http-api/gates-run-control-and-ending#get-apiwork-itemsidcancel-preview) | Shows what a cancel would do, without doing it. |
-| [`POST /api/work-items/{id}/cancel`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidcancel) | Ends an item and keeps its worktree and branch. |
-| [`POST /api/work-items/{id}/complete`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidcomplete) | Ends an item as completed, by hand. |
-| [`POST /api/work-items/{id}/archive`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidarchive) | Archives a completed or cancelled item and reclaims its worktree. |
-| [`POST /api/work-items/{id}/restore`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidrestore) | Puts an archived item back under Done. |
-| [`POST /api/work-items/{id}/abandon`](/reference/http-api/gates-run-control-and-ending#post-apiwork-itemsidabandon) | Ends an item and deletes its worktree and branch. |
-
-### Budget
-
-| Route | What it does |
-|---|---|
-| [`GET /api/budget/today`](/reference/http-api/budget-and-events#get-apibudgettoday) | Answers the instance's spend since local midnight against the daily cap. |
-| [`POST /api/work-items/{id}/budget/raise`](/reference/http-api/budget-and-events#post-apiwork-itemsidbudgetraise) | Raises the dollar cap that stopped an item and retries it. |
-
-### Events
-
-| Route | What it does |
-|---|---|
-| [`GET /api/work-items/{id}/events`](/reference/http-api/budget-and-events#get-apiwork-itemsidevents) | Reads an item's events, forward or backward. |
-| [`WS /api/ws/events`](/reference/events#ws-apiwsevents) | Streams every item's events as they are stored, replaying from `after_seq` first. |
-
-### Diff and review
-
-| Route | What it does |
-|---|---|
-| [`GET /api/work-items/{id}/diff`](/reference/http-api/budget-and-events#get-apiwork-itemsiddiff) | Answers the changes the agents made. |
-| [`GET /api/work-items/{id}/compare`](/reference/http-api/budget-and-events#get-apiwork-itemsidcompare) | Diffs any two review targets. |
-| [`PUT /api/work-items/{id}/viewed`](/reference/http-api/budget-and-events#put-apiwork-itemsidviewed) | Marks a file viewed. |
-| [`DELETE /api/work-items/{id}/viewed`](/reference/http-api/budget-and-events#delete-apiwork-itemsidviewed) | Clears the mark. |
-| [`GET /api/work-items/{id}/fix-target`](/reference/http-api/budget-and-events#get-apiwork-itemsidfix-target) | Answers where a request-changes review would restart. |
-| [`POST /api/work-items/{id}/review`](/reference/http-api/budget-and-events#post-apiwork-itemsidreview) | Submits a review. Its entry documents only `digest`. |
-| [`POST /api/work-items/{id}/gates/{gate}/review`](/reference/http-api/budget-and-events#post-apiwork-itemsidreview) | Submits a review for a named gate, as `/review` does for the pending one. |
-
-### Documents
-
-| Route | What it does |
-|---|---|
-| [`GET /api/work-items/{id}/attachments/{kind}`](/reference/http-api/budget-and-events#get-apiwork-itemsidattachmentskind) | Reads the spec or plan attached at intake. |
-| [`GET /api/work-items/{id}/documents`](/reference/http-api/budget-and-events#get-apiwork-itemsiddocuments) | Lists the documents linked to an item. |
-| [`GET /api/work-items/{id}/artifact`](/reference/http-api/budget-and-events#get-apiwork-itemsidartifact) | Reads the pending gate's document. |
-| [`GET /api/work-items/{id}/artifacts/{kind}`](/reference/http-api/budget-and-events#get-apiwork-itemsidartifactskind) | Reads the document a task wrote. |
-
-### Opening in an editor
-
-| Route | What it does |
-|---|---|
-| [`GET /api/editors`](/reference/http-api/repos-chains-harnesses-and-server#get-apieditors) | Lists the editors this machine can open. |
-| [`POST /api/documents/{id}/open`](/reference/http-api/repos-chains-harnesses-and-server#post-apidocumentsidopen) | Opens a document in an editor. |
-| [`POST /api/work-items/{id}/artifact/open`](/reference/http-api/repos-chains-harnesses-and-server#post-apiwork-itemsidartifactopen) | Opens the pending gate's document. |
-| [`POST /api/work-items/{id}/artifacts/{kind}/open`](/reference/http-api/repos-chains-harnesses-and-server#post-apiwork-itemsidartifactskindopen) | Opens a task's document. |
-| [`POST /api/work-items/{id}/open-worktree`](/reference/http-api/repos-chains-harnesses-and-server#post-apiwork-itemsidopen-worktree) | Opens the item's worktree. |
-
-### Storage
-
-_Added in 2.1_
-
-| Route | What it does |
-|---|---|
-| [`GET /api/storage`](/reference/http-api/repos-chains-harnesses-and-server#get-apistorage) | Answers the disk the worktrees use, item by item. |
-| [`POST /api/storage/preview`](/reference/http-api/repos-chains-harnesses-and-server#post-apistoragepreview) | Shows what archiving some items would free and lose. |
-| [`GET /api/kraft-default`](/reference/http-api/repos-chains-harnesses-and-server#get-apikraft-default) | Answers the lines about Kraft's own chains that need attention. |
-
-### Workers
-
-_Added in 2.4_
-
-| Route | What it does |
-|---|---|
-| [`GET /api/workers`](/reference/http-api/repos-chains-harnesses-and-server#get-apiworkers) | Lists the local worker and the machines, with whether each is online. |
-| [`POST /api/workers`](/reference/http-api/repos-chains-harnesses-and-server#post-apiworkers) | Adds a machine, and answers a dial-in machine's token once. |
-| [`PATCH /api/workers/{name}`](/reference/http-api/repos-chains-harnesses-and-server#patch-apiworkersname) | Changes a machine, or the local worker. |
-| [`POST /api/workers/{name}/rotate-token`](/reference/http-api/repos-chains-harnesses-and-server#post-apiworkersnamerotate-token) | Gives a dial-in machine a new token. |
-| [`DELETE /api/workers/{name}`](/reference/http-api/repos-chains-harnesses-and-server#delete-apiworkersname) | Removes a machine no step runs on. |
-
-### Repos
-
-| Route | What it does |
-|---|---|
-| [`GET /api/repos`](/reference/http-api/repos-chains-harnesses-and-server#get-apirepos) | Lists the connected repos and workspaces. |
-| [`GET /api/repos/silent-reviewers`](/reference/http-api/repos-chains-harnesses-and-server#get-apirepossilent-reviewers) | Lists review bots that have never posted in a repo, across three items or more. _Added in 2.5_ |
-| [`POST /api/repos/probe`](/reference/http-api/repos-chains-harnesses-and-server#post-apireposprobe) | Reads a repository and proposes how to connect it. |
-| [`POST /api/repos`](/reference/http-api/repos-chains-harnesses-and-server#post-apirepos) | Connects a repository. |
-| [`PATCH /api/repos?path=`](/reference/http-api/repos-chains-harnesses-and-server#patch-apirepospath) | Changes a connected repo's entry in `repos.yaml`. |
-| [`DELETE /api/repos?path=`](/reference/http-api/repos-chains-harnesses-and-server#delete-apirepospath) | Disconnects a repo. |
-
-### Chains and library
-
-| Route | What it does |
-|---|---|
-| [`GET /api/templates/chains`](/reference/http-api/repos-chains-harnesses-and-server#get-apitemplateschains) | Lists every chain. |
-| [`GET /api/templates/chains/{id}/resolved`](/reference/http-api/repos-chains-harnesses-and-server#get-apitemplateschainsidresolved) | Answers one chain with its `extends` expanded. |
-| [`GET /api/templates/library`](/reference/http-api/repos-chains-harnesses-and-server#get-apitemplateslibrary) | Answers `library.yaml` and every component in it. |
-| [`GET /api/templates/library/{ref}`](/reference/http-api/repos-chains-harnesses-and-server#get-apitemplateslibraryref) | Answers one library component. |
-| [`GET /api/templates/steering/preview`](/reference/http-api/repos-chains-harnesses-and-server#get-apitemplatessteeringpreview) | Shows what an agent task reads at launch. |
-| [`POST /api/templates/reload`](/reference/http-api/repos-chains-harnesses-and-server#post-apitemplatesreload) | Rereads the library, `policy.yaml` and `intake.yaml`, and answers what it refused. |
-
-### Harnesses and providers
-
-| Route | What it does |
-|---|---|
-| [`GET /api/harnesses/profiles`](/reference/http-api/repos-chains-harnesses-and-server#get-apiharnessesprofiles) | Answers the harness profiles and the agent profiles. |
-| [`GET /api/harnesses`](/reference/http-api/repos-chains-harnesses-and-server#get-apiharnesses) | Lists each provider and whether its CLI is installed. |
-| [`GET /api/harnesses/providers`](/reference/http-api/repos-chains-harnesses-and-server#get-apiharnessesproviders) | Answers each provider's capabilities. |
-
-### Settings
-
-| Route | What it does |
-|---|---|
-| [`GET /api/policy`](/reference/http-api/drafts#get-apipolicy) | Reads `policy.yaml` from disk. |
-| [`PUT /api/policy`](/reference/http-api/drafts#put-apipolicy) | Saves `policy.yaml` without a draft, and applies it. |
-| [`GET /api/intake/checks?limit=`](/reference/http-api/drafts#get-apiintakecheckslimit) | Lists what recent intake polls found. |
-
-### Server
-
-| Route | What it does |
-|---|---|
-| [`GET /api/apply`](/reference/http-api/repos-chains-harnesses-and-server#get-apiapply) | Lists what is saved and not running yet. |
-| [`POST /api/apply/reload`](/reference/http-api/repos-chains-harnesses-and-server#post-apiapplyreload) | Rereads the library, `policy.yaml` and `intake.yaml`. |
-| [`POST /api/apply/restart`](/reference/http-api/repos-chains-harnesses-and-server#post-apiapplyrestart) | Restarts a server that a service manager started. |
-| [`GET /api/update`](/reference/http-api/repos-chains-harnesses-and-server#get-apiupdate) | Answers the cached update check. |
-| [`POST /api/update/check`](/reference/http-api/repos-chains-harnesses-and-server#post-apiupdatecheck) | Asks the release feed now. |
-| [`POST /api/update/mark`](/reference/http-api/repos-chains-harnesses-and-server#post-apiupdatemark), [`DELETE /api/update/mark`](/reference/http-api/repos-chains-harnesses-and-server#delete-apiupdatemark) | Marks a release to install when Kraft is free, or drops the mark. _Added in 2.3_ |
-| [`POST /api/update/restart-when-free`](/reference/http-api/repos-chains-harnesses-and-server#post-apiupdaterestart-when-free) | Asks for one restart at the next free moment. _Added in 2.3_ |
-| [`POST /api/update/confirm`](/reference/http-api/repos-chains-harnesses-and-server#post-apiupdateconfirm) | The restart helper's word that a new server came up. _Added in 2.3_ |
-| [`GET /api/update/settings`](/reference/http-api/repos-chains-harnesses-and-server#get-apiupdatesettings), `PUT /api/update/settings` | `update.yaml`. _Added in 2.3_ |
-
-### Config drafts
-
-| Route | What it does |
-|---|---|
-| [`GET /api/drafts`](/reference/http-api/drafts#get-apidrafts) | Lists every open draft. |
-| [`GET /api/drafts/{area}/{key}`](/reference/http-api/drafts#get-apidraftsareakey) | Reads a draft, or the published files when there is none. |
-| [`GET /api/drafts/{area}/{key}/fragment?path=`](/reference/http-api/drafts#get-apidraftsareakeyfragmentpath) | Reads one component of a draft as YAML. |
-| [`GET /api/drafts/policy/{key}/preview?chain=`](/reference/http-api/drafts#get-apidraftspolicykeypreviewchain) | Shows a published chain's caps under the `policy` draft. |
-| [`PUT /api/drafts/{area}/{key}/files/{file}`](/reference/http-api/drafts#put-apidraftsareakeyfilesfile) | Stores one file's text as typed. |
-| [`POST /api/drafts/{area}/{key}/ops`](/reference/http-api/drafts#post-apidraftsareakeyops) | Applies a list of ops, all or nothing. |
-| [`POST /api/drafts/{area}/{key}/ops?preview=1`](/reference/http-api/drafts#post-apidraftsareakeyopspreview1) | Answers what a list of ops would do, and saves nothing. |
-| [`POST /api/drafts/{area}/{key}/undo`](/reference/http-api/drafts#post-apidraftsareakeyundo) | Undoes the last request. |
-| [`POST /api/drafts/{area}/{key}/publish`](/reference/http-api/drafts#post-apidraftsareakeypublish) | Writes the draft's files and applies them. |
-| [`POST /api/drafts/{area}/{key}/rebase`](/reference/http-api/drafts#post-apidraftsareakeyrebase) | Keeps the draft's text over files that changed on disk. |
-| [`DELETE /api/drafts/{area}/{key}`](/reference/http-api/drafts#delete-apidraftsareakey) | Discards a draft for good. |
-
-### A work item's draft
-
-| Route | What it does |
-|---|---|
-| [`GET /api/work-items/{id}/draft`](/reference/http-api/draft-ops#get-apiwork-itemsiddraft) | Reads an item's draft. |
-| [`PUT /api/work-items/{id}/draft`](/reference/http-api/draft-ops#put-apiwork-itemsiddraft) | Replaces an item's op list. |
-| [`DELETE /api/work-items/{id}/draft`](/reference/http-api/draft-ops#delete-apiwork-itemsiddraft) | Discards an item's draft. |
-| [`POST /api/work-items/{id}/draft/apply`](/reference/http-api/draft-ops#post-apiwork-itemsiddraftapply) | Applies an item's draft. |
+What each [work item status](/reference/statuses) allows is in the `actions` field of [the work item object](/reference/http-api/work-item-object#the-actions-field).
 
 ## In this section
 
-- [Filing, reading and changing work items](/reference/http-api/work-items): filing and duplicating an item, reading the board and one item, changing an item, and acting on several at once.
-- [Gates, run control, ending and retry](/reference/http-api/gates-run-control-and-ending): deciding a gate, pausing, resuming, skipping and escalating, ending and archiving an item, retrying it and the routes a worker calls.
-- [The work item object](/reference/http-api/work-item-object): the three shapes a work item answers in, its stored columns, and the fields that need an explanation.
-- [Budget, events, diff and documents](/reference/http-api/budget-and-events): the daily spend total and raising a budget, the dry run of a create, events paging, the diff and review routes, and a work item's documents.
-- [Repos, chains, harnesses and the server](/reference/http-api/repos-chains-harnesses-and-server): connecting, changing and disconnecting a repo, chains and library components, harnesses, changes saved but not applied, the update check, and opening an editor.
-- [Drafts](/reference/http-api/drafts): the routes the Templates and Settings editors use to keep, change, publish and discard a draft and the `result` each answers, and the policy and intake-check routes.
-- [Ops for each draft area](/reference/http-api/draft-ops): every op a draft takes, by area and a work item's own draft.
+- [Filing, reading and deciding work items](/reference/http-api/work-items): file an item, read the board and one item, approve or reject a gate, and retry a stopped item.
+- [The work item object](/reference/http-api/work-item-object): the three shapes a work item answers in, and the fields that need an explanation.
+- [Connecting a repo](/reference/http-api/connect-a-repo): list, probe, connect and disconnect a repo.

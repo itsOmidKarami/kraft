@@ -39,6 +39,9 @@ SAYS = {
     ("start", 0): {
         "start-lists-available-chains": 'kl.py" chains --available',
         "start-chain-file-path": "a chain file path (`.yaml`, or with a `/`)",
+        "start-reports-unused-bindings-and-goes-on": (
+            "Name each to the user; don't edit `bindings.yaml` or start again, and go on."
+        ),
     },
     ("next", 0): {
         "next-pre-v1-refusal-migrates": (
@@ -142,8 +145,12 @@ SAYS = {
         ),
     },
     ("gate", 1): {
+        "gate-passed-unchanged-is-reported": (
+            "printed `passed_unchanged`, the gate never blocked",
+            "Tell the user it passed, with that `rationale`, then invoke `kraft-lite:next`.",
+        ),
         "gate-chain-revision-restarts-through-start": (
-            "find the chain's source file from the frozen `.kraft-lite/chains/<chain-id>.json`: "
+            "Find the chain's source file from the frozen `.kraft-lite/chains/<chain-id>.json`: "
             "its `source` when that is a file path; otherwise the `path` that `python3 "
             '"$CLAUDE_PLUGIN_ROOT/kl.py" chains --available` lists for its `id`'
         ),

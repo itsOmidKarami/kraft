@@ -41,3 +41,24 @@ def test_no_published_description_cites_an_internal_reference():
         if INTERNAL.search(text)
     }
     assert found == {}
+
+
+def test_every_api_route_has_a_tag_and_a_description():
+    bare = [
+        f"{method.upper()} {path}"
+        for path, ops in app.openapi()["paths"].items()
+        if path.startswith("/api/")
+        for method, op in ops.items()
+        if not (op.get("tags") and op.get("description"))
+    ]
+    assert bare == []
+
+
+def test_the_two_stable_routes_are_tagged_stable():
+    ops = [
+        f"{method.upper()} {path}"
+        for path, item in app.openapi()["paths"].items()
+        for method, op in item.items()
+        if "stable" in op.get("tags", [])
+    ]
+    assert sorted(ops) == ["GET /api/health", "POST /api/triggers"]

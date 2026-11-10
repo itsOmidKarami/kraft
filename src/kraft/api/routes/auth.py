@@ -32,6 +32,8 @@ class Login(BaseModel):
 
 @api_router.post("/login")
 async def login(body: Login, request: Request):
+    """Sign in with the server's password and receive a session cookie. Repeated failures
+    from one address are refused with 429."""
     st = request.app.state
     # Keyed on the same peer `_perimeter` judges: uvicorn trusts
     # `X-Forwarded-For` only from 127.0.0.1, so a remote caller cannot pick
@@ -84,6 +86,7 @@ async def login(body: Login, request: Request):
 
 @api_router.post("/logout", status_code=204)
 async def logout(request: Request):
+    """End this session and clear its cookie."""
     token = request.cookies.get(auth_mod.COOKIE)
     if token:
         await request.app.state.db.write(
@@ -96,12 +99,14 @@ async def logout(request: Request):
 
 @api_router.get("/sessions")
 async def list_sessions(request: Request):
+    """The browser sessions signed in to this server."""
     token = request.cookies.get(auth_mod.COOKIE)
     return {"sessions": request.app.state.db.read(lambda c: auth_mod.list_sessions(c, token))}
 
 
 @api_router.delete("/sessions/{session_id}", status_code=204)
 async def revoke_session(session_id: str, request: Request):
+    """Sign one browser session out."""
     revoked = await request.app.state.db.write(lambda c: auth_mod.revoke_session(c, session_id))
     if not revoked:
         raise HTTPException(404, "unknown session")
@@ -119,6 +124,8 @@ def _mcp_command_on_path() -> bool | None:
 
 @api_router.get("/health")
 async def health(request: Request):
+    """Whether the server is up, with the version and any degraded checks. Needs no login.
+    Keeps its shape between minor releases."""
     st = request.app.state
     invalid_policy = st.invalid_policy
     # A library that did not parse makes every chain unselectable, and a chain

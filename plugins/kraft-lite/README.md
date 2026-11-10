@@ -103,12 +103,15 @@ chain that extends another chain. A chain comes from one of four places:
 3. **Your library.** The directory Kraft reads its configuration from:
    `$KRAFT_CONFIG_DIR` when set (or its 1.x name `$KRAFT_TEMPLATES_DIR`), else
    `$KRAFT_HOME/config`, else `~/.kraft/config`. The first one set is the one,
-   even without a `library.yaml` in it: Kraft seeds that directory from its
-   packaged library, so Lite reads the bundled one, as step 4. Your library
-   replaces the bundled library wholesale, with no layering, as it does in
-   Kraft. A bare name such as `default` means an entry here.
+   even without a `library.yaml` in it: Lite then reads the bundled one, as
+   step 4. Your library replaces the bundled library wholesale, with no
+   layering, as it does in Kraft. A bare name such as `default` means an entry
+   here, and `kraft-default:<name>` means the bundled entry.
 4. **The bundled library.** A copy of Kraft's packaged `config/library.yaml`
    and `config/chains/`, shipped with the plugin and kept identical by a test.
+   It is Kraft's built-in add-on, `kraft-default`. Kraft seeds a new home with
+   a `chains/default.yaml` that is only `extends: kraft-default:default` (and
+   the same for `quick-task`), so a stock home runs the bundled chains.
 
 A repo library differs from Kraft's in two ways. Lite reads the working tree,
 not the default branch's commit, and there is no acceptance step, because you
@@ -119,8 +122,10 @@ counts at your next `start`, committed or not. See
 With no `--chain`, `start` runs `repo:default` when the repo library has a
 `chains/default.yaml`, and `default` otherwise. `kl.py chains --available`
 lists every chain ID Lite can see, with the library it came from and its
-file. A reference to an add-on's chain, such as `acme:ship`, is refused by
-name: Lite loads no add-ons.
+file. A reference to any other add-on, such as `acme:ship`, is refused by
+name: Lite loads no add-ons. A repo library can't name `kraft-default:`
+either, since Kraft's lists the add-ons it builds on and Lite reads no such
+list.
 
 ### Reading the YAML
 
@@ -204,7 +209,8 @@ With no match, the task runs on its default:
   without one, as Kraft runs it. A command Lite can't split, such as one
   with an unclosed quote, stops `start`.
 - A **builtin** or **forge** task runs an instruction Lite carries for every
-  ref and target Kraft allows, written for this repo's forge.
+  ref and target Kraft allows, written for this repo's forge. The verify
+  task's `suite: full` asks for the full suite, as Kraft runs it.
 
 Every task that runs a skill or a prompt, bound or default, gets the task's
 `steering` text appended. Its `profile`, `model` and `effort` reach the
@@ -225,7 +231,8 @@ otherwise leave its task on the default without a word.
 Lite runs inside one session, so it can't enforce a budget, a time cap, an
 allowed-tools list, a sandbox or a harness choice. It reads past `policy`
 (all but a node's `max_attempts`, which caps its fix loop), `wait`, `scope`, `execution`, `harness`, `inputs`, `skippable`, `read_only`,
-`icon`, `timeout`, `artifact_required`, `escalation`, and a gate's
+`icon`, `timeout`, `escalation`, `fallback`, `runner`, `reviewers`, `pipeline`,
+and a gate's
 `auto_review` unless its `auto_review_mode` is `checks_first`. A chain that sets them still runs. An escalation is you, as
 for a fix loop past its cap.
 
@@ -237,7 +244,8 @@ the gate with that note first. The reviewer never approves. A reviewer that
 approving its own gate.
 
 Lite stops, naming the file and the key, at what it can't walk without
-changing what the chain means: a reference to an add-on, a step's or a
+changing what the chain means: a reference to an add-on other than
+`kraft-default`, a step's or a
 task's own `on_failure`, and `on_conflict` under `on_base_changed`. It also
 refuses the cases Kraft refuses, such as an unknown builtin ref or forge
 target, or a key `on_base_changed` or `on_merge_rejected` doesn't have.
@@ -295,10 +303,21 @@ rejection reopens the node the gate's `reject_to` names, else the nearest exec
 node before it, and every node after that, carrying your note. `reject
 --from-node` lands the rejection on another node.
 
+The `chain_finalized` gate, and any gate with `artifact_required`, needs its
+document, as in Kraft: `approve` is refused while no file of its `artifact`
+kind is recorded and on disk. Reject it `--from-node` the node that writes
+the document, so that node runs again.
+
 A gate on a `chain_revision` artifact is the one case Lite can't finish: it
 can't apply a change set to a running chain. If the proposal changes
 anything, Lite says so and offers two ways on: approve without the change, or
 stop and start again on an edited copy of the chain's file.
+
+A proposal that changes nothing passes without asking, as in Kraft: `gate` closes it and
+prints `passed_unchanged` with the proposal's `rationale`. That takes the
+change set Kraft's chain review writes, one fenced JSON block with a
+`rationale` and no `skip`, `add` or `overrides`, and no slicing proposal
+waiting at the gate. Anything else comes to you.
 
 That file is the frozen chain's `source` when it is a path, else the one `kl.py chains --available`
 lists for its ID; a `repo:` chain's copy goes in `.kraft/chains/` under a new
@@ -313,7 +332,11 @@ nothing. It reports `node`, `kind` (`exec` or `gate`), `status`, `note`,
 `on_failure`, `on_failure_ran`, `fix_loop`, `on_base_changed` and
 `on_merge_rejected`. For a gate
 it reports `gate`: the `message`, the `artifact` and its `artifact_path`, the
-`reject_to` node, and whether it is the `chain_finalized` or the slice gate.
+`reject_to` node, whether it is the `chain_finalized` or the slice gate, and
+whether it has `artifact_required`.
+
+`produced` maps each document kind the run recorded to its newest file, so a
+later task finds it, as opening the merge request finds `mr_meta`.
 
 Each task in `steps` is one dispatch record: the `path`, how it runs (`kind`
 is `skill`, `prompt`, `subprocess` or `skip`, with `skill`, `prompt`,
@@ -330,6 +353,9 @@ surviving gate whose `reject_to` named a dropped node falls back to the
 nearest exec node before it. A surviving `on_base_changed.restart_from` that
 named a dropped node moves to the nearest kept exec node before it, else the
 first one kept.
+
+That last rule is Lite's own: Kraft drops such an `on_base_changed`, and Lite
+keeps the restart, as a slice's child chain keeps it.
 
 Lite records the path, relative to the repo when the file is inside it, and
 doesn't copy the file. The gates that remain present it as that kind's

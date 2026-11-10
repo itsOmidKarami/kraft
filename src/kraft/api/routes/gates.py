@@ -311,6 +311,8 @@ async def _refresh_base_at_gate(request, wid: str, row, gate: str) -> bool:
 
 @api_router.post("/work-items/{wid}/gates/{gate:path}/approve")
 async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove | None = None):
+    """Approve the gate the item is waiting at so the chain moves on. For the final review,
+    pass `head` to approve exactly that revision."""
     when_free.refuse_if_claimed()
     st = request.app.state
     deps.forbid_self_action(st, request, wid, escalation_may=False)

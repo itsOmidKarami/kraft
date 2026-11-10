@@ -112,7 +112,7 @@ def test_task_keywords_cover_the_library():
     """A component with no `TASK_KEYWORDS` entry silently falls back to splitting
     its own name into keywords -- the behaviour meant for a repo's own tasks,
     not one the bundled library curated on purpose."""
-    _, library = kl_chains.libraries(PLUGIN, {})
+    library = kl_chains.bundled_library()
     agents = {n for n, raw in library.components["tasks"].items() if raw["kind"] == "agent"}
     expected = agents | set(kl_chains.BUILTIN_REFS) | set(kl_chains.FORGE_TARGETS)
     assert set(kl.TASK_KEYWORDS) == expected

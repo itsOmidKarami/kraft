@@ -39,19 +39,27 @@ BUILTIN_DEFAULTS: dict[str, dict] = {
     },
 }
 
+#: The verify task with `suite: full`, which Kraft runs on each scope's full command.
+FULL_SUITE = {
+    "kind": "prompt",
+    "prompt": "Run the repo's full test suite, plus its fast checks, and report the result.",
+}
+
 FORGE_DEFAULTS: dict[str, dict] = {
     "mr.open_draft": {
         "kind": "prompt",
         "prompt": (
             "Open a draft merge request for the working branch on this repo's forge, or report "
-            "the one already open."
+            "the one already open. Take its title, description and labels from the run's "
+            "`mr_meta` document (`state`'s `produced.mr_meta`) when there is one."
         ),
     },
     "mr.sync": {
         "kind": "prompt",
         "prompt": (
             "Push the working branch so the merge request matches it, and report anything the "
-            "forge rejected."
+            "forge rejected. Keep its title, description and labels as the run's `mr_meta` "
+            "document (`state`'s `produced.mr_meta`) has them, when there is one."
         ),
     },
     "mr.ci": {
@@ -352,6 +360,8 @@ def _default(task: dict, installed: Callable[[str], bool]) -> tuple[dict, str]:
         return {"kind": "skill" if skill else "prompt", **_fields(task)}, "default:agent"
     if kind == "subprocess":
         return {"kind": "subprocess", "command": task.get("command") or []}, "default:subprocess"
+    if task.get("suite") == "full":
+        return FULL_SUITE, f"default:builtins.{task.get('ref')}"
     table, section, name = (
         (BUILTIN_DEFAULTS, "builtins", task.get("ref"))
         if kind == "builtin"

@@ -532,6 +532,7 @@ async def put_item_draft(wid: str, body: Ops, request: Request):
 
 @api_router.delete("/work-items/{wid}/draft", status_code=204)
 async def discard_item_draft(wid: str, request: Request):
+    """Throw away the item's draft chain edits."""
     st = request.app.state
     _item_row(st, request, wid)
     if not await st.db.write(lambda c: store.delete_item(c, wid)):
