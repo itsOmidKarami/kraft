@@ -8,7 +8,7 @@ import sys
 
 import pytest
 from support.harness import entry_of, make_repo
-from support.remote import Peer, attach, memory_pair
+from support.remote import Peer, attach, memory_pair, until
 from support.stub_ssh import stub_ssh
 
 from kraft.remote import protocol, registry
@@ -192,7 +192,7 @@ async def test_a_chatty_ssh_machine_stays_online_as_stderr_is_drained(tmp_path, 
     pings, if nobody read it."""
     bin_dir = stub_ssh(tmp_path / "bin")
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
-    starts = tmp_path / "starts"
+    starts, drained = tmp_path / "starts", tmp_path / "drained"
     machine = (
         "import json, sys\n"
         f"open({str(starts)!r}, 'a').write('.')\n"
@@ -200,15 +200,18 @@ async def test_a_chatty_ssh_machine_stays_online_as_stderr_is_drained(tmp_path, 
         f"send({{'t': 'hello', 'protocol': {protocol.PROTOCOL_VERSION}, 'kraft': '2.3.0'}})\n"
         "sys.stdin.readline()\n"
         "sys.stderr.write('x' * 10_000_000)\n"
-        "sys.stderr.flush()\n"
+        "sys.stderr.flush()\n"  # blocks for good unless the hub reads stderr
+        f"open({str(drained)!r}, 'w').write('.')\n"
         "for line in sys.stdin:\n"
         "    if json.loads(line)['t'] == 'ping':\n"
         "        send({'t': 'pong'})\n"
     )
-    hub = Hub("2.3.0", remote_command=(sys.executable, "-c", machine), ping_s=0.2, dead_s=1.5)
+    hub = Hub("2.3.0", remote_command=(sys.executable, "-c", machine), ping_s=0.2, dead_s=30)
     hub.apply(registry.WorkersFile.model_validate({"workers": {"boxed": {"ssh": "boxed"}}}))
     assert (await hub.probe("boxed", timeout=20))["connected"]
-    await asyncio.sleep(3)  # past dead_s: only answered pings keep it online
+    # the machine got all of stderr out, which it only can if the hub read it; dead_s is long
+    # so a loaded test machine cannot read a late pong as a dead one
+    await until(drained.exists, timeout=30)
     assert _row(hub, "boxed")["online"]
     assert starts.read_text() == "."  # one connection, never redialled
     await hub.close()

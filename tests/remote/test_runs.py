@@ -478,10 +478,12 @@ async def test_a_machine_adds_sandbox_events_to_its_items_history_and_nothing_el
     rig, database, type_, kept
 ):
     run = await _running(rig)  # a KILL sent before the step has started is dropped
+    before = set(rig.runs._tasks)
     await rig.runs.on_frame(
         "gpu", {"t": "event", "id": run.spec.key, "type": type_, "payload": {"host": "x.test"}}
     )
-    await until(lambda: not rig.runs._tasks)  # the frame is handled in a task of its own
+    # the frame is handled in a task of its own: wait for that one, not for every task there is
+    await asyncio.gather(*(rig.runs._tasks - before))
     assert (type_ in _event_types(database)) is kept
     await rig.runs.signal(run, "KILL")
     await rig.done(run)
