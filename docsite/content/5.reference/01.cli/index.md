@@ -120,31 +120,27 @@ always the same value:
 - `kraft item create --json` prints a trimmed object, not the raw payload: `id`, `status` and `title`, plus `slots` (when `--autostart` queued the item), `repo_warning`, `bead_warning` or `duplicate_warning` when one applies.
 - `kraft view list --json` is scoped to the repo you are in unless you pass `--all` or `--repo`; `list_work_items` is never scoped.
 
-These verbs don't print the payload:
+Each verb prints this without `--json`, and this with it:
 
-| Verb | Use instead |
-|---|---|
-| `console` | None; it opens a terminal UI. |
-| `view watch` | `kraft view events --json` (`watch` redraws a board rather than returning a value) |
-| `repo path` | `kraft view show --json` (`path` prints one plain line meant for `cd`) |
-| `admin start`, `stop`, `restart`, `update` | None; these print status lines. |
-| `admin install-service`, `uninstall-service` | None. |
-| `admin mcp`, `admin permission-hook` | None; these speak a protocol on stdio. |
-| `admin addon enable`, `disable` | `kraft admin addon list --json` (these print one line). |
-| `admin init` | None. It accepts `--json` and ignores it; it reports an existing MCP registration before printing one `kraft: wrote PATH` line per file. |
-
-### Without `--json`
-
-| Verbs | What they print |
-|---|---|
-| `kraft item approve`, `reject`, `pause`, `unblock`, `resume`, `retry`, `raise-budget`, `skip`, `complete`, `cancel`, `escalate` | One line saying what they did, most of them with where the item stands now, such as `approved spec_approval on 4f2c…; the item is now running`. |
-| `kraft item review approve` or `request-changes` at a pending gate | The same one line. |
-| `kraft item review request-changes` or `comment`, with no gate pending | The review's fields as `key  value` lines. |
-| `kraft item abandon`, and every `set-*` verb except `set-chain` | The same `key  value` lines. |
-| `kraft item set-chain` | The chain the item now runs. |
-| `kraft item archive` | The preview as a table with a total, then one line per item. |
-| `kraft item restore` | One line saying what was restored. |
-| `kraft item comment`, `resolve`, `reopen` | The thread and where it sits. |
+| Verb | Without `--json` | With `--json` |
+|---|---|---|
+| `console` | A terminal UI. | Not accepted. |
+| `view watch` | A board it redraws rather than returning a value. | Not accepted. Use `kraft view events --json`. |
+| `repo path` | One plain line meant for `cd`. | Not accepted. Use `kraft view show --json`. |
+| `admin start`, `stop`, `restart`, `update` | Status lines. | Not accepted. |
+| `admin install-service`, `uninstall-service` | Status lines. | Not accepted. |
+| `admin mcp`, `admin permission-hook` | A protocol on stdio. | Not accepted. |
+| `admin worker serve`, `attach`, `local` | Status lines on stderr, or a protocol on stdio. | Not accepted. |
+| `admin addon enable`, `disable` | One line. | Not accepted. Use `kraft admin addon list --json`. |
+| `admin init` | It reports an existing MCP registration before printing one `kraft: wrote PATH` line per file. | Accepted and ignored. |
+| `kraft item approve`, `reject`, `pause`, `unblock`, `resume`, `retry`, `raise-budget`, `skip`, `complete`, `cancel`, `escalate` | One line saying what they did, most of them with where the item stands now, such as `approved spec_approval on 4f2c…; the item is now running`. | The API payload. |
+| `kraft item review approve` or `request-changes` at a pending gate | The same one line. | The API payload. |
+| `kraft item review request-changes` or `comment`, with no gate pending | The review's fields as `key  value` lines. | The API payload. |
+| `kraft item abandon`, and every `set-*` verb except `set-chain` | The same `key  value` lines. | The API payload. |
+| `kraft item set-chain` | The chain the item now runs. | The API payload. |
+| `kraft item archive` | The preview as a table with a total, then one line per item. | The preview, or the bulk results with `--yes`. |
+| `kraft item restore` | One line saying what was restored. | The API payload. |
+| `kraft item comment`, `resolve`, `reopen` | The thread and where it sits. | The API payload; `resolve` and `reopen` print the thread. |
 
 The item itself is in `--json`, or in `kraft view show`.
 

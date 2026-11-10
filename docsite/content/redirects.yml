@@ -420,10 +420,10 @@
 /reference/cli/admin#verb-details: /reference/cli/server#run-the-server
 /reference/cli/admin: /reference/cli/server
 /reference/cli/admin#machines: /reference/cli/worker#machines
-/reference/cli/admin#add-edit-list-and-remove-a-machine: /reference/cli/worker#add-edit-list-and-remove-a-machine
-/reference/cli/admin#run-the-machines-side: /reference/cli/worker#run-the-machines-side
+/reference/cli/admin#add-edit-list-and-remove-a-machine: /reference/cli/worker#admin-worker-add
+/reference/cli/admin#run-the-machines-side: /reference/cli/worker#admin-worker-serve
 /reference/cli/admin#forge-accounts: /reference/cli/forge#forge-accounts
-/reference/cli/admin#add-edit-list-remove-and-test-an-account: /reference/cli/forge#add-edit-list-remove-and-test-an-account
+/reference/cli/admin#add-edit-list-remove-and-test-an-account: /reference/cli/forge#admin-forge-add
 /reference/cli/admin#install-and-update-add-ons: /reference/cli/addon#install-and-update-add-ons
 /reference/cli/admin#add-a-collection-and-install-from-it: /reference/cli/addon#add-a-collection-and-install-from-it
 /reference/cli/admin#move-a-collection-to-another-source: /reference/cli/addon#move-a-collection-to-another-source
@@ -458,6 +458,11 @@
 /reference/cli/server#show-a-chain: /reference/cli/server#admin-templates-show
 /reference/cli/server#commands: /reference/cli/server#verbs-at-a-glance
 /reference/cli/addon#commands: /reference/cli/addon#verbs-at-a-glance
+/reference/cli/worker#commands: /reference/cli/worker#verbs-at-a-glance
+/reference/cli/worker#add-edit-list-and-remove-a-machine: /reference/cli/worker#admin-worker-add
+/reference/cli/worker#run-the-machines-side: /reference/cli/worker#admin-worker-serve
+/reference/cli/forge#commands: /reference/cli/forge#verbs-at-a-glance
+/reference/cli/forge#add-edit-list-remove-and-test-an-account: /reference/cli/forge#admin-forge-add
 /reference/cli/admin#verbs-at-a-glance: /reference/cli/server#verbs-at-a-glance
 /reference/web-ui/board#raise-cap-on-a-row: /guides/day-to-day/raise-a-cap#which-stop-offers-what
 /reference/web-ui/board#raise-budget-on-a-row: /guides/day-to-day/raise-a-cap#which-stop-offers-what
