@@ -147,7 +147,7 @@ def test_read_jsonl_of_a_missing_file_is_empty(tmp_path):
 
 
 #: The modules the plugin ships, each free to import the others.
-SHIPPED = ("kl", "kl_bindings", "kl_chains", "kl_migrate", "kl_shape", "kl_yaml")
+SHIPPED = ("kl", "kl_bindings", "kl_chains", "kl_migrate", "kl_shape", "kl_slices", "kl_yaml")
 
 
 @pytest.mark.parametrize("module", SHIPPED)

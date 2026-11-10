@@ -40,7 +40,7 @@ says who it isn't for.
   done.
 - **A person at the decisions.** A *gate* is a node where the chain stops for
   you. Read what the agent wrote, then approve it or request changes with a note
-  that re-runs the node that wrote it. A gate stops the chain until a decision is recorded, and an agent's own calls to decide its gate are refused. Only a sandbox with a `network:` policy keeps an agent from deciding its own gates; no sandbox is set by default, and an unsandboxed agent runs as you. [Security](https://kraft-sdlc.dev/project/security#agents-and-gates)
+  that re-runs the node that wrote it. A gate stops the chain until a decision is recorded, and an agent's own calls to decide its gate are refused. Only a sandbox with a `network:` policy keeps an agent from deciding its own gates; no sandbox is set by default, and an unsandboxed agent runs as you. [Security](https://kraft-sdlc.dev/project/security-in-depth#agents-and-gates)
   has the scope.
 - **Capped retries and spend.** Attempts, time and dollars are bounded. A capped
   item stops and hands you the full trace.

@@ -10,6 +10,7 @@
       "Gives tests/support/samples.py one owning slice, and tells the other slices to wait for it or use it from the owner's branch",
       "States the mode from settings, a feature branch, and this session's own branch as the state branch",
       "Writes the proposal to .kraft-lite/proposals/kl-7f3a91c2.json in the shape `approve --slices` reads",
+      "Checks it with `kl.py plan-slices --check .kraft-lite/proposals/kl-7f3a91c2.json --chain-id kl-7f3a91c2` before opening the gate",
       "Opens the slice gate with `kl.py gate --chain-id kl-7f3a91c2`, with no `--name`, and hands it to kraft-lite:gate to present the proposal beside the gate's own artifact; waits for the user's answer and does not approve it on the user's behalf",
       "Names `kl.py approve --slices .kraft-lite/proposals/kl-7f3a91c2.json --chain-id kl-7f3a91c2` as the way the answer is recorded",
       "Before any child starts: confirms it can start, message and archive sessions, gets one up-front approval for pushing the feature branch, smoke-tests setup and the scoped test command once, and checks the user has finished giving instructions",
@@ -167,7 +168,7 @@
     "query": "The plan is approved. Run it.",
     "setup": "A Claude Code session in repo acme/ledger. Kraft Lite controller's chain kl-7f3a91c2 runs on the default chain. `kl.py state --chain-id kl-7f3a91c2` prints node chain_revision_approval, kind gate, status open, sliced null, gate {message: 'Approve the revised chain', artifact: chain_revision, artifact_path: docs/chain-revision.md, reject_to: chain_revision, chain_finalized: false, slice_gate: true}; the chain revision proposes no change. kraft-lite:next has just invoked you here. The plan has two tasks and no `## Slices` section: Task 1 adds a `--dry-run` flag to the export command, Task 2 documents it. `.kraft-lite/proposals/kl-7f3a91c2.json` exists from an earlier round that the user rejected.",
     "expected_behavior": [
-      "Says the plan is small enough for one session and will not be sliced",
+      "Says the plan will not be sliced: its two tasks are not parts that stand alone, so it runs as one",
       "Deletes .kraft-lite/proposals/kl-7f3a91c2.json",
       "Runs `kl.py gate --chain-id kl-7f3a91c2`, with no `--name`, and invokes kraft-lite:gate, so the chain continues as one",
       "Writes no new proposal, runs no `approve --slices`, and starts no child session"
@@ -251,7 +252,7 @@
     "setup": "The cloud controller session session_01Ctrl00 for chain kl-7f3a91c2 'Ledger export' in repo acme/ledger (base branch main), on its own branch claude/ledger-export-x1. `$CLAUDE_PLUGIN_ROOT` is set and the kraft-lite skills are installed; the claude-code-remote tools are loaded. The chain was started with `--chain ship`, the repo's own chain in `.kraft/chains/ship.yaml`, frozen at `.kraft-lite/chains/kl-7f3a91c2.json`: spec, spec_approval, plan, plan_approval, implementation, verification, draft_merge_request, merge_request_feedback, final_review (chain_finalized), merge. It has no chain_revision node and no chain_revision_approval gate. `state --chain-id kl-7f3a91c2` prints node plan_approval, kind gate, status open, sliced null, gate {message: 'Approve the plan', artifact: plan, artifact_path: docs/plans/ledger-export.md, reject_to: plan, chain_finalized: false, slice_gate: true}; kraft-lite:next has just invoked you here. `kl.py settings` gives mode feature and the default rights. The plan has twelve tasks and a `## Slices` section with four slices. No proposal file exists.",
     "expected_behavior": [
       "Treats plan_approval as this chain's slice gate (from `gate.slice_gate`), and does not say the chain cannot be sliced or that it lacks the default chain's nodes or gates",
-      "Writes the four slices from the plan's `## Slices` section, the mode, a feature branch and the state branch to .kraft-lite/proposals/kl-7f3a91c2.json",
+      "Runs `kl.py plan-slices --chain-id kl-7f3a91c2` and writes the slices it prints from the plan's `## Slices` section, the mode, a feature branch and the state branch to .kraft-lite/proposals/kl-7f3a91c2.json",
       "Opens the gate with `kl.py gate --chain-id kl-7f3a91c2`, with no `--name`, and hands it to kraft-lite:gate, which presents the plan and the proposal",
       "Names `kl.py approve --slices .kraft-lite/proposals/kl-7f3a91c2.json --chain-id kl-7f3a91c2` as the way the answer is recorded, and does not run it or start a child before the user answers"
     ]

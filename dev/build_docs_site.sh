@@ -19,7 +19,7 @@
 # That build has the old look and no version menu, the origin baked into the
 # tag's nuxt.config.ts (so its canonical, og:url and sitemap URLs name that
 # origin, not kraft-sdlc.dev), and a noindex tag added here after the build.
-# CONTRIBUTING.md, "Versions of the docs", has the rest.
+# docs/writing-docs.md, "Versions of the docs", has the rest.
 #
 # Each version gets the dashboard demo (frontend/demo/) of the same code beside
 # its pages, at BASE/demo/: main's from this checkout (frontend/node_modules

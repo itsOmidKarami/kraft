@@ -14,7 +14,7 @@ setup:
     # or a check that may have no network.
     uv run vale --version
     cd frontend && npm ci
-    @echo "the agent plugins are opt-in: 'just setup-plugins' adds them (CONTRIBUTING.md)"
+    @echo "the agent plugins are opt-in: 'just setup-plugins' adds them (docs/agent-tooling.md)"
 
 # superpowers and impeccable, for every agent this repo is worked on with.
 #
@@ -156,7 +156,7 @@ fake_agent := "PATH=" + justfile_directory() + "/fixtures/bin:$PATH"
 
 # The Markdown Vale checks: the docs site, the README and the contributor docs.
 # .github/workflows/test.yml's `lint` job lists the same paths.
-vale_paths := "docsite/content README.md CONTRIBUTING.md ARCHITECTURE.md CLAUDE.md AGENTS.md RELEASING.md SECURITY.md docs/testing.md vscode/README.md plugins/kraft/README.md plugins/kraft-lite/README.md addons/kraft-superpowers/README.md"
+vale_paths := "docsite/content README.md CONTRIBUTING.md ARCHITECTURE.md CLAUDE.md AGENTS.md RELEASING.md SECURITY.md docs/testing.md docs/agent-tooling.md docs/ci.md docs/maintainers.md docs/writing-docs.md vscode/README.md plugins/kraft/README.md plugins/kraft-lite/README.md addons/kraft-superpowers/README.md"
 
 # A dev home starts as a copy of the tracked config/ with thin chains that extend
 # the built-in kraft-default (read from this checkout), plus the throwaway repo
@@ -584,7 +584,7 @@ fix:
 # by hand -- there's no test enforcing it since GitLab CI's config (and the
 # test that checked it) was retired. It covers those two jobs only: the e2e,
 # frontend, vscode, playwright and kraft-lite jobs have recipes of their own
-# (CONTRIBUTING.md, "What CI checks").
+# (docs/ci.md, "What CI checks").
 [doc("CI's lint and test jobs, in order, on the full suite (no testmon)")]
 ci-test: ci-checks
     uv run pytest -m "not e2e" -n logical

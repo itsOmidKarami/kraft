@@ -43,7 +43,7 @@ Three things set it apart:
 
 - **A process the agent can't skip.** A chain like the one above is a file you can read and diff, so the agent doesn't decide the workflow fresh each time.
 - **Checks it doesn't grade itself on.** Kraft runs your tests in a node of its own, waits for your CI itself and has a separate reviewer or judge decide whether a fix is done.
-- **A person at the decisions that matter.** A gate stops the chain until a decision is recorded, and an agent's own calls to decide its gate are refused. Only a sandbox with a `network:` policy keeps an agent from deciding its own gates; no sandbox is set by default, and an unsandboxed agent runs as you. [Security](/project/security#agents-and-gates) has the scope.
+- **A person at the decisions that matter.** A gate stops the chain until a decision is recorded, and an agent's own calls to decide its gate are refused. Only a sandbox with a `network:` policy keeps an agent from deciding its own gates; no sandbox is set by default, and an unsandboxed agent runs as you. [Security](/project/security-in-depth#agents-and-gates) has the scope.
 ::
 
 ::u-page-section

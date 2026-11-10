@@ -4,7 +4,7 @@ supposed to cover it.
 Mechanical only: it can tell "this CLI command is never mentioned in cli.md"
 but not "this paragraph no longer describes what the command does" -- that
 still needs a human (or an agent) to actually read the page. See
-CONTRIBUTING.md's "User-facing docs" table, which lists every source and its
+docs/writing-docs.md's "Which page a change updates" table, which lists every source and its
 page; CHECKS below covers only the subset with a machine-readable list of
 names.
 
@@ -155,7 +155,7 @@ def env_vars() -> set[str]:
 
 
 # (label, extractor, docsite page or folder; a folder counts every page in
-# it). A subset of CONTRIBUTING.md's "User-facing docs" table: only sources with a
+# it). A subset of docs/writing-docs.md's "Which page a change updates" table: only sources with a
 # machine-readable list of names.
 _LIBRARY = "5.reference/03.configuration/04.library-and-chains.md"
 CHECKS: list[tuple[str, Callable[[], set[str]], str]] = [

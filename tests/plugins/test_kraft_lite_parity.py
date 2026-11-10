@@ -1,11 +1,13 @@
 """Kraft Lite against Kraft: the plugin's bundled copy of the packaged library is
 the repo's own, and its dependency-free YAML reader agrees with `yaml.safe_load`
-on every config file Kraft ships. The plugin's own tests cannot check either: the
-directory is published as its own repo, with no `config/` above it and no PyYAML."""
+on every config file Kraft ships, and its `## Slices` reader reads a plan as
+`kraft.slices` does. The plugin's own tests cannot check these: the directory is
+published as its own repo, with no `config/` above it, no PyYAML and no Kraft."""
 
 from __future__ import annotations
 
 import importlib.util
+import re
 import shlex
 import shutil
 import subprocess
@@ -16,7 +18,10 @@ from pathlib import Path
 import pytest
 import yaml
 
+from kraft import progress as kraft_progress
+from kraft import slices as kraft_slices
 from kraft.addons import builtin, load
+from kraft.slices import SliceRefusal, parse_slices
 from kraft.templates import models
 from kraft.templates.library import TemplateLibrary
 
@@ -351,3 +356,168 @@ def test_a_seeded_home_resolves_as_kraft_resolves_it(kl_modules, tmp_path, monke
     lite = kl_chains.resolve(tmp_path, {"KRAFT_CONFIG_DIR": str(home)}, chain)
 
     assert _project_lite(lite) == kraft
+
+
+# --- a plan's `## Slices` section --------------------------------------------------
+
+_SPEC = importlib.util.spec_from_file_location("kraft_lite_kl_slices", PLUGIN / "kl_slices.py")
+kl_slices = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(kl_slices)
+#: Lite has no cap on slices: Kraft's `max_slices` is policy, not grammar.
+NO_CAP = 99
+TASKS = "".join(f"### Task {n}: Step {n}\n" for n in range(1, 31))
+
+
+def _plan(section: str, tasks: str = TASKS) -> str:
+    return f"# Plan\n\n{tasks}\n## Slices\n\n{section}\n"
+
+
+def _kraft_slices(text: str):
+    """Kraft's split as keys, titles, tasks and prelude; or its refusal's reason; or None."""
+    split = parse_slices(text, max_slices=NO_CAP)
+    if split is None or isinstance(split, SliceRefusal):
+        return split and split.reason
+    return {
+        "slices": [(s.key, s.title, list(s.tasks)) for s in split.slices],
+        "prelude": list(split.prelude),
+    }
+
+
+def _lite_slices(text: str):
+    """Lite's split in the same terms as `_kraft_slices`."""
+    split = kl_slices.parse_slices(text)
+    if not isinstance(split, dict):
+        return split
+    return {
+        "slices": [(s["key"], s["title"], s["tasks"]) for s in split["slices"]],
+        "prelude": split["prelude"],
+    }
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param("# Plan\n\n### Task 1: A\n", id="no_section"),
+        pytest.param(_plan("- **Slice 1: A.** Tasks 1-2.\n- **Slice 2: B.** Task 3."), id="split"),
+        pytest.param(
+            _plan("- **Slice 1: A.** Tasks 2–4.\n* **Slice 2: B** Task 6"), id="en_dash_and_star"
+        ),
+        pytest.param(
+            _plan(
+                "- **Slice 1: A.** Task 1.\n- **Slice 2: B.** Task 2.",
+                "### Task 1: x [DONE]\n### Task 2: y\n### Task 3: z\n",
+            ),
+            id="done_task_in_a_slice",
+        ),
+        pytest.param(
+            _plan(
+                "- **Slice 1: A.** Task 2.\n- **Slice 2: B.** Task 3.",
+                "### Task 1: x [DONE]\n### Task 2: y\n### Task 3: z\n### Task 4: w\n",
+            ),
+            id="done_task_is_no_prelude",
+        ),
+        pytest.param(
+            "# Plan\n\n```\n## Slices\n- **Slice 1: A.** Task 1.\n```\n\n### Task 1: x\n",
+            id="fenced_section_is_none",
+        ),
+        pytest.param(
+            _plan("- **Slice 1: A.** Tasks 1-2.\n- **Slice 2: B.** Tasks 2-3."), id="task_twice"
+        ),
+        pytest.param(
+            _plan("- **Slice 1: A.** Task 1.\n- **Slice 2: B.** Task 31."), id="unknown_task"
+        ),
+        pytest.param(_plan("- **Slice 1: A.** Task 1.\n- **Slice 3: B.** Task 2."), id="key_gap"),
+        pytest.param(_plan("- **Slice 1: A.** Tasks 1-3."), id="one_slice"),
+        pytest.param(
+            _plan("- **Slice 1: A.** Tasks 3-1.\n- **Slice 2: B.** Task 4."), id="backwards"
+        ),
+        pytest.param(_plan("- **Slice 1:** Task 1.\n- **Slice 2: B.** Task 4."), id="no_title"),
+        pytest.param(_plan("- **Slice 1: A.**\n- **Slice 2: B.** Task 4."), id="no_task"),
+        pytest.param(_plan("- Slice one: tasks 1 and 2"), id="not_a_slice_bullet"),
+    ],
+)
+def test_kraft_and_lite_read_a_slices_section_alike(text):
+    assert _lite_slices(text) == _kraft_slices(text)
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        pytest.param("Task 2. Depends on slice 1.", id="depends_on"),
+        pytest.param("Task 2. Needs slice 1.", id="needs_slice"),
+        pytest.param("Task 3, after slice 1", id="after_slice"),
+        # Lite reads `Comes after` only as the last sentence, so its reason differs.
+        pytest.param("Comes after slice 1, then Task 2.", id="comes_after_mid_text"),
+    ],
+)
+def test_kraft_and_lite_both_refuse_a_dependency_in_other_words(tail):
+    """Read as task numbers, the `1` in any of these would be a task: both refuse."""
+    text = _plan(f"- **Slice 1: A.** Task 1.\n- **Slice 2: B.** {tail}")
+
+    assert isinstance(_kraft_slices(text), str) and isinstance(_lite_slices(text), str)
+    assert "comes after" in _kraft_slices(text) and "comes after" in _lite_slices(text)
+
+
+@pytest.mark.parametrize(
+    "name, kraft",
+    [
+        pytest.param(name, module, id=name)
+        for module, names in (
+            (kraft_slices, ("_HEADING", "_SLICES_HEADING", "_BULLET", "_SLICE_BOLD")),
+            (kraft_slices, ("_COMES_AFTER", "_TASK_ITEM")),
+            (kraft_progress, ("_TASK_HEADING", "_FENCE")),
+        )
+        for name in names
+    ],
+)
+def test_lites_copied_regexes_are_krafts(name, kraft):
+    """The grammar is copied, not imported: Lite ships without Kraft."""
+    ours, theirs = getattr(kl_slices, name), getattr(kraft, name)
+
+    assert (ours.pattern, ours.flags) == (theirs.pattern, theirs.flags)
+
+
+def _documented_examples() -> list:
+    """Every `## Slices` example Lite documents: a fenced block holding the
+    heading, or an inline bullet beside a filler bullet for each other key."""
+    out = []
+    for path in (
+        PLUGIN / "skills" / "run-slices" / "SKILL.md",
+        REPO / "docsite" / "content" / "5.reference" / "12.kraft-lite.md",
+    ):
+        text = path.read_text()
+        for n, block in enumerate(re.findall(r"```markdown\n(.*?)```", text, re.S)):
+            if "## Slices" in block:
+                out.append(pytest.param(block.split("## Slices", 1)[1], id=f"{path.name}:block{n}"))
+        for bullet in re.findall(r"`(- \*\*Slice \d+:[^`]*)`", text):
+            key = int(re.match(r"- \*\*Slice (\d+)", bullet)[1])
+            lines = [
+                bullet if k == key else f"- **Slice {k}: Filler.** Task {20 + k}."
+                for k in range(1, max(key, 2) + 1)
+            ]
+            out.append(pytest.param("\n".join(lines), id=f"{path.name}:{bullet}"))
+    return out
+
+
+DOCUMENTED = _documented_examples()
+
+
+def test_lite_documents_its_slices_grammar():
+    """The examples are extracted, so one that stops matching the extraction
+    must not pass by vanishing."""
+    assert {p.id.split(":")[0] for p in DOCUMENTED} == {"SKILL.md", "12.kraft-lite.md"}
+    assert sum("Comes after" in p.values[0] for p in DOCUMENTED) == 1
+
+
+@pytest.mark.parametrize("section", DOCUMENTED)
+def test_lites_documented_slices_read_as_kraft_reads_them(section):
+    """Kraft's grammar reads the same in both. Lite's `after` is the one
+    difference: Kraft refuses it, and never misreads it as task numbers."""
+    text = _plan(section)
+    lite = _lite_slices(text)
+    if "Comes after" in section:
+        assert "comes after another" in _kraft_slices(text)
+        assert isinstance(lite, dict) and lite["slices"][-1][2] == [6]
+        assert kl_slices.parse_slices(text)["slices"][-1]["after"] == [1]
+    else:
+        assert isinstance(lite, dict) and lite == _kraft_slices(text)

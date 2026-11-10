@@ -13,8 +13,8 @@
 #
 # nuxt.config.ts reads this file line by line, not as YAML: no quotes, no
 # nesting, no comment after an entry. dev/check_docs_redirects.py checks every
-# entry, and every docs address Kraft itself links to. See CONTRIBUTING.md,
-# "User-facing docs".
+# entry, and every docs address Kraft itself links to. See docs/writing-docs.md,
+# "Page rules".
 
 /get-started/troubleshooting: /troubleshooting
 /guides/the-board: /reference/web-ui/sidebar-search-and-keyboard
@@ -398,7 +398,17 @@
 /concepts/caps-and-budgets#background-jobs: /concepts/caps-and-budgets#the-shipped-implementer-cap
 /concepts/how-a-work-item-runs#where-to-go-next: /concepts/how-a-work-item-runs#related
 /concepts/vocabulary#where-to-go-next: /concepts/vocabulary#related
-/project/security#gates: /project/security#agents-and-gates
+/project/security#network-and-browser: /project/security-in-depth#network-and-browser
+/project/security#host-allowlist: /project/security-in-depth#host-allowlist
+/project/security#agents-and-gates: /project/security-in-depth#agents-and-gates
+/project/security#escalation-turns-can-force-push: /project/security-in-depth#escalation-turns-can-force-push
+/project/security#workers-and-the-sandbox: /project/security-in-depth#workers-and-the-sandbox
+/project/security#files-and-settings: /project/security-in-depth#files-and-settings
+/project/security#kraft-add-ons: /project/security-in-depth#kraft-add-ons
+/project/security#repo-libraries: /project/security-in-depth#repo-libraries
+/project/security#the-bearer-token: /project/security-in-depth#the-bearer-token
+/project/security#login: /project/security-in-depth#login
+/project/security#gates: /project/security-in-depth#agents-and-gates
 /concepts/vocabulary#the-shipped-chains: /concepts/how-a-work-item-runs#the-shipped-chains
 /concepts/vocabulary#the-default-chain: /concepts/how-a-work-item-runs#the-default-chain
 /concepts/vocabulary#the-quick-task-chain: /concepts/how-a-work-item-runs#the-quick-task-chain

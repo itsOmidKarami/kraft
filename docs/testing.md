@@ -12,23 +12,8 @@ something. This is normative for `tests/` and `frontend/src/**/*.test.*`;
   is real (worktrees, rebases and submodules are the product), but a repo
   comes from the cached `make_repo`/`repo` fixture, never built from
   scratch. Unit tests cover every combination the code branches on, and are
-  fast and deterministic. `tests/conftest.py`'s `fake_beads` autouse fixture
-  installs the in-memory `FakeBeads` for every test and refuses a real `bd`
-  reached through `kraft.adapters.beads`. The `_no_real_agent_binary`
-  autouse fixture (`tests/support/real_binaries.py`) does the same for every
-  agent CLI and for `gh`/`glab`, by whatever road: it puts a refusing stub for
-  each name first on `PATH`, so `subprocess`, `asyncio`, `os.system`,
-  `sh -c "claude ..."`, `env claude` and a `python -m kraft` child all reach
-  the stub; it checks `subprocess.Popen` for an installed real binary reached
-  by its path; and `run_task` refuses one by name in the test itself. A
-  server child (`support.server.child_env`) gets the same stubs, plus a stub
-  `bd`. Every one of them fails the test, at the call or at teardown, rather
-  than swallow the mistake: Kraft degrades on a failed CLI, so a refusal it
-  turned into a warning still counts. A test marked `e2e("<cli>")` gets that
-  CLI back; `@pytest.mark.real_executor` turns the agent guard off, for a
-  test that drives the real executor on purpose. A test that proves the
-  guard fires takes `real_binary_guard` and calls `.take()` on what it
-  refused.
+  fast and deterministic. Autouse fixtures refuse a real `bd`, agent CLI or
+  `gh`/`glab` (see "Guard fixtures" below).
 - **E2E (`@pytest.mark.e2e("<cli>")`).** A real CLI, used only to prove the
   contract Kraft assumes: arguments, subcommands and output shape. Keep it small:
   one or two tests per contract, never behaviour sweeps. If the binary is
@@ -154,6 +139,29 @@ fixture refuses to answer a `param == "bd"` request against the fake).
   in a browser on a mocked API, run by CI; `frontend/README.md` says when
   each of the three is required.
 
+## Guard fixtures
+
+`tests/conftest.py`'s `fake_beads` autouse fixture installs the in-memory
+`FakeBeads` for every test and refuses a real `bd` reached through
+`kraft.adapters.beads`.
+
+The `_no_real_agent_binary` autouse fixture (`tests/support/real_binaries.py`)
+does the same for every agent CLI and for `gh`/`glab`, by whatever road. It
+puts a refusing stub for each name first on `PATH`, so `subprocess`, `asyncio`,
+`os.system`, `sh -c "claude ..."`, `env claude` and a `python -m kraft` child
+all reach the stub. It checks `subprocess.Popen` for an installed real binary
+reached by its path, and `run_task` refuses one by name in the test itself.
+
+A server child (`support.server.child_env`) gets the same stubs, plus a stub
+`bd`. Every one of them fails the test, at the call or at teardown, rather than
+swallow the mistake: Kraft degrades on a failed CLI, so a refusal it turned
+into a warning still counts.
+
+A test marked `e2e("<cli>")` gets that CLI back. `@pytest.mark.real_executor`
+turns the agent guard off, for a test that drives the real executor on
+purpose. A test that proves the guard fires takes `real_binary_guard` and calls
+`.take()` on what it refused.
+
 ## What counts as coverage
 
 **"Real coverage, not just a number."** Line coverage is a signal, not
@@ -222,7 +230,7 @@ listed by its own ID; a test removed whole is declared by its ID, cases and
 all. The heading may end in a colon. The failure prints the missing block ready to paste. Edit the body, then
 re-run the job: it reads the body fresh, not from the push that triggered
 it. This exists because a PR once silently reverted two merged PRs with CI
-green: their tests left with them (Kraft-79382).
+green: their tests left with them.
 
 A fold declares its cluster with a wildcard, so consolidation is one line per
 cluster: an ID whose test name ends in `*` covers every removed test in that
@@ -277,8 +285,7 @@ when `NEW` doesn't collect.
   and a run testmon (or `-k`/`-m`) deselected to `0 selected`. Pass
   `--no-testmon` to run the paths regardless.
 - The full suite runs in CI, so push and read CI rather than running it
-  locally. CI runs the unit tier on 3.12, 3.13, 3.14 and 3.15 for a push to
-  `main` and on 3.12 and 3.14 for a pull request;
+  locally. [`ci.md`](ci.md) lists the Python versions it runs;
   `just test-py 3.12` reproduces one version's failure locally, in its own
   environment. A test must pass on the floor, so it never relies on a newer
   stdlib API or on 3.14's lazy annotations.

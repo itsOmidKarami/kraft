@@ -120,7 +120,7 @@ jobs:
       # Needs the release tags the checkout above fetches (fetch-depth: 0).
       - run: uv run python dev/check_docs_added_in.py
       # The docs style (.vale.ini): the same paths as the justfile's vale_paths.
-      - run: uv run vale docsite/content README.md CONTRIBUTING.md ARCHITECTURE.md CLAUDE.md AGENTS.md RELEASING.md SECURITY.md docs/testing.md vscode/README.md plugins/kraft/README.md plugins/kraft-lite/README.md addons/kraft-superpowers/README.md
+      - run: uv run vale docsite/content README.md CONTRIBUTING.md ARCHITECTURE.md CLAUDE.md AGENTS.md RELEASING.md SECURITY.md docs/testing.md docs/agent-tooling.md docs/ci.md docs/maintainers.md docs/writing-docs.md vscode/README.md plugins/kraft/README.md plugins/kraft-lite/README.md addons/kraft-superpowers/README.md
       # An add-on of Kraft's own collection that changed against the pull
       # request's base, or across a push to main, has a higher version.
       - run: uv run python dev/check_addon_versions.py ${{ github.event_name == 'push' && format('--base {0}', github.event.before) || '' }}

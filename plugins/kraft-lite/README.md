@@ -41,7 +41,7 @@ Add `--scope project` to either command to keep it to one repo. Update with `cla
 | `/kraft-lite:next` | Runs the next node. Also the resume point. |
 | `/kraft-lite:gate` | Presents a gate and records your answer. |
 | `/kraft-lite:status` | Reports where each chain has got to. |
-| `/kraft-lite:run-slices` | Controller: builds a large plan as slices, one session each. |
+| `/kraft-lite:run-slices` | Controller: builds the parts of a plan that stand alone as slices, one session each. |
 | `/kraft-lite:build-slice` | Child: builds one slice for its controller. |
 
 ## Learn more

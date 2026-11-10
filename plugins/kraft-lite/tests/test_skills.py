@@ -263,6 +263,7 @@ def test_the_run_slices_skill_cites_every_verb_it_needs(texts):
     is one the controller improvises."""
     for verb in (
         "approve --slices",
+        "plan-slices",
         "slice-set",
         "--status running --session",
         "--status in_review",
