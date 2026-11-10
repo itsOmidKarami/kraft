@@ -46,17 +46,17 @@ sub-agents. Sub-agents are the default, inline or inside one Kraft item: they
 share the worktree and need no setup or join. A part earns more only when it
 makes sense on its own: a coherent piece with its own tests, which its own
 implement, verify and review loop can check without another part's code. Size
-is a weak hint, not the test; a part you can describe in one sentence almost
-never qualifies. Parts that stand alone like that move an inline-classified
-item to a handoff, unless the user said "inline": then keep it inline with
-sub-agents, and say which parts would stand alone. Otherwise:
+is a weak hint, not the test. Parts that stand alone like that move an
+inline-classified item to a handoff, unless the user said "inline": then keep
+it inline with sub-agents, and say which parts would stand alone. Otherwise:
 
 - **Separate work items**, when each part can merge on its own and is a full
   pull request in its own right. One `kraft:handoff` per part, each attaching
   a spec for that part only, each its own merge request.
-- **Slices**, when the parts must land together. The same test with a lower
-  floor: each part still stands alone and earns its own loop, but needn't be a
-  whole pull request. One handed-off item, which Kraft's plan splits into child
+- **Slices**, when the parts must land together, or are too small to be worth
+  a merge request each. The same stands-alone test, held to a lower floor: each
+  part earns its own loop but needn't be a whole pull request. One handed-off
+  item, which Kraft's plan splits into child
   work items, built in parallel and joined into one merge request. Each child
   has its own worktree, setup, implementer session and review. Name each part
   in the spec, with what it covers, so the plan slices along them.
