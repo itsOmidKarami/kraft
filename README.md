@@ -27,7 +27,7 @@ change on its own branch and opens a merge request. It's for developers tired of
 babysitting a session; [when not to use Kraft](https://kraft-sdlc.dev/get-started/why-kraft#when-not-to-use-kraft)
 says who it isn't for.
 
-[![The Kraft board: work items grouped by status with Needs you first, each with one button such as Review, Retry or Raise cap, and Running below](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)](https://kraft-sdlc.dev/demo/)
+[![One work item in the Kraft web UI: filed from the board, stopped for a person at the spec, plan and local review gates in the order its chain file sets, then back at the final review with its draft merge request. Recorded on a dev instance with a simulated agent, sped up while the agent works.](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/run.gif)](https://kraft-sdlc.dev/demo/)
 
 ## What you get
 

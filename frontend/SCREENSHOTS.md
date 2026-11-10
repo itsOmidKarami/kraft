@@ -13,6 +13,7 @@ just docs-screenshots              # the web UI, from the dashboard demo
 just docs-screenshots -g storage   # one picture, by its test name
 just vscode-screenshots            # the VS Code extension (vscode/media/, copied here)
 just console-screenshot            # the console, from a seeded dev instance (below)
+just readme-gif                    # the README's loop, from a fresh dev instance (below)
 ```
 
 `just docs-screenshots` builds the demo, serves it on :4329 and runs
@@ -35,13 +36,22 @@ one over the fake agent's `fake spec body`), and renders Textual's SVG to a
 PNG. The top line names the newest release tag; pass `--version` in a clone
 without tags.
 
+`just readme-gif` records `run.gif` and `run.mp4` from a fresh dev instance:
+`just dev-reset`, `just dev` in one terminal, then the recipe. It files one item
+in the composer, approves its spec, plan and local review gates and ends at the
+final review. The fake agent takes 2 s a step there, so the chain graph shows
+believable durations, and the loop plays at 6× with a badge saying so while the
+agent works. Gate documents, the version and the update notice are swapped at
+the API response, as the console retake does.
+
 `just vscode-screenshots` drives the packaged extension in a real VS Code,
 in a 1440×900 window; on Linux run it under `xvfb-run`. Every picture is saved
 at its size on screen, so text reads at its real size.
 
 | File | Size | Shows | Shown in |
 |---|---|---|---|
-| `board.png` | 1440×700 | the board, grouped by status: Needs you (a gate and six stops, each with its one button), then Running | README, docs home (cropped), first work item, web UI › Board |
+| `board.png` | 1440×700 | the board, grouped by status: Needs you (a gate and six stops, each with its one button), then Running | docs home (cropped), first work item, web UI › Board |
+| `run.gif`, `run.mp4` | 1280×800, 1600×1000 | one item filed, through its gates to the final review, about 22 s | README (the GIF) |
 | `gate.png` | 1440×700 | the review page of the item at `final_review`, its review brief rendered | README, the real chain, review a change |
 | `item.png` | 1440×700 | that item's page with `final_review` selected in the graph and the inspector | docs home (cropped), web UI › Item page |
 | `review.png` | 1440×700 | that item's review page, a must-fix comment being written on lines Old 2 – new 2 | docs home (cropped), web UI › Review page, review a change |
