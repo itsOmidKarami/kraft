@@ -1,7 +1,7 @@
 """A plan's `## Slices` section as Lite reads it (`kl_slices`), and the coverage
-`approve --slices` checks against the chain's plan: every task in exactly one
-slice. That Kraft reads the same section the same way is
-tests/plugins/test_kraft_lite_parity.py's, in the Kraft repo."""
+`plan-slices --check` holds a proposal to: every plan task in a slice. That
+Kraft reads the same section the same way is tests/plugins/test_kraft_lite_parity.py's,
+in the Kraft repo."""
 
 from __future__ import annotations
 
@@ -165,19 +165,32 @@ def proposal(cwd, slices):
 
 def test_plan_slices_reads_the_chains_plan_and_approve_takes_it(at_slice_gate, kl_cli):
     slices = kl_cli(at_slice_gate, "plan-slices")["slices"]
+    path = proposal(at_slice_gate, slices)
 
     assert [s["key"] for s in slices] == ["groundwork", "1", "2"]
-    kl_cli(at_slice_gate, "approve", "--slices", proposal(at_slice_gate, slices))
+    assert kl_cli(at_slice_gate, "plan-slices", "--check", path)["covered"] is True
+    kl_cli(at_slice_gate, "approve", "--slices", path)
     assert kl_cli(at_slice_gate, "slices")["ready"] == ["groundwork"]
 
 
-def test_approve_refuses_slices_that_leave_a_task_unbuilt(at_slice_gate, kl_cli):
-    slices = [{"key": "a", "title": "A", "tasks": [2, 3]}, {"key": "b", "title": "B", "tasks": [4]}]
+@pytest.mark.parametrize(
+    "write, named",
+    [
+        pytest.param(
+            lambda p: p.write_text(
+                json.dumps({"slices": [{"key": "a", "tasks": [2, 3]}, {"key": "b", "tasks": [4]}]})
+            ),
+            "task 1 in no slice",
+            id="leaves_a_task_out",
+        ),
+        pytest.param(lambda p: p.write_text("{nope"), "cannot read the slices", id="not_json"),
+        pytest.param(lambda p: p.write_text("[]"), "cannot read the slices", id="no_slices"),
+    ],
+)
+def test_check_refuses_a_proposal_that_leaves_a_task_unbuilt(at_slice_gate, write, named, kl_cli):
+    path = at_slice_gate / "proposal.json"
+    write(path)
 
-    refused = kl_cli(
-        at_slice_gate, "approve", "--slices", proposal(at_slice_gate, slices), ok=False
-    )
+    refused = kl_cli(at_slice_gate, "plan-slices", "--check", str(path), ok=False)
 
-    assert "task 1 in no slice" in refused.stderr and "Traceback" not in refused.stderr
-    assert kl_cli(at_slice_gate, "state")["status"] == "blocked"
-    assert kl_cli(at_slice_gate, "slices")["slices"] == []
+    assert named in refused.stderr and "Traceback" not in refused.stderr

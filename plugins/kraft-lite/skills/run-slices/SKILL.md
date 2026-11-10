@@ -62,8 +62,7 @@ and invoke `kraft-lite:gate`; the chain continues as one.
 2. Draw the proposal: each slice's tasks, what it comes after, which slices run
    in parallel, and one owning slice for every shared helper, fixture or file
    two slices would both create. The other slice waits for it or uses it from
-   the owner's branch. Every plan task is in exactly one slice; `approve
-   --slices` refuses a proposal that leaves one out. Independent slices are the
+   the owner's branch. Every plan task is in exactly one slice. Independent slices are the
    default. `after` (in a plan, a last sentence `Comes after slice 1.`) is Lite's
    own, for a slice built on another's merged work: Kraft can't slice a plan
    that uses it.
@@ -75,6 +74,9 @@ and invoke `kraft-lite:gate`; the chain continues as one.
    state branch.
 4. Write it to `.kraft-lite/proposals/<chain-id>.json`:
    `{"mode", "feature_branch", "state_branch", "slices": [{"key", "title", "tasks": [N], "after": [key]}]}`.
+   Then `KL plan-slices --check .kraft-lite/proposals/<chain-id>.json`: it
+   refuses a proposal that leaves a plan task out. Fix the proposal until it
+   passes.
 5. `KL gate`, then invoke `kraft-lite:gate`. It presents the gate's own
    artifact with the proposal beside it, and records the user's answer: an
    approval as `approve --slices .kraft-lite/proposals/<chain-id>.json`, a

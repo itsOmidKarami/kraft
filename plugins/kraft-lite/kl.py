@@ -1125,39 +1125,34 @@ def slices_for_gate(
         # Read only when the plan names no mode: a slices.json that cannot be read
         # has nothing to say to a plan that already decided.
         plan = dict(plan, mode=settings(root)["mode"])
-    made = materialize_slices(plan, chain_id)
-    # A task in no slice is built by no child, and nothing after would notice.
-    text = _plan_text(root, _ours(records, chain_id), None)
-    if text is not None:
-        hole = kl_slices.coverage_refusal(text, plan["slices"])
-        if hole:
-            raise SystemExit(f"kraft-lite: the slice plan does not cover the plan: {hole}")
-    return made
+    return materialize_slices(plan, chain_id)
 
 
-def _plan_text(root: Path, records: list[dict], path: Path | None) -> str | None:
-    """The text of `path`, else of the plan the chain recorded; None when it
-    recorded none. A recorded plan that cannot be read is refused."""
-    recorded = path or _artifact(records, "plan")
+def plan_slices(root: Path, records: list[dict], plan: Path | None, check: Path | None) -> dict:
+    """What `plan-slices` prints: the `## Slices` section of `plan`, else of the
+    plan the chain recorded, as a proposal's `slices` (null with no section);
+    with `check`, that the proposal file's slices hold every plan task. Else a
+    `SystemExit` saying why not."""
+    recorded = plan or _artifact(records, "plan")
     if recorded is None:
-        return None
+        raise SystemExit("kraft-lite: this chain recorded no plan: pass --plan PATH")
     try:
-        return (root / recorded).read_text()
+        text = (root / recorded).read_text()
     except OSError as error:
         raise SystemExit(f"kraft-lite: cannot read the plan {recorded}: {error}") from error
-
-
-def plan_slices(root: Path, records: list[dict], path: Path | None) -> dict:
-    """What `plan-slices` prints: the plan's `## Slices` section as a proposal's
-    `slices` list, null when it has none, or a `SystemExit` saying why the
-    section is refused."""
-    text = _plan_text(root, records, path)
-    if text is None:
-        raise SystemExit("kraft-lite: this chain recorded no plan: pass --plan PATH")
+    if check is not None:
+        try:
+            hole = kl_slices.coverage_refusal(text, json.loads(check.read_text())["slices"])
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+            raise SystemExit(f"kraft-lite: cannot read the slices in {check}: {error}") from error
+        if hole:
+            raise SystemExit(f"kraft-lite: the proposal does not cover the plan: {hole}")
+        return {"plan": str(recorded), "covered": True}
     split = kl_slices.parse_slices(text)
     if isinstance(split, str):
         raise SystemExit(f"kraft-lite: the plan's ## Slices section is refused: {split}")
-    return {"slices": None if split is None else kl_slices.proposal_slices(split)}
+    slices = None if split is None else kl_slices.proposal_slices(split)
+    return {"plan": str(recorded), "slices": slices}
 
 
 def _by_age(by_chain: dict[str, list[dict]]) -> list[str]:
@@ -2614,7 +2609,10 @@ def build_parser() -> argparse.ArgumentParser:
     # presents it. Without this the gate is approve-or-stall.
     reject.add_argument("--from-node", default=None)
     # A plan file other than the one the chain recorded.
-    sub.add_parser("plan-slices").add_argument("--plan", type=Path, default=None)
+    plan_slices_parser = sub.add_parser("plan-slices")
+    plan_slices_parser.add_argument("--plan", type=Path, default=None)
+    # A proposal file whose slices must hold every plan task.
+    plan_slices_parser.add_argument("--check", type=Path, default=None)
     slice_set = sub.add_parser("slice-set")
     slice_set.add_argument("--slice", required=True)
     slice_set.add_argument("--status", default=None)
@@ -2775,7 +2773,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.verb == "plan-slices":
-        print(json.dumps(plan_slices(root, records, args.plan), indent=2))
+        print(json.dumps(plan_slices(root, records, args.plan, args.check), indent=2))
         return 0
 
     if args.verb == "slice-set":
