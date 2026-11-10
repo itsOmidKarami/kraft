@@ -86,8 +86,8 @@
   margin-top: 1.5rem;
 }
 
-/* A short list of points under a section's top part (the three promises,
-   after the chain; search and analytics, under the screenshots): columns
+/* A short list of points under a section's top part (what a session can't
+   do, in the hero; search and analytics, under the screenshots): columns
    separated by a rule, not cards. */
 .landing [data-slot='container'] > p {
   margin: 0 0 -1rem;
@@ -142,64 +142,4 @@
   margin: 0;
   font-size: 0.875rem;
   color: var(--ui-text-muted);
-}
-
-/* The home page's hero (`landing-home`): a picture of the board follows the
-   buttons, so the first screen shows the product and not only text. The
-   release docs' older hero doesn't carry the class and is unchanged. */
-.landing-home [data-slot='container'] {
-  padding-top: 2rem;
-}
-
-/* A wider measure keeps the long headline to three lines from a laptop up. */
-.landing-home [data-slot='title'] {
-  max-width: 32ch;
-}
-
-/* On a phone, upright or on its side, the headline and lede are a size
-   smaller and start higher, so more of the first screen is left for the
-   board picture after the buttons. */
-@media (max-width: 639px), (orientation: landscape) and (max-height: 500px) {
-  .landing-home [data-slot='container'] {
-    padding-top: 1.5rem;
-  }
-
-  .landing-home [data-slot='title'] {
-    font-size: 1.75rem;
-  }
-
-  .landing-home [data-slot='description'] {
-    font-size: 1rem;
-  }
-}
-
-/* A touch screen gets buttons a finger can hit: 44px, the WCAG target size. */
-@media (pointer: coarse) {
-  .landing [data-slot='links'] a {
-    min-height: 2.75rem;
-  }
-}
-
-/* One picture per layout: the whole board from a laptop up, the phone board
-   below that, where the wide one would scroll sideways. A hidden lazy image
-   isn't fetched. */
-.hero-shot--phone {
-  max-width: 24rem;
-}
-
-@media (min-width: 1024px) {
-  .hero-shot--phone {
-    display: none;
-  }
-}
-
-@media (max-width: 1023px) {
-  .hero-shot--wide {
-    display: none;
-  }
-}
-
-/* The chain and the three promises, straight after the hero. */
-.landing-chain [data-slot='container'] {
-  padding-block: 1rem 3rem;
 }
