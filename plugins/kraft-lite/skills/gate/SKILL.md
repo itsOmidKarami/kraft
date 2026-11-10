@@ -130,8 +130,9 @@ records the answer:
   A plain `approve` here leaves the chain unsliced. If it refuses, tell the user
   what it said and ask whether to approve unsliced. A refusal that says the
   proposal does not cover the plan has a fix: put every plan task in a slice in
-  the proposal, pass `KL plan-slices --check` on it, show the user what
-  changed, and approve again.
+  the proposal, check it with
+  `KL plan-slices --check .kraft-lite/proposals/<chain-id>.json`, show the user
+  what changed, and approve again.
 - `sliced` null and no proposal file: a plain `approve`.
 
 ### Reject
