@@ -17,7 +17,7 @@ cover "review the spec"; don't add a second review pass on top of it.
 
 Stop when the spec is approved. If the spec skill then hands on to a plan
 skill (brainstorming invokes `superpowers:writing-plans`), don't follow it:
-this overrides that hand-off, not its approval gate. Come back to step 2, and
+this overrides that hand-off, not the spec skill's approval gate. Come back to step 2, and
 step 3 decides whether a plan is written. If the spec skill did a quick task
 itself, there is nothing left to judge. If it splits the request into several
 independent projects, run steps 1 and 2 for each, in the order agreed: each is
