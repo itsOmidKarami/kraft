@@ -142,14 +142,12 @@ def test_a_done_task_needs_no_slice():
 
 @pytest.fixture
 def at_slice_gate(walk, tmp_path):
-    """A chain whose plan node recorded a four-task plan with a `## Slices`
-    section, blocked at the slice gate."""
-    path = tmp_path / "plan.md"
+    """A chain whose newest recorded plan has four tasks and a `## Slices`
+    section, blocked at the slice gate. The walk writes its own `plan.md`."""
+    path = tmp_path / "sliced-plan.md"
     path.write_text(plan("- **Slice 1: Writers.** Tasks 2-3.\n- **Slice 2: CLI.** Task 4."))
-    walk.start(tmp_path)
-    walk.to(tmp_path, "plan")
+    walk.to_chain_revision(tmp_path)
     walk.run(tmp_path, "produced", "--kind", "plan", "--path", str(path))
-    walk.to(tmp_path, "chain_revision")
     walk.run(tmp_path, "close")
     walk.run(tmp_path, "gate")
     return tmp_path
