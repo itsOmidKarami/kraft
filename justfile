@@ -365,7 +365,7 @@ test *ARGS:
 # The unit tier on another Python, in its own environment (.venv-<version>) so
 # it never disturbs the default one: `just test-py 3.12`, or add pytest args,
 # `just test-py 3.13 -k search`. CI runs the whole supported range on main (a
-# pull request skips 3.13); use this to reproduce one version's failure. Full
+# pull request skips 3.13 and 3.15); use this to reproduce one version's failure. Full
 # run, no testmon: its data is per-env.
 [positional-arguments]
 [doc("Unit tier on another Python: just test-py 3.12 [pytest args]")]

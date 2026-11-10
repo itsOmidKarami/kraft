@@ -29,7 +29,7 @@ permissions:
 
 env:
   BD_VERSION: "1.2.2"
-  # Every job but the `test` matrix runs on the newest supported Python. With a
+  # Every job but the `test` matrix runs on 3.14, the Python CI builds with. With a
   # floor of 3.12, an unpinned `uv sync` would take whatever 3.12+ the runner
   # has. The `test` matrix sets its own at job level.
   UV_PYTHON: "3.14"
