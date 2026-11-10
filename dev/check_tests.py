@@ -109,7 +109,7 @@ LINE_BUDGET_ALLOWLIST: dict[str, int] = {
     "tests/adapters/test_agent.py": 856,
     "tests/executor/test_gates.py": 880,
     "tests/executor/test_dispatch.py": 898,
-    "tests/executor/test_walk.py": 1287,
+    "tests/executor/test_walk.py": 1199,
 }
 
 #: How far an allowlisted ceiling may sit above the file's real current size

@@ -431,7 +431,13 @@ def _task_cause(
     # The line Kraft appends after the task's own output when the sandbox's
     # memory limit killed it, or a `just` scope's recipe is missing, is the
     # cause; the task's first line is not.
-    own = [ln for ln in lines[1:] if ln.startswith((_subprocess.OOM_LINE, dispatch.NO_RECIPE_LINE))]
+    # So is the forge's `rebase onto <base> failed: <git's words>` (`forge.run`),
+    # which follows a pipeline's own first line.
+    own = [
+        ln
+        for ln in lines[1:]
+        if ln.startswith((_subprocess.OOM_LINE, dispatch.NO_RECIPE_LINE, "rebase onto "))
+    ]
     line = own[-1] if own else next(iter(lines), "")
     return line if len(line) <= _STOP_CAUSE_MAX else line[: _STOP_CAUSE_MAX - 1] + "…"
 
@@ -2351,6 +2357,23 @@ async def _walk_node_once(
             named = ", ".join(
                 sorted(prompts.named_with_kind(t) for t in blind_failures if _in_process(t))
             )
+            # A forge task that answered `conflict` (its forced rebase hit one)
+            # is the branch's to resolve, not the daemon's: a conflict stop, in
+            # the stuck set, so the node's escalation and auto-escalation answer
+            # it as they do any failed task.
+            conflicted = [
+                t
+                for t in blind_failures
+                if (s := dispatch._latest_session(db, work_item_id, node, t)) is not None
+                and s["status"] == CONFLICT
+            ]
+            if conflicted:
+                detail = _conflict_detail(db, work_item_id, node, conflicted, excs)
+                return _Stuck(
+                    f"{named} hit a rebase conflict in node {node.id}: {detail}. Rebase the "
+                    "branch in the worktree, resolve it and commit, then retry.",
+                    kind=StopKind.CONFLICT,
+                )
             cause, forbidden = _forge_cause(db, work_item_id, node, blind_failures)
             # What to do depends on why it failed: a refused credential or an
             # unreachable forge is the machine's to fix, not a reinstall.
