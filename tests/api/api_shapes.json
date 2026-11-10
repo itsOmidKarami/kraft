@@ -783,6 +783,11 @@
      "then": []
     },
     "gate_artifact": "_",
+    "gate_rounds": {
+     "spec_approval": [
+      "_"
+     ]
+    },
     "group": "_",
     "group_state": "_",
     "head_sha": "_",

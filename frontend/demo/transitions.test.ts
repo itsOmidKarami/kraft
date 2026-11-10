@@ -632,3 +632,22 @@ describe("a chain draft, kept for the server's life", () => {
     expect([after.draft, after.result.changes, (await call("POST", "/undo")).status]).toEqual([false, [], 409]);
   });
 });
+
+describe("gate_rounds on the item", () => {
+  it("shows a rejection's round, with its note, the moment the door settles", () => {
+    const { S, T } = fresh();
+    const id = idOf(S, "needs-gate");
+    const before = S.bundles[id].item.gate_rounds.final_review ?? [];
+    T.reject(id, "final_review", "too vague");
+    const rounds = S.bundles[id].item.gate_rounds.final_review;
+    expect(rounds).toHaveLength(Math.max(before.length, 1));
+    expect(rounds.at(-1)).toMatchObject({ outcome: "rejected", by: "human", note: "too vague", sent_to: "implementation", ended_at: AT });
+  });
+
+  it("gives the long item's plan gate its rejected round first, then its approval", () => {
+    const S = buildScenario("long");
+    const rounds = Object.values(S.bundles).map((b) => b.item.gate_rounds.plan_approval).find((r) => r?.length === 2);
+    expect(rounds?.map((r: { outcome: string }) => r.outcome)).toEqual(["rejected", "approved"]);
+    expect(rounds?.[0].note).toMatch(/invalidation story/);
+  });
+});

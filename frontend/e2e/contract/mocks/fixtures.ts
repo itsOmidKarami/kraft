@@ -26,6 +26,7 @@ export const STATES: DisplayState[] = [
 
 import { buildNgBoard } from "./ngBoard";
 import type { EventType } from "../../../src/types/vocab.generated";
+import type { GateRound } from "../../../src/types";
 import { buildNgItem, NG_NOW, NG_SCENARIOS } from "./ngItems";
 
 /* ── ids & time ──────────────────────────────────────────────────────────── */
@@ -691,6 +692,50 @@ export function artifactFor(item: any, variant: Variant) {
   };
 }
 
+/** `store.gate_rounds`, ported for the event types the mock writes: a round opens at a `gate_requested` (a repeat while
+ *  one is open is the same round), and ends at the gate's approval, rejection or skip (`payload.gate`; a skip with no
+ *  gate is none), or at the item's end. An ending with no open round is a round of its own. */
+export function gateRoundsOf(events: Ev[]): Record<string, GateRound[]> {
+  const rounds: Record<string, GateRound[]> = {};
+  const open: Record<string, GateRound> = {};
+  const round = (gate: string, at: string | null): GateRound => {
+    const list = (rounds[gate] ??= []);
+    const r: GateRound = { n: list.length + 1, requested_at: at, ended_at: null, outcome: "pending", by: null, note: null, sent_to: null, reopened: false, reviewer: null };
+    list.push(r);
+    return r;
+  };
+  const end = (gate: string, at: string, outcome: GateRound["outcome"], rest: Partial<GateRound> = {}): GateRound => {
+    const r = open[gate] ?? round(gate, null);
+    delete open[gate];
+    return Object.assign(r, { ended_at: at, outcome }, rest);
+  };
+  for (const e of events) {
+    const p = e.payload as Record<string, any>;
+    const gate: string | undefined = p.gate ?? undefined;
+    if (e.type === "gate_requested" && gate) {
+      if (!open[gate]) open[gate] = round(gate, e.created_at);
+    } else if ((e.type === "gate_approved" || e.type === "gate_rejected") && gate) {
+      const rejected = e.type === "gate_rejected";
+      const r = end(gate, e.created_at, rejected ? (p.verdict === "fixed" ? "fixed" : "rejected") : "approved", {
+        by: p.by ?? null, note: rejected ? p.note ?? null : null, sent_to: rejected ? p.node ?? null : null,
+      });
+      if (p.by === "agent") r.reviewer = { kind: rejected ? "reject" : "approve", note: String(p.note ?? p.reason ?? p.summary ?? "").trim() };
+    } else if (e.type === "node_skipped" && gate) {
+      end(gate, e.created_at, "skipped", { note: p.note ?? null });
+    } else if (e.type === "work_item_completed" || e.type === "work_item_abandoned") {
+      for (const g of Object.keys(open)) end(g, e.created_at, "closed");
+    } else if (e.type === "gate_reopened" && gate && !open[gate] && rounds[gate]) {
+      rounds[gate][rounds[gate].length - 1].reopened = true;
+    } else if (e.type === "gate_auto_review_skipped" && gate && open[gate] && (p.reason === "passed" || p.reason === "undecided")) {
+      open[gate].reviewer = { kind: p.reason === "passed" ? "ready" : "undecided", note: String(p.note ?? "").trim() };
+    } else if (e.type === "work_item_needs_human" && p.kind === "cap" && typeof p.node_id === "string") {
+      const newest = rounds[p.node_id]?.[rounds[p.node_id].length - 1];
+      if (newest?.outcome === "rejected") newest.sent_to = null;
+    }
+  }
+  return rounds;
+}
+
 /** Fills in, on an item and its sessions, the keys the server's detail always sends (`board.get_work_item`) that a
  *  sample leaves out, at what the server sends an item without that fact, so the mock answers every key
  *  `tests/api/api_shapes.json` lists (`frontend/demo/apiShapes.test.ts`). A key a sample sets is kept. */
@@ -708,6 +753,8 @@ export function serverKeys(b: ItemBundle): ItemBundle {
     children: null, slices: null, parent_id: null, slice_key: null, slice_generation: null, docs_commit: null, pinned_head: null,
     group: null, group_state: null, paused_by_parent: 0,
   });
+  // Not through `fill`: a transition's new event has to show, and `settle` sets it again after each transition.
+  it.gate_rounds = gateRoundsOf(b.events);
   if (it.budget_cap && !("key" in it.budget_cap)) it.budget_cap.key = "budget_usd";
   const run = `/Users/dev/.kraft/run/items/${it.id}/sessions`;
   for (const s of b.sessions) fill(s, {

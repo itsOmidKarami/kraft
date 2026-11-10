@@ -380,6 +380,9 @@ export interface WorkItem {
   /** Each pass of the nodes the chain ran more than once, oldest first, with what started it (detail only). A node
    *  that ran once is not listed. */
   node_passes?: Record<string, NodePass[]>;
+  /** Every round of every gate that had one, oldest first (detail only): read from the events table, so it holds
+   *  rounds the page's window of the newest events has long dropped. */
+  gate_rounds?: Record<string, GateRound[]>;
   /** Minor findings that never entered the fix loop; only on the detail endpoint. */
   deferred_findings?: Finding[];
   /** Findings a judge chose to stop chasing (`stop_downgrade`) -- distinct
@@ -577,6 +580,21 @@ export interface WorkerSession {
    *  `.engineering/sessions/*.md` writeup (03 §3); optional so the many
    *  fixture/test literals that predate this field keep typechecking. */
   session_summary_ref?: string | null;
+}
+
+/** One time the chain reached a gate and something ended it (`store.gate_rounds`). `requested_at` is null for an
+ *  ending the gate was never asked for (an unchanged chain revision, a review-thread bounce). */
+export interface GateRound {
+  n: number;
+  requested_at: string | null;
+  ended_at: string | null;
+  outcome: "approved" | "rejected" | "fixed" | "skipped" | "closed" | "pending";
+  by: "human" | "assistant" | "agent" | "kraft" | null;
+  note: string | null;
+  /** Where a rejection sent the work; null when it breached the gate's reject cap and sent nothing back. */
+  sent_to: string | null;
+  reopened: boolean;
+  reviewer: { kind: "approve" | "reject" | "ready" | "undecided"; note: string } | null;
 }
 
 export interface KraftEvent {

@@ -1598,6 +1598,9 @@ async def get_work_item(wid: str, request: Request):
         # What started each pass after a node's first, for the nodes that ran
         # more than once: one pass is nothing to tell apart.
         "node_passes": {node: ps for node, ps in passes[1].items() if len(ps) > 1},
+        # Every round of every gate (`store.gate_rounds`), read from the events
+        # table, not the page's window of the newest events.
+        "gate_rounds": st.db.read(lambda c: store.gate_rounds(c, wid)),
         "usage": st.db.read(lambda c: store.usage_rollup(c, wid)),
         # Where the implementer is in its plan ("3 of 6 · title"), kept once it
         # stops on the implementation node or finishes it; None before that node

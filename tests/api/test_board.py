@@ -286,6 +286,26 @@ def test_concerns_reach_the_detail_payload(client, repo):
     assert body["concerns"] == ["untested path"]
 
 
+def test_gate_rounds_reach_the_detail_payload(client, repo):
+    """Every round of a gate rides the detail (`store.gate_rounds`), read from
+    the events table, so a gate sent back and asked again keeps its first
+    round and its note."""
+    wid = client.post(
+        "/api/work-items",
+        json={"autostart": True, "repo": str(repo), "title": "t", "chain_template": "quick-task"},
+    ).json()["id"]
+    _seed_events(client, wid, [{"gate": "plan_approval"}], event_type="gate_requested")
+    _seed_events(
+        client,
+        wid,
+        [{"gate": "plan_approval", "note": "redo", "node": "plan", "by": "human"}],
+        event_type="gate_rejected",
+    )
+
+    first = client.get(f"/api/work-items/{wid}").json()["gate_rounds"]["plan_approval"][0]
+    assert (first["outcome"], first["note"]) == ("rejected", "redo")
+
+
 def test_mr_ref_reaches_the_detail_payload(client, repo):
     """A single-repo item gets no `work_item_repos` row (`repos_for`), so
     `mr_opened` (Kraft-d2sq) is the only place its merge request lives --

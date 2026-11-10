@@ -1,5 +1,5 @@
 import { FAILURE_STOP_KINDS, LIVE_SESSION_STATUSES, WORK_ITEM_TRAITS, type DisplayStatus, type EventType, type SessionStatus, type StopKind, type WorkItemStatus } from "../../../src/types/vocab.generated";
-import { documentsFor, hex, logLines, serverKeys, type ItemBundle, type Scenario } from "./fixtures";
+import { documentsFor, gateRoundsOf, hex, logLines, serverKeys, type ItemBundle, type Scenario } from "./fixtures";
 import { ngDryRun } from "./ngBoard";
 import { RESUME_PROMPT } from "./poller";
 import { buildNeverStarted } from "./ngItems";
@@ -158,6 +158,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
   const liveTurn = (b: ItemBundle) => liveThread({ escalation_threads: escalationThreads(b.sessions) });
   const settle = (item: any) => {
     item.escalation_threads = escalationThreads(S.bundles[item.id].sessions);
+    item.gate_rounds = gateRoundsOf(S.bundles[item.id].events);
     item.display_status = displayStatus(item);
     item.updated_at = now();
     return item;
