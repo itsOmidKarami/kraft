@@ -158,7 +158,7 @@ export default defineNuxtConfig({
       breakableLinks((content as { body?: { toc?: { links?: TocLink[] } } }).body?.toc?.links)
     },
   },
-  css: ['~/assets/css/type.css', '~/assets/css/hero.css', '~/assets/css/prose.css', '~/assets/css/layout.css', '~/assets/css/a11y.css'],
+  css: ['~/assets/css/type.css', '~/assets/css/hero.css', '~/assets/css/home.css', '~/assets/css/prose.css', '~/assets/css/layout.css', '~/assets/css/a11y.css'],
   // Nuxt UI's code theme is Material (lighter / palenight). On the code
   // block's background its light strings were 2.2:1, keys 2.6:1 and comments
   // 2.5:1, and its dark comments 3.0:1, under WCAG AA's 4.5:1; prose.css
@@ -257,7 +257,8 @@ export default defineNuxtConfig({
   image: {
     provider: 'none',
   },
-  // IBM Plex, the site's type (assets/css/type.css). @nuxt/fonts (through
+  // IBM Plex, the site's type (assets/css/type.css), and Inter, which only the
+  // home page uses (assets/css/home.css). @nuxt/fonts (through
   // Docus) fetches these at build time and serves them from /_fonts/, so a
   // reader's browser never calls Google Fonts. Only the weights the CSS uses,
   // up to 600: type.css draws bold text at 600. Plex Sans has its italic for
@@ -266,6 +267,8 @@ export default defineNuxtConfig({
     families: [
       { name: 'IBM Plex Mono', weights: [400, 500, 600], styles: ['normal'] },
       { name: 'IBM Plex Sans', weights: [400, 500, 600], styles: ['normal', 'italic'] },
+      // The home page's face (assets/css/home.css), self-hosted like Plex.
+      { name: 'Inter', weights: [400, 500, 600], styles: ['normal'] },
     ],
   },
   nitro: {
