@@ -50,9 +50,10 @@ max_slices: 6
 
 # Spend caps, in dollars. This file turns both on; delete a key to turn that
 # cap off (a missing key is no cap). A cap refuses to START the next agent
-# task; it cannot interrupt one that is already running, because the agent
-# CLI only reports its cost when the session exits. Overshoot is bounded by the
-# cost of one task, not by the cap.
+# task; it does not stop one that is already running, which Kraft lets finish
+# (while it runs, its spend is only Kraft's estimate; the agent CLI reports the
+# real figure at exit). Overshoot is bounded by the cost of one task, not by
+# the cap.
 budget:
   work_item_usd: 10     # per work item, across every loop in its chain
   daily_usd: 50         # every work item on this instance, since local midnight

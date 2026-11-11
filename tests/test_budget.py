@@ -1,6 +1,6 @@
 """A budget cap refuses the next agent launch (sub-project E §1-§3).
 
-It cannot interrupt a running agent: cost only exists once the session exits.
+It does not stop a running agent, which Kraft lets finish.
 Everything here tests the refusal of a *subsequent* launch.
 """
 
