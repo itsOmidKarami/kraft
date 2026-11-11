@@ -571,6 +571,16 @@ rename.
 enforced-by: tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[all-guards-hold], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[suite-full], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[sandboxed], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[remote-runner], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[a-failed-scope], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[no-results], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[an-in-place-or-member-folder], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[no-carry-declared], tests/executor/test_carried_save.py::test_a_round_saves_the_carried_files_only_when_every_guard_holds[files-not-touched-by-the-round], tests/test_carried.py::test_save_writes_a_generation_current_points_at, tests/test_carried.py::test_a_save_that_fails_midway_leaves_current_alone
 origin: src/kraft/executor/dispatch.py §_save_carried
 
+## REQ a-carried-copy-is-not-replaced-by-an-older-tree
+
+WHERE a repository declares `carry`, the system SHALL NOT save an item's
+carried files over a saved copy whose recorded base commit is a strict
+descendant of the commit the item's branch forks from. It SHALL leave the
+item's baseline as it was, and save as before when either commit is unrecorded
+or git cannot order the two.
+enforced-by: tests/test_carried.py::test_a_save_from_an_older_tree_leaves_the_newer_saved_copy[an-older-tree-does-not], tests/test_carried.py::test_a_save_from_an_older_tree_leaves_the_newer_saved_copy[a-newer-tree-replaces], tests/test_carried.py::test_a_save_from_an_older_tree_leaves_the_newer_saved_copy[the-same-base-replaces], tests/test_carried.py::test_a_save_from_an_older_tree_leaves_the_newer_saved_copy[a-diverged-base-replaces], tests/test_carried.py::test_a_save_from_an_older_tree_leaves_the_newer_saved_copy[no-base-stored], tests/test_carried.py::test_a_save_from_an_older_tree_leaves_the_newer_saved_copy[a-base-git-does-not-know], tests/test_carried.py::test_a_save_from_an_older_tree_leaves_the_newer_saved_copy[no-base-given], tests/test_carried.py::test_a_save_goes_ahead_when_git_cannot_be_asked[git-missing], tests/test_carried.py::test_a_save_goes_ahead_when_git_cannot_be_asked[git-hangs], tests/test_carried.py::test_a_skipped_save_is_tried_again_by_the_next_round, tests/executor/test_carried_save.py::test_a_round_saves_under_its_base_and_not_over_a_copy_from_a_newer_one, tests/executor/test_carried_save.py::test_dispatching_the_builtin_saves_what_its_command_wrote[targeted]
+origin: src/kraft/carried.py
+
 ## REQ exec-node-orders-concurrent-task-groups
 
 An execution node's `tasks` SHALL be one concurrent task group; its `steps`

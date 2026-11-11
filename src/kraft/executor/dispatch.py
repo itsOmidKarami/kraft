@@ -824,6 +824,7 @@ async def _save_carried(
     results: list[str],
     sandbox: dict | None,
     runner: str | None,
+    base: str | None,
 ) -> None:
     """Save the item's carried files as the repo's newest copy, after a round
     that may have updated them. Only when every guard holds: a targeted round in
@@ -831,7 +832,9 @@ async def _save_carried(
     could plant a record the host then trusts), in the item's own worktree (an
     in-place item's folder is the person's checkout, a workspace member's a
     mount below the root). `kraft.carried.save` itself saves only when a carried
-    file differs from the baseline. A failed save never fails verification."""
+    file differs from the baseline and `base`, the commit the branch forks from
+    (`_effective_base`), is not older than the saved copy's. A failed save never
+    fails verification."""
     if not (repo_entry and repo_entry.carry):
         return
     if suite is not TestSuite.TARGETED or not results or any(r != "done" for r in results):
@@ -848,6 +851,7 @@ async def _save_carried(
             Path(worktree),
             repo_entry.carry,
             item_paths.carried_record(run_dirs, row["id"]),
+            base=base,
         )
     except OSError as exc:
         logger.warning("carried files of %s were not saved: %s", row["id"], exc)
@@ -1100,6 +1104,7 @@ async def _run_changed_test_scopes(
         results=results,
         sandbox=sandbox,
         runner=runner,
+        base=base,
     )
     stopped = next((s for s in results if s in _SCOPE_STOP_STATUSES), None)
     if stopped is not None:

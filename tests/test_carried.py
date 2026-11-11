@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import write
+from support.harness import commit_all, git, make_repo, write
 
 from kraft import carried, storage
 
@@ -71,6 +72,95 @@ def test_save_writes_a_generation_current_points_at(tmp_path, run_dirs):
     assert _generations(store) == sorted([first, second])
     assert (first / ".testmondata").read_bytes() == b"db"
     assert _save(run_dirs, repo, worktree) is False
+
+
+def _commits(tmp_path: Path) -> tuple[Path, dict[str, str | None]]:
+    """A repo with `old` < `mid` < `new` on main and `side`, forked from `old`."""
+    repo = make_repo(tmp_path)
+    old = git(repo, "rev-parse", "HEAD")
+    write(repo, "a", "1")
+    mid = commit_all(repo)
+    write(repo, "b", "2")
+    new = commit_all(repo)
+    git(repo, "checkout", "-q", "-b", "side", old)
+    write(repo, "c", "3")
+    side = commit_all(repo)
+    git(repo, "checkout", "-q", "main")
+    bases = {"old": old, "mid": mid, "new": new, "side": side, "unknown": "0" * 40, "none": None}
+    return repo, bases
+
+
+@pytest.mark.parametrize(
+    ("stored", "saver", "saved"),
+    [
+        ("old", "new", True),
+        ("new", "old", False),
+        ("mid", "mid", True),
+        ("new", "side", True),
+        ("none", "old", True),
+        ("new", "unknown", True),
+        ("new", "none", True),
+    ],
+    ids=[
+        "a-newer-tree-replaces",
+        "an-older-tree-does-not",
+        "the-same-base-replaces",
+        "a-diverged-base-replaces",
+        "no-base-stored",
+        "a-base-git-does-not-know",
+        "no-base-given",
+    ],
+)
+def test_a_save_from_an_older_tree_leaves_the_newer_saved_copy(
+    tmp_path, run_dirs, stored, saver, saved
+):
+    repo, bases = _commits(tmp_path)
+    worktree = tmp_path / "wt"
+    record = tmp_path / "record.json"
+    store = carried.store_dir(run_dirs, repo)
+    write(worktree, ".testmondata", "first")
+    assert carried.save(run_dirs, repo, worktree, RELS, record, base=bases[stored])
+    first = carried.current_generation(store)
+
+    write(worktree, ".testmondata", "second, longer")
+    assert carried.save(run_dirs, repo, worktree, RELS, record, base=bases[saver]) is saved
+
+    assert (carried.current_generation(store) != first) is saved
+
+
+@pytest.mark.parametrize(
+    "error",
+    [FileNotFoundError("git"), subprocess.TimeoutExpired("git", 30)],
+    ids=["git-missing", "git-hangs"],
+)
+def test_a_save_goes_ahead_when_git_cannot_be_asked(tmp_path, run_dirs, monkeypatch, error):
+    repo, bases = _commits(tmp_path)
+    worktree = tmp_path / "wt"
+    record = tmp_path / "record.json"
+    write(worktree, ".testmondata", "first")
+    carried.save(run_dirs, repo, worktree, RELS, record, base=bases["new"])
+
+    def broken(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(subprocess, "run", broken)
+    write(worktree, ".testmondata", "second, longer")
+
+    assert carried.save(run_dirs, repo, worktree, RELS, record, base=bases["old"]) is True
+
+
+def test_a_skipped_save_is_tried_again_by_the_next_round(tmp_path, run_dirs):
+    """The skip leaves the baseline alone, so a round on a newer tree still saves."""
+    repo, bases = _commits(tmp_path)
+    worktree = tmp_path / "wt"
+    record = tmp_path / "record.json"
+    other = tmp_path / "other"
+    write(other, ".testmondata", "newer tree")
+    carried.save(run_dirs, repo, other, RELS, tmp_path / "other.json", base=bases["new"])
+    write(worktree, ".testmondata", "older tree")
+
+    assert carried.save(run_dirs, repo, worktree, RELS, record, base=bases["old"]) is False
+    assert carried.save(run_dirs, repo, worktree, RELS, record, base=bases["new"]) is True
 
 
 def test_a_file_the_worktree_no_longer_has_is_absent_from_the_new_set(tmp_path, run_dirs):
