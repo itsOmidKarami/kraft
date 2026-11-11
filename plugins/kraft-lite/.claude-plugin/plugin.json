@@ -8,6 +8,8 @@
     "name": "Omid Karami",
     "url": "https://github.com/itsOmidKarami"
   },
+  "homepage": "https://kraft-sdlc.dev/guides/kraft-lite",
+  "repository": "https://github.com/itsOmidKarami/kraft",
   "skills": [
     "./skills"
   ]
