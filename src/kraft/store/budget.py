@@ -162,10 +162,10 @@ def budget_spend(
     """`(spent on this work item, spent instance-wide since `since`)`, in dollars.
 
     A query, not a counter: `worker_sessions.cost_usd` is already the source of
-    truth and a parallel counter is a second thing to get wrong. A NULL
-    `cost_usd` — a session still running, or a subprocess or builtin task that
-    has no cost — contributes zero, so this is a floor on in-flight spend by
-    construction.
+    truth and a parallel counter is a second thing to get wrong. A running
+    session counts at the live estimate `session_progress` last wrote. A NULL
+    `cost_usd` -- an unpriced model, or a subprocess or builtin task that has
+    no cost -- contributes zero.
     """
     family = family_ids(conn, work_item_id)
     item = conn.execute(
