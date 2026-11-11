@@ -223,7 +223,8 @@ Kraft Lite also in `gemini-extension.json`. You never edit these by hand, and
 pull requests never touch them.
 
 Right after it tags a release, `release.yml` stamps those five files, the
-extension's `vscode/package.json` and its lockfile with
+extension's `vscode/package.json` and its lockfile, and the MCP registry entry
+`server.json`, with
 `dev/stamp_plugin_versions.py`. It writes the release notes into `CHANGELOG.md`
 and `vscode/CHANGELOG.md`, then opens and auto-merges a `release::none` pull
 request with all of them. Stamping on a release spares every open pull request
@@ -239,6 +240,26 @@ The tagged commit therefore lags its release by design: the manifests and
 changelogs at `vX.Y.Z` still describe the release before. The artifacts don't
 lag: the wheel's version comes from the tag, and the `.vsix` takes its version
 from the `vsce package` command line and its changelog from the build.
+
+## MCP registry listing
+
+`server.json` at the repository root is Kraft's entry in the official MCP
+registry, `io.github.itsOmidKarami/kraft`. The registry hosts only that entry:
+a client installs the server from PyPI as `uvx kraft-sdlc admin mcp`. It
+proves the name is ours by finding the README's hidden `mcp-name:` line on the
+PyPI page.
+
+Publishing isn't automatic. After a stable release's stamping pull request has
+merged, so that `server.json` names a version that is on PyPI, run from the
+repository root:
+
+```bash
+mcp-publisher login github   # as itsOmidKarami
+mcp-publisher publish
+```
+
+Install `mcp-publisher` with `brew install mcp-publisher` or from the
+[registry's releases](https://github.com/modelcontextprotocol/registry/releases).
 
 ## Docs "What's new" page
 

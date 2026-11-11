@@ -97,6 +97,8 @@ dev = [
 
 [project.scripts]
 kraft = "kraft.cli:main"
+# The package's own name, so `uvx kraft-sdlc` (how MCP registry clients start it) finds a command.
+kraft-sdlc = "kraft.cli:main"
 
 [build-system]
 requires = ["setuptools>=84.2.1", "setuptools-scm>=10.3.4"]

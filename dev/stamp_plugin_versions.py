@@ -29,6 +29,9 @@ MANIFESTS = (
     _ROOT / "vscode" / "package.json",
     # Its lockfile repeats the version; unstamped, it fell a release behind.
     _ROOT / "vscode" / "package-lock.json",
+    # The MCP registry entry: `mcp-publisher publish` reads it, and its package
+    # version must name a release that is on PyPI.
+    _ROOT / "server.json",
 )
 
 _VERSION = re.compile(r"\d+\.\d+\.\d+")
@@ -47,8 +50,13 @@ def stamp(version: str, manifests=MANIFESTS) -> None:
         blob["version"] = version
         # A package-lock.json says it twice: at the top, and for the root
         # package under `packages[""]`.
-        if "" in blob.get("packages", {}):
-            blob["packages"][""]["version"] = version
+        packages = blob.get("packages", {})
+        if isinstance(packages, dict) and "" in packages:
+            packages[""]["version"] = version
+        # server.json says it again for each package it publishes.
+        if isinstance(packages, list):
+            for package in packages:
+                package["version"] = version
         path.write_text(json.dumps(blob, indent=2) + "\n")
 
 

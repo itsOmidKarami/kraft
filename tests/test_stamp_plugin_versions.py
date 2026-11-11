@@ -130,3 +130,35 @@ def test_the_vscode_lockfile_agrees_with_its_package_json():
     package = json.loads((stamp_mod._ROOT / "vscode" / "package.json").read_text())
     lock = json.loads((stamp_mod._ROOT / "vscode" / "package-lock.json").read_text())
     assert lock["version"] == lock["packages"][""]["version"] == package["version"]
+
+
+def test_the_mcp_registry_entry_is_stamped_in_both_places_and_nothing_else_moves(tmp_path):
+    """server.json carries the version at the top and on its PyPI package. The
+    package version left behind lists a release the registry cannot install."""
+    src = stamp_mod._ROOT / "server.json"
+    assert src in stamp_mod.MANIFESTS
+    copy = tmp_path / "server.json"
+    copy.write_text(src.read_text())
+    stamp("1.2.3", [copy])
+    before, after = json.loads(src.read_text()), json.loads(copy.read_text())
+    assert after["version"] == "1.2.3"
+    assert [p["version"] for p in after["packages"]] == ["1.2.3"]
+    before["version"] = "1.2.3"
+    for package in before["packages"]:
+        package["version"] = "1.2.3"
+    assert after == before
+
+
+def test_the_mcp_registry_entry_names_what_proves_and_starts_it():
+    """The registry checks ownership by finding `mcp-name: <name>` on the PyPI
+    page, which is the README; a client starts the server as `uvx <identifier>`,
+    which needs a command of the package's own name."""
+    import tomllib
+
+    root = stamp_mod._ROOT
+    entry = json.loads((root / "server.json").read_text())
+    assert f"mcp-name: {entry['name']} " in (root / "README.md").read_text()
+    (package,) = entry["packages"]
+    scripts = tomllib.loads((root / "pyproject.toml").read_text())["project"]["scripts"]
+    assert scripts.get(package["identifier"]) == scripts["kraft"]
+    assert [a["value"] for a in package["packageArguments"]] == ["admin", "mcp"]
