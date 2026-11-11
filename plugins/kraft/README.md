@@ -39,18 +39,10 @@ install it.
 
 ### Antigravity
 
-Antigravity imports the plugin from a local copy of the repo. The import copies
-it, so the clone can go afterwards:
-
-```bash
-clone=$(mktemp -d)
-git clone --depth 1 https://github.com/itsOmidKarami/kraft.git "$clone"
-agy plugin import "$clone/plugins/kraft"
-rm -rf "$clone"
-```
-
-To update, clone again and run the import with `--force`. Remove with
-`agy plugin uninstall kraft`.
+Antigravity imports the plugin from a local clone of the repo with
+`agy plugin import`. The steps, and how to update, are on the Antigravity tab of
+[Use Kraft from your agent](https://kraft-sdlc.dev/guides/day-to-day/agent-integration#register-kraft-with-your-agent).
+Remove with `agy plugin uninstall kraft`.
 
 ### Other agents
 
@@ -91,7 +83,7 @@ without the slash (`kraft:board`).
 
 What an agent files through the MCP tools lands paused: a person starts it from the board. Details, the MCP
 tools behind each skill, and the by-hand install are in the
-[agent integration guide](https://kraft-sdlc.dev/guides/agent-integration).
+[agent integration guide](https://kraft-sdlc.dev/guides/day-to-day/agent-integration).
 
 Published from `plugins/kraft/` in the Kraft repository, alongside
 [kraft-lite](../kraft-lite). The version is Kraft's own release tag, so plugin
