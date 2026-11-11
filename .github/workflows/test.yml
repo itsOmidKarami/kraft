@@ -420,7 +420,8 @@ jobs:
         # When apt can't fetch from its mirror (2026-11-11: the runners could not
         # resolve azure.archive.ubuntu.com for hours, and `apt-get update` only
         # warns), the package lists still name the file and its SHA256: fetch it
-        # from the Ubuntu archive itself and install it only if the sum matches.
+        # from the Ubuntu archive, or a mirror off ubuntu.com when that name
+        # doesn't resolve either, and install it only if the sum matches.
         run: |
           if ! command -v bwrap >/dev/null; then
             sudo apt-get update && sudo apt-get install -y bubblewrap || true
@@ -431,7 +432,8 @@ jobs:
             file=$(awk '/^Filename:/ {print $2; exit}' <<<"$meta")
             sum=$(awk '/^SHA256:/ {print $2; exit}' <<<"$meta")
             deb="$RUNNER_TEMP/bubblewrap.deb"
-            for host in https://archive.ubuntu.com/ubuntu https://security.ubuntu.com/ubuntu; do
+            for host in https://archive.ubuntu.com/ubuntu https://security.ubuntu.com/ubuntu \
+              https://mirrors.edge.kernel.org/ubuntu https://mirrors.mit.edu/ubuntu; do
               [ -n "$file" ] && [ -n "$sum" ] || break
               if curl -fsSL --retry 3 -o "$deb" "$host/$file" && echo "$sum  $deb" | sha256sum -c -; then
                 sudo dpkg -i "$deb" || true
