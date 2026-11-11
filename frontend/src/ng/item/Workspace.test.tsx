@@ -41,7 +41,7 @@ describe("Workspace", () => {
   });
 
   it("opens a gate on the round the URL names, with its note, and 'latest ↩' goes back to the newest", async () => {
-    const round = (n: number, over = {}) => ({ n, requested_at: "t", ended_at: "t", outcome: "approved", by: "assistant", note: null, sent_to: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [], ...over });
+    const round = (n: number, over = {}) => ({ n, requested_at: "t", ended_at: "t", outcome: "approved", by: "assistant", note: null, sent_to: null, verdict: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [], ...over });
     const gate_rounds = { plan_approval: [round(1, { outcome: "rejected", note: "Cover the invalidation story", sent_to: "plan" }), round(2)] };
     mount("/work-items/w1/nodes/plan_approval?pass=1", { gate_rounds } as never);
     expect(document.querySelector(".gateview-said")).toHaveTextContent("Cover the invalidation story");
@@ -53,7 +53,7 @@ describe("Workspace", () => {
   // The canvas previews a round's note; the drawer holds it whole, and gives focus back to the button that opened it.
   it("opens a round's whole note in the document drawer from Read the note, and returns focus to the button", async () => {
     const note = "Cover the `invalidation` story.\n\nAlso say what a **blob_sha** change does mid-query.";
-    const round = (n: number, over = {}) => ({ n, requested_at: "2026-09-13T09:00:00Z", ended_at: "2026-09-13T09:05:00Z", outcome: "approved", by: "assistant", note: null, sent_to: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [], ...over });
+    const round = (n: number, over = {}) => ({ n, requested_at: "2026-09-13T09:00:00Z", ended_at: "2026-09-13T09:05:00Z", outcome: "approved", by: "assistant", note: null, sent_to: null, verdict: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [], ...over });
     const calls = stubFetch();
     mount("/work-items/w1/nodes/plan_approval?pass=1", { gate_rounds: { plan_approval: [round(1, { outcome: "rejected", note, sent_to: "plan" }), round(2)] } } as never);
     const preview = document.querySelector(".gateview-said")!;
@@ -75,7 +75,7 @@ describe("Workspace", () => {
   });
 
   describe("a gate pane's rounds", () => {
-    const round = (n: number, over = {}) => ({ n, requested_at: "t", ended_at: "t", outcome: "approved", by: "assistant", note: null, sent_to: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [], ...over });
+    const round = (n: number, over = {}) => ({ n, requested_at: "t", ended_at: "t", outcome: "approved", by: "assistant", note: null, sent_to: null, verdict: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [], ...over });
     const waiting = {
       pending_gate: "plan_approval", current_node_id: "plan_approval", display_status: "needs_you", gate_artifact: ".x/plan.md",
       gate_rounds: { plan_approval: [round(1, { outcome: "rejected", note: "redo it", sent_to: "plan" }), round(2, { outcome: "pending", by: null, ended_at: null })] },

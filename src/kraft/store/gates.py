@@ -424,6 +424,7 @@ def gate_rounds(
                 by=p.get("by"),
                 note=p.get("note") if rejected else None,
                 sent_to=p.get("node") if rejected else None,
+                verdict=p.get("verdict") if rejected else None,
             )
             if p.get("by") == "agent":
                 note = p.get("note") or p.get("reason") or p.get("summary") or ""
@@ -463,6 +464,7 @@ def _round(n: int, requested_at: str | None) -> dict:
         "by": None,
         "note": None,
         "sent_to": None,
+        "verdict": None,
         "reopened": False,
         "reviewer": None,
         "review": None,
@@ -499,7 +501,7 @@ def _thread_counts(threads: list[dict]) -> dict:
 
 def _gate_thread_rows(conn: sqlite3.Connection, work_item_id: str) -> dict[str, list[dict]]:
     """Every gate thread of the item that is no draft, by gate, oldest first:
-    one read, the first comment joined in."""
+    one read, the first comment joined in. A draft is `store.review.is_draft_thread`'s."""
     out: dict[str, list[dict]] = {}
     for r in conn.execute(
         "SELECT t.id, t.gate, t.file_path, t.start_line, t.end_line, t.label, t.state, "

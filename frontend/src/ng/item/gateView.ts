@@ -5,7 +5,7 @@ import type { Sel } from "../graph/usePaneSelection";
 import { nameOf } from "../board/rowText";
 import { rejectTarget } from "./graph";
 import { AUTO_REVIEW, sessionLook, sessionsOf } from "./nodeGraph";
-import { byWord, gateRoundList, gateState, isPastRound, isReviewRound, newestOutcome, noteDoc, outcomeWord, reviewDoc, reviewOutcomeWord, roundShown, threadCountLine, threadWhere } from "./gateRounds";
+import { byWord, gateRoundList, gateState, isPastRound, isReviewRound, newestOutcome, noteDoc, outcomeWord, ownOutcome, reviewDoc, roundShown, shownNote, threadCountLine, threadWhere } from "./gateRounds";
 import { roundReviewUrl } from "../review/url";
 import { LABEL_WORD } from "../review/sharedWords";
 import { ENDED, gateMessage, materialized, nodeAt } from "./chainValues";
@@ -60,7 +60,7 @@ export function gateView(item: ItemDetail, gate: ChainNode, now: number, sel: Se
     rounds: gateRoundList(item, gate.id, picked),
     review: reviewed
       ? {
-          outcome: round.review ? reviewOutcomeWord(round.review.outcome) : outcomeWord(round),
+          outcome: ownOutcome(round),
           summary,
           count: threadCountLine(round),
           threads: round.first_threads.map((t) => ({ id: t.id, where: threadWhere(t), label: t.label && LABEL_WORD[t.label], body: t.body })),
@@ -68,7 +68,8 @@ export function gateView(item: ItemDetail, gate: ChainNode, now: number, sel: Se
           onRead: summary && on.readReview ? (button: HTMLElement) => on.readReview!(reviewDoc(gate.id, round), button) : undefined,
         }
       : undefined,
-    said: !reviewed && round?.note && round.ended_at ? { note: round.note, at: round.ended_at, n: round.n, onRead: on.read && ((button: HTMLElement) => on.read!(noteDoc(gate.id, round), button)) } : undefined,
+    // Beside the review block, not in place of it: a person's note is what the next agent was told. Only the thread bounce's is left out, which is those threads as text.
+    said: round && shownNote(round) && round.ended_at ? { note: shownNote(round)!, at: round.ended_at, n: round.n, onRead: on.read && ((button: HTMLElement) => on.read!(noteDoc(gate.id, round), button)) } : undefined,
   };
 }
 

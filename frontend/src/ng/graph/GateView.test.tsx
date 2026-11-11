@@ -162,6 +162,25 @@ describe("GateView: a review round", () => {
     expect(screen.getByRole("link", { name: "Open in review" })).toHaveAttribute("href", review.href);
   });
 
+  it("leaves out the outcome line when the review's outcome is the round's", () => {
+    render(<MemoryRouter><GateView gate={{ id: "g" }} review={{ ...review, outcome: undefined }} /></MemoryRouter>);
+    const box = screen.getByRole("region", { name: "Review" });
+    expect(box).not.toHaveTextContent("changes requested");
+    expect(box).toHaveTextContent("Two things.");
+  });
+
+  it("renders a thread's first line as markdown on one line, never as raw markup", () => {
+    const body = "`commits` can be empty: **never** `max()`, see [docs](https://x.test/d)";
+    render(<MemoryRouter><GateView gate={{ id: "g" }} review={{ ...review, threads: [{ ...review.threads[0], body }] }} /></MemoryRouter>);
+    const line = screen.getByRole("region", { name: "Review" }).querySelector(".gateview-review-body")!;
+    expect([...line.querySelectorAll("code")].map((c) => c.textContent)).toEqual(["commits", "max()"]);
+    expect(line.querySelector("strong")).toHaveTextContent("never");
+    expect(line.querySelector("a")).toHaveAttribute("href", "https://x.test/d");
+    expect(line.textContent).toBe("commits can be empty: never max(), see docs");
+    expect(line.querySelector("p")).toBeNull();
+    expect(css).toMatch(/\.gateview-review-body\s*\{[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/);
+  });
+
   it("reads the review's summary with its own label, the note's button keeping its words", async () => {
     vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(200);
     vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(100);

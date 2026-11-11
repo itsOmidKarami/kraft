@@ -15,7 +15,7 @@ afterEach(() => vi.unstubAllGlobals());
 const gate = V1[1];
 const pending = detail({ current_node_id: "plan_approval", pending_gate: "plan_approval", gate_artifact: ".engineering/plans/p.md", display_status: "needs_you" });
 /** A round of plan_approval, as the server reads it from the events. */
-const round = (n: number, over: Partial<GateRound> = {}): GateRound => ({ n, requested_at: "t", ended_at: "t", outcome: "approved", by: "human", note: null, sent_to: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [], ...over });
+const round = (n: number, over: Partial<GateRound> = {}): GateRound => ({ n, requested_at: "t", ended_at: "t", outcome: "approved", by: "human", note: null, sent_to: null, verdict: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [], ...over });
 const rounds = (...rs: GateRound[]) => ({ gate_rounds: { plan_approval: rs } });
 
 let where = "";
@@ -204,6 +204,20 @@ describe("GateBody", () => {
     expect(row).toHaveTextContent("2 threads · 1 must-fix · 1 question · 1 open");
     expect(row).not.toHaveTextContent("SECRET NOTE");
     expect(screen.getByRole("button", { name: /^Round 2/ })).not.toHaveTextContent("thread");
+  });
+
+  it("opens the picked row of an ended review round in review, at the canvas's URL", () => {
+    stubFetch({ "GET /work-items/w1/threads": [200, []] });
+    const reviewed = round(1, { outcome: "rejected", by: "human", note: "n", sent_to: "plan", review: { id: "rv", outcome: "request_changes", summary: "s", head_sha: "h" }, threads: { total: 2, open: 1, by_label: { must_fix: 1, question: 1, nit: 0 } } });
+    const noted = round(2, { outcome: "rejected", by: "human", note: "n", sent_to: "plan" });
+    const at = (picked: number) => <MemoryRouter><GateBody item={detail({ ...rounds(reviewed, noted, round(3, { outcome: "pending", by: null, ended_at: null })), pending_gate: "plan_approval" })} version="1" gate={gate} picked={picked} /></MemoryRouter>;
+    const { rerender } = rtlRender(at(1));
+    expect(screen.getByRole("link", { name: "Open in review" })).toHaveAttribute("href", "/work-items/w1/review?gate=plan_approval&round=1");
+    // Not the row that is not picked, nor a round that holds no review, nor the waiting round.
+    rerender(at(2));
+    expect(screen.queryByRole("link", { name: "Open in review" })).toBeNull();
+    rerender(at(3));
+    expect(screen.queryByRole("link", { name: "Open in review" })).toBeNull();
   });
 
   // It repeats the status line, until a round has ended.

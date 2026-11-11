@@ -98,6 +98,12 @@ export function noteDoc(gate: string, r: GateRound): { title: string; by: string
 /** A review round, by what it holds and not by the gate's kind: it has a review or at least one thread. */
 export const isReviewRound = (r: GateRound): boolean => r.review !== null || r.threads.total > 0;
 
+/** Kraft's rejection of a gate for its review threads: its note is those threads as text, which the round shows as threads. */
+export const isThreadBounce = (r: GateRound): boolean => r.by === "kraft" && r.verdict === "review_threads";
+
+/** The note a round shows: its rejection's, whoever wrote it, except the thread bounce's. Null when there is none to show. */
+export const shownNote = (r: GateRound): string | null => (isThreadBounce(r) ? null : r.note) || null;
+
 /** "3 threads · 2 must-fix · 1 question · 1 open": the labels that have threads, then how many are still open. An
  *  unlabelled thread counts in the total only. */
 export function threadCountLine(r: GateRound): string {
@@ -117,6 +123,13 @@ export function threadWhere(t: RoundThread): string {
 }
 
 export const reviewOutcomeWord = (o: ReviewOutcome): string => ({ approve: "approved", request_changes: "changes requested", comment: "commented" })[o];
+
+/** The review's own outcome in words, only when it says something the round's does not: "commented" on an approved round,
+ *  not "changes requested" under a round already called that. Undefined when it adds nothing. */
+export function ownOutcome(r: GateRound): string | undefined {
+  const word = r.review && reviewOutcomeWord(r.review.outcome);
+  return word && word !== outcomeWord(r) ? word : undefined;
+}
 
 /** A round's review as a document, for the drawer and the phone's sheet: "<gate> · round N review", written by
  *  "<outcome> · <who> · <time>". */

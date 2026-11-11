@@ -395,8 +395,53 @@ def counts(total, open_, must_fix=0, question=0, nit=0):
             [(None, counts(1, 0, must_fix=1), ["m"]), (None, NONE, [])],
             id="a-thread-shows-its-state-now-on-the-round-it-was-opened-in",
         ),
+        pytest.param(
+            [req_at(1), end_at(9, approved())],
+            [(3, "g", "must_fix", "claimed", "m")],
+            [],
+            [],
+            [(None, counts(1, 1, must_fix=1), ["m"])],
+            id="a-claimed-thread-is-still-open",
+        ),
+        pytest.param(
+            [req_at(1), end_at(9, approved())],
+            [],
+            [(5, "g", "comment", None)],
+            [],
+            [(("comment", "", "h1"), NONE, [])],
+            id="a-review-with-no-summary-has-an-empty-one",
+        ),
+        pytest.param(
+            [req_at(1), end_at(9, approved())],
+            [(3, "g", None, "open", "u"), (4, "g", "nit", "open", "n")],
+            [],
+            [],
+            [(None, counts(2, 2, nit=1), ["u", "n"])],
+            id="an-unlabelled-thread-counts-in-the-total-only",
+        ),
     ],
 )
 async def test_a_rounds_review_and_threads(database, evs, threads, reviews, drafts, expected):
     rounds = await seeded(database, evs, threads, reviews, drafts)
     assert [contents(r) for r in rounds] == expected
+
+
+@pytest.mark.parametrize(
+    ("evs", "expected"),
+    [
+        pytest.param(
+            [rejected("must fix: x", by="kraft", verdict="review_threads")],
+            ["review_threads"],
+            id="the-thread-bounce-names-itself",
+        ),
+        pytest.param([REQ, rejected(by="human")], [None], id="a-plain-rejection-has-none"),
+        pytest.param(
+            [REQ, rejected(verdict="fixed"), REQ, approved()],
+            ["fixed", None],
+            id="an-approval-has-none",
+        ),
+    ],
+)
+async def test_a_rejections_verdict_rides_on_its_round(database, evs, expected):
+    found = await rounds_of(database, evs)
+    assert [r["verdict"] for r in found["g"]] == expected

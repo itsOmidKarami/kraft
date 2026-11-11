@@ -76,7 +76,7 @@ function RoundScreen({ item, gate, round, version }: { item: ItemDetail; gate: s
             <RoundSummary round={found} />
             {threads.state === "loading" && <div className="ph-skeleton" aria-busy="true"><span /><span /></div>}
             {threads.state === "error" && <p className="ph-error" role="alert">{threads.error}</p>}
-            {threads.state === "ready" && <section aria-label="Threads" className="ph-list">{threads.data.map((t) => <ThreadNote key={t.id} thread={t} />)}</section>}
+            {threads.state === "ready" && <section aria-label="Threads" className="ph-list">{threads.data.map((t) => <ThreadNote key={t.id} thread={t} named />)}</section>}
           </>
         )}
       </div>
@@ -261,16 +261,16 @@ export function GateReview({ item, events, reload }: { item: ItemDetail; events:
 /** One thread under its file, read-only: an agent's note or a person's. Its
  *  range is named as the desktop names it, side and all, with the lines it
  *  was written on; a comment not sent yet is marked pending (R10b-03). */
-function ThreadNote({ thread }: { thread: ReviewThread }) {
+function ThreadNote({ thread, named }: { thread: ReviewThread; /** Name the file, as the desktop's round view does ("search/cache.py · Lines 12–14"), for a list of threads that is not under their files. */ named?: boolean }) {
   const first = thread.comments[0];
   const agent = first && first.author !== "you";
   const range = threadRange(thread);
-  const where = range ? rangeName(range).replace(/^./, (c) => c.toLowerCase()) : "";
+  const where = range ? (named ? rangeName(range) : rangeName(range).replace(/^./, (c) => c.toLowerCase())) : "";
   const status = thread.draft ? "pending" : thread.state === "resolved" ? "resolved" : "";
   const quote = range && thread.quote ? thread.quote.split("\n") : [];
   return (
     <div className={`ph-thread${thread.state === "resolved" ? " ph-is-resolved" : ""}`}>
-      <b className="ph-thread-head">{agent ? "agent" : "you"}{where && ` · ${where}`}{thread.label ? ` · ${thread.label.replace("_", " ")}` : ""}{status && ` · ${status}`}</b>
+      <b className="ph-thread-head">{agent ? "agent" : "you"}{named && ` · ${thread.file_path ?? "whole change"}`}{where && ` · ${where}`}{thread.label ? ` · ${thread.label.replace("_", " ")}` : ""}{status && ` · ${status}`}</b>
       {quote.length > 0 && (
         <div className="ph-thread-quote" role="group" aria-label={LINES_COMMENTED_ON}>
           {quote.map((l, i) => <div key={i} className={`ph-diff-line${l[0] === "+" ? " ph-diff-add" : l[0] === "-" ? " ph-diff-del" : ""}`}>{l}</div>)}

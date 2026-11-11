@@ -87,3 +87,18 @@ export function Markdown({ text, code }: { text: string; code?: CodeRenderer }) 
     </div>
   );
 }
+
+/** What a line of text may hold when it shows inline: code spans, bold, italics, strikethrough and links. */
+const INLINE = ["p", "code", "strong", "em", "del", "a"];
+const inline: Components = { ...components, p: ({ children }) => <>{children}</> };
+
+/** One line of markdown as inline text, for a preview in a row: code spans, bold, italics and links render, and nothing
+ *  else (a heading, a list, an image or a block of code is shown as its text). It is a `span`, so the caller's clip and
+ *  ellipsis apply to it. */
+export function InlineMarkdown({ text }: { text: string }) {
+  return (
+    <span className="md md-inline">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={urlTransform} components={inline} allowedElements={INLINE} unwrapDisallowed>{text}</ReactMarkdown>
+    </span>
+  );
+}

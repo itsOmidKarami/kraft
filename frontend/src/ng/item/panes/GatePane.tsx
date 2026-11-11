@@ -1,7 +1,7 @@
 import { REQUEST_CHANGES, sendsBack } from "../../review/finish";
 import { gateName, nameOf } from "../../board/rowText";
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import type { ChainNode } from "../../../types";
 import { FileText } from "../../icons";
 import { Button } from "../../ui/Button";
@@ -11,9 +11,10 @@ import { request } from "../../http";
 import { localTime } from "../../../format";
 import { act } from "../actions";
 import { TestsLine } from "../TestsLine";
-import { byWord, gateState, isPastRound, isReviewRound, outcomeWord, roundShown, roundsOf, threadCountLine } from "../gateRounds";
+import { byWord, gateState, isPastRound, isReviewRound, outcomeWord, roundShown, roundsOf, shownNote, threadCountLine } from "../gateRounds";
 import { OUTCOME } from "../reviewOutcome";
 import { rejectTarget } from "../graph";
+import { roundReviewUrl } from "../../review/url";
 import { totals, useDiffFiles } from "../Top";
 import { runVersion, type ItemDetail } from "../useItem";
 import { holdsText, isEscape, sendOnModEnter } from "../../keys";
@@ -67,11 +68,11 @@ export function GateBody({ item, version, gate, picked, onPick }: { item: ItemDe
           <ul className="ip-notes">{concerns.map((c, i) => <li key={i}>{c}</li>)}</ul>
         </>
       )}
-      {/* The round's reviewer verdict. Kraft's note on it, such as the files it changed, which void its verdict, shows here; a reviewer's rejection is also the round's note, which the canvas previews. */}
+      {/* The round's reviewer verdict. Kraft's note on it, such as the files it changed, which void its verdict, shows here; a reviewer's rejection is also the round's note, which the canvas previews (so it is not said twice). */}
       {outcome && (
         <>
           <h3 className="ip-h">Reviewer: {OUTCOME[outcome.kind].word}</h3>
-          {outcome.note && outcome.note !== round?.note && <p className="ip-review-note">{outcome.note}</p>}
+          {outcome.note && outcome.note !== (round && shownNote(round)) && <p className="ip-review-note">{outcome.note}</p>}
         </>
       )}
       <dl className="item-facts ip-facts ip-gap">
@@ -101,6 +102,8 @@ export function GateBody({ item, version, gate, picked, onPick }: { item: ItemDe
                     <span className="ip-hist-what">{outcomeWord(r)}{by ? ` · ${by}` : ""}</span>
                     {isReviewRound(r) && r.ended_at && <span className="ip-hist-what">{threadCountLine(r)}</span>}
                   </button>
+                  {/* The picked row of a review round opens it on the review page, where the canvas's link goes. */}
+                  {shown && isReviewRound(r) && r.ended_at && <Link className="link-btn ip-hist-open" to={roundReviewUrl(item.id, gate.id, r.n)}>Open in review</Link>}
                 </li>
               );
             })}

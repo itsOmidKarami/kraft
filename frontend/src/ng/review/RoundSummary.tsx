@@ -1,6 +1,6 @@
 import { localTime } from "../../format";
 import type { GateRound } from "../../types";
-import { byWord, outcomeWord, reviewOutcomeWord, threadCountLine } from "../item/gateRounds";
+import { byWord, outcomeWord, ownOutcome, threadCountLine } from "../item/gateRounds";
 import { Markdown } from "../ui/Markdown";
 import "./review.css";
 
@@ -8,16 +8,14 @@ import "./review.css";
  *  how many threads it holds. The desktop's round view and the phone's round screen both show it. */
 export function RoundSummary({ round }: { round: GateRound }) {
   const who = byWord(round.by);
+  // The review's own outcome only when the round's header has not said it already.
+  const own = ownOutcome(round);
   const ended = [outcomeWord(round), who, round.ended_at && localTime(round.ended_at)].filter(Boolean).join(" · ");
   return (
     <div className="rv-round-summary">
       <p className="rv-round-ended">{ended}</p>
-      {round.review && (
-        <>
-          <p className="rv-round-outcome">Review: {reviewOutcomeWord(round.review.outcome)}</p>
-          {round.review.summary && <Markdown text={round.review.summary} />}
-        </>
-      )}
+      {own && <p className="rv-round-outcome">Review: {own}</p>}
+      {round.review?.summary && <Markdown text={round.review.summary} />}
       <p className="rv-round-count">{threadCountLine(round)}</p>
     </div>
   );

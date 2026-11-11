@@ -669,6 +669,18 @@ describe("gate_rounds on the item", () => {
     expect((await call("GET", `/work-items/${id}/threads?round=1`)).status).toBe(400);
   });
 
+  it("the demo's round-1 threads quote their code, each line led by its diff mark, on the lines they sit on", async () => {
+    const { S, call } = server();
+    const { body } = await call("GET", `/work-items/${idOf(S, "needs-gate")}/threads?gate=final_review&round=1`);
+    expect(body.map((t: { id: string }) => t.id).sort()).toEqual(["th-r1-must", "th-r1-q"]);
+    for (const t of body) {
+      const lines = t.quote.split("\n");
+      expect(lines.every((l: string) => /^[ +-]/.test(l))).toBe(true);
+      // One line for each line of the range: what a thread on those lines quotes.
+      expect(lines).toHaveLength(t.end_line - t.start_line + 1);
+    }
+  });
+
   it("a round holds what was made after the previous one ended, up to and including its own end", () => {
     const at = (type: string, payload: Record<string, unknown>, minute: number) => ({ seq: minute, work_item_id: "w", type, node_id: "g", payload, created_at: t(minute) }) as never;
     const thread = (id: string, minute: number, over: Record<string, unknown> = {}) => ({ id, gate: "g", created_at: t(minute), label: "nit", state: "open", draft: false, comments: [{ body: id }], ...over });

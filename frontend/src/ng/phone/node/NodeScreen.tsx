@@ -18,12 +18,12 @@ import { LogLines } from "../log/LogLines";
 import { useLogs } from "../log/useLogs";
 import { PauseSheet } from "../item/PauseSheet";
 import { useDo } from "../item/useDo";
-import { byWord, gateState, isReviewRound, newestOutcome, noteDoc, outcomeWord, reviewDoc, reviewOutcomeWord, roundShown, roundsOf, threadCountLine, threadWhere } from "../../item/gateRounds";
+import { byWord, gateState, isReviewRound, newestOutcome, noteDoc, outcomeWord, ownOutcome, reviewDoc, roundShown, roundsOf, shownNote, threadCountLine, threadWhere } from "../../item/gateRounds";
 import { roundReviewUrl } from "../../review/url";
 import { LABEL_WORD } from "../../review/sharedWords";
 import { nodeSub } from "../item/model";
 import { ConfirmSheet, ReadSheet, useSheet } from "../nav/Sheet";
-import { Markdown } from "../../ui/Markdown";
+import { InlineMarkdown, Markdown } from "../../ui/Markdown";
 import { NotePreview } from "../../ui/NotePreview";
 import { ScreenHeader } from "../nav/ScreenHeader";
 import { ActionBar, Block, Facts, TabStrip } from "../ui/Rows";
@@ -91,7 +91,7 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
   const round = gate ? roundShown(item, nodeId, place.pass) : undefined;
   // A finished review round shows its review where a note round shows its note: the pending round has no review yet.
   const reviewed = !!round?.ended_at && isReviewRound(round);
-  const roundNote = round?.note && !reviewed ? noteDoc(nodeId, round) : null;
+  const roundNote = round && shownNote(round) ? noteDoc(nodeId, round) : null;
   const roundReview = round && reviewed ? reviewDoc(nodeId, round) : null;
   const paths = stepsOf(api).steps;
   const escalations = escalationsIn(seen, nodeId);
@@ -153,15 +153,16 @@ export function NodeScreen({ item, seen = item, version, events, docs, place, no
             {round.outcome !== "pending" && (
               <div className="ph-turn" aria-label={`Round ${round.n}`}>
                 <p className="ph-turn-head"><span>{outcomeWord(round)}{byWord(round.by) ? ` · ${byWord(round.by)}` : ""}{round.outcome === "rejected" && round.sent_to ? ` · sent to ${nameOf(item.chain_definition.nodes, round.sent_to)}` : ""}</span></p>
-                {round.note && !reviewed && <NotePreview className="ph-turn-text" note={round.note} buttonClass="ph-linkbtn" onRead={() => sheet.open("round-note")} />}
+                {/* A person's note shows beside the review: it is what the next agent was told. The thread bounce's does not (it is the threads as text). */}
+                {shownNote(round) && <NotePreview className="ph-turn-text" note={shownNote(round)!} buttonClass="ph-linkbtn" onRead={() => sheet.open("round-note")} />}
                 {reviewed && (
                   <>
-                    {round.review && <p className="ph-turn-text">{reviewOutcomeWord(round.review.outcome)}</p>}
+                    {ownOutcome(round) && <p className="ph-turn-text">{ownOutcome(round)}</p>}
                     {round.review?.summary && <NotePreview className="ph-turn-text" note={round.review.summary} label="Read the review" buttonClass="ph-linkbtn" onRead={() => sheet.open("round-review")} />}
                     <p className="ph-turn-count">{threadCountLine(round)}</p>
                     {round.first_threads.length > 0 && (
                       <ul className="ph-turn-threads">
-                        {round.first_threads.map((t) => <li key={t.id}>{[threadWhere(t), t.label && LABEL_WORD[t.label], t.body].filter(Boolean).join(" · ")}</li>)}
+                        {round.first_threads.map((t) => <li key={t.id}>{[threadWhere(t), t.label && LABEL_WORD[t.label]].filter(Boolean).join(" · ")} · <InlineMarkdown text={t.body} /></li>)}
                       </ul>
                     )}
                     <Link className="ph-linkbtn" to={roundReviewUrl(item.id, nodeId, round.n)}>Open in review</Link>

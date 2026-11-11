@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { Markdown } from "./Markdown";
+import { InlineMarkdown, Markdown } from "./Markdown";
 
 describe("Markdown", () => {
   it("renders GFM tables, links as plain anchors in a new tab, and fenced code as pre > code", () => {
@@ -47,5 +47,25 @@ describe("Markdown", () => {
     const link = screen.getByRole("link");
     expect(link).toHaveAttribute("href", "https://ci.test/run");
     expect(link).toHaveTextContent("image: evil.test/n.png");
+  });
+});
+
+describe("InlineMarkdown", () => {
+  it.each([
+    ["code and bold", "`commits` can be empty: **never** `max()`", "commits can be empty: never max()"],
+    ["a link", "see [the docs](https://example.com/d)", "see the docs"],
+    ["a heading as its text", "# Title", "Title"],
+    ["no image, which would be fetched", "a ![x](https://exfil.test/p.png) b", "a  b"],
+  ])("renders %s inline, with no markup left in the text", (_name, text, shown) => {
+    const { container } = render(<InlineMarkdown text={text} />);
+    expect(container.textContent!.trim()).toBe(shown);
+    expect(container.querySelector("p, h1, ul, img, pre")).toBeNull();
+  });
+
+  it("makes code spans <code>, bold <strong> and links anchors that open in a new tab", () => {
+    const { container } = render(<InlineMarkdown text={"`a` **b** [c](https://example.com)"} />);
+    expect(container.querySelector("code")).toHaveTextContent("a");
+    expect(container.querySelector("strong")).toHaveTextContent("b");
+    expect(screen.getByRole("link", { name: "c" })).toHaveAttribute("target", "_blank");
   });
 });

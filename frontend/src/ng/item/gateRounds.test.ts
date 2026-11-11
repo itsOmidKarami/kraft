@@ -6,7 +6,7 @@ import type { ItemDetail } from "./useItem";
 
 const NO_THREADS = { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } };
 const round = (n: number, over: Partial<GateRound> = {}): GateRound => ({
-  n, requested_at: "t", ended_at: "t", outcome: "approved", by: "assistant", note: null, sent_to: null, reopened: false, reviewer: null,
+  n, requested_at: "t", ended_at: "t", outcome: "approved", by: "assistant", note: null, sent_to: null, verdict: null, reopened: false, reviewer: null,
   review: null, threads: NO_THREADS, first_threads: [], ...over,
 });
 const REVIEW = { id: "rv", outcome: "request_changes", summary: "Two things.", head_sha: "h" } as const;

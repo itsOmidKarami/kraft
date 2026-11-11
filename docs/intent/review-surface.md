@@ -34,7 +34,14 @@ newest review submitted at that gate after the previous round ended and up to
 the round's end, and the count, open count, per-label count and first three
 (must-fix first, then oldest) of the non-draft threads opened at that gate in
 the same window, so a review or thread belongs to exactly one round.
-enforced-by: tests/store/test_gates.py::test_a_rounds_review_and_threads[a-review-and-threads-belong-to-the-round-they-were-made-in], tests/store/test_gates.py::test_a_rounds_review_and_threads[made-between-two-rounds-belongs-to-the-later], tests/store/test_gates.py::test_a_rounds_review_and_threads[a-round-with-no-request-still-has-a-window], tests/store/test_gates.py::test_a_rounds_review_and_threads[drafts-and-other-gates-are-no-part-of-a-round], tests/store/test_gates.py::test_a_rounds_review_and_threads[first-three-are-must-fix-first-then-oldest-and-the-newest-review-wins], tests/store/test_gates.py::test_a_rounds_review_and_threads[a-thread-shows-its-state-now-on-the-round-it-was-opened-in]
+enforced-by: tests/store/test_gates.py::test_a_rounds_review_and_threads[a-review-and-threads-belong-to-the-round-they-were-made-in], tests/store/test_gates.py::test_a_rounds_review_and_threads[made-between-two-rounds-belongs-to-the-later], tests/store/test_gates.py::test_a_rounds_review_and_threads[a-round-with-no-request-still-has-a-window], tests/store/test_gates.py::test_a_rounds_review_and_threads[drafts-and-other-gates-are-no-part-of-a-round], tests/store/test_gates.py::test_a_rounds_review_and_threads[first-three-are-must-fix-first-then-oldest-and-the-newest-review-wins], tests/store/test_gates.py::test_a_rounds_review_and_threads[a-thread-shows-its-state-now-on-the-round-it-was-opened-in], tests/store/test_gates.py::test_a_rounds_review_and_threads[a-claimed-thread-is-still-open], tests/store/test_gates.py::test_a_rounds_review_and_threads[a-review-with-no-summary-has-an-empty-one], tests/store/test_gates.py::test_a_rounds_review_and_threads[an-unlabelled-thread-counts-in-the-total-only]
+origin: src/kraft/store/gates.py
+
+## REQ a-gate-round-carries-its-rejections-verdict
+WHEN a gate round ended in a rejection, the system SHALL report with it the verdict the
+rejection recorded (`review_threads` for Kraft's bounce on open threads), so a view can tell
+that bounce, whose note is those threads as text, from a person's note.
+enforced-by: tests/store/test_gates.py::test_a_rejections_verdict_rides_on_its_round[the-thread-bounce-names-itself], tests/store/test_gates.py::test_a_rejections_verdict_rides_on_its_round[a-plain-rejection-has-none]
 origin: src/kraft/store/gates.py
 
 ## REQ a-rounds-threads-are-listed-by-the-same-window

@@ -604,6 +604,9 @@ export interface GateRound {
   note: string | null;
   /** Where a rejection sent the work; null when it breached the gate's reject cap and sent nothing back. */
   sent_to: string | null;
+  /** What a rejection decided, from its event: `review_threads` for Kraft's bounce of a gate with threads (the note is those
+   *  threads as text), `fixed` for a reviewer that repaired the work; null otherwise. */
+  verdict: string | null;
   reopened: boolean;
   reviewer: { kind: "approve" | "reject" | "ready" | "undecided"; note: string } | null;
   /** The newest review submitted at this gate in the round's window (after the previous round ended, up to this one's

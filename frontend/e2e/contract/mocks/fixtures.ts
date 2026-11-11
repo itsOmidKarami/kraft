@@ -712,7 +712,7 @@ export function gateRoundsOf(events: Ev[], threads: any[] = [], reviews: any[] =
   const open: Record<string, GateRound> = {};
   const round = (gate: string, at: string | null): GateRound => {
     const list = (rounds[gate] ??= []);
-    const r: GateRound = { n: list.length + 1, requested_at: at, ended_at: null, outcome: "pending", by: null, note: null, sent_to: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [] };
+    const r: GateRound = { n: list.length + 1, requested_at: at, ended_at: null, outcome: "pending", by: null, note: null, sent_to: null, verdict: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [] };
     list.push(r);
     return r;
   };
@@ -730,7 +730,7 @@ export function gateRoundsOf(events: Ev[], threads: any[] = [], reviews: any[] =
     } else if ((e.type === "gate_approved" || e.type === "gate_rejected") && gate) {
       const rejected = e.type === "gate_rejected";
       const r = end(gate, e.created_at, rejected ? (p.verdict === "fixed" ? "fixed" : "rejected") : "approved", {
-        by: p.by ?? null, note: rejected ? p.note ?? null : null, sent_to: rejected ? p.node ?? null : null,
+        by: p.by ?? null, note: rejected ? p.note ?? null : null, sent_to: rejected ? p.node ?? null : null, verdict: rejected ? p.verdict ?? null : null,
       });
       if (p.by === "agent") r.reviewer = { kind: rejected ? "reject" : "approve", note: String(p.note ?? p.reason ?? p.summary ?? "").trim() };
     } else if (e.type === "node_skipped" && gate) {

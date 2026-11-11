@@ -373,7 +373,7 @@ describe("the node screen (D)", () => {
     if (message) expect(screen.getByText(message)).toBeInTheDocument();
   });
 
-  const round = (n: number, over = {}) => ({ n, requested_at: "2026-09-13T09:00:00Z", ended_at: "2026-09-13T09:05:00Z", outcome: "approved", by: "assistant", note: null, sent_to: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [], ...over });
+  const round = (n: number, over = {}) => ({ n, requested_at: "2026-09-13T09:00:00Z", ended_at: "2026-09-13T09:05:00Z", outcome: "approved", by: "assistant", note: null, sent_to: null, verdict: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [], ...over });
   // The skip is only in the server's rounds: the page's events (its newest hundred) have long dropped it.
   it("a skipped gate says it was skipped, not that it decides when reached (R14b-05)", async () => {
     mount(item("done", null, { gate_rounds: { plan_approval: [round(1, { outcome: "skipped", by: null })] } }), "/work-items/w1/nodes/plan_approval", { "GET /work-items/w1/events": [200, []] });
@@ -404,18 +404,50 @@ describe("the node screen (D)", () => {
     expect(where()).toBe("/work-items/w1/nodes/plan_approval");
   });
 
-  it("a review round's card shows its review, count and first threads in place of its note, and opens it in review", async () => {
-    const reviewed = round(1, {
-      outcome: "rejected", by: "human", note: "must fix: SECRET NOTE", sent_to: "plan",
-      review: { id: "rv", outcome: "request_changes", summary: "Two things.", head_sha: "h" },
-      threads: { total: 2, open: 1, by_label: { must_fix: 1, question: 1, nit: 0 } },
-      first_threads: [{ id: "t1", file_path: "a.py", start_line: 3, end_line: 3, label: "must_fix", state: "open", body: "fix x" }],
-    });
-    mount(item("needs_you", null, { gate_rounds: { plan_approval: [reviewed, round(2, { outcome: "pending", by: null, ended_at: null })] } }), "/work-items/w1/nodes/plan_approval?pass=1");
-    const card = await screen.findByLabelText("Round 1");
-    for (const text of ["changes requested", "Two things.", "2 threads · 1 must-fix · 1 question · 1 open", "a.py:3"]) expect(card).toHaveTextContent(text);
-    expect(card).not.toHaveTextContent("SECRET NOTE");
+  const reviewedRound = (over: Record<string, unknown> = {}) => round(1, {
+    outcome: "rejected", by: "human", note: "also rename X", sent_to: "plan",
+    review: { id: "rv", outcome: "request_changes", summary: "Two things.", head_sha: "h" },
+    threads: { total: 2, open: 1, by_label: { must_fix: 1, question: 1, nit: 0 } },
+    first_threads: [{ id: "t1", file_path: "a.py", start_line: 3, end_line: 3, label: "must_fix", state: "open", body: "`commits` can be empty: **never** `max()`" }],
+    ...over,
+  });
+  const reviewCard = async (r: ReturnType<typeof round>) => {
+    mount(item("needs_you", null, { gate_rounds: { plan_approval: [r, round(2, { outcome: "pending", by: null, ended_at: null })] } }), "/work-items/w1/nodes/plan_approval?pass=1");
+    return screen.findByLabelText("Round 1");
+  };
+
+  it("a review round's card shows its review, count and first threads beside its note, and opens it in review", async () => {
+    const card = await reviewCard(reviewedRound());
+    for (const text of ["Two things.", "2 threads · 1 must-fix · 1 question · 1 open", "a.py:3", "also rename X"]) expect(card).toHaveTextContent(text);
     expect(within(card).getByRole("link", { name: "Open in review" })).toHaveAttribute("href", "/work-items/w1/review?gate=plan_approval&round=1");
+  });
+
+  // The round's outcome is said once, in the card's head; the review's own only when it says something else.
+  it.each([
+    ["the same as the round's: said once", "request_changes", 0],
+    ["not the round's: said as well", "comment", 1],
+  ] as const)("a review outcome %s", async (_name, outcome, own) => {
+    const card = await reviewCard(reviewedRound({ review: { id: "rv", outcome, summary: "Two things.", head_sha: "h" } }));
+    expect(card.querySelector(".ph-turn-head")).toHaveTextContent("changes requested · you · sent to plan");
+    expect(card.textContent!.split("changes requested").length - 1).toBe(1);
+    expect(card.textContent!.split("commented").length - 1).toBe(own);
+  });
+
+  // The thread bounce's note is the threads as text, so it is left out; a person's note is what the agent was told.
+  it.each([
+    ["a person's note, no threads", { threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [] }, true],
+    ["Kraft's bounce", { by: "kraft", verdict: "review_threads" }, false],
+  ] as const)("the note of %s", async (_name, over, shown) => {
+    const card = await reviewCard(reviewedRound(over));
+    expect(card.textContent!.includes("also rename X")).toBe(shown);
+  });
+
+  it("a thread's first line shows as markdown, never as raw markup", async () => {
+    const card = await reviewCard(reviewedRound());
+    const line = card.querySelector(".ph-turn-threads li")!;
+    expect([...line.querySelectorAll("code")].map((c) => c.textContent)).toEqual(["commits", "max()"]);
+    expect(line.querySelector("strong")).toHaveTextContent("never");
+    expect(line.textContent).not.toMatch(/[`*]/);
   });
 
   // The card previews the first paragraph, rendered; the sheet reads the whole note, rendered.

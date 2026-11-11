@@ -7,7 +7,7 @@ import { detail, FROZEN, SCOPE_PATH, scopeChain, SLICED, sliced, V1 } from "./te
 
 const NOW = Date.parse("2026-09-13T10:10:00Z");
 const sess = (node_id: string, over: Partial<WorkerSession> = {}) => ({ id: `${node_id}${over.attempt ?? 1}${over.hook_point ?? ""}`, node_id, hook_point: `${node_id}.x.y`, status: "done", attempt: 1, round: 0, created_at: over.started_at ?? "2026-09-13T09:00:00Z", started_at: "2026-09-13T09:00:00Z", ...over }) as WorkerSession;
-const round = (outcome: GateRound["outcome"], by: GateRound["by"]): GateRound => ({ n: 1, requested_at: "t", ended_at: "t", outcome, by, note: null, sent_to: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [] });
+const round = (outcome: GateRound["outcome"], by: GateRound["by"]): GateRound => ({ n: 1, requested_at: "t", ended_at: "t", outcome, by, note: null, sent_to: null, verdict: null, reopened: false, reviewer: null, review: null, threads: { total: 0, open: 0, by_label: { must_fix: 0, question: 0, nit: 0 } }, first_threads: [] });
 
 describe("chainGraph", () => {
   it("names the node a rebase bounces to, not its id", () => {

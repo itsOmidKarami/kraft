@@ -110,6 +110,7 @@
 .md :is(p, ul, ol) { margin: 0 0 10px; }
 .md a { color: var(--text); text-decoration: underline; }
 .md img { max-width: 100%; }
+.md-inline { display: inline; }
 .md-img-link { font: var(--fs-label) ui-monospace, Menlo, monospace; }
 .md code { font: var(--fs-label) ui-monospace, Menlo, monospace; }
 .md-pre { padding: 8px 10px; border-radius: 6px; background: var(--bg); overflow: auto; }
