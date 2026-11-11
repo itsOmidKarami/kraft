@@ -417,14 +417,28 @@ jobs:
       - name: install bubblewrap
         # The os sandbox's tests run bwrap as the runner's own user. Ubuntu 24.04
         # blocks unprivileged user namespaces for it without an AppArmor profile.
-        # Tried four times: on 2026-11-11 the runners' resolver lost the apt
-        # mirror for hours, and `apt-get update` only warns when it gets no index.
+        # When apt can't fetch from its mirror (2026-11-11: the runners could not
+        # resolve azure.archive.ubuntu.com for hours, and `apt-get update` only
+        # warns), the package lists still name the file and its SHA256: fetch it
+        # from the Ubuntu archive itself and install it only if the sum matches.
         run: |
-          for try in 1 2 3 4; do
-            command -v bwrap >/dev/null && break
-            sudo apt-get update && sudo apt-get install -y bubblewrap && break
-            sleep 30
-          done
+          if ! command -v bwrap >/dev/null; then
+            sudo apt-get update && sudo apt-get install -y bubblewrap || true
+          fi
+          if ! command -v bwrap >/dev/null; then
+            version=$(apt-cache policy bubblewrap | awk '/Candidate:/ {print $2}')
+            meta=$(apt-cache show "bubblewrap=$version" 2>/dev/null || true)
+            file=$(awk '/^Filename:/ {print $2; exit}' <<<"$meta")
+            sum=$(awk '/^SHA256:/ {print $2; exit}' <<<"$meta")
+            deb="$RUNNER_TEMP/bubblewrap.deb"
+            for host in https://archive.ubuntu.com/ubuntu https://security.ubuntu.com/ubuntu; do
+              [ -n "$file" ] && [ -n "$sum" ] || break
+              if curl -fsSL --retry 3 -o "$deb" "$host/$file" && echo "$sum  $deb" | sha256sum -c -; then
+                sudo dpkg -i "$deb" || true
+                break
+              fi
+            done
+          fi
           command -v bwrap >/dev/null || { echo "::error::could not install bubblewrap"; exit 1; }
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: uv sync --frozen
