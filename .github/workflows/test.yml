@@ -417,7 +417,16 @@ jobs:
       - name: install bubblewrap
         # The os sandbox's tests run bwrap as the runner's own user. Ubuntu 24.04
         # blocks unprivileged user namespaces for it without an AppArmor profile.
-        run: sudo apt-get update && sudo apt-get install -y bubblewrap && sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        # Tried four times: on 2026-11-11 the runners' resolver lost the apt
+        # mirror for hours, and `apt-get update` only warns when it gets no index.
+        run: |
+          for try in 1 2 3 4; do
+            command -v bwrap >/dev/null && break
+            sudo apt-get update && sudo apt-get install -y bubblewrap && break
+            sleep 30
+          done
+          command -v bwrap >/dev/null || { echo "::error::could not install bubblewrap"; exit 1; }
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: uv sync --frozen
       - run: uv run pytest -m e2e -n logical --durations=25 -rs --junitxml=e2e-junit.xml
         env:
@@ -589,12 +598,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl jq python3
+          # No apt-get: the image already has git, curl and ca-certificates, and
+          # node reads the JSON, so an unreachable apt mirror (2026-11-11) can't
+          # fail this job. uv brings its own Python.
           case "$(uname -m)" in aarch64|arm64) BD_ARCH=arm64 ;; *) BD_ARCH=amd64 ;; esac
           # Through the API, as e2e-cli's install bd step says.
           asset=$(curl -fsSL --retry 5 --retry-all-errors -H "Authorization: Bearer $GH_TOKEN" \
             "https://api.github.com/repos/gastownhall/beads/releases/tags/v${BD_VERSION}" |
-            jq -r --arg n "beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" '.assets[] | select(.name == $n) | .url')
+            BD_ASSET="beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" node -e '
+              const r = JSON.parse(require("fs").readFileSync(0, "utf8"));
+              const a = r.assets.find((x) => x.name === process.env.BD_ASSET);
+              if (a) console.log(a.url);')
           test -n "$asset" || { echo "no beads asset for v${BD_VERSION} linux ${BD_ARCH}"; exit 1; }
           curl -fsSL --retry 5 --retry-all-errors -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/octet-stream" -o "$RUNNER_TEMP/bd.tar.gz" "$asset"
