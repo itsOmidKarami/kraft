@@ -12,7 +12,7 @@ defineProps<{ log: LogRow[], decWord: string }>()
       MERGED
     </p>
     <p class="k-big">
-      All a person did: {{ decWord }} decisions.
+      All a person did: <span class="k-you">{{ decWord }} decisions.</span>
     </p>
     <p class="k-sub">
       Claude Code wrote the plan and the code. Kraft ran the tests and reviews, opened the merge request and merged it. These were your calls:

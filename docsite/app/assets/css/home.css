@@ -3,7 +3,11 @@
    The colours are the Ink theme's roles (frontend/src/ng/theme/theme.css,
    [data-surface="ink"][data-amount="full"]): light is the default, and
    .dark .home holds dark, which Nuxt UI puts on <html>. Nothing in the home's
-   components names a colour but these tokens. */
+   components names a colour but these tokens.
+   The colours keep one meaning each: blue is Kraft working, amber is Kraft
+   waiting on you, green is done, and violet (the accent) is your move: what you
+   decide and what you say. Unlike the app, the home fills its buttons with the
+   accent, since every one of them is a call the visitor makes. */
 .home {
   --k-side: #e2e2ec;
   --k-bg: #edeef6;
@@ -21,6 +25,9 @@
   --k-bad: #a13d43;
   --k-run: #246099;
   --k-accent: #504a90;
+  --k-accent-hover: #3e3a73;
+  --k-edge: 75%;
+  --k-ok-wash: 9%;
 }
 
 .dark .home {
@@ -40,6 +47,9 @@
   --k-bad: #ec8082;
   --k-run: #80bdfc;
   --k-accent: #b0adfc;
+  --k-accent-hover: #d0cefd;
+  --k-edge: 45%;
+  --k-ok-wash: 8%;
 }
 
 /* The home's own face and ground, so the docs theme does not restyle it. */
@@ -185,6 +195,10 @@
 
 .home .k-hero h1 span {
   display: block;
+}
+
+.home .k-hero h1 span:last-child {
+  color: var(--k-accent);
 }
 
 .home .k-hero p {
@@ -558,6 +572,21 @@
   align-items: center;
 }
 
+/* The panel takes the wash of what is happening; amber is the app's needs-you strip. */
+.home .kr-panel.k-tone-run {
+  background: color-mix(in srgb, var(--k-run) 6%, var(--k-bg));
+}
+
+.home .kr-panel.k-tone-gate {
+  background: color-mix(in srgb, var(--k-warn) 8%, var(--k-bg));
+  border-top-color: color-mix(in srgb, var(--k-warn) var(--k-edge), var(--k-bg));
+}
+
+.home .kr-panel.k-tone-done {
+  background: color-mix(in srgb, var(--k-ok) var(--k-ok-wash), var(--k-bg));
+  border-top-color: color-mix(in srgb, var(--k-ok) var(--k-edge), var(--k-bg));
+}
+
 .home .k-col {
   min-width: 0;
   display: flex;
@@ -624,8 +653,8 @@
 .home .k-note {
   margin-top: 6px;
   padding: 10px 14px;
-  border: 1px solid var(--k-line);
-  background: var(--k-surface);
+  border: 1px solid color-mix(in srgb, var(--k-accent) 40%, transparent);
+  background: color-mix(in srgb, var(--k-accent) 10%, var(--k-bg));
   border-radius: 6px;
   font-size: 14px;
   color: var(--k-text-sub);
@@ -635,7 +664,7 @@
 .home .k-note span {
   font-family: ui-monospace, Menlo, monospace;
   font-size: 12px;
-  color: var(--k-text-muted);
+  color: var(--k-accent);
 }
 
 .home .k-btn {
@@ -652,13 +681,13 @@
 .home .k-btn-primary,
 .home .k-btn-sm.k-btn-primary {
   border: 0;
-  background: var(--k-text);
+  background: var(--k-accent);
   color: var(--k-bg);
   font-weight: 600;
 }
 
 .home .k-btn-primary:hover {
-  background: var(--k-text-sub);
+  background: var(--k-accent-hover);
   color: var(--k-bg);
 }
 
@@ -674,20 +703,28 @@
   color: var(--k-text);
 }
 
+.home .k-btn-outline.k-btn-decide {
+  border-color: color-mix(in srgb, var(--k-accent) 60%, transparent);
+}
+
+.home .k-btn-outline.k-btn-decide:hover {
+  background: color-mix(in srgb, var(--k-accent) 14%, transparent);
+}
+
 .home .k-btn-pressed-a {
   border: 0;
-  background: var(--k-text-sub);
+  background: var(--k-accent-hover);
   color: var(--k-bg);
   font-weight: 600;
-  box-shadow: 0 0 0 3px var(--k-side), 0 0 0 5px var(--k-text);
+  box-shadow: 0 0 0 3px var(--k-side), 0 0 0 5px var(--k-accent);
 }
 
 .home .k-btn-pressed-r {
-  border: 1px solid var(--k-text);
-  background: var(--k-line);
+  border: 1px solid var(--k-accent);
+  background: color-mix(in srgb, var(--k-accent) 20%, transparent);
   color: var(--k-text);
   font-weight: 500;
-  box-shadow: 0 0 0 3px var(--k-side), 0 0 0 5px var(--k-text);
+  box-shadow: 0 0 0 3px var(--k-side), 0 0 0 5px var(--k-accent);
 }
 
 .home .k-btn-sm {
@@ -707,7 +744,7 @@
 
 .home .k-count div {
   height: 100%;
-  background: var(--k-text-muted);
+  background: var(--k-accent);
   transform-origin: left;
 }
 
@@ -778,6 +815,10 @@
 
 .home .k-merged {
   color: var(--k-ok);
+}
+
+.home .k-you {
+  color: var(--k-accent);
 }
 
 /* The verification node, opened */
@@ -985,7 +1026,7 @@
 }
 
 .home .k-card-foot b {
-  color: var(--k-text);
+  color: var(--k-accent);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -1039,6 +1080,14 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.home .k-cols > div.k-cols-you {
+  border-top-color: var(--k-accent);
+}
+
+.home .k-cols > div.k-cols-run {
+  border-top-color: var(--k-run);
 }
 
 .home .k-cols > div.k-cols-warn {
@@ -1179,6 +1228,10 @@
   .home a.k-btn,
   .home button {
     transition: background-color 0.12s ease-out, box-shadow 0.12s ease-out;
+  }
+
+  .home .kr-panel {
+    transition: background-color 0.6s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.6s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .home .kr-count {

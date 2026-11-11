@@ -80,6 +80,7 @@ const repo = 'https://github.com/itsOmidKarami/kraft'
 
           <div
             class="kr-panel"
+            :class="{ 'k-tone-run': v.running, 'k-tone-gate': v.atGate, 'k-tone-done': v.done }"
             aria-live="polite"
           >
             <template v-if="v.idle">
@@ -163,7 +164,7 @@ const repo = 'https://github.com/itsOmidKarami/kraft'
                 <button
                   type="button"
                   class="k-btn"
-                  :class="v.pressR ? 'k-btn-pressed-r kr-give' : 'k-btn-outline'"
+                  :class="v.pressR ? 'k-btn-pressed-r kr-give' : 'k-btn-outline k-btn-decide'"
                   @click="reject"
                 >
                   Request changes
@@ -264,11 +265,11 @@ const repo = 'https://github.com/itsOmidKarami/kraft'
           The same run, in the real app
         </h2>
         <div class="k-cols">
-          <div>
+          <div class="k-cols-you">
             <h3>You hand it over</h3>
             <p>File a task from the board, the <code>kraft</code> command or your agent. Attach a spec or plan you've already settled, and the chain skips that step and its gate.</p>
           </div>
-          <div>
+          <div class="k-cols-run">
             <h3>It runs without you</h3>
             <p>Each step runs in the item's own worktree, so your checkout stays as you left it. Caps on time, tokens and dollars stop a loop that won't converge, and you get its full trace.</p>
           </div>
