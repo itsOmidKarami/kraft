@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { contentRoutes, pagesMissingFrom } from './content-routes.mjs'
 
 // The site is served from the root of the custom domain (kraft-sdlc.dev), so
 // the latest release's docs are at /, an older major's at /vN/ and main's at
@@ -11,7 +12,11 @@ import { fileURLToPath } from 'node:url'
 // each with the whole list (dev/docs_versions.py) and its own id from it.
 const baseURL = process.env.KRAFT_DOCS_BASE || '/'
 type DocsVersion = { id: string, label: string, base: string, tag: string, name: string }
-const versions: DocsVersion[] = JSON.parse(process.env.KRAFT_DOCS_VERSIONS || '[]')
+// A list without a label (written by hand) names each version by its id: the
+// version menu reads the label of every one, and a missing one failed the
+// render of every docs page.
+const versions: DocsVersion[] = (JSON.parse(process.env.KRAFT_DOCS_VERSIONS || '[]') as Partial<DocsVersion>[])
+  .map(v => ({ ...v, label: v.label ?? v.id }) as DocsVersion)
 // This build's id: latest, vN or next. Empty for a local or PR build, which
 // shows no version UI.
 const version = process.env.KRAFT_DOCS_VERSION || ''
@@ -43,6 +48,10 @@ const movedSections = redirects.filter(([from]) => from.includes('#'))
 const unreleased: { page: string | null, routes: Record<string, 'new' | 'updated'> } = version === 'next' || version === ''
   ? JSON.parse(execFileSync('python3', [fileURLToPath(new URL('../dev/gen_docs_unreleased.py', import.meta.url)), fileURLToPath(new URL('./content', import.meta.url))], { encoding: 'utf8' }))
   : { page: null, routes: {} }
+// Every page of this build's content. The prerender crawler follows links from
+// the build's root, and the root of /next/ and /vN/ is a redirect stub that
+// links to none, so the pages are listed to it instead (nitro.prerender.routes).
+const pageRoutes: string[] = contentRoutes(fileURLToPath(new URL('./content', import.meta.url)))
 const withBase = (path: string) => `${baseURL.replace(/\/$/, '')}${path}`
 
 // What a moved page's old address serves. The prerenderer writes a redirect
@@ -160,7 +169,14 @@ export default defineNuxtConfig({
   devtools: { enabled: false },
   hooks: {
     'nitro:init'(nitro) {
-      nitro.hooks.hook('prerender:done', () => addSectionIndexes(nitro.options.output.publicDir))
+      nitro.hooks.hook('prerender:done', () => {
+        addSectionIndexes(nitro.options.output.publicDir)
+        // A page the prerenderer was seeded with (nitro.prerender.routes) but
+        // did not write is a 404 once deployed, and its error is only a line
+        // in the log.
+        const missing = pagesMissingFrom(nitro.options.output.publicDir, pageRoutes)
+        if (missing.length) throw new Error(`${missing.length} of ${pageRoutes.length} content pages have no HTML: ${missing.join(', ')}`)
+      })
     },
     'content:file:afterParse'({ content }) {
       breakableLinks((content as { body?: { toc?: { links?: TocLink[] } } }).body?.toc?.links)
@@ -295,9 +311,10 @@ export default defineNuxtConfig({
       },
     },
     prerender: {
-      // No page links to a moved page's old address, so the crawler would
-      // never reach it on its own.
-      routes: ['/robots.txt', ...movedPages.map(([from]) => from)],
+      // Every page of the content, so no build depends on the links of its
+      // root to find them (pageRoutes). No page links to a moved page's old
+      // address, so the crawler would never reach it on its own.
+      routes: ['/robots.txt', ...pageRoutes, ...movedPages.map(([from]) => from)],
       // The version menu links to the same page in every other build, which
       // the crawler would take for one of this build's own pages and fail as
       // a 404: a prefix match on each other version's base. The latest's is /,
