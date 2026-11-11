@@ -2,7 +2,7 @@
 
 import pytest
 from support import worktree as wtree
-from support.harness import commit_all, entry_of, git, write
+from support.harness import entry_of, write
 
 from kraft import carried, executor
 from kraft.executor import dispatch
@@ -73,31 +73,6 @@ async def test_a_round_saves_the_carried_files_only_when_every_guard_holds(
     await dispatch._save_carried(it.run_dirs, it.row(), worktree, entry, **kwargs)
 
     assert _saved(it) is saved
-
-
-async def test_a_round_saves_under_its_base_and_not_over_a_copy_from_a_newer_one(item_on, tmp_path):
-    it = await item_on(_verify(), worktree=True)
-    base = git(it.repo, "rev-parse", "HEAD")
-    kwargs = {**_BASE, "base": base}
-    folder = carried.store_dir(it.run_dirs, it.repo)
-    write(it.worktree, ".testmondata", "db")
-    await dispatch._save_carried(it.run_dirs, it.row(), it.worktree, _CARRY, **kwargs)
-    first = carried.current_generation(folder)
-    assert carried.stored_base(first) == base
-
-    # The repo moves on, and a copy is saved from a tree cut after that.
-    write(it.repo, "newer.txt", "x")
-    newer = commit_all(it.repo)
-    scratch = tmp_path / "scratch"
-    write(scratch, ".testmondata", "from the newer tree")
-    carried.save(it.run_dirs, it.repo, scratch, [".testmondata"], tmp_path / "r.json", base=newer)
-    held = carried.current_generation(folder)
-    assert held != first
-
-    # The item's own tree is older than that copy, so its next save leaves it be.
-    write(it.worktree, ".testmondata", "db, a later round, longer")
-    await dispatch._save_carried(it.run_dirs, it.row(), it.worktree, _CARRY, **kwargs)
-    assert carried.current_generation(folder) == held
 
 
 async def test_no_record_after_a_restart_counts_every_present_file_as_changed(item_on):
