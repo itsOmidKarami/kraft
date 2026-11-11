@@ -57,8 +57,8 @@ def _problems(cr, content: Path, map_text: str, links: list[str] = ()) -> list[s
     return problems + cr.check_map(entries, site) + cr.check_links(list(links), entries, site, {})
 
 
-def test_pages_are_served_at_their_path_without_number_prefixes(cr, content):
-    assert set(cr.pages(content)) == {"/guides/vscode", "/get-started/install", "/get-started"}
+def test_pages_are_served_at_their_path_without_number_prefixes_and_the_home_is_one(cr, content):
+    assert set(cr.pages(content)) == {"/", "/guides/vscode", "/get-started/install", "/get-started"}
 
 
 def test_anchors_are_the_ids_the_site_gives_headings(cr, content):

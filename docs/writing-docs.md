@@ -229,11 +229,12 @@ The flip
 side is that a docs-only fix to a released page, such as a typo, waits for the
 next release too. 
 
-A frozen major keeps the words of the components that hold
-them: `dev/build_docs_site.sh` builds it with its own tag's `StageStrip.vue`,
-so the landing page still names the stages the way that release did. If a
-page of a frozen major ever shows text from a newer component, add the
-component to that list.
+The home page is the exception: it is one page at `/`, not a page of each
+version. It is site code (`docsite/app/pages/index.vue`), not content, so a
+merge to `main` that changes it reaches `/` on the next deploy, with no
+release. Only the build at the root of the domain draws it. The root of
+`/next/` and of each `/vN/` is a redirect to it, and the version menu appears
+on docs pages only. A docs page that links to the home links to `/`.
 
 Each version also has the dashboard demo of its own code beside its pages:
 the web UI on sample data, with no server (`frontend/demo/`). `main`'s is at

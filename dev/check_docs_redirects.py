@@ -122,10 +122,18 @@ def anchors(markdown: str) -> set[str]:
 
 
 def pages(content: Path) -> dict[str, set[str]]:
-    """Every page's address, and the anchors on it."""
+    """Every page's address, and the anchors on it.
+
+    The home page, `/`, is site code (`docsite/app/pages/index.vue`) and not a
+    file under `content/`, so it is added here. It is one page for every
+    version, and a link to it from anywhere lands.
+    """
     return {
-        route(path.relative_to(content)): anchors(path.read_text(encoding="utf-8"))
-        for path in sorted(content.rglob("*.md"))
+        "/": set(),
+        **{
+            route(path.relative_to(content)): anchors(path.read_text(encoding="utf-8"))
+            for path in sorted(content.rglob("*.md"))
+        },
     }
 
 

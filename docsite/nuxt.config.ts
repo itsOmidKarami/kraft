@@ -74,7 +74,8 @@ function forwardingPage(from: string, to: string): string {
 // which says the same. GitHub Pages serves this one file for a missing path
 // under / and under every other version alike, so it cannot know which docs
 // the reader wanted and links to all of them, at the addresses of the version
-// list, not this build's base. Styled inline, in the site's own colour tokens
+// list, not this build's base. A version's base redirects to the home, so each
+// link goes to that version's first docs page. Styled inline, in the site's own colour tokens
 // (entry.css is linked in the head), so it does not need the build's
 // utility classes.
 const missingPage = `<style>
@@ -95,7 +96,7 @@ const missingPage = `<style>
 <p class="code">404</p>
 <h1>No page at this address</h1>
 <p>It may have been renamed or moved.</p>
-<p class="links">${versions.map(v => `<a href="${v.base}">${v.name[0]!.toUpperCase()}${v.name.slice(1)}</a>`).join(' ')}</p>
+<p class="links">${versions.map(v => `<a href="${v.base}get-started/why-kraft">${v.name[0]!.toUpperCase()}${v.name.slice(1)}</a>`).join(' ')}</p>
 </main>
 </div>`
 
@@ -292,8 +293,10 @@ export default defineNuxtConfig({
       routes: ['/robots.txt', ...movedPages.map(([from]) => from)],
       // The version menu links to the same page in every other build, which
       // the crawler would take for one of this build's own pages and fail as
-      // a 404: a prefix match on each other version's base. The latest's is
-      // /, which would skip every page, so it is only ever matched exactly.
+      // a 404: a prefix match on each other version's base. The latest's is /,
+      // which would skip every page, and its root is no page to skip: every
+      // build has a page there (the home, or the redirect to it), and the docs
+      // logo links to it, so it is left to the crawler.
       // And no 200.html: it is the SPA fallback of a host that serves one for
       // a missing path, which GitHub Pages is not (it serves 404.html). There
       // it was only a "Page not found" page answering 200 at /kraft/200, open
@@ -303,7 +306,7 @@ export default defineNuxtConfig({
         /^\/demo(\/|$)/,
         new RegExp(`^${withBase('/demo')}(/|$)`),
         '/200.html',
-        ...versions.filter(v => v.id !== version).map(v => new RegExp(v.base === '/' ? '^/$' : `^${v.base}`)),
+        ...versions.filter(v => v.id !== version && v.base !== '/').map(v => new RegExp(`^${v.base}`)),
       ],
     },
   },

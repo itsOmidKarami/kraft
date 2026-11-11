@@ -5,7 +5,8 @@
 export default defineNuxtPlugin(() => {
   const base = useRuntimeConfig().app.baseURL.replace(/\/$/, '')
   const origin = useSiteConfig().url.replace(/\/$/, '')
-  // The home page comes through as the bare origin, with no trailing slash.
+  // The home page comes through as the bare origin, with no trailing slash. A
+  // link marked data-fixed (pages/index.vue's redirect) is already right.
   const fix = (url: unknown) => {
     if (url === origin) return `${origin}${base}/`
     return typeof url === 'string' && url.startsWith(`${origin}/`) && !url.startsWith(`${origin}${base}/`)
@@ -14,7 +15,7 @@ export default defineNuxtPlugin(() => {
   }
   injectHead().hooks.hook('tags:resolve', (ctx) => {
     for (const t of ctx.tags) {
-      if (t.tag === 'link' && t.props.rel === 'canonical') t.props.href = fix(t.props.href)
+      if (t.tag === 'link' && t.props.rel === 'canonical' && !('data-fixed' in t.props)) t.props.href = fix(t.props.href)
       if (t.tag === 'meta' && t.props.property === 'og:url') t.props.content = fix(t.props.content)
     }
   })

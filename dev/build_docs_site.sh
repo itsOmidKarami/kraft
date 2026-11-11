@@ -86,18 +86,6 @@ build_tag() { # ID BASE TAG DEST
   if git -C "$ROOT" cat-file -e "$3:docsite/public/diagrams" 2>/dev/null; then
     git -C "$ROOT" archive "$3" docsite/public/diagrams | tar -xf - -C "$w"
   fi
-  # A frozen major keeps the words its own components held: StageStrip draws
-  # the default chain's stage names, which a later release renames ("draft MR"
-  # became "draft PR"). A component that holds text a page shows goes in this
-  # list; the tag's copy replaces main's if the tag has one.
-  if [ "$1" != latest ]; then
-    for component in StageStrip; do
-      path=docsite/app/components/$component.vue
-      if git -C "$ROOT" cat-file -e "$3:$path" 2>/dev/null; then
-        git -C "$ROOT" show "$3:$path" >"$w/$path"
-      fi
-    done
-  fi
   ln -s "$ROOT/docsite/node_modules" "$w/docsite/node_modules"
   generate "$w/docsite" "$1" "$2" "$4"
 }

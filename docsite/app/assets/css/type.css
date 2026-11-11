@@ -1,5 +1,4 @@
-/* Kraft's type on every page: IBM Plex, the family the landing page and the
-   StageStrip chain already use, in place of the system font. Plex Sans is
+/* Kraft's type on every page: IBM Plex, in place of the system font. Plex Sans is
    the reading face (paragraphs, lists, the sidebar's pages); Plex Mono is
    what a reader types or looks up, and the names of things: code, the
    wordmark (AppHeaderLogo.vue), page titles and section headings, the
@@ -20,7 +19,7 @@
    still on a phone, where an h1 of 45 characters took three lines. Weight
    600 throughout: Plex Mono and Plex Sans are loaded up to 600, and bold
    (700) would be drawn as a smeared fake. Only on a docs page (docs-page:
-   layouts/docs.vue): the landing pages set their own titles (hero.css),
+   layouts/docs.vue): the home page sets its own titles (home.css),
    and the release docs' older landing page has a hero title these sizes
    would shrink. */
 main .docs-page h1 {
