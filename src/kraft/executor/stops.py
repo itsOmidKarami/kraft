@@ -114,9 +114,11 @@ def budget_breach(
 ) -> Breach | None:
     """The breached cap, or None. Evaluated fresh: it is a query, not a counter.
 
-    A breach refuses the *next* launch. It cannot stop a running agent — cost is
-    only known once that agent's session has exited (`usage.read_envelope`) — so
-    the overshoot is bounded by the cost of one task, not by the cap.
+    A breach refuses the *next* launch. It doesn't stop a running agent, which
+    Kraft lets finish -- until that session exits its cost is only an estimate
+    (`usage.read_envelope` has the agent's own figure) -- so the overshoot is
+    bounded by the cost of one task, not by the cap. A sliced family is the
+    exception: `caps.family_tick` pauses its running slices on a breach.
 
     `row` and `path` are the item and the scope launching (a task's path, or a
     node's for its escalation turn): every scope enclosing it that sets a

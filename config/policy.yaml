@@ -53,7 +53,8 @@ max_slices: 6
 # task; it does not stop one that is already running, which Kraft lets finish
 # (while it runs, its spend is only Kraft's estimate; the agent CLI reports the
 # real figure at exit). Overshoot is bounded by the cost of one task, not by
-# the cap.
+# the cap. A sliced item is the exception: once its family passes its cap, the
+# slices still running are paused.
 budget:
   work_item_usd: 10     # per work item, across every loop in its chain
   daily_usd: 50         # every work item on this instance, since local midnight
