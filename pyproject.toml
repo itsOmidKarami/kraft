@@ -48,10 +48,10 @@ dependencies = [
     # Config is modelled in pydantic and every entry point loads config --
     # `kraft mcp` and the CLI must not reach it through a web framework's
     # transitive dependency.
-    "pydantic>=2.9",
+    "pydantic>=2.14.3",
     "psutil>=6",
     "argcomplete>=3",
-    "fastapi>=0.141.1",
+    "fastapi>=0.162.2",
     "uvicorn>=0.54.0",
     "websockets>=15",
     "sqlite-vec>=0.1.9",
@@ -82,9 +82,9 @@ vector = ["fastembed>=0.8.1"]
 [dependency-groups]
 dev = [
     "pytest>=8",
-    "ruff>=0.16.9",  # keep .pre-commit-config.yaml rev in step
+    "ruff>=0.17.4",  # keep .pre-commit-config.yaml rev in step
     "pre-commit>=4",
-    "pytest-testmon>=2.2.0",
+    "pytest-testmon>=2.3.0",
     "pytest-xdist>=3.6",
     "pytest-cov>=6",
     # Test tooling, not a product dependency: without it a hung test produces a
@@ -99,7 +99,7 @@ dev = [
 kraft = "kraft.cli:main"
 
 [build-system]
-requires = ["setuptools>=84.0.0", "setuptools-scm>=10.3.4"]
+requires = ["setuptools>=84.2.1", "setuptools-scm>=10.3.4"]
 build-backend = "setuptools.build_meta"
 
 # The version is the git tag, so a release cannot ship a number nobody bumped.

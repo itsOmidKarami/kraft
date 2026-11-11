@@ -10,7 +10,7 @@ repos:
     # `just lint` agree on what is formatted.
     # Pinned by commit, not tag: a tag can be moved. `frozen:` names it;
     # update with `pre-commit autoupdate --freeze`, which keeps both.
-    rev: a56c0b927e6465d37cae3e97d35d4d18ab2b96cd  # frozen: v0.16.9
+    rev: c0f278f1254ccc8fb09676bcdb8d847e7db493e5  # frozen: v0.17.4
     hooks:
       - id: ruff
         args: [--fix]
