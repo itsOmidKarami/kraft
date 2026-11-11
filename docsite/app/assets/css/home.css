@@ -174,7 +174,7 @@
 }
 
 .home .k-hero h1 {
-  flex: 1 1 520px;
+  flex: 1 1 640px;
   min-width: 0;
   font-size: clamp(34px, 5.6vw, 72px);
   line-height: 1.02;
@@ -188,7 +188,7 @@
 }
 
 .home .k-hero p {
-  flex: 1 1 360px;
+  flex: 1 1 340px;
   min-width: 0;
   font-size: 18px;
   line-height: 1.55;

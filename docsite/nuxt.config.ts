@@ -78,6 +78,13 @@ function forwardingPage(from: string, to: string): string {
 // link goes to that version's first docs page. Styled inline, in the site's own colour tokens
 // (entry.css is linked in the head), so it does not need the build's
 // utility classes.
+// The first docs page of a version: where the 404's link to it goes.
+const docsStart = (v: DocsVersion) => `${v.base}get-started/why-kraft`
+// Whether this build has that page: an older release's content may not.
+const contentDir = fileURLToPath(new URL('./content', import.meta.url))
+const hasDocsStart = existsSync(contentDir) && readdirSync(contentDir)
+  .filter(dir => /^(\d+\.)?get-started$/.test(dir))
+  .some(dir => readdirSync(join(contentDir, dir)).some(file => /^(\d+\.)?why-kraft\.md$/.test(file)))
 const missingPage = `<style>
 .nf{box-sizing:border-box;min-height:100vh;padding:1.5rem;display:flex;flex-direction:column;background:var(--ui-bg,#fff);color:var(--ui-text,#334155);font-family:'IBM Plex Sans',system-ui,sans-serif}
 .nf a{color:var(--ui-primary,#7c3aed);text-underline-offset:4px}
@@ -96,7 +103,7 @@ const missingPage = `<style>
 <p class="code">404</p>
 <h1>No page at this address</h1>
 <p>It may have been renamed or moved.</p>
-<p class="links">${versions.map(v => `<a href="${v.base}get-started/why-kraft">${v.name[0]!.toUpperCase()}${v.name.slice(1)}</a>`).join(' ')}</p>
+<p class="links">${versions.map(v => `<a href="${docsStart(v)}">${v.name[0]!.toUpperCase()}${v.name.slice(1)}</a>`).join(' ')}</p>
 </main>
 </div>`
 
@@ -297,6 +304,12 @@ export default defineNuxtConfig({
       // which would skip every page, and its root is no page to skip: every
       // build has a page there (the home, or the redirect to it), and the docs
       // logo links to it, so it is left to the crawler.
+      // The 404 page links to every version's first docs page, and a build
+      // without that page (an older release) 404s on all of them for the
+      // crawler, its own included. Not when it has the page: the latest's
+      // address is then this build's own route as well (the crawler sees
+      // routes without the base), and ignoring it would drop the page. Given
+      // as the version list has it and again under this build's own base.
       // And no 200.html: it is the SPA fallback of a host that serves one for
       // a missing path, which GitHub Pages is not (it serves 404.html). There
       // it was only a "Page not found" page answering 200 at /kraft/200, open
@@ -307,6 +320,7 @@ export default defineNuxtConfig({
         new RegExp(`^${withBase('/demo')}(/|$)`),
         '/200.html',
         ...versions.filter(v => v.id !== version && v.base !== '/').map(v => new RegExp(`^${v.base}`)),
+        ...(hasDocsStart ? [] : versions.flatMap(v => [docsStart(v), withBase(docsStart(v))])),
       ],
     },
   },
