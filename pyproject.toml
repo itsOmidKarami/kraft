@@ -84,7 +84,7 @@ dev = [
     "pytest>=8",
     "ruff>=0.16.9",  # keep .pre-commit-config.yaml rev in step
     "pre-commit>=4",
-    "pytest-testmon>=2.2.0",
+    "pytest-testmon>=2.3.0",
     "pytest-xdist>=3.6",
     "pytest-cov>=6",
     # Test tooling, not a product dependency: without it a hung test produces a
