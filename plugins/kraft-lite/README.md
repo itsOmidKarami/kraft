@@ -44,6 +44,10 @@ Add `--scope project` to either command to keep it to one repo. Update with `cla
 | `/kraft-lite:run-slices` | Controller: builds the parts of a plan that stand alone as slices, one session each. |
 | `/kraft-lite:build-slice` | Child: builds one slice for its controller. |
 
+## What leaves your machine
+
+Kraft Lite has no telemetry and runs no server. The chain's merge-request steps push the branch with `git`, then open, check and merge the merge request with your own `gh` or `glab`, under your logins. The agent CLI running the session sends your code and prompts to its provider under your account. [Data and privacy](https://kraft-sdlc.dev/project/data-and-privacy) lists the same calls for Kraft.
+
 ## Learn more
 
 - [Kraft Lite guide](https://kraft-sdlc.dev/guides/kraft-lite): install on other harnesses, a first run, bindings and chain sources.

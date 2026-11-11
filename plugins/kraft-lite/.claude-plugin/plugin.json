@@ -10,6 +10,9 @@
   },
   "homepage": "https://kraft-sdlc.dev/guides/kraft-lite",
   "repository": "https://github.com/itsOmidKarami/kraft",
+  "documentationUrl": "https://kraft-sdlc.dev/guides/kraft-lite",
+  "supportUrl": "https://github.com/itsOmidKarami/kraft/issues",
+  "privacyPolicyUrl": "https://kraft-sdlc.dev/project/data-and-privacy",
   "skills": [
     "./skills"
   ]

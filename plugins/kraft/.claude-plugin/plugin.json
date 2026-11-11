@@ -10,6 +10,9 @@
   },
   "homepage": "https://kraft-sdlc.dev/guides/day-to-day/agent-integration",
   "repository": "https://github.com/itsOmidKarami/kraft",
+  "documentationUrl": "https://kraft-sdlc.dev",
+  "supportUrl": "https://github.com/itsOmidKarami/kraft/issues",
+  "privacyPolicyUrl": "https://kraft-sdlc.dev/project/data-and-privacy",
   "skills": [
     "./skills"
   ],
