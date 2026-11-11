@@ -198,7 +198,8 @@ const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'e
 
 const VERIFICATION = STEPS.findIndex(x => x.label === 'verification')
 
-function initial(): PlayerState {
+// The paused item before it starts: what the server renders.
+export function initialState(): PlayerState {
   return { step: -1, decisions: 0, note: false, noteText: '', noteFrom: '', hands: false, paused: false, sentBack: false, press: '', sub: 0, log: [], just: -1 }
 }
 
@@ -351,7 +352,7 @@ export function view(s: PlayerState): PlayerView {
 
 export function createPlayer(opts: PlayerOptions): Player {
   const { timers, onChange, transition } = opts
-  let state = initial()
+  let state = initialState()
   let timer: number | undefined
   let disposed = false
   // Bumped by every go(), so a transition that applies late, after another
