@@ -265,13 +265,13 @@ const completed = (b: ItemBundle, node: string) => b.events.some((e) => e.type =
 const ENDED_STATUSES = ["completed", "abandoned"];
 type Row = [path: string, insertions: number, deletions: number, ...flags: string[]];
 const late = (f: Row) => f.slice(3).includes("late");
+/** Whether a repair of verification's fix loop has finished: the one task that commits inside verification. */
+const repaired = (b: ItemBundle) => b.sessions.some((s) => s.hook_point === "verification.fix_loop.main.repair" && s.status === "done");
 /** What the item has committed: a task's file once the next task started (Kraft commits after every task), all the
- *  implementation's files once it completed, and verification's round's once a repair of its fix loop finished or
- *  verification completed. */
+ *  implementation's files once it completed, and verification's round's once a repair of its fix loop finished. */
 const committed = (b: ItemBundle): Row[] => {
   const files = b.content!.files as Row[];
-  const repaired = b.sessions.some((s) => s.hook_point === "verification.fix_loop.main.repair" && s.status === "done");
-  if (completed(b, "implementation")) return files.filter((f) => !late(f) || repaired || completed(b, "verification"));
+  if (completed(b, "implementation")) return files.filter((f) => !late(f) || repaired(b));
   const started = Math.max(0, ...b.events.filter((e) => e.type === "plan_progress" && e.payload.node_id === "implementation").map((e) => Number(e.payload.task)));
   return files.filter((f) => !late(f)).slice(0, Math.max(0, started - 1));
 };
@@ -351,6 +351,12 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
       return ok ? null : b.item.title;
     }));
     expect(wrong.filter(Boolean)).toEqual([]);
+  });
+  // Only verification's repair commits inside verification: a row whose round never repaired has no file it added.
+  it.runIf(sample)("a board row lists a file verification's round added only where a repair of its ran", () => {
+    const rows = board.filter((b) => (b.content!.files as Row[]).some(late));
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.filter((b) => !b.sessions.some((s) => s.hook_point === "verification.fix_loop.main.repair")).map((b) => b.item.bead_id)).toEqual([]);
   });
   it("a docs item changes docs only, in its table and in the diff it serves", async () => {
     const docs = board.filter((b) => b.item.repo.endsWith("/kraft-docs") || b.item.chain_template === "docs_only");
@@ -664,6 +670,13 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
         const lateNamed = (b.content!.files as Row[]).filter(late).some(([p]) => a.body.content.includes(p));
         if (/\(\+\d+ −\d+\)/.test(a.body.content) !== kind.endsWith("brief") || (!kind.endsWith("brief") && lateNamed)) wrong.push(`${b.item.title}: ${kind}`);
       }
+      // A brief or a merge request, written after the implementation, lists the files its diff shows: no file the round
+      // added unless a repair landed it.
+      const shows = new Set(committed(b).map(([p]) => p));
+      for (const kind of ["work_brief", "review_brief", "mr_meta"]) {
+        const a = await call(`/work-items/${b.item.id}/artifacts/${kind}`);
+        if (a.status === 200 && [...a.body.content.matchAll(/^- `([^`]+)` \(\+\d+ −\d+\)$/gm)].some((m) => !shows.has(m[1]))) wrong.push(`${b.item.title}: ${kind} lists a file its diff lacks`);
+      }
       for (const d of (S.docs[b.item.id] ?? []).filter((x) => x.kind === "sessions" && (["spec", "plan"].includes(x.node_id) || String(x.hook_point).endsWith(".auto_review")))) {
         if ((await call(`/documents/${d.document_id}`)).body.content.includes("the plan names")) wrong.push(`${b.item.title}: ${d.title}`);
       }
@@ -902,36 +915,65 @@ const byNode = (b: ItemBundle) => {
 const strayMrs = (S: Scenario) => [...S.ngBoard, ...S.ngArchived].map((id) => S.bundles[id]).filter((b) => b.item.mr_ref).flatMap((b) => b.sessions.filter((s) => !agentic(b, s)).flatMap((s) =>
   logOf(b, s).filter((l) => (l.text.match(MR_URL) ?? []).some((u: string) => u !== b.item.mr_ref.url)).map((l) => `${b.item.title}: ${l.text}`)));
 
+/** A walk read after every tick, until it has filed an item of its own and walked it through CI (the first it files,
+ *  whose first round of tests fails and is repaired): what each rule found wrong at any tick, and how many ticks met the
+ *  state each rule is about. Built once. */
+type Ticked = { wrong: Record<string, Set<string>>; met: Record<string, number>; ciDone: boolean };
+let ticked: Promise<Ticked> | null = null;
+const tickWalk = (): Promise<Ticked> => (ticked ??= (async () => {
+  vi.useFakeTimers();
+  try {
+    const S = buildScenario("default");
+    let at = Date.parse(NG_NOW);
+    const T = transitions(S, { now: () => new Date(at).toISOString() });
+    const serve = mockServer(S, demoOptions);
+    const get = async (path: string) => JSON.parse(((await serve({ method: "GET", url: `http://demo/api${path}`, json: () => null })) as Answer).body!);
+    for (const id of S.ngBoard) if (S.bundles[id].item.pending_gate) T.approve(id, S.bundles[id].item.pending_gate);
+    const m = motion(S, T, { random: () => 0 });
+    const wrong: Ticked["wrong"] = { mrs: new Set(), late: new Set() };
+    const met: Ticked["met"] = { waited: 0, repairing: 0, landed: 0 };
+    const ciDone = () => S.ngBoard.some((id) => FRESH_TITLES.includes(S.bundles[id].item.title) && completed(S.bundles[id], "merge_request_feedback"));
+    for (let k = 0; k < 400 && !ciDone(); k++) {
+      at += 8_000;
+      vi.advanceTimersByTime(8_000);
+      for (const id of S.ngBoard) {
+        const b = S.bundles[id];
+        if (b.item.pending_gate && b.events.at(-1)?.type === "gate_auto_review_skipped") T.approve(id, b.item.pending_gate);
+        if (b.item.status === "waiting" && b.sessions.some((s) => s.status === "waiting" && logOf(b, s).some((l) => l.text.match(MR_URL)))) met.waited++;
+      }
+      for (const x of strayMrs(S)) wrong.mrs.add(x);
+      // Verification's round lands its files and its fix commit with a repair's end, not before: none while its repair
+      // runs, and none on an item that has had no repair at all.
+      for (const id of [...S.ngBoard, ...S.ngArchived]) {
+        const b = S.bundles[id];
+        if (!b.content || b.item.worktree_exists === false) continue;
+        const d = (await get(`/work-items/${id}/diff`)).landed;
+        const lateNames = (b.content.files as Row[]).filter(late).map(([p]) => p);
+        const shown = d.files.some((f: any) => lateNames.includes(f.path)) || d.commits.some((c: string) => c.endsWith(" Fix what verification found"));
+        if (b.sessions.some((s) => s.hook_point === "verification.fix_loop.main.repair" && s.status !== "done")) met.repairing++;
+        if (shown && repaired(b)) met.landed++;
+        if (shown && !repaired(b)) wrong.late.add(`${b.item.title} at tick ${k}`);
+      }
+    }
+    m.stop();
+    return { wrong, met, ciDone: ciDone() };
+  } finally {
+    vi.useRealTimers();
+  }
+})());
+
 // A log is rewritten as its session goes on (made, waiting, ended), so the end state alone misses one that named another
 // item's merge request on the way: the board is read after every tick of a walk.
-describe("a forge task's log names its own item's merge request at every tick of the walk", () => {
-  it("on the board, tick after tick, until the walk has filed and walked an item of its own through CI", () => {
-    vi.useFakeTimers();
-    try {
-      const S = buildScenario("default");
-      let at = Date.parse(NG_NOW);
-      const T = transitions(S, { now: () => new Date(at).toISOString() });
-      for (const id of S.ngBoard) if (S.bundles[id].item.pending_gate) T.approve(id, S.bundles[id].item.pending_gate);
-      const m = motion(S, T, { random: () => 0 });
-      const wrong = new Set<string>();
-      let waited = 0;
-      const ciDone = () => S.ngBoard.some((id) => FRESH_TITLES.includes(S.bundles[id].item.title) && completed(S.bundles[id], "merge_request_feedback"));
-      for (let k = 0; k < 400 && !ciDone(); k++) {
-        at += 8_000;
-        vi.advanceTimersByTime(8_000);
-        for (const id of S.ngBoard) {
-          const b = S.bundles[id];
-          if (b.item.pending_gate && b.events.at(-1)?.type === "gate_auto_review_skipped") T.approve(id, b.item.pending_gate);
-          if (b.item.status === "waiting" && b.sessions.some((s) => s.status === "waiting" && logOf(b, s).some((l) => l.text.match(MR_URL)))) waited++;
-        }
-        for (const x of strayMrs(S)) wrong.add(x);
-      }
-      m.stop();
-      expect([ciDone(), waited > 0]).toEqual([true, true]);
-      expect([...wrong]).toEqual([]);
-    } finally {
-      vi.useRealTimers();
-    }
+describe("at every tick of the walk", () => {
+  it("a forge task's log names its own item's merge request, until the walk has filed and walked an item of its own through CI", async () => {
+    const { wrong, met, ciDone } = await tickWalk();
+    expect([ciDone, met.waited > 0]).toEqual([true, true]);
+    expect([...wrong.mrs]).toEqual([]);
+  });
+  it("an item's diff shows verification's late files and fix commit only once a repair of its has finished", async () => {
+    const { wrong, met } = await tickWalk();
+    expect([met.repairing > 0, met.landed > 0]).toEqual([true, true]);
+    expect([...wrong.late]).toEqual([]);
   });
 });
 

@@ -30,7 +30,7 @@ const statusOf = (f: File) => (f.slice(3).includes("new") ? "new" : f.slice(3).i
  *  walk gives an item it has no entry for (`transitions.mrOpened`). */
 export const CONTENT: Record<string, Content> = {
   "kraft-cb59": { mr: 142, description: "Search re-embeds every candidate document on every query, so a large repository waits two to four seconds for each search. Cache the embeddings keyed by each document's content hash, drop an entry when reindex sees a new hash, and keep the cache to a fixed size. The search API stays as it is.",
-    files: [["plugins/search/cache.py", 86, 0, "new"], ["plugins/search/reindex.py", 22, 9], ["plugins/search/embed.py", 14, 11], ["plugins/search/config.py", 6, 0], ["tests/test_cache.py", 74, 0, "new"], ["tests/test_reindex.py", 18, 3, "late"], ["docs/search.md", 12, 2]],
+    files: [["plugins/search/cache.py", 86, 0, "new"], ["plugins/search/reindex.py", 22, 9], ["plugins/search/embed.py", 14, 11], ["plugins/search/config.py", 6, 0], ["tests/test_cache.py", 74, 0, "new"], ["docs/search.md", 12, 2]],
     // The new module the review's threads quote (ngItems.ts, needs-gate): a lookup by the document's content hash, and a
     // store that evicts the least recently used entry past the size bound.
     hunks: { "plugins/search/cache.py": { at: 1, rows: [
@@ -41,14 +41,14 @@ export const CONTENT: Record<string, Content> = {
       "    def store(self, doc, embedding):", "        self._cache[doc.content_hash] = embedding", "        if len(self._cache) > self._size:", "            self._cache.popitem(last=False)",
     ].map((l) => `+${l}`) } } },
   "kraft-7d21": { mr: 132, description: "test_retry_after_crash fails about one run in twenty on CI: it sleeps for a fixed 50 ms and expects the pool to have replaced the crashed worker by then. Wait on the pool's restart event instead of a timer, and give the pool a hook the test can await.",
-    files: [["kraft/workers/pool.py", 18, 6], ["kraft/workers/events.py", 9, 0], ["tests/workers/test_pool.py", 23, 17], ["tests/workers/conftest.py", 11, 2, "late"]] },
+    files: [["kraft/workers/pool.py", 18, 6], ["kraft/workers/events.py", 9, 0], ["tests/workers/test_pool.py", 23, 17]] },
   "kraft-a3f0": { mr: 129, description: "Clients of the public API cannot tell how close they are to the rate limit until a request fails with 429. Send X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset on every response, read from the limiter that already counts requests.",
     question: "The limiter counts requests per worker process, so X-RateLimit-Remaining would be one worker's count, not the client's. Count per client in the shared store, which the plan left out, or send the per-worker numbers and say so on the docs page?",
     files: [["kraft_api/middleware/ratelimit.py", 41, 7], ["kraft_api/limiter.py", 16, 3], ["kraft_api/app.py", 4, 1], ["tests/test_ratelimit_headers.py", 58, 0, "new"], ["docs/api/rate-limits.md", 19, 2], ["tests/test_limiter.py", 9, 2, "late"]] },
   "kraft-58e2": { mr: 121, description: "The config loader still calls the old parse_obj and validator APIs, which warn on every start and are on their way out. Move each model to model_validate and field_validator, keep the error messages the CLI prints today, and drop the compatibility shim.",
-    files: [["kraft/config/loader.py", 48, 39], ["kraft/config/models.py", 72, 66], ["kraft/config/compat.py", 0, 41, "deleted"], ["tests/config/test_loader.py", 27, 14], ["pyproject.toml", 1, 1], ["tests/config/test_errors.py", 12, 5, "late"]] },
+    files: [["kraft/config/loader.py", 48, 39], ["kraft/config/models.py", 72, 66], ["kraft/config/compat.py", 0, 41, "deleted"], ["tests/config/test_loader.py", 27, 14], ["pyproject.toml", 1, 1]] },
   "kraft-b108": { mr: 125, description: "A burst of forge calls in a busy hour gets 429 Too Many Requests, and the task fails on the first one. Retry a 429 after the Retry-After the forge sends, up to three times, and fail with the forge's own message after that.",
-    files: [["kraft_api/forge/client.py", 37, 8], ["kraft_api/forge/retry.py", 44, 0, "new"], ["kraft_api/forge/errors.py", 7, 1], ["tests/forge/test_retry.py", 66, 0, "new"], ["tests/forge/test_client.py", 12, 4, "late"]] },
+    files: [["kraft_api/forge/client.py", 37, 8], ["kraft_api/forge/retry.py", 44, 0, "new"], ["kraft_api/forge/errors.py", 7, 1], ["tests/forge/test_retry.py", 66, 0, "new"]] },
   "kraft-4e19": { mr: 123, description: "The docs chain's review prompts repeat the house style guide in full, so each review spends most of its context on rules it already has. Point the prompts at the style guide instead of copying it, and cut each one to what a docs review checks.",
     files: [["docs/chains/docs-review.md", 14, 52], ["docs/chains/prompts/style-check.md", 9, 31], ["docs/chains/prompts/links-check.md", 6, 18], ["docs/style/README.md", 4, 0]] },
   "kraft-91bc": { mr: 140, description: "The extension still reads the board with the old schema, so it shows no slices and misreads a stop's facts. Move its types and its board client to the current schema, and keep reading an older server's answers.",
@@ -62,31 +62,31 @@ export const CONTENT: Record<string, Content> = {
   "kraft-3a90": { mr: 112, description: "Collect what changed since the last release into its notes: the new board filters, the forge retry and the removed poller flags. Each entry says what a person sees, and links the page that explains it.",
     files: [["docs/releases/latest.md", 61, 0, "new"], ["docs/releases/index.md", 3, 0], ["docs/guides/board.md", 4, 1]] },
   "kraft-1b6e": { mr: 104, description: "The --legacy-poller and --poll-interval flags have done nothing since the poller moved into the server, but the CLI still accepts them and its help still lists them. Remove both, say so once when a script passes them, and drop the code that read them.",
-    files: [["kraft/cli/admin.py", 6, 31], ["kraft/cli/flags.py", 9, 22], ["kraft/poller/settings.py", 0, 18, "deleted"], ["tests/cli/test_flags.py", 19, 27], ["docs/cli.md", 2, 9], ["tests/cli/test_admin.py", 4, 11, "late"]] },
+    files: [["kraft/cli/admin.py", 6, 31], ["kraft/cli/flags.py", 9, 22], ["kraft/poller/settings.py", 0, 18, "deleted"], ["tests/cli/test_flags.py", 19, 27], ["docs/cli.md", 2, 9]] },
   "kraft-88ca": { mr: 96, description: "The harness profiles are called deep, strong and fast, which says how hard each thinks but not which model runs. Name each after its model, keep the old names working as aliases, and update the library that names them.",
     files: [["kraft/harness/profiles.py", 24, 19], ["kraft/harness/aliases.py", 18, 0, "new"], ["config/library.yaml", 7, 7], ["tests/harness/test_profiles.py", 21, 9], ["tests/harness/test_aliases.py", 14, 0, "late", "new"]] },
   "kraft-c2d9": { mr: 92, description: "The docs site is light only, and its code blocks glare at night beside the dark dashboard. Add a dark theme that follows the reader's system setting, with a toggle that remembers their choice.",
     files: [["docs/assets/theme.css", 88, 4], ["docs/assets/toggle.js", 31, 0, "new"], ["docs/_layouts/page.html", 6, 1], ["docs/contributing/site.md", 9, 0]] },
   "kraft-0e7a": { mr: 87, description: "The extension takes whatever schema the SDK ships, so an SDK update can change what it reads without anyone noticing. Pin the schema the extension was built against, check it on start, and say plainly when the server answers with another.",
-    files: [["src/sdk/pin.ts", 26, 0, "new"], ["src/sdk/check.ts", 34, 0, "new"], ["src/extension.ts", 9, 3], ["src/test/pin.test.ts", 41, 0, "new"], ["package.json", 3, 1], ["src/test/check.test.ts", 12, 2, "late"]] },
+    files: [["src/sdk/pin.ts", 26, 0, "new"], ["src/sdk/check.ts", 34, 0, "new"], ["src/extension.ts", 9, 3], ["src/test/pin.test.ts", 41, 0, "new"], ["package.json", 3, 1]] },
   "kraft-6fb3": { mr: 83, description: "The intake poller runs inside the API process, so a slow forge call holds up requests and a restart of the API drops a poll halfway. Run the poller as its own process with its own health check, and have the API only read what it wrote.",
-    files: [["kraft_api/intake/poller.py", 31, 54], ["kraft_api/intake/worker.py", 72, 0, "new"], ["kraft_api/app.py", 3, 19], ["kraft_api/health.py", 14, 2], ["deploy/intake.service", 18, 0, "new"], ["tests/intake/test_worker.py", 58, 0, "new"], ["tests/intake/test_poller.py", 9, 24, "late"]] },
+    files: [["kraft_api/intake/poller.py", 31, 54], ["kraft_api/intake/worker.py", 72, 0, "new"], ["kraft_api/app.py", 3, 19], ["kraft_api/health.py", 14, 2], ["deploy/intake.service", 18, 0, "new"], ["tests/intake/test_worker.py", 58, 0, "new"]] },
   "kraft-41d8": { mr: 79, description: "kraft view logs -n 20 prints 19 lines when the log ends with a newline, because the tail counts the empty string after the last one. Count lines, not separators, and cover both endings in the tests.",
-    files: [["kraft/logs/tail.py", 5, 3], ["tests/logs/test_tail.py", 22, 1], ["tests/logs/test_tail_cli.py", 9, 0, "late", "new"]] },
+    files: [["kraft/logs/tail.py", 5, 3], ["tests/logs/test_tail.py", 22, 1]] },
   "kraft-7c40": { mr: 144, description: "Review threads hold most of the reasoning about a change, but search never sees them. Index each thread's comments as a document of its item when the thread changes, and drop them when the item is abandoned.",
     files: [["kraft_api/index/threads.py", 49, 0, "new"], ["kraft_api/index/service.py", 12, 2], ["kraft_api/routes/threads.py", 6, 1], ["tests/index/test_threads.py", 53, 0, "new"], ["tests/index/test_service.py", 8, 1, "late"]] },
   "kraft-b2e7": { mr: 138, description: "The console shows a worker's log only once its session ends. Follow the log while the session runs, in a pane that keeps up with the agent and holds its place when you scroll back.",
     files: [["kraft/console/log_pane.py", 64, 12], ["kraft/console/app.py", 8, 2], ["kraft/logs/follow.py", 33, 0, "new"], ["tests/console/test_log_pane.py", 44, 0, "new"], ["tests/console/test_app.py", 6, 1, "late"]] },
   "kraft-e3c1": { mr: 134, description: "In a checkout used in place, the search plugin rebuilds its index into a temp folder on every run and throws it away. Keep the index in the checkout's own .kraft folder, reuse it while the commit it was built from is unchanged, and rebuild only what moved.",
-    files: [["plugins/search/index_store.py", 47, 9], ["plugins/search/plugin.py", 11, 4], ["plugins/search/staleness.py", 29, 0, "new"], ["tests/search/test_index_store.py", 52, 0, "new"], ["tests/search/test_staleness.py", 13, 0, "late", "new"]] },
+    files: [["plugins/search/index_store.py", 47, 9], ["plugins/search/plugin.py", 11, 4], ["plugins/search/staleness.py", 29, 0, "new"], ["tests/search/test_index_store.py", 52, 0, "new"]] },
   "kraft-6a2f": { mr: 146, description: "The extension's settings are listed in the order they were added, three of them say almost the same thing, and two have no description. Group them, merge the duplicates, and give every setting a line that says what it changes.",
     files: [["package.json", 46, 38], ["src/settings.ts", 21, 14], ["src/migrateSettings.ts", 27, 0, "new"], ["src/test/settings.test.ts", 18, 4], ["README.md", 9, 6, "late"]] },
   "kraft-9a02": { mr: 72, description: "The default chain's prompts grew a paragraph at every fix, and the implementer's now repeats what its skill already says. Cut each prompt back to what its task needs, and move the shared rules into one steering file.",
-    files: [["plugins/chains/default/prompts.yaml", 18, 64], ["plugins/chains/steering/shared.md", 27, 0, "new"], ["plugins/chains/default/chain.yaml", 3, 3], ["tests/chains/test_prompts.py", 12, 4], ["tests/chains/test_steering.py", 7, 0, "late", "new"]] },
+    files: [["plugins/chains/default/prompts.yaml", 18, 64], ["plugins/chains/steering/shared.md", 27, 0, "new"], ["plugins/chains/default/chain.yaml", 3, 3], ["tests/chains/test_prompts.py", 12, 4]] },
   "kraft-d7e4": { mr: 64, description: "kraft admin reload rereads the library, policy.yaml and intake.yaml without a restart, but the docs mention it only in passing. Give it a section in the CLI reference that says what it rereads, what it leaves alone, and when to restart instead.",
     files: [["docs/cli/admin.md", 34, 1], ["docs/guides/configuration.md", 6, 2], ["docs/cli/index.md", 1, 0]] },
   "kraft-5c31": { mr: 61, description: "The webhook sender still builds the v0 payload beside the current one for receivers that asked for it, and none has in months. Remove the v0 builder and its setting, and refuse a subscription that still names it with a message that says what to send instead.",
-    files: [["kraft_api/webhooks/payloads.py", 4, 61], ["kraft_api/webhooks/subscribe.py", 11, 6], ["kraft_api/settings.py", 0, 7, "deleted"], ["tests/webhooks/test_payloads.py", 6, 48], ["tests/webhooks/test_subscribe.py", 15, 2, "late"]] },
+    files: [["kraft_api/webhooks/payloads.py", 4, 61], ["kraft_api/webhooks/subscribe.py", 11, 6], ["kraft_api/settings.py", 0, 7, "deleted"], ["tests/webhooks/test_payloads.py", 6, 48]] },
 };
 
 /** By title: what live motion refiles (motion.ts FRESH_TITLES), so a walked item has a story of its own too, in the repo
@@ -125,16 +125,19 @@ export const planTasks = (c: Content) => [...c.files.filter((f) => !isLate(f)).m
 export const planOf = (frozen: string, content?: Content): string[] => (!frozen.includes('"produces":"plan"') ? [] : content ? planTasks(content) : [...PLAN]);
 
 const done = (b: ItemBundle, node: string) => b.events.some((e) => e.type === "node_completed" && e.payload.node_id === node);
-/** Whether verification's round has landed what it added: a repair of its fix loop has finished, or the node completed. */
-const fixed = (b: ItemBundle) => done(b, "verification") || b.sessions.some((s) => s.hook_point === REPAIR && s.status === "done");
+/** Whether verification's round has landed what it added: a repair of its fix loop has finished. Only the repair commits
+ *  inside verification (`config/library.yaml`): its test scopes are a builtin and its code review reads only. */
+const fixed = (b: ItemBundle) => b.sessions.some((s) => s.hook_point === REPAIR && s.status === "done");
+/** The item's files as far as it has gone: the plan's, and the ones verification's round added once a repair finished.
+ *  What its diff shows at its end, and what a brief or merge request written after its implementation lists. */
+export const itemFiles = (b: ItemBundle): File[] => b.content!.files.filter((f) => !isLate(f) || fixed(b));
 /** The files the item has committed so far, path-sorted as `git diff --numstat` lists them: none before its first plan
- *  task, then each task's file once the implementer has started the next (Kraft commits after every task), all of the
- *  implementation's once it completed, and the files verification's round added once a repair finished or it completed
- *  (`review.read_change` reads `base..HEAD`). */
+ *  task, then each task's file once the implementer has started the next (Kraft commits after every task), and all of
+ *  `itemFiles` once the implementation completed (`review.read_change` reads `base..HEAD`). */
 export function changedFiles(b: ItemBundle): File[] {
   const files = b.content!.files;
   let out: File[];
-  if (done(b, "implementation")) out = files.filter((f) => !isLate(f) || fixed(b));
+  if (done(b, "implementation")) out = itemFiles(b);
   else {
     const started = Math.max(0, ...b.events.filter((e) => e.type === "plan_progress" && e.payload.node_id === "implementation").map((e) => Number(e.payload.task)));
     out = files.filter((f) => !isLate(f)).slice(0, Math.max(0, started - 1));
@@ -327,16 +330,18 @@ export function docBody(b: ItemBundle, d: { kind: string; hook_point?: string | 
   const [first, ...rest] = c.description.split(/(?<=\.) /);
   const files = c.files;
   const docsOnly = files.every(([p]) => p.startsWith("docs/") || p.endsWith(".md"));
-  const counted = files.map(([p, i, dl]) => `- \`${p}\` (+${i} −${dl})`).join("\n");
+  // A brief or a merge request is written after the implementation: it lists what the item's diff shows.
+  const landed = itemFiles(b);
+  const counted = landed.map(([p, i, dl]) => `- \`${p}\` (+${i} −${dl})`).join("\n");
   const paths = files.filter((f) => !isLate(f)).map(([p]) => `- \`${p}\``).join("\n");
-  const top = [...files].sort((x, y) => y[1] + y[2] - x[1] - x[2])[0];
+  const top = [...landed].sort((x, y) => y[1] + y[2] - x[1] - x[2])[0];
   const check = docsOnly ? "The site builds, and every link on a changed page resolves." : "The repo's tests pass, the new behaviour has a test of its own, and the linter is clean.";
   switch (d.kind) {
     case "specs": return `# ${gateTitle(b, "spec")}\n\n## Problem\n\n${first}\n\n## Change\n\n${rest.join(" ") || first}\n\n## Touches\n\n${paths}\n\n## Done when\n\n- ${check}\n`;
     case "plans": return `# ${gateTitle(b, "plan")}\n\n${first}\n\n${planTasks(c).map((task, k) => `### Task ${k + 1}: ${task}`).join("\n\n")}\n\n${check}\n`;
     case "chain_revisions": return `# ${gateTitle(b, "chain_revision")}\n\n${first}\n\n## Nodes\n\nThe rest of the chain fits the approved spec and plan, so it stays as it is.\n\n- Implementation covers what the plan names:\n\n${paths}\n\n- ${docsOnly ? "There is no verification node: the docs check runs in the merge request's CI." : "Verification runs the repo's tests and the docs check."}\n`;
     case "work_briefs": return `# ${gateTitle(b, "work_brief")}\n\n## What changed\n\n${c.description}\n\n## Files\n\n${counted}\n\n## How it was checked\n\n- ${check}\n`;
-    case "review_briefs": return `# ${gateTitle(b, "review_brief")}\n\n## Read first\n\n\`${top[0]}\`, the largest change (+${top[1]} −${top[2]}).\n\n## Summary\n\n${c.description}\n\n## Risk\n\n- ${first}\n- Nothing outside the ${files.length} files below changed.\n\n${counted}\n`;
+    case "review_briefs": return `# ${gateTitle(b, "review_brief")}\n\n## Read first\n\n\`${top[0]}\`, the largest change (+${top[1]} −${top[2]}).\n\n## Summary\n\n${c.description}\n\n## Risk\n\n- ${first}\n- Nothing outside the ${landed.length} files below changed.\n\n${counted}\n`;
     case "mr_metas": {
       const label = docsOnly ? "documentation" : /^(Fix|Retry)\b/.test(it.title) ? "bug" : "enhancement";
       return `---\ntitle: ${it.title}\nlabels: [${label}]\nassignees: []\nreviewers: []\n---\n\n${c.description}\n\n## Changes\n\n${counted}\n\n## How it was checked\n\n${check}\n\nCloses ${it.bead_id ?? it.id}.\n`;
