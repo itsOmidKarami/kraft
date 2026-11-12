@@ -1,6 +1,6 @@
 import { LIVE_SESSION_STATUSES } from "../../../src/types/vocab.generated";
 import type { ItemBundle, Scenario } from "./fixtures";
-import { MODEL } from "./taskKinds";
+import { isAgentSession, MODEL, nodeTasks } from "./taskKinds";
 import { pendingRewind, sinceFork, threadSummary, type Transitions } from "./transitions";
 
 /**
@@ -103,23 +103,16 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
   const skipped = (b: ItemBundle) => sinceFork(b.events).filter((e) => e.type === "scope_skipped").map((e) => String(e.payload.path));
   const under = (path: string, scope: string) => path === scope || path.startsWith(`${scope}.`);
 
-  /** A node's tasks in order, each kinded as the frozen chain kinds it (no frozen chain: every task an agent's),
+  /** A node's tasks in order, each kinded as the frozen chain kinds it (`taskKinds.ts`; no frozen chain: every task an agent's),
    *  less those a scope skip passed over. */
   const tasksOf = (b: ItemBundle, node: any): Task[] => {
-    let frozen: any = null;
-    try { frozen = b.item.materialized_chain ? JSON.parse(b.item.materialized_chain) : null; } catch { /* none: all agents' */ }
-    const own = frozen?.chain?.nodes?.find((n: any) => n.id === node.id);
-    const all: Task[] = own
-      ? (own.steps ?? []).flatMap((st: any) => (st.tasks ?? []).map((t: any) => ({ path: `${node.id}.${st.id}.${t.id}`, agent: t.kind === "agent" })))
-      : (node.tasks ?? []).map((path: string) => ({ path, agent: true }));
+    const own = b.item.materialized_chain ? nodeTasks(b.item.materialized_chain, node.id) : null;
+    const all: Task[] = own ? own.map((t) => ({ path: t.path, agent: t.kind === "agent" })) : (node.tasks ?? []).map((path: string) => ({ path, agent: true }));
     const gone = skipped(b);
     return all.filter((t) => !gone.some((g) => under(t.path, g)));
   };
-  /** Whether a session's task is an agent's; one the frozen chain does not name (a steer's on a never-run node) is. */
-  const isAgent = (b: ItemBundle, s: any) => {
-    const node = (b.item.chain_definition?.nodes ?? []).find((n: any) => n.id === s.node_id);
-    return tasksOf(b, node ?? { id: s.node_id }).find((t) => t.path === s.hook_point)?.agent ?? true;
-  };
+  /** Whether a session's task is an agent's (`isAgentSession`: one the frozen chain does not name, a steer's on a never-run node, is). */
+  const isAgent = (b: ItemBundle, s: any) => isAgentSession(b.item.materialized_chain, s.hook_point, !!s.model);
 
   /** `store.approval_stands`: the newest gate event naming this gate is its approval, and nothing since sent the
    *  chain back at or before it -- a rejection re-entering at its `node`, or a rewind to its `target` not cancelled

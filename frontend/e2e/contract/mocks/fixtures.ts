@@ -28,7 +28,7 @@ import { buildNgBoard } from "./ngBoard";
 import type { EventType } from "../../../src/types/vocab.generated";
 import type { GateRound } from "../../../src/types";
 import { buildNgItem, NG_NOW, NG_SCENARIOS } from "./ngItems";
-import { isAgentSession, RUNS } from "./taskKinds";
+import { isAgentSession, MODEL, runOutput } from "./taskKinds";
 
 /* ── ids & time ──────────────────────────────────────────────────────────── */
 
@@ -211,12 +211,10 @@ export function logLines(sessionId: string, n: number, long: boolean): any[] {
   return out;
 }
 
-/** The log of a task that is no agent's: the command it ran, then what that printed, as stdout. Nothing in it is a
+/** The log of a task that is no agent's: the command it ran, then what that printed so far, as stdout. Nothing in it is a
  *  tool call or a sub-agent's line, so no sub-agent is listed for it (`subagentList`). */
 export function commandLog(task: string, status: string, mr = "https://github.com/acme/kraft-plugins/pull/142"): any[] {
-  const run = RUNS[task];
-  const text = run ? [...(run.command ? [run.command] : []), ...run.output(mr, status)] : [`${task} ${status}`];
-  return text.map((line, i) => ({ n: i + 1, t: t((i + 1) / 10), src: "stdout", text: line }));
+  return runOutput(task, status, mr).map((text, i) => ({ n: i + 1, t: t((i + 1) / 10), src: "stdout", text }));
 }
 
 /** A session's log by what ran it: an agent's lines, or a command's output. */
@@ -989,8 +987,10 @@ export const withReviewer = (S: Scenario) => {
   b.item.materialized_chain = JSON.stringify(chain);
   const from = b.sessions.find((s: any) => s.node_id === "verification" && s.status === "done") ?? b.sessions[0];
   const sid = "a0".repeat(16);
-  b.sessions.push({ ...from, id: sid, node_id: "final_review", hook_point: "final_review.auto_review", status: "done", attempt: 1, round: 0, session_summary_ref: null });
-  b.logs[sid] = b.logs[from.id];
+  // An agent's session, whichever task the row it borrows its ids and times from was: a reviewer is one.
+  b.sessions.push({ ...from, id: sid, node_id: "final_review", hook_point: "final_review.auto_review", status: "done", attempt: 1, round: 0, session_summary_ref: null,
+    model: MODEL, harness: "claude", command: null, tokens_in: 8_400, tokens_out: 1_300, cost_usd: 0.12, wall_ms: 90_000 });
+  b.logs[sid] = logLines(sid, 12, false);
   const seq = Math.max(...b.events.map((e: any) => e.seq));
   b.events.push({ seq: seq + 1, work_item_id: b.item.id, type: "worker_session_exited", payload: { session_id: sid, node_id: "final_review", status: "done" }, node_id: "final_review", created_at: b.events[b.events.length - 1].created_at });
 };

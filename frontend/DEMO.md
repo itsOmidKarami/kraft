@@ -69,7 +69,8 @@ after a response changes. `demo/sampleCoverage.test.ts` fails when no sample
 item shows a display status or stop kind. `demo/coherence.test.ts` fails when
 a session carries what its task cannot: only an agent's session has a harness,
 a model, usage, a summary and sub-agents, and a builtin, subprocess or forge
-task's has its command's output instead. It reads each item's frozen chain for
-the kind, on the sample data and on the sessions the doors make (live motion
-makes its through the same doors); `mocks/taskKinds.ts` is where the mock
-decides it.
+task's has its command's output instead. It checks the sample, its long and
+many variants and the seeds that add sessions, then the sessions the doors
+make. Each item's frozen chain says what a task is; `mocks/taskKinds.ts` reads
+it for the sample items that have one, the doors and live motion, and the
+older sample items, which have none, say it by their model.

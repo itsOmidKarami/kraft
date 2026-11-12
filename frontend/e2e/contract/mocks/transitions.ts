@@ -1,5 +1,5 @@
 import { FAILURE_STOP_KINDS, LIVE_SESSION_STATUSES, WORK_ITEM_TRAITS, type DisplayStatus, type EventType, type SessionStatus, type StopKind, type WorkItemStatus } from "../../../src/types/vocab.generated";
-import { documentsFor, gateRoundsOf, hex, logLines, serverKeys, sessionLog, type ItemBundle, type Scenario } from "./fixtures";
+import { commandLog, documentsFor, gateRoundsOf, hex, logLines, serverKeys, sessionLog, type ItemBundle, type Scenario } from "./fixtures";
 import { ngDryRun } from "./ngBoard";
 import { RESUME_PROMPT } from "./poller";
 import { buildNeverStarted } from "./ngItems";
@@ -599,7 +599,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
         harness: agent ? "claude" : null, command: RUNS[task]?.command ?? null,
         created_at: now(), started_at: now(), exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null,
       });
-      b.logs[sid] = sessionLog(agent, task, sid, 12, false);
+      b.logs[sid] = sessionLog(agent, task, sid, 12, false, "running");
       append(id, "worker_session_created", { session_id: sid, node_id: node, hook_point: hookPoint, round: 0, attempt, thread: 1 });
       settle(it);
       return ok({ id, session_id: sid });
@@ -639,6 +639,8 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       if (summary) s.session_summary_ref = summary;
       if (!usage) {
         Object.assign(s, { status: "done", exited_at: at, wall_ms });
+        // A command's log has grown to all of its output by the time it ends.
+        if (!isAgentSession(it.materialized_chain, s.hook_point, !!s.model)) b.logs[sid] = commandLog(String(s.hook_point).split(".").at(-1)!, "done");
         append(id, "worker_session_exited", { session_id: sid, status: "done", wall_ms });
         settle(it);
         return ok({ id, session_id: sid });

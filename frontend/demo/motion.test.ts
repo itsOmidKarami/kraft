@@ -181,6 +181,17 @@ describe("after the visitor", () => {
     expect(types(ticks(1, id))).toEqual(["worker_session_exited", "node_completed", "node_started", "worker_session_created", "worker_session_started"]);
   });
 
+  it("a steered resume of an item never started is an agent's attempt: it starts, then ends with usage", async () => {
+    const { S, ticks, call } = started();
+    const id = board(S, NEVER_STARTED);
+    await call("POST", `/work-items/${id}/resume`, { steer: "keep it to one file" });
+    const queued = S.bundles[id].sessions.at(-1)!;
+    expect(queued).toMatchObject({ status: "pending", harness: "claude" });
+    expect(types(ticks(1, id))).toContain("worker_session_started");
+    const exit = ticks(1, id).find(([type]) => type === "worker_session_exited");
+    expect(exit?.[1]).toMatchObject({ session_id: queued.id, model: "claude-sonnet-5-5", tokens_in: 28_000 });
+  });
+
   it("Start on an item never started reads 0 of N, and runs its first node", async () => {
     const { S, ticks, call } = started();
     const id = board(S, NEVER_STARTED);
