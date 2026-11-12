@@ -12,7 +12,7 @@
 /** The model a mocked agent session runs on. */
 export const MODEL = "claude-sonnet-5-5";
 
-type FrozenTask = { id: string; kind?: string };
+type FrozenTask = { id: string; kind?: string; ref?: string | null; target?: string | null };
 type FrozenStep = { id: string; tasks?: FrozenTask[] | null };
 /** The shapes a frozen chain has (`kraft.templates`): a node lists `steps`, or its `tasks` directly (step `main`); an exec node
  *  may carry a fix loop and failure handlers of the same two shapes, a gate its reviewer, a group the nodes it holds. */
@@ -23,7 +23,7 @@ type FrozenNode = {
   auto_review?: FrozenTask | null;
 };
 
-let last: { frozen: string; kinds: Map<string, string>; own: Map<string, { path: string; kind: string }[]> } | null = null;
+let last: { frozen: string; kinds: Map<string, string>; runs: Map<string, string>; own: Map<string, { path: string; kind: string }[]> } | null = null;
 
 /** Each task's kind by hook point, and each node's own tasks in order: `<node>.<step>.<task>` (step `main` for a node that lists
  *  its tasks), `<node>.fix_loop.<step>.<task>` and `<node>.fix_loop.judge`, `<node>.on_failure.<step>.<task>`, a gate's
@@ -33,11 +33,17 @@ let last: { frozen: string; kinds: Map<string, string>; own: Map<string, { path:
 function read(frozen: string) {
   if (last?.frozen === frozen) return last;
   const kinds = new Map<string, string>();
+  const runs = new Map<string, string>();
   const own = new Map<string, { path: string; kind: string }[]>();
   const homes = (prefix: string, h: { steps?: FrozenStep[] | null; tasks?: FrozenTask[] | null }) => {
     const out: { path: string; kind: string }[] = [];
-    for (const st of h.steps ?? []) for (const t of st.tasks ?? []) out.push({ path: `${prefix}.${st.id}.${t.id}`, kind: t.kind ?? "agent" });
-    for (const t of h.tasks ?? []) out.push({ path: `${prefix}.main.${t.id}`, kind: t.kind ?? "agent" });
+    const add = (path: string, t: FrozenTask) => {
+      out.push({ path, kind: t.kind ?? "agent" });
+      const what = t.ref ?? t.target;
+      if (what) runs.set(path, what);
+    };
+    for (const st of h.steps ?? []) for (const t of st.tasks ?? []) add(`${prefix}.${st.id}.${t.id}`, t);
+    for (const t of h.tasks ?? []) add(`${prefix}.main.${t.id}`, t);
     for (const t of out) kinds.set(t.path, t.kind);
     return out;
   };
@@ -55,7 +61,7 @@ function read(frozen: string) {
     }
   };
   walk(JSON.parse(frozen)?.chain?.nodes ?? [], "");
-  last = { frozen, kinds, own };
+  last = { frozen, kinds, runs, own };
   return last;
 }
 
@@ -80,50 +86,83 @@ export function isAgentSession(frozen: string | null | undefined, hookPoint: str
   return kind !== null ? kind === "agent" : frozen ? true : hasModel;
 }
 
-/** What a non-agent task ran, by its id: the command (a test or lint run; a rebase or a forge call has none), how long it takes,
- *  and what it prints once done, once failed, and while it runs. `mr` is the merge request the forge tasks talk about. */
-type Run = { command?: string; wall_ms: number; done: (mr: string) => string[]; failed?: (mr: string) => string[]; partial?: (mr: string) => string[] };
+/** What the task at `hookPoint` runs, as its frozen task names it: a builtin's `ref` (`kraft.mr_rebase`), a forge task's
+ *  `target` (`mr.ci`). Null for an agent's task, and where the chain does not name the task. `RUNS` is keyed by it, so two
+ *  tasks that share an id (`external_approval.main.await`, `post_merge_ci.main.await`) print each its own. */
+export function taskRun(frozen: string | null | undefined, hookPoint: string): string | null {
+  return frozen ? read(frozen).runs.get(hookPoint) ?? null : null;
+}
+
+/** What a non-agent task ran, by what runs (`taskRun`): the command (a test run; a rebase or a forge call has none), how long it
+ *  takes, and what it prints once done, once failed, and while it runs. `mr` is the merge request the forge tasks talk about. */
+export type Run = { command?: string; wall_ms: number; done: (mr: string) => string[]; failed?: (mr: string) => string[]; partial?: (mr: string) => string[] };
 export const RUNS: Record<string, Run> = {
-  unit_tests: {
+  // The changed-test-scope runner: one session per scope command it picked, this one the repo's tests (`test_command`).
+  "kraft.verify_changed_test_scopes": {
     command: "uv run pytest -q", wall_ms: 210_000,
     done: () => ["........................................................ [ 48%]", "........................................................ [ 97%]", "...                                                      [100%]", "148 passed in 207.31s (0:03:27)"],
-    failed: () => ["........F...................................................... [ 48%]", "FAILED tests/test_fix_loop.py::test_fix_loop_carries_findings - AssertionError", "1 failed, 147 passed in 204.18s (0:03:24)"],
+    failed: () => ["........F...................................................... [ 48%]", "FAILED tests/test_cache.py::test_cache_evicts_oldest - AssertionError", "1 failed, 147 passed in 204.18s (0:03:24)"],
     partial: () => ["........................................................ [ 48%]"],
   },
-  lint: {
-    command: "uv run ruff check .", wall_ms: 24_000,
-    done: () => ["All checks passed!"],
-    failed: () => ["src/kraft/executor/fix_loop.py:4:8: F401 `Optional` imported but unused", "Found 1 error."],
-  },
-  typecheck: {
-    command: "uv run pyright", wall_ms: 41_000,
-    done: () => ["0 errors, 0 warnings, 0 informations"],
-    failed: () => ["src/kraft/executor/fix_loop.py:88:12 - error: Argument of type None cannot be assigned to parameter plan", "1 error, 0 warnings, 0 informations"],
-  },
-  rebase: {
+  "kraft.mr_rebase": {
     wall_ms: 600,
     done: () => ["nothing to rebase"],
     failed: () => ["CONFLICT (content): Merge conflict in search/cache.py", "CONFLICT (content): Merge conflict in search/reindex.py", "error: could not apply 4d1e2f3... Cache embeddings by content hash", "git rebase failed: resolve the conflicts, then retry"],
   },
-  open_draft: {
+  "mr.open_draft": {
     wall_ms: 8_000,
     done: (mr) => [`opened ${mr}`],
     failed: () => ["error: 403 Forbidden: the token lacks merge_request:write"],
   },
-  mr_checks: {
+  // One session that goes `waiting` poll after poll: its wall time is every poll's.
+  "mr.ci": {
     wall_ms: 480_000,
     done: (mr) => [`pipeline success: ${mr}`, ...["lint", "test (python 3.12)", "docs"].map((c) => `  ${c}: SUCCESS`)],
     failed: (mr) => [`pipeline failed: ${mr}`, "  lint: SUCCESS", "  test (python 3.12): FAILED", "  docs: SUCCESS"],
     partial: (mr) => [`pipeline pending: ${mr}`, ...["lint", "test (python 3.12)", "docs"].map((c) => `  ${c}: PENDING`)],
   },
-  release: { wall_ms: 3_000, done: (mr) => [`merged ${mr}`] },
+  "mr.automated_review": { wall_ms: 200, done: () => ["automated review: no reviewer configured; nothing to collect"] },
+  "mr.sync": { wall_ms: 3_000, done: (mr) => [`synced the description of ${mr}`] },
+  "mr.mark_ready": { wall_ms: 2_000, done: (mr) => [`marked ${mr} ready for review`] },
+  "mr.external_approval": { wall_ms: 1_000, done: (mr) => [`${mr}: approved`] },
+  "mr.merge": { wall_ms: 9_000, done: (mr) => [`merged ${mr}`] },
+  "mr.post_merge_ci": {
+    wall_ms: 780_000,
+    done: () => ["pipeline on main: success", ...["lint", "test (python 3.12)", "docs"].map((c) => `  ${c}: SUCCESS`)],
+    partial: () => ["pipeline on main: pending", ...["lint", "test (python 3.12)", "docs"].map((c) => `  ${c}: PENDING`)],
+  },
+};
+/** The other scope command a changed-test-scope pass runs in the sample: a docs check, beside the repo's tests. */
+export const DOCS_SCOPE: Run = {
+  command: "npx markdownlint-cli2 \"docs/**/*.md\"", wall_ms: 31_000,
+  done: () => ["Linting: 42 file(s)", "Summary: 0 error(s)"],
+  failed: () => ["Linting: 42 file(s)", "docs/search.md:12 MD040/fenced-code-language Fenced code blocks should have a language specified", "Summary: 1 error(s)"],
 };
 
-/** What `task` has printed when its session is in `status`: the command line, then its output so far, all of it once it is done, the
- *  failing run's once it failed. A task `RUNS` does not list says its status. */
-export function runOutput(task: string, status: string, mr: string): string[] {
-  const run = RUNS[task];
-  if (!run) return [`${task} ${status}`];
-  const lines = status === "failed" ? run.failed?.(mr) ?? run.done(mr) : status === "done" || status === "done_with_concerns" ? run.done(mr) : run.partial?.(mr) ?? [];
-  return [...(run.command ? [run.command] : []), ...lines];
+/** What `run` has printed when its session is in `status`: the command line, then its output so far, all of it once it is
+ *  done, the failing run's once it failed. With no run (`label` is then what to call it), the session says its status. */
+export function runOutput(run: Run | string | null | undefined, status: string, mr: string, label = String(run)): string[] {
+  const r = typeof run === "string" ? RUNS[run] : run;
+  if (!r) return [`${label} ${status}`];
+  const lines = status === "failed" ? r.failed?.(mr) ?? r.done(mr) : status === "done" || status === "done_with_concerns" ? r.done(mr) : r.partial?.(mr) ?? [];
+  return [...(r.command ? [r.command] : []), ...lines];
 }
+
+/** How long an agent's task typically runs and what it costs, by hook point (a real server's, rounded): `wall_s`, `cost_usd`,
+ *  `tokens_out`. `tokens_in` is small, the rest of the prompt is cache. A task this does not list runs a minute for $0.30. */
+export const AGENT_RUNS: Record<string, { wall_s: number; cost_usd: number; tokens_out: number }> = {
+  "spec.main.author": { wall_s: 95, cost_usd: 0.6, tokens_out: 9_800 },
+  "plan.main.author": { wall_s: 280, cost_usd: 2.1, tokens_out: 41_000 },
+  "chain_revision.main.revise": { wall_s: 25, cost_usd: 0.29, tokens_out: 1_900 },
+  "implementation.main.implement": { wall_s: 840, cost_usd: 2.6, tokens_out: 88_000 },
+  "verification.review.code_review": { wall_s: 60, cost_usd: 0.4, tokens_out: 4_600 },
+  "verification.fix_loop.main.repair": { wall_s: 240, cost_usd: 0.4, tokens_out: 12_000 },
+  "verification.fix_loop.judge": { wall_s: 60, cost_usd: 0.26, tokens_out: 2_100 },
+  "work_brief.main.author": { wall_s: 55, cost_usd: 0.31, tokens_out: 3_900 },
+  "describe_merge_request.main.author": { wall_s: 100, cost_usd: 0.38, tokens_out: 5_200 },
+  "work_item_summary.main.author": { wall_s: 65, cost_usd: 0.33, tokens_out: 4_400 },
+  escalation: { wall_s: 360, cost_usd: 1.1, tokens_out: 21_000 },
+};
+/** A gate's reviewer (`<gate>.auto_review`) typically. */
+export const REVIEWER_RUN = { wall_s: 75, cost_usd: 0.3, tokens_out: 2_800 };
+export const agentRun = (hookPoint: string) => AGENT_RUNS[hookPoint] ?? (hookPoint.endsWith(".auto_review") ? REVIEWER_RUN : { wall_s: 60, cost_usd: 0.3, tokens_out: 3_000 });

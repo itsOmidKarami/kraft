@@ -1,6 +1,6 @@
 import { LIVE_SESSION_STATUSES } from "../../../src/types/vocab.generated";
 import type { ItemBundle, Scenario } from "./fixtures";
-import { isAgentSession, MODEL, nodeTasks } from "./taskKinds";
+import { isAgentSession, MODEL, nodeTasks, taskRun } from "./taskKinds";
 import { pendingRewind, sinceFork, threadSummary, type Transitions } from "./transitions";
 
 /**
@@ -218,7 +218,7 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
     if (live.length) {
       for (const s of live) {
         // The forge's draft task opens the merge request (`forge.run`), recorded as it ends.
-        if (String(s.hook_point).split(".")[2] === "open_draft") T.mrOpened(id, node);
+        if (taskRun(b.item.materialized_chain, s.hook_point) === "mr.open_draft") T.mrOpened(id, node);
         T.sessionExited(id, s.id, isAgent(b, s) ? usage() : null);
       }
       T.completeNode(id, node);

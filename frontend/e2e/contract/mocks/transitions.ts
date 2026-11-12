@@ -1,9 +1,10 @@
 import { FAILURE_STOP_KINDS, LIVE_SESSION_STATUSES, WORK_ITEM_TRAITS, type DisplayStatus, type EventType, type SessionStatus, type StopKind, type WorkItemStatus } from "../../../src/types/vocab.generated";
 import { commandLog, documentsFor, gateRoundsOf, hex, logLines, serverKeys, sessionLog, type ItemBundle, type Scenario } from "./fixtures";
 import { ngDryRun } from "./ngBoard";
+import { chainOf, frozenOf } from "./ngChain";
 import { RESUME_PROMPT } from "./poller";
 import { buildNeverStarted } from "./ngItems";
-import { isAgentSession, MODEL, RUNS } from "./taskKinds";
+import { isAgentSession, MODEL, RUNS, taskRun } from "./taskKinds";
 
 /**
  * The work item's transitions, as the server makes them: what each door changes, the event row it appends
@@ -321,7 +322,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
         b.sessions.push({
           id: sessionId(), work_item_id: id, node_id: node, hook_point: hook, status: "pending",
           attempt: (last?.attempt ?? 0) + 1, round: last?.round ?? 0, thread: 1, model: last?.model ?? null, head_sha: last?.head_sha ?? null,
-          harness: isAgentSession(it.materialized_chain, hook, !!last?.model) ? "claude" : null, command: RUNS[hook.split(".").at(-1)!]?.command ?? null,
+          harness: isAgentSession(it.materialized_chain, hook, !!last?.model) ? "claude" : null, command: last?.command ?? RUNS[taskRun(it.materialized_chain, hook) ?? ""]?.command ?? null,
           created_at: now(), started_at: null, exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null,
         });
       }
@@ -542,14 +543,12 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       const b = clone(blank);
       const chain = body.chain_template ?? "default";
       const nodes = clone((dry.body as { nodes: any[] }).nodes);
-      const keep = new Set(nodes.map((n) => n.id));
-      const frozen = JSON.parse(b.item.materialized_chain);
-      frozen.chain.nodes = frozen.chain.nodes.filter((n: any) => keep.has(n.id));
       const at = now();
       Object.assign(b.item, {
         id, title: String(body.title).trim(), description: String(body.description ?? "").trim() || null, repo: body.repo ?? b.item.repo,
         chain_template: chain, chain_definition: { template_id: chain, nodes }, effective_chain: { template_id: chain, nodes: clone(nodes) },
-        materialized_chain: JSON.stringify(frozen), bead_id: null, status: body.autostart ? "active" : "paused",
+        // Its template's frozen chain, to the nodes the dry run kept; a chain that extends default (team-default) freezes default's.
+        materialized_chain: frozenOf(chainOf(chain) ? chain : "default", nodes.map((n) => n.id)), bead_id: null, status: body.autostart ? "active" : "paused",
         // Started, it begins at its first node, as a resume of a never-started item does.
         current_node_id: body.autostart ? nodes[0]?.id ?? null : null,
         attachments: body.attachments ?? [], created_at: at,
@@ -604,10 +603,10 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       const agent = isAgentSession(it.materialized_chain, hookPoint);
       b.sessions.push({
         id: sid, work_item_id: id, node_id: node, hook_point: hookPoint, status: "pending", attempt, round: 0, thread: 1, model: null, head_sha: it.head_sha ?? null,
-        harness: agent ? "claude" : null, command: RUNS[task]?.command ?? null,
+        harness: agent ? "claude" : null, command: RUNS[taskRun(it.materialized_chain, hookPoint) ?? ""]?.command ?? null,
         created_at: now(), started_at: now(), exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null,
       });
-      b.logs[sid] = sessionLog(agent, task, sid, 12, false, "running");
+      b.logs[sid] = sessionLog(agent, taskRun(it.materialized_chain, hookPoint), sid, 12, false, "running", task);
       append(id, "worker_session_created", { session_id: sid, node_id: node, hook_point: hookPoint, round: 0, attempt, thread: 1 });
       settle(it);
       return ok({ id, session_id: sid });
@@ -648,7 +647,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       if (!usage) {
         Object.assign(s, { status: "done", exited_at: at, wall_ms });
         // A command's log has grown to all of its output by the time it ends.
-        if (!isAgentSession(it.materialized_chain, s.hook_point, !!s.model)) b.logs[sid] = commandLog(String(s.hook_point).split(".").at(-1)!, "done");
+        if (!isAgentSession(it.materialized_chain, s.hook_point, !!s.model)) b.logs[sid] = commandLog(taskRun(it.materialized_chain, s.hook_point), "done", String(s.hook_point).split(".").at(-1)!);
         append(id, "worker_session_exited", { session_id: sid, status: "done", wall_ms });
         settle(it);
         return ok({ id, session_id: sid });

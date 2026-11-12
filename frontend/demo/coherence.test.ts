@@ -1,7 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { buildScenario, withReviewer, withScopes, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
-import { isAgentSession, MODEL, nodeTasks, RUNS, runOutput, taskKind } from "../e2e/contract/mocks/taskKinds";
+import { buildScenario, withScopes, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
+import { frozenOf } from "../e2e/contract/mocks/ngChain";
+import { isAgentSession, MODEL, nodeTasks, RUNS, runOutput, taskKind, taskRun } from "../e2e/contract/mocks/taskKinds";
 import { transitions } from "../e2e/contract/mocks/transitions";
 
 /**
@@ -14,14 +15,26 @@ import { transitions } from "../e2e/contract/mocks/transitions";
 const kindsOf = (b: ItemBundle) => {
   const out = new Map<string, string>();
   const chain = b.item.materialized_chain ? JSON.parse(b.item.materialized_chain).chain : { nodes: [] };
+  /** A home of tasks: its steps' (`<prefix>.<step>.<task>`) and those it lists directly (step `main`). */
+  const home = (prefix: string, h: any) => {
+    for (const st of h?.steps ?? []) for (const t of st.tasks ?? []) out.set(`${prefix}.${st.id}.${t.id}`, t.kind ?? "agent");
+    for (const t of h?.tasks ?? []) out.set(`${prefix}.main.${t.id}`, t.kind ?? "agent");
+  };
   for (const n of chain.nodes) {
-    for (const st of n.steps ?? []) for (const t of st.tasks) out.set(`${n.id}.${st.id}.${t.id}`, t.kind);
+    home(n.id, n);
+    if (n.fix_loop) home(`${n.id}.fix_loop`, n.fix_loop);
+    if (n.fix_loop?.judge) out.set(`${n.id}.fix_loop.judge`, n.fix_loop.judge.kind ?? "agent");
+    if (n.on_failure) home(`${n.id}.on_failure`, n.on_failure);
     if (n.auto_review) out.set(`${n.id}.auto_review`, n.auto_review.kind);
   }
   return out;
 };
 /** An escalation turn is an agent's, and so is a task the chain names as one; the older samples carry no chain, and say by their model. */
 const agentic = (b: ItemBundle, s: any) => s.hook_point === "escalation" || (kindsOf(b).get(s.hook_point) ?? (s.model ? "agent" : "")) === "agent";
+/** The one agent's task that can finish with no agent: review feedback's triage with no bot feedback to read (`dispatch`). */
+const TRIAGE = "merge_request_feedback.review_feedback.triage";
+const noAgentTriage = (b: ItemBundle, s: any) =>
+  s.hook_point === TRIAGE && s.status === "done" && s.model == null && s.cost_usd == null && logOf(b, s).map((l) => l.text).join("\n") === "no bot feedback collected; no agent started";
 const logOf = (b: ItemBundle, s: any): any[] => b.logs[s.id] ?? [];
 const lastSegment = (hook: string) => hook.split(".").at(-1)!;
 /** `rule` is a way a session can be wrong; the bundles' offenders, readably, so a failure names the item and task. */
@@ -32,7 +45,7 @@ const seeded = (seed: (S: Scenario) => void) => { const S = buildScenario("defau
 const SCENARIOS: [string, () => Scenario][] = [
   ["the default sample", () => buildScenario("default")],
   ["the long variant", () => buildScenario("long")],
-  ["a gate's reviewer", () => seeded(withReviewer)],
+  ["the many variant", () => buildScenario("many")],
   ["test scopes", () => seeded(withScopes)],
 ];
 
@@ -48,11 +61,51 @@ describe.each(SCENARIOS)("sessions in %s", (_scenario, build) => {
     ["a command's finished session reports how long it took", (b, s) => !agentic(b, s) && ["done", "failed"].includes(s.status) && !(s.wall_ms > 0)],
     ["a test or lint run has the command it ran", (_b, s) => ["unit_tests", "lint", "typecheck"].includes(lastSegment(s.hook_point)) && !s.command],
     ["an agent's session reports the claude harness", (b, s) => agentic(b, s) && s.harness !== "claude"],
-    ["an agent's finished session reports its model and usage", (b, s) => agentic(b, s) && ["done", "done_with_concerns"].includes(s.status) && (s.model == null || s.tokens_in == null || s.cost_usd == null)],
-    ["an agent's log has its own lines", (b, s) => agentic(b, s) && !logOf(b, s).some((l) => l.src === "agent")],
+    ["an agent's finished session reports its model and usage", (b, s) => agentic(b, s) && !noAgentTriage(b, s) && ["done", "done_with_concerns"].includes(s.status) && (s.model == null || s.tokens_in == null || s.cost_usd == null)],
+    ["an agent's log has its own lines", (b, s) => agentic(b, s) && !noAgentTriage(b, s) && !logOf(b, s).some((l) => l.src === "agent")],
     ["a board item's agents run the mock's model", (b, s) => onTheBoard.has(b.item.id) && agentic(b, s) && s.model != null && s.model !== MODEL],
   ])("%s", (_rule, rule) => {
     expect(offenders(S, rule)).toEqual([]);
+  });
+});
+
+/** The nodes each template's chain has: what a real server freezes for `default` and `quick-task`, and the board's own `docs_only`. */
+const CHAIN_NODES: Record<string, string[]> = {
+  default: ["spec", "spec_approval", "plan", "plan_approval", "chain_revision", "chain_revision_approval", "implementation", "verification", "work_brief", "local_review",
+    "describe_merge_request", "draft_merge_request", "merge_request_feedback", "work_item_summary", "final_review", "mark_ready", "external_approval", "merge", "post_merge_ci"],
+  "quick-task": ["implementation", "verify"],
+  docs_only: ["spec", "spec_approval", "implementation", "work_brief", "draft_merge_request"],
+};
+/** The items that run a frozen chain (the older samples carry none). */
+const chained = (S: Scenario) => Object.values(S.bundles).filter((b) => b.item.materialized_chain);
+const defIds = (b: ItemBundle): string[] => (b.item.chain_definition?.nodes ?? []).map((n: any) => n.id);
+const frozenIds = (b: ItemBundle): string[] => JSON.parse(b.item.materialized_chain).chain.nodes.map((n: any) => n.id);
+const cost = (b: ItemBundle) => b.sessions.reduce((a, s) => a + (s.cost_usd ?? 0), 0);
+
+describe.each(SCENARIOS)("items in %s", (_scenario, build) => {
+  const S = build();
+  it.each<[string, (b: ItemBundle) => unknown]>([
+    // Each rule answers what is wrong with the item, or nothing.
+    ["every session's hook point is a task of the item's frozen chain, or an escalation turn",
+      (b) => b.sessions.filter((s) => s.hook_point !== "escalation" && !kindsOf(b).has(s.hook_point)).map((s) => s.hook_point)],
+    ["every session's node is a node of the item's chain", (b) => b.sessions.filter((s) => !defIds(b).includes(s.node_id)).map((s) => s.node_id)],
+    ["its chain is its template's, in its definition and its frozen chain",
+      (b) => [defIds(b), frozenIds(b)].some((ids) => JSON.stringify(ids) !== JSON.stringify(CHAIN_NODES[b.item.chain_template])) && b.item.chain_template],
+    ["the node it stands on is in its chain", (b) => b.item.current_node_id != null && !defIds(b).includes(b.item.current_node_id) && b.item.current_node_id],
+    ["its summary counts its chain's nodes", (b) => b.item.summary.nodes_total !== defIds(b).length && b.item.summary.nodes_total],
+    // To the cent the UI shows: a tweak that scales costs rounds each one.
+    ["what it spent is what its sessions cost", (b) => Math.abs(b.item.budget_cap.spent_usd - cost(b)) >= 0.005 && [b.item.budget_cap.spent_usd, cost(b)]],
+    ["a completed item stands on its last node", (b) => b.item.status === "completed" && b.item.current_node_id !== defIds(b).at(-1) && b.item.current_node_id],
+    ["its events never go back in time", (b) => b.events.some((e, k) => k > 0 && Date.parse(e.created_at) < Date.parse(b.events[k - 1].created_at)) && "out of order"],
+    ["every session was created by an event", (b) => b.sessions.filter((s) => !b.events.some((e) => e.type === "worker_session_created" && e.payload.session_id === s.id)).map((s) => s.hook_point)],
+  ])("%s", (_rule, wrong) => {
+    const found = chained(S).map((b) => [b.item.title, wrong(b)] as const).filter(([, w]) => (Array.isArray(w) ? w.length > 0 : !!w));
+    expect(found).toEqual([]);
+  });
+
+  it("no two board items share a title", () => {
+    const titles = [...S.ngBoard, ...S.ngArchived].map((id) => S.bundles[id].item.title);
+    expect(titles.filter((x, k) => titles.indexOf(x) !== k)).toEqual([]);
   });
 });
 
@@ -68,15 +121,19 @@ const pausedWithout = (S: Scenario, drop: string[]) => {
   b.sessions = b.sessions.filter((s) => !drop.includes(lastSegment(s.hook_point)));
   return b;
 };
-/** What the sample's own session at `hook` says, to hold a door's session to: the task's command and the output it ends with. */
-const sampleAt = (b: ItemBundle, hook: string, not: string) => b.sessions.find((s) => s.hook_point === hook && s.id !== not)!;
+/** What the sample's own session at `hook` says, to hold a door's session to: the task's command and the output it ends with,
+ *  from a finished run of the first command it ran there (a changed-test-scope task runs one session per scope command). */
+const sampleAt = (b: ItemBundle, hook: string, not: string) => {
+  const first = b.sessions.find((s) => s.hook_point === hook && s.id !== not)!;
+  return b.sessions.find((s) => s.hook_point === hook && s.id !== not && s.status === "done" && s.command === first.command)!;
+};
 
 describe("sessions the doors make", () => {
   it("a command's task gets a command's session: its command, no usage, and its output grown to all of it", () => {
     const { S, T } = live();
     const id = S.ng.running;
     const b = S.bundles[id];
-    const hook = "verification.test.unit_tests";
+    const hook = "verification.tests.test_changed_scopes";
     const sid = T.createSession(id, "verification", hook).body.session_id;
     const s = () => b.sessions.find((x) => x.id === sid)!;
     const sample = sampleAt(b, hook, sid);
@@ -95,7 +152,7 @@ describe("sessions the doors make", () => {
     const { S, T } = live();
     const id = S.ng.running;
     const b = S.bundles[id];
-    const sid = T.createSession(id, "work_brief", "work_brief.write.work_brief").body.session_id;
+    const sid = T.createSession(id, "work_brief", "work_brief.main.author").body.session_id;
     const s = () => b.sessions.find((x) => x.id === sid)!;
     expect(s()).toMatchObject({ harness: "claude", model: null, tokens_in: null, cost_usd: null });
     expect(logOf(b, s()).some((l) => l.src === "agent")).toBe(true);
@@ -106,7 +163,7 @@ describe("sessions the doors make", () => {
 
   it.each<[string, (S: Scenario) => ItemBundle]>([
     ["a forge call", (S) => S.bundles[S.ng.failed]],
-    ["a test command, which has a command line", (S) => pausedWithout(S, ["lint", "typecheck", "security_scan", "code_review"])],
+    ["a test command, which has a command line", (S) => pausedWithout(S, ["code_review"])],
   ])("an escalation turn is an agent's, though the last session was %s", (_name, pick) => {
     const { S, T } = live();
     const b = pick(S);
@@ -121,7 +178,7 @@ describe("sessions the doors make", () => {
 
   it.each<[string, (S: Scenario) => ItemBundle, "agent" | "command"]>([
     ["an agent's task", (S) => S.bundles[S.ng.paused], "agent"],
-    ["a test command's task", (S) => pausedWithout(S, ["code_review", "typecheck", "security_scan"]), "command"],
+    ["a test command's task", (S) => pausedWithout(S, ["code_review"]), "command"],
     ["a node never started, with no session to copy", (S) => S.bundles[byBead(S, "kraft-f5d3")], "agent"],
   ])("a steered attempt of %s is that task's own kind", (_name, pick, kind) => {
     const { S, T } = live();
@@ -177,6 +234,25 @@ describe("taskKind, and what a real frozen chain holds", () => {
     ["a node the chain lacks", "release", null],
   ])("nodeTasks: %s", (_name, node, paths) => {
     expect(nodeTasks(REAL, node)?.map((t) => t.path) ?? null).toEqual(paths);
+  });
+
+  const SHIPPED = frozenOf("default");
+  it.each([
+    ["a builtin's ref", "verification.tests.test_changed_scopes", "kraft.verify_changed_test_scopes"],
+    ["a forge task's target", "draft_merge_request.open.open", "mr.open_draft"],
+    ["two tasks that share an id run each its own: external_approval's await", "external_approval.main.await", "mr.external_approval"],
+    ["and post_merge_ci's", "post_merge_ci.main.await", "mr.post_merge_ci"],
+    ["a fix loop's forge step", "merge_request_feedback.fix_loop.sync.sync", "mr.sync"],
+    ["an agent's task runs nothing", "implementation.main.implement", null],
+  ])("taskRun on the shipped chain: %s", (_name, hook, run) => {
+    expect(taskRun(SHIPPED, hook)).toBe(run);
+  });
+  it("every builtin and forge task of the shipped chains prints what it ran", () => {
+    for (const template of ["default", "quick-task"]) {
+      const frozen = frozenOf(template);
+      const missing = [...kindsOf({ item: { materialized_chain: frozen } } as ItemBundle)].filter(([, kind]) => kind !== "agent").map(([hook]) => hook).filter((hook) => !RUNS[taskRun(frozen, hook) ?? ""]);
+      expect(missing).toEqual([]);
+    }
   });
 
   it.each([

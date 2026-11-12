@@ -28,7 +28,7 @@ import { buildNgBoard } from "./ngBoard";
 import type { EventType } from "../../../src/types/vocab.generated";
 import type { GateRound } from "../../../src/types";
 import { buildNgItem, NG_NOW, NG_SCENARIOS } from "./ngItems";
-import { isAgentSession, MODEL, runOutput } from "./taskKinds";
+import { isAgentSession, runOutput, type Run } from "./taskKinds";
 
 /* ── ids & time ──────────────────────────────────────────────────────────── */
 
@@ -212,14 +212,15 @@ export function logLines(sessionId: string, n: number, long: boolean): any[] {
 }
 
 /** The log of a task that is no agent's: the command it ran, then what that printed so far, as stdout. Nothing in it is a
- *  tool call or a sub-agent's line, so no sub-agent is listed for it (`subagentList`). */
-export function commandLog(task: string, status: string, mr = "https://github.com/acme/kraft-plugins/pull/142"): any[] {
-  return runOutput(task, status, mr).map((text, i) => ({ n: i + 1, t: t((i + 1) / 10), src: "stdout", text }));
+ *  tool call or a sub-agent's line, so no sub-agent is listed for it (`subagentList`). `run` is what ran (`taskRun`), or
+ *  none, and then the log says `label` and its status. */
+export function commandLog(run: Run | string | null, status: string, label?: string, mr = "https://github.com/acme/kraft-plugins/pull/142"): any[] {
+  return runOutput(run, status, mr, label).map((text, i) => ({ n: i + 1, t: t((i + 1) / 10), src: "stdout", text }));
 }
 
 /** A session's log by what ran it: an agent's lines, or a command's output. */
-export const sessionLog = (agent: boolean, task: string, sid: string, n: number, long: boolean, status = "done") =>
-  agent ? logLines(sid, n, long) : commandLog(task, status);
+export const sessionLog = (agent: boolean, run: Run | string | null, sid: string, n: number, long: boolean, status = "done", label?: string) =>
+  agent ? logLines(sid, n, long) : commandLog(run, status, label);
 
 /** The sub-agents `lines` name, as the server's `/subagents` route lists them: the first runs while its session does. */
 export function subagentList(lines: any[], status: string): any[] {
@@ -285,7 +286,7 @@ function buildItem(state: DisplayState, seed: number, variant: Variant): ItemBun
       ...over,
     };
     sessions.push(s);
-    logs[sid] = sessionLog(model !== null, hook.split(".").at(-1)!, sid, long ? 600 : 40, long, status);
+    logs[sid] = sessionLog(model !== null, null, sid, long ? 600 : 40, long, status, hook.split(".").at(-1)!);
     return s;
   };
 
@@ -979,70 +980,50 @@ const ngBundle = (sc: string, S: Scenario) => S.bundles[S.ng[sc]];
 /** GET /theme answers light (the app reads its mode from the server, not prefers-color-scheme). */
 export const lightMode = (S: Scenario) => { Object.assign(S.settings.theme, { mode: "light" }); };
 
-/** The reviewer on final_review: the frozen chain names it and one finished session ran it. */
-export const withReviewer = (S: Scenario) => {
-  const b = ngBundle("needs-gate", S);
-  const chain = JSON.parse(b.item.materialized_chain);
-  chain.chain.nodes.find((n: any) => n.id === "final_review").auto_review = { id: "auto_review", kind: "agent" };
-  b.item.materialized_chain = JSON.stringify(chain);
-  const from = b.sessions.find((s: any) => s.node_id === "verification" && s.status === "done") ?? b.sessions[0];
-  const sid = "a0".repeat(16);
-  // An agent's session, whichever task the row it borrows its ids and times from was: a reviewer is one.
-  b.sessions.push({ ...from, id: sid, node_id: "final_review", hook_point: "final_review.auto_review", status: "done", attempt: 1, round: 0, session_summary_ref: null,
-    model: MODEL, harness: "claude", command: null, tokens_in: 8_400, tokens_out: 1_300, cost_usd: 0.12, wall_ms: 90_000 });
-  b.logs[sid] = logLines(sid, 12, false);
-  const seq = Math.max(...b.events.map((e: any) => e.seq));
-  b.events.push({ seq: seq + 1, work_item_id: b.item.id, type: "worker_session_exited", payload: { session_id: sid, node_id: "final_review", status: "done" }, node_id: "final_review", created_at: b.events[b.events.length - 1].created_at });
-};
-
-/** The base frozen chain names no producer; a gate's "written by" needs `artifact` on the gate and `produces` on a task. */
-export const withProducer = (S: Scenario) => {
-  const b = ngBundle("needs-gate", S);
-  const chain = JSON.parse(b.item.materialized_chain);
-  chain.chain.nodes.find((n: any) => n.id === "final_review").artifact = "review_brief";
-  const brief = chain.chain.nodes.find((n: any) => n.id === "work_brief");
-  brief.steps[0].tasks[0].produces = "review_brief";
-  b.item.materialized_chain = JSON.stringify(chain);
-};
-
 /** The running item's fix round ended: `committed` says whether the fix changed anything (undefined: git could not say). */
 export const withFixRoundOutcome = (committed: boolean | undefined) => (S: Scenario) => {
   const b = ngBundle("running", S);
-  const start = b.events.find((e: any) => e.type === "fix_cycle_started")!;
-  const seq = Math.max(...b.events.map((e: any) => e.seq));
-  b.events.push({ seq: seq + 1, work_item_id: b.item.id, type: "fix_cycle_finished", payload: { node_id: start.node_id, cycle: start.payload.cycle, ...(committed === undefined ? {} : { committed }) }, node_id: start.node_id, created_at: start.created_at });
+  const end = b.events.find((e: any) => e.type === "fix_cycle_finished")!;
+  const { committed: _was, ...rest } = end.payload;
+  end.payload = { ...rest, ...(committed === undefined ? {} : { committed }) };
 };
 
-/** The running item's `unit_tests` is a changed-test-scope task, and its verification node ran twice: a first pass
- *  that a retry left behind (one scope, which failed), and the pass it is on (two rounds, the second picking one
- *  more scope). What a node's pass picker, a round's scopes and the phone's scope screen need to have something to show. */
+/** The running item's verification node ran twice: a first pass that a retry left behind (one scope, which failed), and
+ *  the pass it is on (two rounds, the second picking one more scope), its repo tests run as `just test-unit`. What a
+ *  node's pass picker, a round's scopes and the phone's scope screen need to have something to show. */
 export const withScopes = (S: Scenario) => {
   // The item page's running item, and the board's running card (the one the phone taps in from).
   for (const b of new Set([ngBundle("running", S), ...Object.values(S.bundles).filter((x) => x.item.bead_id === "kraft-91bc")])) scoped(b);
 };
 function scoped(b: ItemBundle) {
-  const path = "verification.test.unit_tests";
-  const chain = JSON.parse(b.item.materialized_chain);
-  chain.chain.nodes.find((n: any) => n.id === "verification").steps.find((s: any) => s.id === "test").tasks[0].ref = "kraft.verify_changed_test_scopes";
-  b.item.materialized_chain = JSON.stringify(chain);
+  const path = "verification.tests.test_changed_scopes";
   const mine = b.sessions.filter((s: any) => s.node_id === "verification");
   for (const s of mine) s.pass = 2;
   const tests = mine.filter((s: any) => s.hook_point === path);
-  for (const s of tests) Object.assign(s, { command: "just test-unit", repository: null });
+  for (const s of tests) Object.assign(s, { command: s.command === "uv run pytest -q" ? "just test-unit" : s.command, repository: null });
+  const unit = tests.filter((s: any) => s.command === "just test-unit");
+  /** A session the seed adds, and the `worker_session_created` that made it, in time order. */
   const copy = (of: any, n: number, over: Record<string, unknown>) => {
     const s = { ...of, id: `${String(n).padStart(4, "0")}${of.id.slice(4)}`, ...over };
     b.sessions.push(s);
     b.logs[s.id] = b.logs[of.id];
+    const at = b.events.findIndex((e) => Date.parse(e.created_at) > Date.parse(s.created_at));
+    b.events.splice(at < 0 ? b.events.length : at, 0, { seq: 0, work_item_id: b.item.id, type: "worker_session_created", node_id: "verification", created_at: s.created_at,
+      payload: { session_id: s.id, node_id: "verification", hook_point: path, round: s.round, attempt: s.attempt, thread: 1 } });
+    b.events.forEach((e, k) => { e.seq = k + 1; });
     return s;
   };
   const later = (of: any, ms: number) => new Date(Date.parse(of.created_at) + ms).toISOString();
   // Attempts count up per hook point over every pass and round, as the server numbers them.
-  const old = copy(tests[0], 2, { pass: 1, status: "failed", attempt: 1, created_at: later(tests[0], -3_600_000) });
+  const old = copy(unit[0], 2, { pass: 1, status: "failed", attempt: 1, round: 0, created_at: later(unit[0], -120_000) });
   tests.forEach((s: any, i: number) => { s.attempt = i + 2; });
-  const api = copy(tests.at(-1), 1, { command: "just test-api", attempt: tests.length + 2, created_at: later(tests.at(-1), 1000) });
-  b.item.scope_runs = [old, ...tests, api].map((s: any) => ({
+  const api = copy(unit.at(-1), 1, { command: "just test-api", attempt: tests.length + 2, created_at: later(unit.at(-1), 1000) });
+  const runs = [old, ...tests, api];
+  b.item.scope_runs = runs.map((s: any) => ({
     session_id: s.id, node_id: "verification", hook_point: path, repository: null, round: s.round, pass: s.pass, command: s.command,
-    passed: s.status === "done", exit_code: s.status === "done" ? 0 : 1, selected: true, scope: s.command === "just test-api" ? "api/**" : "tests/**", order: s.command === "just test-api" ? 1 : 0,
+    passed: s.status === "done", exit_code: s.status === "done" ? 0 : 1, selected: true,
+    scope: s.command === "just test-api" ? "api/**" : s.command === "just test-unit" ? "tests/**" : "docs/**",
+    order: runs.filter((x: any) => x.pass === s.pass && x.round === s.round).indexOf(s),
   }));
   b.item.node_passes = { verification: [{ pass: 1 }, { pass: 2, reason: "retry" }] };
 }
