@@ -89,7 +89,7 @@ describe("one step", () => {
     expect(ticks(1, id)).toEqual([
       ["node_started", { node_id: "draft_merge_request" }],
       ["worker_session_created", expect.objectContaining({ node_id: "draft_merge_request", hook_point: "draft_merge_request.rebase.rebase" })],
-      ["worker_session_created", expect.objectContaining({ node_id: "draft_merge_request", hook_point: "draft_merge_request.open.open", attempt: 4 })],
+      ["worker_session_created", expect.objectContaining({ node_id: "draft_merge_request", hook_point: "draft_merge_request.open.open", attempt: 2 })],
     ]);
     expect(S.bundles[id].item).toMatchObject({ current_node_id: "draft_merge_request", display_status: "running" });
     // Stamped started as it is made, as the store writes every session; a builtin's is never `running`.
@@ -441,7 +441,7 @@ describe("the clock and the purse", () => {
 describe("an escalation turn", () => {
   it.each([
     // The sample's turn is running when the demo opens; it is stuck on verification, which is not a failure kind.
-    ["the escalated sample's", ESCALATED, null, "verification", "needs_you", "The repair rounds keep fixing what test_changed_scopes reports"],
+    ["the escalated sample's", ESCALATED, null, "verification", "needs_you", "The repair rounds in verification keep fixing what its last measurement reported"],
     ["a visitor's, on a failed item", FAILED, "why does the forge refuse the token?", "draft_merge_request", "failed", "open fails the same way on every attempt"],
     // A question is answered by a resume that carries the answer, and a gate is decided: neither is retried.
     ["a visitor's, on an item stopped on its agent's question", "kraft-a3f0", "which way should this go?", "verification", "needs_you", "waiting on the question its agent asked", "Answer it by resuming the item with your answer as the steer", "I read why verification stopped"],

@@ -3,7 +3,7 @@ import { commandLog, hex, logLines, LONG_DESCRIPTION, t, type ItemBundle, type V
 import { chainOf, frozenOf, type DefNode } from "./ngChain";
 import { RESUME_PROMPT } from "./poller";
 import { agentRun, DOCS_SCOPE, isAgentSession, MODEL, RUNS, taskRun, type Run } from "./taskKinds";
-import { escalationThreads } from "./transitions";
+import { escalationThreads, threadSummary } from "./transitions";
 
 /**
  * Items for the item page (ux2-W5) and the board (ngBoard.ts): the shipped default chain (ngChain.ts) in every
@@ -34,7 +34,19 @@ const MR = { number: 142, url: "https://github.com/acme/kraft-plugins/pull/142" 
 const REVIEWED = "The document covers what the gate asks: nothing in it needs another pass before you decide.";
 const TESTS = "verification.tests.test_changed_scopes";
 const REVIEW = "verification.review.code_review";
+const JUDGE = "verification.fix_loop.judge";
+const REPAIR = "verification.fix_loop.main.repair";
+const OPEN = "draft_merge_request.open.open";
 const STUCK = "stuck: fix attempt 2 in node verification changed nothing, so measuring again would see the same code. The repair ended done and gave no concerns.";
+/** What every automatic escalation turn is sent (`gates._AUTO_ESCALATE_MESSAGE`); a person's turn says its own. */
+export const AUTO_ESCALATE_MESSAGE = "(Auto-escalated: no one has looked at this yet. Diagnose why it stopped and fix it if you can; if you're not confident, stop and say so instead of guessing.)";
+/** `mr_poller.REASON`: the stop when the forge says the item's merge request was closed unmerged. */
+export const MR_CLOSED_REASON = "the merge request was closed on the forge without merging";
+/** A finding as `findings_measured` lists it, and its fingerprint (`findings.Finding.fingerprint`, 16 hex). */
+type Found = { finding: Record<string, unknown>; print: string };
+/** Round 0's red test, then round 1's red docs check: two defects, so two fingerprints, and the stuck detector does not fire. */
+const RED: Found = { finding: { severity: "critical", message: "test_cache_evicts_oldest fails: AssertionError", file: "tests/test_cache.py", line: 41, source_plugin: "pytest" }, print: "5be0c1d7a93e4f20" };
+const DOCS_RED: Found = { finding: { severity: "critical", message: "docs/search.md:12 MD040/fenced-code-language Fenced code blocks should have a language specified", file: "docs/search.md", line: 12, source_plugin: "markdownlint" }, print: "c41f0e9b2d7a6853" };
 
 export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, template = "default"): ItemBundle {
   const long = variant === "long";
@@ -56,7 +68,8 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
   let m = start;
   const ev = (type: EventType, payload: Record<string, unknown> = {}, dm = 0.02) => {
     m += dm;
-    const node = payload.node_id ?? payload.node;
+    // The column: a gate event names its node in `gate` only (`store.gates`).
+    const node = payload.node_id ?? payload.node ?? payload.gate;
     events.push({ seq: ++seq, work_item_id: id, type, payload, node_id: typeof node === "string" ? node : null, created_at: t(m) });
   };
 
@@ -71,11 +84,12 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     const s: any = {
       id: sid, work_item_id: id, node_id: node, hook_point: path, status: o.status ?? "running", attempt: ids.attempt, round: ids.round, thread: ids.thread,
       created_at: t(m), started_at: t(m + 0.01), exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null,
-      model: null, command: run?.command ?? null, head_sha: hex(seed + 400 + n).slice(0, 40), session_summary_ref: null,
+      // A skipped task (no agent started) carries no head (`dispatch.skipped_session`).
+      model: null, command: run?.command ?? null, head_sha: o.noAgent ? null : hex(seed + 400 + n).slice(0, 40), session_summary_ref: null,
     };
     sessions.push(s);
     ev("worker_session_created", ids, 0);
-    if (path.endsWith(".auto_review")) ev("gate_auto_review_started", { gate: node, node_id: node, session_id: sid }, 0);
+    if (path.endsWith(".auto_review")) ev("gate_auto_review_started", { gate: node, session_id: sid }, 0);
     if (agent) ev("worker_session_started", { ...ids, pid: 41_000 + n }, 0.01);
     logs[sid] = agent ? logLines(sid, long ? 300 : 12, long) : o.noAgent ? [] : commandLog(run, s.status, path.split(".").at(-1));
     return Object.assign(s, { _agent: agent, _run: run, _noAgent: !!o.noAgent });
@@ -91,7 +105,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     if (recipe) {
       usage = { model: MODEL, tokens_in: 40 + ((n * 37) % 300), tokens_cache_write: 0, tokens_cache_read: 0, tokens_out: Math.round(recipe.tokens_out * (1 + (n % 4) * 0.05)), cost_usd: Math.round(recipe.cost_usd * (1 + (n % 4) * 0.05) * 10_000) / 10_000 };
       Object.assign(s, usage);
-      if (status === "done" || status === "done_with_concerns") s.session_summary_ref = `.engineering/sessions/${s.id}.md`;
+      if (status === "done" || status === "done_with_concerns") s.session_summary_ref = `items/${id}/sessions/${s.id}/out/summary.md`;
     } else if (s._noAgent) {
       logs[s.id] = [{ n: 1, t: t(0.1), src: "stdout", text: "no bot feedback collected; no agent started" }];
     } else {
@@ -119,7 +133,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     // The long variant overrides its chain's fix loop where it has one (docs_only has none).
     node_overrides: long && has("verification") ? { verification: { attempts: 4 } } : {}, node_overrides_count: long && has("verification") ? 1 : 0,
     agent_overrides: null,
-    budget_cap: { cap_usd: 25, source: long ? "item" : "policy", spent_usd: 0, daily: { spent_usd: 18.2, cap_usd: 50 } },
+    budget_cap: { cap_usd: 10, source: long ? "item" : "policy", spent_usd: 0, daily: { spent_usd: 18.2, cap_usd: 50 } },
     worktree_path: `/Users/dev/.kraft/run/worktrees/${id}`, head_sha: hex(seed + 77).slice(0, 40), review_head: null,
     repos: [], attachments: [], mr_ref: null, progress: null, rate_limit: null,
     escalation_threads: [], concerns: [], deferred_findings: [],
@@ -132,38 +146,50 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
   const passGate = (n: DefNode) => {
     ev("node_started", { node_id: n.id }, 0.2);
     if (n.id === "chain_revision_approval") {
-      ev("chain_revision_unchanged", { gate: n.id, node_id: n.id, rationale: "The plan fits the chain as it stands: no node to add, drop or reorder." }, 0.02);
-      ev("gate_approved", { gate: n.id, node_id: n.id, by: "kraft" }, 0.02);
+      ev("chain_revision_unchanged", { gate: n.id, rationale: "The plan fits the chain as it stands: no node to add, drop or reorder." }, 0.02);
+      ev("gate_approved", { gate: n.id, by: "kraft" }, 0.02);
     } else {
       ev("gate_requested", { gate: n.id, node_id: n.id }, 0.02);
       ran(`${n.id}.auto_review`, n.id);
-      ev("gate_auto_review_skipped", { gate: n.id, node_id: n.id, reason: "passed", note: REVIEWED }, 0.02);
-      ev("gate_approved", { gate: n.id, node_id: n.id, by: "human" }, 3);
+      ev("gate_auto_review_skipped", { gate: n.id, reason: "passed", note: REVIEWED }, 0.02);
+      ev("gate_approved", { gate: n.id, by: "human" }, 3);
     }
     ev("node_completed", { node_id: n.id }, 0.02);
   };
-  /** One changed-test-scope pass: what it picked, then a session per scope command, the repo's tests failing when `red`. */
-  const testPass = (round: number, red = false) => {
+  /** One changed-test-scope pass: what it picked, then a session per scope command, the repo's tests failing when `red`
+   *  and the docs check when `docsRed`. */
+  const testPass = (round: number, red = false, docsRed = false) => {
     ev("test_scopes_selected", { node_id: "verification", hook_point: TESTS, repository: null, round, commands: [RUNS["kraft.verify_changed_test_scopes"].command, DOCS_SCOPE.command], targeted: {}, full_reason: null }, 0.05);
     ran(TESTS, "verification", red ? "failed" : "done", { round });
-    ran(TESTS, "verification", "done", { round, run: DOCS_SCOPE });
+    ran(TESTS, "verification", docsRed ? "failed" : "done", { round, run: DOCS_SCOPE });
   };
-  const measured = (findings: unknown[] = []) => ev("findings_measured", { node_id: "verification", findings, noop_hooks: [] }, 0.05);
-  const RED = [{ severity: "critical", message: "test_cache_evicts_oldest fails: AssertionError", file: "tests/test_cache.py", line: 41, source_plugin: "pytest" }];
-  /** A fix cycle: the repair, its judge's verdict, and whether the repair changed anything. */
+  /** `walk`'s `findings_measured` for round `round`: which measuring tasks had a session that round (a failed step's later
+   *  ones have none), the findings, and their fingerprints. Its head is the round's last session's. */
+  const measured = (round: number, found: Found[] = [], had = [TESTS, REVIEW]) => ev("findings_measured", {
+    node_id: "verification", cycle: round, head_sha: sessions.at(-1).head_sha,
+    measured_tasks: [...had].sort(), unmeasured_tasks: [TESTS, REVIEW].filter((p) => !had.includes(p)).sort(),
+    findings: found.map((f) => f.finding), fingerprints: found.map((f) => f.print).sort(),
+  }, 0.05);
+  /** A fix cycle (`walk`): its start, the repair, and its finish at the head the repair left, never null: one that
+   *  committed nothing finishes at the head it started from. */
   const fixCycle = (cycle: number, committed: boolean) => {
     ev("fix_cycle_started", { node_id: "verification", cycle, max_attempts: 2, failed_tasks: [TESTS] }, 0.05);
-    ran("verification.fix_loop.main.repair", "verification", "done", { round: cycle, attempt: cycle });
-    ran("verification.fix_loop.judge", "verification", "done", { round: cycle, attempt: cycle });
-    ev("judge_verdict", { node_id: "verification", cycle, verdict: "continue", reasoning: "the eviction test still fails on the oldest entry; one more repair should reach it" }, 0.02);
-    ev("fix_cycle_finished", { node_id: "verification", cycle, committed, head_sha: committed ? hex(seed + 300 + cycle).slice(0, 40) : null }, 0.02);
+    ran(REPAIR, "verification", "done", { round: cycle, attempt: cycle });
+    ev("fix_cycle_finished", { node_id: "verification", cycle, committed, head_sha: hex(seed + 300 + (committed ? cycle : cycle - 1)).slice(0, 40) }, 0.02);
+  };
+  /** The fix loop's judge, due only once a repair has run (`walk.judge_due`): it reads round `round`'s measurement before
+   *  the next cycle starts, and its verdict carries the findings it judged. */
+  const judge = (round: number, found: Found[], reasoning: string) => {
+    ran(JUDGE, "verification", "done", { round });
+    ev("judge_verdict", { node_id: "verification", cycle: round, verdict: "continue", reasoning, findings: found.map((f) => f.finding) }, 0.02);
   };
   /** A forge wait that polls (`waits.py`): one session that goes `waiting` poll after poll, a fresh `node_started` each time
    *  its poller re-enters it; settled, it ends done. Unsettled, it is left waiting until `retryAt`. */
   const awaitPolls = (node: string, path: string, kind: string, polls: number, settled: boolean, retryAt?: string) => {
     const s = open(path, node);
     const each = (s._run?.wall_ms ?? 60_000) / polls;
-    ev("external_wait_started", { node_id: node, task: path, kind, session_id: s.id }, 0.02);
+    // `waits.observe`'s start of a wait: its bounds and deadline, no session (its end names that).
+    ev("external_wait_started", { task: path, node_id: node, kind, timeout_s: 5_400, initial_interval_s: 30, max_interval_s: 300, started_at: t(m), deadline: t(m + 90) }, 0.02);
     let wall = 0;
     for (let k = 1; k <= polls; k++) {
       if (k > 1) ev("node_started", { node_id: node }, 0.02);
@@ -201,15 +227,18 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
       case "verification":
         testPass(0);
         ran(REVIEW, n.id);
-        measured();
+        measured(0);
         break;
-      case "draft_merge_request":
+      case "draft_merge_request": {
         ran("draft_merge_request.rebase.rebase", n.id);
-        ran("draft_merge_request.open.open", n.id);
-        ev("branch_pushed", { node_id: n.id, sha: item.head_sha }, 0.02);
+        // The open task pushes the branch and opens the merge request inside its own session (`forge.run`).
+        const s = open(OPEN, n.id);
+        ev("branch_pushed", { node_id: n.id, repo: item.repo, sha: item.head_sha }, 0.02);
         ev("mr_opened", { node_id: n.id, ...MR }, 0.02);
+        close(s);
         item.mr_ref = { ...MR };
         break;
+      }
       case "merge_request_feedback":
         awaitPolls(n.id, "merge_request_feedback.ci.await_ci", "mr.ci", 3, true);
         ran("merge_request_feedback.automated_review.await_review", n.id);
@@ -226,21 +255,23 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
   };
 
   ev("work_item_created", { title, repo: item.repo, chain_template: template }, 0);
-  ev("chain_loaded", { template_id: template, nodes: nodes.map((n) => n.id) }, 0.02);
+  ev("chain_loaded", {}, 0.02);
   for (let i = 0; i < cur; i++) runNode(nodes[i]);
   if (cur < nodes.length) ev("node_started", { node_id: currentNode }, 0.2);
 
   const stop = (kind: string, task: string | null, more: Record<string, unknown> = {}) => ({ kind, node: currentNode, task, attempt: 1, resume_at: null, reason: null, facts: {}, ...more });
   /** The task the item is at: on verification, its code review in round 1, after the first round's tests failed and a fix
-   *  cycle mended them; on a chain with no verification (docs_only), its implementation. Left `status`, still open. */
+   *  cycle mended them; on a chain with no verification (docs_only), its implementation. Left `status`, still open. No
+   *  judge yet: it is due at a measurement after a repair, and round 1's is still being taken. */
   const atTask = (status: string) => {
     if (currentNode !== "verification") {
       const s = open(`${currentNode}.main.implement`, currentNode);
       item.summary.step = null;
       return Object.assign(s, { status });
     }
+    // Round 0: the tests step failed, so the review step after it never ran.
     testPass(0, true);
-    measured(RED);
+    measured(0, [RED], [TESTS]);
     fixCycle(1, true);
     testPass(1);
     const s = open(REVIEW, "verification", { round: 1 });
@@ -254,10 +285,12 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     s.exited_at = t(m);
     s.wall_ms = Date.parse(s.exited_at) - Date.parse(s.started_at);
   };
-  /** An escalation turn on verification: its message, then its session, born and launched as `escalate.dispatch` launches every turn's. */
+  /** An escalation turn on the node it stopped at: its message, then its session, born and launched as `escalate.dispatch`
+   *  launches every turn's. An automatic one (`gates.auto_escalate_stuck`) is sent `AUTO_ESCALATE_MESSAGE`. */
   const turn = (n: number, message: string, auto: boolean, status = "running") => {
-    const s = open("escalation", "verification", { attempt: n });
-    events.splice(events.length - 2, 0, { seq: 0, work_item_id: id, type: "escalation_message", payload: { session_id: s.id, node_id: "verification", message, auto, thread: 1, turn: n }, node_id: "verification", created_at: events.at(-2).created_at });
+    const node = currentNode;
+    const s = open("escalation", node, { attempt: n });
+    events.splice(events.length - 2, 0, { seq: 0, work_item_id: id, type: "escalation_message", payload: { session_id: s.id, node_id: node, message, auto, thread: 1, turn: n }, node_id: node, created_at: events.at(-2).created_at });
     events.forEach((e, k) => { e.seq = k + 1; });
     seq = events.length;
     s.status = status;
@@ -298,50 +331,51 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
       break;
     }
     case "escalated": {
-      // Round 1's tests failed again, and the second repair changed nothing: the walk stops rather than measure the same code.
+      // Round 0's tests failed and the first repair mended them, but round 1's docs check failed: a new finding, so the judge
+      // (due now a repair has run) lets the loop go on. The second repair changed nothing, so the walk stops rather than
+      // measure the same code again (`walk._changed_nothing_reason`), a stuck stop that auto-escalation answers.
       testPass(0, true);
-      measured(RED);
+      measured(0, [RED], [TESTS]);
       fixCycle(1, true);
-      testPass(1, true);
-      measured(RED);
-      ev("fix_cycle_started", { node_id: "verification", cycle: 2, max_attempts: 2, failed_tasks: [TESTS] }, 0.05);
-      ran("verification.fix_loop.main.repair", "verification", "done", { round: 2, attempt: 2 });
-      ev("fix_cycle_finished", { node_id: "verification", cycle: 2, committed: false, head_sha: null }, 0.02);
-      ev("work_item_needs_human", { node_id: "verification", kind: "stuck", reason: STUCK }, 0.05);
-      // An escalation agent's turn running on it: what `display_status` calls escalated.
-      turn(1, "The repair keeps changing nothing: look at why test_cache_evicts_oldest still fails after two repairs.", true);
+      testPass(1, false, true);
+      measured(1, [DOCS_RED], [TESTS]);
+      judge(1, [DOCS_RED], "the repair fixed the eviction test; the docs check is a new, small finding one more repair should reach");
+      fixCycle(2, false);
+      ev("work_item_needs_human", { node_id: "verification", reason: STUCK, kind: "stuck", stuck: true }, 0.05);
+      // The automatic escalation agent's turn running on it: what `display_status` calls escalated.
+      turn(1, AUTO_ESCALATE_MESSAGE, true);
       item.status = "needs_human";
-      item.stop = stop("stuck", TESTS, { attempt: 2, reason: STUCK });
+      item.stop = stop("stuck", REPAIR, { attempt: 2, reason: STUCK });
       item.display_status = "escalated";
       break;
     }
     case "needs-you": {
+      // Round 1's code review asked a question instead of reviewing (`needs_context`): a measuring task's question stops
+      // the node for a person before any fix cycle (`walk`), and no escalation answers a question (`gates.stuck_stop`).
       const cr = atTask("running");
-      close(cr);
-      measured();
-      // Two turns of one thread: the first answered, the second asking a person what the plan froze.
-      ev("work_item_needs_human", { node_id: "verification", kind: "stuck", reason: "code review found a race the plan's frozen reindex API cannot fix" }, 0.05);
-      close(turn(1, "Code review flags a race between reindex and search: find a fix inside the plan.", true));
       const q = "The race needs a reindex API change the plan froze. Allow the change, or accept the finding and move on?";
-      const e = turn(2, "Can it be fixed without touching the reindex API?", false, "needs_context");
-      m += 4;
-      ev("worker_session_exited", { session_id: e.id, status: "needs_context", wall_ms: 240_000 }, 0);
-      Object.assign(e, { wall_ms: 240_000, model: MODEL, tokens_in: 210, tokens_out: 6_100, cost_usd: 0.52 });
-      ev("work_item_needs_human", { node_id: "verification", reason: `needs_context: ${q}`, kind: "question" }, 0.5);
+      close(cr, "needs_context");
+      // A failed task with no findings file is a blind failure (`findings.from_blind_failure`): its log's last lines.
+      const blind: Found = { finding: { severity: "critical", message: `${REVIEW} failed\n- ${q}`, file: null, line: null, source_plugin: REVIEW }, print: "9a0d3e7f1c52b846" };
+      measured(1, [blind]);
+      ev("work_item_needs_human", { node_id: "verification", reason: `needs_context: ${q}`, kind: "question", session_id: cr.id }, 0.05);
       item.status = "needs_human"; item.display_status = "needs_you"; item.needs_context_question = q;
-      item.stop = stop("question", "escalation", { reason: `needs_context: ${q}` });
+      item.stop = stop("question", REVIEW, { reason: `needs_context: ${q}` });
       break;
     }
     case "capped": {
-      // The time cap stops its running session (`session_exited`, capped_out), then the item.
+      // The shipped implementer's own time cap, 120 minutes, stops its running session (`session_exited`, capped_out) and
+      // names what it hit (`time_cap_reached`), then the item stops with that reason. A task's cap is the chain's: no item
+      // override raises it, so the stop names no `limit` (`caps.item_limit`).
       const s = open("implementation.main.implement", "implementation");
       ["Read the search path", "Key the cache by content hash", "Invalidate on reindex"].forEach((title, k) => ev("plan_progress", { node_id: "implementation", task: k + 1, total: 6, title }, 25));
       m -= 75;
       close(s, "capped_out", 120 * 60_000);
       const reason = "`implementation.main.implement` hit its time cap of 120 minutes";
+      ev("time_cap_reached", { scope: "implementation.main.implement", field: "time_cap_minutes", minutes: 120, reason, node_id: "implementation", task: s.hook_point, session_id: s.id }, 0);
       ev("work_item_needs_human", { node_id: "implementation", reason, kind: "cap" }, 0.05);
       item.status = "needs_human"; item.display_status = "needs_you";
-      item.stop = stop("cap", "implementation.main.implement", { reason, facts: { field: "time_cap_minutes", cap_s: 7_200 }, limit: { path: "implementation.main.implement", key: "time_cap_minutes", value: 120, maximum: null }, raisable: true });
+      item.stop = stop("cap", "implementation.main.implement", { reason });
       break;
     }
     case "waiting": {
@@ -360,22 +394,27 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
       }
       item.status = "rate_limited"; item.display_status = "waiting"; item.retry_at = t(133.7);
       item.rate_limit = { count: 2, cap: 5 };
-      item.stop = stop("rate_limit", s.hook_point, { attempt: s.attempt, resume_at: t(133.7), reason: "claude-code hit its rate limit", facts: { harness: "claude-code", fallback: ["codex"], fallback_allowed: ["codex"] } });
+      // No reason: a rate limit writes no stop event (`board._stop_payload`). Its facts are the poller's count, and a
+      // fallback only where the task names one, which no shipped task does (`board._rate_limit_facts`).
+      item.stop = stop("rate_limit", s.hook_point, { attempt: s.attempt, resume_at: t(133.7), facts: { retries: { ...item.rate_limit } } });
       break;
     }
     case "waiting-ci": {
       const s = awaitPolls("merge_request_feedback", "merge_request_feedback.ci.await_ci", "mr.ci", 3, false, t(133));
       item.summary.step = { index: 1, count: 3 };
       item.status = "waiting"; item.display_status = "waiting"; item.retry_at = t(133);
-      item.stop = stop("wait", s.hook_point, { resume_at: t(133), reason: "waiting for CI" });
+      // An external wait's `work_item_waiting` says no reason (`board._stop_payload`).
+      item.stop = stop("wait", s.hook_point, { resume_at: t(133) });
       break;
     }
     case "mr-closed": {
-      awaitPolls("merge_request_feedback", "merge_request_feedback.ci.await_ci", "mr.ci", 2, false);
-      ev("mr_closed", { ref: MR.number, url: MR.url, by: "mara" }, 2);
-      ev("work_item_needs_human", { node_id: "merge_request_feedback", kind: "mr_closed", reason: "MR !142 was closed on the forge without a merge." }, 0.2);
+      // `mr_poller` saw the merge request closed while CI was awaited: a stop, and no `mr_closed` event (only Kraft's
+      // own cancel writes one).
+      const s = awaitPolls("merge_request_feedback", "merge_request_feedback.ci.await_ci", "mr.ci", 2, false);
+      const facts = { ref: MR.number, url: MR.url };
+      ev("work_item_needs_human", { node_id: "merge_request_feedback", reason: MR_CLOSED_REASON, kind: "mr_closed", facts }, 2);
       item.status = "needs_human"; item.display_status = "needs_you";
-      item.stop = stop("mr_closed", null, { reason: "MR !142 was closed on the forge without a merge.", facts: { ref: MR.number, url: MR.url } });
+      item.stop = stop("mr_closed", s.hook_point, { reason: MR_CLOSED_REASON, facts });
       break;
     }
     case "needs-gate": {
@@ -383,7 +422,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
       m = Math.max(m, 90.9);
       ev("gate_requested", { node_id: "final_review", gate: "final_review" }, 0.1);
       ran("final_review.auto_review", "final_review");
-      ev("gate_auto_review_skipped", { gate: "final_review", node_id: "final_review", reason: "passed", note: REVIEWED }, 0.02);
+      ev("gate_auto_review_skipped", { gate: "final_review", reason: "passed", note: REVIEWED }, 0.02);
       m = Math.max(m, 94.98);
       ev("gate_rejected", { gate: "final_review", node: "implementation", by: "human", note: "must fix: `commits` can be empty\n\nquestion: why no size bound?", verdict: "reject" }, 0.02);
       ev("gate_requested", { node_id: "final_review", gate: "final_review" }, 0.2);
@@ -400,21 +439,38 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
       break;
     }
     case "failed": {
+      // The forge refused the token (403) on opening the draft. The node has no fix loop and no failure handler, so one
+      // failed attempt is the task's failure (`walk`): its reason names the task and the first line of its log, its facts
+      // the cause (`walk._forge_cause`). A failed task is in the stuck set, so an automatic escalation turn followed;
+      // it has ended, a token being nothing its agent can fix, and the item stays failed for a person.
       ran("draft_merge_request.rebase.rebase", "draft_merge_request");
-      for (let a = 1; a <= 3; a++) ran("draft_merge_request.open.open", "draft_merge_request", "failed", { attempt: a });
-      ev("work_item_needs_human", { node_id: "draft_merge_request", kind: "failed", reason: "The forge refused to open the draft MR." }, 6);
+      const s = ran(OPEN, "draft_merge_request", "failed");
+      const reason = `task failed in node draft_merge_request: open [forge] — ${logs[s.id][0].text}`;
+      const facts = { cause: "forge_auth" };
+      ev("work_item_needs_human", { node_id: "draft_merge_request", reason, kind: "failed", session_id: s.id, stuck: true, facts }, 0.05);
+      const e = close(turn(1, AUTO_ESCALATE_MESSAGE, true));
+      e.session_summary_ref = threadSummary(id, 1);
       item.status = "needs_human"; item.display_status = "failed";
       item.summary.step = { index: 2, count: 2 };
-      item.stop = stop("failed", "draft_merge_request.open.open", { attempt: 3, reason: "The forge refused to open the draft MR. No handler applies and retrying will not change the answer, so the item stopped instead of looping. Fix the token, then retry from the failed task.", facts: { error: "403 Forbidden · token lacks merge_request:write", tried: "3 times over 6m" } });
+      item.stop = stop("failed", OPEN, { reason, facts });
       break;
     }
     case "conflict": {
-      ran("draft_merge_request.rebase.rebase", "draft_merge_request", "failed", { attempt: 1 });
-      ran("draft_merge_request.rebase.rebase", "draft_merge_request", "failed", { attempt: 2 });
-      ev("work_item_needs_human", { node_id: "draft_merge_request", kind: "conflict", reason: "Rebasing onto main hit conflicts in 3 files." }, 2);
+      // Paused while it opened the draft; resumed after main moved. The resume rebased the branch first
+      // (`lifecycle.refresh_base`, draft_merge_request not rebasing itself) and hit a conflict. No shipped node declares
+      // `on_conflict`, so the walk stops for a person (`walk._door_conflict`) with git's words, the rebase aborted:
+      // nothing is left unmerged in the worktree.
+      ran("draft_merge_request.rebase.rebase", "draft_merge_request");
+      const s = open(OPEN, "draft_merge_request");
+      ev("pause_requested", { sessions: [s.id] }, 0.05);
+      pausedAt(s, 0); s.status = "paused";
+      ev("work_item_resumed", { steer: null }, 25);
+      const reason = `git rebase failed for ${item.worktree_path}: Auto-merging search/cache.py\nCONFLICT (content): Merge conflict in search/cache.py\nAuto-merging search/reindex.py\nCONFLICT (content): Merge conflict in search/reindex.py\nerror: could not apply 4d1e2f3... Cache embeddings by content hash`;
+      const facts = { resolved: [], unresolved: [] };
+      ev("work_item_needs_human", { node_id: "draft_merge_request", reason, kind: "conflict", facts }, 0.05);
       item.status = "needs_human"; item.display_status = "needs_you";
-      item.summary.step = { index: 1, count: 2 };
-      item.stop = stop("conflict", "draft_merge_request.rebase.rebase", { attempt: 2, reason: "Rebasing onto main hit conflicts in 3 files. The on-conflict agent resolved one and stopped on two it could not decide.", facts: { resolved: ["search/config.py"], unresolved: ["search/cache.py", "search/reindex.py"] } });
+      item.summary.step = { index: 2, count: 2 };
+      item.stop = stop("conflict", OPEN, { reason, facts });
       break;
     }
     case "done": case "archived": {

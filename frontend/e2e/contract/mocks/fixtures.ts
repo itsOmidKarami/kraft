@@ -282,7 +282,7 @@ function buildItem(state: DisplayState, seed: number, variant: Variant): ItemBun
       wall_ms: status === "running" || status === "pending" ? null : 6 * 60_000 + sessions.length * 13_000,
       model,
       head_sha: hex(seed + 500 + sessions.length).slice(0, 40),
-      session_summary_ref: model !== null && (status === "done" || status === "done_with_concerns") ? `.engineering/sessions/${sid}.md` : null,
+      session_summary_ref: model !== null && (status === "done" || status === "done_with_concerns") ? `items/${id}/sessions/${sid}/out/summary.md` : null,
       ...over,
     };
     sessions.push(s);
@@ -311,7 +311,7 @@ function buildItem(state: DisplayState, seed: number, variant: Variant): ItemBun
         { severity: "important", message: "Unused import `Optional` in kraft/executor/fix_loop.py", file: "kraft/executor/fix_loop.py", line: 4, source_plugin: "ruff" },
         { severity: "minor", message: "Line too long (131 > 120)", file: "kraft/executor/fix_loop.py", line: 88, source_plugin: "ruff" },
         { severity: "critical", message: "test_fix_loop_carries_findings fails: AssertionError", file: "tests/test_fix_loop.py", line: 212, source_plugin: "pytest" },
-      ], noop_hooks: ["on.security.scan"] }, 2);
+      ] }, 2);
       ev("fix_cycle_started", { node_id: n.id, cycle: 1, failed_tasks: ["on.test.run"] }, 0.5);
       const f = sess("implement", "done", { round: 1 });
       ev("worker_session_created", { session_id: f.id, hook_point: f.hook_point, node_id: "implement" }, 0.1);
@@ -631,16 +631,16 @@ export function documentsFor(item: any, variant: Variant) {
     { kind: "specs", node: "spec", hook: "on.spec.requested", path: `${wt}/2026-09-12-${slug}-design.md`, title: item.title, attached: "spec" },
     { kind: "plans", node: "plan", hook: "on.plan.requested", path: `${wt}/2026-09-12-${slug}.md`, title: `Plan: ${item.title}`, attached: "plan" },
     { kind: "reviews", node: "review", hook: "on.review.requested", path: `.engineering/reviews/2026-09-13-${slug}.md`, title: `Review: ${item.title}` },
-    { kind: "sessions", node: "implement", hook: "on.implementation.start", path: `.engineering/sessions/${hex(901)}.md`, title: `Session ${hex(901)}` },
-    { kind: "sessions", node: "verify", hook: "on.test.run", path: `.engineering/sessions/${hex(902)}.md`, title: hex(902) },
+    { kind: "sessions", node: "implement", hook: "on.implementation.start", path: `items/${item.id}/sessions/${hex(901)}/out/summary.md`, title: `Session ${hex(901)}` },
+    { kind: "sessions", node: "verify", hook: "on.test.run", path: `items/${item.id}/sessions/${hex(902)}/out/summary.md`, title: hex(902) },
   ];
   // W11 · H: summaries from hooks that write no `# ` title, so the indexer titles them with an id.
   // Ahead of the generated sessions, so they are among the results search returns.
   if (long) docs.push(
-    { kind: "sessions", node: "review", hook: "on.review.local.run", path: `.engineering/sessions/${hex(990)}.md`, title: hex(990), headingless: true },
-    { kind: "sessions", node: "open_mr", hook: "on.mr.describe", path: `.engineering/sessions/${hex(991)}.md`, title: hex(991), headingless: true },
+    { kind: "sessions", node: "review", hook: "on.review.local.run", path: `items/${item.id}/sessions/${hex(990)}/out/summary.md`, title: hex(990), headingless: true },
+    { kind: "sessions", node: "open_mr", hook: "on.mr.describe", path: `items/${item.id}/sessions/${hex(991)}/out/summary.md`, title: hex(991), headingless: true },
   );
-  if (long) for (let i = 0; i < 12; i++) docs.push({ kind: "sessions", node: "implement", hook: "on.implementation.start", path: `.engineering/sessions/${hex(910 + i)}.md`, title: `Session ${hex(910 + i)}` });
+  if (long) for (let i = 0; i < 12; i++) docs.push({ kind: "sessions", node: "implement", hook: "on.implementation.start", path: `items/${item.id}/sessions/${hex(910 + i)}/out/summary.md`, title: `Session ${hex(910 + i)}` });
   // W13 A: run info joined from the session. Artifacts and attachments have none;
   // summaries are attempt 1, and the long variant's implement sessions span rounds 0–2.
   let implementRun = 0;
@@ -1048,11 +1048,21 @@ export const withStop = (kind: string, facts: Record<string, unknown>, extra: Re
 /** The failed item also ran `n` test scopes, the first `red` failing. */
 export const withFailedTests = (n: number, red: number) => (S: Scenario) => { withStop("failed", {})(S); Object.assign(ngBundle("failed", S).item, { test_result: { scopes: testScopes(n, red), passed: red === 0 } }); };
 
-/** The capped item, whose stop names the limit that raises it (its implement task's time cap), reports its running time:
- *  the sessions before that task and its two hours, under no running-time cap of the item's own. */
+/** The capped item stopped instead by a running-time cap of its own (an item override), reached as its implement task
+ *  had run two hours: the sessions before that task and those two hours. An item-wide cap is the one an item override
+ *  raises, so its stop names that `limit` (`caps.item_limit`); a task's cap, the sample's, names none. */
 export const withCapLimit = (S: Scenario) => {
   const b = ngBundle("capped", S);
-  b.item.running_time = { running_s: Math.round(b.sessions.reduce((a, s) => a + (s.wall_ms ?? 0), 0) / 1000), cap_minutes: null };
+  const running_s = Math.round(b.sessions.reduce((a, s) => a + (s.wall_ms ?? 0), 0) / 1000);
+  const minutes = Math.round(running_s / 60);
+  const reason = `the work item hit its time cap of ${minutes} minutes`;
+  const limit = { path: "", key: "time_cap_minutes", value: minutes };
+  const hit = b.events.find((e) => e.type === "time_cap_reached")!;
+  hit.payload = { ...hit.payload, scope: "", minutes, reason };
+  const stop = [...b.events].reverse().find((e) => e.type === "work_item_needs_human")!;
+  stop.payload = { ...stop.payload, reason, limit };
+  b.item.stop = { ...b.item.stop, reason, limit: { ...limit, maximum: null } };
+  b.item.running_time = { running_s, cap_minutes: minutes };
 };
 
 /** The running item names beads, so Mark complete says they stay open. */

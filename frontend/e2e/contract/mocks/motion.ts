@@ -58,7 +58,7 @@ const TURN_TICKS = 2;
 
 /** What the escalation agent found, by the kind of stop it was asked about; `task` is the stopped task's name. */
 const FOUND: Record<string, (node: string, task: string) => string> = {
-  stuck: (_, task) => `The repair rounds keep fixing what ${task} reports, not why it reports it, so the same finding comes back each round. A steer that names the cause should get it through.`,
+  stuck: (node) => `The repair rounds in ${node} keep fixing what its last measurement reported, not why it reports it, so each round finds something new to fix. A steer that names the cause should get it through.`,
   failed: (_, task) => `${task} fails the same way on every attempt, for a reason outside the code, so retrying it alone will not change the answer. Fix what its log names first.`,
   cap: (node) => `${node} was still making progress when it reached its cap. A higher cap, or a retry with a narrower steer, should let it finish.`,
   conflict: () => "Both sides changed the conflicting files for different reasons, so neither can simply win: keep main's version and redo this item's change on top of it.",

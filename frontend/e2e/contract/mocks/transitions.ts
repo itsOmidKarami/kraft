@@ -88,7 +88,8 @@ const ADMITS: Record<string, readonly string[]> = {
 /** The board's row of an item: the item, its `stop` without facts, task or attempt (W4's list). */
 export function listRow(item: any) {
   const s = item.stop;
-  return { ...item, stop: s ? { kind: s.kind, node: s.node, resume_at: s.resume_at, reason: s.reason } : null };
+  // The detail's `limit` is read against the chain; the row only says there is one to raise (`board._list_stop`).
+  return { ...item, stop: s ? { kind: s.kind, node: s.node, resume_at: s.resume_at, reason: s.reason, ...(s.limit ? { raisable: true } : {}) } : null };
 }
 
 /** `lifecycle.not_paused`: what resume says to an item that is not paused. */

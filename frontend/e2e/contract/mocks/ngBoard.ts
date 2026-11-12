@@ -20,11 +20,17 @@ const LONG_R = (name: string) => `/Volumes/Work/clients/acme-corporation/monorep
 
 /** The capped sample stopped instead by its $5 spend cap: its stop, its last event and its spend all say so. `board._stop`
  *  names a budget stop's scope; `work_item` is the item's own cap, the one `/budget/raise` takes. */
+/** The capped sample's session ran to its end instead: no time cap was reached. */
+function noTimeCap(b: ItemBundle) {
+  b.events = b.events.filter((e) => e.type !== "time_cap_reached");
+  b.events.forEach((e, n) => { e.seq = n + 1; });
+}
+
 function spendCapped(i: any, b: ItemBundle) {
   const reason = "Spend cap reached · $5.00 of $5.00";
-  // A budget stop names its scope, not the cap stop's `limit`.
-  const { limit: _limit, raisable: _raisable, ...stop } = i.stop;
-  i.stop = { ...stop, kind: "budget", reason, facts: {}, scope: "work_item" };
+  noTimeCap(b);
+  // A budget stop names its scope (`board._stop`).
+  i.stop = { ...i.stop, kind: "budget", reason, facts: {}, scope: "work_item" };
   const last = [...b.events].reverse().find((e) => e.type === "work_item_needs_human")!;
   last.payload = { node_id: last.payload.node_id, reason, kind: "budget", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } };
   // Its sessions' costs scaled to the $5 it spent, and its usage read off them again.
@@ -38,7 +44,7 @@ function spendCapped(i: any, b: ItemBundle) {
   // its usage on its `worker_session_exited` as `store.session_exited` writes it), and the walk stopped before the next
   // agent task launched (`dispatch.over_budget`). No session is capped out: that is a time cap's or a loop's mark.
   for (const s of b.sessions.filter((x) => x.status === "capped_out")) {
-    Object.assign(s, { status: "done", session_summary_ref: `.engineering/sessions/${s.id}.md`, tokens_cache_write: 0, tokens_cache_read: 0 });
+    Object.assign(s, { status: "done", session_summary_ref: `items/${i.id}/sessions/${s.id}/out/summary.md`, tokens_cache_write: 0, tokens_cache_read: 0 });
     const exit = b.events.find((e) => e.type === "worker_session_exited" && e.payload.session_id === s.id)!;
     exit.payload = { session_id: s.id, status: "done", wall_ms: s.wall_ms, model: s.model, tokens_in: s.tokens_in, tokens_cache_write: 0, tokens_cache_read: 0, tokens_out: s.tokens_out, cost_usd: s.cost_usd };
   }
@@ -49,7 +55,8 @@ function spendCapped(i: any, b: ItemBundle) {
  *  item stopped for the person instead of switching the checkout back. Built on the capped sample's attempt. */
 function checkoutMoved(i: any, b: ItemBundle) {
   const s = b.sessions.find((x) => x.status === "capped_out")!;
-  Object.assign(s, { status: "done", session_summary_ref: `.engineering/sessions/${s.id}.md` });
+  noTimeCap(b);
+  Object.assign(s, { status: "done", session_summary_ref: `items/${i.id}/sessions/${s.id}/out/summary.md` });
   const exit = b.events.find((e) => e.type === "worker_session_exited" && e.payload.session_id === s.id)!;
   exit.payload = { ...exit.payload, status: "done" };
   const branch = `kraft/${i.id}`;
@@ -127,7 +134,8 @@ function build(rows: Row[], variant: Variant, seed0: number, bundles: Record<str
     if (i.archived_at) i.archived_at = t(130 - r.age + 30);
     r.tweak?.(i, b);
     for (const s of b.sessions) s.work_item_id = i.id;
-    for (const e of b.events) e.work_item_id = i.id;
+    // Its own repo where an event names one (`work_item_created`, `branch_pushed`).
+    for (const e of b.events) { e.work_item_id = i.id; if (e.payload.repo) e.payload.repo = i.repo; }
     if (r.fresh) b.events.push({ seq: 1, work_item_id: i.id, type: "work_item_created", payload: { title: i.title, repo: i.repo, chain_template: i.chain_template }, node_id: null, created_at: i.created_at });
     bundles[i.id] = b;
     return i.id;
@@ -174,8 +182,9 @@ export function ngDryRun(body: { chain_template?: string; attachments?: { kind: 
   if (missing) return { status: 422, body: { detail: `attachment not found: ${missing.path}` } };
   const chain = body.chain_template ?? "default";
   const tpl = [...NG_CHAINS, NG_EXTENDING_CHAIN].find((c) => c.id === chain);
-  // `work_items.create_work_item`'s answer for a chain it cannot resolve.
-  if (!tpl) return { status: 404, body: { detail: `unknown chain '${chain}'` } };
+  // `deps.resolve_chain_or_422`'s answer for a chain the library cannot resolve, in the resolver's words (`library.resolve_chain`).
+  const known = [...NG_CHAINS, NG_EXTENDING_CHAIN].map((c) => `'${c.id}'`).join(", ");
+  if (!tpl) return { status: 422, body: { detail: `chain '${chain}': no chain '${chain}' in this library; known chains: [${known}]` } };
   const kinds = new Set((body.attachments ?? []).map((a) => a.kind));
   const skipped = (tpl.nodes as DryRunNode[]).flatMap((n) =>
     n.covered_by && kinds.has(n.covered_by) ? [{ node: n.id, why: "covered_by", kind: n.covered_by }] : (body.skip_nodes ?? []).includes(n.id) ? [{ node: n.id, why: "skip" }] : []);
@@ -185,6 +194,7 @@ export function ngDryRun(body: { chain_template?: string; attachments?: { kind: 
   const loops = Object.fromEntries((chainOf(chain) ?? chainOf("default")!).frozen.nodes.filter((n: any) => n.fix_loop).map((n: any) => [n.id, n.fix_loop.max_attempts]));
   return { status: 200, body: {
     dry_run: true, nodes, skipped, gates: nodes.filter((n) => n.kind === "gate").map((n) => n.id),
-    caps: { budget_usd: 25, budget_source: "policy", daily_usd: 50, nodes: Object.fromEntries(nodes.filter((n) => n.fix_loop).map((n) => [n.id, { attempts: loops[n.id] ?? 3, wall_clock_s: 3600 }])) },
+    // The shipped policy's caps (`config/policy.yaml`: `work_item_usd: 10`, `daily_usd: 50`).
+    caps: { budget_usd: 10, budget_source: "policy", daily_usd: 50, nodes: Object.fromEntries(nodes.filter((n) => n.fix_loop).map((n) => [n.id, { attempts: loops[n.id] ?? 3, wall_clock_s: 3600 }])) },
   } };
 }

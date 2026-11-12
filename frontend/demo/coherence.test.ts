@@ -172,7 +172,7 @@ describe("sessions the doors make", () => {
   });
 
   it.each<[string, (S: Scenario) => ItemBundle]>([
-    ["a forge call", (S) => S.bundles[S.ng.failed]],
+    ["a forge call", (S) => S.bundles[S.ng.conflict]],
     ["a test command, which has a command line", (S) => pausedWithout(S, ["code_review"])],
   ])("an escalation turn is an agent's, though the last session was %s", (_name, pick) => {
     const { S, T } = live();
