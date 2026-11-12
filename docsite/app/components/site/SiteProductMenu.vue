@@ -3,7 +3,7 @@
 <script setup lang="ts">
 const root = useTemplateRef<HTMLElement>('root')
 const button = useTemplateRef<HTMLElement>('button')
-const { open, onFocusOut } = useDisclosure(root, button)
+const { open, onFocusOut } = useDisclosure(root, button, '(max-width: 1023px)')
 </script>
 
 <template>

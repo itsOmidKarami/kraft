@@ -1,8 +1,10 @@
 // A button that shows a list of links: the Product menu and the phone menu.
 // Escape closes it and puts focus back on the button. A click outside closes
 // it too, and focus goes back to the button unless the click put it somewhere
-// else. Tabbing out of it, or going to another page, closes it.
-export function useDisclosure(root: Readonly<Ref<HTMLElement | null>>, button: Readonly<Ref<HTMLElement | null>>) {
+// else. Tabbing out of it, or going to another page, closes it, and so does
+// the window crossing `hiddenAt`, the media query under which the header no
+// longer shows it.
+export function useDisclosure(root: Readonly<Ref<HTMLElement | null>>, button: Readonly<Ref<HTMLElement | null>>, hiddenAt: string) {
   const open = ref(false)
   const route = useRoute()
 
@@ -33,7 +35,16 @@ export function useDisclosure(root: Readonly<Ref<HTMLElement | null>>, button: R
     document[method]('pointerdown', onPointer)
   })
   watch(() => route.fullPath, () => close(false))
+  const onMedia = (e: MediaQueryListEvent) => {
+    if (e.matches) close(false)
+  }
+  let media: MediaQueryList | undefined
+  onMounted(() => {
+    media = window.matchMedia(hiddenAt)
+    media.addEventListener('change', onMedia)
+  })
   onBeforeUnmount(() => {
+    media?.removeEventListener('change', onMedia)
     document.removeEventListener('keydown', onKey)
     document.removeEventListener('pointerdown', onPointer)
   })

@@ -4,13 +4,24 @@
      is drawn for the eye (aria-hidden); a screen reader gets the same chain as
      the list above it, each step with its state. While the demo plays on its
      own the panel is quiet; once the visitor takes over it is a live region.
+     Focus on a button holds the run, and when a pressed button goes away
+     focus moves to the panel, not to the page.
      Under 720px of card the lane drops its questions, the labels give way to a
      key, and the panel keeps one height so the page does not jump. -->
 <script setup lang="ts">
 import { STEPS } from '~/utils/homePlayer'
 import type { PlayerNode } from '~/utils/homePlayer'
 
-const { v, start, approve, reject, toggle } = useHomePlayer()
+const card = useTemplateRef<HTMLElement>('card')
+const panel = useTemplateRef<HTMLElement>('panel')
+const { v, paused, start, approve, reject, toggle, hold } = useHomePlayer(card)
+
+const act = (fn: () => void) => {
+  fn()
+  nextTick(() => {
+    if (!document.activeElement || document.activeElement === document.body) panel.value?.focus()
+  })
+}
 
 // The step names under the track, as the board words them.
 const NAMES: Record<string, string> = {
@@ -42,7 +53,10 @@ const cols = computed(() => STEPS.map((s, i) => {
 </script>
 
 <template>
-  <div class="s-demo s-themed">
+  <div
+    ref="card"
+    class="s-demo s-themed"
+  >
     <div class="s-demo-head">
       <div class="s-demo-title">
         <span class="s-demo-item">Cache the schema lookups</span>
@@ -55,11 +69,11 @@ const cols = computed(() => STEPS.map((s, i) => {
           type="button"
           class="s-demo-pause"
           aria-label="Pause the demo"
-          :aria-pressed="!v.playing"
+          :aria-pressed="paused"
           @click="toggle"
         >
           <svg
-            v-if="v.playing"
+            v-if="!paused"
             aria-hidden="true"
             width="16"
             height="16"
@@ -175,7 +189,9 @@ const cols = computed(() => STEPS.map((s, i) => {
     </div>
 
     <div
+      ref="panel"
       class="s-panel"
+      tabindex="-1"
       :class="{ 'is-gate': v.atGate }"
       :aria-live="v.playing ? 'off' : 'polite'"
     >
@@ -237,12 +253,13 @@ const cols = computed(() => STEPS.map((s, i) => {
       <div
         v-if="v.atGate"
         class="s-panel-actions"
+        @focusin="hold"
       >
         <button
           type="button"
           class="s-btn s-btn-primary"
           :class="{ 'is-pressed': v.pressA }"
-          @click="approve"
+          @click="act(approve)"
         >
           Approve
         </button>
@@ -250,7 +267,7 @@ const cols = computed(() => STEPS.map((s, i) => {
           type="button"
           class="s-btn s-btn-secondary"
           :class="{ 'is-pressed': v.pressR }"
-          @click="reject"
+          @click="act(reject)"
         >
           Request changes
         </button>
@@ -258,11 +275,12 @@ const cols = computed(() => STEPS.map((s, i) => {
       <div
         v-else-if="v.idle || v.done"
         class="s-panel-actions"
+        @focusin="hold"
       >
         <button
           type="button"
           class="s-btn s-btn-primary"
-          @click="start"
+          @click="act(start)"
         >
           {{ v.idle ? 'Start the item' : 'Run it again' }}
         </button>

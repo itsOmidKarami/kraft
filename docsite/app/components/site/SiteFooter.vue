@@ -57,9 +57,12 @@ const COLUMNS = [
           class="s-footer-col"
           :aria-label="col.title"
         >
-          <h2 class="s-label-small">
+          <p
+            class="s-label-small"
+            aria-hidden="true"
+          >
             {{ col.title }}
-          </h2>
+          </p>
           <ul>
             <li
               v-for="l in col.links"

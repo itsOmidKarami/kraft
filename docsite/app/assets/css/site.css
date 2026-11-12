@@ -80,6 +80,16 @@
   flex: 1 0 auto;
 }
 
+/* No word left alone on a paragraph's last line, no lopsided heading. */
+.site p,
+.site figcaption {
+  text-wrap: pretty;
+}
+
+.site h3 {
+  text-wrap: balance;
+}
+
 /* The one focus ring, in the text colour: on the violet field the docs'
    violet ring (a11y.css) is too close to the ground. */
 .site :focus-visible {
@@ -450,6 +460,7 @@
 .site .s-footer-col a {
   display: inline-flex;
   align-items: center;
+  min-width: 44px;
   min-height: 44px;
   font-size: 15px;
   line-height: 1.4;
@@ -1319,6 +1330,16 @@
   font-size: 13px;
   line-height: 1.5;
   color: var(--s-text-muted);
+}
+
+/* The docs' `main pre code` (prose.css) makes a block as wide as its
+   longest line and pulls it 16px to the right under the copy button, which
+   here would push lines past the panel instead of wrapping them. */
+.site .s-code pre code {
+  display: block;
+  width: auto;
+  min-width: 0;
+  margin: 0;
 }
 
 .site .s-code pre {

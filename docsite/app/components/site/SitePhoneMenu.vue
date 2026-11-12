@@ -4,7 +4,7 @@
 <script setup lang="ts">
 const root = useTemplateRef<HTMLElement>('root')
 const button = useTemplateRef<HTMLElement>('button')
-const { open, onFocusOut } = useDisclosure(root, button)
+const { open, onFocusOut } = useDisclosure(root, button, '(min-width: 1024px)')
 const demo = demoHref(useRuntimeConfig().app.baseURL)
 
 watch(open, now => document.documentElement.classList.toggle('s-locked', now))
