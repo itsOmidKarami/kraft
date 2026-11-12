@@ -924,7 +924,7 @@ function analyticsFor(variant: Variant) {
 
 /** GET /search over `docs`, each read by `body`: a document matches when its title, path or text holds a word of the
  *  query, case aside, and ranks by the whole query in its title, then by the words its title holds, then by those it
- *  holds anywhere. A query that matches nothing finds nothing. */
+ *  holds anywhere, then a document before a session's summary. A query that matches nothing finds nothing. */
 export function searchFor(q: string, docs: any[], variant: Variant, body: (d: any) => string = () => "") {
   const long = variant === "long";
   const query = q.trim().toLowerCase();
@@ -932,8 +932,8 @@ export function searchFor(q: string, docs: any[], variant: Variant, body: (d: an
   const ranked = docs.map((d) => {
     const title = String(d.title).toLowerCase();
     const all = `${title}\n${String(d.path).toLowerCase()}\n${body(d).toLowerCase()}`;
-    return { d, score: [Number(!!query && title.includes(query)), terms.filter((w) => title.includes(w)).length, terms.filter((w) => all.includes(w)).length] };
-  }).filter((r) => !terms.length || r.score[2] > 0).sort((a, b) => b.score[0] - a.score[0] || b.score[1] - a.score[1] || b.score[2] - a.score[2]);
+    return { d, score: [Number(!!query && title.includes(query)), terms.filter((w) => title.includes(w)).length, terms.filter((w) => all.includes(w)).length, Number(d.source_kind === "artifact")] };
+  }).filter((r) => !terms.length || r.score[2] > 0).sort((a, b) => b.score[0] - a.score[0] || b.score[1] - a.score[1] || b.score[2] - a.score[2] || b.score[3] - a.score[3]);
   /** The text around the query's first word that the document's text holds. */
   const around = (d: any) => {
     const text = body(d).replace(/\s+/g, " ");
