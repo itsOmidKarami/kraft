@@ -85,6 +85,8 @@ const defIds = (b: ItemBundle): string[] => (b.item.chain_definition?.nodes ?? [
 const frozenIds = (b: ItemBundle): string[] => JSON.parse(b.item.materialized_chain).chain.nodes.map((n: any) => n.id);
 /** Whether a scope command passed, as its session's status says: null while it has not finished. */
 const passedBy = (status: string) => (status === "done" || status === "done_with_concerns" ? true : status === "failed" ? false : null);
+/** `store.create_session` counts a node's attempts at a hook point, an escalation turn's included: the sessions whose attempt is not that count. */
+const escalationMiscounts = (b: ItemBundle) => b.sessions.filter((s) => s.hook_point === "escalation").filter((s, k, all) => s.attempt !== all.slice(0, k).filter((x) => x.node_id === s.node_id).length + 1).map((s) => `${s.node_id} attempt ${s.attempt}`);
 const cost = (b: ItemBundle) => b.sessions.reduce((a, s) => a + (s.cost_usd ?? 0), 0);
 /** How a stop's reason starts, by its kind, where the server words it (`walk`, `mr_poller`, `caps`), and the stops that
  *  have none (`board._stop_payload`: a rate limit, an external wait). A kind not listed is not checked. */
@@ -135,9 +137,10 @@ describe.each(SCENARIOS)("items in %s", (_scenario, build) => {
         return repaired && !next && read && JSON.stringify(e.payload.findings) === JSON.stringify(read.payload.findings) ? [] : [`judge at cycle ${e.payload.cycle}`];
       })],
     // A task that fails without writing a findings file reaches the round as one finding (`findings.from_blind_failure`): its hook, no file or line, and the log of each job.
-    ["a finding a failed task left is a blind failure: its hook, no file or line, and a job to read",
-      (b) => b.events.filter((e) => e.type === "findings_measured").flatMap((e) => (e.payload.findings as any[]).filter((f) => String(f.source_plugin).includes("."))
-        .filter((f) => !kindsOf(b).has(f.source_plugin) || f.file !== null || f.line !== null || !String(f.message).startsWith(`${f.source_plugin} failed`) || !("same_as" in f) || !(f.jobs ?? []).length)
+    ["a finding a failed task left is a blind failure: its hook, critical, no file or line, and a job to read",
+      (b) => b.events.filter((e) => e.type === "findings_measured").flatMap((e) => (e.payload.findings as any[])
+        .filter((f) => !kindsOf(b).has(f.source_plugin) || f.severity !== "critical" || f.file !== null || f.line !== null || !String(f.message).startsWith(`${f.source_plugin} failed\n- `)
+          || !("same_as" in f) || !(f.jobs ?? []).length || ((f.jobs as any[]).some((j) => j.label !== f.source_plugin) && !String(f.message).includes("\n\nConfirm the fix with: ")))
         .map((f) => f.source_plugin))],
     ["a finished fix cycle names the head it left", (b) => b.events.filter((e) => e.type === "fix_cycle_finished" && !e.payload.head_sha).map((e) => `cycle ${e.payload.cycle}`)],
     ["its stop's reason is one the walk writes for that kind", (b) => b.item.stop && !reasonFits(b) && `${b.item.stop.kind}: ${b.item.stop.reason}`],
@@ -158,8 +161,7 @@ describe.each(SCENARIOS)("items in %s", (_scenario, build) => {
       return (!e || e.payload.kind !== b.item.stop.kind || (e.payload.reason ?? null) !== (b.item.stop.reason ?? null)) && `${b.item.stop.kind}: ${b.item.stop.reason}`;
     }],
     // `store.create_session` counts a node's attempts at a hook point, an escalation turn's included.
-    ["an escalation session's attempt counts the escalation sessions before it on its node",
-      (b) => b.sessions.filter((s) => s.hook_point === "escalation").filter((s, k, all) => s.attempt !== all.slice(0, k).filter((x) => x.node_id === s.node_id).length + 1).map((s) => `${s.node_id} attempt ${s.attempt}`)],
+    ["an escalation session's attempt counts the escalation sessions before it on its node", escalationMiscounts],
     ["a stop's task is never an escalation turn", (b) => b.item.stop?.task === "escalation" && "escalation"],
     // Only Kraft's own cancel writes `mr_closed`; the poller that sees a merge request closed writes a stop.
     ["no merge request is closed but by Kraft's cancel", (b) => b.events.filter((e) => e.type === "mr_closed" && e.payload.by !== "cancel").map((e) => e.payload.by)],
@@ -216,6 +218,17 @@ describe("sessions the doors make", () => {
     expect(logOf(b, s()).every((l) => l.src === "stdout")).toBe(true);
     expect(logOf(b, s()).map((l) => l.text)).toEqual(logOf(b, sample).map((l) => l.text));
     expect(logOf(b, s()).length).toBeGreaterThan(partial);
+  });
+
+  it("escalation turns the door starts count their attempts on their node, after the sample's own", () => {
+    const { S, T } = live();
+    const b = S.bundles[S.ng.failed];
+    const had = b.sessions.filter((s) => s.hook_point === "escalation").length;
+    expect(T.escalate(b.item.id, "look").status).toBe(200);
+    T.stopEscalation(b.item.id);
+    expect(T.escalate(b.item.id, "again").status).toBe(200);
+    expect(b.sessions.filter((s) => s.hook_point === "escalation")).toHaveLength(had + 2);
+    expect(escalationMiscounts(b)).toEqual([]);
   });
 
   it("an agent's task gets the claude harness and a log of its own lines, and its model once it reports usage", () => {
