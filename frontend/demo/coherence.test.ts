@@ -7,6 +7,8 @@ import { AUTO_ESCALATE_MESSAGE, MR_CLOSED_REASON, NG_NOW } from "../e2e/contract
 import { agentUsage, openWait } from "../e2e/contract/mocks/nodeRecipe";
 import { isAgentSession, MODEL, nodeTasks, PRICE, RUNS, runOutput, taskKind, taskRun } from "../e2e/contract/mocks/taskKinds";
 import { transitions } from "../e2e/contract/mocks/transitions";
+import { mockServer, type Answer } from "../e2e/contract/mocks/mockApi";
+import { demoOptions } from "./scenario";
 
 /**
  * The third unit test that holds the demo's data to Kraft itself (`apiShapes.test.ts` holds its keys, `sampleCoverage.test.ts`
@@ -241,6 +243,133 @@ describe.each(SCENARIOS)("items in %s", (_scenario, build) => {
   it("no two board items share a title", () => {
     const titles = [...S.ngBoard, ...S.ngArchived].map((id) => S.bundles[id].item.title);
     expect(titles.filter((x, k) => titles.indexOf(x) !== k)).toEqual([]);
+  });
+});
+
+/** The node whose completion files each gate document, and the document's kind (`produces`): spec iff past `spec`, plan
+ *  iff past `plan`, the chain revision past `chain_revision`, the work brief past `work_brief`, the review brief past
+ *  the summary node. Written out, not read off the mock. */
+const PRODUCED: Record<string, string> = { spec: "spec", plan: "plan", chain_revision: "chain_revision", work_brief: "work_brief", work_item_summary: "review_brief" };
+const completed = (b: ItemBundle, node: string) => b.events.some((e) => e.type === "node_completed" && e.payload.node_id === node);
+const ENDED_STATUSES = ["completed", "abandoned"];
+
+describe.each<[string, () => Scenario]>([["the default sample", () => buildScenario("default")], ["the live walk", walked]])("each board item's own content in %s", (_scenario, build) => {
+  const S = build();
+  const board = [...S.ngBoard, ...S.ngArchived].map((id) => S.bundles[id]);
+  const serve = mockServer(S, demoOptions);
+  const call = async (path: string) => {
+    const a = (await serve({ method: "GET", url: `http://demo/api${path}`, json: () => null })) as Answer;
+    return { status: a.status, body: a.body ? JSON.parse(a.body) : null };
+  };
+  /** What the item header sums: every file the diff names, landed or in flight, once per path. */
+  const served = async (b: ItemBundle): Promise<{ path: string; insertions: number; deletions: number }[]> => {
+    const d = await call(`/work-items/${b.item.id}/diff`);
+    return d.status === 200 ? [...d.body.landed.files, ...d.body.files] : [];
+  };
+  const doneAgent = (s: any) => s.session_summary_ref && ["done", "done_with_concerns"].includes(s.status);
+
+  it("every board item has a brief, and no two share one", () => {
+    const briefs = board.map((b) => b.item.description);
+    expect(board.filter((b) => !b.item.description).map((b) => b.item.title)).toEqual([]);
+    expect(briefs.filter((x, k) => briefs.indexOf(x) !== k)).toEqual([]);
+  });
+  // The strict rule: every entry of the content table is written for its own item, so no list may repeat, though two
+  // rows of one kind in one repo might in principle change the same files.
+  it("no two board items that have changed something share the list of files they changed", async () => {
+    const lists = (await Promise.all(board.map(served))).map((fs) => fs.map((f) => f.path).sort().join(" ")).filter(Boolean);
+    expect(lists.filter((x, k) => lists.indexOf(x) !== k)).toEqual([]);
+  });
+  it("an item that has not completed implementation has changed nothing", async () => {
+    const wrong = await Promise.all(board.filter((b) => !completed(b, "implementation")).map(async (b) => [b.item.title, (await served(b)).length] as const));
+    expect(wrong.filter(([, n]) => n > 0)).toEqual([]);
+  });
+  it("a docs item changes docs only", () => {
+    const docs = board.filter((b) => b.item.repo.endsWith("/kraft-docs") || b.item.chain_template === "docs_only");
+    expect(docs.length).toBeGreaterThan(0);
+    expect(docs.flatMap((b) => b.content!.files.map(([p]) => p).filter((p) => !p.startsWith("docs/") && !p.endsWith(".md")))).toEqual([]);
+  });
+  it("its header's stat is its files': the implementation's once that completed, and verification's once that did", async () => {
+    const wrong = await Promise.all(board.filter((b) => b.item.worktree_exists !== false && b.events.some((e) => e.type === "node_started")).map(async (b) => {
+      const want = completed(b, "implementation") ? b.content!.files.filter((f) => !f[3] || completed(b, "verification")) : [];
+      const got = await served(b);
+      const sum = (fs: { insertions: number; deletions: number }[]) => [fs.length, fs.reduce((a, f) => a + f.insertions, 0), fs.reduce((a, f) => a + f.deletions, 0)];
+      const compare = (await call(`/work-items/${b.item.id}/compare`)).body.files.map((f: any) => f.path).sort();
+      const ok = JSON.stringify(sum(got)) === JSON.stringify(sum(want.map(([, insertions, deletions]) => ({ insertions, deletions })))) && JSON.stringify(compare) === JSON.stringify(want.map(([p]) => p).sort());
+      return ok ? null : b.item.title;
+    }));
+    expect(wrong.filter(Boolean)).toEqual([]);
+  });
+  it("it has a merge request once its draft's open task has run, its own, the one its mr_opened named", () => {
+    const wrong = board.flatMap((b) => {
+      const opened = b.sessions.some((s) => s.hook_point === "draft_merge_request.open.open" && s.status === "done");
+      const event = b.events.filter((e) => e.type === "mr_opened").at(-1)?.payload;
+      const mr = b.item.mr_ref;
+      const own = { number: b.content!.mr, url: `https://github.com/acme/${b.item.repo.split("/").pop()}/pull/${b.content!.mr}` };
+      return opened !== !!mr || (mr && (JSON.stringify(mr) !== JSON.stringify(own) || event?.number !== mr.number || event?.url !== mr.url)) ? [b.item.title] : [];
+    });
+    expect(wrong).toEqual([]);
+  });
+  it("no two documents share an id, on any item", () => {
+    const ids = Object.values(S.docs).flat().map((d) => d.document_id);
+    expect(ids.filter((x, k) => ids.indexOf(x) !== k)).toEqual([]);
+  });
+  it("its documents are the gate documents of the nodes it completed and its finished agent sessions' summaries, in its own folder", () => {
+    const wrong = board.flatMap((b) => {
+      const id = b.item.id;
+      const want = [
+        ...Object.entries(PRODUCED).filter(([node]) => completed(b, node)).map(([, kind]) => `items/${id}/docs/${kind}.md`),
+        ...new Set(b.sessions.filter(doneAgent).map((s) => s.session_summary_ref)),
+      ].sort();
+      const got = (S.docs[id] ?? []).map((d) => d.path).sort();
+      return JSON.stringify(got) !== JSON.stringify(want) || got.some((p) => !p.startsWith(`items/${id}/`)) ? [`${b.item.title}: ${got.length} of ${want.length}`] : [];
+    });
+    expect(wrong).toEqual([]);
+  });
+  /** Whether a document's text is about `b`: it names its title and says what its brief's first sentence says. */
+  const about = (text: string, b: ItemBundle) => text.includes(b.item.title) && text.includes(b.item.description.split(". ")[0]);
+  // An escalation reply the walk's agent wrote (`docText`) has its own words and no front matter; motion.test.ts holds it.
+  it("each document opens to its own item and is about it", async () => {
+    const wrong: string[] = [];
+    for (const b of board) for (const d of (S.docs[b.item.id] ?? []).filter((x) => S.docText?.[x.document_id] == null)) {
+      const doc = (await call(`/documents/${d.document_id}`)).body;
+      if (doc.id !== d.document_id || !doc.metadata.work_item_ids.includes(b.item.id) || !about(doc.content, b)) wrong.push(`${b.item.title}: ${d.path}`);
+    }
+    expect(wrong).toEqual([]);
+  });
+  it("a gate's document is about its item", async () => {
+    const gated = board.filter((b) => b.item.pending_gate && b.item.gate_artifact);
+    expect(S === walk || gated.length > 0).toBe(true);
+    const wrong = await Promise.all(gated.map(async (b) => (about((await call(`/work-items/${b.item.id}/artifact`)).body.content, b) ? null : b.item.title)));
+    expect(wrong.filter(Boolean)).toEqual([]);
+  });
+  it("search finds nothing for a query nothing holds, and only board items' documents for one many do", async () => {
+    expect((await call("/search?q=zzzqx")).body.results).toEqual([]);
+    const ids = new Set(board.map((b) => b.item.id));
+    const hits = (await call("/search?q=session")).body.results;
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits.filter((r: any) => !ids.has(r.links[0].work_item_id)).map((r: any) => r.title)).toEqual([]);
+  });
+  it("search for an item's title puts that item's documents first", async () => {
+    const wrong = await Promise.all(board.filter((b) => S.docs[b.item.id]?.length).map(async (b) => {
+      const hits = (await call(`/search?q=${encodeURIComponent(b.item.title)}`)).body.results;
+      const first = hits.slice(0, Math.min(6, S.docs[b.item.id].length));
+      return first.length && first.every((r: any) => r.links[0].work_item_id === b.item.id) ? null : b.item.title;
+    }));
+    expect(wrong.filter(Boolean)).toEqual([]);
+  });
+  it("it has run from its first node to the clock, or to its last event once it ended", () => {
+    const wrong = board.filter((b) => b.events.some((e) => e.type === "node_started")).flatMap((b) => {
+      const it = b.item;
+      const first = b.events.find((e) => e.type === "node_started")!.created_at;
+      const ended = ENDED_STATUSES.includes(it.status);
+      return (it.started_at ?? it.created_at) !== first || (ended && (it.ended_at ?? it.updated_at) !== b.events.at(-1)!.created_at) ? [it.title] : [];
+    });
+    expect(wrong).toEqual([]);
+  });
+  it("no two ended board items ran for the same time", () => {
+    const took = board.filter((b) => ENDED_STATUSES.includes(b.item.status) && b.item.started_at).map((b) => Date.parse(b.item.ended_at ?? b.item.updated_at) - Date.parse(b.item.started_at));
+    expect(took.length).toBeGreaterThan(1);
+    expect(took.filter((x, k) => took.indexOf(x) !== k)).toEqual([]);
   });
 });
 

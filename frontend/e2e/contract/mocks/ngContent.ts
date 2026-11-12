@@ -183,7 +183,7 @@ export function docBody(b: ItemBundle, d: { kind: string; hook_point?: string | 
   switch (d.kind) {
     case "specs": return `# Spec: ${it.title}\n\n## Problem\n\n${first}\n\n## Change\n\n${rest.join(" ") || first}\n\n## Touches\n\n${list}\n\n## Done when\n\n- ${check}\n`;
     case "plans": return `# Plan: ${it.title}\n\n${first}\n\n${files.map(([p], k) => `### Task ${k + 1}: Change \`${p}\``).join("\n\n")}\n\n### Task ${files.length + 1}: Check it\n\n${check}\n`;
-    case "chain_revisions": return `# Chain revision: ${it.title}\n\nThe rest of the chain fits the approved spec and plan, so it stays as it is.\n\n- Implementation covers the ${files.length} files the plan names.\n- ${docsOnly ? "There is no verification node: the docs check runs in the merge request's CI." : "Verification runs the repo's tests and the docs check."}\n`;
+    case "chain_revisions": return `# Chain revision: ${it.title}\n\n${first}\n\nThe rest of the chain fits the approved spec and plan, so it stays as it is.\n\n- Implementation covers the ${files.length} files the plan names.\n- ${docsOnly ? "There is no verification node: the docs check runs in the merge request's CI." : "Verification runs the repo's tests and the docs check."}\n`;
     case "work_briefs": return `# Work brief: ${it.title}\n\n## What changed\n\n${c.description}\n\n## Files\n\n${list}\n\n## How it was checked\n\n- ${check}\n`;
     case "review_briefs": return `# Review brief: ${it.title}\n\n## Read first\n\n\`${top[0]}\`, the largest change (+${top[1]} −${top[2]}).\n\n## Summary\n\n${c.description}\n\n## Risk\n\n- ${first}\n- Nothing outside the ${files.length} files below changed.\n\n${list}\n`;
     default: {
