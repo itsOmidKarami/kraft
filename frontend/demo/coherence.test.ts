@@ -473,6 +473,17 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
     expect(wrong).toEqual([]);
     expect(board.some((b) => b.item.mr_ref && b.sessions.some((s) => logOf(b, s).some((l) => l.text.includes(b.item.mr_ref.url))))).toBe(true);
   });
+  it("a failed draft's log and its stop name the route its own repo's forge opens a merge request on", () => {
+    const failed = board.filter((b) => b.sessions.some((s) => s.hook_point === "draft_merge_request.open.open" && s.status === "failed"));
+    if (sample) expect(failed.map((b) => b.item.bead_id)).toContain("kraft-b108");
+    const wrong = failed.filter((b) => {
+      const route = forgeUrl(b.item.repo, 1).includes("/-/merge_requests/") ? "POST projects/:id/merge_requests: " : "POST repos/{owner}/{repo}/pulls: ";
+      const s = b.sessions.find((x) => x.hook_point === "draft_merge_request.open.open" && x.status === "failed")!;
+      const stop = b.events.find((e) => e.type === "work_item_needs_human" && e.payload.session_id === s.id);
+      return !logOf(b, s).some((l) => l.text.includes(route)) || !String(stop?.payload.reason).includes(route);
+    });
+    expect(wrong.map((b) => b.item.title)).toEqual([]);
+  });
   it("no two documents share an id, on any item", () => {
     const ids = Object.values(S.docs).flat().map((d) => d.document_id);
     expect(ids.filter((x, k) => ids.indexOf(x) !== k)).toEqual([]);
@@ -1054,8 +1065,12 @@ describe("what a command prints", () => {
   it.each(["paused", "waiting", "capped_out", "needs_context", "rate_limited"])("a run stopped as %s has printed what a running one has, not the finished output", (status) => {
     for (const task of Object.keys(RUNS).filter((t) => RUNS[t].partial)) expect(runOutput(task, status, MR)).toEqual(runOutput(task, "running", MR));
   });
-  it("a forge call's failure names its route as the transport does, with the placeholders as written", () => {
-    expect(runOutput("mr.open_draft", "failed", "!1").join("\n")).toContain("POST repos/{owner}/{repo}/pulls: ");
+  // `gh.py` opens a pull at `repos/{owner}/{repo}/pulls`, `glab.py` a merge request at `projects/:id/merge_requests`.
+  it.each([
+    ["GitHub", "https://github.com/acme/kraft-core/pull/1", "POST repos/{owner}/{repo}/pulls: Resource not accessible by personal access token (HTTP 403)"],
+    ["GitLab", "https://code.corp.example/gitlab/acme/kraft-api/-/merge_requests/1", "POST projects/:id/merge_requests: 403 Forbidden (HTTP 403)"],
+  ])("a forge call's failure on %s names its route as the transport does, with the placeholders as written", (_forge, mr, said) => {
+    expect(runOutput("mr.open_draft", "failed", mr)).toEqual([`draft_merge_request.open.open failed: ${said}`]);
   });
 
   it.each(Object.keys(RUNS))("%s: a finished run prints something", (task) => {

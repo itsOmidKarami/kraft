@@ -114,8 +114,10 @@ export const RUNS: Record<string, Run> = {
   "mr.open_draft": {
     wall_ms: 8_000,
     done: (mr) => [`opened ${mr}`],
-    // `forge.run`'s log of a failed forge call, `<task> failed: <the forge's answer>`: here the token's 403.
-    failed: () => ["draft_merge_request.open.open failed: POST repos/{owner}/{repo}/pulls: Resource not accessible by personal access token (HTTP 403)"],
+    // `forge.run`'s log of a failed forge call, `<task> failed: <the forge's answer>`: here the token's 403, on the route
+    // the item's forge opens a merge request with (`adapters/forge/gh.py`'s pulls, `glab.py`'s merge_requests) and in
+    // its words, as the transport renders it (`transport.py`). The merge request's address says which forge it is.
+    failed: (mr) => [`draft_merge_request.open.open failed: ${mr.includes("/-/merge_requests/") ? "POST projects/:id/merge_requests: 403 Forbidden" : "POST repos/{owner}/{repo}/pulls: Resource not accessible by personal access token"} (HTTP 403)`],
   },
   // One session that goes `waiting` poll after poll: its wall time is every poll's.
   "mr.ci": {
