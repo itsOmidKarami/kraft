@@ -706,13 +706,14 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     /* documents & search */
     if (p === "/search") {
       // The board's documents, where the board is the ng one (the older samples' otherwise): what a visitor can open.
-      // `limit: int`: FastAPI refuses one that is not an integer before the route runs, as a validation error.
+      // `limit: int`: FastAPI refuses one that is not an integer before the route runs, as a validation error. Pydantic's
+      // lax int takes underscores between digits and a fraction of zeros (`3_0` is 30, `1.0` is 1).
       const lim = q.get("limit");
-      if (lim != null && !/^\s*[-+]?\d+\s*$/.test(lim)) return json({ detail: [{ type: "int_parsing", loc: ["query", "limit"], msg: "Input should be a valid integer, unable to parse string as an integer", input: lim }] }, 422);
+      if (lim != null && !/^\s*[-+]?\d+(_\d+)*(\.0+)?\s*$/.test(lim)) return json({ detail: [{ type: "int_parsing", loc: ["query", "limit"], msg: "Input should be a valid integer, unable to parse string as an integer", input: lim }] }, 422);
       if (!(q.get("q") ?? "").trim()) return json({ detail: "q is required" }, 422);
       const ids = opts.ngBoard ? [...S.ngBoard, ...S.ngArchived] : [...S.items, ...S.archived].map((i) => i.id);
       return json(searchFor(q.get("q")!, ids.flatMap((id) => S.docs[id] ?? []), S.variant, textOf,
-        { source_kind: q.get("source_kind"), kind: q.get("kind"), repo: q.get("repo"), limit: q.get("limit") == null ? undefined : Number(q.get("limit")) }));
+        { source_kind: q.get("source_kind"), kind: q.get("kind"), repo: q.get("repo"), limit: lim == null ? undefined : Number(lim.replace(/_/g, "")) }));
     }
     if ((m = p.match(/^\/documents\/([^/]+)\/open$/))) return json({ document_id: m[1], path: ".engineering/specs/x.md", editor: "code" });
     if ((m = p.match(/^\/documents\/([^/]+)$/))) {

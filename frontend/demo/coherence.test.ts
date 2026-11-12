@@ -811,7 +811,7 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
     expect([(await call("/search?q=")).status, (await call("/search?q=%20")).body.detail]).toEqual([422, "q is required"]);
     // `limit: int`: a limit that is no integer, an empty or a fractional one too, is refused before the route runs, a list
     // of what failed naming what was sent (FastAPI, as a `limit: int` route answers each of these).
-    for (const lim of ["abc", "", "1.5"]) {
+    for (const lim of ["abc", "", "1.5", "1.", "3__0", "1.0_0"]) {
       const bad = await call(`/search?q=the&limit=${lim}`);
       const [d] = Array.isArray(bad.body.detail) ? bad.body.detail : [{}];
       expect([bad.status, d.type, d.loc, d.input], lim).toEqual([422, "int_parsing", ["query", "limit"], lim]);
@@ -886,6 +886,8 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
     expect((await call("/search?q=the")).body.results.length).toBe(Math.min(20, every.length));
     // `search.py` clamps the limit it is asked for to 1..100.
     expect(await Promise.all(["0", "-5", "500"].map(async (n) => (await call(`/search?q=the&limit=${n}`)).body.results.length))).toEqual([1, 1, Math.min(100, every.length)]);
+    // Pydantic's lax int, as FastAPI parses `limit: int`: underscores between digits, and a fraction of zeros.
+    expect(await Promise.all(["1.0", "3_0", " 2.00 "].map(async (n) => (await call(`/search?q=the&limit=${encodeURIComponent(n)}`)).body.results.length))).toEqual([1, 30, 2]);
   });
   it("it has run from its first node to the clock, or to its last event once it ended, and was last touched no earlier than its last event", () => {
     const wrong = board.filter((b) => b.events.some((e) => e.type === "node_started")).flatMap((b) => {
