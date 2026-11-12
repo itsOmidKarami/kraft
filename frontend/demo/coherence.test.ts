@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { buildScenario, withScopes, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
 import { FRESH_TITLES, motion } from "../e2e/contract/mocks/motion";
 import { NG_REPOS } from "../e2e/contract/mocks/ngBoard";
-import { CONTENT, FRESH_CONTENT, mrOf } from "../e2e/contract/mocks/ngContent";
+import { CONTENT, FRESH_CONTENT, mergeDocs, mrOf } from "../e2e/contract/mocks/ngContent";
 import { frozenOf } from "../e2e/contract/mocks/ngChain";
 import { AUTO_ESCALATE_MESSAGE, buildNgItem, MR_CLOSED_REASON, NG_NOW } from "../e2e/contract/mocks/ngItems";
 import { agentUsage, openWait } from "../e2e/contract/mocks/nodeRecipe";
@@ -297,7 +297,10 @@ const forgeUrl = (repo: string, n: number) => {
 };
 /** Each kind's own section: what tells a spec from a plan or a summary. */
 const SECTION: Record<string, string> = { specs: "\n## Problem\n", plans: "\n### Task 1: ", chain_revisions: "\n## Nodes\n", work_briefs: "\n## What changed\n", review_briefs: "\n## Read first\n", sessions: "\n## What this session did\n" };
-const docsOnly = (files: Row[]) => files.every(([p]) => p.startsWith("docs/") || p.endsWith(".md"));
+/** A docs path: a page anywhere, or a site file under `docs/` (its pages, navigation, styles, scripts and layouts); a
+ *  program under `docs/` (`docs/_nav.py`) is code. */
+const isDocsPath = (p: string) => p.endsWith(".md") || (p.startsWith("docs/") && /\.(md|ya?ml|css|js|html|svg|png)$/.test(p));
+const docsOnly = (files: Row[]) => files.every(([p]) => isDocsPath(p));
 const isTestPath = (p: string) => /(^|\/)tests?\//.test(p) || /\.test\.[jt]sx?$/.test(p);
 
 describe.each<[string, () => Scenario, boolean]>([["the default sample", () => buildScenario("default"), true], ["the live walk", walked, false]])("each board item's own content in %s", (_scenario, build, sample) => {
@@ -352,10 +355,10 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
   it("a docs item changes docs only, in its table and in the diff it serves", async () => {
     const docs = board.filter((b) => b.item.repo.endsWith("/kraft-docs") || b.item.chain_template === "docs_only");
     expect(docs.length).toBeGreaterThan(0);
-    expect(docs.flatMap((b) => b.content!.files.map(([p]) => p).filter((p) => !p.startsWith("docs/") && !p.endsWith(".md")))).toEqual([]);
+    expect(docs.flatMap((b) => b.content!.files.map(([p]) => p).filter((p) => !isDocsPath(p)))).toEqual([]);
     const servedPaths = (await Promise.all(docs.filter((b) => withTree.includes(b)).map(served))).flat().map((f) => f.path);
     expect(servedPaths.length).toBeGreaterThan(0);
-    expect(servedPaths.filter((p) => !p.startsWith("docs/") && !p.endsWith(".md"))).toEqual([]);
+    expect(servedPaths.filter((p) => !isDocsPath(p))).toEqual([]);
   });
   it("its header's stat, comparison and diff are its committed files', path-sorted, each patch counted and marked new or deleted as it is", async () => {
     const wrong = await Promise.all(withTree.map(async (b) => {
@@ -374,6 +377,8 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
       const problems = [
         JSON.stringify(got.map((f: any) => [f.path, f.insertions, f.deletions])) !== JSON.stringify([...want].sort((x, y) => (x[0] < y[0] ? -1 : 1)).map(([p, i, dl]) => [p, i, dl])) && "stat",
         JSON.stringify(cmp.files.map((f: any) => [f.path, f.insertions, f.deletions])) !== JSON.stringify(got.map((f: any) => [f.path, f.insertions, f.deletions])) && "compare",
+        // Each file is touched by the node that committed it: verification's round's by verification, the rest by implementation.
+        cmp.files.some((f: any) => JSON.stringify(f.touched_by) !== JSON.stringify([late(want.find(([x]) => x === f.path)!) ? "verification" : "implementation"])) && "touched_by",
         ...[d.landed.diff + d.diff, cmp.diff].map((text: string, k) => {
           const ps = patches(text);
           return (JSON.stringify(ps.map((x) => x.path)) !== JSON.stringify(paths) || !ps.every((x) => x.counted && x.named && marked(x))) && `diff ${k}`;
@@ -467,7 +472,10 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
   });
   it("its commits are one per finished plan task (one named after it with no plan), then verification's fix, newest first", async () => {
     const wrong = await Promise.all(withTree.filter((b) => committed(b).length).map(async (b) => {
-      const subjects = (await call(`/work-items/${b.item.id}/diff`)).body.landed.commits.map((c: string) => c.slice(8));
+      const commits = (await call(`/work-items/${b.item.id}/diff`)).body.landed.commits as string[];
+      const subjects = commits.map((c) => c.slice(8));
+      const shas = commits.map((c) => c.slice(0, 7));
+      if (shas.some((x, k) => shas.indexOf(x) !== k || !/^[0-9a-f]{7}$/.test(x))) return b.item.title;
       const own = committed(b).filter((f) => !late(f));
       const work = defIds(b).includes("plan") ? own.map(([p], k) => `Task ${k + 1}: Change ${p}`) : own.length ? [b.item.title] : [];
       const want = [...work, ...(committed(b).some(late) ? ["Fix what verification found"] : [])].reverse();
@@ -599,6 +607,16 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
       return ok ? null : b.item.title;
     }));
     expect(wrong.filter(Boolean)).toEqual([]);
+  });
+  // `_get_pending_gate_document`: a synthetic id names the gate pending now; another gate's, or a gate on an item with
+  // none pending, is no document.
+  it("a synthetic gate id that names no gate pending now is a 404", async () => {
+    const gated = board.find((b) => b.item.pending_gate && b.item.gate_artifact);
+    const idle = board.find((b) => !b.item.pending_gate && S.docs[b.item.id]?.length)!;
+    const ids = [...(gated ? [`gate:${gated.item.id}:spec_approval`] : []), `gate:${idle.item.id}:final_review`];
+    const answers = await Promise.all(ids.map(async (id) => { const a = await call(`/documents/${encodeURIComponent(id)}`); return [a.status, a.body.detail]; }));
+    expect(answers).toEqual(ids.map(() => [404, "document not found"]));
+    if (gated) expect((await call(`/documents/${encodeURIComponent(`gate:${gated.item.id}:${gated.item.pending_gate}`)}`)).status).toBe(200);
   });
   /** Whether a document's text is about `b`: it names its title and says what its brief's first sentence says. */
   const about = (text: string, b: ItemBundle) => text.includes(b.item.title) && text.includes(b.item.description.split(". ")[0]);
@@ -802,6 +820,20 @@ const longWalk = (n: number): ItemBundle[] => {
     vi.useRealTimers();
   }
 };
+
+// The indexer refiles what the item's nodes and sessions wrote, and leaves what came another way: a summary with a body
+// of its own (an escalation reply), and a document `itemDocs` does not make (one filed at intake, `_attachment_docs`).
+describe("mergeDocs", () => {
+  const doc = (document_id: string, path: string, title = path) => ({ document_id, path, title });
+  it.each<[string, any[], any[], Record<string, string>, string[]]>([
+    ["a refiled path takes the fresh copy", [doc("a", "p", "old")], [doc("a", "p", "new")], {}, ["a:new"]],
+    ["a path filed with a body of its own keeps it", [doc("r", "p", "reply")], [doc("x", "p", "summary")], { r: "# reply" }, ["r:reply"]],
+    ["a document filed another way stays", [doc("s", "docs/spec.md", "attached")], [doc("b", "p")], {}, ["s:attached", "b:p"]],
+    ["a new path is added", [], [doc("b", "p")], {}, ["b:p"]],
+  ])("%s", (_name, had, fresh, text, want) => {
+    expect(mergeDocs(had, fresh, text).map((d) => `${d.document_id}:${d.title}`)).toEqual(want);
+  });
+});
 
 describe("the content table, the entries the walk never reaches included", () => {
   const B = buildScenario("default");
