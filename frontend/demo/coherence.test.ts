@@ -380,11 +380,31 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
     }
     expect(wrong).toEqual([]);
   });
-  it("its commits are one per finished plan task, then verification's fix, newest first", async () => {
+  it("each task its implementer reports is its own plan's: task k of the plan's N, under the plan's own title", async () => {
+    const reporting = board.filter((b) => b.events.some((e) => e.type === "plan_progress"));
+    expect(reporting.length).toBeGreaterThan(0);
+    const wrong = await Promise.all(reporting.map(async (b) => {
+      const plan = (await call(`/work-items/${b.item.id}/artifacts/plan`)).body?.content ?? "";
+      const tasks = [...plan.matchAll(/^### Task \d+: (.*)$/gm)].map((m: RegExpMatchArray) => m[1]);
+      const bad = b.events.filter((e) => e.type === "plan_progress").some((e) => e.payload.total !== tasks.length || e.payload.title !== tasks[Number(e.payload.task) - 1]);
+      return bad || !tasks.length || tasks.at(-1) !== "Check it" ? b.item.title : null;
+    }));
+    expect(wrong.filter(Boolean)).toEqual([]);
+  });
+  // A chain with no plan node (docs_only) has no plan: `report_progress` answers 400, so its implementer reports no task
+  // and names no commit after one.
+  it("an item whose chain has no plan reports no plan task, and one that has a plan reports it", () => {
+    const planless = board.filter((b) => !defIds(b).includes("plan"));
+    expect(planless.length).toBeGreaterThan(0);
+    expect(planless.filter((b) => b.events.some((e) => e.type === "plan_progress")).map((b) => b.item.title)).toEqual([]);
+    expect(board.filter((b) => defIds(b).includes("plan") && completed(b, "implementation") && !b.events.some((e) => e.type === "plan_progress")).map((b) => b.item.title)).toEqual([]);
+  });
+  it("its commits are one per finished plan task (one named after it with no plan), then verification's fix, newest first", async () => {
     const wrong = await Promise.all(withTree.filter((b) => committed(b).length).map(async (b) => {
       const subjects = (await call(`/work-items/${b.item.id}/diff`)).body.landed.commits.map((c: string) => c.slice(8));
       const own = committed(b).filter((f) => !late(f));
-      const want = [...own.map(([p], k) => `Task ${k + 1}: Change ${p}`), ...(committed(b).some(late) ? ["Fix what verification found"] : [])].reverse();
+      const work = defIds(b).includes("plan") ? own.map(([p], k) => `Task ${k + 1}: Change ${p}`) : own.length ? [b.item.title] : [];
+      const want = [...work, ...(committed(b).some(late) ? ["Fix what verification found"] : [])].reverse();
       return JSON.stringify(subjects) === JSON.stringify(want) ? null : b.item.title;
     }));
     expect(wrong.filter(Boolean)).toEqual([]);
@@ -640,10 +660,12 @@ describe("the live walk runs each node as the sample's finished item ran it", ()
     expect([0, 1].map((n) => [fresh(n).item.status, fresh(n).item.chain_template, [...byNode(fresh(n)).keys()]])).toEqual([0, 1].map(() => ["completed", "default", CHAIN_NODES.default]));
   });
   // The seeds and the walk read one recipe (nodeRecipe.ts); this holds what each user does with it to the same events.
+  // Each item reports its own plan's tasks, so how many plan_progress events it has is its own (the literal rows hold that).
+  const unplanned = (types?: string[]) => types?.filter((x) => x !== "plan_progress");
   it.each(CHAIN_NODES.default)("%s", (node) => {
     expect(sample.get(node)).toBeDefined();
-    expect(byNode(fresh(1)).get(node)).toEqual(sample.get(node));
-    if (node !== "verification") expect(byNode(fresh(0)).get(node)).toEqual(sample.get(node));
+    expect(unplanned(byNode(fresh(1)).get(node))).toEqual(unplanned(sample.get(node)));
+    if (node !== "verification") expect(unplanned(byNode(fresh(0)).get(node))).toEqual(unplanned(sample.get(node)));
   });
   it("verification whose first round of tests failed: the running sample's fix cycle and second round, then that round's end", () => {
     const failed = byNode(fresh(0)).get("verification")!;
@@ -694,8 +716,8 @@ const GATE = ["node_started", "gate_requested", "worker_session_created", "gate_
 const WAIT = (polls: number) => ["external_wait_started", ...Array.from({ length: polls - 1 }, () => ["external_wait_observed", "worker_session_exited@null", "work_item_waiting", "node_started"]).flat(), "external_wait_observed", "external_wait_ended", "worker_session_exited@null"];
 /** A changed-test-scope pass: what it picked, then a session per scope command (the repo's tests, the docs check). */
 const SCOPES = ["test_scopes_selected", ...COMMAND, ...COMMAND];
-/** `ci` and `post` are how many looks the CI and post-merge CI waits take. */
-const NODE_EVENTS: Record<string, (ci: number, post: number) => string[]> = {
+/** `ci` and `post` are how many looks the CI and post-merge CI waits take; `plan`, how many tasks the implementer reports. */
+const NODE_EVENTS: Record<string, (ci: number, post: number, plan: number) => string[]> = {
   spec: () => ["node_started", ...AGENT, "node_completed"],
   spec_approval: () => GATE,
   plan: () => ["node_started", ...AGENT, "node_completed"],
@@ -703,7 +725,7 @@ const NODE_EVENTS: Record<string, (ci: number, post: number) => string[]> = {
   chain_revision: () => ["node_started", ...AGENT, "node_completed"],
   // It changed nothing, so its gate passes itself (`chain_revision_unchanged`), with no request.
   chain_revision_approval: () => ["node_started", "chain_revision_unchanged", "gate_approved", "node_completed"],
-  implementation: () => ["node_started", "worker_session_created", "worker_session_started", ...Array(6).fill("plan_progress"), "worker_session_exited@null", "node_completed"],
+  implementation: (_ci, _post, plan) => ["node_started", "worker_session_created", "worker_session_started", ...Array(plan).fill("plan_progress"), "worker_session_exited@null", "node_completed"],
   // Both scopes pass, then the code review, then the round's measurement.
   verification: () => ["node_started", ...SCOPES, ...AGENT, "findings_measured", "node_completed"],
   work_brief: () => ["node_started", ...AGENT, "node_completed"],
@@ -727,11 +749,12 @@ describe("each node of the default chain writes what the server writes, in its o
   const S = walked();
   const fresh = (n: number) => S.bundles[S.ngBoard.find((id) => S.bundles[id].item.title === FRESH_TITLES[n])!];
   // The seeds' CI waits look three times and their post-merge CI four; the walk's every wait twice (motion.ts `POLLS`),
-  // written here as numbers so a change to either fails.
+  // written here as numbers so a change to either fails. Each implementer reports its own plan's tasks: the sample's six
+  // (it has no content), each walked item's four (its three files, then `Check it`).
   it.each(CHAIN_NODES.default)("%s", (node) => {
-    expect(segments(S.bundles[S.ng.done]).get(node)).toEqual(NODE_EVENTS[node](3, 4));
-    expect(segments(fresh(1)).get(node)).toEqual(NODE_EVENTS[node](2, 2));
-    expect(segments(fresh(0)).get(node)).toEqual(node === "verification" ? RED_VERIFICATION : NODE_EVENTS[node](2, 2));
+    expect(segments(S.bundles[S.ng.done]).get(node)).toEqual(NODE_EVENTS[node](3, 4, 6));
+    expect(segments(fresh(1)).get(node)).toEqual(NODE_EVENTS[node](2, 2, 4));
+    expect(segments(fresh(0)).get(node)).toEqual(node === "verification" ? RED_VERIFICATION : NODE_EVENTS[node](2, 2, 4));
   });
   // `WaitBounds.interval_after`: 30 s after the first pending look, doubling; `store.session_exited` stamps each exit.
   it("a seed's pending looks come due on the wait's backoff, and its waiting session's exit is stamped", () => {

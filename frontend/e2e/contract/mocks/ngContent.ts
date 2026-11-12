@@ -3,6 +3,7 @@ import { NG_REPOS } from "./ngBoard";
 import { chainOf } from "./ngChain";
 import { forgesFixture } from "./ngForges";
 import { NG_NOW } from "./clock";
+import { PLAN } from "./nodeRecipe";
 
 /**
  * What each board item is about (ngBoard.ts ROWS and ARCHIVED, by bead; live motion's refiled items, by title): its
@@ -109,6 +110,10 @@ export function mrOf(repo: string, number: number) {
 /** The plan's tasks, as the plan document lists them and the implementer reports them (`plan_progress`): one for each
  *  file it changes, in its order (not those verification's round added), then a check. */
 export const planTasks = (c: Content) => [...c.files.filter((f) => !isLate(f)).map(([p]) => `Change ${p}`), "Check it"];
+/** What an item's implementer reports (`plan_progress`): its plan's tasks, the sample's for an item with no content, and
+ *  none on a chain with no plan (`frozen`, its frozen chain or nodes, names no task that produces one), where
+ *  `report_progress` answers 400 "plan has no '## Task N' headings" (`api/routes/lifecycle.py`). */
+export const planOf = (frozen: string, content?: Content): string[] => (!frozen.includes('"produces":"plan"') ? [] : content ? planTasks(content) : [...PLAN]);
 
 const done = (b: ItemBundle, node: string) => b.events.some((e) => e.type === "node_completed" && e.payload.node_id === node);
 /** The files the item has committed so far, path-sorted as `git diff --numstat` lists them: none before its first plan
@@ -197,9 +202,11 @@ export function hunk(f: File, title: string, repo: string, own?: Rows): string {
 export function contentDiff(b: ItemBundle) {
   const files = changedFiles(b);
   const sha = (k: number) => ((parseInt(b.item.id.slice(0, 7), 16) + k * 7919) % 0xfffffff).toString(16).padStart(7, "0");
-  const tasks = planTasks(b.content!);
+  const tasks = planOf(JSON.stringify(nodesOf(b)), b.content);
   const own = files.filter((f) => !isLate(f));
-  const commits = [...own.map((_, k) => `${sha(k + 1)} Task ${k + 1}: ${tasks[k]}`), ...(files.some(isLate) ? [`${sha(own.length + 1)} Fix what verification found`] : [])].reverse();
+  // A chain with no plan reports no task, so its implementer's work is one commit, named after the item.
+  const work = tasks.length ? own.map((_, k) => `Task ${k + 1}: ${tasks[k]}`) : own.length ? [b.item.title] : [];
+  const commits = [...work, ...(files.some(isLate) ? ["Fix what verification found"] : [])].map((subject, k) => `${sha(k + 1)} ${subject}`).reverse();
   return {
     work_item_id: b.item.id, base_ref: "main", files: [], diff: "", untracked: [], truncated: false,
     landed: {

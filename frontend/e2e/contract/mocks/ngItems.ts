@@ -5,7 +5,7 @@ import { RESUME_PROMPT } from "./poller";
 import { agentUsage, agentWall, awaitPolls, drain, DOCS_RED, fixCycle, judge, measured, nodeBeats, OPEN, RED, REPAIR, REVIEW, REVIEWED, TESTS, testPass, type Found, type Open, type Writer } from "./nodeRecipe";
 import { isAgentSession, RUNS, taskRun } from "./taskKinds";
 import { escalationThreads, threadSummary } from "./transitions";
-import { mrOf, planTasks, type Content } from "./ngContent";
+import { mrOf, planOf, type Content } from "./ngContent";
 
 /**
  * Items for the item page (ux2-W5) and the board (ngBoard.ts): the shipped default chain (ngChain.ts) in every
@@ -132,7 +132,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
 
   /** The recipe's writes (nodeRecipe.ts), as this item records them: each stamped by its own clock `m`. */
   const W: Writer = {
-    id, sessions, events, frozen: FROZEN, repo: item.repo,
+    id, sessions, events, frozen: FROZEN, repo: item.repo, plan: planOf(FROZEN, content),
     get head() { return item.head_sha; },
     ev, open, close,
     enter: (node, dm) => ev("node_started", { node_id: node }, dm),
@@ -275,8 +275,8 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
       // names what it hit (`time_cap_reached`), then the item stops with that reason. A task's cap is the chain's: no item
       // override raises it, so the stop names no `limit` (`caps.item_limit`).
       const s = open("implementation.main.implement", "implementation");
-      // Its plan's first three tasks (ngContent.ts `planTasks`), out of all of them.
-      const plan = content ? planTasks(content) : ["Read the search path", "Key the cache by content hash", "Invalidate on reindex", "Bound the cache", "Tests", "Docs"];
+      // Its plan's first three tasks (ngContent.ts `planOf`), out of all of them.
+      const plan = W.plan;
       plan.slice(0, 3).forEach((title, k) => ev("plan_progress", { node_id: "implementation", task: k + 1, total: plan.length, title }, 25));
       m -= 75;
       close(s, "capped_out", 120 * 60_000);

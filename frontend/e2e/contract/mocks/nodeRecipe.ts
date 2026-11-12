@@ -30,6 +30,8 @@ export interface Writer {
   readonly frozen: string;
   readonly repo: string;
   readonly head: string | null;
+  /** The tasks its implementer reports (`plan_progress`), in order: none on a chain with no plan (ngContent.ts `planOf`). */
+  readonly plan: readonly string[];
   /** The item's events, oldest first, the ones the recipe writes included. */
   readonly events: any[];
   /** How many polls an external wait takes, where the recipe does not say. */
@@ -205,8 +207,8 @@ export function* awaitPolls(w: Writer, node: string, path: string, kind: string,
   return s;
 }
 
-/** The steps of the implementer's plan, as it reports them (`plan_progress`). */
-const PLAN = ["Read the search path", "Key the cache by content hash", "Invalidate on reindex", "Bound the cache", "Tests", "Docs"];
+/** The plan's tasks of an item with no content of its own (the item page's samples), as its implementer reports them. */
+export const PLAN = ["Read the search path", "Key the cache by content hash", "Invalidate on reindex", "Bound the cache", "Tests", "Docs"];
 
 /** A gate the walk reaches: asked for, its reviewer run and ready for a person (`gate_review`), who decides it. The
  *  person's decision is not the recipe's. `chain_revision_approval` passes itself when the revision changed nothing
@@ -235,12 +237,15 @@ export function* nodeBeats(w: Writer, n: DefNode, o: { red?: boolean } = {}): Be
     case "implementation": {
       if (!go("implementation.main.implement")) break;
       const s = w.open("implementation.main.implement", n.id);
-      // Its plan's tasks as it reports them, half of them a beat.
-      for (let k = 0; k < PLAN.length; k++) {
-        if (k % 3 === 0) yield;
-        w.ev("plan_progress", { node_id: n.id, task: k + 1, total: PLAN.length, title: PLAN[k] }, 1.5);
+      // Its plan's tasks as it reports them, half of them a beat; with no plan it reports none, and works two beats all the same.
+      const half = Math.ceil(w.plan.length / 2);
+      yield;
+      for (let k = 0; k < w.plan.length; k++) {
+        if (k === half) yield;
+        w.ev("plan_progress", { node_id: n.id, task: k + 1, total: w.plan.length, title: w.plan[k] }, 1.5);
       }
-      w.clock(-1.5 * PLAN.length);
+      if (!w.plan.length) yield;
+      w.clock(-1.5 * w.plan.length);
       w.close(s);
       break;
     }

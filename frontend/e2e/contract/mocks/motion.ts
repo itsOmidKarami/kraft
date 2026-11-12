@@ -1,7 +1,7 @@
 import { LIVE_SESSION_STATUSES } from "../../../src/types/vocab.generated";
 import { hex, type ItemBundle, type Scenario } from "./fixtures";
 import { agentUsage, nodeBeats, type Beats, type Writer } from "./nodeRecipe";
-import { FRESH_CONTENT } from "./ngContent";
+import { FRESH_CONTENT, planOf } from "./ngContent";
 import { isAgentSession, taskRun } from "./taskKinds";
 import { pendingRewind, sinceFork, threadSummary, type Transitions } from "./transitions";
 
@@ -129,6 +129,7 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
       get frozen() { return b().item.materialized_chain; },
       get repo() { return b().item.repo; },
       get head() { return b().item.head_sha ?? null; },
+      get plan() { return planOf(b().item.materialized_chain, b().content); },
       polls: POLLS,
       ev: (type, payload = {}) => {
         const node = payload.node_id ?? payload.node ?? payload.gate;
