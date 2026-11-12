@@ -49,7 +49,7 @@ const repoSeed = (): Obj[] => [
 ];
 
 const policySeed = (): Obj => ({
-  budget: { work_item_usd: 10, daily_usd: 50 },
+  budget: { work_item_usd: 20, daily_usd: 50 },
   defaults: { max_attempts: 3, timeout_minutes: 60, work_item: { time_cap_minutes: 480, total_time_cap_minutes: 2880, budget_usd: 20 }, nodes: { time_cap_minutes: 180 }, steps: { time_cap_minutes: 120 }, tasks: { time_cap_minutes: 90 } },
   maxima: { timeout_minutes: 180, work_item: { time_cap_minutes: 1440, budget_usd: 25, token_budget: 2000000 }, tasks: { time_cap_minutes: 240, total_time_cap_minutes: 10080 } },
   default: { attempts: 3, wall_clock_s: 3600 },

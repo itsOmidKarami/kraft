@@ -105,6 +105,20 @@ describe("one step", () => {
     expect(S.bundles[id].item).toMatchObject({ current_node_id: "verification", step: { index: 2, count: 2, name: "review", task: "code_review" }, summary: expect.objectContaining({ step: { index: 2, count: 2 } }) });
   });
 
+  // The tour's "request changes": the gated sample has spent most of the shipped 10, and the demo team's policy cap leaves room to rerun it.
+  it("the gated sample, sent back for changes, reruns its work to the code review with no budget stop", async () => {
+    const { S, ticks, call } = started();
+    const id = board(S, GATED);
+    const had = S.bundles[id].item.budget_cap.spent_usd;
+    await call("POST", `/work-items/${id}/gates/final_review/reject`, { note: "again" });
+    // implementation's three beats, then verification's tests step and its code review: the next launch after the spend of the rerun.
+    ticks(5, id);
+    const it = S.bundles[id].item;
+    expect(it).toMatchObject({ status: "active", stop: null, current_node_id: "verification" });
+    expect(it.budget_cap.spent_usd).toBeGreaterThan(had + 2);
+    expect(it.budget_cap.spent_usd).toBeLessThan(it.budget_cap.cap_usd);
+  });
+
   it("a node of a builtin and a forge task runs them in turn, each ended with no usage; its open task pushes the branch and opens the MR", async () => {
     const { S, ticks, call } = started();
     const id = board(S, FAILED);

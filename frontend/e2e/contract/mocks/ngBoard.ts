@@ -194,7 +194,7 @@ export function ngDryRun(body: { chain_template?: string; attachments?: { kind: 
   const loops = Object.fromEntries((chainOf(chain) ?? chainOf("default")!).frozen.nodes.filter((n: any) => n.fix_loop).map((n: any) => [n.id, n.fix_loop.max_attempts]));
   return { status: 200, body: {
     dry_run: true, nodes, skipped, gates: nodes.filter((n) => n.kind === "gate").map((n) => n.id),
-    // The shipped policy's caps (`config/policy.yaml`: `work_item_usd: 10`, `daily_usd: 50`).
-    caps: { budget_usd: 10, budget_source: "policy", daily_usd: 50, nodes: Object.fromEntries(nodes.filter((n) => n.fix_loop).map((n) => [n.id, { attempts: loops[n.id] ?? 3, wall_clock_s: 3600 }])) },
+    // The demo team's policy caps: `work_item_usd` raised from the shipped 10 to 20, so a request for changes can rerun an item that already spent most of 10 (`daily_usd: 50` as shipped).
+    caps: { budget_usd: 20, budget_source: "policy", daily_usd: 50, nodes: Object.fromEntries(nodes.filter((n) => n.fix_loop).map((n) => [n.id, { attempts: loops[n.id] ?? 3, wall_clock_s: 3600 }])) },
   } };
 }

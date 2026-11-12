@@ -119,7 +119,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     // The long variant overrides its chain's fix loop where it has one (docs_only has none).
     node_overrides: long && has("verification") ? { verification: { attempts: 4 } } : {}, node_overrides_count: long && has("verification") ? 1 : 0,
     agent_overrides: null,
-    budget_cap: { cap_usd: 10, source: long ? "item" : "policy", spent_usd: 0, daily: { spent_usd: 18.2, cap_usd: 50 } },
+    budget_cap: { cap_usd: 20, source: long ? "item" : "policy", spent_usd: 0, daily: { spent_usd: 18.2, cap_usd: 50 } },
     worktree_path: `/Users/dev/.kraft/run/worktrees/${id}`, head_sha: hex(seed + 77).slice(0, 40), review_head: null,
     repos: [], attachments: [], mr_ref: null, progress: null, rate_limit: null,
     escalation_threads: [], concerns: [], deferred_findings: [],
