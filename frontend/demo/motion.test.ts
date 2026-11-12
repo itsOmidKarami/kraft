@@ -552,6 +552,21 @@ describe("the clock and the purse", () => {
     expect(types(ticks(1, id))).toEqual(["node_started", "worker_session_created", "worker_session_started"]);
   });
 
+  // `_stopped_step`: its tests passed before the cap stopped it, so the retry the raise makes goes on at its code review.
+  it("the spend-capped sample, raised, runs only its code review: its tests are not paid for again", async () => {
+    const { S, ticks, call } = started();
+    const id = board(S, "kraft-58e2");
+    const b = S.bundles[id];
+    const had = b.sessions.length;
+    expect((await call("POST", `/work-items/${id}/budget/raise`, { budget_usd: 40 })).body).toMatchObject({ node_id: "verification", path: "verification.review", attempt: 1 });
+    expect(types(ticks(1, id))).toEqual(["node_started", "worker_session_created", "worker_session_started"]);
+    expect(ticks(1, id).filter(([t]) => ["findings_measured", "node_completed", "node_started"].includes(t))).toEqual([
+      ["findings_measured", expect.objectContaining({ measured_tasks: ["verification.review.code_review"], unmeasured_tasks: ["verification.tests.test_changed_scopes"] })],
+      ["node_completed", { node_id: "verification" }],
+      ["node_started", { node_id: "work_brief" }],
+    ]);
+    expect(b.sessions.slice(had).filter((s) => s.node_id === "verification").map((s) => [s.hook_point, s.attempt])).toEqual([["verification.review.code_review", 1]]);
+  });
   it("checks the cap at every agent launch, one in the middle of a node too: the tests run, the code review does not", async () => {
     const { S, ticks, call } = started();
     const id = board(S, RUNNING);
@@ -567,8 +582,9 @@ describe("the clock and the purse", () => {
       ["work_item_needs_human", expect.objectContaining({ node_id: "verification", kind: "budget" })],
     ]);
     expect(b.sessions.at(-1)).toMatchObject({ hook_point: "verification.tests.test_changed_scopes", status: "done" });
-    // Its stop's task and attempt are the node's latest session's, and its step that session's (`board._stop`, `_step_of`).
-    expect([b.item.stop.task, b.item.stop.attempt, b.item.step, b.item.summary.step]).toEqual(["verification.tests.test_changed_scopes", b.sessions.at(-1).attempt, { index: 1, count: 2, name: "tests", task: "test_changed_scopes" }, { index: 1, count: 2 }]);
+    // Its stop's task and attempt are the node's latest session's, and its step that session's (`board._stop`, `_step_of`);
+    // the step cursor is the code review's, recorded before the cap check refused it (`set_current_step`).
+    expect([b.item.stop.task, b.item.stop.attempt, b.item.step, b.item.summary.step, b.item.current_step]).toEqual(["verification.tests.test_changed_scopes", b.sessions.at(-1).attempt, { index: 1, count: 2, name: "tests", task: "test_changed_scopes" }, { index: 1, count: 2 }, 1]);
   });
 
   it("checks the cap before a steer's queued attempt starts too", async () => {

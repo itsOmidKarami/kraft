@@ -123,7 +123,9 @@ describe("transitions", () => {
       [["work_item_archived", { by: "you" }, null]]],
     ["restore puts it back under Done", "kraft-9a02", (T, id) => T.restore(id), { status: "completed", display_status: "done", archived_at: null }, [["work_item_restored", {}, null]]],
     ["raise budget lifts the cap and retries", "kraft-58e2", (T, id) => T.raiseBudget(id, 8), { status: "active", display_status: "running", stop: null, budget_cap: expect.objectContaining({ cap_usd: 8, source: "item" }) },
-      [["budget_raised", { budget_usd: 8 }, null], ["work_item_retried", { node_id: "verification" }, "verification"], ...forked()]],
+      // Stopped before its code review, past its first step with no fix cycle run: the retry goes on at that step (`_stopped_step`).
+      [["budget_raised", { budget_usd: 8 }, null], ["work_item_retried", { node_id: "verification" }, "verification"],
+        ["run_forked", { scope: "step", path: "verification.review", reopened: [], preserved: [] }], ["cap_counters_reset", { by: "human", counters: {} }]]],
     ["escalate starts a turn in a new thread", "failed", (T, id) => T.escalate(id, "look at the token", true), { status: "needs_human", display_status: "escalated" },
       turnStarted({ message: "look at the token", auto: false, thread: 2, turn: 1 }, "draft_merge_request", 2)],
     ["stop escalation ends the turn, the item as it stopped", "failed", (T, id) => (T.escalate(id, "look"), T.stopEscalation(id)), { status: "needs_human", display_status: "failed" },
@@ -430,6 +432,20 @@ describe("samples and answers as the server shapes them", () => {
   it("a node retry answers the node as its path", async () => {
     const { S, call } = server();
     expect((await call("POST", `/work-items/${idOf(S, "kraft-b108")}/retry`, {})).body).toMatchObject({ node_id: "draft_merge_request", path: "draft_merge_request" });
+  });
+  // `_stopped_step`: a plain retry after a cap or budget stop past a node's first step reruns that step, the first attempt
+  // of its task; at the first step, or once the node's fix loop has run, the whole node.
+  it.each<[string, string, (b: ItemBundle) => void, string, number]>([
+    ["a spend stop before the code review, raised", "kraft-58e2", () => {}, "verification.review", 1],
+    ["a time cap at the code review", "kraft-58e2", (b) => { b.item.stop = { ...b.item.stop, kind: "cap" }; }, "verification.review", 1],
+    ["a spend stop at the node's first step", "kraft-58e2", (b) => { b.item.current_step = 0; }, "verification", 2],
+    ["a spend stop after a fix cycle", "kraft-58e2", (b) => { b.events.push({ ...b.events.at(-1)!, type: "fix_cycle_started", payload: { node_id: "verification", cycle: 1 } }); }, "verification", 2],
+  ])("%s retries %s at its stopped step", async (_name, bead, setup, path, attempt) => {
+    const { S, call } = server();
+    const b = S.bundles[idOf(S, bead)];
+    setup(b);
+    const r = b.item.stop.kind === "budget" ? await call("POST", `/work-items/${b.item.id}/budget/raise`, { budget_usd: 40 }) : await call("POST", `/work-items/${b.item.id}/retry`, {});
+    expect([r.status, r.body.path, r.body.attempt, b.events.filter((e) => e.type === "run_forked").at(-1)?.payload.path]).toEqual([200, path, attempt, path]);
   });
 
   it("the spend-capped sample says so in its stop, its last event and its spend", () => {

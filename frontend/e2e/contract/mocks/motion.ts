@@ -3,7 +3,7 @@ import { hex, type ItemBundle, type Scenario } from "./fixtures";
 import { agentUsage, nodeBeats, type Beats, type Writer } from "./nodeRecipe";
 import { FRESH_CONTENT, isLate, planOf, type Content } from "./ngContent";
 import { isAgentSession, taskRun } from "./taskKinds";
-import { pendingRewind, sinceFork, threadSummary, type Transitions } from "./transitions";
+import { pendingRewind, sinceFork, stepIndex, threadSummary, type Transitions } from "./transitions";
 
 /**
  * Live motion for the dashboard demo (`MockOptions.motion`): the board's items walk their chains on their own, as
@@ -124,6 +124,17 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
   /** The paths a `scope_skipped` passed over in this run fork (`store.skipped_paths`): a task, or a step and its tasks. */
   const skipped = (b: ItemBundle) => sinceFork(b.events).filter((e) => e.type === "scope_skipped").map((e) => String(e.payload.path));
   const under = (path: string, scope: string) => path === scope || path.startsWith(`${scope}.`);
+  /** A step retry's fork starts at its step (`RunFork.start`): the node's steps before it passed already and are not run
+   *  again, until the node completes in this run. */
+  const passed = (b: ItemBundle, path: string) => {
+    const f = [...b.events].reverse().find((e) => e.type === "run_forked");
+    if (f?.payload.scope !== "step") return false;
+    const node = String(f.payload.path).split(".")[0];
+    if (!path.startsWith(`${node}.`) || sinceFork(b.events).some((e) => e.type === "node_completed" && e.payload.node_id === node)) return false;
+    const nodes = b.item.chain_definition?.nodes ?? [];
+    const at = stepIndex(nodes, node, path);
+    return at >= 0 && at < stepIndex(nodes, node, String(f.payload.path));
+  };
 
   /** The recipe's writes on item `id`, each through a door at the mock's clock. */
   const writer = (id: string): Writer => {
@@ -147,7 +158,7 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
         const agent = !op.noAgent && isAgentSession(b().item.materialized_chain, path);
         // `dispatch.over_budget`, before every agent task's launch. shortcut: a gate's reviewer is not checked (its own
         // launch checks and logs a skip, `gate_review`); add that skip if a demo item ever reaches a gate over its cap.
-        if (agent && !path.endsWith(".auto_review") && overBudget(b())) { T.stopForBudget(id, node); throw STOPPED; }
+        if (agent && !path.endsWith(".auto_review") && overBudget(b())) { T.stopForBudget(id, node, path); throw STOPPED; }
         const sid = T.createSession(id, node, path, op).body.session_id;
         if (op.noAgent) noAgent.add(sid);
         if (path.endsWith(".auto_review")) T.append(id, "gate_auto_review_started", { gate: node, session_id: sid }, node);
@@ -171,7 +182,7 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
       selfApprove: (gate) => { T.selfApprove(id, gate); },
       mrOpened: (node) => { T.mrOpened(id, node); },
       complete: (node) => { T.completeNode(id, node); },
-      skipped: (path) => skipped(b()).some((g) => under(path, g)),
+      skipped: (path) => skipped(b()).some((g) => under(path, g)) || passed(b(), path),
     };
   };
 
@@ -287,7 +298,7 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
       // Stopped before it launched: the attempt never was, and the steer it would have carried is reported
       // undelivered after the stop, as the walk reports it. A retry after the raise starts with no steer.
       T.withdrawSession(id, queued.id);
-      T.stopForBudget(id, node);
+      T.stopForBudget(id, node, queued.hook_point);
       const steer = [...b.events].reverse().find((e) => e.type === "work_item_resumed")?.payload.steer;
       if (typeof steer === "string" && steer) T.steerUndelivered(id, steer);
       return;

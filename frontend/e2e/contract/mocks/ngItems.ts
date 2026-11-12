@@ -331,6 +331,8 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
         item.stop = { ...stop("budget", task), node: "verification", attempt };
         item.step = stepOf(nodes, "verification", task);
         item.summary.step = { index: item.step.index, count: item.step.count };
+        // `dispatch` recorded the code review's step before the cap check refused its launch (`set_current_step`).
+        item.current_step = nodes.find((n) => n.id === "verification")!.steps!.findIndex((g) => g.includes(REVIEW));
         break;
       }
       // The shipped implementer's own time cap, 120 minutes, stops its running session (`session_exited`, capped_out) and
