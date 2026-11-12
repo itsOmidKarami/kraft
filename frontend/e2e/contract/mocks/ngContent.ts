@@ -142,10 +142,19 @@ export function changedFiles(b: ItemBundle): File[] {
 
 const camelOf = (snake: string) => snake.replace(/_(\w)/g, (_, c) => c.toUpperCase());
 const isTest = (path: string) => /(^|\/)tests?\//.test(path) || /\.test\.[jt]sx?$/.test(path) || /(^|\/)test_[^/]+\.py$/.test(path);
+const baseOf = (path: string) => path.split("/").pop()!.replace(/\.[^.]+$/, "").replace(/\.test$/, "");
+/** How a test at `from` imports the module at `to`: up from its own folder to the one they share, then down. */
+function importPath(from: string, to: string) {
+  const [a, b] = [from, to].map((p) => p.split("/").slice(0, -1));
+  let k = 0;
+  while (k < a.length && a[k] === b[k]) k++;
+  return [...(a.length > k ? Array(a.length - k).fill("..") : ["."]), ...b.slice(k), baseOf(to)].join("/");
+}
 /** A file's lines by its kind: some it keeps (context), some it had, some it has, named after the file so it reads as
- *  a change to that file. */
-function template(path: string, title: string, repo: string): [string[], string[], string[]] {
-  const base = path.split("/").pop()!.replace(/\.[^.]+$/, "").replace(/\.test$/, "");
+ *  a change to that file. A test imports the module of its name among `paths`, the item's files, where it has one; a
+ *  page says what the item's brief (`description`) says. */
+function template(path: string, title: string, repo: string, paths: string[], description: string): [string[], string[], string[]] {
+  const base = baseOf(path);
   const snake = base.replace(/[^A-Za-z0-9]+/g, "_").toLowerCase();
   const camel = camelOf(snake);
   const ext = path.split(".").pop()!;
@@ -157,7 +166,8 @@ function template(path: string, title: string, repo: string): [string[], string[
   }
   if (ext === "py") return [[`"""${base} for acme."""`, "import logging"], [`def ${snake}(value):`, "    return value", `    # TODO: ${snake} ignores the limit`],
     [`def ${snake}(value, *, limit=None):`, `    """${title}."""`, "    if limit is not None and value > limit:", `        raise ValueError(f"${snake}: {value} > {limit}")`, "    logging.debug(\"%s ok\", value)", "    return value"]];
-  if (["ts", "tsx", "js"].includes(ext) && isTest(path)) return [[`import { describe, expect, it } from "vitest";`, `import { ${camel} } from "../${base}";`], [`it.todo("${base}");`],
+  const module = paths.find((p) => p !== path && !isTest(p) && baseOf(p) === base && p.split(".").pop() === ext);
+  if (["ts", "tsx", "js"].includes(ext) && isTest(path)) return [[`import { describe, expect, it } from "vitest";`, `import { ${camel} } from "${module ? importPath(path, module) : `../${base}`}";`], [`it.todo("${base}");`],
     [`describe("${base}", () => {`, `  it("${say}", () => {`, `    expect(${camel}({ limit: 2 }).items).toHaveLength(2);`, "  });", "});"]];
   if (ext === "js") return [[`// ${base}`, "const root = document.documentElement;"], [`function ${camel}() {}`],
     [`/** ${title}. */`, `export function ${camel}(value) {`, `  root.dataset.${camel} = value;`, `  localStorage.setItem("${camel}", value);`, "}"]];
@@ -166,12 +176,13 @@ function template(path: string, title: string, repo: string): [string[], string[
     return [[`// ${base}`, head], [`export function ${camel}(value: unknown) {`, "  return value;", "}"],
       [`/** ${title}. */`, `export function ${camel}(value: unknown, limit?: number) {`, `  if (limit !== undefined && Number(value) > limit) throw new Error(\`${camel}: \${value} > \${limit}\`);`, "  return value;", "}"]];
   }
-  if (ext === "md") return [[`# ${base.replace(/[-_]/g, " ")}`, ""], [`This page is a stub.`, "See the source for now."],
-    [`${title}.`, "", `## What it does`, "", `Each setting below says what it changes, and what it is set to when you leave it out.`]];
+  const [first, ...rest] = description.split(/(?<=\.) /);
+  if (ext === "md") return [[`# ${base.replace(/[-_]/g, " ")}`, ""], [`This page is a stub.`, "See the source for now."], [first, "", ...rest]];
   if (ext === "css") return [[`/* ${base} */`, ".page {"], ["  color: #222;", "  background: #fff;"],
     ["  color: var(--fg);", "  background: var(--bg);", "}", "", "@media (prefers-color-scheme: dark) {", "  :root { --fg: #e6e6e6; --bg: #111; }", "}"]];
   if (ext === "html") return [["<!doctype html>", `<html lang="en">`], ["<body>"], [`<body class="${snake}">`, `  <!-- ${title}. -->`, "  <main>{{ content }}</main>"]];
-  if (ext === "json") return [["{", `  "name": "acme-${snake}",`], [`  "main": "out/${base}.js"`], [`  "main": "out/${base}.js",`, `  "description": "${title}."`]];
+  // A manifest: the repo's own package, and a script line (no version: none of the demo's numbers is a release's).
+  if (ext === "json") return [["{", `  "name": "${repo.split("/").pop()}",`], [`  "scripts": { "test": "vitest run" }`], [`  "scripts": { "test": "vitest run", "check": "tsc --noEmit" },`, `  "description": "${title}."`]];
   if (ext === "toml") return [["[project]", `name = "acme"`], [`dependencies = ["pydantic<2"]`], [`dependencies = ["pydantic>=2"]`]];
   if (ext === "service") return [["[Unit]", `Description=acme ${base}`], ["Type=simple"],
     ["After=network-online.target", "", "[Service]", `ExecStart=/usr/bin/acme-${base}`, "Restart=on-failure", "", "[Install]", "WantedBy=multi-user.target"]];
@@ -196,11 +207,12 @@ ${rows.join("\n")}
 }
 
 /** A file's hunk: its own rows where the item has them (`hunks`), else its template's, named after the file. */
-export function hunk(f: File, title: string, repo: string, own?: Rows): string {
+export function hunk(f: File, title: string, repo: string, c: Content): string {
   const [path, ins, del] = f;
   const status = statusOf(f);
+  const own = c.hunks?.[path];
   if (own) return patch(path, status, own.at, own.rows);
-  const [ctx, olds, news] = template(path, title, repo);
+  const [ctx, olds, news] = template(path, title, repo, c.files.map(([p]) => p), c.description);
   // shortcut: a file shows at most its template's lines, not all it changed; enough to read what it is.
   if (status === "new") return patch(path, status, 1, [...ctx, ...news].slice(0, ins).map((l) => `+${l}`));
   if (status === "deleted") return patch(path, status, 1, [...ctx, ...olds].slice(0, del).map((l) => `-${l}`));
@@ -222,7 +234,8 @@ export function contentDiff(b: ItemBundle) {
     landed: {
       commits,
       files: files.map(([path, insertions, deletions]) => ({ path, insertions, deletions })),
-      diff: files.map((f) => hunk(f, b.item.title, b.item.repo, b.content!.hunks?.[f[0]])).join("\n"),
+      // Each patch ends in its own newline, so they follow one another with no blank line between (`artifacts.py`).
+      diff: files.map((f) => hunk(f, b.item.title, b.item.repo, b.content!)).join(""),
       truncated: false,
     },
   };

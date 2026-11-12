@@ -271,14 +271,19 @@ const committed = (b: ItemBundle): Row[] => {
   const started = Math.max(0, ...b.events.filter((e) => e.type === "plan_progress" && e.payload.node_id === "implementation").map((e) => Number(e.payload.task)));
   return files.filter((f) => !late(f)).slice(0, Math.max(0, started - 1));
 };
-/** Each file's patch in `diff`: its path, its header lines, and its `@@` counts against the lines it shows. */
+/** Each file's patch in `diff`: its path, its header lines, and its `@@` counts against the lines it shows. An empty
+ *  row is a context line, as the review page reads one (`patch.ts`); its `---` and `+++` lines name its own path on
+ *  each side, or `/dev/null` for the side a new or deleted file lacks (`named`). */
 const patches = (diff: string) => diff.split(/^(?=diff --git )/m).filter(Boolean).map((p) => {
   const [head, ...rest] = p.split(/^(?=@@ )/m);
   const body = rest.join("").replace(/\n$/, "").split("\n");
   const [, oldN, newN] = /^@@ -\d+,(\d+) \+\d+,(\d+) @@/.exec(body[0])!.map(Number);
   const rows = body.slice(1);
-  const count = (marks: string) => rows.filter((r) => marks.includes(r[0])).length;
-  return { path: /^diff --git a\/(\S+)/.exec(head)![1], head, counted: oldN === count(" -") && newN === count(" +"), oldN, newN };
+  const count = (marks: string) => rows.filter((r) => marks.includes(r === "" ? " " : r[0])).length;
+  const path = /^diff --git a\/(\S+)/.exec(head)![1];
+  const side = (mark: string) => /^(?:---|\+\+\+) (\S+)$/m.exec(head.split("\n").filter((l) => l.startsWith(`${mark} `)).join("\n"))?.[1];
+  const named = [side("---"), side("+++")].every((x, k) => x === "/dev/null" || x === `${"ab"[k]}/${path}`);
+  return { path, head, counted: oldN === count(" -") && newN === count(" +"), named, oldN, newN };
 });
 /** An MR's address as its repo's forge writes it: GitHub's pull, or a merge request on the GitLab account's host. */
 const MR_URL = /https:\/\/\S+\/(?:pull|-\/merge_requests)\/\d+/g;
@@ -367,7 +372,7 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
         JSON.stringify(cmp.files.map((f: any) => [f.path, f.insertions, f.deletions])) !== JSON.stringify(got.map((f: any) => [f.path, f.insertions, f.deletions])) && "compare",
         ...[d.landed.diff + d.diff, cmp.diff].map((text: string, k) => {
           const ps = patches(text);
-          return (JSON.stringify(ps.map((x) => x.path)) !== JSON.stringify(paths) || !ps.every((x) => x.counted && marked(x))) && `diff ${k}`;
+          return (JSON.stringify(ps.map((x) => x.path)) !== JSON.stringify(paths) || !ps.every((x) => x.counted && x.named && marked(x))) && `diff ${k}`;
         }),
       ].filter(Boolean);
       return problems.length ? `${b.item.title}: ${problems.join(", ")}` : null;
@@ -396,11 +401,21 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
     }
     expect(wrong).toEqual([]);
   });
-  it("a file's patch reads as its kind: a test's asserts, and only the VS Code repo's code imports vscode", async () => {
+  // A test imports the module of its name where the item changes one, from where that module is; a page says what the
+  // item's brief says; a manifest is its repo's own package.
+  it("a file's patch reads as its kind: a test's asserts and imports, a page's words, a manifest's name, and only the VS Code repo's code imports vscode", async () => {
     const wrong: string[] = [];
+    const stem = (p: string) => p.replace(/(\.test)?\.[^./]+$/, "");
     for (const b of withTree) for (const p of (await call(`/work-items/${b.item.id}/diff`)).body.landed.diff.split(/^(?=diff --git )/m).filter(Boolean)) {
       const path = /^diff --git a\/(\S+)/.exec(p)![1];
-      if ((isTestPath(path) && !/^\+.*\b(assert|expect)\b/m.test(p)) || (p.includes(`from "vscode"`) && !b.item.repo.endsWith("/kraft-vscode"))) wrong.push(`${b.item.title}: ${path}`);
+      const module = b.content!.files.map(([x]) => x).find((x) => !isTestPath(x) && x !== path && stem(x).split("/").pop() === stem(path).split("/").pop());
+      const imported = /^[ +]import \{ \w+ \} from "(\.[^"]+)";$/m.exec(p)?.[1];
+      const at = path.split("/").slice(0, -1);
+      for (const s of imported?.split("/") ?? []) if (s === "..") at.pop(); else if (s !== ".") at.push(s);
+      if ((isTestPath(path) && !/^\+.*\b(assert|expect)\b/m.test(p)) || (p.includes(`from "vscode"`) && !b.item.repo.endsWith("/kraft-vscode"))
+        || (isTestPath(path) && imported && module && at.join("/") !== stem(module))
+        || (path.endsWith(".md") && !p.includes(b.item.description.split(". ")[0]))
+        || (path.endsWith("package.json") && !p.includes(`"name": "${b.item.repo.split("/").pop()}",`))) wrong.push(`${b.item.title}: ${path}`);
     }
     expect(wrong).toEqual([]);
   });
