@@ -148,7 +148,7 @@ const ROWS: Row[] = [
   },
   {
     name: "logs: a task that has not run shows a Log tab saying there is no log yet",
-    run: async (p) => { await app(p, item("running", "/nodes/verification?sel=verification.review.automated_review&tab=log")); await expect(p.getByRole("tab", { name: "Log" }).or(p.getByRole("button", { name: "Log", exact: true })).first()).toBeVisible({ timeout: 2000 }); await expect(p.getByText(/No log (yet|for this attempt)/)).toBeVisible(); },
+    run: async (p) => { await app(p, item("running", "/nodes/work_brief?sel=work_brief.main.author&tab=log")); await expect(p.getByRole("tab", { name: "Log" }).or(p.getByRole("button", { name: "Log", exact: true })).first()).toBeVisible({ timeout: 2000 }); await expect(p.getByText(/No log (yet|for this attempt)/)).toBeVisible(); },
   },
 
   {
@@ -312,9 +312,11 @@ const ROWS: Row[] = [
     name: "item page: a finished item's Recent reads its gate and its end once each (CG-4)",
     run: async (p) => {
       await app(p, item("done"));
+      // Four nodes ran after the gate (post_merge_ci's waits among them): its line is with the earlier ones.
+      await p.getByRole("button", { name: /^Show \d+ earlier$/ }).click();
       await expect(p.getByText("approve final review · approved by you")).toBeVisible();
       await expect(p.getByText(/^approve final review finished/)).toHaveCount(0);
-      await expect(p.getByText(/^release finished/)).toHaveCount(1);
+      await expect(p.getByText(/^post merge ci finished/)).toHaveCount(1);
     },
   },
   {
@@ -361,7 +363,7 @@ const ROWS: Row[] = [
     name: "stop: a time-capped item names its limit and offers Raise cap [decided]",
     run: async (p) => {
       await app(p, item("capped"), { tweak: withCapLimit });
-      await expect(p.getByText("Running time hit its 8h cap.")).toBeVisible();
+      await expect(p.getByText("`implementation.main.implement` hit its time cap of 120 minutes.")).toBeVisible();
       await expect(p.getByRole("button", { name: "Raise cap" }).first()).toBeVisible();
     },
   },

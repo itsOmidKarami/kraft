@@ -1048,11 +1048,11 @@ export const withStop = (kind: string, facts: Record<string, unknown>, extra: Re
 /** The failed item also ran `n` test scopes, the first `red` failing. */
 export const withFailedTests = (n: number, red: number) => (S: Scenario) => { withStop("failed", {})(S); Object.assign(ngBundle("failed", S).item, { test_result: { scopes: testScopes(n, red), passed: red === 0 } }); };
 
-/** The capped item's stop names the limit that raises it (a time cap), and the item reports its running time. */
+/** The capped item, whose stop names the limit that raises it (its implement task's time cap), reports its running time:
+ *  the sessions before that task and its two hours, under no running-time cap of the item's own. */
 export const withCapLimit = (S: Scenario) => {
   const b = ngBundle("capped", S);
-  b.item.stop = { ...b.item.stop, limit: { path: "", key: "total_time_cap_minutes", value: 480, maximum: null } };
-  b.item.running_time = { running_s: 8 * 3600 + 120, cap_minutes: 480 };
+  b.item.running_time = { running_s: Math.round(b.sessions.reduce((a, s) => a + (s.wall_ms ?? 0), 0) / 1000), cap_minutes: null };
 };
 
 /** The running item names beads, so Mark complete says they stay open. */

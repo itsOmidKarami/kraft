@@ -23,7 +23,7 @@ const hoverPin = async (p: Page) => { await p.getByRole("button", { name: "Pin s
 /** The app's sidebar toggle: one button, its state in aria-pressed. */
 const appToggle = async (p: Page) => { await p.getByRole("button", { name: "Pin sidebar" }).click(); await p.waitForTimeout(400); };
 const appLogTab = (sel: string, data: Variant = "default") => (p: Page) =>
-  app(p, item("running", `/nodes/verification?sel=${sel}&tab=log`), { data, ready: (pg) => pg.getByLabel("Log lines").or(pg.getByText(/No log for this attempt|Not started\.|No log yet/)).first().waitFor({ timeout: 8000 }) });
+  app(p, item("running", `/nodes/${sel.split(".")[0]}?sel=${sel}&tab=log`), { data, ready: (pg) => pg.getByLabel("Log lines").or(pg.getByText(/No log for this attempt|Not started\.|No log yet/)).first().waitFor({ timeout: 8000 }) });
 const appGateDoc = (data: Variant = "default") => async (p: Page) => {
   await app(p, item("needs-gate", "?sel=final_review"), { data, routes: editorsRoute });
   await p.getByRole("button", { name: /^Read / }).first().click();
@@ -143,7 +143,7 @@ export const STATES: State[] = [
   { area: "work-item", state: "default", app: (p) => app(p, item("running")) },
   { area: "work-item", state: "node", app: (p) => app(p, item("running", "/nodes/verification")) },
   { area: "work-item", state: "node-earlier-pass", app: (p) => app(p, item("running", "/nodes/verification?pass=1"), { tweak: withScopes, ready: (pg) => pg.getByRole("button", { name: /^pass 1 of 2$/ }).waitFor({ timeout: 8000 }) }) },
-  { area: "work-item", state: "node-scope", app: (p) => app(p, item("running", `/nodes/verification?sel=verification.test.unit_tests&${new URLSearchParams({ scope: ":just test-unit" })}`), { tweak: withScopes, ready: (pg) => pg.getByRole("group", { name: /repositories and scopes/ }).waitFor({ timeout: 8000 }) }) },
+  { area: "work-item", state: "node-scope", app: (p) => app(p, item("running", `/nodes/verification?sel=verification.tests.test_changed_scopes&${new URLSearchParams({ scope: ":just test-unit" })}`), { tweak: withScopes, ready: (pg) => pg.getByRole("group", { name: /repositories and scopes/ }).waitFor({ timeout: 8000 }) }) },
   { area: "work-item", state: "loading", app: (p) => app(p, item("running"), { routes: (pg) => pg.route(/\/api\/work-items\/[0-9a-f]+(\?|$)/, () => {}), ready: async () => {} }) },
   { area: "work-item", state: "error", app: (p) => app(p, "/work-items/0000000000000000deadbeef", { ready: async () => {} }) },
   { area: "work-item", state: "failed", app: (p) => app(p, item("failed")) },
@@ -164,7 +164,7 @@ export const STATES: State[] = [
 
   // Logs viewer
   { area: "logs-viewer", state: "default", app: appLogTab("verification.review.code_review") },
-  { area: "logs-viewer", state: "empty", app: appLogTab("verification.review.automated_review") },
+  { area: "logs-viewer", state: "empty", app: appLogTab("work_brief.main.author") },
   { area: "logs-viewer", state: "fullscreen", app: async (p) => { await appLogTab("verification.review.code_review")(p); await click(/full screen/)(p); } },
 
   // Settings
@@ -243,7 +243,7 @@ export const STATES: State[] = [
 
   // Edit mode and Apply on a running item (ED-)
   { area: "edit-mode", state: "draft-chip", app: (p) => app(p, item("running"), { mock: { itemDraft: "changes" } }) },
-  { area: "edit-mode", state: "config-override", app: async (p) => { await app(p, item("running", "?sel=work_brief.write.work_brief&tab=config"), { mock: { itemDraft: "none" } }); await p.getByRole("button", { name: "Override model" }).click(); await p.getByRole("textbox", { name: "model" }).fill("opus"); await p.keyboard.press("Enter"); await p.waitForTimeout(600); } },
+  { area: "edit-mode", state: "config-override", app: async (p) => { await app(p, item("running", "?sel=work_brief.main.author&tab=config"), { mock: { itemDraft: "none" } }); await p.getByRole("button", { name: "Override model" }).click(); await p.getByRole("textbox", { name: "model" }).fill("opus"); await p.keyboard.press("Enter"); await p.waitForTimeout(600); } },
   { area: "edit-mode", state: "apply", app: async (p) => { await app(p, item("running"), { mock: { itemDraft: "changes" } }); await click("Review & apply")(p); await p.getByRole("dialog").waitFor(); } },
   { area: "edit-mode", state: "problems", app: (p) => app(p, item("running"), { mock: { itemDraft: "problems" } }) },
   { area: "edit-mode", state: "seam-menu", app: async (p) => { await app(p, item("running"), { mock: { itemDraft: "none" } }); await p.getByRole("button", { name: "Add a library node here" }).first().focus(); await p.keyboard.press("Enter"); await p.waitForTimeout(500); } },
@@ -280,7 +280,7 @@ export const STATES: State[] = [
   { area: "phone", state: "item-failed-forge-token", viewport: "phone", app: appPhone(item("failed"), { tweak: withStop("infra", { cause: "forge_auth", account: "corp-gl", source: "env CORP_GL" }) }) },
   { area: "phone", state: "node", viewport: "phone", app: appPhone(item("running", "/nodes/verification")) },
   { area: "phone", state: "node-earlier-pass", viewport: "phone", app: appPhone(item("running", "/nodes/verification?pass=1"), { tweak: withScopes, ready: (pg) => pg.getByRole("button", { name: /^pass 1 ·/, pressed: true }).waitFor({ timeout: 8000 }) }) },
-  { area: "phone", state: "scope", viewport: "phone", app: appPhone(item("running", `/nodes/verification?sel=verification.test.unit_tests&${new URLSearchParams({ scope: ":just test-unit" })}`), { tweak: withScopes, ready: (pg) => pg.getByRole("heading", { level: 1, name: "just test-unit" }).waitFor({ timeout: 8000 }) }) },
+  { area: "phone", state: "scope", viewport: "phone", app: appPhone(item("running", `/nodes/verification?sel=verification.tests.test_changed_scopes&${new URLSearchParams({ scope: ":just test-unit" })}`), { tweak: withScopes, ready: (pg) => pg.getByRole("heading", { level: 1, name: "just test-unit" }).waitFor({ timeout: 8000 }) }) },
   { area: "phone", state: "gate-node", viewport: "phone", app: appPhone(item("needs-gate", "/nodes/final_review")) },
   { area: "phone", state: "gate-review", viewport: "phone", app: appPhone(item("needs-gate", "/review"), { ready: (pg) => pg.locator("main").first().waitFor() }) },
   { area: "phone", state: "start-review", viewport: "phone", app: async (p) => { await appPhone(item("paused"), { tweak: withOneOffPending })(p); await p.getByRole("button", { name: "Start", exact: true }).click(); await p.waitForTimeout(700); } },

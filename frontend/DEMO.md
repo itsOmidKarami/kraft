@@ -10,7 +10,12 @@ way it has their docs: `main`'s at `/next/demo/` and a release's, built from
 its own tag, at `/demo/` (docs/writing-docs.md, "Versions of the docs").
 
 `demo/main.ts` builds the scenario and hands it to `mocks/mockApi.ts`, the same
-answers the contract suite gets. `demo/shim.ts` puts them under the page:
+answers the contract suite gets. Its work items run Kraft's shipped chains, as
+a real server freezes them for an item: `mocks/shippedChains.json`, which `just
+shapes` rewrites from a real server (`tests/api/test_demo_chain.py`), read by
+`mocks/ngChain.ts`. Each item stands where a real one in its state stands, with
+the sessions and events a real server writes on the way: `default`'s 19 nodes,
+`quick-task`'s two, and `docs_only`, five of `default`'s nodes. `demo/shim.ts` puts them under the page:
 `fetch` and the events socket for `/api/**`, the clock moved to the scenario's
 moment, and the two `<a href="/api/...">` log links. An action there sticks
 until the page reloads: the mock changes the item as the server would
@@ -69,8 +74,12 @@ after a response changes. `demo/sampleCoverage.test.ts` fails when no sample
 item shows a display status or stop kind. `demo/coherence.test.ts` fails when
 a session carries what its task cannot: only an agent's session has a harness,
 a model, usage, a summary and sub-agents, and a builtin, subprocess or forge
-task's has its command's output instead. It checks the sample, its long
-variant and the seeds that add sessions, then the sessions the doors make. Each item's frozen chain says what a task is; `mocks/taskKinds.ts` reads
+task's has its command's output instead. It also fails when an item strays
+from its chain: a session on a task or node its chain lacks, a chain that is not
+its template's, a node count, a spend or a finished item's node that does not
+add up, events out of time order, or a session no event created. It checks the
+sample, its long and many variants and the seeds that add sessions, then the
+sessions the doors make. Each item's frozen chain says what a task is; `mocks/taskKinds.ts` reads
 it for the sample items that have one, the doors and live motion, and the
 older sample items, which have none, say it by their model.
 `demo/deadEnds.test.ts` fails when a control leads nowhere: Duplicate answers
