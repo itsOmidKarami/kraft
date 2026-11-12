@@ -113,7 +113,7 @@ export const RUNS: Record<string, Run> = {
     wall_ms: 8_000,
     done: (mr) => [`opened ${mr}`],
     // `forge.run`'s log of a failed forge call, `<task> failed: <the forge's answer>`: here the token's 403.
-    failed: () => ["draft_merge_request.open.open failed: POST repos/acme/kraft-plugins/pulls: Resource not accessible by personal access token (HTTP 403)"],
+    failed: () => ["draft_merge_request.open.open failed: POST repos/{owner}/{repo}/pulls: Resource not accessible by personal access token (HTTP 403)"],
   },
   // One session that goes `waiting` poll after poll: its wall time is every poll's.
   "mr.ci": {

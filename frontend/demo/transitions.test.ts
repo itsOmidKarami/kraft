@@ -437,7 +437,7 @@ describe("samples and answers as the server shapes them", () => {
     const b = S.bundles[idOf(S, "kraft-58e2")];
     expect(b.item.stop).toMatchObject({ kind: "budget", scope: "work_item" });
     expect(b.item.stop.facts).toEqual({});
-    expect(b.events.filter((e) => e.type === "work_item_needs_human").at(-1)?.payload).toEqual({ node_id: "implementation", reason: "Spend cap reached · $5.00 of $5.00", kind: "budget", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } });
+    expect(b.events.filter((e) => e.type === "work_item_needs_human").at(-1)?.payload).toEqual({ node_id: "implementation", reason: "budget cap reached: $5.00 spent on this work item, cap $5.00. Nothing new was started; a running agent was not interrupted.", kind: "budget", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } });
     const cost = b.sessions.reduce((a, s) => a + s.cost_usd, 0);
     expect([Math.abs(cost - 5) < 0.01, Math.abs(b.item.usage.total.cost_usd - 5) < 0.01, b.item.budget_cap.spent_usd]).toEqual([true, true, 5]);
     // A spend cap interrupts nothing: the session that spent the last of it ran to its end, then the walk stopped.

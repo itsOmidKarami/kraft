@@ -42,11 +42,14 @@ const STUCK = "stuck: fix attempt 2 in node verification changed nothing, so mea
 export const AUTO_ESCALATE_MESSAGE = "(Auto-escalated: no one has looked at this yet. Diagnose why it stopped and fix it if you can; if you're not confident, stop and say so instead of guessing.)";
 /** `mr_poller.REASON`: the stop when the forge says the item's merge request was closed unmerged. */
 export const MR_CLOSED_REASON = "the merge request was closed on the forge without merging";
-/** A finding as `findings_measured` lists it, and its fingerprint (`findings.Finding.fingerprint`, 16 hex). */
-type Found = { finding: Record<string, unknown>; print: string };
+/** A finding as `findings_measured` lists it, and its fingerprint (`findings.Finding.fingerprint`, 16 hex). A failed scope runs as a plain
+ *  subprocess and writes no findings file, so what reaches the round is a blind failure (`findings.from_blind_failure`): the hook, each
+ *  failed command with an extract of its output, and the command to confirm the fix with; no file, no line, the hook as its source. */
+type Found = { finding: Record<string, unknown>; print: string; cmd?: string };
+const blindFinding = (hook: string, cmd: string, extract: string) => ({ severity: "critical", message: `${hook} failed\n- ${cmd}: ${extract}\n\nConfirm the fix with: ${cmd}`, file: null, line: null, source_plugin: hook });
 /** Round 0's red test, then round 1's red docs check: two defects, so two fingerprints, and the stuck detector does not fire. */
-const RED: Found = { finding: { severity: "critical", message: "test_cache_evicts_oldest fails: AssertionError", file: "tests/test_cache.py", line: 41, source_plugin: "pytest" }, print: "5be0c1d7a93e4f20" };
-const DOCS_RED: Found = { finding: { severity: "critical", message: "docs/search.md:12 MD040/fenced-code-language Fenced code blocks should have a language specified", file: "docs/search.md", line: 12, source_plugin: "markdownlint" }, print: "c41f0e9b2d7a6853" };
+const RED: Found = { finding: blindFinding(TESTS, RUNS["kraft.verify_changed_test_scopes"].command!, "FAILED tests/test_cache.py::test_cache_evicts_oldest - AssertionError"), print: "5be0c1d7a93e4f20", cmd: RUNS["kraft.verify_changed_test_scopes"].command };
+const DOCS_RED: Found = { finding: blindFinding(TESTS, DOCS_SCOPE.command!, "docs/search.md:12 MD040/fenced-code-language Fenced code blocks should have a language specified"), print: "c41f0e9b2d7a6853", cmd: DOCS_SCOPE.command };
 
 export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, template = "default"): ItemBundle {
   const long = variant === "long";
@@ -163,12 +166,17 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     ran(TESTS, "verification", red ? "failed" : "done", { round });
     ran(TESTS, "verification", docsRed ? "failed" : "done", { round, run: DOCS_SCOPE });
   };
+  /** A finding as the walk writes it (`asdict(Finding)`): `same_as`, and the jobs a blind failure points at, each its failed session's log (`findings.session_log_ref`). */
+  const asFinding = (f: Found) => {
+    const job = [...sessions].reverse().find((x) => x.hook_point === f.finding.source_plugin && x.status !== "done" && (f.cmd ? x.command === f.cmd : !x.command));
+    return { ...f.finding, same_as: null, jobs: job ? [{ label: f.cmd ?? String(f.finding.source_plugin), log_ref: `kraft view logs ${id} --session ${job.id}` }] : [] };
+  };
   /** `walk`'s `findings_measured` for round `round`: which measuring tasks had a session that round (a failed step's later
    *  ones have none), the findings, and their fingerprints. Its head is the round's last session's. */
   const measured = (round: number, found: Found[] = [], had = [TESTS, REVIEW]) => ev("findings_measured", {
     node_id: "verification", cycle: round, head_sha: sessions.at(-1).head_sha,
     measured_tasks: [...had].sort(), unmeasured_tasks: [TESTS, REVIEW].filter((p) => !had.includes(p)).sort(),
-    findings: found.map((f) => f.finding), fingerprints: found.map((f) => f.print).sort(),
+    findings: found.map(asFinding), fingerprints: found.map((f) => f.print).sort(),
   }, 0.05);
   /** A fix cycle (`walk`): its start, the repair, and its finish at the head the repair left, never null: one that
    *  committed nothing finishes at the head it started from. */
@@ -181,7 +189,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
    *  the next cycle starts, and its verdict carries the findings it judged. */
   const judge = (round: number, found: Found[], reasoning: string) => {
     ran(JUDGE, "verification", "done", { round });
-    ev("judge_verdict", { node_id: "verification", cycle: round, verdict: "continue", reasoning, findings: found.map((f) => f.finding) }, 0.02);
+    ev("judge_verdict", { node_id: "verification", cycle: round, verdict: "continue", reasoning, findings: found.map(asFinding) }, 0.02);
   };
   /** A forge wait that polls (`waits.py`): one session that goes `waiting` poll after poll, a fresh `node_started` each time
    *  its poller re-enters it; settled, it ends done. Unsettled, it is left waiting until `retryAt`. */

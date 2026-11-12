@@ -94,6 +94,7 @@ const REASONS: Record<string, (reason: string | null, b: ItemBundle) => boolean>
   failed: (r) => /^task failed in node \S+: /.test(r ?? ""),
   conflict: (r) => /^git rebase failed for |hit a rebase conflict in node /.test(r ?? ""),
   cap: (r, b) => r === b.events.filter((e) => e.type === "time_cap_reached").at(-1)?.payload.reason,
+  budget: (r) => /^(budget cap reached|budget_usd reached|token budget reached): /.test(r ?? ""),
   mr_closed: (r) => r === MR_CLOSED_REASON,
   rate_limit: (r) => r === null,
   wait: (r) => r === null,
@@ -133,6 +134,11 @@ describe.each(SCENARIOS)("items in %s", (_scenario, build) => {
         const read = before.filter((x) => x.type === "findings_measured" && Number(x.payload.cycle) === Number(e.payload.cycle)).at(-1);
         return repaired && !next && read && JSON.stringify(e.payload.findings) === JSON.stringify(read.payload.findings) ? [] : [`judge at cycle ${e.payload.cycle}`];
       })],
+    // A task that fails without writing a findings file reaches the round as one finding (`findings.from_blind_failure`): its hook, no file or line, and the log of each job.
+    ["a finding a failed task left is a blind failure: its hook, no file or line, and a job to read",
+      (b) => b.events.filter((e) => e.type === "findings_measured").flatMap((e) => (e.payload.findings as any[]).filter((f) => String(f.source_plugin).includes("."))
+        .filter((f) => !kindsOf(b).has(f.source_plugin) || f.file !== null || f.line !== null || !String(f.message).startsWith(`${f.source_plugin} failed`) || !("same_as" in f) || !(f.jobs ?? []).length)
+        .map((f) => f.source_plugin))],
     ["a finished fix cycle names the head it left", (b) => b.events.filter((e) => e.type === "fix_cycle_finished" && !e.payload.head_sha).map((e) => `cycle ${e.payload.cycle}`)],
     ["its stop's reason is one the walk writes for that kind", (b) => b.item.stop && !reasonFits(b) && `${b.item.stop.kind}: ${b.item.stop.reason}`],
     // `gates.auto_escalate_stuck` answers only a stop in the stuck set, and always with the same message.
@@ -341,6 +347,10 @@ describe("what a command prints", () => {
   it.each(["paused", "waiting", "capped_out", "needs_context", "rate_limited"])("a run stopped as %s has printed what a running one has, not the finished output", (status) => {
     for (const task of Object.keys(RUNS).filter((t) => RUNS[t].partial)) expect(runOutput(task, status, MR)).toEqual(runOutput(task, "running", MR));
   });
+  it("a forge call's failure names its route as the transport does, with the placeholders as written", () => {
+    expect(runOutput("mr.open_draft", "failed", "!1").join("\n")).toContain("POST repos/{owner}/{repo}/pulls: ");
+  });
+
   it.each(Object.keys(RUNS))("%s: a finished run prints something", (task) => {
     expect(runOutput(task, "done", MR).length).toBeGreaterThan(0);
   });

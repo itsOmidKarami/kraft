@@ -27,7 +27,7 @@ function noTimeCap(b: ItemBundle) {
 }
 
 function spendCapped(i: any, b: ItemBundle) {
-  const reason = "Spend cap reached · $5.00 of $5.00";
+  const reason = "budget cap reached: $5.00 spent on this work item, cap $5.00. Nothing new was started; a running agent was not interrupted.";
   noTimeCap(b);
   // A budget stop names its scope (`board._stop`).
   i.stop = { ...i.stop, kind: "budget", reason, facts: {}, scope: "work_item" };
