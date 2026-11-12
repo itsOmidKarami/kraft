@@ -138,6 +138,8 @@ describe.each(SCENARIOS)("sessions in %s", (_scenario, build) => {
       && !(Math.abs(Object.entries(PRICE).reduce((a, [k, usd]) => a + (s[k] ?? NaN) * usd / 1e6, 0) - s.cost_usd) < 1e-6)],
     // An item with content: its agents' logs and sub-agents are about its own files; the shared sample's are not its.
     ["an agent's log and sub-agents name only its item's own files", (b, s) => !!b.content && agentic(b, s) && foreignFiles(b, agentTexts(b, s)).length > 0],
+    // Its red test run names its own late file's test, its red docs check its own page (`ownFailure`).
+    ["a command's log on an item with content names only its item's own files", (b, s) => !!b.content && !agentic(b, s) && foreignFiles(b, logOf(b, s).map((l) => l.text)).length > 0],
     ["a sub-agent is about one of its item's files, in its description and, once it has finished, its answer", (b, s) => !!b.content
       && subagentsOf(b, s).some((a) => [a.description, ...(a.status === "completed" ? [a.summary] : [])].some((x) => !b.content!.files.some(([p]) => String(x).includes(p))))],
     ["only the implementer, verification's repair and its code review hand work to sub-agents", (b, s) => !!b.content
@@ -1037,6 +1039,21 @@ const longWalk = (n: number): ItemBundle[] => {
 
 // The indexer refiles what the item's nodes and sessions wrote, and leaves what came another way: a summary with a body
 // of its own (an escalation reply), and a document `itemDocs` does not make (one filed at intake, `_attachment_docs`).
+describe("sizeOf, and a small change's run", () => {
+  const one = (path: string, lines: number) => ({ mr: 70, description: "A small change.", files: [[path, lines, 0]] as any });
+  it("a docs change is half a code change of the same files, and a bigger one is bigger", () => {
+    expect([sizeOf(one("docs/a.md", 140)) * 2, sizeOf(one("kraft/a.py", 290)) > sizeOf(one("kraft/a.py", 140))]).toEqual([sizeOf(one("kraft/a.py", 140)), true]);
+  });
+  // Its run is short, so its implementer's reports crowd closer: each still lands before the session ends.
+  it("a two-file, twenty-line item's implementer reports every plan task before its session ends", () => {
+    const c = { ...one("kraft/a.py", 12), files: [["kraft/a.py", 12, 0], ["kraft/b.py", 8, 0]] as any };
+    const b = buildNgItem("done", 1998, "default", "default", mrOf("/Users/dev/code/kraft-core", 70), c);
+    const exit = b.events.findIndex((e) => e.type === "worker_session_exited" && b.sessions.find((s) => s.id === e.payload.session_id)?.hook_point === "implementation.main.implement");
+    const reports = b.events.flatMap((e, k) => (e.type === "plan_progress" ? [k] : []));
+    expect([reports.length, reports.every((k) => k < exit && b.events[k].created_at <= b.events[exit].created_at)]).toEqual([3, true]);
+  });
+});
+
 describe("mergeDocs", () => {
   const doc = (document_id: string, path: string, title = path) => ({ document_id, path, title });
   it.each<[string, any[], any[], Record<string, string>, string[]]>([

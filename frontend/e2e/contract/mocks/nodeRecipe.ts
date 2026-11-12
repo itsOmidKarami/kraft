@@ -110,7 +110,6 @@ export function failedTest(late?: string | null): string {
   const base = late.split("/").pop()!.replace(/\.[^.]+$/, "").replace(/\.test$/, "");
   return /\.(md|rst|txt)$/.test(late) ? `FAILED ${late}::${late.split("/").pop()}` : `FAILED ${late}::${base} - AssertionError`;
 }
-/** A red test run's log with the item's own failing test in the sample's place (`failedTest`). */
 /** The docs check's complaint about `page` (the sample's, `DOCS_SCOPE`'s, without one). */
 const docsLine = (page = "docs/search.md") => `${page}:12 MD040/fenced-code-language Fenced code blocks should have a language specified`;
 /** A failed scope's log as an item's own: its late file's red test, and its own page's docs complaint. */
@@ -261,14 +260,16 @@ export function* nodeBeats(w: Writer, n: DefNode, o: { red?: boolean } = {}): Be
       if (!go("implementation.main.implement")) break;
       const s = w.open("implementation.main.implement", n.id);
       // Its plan's tasks as it reports them, half of them a beat; with no plan it reports none, and works two beats all the same.
+      // A minute and a half apart, closer in a run too short for that: every report falls inside it.
       const half = Math.ceil(w.plan.length / 2);
+      const gap = Math.min(1.5, agentWall(s.hook_point, w.sessions.indexOf(s), w.size) / 60_000 / (w.plan.length + 1));
       yield;
       for (let k = 0; k < w.plan.length; k++) {
         if (k === half) yield;
-        w.ev("plan_progress", { node_id: n.id, task: k + 1, total: w.plan.length, title: w.plan[k] }, 1.5);
+        w.ev("plan_progress", { node_id: n.id, task: k + 1, total: w.plan.length, title: w.plan[k] }, gap);
       }
       if (!w.plan.length) yield;
-      w.clock(-1.5 * w.plan.length);
+      w.clock(-gap * w.plan.length);
       w.close(s);
       break;
     }
