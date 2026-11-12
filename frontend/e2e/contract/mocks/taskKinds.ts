@@ -139,6 +139,30 @@ export const DOCS_SCOPE: Run = {
   failed: () => ["Linting: 42 file(s)", "docs/search.md:12 MD040/fenced-code-language Fenced code blocks should have a language specified", "Summary: 1 error(s)"],
 };
 
+/** `scope_runs` on an item's detail, as `board._scope_runs` lists them: one entry for each command a changed-test-scope task ran,
+ *  in the order its sessions started. The node's scope pane draws from them: with none, a finished `test_changed_scopes` reads
+ *  "0 of 0 scopes passed". An entry `had` already names (a seed's pass and scope) is kept, its outcome brought up to date. */
+export function scopeRunsOf(frozen: string | null | undefined, sessions: any[], had: any[] = []): any[] {
+  const known = new Map(had.map((r) => [r.session_id, r]));
+  const runs = sessions
+    .filter((s) => s.command && taskRun(frozen, s.hook_point) === "kraft.verify_changed_test_scopes")
+    .map((s) => {
+      const passed = s.status === "done" || s.status === "done_with_concerns" ? true : s.status === "failed" ? false : null;
+      return {
+        node_id: s.node_id, hook_point: s.hook_point, repository: s.repository ?? null, round: s.round, pass: s.pass ?? 1, command: s.command, identity: s.command,
+        selected: true, scope: s.command === DOCS_SCOPE.command ? "docs/**" : "tests/**",
+        ...known.get(s.id), session_id: s.id, passed, ...(passed === null ? {} : { exit_code: passed ? 0 : 1 }),
+      };
+    });
+  const seen = new Map<string, number>();
+  return runs.map((r) => {
+    const at = `${r.pass}:${r.round}`;
+    const order = seen.get(at) ?? 0;
+    seen.set(at, order + 1);
+    return { ...r, order: r.order ?? order };
+  });
+}
+
 /** What `run` has printed when its session is in `status`: the command line, then its output so far, all of it once it is
  *  done, the failing run's once it failed. With no run (`label` is then what to call it), the session says its status. */
 export function runOutput(run: Run | string | null | undefined, status: string, mr: string, label = String(run)): string[] {

@@ -4,7 +4,7 @@ import { ngDryRun } from "./ngBoard";
 import { chainOf, frozenOf } from "./ngChain";
 import { RESUME_PROMPT } from "./poller";
 import { buildNeverStarted } from "./ngItems";
-import { isAgentSession, MODEL, RUNS, taskRun } from "./taskKinds";
+import { isAgentSession, MODEL, RUNS, scopeRunsOf, taskRun } from "./taskKinds";
 
 /**
  * The work item's transitions, as the server makes them: what each door changes, the event row it appends
@@ -161,6 +161,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
   const settle = (item: any) => {
     item.escalation_threads = escalationThreads(S.bundles[item.id].sessions);
     item.gate_rounds = gateRoundsOf(S.bundles[item.id].events, S.bundles[item.id].threads ?? [], S.bundles[item.id].reviews ?? []);
+    item.scope_runs = scopeRunsOf(item.materialized_chain, S.bundles[item.id].sessions, item.scope_runs);
     item.display_status = displayStatus(item);
     item.updated_at = now();
     return item;

@@ -80,6 +80,8 @@ const CHAIN_NODES: Record<string, string[]> = {
 const chained = (S: Scenario) => Object.values(S.bundles).filter((b) => b.item.materialized_chain);
 const defIds = (b: ItemBundle): string[] => (b.item.chain_definition?.nodes ?? []).map((n: any) => n.id);
 const frozenIds = (b: ItemBundle): string[] => JSON.parse(b.item.materialized_chain).chain.nodes.map((n: any) => n.id);
+/** Whether a scope command passed, as its session's status says: null while it has not finished. */
+const passedBy = (status: string) => (status === "done" || status === "done_with_concerns" ? true : status === "failed" ? false : null);
 const cost = (b: ItemBundle) => b.sessions.reduce((a, s) => a + (s.cost_usd ?? 0), 0);
 
 describe.each(SCENARIOS)("items in %s", (_scenario, build) => {
@@ -90,13 +92,17 @@ describe.each(SCENARIOS)("items in %s", (_scenario, build) => {
       (b) => b.sessions.filter((s) => s.hook_point !== "escalation" && !kindsOf(b).has(s.hook_point)).map((s) => s.hook_point)],
     ["every session's node is a node of the item's chain", (b) => b.sessions.filter((s) => !defIds(b).includes(s.node_id)).map((s) => s.node_id)],
     ["its chain is its template's, in its definition and its frozen chain",
-      (b) => [defIds(b), frozenIds(b)].some((ids) => JSON.stringify(ids) !== JSON.stringify(CHAIN_NODES[b.item.chain_template])) && b.item.chain_template],
+      (b) => [defIds(b), frozenIds(b)].some((ids) => JSON.stringify(ids) !== JSON.stringify(CHAIN_NODES[b.item.chain_template])) && `template ${b.item.chain_template}`],
     ["the node it stands on is in its chain", (b) => b.item.current_node_id != null && !defIds(b).includes(b.item.current_node_id) && `stands on ${b.item.current_node_id}`],
     ["its summary counts its chain's nodes", (b) => b.item.summary.nodes_total !== defIds(b).length && `counts ${b.item.summary.nodes_total}`],
     // To the cent the UI shows: a tweak that scales costs rounds each one.
     ["what it spent is what its sessions cost", (b) => Math.abs(b.item.budget_cap.spent_usd - cost(b)) >= 0.005 && [b.item.budget_cap.spent_usd, cost(b)]],
     ["a completed item stands on its last node", (b) => b.item.status === "completed" && b.item.current_node_id !== defIds(b).at(-1) && `stands on ${b.item.current_node_id}`],
     ["its events never go back in time", (b) => b.events.some((e, k) => k > 0 && Date.parse(e.created_at) < Date.parse(b.events[k - 1].created_at)) && "out of order"],
+    ["every command a changed-test-scope task ran is in `scope_runs`, with how it went",
+      (b) => b.sessions.filter((s) => s.command && taskRun(b.item.materialized_chain, s.hook_point) === "kraft.verify_changed_test_scopes")
+        .filter((s) => { const r = (b.item.scope_runs ?? []).find((x: any) => x.session_id === s.id); return !r || r.command !== s.command || r.hook_point !== s.hook_point || r.passed !== passedBy(s.status); })
+        .map((s) => s.hook_point)],
     ["every session was created by an event", (b) => b.sessions.filter((s) => !b.events.some((e) => e.type === "worker_session_created" && e.payload.session_id === s.id)).map((s) => s.hook_point)],
   ])("%s", (_rule, wrong) => {
     const found = chained(S).map((b) => [b.item.title, wrong(b)] as const).filter(([, w]) => (Array.isArray(w) ? w.length > 0 : !!w));
@@ -139,10 +145,14 @@ describe("sessions the doors make", () => {
     const sample = sampleAt(b, hook, sid);
     expect(s()).toMatchObject({ status: "pending", model: null, harness: null, command: sample.command });
     expect(sample.command).toBeTruthy();
+    // A changed-test-scope command is listed in the item's scope runs, unfinished, and its outcome follows its session's.
+    const scoped = () => b.item.scope_runs.find((r: any) => r.session_id === sid);
+    expect(scoped()).toMatchObject({ hook_point: hook, command: sample.command, passed: null });
     // While it runs it has printed less than when it is done.
     const partial = logOf(b, s()).length;
     T.sessionExited(id, sid, null);
     expect(s()).toMatchObject({ status: "done", model: null, harness: null, tokens_in: null });
+    expect(scoped()).toMatchObject({ passed: true, exit_code: 0 });
     expect(logOf(b, s()).every((l) => l.src === "stdout")).toBe(true);
     expect(logOf(b, s()).map((l) => l.text)).toEqual(logOf(b, sample).map((l) => l.text));
     expect(logOf(b, s()).length).toBeGreaterThan(partial);

@@ -371,7 +371,7 @@ describe("the review doors", () => {
   it.each([
     ["a stopped item retries at the target", "kraft-b108", "implementation", "retried", "active", ["rewind_requested", "work_item_retried", "gate_reopened", "run_forked", "cap_counters_reset", "review_submitted"], "implementation"],
     ["a running item at the target reruns it", "kraft-91bc", "verification", "rerun", "active", ["rewind_requested", "pause_requested", "worker_session_paused", "work_item_resumed", "review_submitted"], "verification"],
-    ["a paused item waits for it", "kraft-4e19", "implementation", "queued", "paused", ["rewind_requested", "review_submitted"], "implementation"],
+    ["a paused item waits for it", "kraft-4e19", "spec", "queued", "paused", ["rewind_requested", "review_submitted"], "implementation"],
   ])("with no gate pending, request changes: %s", async (_name, bead, node, action, status, types, at) => {
     const { S, call } = server();
     const id = idOf(S, bead);

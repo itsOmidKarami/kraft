@@ -240,14 +240,14 @@ describe("after the visitor", () => {
     const running = b.sessions.find((s) => s.status === "running")!;
     const others = () => b.sessions.filter((s) => s.node_id === "verification" && s.id !== running.id).map((s) => s.status);
     const was = others();
-    // The review step, the code review running in it: that session stops, the tests step's are left as they were.
-    expect((await call("POST", `/work-items/${id}/skip`, { path: "verification.review" })).status).toBe(200);
-    expect([running.status, others()]).toEqual(["paused", was]);
+    // The tests step, while the code review runs in the review step: the review's session is not its own, so it keeps running, and the tests step's are left as they were.
+    expect((await call("POST", `/work-items/${id}/skip`, { path: "verification.tests" })).status).toBe(200);
+    expect([running.status, others()]).toEqual(["running", was]);
     ticks(2, id);
     await call("POST", `/work-items/${id}/gates/local_review/reject`, { note: "again" });
     ticks(2, id);
-    // Its review step passed over, verification runs its tests step alone: a builtin's session, waiting to end.
-    expect(b.sessions.at(-1)).toMatchObject({ node_id: "verification", hook_point: "verification.tests.test_changed_scopes", status: "pending" });
+    // Its tests step passed over, verification runs its review step alone.
+    expect(b.sessions.at(-1)).toMatchObject({ node_id: "verification", hook_point: "verification.review.code_review", status: "running" });
   });
 
   it("a retry forks the run: a gate approved before is asked again", async () => {
