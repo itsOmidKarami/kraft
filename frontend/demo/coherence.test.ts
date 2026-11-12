@@ -1,8 +1,10 @@
 // @vitest-environment node
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildScenario, withScopes, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
+import { FRESH_TITLES, motion } from "../e2e/contract/mocks/motion";
 import { frozenOf } from "../e2e/contract/mocks/ngChain";
-import { AUTO_ESCALATE_MESSAGE, MR_CLOSED_REASON } from "../e2e/contract/mocks/ngItems";
+import { AUTO_ESCALATE_MESSAGE, MR_CLOSED_REASON, NG_NOW } from "../e2e/contract/mocks/ngItems";
+import { agentUsage } from "../e2e/contract/mocks/nodeRecipe";
 import { isAgentSession, MODEL, nodeTasks, RUNS, runOutput, taskKind, taskRun } from "../e2e/contract/mocks/taskKinds";
 import { transitions } from "../e2e/contract/mocks/transitions";
 
@@ -43,11 +45,42 @@ const offenders = (S: Scenario, rule: (b: ItemBundle, s: any) => boolean) =>
   Object.values(S.bundles).flatMap((b) => b.sessions.filter((s) => rule(b, s)).map((s) => `${b.item.title}: ${s.hook_point} (${s.status})`));
 
 const seeded = (seed: (S: Scenario) => void) => { const S = buildScenario("default"); seed(S); return S; };
+/** The board as the demo's live motion walks it (motion.ts), its clock going on with each 8 s tick: the gates waiting when
+ *  it starts approved, then each gate the walk asks approved once its reviewer has said it is ready, until the second item
+ *  the walk files (the first fails a round of tests, the second does not) has finished. Built once: it takes a few hundred ticks. */
+let walk: Scenario | null = null;
+const walked = (): Scenario => {
+  if (walk) return walk;
+  vi.useFakeTimers();
+  try {
+    const S = buildScenario("default");
+    let at = Date.parse(NG_NOW);
+    const T = transitions(S, { now: () => new Date(at).toISOString() });
+    for (const id of S.ngBoard) if (S.bundles[id].item.pending_gate) T.approve(id, S.bundles[id].item.pending_gate);
+    const m = motion(S, T, { random: () => 0 });
+    const done = () => S.ngBoard.some((id) => S.bundles[id].item.title === FRESH_TITLES[1] && S.bundles[id].item.status === "completed");
+    for (let k = 0; k < 400 && !done(); k++) {
+      at += 8_000;
+      vi.advanceTimersByTime(8_000);
+      for (const id of S.ngBoard) {
+        const b = S.bundles[id];
+        if (b.item.pending_gate && b.events.at(-1)?.type === "gate_auto_review_skipped") T.approve(id, b.item.pending_gate);
+      }
+    }
+    m.stop();
+    if (!done()) throw new Error("the walk did not finish the second item it filed");
+    walk = S;
+    return S;
+  } finally {
+    vi.useRealTimers();
+  }
+};
 const SCENARIOS: [string, () => Scenario][] = [
   ["the default sample", () => buildScenario("default")],
   ["the long variant", () => buildScenario("long")],
   ["the many variant", () => buildScenario("many")],
   ["test scopes", () => seeded(withScopes)],
+  ["the live walk", walked],
 ];
 
 describe.each(SCENARIOS)("sessions in %s", (_scenario, build) => {
@@ -174,6 +207,63 @@ describe.each(SCENARIOS)("items in %s", (_scenario, build) => {
   it("no two board items share a title", () => {
     const titles = [...S.ngBoard, ...S.ngArchived].map((id) => S.bundles[id].item.title);
     expect(titles.filter((x, k) => titles.indexOf(x) !== k)).toEqual([]);
+  });
+});
+
+/** A finished item's event types node by node: each node's from its `node_started` until the walk starts the next. A forge
+ *  wait reads as one pending poll then the settled one, however many polls it took: a poller's re-entering
+ *  `node_started` is dropped, and a pending poll the same as the one before it. */
+const byNode = (b: ItemBundle) => {
+  const out = new Map<string, string[]>();
+  let at: string | null = null;
+  for (const e of b.events) {
+    if (e.type === "work_item_completed") break;
+    if (e.type === "node_started") at = String(e.payload.node_id);
+    if (at) out.set(at, [...(out.get(at) ?? []), e.type]);
+  }
+  const POLL = "external_wait_observed,worker_session_exited,work_item_waiting";
+  for (const [node, types] of out) {
+    const kept: string[] = [];
+    types.forEach((type, k) => {
+      if (type === "node_started" && types[k + 1] === "external_wait_observed") return;
+      kept.push(type);
+      const n = kept.length;
+      if (n >= 6 && kept.slice(n - 3).join() === POLL && kept.slice(n - 6, n - 3).join() === POLL) kept.splice(n - 3, 3);
+    });
+    out.set(node, kept);
+  }
+  return out;
+};
+
+describe("the live walk runs each node as the sample's finished item ran it", () => {
+  const S = walked();
+  const fresh = (n: number) => S.bundles[S.ngBoard.find((id) => S.bundles[id].item.title === FRESH_TITLES[n])!];
+  const sample = byNode(S.bundles[S.ng.done]);
+  it("walks both items it filed to the end of the default chain", () => {
+    expect([0, 1].map((n) => [fresh(n).item.status, fresh(n).item.chain_template, [...byNode(fresh(n)).keys()]])).toEqual([0, 1].map(() => ["completed", "default", CHAIN_NODES.default]));
+  });
+  // The seeds and the walk read one recipe (nodeRecipe.ts); this holds what each user does with it to the same events.
+  it.each(CHAIN_NODES.default)("%s", (node) => {
+    expect(sample.get(node)).toBeDefined();
+    expect(byNode(fresh(1)).get(node)).toEqual(sample.get(node));
+    if (node !== "verification") expect(byNode(fresh(0)).get(node)).toEqual(sample.get(node));
+  });
+  it("verification whose first round of tests failed: the running sample's fix cycle and second round, then that round's end", () => {
+    const failed = byNode(fresh(0)).get("verification")!;
+    const running = byNode(S.bundles[S.ng.running]).get("verification")!;
+    expect(running).toContain("fix_cycle_finished");
+    expect(failed.slice(0, running.length)).toEqual(running);
+    expect(failed.slice(running.length)).toEqual(["worker_session_exited", "findings_measured", "node_completed"]);
+  });
+  it("every session it made has its task's kind, and an agent's reports what its task's recipe says", () => {
+    const wrong = [0, 1].map(fresh).flatMap((b) => b.sessions.filter((s) => {
+      const agent = agentic(b, s);
+      if ((s.harness === "claude") !== agent) return true;
+      if (!agent || noAgentTriage(b, s)) return s.model != null || s.cost_usd != null;
+      const u = agentUsage(s.hook_point, b.sessions.indexOf(s));
+      return s.model !== u.model || s.tokens_in !== u.tokens_in || s.tokens_out !== u.tokens_out || s.cost_usd !== u.cost_usd;
+    }).map((s) => `${b.item.title}: ${s.hook_point}`));
+    expect(wrong).toEqual([]);
   });
 });
 

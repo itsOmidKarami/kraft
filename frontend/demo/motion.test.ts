@@ -597,6 +597,32 @@ describe("when the board goes quiet", () => {
   });
 });
 
+describe("a long walk", () => {
+  it("finishes the board's active items over 200 ticks with every gate approved, and an item it files never stands on a node its chain lacks", async () => {
+    const { S, ticks, call } = clocked();
+    const had = new Set(S.ngBoard);
+    // The running row, and the rate-limited one its poller wakes.
+    const going = [RUNNING, WAITING].map((bead) => board(S, bead));
+    const approve = (id: string) => call("POST", `/work-items/${id}/gates/${S.bundles[id].item.pending_gate}/approve`);
+    for (const id of had) if (S.bundles[id].item.pending_gate) expect((await approve(id)).status).toBe(200);
+    const strays: string[] = [];
+    for (let k = 0; k < 200; k++) {
+      ticks(1);
+      for (const id of S.ngBoard) {
+        const b = S.bundles[id];
+        if (b.item.pending_gate && b.events.at(-1)?.type === "gate_auto_review_skipped") expect((await approve(id)).status).toBe(200);
+        const nodes = b.item.chain_definition.nodes.map((n: any) => n.id);
+        if (!had.has(id) && b.item.current_node_id != null && !nodes.includes(b.item.current_node_id)) strays.push(`${b.item.title}: ${b.item.current_node_id}`);
+      }
+    }
+    expect(strays).toEqual([]);
+    expect(going.map((id) => S.bundles[id].item.status)).toEqual(["completed", "completed"]);
+    const filed = S.ngBoard.filter((id) => !had.has(id));
+    expect(filed.length).toBeGreaterThan(2);
+    expect(filed.slice(0, -1).map((id) => S.bundles[id].item.status)).toEqual(filed.slice(0, -1).map(() => "completed"));
+  });
+});
+
 describe("what never moves", () => {
   it("one step a tick, however often it is resumed while it runs", () => {
     const { S, serve, ticks } = started();
