@@ -538,10 +538,11 @@ vocab:
     uv run python dev/gen_vocab.py
 
 # Rewrite tests/api/api_shapes.json, the keys each GET route the web UI reads
-# answers with, which frontend/demo/apiShapes.test.ts holds the mocked API to
-[doc("Rewrite the API response-shape table from the real server")]
+# answers with, which frontend/demo/apiShapes.test.ts holds the mocked API to, and
+# frontend/e2e/contract/mocks/shippedChains.json, the shipped chains the demo's items run
+[doc("Rewrite the API response-shape table and the demo's recorded chain from the real server")]
 shapes:
-    WRITE_API_SHAPES=1 just test tests/api/test_api_shapes.py --no-testmon -n 0
+    WRITE_API_SHAPES=1 WRITE_DEMO_CHAIN=1 just test tests/api/test_api_shapes.py tests/api/test_demo_chain.py --no-testmon -n 0
 
 # Regenerate src/kraft/templates/lucide_icons.txt from the installed lucide-react
 # (the icon names a template's `icon:` is linted against). Run after every bump.
