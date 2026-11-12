@@ -55,7 +55,9 @@ describe.each(["default", "long", "many"] as const)("the %s data is dated at or 
     const item = S.ngBoard.find((id) => S.bundles[id].item.pending_gate && S.docs[id]?.length) ?? S.ng["needs-gate"] ?? Object.keys(S.bundles).find((id) => S.bundles[id].sessions.length)!;
     const b = S.bundles[item];
     b.item.attachments = [{ kind: "spec", path: "docs/spec.md" }];
-    const ids: Record<string, string> = { $ITEM: item, $FILED: item, $ONE_OFF: item, $SESSION: b.sessions[0].id, $AGENT: subagentList(b.logs[b.sessions[0].id] ?? [], b.sessions[0].status)[0]?.id ?? "none", $DOC: Object.values(S.docs).flat()[0].document_id, $REPO: b.item.repo };
+    // A session whose agent handed work to sub-agents (a spec's author, its first, works alone).
+    const sub = b.sessions.find((s) => subagentList(b.logs[s.id] ?? [], s.status).length)!;
+    const ids: Record<string, string> = { $ITEM: item, $FILED: item, $ONE_OFF: item, $SESSION: sub.id, $AGENT: subagentList(b.logs[sub.id] ?? [], sub.status)[0]?.id ?? "none", $DOC: Object.values(S.docs).flat()[0].document_id, $REPO: b.item.repo };
     return { S, ids, serve: mockServer(S, { ...demoOptions, now: () => NG_NOW }) };
   };
   const routes: [string, Record<string, string>][] = [...Object.entries(TABLE.routes).map(([r, v]) => [r, v.params] as [string, Record<string, string>]), ...EXTRA.map((r) => [r, {}] as [string, Record<string, string>])];

@@ -2,7 +2,7 @@ import type { EventType } from "../../../src/types/vocab.generated";
 import { commandLog, hex, logLines, LONG_DESCRIPTION, t, type ItemBundle, type Variant } from "./fixtures";
 import { chainOf, frozenOf, type DefNode } from "./ngChain";
 import { RESUME_PROMPT } from "./poller";
-import { agentUsage, agentWall, awaitPolls, drain, DOCS_RED, fixCycle, judge, measured, nodeBeats, OPEN, ownFailure, redOf, REPAIR, REVIEW, REVIEWED, TESTS, testPass, type Found, type Open, type Writer } from "./nodeRecipe";
+import { agentUsage, agentWall, awaitPolls, docsRedOf, drain, fixCycle, judge, measured, nodeBeats, OPEN, ownFailure, redOf, REPAIR, REVIEW, REVIEWED, TESTS, testPass, type Found, type Open, type Writer } from "./nodeRecipe";
 import { isAgentSession, RUNS, taskRun } from "./taskKinds";
 import { escalationThreads, stepOf, stopTaskOf, threadSummary } from "./transitions";
 import { isLate, mrOf, planOf, type Content } from "./ngContent";
@@ -75,6 +75,8 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
   const events: any[] = [];
   // The file verification's round adds, whose test its first round fails (nodeRecipe.ts `failedTest`).
   const late = content?.files.find(isLate)?.[0] ?? null;
+  // Its own page, which a docs check that fails names (nodeRecipe.ts `docsRedOf`).
+  const page = content?.files.find(([p]) => p.endsWith(".md"))?.[0] ?? null;
   const logs: Record<string, any[]> = {};
   let seq = 0;
   // Minutes from T0. A time cap's two hours of implementation start the capped item before T0, so it stops before NG_NOW.
@@ -104,7 +106,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     ev("worker_session_created", ids, 0);
     if (path.endsWith(".auto_review")) ev("gate_auto_review_started", { gate: node, session_id: sid }, 0);
     if (agent) ev("worker_session_started", { ...ids, pid: 41_000 + n }, 0.01);
-    logs[sid] = agent ? logLines(sid, long ? 300 : 12, long) : o.noAgent ? [] : commandLog(run, s.status, path.split(".").at(-1), mr.url);
+    logs[sid] = agent ? logLines(sid, long ? 300 : 12, long, { content, hook: path, status: s.status }) : o.noAgent ? [] : commandLog(run, s.status, path.split(".").at(-1), mr.url);
     return Object.assign(s, { _agent: agent, _run: run, _noAgent: !!o.noAgent });
   };
   /** `store.session_exited`: `status` after its wall time, with the usage an agent reported. */
@@ -117,11 +119,13 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     if (s._agent) {
       usage = agentUsage(s.hook_point, n);
       Object.assign(s, usage);
+      // Its sub-agents have all answered by now.
+      if (content) logs[s.id] = logLines(s.id, 12, false, { content, hook: s.hook_point, status });
       if (status === "done" || status === "done_with_concerns") s.session_summary_ref = `items/${id}/sessions/${s.id}/out/summary.md`;
     } else if (s._noAgent) {
       logs[s.id] = [{ n: 1, t: t(0.1), src: "stdout", text: "no bot feedback collected; no agent started" }];
     } else {
-      logs[s.id] = ownFailure(commandLog(s._run, status, s.hook_point.split(".").at(-1), mr.url), late);
+      logs[s.id] = ownFailure(commandLog(s._run, status, s.hook_point.split(".").at(-1), mr.url), late, page);
     }
     ev("worker_session_exited", { session_id: s.id, status, wall_ms: wall, ...usage }, 0);
     return s;
@@ -287,8 +291,8 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
       measured(W, 0, [redOf(late)], [TESTS]);
       drain(fixCycle(W, 1, true));
       drain(testPass(W, 1, false, true));
-      measured(W, 1, [DOCS_RED], [TESTS]);
-      drain(judge(W, 1, [DOCS_RED], "the repair fixed the failing test; the docs check is a new, small finding one more repair should reach"));
+      measured(W, 1, [docsRedOf(page)], [TESTS]);
+      drain(judge(W, 1, [docsRedOf(page)], "the repair fixed the failing test; the docs check is a new, small finding one more repair should reach"));
       drain(fixCycle(W, 2, false));
       ev("work_item_needs_human", { node_id: "verification", reason: STUCK, kind: "stuck", stuck: true }, 0.05);
       // The automatic escalation agent's turn running on it: what `display_status` calls escalated.
