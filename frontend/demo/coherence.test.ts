@@ -231,6 +231,17 @@ describe("sessions the doors make", () => {
     expect(escalationMiscounts(b)).toEqual([]);
   });
 
+  it("an escalation turn on another node counts its attempts from one there", () => {
+    const { S, T } = live();
+    const b = S.bundles[S.ng.failed];
+    expect(T.escalate(b.item.id, "look").status).toBe(200);
+    T.stopEscalation(b.item.id);
+    b.item.current_node_id = "work_item_summary";
+    expect(T.escalate(b.item.id, "and here").status).toBe(200);
+    expect(b.sessions.at(-1)).toMatchObject({ hook_point: "escalation", node_id: "work_item_summary", attempt: 1 });
+    expect(escalationMiscounts(b)).toEqual([]);
+  });
+
   it("an agent's task gets the claude harness and a log of its own lines, and its model once it reports usage", () => {
     const { S, T } = live();
     const id = S.ng.running;
