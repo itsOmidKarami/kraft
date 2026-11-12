@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { buildScenario, searchFor, withScopes, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
 import { FRESH_TITLES, motion } from "../e2e/contract/mocks/motion";
 import { NG_REPOS } from "../e2e/contract/mocks/ngBoard";
-import { CONTENT, FRESH_CONTENT, isDocsPath, mergeDocs, mrOf } from "../e2e/contract/mocks/ngContent";
+import { CONTENT, docBody, FRESH_CONTENT, isDocsPath, mergeDocs, mrOf } from "../e2e/contract/mocks/ngContent";
 import { frozenOf } from "../e2e/contract/mocks/ngChain";
 import { AUTO_ESCALATE_MESSAGE, buildNgItem, MR_CLOSED_REASON, NG_NOW } from "../e2e/contract/mocks/ngItems";
 import { agentUsage, openWait } from "../e2e/contract/mocks/nodeRecipe";
@@ -315,6 +315,18 @@ const SECTION: Record<string, string> = { specs: "\n## Problem\n", plans: "\n###
 /** A docs path is the mock's own (ngContent.ts `isDocsPath`): its documents' wording and these rules read one definition. */
 const docsOnly = (files: Row[]) => files.every(([p]) => isDocsPath(p));
 const isTestPath = (p: string) => /(^|\/)tests?\//.test(p) || /\.test\.[jt]sx?$/.test(p);
+/** What is wrong with a brief's or a merge request's list of files, written after the implementation, against `shows`,
+ *  the files its diff shows: each row `- \`path\` (+i −d)` one of them with its counts, all of them listed; a review
+ *  brief's "Read first" the largest change and its "N files" the rows it lists. Null when nothing is. */
+const briefProblem = (text: string, kind: string, shows: Row[]): string | null => {
+  const listed = [...text.matchAll(/^- `([^`]+)` \(\+(\d+) −(\d+)\)$/gm)].map((m) => `${m[1]} ${m[2]} ${m[3]}`).sort();
+  if (JSON.stringify(listed) !== JSON.stringify(shows.map(([p, i, d]) => `${p} ${i} ${d}`).sort())) return `lists ${listed.join(", ")}`;
+  if (kind !== "review_brief") return null;
+  const top = Math.max(...shows.map(([, i, d]) => i + d));
+  const first = /^`([^`]+)`, the largest change \(\+(\d+) −(\d+)\)\.$/m.exec(text);
+  if (!first || Number(first[2]) + Number(first[3]) !== top || !shows.some(([p, i, d]) => p === first[1] && i === Number(first[2]) && d === Number(first[3]))) return `reads ${first?.[1]} first`;
+  return /^- Nothing outside the (\d+) files below changed\.$/m.exec(text)?.[1] === String(listed.length) ? null : "miscounts its files";
+};
 
 describe.each<[string, () => Scenario, boolean]>([["the default sample", () => buildScenario("default"), true], ["the live walk", walked, false]])("each board item's own content in %s", (_scenario, build, sample) => {
   const S = build();
@@ -714,6 +726,7 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
   it("what each document says fits when it was written", async () => {
     const wrong: string[] = [];
     let counts = 0;
+    let briefs = 0;
     for (const b of board) {
       for (const kind of ["spec", "plan", "chain_revision", "work_brief", "review_brief"]) {
         const a = await call(`/work-items/${b.item.id}/artifacts/${kind}`);
@@ -723,10 +736,13 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
       }
       // A brief or a merge request, written after the implementation, lists the files its diff shows: no file the round
       // added unless a repair landed it.
-      const shows = new Set(committed(b).map(([p]) => p));
+      // Each with the counts its diff gives it; a review brief says how many files it lists, and reads the largest first.
       for (const kind of ["work_brief", "review_brief", "mr_meta"]) {
         const a = await call(`/work-items/${b.item.id}/artifacts/${kind}`);
-        if (a.status === 200 && [...a.body.content.matchAll(/^- `([^`]+)` \(\+\d+ −\d+\)$/gm)].some((m) => !shows.has(m[1]))) wrong.push(`${b.item.title}: ${kind} lists a file its diff lacks`);
+        if (a.status !== 200) continue;
+        briefs++;
+        const problem = briefProblem(a.body.content, kind, committed(b));
+        if (problem) wrong.push(`${b.item.title}: ${kind} ${problem}`);
       }
       for (const d of (S.docs[b.item.id] ?? []).filter((x) => x.kind === "sessions" && (["spec", "plan"].includes(x.node_id) || String(x.hook_point).endsWith(".auto_review")))) {
         if ((await call(`/documents/${d.document_id}`)).body.content.includes("the plan names")) wrong.push(`${b.item.title}: ${d.title}`);
@@ -744,8 +760,17 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
           || (!planned && /\bthe plan\b/.test(text))) wrong.push(`${b.item.title}: ${d.title}`);
       }
     }
-    expect(counts).toBeGreaterThan(0);
+    expect([counts > 0, briefs > 0]).toEqual([true, true]);
     expect(wrong).toEqual([]);
+  });
+  // A brief written while verification's round has added a file no repair has landed leaves that file out, and counts
+  // only what it lists. No board item reaches a brief so; this one is the gated row with such a file added.
+  it.runIf(sample)("a review brief written before a repair landed its round's file lists and counts only what landed", () => {
+    const b = board.find((x) => x.item.bead_id === "kraft-cb59")!;
+    const files = [...(b.content!.files as Row[]), ["tests/test_cache_bound.py", 9, 0, "late"]] as Row[];
+    const text = docBody({ ...b, content: { ...b.content!, files: files as any } }, { kind: "review_briefs" });
+    expect(briefProblem(text, "review_brief", files.filter((f) => !late(f)))).toBeNull();
+    expect(text).not.toContain("tests/test_cache_bound.py");
   });
   it("a kind the item's chain neither produces nor gates is a 404; its merge request's metadata is its own", async () => {
     const one = board.find((b) => b.item.chain_template === "default" && completed(b, "describe_merge_request"))!;
