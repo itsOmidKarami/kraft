@@ -28,7 +28,10 @@ export const isLate = (f: File) => f.slice(3).includes("late");
  *  program under `docs/` (`docs/_nav.py`) is code. */
 export const isDocsPath = (p: string) => p.endsWith(".md") || (p.startsWith("docs/") && /\.(md|ya?ml|css|js|html|svg|png)$/.test(p));
 /** How big an item's change is, against a typical one's 1: its lines changed and ten for each file it touches, over
- *  150; a docs item's half that, prose being cheaper to write than code. An item with no content of its own is 1. */
+ *  150; a docs item's half that, prose being cheaper to write than code. An item with no content of its own is 1.
+ *  shortcut: the ten a file is what tells two items that changed as many lines apart, and it can put an item that
+ *  changed fewer lines in more files above one that changed more (coherence.test.ts holds spend to lines); a new row
+ *  that does so needs its counts or the weight moved. */
 export const sizeOf = (c?: Content) =>
   c ? (c.files.reduce((a, [, ins, del]) => a + ins + del + 10, 0) / 150) * (c.files.every(([p]) => isDocsPath(p)) ? 0.5 : 1) : 1;
 const statusOf =(f: File) => (f.slice(3).includes("new") ? "new" : f.slice(3).includes("deleted") ? "deleted" : null);

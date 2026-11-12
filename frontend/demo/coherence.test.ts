@@ -120,6 +120,8 @@ describe.each(SCENARIOS)("sessions in %s", (_scenario, build) => {
     // with no frozen chain, carry made-up figures and no cache split.
     ["an agent's cost is what its tokens cost, to a millionth of a dollar", (b, s) => !!b.item.materialized_chain && s.model === MODEL && s.cost_usd != null
       && !(Math.abs(Object.entries(PRICE).reduce((a, [k, usd]) => a + (s[k] ?? NaN) * usd / 1e6, 0) - s.cost_usd) < 1e-6)],
+    // Its cache reads are what its cost leaves after the rest: a cost scaled down below its other tokens' leaves fewer than none.
+    ["no kind of token is counted below zero", (_b, s) => Object.keys(PRICE).some((k) => s[k] < 0)],
   ])("%s", (_rule, rule) => {
     expect(offenders(S, rule)).toEqual([]);
   });
