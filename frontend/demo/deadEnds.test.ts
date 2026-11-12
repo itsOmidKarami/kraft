@@ -38,7 +38,20 @@ describe("Duplicate", () => {
     expect(copy.status).toBe(200);
     expect(copy.body).toMatchObject({ title: was.title, description: was.description, repo: was.repo, chain_template: was.chain_template, status: "paused", current_node_id: null });
     expect((await call("GET", "/work-items")).body.items.map((i: any) => i.id)).toContain(made.body.id);
-    expect((await call("GET", `/work-items/${id}`)).body.status).toBe(was.status);
+    expect((await call("GET", `/work-items/${id}`)).body).toEqual(was);
+  });
+
+  it("a copy of an item filed with a spec and a plan carries both, for another repo than the default", async () => {
+    const { call } = demo();
+    const attachments = [{ kind: "spec", path: "docs/specs/cache.md" }, { kind: "plan", path: "docs/plans/cache.md" }];
+    const filed = await call("POST", "/work-items", { title: "Cache embeddings", description: "Key them by content hash.", repo: "kraft-plugins", attachments });
+    expect(filed.status).toBe(201);
+    const was = (await call("GET", `/work-items/${filed.body.id}`)).body;
+    expect(was.attachments).toEqual(attachments);
+    const made = await call("POST", `/work-items/${filed.body.id}/duplicate`);
+    expect(made.status).toBe(201);
+    expect((await call("GET", `/work-items/${made.body.id}`)).body).toMatchObject({ title: "Cache embeddings", repo: "kraft-plugins", attachments });
+    expect((await call("GET", `/work-items/${filed.body.id}`)).body).toEqual(was);
   });
 
   it("an item nobody made is the server's 404", async () => {
