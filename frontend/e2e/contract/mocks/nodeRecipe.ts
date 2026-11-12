@@ -134,40 +134,62 @@ export function* judge(w: Writer, round: number, found: Found[], reasoning: stri
 /** The forge waits (`forge.run._WAITS`, by target): every dispatch of one is an observation (`waits.observe`), a first
  *  look that settles at once included. */
 const WAITS = new Set(["mr.ci", "mr.automated_review", "mr.external_approval", "mr.merge", "mr.post_merge_ci"]);
+/** `waits.open_wait`: how many looks `task`'s open wait has had, or null when none is open (its last one ended, or a
+ *  fork restarted the run since). */
+const openWait = (w: Writer, task: string): number | null => {
+  const evs = w.events.slice(w.events.map((e) => e.type).lastIndexOf("run_forked") + 1);
+  let seen = 0;
+  for (const e of [...evs].reverse()) {
+    if (e.payload?.task !== task) continue;
+    if (e.type === "external_wait_observed") seen++;
+    else if (e.type === "external_wait_started") return seen;
+    else if (e.type === "external_wait_ended") return null;
+  }
+  return null;
+};
 /** A forge wait (`waits.py`): one session that goes `waiting` poll after poll, a fresh `node_started` each time its
  *  poller re-enters it; settled, it ends done. Unsettled, it is left waiting until `retryAt`. Each poll after the first
  *  is a beat of its own: the item waits between them. One that settles at its first look ends a beat after its session
- *  is made, as `ran`'s does. */
+ *  is made, as `ran`'s does. A session of this node's left `waiting` by an earlier look (a pause stops only live ones)
+ *  is reused (`store.create_session`'s `reuse_if_waiting`) and its open wait goes on: no second start, its looks
+ *  numbered on. `polls` is the looks this play takes, one at least. */
 export function* awaitPolls(w: Writer, node: string, path: string, kind: string, polls: number, settled: boolean, retryAt?: string): Beats<any> {
-  const s = w.open(path, node);
-  if (settled && polls === 1) yield;
+  const reused = [...w.sessions].reverse().find((x) => x.node_id === node && x.hook_point === path && x.round === 0 && x.status === "waiting");
+  const s = reused ?? w.open(path, node);
+  const had = openWait(w, path);
+  const first = (had ?? 0) + 1;
+  const last = Math.max(polls, first);
+  if (!reused && settled && first === last) yield;
   // The demo's repos configure no review bot: the review wait's look says so before it settles (`forge.run`'s collect path).
   if (kind === "mr.automated_review") w.ev("automated_review_not_configured", { node_id: node, task: path, repo: w.repo }, 0.02);
   // What it observes (`_WAITS`' condition): its target's own name.
   const condition = kind.replace(/^mr\./, "");
-  const each = (RUNS[taskRun(w.frozen, path) ?? ""]?.wall_ms ?? 60_000) / polls;
-  // `waits.observe`'s start of a wait: its bounds and deadline, no session (its end names that).
-  const started_at = w.at(0);
-  w.ev("external_wait_started", { task: path, node_id: node, kind, timeout_s: 5_400, initial_interval_s: 30, max_interval_s: 300, started_at, deadline: new Date(Date.parse(started_at) + 5_400_000).toISOString() }, 0.02);
+  const each = (RUNS[taskRun(w.frozen, path) ?? ""]?.wall_ms ?? 60_000) / (last - first + 1);
+  if (had === null) {
+    // `waits.observe`'s start of a wait: its bounds and deadline, no session (its end names that).
+    const started_at = w.at(0);
+    w.ev("external_wait_started", { task: path, node_id: node, kind, timeout_s: 5_400, initial_interval_s: 30, max_interval_s: 300, started_at, deadline: new Date(Date.parse(started_at) + 5_400_000).toISOString() }, 0.02);
+  }
   let wall = 0;
-  for (let k = 1; k <= polls; k++) {
-    if (k > 1) {
+  // The first look of this play follows the `node_started` that entered the node; each later one, its poller's.
+  for (let k = first; k <= last; k++) {
+    if (k > first) {
       yield;
       w.enter(node, 0.02);
     }
     wall += each;
     w.clock(each / 60_000);
-    if (settled && k === polls) {
+    if (settled && k === last) {
       w.ev("external_wait_observed", { node_id: node, task: path, observation: k, condition, state: "settled", result: "done" }, 0);
       w.ev("external_wait_ended", { node_id: node, task: path, outcome: "settled", result: "done", observations: k, session_id: s.id }, 0);
       return w.close(s, "done", Math.round(wall), false);
     }
     // `WaitBounds.interval_after`, in minutes: 30 s after the first pending look, doubling up to the 300 s most.
     const gap = Math.min(0.5 * 2 ** (k - 1), 5);
-    const next = k === polls && retryAt ? retryAt : w.at(gap);
+    const next = k === last && retryAt ? retryAt : w.at(gap);
     w.ev("external_wait_observed", { node_id: node, task: path, observation: k, condition, state: "pending", result: "pending", next_observation_at: next }, 0);
     w.wait(s, node, next, Math.round(wall));
-    if (k < polls) w.clock(gap);
+    if (k < last) w.clock(gap);
   }
   return s;
 }

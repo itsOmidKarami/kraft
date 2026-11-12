@@ -402,6 +402,26 @@ describe("after the visitor", () => {
     expect(types(evs)).toContain("worker_session_created");
   });
 
+  it("a pause and resume during a CI wait go on with its waiting session and its open wait, numbering its looks on", async () => {
+    const { S, ticks, call } = started();
+    const id = board(S, FAILED);
+    const b = S.bundles[id];
+    const CI = "merge_request_feedback.ci.await_ci";
+    await call("POST", `/work-items/${id}/retry`, {});
+    ticks(3, id);
+    expect(b.item).toMatchObject({ current_node_id: "merge_request_feedback", status: "waiting" });
+    const waiting = b.sessions.at(-1)!;
+    // A pause stops only live sessions (`store.running_sessions_for_node`): the waiting one is left as it is.
+    expect((await call("POST", `/work-items/${id}/pause`)).body.paused_sessions).toEqual([]);
+    await call("POST", `/work-items/${id}/resume`, {});
+    for (let k = 0; k < 6 && !count(S, id, "node_completed", "merge_request_feedback"); k++) ticks(1, id);
+    expect(count(S, id, "node_completed", "merge_request_feedback")).toBe(1);
+    expect(b.sessions.filter((s) => s.hook_point === CI).map((s) => [s.id, s.status])).toEqual([[waiting.id, "done"]]);
+    expect(b.events.filter((e) => e.payload.task === CI && e.type.startsWith("external_wait_")).map((e) => [e.type, e.payload.observation ?? e.payload.observations ?? null, e.payload.state ?? e.payload.outcome ?? null])).toEqual([
+      ["external_wait_started", null, null], ["external_wait_observed", 1, "pending"], ["external_wait_observed", 2, "settled"], ["external_wait_ended", 2, "settled"],
+    ]);
+  });
+
   it("an already-completed builtin node run again writes node_completed once, and the walk still moves on", async () => {
     const { S, ticks, call } = clocked();
     const id = board(S, FAILED);
