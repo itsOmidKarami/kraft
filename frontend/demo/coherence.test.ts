@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { buildScenario, withScopes, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
 import { FRESH_TITLES, motion } from "../e2e/contract/mocks/motion";
@@ -53,6 +54,8 @@ const seeded = (seed: (S: Scenario) => void) => { const S = buildScenario("defau
  *  it starts approved, then each gate the walk asks approved once its reviewer has said it is ready, until the second item
  *  the walk files (the first fails a round of tests, the second does not) has finished. Built once: it takes a few hundred ticks. */
 let walk: Scenario | null = null;
+/** Where the walk's clock stood when it stopped. */
+let walkedTo = NG_NOW;
 const walked = (): Scenario => {
   if (walk) return walk;
   vi.useFakeTimers();
@@ -73,6 +76,7 @@ const walked = (): Scenario => {
     }
     m.stop();
     if (!done()) throw new Error("the walk did not finish the second item it filed");
+    walkedTo = new Date(at).toISOString();
     walk = S;
     return S;
   } finally {
@@ -531,6 +535,30 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
       const got = (S.docs[id] ?? []).map((d) => d.path).sort();
       return JSON.stringify(got) !== JSON.stringify(want) || got.some((p) => !p.startsWith(`items/${id}/`)) ? [`${b.item.title}: ${got.length} of ${want.length}`] : [];
     });
+    expect(wrong).toEqual([]);
+  });
+  // `documents_for_work_item`: a summary's row is its session's, indexed as the session exited; nothing is indexed after
+  // the clock (the sample's, or where the walk's stood).
+  it("each session summary's document is its session's, indexed when it exited, and none is indexed after the clock", () => {
+    const clock = sample ? NG_NOW : walkedTo;
+    const wrong = board.flatMap((b) => (S.docs[b.item.id] ?? []).flatMap((d) => {
+      const s = b.sessions.find((x) => x.id === d.worker_session_id);
+      const own = d.source_kind !== "session_summary" || (s && d.attempt === s.attempt && d.round === s.round && d.session_status === s.status && d.indexed_at === s.exited_at && d.node_id === s.node_id && d.hook_point === s.hook_point);
+      return !own || d.indexed_at > clock ? [`${b.item.title}: ${d.path}`] : [];
+    }));
+    expect(wrong).toEqual([]);
+  });
+  // A row of the list carries every key a real one does (`tests/api/api_shapes.json`), each row, not only one of them;
+  // the pending gate's the keys `_pending_gate_doc` writes.
+  it("every row of its documents list carries the keys a real row carries", async () => {
+    const shapes = JSON.parse(readFileSync(new URL("../../tests/api/api_shapes.json", import.meta.url), "utf-8"));
+    const keys = Object.keys(shapes.routes["GET /api/work-items/{wid}/documents"].shape.documents[0]);
+    const pending = ["attachment_kind", "document_id", "hook_point", "indexed_at", "kind", "node_id", "path", "repo", "source_kind", "title", "worker_session_id"];
+    const wrong: string[] = [];
+    for (const b of board) for (const d of (await call(`/work-items/${b.item.id}/documents`)).body.documents) {
+      const lacks = (String(d.document_id).startsWith("gate:") ? pending : keys).filter((k) => !(k in d));
+      if (lacks.length) wrong.push(`${b.item.title}: ${d.path} lacks ${lacks.join(", ")}`);
+    }
     expect(wrong).toEqual([]);
   });
   it("a gate document is indexed at its approval, with no node, task or session, and the list is newest first", async () => {

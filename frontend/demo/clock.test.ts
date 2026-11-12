@@ -50,8 +50,9 @@ describe.each(["default", "long", "many"] as const)("the %s data is dated at or 
 
   const scenario = () => {
     const S = buildScenario(variant);
-    // The long and many data have no named samples: the first item that ran something stands in.
-    const item = S.ng["needs-gate"] ?? Object.keys(S.bundles).find((id) => S.bundles[id].sessions.length)!;
+    // The board row waiting at its final review, with documents of its own (kraft-cb59, the default data's). The long and
+    // many data have no named samples and no documents: the first item that ran something stands in.
+    const item = S.ngBoard.find((id) => S.bundles[id].item.pending_gate && S.docs[id]?.length) ?? S.ng["needs-gate"] ?? Object.keys(S.bundles).find((id) => S.bundles[id].sessions.length)!;
     const b = S.bundles[item];
     b.item.attachments = [{ kind: "spec", path: "docs/spec.md" }];
     const ids: Record<string, string> = { $ITEM: item, $FILED: item, $ONE_OFF: item, $SESSION: b.sessions[0].id, $AGENT: subagentList(b.logs[b.sessions[0].id] ?? [], b.sessions[0].status)[0]?.id ?? "none", $DOC: Object.values(S.docs).flat()[0].document_id, $REPO: b.item.repo };

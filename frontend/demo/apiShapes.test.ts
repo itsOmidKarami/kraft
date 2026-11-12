@@ -51,7 +51,6 @@ const KNOWN_GAPS: Record<string, string> = {
   // every surface falls back on its own rule (`status.admits`), held to the same doors by `status.test.ts`.
   "GET /api/work-items:items[].actions": "the UI's own door rule stands in, as for a server older than `actions`",
   "GET /api/work-items/{wid}:actions": "the UI's own door rule stands in, as for a server older than `actions`",
-  "GET /api/work-items/{wid}/documents:documents[]": "the item pages' sample items list no documents; the older board's carry every key",
 };
 
 describe("skeleton: the same rows as test_api_shapes.py's", () => {
@@ -81,7 +80,9 @@ describe("missingKeys", () => {
 
 describe("the demo's mocked API answers every key the real server does", () => {
   const S = buildScenario("default");
-  const item = S.ng["needs-gate"];
+  // A board row waiting at a gate, with documents of its own (kraft-cb59): its documents list holds the pending gate's
+  // and those its approvals and sessions filed, every key a real list's rows carry.
+  const item = S.ngBoard.find((id) => S.bundles[id].item.bead_id === "kraft-cb59")!;
   const b = S.bundles[item];
   // No sample item is filed with a spec, so the attachment route reads one given here.
   b.item.attachments = [{ kind: "spec", path: "docs/spec.md" }];
