@@ -1088,15 +1088,19 @@ def running_sessions_under(conn: sqlite3.Connection, work_item_id: str, path: st
 def resumable_agent_session(
     conn: sqlite3.Connection, work_item_id: str, node_id: str, hook_point: str
 ):
-    """The session a paused agent task resumes: the task's latest session in
-    this node, if an operator paused it and no retry or restart has begun a new
-    pass since (`reusable_session`'s rule, Kraft-znsvg). None otherwise."""
+    """The session a paused or asking agent task resumes: the task's latest
+    session in this node, if an operator paused it or it ended `needs_context`,
+    and no retry or restart has begun a new pass since (`reusable_session`'s
+    rule, Kraft-znsvg). None otherwise."""
     latest = conn.execute(
         "SELECT * FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
         "AND hook_point = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
         (work_item_id, node_id, hook_point),
     ).fetchone()
-    if latest is None or latest["status"] != SessionStatus.PAUSED:
+    if latest is None or latest["status"] not in (
+        SessionStatus.PAUSED,
+        SessionStatus.NEEDS_CONTEXT,
+    ):
         return None
     newer_pass = conn.execute(
         "SELECT 1 FROM events WHERE work_item_id = ? "

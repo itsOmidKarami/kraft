@@ -8,7 +8,9 @@ from kraft import item_paths, outputs
 from kraft import progress as _progress
 from kraft import store as _store
 from kraft.config import RepoEntry, git_read
+from kraft.executor.round_prompts import AGENT_ANSWERED_NOTE as AGENT_ANSWERED_NOTE
 from kraft.executor.round_prompts import AGENT_RESUMED_NOTE as AGENT_RESUMED_NOTE
+from kraft.executor.round_prompts import AGENT_UNANSWERED_NOTE as AGENT_UNANSWERED_NOTE
 from kraft.executor.round_prompts import JUDGE_PROMPT as JUDGE_PROMPT
 from kraft.executor.round_prompts import bot_feedback as bot_feedback
 from kraft.executor.round_prompts import bot_feedback_source as bot_feedback_source
@@ -21,6 +23,7 @@ from kraft.executor.round_prompts import last_review_session as last_review_sess
 from kraft.executor.round_prompts import named_with_kind as named_with_kind
 from kraft.executor.round_prompts import previous_attempt_note as previous_attempt_note
 from kraft.executor.round_prompts import previous_review_note as previous_review_note
+from kraft.executor.round_prompts import resumed_note as resumed_note
 from kraft.executor.round_prompts import review_package as review_package
 from kraft.executor.round_prompts import round_history_note as round_history_note
 from kraft.executor.round_prompts import (

@@ -797,10 +797,12 @@ enforced-by: tests/executor/test_steer_targets.py::test_one_steer_reaches_every_
 
 ## REQ resumed-agent-task-preserves-its-session-when-possible
 
-When resuming a paused agent task, the system SHALL resume its durable session
-when available, and otherwise restart that task with its original instruction
-and any supplied steer.
-enforced-by: tests/executor/test_steer_targets.py::test_a_paused_agent_task_resumes_its_own_session, tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[no-provider-id], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[not-paused], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[before-a-retry], tests/test_pause_resume.py::test_pause_then_resume_with_a_steer_relaunches_the_task[resumes], tests/test_pause_resume.py::test_pause_then_resume_with_a_steer_relaunches_the_task[restarts]
+When resuming an agent task that an operator paused, or whose latest session in
+the node stopped to ask a question, the system SHALL resume its durable session
+when available, telling it the steer or answer, or that no answer came;
+otherwise it SHALL restart that task with its original instruction and any
+supplied steer.
+enforced-by: tests/executor/test_steer_targets.py::test_a_paused_agent_task_resumes_its_own_session[paused], tests/executor/test_steer_targets.py::test_a_paused_agent_task_resumes_its_own_session[asked], tests/executor/test_steer_targets.py::test_a_paused_agent_task_resumes_its_own_session[asked-no-answer], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[no-provider-id], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[not-paused], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[before-a-retry], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[asked-on-a-harness-without-resume], tests/test_pause_resume.py::test_pause_then_resume_with_a_steer_relaunches_the_task[resumes], tests/test_pause_resume.py::test_pause_then_resume_with_a_steer_relaunches_the_task[restarts]
 
 ## REQ steer-reaches-only-stopped-agentic-work
 

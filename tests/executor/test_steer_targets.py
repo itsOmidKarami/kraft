@@ -7,10 +7,10 @@ from __future__ import annotations
 import json
 
 import pytest
-from support.harness import write_harness_profiles
+from support.harness import harness_without, write_harness_profiles
 
 from kraft import executor, store
-from kraft.executor import dispatch
+from kraft.executor import dispatch, prompts
 from kraft.paths import config_dir
 
 #: Two agent tasks and a subprocess task running side by side in one step.
@@ -40,10 +40,13 @@ def launched(monkeypatch, fake_agent):
     return seen
 
 
-async def _paused(item_on, *paths):
+async def _paused(item_on, *paths, ended: dict[str, str] | None = None):
+    """The item with a session per path, each `paused` unless `ended` says how
+    it ended (`needs_context`: it asked). The item stays `paused`: dispatch
+    reads only the session row."""
     it = await item_on(CHAIN, "work", status="paused")
     for i, path in enumerate(paths):
-        await it.session(f"s{i}", path, "paused")
+        await it.session(f"s{i}", path, (ended or {}).get(path, "paused"))
     return it
 
 
@@ -124,17 +127,28 @@ def _log_init(it, sid, cli_session):
     log.write_text(json.dumps({"type": "system", "subtype": "init", "session_id": cli_session}))
 
 
-async def test_a_paused_agent_task_resumes_its_own_session(item_on, launched):
-    """`resumed-agent-task-preserves-its-session-when-possible`: the paused
-    session's provider id rides `--resume`, and the prompt is the steer and a
-    note to carry on -- not the whole brief again."""
-    it = await _paused(item_on, "work.main.front")
+@pytest.mark.parametrize(
+    ("ended", "answer", "note"),
+    [
+        ("paused", "mind the tests", prompts.AGENT_RESUMED_NOTE),
+        ("needs_context", "mind the tests", prompts.AGENT_ANSWERED_NOTE),
+        ("needs_context", None, prompts.AGENT_UNANSWERED_NOTE),
+    ],
+    ids=["paused", "asked", "asked-no-answer"],
+)
+async def test_a_paused_agent_task_resumes_its_own_session(item_on, launched, ended, answer, note):
+    """`resumed-agent-task-preserves-its-session-when-possible`: the paused (or
+    asking) session's provider id rides `--resume`, and the prompt is the steer
+    or answer and a note to carry on -- not the whole brief again."""
+    it = await _paused(item_on, "work.main.front", ended={"work.main.front": ended})
     _log_init(it, "s0", "cli-front")
 
-    await _dispatch(it, "work.main.front", executor.Steer("mind the tests", source="human"))
+    await _dispatch(it, "work.main.front", executor.Steer(answer, source="human"))
     sent = launched["work.main.front"]
     assert sent["resume_session_id"] == "cli-front"
-    assert "mind the tests" in sent["task_instruction"]
+    if answer:
+        assert answer in sent["task_instruction"]
+    assert note in sent["task_instruction"]
     assert "Build the front end." not in sent["task_instruction"]
     assert it.events("agent_session_resumed")[0]["payload"] == {
         "task": "work.main.front",
@@ -142,15 +156,23 @@ async def test_a_paused_agent_task_resumes_its_own_session(item_on, launched):
     }
 
 
-@pytest.mark.parametrize("why", ["no-provider-id", "not-paused", "before-a-retry"])
+@pytest.mark.parametrize(
+    "why",
+    ["no-provider-id", "not-paused", "before-a-retry", "asked-on-a-harness-without-resume"],
+)
 async def test_an_agent_task_that_cannot_resume_restarts_with_its_instruction(
-    item_on, launched, why
+    item_on, launched, monkeypatch, why
 ):
     """The fallback half: no session the provider can resume, one that ended
     some other way, or one from before a retry (a retry never reuses a
     pre-retry session) -- the task restarts with its original instruction and
     the steer."""
-    it = await _paused(item_on, *(["work.main.front"] if why != "not-paused" else []))
+    asked = {"work.main.front": "needs_context"} if why.startswith("asked") else None
+    it = await _paused(item_on, *(["work.main.front"] if why != "not-paused" else []), ended=asked)
+    if why.startswith("asked"):
+        # Built before patching: `harness_without` itself calls `harness.load`.
+        table = harness_without("resume", "fake")
+        monkeypatch.setattr(dispatch._harness, "load", lambda *_a, **_k: table)
     if why == "not-paused":
         await it.session("s0", "work.main.front", "failed")
     if why != "no-provider-id":
