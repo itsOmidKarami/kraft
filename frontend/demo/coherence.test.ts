@@ -246,6 +246,8 @@ describe.each(SCENARIOS)("items in %s", (_scenario, build) => {
       && !(nodeTasks(b.item.materialized_chain, b.item.stop.node) ?? []).some((t) => t.kind === "agent" && !b.sessions.some((s) => s.hook_point === t.path)) && b.item.stop.node],
     // A run as long as its task's time cap would have been stopped by it (`time_cap_reached`, capped out).
     ["an agent's finished session ran shorter than its task's time cap", (b) => b.sessions.filter((s) => ["done", "done_with_concerns"].includes(s.status) && capOf(b, s.hook_point) && !(s.wall_ms < capOf(b, s.hook_point)! * 60_000)).map((s) => `${s.hook_point}: ${s.wall_ms}`)],
+    // `config/library.yaml`: every successful implementer run on record finished inside 96 minutes.
+    ["an implementer's finished run is no longer than the longest successful one on record", (b) => b.sessions.filter((s) => s.hook_point === "implementation.main.implement" && ["done", "done_with_concerns"].includes(s.status) && s.wall_ms > 96 * 60_000).map((s) => `${s.hook_point}: ${s.wall_ms}`)],
   ])("%s", (_rule, wrong) => {
     const found = chained(S).map((b) => [b.item.title, wrong(b)] as const).filter(([, w]) => (Array.isArray(w) ? w.length > 0 : !!w));
     expect(found).toEqual([]);

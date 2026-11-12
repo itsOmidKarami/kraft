@@ -22,11 +22,12 @@ type Row = { sc: NgScenario; title: string; repo: string; bead: string; age: num
 const R = (name: string) => `/Users/dev/code/${name}`;
 const LONG_R = (name: string) => `/Volumes/Work/clients/acme-corporation/monorepo/services/${name}-with-a-long-checkout-path`;
 
-/** The capped sample's session ran to its end instead: no time cap was reached, and it ended a quarter of an hour short
- *  of the implementer's 120 minutes (a run of the cap's whole length would have been capped). Its exit and what follows
- *  it move back with it, and its node's and the item's wall time with its own. */
+/** The capped sample's session ran to its end instead: no time cap was reached, and it ended after 90 minutes, inside
+ *  the 96 every successful implementer run on record took at most (`config/library.yaml`), half an hour short of the
+ *  implementer's 120-minute cap. Its exit and what follows it move back with it, and its node's and the item's wall time
+ *  with its own. */
 function noTimeCap(i: any, b: ItemBundle) {
-  const cut = 15 * 60_000;
+  const cut = 30 * 60_000;
   const s = b.sessions.find((x) => x.status === "capped_out")!;
   b.events = b.events.filter((e) => e.type !== "time_cap_reached");
   const exit = b.events.findIndex((e) => e.type === "worker_session_exited" && e.payload.session_id === s.id);
