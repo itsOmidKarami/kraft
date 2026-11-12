@@ -125,7 +125,7 @@ const ROWS: Row[] = [
   },
   {
     name: "search: the query is highlighted in titles (Q3)",
-    run: async (p) => { await app(p, "/"); await p.keyboard.press("ControlOrMeta+k"); await p.getByRole("combobox", { name: /search/i }).fill("measured"); await pause(p, 600); expect(await p.getByRole("option").locator("mark").filter({ hasText: /^measured$/i }).count(), "the app's fixture titles hold \"measured\", not \"cache\"").toBeGreaterThan(0); },
+    run: async (p) => { await app(p, "/"); await p.keyboard.press("ControlOrMeta+k"); await p.getByRole("combobox", { name: /search/i }).fill("brief"); await pause(p, 600); expect(await p.getByRole("option").locator("mark").filter({ hasText: /^brief$/i }).count(), "the board's work and review briefs hold \"brief\" in their titles").toBeGreaterThan(0); },
   },
   {
     name: "search: Filters sits at the right end of the tab row (Q5)",

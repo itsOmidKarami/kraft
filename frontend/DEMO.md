@@ -15,7 +15,11 @@ a real server freezes them for an item: `mocks/shippedChains.json`, which `just
 shapes` rewrites from a real server (`tests/api/test_demo_chain.py`), read by
 `mocks/ngChain.ts`. Each item stands where a real one in its state stands, with
 the sessions and events a real server writes on the way: `default`'s 19 nodes,
-`quick-task`'s two, and `docs_only`, five of `default`'s nodes. `demo/shim.ts` puts them under the page:
+`quick-task`'s two, and `docs_only`, five of `default`'s nodes. Each board item is about something of its own
+(`mocks/ngContent.ts`): its brief, the files it changes, which its diff, comparison and header serve once its
+implementation has completed, its merge request's number, and the documents its completed nodes and finished agent
+sessions wrote, each written for its title; Search matches its query over those. Its history is timed so it has run
+for its own time. The item page's samples and the long and many variants keep the shared data. `demo/shim.ts` puts them under the page:
 `fetch` and the events socket for `/api/**`, the clock moved to the scenario's
 moment, and the two `<a href="/api/...">` log links. An action there sticks
 until the page reloads: the mock changes the item as the server would
@@ -85,7 +89,11 @@ add up, events out of time order, or a session no event created. And it fails
 on a stop the walk could not have written: a fix loop's judge before a repair
 has run, a stop reason the server does not write for that kind, an automatic
 escalation turn answering a stop outside the stuck set, or a session summary
-outside its item's folder. It checks the
+outside its item's folder. It fails when two board items share a brief or a list of changed files, an
+item shows a change before its implementation completes, a docs item changes code, a merge request is not the one
+its `mr_opened` named, a document's id repeats or its documents are not those of the nodes it completed and its
+finished agent sessions, Search ignores its query or reaches past the board, or a running time is not its events'
+span. It checks the
 sample, its long and many variants, the seeds that add sessions and the board
 after live motion has walked two items it filed to the end, then the sessions
 the doors make. It fails when an event's `node_id` column is not the node its
