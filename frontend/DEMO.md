@@ -23,11 +23,15 @@ until the page reloads: the mock changes the item as the server would
 socket (`broadcast`), so the board moves as the item does. The board moves
 on its own too: `MockOptions.motion` (`mocks/motion.ts`), which only the
 demo sets, moves each board item whose status is `active` one step along
-its chain every 8–15 seconds, through the same transitions. A node takes
-two ticks, with a session for each task it runs, and a gate stops the item
-until the visitor answers it. A waiting or rate-limited item is active
-again once its retry time passes, and a spend cap stops an item before its
-next agent task. An escalation turn, the sample's or one the visitor starts,
+its chain every 8–15 seconds, through the same transitions. It runs each
+node as the sample items show it ran, from the one recipe both read
+(`mocks/nodeRecipe.ts`), one beat a tick: each task's session with what its
+task reports, verification's test scopes, code review and findings, the
+draft's merge request, and CI waits that poll. The first item it files fails
+a round of tests, so a fix cycle runs. A gate is asked for, its reviewer
+runs, and the item waits for the visitor to answer it. A waiting or
+rate-limited item is active again once its retry time passes, and a spend
+cap stops an item before its next agent task. An escalation turn, the sample's or one the visitor starts,
 ends on its own two ticks in, as its agent finishing does: its session is done,
 its reply is the item's document (the task's Output links it), and the item
 stays as it stopped, for a reply, a retry or a decision. A finished chain is Done. When no board item is active
@@ -82,8 +86,10 @@ on a stop the walk could not have written: a fix loop's judge before a repair
 has run, a stop reason the server does not write for that kind, an automatic
 escalation turn answering a stop outside the stuck set, or a session summary
 outside its item's folder. It checks the
-sample, its long and many variants and the seeds that add sessions, then the
-sessions the doors make. Each item's frozen chain says what a task is; `mocks/taskKinds.ts` reads
+sample, its long and many variants, the seeds that add sessions and the board
+after live motion has walked two items it filed to the end, then the sessions
+the doors make. Node by node, the walked items' events must be the finished
+sample item's. Each item's frozen chain says what a task is; `mocks/taskKinds.ts` reads
 it for the sample items that have one, the doors and live motion, and the
 older sample items, which have none, say it by their model.
 `demo/deadEnds.test.ts` fails when a control leads nowhere: Duplicate answers
