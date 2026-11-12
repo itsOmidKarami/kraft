@@ -2,10 +2,10 @@ import type { EventType } from "../../../src/types/vocab.generated";
 import { commandLog, hex, logLines, LONG_DESCRIPTION, t, type ItemBundle, type Variant } from "./fixtures";
 import { chainOf, frozenOf, type DefNode } from "./ngChain";
 import { RESUME_PROMPT } from "./poller";
-import { agentUsage, agentWall, awaitPolls, drain, DOCS_RED, fixCycle, judge, measured, nodeBeats, OPEN, RED, REPAIR, REVIEW, REVIEWED, TESTS, testPass, type Found, type Open, type Writer } from "./nodeRecipe";
+import { agentUsage, agentWall, awaitPolls, drain, DOCS_RED, fixCycle, judge, measured, nodeBeats, OPEN, ownFailure, redOf, REPAIR, REVIEW, REVIEWED, TESTS, testPass, type Found, type Open, type Writer } from "./nodeRecipe";
 import { isAgentSession, RUNS, taskRun } from "./taskKinds";
 import { escalationThreads, threadSummary } from "./transitions";
-import { mrOf, planOf, type Content } from "./ngContent";
+import { isLate, mrOf, planOf, type Content } from "./ngContent";
 
 /**
  * Items for the item page (ux2-W5) and the board (ngBoard.ts): the shipped default chain (ngChain.ts) in every
@@ -73,6 +73,8 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
   const cur = want === null ? nodes.length : nodes.findIndex((n) => n.id === currentNode);
   const sessions: any[] = [];
   const events: any[] = [];
+  // The file verification's round adds, whose test its first round fails (nodeRecipe.ts `failedTest`).
+  const late = content?.files.find(isLate)?.[0] ?? null;
   const logs: Record<string, any[]> = {};
   let seq = 0;
   // Minutes from T0. A time cap's two hours of implementation start the capped item before T0, so it stops before NG_NOW.
@@ -119,7 +121,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     } else if (s._noAgent) {
       logs[s.id] = [{ n: 1, t: t(0.1), src: "stdout", text: "no bot feedback collected; no agent started" }];
     } else {
-      logs[s.id] = commandLog(s._run, status, s.hook_point.split(".").at(-1), mr.url);
+      logs[s.id] = ownFailure(commandLog(s._run, status, s.hook_point.split(".").at(-1), mr.url), late);
     }
     ev("worker_session_exited", { session_id: s.id, status, wall_ms: wall, ...usage }, 0);
     return s;
@@ -153,7 +155,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
 
   /** The recipe's writes (nodeRecipe.ts), as this item records them: each stamped by its own clock `m`. */
   const W: Writer = {
-    id, sessions, events, frozen: FROZEN, repo: item.repo, plan: planOf(FROZEN, content),
+    id, sessions, events, frozen: FROZEN, repo: item.repo, plan: planOf(FROZEN, content), late,
     get head() { return item.head_sha; },
     ev, open, close,
     enter: (node, dm) => ev("node_started", { node_id: node }, dm),
@@ -200,7 +202,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     }
     // Round 0: the tests step failed, so the review step after it never ran.
     drain(testPass(W, 0, true));
-    measured(W, 0, [RED], [TESTS]);
+    measured(W, 0, [redOf(late)], [TESTS]);
     drain(fixCycle(W, 1, true));
     drain(testPass(W, 1));
     const s = open(REVIEW, "verification", { round: 1 });
@@ -281,11 +283,11 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
       // (due now a repair has run) lets the loop go on. The second repair changed nothing, so the walk stops rather than
       // measure the same code again (`walk._changed_nothing_reason`), a stuck stop that auto-escalation answers.
       drain(testPass(W, 0, true));
-      measured(W, 0, [RED], [TESTS]);
+      measured(W, 0, [redOf(late)], [TESTS]);
       drain(fixCycle(W, 1, true));
       drain(testPass(W, 1, false, true));
       measured(W, 1, [DOCS_RED], [TESTS]);
-      drain(judge(W, 1, [DOCS_RED], "the repair fixed the eviction test; the docs check is a new, small finding one more repair should reach"));
+      drain(judge(W, 1, [DOCS_RED], "the repair fixed the failing test; the docs check is a new, small finding one more repair should reach"));
       drain(fixCycle(W, 2, false));
       ev("work_item_needs_human", { node_id: "verification", reason: STUCK, kind: "stuck", stuck: true }, 0.05);
       // The automatic escalation agent's turn running on it: what `display_status` calls escalated.

@@ -371,6 +371,28 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.filter((b) => !b.sessions.some((s) => s.hook_point === "verification.fix_loop.main.repair")).map((b) => b.item.bead_id)).toEqual([]);
   });
+  // A round of tests fails on the test of the file that round goes on to add (its `late` file), in the finding the round
+  // measured and in its session's log; a page's check is its doctest. Written out, not read off the mock.
+  it("a red round of tests fails on the item's own late file's test, in its finding and its log", () => {
+    const want: Record<string, string> = {
+      "kraft-a3f0": "FAILED tests/test_limiter.py::test_limiter - AssertionError",
+      "kraft-91bc": "FAILED src/test/board.test.ts::board - AssertionError",
+      "kraft-2c77": "FAILED tests/lint/test_report.py::test_report - AssertionError",
+      "kraft-88ca": "FAILED tests/harness/test_aliases.py::test_aliases - AssertionError",
+      "kraft-7c40": "FAILED tests/index/test_service.py::test_service - AssertionError",
+      "kraft-b2e7": "FAILED tests/console/test_app.py::test_app - AssertionError",
+      "kraft-6a2f": "FAILED README.md::README.md",
+      ...(!sample && { [FRESH_TITLES[0]]: "FAILED tests/forge/test_run.py::test_run - AssertionError" }),
+    };
+    const got = Object.fromEntries(board.flatMap((b) => {
+      const said = [
+        ...b.events.filter((e) => e.type === "findings_measured").flatMap((e) => (e.payload.findings as any[]).map((f) => String(f.message))),
+        ...b.sessions.filter((s) => s.hook_point === "verification.tests.test_changed_scopes" && s.status === "failed").flatMap((s) => logOf(b, s).map((l) => l.text)),
+      ].flatMap((x) => x.split("\n")).map((x) => /FAILED \S+(?: - AssertionError)?/.exec(x)?.[0]).filter(Boolean);
+      return said.length ? [[b.item.bead_id ?? b.item.title, [...new Set(said)].join(" | ")]] : [];
+    }));
+    expect(got).toEqual(want);
+  });
   it("a docs item changes docs only, in its table and in the diff it serves", async () => {
     const docs = board.filter((b) => b.item.repo.endsWith("/kraft-docs") || b.item.chain_template === "docs_only");
     expect(docs.length).toBeGreaterThan(0);

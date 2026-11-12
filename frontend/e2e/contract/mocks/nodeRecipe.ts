@@ -32,6 +32,9 @@ export interface Writer {
   readonly head: string | null;
   /** The tasks its implementer reports (`plan_progress`), in order: none on a chain with no plan (ngContent.ts `planOf`). */
   readonly plan: readonly string[];
+  /** The file verification's round adds (ngContent.ts, a `late` file): the one its first round of tests fails on. None for
+   *  an item with no content of its own, whose round fails the sample's test. */
+  readonly late?: string | null;
   /** The item's events, oldest first, the ones the recipe writes included. */
   readonly events: any[];
   /** How many polls an external wait takes, where the recipe does not say. */
@@ -90,8 +93,17 @@ export const agentWall = (hookPoint: string, n: number) => Math.round(agentRun(h
  *  failed command with an extract of its output, and the command to confirm the fix with; no file, no line, the hook as its source. */
 export type Found = { finding: Record<string, unknown>; print: string; cmd?: string };
 const blindFinding = (hook: string, cmd: string, extract: string) => ({ severity: "critical", message: `${hook} failed\n- ${cmd}: ${extract}\n\nConfirm the fix with: ${cmd}`, file: null, line: null, source_plugin: hook });
+/** The line the repo's tests print for round 0's red test: the sample's, or the item's own, named after the file its
+ *  round adds (a test file's test of its own name; a page's doctest, as pytest collects one). */
+export function failedTest(late?: string | null): string {
+  if (!late) return "FAILED tests/test_cache.py::test_cache_evicts_oldest - AssertionError";
+  const base = late.split("/").pop()!.replace(/\.[^.]+$/, "").replace(/\.test$/, "");
+  return /\.(md|rst|txt)$/.test(late) ? `FAILED ${late}::${late.split("/").pop()}` : `FAILED ${late}::${base} - AssertionError`;
+}
+/** A red test run's log with the item's own failing test in the sample's place (`failedTest`). */
+export const ownFailure = (log: any[], late?: string | null) => (late ? log.map((l) => (l.text === failedTest() ? { ...l, text: failedTest(late) } : l)) : log);
 /** Round 0's red test, then round 1's red docs check: two defects, so two fingerprints, and the stuck detector does not fire. */
-export const RED: Found = { finding: blindFinding(TESTS, RUNS["kraft.verify_changed_test_scopes"].command!, "FAILED tests/test_cache.py::test_cache_evicts_oldest - AssertionError"), print: "5be0c1d7a93e4f20", cmd: RUNS["kraft.verify_changed_test_scopes"].command };
+export const redOf = (late?: string | null): Found => ({ finding: blindFinding(TESTS, RUNS["kraft.verify_changed_test_scopes"].command!, failedTest(late)), print: "5be0c1d7a93e4f20", cmd: RUNS["kraft.verify_changed_test_scopes"].command });
 export const DOCS_RED: Found = { finding: blindFinding(TESTS, DOCS_SCOPE.command!, "docs/search.md:12 MD040/fenced-code-language Fenced code blocks should have a language specified"), print: "c41f0e9b2d7a6853", cmd: DOCS_SCOPE.command };
 
 /** A session that ran to `status`: made (and launched), a beat, then ended. */
@@ -255,7 +267,7 @@ export function* nodeBeats(w: Writer, n: DefNode, o: { red?: boolean } = {}): Be
       if (go(TESTS) && o.red) {
         // The tests step failed, so the review step after it never ran this round; a fix cycle mends it.
         yield* testPass(w, 0, true);
-        measured(w, 0, [RED], [TESTS]);
+        measured(w, 0, [redOf(w.late)], [TESTS]);
         yield* fixCycle(w, 1, true);
         round = 1;
       }

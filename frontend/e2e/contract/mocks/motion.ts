@@ -1,7 +1,7 @@
 import { LIVE_SESSION_STATUSES } from "../../../src/types/vocab.generated";
 import { hex, type ItemBundle, type Scenario } from "./fixtures";
 import { agentUsage, nodeBeats, type Beats, type Writer } from "./nodeRecipe";
-import { FRESH_CONTENT, planOf, type Content } from "./ngContent";
+import { FRESH_CONTENT, isLate, planOf, type Content } from "./ngContent";
 import { isAgentSession, taskRun } from "./taskKinds";
 import { pendingRewind, sinceFork, threadSummary, type Transitions } from "./transitions";
 
@@ -136,6 +136,7 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
       get repo() { return b().item.repo; },
       get head() { return b().item.head_sha ?? null; },
       get plan() { return planOf(b().item.materialized_chain, b().content); },
+      get late() { return b().content?.files.find(isLate)?.[0] ?? null; },
       polls: POLLS,
       ev: (type, payload = {}) => {
         const node = payload.node_id ?? payload.node ?? payload.gate;

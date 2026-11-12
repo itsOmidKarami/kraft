@@ -5,6 +5,7 @@ import { chainOf, frozenOf } from "./ngChain";
 import { RESUME_PROMPT } from "./poller";
 import { buildNeverStarted } from "./ngItems";
 import { DOCS_SCOPE, isAgentSession, MODEL, RUNS, scopeRunsOf, taskRun, type Run } from "./taskKinds";
+import { ownFailure } from "./nodeRecipe";
 import { changedFiles, isLate, itemDocs, mergeDocs, mrOf, planOf } from "./ngContent";
 
 /**
@@ -691,7 +692,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
         // A command's log has grown to all of its output by the time it ends, the failing run's if it failed.
         const task = String(s.hook_point).split(".").at(-1)!;
         if (o.noAgent) b.logs[sid] = [{ n: 1, t: at, src: "stdout", text: "no bot feedback collected; no agent started" }];
-        else if (!isAgentSession(it.materialized_chain, s.hook_point, !!s.model)) b.logs[sid] = commandLog(s.command === DOCS_SCOPE.command ? DOCS_SCOPE : taskRun(it.materialized_chain, s.hook_point), status, task, it.mr_ref?.url);
+        else if (!isAgentSession(it.materialized_chain, s.hook_point, !!s.model)) b.logs[sid] = ownFailure(commandLog(s.command === DOCS_SCOPE.command ? DOCS_SCOPE : taskRun(it.materialized_chain, s.hook_point), status, task, it.mr_ref?.url), b.content?.files.find(isLate)?.[0]);
         append(id, "worker_session_exited", { session_id: sid, status, wall_ms });
         settle(it);
         return ok({ id, session_id: sid });
