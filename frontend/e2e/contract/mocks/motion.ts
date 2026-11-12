@@ -214,8 +214,8 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
   };
 
   /** How the item stands on its node, by its newest positional event: `done` past it (completed, skipped, its gate
-   *  approved), `skipped` when a task or step of it was skipped (the walk runs one task a node, so that ends it),
-   *  else `again`: the node runs (a rejection's target, a retry, a resume, a node never started or left mid-way). */
+   *  approved), `skipped` when a task or step of it was skipped with no beats of it left to play (a sample item's node,
+   *  which the walk did not start: that ends it), else `again`: the node runs (a rejection's target, a retry, a resume, a node never started or left mid-way). */
   const standing = (b: ItemBundle): "done" | "skipped" | "again" => {
     const cur = b.item.current_node_id;
     const last = [...b.events].reverse().find((e) => WHERE.has(e.type));
