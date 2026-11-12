@@ -42,8 +42,8 @@ const usageOf = (S: Scenario, id: string, sid: string) => {
 };
 /** A board row's id by its bead. */
 const board = (S: Scenario, bead: string) => S.ngBoard.find((id) => S.bundles[id].item.bead_id === bead)!;
-/** The row by its bead, its spend cap lifted: a sample item has spent most of its $10, and running its implementation
- *  again at what that really costs would stop it on the cap before the step a test is about. */
+/** The row by its bead, its spend cap lifted: a sample item has spent a good part of its cap, and a test that reruns
+ *  work several times at what it really costs would stop it on the cap before the step the test is about. */
 const uncapped = (S: Scenario, bead: string) => {
   const id = board(S, bead);
   S.bundles[id].item.budget_cap.cap_usd = 100;
