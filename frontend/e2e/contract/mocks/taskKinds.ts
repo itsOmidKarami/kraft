@@ -148,8 +148,9 @@ export const DOCS_SCOPE: Run = {
  *  look that settles at once included. */
 export const WAITS = new Set(["mr.ci", "mr.automated_review", "mr.external_approval", "mr.merge", "mr.post_merge_ci", "ci.pipeline"]);
 /** `running_time.running_s` (`caps.running_time`): the seconds at least one of the item's finished sessions ran, a forge
- *  wait's left out, so two that overlap count once. A live session counts nothing yet, nor (a shortcut: the sample retries
- *  none by hand) does the clock restart at a person's retry, nor drop a person's escalation turn. */
+ *  wait's left out, so two that overlap count once. Shortcuts: a live session counts nothing yet (the real clock ends it at
+ *  now; no card shows a live item's time), the clock does not restart at a person's retry (the sample retries none by
+ *  hand), and a person's escalation turn is not dropped. */
 export function runningS(frozen: string | null | undefined, sessions: any[]): number {
   const spans = sessions.filter((s) => s.wall_ms != null && !WAITS.has(taskRun(frozen, s.hook_point) ?? ""))
     .map((s) => [Date.parse(s.started_at ?? s.created_at), Date.parse(s.started_at ?? s.created_at) + s.wall_ms]).sort((a, b) => a[0] - b[0]);
