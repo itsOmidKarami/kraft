@@ -5,7 +5,7 @@ import { RESUME_PROMPT } from "./poller";
 import { agentUsage, agentWall, awaitPolls, drain, DOCS_RED, fixCycle, judge, measured, nodeBeats, OPEN, ownFailure, redOf, REPAIR, REVIEW, REVIEWED, TESTS, testPass, type Found, type Open, type Writer } from "./nodeRecipe";
 import { isAgentSession, RUNS, taskRun } from "./taskKinds";
 import { escalationThreads, stepOf, stopTaskOf, threadSummary } from "./transitions";
-import { isLate, mrOf, planOf, type Content } from "./ngContent";
+import { isLate, mrOf, planOf, sizeOf, type Content } from "./ngContent";
 
 /**
  * Items for the item page (ux2-W5) and the board (ngBoard.ts): the shipped default chain (ngChain.ts) in every
@@ -75,6 +75,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
   const events: any[] = [];
   // The file verification's round adds, whose test its first round fails (nodeRecipe.ts `failedTest`).
   const late = content?.files.find(isLate)?.[0] ?? null;
+  const size = sizeOf(content);
   const logs: Record<string, any[]> = {};
   let seq = 0;
   // Minutes from T0. A time cap's two hours of implementation start the capped item before T0, so it stops before NG_NOW.
@@ -110,12 +111,12 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
   /** `store.session_exited`: `status` after its wall time, with the usage an agent reported. */
   const close = (s: any, status = "done", wall_ms?: number, advance = true) => {
     const n = sessions.indexOf(s);
-    const wall = wall_ms ?? (s._agent ? agentWall(s.hook_point, n) : s._noAgent ? 1 : s._run?.wall_ms ?? 1_000);
+    const wall = wall_ms ?? (s._agent ? agentWall(s.hook_point, n, size) : s._noAgent ? 1 : s._run?.wall_ms ?? 1_000);
     if (advance) m += wall / 60_000;
     Object.assign(s, { status, exited_at: t(m), wall_ms: wall });
     let usage = {};
     if (s._agent) {
-      usage = agentUsage(s.hook_point, n);
+      usage = agentUsage(s.hook_point, n, size);
       Object.assign(s, usage);
       if (status === "done" || status === "done_with_concerns") s.session_summary_ref = `items/${id}/sessions/${s.id}/out/summary.md`;
     } else if (s._noAgent) {
@@ -155,7 +156,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
 
   /** The recipe's writes (nodeRecipe.ts), as this item records them: each stamped by its own clock `m`. */
   const W: Writer = {
-    id, sessions, events, frozen: FROZEN, repo: item.repo, plan: planOf(FROZEN, content), late,
+    id, sessions, events, frozen: FROZEN, repo: item.repo, plan: planOf(FROZEN, content), late, size,
     get head() { return item.head_sha; },
     ev, open, close,
     enter: (node, dm) => ev("node_started", { node_id: node }, dm),

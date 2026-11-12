@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { buildScenario, searchFor, withScopes, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
 import { FRESH_TITLES, motion } from "../e2e/contract/mocks/motion";
 import { NG_REPOS } from "../e2e/contract/mocks/ngBoard";
-import { CONTENT, docBody, FRESH_CONTENT, isDocsPath, isLate, mergeDocs, mrOf } from "../e2e/contract/mocks/ngContent";
+import { CONTENT, docBody, FRESH_CONTENT, isDocsPath, isLate, mergeDocs, mrOf, sizeOf } from "../e2e/contract/mocks/ngContent";
 import { frozenOf } from "../e2e/contract/mocks/ngChain";
 import { AUTO_ESCALATE_MESSAGE, buildNgItem, MR_CLOSED_REASON, NG_NOW, renderNote } from "../e2e/contract/mocks/ngItems";
 import { agentUsage, openWait } from "../e2e/contract/mocks/nodeRecipe";
@@ -1183,7 +1183,7 @@ describe("the live walk runs each node as the sample's finished item ran it", ()
       const agent = agentic(b, s);
       if ((s.harness === "claude") !== agent) return true;
       if (!agent || noAgentTriage(b, s)) return s.model != null || s.cost_usd != null || s.command !== commandOf(b, s);
-      const u = agentUsage(s.hook_point, b.sessions.indexOf(s));
+      const u = agentUsage(s.hook_point, b.sessions.indexOf(s), sizeOf(b.content));
       return s.model !== u.model || s.tokens_in !== u.tokens_in || s.tokens_out !== u.tokens_out || s.cost_usd !== u.cost_usd;
     }).map((s) => `${b.item.title}: ${s.hook_point}`));
     expect(wrong).toEqual([]);

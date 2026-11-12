@@ -1,7 +1,7 @@
 import { LIVE_SESSION_STATUSES } from "../../../src/types/vocab.generated";
 import { hex, type ItemBundle, type Scenario } from "./fixtures";
 import { agentUsage, nodeBeats, type Beats, type Writer } from "./nodeRecipe";
-import { FRESH_CONTENT, isLate, planOf, type Content } from "./ngContent";
+import { FRESH_CONTENT, isLate, planOf, sizeOf, type Content } from "./ngContent";
 import { isAgentSession, taskRun } from "./taskKinds";
 import { pendingRewind, sinceFork, stepIndex, threadSummary, type Transitions } from "./transitions";
 
@@ -149,6 +149,7 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
       get plan() { return planOf(b().item.materialized_chain, b().content); },
       get late() { return b().content?.files.find(isLate)?.[0] ?? null; },
       polls: POLLS,
+      get size() { return sizeOf(b().content); },
       ev: (type, payload = {}) => {
         const node = payload.node_id ?? payload.node ?? payload.gate;
         T.append(id, type, payload, typeof node === "string" ? node : null);
@@ -169,7 +170,7 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
         // A skip stopped it already: nothing to end.
         if (!LIVE_SESSION_STATUSES.includes(s.status) && s.status !== "waiting") return s;
         const skippedAgent = noAgent.has(s.id);
-        const usage = isAgent(b(), s) && !skippedAgent ? agentUsage(s.hook_point, b().sessions.indexOf(s)) : null;
+        const usage = isAgent(b(), s) && !skippedAgent ? agentUsage(s.hook_point, b().sessions.indexOf(s), sizeOf(b().content)) : null;
         const summary = usage && status === "done" ? `items/${id}/sessions/${s.id}/out/summary.md` : null;
         T.sessionExited(id, s.id, usage, summary, { status, noAgent: skippedAgent });
         return s;
@@ -310,7 +311,7 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
       for (const s of live) {
         // The forge's draft task opens the merge request (`forge.run`), recorded as it ends.
         if (taskRun(b.item.materialized_chain, s.hook_point) === "mr.open_draft") T.mrOpened(id, node);
-        T.sessionExited(id, s.id, isAgent(b, s) ? agentUsage(s.hook_point, b.sessions.indexOf(s)) : null);
+        T.sessionExited(id, s.id, isAgent(b, s) ? agentUsage(s.hook_point, b.sessions.indexOf(s), sizeOf(b.content)) : null);
       }
       T.completeNode(id, node);
       return enter(id, nextNode(b, false));
@@ -334,7 +335,7 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
         const key = `${id}/${s.id}`;
         const n = (turns.get(key) ?? 0) + 1;
         if (n < TURN_TICKS) { seen.set(key, n); continue; }
-        T.sessionExited(id, s.id, agentUsage(s.hook_point, b.sessions.indexOf(s)), threadSummary(id, s.thread ?? 1));
+        T.sessionExited(id, s.id, agentUsage(s.hook_point, b.sessions.indexOf(s), sizeOf(b.content)), threadSummary(id, s.thread ?? 1));
         T.indexSummary(id, s.id, reply(b, s));
       }
     }
