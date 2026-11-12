@@ -86,11 +86,14 @@ const ADMITS: Record<string, readonly string[]> = {
   archive: ["completed", "abandoned"],
 };
 
-/** The board's row of an item: the item, its `stop` without facts, task or attempt (W4's list). */
+/** The board's row of an item: the item, its `stop` without facts, task or attempt (W4's list), and its plan progress
+ *  without the task list (`board._board_progress`). */
 export function listRow(item: any) {
   const s = item.stop;
+  const p = item.progress;
   // The detail's `limit` is read against the chain; the row only says there is one to raise (`board._list_stop`).
-  return { ...item, stop: s ? { kind: s.kind, node: s.node, resume_at: s.resume_at, reason: s.reason, ...(s.limit ? { raisable: true } : {}) } : null };
+  return { ...item, stop: s ? { kind: s.kind, node: s.node, resume_at: s.resume_at, reason: s.reason, ...(s.limit ? { raisable: true } : {}) } : null,
+    progress: p ? { current: p.current, total: p.total, title: p.title } : null };
 }
 
 /** `lifecycle.not_paused`: what resume says to an item that is not paused. */

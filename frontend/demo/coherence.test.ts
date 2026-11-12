@@ -1012,6 +1012,12 @@ const tickWalk = (): Promise<Ticked> => (ticked ??= (async () => {
         const want = !runs ? null : told ? [told.task, told.total, told.title] : 1;
         const row = rows.find((r) => r.id === id);
         if ([row?.progress, b.item.progress].some((p) => JSON.stringify(at(p)) !== JSON.stringify(want))) wrong.progress.add(`${b.item.title} at tick ${k}: ${JSON.stringify(row?.progress)}`);
+        // The row's progress is position and title only (`board._board_progress`); the detail's lists every task of the
+        // plan, one per file it changes then a check, each done below the current one and pending above it.
+        if (row?.progress && JSON.stringify(Object.keys(row.progress).sort()) !== '["current","title","total"]') wrong.progress.add(`${b.item.title} at tick ${k}: the row lists ${Object.keys(row.progress)}`);
+        const p = b.item.progress;
+        const plan = [...(b.content!.files as Row[]).filter((f) => !late(f)).map(([x]) => `Change ${x}`), "Check it"];
+        if (p && JSON.stringify(p.tasks.map((x: any) => [x.n, x.title, x.state])) !== JSON.stringify(plan.map((x, n) => [n + 1, x, n + 1 < p.current ? "done" : n + 1 === p.current ? "current" : "pending"]))) wrong.progress.add(`${b.item.title} at tick ${k}: tasks ${JSON.stringify(p.tasks)}`);
       }
     }
     m.stop();
@@ -1050,6 +1056,9 @@ describe("at every tick of the walk", () => {
     T.enterNode(b.item.id, "implementation");
     const shown = () => b.item.progress && [b.item.progress.current, b.item.progress.total, b.item.progress.title];
     expect([b.item.status, shown()]).toEqual(["active", [3, 4, "Change tests/workers/test_pool.py"]]);
+    expect(b.item.progress.tasks.map((x: any) => [x.n, x.title, x.state])).toEqual([
+      [1, "Change kraft/workers/pool.py", "done"], [2, "Change kraft/workers/events.py", "done"], [3, "Change tests/workers/test_pool.py", "current"], [4, "Check it", "pending"],
+    ]);
     expect(T.pause(b.item.id).status).toBe(200);
     expect([b.item.status, shown()]).toEqual(["paused", null]);
   });
