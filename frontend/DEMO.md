@@ -21,7 +21,7 @@ implementation commits each task of its own plan (a chain with no plan, `docs_on
 request on its repo's forge, and its documents, each written for its title. A gate's document is indexed when a person or a reviewer approves the gate, at that moment: a pending gate's is
 listed under its synthetic id and never searched, a chain revision that changed nothing has none, and a docs item has
 no work brief. Each finished agent session's summary is indexed too. Search matches every word of its query over
-those, as the index does. Its history is timed so it has run for its own time. The item page's samples and the long and many variants keep the shared data. `demo/shim.ts` puts them under the page:
+those, as the index does. Its history is timed so it has run for its own time, and its agents spend and take time by the size of its change (`sizeOf`): the lines and files it changes, half for a docs item. The item page's samples and the long and many variants keep the shared data. `demo/shim.ts` puts them under the page:
 `fetch` and the events socket for `/api/**`, the clock moved to the scenario's
 moment, and the two `<a href="/api/...">` log links. An action there sticks
 until the page reloads: the mock changes the item as the server would
@@ -96,7 +96,7 @@ item shows a change for a plan task it has not finished or reports a task its ow
 lines or calls a new or deleted file changed, a file's counts or a written-out hunk do not fit how it changes, a review thread quotes lines its diff does not show or names code its lines lack, a rejection's note is not its review's summary and the threads open when it was sent, a merge request is not its own on its repo's forge or a forge task's log names another's at any tick of a walk, a diff shows verification's late file or fix commit before a repair of its has finished, a board row's plan progress is not the task last reported while the item runs its implementation (or shows one when it does not), a spend cap stops an item on a node with no agent task left to launch, a finished agent's run is as long as its time cap or an implementer's longer than any on record, a red round of tests fails on a test other than its own late file's, a document's id
 repeats, its documents are not those of the gates approved and its finished agent sessions or are not indexed at the
 approval, a documents row lacks a key a real row has, a document is served before its node wrote it, a brief's or a merge request's list of files is not the files its diff shows with their counts, a review brief's "N files" miscounts its rows or its "Read first" is not its largest change, a document's text is another kind's or another item's, Search ignores its query, filters, ranking or limit or reaches
-past the board, or two started items show the same running time. It checks the
+past the board, two started items show the same running time, two finished ones the same spend or time taken, an item does not spend less than one on its chain that changed more lines, or one spends as much as the demo team's cap. It checks the
 sample, its long and many variants, the seeds that add sessions and the board
 after live motion has walked two items it filed to the end, then the sessions
 the doors make. It fails when an event's `node_id` column is not the node its
