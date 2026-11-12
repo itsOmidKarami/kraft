@@ -545,6 +545,30 @@ describe("a created item", () => {
     expect([detail.title, detail.budget_cap.spent_usd, detail.chain_definition.nodes.length]).toEqual(["fresh", 0, 19]);
   });
 
+  it.each([
+    // Each chain the composer lists, its nodes and its fix loops' caps: the frozen loop's attempts, the policy's wall clock.
+    ["default", 19, { verification: { attempts: 2, wall_clock_s: 3600 }, merge_request_feedback: { attempts: 3, wall_clock_s: 3600 } }],
+    ["quick-task", 2, {}],
+    ["docs_only", 5, {}],
+  ])("the composer, the dry run and a new item read one list: %s", async (chain, count, caps) => {
+    const { call } = server();
+    const listed = (await call("GET", "/templates/chains")).body.find((c: any) => c.id === chain);
+    const dry = (await call("POST", "/work-items?dry_run=true", { title: "x", chain_template: chain })).body;
+    expect([listed.nodes.length, dry.nodes.map((n: any) => n.id), dry.caps.nodes]).toEqual([count, listed.nodes.map((n: any) => n.id), caps]);
+    const id = (await call("POST", "/work-items", { title: "x", chain_template: chain })).body.id;
+    const detail = (await call("GET", `/work-items/${id}`)).body;
+    // The new item freezes its own template's chain, every node of it.
+    expect(JSON.parse(detail.materialized_chain).chain.nodes.map((n: any) => n.id)).toEqual(listed.nodes.map((n: any) => n.id));
+  });
+
+  it("refuses a chain the server has no template for, filing nothing", async () => {
+    const { S, call } = server();
+    const had = S.ngBoard.length;
+    expect(await call("POST", "/work-items", { title: "x", chain_template: "nope" })).toEqual({ status: 404, body: { detail: "unknown chain 'nope'" } });
+    expect(await call("POST", "/work-items?dry_run=true", { title: "x", chain_template: "nope" })).toEqual({ status: 404, body: { detail: "unknown chain 'nope'" } });
+    expect(S.ngBoard.length).toBe(had);
+  });
+
   it("is filed in the empty scenario too", async () => {
     const { call } = server("empty");
     const made = await call("POST", "/work-items", { title: "first" });
