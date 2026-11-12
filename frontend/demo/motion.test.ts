@@ -127,8 +127,8 @@ describe("one step", () => {
       ["worker_session_exited", { session_id: expect.any(String), status: "done", wall_ms: expect.any(Number) }],
       ["worker_session_created", expect.objectContaining({ node_id: "draft_merge_request", hook_point: "draft_merge_request.open.open", attempt: 2 })],
       ["branch_pushed", expect.objectContaining({ node_id: "draft_merge_request" })],
-      // Its own merge request (ngContent.ts).
-      ["mr_opened", { number: 125, url: "https://github.com/acme/kraft-api/pull/125" }],
+      // Its own merge request (ngContent.ts), on its repo's GitLab (NG_REPOS, the shared-gl account).
+      ["mr_opened", { number: 125, url: "https://code.corp.example/gitlab/acme/kraft-api/-/merge_requests/125" }],
     ]);
     expect(ticks(1, id)).toEqual([
       ["worker_session_exited", { session_id: expect.any(String), status: "done", wall_ms: expect.any(Number) }],
@@ -148,7 +148,7 @@ describe("one step", () => {
     // No node is left standing finished: the tick that completed it entered the next.
     expect(S.bundles[id].item).toMatchObject({ current_node_id: "merge_request_feedback", status: "waiting", display_status: "waiting", stop: { kind: "wait", reason: null } });
     expect(S.bundles[id].sessions.filter((s) => s.node_id === "draft_merge_request").slice(-2).map((s) => [s.status, s.cost_usd])).toEqual([["done", null], ["done", null]]);
-    expect(S.bundles[id].item.mr_ref).toEqual({ number: 125, url: "https://github.com/acme/kraft-api/pull/125" });
+    expect(S.bundles[id].item.mr_ref).toEqual({ number: 125, url: "https://code.corp.example/gitlab/acme/kraft-api/-/merge_requests/125" });
     expect(S.bundles[id].events.find((e) => e.type === "mr_opened")?.node_id).toBe("draft_merge_request");
   });
 
@@ -612,11 +612,16 @@ describe("an escalation turn", () => {
     expect(recent(b.events as any).map((l) => l.line)).toContain("escalation answered");
     // The thread's turns so far: kraft-a3f0's had two before the visitor's.
     const turns = b.sessions.filter((x) => x.hook_point === "escalation").length;
+    const others = async () => (await call("GET", `/work-items/${id}/documents`)).body.documents.filter((d: any) => d.path !== ref).map((d: any) => d.path);
+    const before = await others();
+    expect(before.length).toBeGreaterThan(0);
     expect((await call("POST", `/work-items/${id}/escalate`, { message: "go on" })).status).toBe(200);
     expect([s.session_summary_ref, b.events.filter((e) => e.type === "escalation_message").at(-1)?.payload]).toEqual([`items/${id}/sessions/${s.id}/out/summary.md`, expect.objectContaining({ thread: 1, turn: turns + 1 })]);
     ticks(2, id);
     // That turn's summary is filed at the thread's path again: one document, the newest turn's.
     expect(await at()).toEqual([expect.objectContaining({ document_id: docs[0].document_id, path: ref, worker_session_id: b.sessions.at(-1)!.id })]);
+    // Its other documents are as they were: the turn filed its own and dropped none.
+    expect(await others()).toEqual(before);
   });
 
   it("a turn the visitor stopped (Stop agent) is not ended again", async () => {

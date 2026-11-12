@@ -1,7 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import { buildScenario, withScopes, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
-import { FRESH_TITLES, motion } from "../e2e/contract/mocks/motion";
+import { FRESH_REPOS, FRESH_TITLES, motion } from "../e2e/contract/mocks/motion";
+import { NG_REPOS } from "../e2e/contract/mocks/ngBoard";
+import { CONTENT, FRESH_CONTENT } from "../e2e/contract/mocks/ngContent";
 import { frozenOf } from "../e2e/contract/mocks/ngChain";
 import { AUTO_ESCALATE_MESSAGE, MR_CLOSED_REASON, NG_NOW } from "../e2e/contract/mocks/ngItems";
 import { agentUsage, openWait } from "../e2e/contract/mocks/nodeRecipe";
@@ -246,14 +248,48 @@ describe.each(SCENARIOS)("items in %s", (_scenario, build) => {
   });
 });
 
-/** The node whose completion files each gate document, and the document's kind (`produces`): spec iff past `spec`, plan
- *  iff past `plan`, the chain revision past `chain_revision`, the work brief past `work_brief`, the review brief past
- *  the summary node. Written out, not read off the mock. */
-const PRODUCED: Record<string, string> = { spec: "spec", plan: "plan", chain_revision: "chain_revision", work_brief: "work_brief", work_item_summary: "review_brief" };
+/** The gate whose approval indexes each document, and the document's kind (the gate's `artifact`, `config/chains/default.yaml`):
+ *  the spec at `spec_approval`, the plan at `plan_approval`, the chain revision at `chain_revision_approval`, the work brief
+ *  at `local_review`, the review brief at `final_review`. A gate the item's chain lacks indexes nothing (`docs_only` has no
+ *  `local_review`), and a chain revision Kraft passed itself because it changed nothing is never indexed
+ *  (`pass_unchanged_revision` approves it `by: kraft`, not through `apply_approval`). Written out, not read off the mock. */
+const GATED: Record<string, string> = { spec_approval: "spec", plan_approval: "plan", chain_revision_approval: "chain_revision", local_review: "work_brief", final_review: "review_brief" };
+/** The approval that indexed the gate's document: the last a person or a reviewer gave it. */
+const approvalOf = (b: ItemBundle, gate: string) => [...b.events].reverse().find((e) => e.type === "gate_approved" && e.payload.gate === gate && ["human", "agent"].includes(String(e.payload.by)));
+const indexedGates = (b: ItemBundle) => Object.keys(GATED).filter((g) => b.item.chain_definition.nodes.some((n: any) => n.id === g) && approvalOf(b, g));
 const completed = (b: ItemBundle, node: string) => b.events.some((e) => e.type === "node_completed" && e.payload.node_id === node);
 const ENDED_STATUSES = ["completed", "abandoned"];
+type Row = [path: string, insertions: number, deletions: number, ...flags: string[]];
+const late = (f: Row) => f.slice(3).includes("late");
+/** What the item has committed: a task's file once the next task started (Kraft commits after every task), all the
+ *  implementation's files once it completed, and verification's round's once that completed. */
+const committed = (b: ItemBundle): Row[] => {
+  const files = b.content!.files as Row[];
+  if (completed(b, "implementation")) return files.filter((f) => !late(f) || completed(b, "verification"));
+  const started = Math.max(0, ...b.events.filter((e) => e.type === "plan_progress" && e.payload.node_id === "implementation").map((e) => Number(e.payload.task)));
+  return files.filter((f) => !late(f)).slice(0, Math.max(0, started - 1));
+};
+/** Each file's patch in `diff`: its path, its header lines, and its `@@` counts against the lines it shows. */
+const patches = (diff: string) => diff.split(/^(?=diff --git )/m).filter(Boolean).map((p) => {
+  const [head, ...rest] = p.split(/^(?=@@ )/m);
+  const body = rest.join("").replace(/\n$/, "").split("\n");
+  const [, oldN, newN] = /^@@ -\d+,(\d+) \+\d+,(\d+) @@/.exec(body[0])!.map(Number);
+  const rows = body.slice(1);
+  const count = (marks: string) => rows.filter((r) => marks.includes(r[0])).length;
+  return { path: /^diff --git a\/(\S+)/.exec(head)![1], head, counted: oldN === count(" -") && newN === count(" +"), oldN, newN };
+});
+/** An MR's address as its repo's forge writes it: GitHub's pull, or a merge request on the GitLab account's host. */
+const MR_URL = /https:\/\/\S+\/(?:pull|-\/merge_requests)\/\d+/g;
+const forgeUrl = (repo: string, n: number) => {
+  const name = repo.split("/").pop()!;
+  return NG_REPOS.find((r) => r.id === name)!.forge === "gitlab" ? `https://code.corp.example/gitlab/acme/${name}/-/merge_requests/${n}` : `https://github.com/acme/${name}/pull/${n}`;
+};
+/** Each kind's own section: what tells a spec from a plan or a summary. */
+const SECTION: Record<string, string> = { specs: "\n## Problem\n", plans: "\n### Task 1: ", chain_revisions: "\n## Nodes\n", work_briefs: "\n## What changed\n", review_briefs: "\n## Read first\n", sessions: "\n## What this session did\n" };
+const docsOnly = (files: Row[]) => files.every(([p]) => p.startsWith("docs/") || p.endsWith(".md"));
+const isTestPath = (p: string) => /(^|\/)tests?\//.test(p) || /\.test\.[jt]sx?$/.test(p);
 
-describe.each<[string, () => Scenario]>([["the default sample", () => buildScenario("default")], ["the live walk", walked]])("each board item's own content in %s", (_scenario, build) => {
+describe.each<[string, () => Scenario, boolean]>([["the default sample", () => buildScenario("default"), true], ["the live walk", walked, false]])("each board item's own content in %s", (_scenario, build, sample) => {
   const S = build();
   const board = [...S.ngBoard, ...S.ngArchived].map((id) => S.bundles[id]);
   const serve = mockServer(S, demoOptions);
@@ -264,60 +300,113 @@ describe.each<[string, () => Scenario]>([["the default sample", () => buildScena
   /** What the item header sums: every file the diff names, landed or in flight, once per path. */
   const served = async (b: ItemBundle): Promise<{ path: string; insertions: number; deletions: number }[]> => {
     const d = await call(`/work-items/${b.item.id}/diff`);
-    return d.status === 200 ? [...d.body.landed.files, ...d.body.files] : [];
+    expect(d.status, b.item.title).toBe(200);
+    return [...d.body.landed.files, ...d.body.files];
   };
+  const withTree = board.filter((b) => b.item.worktree_exists !== false && b.events.some((e) => e.type === "node_started"));
   const doneAgent = (s: any) => s.session_summary_ref && ["done", "done_with_concerns"].includes(s.status);
+  const itemOf = (r: any) => r.links.find((l: any) => l.work_item_id)?.work_item_id;
 
-  it("every board item has a brief, and no two share one", () => {
+  it("every board item has a brief, its own, and no two share one", () => {
     const briefs = board.map((b) => b.item.description);
-    expect(board.filter((b) => !b.item.description).map((b) => b.item.title)).toEqual([]);
+    expect(board.filter((b) => !b.item.description || b.item.description !== b.content?.description).map((b) => b.item.title)).toEqual([]);
     expect(briefs.filter((x, k) => briefs.indexOf(x) !== k)).toEqual([]);
   });
   // The strict rule: every entry of the content table is written for its own item, so no list may repeat, though two
   // rows of one kind in one repo might in principle change the same files.
   it("no two board items that have changed something share the list of files they changed", async () => {
-    const lists = (await Promise.all(board.map(served))).map((fs) => fs.map((f) => f.path).sort().join(" ")).filter(Boolean);
+    const lists = (await Promise.all(withTree.map(served))).map((fs) => fs.map((f) => f.path).sort().join(" ")).filter(Boolean);
+    expect(lists.length).toBeGreaterThan(0);
     expect(lists.filter((x, k) => lists.indexOf(x) !== k)).toEqual([]);
   });
-  it("an item that has not completed implementation has changed nothing", async () => {
-    const wrong = await Promise.all(board.filter((b) => !completed(b, "implementation")).map(async (b) => [b.item.title, (await served(b)).length] as const));
+  it("an item that has started no plan task has changed nothing", async () => {
+    const before = board.filter((b) => !completed(b, "implementation") && !b.events.some((e) => e.type === "plan_progress"));
+    expect(before.length).toBeGreaterThan(0);
+    const wrong = await Promise.all(before.filter((b) => b.item.worktree_exists !== false).map(async (b) => [b.item.title, (await served(b)).length] as const));
     expect(wrong.filter(([, n]) => n > 0)).toEqual([]);
   });
-  it("a docs item changes docs only", () => {
-    const docs = board.filter((b) => b.item.repo.endsWith("/kraft-docs") || b.item.chain_template === "docs_only");
-    expect(docs.length).toBeGreaterThan(0);
-    expect(docs.flatMap((b) => b.content!.files.map(([p]) => p).filter((p) => !p.startsWith("docs/") && !p.endsWith(".md")))).toEqual([]);
-  });
-  it("its header's stat is its files': the implementation's once that completed, and verification's once that did", async () => {
-    const wrong = await Promise.all(board.filter((b) => b.item.worktree_exists !== false && b.events.some((e) => e.type === "node_started")).map(async (b) => {
-      const want = completed(b, "implementation") ? b.content!.files.filter((f) => !f[3] || completed(b, "verification")) : [];
-      const got = await served(b);
-      const sum = (fs: { insertions: number; deletions: number }[]) => [fs.length, fs.reduce((a, f) => a + f.insertions, 0), fs.reduce((a, f) => a + f.deletions, 0)];
-      const compare = (await call(`/work-items/${b.item.id}/compare`)).body.files.map((f: any) => f.path).sort();
-      const ok = JSON.stringify(sum(got)) === JSON.stringify(sum(want.map(([, insertions, deletions]) => ({ insertions, deletions })))) && JSON.stringify(compare) === JSON.stringify(want.map(([p]) => p).sort());
+  it("an item stopped inside its implementation reports its plan's own tasks, and has committed the files of those it finished", async () => {
+    const inside = board.filter((b) => !completed(b, "implementation") && b.events.some((e) => e.type === "plan_progress"));
+    if (sample) expect(inside.length).toBeGreaterThan(0);
+    const wrong = await Promise.all(inside.map(async (b) => {
+      const plan = (await call(`/work-items/${b.item.id}/artifacts/plan`)).body.content as string;
+      const tasks = [...plan.matchAll(/^### Task \d+: (.*)$/gm)].map((m) => m[1]);
+      const told = b.events.filter((e) => e.type === "plan_progress").map((e) => [e.payload.title, e.payload.total]);
+      const files = (await served(b)).map((f) => f.path);
+      const ok = JSON.stringify(told) === JSON.stringify(tasks.slice(0, told.length).map((t) => [t, tasks.length])) && files.length > 0 && JSON.stringify(files) === JSON.stringify(committed(b).map(([p]) => p).sort());
       return ok ? null : b.item.title;
     }));
     expect(wrong.filter(Boolean)).toEqual([]);
   });
-  it("it has a merge request once its draft's open task has run, its own, the one its mr_opened named", () => {
+  it("a docs item changes docs only, in its table and in the diff it serves", async () => {
+    const docs = board.filter((b) => b.item.repo.endsWith("/kraft-docs") || b.item.chain_template === "docs_only");
+    expect(docs.length).toBeGreaterThan(0);
+    expect(docs.flatMap((b) => b.content!.files.map(([p]) => p).filter((p) => !p.startsWith("docs/") && !p.endsWith(".md")))).toEqual([]);
+    const servedPaths = (await Promise.all(docs.filter((b) => withTree.includes(b)).map(served))).flat().map((f) => f.path);
+    expect(servedPaths.length).toBeGreaterThan(0);
+    expect(servedPaths.filter((p) => !p.startsWith("docs/") && !p.endsWith(".md"))).toEqual([]);
+  });
+  it("its header's stat, comparison and diff are its committed files', path-sorted, each patch counted and marked new or deleted as it is", async () => {
+    const wrong = await Promise.all(withTree.map(async (b) => {
+      const want = committed(b);
+      const d = (await call(`/work-items/${b.item.id}/diff`)).body;
+      const got = [...d.landed.files, ...d.files];
+      const cmp = (await call(`/work-items/${b.item.id}/compare`)).body;
+      const paths = want.map(([p]) => p).sort();
+      const status = (p: string) => { const f = want.find(([x]) => x === p)!; return f.slice(3).includes("new") ? "new" : f.slice(3).includes("deleted") ? "deleted" : null; };
+      const marked = (x: ReturnType<typeof patches>[number]) => {
+        const s = status(x.path);
+        return s === "new" ? x.head.includes("\nnew file mode 100644\n") && x.head.includes("\n--- /dev/null\n") && x.oldN === 0
+          : s === "deleted" ? x.head.includes("\ndeleted file mode 100644\n") && x.head.includes("\n+++ /dev/null\n") && x.newN === 0
+          : !/new file mode|deleted file mode|\/dev\/null/.test(x.head);
+      };
+      const problems = [
+        JSON.stringify(got.map((f: any) => [f.path, f.insertions, f.deletions])) !== JSON.stringify([...want].sort((x, y) => (x[0] < y[0] ? -1 : 1)).map(([p, i, dl]) => [p, i, dl])) && "stat",
+        JSON.stringify(cmp.files.map((f: any) => [f.path, f.insertions, f.deletions])) !== JSON.stringify(got.map((f: any) => [f.path, f.insertions, f.deletions])) && "compare",
+        ...[d.landed.diff + d.diff, cmp.diff].map((text: string, k) => {
+          const ps = patches(text);
+          return (JSON.stringify(ps.map((x) => x.path)) !== JSON.stringify(paths) || !ps.every((x) => x.counted && marked(x))) && `diff ${k}`;
+        }),
+      ].filter(Boolean);
+      return problems.length ? `${b.item.title}: ${problems.join(", ")}` : null;
+    }));
+    expect(wrong.filter(Boolean)).toEqual([]);
+  });
+  it("its commits are one per finished plan task, then verification's fix, newest first", async () => {
+    const wrong = await Promise.all(withTree.filter((b) => committed(b).length).map(async (b) => {
+      const subjects = (await call(`/work-items/${b.item.id}/diff`)).body.landed.commits.map((c: string) => c.slice(8));
+      const own = committed(b).filter((f) => !late(f));
+      const want = [...own.map(([p], k) => `Task ${k + 1}: Change ${p}`), ...(committed(b).some(late) ? ["Fix what verification found"] : [])].reverse();
+      return JSON.stringify(subjects) === JSON.stringify(want) ? null : b.item.title;
+    }));
+    expect(wrong.filter(Boolean)).toEqual([]);
+  });
+  it("it has a merge request once its draft's open task has run, its own on its repo's forge, the one its mr_opened named", () => {
     const wrong = board.flatMap((b) => {
       const opened = b.sessions.some((s) => s.hook_point === "draft_merge_request.open.open" && s.status === "done");
       const event = b.events.filter((e) => e.type === "mr_opened").at(-1)?.payload;
       const mr = b.item.mr_ref;
-      const own = { number: b.content!.mr, url: `https://github.com/acme/${b.item.repo.split("/").pop()}/pull/${b.content!.mr}` };
+      const own = { number: b.content!.mr, url: forgeUrl(b.item.repo, b.content!.mr) };
       return opened !== !!mr || (mr && (JSON.stringify(mr) !== JSON.stringify(own) || event?.number !== mr.number || event?.url !== mr.url)) ? [b.item.title] : [];
     });
     expect(wrong).toEqual([]);
+    expect(board.some((b) => b.item.mr_ref?.url.includes("/-/merge_requests/"))).toBe(true);
+  });
+  it("a forge task's log names its own item's merge request, and no other", () => {
+    const wrong = board.filter((b) => b.item.mr_ref).flatMap((b) => b.sessions.filter((s) => !agentic(b, s)).flatMap((s) =>
+      logOf(b, s).filter((l) => (l.text.match(MR_URL) ?? []).some((u: string) => u !== b.item.mr_ref.url)).map((l) => `${b.item.title}: ${l.text}`)));
+    expect(wrong).toEqual([]);
+    expect(board.some((b) => b.item.mr_ref && b.sessions.some((s) => logOf(b, s).some((l) => l.text.includes(b.item.mr_ref.url))))).toBe(true);
   });
   it("no two documents share an id, on any item", () => {
     const ids = Object.values(S.docs).flat().map((d) => d.document_id);
     expect(ids.filter((x, k) => ids.indexOf(x) !== k)).toEqual([]);
   });
-  it("its documents are the gate documents of the nodes it completed and its finished agent sessions' summaries, in its own folder", () => {
+  it("its documents are the documents of the gates a person or reviewer approved and its finished agent sessions' summaries, in its own folder", () => {
     const wrong = board.flatMap((b) => {
       const id = b.item.id;
       const want = [
-        ...Object.entries(PRODUCED).filter(([node]) => completed(b, node)).map(([, kind]) => `items/${id}/docs/${kind}.md`),
+        ...indexedGates(b).map((g) => `items/${id}/docs/${GATED[g]}.md`),
         ...new Set(b.sessions.filter(doneAgent).map((s) => s.session_summary_ref)),
       ].sort();
       const got = (S.docs[id] ?? []).map((d) => d.path).sort();
@@ -325,51 +414,170 @@ describe.each<[string, () => Scenario]>([["the default sample", () => buildScena
     });
     expect(wrong).toEqual([]);
   });
+  it("a gate document is indexed at its approval, with no node, task or session, and the list is newest first", async () => {
+    const wrong = await Promise.all(board.map(async (b) => {
+      const list = (await call(`/work-items/${b.item.id}/documents`)).body.documents;
+      const gates = list.filter((d: any) => d.source_kind === "artifact" && !String(d.document_id).startsWith("gate:"));
+      const timed = gates.every((d: any) => d.indexed_at === approvalOf(b, Object.keys(GATED).find((g) => `${GATED[g]}s` === d.kind)!)?.created_at && [d.node_id, d.hook_point, d.worker_session_id, d.session_work_item_id].every((x) => x === null));
+      const sorted = list.every((d: any, k: number) => !k || list[k - 1].indexed_at >= d.indexed_at);
+      return timed && sorted ? null : b.item.title;
+    }));
+    expect(wrong.filter(Boolean)).toEqual([]);
+  });
+  it("a chain revision that changed nothing has no document, and a docs item has no work brief", () => {
+    const unchanged = board.filter((b) => b.events.some((e) => e.type === "chain_revision_unchanged"));
+    const docsItems = board.filter((b) => b.item.chain_template === "docs_only" && completed(b, "work_brief"));
+    expect([unchanged.length > 0, docsItems.length > 0]).toEqual([true, true]);
+    expect([...unchanged.filter((b) => S.docs[b.item.id].some((d) => d.kind === "chain_revisions")), ...docsItems.filter((b) => S.docs[b.item.id].some((d) => d.kind === "work_briefs"))].map((b) => b.item.title)).toEqual([]);
+  });
+  it("a pending gate's document is listed first under its synthetic id, read live, and never found by search", async () => {
+    const gated = board.filter((b) => b.item.pending_gate && b.item.gate_artifact);
+    if (sample) expect(gated.length).toBeGreaterThan(0);
+    const wrong = await Promise.all(gated.map(async (b) => {
+      const id = `gate:${b.item.id}:${b.item.pending_gate}`;
+      const [first, ...rest] = (await call(`/work-items/${b.item.id}/documents`)).body.documents;
+      const doc = (await call(`/documents/${encodeURIComponent(id)}`)).body;
+      const hits = (await call(`/search?q=${encodeURIComponent(b.item.title)}&limit=100`)).body.results;
+      const ok = first.document_id === id && first.path === b.item.gate_artifact && [first.node_id, first.hook_point, first.worker_session_id].every((x) => x === null)
+        && !rest.some((d: any) => d.path === first.path) && !S.docs[b.item.id].some((d) => d.path === first.path)
+        && doc.content.startsWith(`# ${first.title}\n`) && JSON.stringify([doc.metadata, doc.links, doc.source_created_at, "origin" in doc]) === JSON.stringify([{}, [], null, false])
+        && !hits.some((r: any) => r.id === id || r.path === first.path);
+      return ok ? null : b.item.title;
+    }));
+    expect(wrong.filter(Boolean)).toEqual([]);
+  });
   /** Whether a document's text is about `b`: it names its title and says what its brief's first sentence says. */
   const about = (text: string, b: ItemBundle) => text.includes(b.item.title) && text.includes(b.item.description.split(". ")[0]);
   // An escalation reply the walk's agent wrote (`docText`) has its own words and no front matter; motion.test.ts holds it.
-  it("each document opens to its own item and is about it", async () => {
+  it("each document opens to its own item, headed by its title, with its kind's own section, about it, as the indexer ingested it", async () => {
     const wrong: string[] = [];
     for (const b of board) for (const d of (S.docs[b.item.id] ?? []).filter((x) => S.docText?.[x.document_id] == null)) {
       const doc = (await call(`/documents/${d.document_id}`)).body;
-      if (doc.id !== d.document_id || !doc.metadata.work_item_ids.includes(b.item.id) || !about(doc.content, b)) wrong.push(`${b.item.title}: ${d.path}`);
+      const summary = d.source_kind === "session_summary";
+      const meta = summary ? ["hook_point", "node_id", "work_item_ids", "worker_session_id"] : ["hook_point", "node_id", "work_item_ids"];
+      const item = { work_item_id: b.item.id, node_id: null, hook_point: null, worker_session_id: null, session_work_item_id: null };
+      const links = summary ? [{ work_item_id: null, node_id: d.node_id, hook_point: d.hook_point, worker_session_id: d.worker_session_id, session_work_item_id: b.item.id }, item] : [item];
+      const ok = doc.id === d.document_id && d.repo === b.item.repo && doc.metadata.work_item_ids.includes(b.item.id) && doc.content.startsWith(`# ${d.title}\n`) && doc.content.includes(SECTION[d.kind]) && about(doc.content, b)
+        && doc.origin === "event_ingest" && doc.source_created_at === null && doc.source_updated_at === null
+        && JSON.stringify(Object.keys(doc.metadata).sort()) === JSON.stringify(meta) && JSON.stringify(doc.links) === JSON.stringify(links)
+        && (summary || (doc.metadata.node_id !== null && doc.metadata.hook_point !== null));
+      if (!ok) wrong.push(`${b.item.title}: ${d.path}`);
     }
     expect(wrong).toEqual([]);
   });
-  it("a gate's document is about its item", async () => {
-    const gated = board.filter((b) => b.item.pending_gate && b.item.gate_artifact);
-    expect(S === walk || gated.length > 0).toBe(true);
-    const wrong = await Promise.all(gated.map(async (b) => (about((await call(`/work-items/${b.item.id}/artifact`)).body.content, b) ? null : b.item.title)));
-    expect(wrong.filter(Boolean)).toEqual([]);
+  it("each kind a document of its item has is served by its kind, about it, from its own folder; the pending gate's too", async () => {
+    const wrong: string[] = [];
+    for (const b of board) {
+      const kinds = new Set((S.docs[b.item.id] ?? []).filter((d) => d.source_kind === "artifact").map((d) => d.kind.replace(/s$/, "")));
+      for (const kind of kinds) {
+        const a = await call(`/work-items/${b.item.id}/artifacts/${kind}`);
+        if (a.status !== 200 || a.body.path !== `items/${b.item.id}/docs/${kind}.md` || !a.body.content.startsWith(`# ${a.body.title}\n`) || !a.body.content.includes(SECTION[`${kind}s`]) || !about(a.body.content, b)) wrong.push(`${b.item.title}: ${kind}`);
+      }
+      if (b.item.pending_gate && b.item.gate_artifact) {
+        const a = (await call(`/work-items/${b.item.id}/artifact`)).body;
+        if (!a.path.startsWith(`items/${b.item.id}/`) || !about(a.content, b)) wrong.push(`${b.item.title}: the pending gate's`);
+      }
+    }
+    expect(wrong).toEqual([]);
   });
-  it("search finds nothing for a query nothing holds, and only board items' documents for one many do", async () => {
+  it("a kind the item's chain neither produces nor gates is a 404; its merge request's metadata is its own", async () => {
+    const one = board.find((b) => b.item.chain_template === "default" && completed(b, "describe_merge_request"))!;
+    const docs = board.find((b) => b.item.chain_template === "docs_only")!;
+    expect([(await call(`/work-items/${one.item.id}/artifacts/nonsense`)).status, (await call(`/work-items/${docs.item.id}/artifacts/plan`)).status, (await call(`/work-items/${docs.item.id}/artifacts/spec`)).status]).toEqual([404, 404, 200]);
+    const meta = (await call(`/work-items/${one.item.id}/artifacts/mr_meta`)).body;
+    expect([meta.title, meta.content.startsWith("---"), meta.content.includes(one.item.description), meta.content.includes(one.content!.files[0][0])]).toEqual([one.item.title, false, true, true]);
+  });
+  it("search finds nothing for a query nothing holds, nor for a blank one, and only board items' documents for one many do", async () => {
     expect((await call("/search?q=zzzqx")).body.results).toEqual([]);
+    expect([(await call("/search?q=")).status, (await call("/search?q=%20")).body.detail]).toEqual([422, "q is required"]);
     const ids = new Set(board.map((b) => b.item.id));
     const hits = (await call("/search?q=session")).body.results;
     expect(hits.length).toBeGreaterThan(0);
-    expect(hits.filter((r: any) => !ids.has(r.links[0].work_item_id)).map((r: any) => r.title)).toEqual([]);
+    expect(hits.filter((r: any) => !ids.has(itemOf(r))).map((r: any) => r.title)).toEqual([]);
   });
   it("search for an item's title puts that item's documents first", async () => {
     const wrong = await Promise.all(board.filter((b) => S.docs[b.item.id]?.length).map(async (b) => {
       const hits = (await call(`/search?q=${encodeURIComponent(b.item.title)}`)).body.results;
       const first = hits.slice(0, Math.min(6, S.docs[b.item.id].length));
-      return first.length && first.every((r: any) => r.links[0].work_item_id === b.item.id) ? null : b.item.title;
+      return first.length && first.every((r: any) => itemOf(r) === b.item.id) ? null : b.item.title;
     }));
     expect(wrong.filter(Boolean)).toEqual([]);
   });
-  it("it has run from its first node to the clock, or to its last event once it ended", () => {
+  it("search ranks a document before a session's summary when they match alike", async () => {
+    for (const q of ["cache", "brief"]) expect((await call(`/search?q=${q}`)).body.results[0]?.source_kind, q).toBe("artifact");
+  });
+  it("search matches every word of the query, whole, in a title or text, not a path, and marks them in the snippet", async () => {
+    const all = (q: string) => call(`/search?q=${encodeURIComponent(q)}&limit=100`).then((r) => r.body.results);
+    const both = await all("cache hash");
+    const either = [...(await all("cache")), ...(await all("hash"))];
+    expect(both.length).toBeGreaterThan(0);
+    expect(both.length).toBeLessThan(new Set(either.map((r: any) => r.id)).size);
+    expect(both.filter((r: any) => !/\[cache\]/i.test(r.snippet) && !/\bcache\b/i.test(r.title)).map((r: any) => r.title)).toEqual([]);
+    expect(both.filter((r: any) => !/\[(cache|hash)\]/i.test(r.snippet)).map((r: any) => r.title)).toEqual([]);
+    // A word inside another is no match; nor is the item's id, which only its documents' paths hold.
+    expect([(await all("cach")).length, (await all(board.find((b) => S.docs[b.item.id]?.length)!.item.id)).length]).toEqual([0, 0]);
+  });
+  it("search narrows by source kind, kind, repo and limit", async () => {
+    const q = "/search?q=the&limit=100";
+    const every = (await call(q)).body.results;
+    const repo = board.find((b) => S.docs[b.item.id]?.length)!.item.repo;
+    const by = async (f: string) => (await call(`${q}&${f}`)).body.results;
+    const [summaries, specs, inRepo, three] = await Promise.all([by("source_kind=session_summary"), by("kind=specs"), by(`repo=${encodeURIComponent(repo)}`), call("/search?q=the&limit=3").then((r) => r.body.results)]);
+    const keeps = [(r: any) => r.source_kind === "session_summary", (r: any) => r.kind === "specs", (r: any) => r.repo === repo];
+    // Each filter keeps some of what the query finds, and only those.
+    expect(keeps.map((k, n) => every.some(k) && !every.every(k) && [summaries, specs, inRepo][n].length > 0 && [summaries, specs, inRepo][n].every(k))).toEqual([true, true, true]);
+    expect(three.length).toBe(3);
+    expect((await call("/search?q=the")).body.results.length).toBe(Math.min(20, every.length));
+  });
+  it("it has run from its first node to the clock, or to its last event once it ended, and was last touched no earlier than its last event", () => {
     const wrong = board.filter((b) => b.events.some((e) => e.type === "node_started")).flatMap((b) => {
       const it = b.item;
       const first = b.events.find((e) => e.type === "node_started")!.created_at;
       const ended = ENDED_STATUSES.includes(it.status);
-      return (it.started_at ?? it.created_at) !== first || (ended && (it.ended_at ?? it.updated_at) !== b.events.at(-1)!.created_at) ? [it.title] : [];
+      return (it.started_at ?? it.created_at) !== first || (ended && (it.ended_at ?? it.updated_at) !== b.events.at(-1)!.created_at) || it.updated_at < b.events.at(-1)!.created_at ? [it.title] : [];
     });
     expect(wrong).toEqual([]);
   });
-  it("no two ended board items ran for the same time", () => {
-    const took = board.filter((b) => ENDED_STATUSES.includes(b.item.status) && b.item.started_at).map((b) => Date.parse(b.item.ended_at ?? b.item.updated_at) - Date.parse(b.item.started_at));
-    expect(took.length).toBeGreaterThan(1);
-    expect(took.filter((x, k) => took.indexOf(x) !== k)).toEqual([]);
+  // The sample's histories end when each item was last touched, before the clock: none ends at it by accident. The walk's
+  // clock moves with it, so an item it touched last ends at its moment.
+  it.runIf(sample)("no history in the sample ends at the clock", () => {
+    expect(board.filter((b) => b.events.length && b.events.at(-1)!.created_at >= NG_NOW).map((b) => b.item.title)).toEqual([]);
+  });
+  // Every started item shows a running time: an ended one its span, a live one the clock less its start, so no two live
+  // ones may have started at the same moment. A never-started item (f5d3) shows none and is exempt.
+  it("no two started board items show the same running time", () => {
+    const ended = board.filter((b) => ENDED_STATUSES.includes(b.item.status) && b.item.started_at).map((b) => Date.parse(b.item.ended_at ?? b.item.updated_at) - Date.parse(b.item.started_at));
+    const live = board.filter((b) => !ENDED_STATUSES.includes(b.item.status) && b.item.started_at).map((b) => b.item.started_at);
+    expect([ended.length > 1, live.length > 1]).toEqual([true, true]);
+    expect([ended.filter((x, k) => ended.indexOf(x) !== k), live.filter((x, k) => live.indexOf(x) !== k)]).toEqual([[], []]);
+  });
+});
+
+describe("the content table, the entries the walk never reaches included", () => {
+  const B = buildScenario("default");
+  const rows = [
+    ...[...B.ngBoard, ...B.ngArchived].map((id) => B.bundles[id].item).map((i) => ({ name: i.title, repo: i.repo.split("/").pop()!, docs: i.repo.endsWith("/kraft-docs") || i.chain_template === "docs_only", c: CONTENT[i.bead_id] })),
+    ...FRESH_TITLES.map((title, n) => ({ name: title, repo: FRESH_REPOS[n % FRESH_REPOS.length].split("/").pop()!, docs: FRESH_REPOS[n % FRESH_REPOS.length].endsWith("/kraft-docs"), c: FRESH_CONTENT[title] })),
+  ];
+  it("has an entry for every board row and every title the walk refiles", () => {
+    expect(rows.filter((r) => !r.c).map((r) => r.name)).toEqual([]);
+  });
+  it("every entry has its own brief", () => {
+    const briefs = rows.map((r) => r.c.description);
+    expect(briefs.filter((x, k) => briefs.indexOf(x) !== k)).toEqual([]);
+  });
+  it("no two entries in one repo share a merge request number, and none is in the walk's own range", () => {
+    const keys = rows.map((r) => `${r.repo}#${r.c.mr}`);
+    expect(keys.filter((x, k) => keys.indexOf(x) !== k)).toEqual([]);
+    expect(rows.filter((r) => r.c.mr >= 150 && r.c.mr <= 159).map((r) => r.name)).toEqual([]);
+  });
+  // A docs item changes docs only, and an item that changes only docs is one; a code item changes a test; an item that
+  // removes or drops something takes out more than it adds.
+  it("its files fit its kind", () => {
+    const files = (r: (typeof rows)[number]) => r.c.files as Row[];
+    expect(rows.filter((r) => r.docs !== docsOnly(files(r))).map((r) => r.name)).toEqual([]);
+    expect(rows.filter((r) => !r.docs && !files(r).some(([p]) => isTestPath(p))).map((r) => r.name)).toEqual([]);
+    expect(rows.filter((r) => /^(Remove|Drop)\b/.test(r.name) && files(r).reduce((a, [, i, d]) => a + i - d, 0) >= 0).map((r) => r.name)).toEqual([]);
   });
 });
 
