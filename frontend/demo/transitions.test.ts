@@ -122,10 +122,19 @@ describe("transitions", () => {
     ["archive files an ended item away", "kraft-3a90", (T, id) => T.archive(id), { status: "completed", display_status: "archived", archived_by: "you", archived_at: AT },
       [["work_item_archived", { by: "you" }, null]]],
     ["restore puts it back under Done", "kraft-9a02", (T, id) => T.restore(id), { status: "completed", display_status: "done", archived_at: null }, [["work_item_restored", {}, null]]],
-    ["raise budget lifts the cap and retries", "kraft-58e2", (T, id) => T.raiseBudget(id, 8), { status: "active", display_status: "running", stop: null, budget_cap: expect.objectContaining({ cap_usd: 8, source: "item" }) },
+    ["raise budget lifts the cap and retries", "kraft-58e2", (T, id) => T.raiseBudget(id, 8), { status: "active", display_status: "running", stop: null, current_step: 1, budget_cap: expect.objectContaining({ cap_usd: 8, source: "item" }) },
       // Stopped before its code review, past its first step with no fix cycle run: the retry goes on at that step (`_stopped_step`).
       [["budget_raised", { budget_usd: 8 }, null], ["work_item_retried", { node_id: "verification" }, "verification"],
         ["run_forked", { scope: "step", path: "verification.review", reopened: [], preserved: [] }], ["cap_counters_reset", { by: "human", counters: {} }]]],
+    // The step cursor (`current_step`): written as a step's task starts (`set_current_step`), kept by re-entering the node
+    // the item stands on and reset by entering another (`store.enter_node`), reset by a rejection (`stand_at`), and set by
+    // a retry to where its fork starts (`RunFork.start`; a step retry's is the raise below). Each from a step it was not.
+    ["a task's session records its step", "running", (T, id, b) => ((b.item.current_step = 0), T.createSession(id, "verification", "verification.review.code_review")), { current_step: 1 },
+      [["worker_session_created", { hook_point: "verification.review.code_review" }, "verification"]]],
+    ["entering the node it stands on keeps its step", "running", (T, id, b) => ((b.item.current_step = 1), T.enterNode(id, "verification")), { current_step: 1 }, [["node_started", { node_id: "verification" }, "verification"]]],
+    ["entering another node starts at its first step", "running", (T, id, b) => ((b.item.current_step = 1), T.enterNode(id, "work_brief")), { current_node_id: "work_brief", current_step: 0 }, [["node_started", { node_id: "work_brief" }, "work_brief"]]],
+    ["a rejection starts its target at its first step", "needs-gate", (T, id, b) => ((b.item.current_step = 1), T.reject(id, "final_review", "too vague")), { current_node_id: "implementation", current_step: 0 }, [["gate_rejected"]]],
+    ["a node retry starts at its first step", "failed", (T, id, b) => ((b.item.current_step = 1), T.retry(id)), { current_step: 0 }, [["work_item_retried"], ...forked()]],
     ["escalate starts a turn in a new thread", "failed", (T, id) => T.escalate(id, "look at the token", true), { status: "needs_human", display_status: "escalated" },
       turnStarted({ message: "look at the token", auto: false, thread: 2, turn: 1 }, "draft_merge_request", 2)],
     ["stop escalation ends the turn, the item as it stopped", "failed", (T, id) => (T.escalate(id, "look"), T.stopEscalation(id)), { status: "needs_human", display_status: "failed" },
