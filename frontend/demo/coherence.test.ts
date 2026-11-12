@@ -4,9 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 import { buildScenario, withScopes, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
 import { FRESH_TITLES, motion } from "../e2e/contract/mocks/motion";
 import { NG_REPOS } from "../e2e/contract/mocks/ngBoard";
-import { CONTENT, FRESH_CONTENT } from "../e2e/contract/mocks/ngContent";
+import { CONTENT, FRESH_CONTENT, mrOf } from "../e2e/contract/mocks/ngContent";
 import { frozenOf } from "../e2e/contract/mocks/ngChain";
-import { AUTO_ESCALATE_MESSAGE, MR_CLOSED_REASON, NG_NOW } from "../e2e/contract/mocks/ngItems";
+import { AUTO_ESCALATE_MESSAGE, buildNgItem, MR_CLOSED_REASON, NG_NOW } from "../e2e/contract/mocks/ngItems";
 import { agentUsage, openWait } from "../e2e/contract/mocks/nodeRecipe";
 import { isAgentSession, MODEL, nodeTasks, PRICE, RUNS, runOutput, taskKind, taskRun } from "../e2e/contract/mocks/taskKinds";
 import { transitions } from "../e2e/contract/mocks/transitions";
@@ -521,6 +521,13 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
     const generic = "The race needs a reindex API change the plan froze";
     expect(board.filter((b) => JSON.stringify([b.events, b.item]).includes(generic)).map((b) => b.item.title)).toEqual([]);
   });
+  it("it was filed before anything it records, under the title its history opens with", () => {
+    const wrong = board.filter((b) => b.events.length).filter((b) => {
+      const created = b.events.find((e) => e.type === "work_item_created");
+      return b.item.created_at > b.events[0].created_at || created?.payload.title !== b.item.title;
+    });
+    expect(wrong.map((b) => b.item.title)).toEqual([]);
+  });
   it("no two documents share an id, on any item", () => {
     const ids = Object.values(S.docs).flat().map((d) => d.document_id);
     expect(ids.filter((x, k) => ids.indexOf(x) !== k)).toEqual([]);
@@ -633,11 +640,11 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
   it("what each document says fits when it was written", async () => {
     const wrong: string[] = [];
     for (const b of board) {
-      for (const kind of ["spec", "plan", "work_brief", "review_brief"]) {
+      for (const kind of ["spec", "plan", "chain_revision", "work_brief", "review_brief"]) {
         const a = await call(`/work-items/${b.item.id}/artifacts/${kind}`);
         if (a.status !== 200) continue;
         const lateNamed = (b.content!.files as Row[]).filter(late).some(([p]) => a.body.content.includes(p));
-        if (/\(\+\d+ −\d+\)/.test(a.body.content) !== kind.endsWith("brief") || (kind === "plan" && lateNamed)) wrong.push(`${b.item.title}: ${kind}`);
+        if (/\(\+\d+ −\d+\)/.test(a.body.content) !== kind.endsWith("brief") || (!kind.endsWith("brief") && lateNamed)) wrong.push(`${b.item.title}: ${kind}`);
       }
       for (const d of (S.docs[b.item.id] ?? []).filter((x) => x.kind === "sessions" && (["spec", "plan"].includes(x.node_id) || String(x.hook_point).endsWith(".auto_review")))) {
         if ((await call(`/documents/${d.document_id}`)).body.content.includes("the plan names")) wrong.push(`${b.item.title}: ${d.title}`);
@@ -859,6 +866,43 @@ const byNode = (b: ItemBundle) => {
   return out;
 };
 
+/** The forge tasks' log lines on the board that name a merge request other than their own item's. */
+const strayMrs = (S: Scenario) => [...S.ngBoard, ...S.ngArchived].map((id) => S.bundles[id]).filter((b) => b.item.mr_ref).flatMap((b) => b.sessions.filter((s) => !agentic(b, s)).flatMap((s) =>
+  logOf(b, s).filter((l) => (l.text.match(MR_URL) ?? []).some((u: string) => u !== b.item.mr_ref.url)).map((l) => `${b.item.title}: ${l.text}`)));
+
+// A log is rewritten as its session goes on (made, waiting, ended), so the end state alone misses one that named another
+// item's merge request on the way: the board is read after every tick of a walk.
+describe("a forge task's log names its own item's merge request at every tick of the walk", () => {
+  it("on the board, tick after tick, until the walk has filed and walked an item of its own through CI", () => {
+    vi.useFakeTimers();
+    try {
+      const S = buildScenario("default");
+      let at = Date.parse(NG_NOW);
+      const T = transitions(S, { now: () => new Date(at).toISOString() });
+      for (const id of S.ngBoard) if (S.bundles[id].item.pending_gate) T.approve(id, S.bundles[id].item.pending_gate);
+      const m = motion(S, T, { random: () => 0 });
+      const wrong = new Set<string>();
+      let waited = 0;
+      const ciDone = () => S.ngBoard.some((id) => FRESH_TITLES.includes(S.bundles[id].item.title) && completed(S.bundles[id], "merge_request_feedback"));
+      for (let k = 0; k < 400 && !ciDone(); k++) {
+        at += 8_000;
+        vi.advanceTimersByTime(8_000);
+        for (const id of S.ngBoard) {
+          const b = S.bundles[id];
+          if (b.item.pending_gate && b.events.at(-1)?.type === "gate_auto_review_skipped") T.approve(id, b.item.pending_gate);
+          if (b.item.status === "waiting" && b.sessions.some((s) => s.status === "waiting" && logOf(b, s).some((l) => l.text.match(MR_URL)))) waited++;
+        }
+        for (const x of strayMrs(S)) wrong.add(x);
+      }
+      m.stop();
+      expect([ciDone(), waited > 0]).toEqual([true, true]);
+      expect([...wrong]).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("the live walk runs each node as the sample's finished item ran it", () => {
   const S = walked();
   const fresh = (n: number) => S.bundles[S.ngBoard.find((id) => S.bundles[id].item.title === FRESH_TITLES[n])!];
@@ -1052,6 +1096,39 @@ describe("sessions the doors make", () => {
     expect(logOf(b, s()).every((l) => l.src === "stdout")).toBe(true);
     expect(logOf(b, s()).map((l) => l.text)).toEqual(logOf(b, sample).map((l) => l.text));
     expect(logOf(b, s()).length).toBeGreaterThan(partial);
+  });
+
+  it("a forge wait's session a door makes prints its own item's merge request while it runs", () => {
+    const { S, T } = live();
+    // A finished row with a merge request of its own, back on its CI wait as a retry would put it.
+    const b = S.bundles[byBead(S, "kraft-1b6e")];
+    Object.assign(b.item, { status: "active", current_node_id: "merge_request_feedback" });
+    const sid = T.createSession(b.item.id, "merge_request_feedback", "merge_request_feedback.ci.await_ci").body.session_id;
+    const urls = logOf(b, b.sessions.find((s) => s.id === sid)).flatMap((l) => l.text.match(MR_URL) ?? []);
+    expect([b.item.mr_ref.url !== forgeUrl("/Users/dev/code/kraft-plugins", 142), urls.length > 0, urls.every((u: string) => u === b.item.mr_ref.url)]).toEqual([true, true, true]);
+  });
+
+  // An item a visitor files has no content of its own: its draft opens the walk's next number, from 150, on its repo's forge.
+  it("an item the composer filed opens merge request 150 on its own repo's forge, and the next one 151", () => {
+    const { S, T } = live();
+    const opened = ["kraft-api", "kraft-core"].map((name) => {
+      const id = T.create({ title: `Filed in ${name}`, repo: `/Users/dev/code/${name}`, chain_template: "default", autostart: true }).body.id;
+      expect(S.bundles[id].content).toBeUndefined();
+      T.mrOpened(id, "draft_merge_request");
+      return [S.bundles[id].item.mr_ref, S.bundles[id].events.at(-1)!.payload];
+    });
+    const want = [{ number: 150, url: forgeUrl("/Users/dev/code/kraft-api", 150) }, { number: 151, url: forgeUrl("/Users/dev/code/kraft-core", 151) }];
+    expect(opened).toEqual(want.map((mr) => [mr, mr]));
+    expect(want[0].url).toContain("/-/merge_requests/150");
+  });
+
+  // The board has no row left waiting on CI, so a seed built as one stands in for what the recipe's wait writes.
+  it("a seed left waiting on CI prints its own merge request in its waiting log", () => {
+    const mr = mrOf("/Users/dev/code/kraft-core", CONTENT["kraft-1b6e"].mr);
+    const b = buildNgItem("waiting-ci", 1999, "default", "default", mr, CONTENT["kraft-1b6e"]);
+    const s = b.sessions.find((x) => x.status === "waiting")!;
+    const urls = logOf(b, s).flatMap((l) => l.text.match(MR_URL) ?? []);
+    expect([urls.length > 0, urls.every((u: string) => u === mr.url), mr.url === forgeUrl("/Users/dev/code/kraft-core", 104)]).toEqual([true, true, true]);
   });
 
   it("escalation turns the door starts count their attempts on their node, after the sample's own", () => {
