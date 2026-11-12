@@ -378,10 +378,10 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
     expect(wrong.filter(Boolean)).toEqual([]);
   });
   // Only verification's repair commits inside verification: a row whose round never repaired has no file it added.
-  it.runIf(sample)("a board row lists a file verification's round added only where a repair of its ran", () => {
+  it("a board row lists a file verification's round added only where a repair of its ran", () => {
     const rows = board.filter((b) => (b.content!.files as Row[]).some(late));
     expect(rows.length).toBeGreaterThan(0);
-    expect(rows.filter((b) => !b.sessions.some((s) => s.hook_point === "verification.fix_loop.main.repair")).map((b) => b.item.bead_id)).toEqual([]);
+    expect(rows.filter((b) => !b.sessions.some((s) => s.hook_point === "verification.fix_loop.main.repair")).map((b) => b.item.bead_id ?? b.item.title)).toEqual([]);
   });
   // A round of tests fails on the test of the file that round goes on to add (its `late` file), in the finding the round
   // measured and in its session's log; a page's check is its doctest. Written out, not read off the mock.
@@ -1220,10 +1220,11 @@ describe("each node of the default chain writes what the server writes, in its o
   const fresh = (n: number) => S.bundles[S.ngBoard.find((id) => S.bundles[id].item.title === FRESH_TITLES[n])!];
   // The seeds' CI waits look three times and their post-merge CI four; the walk's every wait twice (motion.ts `POLLS`),
   // written here as numbers so a change to either fails. Each implementer reports its own plan's tasks: the sample's six
-  // (it has no content), each walked item's four (its three files, then `Check it`).
+  // (it has no content), the first walked item's four (its three files, then `Check it`; its fourth is verification's
+  // round's), the second's five (its four files, then `Check it`).
   it.each(CHAIN_NODES.default)("%s", (node) => {
     expect(segments(S.bundles[S.ng.done]).get(node)).toEqual(NODE_EVENTS[node](3, 4, 6));
-    expect(segments(fresh(1)).get(node)).toEqual(NODE_EVENTS[node](2, 2, 4));
+    expect(segments(fresh(1)).get(node)).toEqual(NODE_EVENTS[node](2, 2, 5));
     expect(segments(fresh(0)).get(node)).toEqual(node === "verification" ? RED_VERIFICATION : NODE_EVENTS[node](2, 2, 4));
   });
   // `WaitBounds.interval_after`: 30 s after the first pending look, doubling; `store.session_exited` stamps each exit.
