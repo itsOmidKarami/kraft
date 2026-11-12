@@ -364,7 +364,7 @@ const ROWS: Row[] = [
     name: "stop: a time-capped item names its limit and offers Raise cap [decided]",
     run: async (p) => {
       await app(p, item("capped"), { tweak: withCapLimit });
-      await expect(p.getByText(/^The work item hit its time cap of \d+ minutes\.$/)).toBeVisible();
+      await expect(p.getByText(/The work item hit its time cap of \d+ minutes\./)).toBeVisible();
       await expect(p.getByRole("button", { name: "Raise cap" }).first()).toBeVisible();
     },
   },

@@ -77,7 +77,11 @@ a model, usage, a summary and sub-agents, and a builtin, subprocess or forge
 task's has its command's output instead. It also fails when an item strays
 from its chain: a session on a task or node its chain lacks, a chain that is not
 its template's, a node count, a spend or a finished item's node that does not
-add up, events out of time order, or a session no event created. It checks the
+add up, events out of time order, or a session no event created. And it fails
+on a stop the walk could not have written: a fix loop's judge before a repair
+has run, a stop reason the server does not write for that kind, an automatic
+escalation turn answering a stop outside the stuck set, or a session summary
+outside its item's folder. It checks the
 sample, its long and many variants and the seeds that add sessions, then the
 sessions the doors make. Each item's frozen chain says what a task is; `mocks/taskKinds.ts` reads
 it for the sample items that have one, the doors and live motion, and the
