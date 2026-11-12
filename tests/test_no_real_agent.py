@@ -344,6 +344,27 @@ def test_docker_and_podman_answer_no_daemon_at_once_unless_an_e2e_test_names_one
     assert guard.calls() == []
 
 
+@pytest.mark.parametrize(
+    ("marked", "refused"),
+    [(frozenset({"agent"}), False), (frozenset(), True)],
+    ids=["e2e-agent", "unit"],
+)
+def test_an_e2e_cli_is_not_refused_under_another_name_for_the_same_file(
+    tmp_path, monkeypatch, marked, refused
+):
+    """Cursor installs `agent` and `cursor-agent` as links to one file, and `Popen` refuses by
+    real path: the test marked `e2e("agent")` must still run its `agent`."""
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "cursor-agent").write_text("#!/bin/sh\n")
+    (real / "cursor-agent").chmod(0o755)
+    (real / "agent").symlink_to(real / "cursor-agent")
+    monkeypatch.setenv("PATH", f"{real}{os.pathsep}{os.environ['PATH']}")
+    guard = real_binaries.install(monkeypatch, "probe", real_binaries.allowed_by(marked))
+    argv = [str(real / "agent"), "--help"]  # a bare `agent` meets the stub first
+    assert (guard.refused_program({"args": argv}) is not None) is refused
+
+
 @pytest.mark.e2e("docker")
 def test_an_e2e_docker_test_is_not_answered_by_the_quiet_stand_in():
     """Through the real `_no_real_agent_binary` fixture: where docker is installed (CI's e2e
