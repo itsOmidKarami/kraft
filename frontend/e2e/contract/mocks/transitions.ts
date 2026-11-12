@@ -753,7 +753,8 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       if (!s) return no(404, `unknown session ${sid}`);
       if (!LIVE_SESSION_STATUSES.includes(s.status) && s.status !== "waiting") return no(409, `session ${sid} is ${s.status}, not live`);
       const wall_ms = Math.max(0, Date.parse(now()) - Date.parse(s.started_at ?? s.created_at));
-      Object.assign(s, { status: "waiting", wall_ms });
+      // `store.session_exited` stamps a waiting exit as it does any other.
+      Object.assign(s, { status: "waiting", exited_at: now(), wall_ms });
       b.logs[sid] = commandLog(taskRun(it.materialized_chain, s.hook_point), "waiting", String(s.hook_point).split(".").at(-1)!);
       Object.assign(it, { status: "waiting", retry_at: retryAt, step: null, stop: { kind: "wait", node: s.node_id, task: s.hook_point, attempt: 1, resume_at: retryAt, reason: null, facts: {} } });
       append(id, "worker_session_exited", { session_id: sid, status: "waiting", wall_ms });

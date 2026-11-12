@@ -134,7 +134,8 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     ev, open, close,
     enter: (node, dm) => ev("node_started", { node_id: node }, dm),
     wait: (s, node, next, wall) => {
-      Object.assign(s, { status: "waiting", wall_ms: wall });
+      // `store.session_exited` stamps a waiting exit as it does any other.
+      Object.assign(s, { status: "waiting", exited_at: t(m), wall_ms: wall });
       ev("worker_session_exited", { session_id: s.id, status: "waiting", wall_ms: wall }, 0);
       ev("work_item_waiting", { node_id: node, retry_at: next }, 0);
       logs[s.id] = commandLog(s._run, "waiting", s.hook_point.split(".").at(-1));

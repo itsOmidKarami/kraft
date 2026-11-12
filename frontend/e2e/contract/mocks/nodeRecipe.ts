@@ -131,14 +131,24 @@ export function* judge(w: Writer, round: number, found: Found[], reasoning: stri
   yield* ran(w, JUDGE, "verification", "done", { round });
   w.ev("judge_verdict", { node_id: "verification", cycle: round, verdict: "continue", reasoning, findings: found.map((f) => asFinding(w, f)) }, 0.02);
 }
-/** A forge wait that polls (`waits.py`): one session that goes `waiting` poll after poll, a fresh `node_started` each time
- *  its poller re-enters it; settled, it ends done. Unsettled, it is left waiting until `retryAt`. Each poll after the
- *  first is a beat of its own: the item waits between them. */
+/** The forge waits (`forge.run._WAITS`, by target): every dispatch of one is an observation (`waits.observe`), a first
+ *  look that settles at once included. */
+const WAITS = new Set(["mr.ci", "mr.automated_review", "mr.external_approval", "mr.merge", "mr.post_merge_ci"]);
+/** A forge wait (`waits.py`): one session that goes `waiting` poll after poll, a fresh `node_started` each time its
+ *  poller re-enters it; settled, it ends done. Unsettled, it is left waiting until `retryAt`. Each poll after the first
+ *  is a beat of its own: the item waits between them. One that settles at its first look ends a beat after its session
+ *  is made, as `ran`'s does. */
 export function* awaitPolls(w: Writer, node: string, path: string, kind: string, polls: number, settled: boolean, retryAt?: string): Beats<any> {
   const s = w.open(path, node);
+  if (settled && polls === 1) yield;
+  // The demo's repos configure no review bot: the review wait's look says so before it settles (`forge.run`'s collect path).
+  if (kind === "mr.automated_review") w.ev("automated_review_not_configured", { node_id: node, task: path, repo: w.repo }, 0.02);
+  // What it observes (`_WAITS`' condition): its target's own name.
+  const condition = kind.replace(/^mr\./, "");
   const each = (RUNS[taskRun(w.frozen, path) ?? ""]?.wall_ms ?? 60_000) / polls;
   // `waits.observe`'s start of a wait: its bounds and deadline, no session (its end names that).
-  w.ev("external_wait_started", { task: path, node_id: node, kind, timeout_s: 5_400, initial_interval_s: 30, max_interval_s: 300, started_at: w.at(0), deadline: w.at(90) }, 0.02);
+  const started_at = w.at(0);
+  w.ev("external_wait_started", { task: path, node_id: node, kind, timeout_s: 5_400, initial_interval_s: 30, max_interval_s: 300, started_at, deadline: new Date(Date.parse(started_at) + 5_400_000).toISOString() }, 0.02);
   let wall = 0;
   for (let k = 1; k <= polls; k++) {
     if (k > 1) {
@@ -148,14 +158,16 @@ export function* awaitPolls(w: Writer, node: string, path: string, kind: string,
     wall += each;
     w.clock(each / 60_000);
     if (settled && k === polls) {
-      w.ev("external_wait_observed", { node_id: node, task: path, observation: k, state: "settled" }, 0);
-      w.ev("external_wait_ended", { node_id: node, task: path, outcome: "settled", observations: k, session_id: s.id }, 0);
+      w.ev("external_wait_observed", { node_id: node, task: path, observation: k, condition, state: "settled", result: "done" }, 0);
+      w.ev("external_wait_ended", { node_id: node, task: path, outcome: "settled", result: "done", observations: k, session_id: s.id }, 0);
       return w.close(s, "done", Math.round(wall), false);
     }
-    const next = k === polls && retryAt ? retryAt : w.at(2);
-    w.ev("external_wait_observed", { node_id: node, task: path, observation: k, state: "pending", next_observation_at: next }, 0);
+    // `WaitBounds.interval_after`, in minutes: 30 s after the first pending look, doubling up to the 300 s most.
+    const gap = Math.min(0.5 * 2 ** (k - 1), 5);
+    const next = k === polls && retryAt ? retryAt : w.at(gap);
+    w.ev("external_wait_observed", { node_id: node, task: path, observation: k, condition, state: "pending", result: "pending", next_observation_at: next }, 0);
     w.wait(s, node, next, Math.round(wall));
-    if (k < polls) w.clock(2);
+    if (k < polls) w.clock(gap);
   }
   return s;
 }
@@ -227,15 +239,18 @@ export function* nodeBeats(w: Writer, n: DefNode, o: { red?: boolean } = {}): Be
     }
     case "merge_request_feedback":
       if (go("merge_request_feedback.ci.await_ci")) yield* awaitPolls(w, n.id, "merge_request_feedback.ci.await_ci", "mr.ci", w.polls ?? 3, true);
-      if (go("merge_request_feedback.automated_review.await_review")) yield* ran(w, "merge_request_feedback.automated_review.await_review", n.id);
+      if (go("merge_request_feedback.automated_review.await_review")) yield* awaitPolls(w, n.id, "merge_request_feedback.automated_review.await_review", "mr.automated_review", 1, true);
       if (go("merge_request_feedback.review_feedback.triage")) yield* ran(w, "merge_request_feedback.review_feedback.triage", n.id, "done", { noAgent: true });
       break;
     case "post_merge_ci":
       if (go("post_merge_ci.main.await")) yield* awaitPolls(w, n.id, "post_merge_ci.main.await", "mr.post_merge_ci", w.polls ?? 4, true);
       break;
     default:
-      // A node of one task, or one per step: each runs in turn.
-      for (const path of n.tasks as string[]) if (go(path)) yield* ran(w, path, n.id);
+      // A node of one task, or one per step: each runs in turn, a forge wait (external_approval's, merge's) as one.
+      for (const path of n.tasks as string[]) {
+        const run = taskRun(w.frozen, path) ?? "";
+        if (go(path)) yield* WAITS.has(run) ? awaitPolls(w, n.id, path, run, 1, true) : ran(w, path, n.id);
+      }
   }
   w.complete(n.id);
 }
