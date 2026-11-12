@@ -5,7 +5,7 @@ import { chainOf, frozenOf } from "./ngChain";
 import { RESUME_PROMPT } from "./poller";
 import { buildNeverStarted } from "./ngItems";
 import { DOCS_SCOPE, isAgentSession, MODEL, RUNS, scopeRunsOf, taskRun, type Run } from "./taskKinds";
-import { itemDocs, mergeDocs, mrOf } from "./ngContent";
+import { changedFiles, isLate, itemDocs, mergeDocs, mrOf, planOf } from "./ngContent";
 
 /**
  * The work item's transitions, as the server makes them: what each door changes, the event row it appends
@@ -129,6 +129,27 @@ export interface TransitionOptions {
 
 export type Transitions = ReturnType<typeof transitions>;
 
+/** `progress.for_item`: while the item holds its slot (active) on its implementation node, where its plan stands, the
+ *  task its implementer last reported starting this run (`run_state`) or the one after the last its commits name,
+ *  whichever is further (`combine`); none on a chain with no plan, in a rework run a gate's rejection sent back
+ *  (`is_rework`), or once it stops, pauses or moves on (`active_implementation_node`). */
+export function progressOf(b: ItemBundle) {
+  const it = b.item;
+  const plan = planOf(it.materialized_chain ?? "", b.content);
+  if (it.status !== "active" || it.current_node_id !== "implementation" || !plan.length) return null;
+  const ev = b.events;
+  const last = (hit: (e: (typeof ev)[number]) => boolean) => ev.map(hit).lastIndexOf(true);
+  const done = last((e) => e.type === "node_completed" && e.payload.node_id === "implementation");
+  const rejected = done < 0 ? -1 : last((e) => e.type === "gate_rejected");
+  if (rejected > done && ev.slice(rejected + 1).find((e) => e.type === "node_started")?.payload.node_id === "implementation") return null;
+  const run = ev.slice(last((e) => e.type === "node_started" && e.payload.node_id === "implementation") + 1);
+  const told = Number(run.filter((e) => e.type === "plan_progress").at(-1)?.payload.task ?? 0);
+  // Each finished task's file is committed under its task's number (ngContent.ts `contentDiff`).
+  const committed = b.content ? changedFiles(b).filter((f) => !isLate(f)).length : 0;
+  const current = Math.min(plan.length, Math.max(told, committed + 1));
+  return { current, total: plan.length, title: plan[current - 1], tasks: plan.map((title, k) => ({ n: k + 1, title, state: k + 1 < current ? "done" : k + 1 === current ? "current" : "pending" })) };
+}
+
 export function transitions(S: Scenario, o: TransitionOptions = {}) {
   const now = o.now ?? (() => new Date().toISOString());
   let seq = Math.max(4242, ...Object.values(S.bundles).flatMap((b) => b.events.map((e) => e.seq)));
@@ -148,9 +169,13 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
     const named = payload.node_id ?? payload.node;
     const e: Ev = { seq: ++seq, work_item_id: id, type, payload, node_id: node_id !== undefined ? node_id : typeof named === "string" ? named : null, created_at: now() };
     S.bundles[id].events.push(e as ItemBundle["events"][number]);
+    // A report moves the plan's progress at once: the walk writes it through no door that settles.
+    if (type === "plan_progress") track(S.bundles[id]);
     o.onEvent?.(e);
     return e;
   };
+  /** The item's plan progress as its events now say, on an item that runs a frozen chain (the older samples keep theirs). */
+  const track = (b: ItemBundle) => { if (b.item.materialized_chain) b.item.progress = progressOf(b); };
   /** A session id no session in the scenario has. */
   const sessionId = () => {
     const taken = new Set(Object.values(S.bundles).flatMap((b) => b.sessions.map((s) => s.id)));
@@ -165,6 +190,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
     item.gate_rounds = gateRoundsOf(S.bundles[item.id].events, S.bundles[item.id].threads ?? [], S.bundles[item.id].reviews ?? []);
     item.scope_runs = scopeRunsOf(item.materialized_chain, S.bundles[item.id].sessions, item.scope_runs);
     item.display_status = displayStatus(item);
+    track(S.bundles[item.id]);
     item.updated_at = now();
     // The indexer files what the item's nodes and sessions have written by now.
     const b = S.bundles[item.id];
@@ -584,7 +610,8 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
     /* The walk's writes: what the executor does to a running item, in the store's order and words. No route calls
        these; the demo's live motion (motion.ts) does. Each refuses an unknown or ended item, as the doors above do. */
 
-    /** `store.enter_node`: the item stands on `node`, its step and plan progress cleared until a session reports. */
+    /** `store.enter_node`: the item stands on `node`, its step cleared until a session starts; its plan progress is
+     *  `progressOf`'s, which `settle` reads again. */
     enterNode(id: string, node: string): Result {
       const x = find(id, true);
       if (refused(x)) return x;

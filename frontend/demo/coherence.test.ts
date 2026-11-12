@@ -475,16 +475,6 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
     });
     expect(wrong).toEqual([]);
   });
-  // `progress.for_item`: only an item running its implementation node has plan progress (`active_implementation_node`).
-  it("only an item running its implementation shows plan progress, on the board and in its detail", async () => {
-    const rows = (await call("/work-items")).body.items;
-    const wrong = board.flatMap((b) => {
-      const running = b.item.status === "active" && b.item.current_node_id === "implementation";
-      const row = rows.find((r: any) => r.id === b.item.id);
-      return [b.item.progress, row?.progress].some((p) => !running && p != null) ? [b.item.title] : [];
-    });
-    expect(wrong).toEqual([]);
-  });
   // A chain with no plan node (docs_only) has no plan: `report_progress` answers 400, so its implementer reports no task
   // and names no commit after one.
   it("an item whose chain has no plan reports no plan task, and one that has a plan reports it", () => {
@@ -947,8 +937,8 @@ const tickWalk = (): Promise<Ticked> => (ticked ??= (async () => {
     const get = async (path: string) => JSON.parse(((await serve({ method: "GET", url: `http://demo/api${path}`, json: () => null })) as Answer).body!);
     for (const id of S.ngBoard) if (S.bundles[id].item.pending_gate) T.approve(id, S.bundles[id].item.pending_gate);
     const m = motion(S, T, { random: () => 0 });
-    const wrong: Ticked["wrong"] = { mrs: new Set(), late: new Set() };
-    const met: Ticked["met"] = { waited: 0, repairing: 0, landed: 0 };
+    const wrong: Ticked["wrong"] = { mrs: new Set(), late: new Set(), progress: new Set() };
+    const met: Ticked["met"] = { waited: 0, repairing: 0, landed: 0, reported: 0 };
     const ciDone = () => S.ngBoard.some((id) => FRESH_TITLES.includes(S.bundles[id].item.title) && completed(S.bundles[id], "merge_request_feedback"));
     for (let k = 0; k < 400 && !ciDone(); k++) {
       at += 8_000;
@@ -971,6 +961,20 @@ const tickWalk = (): Promise<Ticked> => (ticked ??= (async () => {
         if (shown && repaired(b)) met.landed++;
         if (shown && !repaired(b)) wrong.late.add(`${b.item.title} at tick ${k}`);
       }
+      // `progress.for_item`: while an item with a plan is active on its implementation node, its board row and its detail
+      // say the task its implementer last reported starting this run (the first before it reports one); otherwise none.
+      const rows = (await get("/work-items")).items as any[];
+      for (const id of S.ngBoard) {
+        const b = S.bundles[id];
+        const runs = b.item.status === "active" && b.item.current_node_id === "implementation" && defIds(b).includes("plan");
+        const from = b.events.map((e) => e.type === "node_started" && e.payload.node_id === "implementation").lastIndexOf(true);
+        const told = b.events.slice(from + 1).filter((e) => e.type === "plan_progress").at(-1)?.payload;
+        if (runs && told) met.reported++;
+        const at = (p: any) => (p == null ? null : runs && !told ? p.current : [p.current, p.total, p.title]);
+        const want = !runs ? null : told ? [told.task, told.total, told.title] : 1;
+        const row = rows.find((r) => r.id === id);
+        if ([row?.progress, b.item.progress].some((p) => JSON.stringify(at(p)) !== JSON.stringify(want))) wrong.progress.add(`${b.item.title} at tick ${k}: ${JSON.stringify(row?.progress)}`);
+      }
     }
     m.stop();
     return { wrong, met, ciDone: ciDone() };
@@ -991,6 +995,34 @@ describe("at every tick of the walk", () => {
     const { wrong, met } = await tickWalk();
     expect([met.repairing > 0, met.landed > 0]).toEqual([true, true]);
     expect([...wrong.late]).toEqual([]);
+  });
+  it("a board row and its detail show plan progress only while the item runs its implementation, at the task last reported", async () => {
+    const { wrong, met } = await tickWalk();
+    expect(met.reported).toBeGreaterThan(0);
+    expect([...wrong.progress]).toEqual([]);
+  });
+  // `combine`: a retried run has reported nothing yet, so the task after the last its commits name is current; a pause
+  // gives up the item's slot, and with it its progress (`active_implementation_node`).
+  it("an item retried on its implementation shows the task after its last commit, and none once it is paused", () => {
+    const S = buildScenario("default");
+    const T = transitions(S);
+    const b = S.bundles[byBead(S, "kraft-7d21")];
+    expect(T.retry(b.item.id).status).toBe(200);
+    // The walk enters the node again, a fresh run with no report yet.
+    T.enterNode(b.item.id, "implementation");
+    const shown = () => b.item.progress && [b.item.progress.current, b.item.progress.total, b.item.progress.title];
+    expect([b.item.status, shown()]).toEqual(["active", [3, 4, "Change tests/workers/test_pool.py"]]);
+    expect(T.pause(b.item.id).status).toBe(200);
+    expect([b.item.status, shown()]).toEqual(["paused", null]);
+  });
+  // `is_rework`: a run a gate's rejection sent back to the implementation follows the note, not the plan.
+  it("an item a rejection sent back to its implementation shows no plan progress", () => {
+    const S = buildScenario("default");
+    const T = transitions(S);
+    const b = S.bundles[byBead(S, "kraft-cb59")];
+    expect(T.reject(b.item.id, "final_review", "again", "implementation").status).toBe(200);
+    T.enterNode(b.item.id, "implementation");
+    expect([b.item.status, b.item.current_node_id, b.item.progress]).toEqual(["active", "implementation", null]);
   });
 });
 
