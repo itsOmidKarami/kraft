@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { buildScenario, withScopes, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
 import { frozenOf } from "../e2e/contract/mocks/ngChain";
+import { AUTO_ESCALATE_MESSAGE, MR_CLOSED_REASON } from "../e2e/contract/mocks/ngItems";
 import { isAgentSession, MODEL, nodeTasks, RUNS, runOutput, taskKind, taskRun } from "../e2e/contract/mocks/taskKinds";
 import { transitions } from "../e2e/contract/mocks/transitions";
 
@@ -57,6 +58,8 @@ describe.each(SCENARIOS)("sessions in %s", (_scenario, build) => {
     ["a command's session reports no harness", (b, s) => !agentic(b, s) && s.harness != null],
     ["a command's session reports no usage", (b, s) => !agentic(b, s) && (s.tokens_in != null || s.tokens_out != null || s.cost_usd != null)],
     ["a command's session wrote no summary", (b, s) => !agentic(b, s) && s.session_summary_ref != null],
+    // `item_paths`: a session's summary is in its item's folder, `items/<id>/sessions/<folder>/out/summary.md`.
+    ["a session's summary is in its item's folder", (b, s) => s.session_summary_ref != null && !new RegExp(`^items/${b.item.id}/sessions/[^/]+/out/summary\\.md$`).test(s.session_summary_ref)],
     ["a command's log holds its output only: no tool call, no agent line", (b, s) => !agentic(b, s) && logOf(b, s).some((l) => l.src !== "stdout" || l.agent)],
     ["a command's finished session reports how long it took", (b, s) => !agentic(b, s) && ["done", "failed"].includes(s.status) && !(s.wall_ms > 0)],
     ["a test or lint run has the command it ran", (_b, s) => ["unit_tests", "lint", "typecheck"].includes(lastSegment(s.hook_point)) && !s.command],
@@ -83,6 +86,22 @@ const frozenIds = (b: ItemBundle): string[] => JSON.parse(b.item.materialized_ch
 /** Whether a scope command passed, as its session's status says: null while it has not finished. */
 const passedBy = (status: string) => (status === "done" || status === "done_with_concerns" ? true : status === "failed" ? false : null);
 const cost = (b: ItemBundle) => b.sessions.reduce((a, s) => a + (s.cost_usd ?? 0), 0);
+/** How a stop's reason starts, by its kind, where the server words it (`walk`, `mr_poller`, `caps`), and the stops that
+ *  have none (`board._stop_payload`: a rate limit, an external wait). A kind not listed is not checked. */
+const REASONS: Record<string, (reason: string | null, b: ItemBundle) => boolean> = {
+  stuck: (r) => /^(stuck|judge): /.test(r ?? ""),
+  question: (r) => /^needs_context: /.test(r ?? ""),
+  failed: (r) => /^task failed in node \S+: /.test(r ?? ""),
+  conflict: (r) => /^git rebase failed for |hit a rebase conflict in node /.test(r ?? ""),
+  cap: (r, b) => r === b.events.filter((e) => e.type === "time_cap_reached").at(-1)?.payload.reason,
+  mr_closed: (r) => r === MR_CLOSED_REASON,
+  rate_limit: (r) => r === null,
+  wait: (r) => r === null,
+};
+const reasonFits = (b: ItemBundle) => (REASONS[b.item.stop.kind] ?? (() => true))(b.item.stop.reason, b);
+/** The kinds a stop in the stuck set can have (`walk._Stuck`): a failed task, a spent fix loop, a loop that cannot get on,
+ *  a rebase conflict in a fix loop. */
+const STUCK_SET = ["stuck", "failed", "cap", "conflict"];
 
 describe.each(SCENARIOS)("items in %s", (_scenario, build) => {
   const S = build();
@@ -104,6 +123,29 @@ describe.each(SCENARIOS)("items in %s", (_scenario, build) => {
         .filter((s) => { const r = (b.item.scope_runs ?? []).find((x: any) => x.session_id === s.id); return !r || r.command !== s.command || r.hook_point !== s.hook_point || r.passed !== passedBy(s.status); })
         .map((s) => s.hook_point)],
     ["every session was created by an event", (b) => b.sessions.filter((s) => !b.events.some((e) => e.type === "worker_session_created" && e.payload.session_id === s.id)).map((s) => s.hook_point)],
+    // `walk`: the judge is due only once a repair has run, and judges a measurement before the next cycle starts.
+    ["a fix loop's judge reads a measurement after a repair, before the next cycle, and names the findings it judged",
+      (b) => b.events.flatMap((e, k) => {
+        if (e.type !== "judge_verdict") return [];
+        const before = b.events.slice(0, k);
+        const repaired = before.some((x) => x.type === "fix_cycle_finished" && Number(x.payload.cycle) <= Number(e.payload.cycle));
+        const next = before.some((x) => x.type === "fix_cycle_started" && Number(x.payload.cycle) > Number(e.payload.cycle));
+        return repaired && !next && Array.isArray(e.payload.findings) ? [] : [`judge at cycle ${e.payload.cycle}`];
+      })],
+    ["a finished fix cycle names the head it left", (b) => b.events.filter((e) => e.type === "fix_cycle_finished" && !e.payload.head_sha).map((e) => `cycle ${e.payload.cycle}`)],
+    ["its stop's reason is one the walk writes for that kind", (b) => b.item.stop && !reasonFits(b) && `${b.item.stop.kind}: ${b.item.stop.reason}`],
+    // `gates.auto_escalate_stuck` answers only a stop in the stuck set, and always with the same message.
+    ["an automatic escalation turn answers a stuck stop, in Kraft's words",
+      (b) => b.events.flatMap((e, k) => {
+        if (e.type !== "escalation_message" || !e.payload.auto) return [];
+        const stop = b.events.slice(0, k).filter((x) => x.type === "work_item_needs_human").at(-1);
+        return stop?.payload.stuck === true && e.payload.message === AUTO_ESCALATE_MESSAGE ? [] : [`turn ${e.payload.turn}`];
+      })],
+    ["only a stop in the stuck set is marked stuck", (b) => b.events.filter((e) => e.type === "work_item_needs_human" && e.payload.stuck && !STUCK_SET.includes(String(e.payload.kind))).map((e) => e.payload.kind)],
+    ["a stop's task is never an escalation turn", (b) => b.item.stop?.task === "escalation" && "escalation"],
+    // Only Kraft's own cancel writes `mr_closed`; the poller that sees a merge request closed writes a stop.
+    ["no merge request is closed but by Kraft's cancel", (b) => b.events.filter((e) => e.type === "mr_closed" && e.payload.by !== "cancel").map((e) => e.payload.by)],
+    ["it spent no more than its cap, unless that cap stopped it", (b) => b.item.budget_cap.spent_usd > b.item.budget_cap.cap_usd && b.item.stop?.kind !== "budget" && b.item.budget_cap.spent_usd],
   ])("%s", (_rule, wrong) => {
     const found = chained(S).map((b) => [b.item.title, wrong(b)] as const).filter(([, w]) => (Array.isArray(w) ? w.length > 0 : !!w));
     expect(found).toEqual([]);
