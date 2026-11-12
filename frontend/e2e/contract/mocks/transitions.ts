@@ -666,11 +666,11 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       Object.assign(s, { status, exited_at: at, wall_ms, ...usage, ...cache });
       const u = it.usage;
       if (u) {
-        const add = (r: any) => ({ ...r, tokens_in: r.tokens_in + usage.tokens_in, tokens_out: r.tokens_out + usage.tokens_out, cost_usd: dollars(r.cost_usd + usage.cost_usd), wall_ms: r.wall_ms + wall_ms, sessions: r.sessions + 1 });
+        const add = (r: any) => ({ ...r, tokens_in: r.tokens_in + usage.tokens_in, tokens_cache_write: (r.tokens_cache_write ?? 0) + cache.tokens_cache_write, tokens_cache_read: (r.tokens_cache_read ?? 0) + cache.tokens_cache_read, tokens_out: r.tokens_out + usage.tokens_out, cost_usd: dollars(r.cost_usd + usage.cost_usd), wall_ms: r.wall_ms + wall_ms, sessions: r.sessions + 1 });
         const row = u.by_node.find((r: any) => r.node === s.node_id);
         u.total = add(u.total);
         u.by_node = row ? u.by_node.map((r: any) => (r === row ? add(r) : r))
-          : [...u.by_node, add({ node: s.node_id, tokens_in: 0, tokens_out: 0, cost_usd: 0, cost_complete: true, wall_ms: 0, sessions: 0, rounds: 1, capped_out: 0 })];
+          : [...u.by_node, add({ node: s.node_id, tokens_in: 0, tokens_cache_write: 0, tokens_cache_read: 0, tokens_out: 0, cost_usd: 0, cost_complete: true, split_complete: true, wall_ms: 0, sessions: 0, rounds: 1, capped_out: 0 })];
       }
       if (it.budget_cap) it.budget_cap = { ...it.budget_cap, spent_usd: dollars((it.budget_cap.spent_usd ?? 0) + usage.cost_usd) };
       append(id, "worker_session_exited", { session_id: sid, status, wall_ms, model: usage.model, tokens_in: usage.tokens_in, ...cache, tokens_out: usage.tokens_out, cost_usd: usage.cost_usd });

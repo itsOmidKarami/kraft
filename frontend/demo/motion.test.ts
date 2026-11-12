@@ -278,6 +278,7 @@ describe("after the visitor", () => {
     expect((await call("POST", `/work-items/${id}/resume`, {})).status).toBe(200);
     expect((await call("GET", `/work-items/${id}`)).body.summary).toEqual({ nodes_done: 0, nodes_total: 19, gates_passed: 0, step: null });
     expect(ticks(1, id)).toEqual([
+      ["chain_loaded", {}],
       ["node_started", { node_id: "spec" }],
       ["worker_session_created", expect.objectContaining({ node_id: "spec", hook_point: "spec.main.author", attempt: 1 })],
       ["worker_session_started", expect.objectContaining({ node_id: "spec" })],
@@ -642,7 +643,7 @@ describe("when the board goes quiet", () => {
     const id = S.ngBoard.at(-1)!;
     expect(S.ngBoard.length).toBe(had + 1);
     expect(S.bundles[id].item).toMatchObject({ title: FRESH_TITLES[0], status: "active", display_status: "running", current_node_id: "spec" });
-    expect(types(evs)).toEqual(["work_item_created", "node_started", "worker_session_created", "worker_session_started"]);
+    expect(types(evs)).toEqual(["work_item_created", "chain_loaded", "node_started", "worker_session_created", "worker_session_started"]);
     // It reaches its first gate, and while that waits nothing more is filed.
     ticks(1);
     expect(S.bundles[id].item.pending_gate).toBe("spec_approval");

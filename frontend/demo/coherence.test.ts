@@ -4,7 +4,7 @@ import { buildScenario, withScopes, type ItemBundle, type Scenario } from "../e2
 import { FRESH_TITLES, motion } from "../e2e/contract/mocks/motion";
 import { frozenOf } from "../e2e/contract/mocks/ngChain";
 import { AUTO_ESCALATE_MESSAGE, MR_CLOSED_REASON, NG_NOW } from "../e2e/contract/mocks/ngItems";
-import { agentUsage } from "../e2e/contract/mocks/nodeRecipe";
+import { agentUsage, openWait } from "../e2e/contract/mocks/nodeRecipe";
 import { isAgentSession, MODEL, nodeTasks, PRICE, RUNS, runOutput, taskKind, taskRun } from "../e2e/contract/mocks/taskKinds";
 import { transitions } from "../e2e/contract/mocks/transitions";
 
@@ -162,6 +162,21 @@ describe.each(SCENARIOS)("items in %s", (_scenario, build) => {
       (b) => b.sessions.filter((s) => s.command && taskRun(b.item.materialized_chain, s.hook_point) === "kraft.verify_changed_test_scopes")
         .filter((s) => { const r = (b.item.scope_runs ?? []).find((x: any) => x.session_id === s.id); return !r || r.command !== s.command || r.hook_point !== s.hook_point || r.passed !== passedBy(s.status); })
         .map((s) => s.hook_point)],
+    // `walk` writes `chain_loaded` on every walk from the first node.
+    ["an item that started a node loaded its chain first",
+      (b) => { const first = b.events.findIndex((e) => e.type === "node_started"); return first >= 0 && !b.events.slice(0, first).some((e) => e.type === "chain_loaded") && "no chain_loaded before its first node"; }],
+    // `store.budget`'s rollup sums every kind of token (`usage.KINDS`) of a node's sessions, and of the item's.
+    ["a node's and the item's token rollups are the sum of their sessions, kind by kind",
+      (b) => {
+        const u = b.item.usage;
+        if (!u) return false;
+        const kinds = ["tokens_in", "tokens_cache_write", "tokens_cache_read", "tokens_out"];
+        const sum = (ss: any[], k: string) => ss.reduce((a, x) => a + (x[k] ?? 0), 0);
+        return [
+          ...u.by_node.flatMap((r: any) => kinds.filter((k) => (r[k] ?? 0) !== sum(b.sessions.filter((x) => x.node_id === r.node), k)).map((k) => `${r.node}.${k}`)),
+          ...kinds.filter((k) => (u.total[k] ?? 0) !== sum(b.sessions, k)).map((k) => `total.${k}`),
+        ];
+      }],
     ["every session was created by an event", (b) => b.sessions.filter((s) => !b.events.some((e) => e.type === "worker_session_created" && e.payload.session_id === s.id)).map((s) => s.hook_point)],
     // `walk`: the judge is due only once a repair has run, and judges a measurement before the next cycle starts.
     ["a fix loop's judge reads a measurement after a repair, before the next cycle, and names the findings that measurement held",
@@ -378,6 +393,42 @@ const sampleAt = (b: ItemBundle, hook: string, not: string) => {
   const first = b.sessions.find((s) => s.hook_point === hook && s.id !== not)!;
   return b.sessions.find((s) => s.hook_point === hook && s.id !== not && s.status === "done" && s.command === first.command)!;
 };
+
+/** `ForgeTask.wait_bounds` (`config/library.yaml`): a wait's timeout, first interval and longest interval, in seconds, by what it watches. */
+const BOUNDS = [
+  ["mr.ci", 5_400, 30, 300], ["mr.post_merge_ci", 5_400, 30, 300], ["mr.merge", 5_400, 30, 300],
+  ["mr.automated_review", 1_800, 30, 300], ["mr.external_approval", 604_800, 300, 3_600],
+] as const;
+describe("a forge wait starts with its task's bounds", () => {
+  const W = walked();
+  const bundles = [W.bundles[W.ng.done], ...W.ngBoard.map((id) => W.bundles[id]).filter((b) => FRESH_TITLES.includes(b.item.title))];
+  it.each(BOUNDS)("%s", (kind, timeout, initial, max) => {
+    const starts = bundles.flatMap((b) => b.events.filter((e) => e.type === "external_wait_started" && e.payload.kind === kind));
+    expect(starts.length).toBeGreaterThanOrEqual(2);
+    for (const e of starts) {
+      expect(e.payload).toMatchObject({ timeout_s: timeout, initial_interval_s: initial, max_interval_s: max });
+      expect(Date.parse(String(e.payload.deadline)) - Date.parse(String(e.payload.started_at))).toBe(timeout * 1000);
+    }
+  });
+});
+
+describe("a wait is open from its start until its end or a restart of the run", () => {
+  const ev = (type: string) => ({ type, payload: { task: "t" } });
+  it.each<[string, string[], number | null]>([
+    ["nothing", [], null],
+    ["its start", ["external_wait_started"], 0],
+    ["a look", ["external_wait_started", "external_wait_observed"], 1],
+    ["two looks", ["external_wait_started", "external_wait_observed", "external_wait_observed"], 2],
+    ["its end", ["external_wait_started", "external_wait_observed", "external_wait_ended"], null],
+    ["a retry", ["external_wait_started", "external_wait_observed", "work_item_retried"], null],
+    ["a fork", ["external_wait_started", "external_wait_observed", "run_forked"], null],
+    ["a base change's restart", ["external_wait_started", "external_wait_observed", "base_change_restart"], null],
+    ["a merge rejection's restart", ["external_wait_started", "external_wait_observed", "merge_rejection_restart"], null],
+    ["a wait begun after a restart", ["external_wait_started", "run_forked", "external_wait_started", "external_wait_observed"], 1],
+  ])("after %s", (_what, types, open) => {
+    expect(openWait({ events: types.map(ev) } as any, "t")).toBe(open);
+  });
+});
 
 describe("sessions the doors make", () => {
   it("a command's task gets a command's session: its command, no usage, and its output grown to all of it", () => {

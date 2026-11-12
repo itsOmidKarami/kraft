@@ -45,7 +45,8 @@ function spendCapped(i: any, b: ItemBundle) {
     if (exit) Object.assign(exit.payload, { cost_usd: s.cost_usd, tokens_cache_read: s.tokens_cache_read });
   }
   const sum = (ss: any[]) => Math.round(ss.reduce((a, s) => a + (s.cost_usd ?? 0), 0) * 10_000) / 10_000;
-  i.usage = { ...i.usage, total: { ...i.usage.total, cost_usd: sum(b.sessions) }, by_node: i.usage.by_node.map((r: any) => ({ ...r, cost_usd: sum(b.sessions.filter((s) => s.node_id === r.node)) })) };
+  const reads = (ss: any[]) => ss.reduce((a, s) => a + (s.tokens_cache_read ?? 0), 0);
+  i.usage = { ...i.usage, total: { ...i.usage.total, cost_usd: sum(b.sessions), tokens_cache_read: reads(b.sessions) }, by_node: i.usage.by_node.map((r: any) => ({ ...r, cost_usd: sum(b.sessions.filter((s) => s.node_id === r.node)), tokens_cache_read: reads(b.sessions.filter((s) => s.node_id === r.node)) })) };
   i.budget_cap = { ...i.budget_cap, cap_usd: 5, spent_usd: 5 };
   // A spend cap interrupts nothing: the session that spent the last of it ran to its end (done, its summary written,
   // its usage on its `worker_session_exited` as `store.session_exited` writes it), and the walk stopped before the next

@@ -392,11 +392,11 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
   const byNode = [...new Set(sessions.map((s) => s.node_id))].map((node) => {
     const ss = sessions.filter((s) => s.node_id === node);
     const sum = (k: string) => ss.reduce((a, s) => a + (s[k] ?? 0), 0);
-    return { node, tokens_in: sum("tokens_in"), tokens_out: sum("tokens_out"), cost_usd: Math.round(sum("cost_usd") * 10_000) / 10_000, cost_complete: true, wall_ms: sum("wall_ms"), sessions: ss.length, rounds: 1, capped_out: 0 };
+    return { node, tokens_in: sum("tokens_in"), tokens_cache_write: sum("tokens_cache_write"), tokens_cache_read: sum("tokens_cache_read"), tokens_out: sum("tokens_out"), cost_usd: Math.round(sum("cost_usd") * 10_000) / 10_000, cost_complete: true, split_complete: true, wall_ms: sum("wall_ms"), sessions: ss.length, rounds: 1, capped_out: 0 };
   });
-  const total = byNode.reduce((a, r) => ({ tokens_in: a.tokens_in + r.tokens_in, tokens_out: a.tokens_out + r.tokens_out, cost_usd: a.cost_usd + r.cost_usd, wall_ms: a.wall_ms + r.wall_ms }), { tokens_in: 0, tokens_out: 0, cost_usd: 0, wall_ms: 0 });
+  const total = byNode.reduce((a, r) => ({ tokens_in: a.tokens_in + r.tokens_in, tokens_cache_write: a.tokens_cache_write + r.tokens_cache_write, tokens_cache_read: a.tokens_cache_read + r.tokens_cache_read, tokens_out: a.tokens_out + r.tokens_out, cost_usd: a.cost_usd + r.cost_usd, wall_ms: a.wall_ms + r.wall_ms }), { tokens_in: 0, tokens_cache_write: 0, tokens_cache_read: 0, tokens_out: 0, cost_usd: 0, wall_ms: 0 });
   total.cost_usd = Math.round(total.cost_usd * 10_000) / 10_000;
-  item.usage = { total: { ...total, cost_complete: true, sessions: sessions.length, rounds: 1, capped_out: 0 }, by_node: byNode };
+  item.usage = { total: { ...total, cost_complete: true, split_complete: true, sessions: sessions.length, rounds: 1, capped_out: 0 }, by_node: byNode };
   item.budget_cap.spent_usd = total.cost_usd;
   const threads = sc === "needs-gate" ? [
     { id: "th-r1-must", work_item_id: id, gate: "final_review", node_id: "implementation", file_path: "search/cache.py", side: "new", start_line: 12, end_line: 14, quote: " def newest(commits):\n+    latest = max(c.ts for c in commits)\n+    return self._cache[latest]", label: "must_fix", state: "resolved", resolved_at: t(94), created_at: t(92), comments: [{ id: "c-r1-must", author: "you", body: "`commits` can be empty: `max()` of an empty generator raises", created_at: t(92) }] },

@@ -134,10 +134,20 @@ export function* judge(w: Writer, round: number, found: Found[], reasoning: stri
 /** The forge waits (`forge.run._WAITS`, by target): every dispatch of one is an observation (`waits.observe`), a first
  *  look that settles at once included. */
 const WAITS = new Set(["mr.ci", "mr.automated_review", "mr.external_approval", "mr.merge", "mr.post_merge_ci"]);
+/** A forge wait's bounds in seconds, as `ForgeTask.wait_bounds` reads them (a task's `total_time_cap_minutes` and `wait.polling`,
+ *  `DEFAULT_WAIT` for what it leaves out; `config/library.yaml`): its timeout, its first interval and its longest. */
+const BOUNDS: Record<string, { timeout: number; initial: number; max: number }> = {
+  "mr.ci": { timeout: 5_400, initial: 30, max: 300 },
+  "mr.post_merge_ci": { timeout: 5_400, initial: 30, max: 300 },
+  "mr.merge": { timeout: 5_400, initial: 30, max: 300 },
+  "mr.automated_review": { timeout: 1_800, initial: 30, max: 300 },
+  "mr.external_approval": { timeout: 604_800, initial: 300, max: 3_600 },
+};
 /** `waits.open_wait`: how many looks `task`'s open wait has had, or null when none is open (its last one ended, or a
  *  fork restarted the run since). */
-const openWait = (w: Writer, task: string): number | null => {
-  const evs = w.events.slice(w.events.map((e) => e.type).lastIndexOf("run_forked") + 1);
+export const openWait = (w: Pick<Writer, "events">, task: string): number | null => {
+  // `waits.open_wait` cuts at every restart of the run, not only a fork.
+  const evs = w.events.slice(Math.max(...["work_item_retried", "run_forked", "base_change_restart", "merge_rejection_restart"].map((t) => w.events.map((e) => e.type).lastIndexOf(t))) + 1);
   let seen = 0;
   for (const e of [...evs].reverse()) {
     if (e.payload?.task !== task) continue;
@@ -164,11 +174,12 @@ export function* awaitPolls(w: Writer, node: string, path: string, kind: string,
   if (kind === "mr.automated_review") w.ev("automated_review_not_configured", { node_id: node, task: path, repo: w.repo }, 0.02);
   // What it observes (`_WAITS`' condition): its target's own name.
   const condition = kind.replace(/^mr\./, "");
+  const bounds = BOUNDS[kind] ?? BOUNDS["mr.ci"];
   const each = (RUNS[taskRun(w.frozen, path) ?? ""]?.wall_ms ?? 60_000) / (last - first + 1);
   if (had === null) {
     // `waits.observe`'s start of a wait: its bounds and deadline, no session (its end names that).
     const started_at = w.at(0);
-    w.ev("external_wait_started", { task: path, node_id: node, kind, timeout_s: 5_400, initial_interval_s: 30, max_interval_s: 300, started_at, deadline: new Date(Date.parse(started_at) + 5_400_000).toISOString() }, 0.02);
+    w.ev("external_wait_started", { task: path, node_id: node, kind, timeout_s: bounds.timeout, initial_interval_s: bounds.initial, max_interval_s: bounds.max, started_at, deadline: new Date(Date.parse(started_at) + bounds.timeout * 1000).toISOString() }, 0.02);
   }
   let wall = 0;
   // The first look of this play follows the `node_started` that entered the node; each later one, its poller's.
@@ -185,7 +196,7 @@ export function* awaitPolls(w: Writer, node: string, path: string, kind: string,
       return w.close(s, "done", Math.round(wall), false);
     }
     // `WaitBounds.interval_after`, in minutes: 30 s after the first pending look, doubling up to the 300 s most.
-    const gap = Math.min(0.5 * 2 ** (k - 1), 5);
+    const gap = Math.min((bounds.initial / 60) * 2 ** (k - 1), bounds.max / 60);
     const next = k === last && retryAt ? retryAt : w.at(gap);
     w.ev("external_wait_observed", { node_id: node, task: path, observation: k, condition, state: "pending", result: "pending", next_observation_at: next }, 0);
     w.wait(s, node, next, Math.round(wall));

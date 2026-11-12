@@ -256,6 +256,8 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
     const b = S.bundles[id];
     if (!node) { T.markCompleted(id); return; }
     if (node.kind === "gate" && cleared(b, node.id)) return enter(id, after(b, node));
+    // `walk` writes `chain_loaded` on every walk from the first node.
+    if (node.id === b.item.chain_definition?.nodes?.[0]?.id && !b.events.some((e) => e.type === "chain_loaded")) T.append(id, "chain_loaded", {});
     const fails = red.has(id) && !b.events.some((e) => e.type === "fix_cycle_started");
     plays.set(id, { node: node.id, beats: nodeBeats(writer(id), node, { red: fails }), at: b.events.length });
     advance(id);
