@@ -50,7 +50,7 @@ describe("Duplicate", () => {
     expect(was.attachments).toEqual(attachments);
     const made = await call("POST", `/work-items/${filed.body.id}/duplicate`);
     expect(made.status).toBe(201);
-    expect((await call("GET", `/work-items/${made.body.id}`)).body).toMatchObject({ title: "Cache embeddings", repo: "kraft-plugins", attachments });
+    expect((await call("GET", `/work-items/${made.body.id}`)).body).toMatchObject({ title: "Cache embeddings", description: "Key them by content hash.", repo: "kraft-plugins", attachments, status: "paused", current_node_id: null });
     expect((await call("GET", `/work-items/${filed.body.id}`)).body).toEqual(was);
   });
 
