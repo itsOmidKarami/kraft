@@ -9,6 +9,7 @@ import { forgesServer } from "./ngForges";
 import { motion, type Motion, type MotionOptions } from "./motion";
 import { listRow, transitions, type Ev } from "./transitions";
 import { ago, NG_NOW } from "./clock";
+import { analyticsOf } from "./ngAnalytics";
 import draftViews from "./draftViews.json" with { type: "json" };
 
 /**
@@ -301,6 +302,20 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
   const itemDrafts = new Map<string, any[]>();
   // Always answering: a shell cell may open Policy (a built page), and the shipped UI never asks for /drafts/(repos|policy|intake).
   const areas = makeAreas();
+  /** The ids of the items the board lists, archived ones last. */
+  const board = () => (opts.ngBoard ? [...S.ngBoard, ...S.ngArchived] : [...S.items, ...S.archived].map((i) => i.id));
+  /** A machine's steps as the board's sessions hold them (`routes/workers.py`): the local worker runs each running session
+   *  that names no runner and has a process (`running_local_sessions`); another machine, each pending or running session
+   *  that names it (`live_sessions_on`). */
+  const onBoard = (w: (typeof WORKERS_FIXTURE)[number]) => {
+    const held = board().flatMap((id) => S.bundles[id].sessions.filter((s) => w.mode === "local"
+      ? s.status === "running" && s.runner == null && (s.pid ?? S.bundles[id].events.find((e) => e.type === "worker_session_started" && e.payload.session_id === s.id)?.payload.pid) != null
+      : ["pending", "running"].includes(s.status) && s.runner === w.name).map(() => id));
+    if (w.mode === "local") return { ...w, slots_used: held.length };
+    const holders = [...new Set(held)].map((id) => ({ id, title: S.bundles[id].item.title, steps: held.filter((x) => x === id).length }));
+    // shortcut: a held machine keeps its fixture's wording, true of one step of one item; no demo session names a runner.
+    return { ...w, slots_used: held.length, holders, remove_blocked: holders.length ? w.remove_blocked : null };
+  };
 
   const viewedMarks = new Set<string>();
   const lib = opts.ngLibrary ? libraryState() : null;
@@ -711,7 +726,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       const lim = q.get("limit");
       if (lim != null && !/^\s*[-+]?\d+(_\d+)*(\.0+)?\s*$/.test(lim)) return json({ detail: [{ type: "int_parsing", loc: ["query", "limit"], msg: "Input should be a valid integer, unable to parse string as an integer", input: lim }] }, 422);
       if (!(q.get("q") ?? "").trim()) return json({ detail: "q is required" }, 422);
-      const ids = opts.ngBoard ? [...S.ngBoard, ...S.ngArchived] : [...S.items, ...S.archived].map((i) => i.id);
+      const ids = board();
       return json(searchFor(q.get("q")!, ids.flatMap((id) => S.docs[id] ?? []), S.variant, textOf,
         { source_kind: q.get("source_kind"), kind: q.get("kind"), repo: q.get("repo"), limit: lim == null ? undefined : Number(lim.replace(/_/g, "")) }));
     }
@@ -935,10 +950,11 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     if (p === "/notify/test") return json({ at: new Date().toISOString(), status: 200, ms: 388, error: null });
     if (p === "/sessions") return json(st.sessions);
     if ((m = p.match(/^\/sessions\/[^/]+$/))) return { status: 204 };
-    if (p === "/analytics") return json(S.analytics);
+    // The default sample's board answers its own analytics, as the server derives them; the variants keep their fixture.
+    if (p === "/analytics") return json(opts.ngBoard === true && S.variant === "default" ? analyticsOf(board().map((id) => S.bundles[id]), q, opts.now?.() ?? NG_NOW) : S.analytics);
     const fg = forges(method, p, req.json());
     if (fg) return fg[0] === 204 ? { status: 204 } : json(fg[1], fg[0]);
-    if (p === "/workers" && method === "GET") return json({ workers: WORKERS_FIXTURE });
+    if (p === "/workers" && method === "GET") return json({ workers: WORKERS_FIXTURE.map(onBoard) });
     // The Add, Edit, Remove and rotate-token answers, plausible and not kept: the list reads the fixture again.
     if (p === "/workers" && method === "POST") {
       const b = req.json() ?? {};
