@@ -76,7 +76,7 @@ strands an entry fails it. It keeps live motion still, as a hidden tab does
 data. `just demo-smoke` runs it (`npm run demo:smoke` without `just`), and so
 does CI's `ui contract` job.
 
-Five unit tests hold the demo's data to Kraft itself. `demo/apiShapes.test.ts`
+Six unit tests hold the demo's data to Kraft itself. `demo/apiShapes.test.ts`
 asks the mock, with the demo's options (`demo/scenario.ts`), every route in
 `tests/api/api_shapes.json`, the keys a real server answers with, and fails
 on a key or route the mock leaves out. `just shapes` rewrites that table
@@ -117,3 +117,9 @@ the Library its editor links to.
 check, a document indexed or an event later than now, bar the keys that name a
 moment still to come (a retry, an expiry). A past-tense fixture takes its stamp
 from `ago`.
+`demo/areas.test.ts` fails when Analytics, Harnesses or Workers says what the
+board does not: Analytics is the board's items through the server's arithmetic
+(`mocks/ngAnalytics.ts`), so a node or gate the default chain lacks, a total
+that is not a sum over the items, repairs that are not their fix cycles, or a
+week after the clock fails it; so does a harness lane task the shipped chains
+lack, or a machine running more or fewer sessions than the board's.
