@@ -601,9 +601,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
         beads: b.beads ?? [],
       });
     }
-    if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/duplicate$/))) {
-      return json({ id: `${m[1]}-dup`, status: "paused" }, 201);
-    }
+    if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/duplicate$/))) return send(T.duplicate(m[1]));
     /* the item chain draft (B15, ux2-W11): none unless `opts.itemDraft` seeds the running item's; then a small stateful server */
     if ((m = p.match(/^\/work-items\/([^/]+)\/draft(\/apply)?$/))) {
       const b = S.bundles[m[1]];

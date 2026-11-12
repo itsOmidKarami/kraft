@@ -61,7 +61,7 @@ strands an entry fails it. It keeps live motion still, as a hidden tab does
 data. `just demo-smoke` runs it (`npm run demo:smoke` without `just`), and so
 does CI's `ui contract` job.
 
-Three unit tests hold the demo's data to Kraft itself. `demo/apiShapes.test.ts`
+Four unit tests hold the demo's data to Kraft itself. `demo/apiShapes.test.ts`
 asks the mock, with the demo's options (`demo/scenario.ts`), every route in
 `tests/api/api_shapes.json`, the keys a real server answers with, and fails
 on a key or route the mock leaves out. `just shapes` rewrites that table
@@ -73,3 +73,6 @@ task's has its command's output instead. It checks the sample, its long
 variant and the seeds that add sessions, then the sessions the doors make. Each item's frozen chain says what a task is; `mocks/taskKinds.ts` reads
 it for the sample items that have one, the doors and live motion, and the
 older sample items, which have none, say it by their model.
+`demo/deadEnds.test.ts` fails when a control leads nowhere: Duplicate answers
+with a real paused item, and every component the default chain extends is in
+the Library its editor links to.

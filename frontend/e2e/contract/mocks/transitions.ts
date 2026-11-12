@@ -567,6 +567,14 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       const it = b.item;
       return ok({ id, bead_id: null, status: it.status, chain_definition: it.chain_definition, materialized_chain: it.materialized_chain, current_node_id: it.current_node_id }, 201);
     },
+    /** POST /work-items/{id}/duplicate: a new item filed paused with this one's title, brief, repo, chain and attachments
+     *  (an ended one too: its card says duplicating starts a new one), through the door a new item comes in by. */
+    duplicate(id: string): Result {
+      const x = find(id);
+      if (refused(x)) return x;
+      const { title, description, repo, chain_template, attachments } = x.it;
+      return t.create({ title, description, repo, chain_template, attachments });
+    },
 
     /* The walk's writes: what the executor does to a running item, in the store's order and words. No route calls
        these; the demo's live motion (motion.ts) does. Each refuses an unknown or ended item, as the doors above do. */
