@@ -349,3 +349,28 @@ def test_an_e2e_docker_test_is_not_answered_by_the_quiet_stand_in():
     """Through the real `_no_real_agent_binary` fixture: where docker is installed (CI's e2e
     job), the test that names it gets the machine's own."""
     assert shutil.which("docker") != str(real_binaries.quiet_dir() / "docker")
+
+
+def test_a_real_agent_runs_without_kraft_e2e_only_when_every_mark_spends_no_tokens(
+    pytester, monkeypatch
+):
+    """`spends_tokens=False` on every e2e mark (a `--help` check) lifts KRAFT_E2E=1;
+    a bare `e2e("claude")` keeps it, and so does one mark of two without the
+    keyword. `claude` is on PATH here as the guard's stub, so KRAFT_E2E is the
+    only thing that can skip a case."""
+    monkeypatch.delenv("KRAFT_E2E", raising=False)
+    monkeypatch.delenv("KRAFT_E2E_REQUIRE", raising=False)
+    pytester.makeconftest((Path(__file__).parent / "conftest.py").read_text())
+    pytester.makepyfile(
+        "import pytest\n\n"
+        '@pytest.mark.e2e("claude")\n'
+        "def test_spends():\n    pass\n\n"
+        '@pytest.mark.e2e("claude", spends_tokens=False)\n'
+        "def test_help_only():\n    pass\n\n"
+        '@pytest.mark.e2e("claude")\n'
+        '@pytest.mark.e2e("claude", spends_tokens=False)\n'
+        "def test_one_mark_spends():\n    pass\n"
+    )
+    result = pytester.runpytest_inprocess("-p", "no:cacheprovider", "-rs")
+    result.assert_outcomes(passed=1, skipped=2)
+    result.stdout.fnmatch_lines(["*KRAFT_E2E=1 (a real agent spends tokens)*"])

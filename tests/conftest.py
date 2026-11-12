@@ -187,11 +187,10 @@ def _e2e_binaries(item) -> set[str]:
 
 
 def pytest_collection_modifyitems(config, items):
-    """An e2e test runs only where every CLI it names is installed, and one
-    naming a real agent also needs KRAFT_E2E=1, since it spends tokens. Each
-    skip names what is missing. A CLI listed in KRAFT_E2E_REQUIRE (CI's e2e
-    job sets `bd,docker,podman,bwrap`, its macOS job `sandbox-exec`) makes that
-    skip an error, so the job cannot go green having run nothing."""
+    """An e2e test runs where every CLI it names is installed. One naming a real agent
+    also needs KRAFT_E2E=1 (tokens) unless each of its e2e marks says spends_tokens=False.
+    A skip names what is missing. KRAFT_E2E_REQUIRE (CI's e2e job: bd,docker,podman,bwrap;
+    macOS: sandbox-exec) makes a listed CLI's skip an error: no green job that ran nothing."""
     required = set(filter(None, os.environ.get("KRAFT_E2E_REQUIRE", "").split(",")))
     for item in items:
         if "e2e" not in item.keywords:
@@ -202,7 +201,8 @@ def pytest_collection_modifyitems(config, items):
         missing = sorted(b for b in needs if not shutil.which(b))
         if missing and required & set(missing):
             raise pytest.UsageError(f"{item.nodeid}: KRAFT_E2E_REQUIRE, but {missing} not on PATH")
-        if _REAL_AGENT_BINARIES & needs and os.environ.get("KRAFT_E2E") != "1":
+        spends = any(m.kwargs.get("spends_tokens", True) for m in item.iter_markers("e2e"))
+        if _REAL_AGENT_BINARIES & needs and spends and os.environ.get("KRAFT_E2E") != "1":
             missing.append("KRAFT_E2E=1 (a real agent spends tokens)")
         if missing:
             item.add_marker(pytest.mark.skip(reason=f"e2e: needs {', '.join(missing)}"))
