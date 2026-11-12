@@ -312,7 +312,8 @@ const forgeUrl = (repo: string, n: number) => {
 };
 /** Each kind's own section: what tells a spec from a plan or a summary. */
 const SECTION: Record<string, string> = { specs: "\n## Problem\n", plans: "\n### Task 1: ", chain_revisions: "\n## Nodes\n", work_briefs: "\n## What changed\n", review_briefs: "\n## Read first\n", sessions: "\n## What this session did\n" };
-/** A docs path is the mock's own (ngContent.ts `isDocsPath`): its documents' wording and these rules read one definition. */
+/** A docs path is the mock's own (ngContent.ts `isDocsPath`): its documents' wording and these rules read one definition,
+ *  which a table of paths written out below holds. */
 const docsOnly = (files: Row[]) => files.every(([p]) => isDocsPath(p));
 const isTestPath = (p: string) => /(^|\/)tests?\//.test(p) || /\.test\.[jt]sx?$/.test(p);
 /** What is wrong with a brief's or a merge request's list of files, written after the implementation, against `shows`,
@@ -961,6 +962,11 @@ describe("the content table, the entries the walk never reaches included", () =>
     expect(keys.filter((x, k) => keys.indexOf(x) !== k)).toEqual([]);
     expect(rows.filter((r) => r.c.mr >= 150 && r.c.mr <= 159).map((r) => r.name)).toEqual([]);
   });
+  // The one definition the rules and the mock read, held to a table of its own: a page anywhere, a site file under
+  // `docs/`, and not a program there or a file outside it.
+  it.each<[string, boolean]>([["docs/_nav.py", false], ["src/a.ts", false], ["plugins/search/cache.py", false], ["docs/x.css", true], ["README.md", true], ["docs/_nav.yml", true]])("a docs path: %s is %s", (path, docs) => {
+    expect(isDocsPath(path)).toBe(docs);
+  });
   // A docs item changes docs only, and an item that changes only docs is one; a code item changes a test; an item that
   // removes or drops something takes out more than it adds.
   it("its files fit its kind", () => {
@@ -1023,6 +1029,8 @@ const tickWalk = (): Promise<Ticked> => (ticked ??= (async () => {
     const serve = mockServer(S, demoOptions);
     const get = async (path: string) => JSON.parse(((await serve({ method: "GET", url: `http://demo/api${path}`, json: () => null })) as Answer).body!);
     for (const id of S.ngBoard) if (S.bundles[id].item.pending_gate) T.approve(id, S.bundles[id].item.pending_gate);
+    // The sample rows a repair had already landed before the walk began: a late file they show is not the walk's.
+    const landedBefore = new Set(S.ngBoard.filter((id) => repaired(S.bundles[id])));
     const m = motion(S, T, { random: () => 0 });
     const wrong: Ticked["wrong"] = { mrs: new Set(), late: new Set(), progress: new Set() };
     const met: Ticked["met"] = { waited: 0, repairing: 0, landed: 0, reported: 0 };
@@ -1045,7 +1053,7 @@ const tickWalk = (): Promise<Ticked> => (ticked ??= (async () => {
         const lateNames = (b.content.files as Row[]).filter(late).map(([p]) => p);
         const shown = d.files.some((f: any) => lateNames.includes(f.path)) || d.commits.some((c: string) => c.endsWith(" Fix what verification found"));
         if (b.sessions.some((s) => s.hook_point === "verification.fix_loop.main.repair" && s.status !== "done")) met.repairing++;
-        if (shown && repaired(b)) met.landed++;
+        if (shown && repaired(b) && !landedBefore.has(id)) met.landed++;
         if (shown && !repaired(b)) wrong.late.add(`${b.item.title} at tick ${k}`);
       }
       // `progress.for_item`: while an item with a plan is active on its implementation node, its board row and its detail
