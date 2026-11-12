@@ -2477,11 +2477,12 @@ async def _launch_agent(
     """One candidate's launch for `dispatch_node`: `(status, final)`, `final`
     when the launch never started and the status is the task's answer as it
     stands (a refusal is a configuration stop, not a straggler to sweep)."""
-    # A task an operator paused mid-turn resumes its own provider session when
-    # it can, told to carry on with any steer in hand; otherwise it restarts
-    # with its original instruction (`resumed-agent-task-preserves-its-
-    # session-when-possible`). Never on a fix loop's or a recovery's own
-    # instruction, which is a new job, not the paused one.
+    # A task an operator paused mid-turn, or one that stopped to ask a question,
+    # resumes its own provider session when it can, told to carry on with any
+    # steer or answer in hand; otherwise it restarts with its original
+    # instruction (`resumed-agent-task-preserves-its-session-when-possible`).
+    # Never on a fix loop's or a recovery's own instruction, which is a new
+    # job, not the paused one.
     resumed = (
         _resumable_session(db, work_item_row["id"], node, task, harnesses.valid.get(inv.harness))
         if resumable
@@ -2580,7 +2581,7 @@ async def _launch_agent(
                 if note
                 else ""
             )
-            + (prompts.AGENT_RESUMED_NOTE if resumed is not None else instruction)
+            + (prompts.resumed_note(resumed[2], bool(note)) if resumed is not None else instruction)
             + notes,
             extra_env=extra_env,
             extra_ro=extra_ro,
@@ -2647,24 +2648,26 @@ def _output_decl(t: AgentTask | SubprocessTask, task, launch) -> outputs.Decl:
     )
 
 
-def _resumable_session(db, work_item_id: str, node, task, harness) -> tuple[str, str] | None:
-    """`(session id, provider session id)` of the paused session `task`
-    resumes, or None to restart it. Only a harness that can resume, only the
-    task's latest session and only if an operator paused it, never from before
-    a retry or a restart (7a's rule: a new pass never reuses a pre-retry
-    session), and only when its log names the provider's own session id."""
+def _resumable_session(db, work_item_id: str, node, task, harness) -> tuple[str, str, str] | None:
+    """`(session id, provider session id, status)` of the paused or asking
+    session `task` resumes, or None to restart it; `status` is `paused` or
+    `needs_context`, read off the row the store returned. Only a harness that
+    can resume, only the task's latest session and only if an operator paused
+    it or it asked a question, never from before a retry or a restart (7a's
+    rule: a new pass never reuses a pre-retry session), and only when its log
+    names the provider's own session id."""
     if harness is None or not harness.supports("resume"):
         return None
-    paused = db.read(lambda c: store.resumable_agent_session(c, work_item_id, node.id, task.path))
-    if paused is None:
+    found = db.read(lambda c: store.resumable_agent_session(c, work_item_id, node.id, task.path))
+    if found is None:
         return None
     # The harness's own schema (Kraft-wge0e): a codex thread id is not on a
     # claude `system`/`init` line.
     reader = _agent.log_reader(harness)
     if reader is None:
         return None
-    provider = _usage.READERS[reader].session_id(Path(paused["log_path"]))
-    return (paused["id"], provider) if provider else None
+    provider = _usage.READERS[reader].session_id(Path(found["log_path"]))
+    return (found["id"], provider, found["status"]) if provider else None
 
 
 async def measure_node(

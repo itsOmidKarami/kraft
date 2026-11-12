@@ -468,9 +468,9 @@ def test_identify_as_worker_sets_the_work_item_env_var(run, identify, work_item_
         # Sub-project G §1: the injected context is the only channel that tells
         # an agent the status vocabulary exists.
         ("done", "done_with_concerns", "failed", "needs_context", "concerns", "question"),
-        # Spec §5: needs_context costs a full stop and relaunch, so ask for
-        # every missing fact at once.
-        ("ask for all of them in that one question",),
+        # Spec §5: needs_context stops the run until a person answers, so ask
+        # for every missing fact at once.
+        ("until a person answers", "ask for all of them in that one question"),
         # Kraft-avpe: a headless session has no next turn to receive a
         # background job's notification.
         ("nothing runs after you stop", "background"),

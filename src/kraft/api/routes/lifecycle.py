@@ -120,10 +120,11 @@ class Unblock(BaseModel):
 
 
 class Resume(BaseModel):
-    #: Reaches every paused agent task (`steer-defaults-to-all-paused-agent-tasks`).
+    #: Reaches every paused agent task, and every one that asked a question
+    #: (`steer-defaults-to-all-paused-agent-tasks`).
     steer: str | None = None
-    #: Individual steers for paused agent tasks, by canonical task path; each
-    #: wins over `steer` for the task it names.
+    #: Individual steers for paused or asking agent tasks, by canonical task
+    #: path; each wins over `steer` for the task it names.
     steers: dict[str, str] = {}
 
 

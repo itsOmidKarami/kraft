@@ -719,12 +719,15 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
 
     resume = subs.add_parser("resume", parents=[common], help="start or restart a paused item")
     resume.add_argument("id", nargs="?")
-    resume.add_argument("--steer", help="reaches every paused agent task")
+    resume.add_argument(
+        "--steer", help="reaches every paused agent task, and every one that asked a question"
+    )
     resume.add_argument(
         "--steer-task",
         action="append",
         metavar="PATH=TEXT",
-        help="a steer for one paused agent task, by canonical path (node.step.task); repeatable",
+        help="a steer for one paused or asking agent task, by canonical path (node.step.task); "
+        "repeatable",
     )
     resume.set_defaults(func=_cmd_resume)
 

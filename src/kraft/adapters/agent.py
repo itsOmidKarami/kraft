@@ -75,9 +75,9 @@ _CTX = (
     'doubts about correctness, with why in a "concerns" field; "failed" if you '
     'could not complete the task; or "needs_context" if you were missing '
     'information nobody gave you, with what you need in a "question" field. '
-    "needs_context stops this run and costs a full relaunch to pick it back "
-    "up, so if you are missing more than one fact, ask for all of them in "
-    "that one question rather than stopping once per fact.\n"
+    "needs_context stops this run until a person answers, so if you are "
+    "missing more than one fact, ask for all of them in that one question "
+    "rather than stopping once per fact.\n"
     "\n"
     "This session ends the moment your turn ends: nothing runs after you stop "
     "responding, and a turn that ends with a background job still running fails, "

@@ -15,7 +15,7 @@ from kraft import item_paths, store
 from kraft import review as _review
 from kraft.config import git_read
 from kraft.templates.models import AgentInput, AgentTask, ForgeAction, ForgeTask, ResolvedTask
-from kraft.vocab import ADVANCING, RESTARTS_RUN
+from kraft.vocab import ADVANCING, RESTARTS_RUN, SessionStatus
 from kraft.vocab.sql import marks
 
 #: Handed to fix cycle N > 1: cycle N-1's own result file, by path, not by
@@ -548,3 +548,24 @@ AGENT_RESUMED_NOTE = (
     "An operator paused you mid-task and has now resumed you. Carry on with the "
     "task you were given, from where you stopped, and finish it as instructed."
 )
+
+#: What a task that stopped to ask a question is told when it resumes its own
+#: session, whether the answer is above it or none came.
+AGENT_ANSWERED_NOTE = (
+    "You stopped to ask a question, and its answer is above. Carry on with the "
+    "task you were given, from where you stopped, and finish it as instructed."
+)
+AGENT_UNANSWERED_NOTE = (
+    "You stopped to ask a question, and you were resumed without an answer. Carry "
+    "on with the task you were given, from where you stopped, using what you "
+    "have, and finish it as instructed. Report needs_context again only if you "
+    "cannot go on without the answer."
+)
+
+
+def resumed_note(ended: str, answered: bool) -> str:
+    """The new turn of a resumed session: how the session ended (`paused` or
+    `needs_context`) and whether a steer or answer came with it."""
+    if ended == SessionStatus.NEEDS_CONTEXT:
+        return AGENT_ANSWERED_NOTE if answered else AGENT_UNANSWERED_NOTE
+    return AGENT_RESUMED_NOTE

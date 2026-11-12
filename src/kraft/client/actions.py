@@ -406,9 +406,9 @@ async def resume(
     work_item_id: str | None = None,
     steers: dict[str, str] | None = None,
 ) -> dict:
-    """Restart a paused item. `steer` reaches every paused agent task;
-    `steers` gives individual paused agent tasks their own, by canonical task
-    path (`node.step.task`).
+    """Restart a paused item. `steer` reaches every paused agent task, and
+    every agent task that asked a question; `steers` gives individual paused or
+    asking agent tasks their own, by canonical task path (`node.step.task`).
 
     This is also how a created-paused item is started for the first time: a NULL
     current_node_id resolves to node zero (design §6 rule 1).
