@@ -372,6 +372,14 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
     }));
     expect(wrong.filter(Boolean)).toEqual([]);
   });
+  it("a file's patch reads as its kind: a test's asserts, and only the VS Code repo's code imports vscode", async () => {
+    const wrong: string[] = [];
+    for (const b of withTree) for (const p of (await call(`/work-items/${b.item.id}/diff`)).body.landed.diff.split(/^(?=diff --git )/m).filter(Boolean)) {
+      const path = /^diff --git a\/(\S+)/.exec(p)![1];
+      if ((isTestPath(path) && !/^\+.*\b(assert|expect)\b/m.test(p)) || (p.includes(`from "vscode"`) && !b.item.repo.endsWith("/kraft-vscode"))) wrong.push(`${b.item.title}: ${path}`);
+    }
+    expect(wrong).toEqual([]);
+  });
   it("its commits are one per finished plan task, then verification's fix, newest first", async () => {
     const wrong = await Promise.all(withTree.filter((b) => committed(b).length).map(async (b) => {
       const subjects = (await call(`/work-items/${b.item.id}/diff`)).body.landed.commits.map((c: string) => c.slice(8));
@@ -476,6 +484,24 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
       if (b.item.pending_gate && b.item.gate_artifact) {
         const a = (await call(`/work-items/${b.item.id}/artifact`)).body;
         if (!a.path.startsWith(`items/${b.item.id}/`) || !about(a.content, b)) wrong.push(`${b.item.title}: the pending gate's`);
+      }
+    }
+    expect(wrong).toEqual([]);
+  });
+  // A spec, plan and chain revision are written before anything changed: no counts, and the plan names no file
+  // verification's round added; a work and a review brief are written after, with counts. A session that ran before
+  // there was a plan (a spec's or plan's writer, a gate's reviewer) says nothing of what the plan names.
+  it("what each document says fits when it was written", async () => {
+    const wrong: string[] = [];
+    for (const b of board) {
+      for (const kind of ["spec", "plan", "work_brief", "review_brief"]) {
+        const a = await call(`/work-items/${b.item.id}/artifacts/${kind}`);
+        if (a.status !== 200) continue;
+        const lateNamed = (b.content!.files as Row[]).filter(late).some(([p]) => a.body.content.includes(p));
+        if (/\(\+\d+ −\d+\)/.test(a.body.content) !== kind.endsWith("brief") || (kind === "plan" && lateNamed)) wrong.push(`${b.item.title}: ${kind}`);
+      }
+      for (const d of (S.docs[b.item.id] ?? []).filter((x) => x.kind === "sessions" && (["spec", "plan"].includes(x.node_id) || String(x.hook_point).endsWith(".auto_review")))) {
+        if ((await call(`/documents/${d.document_id}`)).body.content.includes("the plan names")) wrong.push(`${b.item.title}: ${d.title}`);
       }
     }
     expect(wrong).toEqual([]);
