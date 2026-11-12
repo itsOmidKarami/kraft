@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { buildScenario, searchFor, withScopes, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
 import { FRESH_TITLES, motion } from "../e2e/contract/mocks/motion";
 import { NG_REPOS } from "../e2e/contract/mocks/ngBoard";
-import { CONTENT, docBody, FRESH_CONTENT, isDocsPath, mergeDocs, mrOf } from "../e2e/contract/mocks/ngContent";
+import { CONTENT, docBody, FRESH_CONTENT, isDocsPath, isLate, mergeDocs, mrOf } from "../e2e/contract/mocks/ngContent";
 import { frozenOf } from "../e2e/contract/mocks/ngChain";
 import { AUTO_ESCALATE_MESSAGE, buildNgItem, MR_CLOSED_REASON, NG_NOW, renderNote } from "../e2e/contract/mocks/ngItems";
 import { agentUsage, openWait } from "../e2e/contract/mocks/nodeRecipe";
@@ -478,7 +478,9 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
       const block = (th: any) => [`[${th.id}] ${th.file_path}:+${th.start_line}${th.end_line === th.start_line ? "" : ` to +${th.end_line}`}${th.label ? ` (${th.label})` : ""}`, ...(th.quote ? th.quote.split("\n") : []).map((l: string) => `    | ${l}`), th.comments[0].body].join("\n");
       // `store.render_note`: the summary, the fixed head line, then the blocks, each part a blank line from the next.
       const head = 'Review threads to address (reply to each with `kraft item reply <thread-id> --claim fixed|answered --body "..."`):';
-      const ok = open.length > 0 && note === [r.summary, head, open.map(block).join("\n\n")].join("\n\n") && (b.threads as any[]).filter((th) => !open.includes(th)).every((th) => !note.includes(`[${th.id}]`));
+      // A request for changes counts what its note lists: "Three things" over three threads.
+      const counted = r.outcome !== "request_changes" || r.summary.startsWith(`${["One", "Two", "Three", "Four", "Five"][open.length - 1]} thing`);
+      const ok = open.length > 0 && counted && note === [r.summary, head, open.map(block).join("\n\n")].join("\n\n") && (b.threads as any[]).filter((th) => !open.includes(th)).every((th) => !note.includes(`[${th.id}]`));
       return ok ? [] : [`${b.item.title}: ${r.id}`];
     }));
     expect(wrong).toEqual([]);
@@ -964,6 +966,10 @@ describe("the content table, the entries the walk never reaches included", () =>
   it("has an entry for every board row and every title the walk refiles", () => {
     expect(rows.filter((r) => !r.c).map((r) => r.name)).toEqual([]);
   });
+  // A late file is what the walk's red first round reports (`redOf`), and only its first filing goes red.
+  it("only the walk's first story carries a late file", () => {
+    expect(FRESH_TITLES.filter((title) => FRESH_CONTENT[title].files.some(isLate))).toEqual([FRESH_TITLES[0]]);
+  });
   it("every entry has its own brief", () => {
     const briefs = rows.map((r) => r.c.description);
     expect(briefs.filter((x, k) => briefs.indexOf(x) !== k)).toEqual([]);
@@ -975,7 +981,7 @@ describe("the content table, the entries the walk never reaches included", () =>
   });
   // The one definition the rules and the mock read, held to a table of its own: a page anywhere, a site file under
   // `docs/`, and not a program there or a file outside it.
-  it.each<[string, boolean]>([["docs/_nav.py", false], ["src/a.ts", false], ["plugins/search/cache.py", false], ["docs/x.css", true], ["README.md", true], ["docs/_nav.yml", true]])("a docs path: %s is %s", (path, docs) => {
+  it.each<[string, boolean]>([["docs/_nav.py", false], ["src/a.ts", false], ["plugins/search/cache.py", false], ["src/docs/x.css", false], ["docs/x.css", true], ["README.md", true], ["docs/_nav.yml", true], ["docs/_nav.yaml", true]])("a docs path: %s is %s", (path, docs) => {
     expect(isDocsPath(path)).toBe(docs);
   });
   // A docs item changes docs only, and an item that changes only docs is one; a code item changes a test; an item that
