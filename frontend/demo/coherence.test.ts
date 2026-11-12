@@ -8,7 +8,7 @@ import { CONTENT, docBody, FRESH_CONTENT, isDocsPath, isLate, mergeDocs, mrOf, s
 import { frozenOf } from "../e2e/contract/mocks/ngChain";
 import { AUTO_ESCALATE_MESSAGE, buildNgItem, MR_CLOSED_REASON, NG_NOW, renderNote } from "../e2e/contract/mocks/ngItems";
 import { agentUsage, openWait } from "../e2e/contract/mocks/nodeRecipe";
-import { isAgentSession, MODEL, nodeTasks, PRICE, RUNS, runOutput, taskKind, taskRun } from "../e2e/contract/mocks/taskKinds";
+import { isAgentSession, MODEL, nodeTasks, PRICE, RUNS, runningS, runOutput, taskKind, taskRun } from "../e2e/contract/mocks/taskKinds";
 import { transitions } from "../e2e/contract/mocks/transitions";
 import { mockServer, type Answer } from "../e2e/contract/mocks/mockApi";
 import { demoOptions } from "./scenario";
@@ -1222,6 +1222,18 @@ describe("the live walk runs each node as the sample's finished item ran it", ()
   const sample = byNode(S.bundles[S.ng.done]);
   it("walks both items it filed to the end of the default chain", () => {
     expect([0, 1].map((n) => [fresh(n).item.status, fresh(n).item.chain_template, [...byNode(fresh(n)).keys()]])).toEqual([0, 1].map(() => ["completed", "default", CHAIN_NODES.default]));
+  });
+  // `caps.running_time`: what the done card's "took" reads, every session's wall but a forge wait's (`ForgeAction.waits`).
+  it("a board item, a walked one too, took its sessions' wall time, its forge waits' left out", () => {
+    const waits = ["mr.ci", "mr.automated_review", "mr.external_approval", "mr.merge", "mr.post_merge_ci", "ci.pipeline"];
+    const took = (b: ItemBundle) => Math.round(b.sessions.filter((s) => !waits.includes(taskRun(b.item.materialized_chain, s.hook_point) ?? "")).reduce((a, s) => a + (s.wall_ms ?? 0), 0) / 1000);
+    const board = S.ngBoard.map((id) => S.bundles[id]);
+    expect(board.filter((b) => b.item.running_time.running_s !== took(b)).map((b) => `${b.item.title}: ${b.item.running_time.running_s}, not ${took(b)}`)).toEqual([]);
+    expect([0, 1].map((n) => took(fresh(n)) > 0)).toEqual([true, true]);
+  });
+  it("two sessions that ran at once count once in an item's running time", () => {
+    const at = (min: number, wall_ms: number) => ({ hook_point: "x", started_at: new Date(Date.UTC(2026, 0, 1, 0, min)).toISOString(), wall_ms });
+    expect(runningS(null, [at(0, 120_000), at(1, 120_000), at(10, 30_000), { ...at(20, 0), wall_ms: null }])).toBe(210);
   });
   // The seeds and the walk read one recipe (nodeRecipe.ts); this holds what each user does with it to the same events.
   // Each item reports its own plan's tasks, so how many plan_progress events it has is its own (the literal rows hold that).

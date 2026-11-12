@@ -29,7 +29,7 @@ import type { EventType } from "../../../src/types/vocab.generated";
 import type { GateRound } from "../../../src/types";
 import { buildNgItem, NG_NOW, NG_SCENARIOS } from "./ngItems";
 import { ago, agoPy } from "./clock";
-import { agentRun, isAgentSession, runOutput, scopeRunsOf, type Run } from "./taskKinds";
+import { agentRun, isAgentSession, runningS, runOutput, scopeRunsOf, type Run } from "./taskKinds";
 import { changedFiles, contentDiff, docBody, gateTitle, isDocsPath, isLate, isTest, itemDocs, mrOf, symbolOf, type Content } from "./ngContent";
 
 /* ── ids & time ──────────────────────────────────────────────────────────── */
@@ -886,13 +886,12 @@ export function gateRoundsOf(events: Ev[], threads: any[] = [], reviews: any[] =
 export function serverKeys(b: ItemBundle): ItemBundle {
   const it = b.item;
   const fill = (o: any, d: Record<string, unknown>) => { for (const [k, v] of Object.entries(d)) if (!(k in o)) o[k] = v; };
-  const ran = b.sessions.reduce((n, s) => n + (s.wall_ms ?? 0), 0);
   fill(it, {
     archived_at: null, archived_by: null, fallback: null, base_ref: null, bead_cwd: null, branch: `kraft/${it.id}`, budget_set: 0, budget_usd: null,
     ci_pipeline_ref: null, current_step: 0, dependencies: [], depends_on: null, ended_at: null, ended_reason: null, escalation_session_id: null, implements_beads: null,
     judge_stop_note: [], needs_context_question: null, node_passes: {}, pending_rewind: null, pending_steer_context: null, policy_override: null,
     queued: null, queued_request: null, reject_default: null, retry_at: null, root_merge_policy: null, run_chain: null,
-    running_time: { running_s: Math.round(ran / 1000), cap_minutes: null }, scope_runs: scopeRunsOf(it.materialized_chain, b.sessions), skipped_paths: [], started_at: b.sessions.map((s) => s.started_at).filter(Boolean).sort()[0] ?? null, step: null, stop_kind: null, stop_reason: null,
+    running_time: { running_s: runningS(it.materialized_chain, b.sessions), cap_minutes: null }, scope_runs: scopeRunsOf(it.materialized_chain, b.sessions), skipped_paths: [], started_at: b.sessions.map((s) => s.started_at).filter(Boolean).sort()[0] ?? null, step: null, stop_kind: null, stop_reason: null,
     submodules: null, suggested_action: null, test_result: null, worktree_exists: true, in_place: false,
     children: null, slices: null, parent_id: null, slice_key: null, slice_generation: null, docs_commit: null, pinned_head: null,
     group: null, group_state: null, paused_by_parent: 0,
@@ -1192,7 +1191,7 @@ export const withFailedTests = (n: number, red: number) => (S: Scenario) => { wi
  *  raises, so its stop names that `limit` (`caps.item_limit`); a task's cap, the sample's, names none. */
 export const withCapLimit = (S: Scenario) => {
   const b = ngBundle("capped", S);
-  const running_s = Math.round(b.sessions.reduce((a, s) => a + (s.wall_ms ?? 0), 0) / 1000);
+  const running_s = runningS(b.item.materialized_chain, b.sessions);
   const minutes = Math.round(running_s / 60);
   const reason = `the work item hit its time cap of ${minutes} minutes`;
   const limit = { path: "", key: "time_cap_minutes", value: minutes };

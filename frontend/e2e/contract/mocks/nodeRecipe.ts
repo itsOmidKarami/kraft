@@ -1,5 +1,5 @@
 import type { EventType } from "../../../src/types/vocab.generated";
-import { agentRun, DOCS_SCOPE, MODEL, PRICE, RUNS, taskRun, type Run } from "./taskKinds";
+import { agentRun, DOCS_SCOPE, MODEL, PRICE, RUNS, taskRun, WAITS, type Run } from "./taskKinds";
 import type { DefNode } from "./ngChain";
 
 /**
@@ -159,9 +159,6 @@ export function* judge(w: Writer, round: number, found: Found[], reasoning: stri
   yield* ran(w, JUDGE, "verification", "done", { round });
   w.ev("judge_verdict", { node_id: "verification", cycle: round, verdict: "continue", reasoning, findings: found.map((f) => asFinding(w, f)) }, 0.02);
 }
-/** The forge waits (`forge.run._WAITS`, by target): every dispatch of one is an observation (`waits.observe`), a first
- *  look that settles at once included. */
-const WAITS = new Set(["mr.ci", "mr.automated_review", "mr.external_approval", "mr.merge", "mr.post_merge_ci"]);
 /** A forge wait's bounds in seconds, as `ForgeTask.wait_bounds` reads them (a task's `total_time_cap_minutes` and `wait.polling`,
  *  `DEFAULT_WAIT` for what it leaves out; `config/library.yaml`): its timeout, its first interval and its longest. */
 const BOUNDS: Record<string, { timeout: number; initial: number; max: number }> = {

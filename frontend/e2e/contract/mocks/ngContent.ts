@@ -96,7 +96,7 @@ export const CONTENT: Record<string, Content> = {
   "kraft-d7e4": { mr: 64, description: "kraft admin reload rereads the library, policy.yaml and intake.yaml without a restart, but the docs mention it only in passing. Give it a section in the CLI reference that says what it rereads, what it leaves alone, and when to restart instead.",
     files: [["docs/cli/admin.md", 34, 1], ["docs/guides/configuration.md", 6, 2], ["docs/cli/index.md", 1, 0]] },
   "kraft-5c31": { mr: 61, description: "The webhook sender still builds the v0 payload beside the current one for receivers that asked for it, and none has in months. Remove the v0 builder and its setting, and refuse a subscription that still names it with a message that says what to send instead.",
-    files: [["kraft_api/webhooks/payloads.py", 4, 61], ["kraft_api/webhooks/subscribe.py", 11, 6], ["kraft_api/settings.py", 0, 7, "deleted"], ["tests/webhooks/test_payloads.py", 6, 48]] },
+    files: [["kraft_api/webhooks/payloads.py", 4, 76], ["kraft_api/webhooks/subscribe.py", 11, 6], ["kraft_api/settings.py", 0, 7, "deleted"], ["tests/webhooks/test_payloads.py", 6, 48]] },
 };
 
 /** By title: what live motion refiles (motion.ts FRESH_TITLES), so a walked item has a story of its own too, in the repo

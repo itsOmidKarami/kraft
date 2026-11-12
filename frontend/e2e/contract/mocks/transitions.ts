@@ -4,7 +4,7 @@ import { ngDryRun } from "./ngBoard";
 import { chainOf, frozenOf } from "./ngChain";
 import { RESUME_PROMPT } from "./poller";
 import { buildNeverStarted } from "./ngItems";
-import { DOCS_SCOPE, isAgentSession, MODEL, RUNS, scopeRunsOf, taskRun, type Run } from "./taskKinds";
+import { DOCS_SCOPE, isAgentSession, MODEL, RUNS, runningS, scopeRunsOf, taskRun, type Run } from "./taskKinds";
 import { ownFailure } from "./nodeRecipe";
 import { changedFiles, isLate, itemDocs, mergeDocs, mrOf, planOf } from "./ngContent";
 
@@ -734,8 +734,10 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       const status = o.status ?? "done";
       // COALESCE: no summary leaves the one already recorded.
       if (summary) s.session_summary_ref = summary;
+      Object.assign(s, { status, exited_at: at, wall_ms });
+      // `caps.running_time` reads the item's sessions again: this one's wall now counts, unless it was a forge wait.
+      if (it.running_time) it.running_time = { ...it.running_time, running_s: runningS(it.materialized_chain, b.sessions) };
       if (!usage) {
-        Object.assign(s, { status, exited_at: at, wall_ms });
         // A command's log has grown to all of its output by the time it ends, the failing run's if it failed.
         const task = String(s.hook_point).split(".").at(-1)!;
         if (o.noAgent) b.logs[sid] = [{ n: 1, t: at, src: "stdout", text: "no bot feedback collected; no agent started" }];

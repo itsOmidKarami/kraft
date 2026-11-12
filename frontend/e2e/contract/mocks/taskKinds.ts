@@ -144,6 +144,20 @@ export const DOCS_SCOPE: Run = {
   failed: () => ["Linting: 42 file(s)", "docs/search.md:12 MD040/fenced-code-language Fenced code blocks should have a language specified", "Summary: 1 error(s)"],
 };
 
+/** The forge waits (`ForgeAction.waits`, by target): every dispatch of one is an observation (`waits.observe`), a first
+ *  look that settles at once included. */
+export const WAITS = new Set(["mr.ci", "mr.automated_review", "mr.external_approval", "mr.merge", "mr.post_merge_ci", "ci.pipeline"]);
+/** `running_time.running_s` (`caps.running_time`): the seconds at least one of the item's finished sessions ran, a forge
+ *  wait's left out, so two that overlap count once. A live session counts nothing yet, nor (a shortcut: the sample retries
+ *  none by hand) does the clock restart at a person's retry, nor drop a person's escalation turn. */
+export function runningS(frozen: string | null | undefined, sessions: any[]): number {
+  const spans = sessions.filter((s) => s.wall_ms != null && !WAITS.has(taskRun(frozen, s.hook_point) ?? ""))
+    .map((s) => [Date.parse(s.started_at ?? s.created_at), Date.parse(s.started_at ?? s.created_at) + s.wall_ms]).sort((a, b) => a[0] - b[0]);
+  let total = 0, reach = -Infinity;
+  for (const [a, z] of spans) { total += Math.max(0, z - Math.max(a, reach)); reach = Math.max(reach, z); }
+  return Math.round(total / 1000);
+}
+
 /** `scope_runs` on an item's detail, as `board._scope_runs` lists them: one entry for each command a changed-test-scope task ran,
  *  in the order its sessions started. The node's scope pane draws from them: with none, a finished `test_changed_scopes` reads
  *  "0 of 0 scopes passed". An entry `had` already names (a seed's pass and scope) is kept, its outcome brought up to date. */
