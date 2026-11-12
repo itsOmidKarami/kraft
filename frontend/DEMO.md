@@ -16,10 +16,12 @@ shapes` rewrites from a real server (`tests/api/test_demo_chain.py`), read by
 `mocks/ngChain.ts`. Each item stands where a real one in its state stands, with
 the sessions and events a real server writes on the way: `default`'s 19 nodes,
 `quick-task`'s two, and `docs_only`, five of `default`'s nodes. Each board item is about something of its own
-(`mocks/ngContent.ts`): its brief, the files it changes, which its diff, comparison and header serve once its
-implementation has completed, its merge request's number, and the documents its completed nodes and finished agent
-sessions wrote, each written for its title; Search matches its query over those. Its history is timed so it has run
-for its own time. The item page's samples and the long and many variants keep the shared data. `demo/shim.ts` puts them under the page:
+(`mocks/ngContent.ts`): its brief, the files it changes, which its diff, comparison and header serve as its
+implementation commits each plan task, its merge request on its repo's forge, and its documents, each written for its
+title. A gate's document is indexed when a person or a reviewer approves the gate, at that moment: a pending gate's is
+listed under its synthetic id and never searched, a chain revision that changed nothing has none, and a docs item has
+no work brief. Each finished agent session's summary is indexed too. Search matches every word of its query over
+those, as the index does. Its history is timed so it has run for its own time. The item page's samples and the long and many variants keep the shared data. `demo/shim.ts` puts them under the page:
 `fetch` and the events socket for `/api/**`, the clock moved to the scenario's
 moment, and the two `<a href="/api/...">` log links. An action there sticks
 until the page reloads: the mock changes the item as the server would
@@ -90,10 +92,11 @@ on a stop the walk could not have written: a fix loop's judge before a repair
 has run, a stop reason the server does not write for that kind, an automatic
 escalation turn answering a stop outside the stuck set, or a session summary
 outside its item's folder. It fails when two board items share a brief or a list of changed files, an
-item shows a change before its implementation completes, a docs item changes code, a merge request is not the one
-its `mr_opened` named, a document's id repeats or its documents are not those of the nodes it completed and its
-finished agent sessions, Search ignores its query or reaches past the board, or a running time is not its events'
-span. It checks the
+item shows a change for a plan task it has not finished, a docs item changes code, a patch's header miscounts its
+lines or calls a new or deleted file changed, a merge request is not its own on its repo's forge, a document's id
+repeats, its documents are not those of the gates approved and its finished agent sessions or are not indexed at the
+approval, a document's text is another kind's or another item's, Search ignores its query, filters or limit or reaches
+past the board, or two started items show the same running time. It checks the
 sample, its long and many variants, the seeds that add sessions and the board
 after live motion has walked two items it filed to the end, then the sessions
 the doors make. It fails when an event's `node_id` column is not the node its
