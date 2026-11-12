@@ -252,13 +252,20 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
   const stopSessions = (b: ItemBundle): string[] => {
     // `store.running_sessions_for_node`: the current node's, and an escalation turn's on any node.
     const live = b.sessions.filter((s) => (s.node_id === b.item.current_node_id || s.hook_point === "escalation") && LIVE_SESSION_STATUSES.includes(s.status));
-    for (const s of live) Object.assign(s, { status: "paused", exited_at: now() });
+    for (const s of live) cutOff(b, s);
     return live.map((s) => s.id);
+  };
+  /** `s` marked paused, and, an agent's on an item with content, its log as it stood then: its first sub-agent still at
+   *  work, the rest done inside the time it ran. */
+  const cutOff = (b: ItemBundle, s: any) => {
+    Object.assign(s, { status: "paused", exited_at: now() });
+    const wall_ms = Math.max(0, Date.parse(s.exited_at) - Date.parse(s.started_at ?? s.created_at));
+    if (b.content && isAgentSession(b.item.materialized_chain, s.hook_point, !!s.model)) b.logs[s.id] = logLines(s.id, 12, false, { content: b.content, hook: s.hook_point, status: "running", wall_ms });
   };
   /** `store.running_sessions_under`: the live sessions of a task or step, marked paused. */
   const stopUnder = (b: ItemBundle, scope: string): string[] => {
     const live = b.sessions.filter((s) => (s.hook_point === scope || String(s.hook_point).startsWith(`${scope}.`)) && LIVE_SESSION_STATUSES.includes(s.status));
-    for (const s of live) Object.assign(s, { status: "paused", exited_at: now() });
+    for (const s of live) cutOff(b, s);
     return live.map((s) => s.id);
   };
   /** `store.forks.fork_run` for a retry of `target`, or of one of its steps (`step`, `node.step`): every gate from it on
@@ -749,7 +756,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       const cache = { tokens_cache_write: usage.tokens_cache_write ?? 0, tokens_cache_read: usage.tokens_cache_read ?? 0 };
       Object.assign(s, { status, exited_at: at, wall_ms, ...usage, ...cache });
       // An agent on an item with content: its sub-agents have all answered by now.
-      if (b.content) b.logs[sid] = logLines(sid, 12, false, { content: b.content, hook: s.hook_point, status });
+      if (b.content) b.logs[sid] = logLines(sid, 12, false, { content: b.content, hook: s.hook_point, status, wall_ms });
       const u = it.usage;
       if (u) {
         const add = (r: any) => ({ ...r, tokens_in: r.tokens_in + usage.tokens_in, tokens_cache_write: (r.tokens_cache_write ?? 0) + cache.tokens_cache_write, tokens_cache_read: (r.tokens_cache_read ?? 0) + cache.tokens_cache_read, tokens_out: r.tokens_out + usage.tokens_out, cost_usd: dollars(r.cost_usd + usage.cost_usd), wall_ms: r.wall_ms + wall_ms, sessions: r.sessions + 1 });

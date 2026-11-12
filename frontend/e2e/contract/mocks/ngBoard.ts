@@ -1,4 +1,4 @@
-import { hex, repo, t, type ItemBundle, type Variant } from "./fixtures";
+import { hex, logLines, repo, t, type ItemBundle, type Variant } from "./fixtures";
 import draftViews from "./draftViews.json" with { type: "json" };
 import { chainOf } from "./ngChain";
 import { buildNeverStarted, buildNgItem, type NgScenario } from "./ngItems";
@@ -34,6 +34,8 @@ function noTimeCap(i: any, b: ItemBundle) {
   for (const e of b.events.slice(exit)) e.created_at = new Date(Date.parse(e.created_at) - cut).toISOString();
   Object.assign(s, { wall_ms: s.wall_ms - cut, exited_at: b.events[exit].created_at });
   b.events[exit].payload.wall_ms = s.wall_ms;
+  // Its sub-agents ran inside the shorter run.
+  if (b.content) b.logs[s.id] = logLines(s.id, 12, false, { content: b.content, hook: s.hook_point, status: s.status, wall_ms: s.wall_ms });
   for (const r of [i.usage.total, ...i.usage.by_node.filter((x: any) => x.node === s.node_id)]) r.wall_ms -= cut;
   b.events.forEach((e, n) => { e.seq = n + 1; });
 }

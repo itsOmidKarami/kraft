@@ -701,7 +701,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       const list = subagentList(bundle?.logs[m[2]] ?? [], status);
       if (!m[3]) return json({ session_id: m[2], status, subagents: list });
       const one = list.find((a) => a.id === m![3]);
-      return one ? json({ ...one, prompt: `Look through the repository for ${one.description.toLowerCase()} and report what you find.`, answer: one.summary }) : json({ detail: "no such sub-agent in this session's log" }, 404);
+      return one ? json({ ...one, prompt: `${one.description}, and report what you find.`, answer: one.summary }) : json({ detail: "no such sub-agent in this session's log" }, 404);
     }
 
     /* logs: jsonl, plain text, SSE tail */

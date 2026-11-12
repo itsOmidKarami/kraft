@@ -34,7 +34,7 @@ export const isDocsPath = (p: string) => p.endsWith(".md") || (p.startsWith("doc
  *  that does so needs its counts or the weight moved. */
 export const sizeOf = (c?: Content) =>
   c ? (c.files.reduce((a, [, ins, del]) => a + ins + del + 10, 0) / 150) * (c.files.every(([p]) => isDocsPath(p)) ? 0.5 : 1) : 1;
-const statusOf =(f: File) => (f.slice(3).includes("new") ? "new" : f.slice(3).includes("deleted") ? "deleted" : null);
+export const statusOf = (f: File) => (f.slice(3).includes("new") ? "new" : f.slice(3).includes("deleted") ? "deleted" : null);
 
 /** By bead: the 24 board rows. Merge request numbers count up with the item's age; none is in 150-159, which the
  *  walk gives an item it has no entry for (`transitions.mrOpened`). */

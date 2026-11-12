@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { buildScenario, DELEGATES, searchFor, subagentList, withScopes, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
+import { buildScenario, searchFor, subagentList, withScopes, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
 import { FRESH_TITLES, motion } from "../e2e/contract/mocks/motion";
 import { ngDryRun, NG_REPOS } from "../e2e/contract/mocks/ngBoard";
 import { CONTENT, docBody, FRESH_CONTENT, isDocsPath, isLate, mergeDocs, mrOf, sizeOf } from "../e2e/contract/mocks/ngContent";
@@ -140,7 +140,31 @@ describe.each(SCENARIOS)("sessions in %s", (_scenario, build) => {
     ["an agent's log and sub-agents name only its item's own files", (b, s) => !!b.content && agentic(b, s) && foreignFiles(b, agentTexts(b, s)).length > 0],
     ["a sub-agent is about one of its item's files, in its description and, once it has finished, its answer", (b, s) => !!b.content
       && subagentsOf(b, s).some((a) => [a.description, ...(a.status === "completed" ? [a.summary] : [])].some((x) => !b.content!.files.some(([p]) => String(x).includes(p))))],
-    ["only the implementer, verification's repair and its code review hand work to sub-agents", (b, s) => !!b.content && !DELEGATES.has(s.hook_point) && subagentsOf(b, s).length > 0],
+    ["only the implementer, verification's repair and its code review hand work to sub-agents", (b, s) => !!b.content
+      && !["implementation.main.implement", "verification.fix_loop.main.repair", "verification.review.code_review"].includes(s.hook_point) && subagentsOf(b, s).length > 0],
+    // A code review changes, writes and commits nothing (`skills/code-review/SKILL.md`); an author, a reviewer or the judge reads.
+    ["only the implementer and verification's repair edit the item's files; every other agent reads them", (b, s) => !!b.content && agentic(b, s)
+      && !["implementation.main.implement", "verification.fix_loop.main.repair"].includes(s.hook_point) && logOf(b, s).some((l) => /"name":"Edit"|before I change it/.test(l.text))],
+    ["an agent before implementation reads no file the change adds", (b, s) => !!b.content && agentic(b, s) && /^(spec|plan|chain_revision)/.test(s.hook_point)
+      && logOf(b, s).some((l) => b.content!.files.some((f) => f.slice(3).includes("new") && String(l.text).includes(f[0])))],
+    // A sub-agent is a call inside its session: it cannot outlast it, and those of one session together leave it time of its own.
+    ["a stopped or finished session's sub-agents each ran inside it, together at most four fifths of it", (b, s) => {
+      const subs = b.content && !["running", "pending"].includes(s.status) ? subagentsOf(b, s) : [];
+      const wall = s.wall_ms ?? Date.parse(s.exited_at) - Date.parse(s.started_at ?? s.created_at);
+      return subs.some((a) => a.duration_ms > wall) || subs.reduce((n, a) => n + a.duration_ms, 0) > 0.8 * wall + subs.length;
+    }],
+    // Who calls a file, what it must keep and which tests cover it are questions about code that is there and stays.
+    ["a sub-agent asks for callers, what must be kept or covering tests only of existing code the change modifies", (b, s) => !!b.content && subagentsOf(b, s).some((a) => {
+      const m = String(a.description).match(/^(?:Find who calls \S+ in (\S+)|Check what (\S+) must keep|Find the tests that cover (\S+))$/);
+      const f = m && b.content!.files.find(([p]) => p === (m[1] ?? m[2] ?? m[3]));
+      return !!m && (!f || /(^|\/)tests?\/|(^|\/)test_|\.test\./.test(f[0]) || f.slice(3).some((x) => x === "new" || x === "deleted"));
+    })],
+    // A search for a file's function or name looks where it is used, not in the file itself (an item of one file has nowhere else).
+    ["a sub-agent's search looks for its subject outside the subject's own file", (b, s) => !!b.content && b.content.files.length > 2 && logOf(b, s).some((l) => {
+      const o = l.agent && l.src === "tool" ? JSON.parse(l.text) : null;
+      const bare = (x: string) => x.split("/").pop()!.replace(/\.[^.]+$/, "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+      return o?.name === "Grep" && bare(o.input.path) === bare(o.input.pattern);
+    })],
     ["a finished session's sub-agents have all finished", (b, s) => ["done", "done_with_concerns"].includes(s.status) && subagentsOf(b, s).some((a) => a.status !== "completed")],
     ["a sub-agent spends no more tokens than its session", (b, s) => s.tokens_in != null && subagentsOf(b, s).some((a) => a.tokens > usedBy(s))],
     // Its cache reads are what its cost leaves after the rest: a cost scaled down below its other tokens' leaves fewer than none.
@@ -148,6 +172,15 @@ describe.each(SCENARIOS)("sessions in %s", (_scenario, build) => {
   ])("%s", (_rule, rule) => {
     expect(offenders(S, rule)).toEqual([]);
   });
+});
+
+it("a sub-agent's prompt is its description as it is written", async () => {
+  const S = buildScenario("default");
+  const b = S.ngBoard.map((id) => S.bundles[id]).find((x) => x.content && x.sessions.some((s) => subagentsOf(x, s).length))!;
+  const s = b.sessions.find((x) => subagentsOf(b, x).length)!;
+  const a = subagentsOf(b, s)[0];
+  const got = JSON.parse(((await mockServer(S, demoOptions)({ method: "GET", url: `http://demo/api/work-items/${b.item.id}/sessions/${s.id}/subagents/${a.id}`, json: () => null })) as Answer).body!);
+  expect(got.prompt).toBe(`${a.description}, and report what you find.`);
 });
 
 it("in the live walk, a running agent's log and sub-agents name only its item's own files at every tick", () => {
@@ -1466,6 +1499,24 @@ describe("sessions the doors make", () => {
     expect(T.escalate(b.item.id, "again").status).toBe(200);
     expect(b.sessions.filter((s) => s.hook_point === "escalation")).toHaveLength(had + 2);
     expect(escalationMiscounts(b)).toEqual([]);
+    // On a board item, a turn's log is about that item, not the shared sample's.
+    const c = S.bundles[byBead(S, "kraft-cb59")];
+    expect(T.escalate(c.item.id, "look").status).toBe(200);
+    expect([c.sessions.at(-1)!.hook_point, foreignFiles(c, agentTexts(c, c.sessions.at(-1)))]).toEqual(["escalation", []]);
+  });
+
+  it("a pause leaves an agent's sub-agents inside the time it ran, its first one cut off", () => {
+    const { S, T } = live();
+    // A board item back at its implementation, as a retry would put it, with an implementer the pause stops at once.
+    const b = S.bundles[byBead(S, "kraft-91bc")];
+    b.item.current_node_id = "implementation";
+    const sid = T.createSession(b.item.id, "implementation", "implementation.main.implement").body.session_id;
+    T.sessionRunning(b.item.id, sid);
+    const s = b.sessions.find((x) => x.id === sid)!;
+    expect(subagentsOf(b, s).length).toBeGreaterThan(0);
+    expect(T.pause(b.item.id).status).toBe(200);
+    const wall = Date.parse(s.exited_at) - Date.parse(s.started_at);
+    expect(subagentsOf(b, s).map((a) => [a.status, a.duration_ms <= wall])).toEqual(subagentsOf(b, s).map((_, k) => [k ? "completed" : "cut_off", true]));
   });
 
   it("an escalation turn on another node counts its attempts from one there", () => {

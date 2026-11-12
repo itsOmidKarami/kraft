@@ -121,7 +121,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
       usage = agentUsage(s.hook_point, n, size);
       Object.assign(s, usage);
       // Its sub-agents have all answered by now.
-      if (content) logs[s.id] = logLines(s.id, 12, false, { content, hook: s.hook_point, status });
+      if (content) logs[s.id] = logLines(s.id, 12, false, { content, hook: s.hook_point, status, wall_ms: wall });
       if (status === "done" || status === "done_with_concerns") s.session_summary_ref = `items/${id}/sessions/${s.id}/out/summary.md`;
     } else if (s._noAgent) {
       logs[s.id] = [{ n: 1, t: t(0.1), src: "stdout", text: "no bot feedback collected; no agent started" }];
@@ -221,7 +221,10 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     ev("worker_session_paused", { session_id: s.id }, dm);
     s.exited_at = t(m);
     s.wall_ms = Date.parse(s.exited_at) - Date.parse(s.started_at);
+    cutOff(s);
   };
+  /** A stopped agent's log as it stood then: its first sub-agent still at work, the rest done inside its wall time. */
+  const cutOff = (s: any) => { if (content && s._agent) logs[s.id] = logLines(s.id, 12, false, { content, hook: s.hook_point, status: "running", wall_ms: s.wall_ms }); };
   /** An escalation turn on the node it stopped at: its message, then its session, born and launched as `escalate.dispatch`
    *  launches every turn's. An automatic one (`gates.auto_escalate_stuck`) is sent `AUTO_ESCALATE_MESSAGE`. */
   const turn = (n: number, message: string, auto: boolean, status = "running") => {
@@ -364,6 +367,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
       for (let k = 0; k < 3; k++) {
         m += 0.3;
         Object.assign(s, { status: "rate_limited", exited_at: t(m), wall_ms: 18_000 });
+        cutOff(s);
         ev("worker_session_exited", { session_id: s.id, status: "rate_limited", wall_ms: 18_000 }, 0);
         ev("work_item_rate_limited", { node_id: currentNode, retry_at: k < 2 ? t(m + 2) : t(133.7) }, 0);
         if (k === 2) break;
