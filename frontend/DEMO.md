@@ -88,8 +88,14 @@ escalation turn answering a stop outside the stuck set, or a session summary
 outside its item's folder. It checks the
 sample, its long and many variants, the seeds that add sessions and the board
 after live motion has walked two items it filed to the end, then the sessions
-the doors make. Node by node, the walked items' events must be the finished
-sample item's. Each item's frozen chain says what a task is; `mocks/taskKinds.ts` reads
+the doors make. It fails when an event's `node_id` column is not the node its
+payload names, an agent session's cost is not what its tokens cost at its
+model's prices, or a command's session ran another scope's command. Node by
+node, the walked items' events must be the finished sample item's: those rows
+compare the walk with the seeds, which share one recipe, so a beat the recipe
+drops passes them. The literal rows pin the recipe itself: each node's events,
+written out in the server's order with their polls, for the finished sample
+item and for the walked items. Each item's frozen chain says what a task is; `mocks/taskKinds.ts` reads
 it for the sample items that have one, the doors and live motion, and the
 older sample items, which have none, say it by their model.
 `demo/deadEnds.test.ts` fails when a control leads nowhere: Duplicate answers
