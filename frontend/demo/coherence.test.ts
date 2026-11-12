@@ -37,6 +37,13 @@ const kindsOf = (b: ItemBundle) => {
   }
   return out;
 };
+/** A task's own time cap in minutes, as its frozen chain gives it (`policy.time_cap_minutes`), or null. */
+const capOf = (b: ItemBundle, hook: string): number | null => {
+  const [node, step, task] = hook.split(".");
+  const n = JSON.parse(b.item.materialized_chain ?? '{"chain":{"nodes":[]}}').chain.nodes.find((x: any) => x.id === node);
+  const t = (step === "main" ? n?.tasks : n?.steps?.find((x: any) => x.id === step)?.tasks)?.find((x: any) => x.id === task);
+  return t?.policy?.time_cap_minutes ?? null;
+};
 /** An escalation turn is an agent's, and so is a task the chain names as one; the older samples carry no chain, and say by their model. */
 const agentic = (b: ItemBundle, s: any) => s.hook_point === "escalation" || (kindsOf(b).get(s.hook_point) ?? (s.model ? "agent" : "")) === "agent";
 /** The one agent's task that can finish with no agent: review feedback's triage with no bot feedback to read (`dispatch`). */
@@ -233,6 +240,12 @@ describe.each(SCENARIOS)("items in %s", (_scenario, build) => {
     // Only Kraft's own cancel writes `mr_closed`; the poller that sees a merge request closed writes a stop.
     ["no merge request is closed but by Kraft's cancel", (b) => b.events.filter((e) => e.type === "mr_closed" && e.payload.by !== "cancel").map((e) => e.payload.by)],
     ["it spent no more than its cap, unless that cap stopped it", (b) => b.item.budget_cap.spent_usd > b.item.budget_cap.cap_usd && b.item.stop?.kind !== "budget" && b.item.budget_cap.spent_usd],
+    // `dispatch.over_budget` runs before an agent task launches: a spend cap stops the item on the node whose agent task
+    // it held back, which has no session yet; a node whose every task ran would have completed.
+    ["a spend cap stops it on a node with an agent task still to launch", (b) => b.item.stop?.kind === "budget"
+      && !(nodeTasks(b.item.materialized_chain, b.item.stop.node) ?? []).some((t) => t.kind === "agent" && !b.sessions.some((s) => s.hook_point === t.path)) && b.item.stop.node],
+    // A run as long as its task's time cap would have been stopped by it (`time_cap_reached`, capped out).
+    ["an agent's finished session ran shorter than its task's time cap", (b) => b.sessions.filter((s) => ["done", "done_with_concerns"].includes(s.status) && capOf(b, s.hook_point) && !(s.wall_ms < capOf(b, s.hook_point)! * 60_000)).map((s) => `${s.hook_point}: ${s.wall_ms}`)],
   ])("%s", (_rule, wrong) => {
     const found = chained(S).map((b) => [b.item.title, wrong(b)] as const).filter(([, w]) => (Array.isArray(w) ? w.length > 0 : !!w));
     expect(found).toEqual([]);

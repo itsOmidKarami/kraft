@@ -15,24 +15,32 @@ import { NG_NOW } from "./clock";
  * (transitions.ts `listRow`, whose `stop` carries no `facts`, as W4's list sends it).
  */
 
-/** `fresh`: filed paused and never started, so it has no history at all (only `work_item_created`), whatever `sc` ran. */
-type Row = { sc: NgScenario; title: string; repo: string; bead: string; age: number; chain?: string; fresh?: boolean; tweak?: (i: any, b: ItemBundle) => void };
+/** `fresh`: filed paused and never started, so it has no history at all (only `work_item_created`), whatever `sc` ran.
+ *  `spend`: a capped row its spend cap stopped (ngItems.ts). */
+type Row = { sc: NgScenario; title: string; repo: string; bead: string; age: number; chain?: string; fresh?: boolean; spend?: boolean; tweak?: (i: any, b: ItemBundle) => void };
 
 const R = (name: string) => `/Users/dev/code/${name}`;
 const LONG_R = (name: string) => `/Volumes/Work/clients/acme-corporation/monorepo/services/${name}-with-a-long-checkout-path`;
 
-/** The capped sample stopped instead by its $5 spend cap: its stop, its last event and its spend all say so. `board._stop`
- *  names a budget stop's scope; `work_item` is the item's own cap, the one `/budget/raise` takes. */
-/** The capped sample's session ran to its end instead: no time cap was reached. */
-function noTimeCap(b: ItemBundle) {
+/** The capped sample's session ran to its end instead: no time cap was reached, and it ended a quarter of an hour short
+ *  of the implementer's 120 minutes (a run of the cap's whole length would have been capped). Its exit and what follows
+ *  it move back with it, and its node's and the item's wall time with its own. */
+function noTimeCap(i: any, b: ItemBundle) {
+  const cut = 15 * 60_000;
+  const s = b.sessions.find((x) => x.status === "capped_out")!;
   b.events = b.events.filter((e) => e.type !== "time_cap_reached");
+  const exit = b.events.findIndex((e) => e.type === "worker_session_exited" && e.payload.session_id === s.id);
+  for (const e of b.events.slice(exit)) e.created_at = new Date(Date.parse(e.created_at) - cut).toISOString();
+  Object.assign(s, { wall_ms: s.wall_ms - cut, exited_at: b.events[exit].created_at });
+  b.events[exit].payload.wall_ms = s.wall_ms;
+  for (const r of [i.usage.total, ...i.usage.by_node.filter((x: any) => x.node === s.node_id)]) r.wall_ms -= cut;
   b.events.forEach((e, n) => { e.seq = n + 1; });
 }
 
 /** The capped sample's implementer ran to its end instead: it reported the rest of its plan's tasks before it exited,
  *  each stamped between the last it had reported and its exit, so it committed every task's file (ngContent.ts
- *  `changedFiles`). A spend cap and a moved checkout both stop the item after the task ran (`dispatch.over_budget`
- *  before the next launch, `inplace.check_task` after it), so neither cuts the plan short. */
+ *  `changedFiles`). A moved checkout stops the item after the task ran (`inplace.check_task`), so it does not cut the
+ *  plan short. */
 function finishedPlan(b: ItemBundle) {
   const told = b.events.filter((e) => e.type === "plan_progress");
   const last = told.at(-1)!;
@@ -46,10 +54,11 @@ function finishedPlan(b: ItemBundle) {
   b.events.forEach((e, n) => { e.seq = n + 1; });
 }
 
+/** The capped sample stopped instead by its $5 spend cap, on verification before its code review launched (ngItems.ts,
+ *  `spend`): its stop, its last event and its spend all say so. `board._stop` names a budget stop's scope; `work_item` is
+ *  the item's own cap, the one `/budget/raise` takes. */
 function spendCapped(i: any, b: ItemBundle) {
   const reason = "budget cap reached: $5.00 spent on this work item, cap $5.00. Nothing new was started; a running agent was not interrupted.";
-  noTimeCap(b);
-  finishedPlan(b);
   // A budget stop names its scope (`board._stop`).
   i.stop = { ...i.stop, kind: "budget", reason, facts: {}, scope: "work_item" };
   const last = [...b.events].reverse().find((e) => e.type === "work_item_needs_human")!;
@@ -68,22 +77,14 @@ function spendCapped(i: any, b: ItemBundle) {
   const reads = (ss: any[]) => ss.reduce((a, s) => a + (s.tokens_cache_read ?? 0), 0);
   i.usage = { ...i.usage, total: { ...i.usage.total, cost_usd: sum(b.sessions), tokens_cache_read: reads(b.sessions) }, by_node: i.usage.by_node.map((r: any) => ({ ...r, cost_usd: sum(b.sessions.filter((s) => s.node_id === r.node)), tokens_cache_read: reads(b.sessions.filter((s) => s.node_id === r.node)) })) };
   i.budget_cap = { ...i.budget_cap, cap_usd: 5, spent_usd: 5 };
-  // A spend cap interrupts nothing: the session that spent the last of it ran to its end (done, its summary written,
-  // its usage on its `worker_session_exited` as `store.session_exited` writes it), and the walk stopped before the next
-  // agent task launched (`dispatch.over_budget`). No session is capped out: that is a time cap's or a loop's mark.
-  for (const s of b.sessions.filter((x) => x.status === "capped_out")) {
-    Object.assign(s, { status: "done", session_summary_ref: `items/${i.id}/sessions/${s.id}/out/summary.md` });
-    const exit = b.events.find((e) => e.type === "worker_session_exited" && e.payload.session_id === s.id)!;
-    exit.payload = { session_id: s.id, status: "done", wall_ms: s.wall_ms, model: s.model, tokens_in: s.tokens_in, tokens_cache_write: s.tokens_cache_write, tokens_cache_read: s.tokens_cache_read, tokens_out: s.tokens_out, cost_usd: s.cost_usd };
-  }
 }
 
-/** An in-place item whose checkout moved to main while its review ran (`inplace.check_task`): Kraft switched the
+/** An in-place item whose checkout moved to main while its implementer ran (`inplace.check_task`): Kraft switched the
  *  person's checkout onto the item's branch before the task (`checkout_switched`), the session ran to its end, and the
  *  item stopped for the person instead of switching the checkout back. Built on the capped sample's attempt. */
 function checkoutMoved(i: any, b: ItemBundle) {
   const s = b.sessions.find((x) => x.status === "capped_out")!;
-  noTimeCap(b);
+  noTimeCap(i, b);
   finishedPlan(b);
   Object.assign(s, { status: "done", session_summary_ref: `items/${i.id}/sessions/${s.id}/out/summary.md` });
   const exit = b.events.find((e) => e.type === "worker_session_exited" && e.payload.session_id === s.id)!;
@@ -122,7 +123,7 @@ const ROWS: Row[] = [
   { sc: "needs-gate", title: "Design the caching layer for document search", repo: "kraft-plugins", bead: "kraft-cb59", age: 4 },
   { sc: "capped", title: "Fix flaky retry test in the worker pool", repo: "kraft-core", bead: "kraft-7d21", age: 22 },
   { sc: "needs-you", title: "Add rate limit headers to the public API", repo: "kraft-api", bead: "kraft-a3f0", age: 60 },
-  { sc: "capped", title: "Migrate the config loader to pydantic v2", repo: "kraft-core", bead: "kraft-58e2", age: 120, tweak: spendCapped },
+  { sc: "capped", title: "Migrate the config loader to pydantic v2", repo: "kraft-core", bead: "kraft-58e2", age: 120, spend: true, tweak: spendCapped },
   { sc: "failed", title: "Retry on 429 from the forge API", repo: "kraft-api", bead: "kraft-b108", age: 40 },
   { sc: "paused", title: "Trim the review prompts for the docs chain", repo: "kraft-docs", bead: "kraft-4e19", age: 75, chain: "docs_only" },
   { sc: "running", title: "Bump the VS Code extension to schema v4", repo: "kraft-vscode", bead: "kraft-91bc", age: 6, tweak: runsInPlace },
@@ -173,7 +174,7 @@ function build(rows: Row[], variant: Variant, seed0: number, bundles: Record<str
   return rows.map((r, n) => {
     // Its own brief, files and merge request, in the default sample (ngContent.ts).
     const content = variant === "default" ? CONTENT[r.bead] : undefined;
-    const b = r.fresh ? buildNeverStarted(seed0 + n, long ? "long" : "default", r.chain) : buildNgItem(r.sc, seed0 + n, long ? "long" : "default", r.chain, content && mrOf(r.repo, content.mr), content);
+    const b = r.fresh ? buildNeverStarted(seed0 + n, long ? "long" : "default", r.chain) : buildNgItem(r.sc, seed0 + n, long ? "long" : "default", r.chain, content && mrOf(r.repo, content.mr), content, { spend: r.spend });
     const i = b.item;
     i.id = hex(seed0 + n);
     i.title = long ? r.title + LONG_TAIL : r.title;

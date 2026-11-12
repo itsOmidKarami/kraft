@@ -59,8 +59,8 @@ export function renderNote(threads: any[], summary: string): string {
 }
 /** `mr`: the merge request its draft opens, what its forge tasks print and its stop names; `content`: what the item is
  *  about, which its plan's tasks, its question and its review threads' lines are written from (a board row's own,
- *  ngContent.ts). Without them, the sample's. */
-export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, template = "default", mr = mrOf("/Users/dev/code/kraft-plugins", 142), content?: Content): ItemBundle {
+ *  ngContent.ts). Without them, the sample's. `spend`: a capped item stopped by its spend cap instead of a time cap. */
+export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, template = "default", mr = mrOf("/Users/dev/code/kraft-plugins", 142), content?: Content, o: { spend?: boolean } = {}): ItemBundle {
   const long = variant === "long";
   const id = hex(seed);
   const chain = chainOf(template)!;
@@ -310,6 +310,23 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
       break;
     }
     case "capped": {
+      if (o.spend) {
+        // The implementer ran its whole plan to its end, the node completed and verification's tests passed; the spend
+        // cap stops the item before its code review, an agent's task, launches (`dispatch.over_budget`), on verification
+        // (`stops.stop_for_budget`: no task, no session). The cap's words and numbers are ngBoard.ts `spendCapped`'s.
+        const s = open("implementation.main.implement", "implementation");
+        W.plan.forEach((title, k) => ev("plan_progress", { node_id: "implementation", task: k + 1, total: W.plan.length, title }, 1.5));
+        m -= 1.5 * W.plan.length;
+        close(s);
+        ev("node_completed", { node_id: "implementation" }, 0.02);
+        ev("node_started", { node_id: "verification" }, 0.2);
+        drain(testPass(W, 0));
+        ev("work_item_needs_human", { node_id: "verification", reason: null, kind: "budget" }, 0.05);
+        item.current_node_id = "verification";
+        item.status = "needs_human"; item.display_status = "needs_you";
+        item.stop = { ...stop("budget", null), node: "verification" };
+        break;
+      }
       // The shipped implementer's own time cap, 120 minutes, stops its running session (`session_exited`, capped_out) and
       // names what it hit (`time_cap_reached`), then the item stops with that reason. A task's cap is the chain's: no item
       // override raises it, so the stop names no `limit` (`caps.item_limit`).

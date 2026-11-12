@@ -123,7 +123,7 @@ describe("transitions", () => {
       [["work_item_archived", { by: "you" }, null]]],
     ["restore puts it back under Done", "kraft-9a02", (T, id) => T.restore(id), { status: "completed", display_status: "done", archived_at: null }, [["work_item_restored", {}, null]]],
     ["raise budget lifts the cap and retries", "kraft-58e2", (T, id) => T.raiseBudget(id, 8), { status: "active", display_status: "running", stop: null, budget_cap: expect.objectContaining({ cap_usd: 8, source: "item" }) },
-      [["budget_raised", { budget_usd: 8 }, null], ["work_item_retried", { node_id: "implementation" }, "implementation"], ...forked()]],
+      [["budget_raised", { budget_usd: 8 }, null], ["work_item_retried", { node_id: "verification" }, "verification"], ...forked()]],
     ["escalate starts a turn in a new thread", "failed", (T, id) => T.escalate(id, "look at the token", true), { status: "needs_human", display_status: "escalated" },
       turnStarted({ message: "look at the token", auto: false, thread: 2, turn: 1 }, "draft_merge_request", 2)],
     ["stop escalation ends the turn, the item as it stopped", "failed", (T, id) => (T.escalate(id, "look"), T.stopEscalation(id)), { status: "needs_human", display_status: "failed" },
@@ -437,13 +437,15 @@ describe("samples and answers as the server shapes them", () => {
     const b = S.bundles[idOf(S, "kraft-58e2")];
     expect(b.item.stop).toMatchObject({ kind: "budget", scope: "work_item" });
     expect(b.item.stop.facts).toEqual({});
-    expect(b.events.filter((e) => e.type === "work_item_needs_human").at(-1)?.payload).toEqual({ node_id: "implementation", reason: "budget cap reached: $5.00 spent on this work item, cap $5.00. Nothing new was started; a running agent was not interrupted.", kind: "budget", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } });
+    expect(b.events.filter((e) => e.type === "work_item_needs_human").at(-1)?.payload).toEqual({ node_id: "verification", reason: "budget cap reached: $5.00 spent on this work item, cap $5.00. Nothing new was started; a running agent was not interrupted.", kind: "budget", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } });
     const cost = b.sessions.reduce((a, s) => a + s.cost_usd, 0);
     expect([Math.abs(cost - 5) < 0.01, Math.abs(b.item.usage.total.cost_usd - 5) < 0.01, b.item.budget_cap.spent_usd]).toEqual([true, true, 5]);
-    // A spend cap interrupts nothing: the session that spent the last of it ran to its end, then the walk stopped.
+    // A spend cap interrupts nothing: the agent that spent the last of it ran to its end, verification's tests (no agent,
+    // no spend) ran, and the walk stopped on verification before its code review launched, with no task of its own.
     expect(b.sessions.filter((s) => s.status !== "done")).toEqual([]);
-    const last = b.sessions.at(-1);
-    expect([last.hook_point, last.attempt, last.session_summary_ref, b.item.stop.task, b.item.stop.attempt]).toEqual(["implementation.main.implement", 1, `items/${b.item.id}/sessions/${last.id}/out/summary.md`, "implementation.main.implement", 1]);
+    const agent = b.sessions.filter((s) => s.model).at(-1);
+    expect([agent.hook_point, agent.session_summary_ref, b.sessions.slice(b.sessions.indexOf(agent) + 1).map((s) => s.hook_point)]).toEqual(["implementation.main.implement", `items/${b.item.id}/sessions/${agent.id}/out/summary.md`, ["verification.tests.test_changed_scopes", "verification.tests.test_changed_scopes"]]);
+    expect([b.item.current_node_id, b.item.stop.node, b.item.stop.task, b.item.stop.attempt]).toEqual(["verification", "verification", null, 1]);
   });
 
   it.each([
