@@ -33,6 +33,3 @@ export function frozenOf(template: string, keep?: string[]): string {
   const c = CHAINS[template];
   return JSON.stringify({ chain: { ...c.frozen, nodes: c.frozen.nodes.filter((n: any) => !keep || keep.includes(n.id)) } });
 }
-
-/** The default chain's nodes, in order. */
-export const NG_NODES: DefNode[] = DEFAULT.nodes;

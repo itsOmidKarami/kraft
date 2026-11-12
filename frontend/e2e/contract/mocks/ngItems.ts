@@ -5,8 +5,6 @@ import { RESUME_PROMPT } from "./poller";
 import { agentRun, DOCS_SCOPE, isAgentSession, MODEL, RUNS, taskRun, type Run } from "./taskKinds";
 import { escalationThreads } from "./transitions";
 
-export { NG_NODES } from "./ngChain";
-
 /**
  * Items for the item page (ux2-W5) and the board (ngBoard.ts): the shipped default chain (ngChain.ts) in every
  * scenario the item page draws, plus paused, each standing where a real item in that state stands, with the sessions
@@ -118,7 +116,8 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     current_node_id: currentNode, bead_id: "kraft-cb59",
     created_at: t(start), updated_at: t(start),
     auto_gate: true, pending_gate: null, gate_artifact: null, steerable: true,
-    node_overrides: long ? { verification: { attempts: 4 } } : {}, node_overrides_count: long ? 1 : 0,
+    // The long variant overrides its chain's fix loop where it has one (docs_only has none).
+    node_overrides: long && has("verification") ? { verification: { attempts: 4 } } : {}, node_overrides_count: long && has("verification") ? 1 : 0,
     agent_overrides: null,
     budget_cap: { cap_usd: 25, source: long ? "item" : "policy", spent_usd: 0, daily: { spent_usd: 18.2, cap_usd: 50 } },
     worktree_path: `/Users/dev/.kraft/run/worktrees/${id}`, head_sha: hex(seed + 77).slice(0, 40), review_head: null,
