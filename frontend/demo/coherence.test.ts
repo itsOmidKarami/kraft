@@ -262,10 +262,12 @@ const ENDED_STATUSES = ["completed", "abandoned"];
 type Row = [path: string, insertions: number, deletions: number, ...flags: string[]];
 const late = (f: Row) => f.slice(3).includes("late");
 /** What the item has committed: a task's file once the next task started (Kraft commits after every task), all the
- *  implementation's files once it completed, and verification's round's once that completed. */
+ *  implementation's files once it completed, and verification's round's once a repair of its fix loop finished or
+ *  verification completed. */
 const committed = (b: ItemBundle): Row[] => {
   const files = b.content!.files as Row[];
-  if (completed(b, "implementation")) return files.filter((f) => !late(f) || completed(b, "verification"));
+  const repaired = b.sessions.some((s) => s.hook_point === "verification.fix_loop.main.repair" && s.status === "done");
+  if (completed(b, "implementation")) return files.filter((f) => !late(f) || repaired || completed(b, "verification"));
   const started = Math.max(0, ...b.events.filter((e) => e.type === "plan_progress" && e.payload.node_id === "implementation").map((e) => Number(e.payload.task)));
   return files.filter((f) => !late(f)).slice(0, Math.max(0, started - 1));
 };
@@ -387,9 +389,32 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
       const plan = (await call(`/work-items/${b.item.id}/artifacts/plan`)).body?.content ?? "";
       const tasks = [...plan.matchAll(/^### Task \d+: (.*)$/gm)].map((m: RegExpMatchArray) => m[1]);
       const bad = b.events.filter((e) => e.type === "plan_progress").some((e) => e.payload.total !== tasks.length || e.payload.title !== tasks[Number(e.payload.task) - 1]);
-      return bad || !tasks.length || tasks.at(-1) !== "Check it" ? b.item.title : null;
+      // One task per file it changes (not those verification's round adds), then a check, last.
+      const shape = tasks.length === (b.content!.files as Row[]).filter((f) => !late(f)).length + 1 && tasks.at(-1) === "Check it";
+      return bad || !shape ? b.item.title : null;
     }));
     expect(wrong.filter(Boolean)).toEqual([]);
+  });
+  // A time cap stops the implementer mid-plan (capped_out); a spend cap or a moved checkout stops the item after the
+  // task ran (`dispatch.over_budget` before the next launch, `inplace.check_task` after it), so its session is done.
+  it("an implementer that ran to its end reported its whole plan, and one stopped short did not", () => {
+    const wrong = board.filter((b) => b.events.some((e) => e.type === "plan_progress")).flatMap((b) => {
+      const s = b.sessions.filter((x) => x.hook_point === "implementation.main.implement").at(-1)!;
+      const told = b.events.filter((e) => e.type === "plan_progress");
+      const all = Math.max(...told.map((e) => Number(e.payload.task))) === told[0].payload.total;
+      return (s.status === "done") !== all ? [`${b.item.title}: ${s.status}, ${told.length} of ${told[0].payload.total}`] : [];
+    });
+    expect(wrong).toEqual([]);
+  });
+  // `progress.for_item`: only an item running its implementation node has plan progress (`active_implementation_node`).
+  it("only an item running its implementation shows plan progress, on the board and in its detail", async () => {
+    const rows = (await call("/work-items")).body.items;
+    const wrong = board.flatMap((b) => {
+      const running = b.item.status === "active" && b.item.current_node_id === "implementation";
+      const row = rows.find((r: any) => r.id === b.item.id);
+      return [b.item.progress, row?.progress].some((p) => !running && p != null) ? [b.item.title] : [];
+    });
+    expect(wrong).toEqual([]);
   });
   // A chain with no plan node (docs_only) has no plan: `report_progress` answers 400, so its implementer reports no task
   // and names no commit after one.
@@ -522,6 +547,15 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
       }
       for (const d of (S.docs[b.item.id] ?? []).filter((x) => x.kind === "sessions" && (["spec", "plan"].includes(x.node_id) || String(x.hook_point).endsWith(".auto_review")))) {
         if ((await call(`/documents/${d.document_id}`)).body.content.includes("the plan names")) wrong.push(`${b.item.title}: ${d.title}`);
+      }
+      // The implementer's summary lists the files its plan named, not those verification's round added after it; a count
+      // of the plan's tasks is the plan's, and an item with no plan names none.
+      const files = b.content!.files as Row[];
+      const tasks = defIds(b).includes("plan") ? files.filter((f) => !late(f)).length + 1 : 0;
+      for (const d of (S.docs[b.item.id] ?? []).filter((x) => x.kind === "sessions" && S.docText?.[x.document_id] == null)) {
+        const text = (await call(`/documents/${d.document_id}`)).body.content as string;
+        const count = /the (\d+) tasks the plan names/.exec(text)?.[1];
+        if ((d.hook_point === "implementation.main.implement" && files.filter(late).some(([p]) => text.includes(p))) || (count != null && Number(count) !== tasks) || (!tasks && /\bthe plan\b/.test(text))) wrong.push(`${b.item.title}: ${d.title}`);
       }
     }
     expect(wrong).toEqual([]);

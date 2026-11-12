@@ -3,7 +3,7 @@ import { NG_REPOS } from "./ngBoard";
 import { chainOf } from "./ngChain";
 import { forgesFixture } from "./ngForges";
 import { NG_NOW } from "./clock";
-import { PLAN } from "./nodeRecipe";
+import { PLAN, REPAIR } from "./nodeRecipe";
 
 /**
  * What each board item is about (ngBoard.ts ROWS and ARCHIVED, by bead; live motion's refiled items, by title): its
@@ -116,13 +116,16 @@ export const planTasks = (c: Content) => [...c.files.filter((f) => !isLate(f)).m
 export const planOf = (frozen: string, content?: Content): string[] => (!frozen.includes('"produces":"plan"') ? [] : content ? planTasks(content) : [...PLAN]);
 
 const done = (b: ItemBundle, node: string) => b.events.some((e) => e.type === "node_completed" && e.payload.node_id === node);
+/** Whether verification's round has landed what it added: a repair of its fix loop has finished, or the node completed. */
+const fixed = (b: ItemBundle) => done(b, "verification") || b.sessions.some((s) => s.hook_point === REPAIR && s.status === "done");
 /** The files the item has committed so far, path-sorted as `git diff --numstat` lists them: none before its first plan
  *  task, then each task's file once the implementer has started the next (Kraft commits after every task), all of the
- *  implementation's once it completed, and the files verification's round added once that completed too. */
+ *  implementation's once it completed, and the files verification's round added once a repair finished or it completed
+ *  (`review.read_change` reads `base..HEAD`). */
 export function changedFiles(b: ItemBundle): File[] {
   const files = b.content!.files;
   let out: File[];
-  if (done(b, "implementation")) out = files.filter((f) => !isLate(f) || done(b, "verification"));
+  if (done(b, "implementation")) out = files.filter((f) => !isLate(f) || fixed(b));
   else {
     const started = Math.max(0, ...b.events.filter((e) => e.type === "plan_progress" && e.payload.node_id === "implementation").map((e) => Number(e.payload.task)));
     out = files.filter((f) => !isLate(f)).slice(0, Math.max(0, started - 1));
@@ -317,11 +320,14 @@ export function docBody(b: ItemBundle, d: { kind: string; hook_point?: string | 
     default: {
       const task = words(String(d.hook_point ?? "").split(".").at(-1) ?? "");
       const gate = nodesOf(b).find((n) => n.id === d.node_id && n.kind === "gate");
-      const did = task === "implement" ? `Worked through the plan task by task and committed each.\n\n${counted}`
+      // The implementer's own work is the plan's files, not those verification's round added after it.
+      const own = files.filter((f) => !isLate(f)).map(([p, i, dl]) => `- \`${p}\` (+${i} −${dl})`).join("\n");
+      const tasks = planOf(JSON.stringify(nodesOf(b)), c).length;
+      const did = task === "implement" ? `${tasks ? "Worked through the plan task by task and committed each." : "Made the change the spec describes and committed it."}\n\n${own}`
         // A gate's reviewer and the writer of a spec, plan or chain revision run before any code changed.
         : gate ? `Read the ${words(gate.artifact ?? "document")} before the person decides: it says what changes, and how to tell it is done.`
         : ["spec", "plan", "chain_revision"].includes(d.node_id ?? "") ? `Wrote the ${words(d.node_id!)} from the item's brief.`
-        : `Ran ${task} for ${d.node_id ?? "the item"} on the ${files.length} files the plan names.`;
+        : `Ran ${task} for ${d.node_id ?? "the item"} on ${tasks ? `the ${tasks} tasks the plan names` : `the ${files.filter((f) => !isLate(f)).length} files the spec names`}.`;
       return `# ${taskName(d.hook_point, d.node_id)}: ${it.title}\n\n${first}\n\n## What this session did\n\n${did}\n\n## Next\n\n${check}\n`;
     }
   }

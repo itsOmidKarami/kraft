@@ -3,7 +3,7 @@ import draftViews from "./draftViews.json" with { type: "json" };
 import { chainOf } from "./ngChain";
 import { buildNeverStarted, buildNgItem, type NgScenario } from "./ngItems";
 import { cacheRead } from "./nodeRecipe";
-import { CONTENT, mrOf, planTasks } from "./ngContent";
+import { CONTENT, mrOf, planOf } from "./ngContent";
 import { NG_NOW } from "./clock";
 
 /**
@@ -29,9 +29,27 @@ function noTimeCap(b: ItemBundle) {
   b.events.forEach((e, n) => { e.seq = n + 1; });
 }
 
+/** The capped sample's implementer ran to its end instead: it reported the rest of its plan's tasks before it exited,
+ *  each stamped between the last it had reported and its exit, so it committed every task's file (ngContent.ts
+ *  `changedFiles`). A spend cap and a moved checkout both stop the item after the task ran (`dispatch.over_budget`
+ *  before the next launch, `inplace.check_task` after it), so neither cuts the plan short. */
+function finishedPlan(b: ItemBundle) {
+  const told = b.events.filter((e) => e.type === "plan_progress");
+  const last = told.at(-1)!;
+  const s = b.sessions.find((x) => x.hook_point === "implementation.main.implement")!;
+  const exit = b.events.find((e) => e.type === "worker_session_exited" && e.payload.session_id === s.id)!;
+  const plan = planOf(b.item.materialized_chain, b.content);
+  const rest = plan.slice(told.length);
+  const from = Date.parse(last.created_at);
+  const step = (Date.parse(exit.created_at) - from) / (rest.length + 1);
+  b.events.splice(b.events.indexOf(last) + 1, 0, ...rest.map((title, k) => ({ ...last, payload: { ...last.payload, task: told.length + k + 1, title }, created_at: new Date(from + step * (k + 1)).toISOString() })));
+  b.events.forEach((e, n) => { e.seq = n + 1; });
+}
+
 function spendCapped(i: any, b: ItemBundle) {
   const reason = "budget cap reached: $5.00 spent on this work item, cap $5.00. Nothing new was started; a running agent was not interrupted.";
   noTimeCap(b);
+  finishedPlan(b);
   // A budget stop names its scope (`board._stop`).
   i.stop = { ...i.stop, kind: "budget", reason, facts: {}, scope: "work_item" };
   const last = [...b.events].reverse().find((e) => e.type === "work_item_needs_human")!;
@@ -66,6 +84,7 @@ function spendCapped(i: any, b: ItemBundle) {
 function checkoutMoved(i: any, b: ItemBundle) {
   const s = b.sessions.find((x) => x.status === "capped_out")!;
   noTimeCap(b);
+  finishedPlan(b);
   Object.assign(s, { status: "done", session_summary_ref: `items/${i.id}/sessions/${s.id}/out/summary.md` });
   const exit = b.events.find((e) => e.type === "worker_session_exited" && e.payload.session_id === s.id)!;
   exit.payload = { ...exit.payload, status: "done" };
@@ -84,9 +103,9 @@ function checkoutMoved(i: any, b: ItemBundle) {
 
 /** The running row, in kraft-vscode's own checkout: what `waitsForCheckout` waits behind. */
 function runsInPlace(i: any) {
-  // Its plan's second task (ngContent.ts `planTasks`), the sample's where it has none.
-  const plan = CONTENT[i.bead_id] ? planTasks(CONTENT[i.bead_id]) : ["Read the verify contract", "Thread findings into the prompt", "Tests"];
-  i.progress = { current: 2, total: plan.length, title: plan[1] };
+  // On verification's code review: no plan progress, which the board sends only while the item runs its implementation
+  // node (`progress.for_item`).
+  i.progress = null;
   i.step = { index: 2, count: 2, name: "review", task: "code_review" };
   Object.assign(i, { in_place: true, worktree_path: i.repo });
 }
@@ -160,6 +179,7 @@ function build(rows: Row[], variant: Variant, seed0: number, bundles: Record<str
     i.title = long ? r.title + LONG_TAIL : r.title;
     i.repo = (long ? LONG_R : R)(r.repo);
     i.bead_id = r.bead;
+    if (content) b.content = content;
     r.tweak?.(i, b);
     // Its history ends when it was last touched, so each item has run for its own time: from its first node to the
     // clock, or to its last event once it has ended.
@@ -172,10 +192,7 @@ function build(rows: Row[], variant: Variant, seed0: number, bundles: Record<str
       i.started_at = b.events.find((e) => e.type === "node_started")?.created_at ?? null;
       if (["completed", "abandoned"].includes(i.status)) i.ended_at = b.events.at(-1)!.created_at;
     }
-    if (content) {
-      b.content = content;
-      i.description = content.description;
-    }
+    if (content) i.description = content.description;
     for (const s of b.sessions) s.work_item_id = i.id;
     // Its own repo and title where an event names one (`work_item_created`, `branch_pushed`).
     for (const e of b.events) { e.work_item_id = i.id; if (e.payload.repo) e.payload.repo = i.repo; if (e.type === "work_item_created") e.payload.title = i.title; }
