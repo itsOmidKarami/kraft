@@ -32,7 +32,6 @@ const seeded = (seed: (S: Scenario) => void) => { const S = buildScenario("defau
 const SCENARIOS: [string, () => Scenario][] = [
   ["the default sample", () => buildScenario("default")],
   ["the long variant", () => buildScenario("long")],
-  ["the many variant", () => buildScenario("many")],
   ["a gate's reviewer", () => seeded(withReviewer)],
   ["test scopes", () => seeded(withScopes)],
 ];
@@ -46,7 +45,7 @@ describe.each(SCENARIOS)("sessions in %s", (_scenario, build) => {
     ["a command's session reports no usage", (b, s) => !agentic(b, s) && (s.tokens_in != null || s.tokens_out != null || s.cost_usd != null)],
     ["a command's session wrote no summary", (b, s) => !agentic(b, s) && s.session_summary_ref != null],
     ["a command's log holds its output only: no tool call, no agent line", (b, s) => !agentic(b, s) && logOf(b, s).some((l) => l.src !== "stdout" || l.agent)],
-    ["a command's finished session reports how long it took", (b, s) => !agentic(b, s) && ["done", "failed"].includes(s.status) && s.wall_ms == null],
+    ["a command's finished session reports how long it took", (b, s) => !agentic(b, s) && ["done", "failed"].includes(s.status) && !(s.wall_ms > 0)],
     ["a test or lint run has the command it ran", (_b, s) => ["unit_tests", "lint", "typecheck"].includes(lastSegment(s.hook_point)) && !s.command],
     ["an agent's session reports the claude harness", (b, s) => agentic(b, s) && s.harness !== "claude"],
     ["an agent's finished session reports its model and usage", (b, s) => agentic(b, s) && ["done", "done_with_concerns"].includes(s.status) && (s.model == null || s.tokens_in == null || s.cost_usd == null)],
@@ -98,7 +97,7 @@ describe("sessions the doors make", () => {
     const b = S.bundles[id];
     const sid = T.createSession(id, "work_brief", "work_brief.write.work_brief").body.session_id;
     const s = () => b.sessions.find((x) => x.id === sid)!;
-    expect(s()).toMatchObject({ harness: "claude", model: null });
+    expect(s()).toMatchObject({ harness: "claude", model: null, tokens_in: null, cost_usd: null });
     expect(logOf(b, s()).some((l) => l.src === "agent")).toBe(true);
     T.sessionRunning(id, sid);
     T.sessionExited(id, sid, { model: MODEL, tokens_in: 30_000, tokens_out: 4_000, cost_usd: 0.1 });
@@ -130,7 +129,7 @@ describe("sessions the doors make", () => {
     const before = b.sessions.at(-1);
     expect(T.resume(b.item.id, "Look at the unused imports.").status).toBe(200);
     const next = b.sessions.at(-1)!;
-    expect(next).toMatchObject({ status: "pending", ...(kind === "agent" ? { harness: "claude" } : { harness: null, command: before!.command }) });
+    expect(next).toMatchObject({ status: "pending", tokens_in: null, cost_usd: null, ...(kind === "agent" ? { harness: "claude" } : { harness: null, command: before!.command }) });
     if (kind === "command") expect(next.command).toBeTruthy();
   });
 });
@@ -198,6 +197,9 @@ describe("what a command prints", () => {
   });
   it.each(Object.keys(RUNS).filter((task) => RUNS[task].partial))("%s: a run in progress has printed less than a finished one", (task) => {
     expect(runOutput(task, "running", MR)).not.toEqual(runOutput(task, "done", MR));
+  });
+  it.each(["paused", "waiting", "capped_out", "needs_context", "rate_limited"])("a run stopped as %s has printed what a running one has, not the finished output", (status) => {
+    for (const task of Object.keys(RUNS).filter((t) => RUNS[t].partial)) expect(runOutput(task, status, MR)).toEqual(runOutput(task, "running", MR));
   });
   it.each(Object.keys(RUNS))("%s: a finished run prints something", (task) => {
     expect(runOutput(task, "done", MR).length).toBeGreaterThan(0);

@@ -28,7 +28,8 @@ let last: { frozen: string; kinds: Map<string, string>; own: Map<string, { path:
 /** Each task's kind by hook point, and each node's own tasks in order: `<node>.<step>.<task>` (step `main` for a node that lists
  *  its tasks), `<node>.fix_loop.<step>.<task>` and `<node>.fix_loop.judge`, `<node>.on_failure.<step>.<task>`, a gate's
  *  `<gate>.auto_review`, a group's nodes under `<group>.`.
- *  shortcut: a task's or a step's own `on_failure` handler is not walked; its hook point reads as unnamed, so an agent's. */
+ *  shortcut: a task's or a step's own `on_failure` handler, a node's `on_merge_rejected` repair and its `on_base_changed.on_conflict` handler are not
+ *  walked; their hook points read as unnamed, so an agent's, which is what every shipped one is. */
 function read(frozen: string) {
   if (last?.frozen === frozen) return last;
   const kinds = new Map<string, string>();
