@@ -28,6 +28,7 @@ import { buildNgBoard } from "./ngBoard";
 import type { EventType } from "../../../src/types/vocab.generated";
 import type { GateRound } from "../../../src/types";
 import { buildNgItem, NG_NOW, NG_SCENARIOS } from "./ngItems";
+import { isAgentSession, RUNS } from "./taskKinds";
 
 /* ── ids & time ──────────────────────────────────────────────────────────── */
 
@@ -210,6 +211,18 @@ export function logLines(sessionId: string, n: number, long: boolean): any[] {
   return out;
 }
 
+/** The log of a task that is no agent's: the command it ran, then what that printed, as stdout. Nothing in it is a
+ *  tool call or a sub-agent's line, so no sub-agent is listed for it (`subagentList`). */
+export function commandLog(task: string, status: string, mr = "https://github.com/acme/kraft-plugins/pull/142"): any[] {
+  const run = RUNS[task];
+  const text = run ? [...(run.command ? [run.command] : []), ...run.output(mr, status)] : [`${task} ${status}`];
+  return text.map((line, i) => ({ n: i + 1, t: t((i + 1) / 10), src: "stdout", text: line }));
+}
+
+/** A session's log by what ran it: an agent's lines, or a command's output. */
+export const sessionLog = (agent: boolean, task: string, sid: string, n: number, long: boolean, status = "done") =>
+  agent ? logLines(sid, n, long) : commandLog(task, status);
+
 /** The sub-agents `lines` name, as the server's `/subagents` route lists them: the first runs while its session does. */
 export function subagentList(lines: any[], status: string): any[] {
   const seen = new Map<string, any>();
@@ -258,20 +271,23 @@ function buildItem(state: DisplayState, seed: number, variant: Variant): ItemBun
   };
   const sess = (node: string, status: string, over: Record<string, unknown> = {}, hook = HOOK[node] ?? "on.task") => {
     const sid = hex(seed * 100 + sessions.length + 1);
+    // The older samples carry no frozen chain: a test, merge request or CI hook is a command's, the rest an agent's.
+    const model = hook.includes("test") || hook.includes("mr") || hook.includes("ci") ? null : "claude-opus-4-1";
+    const used = model !== null && status !== "pending";
     const s = {
       id: sid, work_item_id: id, node_id: node, hook_point: hook, status, attempt: 1, round: 0,
       created_at: t(m), started_at: t(m + 0.2), exited_at: status === "running" || status === "pending" ? null : t(m + 6),
-      tokens_in: status === "pending" ? null : 48_210 + sessions.length * 7_311,
-      tokens_out: status === "pending" ? null : 6_120 + sessions.length * 911,
-      cost_usd: status === "pending" ? null : 0.41 + sessions.length * 0.17,
+      tokens_in: used ? 48_210 + sessions.length * 7_311 : null,
+      tokens_out: used ? 6_120 + sessions.length * 911 : null,
+      cost_usd: used ? 0.41 + sessions.length * 0.17 : null,
       wall_ms: status === "running" || status === "pending" ? null : 6 * 60_000 + sessions.length * 13_000,
-      model: hook.includes("test") || hook.includes("mr") || hook.includes("ci") ? null : "claude-opus-4-1",
+      model,
       head_sha: hex(seed + 500 + sessions.length).slice(0, 40),
-      session_summary_ref: status === "done" || status === "done_with_concerns" ? `.engineering/sessions/${sid}.md` : null,
+      session_summary_ref: model !== null && (status === "done" || status === "done_with_concerns") ? `.engineering/sessions/${sid}.md` : null,
       ...over,
     };
     sessions.push(s);
-    logs[sid] = logLines(sid, long ? 600 : 40, long);
+    logs[sid] = sessionLog(model !== null, hook.split(".").at(-1)!, sid, long ? 600 : 40, long, status);
     return s;
   };
 
@@ -785,7 +801,7 @@ export function serverKeys(b: ItemBundle): ItemBundle {
   if (it.budget_cap && !("key" in it.budget_cap)) it.budget_cap.key = "budget_usd";
   const run = `/Users/dev/.kraft/run/items/${it.id}/sessions`;
   for (const s of b.sessions) fill(s, {
-    harness: "claude", command: null, cost_estimated: false, egress: null, sandbox: null, repository: null, runner: null, runner_unreachable_since: null, skipped: false, pass: 1, pid: null, pid_start_time: null,
+    harness: isAgentSession(it.materialized_chain, s.hook_point, !!s.model) ? "claude" : null, command: null, cost_estimated: false, egress: null, sandbox: null, repository: null, runner: null, runner_unreachable_since: null, skipped: false, pass: 1, pid: null, pid_start_time: null,
     tokens_cache_read: 0, tokens_cache_write: 0, log_path: `${run}/${s.id}/session.log`, result_path: `${run}/${s.id}/out/result.json`,
   });
   return b;

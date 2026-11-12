@@ -1,6 +1,7 @@
 import type { EventType } from "../../../src/types/vocab.generated";
-import { hex, logLines, LONG_DESCRIPTION, t, type ItemBundle, type Variant } from "./fixtures";
+import { commandLog, hex, logLines, LONG_DESCRIPTION, t, type ItemBundle, type Variant } from "./fixtures";
 import { RESUME_PROMPT } from "./poller";
+import { isAgentSession, MODEL, RUNS } from "./taskKinds";
 
 /**
  * Items for the item page (ux2-W5): the prototype's 15-node V1 chain in
@@ -85,17 +86,22 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
   const sess = (path: string, status: string, over: Record<string, unknown> = {}) => {
     const sid = hex(seed * 100 + sessions.length + 1);
     const node = path.split(".")[0];
+    const task = path.split(".").at(-1)!;
+    // What the frozen chain says the task is: only an agent's session has a model, usage, a summary and sub-agents.
+    const agent = isAgentSession(FROZEN, String(over.hook_point ?? path));
+    const run = RUNS[task];
+    const n = sessions.length;
     const s = {
       id: sid, work_item_id: id, node_id: node, hook_point: path, status, attempt: 1, round: 0, thread: 1,
       created_at: t(m), started_at: t(m + 0.1), exited_at: ["running", "pending", "rate_limited", "waiting"].includes(status) ? null : t(m + 4),
-      tokens_in: 41_200 + sessions.length * 3_100, tokens_out: 5_400 + sessions.length * 410, cost_usd: 0.06 + (sessions.length % 5) * 0.03,
-      wall_ms: ["running", "pending"].includes(status) ? null : 4 * 60_000 + (sessions.length % 7) * 21_000,
-      model: path.includes("unit_tests") || path.includes("lint") || path.includes("typecheck") || path.includes("mr_checks") ? null : "claude-sonnet-4-5",
-      head_sha: hex(seed + 400 + sessions.length).slice(0, 40), session_summary_ref: status === "done" ? `.engineering/sessions/${sid}.md` : null,
+      tokens_in: agent ? 41_200 + n * 3_100 : null, tokens_out: agent ? 5_400 + n * 410 : null, cost_usd: agent ? 0.06 + (n % 5) * 0.03 : null,
+      wall_ms: ["running", "pending"].includes(status) ? null : agent ? 4 * 60_000 + (n % 7) * 21_000 : run?.wall_ms ?? 1_000,
+      model: agent ? MODEL : null, command: run?.command ?? null,
+      head_sha: hex(seed + 400 + n).slice(0, 40), session_summary_ref: agent && status === "done" ? `.engineering/sessions/${sid}.md` : null,
       ...over,
     };
     sessions.push(s);
-    logs[sid] = logLines(sid, long ? 300 : 12, long);
+    logs[sid] = agent ? logLines(sid, long ? 300 : 12, long) : commandLog(task, status);
     return s;
   };
   const runNode = (n: Node, status = "done", attempt = 1) => {

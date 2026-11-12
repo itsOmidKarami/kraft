@@ -28,7 +28,8 @@ function spendCapped(i: any, b: ItemBundle) {
   last.payload = { node_id: last.payload.node_id, reason, kind: "budget", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } };
   // Its sessions' costs scaled to the $5 it spent, and its usage read off them again.
   const was = b.sessions.reduce((a, s) => a + (s.cost_usd ?? 0), 0);
-  for (const s of b.sessions) s.cost_usd = Math.round(((s.cost_usd ?? 0) * 5 / was) * 10_000) / 10_000;
+  // Only an agent's session has a cost: a test command's has none, and stays so.
+  for (const s of b.sessions) if (s.cost_usd != null) s.cost_usd = Math.round((s.cost_usd * 5 / was) * 10_000) / 10_000;
   const sum = (ss: any[]) => Math.round(ss.reduce((a, s) => a + (s.cost_usd ?? 0), 0) * 10_000) / 10_000;
   i.usage = { ...i.usage, total: { ...i.usage.total, cost_usd: sum(b.sessions) }, by_node: i.usage.by_node.map((r: any) => ({ ...r, cost_usd: sum(b.sessions.filter((s) => s.node_id === r.node)) })) };
   i.budget_cap = { ...i.budget_cap, spent_usd: 5 };

@@ -1,8 +1,9 @@
 import { FAILURE_STOP_KINDS, LIVE_SESSION_STATUSES, WORK_ITEM_TRAITS, type DisplayStatus, type EventType, type SessionStatus, type StopKind, type WorkItemStatus } from "../../../src/types/vocab.generated";
-import { documentsFor, gateRoundsOf, hex, logLines, serverKeys, type ItemBundle, type Scenario } from "./fixtures";
+import { documentsFor, gateRoundsOf, hex, logLines, serverKeys, sessionLog, type ItemBundle, type Scenario } from "./fixtures";
 import { ngDryRun } from "./ngBoard";
 import { RESUME_PROMPT } from "./poller";
 import { buildNeverStarted } from "./ngItems";
+import { isAgentSession, MODEL, RUNS } from "./taskKinds";
 
 /**
  * The work item's transitions, as the server makes them: what each door changes, the event row it appends
@@ -316,9 +317,11 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
         // The next attempt of the node's own last task, waiting to start (an escalation turn is not one).
         const node = it.current_node_id;
         const last = b.sessions.filter((s) => s.node_id === node && s.hook_point !== "escalation").at(-1);
+        const hook = last?.hook_point ?? node;
         b.sessions.push({
-          id: sessionId(), work_item_id: id, node_id: node, hook_point: last?.hook_point ?? node, status: "pending",
+          id: sessionId(), work_item_id: id, node_id: node, hook_point: hook, status: "pending",
           attempt: (last?.attempt ?? 0) + 1, round: last?.round ?? 0, thread: 1, model: last?.model ?? null, head_sha: last?.head_sha ?? null,
+          harness: isAgentSession(it.materialized_chain, hook, !!last?.model) ? "claude" : null, command: RUNS[hook.split(".").at(-1)!]?.command ?? null,
           created_at: now(), started_at: null, exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null,
         });
       }
@@ -466,8 +469,9 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       const sid = sessionId();
       // `store.create_session` counts the attempt by node and hook point.
       const attempt = b.sessions.filter((s) => s.node_id === node && s.hook_point === "escalation").length + 1;
-      b.sessions.push({ ...from, id: sid, work_item_id: id, node_id: node, hook_point: "escalation", status: "running", attempt, round: 0, thread, created_at: now(), started_at: now(), exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null });
-      b.logs[sid] = [...(b.logs[from.id] ?? [])];
+      // An agent's turn whatever the task it was asked about was: its row is not the last session's (a test command's has no model).
+      b.sessions.push({ ...from, id: sid, work_item_id: id, node_id: node, hook_point: "escalation", status: "running", attempt, round: 0, thread, created_at: now(), started_at: now(), exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null, model: MODEL, harness: "claude", command: null });
+      b.logs[sid] = logLines(sid, 12, false);
       // `escalate.dispatch`: the message first, then the turn's session, born and launched as every agent task's is.
       append(id, "escalation_message", { session_id: sid, message: message.trim(), auto: false, thread, turn }, node);
       append(id, "worker_session_created", { session_id: sid, node_id: node, hook_point: "escalation", round: 0, attempt, thread });
@@ -588,11 +592,14 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       const { b, it } = x;
       const attempt = b.sessions.filter((s) => s.node_id === node && s.hook_point === hookPoint).length + 1;
       const sid = sessionId();
+      const task = hookPoint.split(".").at(-1)!;
+      const agent = isAgentSession(it.materialized_chain, hookPoint);
       b.sessions.push({
         id: sid, work_item_id: id, node_id: node, hook_point: hookPoint, status: "pending", attempt, round: 0, thread: 1, model: null, head_sha: it.head_sha ?? null,
+        harness: agent ? "claude" : null, command: RUNS[task]?.command ?? null,
         created_at: now(), started_at: now(), exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null,
       });
-      b.logs[sid] = logLines(sid, 12, false);
+      b.logs[sid] = sessionLog(agent, task, sid, 12, false);
       append(id, "worker_session_created", { session_id: sid, node_id: node, hook_point: hookPoint, round: 0, attempt, thread: 1 });
       settle(it);
       return ok({ id, session_id: sid });

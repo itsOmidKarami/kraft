@@ -1,5 +1,6 @@
 import { LIVE_SESSION_STATUSES } from "../../../src/types/vocab.generated";
 import type { ItemBundle, Scenario } from "./fixtures";
+import { MODEL } from "./taskKinds";
 import { pendingRewind, sinceFork, threadSummary, type Transitions } from "./transitions";
 
 /**
@@ -52,7 +53,6 @@ export const FRESH_TITLES = [
   "Warn when a gate names no artifact",
 ];
 const FRESH_REPOS = ["kraft-core", "kraft-api", "kraft-plugins", "kraft-docs"].map((r) => `/Users/dev/code/${r}`);
-const MODEL = "claude-sonnet-4-5";
 /** The ticks an escalation turn runs before its agent answers. */
 const TURN_TICKS = 2;
 
