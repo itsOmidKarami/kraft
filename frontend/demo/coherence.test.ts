@@ -102,8 +102,8 @@ describe.each(SCENARIOS)("sessions in %s", (_scenario, build) => {
     ["a board item's agents run the mock's model", (b, s) => onTheBoard.has(b.item.id) && agentic(b, s) && s.model != null && s.model !== MODEL],
     // `usage.py`: an exit reports every kind of token, and its cost is theirs at its model's prices. The older samples,
     // with no frozen chain, carry made-up figures and no cache split.
-    ["an agent's cost is what its tokens cost, to a cent", (b, s) => !!b.item.materialized_chain && s.model === MODEL && s.cost_usd != null
-      && !(Math.abs(Object.entries(PRICE).reduce((a, [k, usd]) => a + (s[k] ?? NaN) * usd / 1e6, 0) - s.cost_usd) < 0.01)],
+    ["an agent's cost is what its tokens cost, to a millionth of a dollar", (b, s) => !!b.item.materialized_chain && s.model === MODEL && s.cost_usd != null
+      && !(Math.abs(Object.entries(PRICE).reduce((a, [k, usd]) => a + (s[k] ?? NaN) * usd / 1e6, 0) - s.cost_usd) < 1e-6)],
   ])("%s", (_rule, rule) => {
     expect(offenders(S, rule)).toEqual([]);
   });

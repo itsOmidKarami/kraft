@@ -90,7 +90,7 @@ sample, its long and many variants, the seeds that add sessions and the board
 after live motion has walked two items it filed to the end, then the sessions
 the doors make. It fails when an event's `node_id` column is not the node its
 payload names, an agent session's cost is not what its tokens cost at its
-model's prices, or a command's session ran another scope's command. Node by
+model's prices, or, in the live walk, a command's session ran another scope's command. Node by
 node, the walked items' events must be the finished sample item's: those rows
 compare the walk with the seeds, which share one recipe, so a beat the recipe
 drops passes them. The literal rows pin the recipe itself: each node's events,
