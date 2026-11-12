@@ -30,6 +30,7 @@ import type { GateRound } from "../../../src/types";
 import { buildNgItem, NG_NOW, NG_SCENARIOS } from "./ngItems";
 import { ago, agoPy } from "./clock";
 import { isAgentSession, runOutput, scopeRunsOf, type Run } from "./taskKinds";
+import { changedFiles, contentDiff, docBody, hunk, itemDocs, type Content } from "./ngContent";
 
 /* ── ids & time ──────────────────────────────────────────────────────────── */
 
@@ -187,6 +188,8 @@ export interface ItemBundle {
   beads?: string[];
   /** The reviews submitted on the item (`reviews` rows): what `gateRoundsOf` puts in each round's `review`. */
   reviews?: any[];
+  /** What the item is about (ngContent.ts): its brief, files and merge request. Only the default sample's board items carry it. */
+  content?: Content;
 }
 
 export function logLines(sessionId: string, n: number, long: boolean): any[] {
@@ -220,8 +223,8 @@ export function commandLog(run: Run | string | null, status: string, label?: str
 }
 
 /** A session's log by what ran it: an agent's lines, or a command's output. */
-export const sessionLog = (agent: boolean, run: Run | string | null, sid: string, n: number, long: boolean, status = "done", label?: string) =>
-  agent ? logLines(sid, n, long) : commandLog(run, status, label);
+export const sessionLog = (agent: boolean, run: Run | string | null, sid: string, n: number, long: boolean, status = "done", label?: string, mr?: string) =>
+  agent ? logLines(sid, n, long) : commandLog(run, status, label, mr);
 
 /** The sub-agents `lines` name, as the server's `/subagents` route lists them: the first runs while its session does. */
 export function subagentList(lines: any[], status: string): any[] {
@@ -567,7 +570,9 @@ const FILES_LONG = [
   `frontend/e2e-shots/${hex(3)}.png`,
 ];
 
-export function diffFor(id: string, variant: Variant) {
+/** `b`: the item's bundle; one with content (ngContent.ts) answers its own files, in the default sample only. */
+export function diffFor(id: string, variant: Variant, b?: ItemBundle) {
+  if (b?.content && variant === "default") return contentDiff(b);
   const files = (variant === "long" ? FILES_LONG : FILES_DEFAULT).map((path, i) => ({ path, insertions: 3 + (i * 7) % 90, deletions: (i * 3) % 40 }));
   const hunk = (p: string) => `diff --git a/${p} b/${p}
 index 3f2a1b0..9c8d7e6 100644
@@ -610,14 +615,18 @@ export function fixTargetFor(gate: string | null, node?: string) {
 
 // The shape of GET /work-items/:id/compare. One whitespace-only file rides along
 // so ignore_whitespace has something to drop, as git -w does for the real route.
-export function compareFor(id: string, variant: Variant, ignoreWhitespace = false, viewed: ReadonlySet<string> = new Set()) {
-  const d = diffFor(id, variant);
-  const files = d.files.map((f, i) => ({ ...f, touched_by: i % 2 ? ["verify"] : ["implementation"] }));
-  if (!ignoreWhitespace) files.push({ path: "src/reindent.py", insertions: 4, deletions: 4, touched_by: ["implementation"] });
+export function compareFor(id: string, variant: Variant, ignoreWhitespace = false, viewed: ReadonlySet<string> = new Set(), b?: ItemBundle) {
+  const d = diffFor(id, variant, b);
+  // An item with content compares base to latest over all it committed, each file touched by the node that changed it,
+  // and has no whitespace-only file.
+  const own = b?.content && variant === "default" ? changedFiles(b) : null;
+  const files = own ? own.map(([path, insertions, deletions, late]) => ({ path, insertions, deletions, touched_by: [late ? "verification" : "implementation"] }))
+    : d.files.map((f, i) => ({ ...f, touched_by: i % 2 ? ["verify"] : ["implementation"] }));
+  if (!own && !ignoreWhitespace) files.push({ path: "src/reindent.py", insertions: 4, deletions: 4, touched_by: ["implementation"] });
   for (const f of files) (f as any).viewed = viewed.has(`${id}|${f.path}`);
   return {
     from: { target: "base", sha: "a1b2c3d" }, to: { target: "latest", sha: null }, rebased: false,
-    files, groups: [], diff: d.diff, untracked: d.untracked, truncated: d.truncated,
+    files, groups: [], diff: own ? own.map((f) => hunk(f, b!.item.title)).join("\n") : d.diff, untracked: d.untracked, truncated: d.truncated,
     ignore_whitespace: ignoreWhitespace, diff_max_bytes: 1_000_000,
   };
 }
@@ -646,7 +655,8 @@ export function documentsFor(item: any, variant: Variant) {
   // summaries are attempt 1, and the long variant's implement sessions span rounds 0–2.
   let implementRun = 0;
   return docs.map((d, i) => ({
-    document_id: hex(700 + i), work_item_id: item.id,
+    // The item's own id prefix: no two items' documents share an id.
+    document_id: `${item.id.slice(0, 24)}${(700 + i).toString(16).padStart(8, "0")}`, work_item_id: item.id,
     repo: item.repo, title: d.title, kind: d.kind, source_kind: d.kind === "sessions" ? "session_summary" : "artifact",
     path: d.path, node_id: d.node, hook_point: d.hook,
     worker_session_id: d.kind === "sessions" ? hex(item.id.length + i) : null,
@@ -665,10 +675,11 @@ const headinglessLead = (hook: string) =>
     ? "Opened the merge request description from the plan and the three task commits."
     : "Reviewed the invalidation path against main; the blob_sha check holds across a rebase but not a force-push.";
 
-export function documentDetail(id: string, docs: any[]) {
+/** `own`: the document's text where its item has one (ngContent.ts `docBody`); else the sample text below. */
+export function documentDetail(id: string, docs: any[], own?: string) {
   const d = docs.find((x) => x.document_id === id) ?? docs[0];
   // W12.2: no "Status · repo · path" lead line -- the pane header already says it.
-  const body = `${d.headingless ? headinglessLead(d.hook_point) : `# ${d.title}`}
+  const body = own ?? `${d.headingless ? headinglessLead(d.hook_point) : `# ${d.title}`}
 
 ## Summary
 
@@ -693,14 +704,20 @@ ${"Paragraph of prose. ".repeat(60)}
   return {
     id: d.document_id, repo: d.repo, source_kind: d.source_kind, kind: d.kind, title: d.title, path: d.path,
     // The document's front matter, as an agent writes it (work_item_ids, node_id, hook_point, worker_session_id).
-    content: body, metadata: { work_item_ids: [d.work_item_id], node_id: d.node_id, hook_point: d.hook_point, worker_session_id: d.worker_session_id, author: "claude-opus-4-1", words: 1240 },
+    content: body, metadata: { work_item_ids: [d.work_item_id], node_id: d.node_id, hook_point: d.hook_point, worker_session_id: d.worker_session_id, author: "claude-opus-4-1", words: own ? own.split(/\s+/).length : 1240 },
     source_created_at: t(10), source_updated_at: t(90), indexed_at: d.indexed_at,
     origin: d.source_kind === "artifact" ? "git_scan" : "event_ingest",
     links: [{ work_item_id: null, node_id: d.node_id, hook_point: d.hook_point, worker_session_id: d.worker_session_id, session_work_item_id: null }],
   };
 }
 
-export function artifactFor(item: any, variant: Variant) {
+/** `b`: the item's bundle; one with content answers its gate document's own text, by its kind (`items/<id>/docs/<kind>.md`). */
+export function artifactFor(item: any, variant: Variant, b?: ItemBundle) {
+  const kind = b?.content && /\/docs\/([^/]+)\.md$/.exec(item.gate_artifact ?? "")?.[1];
+  if (kind) {
+    const content = docBody(b!, { kind: `${kind}s` });
+    return { work_item_id: item.id, path: item.gate_artifact, title: content.split("\n")[0].slice(2), content, truncated: false, artifact_max_bytes: 65536, absolute_path: `/Users/dev/.kraft/run/${item.gate_artifact}` };
+  }
   return {
     work_item_id: item.id, path: item.gate_artifact ?? ".engineering/reviews/2026-09-13-caching-layer.md",
     title: `Review: ${item.title}`,
@@ -905,13 +922,29 @@ function analyticsFor(variant: Variant) {
   };
 }
 
-export function searchFor(q: string, docs: any[], variant: Variant) {
+/** GET /search over `docs`, each read by `body`: a document matches when its title, path or text holds a word of the
+ *  query, case aside, and ranks by the whole query in its title, then by the words its title holds, then by those it
+ *  holds anywhere. A query that matches nothing finds nothing. */
+export function searchFor(q: string, docs: any[], variant: Variant, body: (d: any) => string = () => "") {
   const long = variant === "long";
+  const query = q.trim().toLowerCase();
+  const terms = query.split(/\s+/).filter(Boolean);
+  const ranked = docs.map((d) => {
+    const title = String(d.title).toLowerCase();
+    const all = `${title}\n${String(d.path).toLowerCase()}\n${body(d).toLowerCase()}`;
+    return { d, score: [Number(!!query && title.includes(query)), terms.filter((w) => title.includes(w)).length, terms.filter((w) => all.includes(w)).length] };
+  }).filter((r) => !terms.length || r.score[2] > 0).sort((a, b) => b.score[0] - a.score[0] || b.score[1] - a.score[1] || b.score[2] - a.score[2]);
+  /** The text around the query's first word that the document's text holds. */
+  const around = (d: any) => {
+    const text = body(d).replace(/\s+/g, " ");
+    const at = terms.map((w) => text.toLowerCase().indexOf(w)).find((k) => k >= 0);
+    return at === undefined ? null : `…${text.slice(Math.max(0, at - 60), at + 100)}…`;
+  };
   return {
     query: q, mode: "hybrid",
-    results: variant === "empty" ? [] : docs.slice(0, long ? 15 : 6).map((d, i) => ({
+    results: variant === "empty" ? [] : ranked.map((r) => r.d).slice(0, long ? 15 : 6).map((d, i) => ({
       id: d.document_id, repo: d.repo, source_kind: d.source_kind, kind: d.kind, title: d.title, path: d.path,
-      snippet: long ? `…${LONG_DESCRIPTION.slice(40, 380)}…` : "…carry findings_measured from the verify node into the fix loop's system prompt…",
+      snippet: around(d) ?? (long ? `…${LONG_DESCRIPTION.slice(40, 380)}…` : "…carry findings_measured from the verify node into the fix loop's system prompt…"),
       score: 0.91 - i * 0.05,
       // The item the document belongs to, so opening a result lands on a real page (Kraft-hrlqs).
       links: [{ work_item_id: d.work_item_id, node_id: d.node_id, hook_point: d.hook_point, worker_session_id: d.worker_session_id }],
@@ -966,7 +999,7 @@ export function buildScenario(variant: Variant, theme: { mode?: string; density?
     ng[sc] = b.item.id; bundles[b.item.id] = b; docs[b.item.id] = [];
   });
   const board = buildNgBoard(variant, bundles);
-  for (const id of [...board.list, ...board.archived]) docs[id] = [];
+  for (const id of [...board.list, ...board.archived]) docs[id] = itemDocs(bundles[id]);
   for (const b of Object.values(bundles)) serverKeys(b);
   return { variant, items, archived, byState, ng, ngBoard: board.list, ngArchived: board.archived, bundles, docs, settings: settingsFor(variant, theme), analytics: analyticsFor(variant) };
 }

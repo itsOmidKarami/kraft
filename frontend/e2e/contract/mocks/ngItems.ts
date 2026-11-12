@@ -36,7 +36,8 @@ const STUCK = "stuck: fix attempt 2 in node verification changed nothing, so mea
 export const AUTO_ESCALATE_MESSAGE = "(Auto-escalated: no one has looked at this yet. Diagnose why it stopped and fix it if you can; if you're not confident, stop and say so instead of guessing.)";
 /** `mr_poller.REASON`: the stop when the forge says the item's merge request was closed unmerged. */
 export const MR_CLOSED_REASON = "the merge request was closed on the forge without merging";
-export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, template = "default"): ItemBundle {
+/** `mr`: the merge request its draft opens, what its forge tasks print and its stop names (a board row's own, ngContent.ts). */
+export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, template = "default", mr = MR): ItemBundle {
   const long = variant === "long";
   const id = hex(seed);
   const chain = chainOf(template)!;
@@ -78,7 +79,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     ev("worker_session_created", ids, 0);
     if (path.endsWith(".auto_review")) ev("gate_auto_review_started", { gate: node, session_id: sid }, 0);
     if (agent) ev("worker_session_started", { ...ids, pid: 41_000 + n }, 0.01);
-    logs[sid] = agent ? logLines(sid, long ? 300 : 12, long) : o.noAgent ? [] : commandLog(run, s.status, path.split(".").at(-1));
+    logs[sid] = agent ? logLines(sid, long ? 300 : 12, long) : o.noAgent ? [] : commandLog(run, s.status, path.split(".").at(-1), mr.url);
     return Object.assign(s, { _agent: agent, _run: run, _noAgent: !!o.noAgent });
   };
   /** `store.session_exited`: `status` after its wall time, with the usage an agent reported. */
@@ -95,7 +96,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     } else if (s._noAgent) {
       logs[s.id] = [{ n: 1, t: t(0.1), src: "stdout", text: "no bot feedback collected; no agent started" }];
     } else {
-      logs[s.id] = commandLog(s._run, status, s.hook_point.split(".").at(-1));
+      logs[s.id] = commandLog(s._run, status, s.hook_point.split(".").at(-1), mr.url);
     }
     ev("worker_session_exited", { session_id: s.id, status, wall_ms: wall, ...usage }, 0);
     return s;
@@ -138,14 +139,14 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
       Object.assign(s, { status: "waiting", exited_at: t(m), wall_ms: wall });
       ev("worker_session_exited", { session_id: s.id, status: "waiting", wall_ms: wall }, 0);
       ev("work_item_waiting", { node_id: node, retry_at: next }, 0);
-      logs[s.id] = commandLog(s._run, "waiting", s.hook_point.split(".").at(-1));
+      logs[s.id] = commandLog(s._run, "waiting", s.hook_point.split(".").at(-1), mr.url);
     },
     at: (dm) => t(m + dm),
     clock: (dm) => { m += dm; },
     sha: (k) => hex(seed + 300 + k).slice(0, 40),
     requestGate: (gate) => ev("gate_requested", { gate, node_id: gate }, 0.02),
     selfApprove: (gate) => ev("gate_approved", { gate, by: "kraft" }, 0.02),
-    mrOpened: (node) => { ev("mr_opened", { node_id: node, ...MR }, 0.02); item.mr_ref = { ...MR }; },
+    mrOpened: (node) => { ev("mr_opened", { node_id: node, ...mr }, 0.02); item.mr_ref = { ...mr }; },
     complete: (node) => ev("node_completed", { node_id: node }, 0.02),
     skipped: () => false,
   };
@@ -315,7 +316,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
       // `mr_poller` saw the merge request closed while CI was awaited: a stop, and no `mr_closed` event (only Kraft's
       // own cancel writes one).
       const s = drain(awaitPolls(W, "merge_request_feedback", "merge_request_feedback.ci.await_ci", "mr.ci", 2, false));
-      const facts = { ref: MR.number, url: MR.url };
+      const facts = { ref: mr.number, url: mr.url };
       ev("work_item_needs_human", { node_id: "merge_request_feedback", reason: MR_CLOSED_REASON, kind: "mr_closed", facts }, 2);
       item.status = "needs_human"; item.display_status = "needs_you";
       item.stop = stop("mr_closed", s.hook_point, { reason: MR_CLOSED_REASON, facts });

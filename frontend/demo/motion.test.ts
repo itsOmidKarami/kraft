@@ -127,7 +127,8 @@ describe("one step", () => {
       ["worker_session_exited", { session_id: expect.any(String), status: "done", wall_ms: expect.any(Number) }],
       ["worker_session_created", expect.objectContaining({ node_id: "draft_merge_request", hook_point: "draft_merge_request.open.open", attempt: 2 })],
       ["branch_pushed", expect.objectContaining({ node_id: "draft_merge_request" })],
-      ["mr_opened", { number: 150, url: "https://github.com/acme/kraft-api/pull/150" }],
+      // Its own merge request (ngContent.ts).
+      ["mr_opened", { number: 125, url: "https://github.com/acme/kraft-api/pull/125" }],
     ]);
     expect(ticks(1, id)).toEqual([
       ["worker_session_exited", { session_id: expect.any(String), status: "done", wall_ms: expect.any(Number) }],
@@ -147,7 +148,7 @@ describe("one step", () => {
     // No node is left standing finished: the tick that completed it entered the next.
     expect(S.bundles[id].item).toMatchObject({ current_node_id: "merge_request_feedback", status: "waiting", display_status: "waiting", stop: { kind: "wait", reason: null } });
     expect(S.bundles[id].sessions.filter((s) => s.node_id === "draft_merge_request").slice(-2).map((s) => [s.status, s.cost_usd])).toEqual([["done", null], ["done", null]]);
-    expect(S.bundles[id].item.mr_ref).toEqual({ number: 150, url: "https://github.com/acme/kraft-api/pull/150" });
+    expect(S.bundles[id].item.mr_ref).toEqual({ number: 125, url: "https://github.com/acme/kraft-api/pull/125" });
     expect(S.bundles[id].events.find((e) => e.type === "mr_opened")?.node_id).toBe("draft_merge_request");
   });
 
@@ -599,7 +600,9 @@ describe("an escalation turn", () => {
     // The item stays as it stopped, its thread ended with its turn.
     expect((await call("GET", `/work-items/${id}`)).body).toMatchObject({ status: "needs_human", display_status: shown, escalation_threads: [{ thread: 1, session_id: s.id, status: "done", ended_at: NG_NOW }] });
     // The indexer files the summary as the item's document, the one the task's Output links by its path.
-    const docs = (await call("GET", `/work-items/${id}/documents`)).body.documents;
+    // Beside the documents its nodes and earlier sessions wrote, one at the thread's path.
+    const at = async () => (await call("GET", `/work-items/${id}/documents`)).body.documents.filter((d: any) => d.path === ref);
+    const docs = await at();
     expect(docs).toEqual([expect.objectContaining({ path: ref, title: `Escalation reply on ${node}`, kind: "sessions", source_kind: "session_summary", node_id: node, hook_point: "escalation", worker_session_id: s.id, session_status: "done" })]);
     const doc = (await call("GET", `/documents/${docs[0].document_id}`)).body;
     expect([doc.title, doc.metadata, doc.source_created_at, doc.source_updated_at]).toEqual([`Escalation reply on ${node}`, {}, null, null]);
@@ -613,7 +616,7 @@ describe("an escalation turn", () => {
     expect([s.session_summary_ref, b.events.filter((e) => e.type === "escalation_message").at(-1)?.payload]).toEqual([`items/${id}/sessions/${s.id}/out/summary.md`, expect.objectContaining({ thread: 1, turn: turns + 1 })]);
     ticks(2, id);
     // That turn's summary is filed at the thread's path again: one document, the newest turn's.
-    expect((await call("GET", `/work-items/${id}/documents`)).body.documents).toEqual([expect.objectContaining({ document_id: docs[0].document_id, path: ref, worker_session_id: b.sessions.at(-1)!.id })]);
+    expect(await at()).toEqual([expect.objectContaining({ document_id: docs[0].document_id, path: ref, worker_session_id: b.sessions.at(-1)!.id })]);
   });
 
   it("a turn the visitor stopped (Stop agent) is not ended again", async () => {
@@ -623,7 +626,7 @@ describe("an escalation turn", () => {
     ticks(1, id);
     expect((await call("POST", `/work-items/${id}/escalate/stop`)).status).toBe(200);
     expect(ticks(3, id)).toEqual([]);
-    expect([s.status, s.session_summary_ref, S.docs[id]]).toEqual(["paused", null, []]);
+    expect([s.status, s.session_summary_ref, S.docs[id].filter((d) => d.hook_point === "escalation")]).toEqual(["paused", null, []]);
   });
 });
 

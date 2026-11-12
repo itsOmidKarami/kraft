@@ -1,6 +1,7 @@
 import { LIVE_SESSION_STATUSES } from "../../../src/types/vocab.generated";
 import { hex, type ItemBundle, type Scenario } from "./fixtures";
 import { agentUsage, nodeBeats, type Beats, type Writer } from "./nodeRecipe";
+import { FRESH_CONTENT } from "./ngContent";
 import { isAgentSession, taskRun } from "./taskKinds";
 import { pendingRewind, sinceFork, threadSummary, type Transitions } from "./transitions";
 
@@ -342,8 +343,11 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
       const gated = board.some((id) => S.bundles[id].item.status === "needs_human" && S.bundles[id].item.pending_gate);
       if (!active.length && !gated) {
         const n = filed++;
-        const made = T.create({ title: FRESH_TITLES[n % FRESH_TITLES.length], repo: FRESH_REPOS[n % FRESH_REPOS.length], chain_template: "default", autostart: true });
+        const title = FRESH_TITLES[n % FRESH_TITLES.length];
+        const made = T.create({ title, description: FRESH_CONTENT[title].description, repo: FRESH_REPOS[n % FRESH_REPOS.length], chain_template: "default", autostart: true });
         if (made.status === 201) {
+          // Its own files and merge request (ngContent.ts), as a board row has.
+          S.bundles[made.body.id].content = FRESH_CONTENT[title];
           if (n === 0) red.add(made.body.id);
           step(made.body.id);
         }

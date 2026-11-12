@@ -3,6 +3,8 @@ import draftViews from "./draftViews.json" with { type: "json" };
 import { chainOf } from "./ngChain";
 import { buildNeverStarted, buildNgItem, type NgScenario } from "./ngItems";
 import { cacheRead } from "./nodeRecipe";
+import { CONTENT, mrOf } from "./ngContent";
+import { NG_NOW } from "./clock";
 
 /**
  * The board's list (ux2-W6): one row per kind of row AreaBoard.dc.html
@@ -128,22 +130,53 @@ const ARCHIVED: Row[] = [
 
 const LONG_TAIL = " so the board has to ellipsize a title that runs far past the row's width without pushing the ticks or the action off it";
 
+const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/;
+/** Every moment in `o` moved by `by(ms)`, but a retry or a resume still to come: what the item waits for stays put. */
+function shift(o: any, by: (ms: number) => number, now: number, key = ""): any {
+  if (typeof o === "string") return ISO.test(o) && !(["retry_at", "resume_at"].includes(key) && Date.parse(o) > now) ? new Date(by(Date.parse(o))).toISOString() : o;
+  if (o && typeof o === "object") for (const k of Object.keys(o)) o[k] = shift(o[k], by, now, Array.isArray(o) ? key : k);
+  return o;
+}
+/** The item's history retimed: a person took `wait` minutes longer over each gate they approved (nothing runs while a
+ *  gate waits), and then all of it moved so its last event is at `end`. */
+function retime(b: ItemBundle, wait: number, end: number) {
+  const now = Date.parse(NG_NOW);
+  const approved = b.events.filter((e) => e.type === "gate_approved" && e.payload.by === "human").map((e) => Date.parse(e.created_at));
+  const longer = (ms: number) => ms + approved.filter((a) => a <= ms).length * wait * 60_000;
+  const last = longer(Date.parse(b.events.at(-1)!.created_at));
+  shift(b, (ms) => longer(ms) + end - last, now);
+}
+
 function build(rows: Row[], variant: Variant, seed0: number, bundles: Record<string, ItemBundle>): string[] {
   const long = variant === "long";
   return rows.map((r, n) => {
-    const b = r.fresh ? buildNeverStarted(seed0 + n, long ? "long" : "default", r.chain) : buildNgItem(r.sc, seed0 + n, long ? "long" : "default", r.chain);
+    // Its own brief, files and merge request, in the default sample (ngContent.ts).
+    const content = variant === "default" ? CONTENT[r.bead] : undefined;
+    const b = r.fresh ? buildNeverStarted(seed0 + n, long ? "long" : "default", r.chain) : buildNgItem(r.sc, seed0 + n, long ? "long" : "default", r.chain, content && mrOf(r.repo, content.mr));
     const i = b.item;
     i.id = hex(seed0 + n);
     i.title = long ? r.title + LONG_TAIL : r.title;
     i.repo = (long ? LONG_R : R)(r.repo);
     i.bead_id = r.bead;
-    i.updated_at = t(130 - r.age);
-    i.created_at = t(130 - r.age - 90);
-    if (i.archived_at) i.archived_at = t(130 - r.age + 30);
     r.tweak?.(i, b);
+    // Its history ends when it was last touched, so each item has run for its own time: from its first node to the
+    // clock, or to its last event once it has ended.
+    const ran = content && b.events.length > 0;
+    if (ran) retime(b, (n * 7) % 19, Date.parse(t(130 - r.age)));
+    i.updated_at = t(130 - r.age);
+    i.created_at = ran ? b.events[0].created_at : t(130 - r.age - 90);
+    if (i.archived_at) i.archived_at = t(130 - r.age + 30);
+    if (ran) {
+      i.started_at = b.events.find((e) => e.type === "node_started")?.created_at ?? null;
+      if (["completed", "abandoned"].includes(i.status)) i.ended_at = b.events.at(-1)!.created_at;
+    }
+    if (content) {
+      b.content = content;
+      i.description = content.description;
+    }
     for (const s of b.sessions) s.work_item_id = i.id;
-    // Its own repo where an event names one (`work_item_created`, `branch_pushed`).
-    for (const e of b.events) { e.work_item_id = i.id; if (e.payload.repo) e.payload.repo = i.repo; }
+    // Its own repo and title where an event names one (`work_item_created`, `branch_pushed`).
+    for (const e of b.events) { e.work_item_id = i.id; if (e.payload.repo) e.payload.repo = i.repo; if (e.type === "work_item_created") e.payload.title = i.title; }
     if (r.fresh) b.events.push({ seq: 1, work_item_id: i.id, type: "work_item_created", payload: { title: i.title, repo: i.repo, chain_template: i.chain_template }, node_id: null, created_at: i.created_at });
     bundles[i.id] = b;
     return i.id;

@@ -5,6 +5,7 @@ import { chainOf, frozenOf } from "./ngChain";
 import { RESUME_PROMPT } from "./poller";
 import { buildNeverStarted } from "./ngItems";
 import { DOCS_SCOPE, isAgentSession, MODEL, RUNS, scopeRunsOf, taskRun, type Run } from "./taskKinds";
+import { itemDocs, mergeDocs } from "./ngContent";
 
 /**
  * The work item's transitions, as the server makes them: what each door changes, the event row it appends
@@ -165,6 +166,9 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
     item.scope_runs = scopeRunsOf(item.materialized_chain, S.bundles[item.id].sessions, item.scope_runs);
     item.display_status = displayStatus(item);
     item.updated_at = now();
+    // The indexer files what the item's nodes and sessions have written by now.
+    const b = S.bundles[item.id];
+    if (b.content) S.docs[item.id] = mergeDocs(S.docs[item.id], itemDocs(b), S.docText);
     return item;
   };
   /** The item, or `deps._work_item_row`'s 404; `live` also refuses an ended one (`deps._live_work_item_row`). */
@@ -612,7 +616,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
         harness: agent ? "claude" : null, command: (typeof run === "string" ? RUNS[run] : run)?.command ?? null,
         created_at: now(), started_at: now(), exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null,
       });
-      b.logs[sid] = o.noAgent ? [] : sessionLog(agent, run, sid, 12, false, "running", task);
+      b.logs[sid] = o.noAgent ? [] : sessionLog(agent, run, sid, 12, false, "running", task, it.mr_ref?.url);
       append(id, "worker_session_created", { session_id: sid, node_id: node, hook_point: hookPoint, round, attempt, thread: 1 });
       settle(it);
       return ok({ id, session_id: sid });
@@ -657,7 +661,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
         // A command's log has grown to all of its output by the time it ends, the failing run's if it failed.
         const task = String(s.hook_point).split(".").at(-1)!;
         if (o.noAgent) b.logs[sid] = [{ n: 1, t: at, src: "stdout", text: "no bot feedback collected; no agent started" }];
-        else if (!isAgentSession(it.materialized_chain, s.hook_point, !!s.model)) b.logs[sid] = commandLog(s.command === DOCS_SCOPE.command ? DOCS_SCOPE : taskRun(it.materialized_chain, s.hook_point), status, task);
+        else if (!isAgentSession(it.materialized_chain, s.hook_point, !!s.model)) b.logs[sid] = commandLog(s.command === DOCS_SCOPE.command ? DOCS_SCOPE : taskRun(it.materialized_chain, s.hook_point), status, task, it.mr_ref?.url);
         append(id, "worker_session_exited", { session_id: sid, status, wall_ms });
         settle(it);
         return ok({ id, session_id: sid });
@@ -755,7 +759,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       const wall_ms = Math.max(0, Date.parse(now()) - Date.parse(s.started_at ?? s.created_at));
       // `store.session_exited` stamps a waiting exit as it does any other.
       Object.assign(s, { status: "waiting", exited_at: now(), wall_ms });
-      b.logs[sid] = commandLog(taskRun(it.materialized_chain, s.hook_point), "waiting", String(s.hook_point).split(".").at(-1)!);
+      b.logs[sid] = commandLog(taskRun(it.materialized_chain, s.hook_point), "waiting", String(s.hook_point).split(".").at(-1)!, it.mr_ref?.url);
       Object.assign(it, { status: "waiting", retry_at: retryAt, step: null, stop: { kind: "wait", node: s.node_id, task: s.hook_point, attempt: 1, resume_at: retryAt, reason: null, facts: {} } });
       append(id, "worker_session_exited", { session_id: sid, status: "waiting", wall_ms });
       append(id, "work_item_waiting", { node_id: s.node_id, retry_at: retryAt });
@@ -825,8 +829,8 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
     mrOpened(id: string, node: string): Result {
       const x = find(id, true);
       if (refused(x)) return x;
-      const { it } = x;
-      const number = it.mr_ref?.number ?? 150 + mrs++;
+      const { b, it } = x;
+      const number = it.mr_ref?.number ?? b.content?.mr ?? 150 + mrs++;
       const url = it.mr_ref?.url ?? `https://github.com/acme/${String(it.repo).split("/").pop()}/pull/${number}`;
       it.mr_ref = { number, url };
       append(id, "mr_opened", { number, url }, node);
