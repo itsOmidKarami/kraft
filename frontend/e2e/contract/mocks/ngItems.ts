@@ -47,7 +47,7 @@ const REVIEW_OF_HUNK = {
   local: "`lookup` moves a hit to the end, so eviction drops the least recently used entry, not the oldest stored: say which in the class docstring.",
 };
 /** The review's summary, as the note of the rejection it sent (`store.render_note`). */
-const REVIEW_SUMMARY = "Two things before this ships.";
+const REVIEW_SUMMARY = "Three things before this ships.";
 const NOTE_HEAD = 'Review threads to address (reply to each with `kraft item reply <thread-id> --claim fixed|answered --body "..."`):';
 /** `store.render_note`: the review's summary, then each thread not resolved when it was submitted, where it sits
  *  (`render.thread_where`, a new-side range `path:+5 to +7`), the lines it quotes and the first comment's body. */

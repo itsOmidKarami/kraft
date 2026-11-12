@@ -6,7 +6,7 @@ import { FRESH_TITLES, motion } from "../e2e/contract/mocks/motion";
 import { NG_REPOS } from "../e2e/contract/mocks/ngBoard";
 import { CONTENT, docBody, FRESH_CONTENT, isDocsPath, mergeDocs, mrOf } from "../e2e/contract/mocks/ngContent";
 import { frozenOf } from "../e2e/contract/mocks/ngChain";
-import { AUTO_ESCALATE_MESSAGE, buildNgItem, MR_CLOSED_REASON, NG_NOW } from "../e2e/contract/mocks/ngItems";
+import { AUTO_ESCALATE_MESSAGE, buildNgItem, MR_CLOSED_REASON, NG_NOW, renderNote } from "../e2e/contract/mocks/ngItems";
 import { agentUsage, openWait } from "../e2e/contract/mocks/nodeRecipe";
 import { isAgentSession, MODEL, nodeTasks, PRICE, RUNS, runOutput, taskKind, taskRun } from "../e2e/contract/mocks/taskKinds";
 import { transitions } from "../e2e/contract/mocks/transitions";
@@ -482,6 +482,13 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
       return ok ? [] : [`${b.item.title}: ${r.id}`];
     }));
     expect(wrong).toEqual([]);
+  });
+  it("a rejection's note leaves out a thread resolved by then, and is the summary alone when none is open", () => {
+    const th = (id: string, state: string, at: number) => ({ id, state, file_path: "a/b.py", start_line: at, end_line: at, label: "nit", quote: "+x", comments: [{ body: `say ${id}` }] });
+    const note = renderNote([th("open1", "open", 3), th("done1", "resolved", 5)], "S.");
+    expect(note).toContain("[open1] a/b.py:+3 (nit)");
+    expect(note).not.toContain("done1");
+    expect(renderNote([th("done1", "resolved", 5)], "S.")).toBe("S.");
   });
   // A test imports the module of its name where the item changes one, from where that module is; the page a docs item is
   // about (its first) says what the item's brief says, and any other page does not, but names the item; a manifest is its
