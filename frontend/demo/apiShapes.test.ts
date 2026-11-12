@@ -86,7 +86,9 @@ describe("the demo's mocked API answers every key the real server does", () => {
   const b = S.bundles[item];
   // No sample item is filed with a spec, so the attachment route reads one given here.
   b.item.attachments = [{ kind: "spec", path: "docs/spec.md" }];
-  const ids: Record<string, string> = { $ITEM: item, $FILED: item, $ONE_OFF: item, $SESSION: b.sessions[0].id, $AGENT: subagentList(b.logs[b.sessions[0].id] ?? [], b.sessions[0].status)[0]?.id ?? "none", $DOC: Object.values(S.docs).flat().find((d) => d.source_kind === "session_summary")!.document_id, $REPO: b.item.repo };
+  // A session whose agent handed work to sub-agents (a spec's author, its first, works alone).
+  const sub = b.sessions.find((s) => subagentList(b.logs[s.id] ?? [], s.status).length)!;
+  const ids: Record<string, string> = { $ITEM: item, $FILED: item, $ONE_OFF: item, $SESSION: sub.id, $AGENT: subagentList(b.logs[sub.id] ?? [], sub.status)[0]?.id ?? "none", $DOC: Object.values(S.docs).flat().find((d) => d.source_kind === "session_summary")!.document_id, $REPO: b.item.repo };
   const serve = mockServer(S, demoOptions);
   const url = (route: string, params: Record<string, string>) => {
     let path = route.replace(/^GET /, "");

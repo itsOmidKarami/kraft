@@ -150,8 +150,10 @@ export function changedFiles(b: ItemBundle): File[] {
 }
 
 const camelOf = (snake: string) => snake.replace(/_(\w)/g, (_, c) => c.toUpperCase());
-const isTest = (path: string) => /(^|\/)tests?\//.test(path) || /\.test\.[jt]sx?$/.test(path) || /(^|\/)test_[^/]+\.py$/.test(path);
+export const isTest = (path: string) => /(^|\/)tests?\//.test(path) || /\.test\.[jt]sx?$/.test(path) || /(^|\/)test_[^/]+\.py$/.test(path);
 const baseOf = (path: string) => path.split("/").pop()!.replace(/\.[^.]+$/, "").replace(/\.test$/, "");
+/** The function a file's hunk changes (`template`): its name in snake case in Python, camel case elsewhere. */
+export const symbolOf = (path: string) => { const snake = baseOf(path).replace(/[^A-Za-z0-9]+/g, "_").toLowerCase(); return path.endsWith(".py") ? snake : camelOf(snake); };
 /** How a test at `from` imports the module at `to`: up from its own folder to the one they share, then down. */
 function importPath(from: string, to: string) {
   const [a, b] = [from, to].map((p) => p.split("/").slice(0, -1));

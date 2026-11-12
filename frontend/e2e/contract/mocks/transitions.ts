@@ -551,7 +551,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       const attempt = b.sessions.filter((s) => s.node_id === node && s.hook_point === "escalation").length + 1;
       // An agent's turn whatever the task it was asked about was: its row is not the last session's (a test command's has no model).
       b.sessions.push({ ...from, id: sid, work_item_id: id, node_id: node, hook_point: "escalation", status: "running", attempt, round: 0, thread, created_at: now(), started_at: now(), exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null, model: MODEL, harness: "claude", command: null });
-      b.logs[sid] = logLines(sid, 12, false);
+      b.logs[sid] = logLines(sid, 12, false, { content: b.content, hook: "escalation", status: "running" });
       // `escalate.dispatch`: the message first, then the turn's session, born and launched as every agent task's is.
       append(id, "escalation_message", { session_id: sid, message: message.trim(), auto: false, thread, turn }, node);
       append(id, "worker_session_created", { session_id: sid, node_id: node, hook_point: "escalation", round: 0, attempt, thread });
@@ -691,7 +691,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
         harness: agent ? "claude" : null, command: (typeof run === "string" ? RUNS[run] : run)?.command ?? null,
         created_at: now(), started_at: now(), exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null,
       });
-      b.logs[sid] = o.noAgent ? [] : sessionLog(agent, run, sid, 12, false, "running", task, it.mr_ref?.url);
+      b.logs[sid] = o.noAgent ? [] : agent && b.content ? logLines(sid, 12, false, { content: b.content, hook: hookPoint, status: "running" }) : sessionLog(agent, run, sid, 12, false, "running", task, it.mr_ref?.url);
       append(id, "worker_session_created", { session_id: sid, node_id: node, hook_point: hookPoint, round, attempt, thread: 1 });
       // `dispatch` records the step before it runs (`set_current_step`); a fix loop's task is in none.
       const at = stepIndex(it.chain_definition?.nodes ?? [], node, hookPoint);
@@ -746,6 +746,8 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       }
       const cache = { tokens_cache_write: usage.tokens_cache_write ?? 0, tokens_cache_read: usage.tokens_cache_read ?? 0 };
       Object.assign(s, { status, exited_at: at, wall_ms, ...usage, ...cache });
+      // An agent on an item with content: its sub-agents have all answered by now.
+      if (b.content) b.logs[sid] = logLines(sid, 12, false, { content: b.content, hook: s.hook_point, status });
       const u = it.usage;
       if (u) {
         const add = (r: any) => ({ ...r, tokens_in: r.tokens_in + usage.tokens_in, tokens_cache_write: (r.tokens_cache_write ?? 0) + cache.tokens_cache_write, tokens_cache_read: (r.tokens_cache_read ?? 0) + cache.tokens_cache_read, tokens_out: r.tokens_out + usage.tokens_out, cost_usd: dollars(r.cost_usd + usage.cost_usd), wall_ms: r.wall_ms + wall_ms, sessions: r.sessions + 1 });

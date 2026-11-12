@@ -104,7 +104,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     ev("worker_session_created", ids, 0);
     if (path.endsWith(".auto_review")) ev("gate_auto_review_started", { gate: node, session_id: sid }, 0);
     if (agent) ev("worker_session_started", { ...ids, pid: 41_000 + n }, 0.01);
-    logs[sid] = agent ? logLines(sid, long ? 300 : 12, long) : o.noAgent ? [] : commandLog(run, s.status, path.split(".").at(-1), mr.url);
+    logs[sid] = agent ? logLines(sid, long ? 300 : 12, long, { content, hook: path, status: s.status }) : o.noAgent ? [] : commandLog(run, s.status, path.split(".").at(-1), mr.url);
     return Object.assign(s, { _agent: agent, _run: run, _noAgent: !!o.noAgent });
   };
   /** `store.session_exited`: `status` after its wall time, with the usage an agent reported. */
@@ -117,6 +117,8 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     if (s._agent) {
       usage = agentUsage(s.hook_point, n);
       Object.assign(s, usage);
+      // Its sub-agents have all answered by now.
+      if (content) logs[s.id] = logLines(s.id, 12, false, { content, hook: s.hook_point, status });
       if (status === "done" || status === "done_with_concerns") s.session_summary_ref = `items/${id}/sessions/${s.id}/out/summary.md`;
     } else if (s._noAgent) {
       logs[s.id] = [{ n: 1, t: t(0.1), src: "stdout", text: "no bot feedback collected; no agent started" }];

@@ -29,8 +29,8 @@ import type { EventType } from "../../../src/types/vocab.generated";
 import type { GateRound } from "../../../src/types";
 import { buildNgItem, NG_NOW, NG_SCENARIOS } from "./ngItems";
 import { ago, agoPy } from "./clock";
-import { isAgentSession, runOutput, scopeRunsOf, type Run } from "./taskKinds";
-import { changedFiles, contentDiff, docBody, gateTitle, isLate, itemDocs, mrOf, type Content } from "./ngContent";
+import { agentRun, isAgentSession, runOutput, scopeRunsOf, type Run } from "./taskKinds";
+import { changedFiles, contentDiff, docBody, gateTitle, isDocsPath, isLate, isTest, itemDocs, mrOf, symbolOf, type Content } from "./ngContent";
 
 /* ── ids & time ──────────────────────────────────────────────────────────── */
 
@@ -192,7 +192,61 @@ export interface ItemBundle {
   content?: Content;
 }
 
-export function logLines(sessionId: string, n: number, long: boolean): any[] {
+/** The tasks whose agent hands work to sub-agents (Claude Code's Agent tool, `subagents.py`): the implementer, which the
+ *  plan skill has hand a plan's tasks to sub-agents (`skills/plan/SKILL.md`), verification's repair and its code
+ *  review. An author of a spec, plan, chain revision, brief or summary, a gate's reviewer, the judge and an escalation
+ *  turn read a document or two and work alone. */
+export const DELEGATES = new Set(["implementation.main.implement", "verification.fix_loop.main.repair", "verification.review.code_review"]);
+/** FNV-1a: a stable 32-bit number from a session id, which varies its log and sub-agents. */
+const fnv = (s: string) => [...s].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 0x01000193) >>> 0, 0x811c9dc5);
+
+/** An agent session's log on an item with content (ngContent.ts): what `logLines` writes, about the item's own files,
+ *  and, for a task that delegates, sub-agents (one to three for the implementer, up to two for a repair or a review),
+ *  each about one of them. A sub-agent writes as Claude Code's do: a line of its own, a tool call, a `task_progress`
+ *  and, once done, a `task_notification` with its answer and usage, which `subagentList` reads as `subagents.Fold`
+ *  does. While its session runs, the first is still at work. */
+function contentLog(sid: string, hook: string, c: Content, status: string): any[] {
+  const h = fnv(sid);
+  const files = c.files.filter((f) => !isLate(f)).map(([p]) => p);
+  const at = (k: number) => files[(h + k) % files.length];
+  const test = files.find(isTest);
+  const lines: any[] = [];
+  const line = (src: string, text: string, more: Record<string, unknown> = {}) => lines.push({ n: lines.length + 1, t: t((lines.length + 1) / 10), src, text, ...more });
+  const subs = DELEGATES.has(hook) ? Math.min(files.length, (hook === "implementation.main.implement" ? 1 : 0) + (h % 3)) : 0;
+  for (let i = 1; i <= 12; i++) {
+    const f = at(i);
+    const fn = symbolOf(f);
+    const src = (["sys", "stdout", "agent", "tool"] as const)[i % 4];
+    if (src === "sys") line(src, `[kraft] dispatch ${sid.slice(0, 8)} attempt 1 cwd=/Users/dev/.kraft/worktrees/${sid.slice(0, 12)}`);
+    else if (src === "stdout") line(src, test ? `${test}::${symbolOf(test)} PASSED [ ${String(i * 8).padStart(3)}%]` : `${f}: 0 problems`);
+    else if (src === "agent") line(src, isDocsPath(f) ? `Reading ${f} to see what the page says now before I change it.` : `Reading ${f} to see what ${fn} does before I change it.`);
+    else line(src, JSON.stringify({ type: "tool_use", name: "Edit", input: { file_path: f, old_string: `${fn}(value`, new_string: `${fn}(value, limit` } }), { summary: `Edit ${f}` });
+    const k = i / 4 - 1;
+    if (i % 4 !== 0 || k >= subs) continue;
+    // A sub-agent after each of the first `subs` edits: its own file, its own question, its own usage.
+    const f2 = at(k), fn2 = symbolOf(f2), docs = isDocsPath(f2);
+    const type = k === 1 ? "general-purpose" : "Explore";
+    const label = docs ? `Find the pages that link to ${f2}` : [`Find who calls ${fn2} in ${f2}`, `Check what ${f2} must keep`, `Find the tests that cover ${fn2}`][k];
+    const answer = docs ? `Found them: ${2 + ((h >>> k) % 4)} pages link to ${f2}, none by an anchor this change moves.`
+      : [`Found it in ${f2}: ${fn2} has ${2 + ((h >>> k) % 3)} callers, all inside this change.`, `Found it in ${f2}: ${fn2} keeps its signature for its callers; only its body changes.`, `Found it in ${test ?? f2}: it covers ${fn2} only on the happy path.`][k];
+    const id = `a${((h ^ Math.imul(k + 1, 0x9e3779b1)) >>> 0).toString(16).padStart(8, "0")}`;
+    const tag = { agent: id, agent_label: label, agent_type: type };
+    const usage = { total_tokens: 9_000 + ((h >>> (k * 5)) % 37) * 1_100, tool_uses: 3 + ((h >>> (k * 3 + 1)) % 9), duration_ms: Math.round(agentRun(hook).wall_s * 1000 * (0.15 + ((h >>> (k * 4 + 2)) % 5) * 0.05)) };
+    const tool = k === 1 ? "Read" : "Grep";
+    const look = `Looking for ${docs ? "links to it" : fn2} in ${f2}.`;
+    line("agent", look, { ...tag, summary: `↳ ${label}: ${look}` });
+    line("tool", JSON.stringify({ type: "tool_use", name: tool, input: tool === "Read" ? { file_path: f2 } : { pattern: fn2, path: f2 } }), { ...tag, summary: `↳ ${label}: ${tool} ${f2}` });
+    line("sys", JSON.stringify({ type: "system", subtype: "task_progress", task_id: id, subagent_type: type, description: label, last_tool_name: tool, usage }), { ...tag, summary: `↳ ${label}: ${tool} · ${Math.round(usage.total_tokens / 1000)}k tokens · ${usage.tool_uses} tool uses` });
+    if (status === "running" && k === 0) continue;
+    line("sys", JSON.stringify({ type: "system", subtype: "task_notification", task_id: id, status: "completed", summary: answer, usage }), { ...tag, agent_status: "completed", summary: `↳ ${label}: completed: ${answer} · ${Math.round(usage.duration_ms / 1000)}s` });
+  }
+  return lines;
+}
+
+/** An agent session's log. `own`: the item's content and the session's task and status, for a log about the item's own
+ *  files (`contentLog`); with no content, the shared sample's. */
+export function logLines(sessionId: string, n: number, long: boolean, own?: { content?: Content; hook: string; status: string }): any[] {
+  if (own?.content) return contentLog(sessionId, own.hook, own.content, own.status);
   const out: any[] = [];
   const srcs = ["sys", "stdout", "agent", "tool"] as const;
   for (let i = 1; i <= n; i++) {
@@ -230,14 +284,26 @@ export const sessionLog = (agent: boolean, run: Run | string | null, sid: string
 export function subagentList(lines: any[], status: string): any[] {
   const seen = new Map<string, any>();
   for (const l of lines) {
-    if (!l.agent || seen.has(l.agent)) continue;
-    const n = seen.size;
-    const running = status === "running" && n === 0;
-    seen.set(l.agent, {
-      id: l.agent, tool_use_id: `toolu_${l.agent}`, description: l.agent_label, type: l.agent_type ?? null, depth: 1, status: running ? "running" : "completed",
-      started_at: ago(71), ended_at: running ? null : ago(70.3), tokens: 31_000 + n * 7_000, tool_uses: 4 + n, duration_ms: 42_000,
-      last_tool: "Grep", summary: running ? null : "Found the grouping code in Changes.tsx.",
-    });
+    if (!l.agent) continue;
+    const running = status === "running" && (seen.size === 0 || seen.keys().next().value === l.agent);
+    if (!seen.has(l.agent)) {
+      const n = seen.size;
+      seen.set(l.agent, {
+        id: l.agent, tool_use_id: `toolu_${l.agent}`, description: l.agent_label, type: l.agent_type ?? null, depth: 1, status: running ? "running" : "completed",
+        started_at: ago(71), ended_at: running ? null : ago(70.3), tokens: 31_000 + n * 7_000, tool_uses: 4 + n, duration_ms: 42_000,
+        last_tool: "Grep", summary: running ? null : "Found the grouping code in Changes.tsx.",
+      });
+    }
+    // A sub-agent's `task_progress` or `task_notification` line (`contentLog`'s; the sample's have none): its last tool,
+    // its usage and, once it has finished, its answer.
+    if (l.src !== "sys") continue;
+    const e = seen.get(l.agent);
+    const o = JSON.parse(l.text);
+    Object.assign(e, { tokens: o.usage.total_tokens, tool_uses: o.usage.tool_uses, duration_ms: o.usage.duration_ms, last_tool: o.last_tool_name ?? e.last_tool });
+    // One with no notification in an ended session's log was cut off (`Fold.entries`): a pause stopped it.
+    if (!running) Object.assign(e, o.subtype === "task_notification"
+      ? { status: "completed", summary: o.summary, ended_at: new Date(Date.parse(e.started_at) + e.duration_ms).toISOString() }
+      : { status: "cut_off", summary: null, ended_at: null });
   }
   return [...seen.values()];
 }
