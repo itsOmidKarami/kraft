@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { buildScenario, searchFor, withScopes, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
+import { buildScenario, DELEGATES, searchFor, subagentList, withScopes, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
 import { FRESH_TITLES, motion } from "../e2e/contract/mocks/motion";
 import { NG_REPOS } from "../e2e/contract/mocks/ngBoard";
 import { CONTENT, docBody, FRESH_CONTENT, isDocsPath, isLate, mergeDocs, mrOf } from "../e2e/contract/mocks/ngContent";
@@ -52,6 +52,18 @@ const noAgentTriage = (b: ItemBundle, s: any) =>
   s.hook_point === TRIAGE && s.status === "done" && s.model == null && s.cost_usd == null && logOf(b, s).map((l) => l.text).join("\n") === "no bot feedback collected; no agent started";
 const logOf = (b: ItemBundle, s: any): any[] => b.logs[s.id] ?? [];
 const lastSegment = (hook: string) => hook.split(".").at(-1)!;
+/** A session's sub-agents, as its `/subagents` route lists them. */
+const subagentsOf = (b: ItemBundle, s: any): any[] => subagentList(logOf(b, s), s.status);
+/** What an agent's session shows: its log's lines and their summaries, and its sub-agents' descriptions and answers. */
+const agentTexts = (b: ItemBundle, s: any): string[] =>
+  [...logOf(b, s).flatMap((l) => [l.text, l.summary]), ...subagentsOf(b, s).flatMap((a) => [a.description, a.summary])].filter((x): x is string => typeof x === "string");
+/** Every file `texts` name (a path or a bare file name) that is none of its item's own: neither one of its paths nor one's name. */
+const foreignFiles = (b: ItemBundle, texts: string[]) => {
+  const own = new Set(b.content!.files.flatMap(([p]) => [p, p.split("/").pop()!]));
+  return [...new Set(texts.flatMap((x) => x.match(/[\w./-]*\w\.(?:py|tsx?|jsx?|md|ya?ml|json|toml|css|html|service)\b/g) ?? []))].filter((f) => !own.has(f));
+};
+/** Every token a session's usage counts (`usage.KINDS`). */
+const usedBy = (s: any) => (s.tokens_in ?? 0) + (s.tokens_cache_write ?? 0) + (s.tokens_cache_read ?? 0) + (s.tokens_out ?? 0);
 /** `rule` is a way a session can be wrong; the bundles' offenders, readably, so a failure names the item and task. */
 const offenders = (S: Scenario, rule: (b: ItemBundle, s: any) => boolean) =>
   Object.values(S.bundles).flatMap((b) => b.sessions.filter((s) => rule(b, s)).map((s) => `${b.item.title}: ${s.hook_point} (${s.status})`));
@@ -119,6 +131,10 @@ describe.each(SCENARIOS)("sessions in %s", (_scenario, build) => {
     // with no frozen chain, carry made-up figures and no cache split.
     ["an agent's cost is what its tokens cost, to a millionth of a dollar", (b, s) => !!b.item.materialized_chain && s.model === MODEL && s.cost_usd != null
       && !(Math.abs(Object.entries(PRICE).reduce((a, [k, usd]) => a + (s[k] ?? NaN) * usd / 1e6, 0) - s.cost_usd) < 1e-6)],
+    // An item with content: its agents' logs and sub-agents are about its own files; the shared sample's are not its.
+    ["an agent's log and sub-agents name only its item's own files", (b, s) => !!b.content && agentic(b, s) && foreignFiles(b, agentTexts(b, s)).length > 0],
+    ["only the implementer, verification's repair and its code review hand work to sub-agents", (b, s) => !!b.content && !DELEGATES.has(s.hook_point) && subagentsOf(b, s).length > 0],
+    ["a sub-agent spends no more tokens than its session", (b, s) => s.tokens_in != null && subagentsOf(b, s).some((a) => a.tokens > usedBy(s))],
   ])("%s", (_rule, rule) => {
     expect(offenders(S, rule)).toEqual([]);
   });
@@ -264,6 +280,14 @@ describe.each(SCENARIOS)("items in %s", (_scenario, build) => {
   it("no two board items share a title", () => {
     const titles = [...S.ngBoard, ...S.ngArchived].map((id) => S.bundles[id].item.title);
     expect(titles.filter((x, k) => titles.indexOf(x) !== k)).toEqual([]);
+  });
+
+  it("no two board items' sub-agents share a description, and what its rounds measured names only its own files", () => {
+    const board = [...S.ngBoard, ...S.ngArchived].map((id) => S.bundles[id]).filter((b) => b.content);
+    const said = board.map((b) => new Set(b.sessions.flatMap((s) => subagentsOf(b, s).map((a) => a.description as string))));
+    expect(said.flatMap((d, k) => [...d].filter((x) => said.some((e, j) => j !== k && e.has(x))))).toEqual([]);
+    const measured = (b: ItemBundle) => b.events.filter((e) => e.type === "findings_measured").flatMap((e) => (e.payload.findings as any[]).map((f) => String(f.message)));
+    expect(board.map((b) => [b.item.title, foreignFiles(b, measured(b))]).filter(([, w]) => w.length)).toEqual([]);
   });
 });
 

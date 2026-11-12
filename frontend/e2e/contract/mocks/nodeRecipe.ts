@@ -103,10 +103,14 @@ export function failedTest(late?: string | null): string {
   return /\.(md|rst|txt)$/.test(late) ? `FAILED ${late}::${late.split("/").pop()}` : `FAILED ${late}::${base} - AssertionError`;
 }
 /** A red test run's log with the item's own failing test in the sample's place (`failedTest`). */
-export const ownFailure = (log: any[], late?: string | null) => (late ? log.map((l) => (l.text === failedTest() ? { ...l, text: failedTest(late) } : l)) : log);
+/** The docs check's complaint about `page` (the sample's, `DOCS_SCOPE`'s, without one). */
+const docsLine = (page = "docs/search.md") => `${page}:12 MD040/fenced-code-language Fenced code blocks should have a language specified`;
+/** A failed scope's log as an item's own: its late file's red test, and its own page's docs complaint. */
+export const ownFailure = (log: any[], late?: string | null, page?: string | null) =>
+  log.map((l) => (late && l.text === failedTest() ? { ...l, text: failedTest(late) } : page && l.text === docsLine() ? { ...l, text: docsLine(page) } : l));
 /** Round 0's red test, then round 1's red docs check: two defects, so two fingerprints, and the stuck detector does not fire. */
 export const redOf = (late?: string | null): Found => ({ finding: blindFinding(TESTS, RUNS["kraft.verify_changed_test_scopes"].command!, failedTest(late)), print: "5be0c1d7a93e4f20", cmd: RUNS["kraft.verify_changed_test_scopes"].command });
-export const DOCS_RED: Found = { finding: blindFinding(TESTS, DOCS_SCOPE.command!, "docs/search.md:12 MD040/fenced-code-language Fenced code blocks should have a language specified"), print: "c41f0e9b2d7a6853", cmd: DOCS_SCOPE.command };
+export const docsRedOf = (page?: string | null): Found => ({ finding: blindFinding(TESTS, DOCS_SCOPE.command!, docsLine(page ?? undefined)), print: "c41f0e9b2d7a6853", cmd: DOCS_SCOPE.command });
 
 /** A session that ran to `status`: made (and launched), a beat, then ended. */
 export function* ran(w: Writer, path: string, node: string, status = "done", o: Open = {}): Beats<any> {
