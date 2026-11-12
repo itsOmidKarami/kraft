@@ -36,6 +36,9 @@ something. This is normative for `tests/` and `frontend/src/**/*.test.*`;
   `SKIPPED:` and lets the commit through in a Kraft worker, without
   `KRAFT_SMOKE_MODELS=1`, or with no credential set; `just smoke-models`
   itself still fails without one.
+  Whether each bundled harness file's flags and subcommands still exist is
+  checked without a token: `just smoke-flags` locally, and the daily
+  `harness flags` workflow against the latest CLIs ([`ci.md`](ci.md)).
 
 A test that wants to run the same behaviour against both tiers takes one
 parametrized fixture instead of two test bodies. `support.fake_beads` does
