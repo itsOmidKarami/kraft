@@ -1,6 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import type { Scenario } from "./mocks/fixtures";
-import { withBeads, withCapLimit, withEscalationThread, withFailedTests, withFixRoundOutcome, withOneOffPending, withReviewer, withScopes, withStop, withTestResult } from "./mocks/fixtures";
+import { withBeads, withCapLimit, withEscalationThread, withFailedTests, withFixRoundOutcome, withOneOffPending, withScopes, withStop, withTestResult } from "./mocks/fixtures";
 import { app, away, contract, dragPaneEdge, focusedName, item, pause, type Row } from "./kit";
 
 /** The item page: the side pane, the header's card menu, the log viewer, the chain graph, a gate's pane, and what a stop says. */
@@ -235,7 +235,7 @@ const ROWS: Row[] = [
   {
     name: "gate: clicking a gate's auto_review opens its own task pane with attempts and Log, and no Skip or Retry",
     run: async (p) => {
-      await app(p, item("needs-gate", "/nodes/final_review"), { tweak: withReviewer });
+      await app(p, item("needs-gate", "/nodes/final_review"));
       await p.getByRole("button", { name: /auto_review/ }).first().click(); await pause(p, 600);
       expect(p.url()).toContain("sel=final_review.auto_review");
       await expect(p.getByRole("tab", { name: "Log" }).first()).toBeVisible();

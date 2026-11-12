@@ -3,6 +3,7 @@ import { commandLog, hex, logLines, LONG_DESCRIPTION, t, type ItemBundle, type V
 import { chainOf, frozenOf, type DefNode } from "./ngChain";
 import { RESUME_PROMPT } from "./poller";
 import { agentRun, DOCS_SCOPE, isAgentSession, MODEL, RUNS, taskRun, type Run } from "./taskKinds";
+import { escalationThreads } from "./transitions";
 
 export { NG_NODES } from "./ngChain";
 
@@ -425,6 +426,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     }
   }
   for (const s of sessions) { delete s._agent; delete s._run; delete s._noAgent; }
+  item.escalation_threads = escalationThreads(sessions);
   item.updated_at = t(m);
   const done = new Set(events.filter((e) => e.type === "node_completed").map((e) => e.payload.node_id));
   item.summary = { ...item.summary, nodes_done: nodes.filter((n) => done.has(n.id)).length, gates_passed: nodes.filter((n) => n.kind === "gate" && done.has(n.id)).length };

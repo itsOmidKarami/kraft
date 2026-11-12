@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { compareFor, withProducer } from "./mocks/fixtures";
+import { compareFor } from "./mocks/fixtures";
 import { app, contract, editorsRoute, focusedName, item, pause, type Row } from "./kit";
 
 /** Review and the document viewer: the gate review, Approve's lock, Esc and focus, Open in editor, search matches. */
@@ -153,7 +153,7 @@ const ROWS: Row[] = [
   {
     name: "doc viewer: a gate's document says who wrote it [decided]",
     run: async (p) => {
-      await app(p, item("needs-gate", "?sel=final_review"), { routes: editorsRoute, tweak: withProducer });
+      await app(p, item("needs-gate", "?sel=final_review"), { routes: editorsRoute });
       await p.getByRole("button", { name: /^Read / }).first().click(); await p.getByRole("dialog").waitFor();
       await expect(p.getByRole("dialog").getByText(/written by/).first()).toBeVisible({ timeout: 3000 });
     },

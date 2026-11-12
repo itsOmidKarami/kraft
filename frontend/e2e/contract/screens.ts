@@ -1,6 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import type { Scenario, Variant } from "./mocks/fixtures";
-import { withCapLimit, withFixRoundOutcome, withOneOffPending, withProducer, withReviewer, withScopes, withStop, withTestResult } from "./mocks/fixtures";
+import { withCapLimit, withFixRoundOutcome, withOneOffPending, withScopes, withStop, withTestResult } from "./mocks/fixtures";
 import { app, editorsRoute, item, type AppOpts } from "./kit";
 import { NAMED_MEANWHILE } from "./mocks/ngForges";
 
@@ -303,8 +303,8 @@ export const STATES: State[] = [
 
   // Follow-ups: what a seed adds, review ranges, the revealed sidebar, the phone
   // Follow-ups merged since sweep 2
-  { area: "follow-ups", state: "reviewer-pane", ...at("a gate's auto_review opens its own task pane", item("needs-gate", "/nodes/final_review?sel=final_review.auto_review"), { tweak: withReviewer }) },
-  { area: "follow-ups", state: "reviewer-gate", ...at("the gate pane that owns the reviewer", item("needs-gate", "?sel=final_review"), { tweak: withReviewer }) },
+  { area: "follow-ups", state: "reviewer-pane", ...at("a gate's auto_review opens its own task pane", item("needs-gate", "/nodes/final_review?sel=final_review.auto_review")) },
+  { area: "follow-ups", state: "reviewer-gate", ...at("the gate pane that owns the reviewer", item("needs-gate", "?sel=final_review")) },
   { area: "follow-ups", state: "recent-committed", ...at("Recent: the fix committed a change", item("running"), { tweak: withFixRoundOutcome(true) }) },
   { area: "follow-ups", state: "gate-tests-fail", ...at("gate pane: tests ✗ 1 of 3 scopes", item("needs-gate", "?sel=final_review"), { tweak: withTestResult(3, 1) }) },
   { area: "follow-ups", state: "failed-forge-auth", ...at("failed card, forge_auth", item("failed"), { tweak: withStop("infra", { cause: "forge_auth" }) }) },
@@ -314,8 +314,8 @@ export const STATES: State[] = [
   { area: "follow-ups", state: "capped-limit", ...at("capped item whose stop names its limit: header, banner, spent line", item("capped"), { tweak: withCapLimit }) },
   { area: "follow-ups", state: "capped-limit-peek", ...at("…and its board peek", "/", { tweak: withCapLimit, ready: async (pg) => { await pg.getByRole("button", { name: /^Fix flaky retry test/ }).first().click(); await pg.waitForTimeout(700); } }) },
 
-  { area: "follow-ups", state: "gate-doc-by", ...at("a gate's document: written by, Open in editor", item("needs-gate", "?sel=final_review"), { tweak: withProducer, routes: editorsRoute, ready: async (pg) => { await pg.getByRole("button", { name: /^Read / }).first().click(); await pg.getByRole("dialog").waitFor(); } }) },
-  { area: "follow-ups", state: "review-by", ...at("the gate review: written by", item("needs-gate", "/review?doc=1"), { tweak: withProducer, ready: (pg) => pg.locator(".review-page").waitFor({ timeout: 8000 }) }) },
+  { area: "follow-ups", state: "gate-doc-by", ...at("a gate's document: written by, Open in editor", item("needs-gate", "?sel=final_review"), { routes: editorsRoute, ready: async (pg) => { await pg.getByRole("button", { name: /^Read / }).first().click(); await pg.getByRole("dialog").waitFor(); } }) },
+  { area: "follow-ups", state: "review-by", ...at("the gate review: written by", item("needs-gate", "/review?doc=1"), { ready: (pg) => pg.locator(".review-page").waitFor({ timeout: 8000 }) }) },
 
   // Review ranges
   { area: "review-ranges", state: "range-new", ...at("composer on lines 2–7: header Lines 2–7", item("needs-gate", "/review"), { ready: rangeOpen(["new", 2], ["new", 7]) }) },
