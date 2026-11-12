@@ -3,6 +3,7 @@ import { buildScenario, type Scenario } from "../e2e/contract/mocks/fixtures";
 import { mockServer, type Answer, type MockOptions } from "../e2e/contract/mocks/mockApi";
 import { FRESH_TITLES } from "../e2e/contract/mocks/motion";
 import { agentUsage } from "../e2e/contract/mocks/nodeRecipe";
+import { sizeOf } from "../e2e/contract/mocks/ngContent";
 import { NG_NOW } from "../e2e/contract/mocks/ngItems";
 import { RESUME_PROMPT, type Ev } from "../e2e/contract/mocks/transitions";
 import { recent } from "../src/ng/item/events";
@@ -38,7 +39,7 @@ const clocked = () => {
 const usageOf = (S: Scenario, id: string, sid: string) => {
   const b = S.bundles[id];
   const s = b.sessions.find((x) => x.id === sid)!;
-  return agentUsage(s.hook_point, b.sessions.indexOf(s));
+  return agentUsage(s.hook_point, b.sessions.indexOf(s), sizeOf(b.content));
 };
 /** A board row's id by its bead. */
 const board = (S: Scenario, bead: string) => S.ngBoard.find((id) => S.bundles[id].item.bead_id === bead)!;

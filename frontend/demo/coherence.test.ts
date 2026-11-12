@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { buildScenario, DELEGATES, searchFor, subagentList, withScopes, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
 import { FRESH_TITLES, motion } from "../e2e/contract/mocks/motion";
-import { NG_REPOS } from "../e2e/contract/mocks/ngBoard";
-import { CONTENT, docBody, FRESH_CONTENT, isDocsPath, isLate, mergeDocs, mrOf } from "../e2e/contract/mocks/ngContent";
+import { ngDryRun, NG_REPOS } from "../e2e/contract/mocks/ngBoard";
+import { CONTENT, docBody, FRESH_CONTENT, isDocsPath, isLate, mergeDocs, mrOf, sizeOf } from "../e2e/contract/mocks/ngContent";
 import { frozenOf } from "../e2e/contract/mocks/ngChain";
 import { AUTO_ESCALATE_MESSAGE, buildNgItem, MR_CLOSED_REASON, NG_NOW, renderNote } from "../e2e/contract/mocks/ngItems";
 import { agentUsage, openWait } from "../e2e/contract/mocks/nodeRecipe";
@@ -12,6 +12,7 @@ import { isAgentSession, MODEL, nodeTasks, PRICE, RUNS, runOutput, taskKind, tas
 import { transitions } from "../e2e/contract/mocks/transitions";
 import { mockServer, type Answer } from "../e2e/contract/mocks/mockApi";
 import { demoOptions } from "./scenario";
+import { elapsed } from "../src/format";
 
 /**
  * The third unit test that holds the demo's data to Kraft itself (`apiShapes.test.ts` holds its keys, `sampleCoverage.test.ts`
@@ -142,6 +143,8 @@ describe.each(SCENARIOS)("sessions in %s", (_scenario, build) => {
     ["only the implementer, verification's repair and its code review hand work to sub-agents", (b, s) => !!b.content && !DELEGATES.has(s.hook_point) && subagentsOf(b, s).length > 0],
     ["a finished session's sub-agents have all finished", (b, s) => ["done", "done_with_concerns"].includes(s.status) && subagentsOf(b, s).some((a) => a.status !== "completed")],
     ["a sub-agent spends no more tokens than its session", (b, s) => s.tokens_in != null && subagentsOf(b, s).some((a) => a.tokens > usedBy(s))],
+    // Its cache reads are what its cost leaves after the rest: a cost scaled down below its other tokens' leaves fewer than none.
+    ["no kind of token is counted below zero", (_b, s) => Object.keys(PRICE).some((k) => s[k] < 0)],
   ])("%s", (_rule, rule) => {
     expect(offenders(S, rule)).toEqual([]);
   });
@@ -947,6 +950,34 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
     expect([ended.length > 1, live.length > 1]).toEqual([true, true]);
     expect([ended.filter((x, k) => ended.indexOf(x) !== k), live.filter((x, k) => live.indexOf(x) !== k)]).toEqual([[], []]);
   });
+  // What a finished item's card shows: what it spent, to the cent, and how long its sessions took, as the card writes it.
+  const spentOf = (b: ItemBundle) => b.item.budget_cap.spent_usd.toFixed(2);
+  const tookOf = (b: ItemBundle) => elapsed(b.item.running_time.running_s * 1000);
+  const linesOf = (b: ItemBundle) => b.content!.files.reduce((a, [, ins, del]) => a + ins + del, 0);
+  const dups = (xs: string[]) => xs.filter((x, k) => xs.indexOf(x) !== k);
+  it.runIf(sample)("no two finished default-chain items show the same spend, nor the same time taken", () => {
+    const ended = board.filter((b) => ENDED_STATUSES.includes(b.item.status) && b.item.chain_template === "default");
+    expect(ended.length).toBeGreaterThan(3);
+    expect([dups(ended.map(spentOf)), dups(ended.map(tookOf))]).toEqual([[], []]);
+  });
+  // Spend follows the change: of two items that ran their chain to its end, the one that changed more lines spent more
+  // on the same chain, and a docs item spent and took less than a default-chain item that changed more.
+  it.runIf(sample)("an item that changed more lines spent more on its chain, and a docs item less than a bigger default one", () => {
+    const ran = board.filter((b) => completed(b, defIds(b).at(-1)!));
+    const chain = (c: string) => ran.filter((b) => b.item.chain_template === c).length;
+    expect([chain("default") > 4, chain("docs_only") > 1]).toEqual([true, true]);
+    const cents = (b: ItemBundle) => b.item.budget_cap.spent_usd;
+    const wrong = ran.flatMap((a) => ran.filter((b) => linesOf(a) < linesOf(b) && (a.item.chain_template === b.item.chain_template
+      ? !(cents(a) < cents(b))
+      : a.item.chain_template === "docs_only" && b.item.chain_template === "default" && !(cents(a) < cents(b) && a.item.running_time.running_s < b.item.running_time.running_s)))
+      .map((b) => `${a.item.bead_id} (${linesOf(a)} lines, ${spentOf(a)}) against ${b.item.bead_id} (${linesOf(b)} lines, ${spentOf(b)})`));
+    expect(wrong).toEqual([]);
+  });
+  // `work_item_usd` is the demo team's policy cap (ngBoard.ts `ngDryRun`); an item with a lower cap of its own stops at that.
+  it("every board item spent less than the demo team's cap", () => {
+    const cap = (ngDryRun({}).body as any).caps.budget_usd;
+    expect(board.filter((b) => !(b.item.budget_cap.spent_usd < cap)).map((b) => `${b.item.bead_id}: ${b.item.budget_cap.spent_usd}`)).toEqual([]);
+  });
 });
 
 /** The items a walk files when nothing else is on the board, `n` of them: each completed by a door the tick it is filed. */
@@ -1219,7 +1250,7 @@ describe("the live walk runs each node as the sample's finished item ran it", ()
       const agent = agentic(b, s);
       if ((s.harness === "claude") !== agent) return true;
       if (!agent || noAgentTriage(b, s)) return s.model != null || s.cost_usd != null || s.command !== commandOf(b, s);
-      const u = agentUsage(s.hook_point, b.sessions.indexOf(s));
+      const u = agentUsage(s.hook_point, b.sessions.indexOf(s), sizeOf(b.content));
       return s.model !== u.model || s.tokens_in !== u.tokens_in || s.tokens_out !== u.tokens_out || s.cost_usd !== u.cost_usd;
     }).map((s) => `${b.item.title}: ${s.hook_point}`));
     expect(wrong).toEqual([]);
