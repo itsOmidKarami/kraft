@@ -463,7 +463,9 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
       const note = String(b.events.find((e) => e.type === "gate_rejected" && e.created_at === r.submitted_at)?.payload.note);
       const open = (b.threads as any[]).filter((th) => th.created_at <= r.submitted_at && !(th.resolved_at && th.resolved_at <= r.submitted_at));
       const block = (th: any) => [`[${th.id}] ${th.file_path}:+${th.start_line}${th.end_line === th.start_line ? "" : ` to +${th.end_line}`}${th.label ? ` (${th.label})` : ""}`, ...(th.quote ? th.quote.split("\n") : []).map((l: string) => `    | ${l}`), th.comments[0].body].join("\n");
-      const ok = note.startsWith(`${r.summary}\n\n`) && open.length > 0 && open.every((th) => note.includes(block(th))) && (b.threads as any[]).filter((th) => !open.includes(th)).every((th) => !note.includes(`[${th.id}]`));
+      // `store.render_note`: the summary, the fixed head line, then the blocks, each part a blank line from the next.
+      const head = 'Review threads to address (reply to each with `kraft item reply <thread-id> --claim fixed|answered --body "..."`):';
+      const ok = open.length > 0 && note === [r.summary, head, open.map(block).join("\n\n")].join("\n\n") && (b.threads as any[]).filter((th) => !open.includes(th)).every((th) => !note.includes(`[${th.id}]`));
       return ok ? [] : [`${b.item.title}: ${r.id}`];
     }));
     expect(wrong).toEqual([]);
