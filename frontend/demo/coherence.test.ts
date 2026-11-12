@@ -411,9 +411,26 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
           for (const row of p.split(/^@@ .*$/m)[1].replace(/^\n/, "").replace(/\n$/, "").split("\n")) if (row[0] !== "-") lines.set(n++, row);
         }
         const span = Array.from({ length: th.end_line - th.start_line + 1 }, (_, k) => lines.get(th.start_line + k));
-        if (!p || span.some((r) => r === undefined) || (th.quote != null && th.quote !== span.join("\n"))) wrong.push(`${b.item.title}: ${th.id}`);
+        // An item with a hunk of its own quotes it on every thread; the sample's local-review thread quotes nothing.
+        if (!p || span.some((r) => r === undefined) || (b.content?.hunks && th.quote == null) || (th.quote != null && th.quote !== span.join("\n"))) wrong.push(`${b.item.title}: ${th.id}`);
+        // What a comment names in backticks is code on the lines it sits on (a thread about `lookup` quotes `def lookup`).
+        for (const c of th.comments) for (const [, name] of c.body.matchAll(/`([^`]+)`/g)) if (!th.quote?.includes(name)) wrong.push(`${b.item.title}: ${th.id} names ${name}`);
       }
     }
+    expect(wrong).toEqual([]);
+  });
+  // `submit_review`'s note (`store.render_note`): the review's summary, then each thread open as it was submitted, where it
+  // sits, the lines it quotes and what was said; a thread resolved by then is left out.
+  it("a review's rejection note is its summary and the threads open when it was sent, each where it sits with its quote", () => {
+    const threaded = board.filter((b) => b.threads?.length && b.reviews?.length);
+    if (sample) expect(threaded.length).toBeGreaterThan(0);
+    const wrong = threaded.flatMap((b) => (b.reviews ?? []).flatMap((r: any) => {
+      const note = String(b.events.find((e) => e.type === "gate_rejected" && e.created_at === r.submitted_at)?.payload.note);
+      const open = (b.threads as any[]).filter((th) => th.created_at <= r.submitted_at && !(th.resolved_at && th.resolved_at <= r.submitted_at));
+      const block = (th: any) => [`[${th.id}] ${th.file_path}:+${th.start_line}${th.end_line === th.start_line ? "" : ` to +${th.end_line}`}${th.label ? ` (${th.label})` : ""}`, ...(th.quote ? th.quote.split("\n") : []).map((l: string) => `    | ${l}`), th.comments[0].body].join("\n");
+      const ok = note.startsWith(`${r.summary}\n\n`) && open.length > 0 && open.every((th) => note.includes(block(th))) && (b.threads as any[]).filter((th) => !open.includes(th)).every((th) => !note.includes(`[${th.id}]`));
+      return ok ? [] : [`${b.item.title}: ${r.id}`];
+    }));
     expect(wrong).toEqual([]);
   });
   // A test imports the module of its name where the item changes one, from where that module is; a page says what the

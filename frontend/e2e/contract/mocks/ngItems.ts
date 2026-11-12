@@ -36,15 +36,27 @@ const STUCK = "stuck: fix attempt 2 in node verification changed nothing, so mea
 export const AUTO_ESCALATE_MESSAGE = "(Auto-escalated: no one has looked at this yet. Diagnose why it stopped and fix it if you can; if you're not confident, stop and say so instead of guessing.)";
 /** `mr_poller.REASON`: the stop when the forge says the item's merge request was closed unmerged. */
 export const MR_CLOSED_REASON = "the merge request was closed on the forge without merging";
-/** What the person said at the final review: the rejection's note and each thread's comment. The sample's are about its
- *  own lines; a board row with a hunk of its own (kraft-cb59's new cache module, ngContent.ts) is reviewed on that. */
-const REVIEW_OF_SAMPLE = { note: "must fix: `commits` can be empty\n\nquestion: why no size bound?", must: "`commits` can be empty: `max()` of an empty generator raises", question: "why no size bound?", local: "cache has no size bound" };
+/** What the person said at the final review, each thread's comment. The sample's are about its own lines; a board row
+ *  with a hunk of its own (kraft-cb59's new cache module, ngContent.ts) is reviewed on that: a store of a key already
+ *  cached left it where it was, first in line for eviction (since fixed, the hunk's `move_to_end` in `store`), how the
+ *  bound counts, and which entry eviction drops. */
+const REVIEW_OF_SAMPLE = { must: "`commits` can be empty: `max()` of an empty generator raises", question: "why no size bound?", local: "cache has no size bound" };
 const REVIEW_OF_HUNK = {
-  note: "must fix: an empty cache misses every lookup\n\nquestion: is 4096 entries enough?",
-  must: "On an empty cache every `lookup` is a miss, and `None` reads like an embedding to a caller that forgets to check: say in the docstring that a miss means embed, then `store`.",
-  question: "Eviction drops the least recently used entry once the cache passes `size`: is 4096 enough for a large repository, or should it come from config.py?",
-  local: "`move_to_end` makes eviction least recently used, not oldest stored: say which in the class docstring.",
+  must: "Storing a key that is already cached leaves it where it was in the OrderedDict, so a hot entry stored again is the first one evicted: move it to the end on every `store`.",
+  question: "`size` counts entries, not bytes: at 1,536 floats an embedding, 4096 of them is about 25 MB. Is a count the bound we want, or should it be bytes?",
+  local: "`lookup` moves a hit to the end, so eviction drops the least recently used entry, not the oldest stored: say which in the class docstring.",
 };
+/** The review's summary, as the note of the rejection it sent (`store.render_note`). */
+const REVIEW_SUMMARY = "Two things before this ships.";
+const NOTE_HEAD = 'Review threads to address (reply to each with `kraft item reply <thread-id> --claim fixed|answered --body "..."`):';
+/** `store.render_note`: the review's summary, then each thread not resolved when it was submitted, where it sits
+ *  (`render.thread_where`, a new-side range `path:+5 to +7`), the lines it quotes and the first comment's body. */
+export function renderNote(threads: any[], summary: string): string {
+  const where = (t: any) => `${t.file_path}:+${t.start_line}${t.start_line === t.end_line ? "" : ` to +${t.end_line}`}`;
+  const blocks = threads.filter((t) => t.state !== "resolved").map((t) =>
+    [`[${t.id}] ${where(t)}${t.label ? ` (${t.label})` : ""}`, ...(t.quote ? t.quote.split("\n") : []).map((l: string) => `    | ${l}`), t.comments[0].body].join("\n"));
+  return [summary, ...(blocks.length ? [NOTE_HEAD, blocks.join("\n\n")] : [])].join("\n\n");
+}
 /** `mr`: the merge request its draft opens, what its forge tasks print and its stop names; `content`: what the item is
  *  about, which its plan's tasks, its question and its review threads' lines are written from (a board row's own,
  *  ngContent.ts). Without them, the sample's. */
@@ -214,6 +226,23 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     return s;
   };
 
+  // Where the threads sit: a board row's on the lines its own hunk shows (ngContent.ts `hunks`), which they quote.
+  const [cache, own] = Object.entries(content?.hunks ?? {})[0] ?? [];
+  const at = (k: number) => own!.at + own!.rows.slice(0, k).filter((r) => r[0] !== "-").length;
+  const quote = (from: number, to: number) => own!.rows.filter((r) => r[0] !== "-").slice(from - own!.at, to - own!.at + 1).join("\n");
+  // A board row's threads are about its own hunk (kraft-cb59's store, its bound and its lookup, ngContent.ts), the sample's about its own.
+  const [must, bound, local] = own ? [[at(19), at(20)], [at(7), at(8)], [at(11), at(16)]] : [[12, 14], [30, 30], [40, 44]];
+  const said = own ? REVIEW_OF_HUNK : REVIEW_OF_SAMPLE;
+  // Filed on the first attempt's head, which the review was submitted on too (both `rev-parse HEAD`); the must-fix was
+  // resolved once the rework mended it, after the review sent it back.
+  const head = "4d1e2f3";
+  const threads = sc === "needs-gate" ? [
+    { id: "th1", work_item_id: id, gate: null, node_id: "local_review", file_path: cache ?? "search/cache.py", side: "new", start_line: local[0], end_line: local[1], ...(own && { quote: quote(local[0], local[1]) }), anchor_sha: head, label: "question", state: "open", resolved_at: null, created_at: t(90), comments: [{ id: "c1", author: "you", body: said.local, created_at: t(90) }] },
+    { id: "th-r1-must", work_item_id: id, gate: "final_review", node_id: "implementation", file_path: cache ?? "search/cache.py", side: "new", start_line: must[0], end_line: must[1], quote: own ? quote(must[0], must[1]) : " def newest(commits):\n+    latest = max(c.ts for c in commits)\n+    return self._cache[latest]", anchor_sha: head, label: "must_fix", state: "resolved", resolved_at: t(95.1), created_at: t(92), comments: [{ id: "c-r1-must", author: "you", body: said.must, created_at: t(92) }] },
+    { id: "th-r1-q", work_item_id: id, gate: "final_review", node_id: "implementation", file_path: cache ?? "search/reindex.py", side: "new", start_line: bound[0], end_line: bound[1], quote: own ? quote(bound[0], bound[1]) : "+        self._cache[key] = value", anchor_sha: head, label: "question", state: "open", resolved_at: null, created_at: t(93), comments: [{ id: "c-r1-q", author: "you", body: said.question, created_at: t(93) }] },
+  ] : [];
+  const reviews = sc === "needs-gate" ? [{ id: "rv1", gate: "final_review", outcome: "request_changes", summary: REVIEW_SUMMARY, head_sha: head, submitted_at: t(95) }] : [];
+
   switch (sc) {
     case "running": case "paused": case "cancelled": case "queued": case "blocked": {
       const held = sc !== "running";
@@ -343,7 +372,10 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
       ran("final_review.auto_review", "final_review");
       ev("gate_auto_review_skipped", { gate: "final_review", reason: "passed", note: REVIEWED }, 0.02);
       m = Math.max(m, 94.98);
-      ev("gate_rejected", { gate: "final_review", node: "implementation", by: "human", note: (content?.hunks ? REVIEW_OF_HUNK : REVIEW_OF_SAMPLE).note, verdict: "reject" }, 0.02);
+      // The review's note (`submit_review`): its summary and the threads open as it was submitted.
+      const sent = reviews[0].submitted_at;
+      const asSent = threads.map((x) => ({ ...x, state: x.resolved_at && x.resolved_at <= sent ? "resolved" : "open" }));
+      ev("gate_rejected", { gate: "final_review", node: "implementation", by: "human", note: renderNote(asSent, REVIEW_SUMMARY), verdict: "reject" }, 0.02);
       ev("gate_requested", { node_id: "final_review", gate: "final_review" }, 0.2);
       item.status = "needs_human"; item.display_status = "needs_you"; item.pending_gate = "final_review";
       // A re-review (ux2-W8): two attempts at the gate, and a review submitted on the first.
@@ -413,19 +445,6 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
   total.cost_usd = Math.round(total.cost_usd * 10_000) / 10_000;
   item.usage = { total: { ...total, cost_complete: true, split_complete: true, sessions: sessions.length, rounds: 1, capped_out: 0 }, by_node: byNode };
   item.budget_cap.spent_usd = total.cost_usd;
-  // Where the threads sit: a board row's on the lines its own hunk shows (ngContent.ts `hunks`), which they quote.
-  const [cache, own] = Object.entries(content?.hunks ?? {})[0] ?? [];
-  const at = (k: number) => own!.at + own!.rows.slice(0, k).filter((r) => r[0] !== "-").length;
-  const quote = (from: number, to: number) => own!.rows.filter((r) => r[0] !== "-").slice(from - own!.at, to - own!.at + 1).join("\n");
-  // A board row's threads are about its own hunk (kraft-cb59's lookup and its eviction, ngContent.ts), the sample's about its own.
-  const [must, store, local] = own ? [[at(13), at(15)], [at(21), at(22)], [at(16), at(17)]] : [[12, 14], [30, 30], [40, 44]];
-  const said = own ? REVIEW_OF_HUNK : REVIEW_OF_SAMPLE;
-  const threads = sc === "needs-gate" ? [
-    { id: "th-r1-must", work_item_id: id, gate: "final_review", node_id: "implementation", file_path: cache ?? "search/cache.py", side: "new", start_line: must[0], end_line: must[1], quote: own ? quote(must[0], must[1]) : " def newest(commits):\n+    latest = max(c.ts for c in commits)\n+    return self._cache[latest]", label: "must_fix", state: "resolved", resolved_at: t(94), created_at: t(92), comments: [{ id: "c-r1-must", author: "you", body: said.must, created_at: t(92) }] },
-    { id: "th-r1-q", work_item_id: id, gate: "final_review", node_id: "implementation", file_path: cache ?? "search/reindex.py", side: "new", start_line: store[0], end_line: store[1], quote: own ? quote(store[0], store[1]) : "+        self._cache[key] = value", label: "question", state: "open", created_at: t(93), comments: [{ id: "c-r1-q", author: "you", body: said.question, created_at: t(93) }] },
-    { id: "th1", work_item_id: id, gate: null, node_id: "local_review", file_path: cache ?? "search/cache.py", side: "new", start_line: local[0], end_line: local[1], ...(own && { quote: quote(local[0], local[1]) }), label: "question", state: "open", created_at: t(90), comments: [{ id: "c1", author: "you", body: said.local, created_at: t(90) }] },
-  ] : [];
-  const reviews = sc === "needs-gate" ? [{ id: "rv1", gate: "final_review", outcome: "request_changes", summary: "Two things before this ships.", head_sha: "4d1e2f3", submitted_at: t(95) }] : [];
   return { item, sessions, events, logs, threads, reviews };
 }
 
