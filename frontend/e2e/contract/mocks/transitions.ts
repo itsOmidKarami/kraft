@@ -97,6 +97,20 @@ export function listRow(item: any) {
     progress: p ? { current: p.current, total: p.total, title: p.title } : null };
 }
 
+/** `board._stop_task_and_attempt`: the hook point and attempt of `node`'s latest session that is not an escalation turn. */
+export function stopTaskOf(sessions: any[], node: string | null): { task: string | null; attempt: number | null } {
+  const s = [...sessions].reverse().find((x) => x.node_id === node && x.hook_point !== "escalation");
+  return { task: s?.hook_point ?? null, attempt: s?.attempt ?? null };
+}
+/** `board._step_of(..., with_task=True)`: the step of `node` that `task` is in, where the node has more than one. */
+export function stepOf(nodes: any[], node: string | null, task: string | null) {
+  const steps: string[][] = nodes.find((n) => n.id === node)?.steps ?? [];
+  const at = steps.findIndex((g) => g.includes(task ?? ""));
+  if (steps.length < 2 || at < 0) return null;
+  const [, name, leaf] = String(task).split(".");
+  return { index: at + 1, count: steps.length, name, task: leaf };
+}
+
 /** `lifecycle.not_paused`: what resume says to an item that is not paused. */
 function notPaused(item: any): string {
   if (WORK_ITEM_TRAITS[item.status as WorkItemStatus]?.running) return `work item is ${item.status}: it is running, so pause it first`;
@@ -767,13 +781,17 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
     stopForBudget(id: string, node: string): Result {
       const x = find(id, true);
       if (refused(x)) return x;
-      const { it } = x;
+      const { b, it } = x;
       const spent = it.budget_cap?.spent_usd ?? 0;
       const cap = it.budget_cap?.cap_usd ?? 0;
       const reason = `budget cap reached: ${meter(spent)} spent on this work item, cap ${capUsd(cap)}. Nothing new was started; a running agent was not interrupted.`;
       const budget = { scope: "work_item", spent_usd: spent, cap_usd: cap };
-      // `board._stop` names the cap's scope: `work_item`, the item's own, is the one `/budget/raise` takes.
-      Object.assign(it, { status: "needs_human", step: null, stop: { kind: "budget", node, task: null, attempt: 1, resume_at: null, reason, facts: {}, scope: "work_item" } });
+      // `board._stop` reads its task and attempt off the node's latest session, and names the cap's scope: `work_item`, the
+      // item's own, is the one `/budget/raise` takes. The step is that session's (`board._step_of`).
+      const { task, attempt } = stopTaskOf(b.sessions, node);
+      const step = stepOf(it.chain_definition?.nodes ?? [], node, task);
+      Object.assign(it, { status: "needs_human", step, stop: { kind: "budget", node, task, attempt, resume_at: null, reason, facts: {}, scope: "work_item" } });
+      if (it.summary) it.summary = { ...it.summary, step: step && { index: step.index, count: step.count } };
       append(id, "work_item_needs_human", { node_id: node, reason, kind: "budget", budget });
       return ok(settle(it));
     },

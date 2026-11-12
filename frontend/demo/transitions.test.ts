@@ -441,11 +441,13 @@ describe("samples and answers as the server shapes them", () => {
     const cost = b.sessions.reduce((a, s) => a + s.cost_usd, 0);
     expect([Math.abs(cost - 5) < 0.01, Math.abs(b.item.usage.total.cost_usd - 5) < 0.01, b.item.budget_cap.spent_usd]).toEqual([true, true, 5]);
     // A spend cap interrupts nothing: the agent that spent the last of it ran to its end, verification's tests (no agent,
-    // no spend) ran, and the walk stopped on verification before its code review launched, with no task of its own.
+    // no spend) ran, and the walk stopped on verification before its code review launched. Its stop's task, attempt and
+    // step are the node's latest session's, the tests' (`board._stop_task_and_attempt`, `_step_of`), as are the row's.
     expect(b.sessions.filter((s) => s.status !== "done")).toEqual([]);
     const agent = b.sessions.filter((s) => s.model).at(-1);
     expect([agent.hook_point, agent.session_summary_ref, b.sessions.slice(b.sessions.indexOf(agent) + 1).map((s) => s.hook_point)]).toEqual(["implementation.main.implement", `items/${b.item.id}/sessions/${agent.id}/out/summary.md`, ["verification.tests.test_changed_scopes", "verification.tests.test_changed_scopes"]]);
-    expect([b.item.current_node_id, b.item.stop.node, b.item.stop.task, b.item.stop.attempt]).toEqual(["verification", "verification", null, 1]);
+    expect([b.item.current_node_id, b.item.stop.node, b.item.stop.task, b.item.stop.attempt]).toEqual(["verification", "verification", "verification.tests.test_changed_scopes", 1]);
+    expect([b.item.summary.step, b.item.step]).toEqual([{ index: 1, count: 2 }, { index: 1, count: 2, name: "tests", task: "test_changed_scopes" }]);
   });
 
   it.each([

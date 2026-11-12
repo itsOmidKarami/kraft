@@ -567,6 +567,8 @@ describe("the clock and the purse", () => {
       ["work_item_needs_human", expect.objectContaining({ node_id: "verification", kind: "budget" })],
     ]);
     expect(b.sessions.at(-1)).toMatchObject({ hook_point: "verification.tests.test_changed_scopes", status: "done" });
+    // Its stop's task and attempt are the node's latest session's, and its step that session's (`board._stop`, `_step_of`).
+    expect([b.item.stop.task, b.item.stop.attempt, b.item.step, b.item.summary.step]).toEqual(["verification.tests.test_changed_scopes", b.sessions.at(-1).attempt, { index: 1, count: 2, name: "tests", task: "test_changed_scopes" }, { index: 1, count: 2 }]);
   });
 
   it("checks the cap before a steer's queued attempt starts too", async () => {

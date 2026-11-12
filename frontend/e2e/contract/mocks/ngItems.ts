@@ -4,7 +4,7 @@ import { chainOf, frozenOf, type DefNode } from "./ngChain";
 import { RESUME_PROMPT } from "./poller";
 import { agentUsage, agentWall, awaitPolls, drain, DOCS_RED, fixCycle, judge, measured, nodeBeats, OPEN, ownFailure, redOf, REPAIR, REVIEW, REVIEWED, TESTS, testPass, type Found, type Open, type Writer } from "./nodeRecipe";
 import { isAgentSession, RUNS, taskRun } from "./taskKinds";
-import { escalationThreads, threadSummary } from "./transitions";
+import { escalationThreads, stepOf, stopTaskOf, threadSummary } from "./transitions";
 import { isLate, mrOf, planOf, type Content } from "./ngContent";
 
 /**
@@ -315,7 +315,8 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
       if (o.spend) {
         // The implementer ran its whole plan to its end, the node completed and verification's tests passed; the spend
         // cap stops the item before its code review, an agent's task, launches (`dispatch.over_budget`), on verification
-        // (`stops.stop_for_budget`: no task, no session). The cap's words and numbers are ngBoard.ts `spendCapped`'s.
+        // (`stops.stop_for_budget` starts no session). Its stop's task and attempt, and its step, are read off the node's
+        // latest session, the tests' (`board._stop_task_and_attempt`). The cap's words and numbers are ngBoard.ts `spendCapped`'s.
         const s = open("implementation.main.implement", "implementation");
         W.plan.forEach((title, k) => ev("plan_progress", { node_id: "implementation", task: k + 1, total: W.plan.length, title }, 1.5));
         m -= 1.5 * W.plan.length;
@@ -326,7 +327,10 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
         ev("work_item_needs_human", { node_id: "verification", reason: null, kind: "budget" }, 0.05);
         item.current_node_id = "verification";
         item.status = "needs_human"; item.display_status = "needs_you";
-        item.stop = { ...stop("budget", null), node: "verification" };
+        const { task, attempt } = stopTaskOf(sessions, "verification");
+        item.stop = { ...stop("budget", task), node: "verification", attempt };
+        item.step = stepOf(nodes, "verification", task);
+        item.summary.step = { index: item.step.index, count: item.step.count };
         break;
       }
       // The shipped implementer's own time cap, 120 minutes, stops its running session (`session_exited`, capped_out) and
