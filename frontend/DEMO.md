@@ -37,7 +37,7 @@ draft's merge request, and CI waits that poll. The first item it files fails
 a round of tests, so a fix cycle runs. A gate is asked for, its reviewer
 runs, and the item waits for the visitor to answer it. A waiting or
 rate-limited item is active again once its retry time passes, and a spend
-cap stops an item before its next agent task; raising it retries the item at the step it stopped in, unless a fix cycle has run. An escalation turn, the sample's or one the visitor starts,
+cap stops an item before its next agent task; raising it retries the item at the step it stopped in, unless a fix cycle has run since its last rejection or retry. An escalation turn, the sample's or one the visitor starts,
 ends on its own two ticks in, as its agent finishing does: its session is done,
 its reply is the item's document (the task's Output links it), and the item
 stays as it stopped, for a reply, a retry or a decision. A finished chain is Done. When no board item is active

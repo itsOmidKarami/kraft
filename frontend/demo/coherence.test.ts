@@ -887,7 +887,7 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
     // `search.py` clamps the limit it is asked for to 1..100.
     expect(await Promise.all(["0", "-5", "500"].map(async (n) => (await call(`/search?q=the&limit=${n}`)).body.results.length))).toEqual([1, 1, Math.min(100, every.length)]);
     // Pydantic's lax int, as FastAPI parses `limit: int`: underscores between digits, and a fraction of zeros.
-    expect(await Promise.all(["1.0", "3_0", " 2.00 "].map(async (n) => (await call(`/search?q=the&limit=${encodeURIComponent(n)}`)).body.results.length))).toEqual([1, 30, 2]);
+    expect(await Promise.all(["1.0", "3_0", " 2.00 ", "1_0_0", "+3"].map(async (n) => (await call(`/search?q=the&limit=${encodeURIComponent(n)}`)).body.results.length))).toEqual([1, 30, 2, 100, 3]);
   });
   it("it has run from its first node to the clock, or to its last event once it ended, and was last touched no earlier than its last event", () => {
     const wrong = board.filter((b) => b.events.some((e) => e.type === "node_started")).flatMap((b) => {
@@ -983,7 +983,7 @@ describe("the content table, the entries the walk never reaches included", () =>
   });
   // The one definition the rules and the mock read, held to a table of its own: a page anywhere, a site file under
   // `docs/`, and not a program there or a file outside it.
-  it.each<[string, boolean]>([["docs/_nav.py", false], ["src/a.ts", false], ["plugins/search/cache.py", false], ["src/docs/x.css", false], ["docs/x.css", true], ["README.md", true], ["docs/_nav.yml", true], ["docs/_nav.yaml", true]])("a docs path: %s is %s", (path, docs) => {
+  it.each<[string, boolean]>([["docs/_nav.py", false], ["src/a.ts", false], ["plugins/search/cache.py", false], ["src/docs/x.css", false], ["docs/x.css", true], ["README.md", true], ["docs/_nav.yml", true], ["docs/_nav.yaml", true], ["docs/a.js", true], ["docs/a.png", true]])("a docs path: %s is %s", (path, docs) => {
     expect(isDocsPath(path)).toBe(docs);
   });
   // A docs item changes docs only, and an item that changes only docs is one; a code item changes a test; an item that
