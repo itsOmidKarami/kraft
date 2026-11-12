@@ -164,7 +164,12 @@ describe.each(SCENARIOS)("items in %s", (_scenario, build) => {
         .map((s) => s.hook_point)],
     // `walk` writes `chain_loaded` on every walk from the first node.
     ["an item that started a node loaded its chain first",
-      (b) => { const first = b.events.findIndex((e) => e.type === "node_started"); return first >= 0 && !b.events.slice(0, first).some((e) => e.type === "chain_loaded") && "no chain_loaded before its first node"; }],
+      (b) => {
+        const first = b.events.findIndex((e) => e.type === "node_started");
+        const loaded = b.events.filter((e) => e.type === "chain_loaded").length;
+        // The demo models an item's first walk: once, before its first node (the server also writes it on a retry at the first node).
+        return first >= 0 && (!b.events.slice(0, first).some((e) => e.type === "chain_loaded") || loaded > 1) && `${loaded} chain_loaded, first node at event ${first}`;
+      }],
     // `store.budget`'s rollup sums every kind of token (`usage.KINDS`) of a node's sessions, and of the item's.
     ["a node's and the item's token rollups are the sum of their sessions, kind by kind",
       (b) => {
@@ -175,6 +180,8 @@ describe.each(SCENARIOS)("items in %s", (_scenario, build) => {
         return [
           ...u.by_node.flatMap((r: any) => kinds.filter((k) => (r[k] ?? 0) !== sum(b.sessions.filter((x) => x.node_id === r.node), k)).map((k) => `${r.node}.${k}`)),
           ...kinds.filter((k) => (u.total[k] ?? 0) !== sum(b.sessions, k)).map((k) => `total.${k}`),
+          // `budget.usage_rollup` says whether the cache was counted apart: the demo's sessions all report it.
+          ...[...u.by_node, u.total].filter((r: any) => r.split_complete !== true).map((r: any) => `${r.node ?? "total"}.split_complete`),
         ];
       }],
     ["every session was created by an event", (b) => b.sessions.filter((s) => !b.events.some((e) => e.type === "worker_session_created" && e.payload.session_id === s.id)).map((s) => s.hook_point)],

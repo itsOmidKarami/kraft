@@ -268,6 +268,19 @@ describe("after the visitor", () => {
     expect(exit?.[1]).toMatchObject({ session_id: queued.id, ...usageOf(S, id, queued.id) });
   });
 
+  it("a rejection that sends the walk back to the first node loads the chain once", async () => {
+    const { S, ticks, call } = started();
+    const id = board(S, NEVER_STARTED);
+    expect((await call("POST", `/work-items/${id}/resume`, {})).status).toBe(200);
+    ticks(8, id);
+    expect(S.bundles[id].item.pending_gate).toBe("spec_approval");
+    expect((await call("POST", `/work-items/${id}/gates/spec_approval/reject`, { note: "again" })).status).toBe(200);
+    ticks(4, id);
+    const types = S.bundles[id].events.map((e) => e.type);
+    expect(types.filter((t) => t === "node_started").length).toBeGreaterThan(2);
+    expect(types.filter((t) => t === "chain_loaded")).toHaveLength(1);
+  });
+
   it("Start on an item never started reads 0 of N, and runs its first node", async () => {
     const { S, ticks, call } = started();
     const id = board(S, NEVER_STARTED);

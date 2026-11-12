@@ -418,7 +418,7 @@ export function buildNeverStarted(seed: number, variant: Variant, template = "de
     worktree_path: null, worktree_exists: false, head_sha: null, branch: null, mr_ref: null, progress: null, step: null, rate_limit: null, retry_at: null,
     attempts: [], last_review_sha: null, fix_target: null, needs_context_question: null,
     budget_cap: { ...it.budget_cap, source: "policy", spent_usd: 0 },
-    usage: { total: { tokens_in: 0, tokens_out: 0, cost_usd: 0, cost_complete: true, wall_ms: 0, sessions: 0, rounds: 0, capped_out: 0 }, by_node: [] },
+    usage: { total: { tokens_in: 0, tokens_cache_write: 0, tokens_cache_read: 0, tokens_out: 0, cost_usd: 0, cost_complete: true, split_complete: true, wall_ms: 0, sessions: 0, rounds: 0, capped_out: 0 }, by_node: [] },
     summary: { nodes_done: 0, nodes_total: it.chain_definition.nodes.length, gates_passed: 0, step: null },
   });
   return { item: it, sessions: [], events: [], logs: {}, threads: [], beads: [] };
