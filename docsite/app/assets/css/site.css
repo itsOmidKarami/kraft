@@ -1,0 +1,536 @@
+/* The marketing pages (layouts/site.vue). docsite/DESIGN.md is their design
+   system and names every value here. Every rule starts with .site, so the docs
+   pages are untouched and the docs theme cannot restyle these pages.
+   Light is the default; .dark .site is dark (Nuxt UI puts .dark on <html>).
+   .s-field is the violet field (the header, the hero, the Install band): it
+   keeps the dark theme's colours in both themes. .s-themed, inside the field,
+   takes the page's theme again (the hero card). */
+.site,
+.site .s-themed {
+  --s-ground: #f4f4fb;
+  --s-band: #e9e9f2;
+  --s-card: #ffffff;
+  --s-raised: #eaeaf2;
+  --s-hairline: #d5d5df;
+  --s-border: #b9b9c4;
+  --s-stroke: #7a7a84;
+  --s-outline: #76767f;
+  --s-text: #15151a;
+  --s-text-sub: #35353b;
+  --s-text-muted: #5a5a63;
+  --s-glyph-todo: #81818a;
+  --s-accent: #504a90;
+  --s-accent-hover: #3e3a73;
+  --s-on-accent: #ffffff;
+  --s-amber: #875800;
+  --s-amber-wash: #efe2cd;
+  --s-amber-line: #e7dccd;
+  --s-blue: #246099;
+}
+
+.dark .site,
+.dark .site .s-themed,
+.site .s-field {
+  --s-ground: #20202b;
+  --s-band: #15151f;
+  --s-card: #2e2e39;
+  --s-raised: #32323d;
+  --s-hairline: #393944;
+  --s-border: #51515d;
+  --s-stroke: #777784;
+  --s-outline: #808090;
+  --s-text: #eeeef2;
+  --s-text-sub: #c6c7cc;
+  --s-text-muted: #9d9ea5;
+  --s-glyph-todo: #767781;
+  --s-accent: #b0adfc;
+  --s-accent-hover: #d0cefd;
+  --s-on-accent: #15151f;
+  --s-amber: #deb866;
+  --s-amber-wash: #332f31;
+  --s-amber-line: #292526;
+  --s-blue: #80bdfc;
+}
+
+.site .s-field {
+  --s-rule: #38337a;
+  --s-nav: #dcdbf0;
+  --s-lede: #cfcde8;
+  --s-caption: #c2c0e6;
+  --s-field-outline: #7f7bcf;
+  background: #231f52;
+  color: var(--s-text);
+}
+
+.site {
+  --s-gutter: clamp(24px, 7.5vw, 96px);
+  --s-mono: ui-monospace, Menlo, monospace;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--s-ground);
+  color: var(--s-text);
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 17px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.site main {
+  flex: 1 0 auto;
+}
+
+/* The one focus ring, in the text colour: on the violet field the docs'
+   violet ring (a11y.css) is too close to the ground. */
+.site :focus-visible {
+  outline-color: var(--s-text);
+}
+
+.site ::selection {
+  background: var(--s-accent);
+  color: var(--s-on-accent);
+}
+
+.site .s-wrap {
+  box-sizing: border-box;
+  max-width: calc(1088px + 2 * var(--s-gutter));
+  margin-inline: auto;
+  padding-inline: var(--s-gutter);
+}
+
+.site .s-label-small {
+  margin: 0;
+  font-family: var(--s-mono);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--s-text-muted);
+}
+
+/* Buttons */
+.site .s-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 52px;
+  padding: 0 26px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out;
+}
+
+.site .s-btn-sm {
+  height: 44px;
+  padding: 0 20px;
+  font-size: 15px;
+}
+
+.site .s-btn-primary {
+  background: var(--s-accent);
+  color: var(--s-on-accent);
+}
+
+.site .s-btn-primary:hover {
+  background: var(--s-accent-hover);
+}
+
+.site .s-btn-secondary {
+  border-color: var(--s-outline);
+  background: var(--s-card);
+  color: var(--s-text);
+  font-weight: 500;
+}
+
+.site .s-btn-secondary:hover {
+  background: var(--s-raised);
+}
+
+.site .s-field .s-btn-secondary {
+  border-color: var(--s-field-outline);
+  background: transparent;
+}
+
+.site .s-field .s-btn-secondary:hover {
+  background: rgb(255 255 255 / 0.06);
+}
+
+.site .s-icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--s-text);
+  cursor: pointer;
+}
+
+/* Header */
+.site .s-header {
+  position: relative;
+  z-index: 20;
+  border-bottom: 1px solid var(--s-rule);
+}
+
+.site .s-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+}
+
+.site .s-wordmark {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--s-text);
+  text-decoration: none;
+}
+
+.site .s-nav {
+  display: none;
+  align-items: center;
+  gap: 32px;
+}
+
+.site .s-header-phone {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: -12px;
+}
+
+.site .s-header-phone .s-btn-sm {
+  padding: 0 18px;
+}
+
+.site .s-nav-link,
+.site .s-menu-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--s-nav);
+  text-decoration: none;
+  transition: color 120ms ease-out;
+}
+
+.site .s-nav-link:hover,
+.site .s-menu-button:hover,
+.site .s-nav-link[aria-current='page'] {
+  color: var(--s-text);
+}
+
+@media (min-width: 1024px) {
+  .site .s-header-row {
+    height: 88px;
+  }
+
+  .site .s-nav {
+    display: flex;
+  }
+
+  .site .s-header-phone {
+    display: none;
+  }
+}
+
+/* The Product menu */
+.site .s-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.site .s-menu-button {
+  gap: 6px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.site .s-menu-button[aria-expanded='true'] {
+  color: var(--s-text);
+}
+
+.site .s-menu-button svg {
+  transition: transform 120ms ease-out;
+}
+
+.site .s-menu-button[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+
+.site .s-menu-list {
+  position: absolute;
+  top: 60px;
+  left: -88px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  box-sizing: border-box;
+  width: 560px;
+  margin: 0;
+  padding: 12px;
+  list-style: none;
+  border: 1px solid var(--s-rule);
+  border-radius: 16px;
+  background: var(--s-band);
+  box-shadow: 0 24px 48px rgb(8 8 30 / 0.45);
+}
+
+.site .s-menu-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  text-decoration: none;
+  transition: background-color 120ms ease-out;
+}
+
+.site .s-menu-item:hover {
+  background: var(--s-card);
+}
+
+.site .s-menu-name {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--s-text);
+}
+
+.site .s-menu-line {
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--s-text-sub);
+}
+
+/* The phone menu: the screen under the header. */
+.site .s-sheet {
+  position: fixed;
+  inset: 64px 0 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  box-sizing: border-box;
+  padding: 24px var(--s-gutter) 28px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 1023px) {
+  html.s-locked {
+    overflow: hidden;
+  }
+}
+
+.site .s-sheet ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.site .s-sheet-label {
+  color: var(--s-caption);
+  font-weight: 600;
+}
+
+.site .s-sheet-pages li {
+  border-bottom: 1px solid var(--s-rule);
+}
+
+.site .s-sheet-pages a {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 0;
+  text-decoration: none;
+}
+
+.site .s-sheet-name {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--s-text);
+}
+
+.site .s-sheet-line {
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--s-lede);
+}
+
+.site .s-sheet-links a {
+  display: flex;
+  align-items: center;
+  min-height: 52px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--s-text);
+  text-decoration: none;
+}
+
+.site .s-sheet-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: auto;
+}
+
+/* Footer */
+.site .s-footer {
+  padding: 48px 0 40px;
+  border-top: 1px solid var(--s-hairline);
+  background: var(--s-band);
+}
+
+.site .s-footer-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.site .s-footer-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.site .s-footer-brand p {
+  margin: 0;
+  max-width: 300px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--s-text-muted);
+}
+
+.site .s-footer-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 28px 16px;
+}
+
+.site .s-footer-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.site .s-footer-col ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.site .s-footer-col a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--s-text-sub);
+  text-decoration: none;
+  text-underline-offset: 4px;
+}
+
+.site .s-footer-col a:hover {
+  color: var(--s-text);
+  text-decoration: underline;
+}
+
+@media (min-width: 1024px) {
+  .site .s-footer {
+    padding: 72px 0 64px;
+  }
+
+  .site .s-footer-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr));
+    column-gap: 48px;
+    align-items: start;
+  }
+
+  .site .s-footer-cols {
+    display: contents;
+  }
+
+  .site .s-footer-brand {
+    gap: 6px;
+  }
+
+  .site .s-footer-col {
+    gap: 8px;
+  }
+}
+
+/* The theme switch */
+.site .s-theme {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 28px;
+}
+
+@media (min-width: 1024px) {
+  .site .s-theme {
+    margin-top: 22px;
+  }
+}
+
+.site .s-switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--s-outline);
+  border-radius: 10px;
+}
+
+.site .s-switch button {
+  height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--s-text-sub);
+  cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+
+.site .s-switch button:hover {
+  color: var(--s-text);
+}
+
+.site .s-switch button[aria-checked='true'] {
+  background: var(--s-card);
+  color: var(--s-text);
+  font-weight: 600;
+}

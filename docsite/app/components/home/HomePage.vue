@@ -9,35 +9,12 @@ const { v, start, approve, reject, toggle } = useHomePlayer()
 // The demo is a folder of static files beside the pages, not a route: a plain
 // link, with the base put on by hand.
 const demo = `${useRuntimeConfig().app.baseURL.replace(/\/$/, '')}/demo/`
-const repo = 'https://github.com/itsOmidKarami/kraft'
 </script>
 
 <template>
   <div class="home">
-    <header class="k-header">
-      <div class="k-wrap">
-        <NuxtLink
-          class="k-brand"
-          to="/"
-        >
-          Kraft
-        </NuxtLink>
-        <NuxtLink to="/concepts/how-a-work-item-runs">
-          How it works
-        </NuxtLink>
-        <NuxtLink to="/get-started/install">
-          Docs
-        </NuxtLink>
-        <NuxtLink :to="repo">
-          GitHub
-        </NuxtLink>
-      </div>
-    </header>
 
-    <main
-      id="main-content"
-      tabindex="-1"
-    >
+    <div>
       <section class="k-wrap k-hero">
         <h1><span>Kraft runs the task.</span> <span>You make the calls.</span></h1>
         <p>Kraft is an app on your computer. It hands coding tasks to Claude Code, checks the work and stops only for the decisions that are yours. Watch one task run below, or press a button to make the call yourself.</p>
@@ -316,18 +293,7 @@ const repo = 'https://github.com/itsOmidKarami/kraft'
           </div>
         </div>
       </section>
-    </main>
+    </div>
 
-    <footer class="k-footer">
-      <div class="k-wrap">
-        <span class="k-source"><NuxtLink :to="repo">Source on GitHub</NuxtLink></span>
-        <NuxtLink to="/get-started/why-kraft">
-          Why Kraft
-        </NuxtLink>
-        <NuxtLink to="/get-started/faq">
-          FAQ
-        </NuxtLink>
-      </div>
-    </footer>
   </div>
 </template>

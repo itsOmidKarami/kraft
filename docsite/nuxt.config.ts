@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { contentRoutes, pagesMissingFrom } from './content-routes.mjs'
+import { sitePages } from './site-pages.mjs'
 
 // The site is served from the root of the custom domain (kraft-sdlc.dev), so
 // the latest release's docs are at /, an older major's at /vN/ and main's at
@@ -182,7 +183,7 @@ export default defineNuxtConfig({
       breakableLinks((content as { body?: { toc?: { links?: TocLink[] } } }).body?.toc?.links)
     },
   },
-  css: ['~/assets/css/type.css', '~/assets/css/hero.css', '~/assets/css/home.css', '~/assets/css/prose.css', '~/assets/css/layout.css', '~/assets/css/a11y.css'],
+  css: ['~/assets/css/type.css', '~/assets/css/hero.css', '~/assets/css/home.css', '~/assets/css/site.css', '~/assets/css/prose.css', '~/assets/css/layout.css', '~/assets/css/a11y.css'],
   // Nuxt UI's code theme is Material (lighter / palenight). On the code
   // block's background its light strings were 2.2:1, keys 2.6:1 and comments
   // 2.5:1, and its dark comments 3.0:1, under WCAG AA's 4.5:1; prose.css
@@ -226,8 +227,15 @@ export default defineNuxtConfig({
   // nuxt-llms writes no llms.txt or llms-full.txt without a domain, and Docus
   // infers none on GitHub Pages. Its links are the domain plus a router path,
   // so the domain carries this build's base ('', /v1 or /next).
+  // The marketing pages (site-pages.mjs) are no content, so llms.txt lists
+  // them from here, at the root of the domain where every build sends them.
   llms: {
     domain: `${origin}${baseURL.replace(/\/$/, '')}`,
+    sections: [{
+      title: 'Site',
+      description: 'What Kraft is, before the docs say how to use it.',
+      links: sitePages.map(p => ({ title: p.title, description: p.description, href: `${origin}${p.path}` })),
+    }],
   },
   // @nuxtjs/robots refuses to write robots.txt under a base URL, and a crawler
   // only reads one at the domain root anyway. server/routes/robots.txt.ts
@@ -254,6 +262,9 @@ export default defineNuxtConfig({
       // any middleware of ours and without looking at the fragment, so a
       // moved section of a moved page went to the page's new address.
       moved: Object.fromEntries(redirects),
+      // The marketing pages' titles and descriptions (composables/useSitePage.ts),
+      // and the sitemap's list of them (server/plugins/sitemap.ts).
+      sitePages,
     },
   },
   // The label icon of a ```yaml [config/x.yaml] block is Nuxt UI's
@@ -314,7 +325,7 @@ export default defineNuxtConfig({
       // Every page of the content, so no build depends on the links of its
       // root to find them (pageRoutes). No page links to a moved page's old
       // address, so the crawler would never reach it on its own.
-      routes: ['/robots.txt', ...pageRoutes, ...movedPages.map(([from]) => from)],
+      routes: ['/robots.txt', ...sitePages.map(p => p.path), ...pageRoutes, ...movedPages.map(([from]) => from)],
       // The version menu links to the same page in every other build, which
       // the crawler would take for one of this build's own pages and fail as
       // a 404: a prefix match on each other version's base. The latest's is /,

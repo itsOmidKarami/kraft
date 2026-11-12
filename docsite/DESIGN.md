@@ -21,7 +21,7 @@ colors:
   border-dark: "#51515d"
   border-light: "#b9b9c4"
   stroke-dark: "#777784"
-  stroke-light: "#888892"
+  stroke-light: "#7a7a84"
   control-outline-dark: "#808090"
   control-outline-light: "#76767f"
   text-dark: "#eeeef2"
