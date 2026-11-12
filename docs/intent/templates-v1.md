@@ -784,16 +784,18 @@ enforced-by: tests/templates/test_materialization.py::test_materialization_freez
 
 ## REQ steer-can-address-paused-agent-tasks-individually
 
-An operator MAY provide distinct steering instructions to selected paused agent
-tasks. A steer SHALL NOT target a non-agent task.
-enforced-by: tests/executor/test_steer_targets.py::test_a_task_addressed_individually_gets_its_own_steer, tests/executor/test_steer_targets.py::test_a_steer_that_cannot_land_is_refused_naming_its_task[non-agent], tests/executor/test_steer_targets.py::test_a_steer_that_cannot_land_is_refused_naming_its_task[not-paused], tests/test_pause_resume.py::test_resume_addresses_its_steer_to_the_paused_agent_tasks[individual], tests/test_pause_resume.py::test_a_steer_aimed_at_a_non_agent_task_is_refused_naming_it
+An operator MAY provide distinct steering instructions to selected agent tasks
+that are paused or whose latest session asked a question. A steer SHALL NOT
+target a non-agent task, nor an agent task that is neither paused nor asking.
+enforced-by: tests/executor/test_steer_targets.py::test_a_task_addressed_individually_gets_its_own_steer, tests/executor/test_steer_targets.py::test_a_steer_that_cannot_land_is_refused_naming_its_task[non-agent], tests/executor/test_steer_targets.py::test_a_steer_that_cannot_land_is_refused_naming_its_task[not-paused], tests/test_pause_resume_steers.py::test_resume_addresses_its_steer_to_the_paused_agent_tasks[individual], tests/test_pause_resume_steers.py::test_resume_addresses_its_steer_to_the_paused_agent_tasks[answers-the-task-that-asked], tests/test_pause_resume_steers.py::test_a_steer_aimed_at_a_non_agent_task_is_refused_naming_it
 
 ## REQ steer-defaults-to-all-paused-agent-tasks
 
-When an operator resumes paused work with one unqualified steer, the system
-SHALL deliver that instruction to every paused agent task; selected tasks MAY
-instead receive individual instructions.
-enforced-by: tests/executor/test_steer_targets.py::test_one_steer_reaches_every_paused_agent_task, tests/executor/test_steer_targets.py::test_a_task_that_was_not_paused_gets_no_default_steer, tests/test_pause_resume.py::test_resume_addresses_its_steer_to_the_paused_agent_tasks[one-steer-for-every-paused-agent]
+When an operator resumes paused work, or work stopped on an agent's question,
+with one unqualified steer, the system SHALL deliver that instruction to every
+agent task of the current node that is paused or whose latest session asked;
+selected tasks MAY instead receive individual instructions.
+enforced-by: tests/executor/test_steer_targets.py::test_one_steer_reaches_every_paused_agent_task, tests/executor/test_steer_targets.py::test_a_task_that_was_not_paused_gets_no_default_steer[paused], tests/executor/test_steer_targets.py::test_a_task_that_was_not_paused_gets_no_default_steer[asked], tests/test_pause_resume_steers.py::test_resume_addresses_its_steer_to_the_paused_agent_tasks[one-steer-for-every-paused-agent]
 
 ## REQ resumed-agent-task-preserves-its-session-when-possible
 
@@ -809,7 +811,7 @@ enforced-by: tests/executor/test_steer_targets.py::test_a_paused_agent_task_resu
 The system SHALL refuse a steer on a running work item, and on a paused work
 item whose pause stopped no agent task, naming why. A steer SHALL NOT be
 handed to whichever agent runs next in place of the work the pause stopped.
-enforced-by: tests/test_pause_resume.py::test_steer_and_resume_are_refused_while_the_item_is_running, tests/test_pause_resume.py::test_a_pause_that_stopped_no_agent_task_takes_no_steer, tests/api/test_lifecycle.py::test_a_rebase_conflict_does_not_escalate_when_disarmed[resume]
+enforced-by: tests/test_pause_resume.py::test_steer_and_resume_are_refused_while_the_item_is_running, tests/test_pause_resume_steers.py::test_a_pause_that_stopped_no_agent_task_takes_no_steer, tests/api/test_lifecycle.py::test_a_rebase_conflict_does_not_escalate_when_disarmed[resume]
 origin: src/kraft/api/routes/lifecycle.py §paused_steer_refusal -- Kraft-5d3sy: steer works only on an item that is not running, and only when the current work is agentic; the paused agent session is resumed when its harness allows it, the steer injected, and the work continues. An item filed paused and never started stopped nothing, so its steer is a note to its first agent.
 
 ## REQ pause-is-a-work-item-control

@@ -93,8 +93,16 @@ async def test_a_task_addressed_individually_gets_its_own_steer(item_on, launche
     assert "keep the old API" not in launched["work.main.back"]["task_instruction"]
 
 
-async def test_a_task_that_was_not_paused_gets_no_default_steer(item_on):
-    it = await _paused(item_on, "work.main.front")
+@pytest.mark.parametrize(
+    "ended",
+    [{}, {"work.main.front": "needs_context", "work.main.back": "failed"}],
+    ids=["paused", "asked"],
+)
+async def test_a_task_that_was_not_paused_gets_no_default_steer(item_on, ended):
+    """A task that failed or finished gets no steer; one that asked gets the answer."""
+    it = await _paused(
+        item_on, "work.main.front", *(["work.main.back"] if ended else []), ended=ended
+    )
 
     assert _steer_for(it, "keep the old API") == {"work.main.front": "keep the old API"}
 
@@ -105,7 +113,7 @@ async def test_a_task_that_was_not_paused_gets_no_default_steer(item_on):
         ("work.main.lint", "is a subprocess task"),
         ("work.main.nope", "has no task 'nope'"),
         ("work.main", "is not a task"),
-        ("work.main.back", "is not paused"),
+        ("work.main.back", "is neither paused nor waiting for an answer"),
     ],
     ids=["non-agent", "unknown", "a-step", "not-paused"],
 )

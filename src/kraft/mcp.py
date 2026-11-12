@@ -423,8 +423,9 @@ def build() -> MCPServer:
         steers: dict[str, str] | None = None,
     ) -> dict:
         """Start or restart a paused Kraft work item. `steer` reaches every
-        paused agent task; `steers` gives individual paused agent tasks their
-        own, keyed by canonical task path (`node.step.task`). This is also how a
+        paused agent task, and every agent task that asked a question; `steers`
+        gives individual paused or asking agent tasks their own, keyed by
+        canonical task path (`node.step.task`). This is also how a
         work item created by create_work_item is started for the first time. With
         every slot busy the item is queued (status "queued") and starts on its
         own when one frees. An item that comes after an unfinished one is blocked

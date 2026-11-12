@@ -139,13 +139,15 @@ def agent_task_paths(row, chain=store.UNREAD) -> list[str]:
 def resume_steer(db, row, text: str | None, steers: dict[str, str]) -> dict[str, str | None] | None:
     """Who a resume's steer reaches, by task path.
 
-    `text` reaches every paused agent task of the node the item stands on
-    (`steer-defaults-to-all-paused-agent-tasks`); `steers` addresses paused
-    agent tasks individually and wins for the task it names
+    `text` reaches every agent task of the node the item stands on that is
+    paused or whose latest session asked a question
+    (`steer-defaults-to-all-paused-agent-tasks`); `steers` addresses any of them
+    individually and wins for the task it names
     (`steer-can-address-paused-agent-tasks-individually`). `None` when no agent
-    task is paused there -- then `text`, if any, is the unaddressed note the
-    next agent launch takes. A path that is not a paused agent task of this
-    node is a `SteerError` naming it: a steer never targets a non-agent task.
+    task is waiting there -- then `text`, if any, is the unaddressed note the
+    next agent launch takes. A path that is neither a paused nor an asking agent
+    task of this node is a `SteerError` naming it: a steer never targets a
+    non-agent task.
     """
     from kraft.templates.forks import ChainPath, PathError
     from kraft.templates.models import AgentTask
@@ -153,7 +155,11 @@ def resume_steer(db, row, text: str | None, steers: dict[str, str]) -> dict[str,
     node_id = row["current_node_id"]
     agents = agent_task_paths(row)
     latest = db.read(lambda c: store.latest_session_per_task(c, row["id"], node_id, agents))
-    paused = [r["hook_point"] for r in latest if r["status"] == SessionStatus.PAUSED]
+    waiting = [
+        r["hook_point"]
+        for r in latest
+        if r["status"] in (SessionStatus.PAUSED, SessionStatus.NEEDS_CONTEXT)
+    ]
     chain = store.materialized_chain_of(row) if steers else None
     if steers and chain is None:
         # A legacy row, which no walk can run: the walk says so, not this.
@@ -172,13 +178,13 @@ def resume_steer(db, row, text: str | None, steers: dict[str, str]) -> dict[str,
                 f"{path!r} is a {target.task.task.kind.value} task, and a steer reaches "
                 "only an agent task",
             )
-        if path not in paused:
-            raise SteerError(field, f"{path!r} is not paused")
-    if not paused:
+        if path not in waiting:
+            raise SteerError(field, f"{path!r} is neither paused nor waiting for an answer")
+    if not waiting:
         return None
-    # A paused task with no text of its own yet maps to None: a steer left
-    # earlier through `/steer` is read only once the resume has claimed the item.
-    return {p: steers.get(p, text) for p in paused}
+    # A paused or asking task with no text of its own yet maps to None: a steer
+    # left earlier through `/steer` is read only once the resume has claimed the item.
+    return {p: steers.get(p, text) for p in waiting}
 
 
 async def resume_once(
