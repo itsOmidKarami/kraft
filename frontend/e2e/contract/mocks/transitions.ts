@@ -640,7 +640,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
      *  spend, and the summary it wrote, if it wrote one (`summary`, its `session_summary_ref`). A builtin, forge or
      *  command task reports none (`usage` null): only its wall time, and `status` (a failed scope command); an agent's
      *  task that started no agent (`noAgent`) says so in its log. A session still `waiting` on a forge ends too. */
-    sessionExited(id: string, sid: string, usage: { model: string; tokens_in: number; tokens_out: number; cost_usd: number } | null, summary: string | null = null, o: { status?: string; noAgent?: boolean } = {}): Result {
+    sessionExited(id: string, sid: string, usage: { model: string; tokens_in: number; tokens_cache_write?: number; tokens_cache_read?: number; tokens_out: number; cost_usd: number } | null, summary: string | null = null, o: { status?: string; noAgent?: boolean } = {}): Result {
       const x = find(id, true);
       if (refused(x)) return x;
       const { b, it } = x;
@@ -662,7 +662,8 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
         settle(it);
         return ok({ id, session_id: sid });
       }
-      Object.assign(s, { status, exited_at: at, wall_ms, ...usage, tokens_cache_write: 0, tokens_cache_read: 0 });
+      const cache = { tokens_cache_write: usage.tokens_cache_write ?? 0, tokens_cache_read: usage.tokens_cache_read ?? 0 };
+      Object.assign(s, { status, exited_at: at, wall_ms, ...usage, ...cache });
       const u = it.usage;
       if (u) {
         const add = (r: any) => ({ ...r, tokens_in: r.tokens_in + usage.tokens_in, tokens_out: r.tokens_out + usage.tokens_out, cost_usd: dollars(r.cost_usd + usage.cost_usd), wall_ms: r.wall_ms + wall_ms, sessions: r.sessions + 1 });
@@ -672,7 +673,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
           : [...u.by_node, add({ node: s.node_id, tokens_in: 0, tokens_out: 0, cost_usd: 0, cost_complete: true, wall_ms: 0, sessions: 0, rounds: 1, capped_out: 0 })];
       }
       if (it.budget_cap) it.budget_cap = { ...it.budget_cap, spent_usd: dollars((it.budget_cap.spent_usd ?? 0) + usage.cost_usd) };
-      append(id, "worker_session_exited", { session_id: sid, status, wall_ms, model: usage.model, tokens_in: usage.tokens_in, tokens_cache_write: 0, tokens_cache_read: 0, tokens_out: usage.tokens_out, cost_usd: usage.cost_usd });
+      append(id, "worker_session_exited", { session_id: sid, status, wall_ms, model: usage.model, tokens_in: usage.tokens_in, ...cache, tokens_out: usage.tokens_out, cost_usd: usage.cost_usd });
       settle(it);
       return ok({ id, session_id: sid });
     },

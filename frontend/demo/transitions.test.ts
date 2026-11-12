@@ -462,7 +462,7 @@ describe("samples and answers as the server shapes them", () => {
     const exit = b.events.find((e) => e.type === "worker_session_exited" && e.payload.session_id === last.id)!;
     const stop = b.events.filter((e) => e.type === "work_item_needs_human").at(-1)!;
     expect(last.status).toBe(status);
-    expect(exit.payload).toEqual({ session_id: last.id, status, wall_ms: last.wall_ms, model: "claude-sonnet-5-5", tokens_in: last.tokens_in, tokens_cache_write: 0, tokens_cache_read: 0, tokens_out: last.tokens_out, cost_usd: last.cost_usd });
+    expect(exit.payload).toEqual({ session_id: last.id, status, wall_ms: last.wall_ms, model: "claude-sonnet-5-5", tokens_in: last.tokens_in, tokens_cache_write: last.tokens_cache_write, tokens_cache_read: last.tokens_cache_read, tokens_out: last.tokens_out, cost_usd: last.cost_usd });
     expect([last.exited_at, exit.seq < stop.seq]).toEqual([exit.created_at, true]);
     expect(recent(b.events as any).map((l) => l.line)).not.toContain(`a session is running on ${node}`);
   });

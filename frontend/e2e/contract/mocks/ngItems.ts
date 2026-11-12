@@ -129,7 +129,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
 
   /** The recipe's writes (nodeRecipe.ts), as this item records them: each stamped by its own clock `m`. */
   const W: Writer = {
-    id, sessions, frozen: FROZEN, repo: item.repo,
+    id, sessions, events, frozen: FROZEN, repo: item.repo,
     get head() { return item.head_sha; },
     ev, open, close,
     enter: (node, dm) => ev("node_started", { node_id: node }, dm),

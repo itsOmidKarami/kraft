@@ -1,5 +1,5 @@
 import type { EventType } from "../../../src/types/vocab.generated";
-import { agentRun, DOCS_SCOPE, MODEL, RUNS, taskRun, type Run } from "./taskKinds";
+import { agentRun, DOCS_SCOPE, MODEL, PRICE, RUNS, taskRun, type Run } from "./taskKinds";
 import type { DefNode } from "./ngChain";
 
 /**
@@ -30,6 +30,8 @@ export interface Writer {
   readonly frozen: string;
   readonly repo: string;
   readonly head: string | null;
+  /** The item's events, oldest first, the ones the recipe writes included. */
+  readonly events: any[];
   /** How many polls an external wait takes, where the recipe does not say. */
   readonly polls?: number;
   ev(type: EventType, payload?: Record<string, unknown>, dm?: number): void;
@@ -66,11 +68,17 @@ export function drain<T>(g: Beats<T>): T {
   }
 }
 
+/** The cache reads that make up the rest of what `u` cost, at `MODEL`'s prices. */
+export const cacheRead = (u: { cost_usd: number; tokens_in: number; tokens_cache_write: number; tokens_out: number }) =>
+  Math.round((u.cost_usd * 1e6 - u.tokens_in * PRICE.tokens_in - u.tokens_cache_write * PRICE.tokens_cache_write - u.tokens_out * PRICE.tokens_out) / PRICE.tokens_cache_read);
 /** What an agent's session reports on its way out, by its task's recipe (`agentRun`); `n` is its place among the item's
- *  sessions, which jitters it a little so no two read the same. */
+ *  sessions, which jitters it a little so no two read the same. Every kind of token, as an exit reports them
+ *  (`usage.KINDS`): a little fresh input, a cache write as it first reads the repo, and the cache reads its cost
+ *  leaves room for, most of an agent's prompt. */
 export function agentUsage(hookPoint: string, n: number) {
   const r = agentRun(hookPoint);
-  return { model: MODEL, tokens_in: 40 + ((n * 37) % 300), tokens_cache_write: 0, tokens_cache_read: 0, tokens_out: Math.round(r.tokens_out * (1 + (n % 4) * 0.05)), cost_usd: Math.round(r.cost_usd * (1 + (n % 4) * 0.05) * 10_000) / 10_000 };
+  const u = { model: MODEL, tokens_in: 40 + ((n * 37) % 300), tokens_cache_write: 18_000 + ((n * 211) % 9_000), tokens_cache_read: 0, tokens_out: Math.round(r.tokens_out * (1 + (n % 4) * 0.05)), cost_usd: Math.round(r.cost_usd * (1 + (n % 4) * 0.05) * 10_000) / 10_000 };
+  return { ...u, tokens_cache_read: cacheRead(u) };
 }
 /** An agent's wall time by its recipe, jittered as `agentUsage` is. */
 export const agentWall = (hookPoint: string, n: number) => Math.round(agentRun(hookPoint).wall_s * 1000 * (1 + (n % 3) * 0.07));

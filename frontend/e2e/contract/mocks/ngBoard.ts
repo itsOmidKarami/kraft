@@ -2,6 +2,7 @@ import { hex, repo, t, type ItemBundle, type Variant } from "./fixtures";
 import draftViews from "./draftViews.json" with { type: "json" };
 import { chainOf } from "./ngChain";
 import { buildNeverStarted, buildNgItem, type NgScenario } from "./ngItems";
+import { cacheRead } from "./nodeRecipe";
 
 /**
  * The board's list (ux2-W6): one row per kind of row AreaBoard.dc.html
@@ -35,8 +36,14 @@ function spendCapped(i: any, b: ItemBundle) {
   last.payload = { node_id: last.payload.node_id, reason, kind: "budget", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } };
   // Its sessions' costs scaled to the $5 it spent, and its usage read off them again.
   const was = b.sessions.reduce((a, s) => a + (s.cost_usd ?? 0), 0);
-  // Only an agent's session has a cost: a test command's has none, and stays so.
-  for (const s of b.sessions) if (s.cost_usd != null) s.cost_usd = Math.round((s.cost_usd * 5 / was) * 10_000) / 10_000;
+  // Only an agent's session has a cost: a test command's has none, and stays so. Its cache reads are what the new cost
+  // leaves, and its exit says what it now reports.
+  for (const s of b.sessions) if (s.cost_usd != null) {
+    s.cost_usd = Math.round((s.cost_usd * 5 / was) * 10_000) / 10_000;
+    s.tokens_cache_read = cacheRead(s);
+    const exit = b.events.find((e) => e.type === "worker_session_exited" && e.payload.session_id === s.id);
+    if (exit) Object.assign(exit.payload, { cost_usd: s.cost_usd, tokens_cache_read: s.tokens_cache_read });
+  }
   const sum = (ss: any[]) => Math.round(ss.reduce((a, s) => a + (s.cost_usd ?? 0), 0) * 10_000) / 10_000;
   i.usage = { ...i.usage, total: { ...i.usage.total, cost_usd: sum(b.sessions) }, by_node: i.usage.by_node.map((r: any) => ({ ...r, cost_usd: sum(b.sessions.filter((s) => s.node_id === r.node)) })) };
   i.budget_cap = { ...i.budget_cap, cap_usd: 5, spent_usd: 5 };
@@ -44,9 +51,9 @@ function spendCapped(i: any, b: ItemBundle) {
   // its usage on its `worker_session_exited` as `store.session_exited` writes it), and the walk stopped before the next
   // agent task launched (`dispatch.over_budget`). No session is capped out: that is a time cap's or a loop's mark.
   for (const s of b.sessions.filter((x) => x.status === "capped_out")) {
-    Object.assign(s, { status: "done", session_summary_ref: `items/${i.id}/sessions/${s.id}/out/summary.md`, tokens_cache_write: 0, tokens_cache_read: 0 });
+    Object.assign(s, { status: "done", session_summary_ref: `items/${i.id}/sessions/${s.id}/out/summary.md` });
     const exit = b.events.find((e) => e.type === "worker_session_exited" && e.payload.session_id === s.id)!;
-    exit.payload = { session_id: s.id, status: "done", wall_ms: s.wall_ms, model: s.model, tokens_in: s.tokens_in, tokens_cache_write: 0, tokens_cache_read: 0, tokens_out: s.tokens_out, cost_usd: s.cost_usd };
+    exit.payload = { session_id: s.id, status: "done", wall_ms: s.wall_ms, model: s.model, tokens_in: s.tokens_in, tokens_cache_write: s.tokens_cache_write, tokens_cache_read: s.tokens_cache_read, tokens_out: s.tokens_out, cost_usd: s.cost_usd };
   }
 }
 

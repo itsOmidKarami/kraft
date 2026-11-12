@@ -124,6 +124,7 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
     return {
       id,
       get sessions() { return b().sessions; },
+      get events() { return b().events; },
       get frozen() { return b().item.materialized_chain; },
       get repo() { return b().item.repo; },
       get head() { return b().item.head_sha ?? null; },

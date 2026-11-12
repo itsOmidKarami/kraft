@@ -11,6 +11,8 @@
 
 /** The model a mocked agent session runs on. */
 export const MODEL = "claude-sonnet-5-5";
+/** What `MODEL` costs, USD per million tokens of each kind (`src/kraft/prices.json`). */
+export const PRICE = { tokens_in: 2, tokens_cache_write: 4, tokens_cache_read: 0.2, tokens_out: 10 };
 
 type FrozenTask = { id: string; kind?: string; ref?: string | null; target?: string | null };
 type FrozenStep = { id: string; tasks?: FrozenTask[] | null };

@@ -5,7 +5,7 @@ import { FRESH_TITLES, motion } from "../e2e/contract/mocks/motion";
 import { frozenOf } from "../e2e/contract/mocks/ngChain";
 import { AUTO_ESCALATE_MESSAGE, MR_CLOSED_REASON, NG_NOW } from "../e2e/contract/mocks/ngItems";
 import { agentUsage } from "../e2e/contract/mocks/nodeRecipe";
-import { isAgentSession, MODEL, nodeTasks, RUNS, runOutput, taskKind, taskRun } from "../e2e/contract/mocks/taskKinds";
+import { isAgentSession, MODEL, nodeTasks, PRICE, RUNS, runOutput, taskKind, taskRun } from "../e2e/contract/mocks/taskKinds";
 import { transitions } from "../e2e/contract/mocks/transitions";
 
 /**
@@ -100,6 +100,10 @@ describe.each(SCENARIOS)("sessions in %s", (_scenario, build) => {
     ["an agent's finished session reports its model and usage", (b, s) => agentic(b, s) && !noAgentTriage(b, s) && ["done", "done_with_concerns"].includes(s.status) && (s.model == null || s.tokens_in == null || s.cost_usd == null)],
     ["an agent's log has its own lines", (b, s) => agentic(b, s) && !noAgentTriage(b, s) && !logOf(b, s).some((l) => l.src === "agent")],
     ["a board item's agents run the mock's model", (b, s) => onTheBoard.has(b.item.id) && agentic(b, s) && s.model != null && s.model !== MODEL],
+    // `usage.py`: an exit reports every kind of token, and its cost is theirs at its model's prices. The older samples,
+    // with no frozen chain, carry made-up figures and no cache split.
+    ["an agent's cost is what its tokens cost, to a cent", (b, s) => !!b.item.materialized_chain && s.model === MODEL && s.cost_usd != null
+      && !(Math.abs(Object.entries(PRICE).reduce((a, [k, usd]) => a + (s[k] ?? NaN) * usd / 1e6, 0) - s.cost_usd) < 0.01)],
   ])("%s", (_rule, rule) => {
     expect(offenders(S, rule)).toEqual([]);
   });
