@@ -502,6 +502,21 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
     });
     expect(wrong.map((b) => b.item.title)).toEqual([]);
   });
+  // A row stopped on its code review's question asks its own (CONTENT `question`), in its stop and in the blind finding
+  // the round measured; the item page's sample question is about the sample's cache and is on no board item.
+  it("an item stopped on a question asks its own, in its stop and its measured finding, and no board item asks the sample's", () => {
+    const asking = board.filter((b) => b.content!.question);
+    if (sample) expect(asking.map((b) => b.item.bead_id)).toEqual(["kraft-a3f0"]);
+    const wrong = asking.filter((b) => {
+      const q = b.content!.question!;
+      const stop = b.events.filter((e) => e.type === "work_item_needs_human").at(-1);
+      const found = b.events.filter((e) => e.type === "findings_measured").at(-1)?.payload.findings as any[] | undefined;
+      return !String(stop?.payload.reason).includes(q) || !found?.some((f) => String(f.message).includes(q)) || b.item.needs_context_question !== q;
+    });
+    expect(wrong.map((b) => b.item.title)).toEqual([]);
+    const generic = "The race needs a reindex API change the plan froze";
+    expect(board.filter((b) => JSON.stringify([b.events, b.item]).includes(generic)).map((b) => b.item.title)).toEqual([]);
+  });
   it("no two documents share an id, on any item", () => {
     const ids = Object.values(S.docs).flat().map((d) => d.document_id);
     expect(ids.filter((x, k) => ids.indexOf(x) !== k)).toEqual([]);
@@ -650,6 +665,34 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
       return first.length && first.every((r: any) => itemOf(r) === b.item.id) ? null : b.item.title;
     }));
     expect(wrong.filter(Boolean)).toEqual([]);
+  });
+  // `_fts` ranks by the whole query in a title first, then by the words a title holds: a hit whose title holds the
+  // query comes before any whose title does not. FTS5 folds case, so a query's case changes nothing.
+  it("search puts a hit whose title holds the query, a word or a phrase, before one whose title does not, whatever the query's case", async () => {
+    const all = (q: string) => call(`/search?q=${encodeURIComponent(q)}&limit=100`).then((r) => r.body.results as any[]);
+    const holds = (title: string, q: string) => ` ${title.toLowerCase().match(/[\p{L}\p{N}]+/gu)!.join(" ")} `.includes(` ${q} `);
+    for (const q of ["cache", "search index"]) {
+      const hits = await all(q);
+      const marks = hits.map((r) => holds(r.title, q));
+      expect([marks.includes(true), marks.includes(false)], q).toEqual([true, true]);
+      expect(marks.lastIndexOf(true), q).toBeLessThan(marks.indexOf(false));
+    }
+    expect((await all("CACHE")).map((r) => r.id)).toEqual((await all("cache")).map((r) => r.id));
+  });
+  // `snippet(..., 64)`: the window opens a little before the first match, at most eight tokens, and marks it; one near
+  // the text's end opens earlier, to hold its last 64 tokens.
+  it("a search snippet marks the first match in its document and opens at most eight tokens before it", async () => {
+    const hits = (await call("/search?q=cache&limit=100")).body.results as any[];
+    expect(hits.length).toBeGreaterThan(0);
+    const wrong: string[] = [];
+    for (const r of hits) {
+      const text = (await call(`/documents/${encodeURIComponent(r.id)}`)).body.content as string;
+      const first = text.match(/[\p{L}\p{N}]+/gu)!.find((w) => w.toLowerCase() === "cache");
+      const at = r.snippet.indexOf("[");
+      const before = r.snippet.slice(0, at).match(/[\p{L}\p{N}]+/gu) ?? [];
+      if (at < 0 || !r.snippet.startsWith(`[${first}]`, at) || (before.length > 8 && r.snippet.endsWith("…"))) wrong.push(`${r.title}: ${r.snippet.slice(0, 60)}`);
+    }
+    expect(wrong).toEqual([]);
   });
   it("search ranks a document before a session's summary when they match alike", async () => {
     for (const q of ["cache", "brief"]) expect((await call(`/search?q=${q}`)).body.results[0]?.source_kind, q).toBe("artifact");

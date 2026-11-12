@@ -239,6 +239,21 @@ describe("after the visitor", () => {
     expect(ticks(3, id)).toEqual([]);
   });
 
+  // `_pending_gate_doc`: the gate's document is listed in place of the copy an earlier approval indexed at its path.
+  it("a gate asked again after a rejection lists its document once, the pending one first, not beside the copy its earlier approval filed", async () => {
+    const { S, ticks, call } = started();
+    const id = board(S, GATED);
+    const filed = S.docs[id].find((d) => d.path === `items/${id}/docs/work_brief.md`);
+    expect(filed).toBeDefined();
+    await call("POST", `/work-items/${id}/gates/final_review/reject`, { note: "again" });
+    for (let k = 0; k < 40 && S.bundles[id].item.pending_gate !== "local_review"; k++) ticks(1, id);
+    expect(S.bundles[id].item.pending_gate).toBe("local_review");
+    const docs = (await call("GET", `/work-items/${id}/documents`)).body.documents;
+    const paths = docs.map((d: any) => d.path);
+    expect(paths.filter((p: string, k: number) => paths.indexOf(p) !== k)).toEqual([]);
+    expect([docs[0].document_id, docs[0].path, docs.some((d: any) => d.document_id === filed!.document_id)]).toEqual([`gate:${id}:local_review`, filed!.path, false]);
+  });
+
   it("reject sends it back to the gate's reject_to, which runs again", async () => {
     const { S, ticks, call } = started();
     const id = board(S, GATED);
