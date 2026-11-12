@@ -800,9 +800,13 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
   it("search finds nothing for a query nothing holds, nor for a blank one, and only board items' documents for one many do", async () => {
     expect((await call("/search?q=zzzqx")).body.results).toEqual([]);
     expect([(await call("/search?q=")).status, (await call("/search?q=%20")).body.detail]).toEqual([422, "q is required"]);
-    // `limit: int`: a limit that is no integer is refused before the route runs, a list of what failed (FastAPI).
-    const bad = await call("/search?q=the&limit=abc");
-    expect([bad.status, bad.body.detail[0]?.loc]).toEqual([422, ["query", "limit"]]);
+    // `limit: int`: a limit that is no integer, an empty or a fractional one too, is refused before the route runs, a list
+    // of what failed naming what was sent (FastAPI, as a `limit: int` route answers each of these).
+    for (const lim of ["abc", "", "1.5"]) {
+      const bad = await call(`/search?q=the&limit=${lim}`);
+      const [d] = Array.isArray(bad.body.detail) ? bad.body.detail : [{}];
+      expect([bad.status, d.type, d.loc, d.input], lim).toEqual([422, "int_parsing", ["query", "limit"], lim]);
+    }
     const ids = new Set(board.map((b) => b.item.id));
     const hits = (await call("/search?q=session")).body.results;
     expect(hits.length).toBeGreaterThan(0);
@@ -1525,12 +1529,12 @@ describe("what a command prints", () => {
 
 // `searchFor` on documents written for each rule, so a tier or a window the board's own data happens to satisfy is still
 // pinned. A two-word query whose phrase one title holds: the phrase first, then the titles holding both words, then one,
-// then none, though a document comes before a session's summary when they match alike.
+// then none; of two that match alike, a document before a session's summary, whichever was listed first.
 describe("searchFor, on documents written for it", () => {
   const doc = (id: string, title: string, source_kind = "artifact") => ({ document_id: id, title, source_kind, kind: "specs", repo: "r", path: `${id}.md`, work_item_id: id });
-  it("ranks the phrase in a title, then how many of the query's words a title holds", () => {
-    const docs = [doc("one", "Search notes"), doc("none", "Other notes"), doc("both", "The search for a cache", "session_summary"), doc("phrase", "Cache search, the guide", "session_summary")];
-    expect(searchFor("cache search", docs, "default", () => "a cache to search").results.map((r: any) => r.id)).toEqual(["phrase", "both", "one", "none"]);
+  it("ranks the phrase in a title, then how many of the query's words a title holds, then a document before a summary", () => {
+    const docs = [doc("one", "Search notes"), doc("none", "Other notes"), doc("both", "The search for a cache", "session_summary"), doc("phrase", "Cache search, the guide", "session_summary"), doc("tie-summary", "Search log", "session_summary"), doc("tie-doc", "Search guide")];
+    expect(searchFor("cache search", docs, "default", () => "a cache to search").results.map((r: any) => r.id)).toEqual(["phrase", "both", "one", "tie-doc", "tie-summary", "none"]);
   });
   // `snippet(..., 64)`: the window opens eight tokens before the first match, or at the text's start; near the end it
   // opens earlier, at its last 64 tokens.
