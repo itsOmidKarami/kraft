@@ -528,7 +528,7 @@ function buildItem(state: DisplayState, seed: number, variant: Variant): ItemBun
       ev("work_item_completed", {}, 1);
       item.status = "completed";
       item.mr_ref = { number: 1837, url: "https://gitlab.example.com/acme/kraft/-/merge_requests/1837" };
-      if (state === "archived") { item.archived_at = t(m + 60); item.archived_by = seed % 2 ? "you" : "auto"; }
+      if (state === "archived") { item.archived_at = t(Math.min(m + 60, 128)); item.archived_by = seed % 2 ? "you" : "auto"; }
       item.display_status = state === "archived" ? "archived" : "done";
       break;
     }

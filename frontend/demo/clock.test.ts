@@ -14,11 +14,11 @@ import { demoOptions } from "./scenario";
  */
 type Table = { routes: Record<string, { params: Record<string, string> }> };
 const TABLE: Table = JSON.parse(readFileSync(new URL("../../tests/api/api_shapes.json", import.meta.url), "utf-8"));
-/** Routes the table does not list that carry timestamps: Auto-intake's recent checks. */
-const EXTRA = ["GET /api/intake/checks?limit=20"];
+/** Routes the table does not list that carry timestamps: Auto-intake's recent checks and the config drafts. */
+const EXTRA = ["GET /api/intake/checks?limit=20", "GET /api/drafts/repos/repos", "GET /api/drafts/policy/policy", "GET /api/drafts/intake/intake", "GET /api/drafts/harnesses/harnesses"];
 const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d(\.\d+)?)?(Z|[+-]\d\d:?\d\d)?$/;
 const MS = (v: string) => Date.parse(/(Z|[+-]\d\d:?\d\d)$/.test(v) ? v : `${v}Z`);
-/** Keys that name a moment still to come. */
+/** Keys that name a moment still to come. They are skipped both ways: a retry or a deadline may be due already, and a lapsed token's `expires_on` is a day gone. */
 const FUTURE = /^(retry_at|resume_at|expires_at|expires_on|deadline|reset_at|next_[a-z_]+|until)$/;
 const GRACE_MS = 60_000;
 
@@ -75,6 +75,21 @@ describe.each(["default", "long", "many"] as const)("the %s data is dated at or 
 
 /** The items the demo serves are the default data's (the long and many data are the contract suite's, whose classic items run past it). */
 describe("the demo's items are dated at or before the clock", () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(Date.parse(NG_NOW)); });
+  afterEach(() => vi.useRealTimers());
+
+  // The routes above read one item's detail; an archived item's `archived_at` shows only in its own.
+  it("every item's detail", async () => {
+    const S = buildScenario("default");
+    const serve = mockServer(S, { ...demoOptions, now: () => NG_NOW });
+    const late: string[] = [];
+    for (const id of Object.keys(S.bundles)) {
+      const reply = (await serve({ method: "GET", url: `http://demo/api/work-items/${id}`, json: () => null })) as Answer;
+      late.push(...afterClock(JSON.parse(reply.body!), S.bundles[id].item.bead_id ?? id));
+    }
+    expect(late).toEqual([]);
+  });
+
   it("every item's events and sessions", () => {
     const S = buildScenario("default");
     const late = Object.values(S.bundles).flatMap((b) => [...b.events.map((e) => ({ at: e.created_at })), ...b.sessions.map((x) => ({ at: x.created_at, started: x.started_at, exited: x.exited_at }))].flatMap((x, i) => afterClock(x, `${b.item.bead_id}#${i}`)));
