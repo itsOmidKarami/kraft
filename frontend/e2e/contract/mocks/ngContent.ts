@@ -243,12 +243,13 @@ export function contentDiff(b: ItemBundle) {
 
 /** The item's frozen chain's nodes (its `materialized_chain`, else its template's). */
 const nodesOf = (b: ItemBundle): any[] => (b.item.materialized_chain ? JSON.parse(b.item.materialized_chain).chain.nodes : chainOf(b.item.chain_template)?.frozen.nodes ?? []);
-/** Every kind the item's chain produces (a task's `produces`) or a gate decides (its `artifact`): what
- *  `GET /artifacts/{kind}` answers (`artifacts._produced_path`). */
-export const chainKinds = (b: ItemBundle): Set<string> => new Set([
-  ...nodesOf(b).flatMap((n) => [...JSON.stringify(n).matchAll(/"produces":"([^"]+)"/g)].map((m) => m[1])),
-  ...nodesOf(b).filter((n) => n.kind === "gate" && n.artifact).map((n) => n.artifact),
-]);
+/** Every kind the item's chain produces (a task's `produces`): what `GET /artifacts/{kind}` answers
+ *  (`artifacts._produced_path`, which takes a gate's `artifact` too: every gate's here is a kind a task produces). */
+export const chainKinds = (b: ItemBundle): Set<string> => new Set(nodesOf(b).flatMap((n) => [...JSON.stringify(n).matchAll(/"produces":"([^"]+)"/g)].map((m) => m[1])));
+/** Whether the item's `kind` document is on disk: the node that produces it has completed, or a gate waits on it. Before
+ *  then, with nothing indexed, `GET /artifacts/{kind}` has none (`artifacts.get_produced_artifact`). */
+export const written = (b: ItemBundle, kind: string) =>
+  b.events.some((e) => e.type === "node_completed" && e.payload.node_id === producedBy(b, kind).node_id) || (!!b.item.pending_gate && String(b.item.gate_artifact).endsWith(`/docs/${kind}.md`));
 /** The node whose task produces `kind`, and that task's session's hook point: what the document's front matter names. */
 export function producedBy(b: ItemBundle, kind: string): { node_id: string | null; hook_point: string | null } {
   const node = nodesOf(b).find((n) => n.kind !== "gate" && JSON.stringify(n).includes(`"produces":"${kind}"`))?.id ?? null;
@@ -285,8 +286,9 @@ export function itemDocs(b: ItemBundle): any[] {
   });
   const refs = new Map<string, number>();
   // An escalation turn's summary is indexed at its thread's path when it exits; once a later turn takes that path its
-  // own copy moves to its session's folder, which nothing indexes.
-  const indexed = (s: any) => s.session_summary_ref && ["done", "done_with_concerns"].includes(s.status) && (s.hook_point !== "escalation" || /\/sessions\/escalation-\d+\/out\/summary\.md$/.test(s.session_summary_ref));
+  // own copy moves to its session's folder, which nothing indexes. The server files any session that wrote a summary,
+  // whatever its status; the status filter holds because the demo's failed and capped sessions write none.
+  const indexed =(s: any) => s.session_summary_ref && ["done", "done_with_concerns"].includes(s.status) && (s.hook_point !== "escalation" || /\/sessions\/escalation-\d+\/out\/summary\.md$/.test(s.session_summary_ref));
   b.sessions.forEach((s, n) => { if (indexed(s) && !refs.has(s.session_summary_ref)) refs.set(s.session_summary_ref, n); });
   for (const [path, first] of refs) {
     const s = b.sessions.filter((x) => x.session_summary_ref === path).at(-1)!;

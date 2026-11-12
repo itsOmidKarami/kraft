@@ -474,10 +474,13 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
   it("it has a merge request once its draft's open task has run, its own on its repo's forge, the one its mr_opened named", () => {
     const wrong = board.flatMap((b) => {
       const opened = b.sessions.some((s) => s.hook_point === "draft_merge_request.open.open" && s.status === "done");
-      const event = b.events.filter((e) => e.type === "mr_opened").at(-1)?.payload;
+      const opening = b.events.filter((e) => e.type === "mr_opened").at(-1);
+      const event = opening?.payload;
       const mr = b.item.mr_ref;
       const own = { number: b.content!.mr, url: forgeUrl(b.item.repo, b.content!.mr) };
-      return opened !== !!mr || (mr && (JSON.stringify(mr) !== JSON.stringify(own) || event?.number !== mr.number || event?.url !== mr.url)) ? [b.item.title] : [];
+      // `forge.run` writes `{number, url}`, its node in the column only.
+      const shaped = !opening || (JSON.stringify(Object.keys(opening.payload).sort()) === '["number","url"]' && opening.node_id === "draft_merge_request");
+      return opened !== !!mr || !shaped || (mr && (JSON.stringify(mr) !== JSON.stringify(own) || event?.number !== mr.number || event?.url !== mr.url)) ? [b.item.title] : [];
     });
     expect(wrong).toEqual([]);
     expect(board.some((b) => b.item.mr_ref?.url.includes("/-/merge_requests/"))).toBe(true);
@@ -615,6 +618,23 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
     const meta = (await call(`/work-items/${one.item.id}/artifacts/mr_meta`)).body;
     expect([meta.title, meta.content.startsWith("---"), meta.content.includes(one.item.description), meta.content.includes(one.content!.files[0][0])]).toEqual([one.item.title, false, true, true]);
   });
+  // `get_produced_artifact`: a kind is on disk once the node that produces it has completed (a pending gate's is too);
+  // before that, with nothing indexed, it is a 404 that says the item has none.
+  it("a kind its chain produces is served once the node that writes it has completed, and is a 404 before", async () => {
+    const wrong: string[] = [];
+    let before = 0;
+    for (const b of board) {
+      const nodes: any[] = JSON.parse(b.item.materialized_chain).chain.nodes;
+      for (const n of nodes) for (const [, kind] of JSON.stringify(n).matchAll(/"produces":"([^"]+)"/g)) {
+        const a = await call(`/work-items/${b.item.id}/artifacts/${kind}`);
+        const due = completed(b, n.id) || (!!b.item.pending_gate && b.item.gate_artifact === `items/${b.item.id}/docs/${kind}.md`);
+        if (!due) before++;
+        if (due ? a.status !== 200 : a.status !== 404 || a.body.detail !== `this work item has no ${kind}`) wrong.push(`${b.item.title}: ${kind} ${a.status}`);
+      }
+    }
+    expect(before).toBeGreaterThan(0);
+    expect(wrong).toEqual([]);
+  });
   it("search finds nothing for a query nothing holds, nor for a blank one, and only board items' documents for one many do", async () => {
     expect((await call("/search?q=zzzqx")).body.results).toEqual([]);
     expect([(await call("/search?q=")).status, (await call("/search?q=%20")).body.detail]).toEqual([422, "q is required"]);
@@ -656,6 +676,8 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
     expect(keeps.map((k, n) => every.some(k) && !every.every(k) && [summaries, specs, inRepo][n].length > 0 && [summaries, specs, inRepo][n].every(k))).toEqual([true, true, true]);
     expect(three.length).toBe(3);
     expect((await call("/search?q=the")).body.results.length).toBe(Math.min(20, every.length));
+    // `search.py` clamps the limit it is asked for to 1..100.
+    expect(await Promise.all(["0", "-5", "500"].map(async (n) => (await call(`/search?q=the&limit=${n}`)).body.results.length))).toEqual([1, 1, Math.min(100, every.length)]);
   });
   it("it has run from its first node to the clock, or to its last event once it ended, and was last touched no earlier than its last event", () => {
     const wrong = board.filter((b) => b.events.some((e) => e.type === "node_started")).flatMap((b) => {

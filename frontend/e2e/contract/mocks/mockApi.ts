@@ -3,7 +3,7 @@ import { inTreeOrder, tree } from "../../../src/ng/review/model";
 import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, gateRoundsOf, roundWindows, searchFor, subagentList, within, WORKERS_FIXTURE, type Scenario } from "./fixtures";
 import { makeAreas } from "./areasMock";
 import { ngThreads } from "./ngItems";
-import { chainKinds, docBody, pendingDoc, producedBy } from "./ngContent";
+import { chainKinds, docBody, pendingDoc, producedBy, written } from "./ngContent";
 import { harnessesServer, PROVIDER_STATUS } from "./ngHarnesses";
 import { forgesServer } from "./ngForges";
 import { motion, type Motion, type MotionOptions } from "./motion";
@@ -592,6 +592,8 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       const [, wid, where, kind] = m;
       // A kind no task of the item's chain produces and no gate decides is a 404 (`_produced_path`).
       if (where === "artifacts" && b.content && !chainKinds(b).has(kind)) return json({ detail: `no task of this work item produces '${kind}'` }, 404);
+      // One its chain names but no node has written yet: no file, nothing indexed.
+      if (where === "artifacts" && b.content && !written(b, kind)) return json({ detail: `this work item has no ${kind}` }, 404);
       // An item with content (ngContent.ts) has each kind's own text; the rest read the gate artifact's.
       const own = b.content && docBody(b, { kind: `${kind}s` });
       // Front matter is stripped, and a title it names wins over the heading (`_worktree_document`).
@@ -707,7 +709,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       if (!(q.get("q") ?? "").trim()) return json({ detail: "q is required" }, 422);
       const ids = opts.ngBoard ? [...S.ngBoard, ...S.ngArchived] : [...S.items, ...S.archived].map((i) => i.id);
       return json(searchFor(q.get("q")!, ids.flatMap((id) => S.docs[id] ?? []), S.variant, textOf,
-        { source_kind: q.get("source_kind"), kind: q.get("kind"), repo: q.get("repo"), limit: Number(q.get("limit")) || undefined }));
+        { source_kind: q.get("source_kind"), kind: q.get("kind"), repo: q.get("repo"), limit: q.get("limit") == null ? undefined : Number(q.get("limit")) }));
     }
     if ((m = p.match(/^\/documents\/([^/]+)\/open$/))) return json({ document_id: m[1], path: ".engineering/specs/x.md", editor: "code" });
     if ((m = p.match(/^\/documents\/([^/]+)$/))) {

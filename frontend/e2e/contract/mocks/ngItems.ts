@@ -66,10 +66,10 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
   // Minutes from T0. A time cap's two hours of implementation start the capped item before T0, so it stops before NG_NOW.
   const start = sc === "capped" ? -15 : 0;
   let m = start;
-  const ev = (type: EventType, payload: Record<string, unknown> = {}, dm = 0.02) => {
+  const ev = (type: EventType, payload: Record<string, unknown> = {}, dm = 0.02, column?: string) => {
     m += dm;
-    // The column: a gate event names its node in `gate` only (`store.gates`).
-    const node = payload.node_id ?? payload.node ?? payload.gate;
+    // The column: a gate event names its node in `gate` only (`store.gates`); one whose payload names none, its own.
+    const node = column ?? payload.node_id ?? payload.node ?? payload.gate;
     events.push({ seq: ++seq, work_item_id: id, type, payload, node_id: typeof node === "string" ? node : null, created_at: t(m) });
   };
 
@@ -157,7 +157,8 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     sha: (k) => hex(seed + 300 + k).slice(0, 40),
     requestGate: (gate) => ev("gate_requested", { gate, node_id: gate }, 0.02),
     selfApprove: (gate) => ev("gate_approved", { gate, by: "kraft" }, 0.02),
-    mrOpened: (node) => { ev("mr_opened", { node_id: node, ...mr }, 0.02); item.mr_ref = { ...mr }; },
+    // `forge.run`: `{number, url}`, the node in the column only.
+    mrOpened: (node) => { ev("mr_opened", { ...mr }, 0.02, node); item.mr_ref = { ...mr }; },
     complete: (node) => ev("node_completed", { node_id: node }, 0.02),
     skipped: () => false,
   };

@@ -968,7 +968,8 @@ function snippet(text: string, terms: string[]): string {
 export function searchFor(q: string, docs: any[], variant: Variant, body: (d: any) => string = () => "", f: SearchFilters = {}) {
   const terms = [...new Set(tokens(q))];
   const query = terms.join(" ");
-  const limit = Math.max(1, Math.min(f.limit || 20, 100));
+  // `search.py` clamps what it is asked to 1..100: a limit of 0 answers one.
+  const limit = Math.max(1, Math.min(f.limit ?? 20, 100));
   const ranked = docs.filter((d) => (!f.source_kind || d.source_kind === f.source_kind) && (!f.kind || d.kind === f.kind) && (!f.repo || d.repo === f.repo)).map((d) => {
     const title = tokens(d.title);
     const all = new Set([...title, ...tokens(body(d))]);
