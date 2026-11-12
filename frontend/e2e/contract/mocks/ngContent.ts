@@ -24,6 +24,9 @@ export type Rows = { at: number; rows: string[] };
 export interface Content { description: string; files: File[]; mr: number; hunks?: Record<string, Rows>; question?: string; repo?: string }
 
 export const isLate = (f: File) => f.slice(3).includes("late");
+/** A docs path: a page anywhere, or a site file under `docs/` (its pages, navigation, styles, scripts and layouts); a
+ *  program under `docs/` (`docs/_nav.py`) is code. */
+export const isDocsPath = (p: string) => p.endsWith(".md") || (p.startsWith("docs/") && /\.(md|ya?ml|css|js|html|svg|png)$/.test(p));
 const statusOf = (f: File) => (f.slice(3).includes("new") ? "new" : f.slice(3).includes("deleted") ? "deleted" : null);
 
 /** By bead: the 24 board rows. Merge request numbers count up with the item's age; none is in 150-159, which the
@@ -182,7 +185,12 @@ function template(path: string, title: string, repo: string, paths: string[], de
       [`/** ${title}. */`, `export function ${camel}(value: unknown, limit?: number) {`, `  if (limit !== undefined && Number(value) > limit) throw new Error(\`${camel}: \${value} > \${limit}\`);`, "  return value;", "}"]];
   }
   const [first, ...rest] = description.split(/(?<=\.) /);
-  if (ext === "md") return [[`# ${base.replace(/[-_]/g, " ")}`, ""], [`This page is a stub.`, "See the source for now."], [first, "", ...rest]];
+  if (ext === "md") {
+    // The page a docs item is about says what its brief says; any other page has its heading and a line of its own.
+    const words = base.replace(/[-_]/g, " ");
+    const principal = paths.every(isDocsPath) && paths.find((p) => p.endsWith(".md")) === path;
+    return [[`# ${words}`, ""], [`This page is a stub.`, "See the source for now."], principal ? [first, "", ...rest] : [`The ${words} page, updated for: ${title}.`]];
+  }
   if (ext === "css") return [[`/* ${base} */`, ".page {"], ["  color: #222;", "  background: #fff;"],
     ["  color: var(--fg);", "  background: var(--bg);", "}", "", "@media (prefers-color-scheme: dark) {", "  :root { --fg: #e6e6e6; --bg: #111; }", "}"]];
   if (ext === "html") return [["<!doctype html>", `<html lang="en">`], ["<body>"], [`<body class="${snake}">`, `  <!-- ${title}. -->`, "  <main>{{ content }}</main>"]];
@@ -225,7 +233,8 @@ export function hunk(f: File, title: string, repo: string, c: Content): string {
 }
 
 /** GET /diff for an item with content: what it changed is committed (`landed`), nothing is in flight. Its commits
- *  are `git log --oneline`'s, newest first: one for each plan task it finished, then the fix verification's round made. */
+ *  are `git log --oneline`'s, newest first: one for each plan task it finished (on a chain with no plan, one named after
+ *  the item), then the fix a repair of verification's round made. */
 export function contentDiff(b: ItemBundle) {
   const files = changedFiles(b);
   const sha = (k: number) => ((parseInt(b.item.id.slice(0, 7), 16) + k * 7919) % 0xfffffff).toString(16).padStart(7, "0");
@@ -293,7 +302,7 @@ export function itemDocs(b: ItemBundle): any[] {
   // An escalation turn's summary is indexed at its thread's path when it exits; once a later turn takes that path its
   // own copy moves to its session's folder, which nothing indexes. The server files any session that wrote a summary,
   // whatever its status; the status filter holds because the demo's failed and capped sessions write none.
-  const indexed =(s: any) => s.session_summary_ref && ["done", "done_with_concerns"].includes(s.status) && (s.hook_point !== "escalation" || /\/sessions\/escalation-\d+\/out\/summary\.md$/.test(s.session_summary_ref));
+  const indexed = (s: any) => s.session_summary_ref && ["done", "done_with_concerns"].includes(s.status) && (s.hook_point !== "escalation" || /\/sessions\/escalation-\d+\/out\/summary\.md$/.test(s.session_summary_ref));
   b.sessions.forEach((s, n) => { if (indexed(s) && !refs.has(s.session_summary_ref)) refs.set(s.session_summary_ref, n); });
   for (const [path, first] of refs) {
     const s = b.sessions.filter((x) => x.session_summary_ref === path).at(-1)!;
@@ -329,7 +338,7 @@ export function docBody(b: ItemBundle, d: { kind: string; hook_point?: string | 
   const c = b.content!;
   const [first, ...rest] = c.description.split(/(?<=\.) /);
   const files = c.files;
-  const docsOnly = files.every(([p]) => p.startsWith("docs/") || p.endsWith(".md"));
+  const docsOnly = files.every(([p]) => isDocsPath(p));
   // A brief or a merge request is written after the implementation: it lists what the item's diff shows.
   const landed = itemFiles(b);
   const counted = landed.map(([p, i, dl]) => `- \`${p}\` (+${i} −${dl})`).join("\n");
@@ -356,7 +365,7 @@ export function docBody(b: ItemBundle, d: { kind: string; hook_point?: string | 
         // A gate's reviewer and the writer of a spec, plan or chain revision run before any code changed.
         : gate ? `Read the ${words(gate.artifact ?? "document")} before the person decides: it says what changes, and how to tell it is done.`
         : ["spec", "plan", "chain_revision"].includes(d.node_id ?? "") ? `Wrote the ${words(d.node_id!)} from the item's brief.`
-        : `Ran ${task} for ${d.node_id ?? "the item"} on ${tasks ? `the ${tasks} tasks the plan names` : `the ${files.filter((f) => !isLate(f)).length} files the spec names`}.`;
+        : `Ran ${task} for ${d.node_id ?? "the item"} on the ${files.filter((f) => !isLate(f)).length} files the ${tasks ? "plan" : "spec"} names.`;
       return `# ${taskName(d.hook_point, d.node_id)}: ${it.title}\n\n${first}\n\n## What this session did\n\n${did}\n\n## Next\n\n${check}\n`;
     }
   }

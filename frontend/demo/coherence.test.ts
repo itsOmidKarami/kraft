@@ -1,10 +1,10 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { buildScenario, withScopes, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
+import { buildScenario, searchFor, withScopes, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
 import { FRESH_TITLES, motion } from "../e2e/contract/mocks/motion";
 import { NG_REPOS } from "../e2e/contract/mocks/ngBoard";
-import { CONTENT, FRESH_CONTENT, mergeDocs, mrOf } from "../e2e/contract/mocks/ngContent";
+import { CONTENT, FRESH_CONTENT, isDocsPath, mergeDocs, mrOf } from "../e2e/contract/mocks/ngContent";
 import { frozenOf } from "../e2e/contract/mocks/ngChain";
 import { AUTO_ESCALATE_MESSAGE, buildNgItem, MR_CLOSED_REASON, NG_NOW } from "../e2e/contract/mocks/ngItems";
 import { agentUsage, openWait } from "../e2e/contract/mocks/nodeRecipe";
@@ -310,9 +310,7 @@ const forgeUrl = (repo: string, n: number) => {
 };
 /** Each kind's own section: what tells a spec from a plan or a summary. */
 const SECTION: Record<string, string> = { specs: "\n## Problem\n", plans: "\n### Task 1: ", chain_revisions: "\n## Nodes\n", work_briefs: "\n## What changed\n", review_briefs: "\n## Read first\n", sessions: "\n## What this session did\n" };
-/** A docs path: a page anywhere, or a site file under `docs/` (its pages, navigation, styles, scripts and layouts); a
- *  program under `docs/` (`docs/_nav.py`) is code. */
-const isDocsPath = (p: string) => p.endsWith(".md") || (p.startsWith("docs/") && /\.(md|ya?ml|css|js|html|svg|png)$/.test(p));
+/** A docs path is the mock's own (ngContent.ts `isDocsPath`): its documents' wording and these rules read one definition. */
 const docsOnly = (files: Row[]) => files.every(([p]) => isDocsPath(p));
 const isTestPath = (p: string) => /(^|\/)tests?\//.test(p) || /\.test\.[jt]sx?$/.test(p);
 
@@ -446,20 +444,24 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
     }));
     expect(wrong).toEqual([]);
   });
-  // A test imports the module of its name where the item changes one, from where that module is; a page says what the
-  // item's brief says; a manifest is its repo's own package.
+  // A test imports the module of its name where the item changes one, from where that module is; the page a docs item is
+  // about (its first) says what the item's brief says, and any other page does not, but names the item; a manifest is its
+  // repo's own package.
   it("a file's patch reads as its kind: a test's asserts and imports, a page's words, a manifest's name, and only the VS Code repo's code imports vscode", async () => {
     const wrong: string[] = [];
     const stem = (p: string) => p.replace(/(\.test)?\.[^./]+$/, "");
     for (const b of withTree) for (const p of (await call(`/work-items/${b.item.id}/diff`)).body.landed.diff.split(/^(?=diff --git )/m).filter(Boolean)) {
       const path = /^diff --git a\/(\S+)/.exec(p)![1];
+      const paths = (b.content!.files as Row[]).map(([x]) => x);
+      const principal = docsOnly(b.content!.files as Row[]) && paths.find((x) => x.endsWith(".md")) === path;
+      const brief = p.includes(b.item.description.split(". ")[0]);
       const module = b.content!.files.map(([x]) => x).find((x) => !isTestPath(x) && x !== path && stem(x).split("/").pop() === stem(path).split("/").pop());
       const imported = /^[ +]import \{ \w+ \} from "(\.[^"]+)";$/m.exec(p)?.[1];
       const at = path.split("/").slice(0, -1);
       for (const s of imported?.split("/") ?? []) if (s === "..") at.pop(); else if (s !== ".") at.push(s);
       if ((isTestPath(path) && !/^\+.*\b(assert|expect)\b/m.test(p)) || (p.includes(`from "vscode"`) && !b.item.repo.endsWith("/kraft-vscode"))
         || (isTestPath(path) && imported && module && at.join("/") !== stem(module))
-        || (path.endsWith(".md") && !p.includes(b.item.description.split(". ")[0]))
+        || (path.endsWith(".md") && (principal ? !brief : brief || !p.includes(b.item.title)))
         || (path.endsWith("package.json") && !p.includes(`"name": "${b.item.repo.split("/").pop()}",`))) wrong.push(`${b.item.title}: ${path}`);
     }
     expect(wrong).toEqual([]);
@@ -590,11 +592,12 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
     expect(wrong).toEqual([]);
   });
   // A row of the list carries every key a real one does (`tests/api/api_shapes.json`), each row, not only one of them;
-  // the pending gate's the keys `_pending_gate_doc` writes.
+  // the pending gate's the keys `_pending_gate_doc` writes, and the run keys (`attempt`, `round`, `session_status`) the
+  // list's last pass sets on every row, its own included (`documents_for_work_item`).
   it("every row of its documents list carries the keys a real row carries", async () => {
     const shapes = JSON.parse(readFileSync(new URL("../../tests/api/api_shapes.json", import.meta.url), "utf-8"));
     const keys = Object.keys(shapes.routes["GET /api/work-items/{wid}/documents"].shape.documents[0]);
-    const pending = ["attachment_kind", "document_id", "hook_point", "indexed_at", "kind", "node_id", "path", "repo", "source_kind", "title", "worker_session_id"];
+    const pending = ["attachment_kind", "attempt", "document_id", "hook_point", "indexed_at", "kind", "node_id", "path", "repo", "round", "session_status", "source_kind", "title", "worker_session_id"];
     const wrong: string[] = [];
     for (const b of board) for (const d of (await call(`/work-items/${b.item.id}/documents`)).body.documents) {
       const lacks = (String(d.document_id).startsWith("gate:") ? pending : keys).filter((k) => !(k in d));
@@ -626,7 +629,8 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
       const [first, ...rest] = (await call(`/work-items/${b.item.id}/documents`)).body.documents;
       const doc = (await call(`/documents/${encodeURIComponent(id)}`)).body;
       const hits = (await call(`/search?q=${encodeURIComponent(b.item.title)}&limit=100`)).body.results;
-      const ok = first.document_id === id && first.path === b.item.gate_artifact && [first.node_id, first.hook_point, first.worker_session_id].every((x) => x === null)
+      // Listed now, by the demo's clock (`clock.ts`), not the machine's.
+      const ok = first.document_id === id && first.path === b.item.gate_artifact && [first.node_id, first.hook_point, first.worker_session_id].every((x) => x === null) && (!sample || first.indexed_at === NG_NOW)
         && !rest.some((d: any) => d.path === first.path) && !S.docs[b.item.id].some((d) => d.path === first.path)
         && doc.content.startsWith(`# ${first.title}\n`) && JSON.stringify([doc.metadata, doc.links, doc.source_created_at, "origin" in doc]) === JSON.stringify([{}, [], null, false])
         && !hits.some((r: any) => r.id === id || r.path === first.path);
@@ -641,7 +645,7 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
     const idle = board.find((b) => !b.item.pending_gate && S.docs[b.item.id]?.length)!;
     const ids = [...(gated ? [`gate:${gated.item.id}:spec_approval`] : []), `gate:${idle.item.id}:final_review`];
     const answers = await Promise.all(ids.map(async (id) => { const a = await call(`/documents/${encodeURIComponent(id)}`); return [a.status, a.body.detail]; }));
-    expect(answers).toEqual(ids.map(() => [404, "document not found"]));
+    expect(answers).toEqual(ids.map(() => [404, "unknown document"]));
     if (gated) expect((await call(`/documents/${encodeURIComponent(`gate:${gated.item.id}:${gated.item.pending_gate}`)}`)).status).toBe(200);
   });
   /** Whether a document's text is about `b`: it names its title and says what its brief's first sentence says. */
@@ -683,6 +687,7 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
   // there was a plan (a spec's or plan's writer, a gate's reviewer) says nothing of what the plan names.
   it("what each document says fits when it was written", async () => {
     const wrong: string[] = [];
+    let counts = 0;
     for (const b of board) {
       for (const kind of ["spec", "plan", "chain_revision", "work_brief", "review_brief"]) {
         const a = await call(`/work-items/${b.item.id}/artifacts/${kind}`);
@@ -700,16 +705,20 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
       for (const d of (S.docs[b.item.id] ?? []).filter((x) => x.kind === "sessions" && (["spec", "plan"].includes(x.node_id) || String(x.hook_point).endsWith(".auto_review")))) {
         if ((await call(`/documents/${d.document_id}`)).body.content.includes("the plan names")) wrong.push(`${b.item.title}: ${d.title}`);
       }
-      // The implementer's summary lists the files its plan named, not those verification's round added after it; a count
-      // of the plan's tasks is the plan's, and an item with no plan names none.
+      // The implementer's summary lists the files its plan named, not those verification's round added after it; any other
+      // session counts the files its plan (or, with no plan, its spec) names, and an item with no plan names none.
       const files = b.content!.files as Row[];
-      const tasks = defIds(b).includes("plan") ? files.filter((f) => !late(f)).length + 1 : 0;
+      const planned = defIds(b).includes("plan");
       for (const d of (S.docs[b.item.id] ?? []).filter((x) => x.kind === "sessions" && S.docText?.[x.document_id] == null)) {
         const text = (await call(`/documents/${d.document_id}`)).body.content as string;
-        const count = /the (\d+) tasks the plan names/.exec(text)?.[1];
-        if ((d.hook_point === "implementation.main.implement" && files.filter(late).some(([p]) => text.includes(p))) || (count != null && Number(count) !== tasks) || (!tasks && /\bthe plan\b/.test(text))) wrong.push(`${b.item.title}: ${d.title}`);
+        const said = /\bon the (\d+) (\w+) the (plan|spec) names\./.exec(text);
+        if (said) counts++;
+        if ((d.hook_point === "implementation.main.implement" && files.filter(late).some(([p]) => text.includes(p)))
+          || (said && JSON.stringify(said.slice(1)) !== JSON.stringify([String(files.filter((f) => !late(f)).length), "files", planned ? "plan" : "spec"]))
+          || (!planned && /\bthe plan\b/.test(text))) wrong.push(`${b.item.title}: ${d.title}`);
       }
     }
+    expect(counts).toBeGreaterThan(0);
     expect(wrong).toEqual([]);
   });
   it("a kind the item's chain neither produces nor gates is a 404; its merge request's metadata is its own", async () => {
@@ -739,6 +748,9 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
   it("search finds nothing for a query nothing holds, nor for a blank one, and only board items' documents for one many do", async () => {
     expect((await call("/search?q=zzzqx")).body.results).toEqual([]);
     expect([(await call("/search?q=")).status, (await call("/search?q=%20")).body.detail]).toEqual([422, "q is required"]);
+    // `limit: int`: a limit that is no integer is refused before the route runs, a list of what failed (FastAPI).
+    const bad = await call("/search?q=the&limit=abc");
+    expect([bad.status, bad.body.detail[0]?.loc]).toEqual([422, ["query", "limit"]]);
     const ids = new Set(board.map((b) => b.item.id));
     const hits = (await call("/search?q=session")).body.results;
     expect(hits.length).toBeGreaterThan(0);
@@ -752,8 +764,10 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
     }));
     expect(wrong.filter(Boolean)).toEqual([]);
   });
-  // `_fts` ranks by the whole query in a title first, then by the words a title holds: a hit whose title holds the
-  // query comes before any whose title does not. FTS5 folds case, so a query's case changes nothing.
+  // The server's `_fts` orders by `bm25(documents_fts)`, every column weighed alike, with no boost for a phrase; the demo
+  // ranks by a heuristic in its place: the whole query in a title first, then how many of its words a title holds (the
+  // `searchFor` rows below pin both tiers). A hit whose title holds the query comes before any whose title does not. FTS5
+  // folds case, so a query's case changes nothing.
   it("search puts a hit whose title holds the query, a word or a phrase, before one whose title does not, whatever the query's case", async () => {
     const all = (q: string) => call(`/search?q=${encodeURIComponent(q)}&limit=100`).then((r) => r.body.results as any[]);
     const holds = (title: string, q: string) => ` ${title.toLowerCase().match(/[\p{L}\p{N}]+/gu)!.join(" ")} `.includes(` ${q} `);
@@ -903,6 +917,15 @@ describe("the content table, the entries the walk never reaches included", () =>
     expect(rows.filter((r) => r.docs !== docsOnly(files(r))).map((r) => r.name)).toEqual([]);
     expect(rows.filter((r) => !r.docs && !files(r).some(([p]) => isTestPath(p))).map((r) => r.name)).toEqual([]);
     expect(rows.filter((r) => /^(Remove|Drop)\b/.test(r.name) && files(r).reduce((a, [, i, d]) => a + i - d, 0) >= 0).map((r) => r.name)).toEqual([]);
+  });
+  // A new file removes nothing and a deleted one adds nothing; a hunk written out shows no more rows of a side than its
+  // file's stat counts, and its file is one the item changes.
+  it("each file's counts fit how it changes, and a written-out hunk its file's counts", () => {
+    expect(rows.flatMap((r) => (r.c.files as Row[]).filter(([, i, d, ...f]) => (f.includes("new") && d !== 0) || (f.includes("deleted") && i !== 0)).map(([p]) => `${r.name}: ${p}`))).toEqual([]);
+    const hunks = rows.flatMap((r) => Object.entries(r.c.hunks ?? {}).map(([p, h]) => ({ r, h, f: (r.c.files as Row[]).find(([x]) => x === p) })));
+    expect(hunks.length).toBeGreaterThan(0);
+    const marks = (h: { rows: string[] }, m: string) => h.rows.filter((x) => x[0] === m).length;
+    expect(hunks.filter(({ h, f }) => !f || marks(h, "+") > f[1] || marks(h, "-") > f[2]).map(({ r }) => r.name)).toEqual([]);
   });
 });
 
@@ -1428,5 +1451,28 @@ describe("what a command prints", () => {
 
   it.each(Object.keys(RUNS))("%s: a finished run prints something", (task) => {
     expect(runOutput(task, "done", MR).length).toBeGreaterThan(0);
+  });
+});
+
+// `searchFor` on documents written for each rule, so a tier or a window the board's own data happens to satisfy is still
+// pinned. A two-word query whose phrase one title holds: the phrase first, then the titles holding both words, then one,
+// then none, though a document comes before a session's summary when they match alike.
+describe("searchFor, on documents written for it", () => {
+  const doc = (id: string, title: string, source_kind = "artifact") => ({ document_id: id, title, source_kind, kind: "specs", repo: "r", path: `${id}.md`, work_item_id: id });
+  it("ranks the phrase in a title, then how many of the query's words a title holds", () => {
+    const docs = [doc("one", "Search notes"), doc("none", "Other notes"), doc("both", "The search for a cache", "session_summary"), doc("phrase", "Cache search, the guide", "session_summary")];
+    expect(searchFor("cache search", docs, "default", () => "a cache to search").results.map((r: any) => r.id)).toEqual(["phrase", "both", "one", "none"]);
+  });
+  // `snippet(..., 64)`: the window opens eight tokens before the first match, or at the text's start; near the end it
+  // opens earlier, at its last 64 tokens.
+  it.each([
+    ["a match near the start opens the text", 3, 3, false, true],
+    ["a match further in opens eight tokens before it", 20, 8, true, true],
+    ["a match near the end opens at the text's last 64 tokens", 100, 44, true, false],
+  ])("%s", (_name, at, lead, cutBefore, cutAfter) => {
+    const text = Array.from({ length: 120 }, (_, k) => (k === at ? "cache" : `w${k}`)).join(" ");
+    const [hit] = searchFor("cache", [doc("d", "Notes")], "default", () => text).results;
+    const before = hit.snippet.slice(0, hit.snippet.indexOf("[")).match(/[\p{L}\p{N}]+/gu) ?? [];
+    expect([before.length, hit.snippet.startsWith("…"), hit.snippet.endsWith("…")]).toEqual([lead, cutBefore, cutAfter]);
   });
 });

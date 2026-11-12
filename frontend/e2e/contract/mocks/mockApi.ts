@@ -8,7 +8,7 @@ import { harnessesServer, PROVIDER_STATUS } from "./ngHarnesses";
 import { forgesServer } from "./ngForges";
 import { motion, type Motion, type MotionOptions } from "./motion";
 import { listRow, transitions, type Ev } from "./transitions";
-import { ago } from "./clock";
+import { ago, NG_NOW } from "./clock";
 import draftViews from "./draftViews.json" with { type: "json" };
 
 /**
@@ -428,7 +428,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     if ((m = p.match(/^\/work-items\/([^/]+)\/documents$/))) {
       // What a pending gate is about is listed too, before approval indexes it, in place of an earlier approval's copy.
       const b = S.bundles[m[1]];
-      const pending = b && pendingDoc(b, new Date(opts.now?.() ?? Date.now()).toISOString());
+      const pending = b && pendingDoc(b, new Date(opts.now?.() ?? NG_NOW).toISOString());
       const docs = (S.docs[m[1]] ?? []).filter((d) => d.path !== pending?.path);
       return json({ work_item_id: m[1], documents: pending ? [pending, ...docs] : docs });
     }
@@ -706,6 +706,9 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     /* documents & search */
     if (p === "/search") {
       // The board's documents, where the board is the ng one (the older samples' otherwise): what a visitor can open.
+      // `limit: int`: FastAPI refuses one that is not an integer before the route runs, as a validation error.
+      const lim = q.get("limit");
+      if (lim != null && !/^\s*[-+]?\d+\s*$/.test(lim)) return json({ detail: [{ type: "int_parsing", loc: ["query", "limit"], msg: "Input should be a valid integer, unable to parse string as an integer", input: lim }] }, 422);
       if (!(q.get("q") ?? "").trim()) return json({ detail: "q is required" }, 422);
       const ids = opts.ngBoard ? [...S.ngBoard, ...S.ngArchived] : [...S.items, ...S.archived].map((i) => i.id);
       return json(searchFor(q.get("q")!, ids.flatMap((id) => S.docs[id] ?? []), S.variant, textOf,
@@ -720,10 +723,10 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       if (own != null) return json({ ...documentDetail(id, all), content: own, metadata: {}, source_created_at: null, source_updated_at: null });
       // A pending gate's document, by its synthetic id: the file again, nothing indexed about it (`_get_pending_gate_document`).
       const [, wid] = /^gate:([^:]+):/.exec(id) ?? [];
-      const pending = wid && S.bundles[wid] && pendingDoc(S.bundles[wid], new Date(opts.now?.() ?? Date.now()).toISOString());
+      const pending = wid && S.bundles[wid] && pendingDoc(S.bundles[wid], new Date(opts.now?.() ?? NG_NOW).toISOString());
       if (wid) return pending && pending.document_id === id
         ? json({ id, ...Object.fromEntries(["repo", "source_kind", "kind", "title", "path", "indexed_at"].map((k) => [k, pending[k]])), content: docBody(S.bundles[wid], pending), metadata: {}, source_created_at: null, source_updated_at: null, links: [] })
-        : json({ detail: "document not found" }, 404);
+        : json({ detail: "unknown document" }, 404);
       const d = all.find((x) => x.document_id === id);
       const b = d && S.bundles[d.work_item_id];
       return json(b?.content ? documentDetail(id, all, docBody(b, d), d.source_kind === "artifact" ? producedBy(b, d.kind.replace(/s$/, "")) : undefined) : documentDetail(id, all));
