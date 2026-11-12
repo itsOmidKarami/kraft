@@ -37,7 +37,7 @@ draft's merge request, and CI waits that poll. The first item it files fails
 a round of tests, so a fix cycle runs. A gate is asked for, its reviewer
 runs, and the item waits for the visitor to answer it. A waiting or
 rate-limited item is active again once its retry time passes, and a spend
-cap stops an item before its next agent task; raising it retries the item at the step it stopped in. An escalation turn, the sample's or one the visitor starts,
+cap stops an item before its next agent task; raising it retries the item at the step it stopped in, unless a fix cycle has run. An escalation turn, the sample's or one the visitor starts,
 ends on its own two ticks in, as its agent finishing does: its session is done,
 its reply is the item's document (the task's Output links it), and the item
 stays as it stopped, for a reply, a retry or a decision. A finished chain is Done. When no board item is active
@@ -95,7 +95,7 @@ outside its item's folder. It fails when two board items share a brief or a list
 item shows a change for a plan task it has not finished or reports a task its own plan lacks, a docs item changes code, a patch's header miscounts its
 lines or calls a new or deleted file changed, a file's counts or a written-out hunk do not fit how it changes, a review thread quotes lines its diff does not show or names code its lines lack, a rejection's note is not its review's summary and the threads open when it was sent, a merge request is not its own on its repo's forge or a forge task's log names another's at any tick of a walk, a diff shows verification's late file or fix commit before a repair of its has finished, a board row's plan progress is not the task last reported while the item runs its implementation (or shows one when it does not), a spend cap stops an item on a node with no agent task left to launch, a finished agent's run is as long as its time cap or an implementer's longer than any on record, a red round of tests fails on a test other than its own late file's, a document's id
 repeats, its documents are not those of the gates approved and its finished agent sessions or are not indexed at the
-approval, a documents row lacks a key a real row has, a document is served before its node wrote it, a brief lists a file its diff does not show, a document's text is another kind's or another item's, Search ignores its query, filters, ranking or limit or reaches
+approval, a documents row lacks a key a real row has, a document is served before its node wrote it, a brief's or a merge request's list of files is not the files its diff shows with their counts, a review brief's "N files" miscounts its rows or its "Read first" is not its largest change, a document's text is another kind's or another item's, Search ignores its query, filters, ranking or limit or reaches
 past the board, or two started items show the same running time. It checks the
 sample, its long and many variants, the seeds that add sessions and the board
 after live motion has walked two items it filed to the end, then the sessions
