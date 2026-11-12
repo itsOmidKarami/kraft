@@ -58,6 +58,20 @@ class TestE2eNamesCli:
         assert len(violations) == 1
         assert "no call and no" in violations[0]
 
+    @pytest.mark.parametrize(
+        ("relpath", "flagged"),
+        [("tests/test_other.py", True), ("tests/test_harness_flags.py", False)],
+        ids=["elsewhere", "listed-in-NO_TOKEN_E2E"],
+    )
+    def test_spends_tokens_is_allowed_only_in_a_listed_file(self, ct, relpath, flagged):
+        tree = _tree(
+            'import pytest\n\n@pytest.mark.e2e("claude", spends_tokens=False)\n'
+            "def test_x():\n    assert True\n"
+        )
+        violations = ct.check_e2e_names_cli(tree, relpath)
+        assert len(violations) == int(flagged)
+        assert all("NO_TOKEN_E2E" in v for v in violations)
+
 
 class TestNoRealCliOutsideE2e:
     def test_an_unmarked_test_shelling_out_to_bd_is_flagged(self, ct):

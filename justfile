@@ -461,6 +461,14 @@ smoke-models-hook:
     fi
     exec just smoke-models
 
+# Every flag and subcommand the bundled harness files name, against the --help of
+# each agent CLI on this machine: no prompt, no token, no credential, so no
+# KRAFT_E2E. A CLI that isn't installed skips, naming itself. The harness flags
+# workflow runs the same test daily against the latest release of each CLI.
+[doc("Check the bundled harness files' flags and subcommands against each installed agent CLI's --help")]
+smoke-flags:
+    just test tests/test_harness_flags.py --no-testmon -n 0 -rs
+
 # The UI contract: ~90 behaviours of the built SPA (the sidebar's pin, Esc and focus,
 # the item header's cards, review, the document viewer, tooltips) and the icon-only
 # audit (every icon-only control has a name and a tooltip), in a real browser on a

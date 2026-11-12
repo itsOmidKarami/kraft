@@ -40,4 +40,12 @@ verification runs it.
 | `tests nudge` | the PR's test-tree delta as a comment (`dev/test_shape_report.py --diff`), only on one of the three signs its `worth_saying` states; never fails | `uv run python dev/test_shape_report.py --diff origin/main HEAD` |
 | `codeql` | GitHub's static analysis | nothing to run |
 
+One workflow runs on a schedule instead of on a pull request: `harness flags`
+(`.github/workflows/harness-flags.yml`), daily at 05:17 UTC and when started by
+hand. It installs the latest release of each agent CLI and checks every flag and
+subcommand the bundled harness files name against its `--help`, with no prompt
+and no credential. `just smoke-flags` runs the same test against the CLIs you
+have, and skips the rest. A new bundled harness file needs its CLI's install
+step and its binary in `KRAFT_E2E_REQUIRE` there, or its case skips.
+
 Branch protection requires `test` alongside the kraft-lite checks, `removals declared` and `release impact declared`. Once the ruleset names only those, the supported Python range and the job list change without editing repo settings.

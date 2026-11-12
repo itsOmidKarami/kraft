@@ -344,8 +344,54 @@ def test_docker_and_podman_answer_no_daemon_at_once_unless_an_e2e_test_names_one
     assert guard.calls() == []
 
 
+@pytest.mark.parametrize(
+    ("marked", "refused"),
+    [(frozenset({"agent"}), False), (frozenset(), True)],
+    ids=["e2e-agent", "unit"],
+)
+def test_an_e2e_cli_is_not_refused_under_another_name_for_the_same_file(
+    tmp_path, monkeypatch, marked, refused
+):
+    """Cursor installs `agent` and `cursor-agent` as links to one file, and `Popen` refuses by
+    real path: the test marked `e2e("agent")` must still run its `agent`."""
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "cursor-agent").write_text("#!/bin/sh\n")
+    (real / "cursor-agent").chmod(0o755)
+    (real / "agent").symlink_to(real / "cursor-agent")
+    monkeypatch.setenv("PATH", f"{real}{os.pathsep}{os.environ['PATH']}")
+    guard = real_binaries.install(monkeypatch, "probe", real_binaries.allowed_by(marked))
+    argv = [str(real / "agent"), "--help"]  # a bare `agent` meets the stub first
+    assert (guard.refused_program({"args": argv}) is not None) is refused
+
+
 @pytest.mark.e2e("docker")
 def test_an_e2e_docker_test_is_not_answered_by_the_quiet_stand_in():
     """Through the real `_no_real_agent_binary` fixture: where docker is installed (CI's e2e
     job), the test that names it gets the machine's own."""
     assert shutil.which("docker") != str(real_binaries.quiet_dir() / "docker")
+
+
+def test_a_real_agent_runs_without_kraft_e2e_only_when_every_mark_spends_no_tokens(
+    pytester, monkeypatch
+):
+    """`spends_tokens=False` on every e2e mark (a `--help` check) lifts KRAFT_E2E=1;
+    a bare `e2e("claude")` keeps it, and so does one mark of two without the
+    keyword. `claude` is on PATH here as the guard's stub, so KRAFT_E2E is the
+    only thing that can skip a case."""
+    monkeypatch.delenv("KRAFT_E2E", raising=False)
+    monkeypatch.delenv("KRAFT_E2E_REQUIRE", raising=False)
+    pytester.makeconftest((Path(__file__).parent / "conftest.py").read_text())
+    pytester.makepyfile(
+        "import pytest\n\n"
+        '@pytest.mark.e2e("claude")\n'
+        "def test_spends():\n    pass\n\n"
+        '@pytest.mark.e2e("claude", spends_tokens=False)\n'
+        "def test_help_only():\n    pass\n\n"
+        '@pytest.mark.e2e("claude")\n'
+        '@pytest.mark.e2e("claude", spends_tokens=False)\n'
+        "def test_one_mark_spends():\n    pass\n"
+    )
+    result = pytester.runpytest_inprocess("-p", "no:cacheprovider", "-rs")
+    result.assert_outcomes(passed=1, skipped=2)
+    result.stdout.fnmatch_lines(["*KRAFT_E2E=1 (a real agent spends tokens)*"])

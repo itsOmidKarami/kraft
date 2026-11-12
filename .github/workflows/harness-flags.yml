@@ -1,0 +1,69 @@
+# Every flag and subcommand the bundled harness files (src/kraft/harnesses/*.yaml)
+# name, against the --help of the latest release of each agent CLI. A vendor that
+# renames or drops one turns this red the day it ships, before a user's work item
+# finds out. No prompt is sent and no credential is set: the test reads --help and
+# --version only (its e2e marks say spends_tokens=False, so no KRAFT_E2E). Not on
+# pull requests, which install no agent CLI. A red run is the signal; nothing
+# opens an issue. `just smoke-flags` runs the same test against the CLIs you have.
+name: harness flags
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  UV_PYTHON: "3.14"
+
+jobs:
+  flags:
+    name: harness flags (latest CLIs)
+    # Pinned for the same reason as test.yml's e2e-cli job.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        # pipefail: a failed download piped into bash must fail its step.
+        shell: bash
+    steps:
+      # The vendors' install scripts run before the checkout, so they never see
+      # the repository or a token in its .git/config.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: put the install scripts' directories on PATH
+        run: |
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+      # Each vendor's own documented install, latest release.
+      - name: install claude, codex and gemini
+        run: npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli
+      - name: install opencode
+        # Not npm's opencode-ai: that is 1.x, which refuses --standalone.
+        run: curl -fsSL https://opencode.ai/v2/install | bash
+      - name: install amp
+        run: curl -fsSL https://ampcode.com/install.sh | bash
+      - name: install cursor's agent
+        run: curl https://cursor.com/install -fsS | bash
+      - name: install antigravity's agy
+        run: curl -fsSL https://antigravity.google/cli/install.sh | bash
+      - name: versions
+        run: |
+          for b in claude codex gemini opencode amp agent agy; do
+            printf '%s: %s\n' "$b" "$("$b" --version </dev/null 2>&1 | head -n 1)"
+          done
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --frozen
+      - run: uv run pytest tests/test_harness_flags.py -v -rs
+        env:
+          # Every CLI installed above: a failed install is a failure, not a skip.
+          KRAFT_E2E_REQUIRE: claude,codex,gemini,opencode,amp,agent,agy

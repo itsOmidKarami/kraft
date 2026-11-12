@@ -24,14 +24,21 @@ something. This is normative for `tests/` and `frontend/src/**/*.test.*`;
   CLI (`pytest_collection_modifyitems` in `tests/conftest.py` raises
   `UsageError` if it doesn't): `dev/check_tests.py` catches the same defect
   statically, before collection. A test naming a real agent (`claude`)
-  also needs `KRAFT_E2E=1`, since it spends tokens, and CI's e2e job has no
-  agent credential, so those skip there. The one that matters,
+  also needs `KRAFT_E2E=1`, since it spends tokens, unless every `e2e` mark
+  on it says `spends_tokens=False`. Only a test that sends no prompt may say
+  that, and `dev/check_tests.py` refuses the keyword in any file its
+  `NO_TOKEN_E2E` doesn't list: today that's `tests/test_harness_flags.py`,
+  which reads each agent CLI's `--help`. CI's e2e job has no agent
+  credential, so the tests that spend tokens skip there. The one that matters,
   `tests/test_shipped_models.py`, runs locally instead: `just smoke-models`,
   which the pre-commit hook calls (through `just smoke-models-hook`) when a
   commit touches `config/` or `src/kraft/harnesses/`. The hook prints
   `SKIPPED:` and lets the commit through in a Kraft worker, without
   `KRAFT_SMOKE_MODELS=1`, or with no credential set; `just smoke-models`
   itself still fails without one.
+  Whether each bundled harness file's flags and subcommands still exist is
+  checked without a token: `just smoke-flags` locally, and the daily
+  `harness flags` workflow against the latest CLIs ([`ci.md`](ci.md)).
 
 A test that wants to run the same behaviour against both tiers takes one
 parametrized fixture instead of two test bodies. `support.fake_beads` does
@@ -321,7 +328,8 @@ not "did you prove a mutation," which needs a human or an agent, but the
 shape rules that don't, over both testpaths, `tests/` and
 `plugins/kraft-lite/tests/`:
 
-- **(a)** every `pytest.mark.e2e` names at least one CLI.
+- **(a)** every `pytest.mark.e2e` names at least one CLI, and only a file in
+  `NO_TOKEN_E2E` passes `spends_tokens=`.
 - **(b)** no test file outside the e2e tier launches a real `bd`, agent CLI
   or `gh`/`glab`: an argv list (positional or `args=`), a shell string, a
   `sh -c` or `env` wrapper, a variable or helper bound to such an argv,

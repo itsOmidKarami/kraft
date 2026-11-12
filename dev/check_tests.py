@@ -9,7 +9,9 @@ Five checks, over both testpaths (`tests/` and `plugins/kraft-lite/tests/`):
 
   (a) every `pytest.mark.e2e` names at least one CLI. The runtime version of
       this lives in `tests/conftest.py`'s `pytest_collection_modifyitems`;
-      this is the same rule, caught before collection.
+      this is the same rule, caught before collection. Only a file in
+      NO_TOKEN_E2E may pass `spends_tokens=`, which conftest reads to let a
+      test that sends no prompt reach a real agent without KRAFT_E2E=1.
   (b) no test outside the e2e tier launches a real `bd`, agent CLI or
       `gh`/`glab` (GUARDED_BINARIES): through `subprocess` (an argv
       positional or `args=`, or a shell string), `asyncio`'s
@@ -163,6 +165,13 @@ REAL_CLI_ALLOWLIST: dict[str, str] = {
     "tests/test_no_real_agent.py": "probes the runtime real-binary guard",
 }
 
+#: Files whose `e2e(...)` marks may say `spends_tokens=False`, which lets a test naming a
+#: real agent run without KRAFT_E2E=1 (tests/conftest.py). Only a test that sends no
+#: prompt belongs here, with its reason.
+NO_TOKEN_E2E: dict[str, str] = {
+    "tests/test_harness_flags.py": "runs each agent CLI's --help and --version only",
+}
+
 #: `path::qualname` pairs for a `def test_` with no assert/raises/warns
 #: anywhere in its own body or a same-module helper it calls. Each entry
 #: earns its place with a one-line reason: the function under test returns
@@ -296,6 +305,14 @@ def check_e2e_names_cli(tree: ast.Module, relpath: str) -> list[str]:
                 violations.append(
                     f"{relpath}:{site.lineno}: @pytest.mark.e2e() needs at least one "
                     f'CLI name, e.g. e2e("bd")'
+                )
+            if any(kw.arg == "spends_tokens" for kw in site.keywords) and (
+                relpath not in NO_TOKEN_E2E
+            ):
+                violations.append(
+                    f"{relpath}:{site.lineno}: e2e(..., spends_tokens=...) runs a real agent "
+                    "without KRAFT_E2E=1; only a file in NO_TOKEN_E2E (dev/check_tests.py) "
+                    "may say it"
                 )
         else:
             violations.append(

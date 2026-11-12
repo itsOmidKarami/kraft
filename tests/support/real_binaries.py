@@ -249,7 +249,12 @@ def install(monkeypatch, nodeid: str, e2e_names: frozenset[str] = frozenset()) -
     names = shadowed_for(e2e_names)
     stubs = stub_dir(names)
     path = _without_stubs(os.environ.get("PATH", os.defpath))
-    guard = Guard(nodeid, stubs, installed(names, path))
+    # Cursor installs `agent` and `cursor-agent` as links to one file: the test that names one
+    # is not refused for the real path it shares with the other.
+    named = set(installed(allowed_by(e2e_names), path))
+    guard = Guard(
+        nodeid, stubs, {p: n for p, n in installed(names, path).items() if p not in named}
+    )
     guard.quiet = not QUIET_BINARIES & e2e_names
     monkeypatch.setenv("PATH", os.pathsep.join([str(stubs), *_quiet(guard), path]))
     monkeypatch.setattr(

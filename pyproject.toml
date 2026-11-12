@@ -148,7 +148,7 @@ filterwarnings = [
     "error:Exception ignored (in|while finalizing).*coroutine:pytest.PytestUnraisableExceptionWarning",
 ]
 markers = [
-    "e2e(*clis): uses a real external CLI (bd, claude, ...) to check a contract; skips unless each named CLI is on PATH (claude also needs KRAFT_E2E=1)",
+    "e2e(*clis, spends_tokens=True): uses a real external CLI (bd, claude, ...) to check a contract; skips unless each named CLI is on PATH (a real agent also needs KRAFT_E2E=1, unless every e2e mark on the test says spends_tokens=False: it sends no prompt)",
     "beads_adapter: tests of kraft.adapters.beads itself; keeps the real adapter, with bd stubbed, instead of the suite's in-memory fake",
     "slow: subprocess servers, real uvicorn, multi-second sleeps -- included in the main CI test job, just kept separable for local runs",
     "api_client(**kwargs): options for the `client` fixture, passed to support.api._client (peer, env, default_setup)",
