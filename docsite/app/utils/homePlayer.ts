@@ -21,7 +21,7 @@ export type Step = {
 // The chain of an item filed with its spec attached: spec and spec_approval
 // are skipped, as in Kraft, so it starts at plan.
 export const STEPS: Step[] = [
-  { kind: 'run', label: 'plan', icon: 'agent', actor: 'AGENT', title: 'An agent writes the plan.', detail: 'You attached the spec when you filed the item, so the chain starts here. A fresh Claude Code session reads it and plans the change, task by task.' },
+  { kind: 'run', label: 'plan', icon: 'agent', actor: 'AGENT', title: 'An agent writes the plan.', detail: 'You attached the spec when you filed the item, so the chain starts here. A fresh session of your coding agent reads it and plans the change, task by task.' },
   { kind: 'gate', label: 'plan_approval', back: 'plan', note: 'Clear the cache when a migration runs.', actor: 'YOU', title: 'Approve the plan?', detail: 'Nothing after this gate runs until you decide. If you request changes, your note goes back to plan.' },
   { kind: 'run', label: 'implementation', icon: 'agent', actor: 'AGENT', title: 'An agent writes the code.', detail: 'It works in the item’s worktree, a copy of your repo on its own branch, so your checkout stays as you left it.' },
   { kind: 'run', label: 'verification', icon: 'layers', actor: 'KRAFT', title: 'Your tests run, then a code review.', detail: 'Kraft runs the tests itself, in a fix loop capped by attempts, time and spend.' },

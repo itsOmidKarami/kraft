@@ -1,299 +1,246 @@
+<!-- The home page (docsite/DESIGN.md; the boards Main, Home-light and
+     Home-phone). It makes the promise and routes onward: each section ends in
+     a link to the page that says more. The copy is the approved boards'. -->
 <script setup lang="ts">
-// Design K: one work item playing through Kraft's default chain by itself,
-// stopping at its gates, so a newcomer sees what Kraft is in the first screen.
-// The page renders in its idle state on the server, with the whole chain, every
-// section and working links; the player (app/utils/homePlayer.ts) starts once
-// the browser has mounted it. The copy is final.
-const { v, start, approve, reject, toggle } = useHomePlayer()
+const demo = demoHref(useRuntimeConfig().app.baseURL)
 
-// The demo is a folder of static files beside the pages, not a route: a plain
-// link, with the base put on by hand.
-const demo = `${useRuntimeConfig().app.baseURL.replace(/\/$/, '')}/demo/`
+const DEFAULT_CHAIN = [
+  '  - id: plan',
+  '    kind: exec',
+  '    tasks:',
+  '      - id: author',
+  '        extends: plan_author',
+  ' ',
+  '  - id: plan_approval',
+  '    kind: gate',
+  '    message: Review and approve the implementation plan.',
+  '    artifact: plan',
+  '    reject_to: plan',
+  '    …',
+]
+const WITH_LINT = [
+  'id: with-lint',
+  'extends: default',
+  ' ',
+  'add:',
+  '  - after: verification',
+  '    node:',
+  '      id: lint',
+  '      extends: lint',
+]
+const RUN_POINTS = [
+  { title: 'A process the agent can\'t skip.', text: 'Each work item follows a chain, a YAML file you can read and diff.' },
+  { title: 'A person at the decisions.', text: 'A gate stops the chain until a decision is recorded. You approve, or request changes with a note.' },
+  { title: 'Checks it doesn\'t grade itself on.', text: 'Kraft runs your tests in a node of its own, waits for your CI and has a separate reviewer decide whether a fix is done.' },
+  { title: 'Capped retries and spend.', text: 'Attempts, time, tokens and dollars are bounded. A capped item stops and hands you the full trace.' },
+]
 </script>
 
 <template>
-  <div class="home">
-
-    <div>
-      <section class="k-wrap k-hero">
-        <h1><span>Kraft runs the task.</span> <span>You make the calls.</span></h1>
-        <p>Kraft is an app on your computer. It hands coding tasks to Claude Code, checks the work and stops only for the decisions that are yours. Watch one task run below, or press a button to make the call yourself.</p>
-      </section>
-
-      <section
-        class="k-wrap"
-        aria-label="A demo work item"
-      >
-        <div class="k-card">
-          <div class="k-card-head">
-            <span class="k-item">Cache the schema lookups</span>
-            <span class="k-mono k-kind">work item · default chain</span>
-            <span
-              v-if="v.idle"
-              class="k-badge k-badge-paused"
-            >PAUSED</span>
-            <span
-              v-if="v.running"
-              class="k-badge k-badge-running"
-            ><span
-              class="k-run-dot kr-run-dot"
-              aria-hidden="true"
-            />RUNNING</span>
-            <span
-              v-if="v.atGate"
-              class="k-badge k-badge-needs"
-            >NEEDS YOU</span>
-            <span
-              v-if="v.done"
-              class="k-badge k-badge-done"
-            >DONE</span>
-          </div>
-
-          <HomeTicks
-            :nodes="v.nodes"
-            :now="v.now"
-          />
-          <HomeChain :nodes="v.nodes" />
-
-          <div
-            class="kr-panel"
-            :class="{ 'k-tone-run': v.running, 'k-tone-gate': v.atGate, 'k-tone-done': v.done }"
-            aria-live="polite"
-          >
-            <template v-if="v.idle">
-              <div class="k-col k-col-wide">
-                <p class="k-big">
-                  This work item is one coding task, filed with your spec.
-                </p>
-                <p class="k-sub">
-                  It's paused and spends nothing until it starts. Dashed steps are still to run. Each diamond is a gate: a stop that waits for you.
-                </p>
-              </div>
-              <button
-                type="button"
-                class="k-btn k-btn-primary"
-                style="flex: 1 1 200px"
-                @click="start"
-              >
-                Start the item
-              </button>
-            </template>
-
-            <template v-else-if="v.running">
-              <div class="k-col k-col-run">
-                <p class="k-eyebrow">
-                  {{ v.cap.actor }} · RUNNING
-                </p>
-                <p class="k-big">
-                  {{ v.cap.title }}
-                </p>
-                <p
-                  v-if="v.plainRun"
-                  class="k-sub k-sub-run"
-                >
-                  {{ v.cap.detail }}
-                </p>
-                <p
-                  v-else
-                  class="k-sub k-sub-run"
-                  style="min-height: 3em"
-                >
-                  {{ v.v.caption }}
-                </p>
-                <p
-                  v-if="v.note"
-                  class="k-note"
-                ><span>Your note from {{ v.noteFrom }}</span><br>“{{ v.noteText }}” This step runs again with your note, then the gate asks again.</p>
-              </div>
-              <HomeVerify
-                v-if="v.verifying"
-                :v="v.v"
-              />
-            </template>
-
-            <template v-else-if="v.atGate">
-              <div class="k-col k-col-wide">
-                <p class="k-eyebrow k-gate-eyebrow">
-                  <span aria-hidden="true" />YOU · GATE
-                </p>
-                <p class="k-big">
-                  {{ v.cap.title }}
-                </p>
-                <p class="k-sub">
-                  {{ v.cap.detail }}
-                </p>
-                <p
-                  v-if="v.autoHint"
-                  class="k-hint"
-                >
-                  It will {{ v.autoVerb }} on its own in a moment, unless you press a button first.
-                </p>
-              </div>
-              <div class="k-col k-col-act">
-                <button
-                  type="button"
-                  class="k-btn"
-                  :class="v.pressA ? 'k-btn-pressed-a kr-give' : 'k-btn-primary'"
-                  @click="approve"
-                >
-                  Approve
-                </button>
-                <button
-                  type="button"
-                  class="k-btn"
-                  :class="v.pressR ? 'k-btn-pressed-r kr-give' : 'k-btn-outline k-btn-decide'"
-                  @click="reject"
-                >
-                  Request changes
-                </button>
-                <div
-                  v-if="v.counting"
-                  class="k-count"
-                  aria-hidden="true"
-                >
-                  <div class="kr-count" />
-                </div>
-              </div>
-            </template>
-
-            <template v-else-if="v.done">
-              <HomeReceipt
-                :log="v.log"
-                :dec-word="v.decWord"
-              />
-              <div class="k-col k-col-act">
-                <NuxtLink
-                  class="k-btn k-btn-primary"
-                  to="/get-started/install"
-                >
-                  Install Kraft
-                </NuxtLink>
-                <button
-                  type="button"
-                  class="k-btn k-btn-outline"
-                  @click="start"
-                >
-                  Run it again
-                </button>
-              </div>
-            </template>
-          </div>
-
-          <div class="k-card-foot">
-            <span class="k-count-line">Decisions so far: <b>{{ v.decisions }}</b></span>
-            <span class="kr-foot-note">Simplified and sped up: a real step takes minutes.</span>
-            <button
-              v-if="v.playing"
-              type="button"
-              class="k-toggle kr-touch"
-              aria-label="Pause the demo"
-              @click="toggle"
-            >
-              <svg
-                width="10"
-                height="10"
-                viewBox="0 0 10 10"
-                aria-hidden="true"
-              ><rect
-                x="1.5"
-                y="1"
-                width="2.5"
-                height="8"
-                rx="0.5"
-                fill="currentColor"
-              /><rect
-                x="6"
-                y="1"
-                width="2.5"
-                height="8"
-                rx="0.5"
-                fill="currentColor"
-              /></svg>Pause
-            </button>
-            <button
-              v-else
-              type="button"
-              class="k-toggle kr-touch"
-              aria-label="Let the demo play on its own"
-              @click="toggle"
-            >
-              <svg
-                width="10"
-                height="10"
-                viewBox="0 0 10 10"
-                aria-hidden="true"
-              ><path
-                d="M2 1.2v7.6a.5.5 0 0 0 .76.43l6.2-3.8a.5.5 0 0 0 0-.86l-6.2-3.8A.5.5 0 0 0 2 1.2z"
-                fill="currentColor"
-              /></svg>Play on its own
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <section
-        class="k-wrap k-section"
-        aria-labelledby="happened"
-      >
-        <h2
-          id="happened"
-          class="k-h2"
-        >
-          The same run, in the real app
-        </h2>
-        <div class="k-cols">
-          <div class="k-cols-you">
-            <h3>You hand it over</h3>
-            <p>File a task from the board, the <code>kraft</code> command or your agent. Attach a spec or plan you've already settled, and the chain skips that step and its gate.</p>
-          </div>
-          <div class="k-cols-run">
-            <h3>It runs without you</h3>
-            <p>Each step runs in the item's own worktree, so your checkout stays as you left it. Caps on time, tokens and dollars stop a loop that won't converge, and you get its full trace.</p>
-          </div>
-          <div class="k-cols-warn">
-            <h3>It finds you when it stops</h3>
-            <p>A webhook or browser alert tells you, and the board lists what needs you first, on a laptop or a phone. Kraft refuses an agent that tries to decide its own gate.</p>
-          </div>
-        </div>
-        <div class="k-shot">
-          <LandingShot
-            src="/assets/board.png"
-            alt="The Kraft board: work items grouped by status with Needs you first, each with one button such as Review, Retry or Raise cap, and Running below"
-            crop="210 0 1230 688"
-            :width="1440"
-          />
-        </div>
-        <p class="k-shot-note">
-          The board: seven items waiting on a person, the rest running. Without a sandbox, an agent runs as you: <NuxtLink to="/project/security#agents-and-gates">what a gate holds back</NuxtLink>.
-        </p>
-      </section>
-
-      <section
-        class="k-wrap k-section k-start-section"
-        aria-labelledby="start"
-      >
-        <div class="k-start-row">
-          <div class="k-col k-col-wide">
-            <h2 id="start">
-              Now with your own repo.
-            </h2>
-            <p>You need macOS or Linux, git and a signed-in Claude Code. The shipped chain also needs a GitHub or GitLab remote. Open source, Apache-2.0.</p>
-          </div>
-          <div class="k-start-links">
+  <div class="s-home">
+    <section class="s-hero s-field">
+      <div class="s-wrap s-hero-body">
+        <div class="s-hero-text">
+          <h1 class="s-display">
+            <span>Kraft runs the task.</span>
+            <span class="s-you">You make the calls.</span>
+          </h1>
+          <p class="s-lede">
+            Kraft runs on your own machine. It hands coding tasks to your coding agent, checks the work and stops only for the decisions that are yours.
+          </p>
+          <div class="s-actions">
             <NuxtLink
-              class="k-btn k-btn-sm k-btn-primary"
-              to="/get-started/install"
+              class="s-btn s-btn-primary"
+              :to="INSTALL"
             >
               Install
             </NuxtLink>
             <a
-              class="k-btn k-btn-sm k-btn-outline"
+              class="s-btn s-btn-secondary"
               :href="demo"
-            >Try the full demo</a>
+            >Try the live demo</a>
           </div>
         </div>
-      </section>
-    </div>
+        <figure class="s-hero-figure">
+          <HomeDemo />
+          <figcaption>Watch one work item run, or press a button to make the call yourself.</figcaption>
+        </figure>
+      </div>
+    </section>
 
+    <section
+      class="s-section s-band s-statement"
+      aria-labelledby="not-another"
+    >
+      <div class="s-wrap">
+        <h2
+          id="not-another"
+          class="s-h2 s-h2-big"
+        >
+          Not another coding agent.
+        </h2>
+        <p class="s-lede">
+          Kraft runs the one you already use, and adds what a single session can't.
+        </p>
+        <SiteArrowLink to="/why">
+          Why Kraft
+        </SiteArrowLink>
+      </div>
+    </section>
+
+    <section
+      class="s-section"
+      aria-labelledby="on-track"
+    >
+      <div class="s-wrap">
+        <div class="s-head">
+          <h2
+            id="on-track"
+            class="s-h2"
+          >
+            How a run stays on track.
+          </h2>
+          <SiteArrowLink to="/how-it-works">
+            How it works
+          </SiteArrowLink>
+        </div>
+        <div class="s-on-track">
+          <ul class="s-points">
+            <li
+              v-for="p in RUN_POINTS"
+              :key="p.title"
+            >
+              <h3>{{ p.title }}</h3>
+              <p>{{ p.text }}</p>
+            </li>
+          </ul>
+          <figure class="s-figure">
+            <SiteCode
+              path="chains/default.yaml"
+              note="the default chain, as shipped"
+              short="as shipped"
+              :lines="DEFAULT_CHAIN"
+              :hl="[6, 11]"
+              :mark="6"
+            />
+            <figcaption>The highlighted node is a gate.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section
+      class="s-section s-band"
+      aria-labelledby="board"
+    >
+      <div class="s-wrap">
+        <div class="s-head">
+          <div class="s-head-text">
+            <h2
+              id="board"
+              class="s-h2"
+            >
+              One board for what needs you.
+            </h2>
+            <p class="s-lede">
+              Open it on a laptop or a phone, or clear gates from VS Code or the command line.
+            </p>
+          </div>
+          <SiteArrowLink to="/tour">
+            Product tour
+          </SiteArrowLink>
+        </div>
+        <figure class="s-figure">
+          <div class="s-crop">
+            <picture>
+              <source
+                media="(max-width: 767px)"
+                srcset="/assets/site/needs-you-phone.png"
+                width="374"
+                height="228"
+              >
+              <img
+                src="/assets/site/needs-you.png"
+                width="1180"
+                height="216"
+                alt="Work items under Needs you on the Kraft board, each with the reason it stopped and one button"
+                loading="lazy"
+              >
+            </picture>
+          </div>
+          <figcaption>
+            <span class="s-wide">Needs you, on the board: each item says why it stopped and offers one action.</span>
+            <span class="s-narrow">Needs you, on the board's phone layout: the item says why it stopped and offers one action.</span>
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section
+      class="s-section"
+      aria-labelledby="shape"
+    >
+      <div class="s-wrap">
+        <h2
+          id="shape"
+          class="s-h2 s-head"
+        >
+          Yours to shape and scale.
+        </h2>
+        <div class="s-cards">
+          <div class="s-card">
+            <h3>Change the chain.</h3>
+            <p>Extend the default chain or write your own. Share chains as add-ons. Pick the agent and model for each task.</p>
+            <SiteCode
+              class="s-card-picture"
+              path="chains/with-lint.yaml"
+              note="an example from the docs"
+              short="from the docs"
+              :lines="WITH_LINT"
+              :hl="[1, 1]"
+            />
+            <SiteArrowLink to="/customize">
+              Make it yours
+            </SiteArrowLink>
+          </div>
+          <div class="s-card">
+            <h3>Run more at once.</h3>
+            <p>Split a large plan into slices that several agents build at once. Kraft joins the results before review.</p>
+            <div class="s-drawing s-card-picture">
+              <SiteDrawingSlices class="s-wide" />
+              <SiteDrawingSlices
+                class="s-narrow"
+                size="compact"
+              />
+            </div>
+            <SiteArrowLink to="/scale">
+              Scale up
+            </SiteArrowLink>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <SiteInstall>
+      <p class="s-lede">
+        Then start it with <code>kraft</code>, connect a repo with <code>kraft repo connect</code>, and file your first work item.
+      </p>
+      <p>You need macOS or Linux, git, uv and a signed-in Claude Code. Opening a merge request also needs gh or glab signed in, or an API token.</p>
+      <p>Kraft is free and Apache-2.0. Your agent provider bills the sessions. It runs as one local process, with no telemetry.</p>
+      <template #links>
+        <SiteArrowLink :to="INSTALL">
+          Install guide
+        </SiteArrowLink>
+        <SiteArrowLink to="/get-started/first-work-item">
+          Your first work item
+        </SiteArrowLink>
+        <SiteArrowLink :href="demo">
+          Try the live demo
+        </SiteArrowLink>
+        <SiteArrowLink :href="REPO">
+          Source on GitHub
+        </SiteArrowLink>
+      </template>
+    </SiteInstall>
   </div>
 </template>
