@@ -124,13 +124,14 @@ describe.each(SCENARIOS)("items in %s", (_scenario, build) => {
         .map((s) => s.hook_point)],
     ["every session was created by an event", (b) => b.sessions.filter((s) => !b.events.some((e) => e.type === "worker_session_created" && e.payload.session_id === s.id)).map((s) => s.hook_point)],
     // `walk`: the judge is due only once a repair has run, and judges a measurement before the next cycle starts.
-    ["a fix loop's judge reads a measurement after a repair, before the next cycle, and names the findings it judged",
+    ["a fix loop's judge reads a measurement after a repair, before the next cycle, and names the findings that measurement held",
       (b) => b.events.flatMap((e, k) => {
         if (e.type !== "judge_verdict") return [];
         const before = b.events.slice(0, k);
         const repaired = before.some((x) => x.type === "fix_cycle_finished" && Number(x.payload.cycle) <= Number(e.payload.cycle));
         const next = before.some((x) => x.type === "fix_cycle_started" && Number(x.payload.cycle) > Number(e.payload.cycle));
-        return repaired && !next && Array.isArray(e.payload.findings) ? [] : [`judge at cycle ${e.payload.cycle}`];
+        const read = before.filter((x) => x.type === "findings_measured" && Number(x.payload.cycle) === Number(e.payload.cycle)).at(-1);
+        return repaired && !next && read && JSON.stringify(e.payload.findings) === JSON.stringify(read.payload.findings) ? [] : [`judge at cycle ${e.payload.cycle}`];
       })],
     ["a finished fix cycle names the head it left", (b) => b.events.filter((e) => e.type === "fix_cycle_finished" && !e.payload.head_sha).map((e) => `cycle ${e.payload.cycle}`)],
     ["its stop's reason is one the walk writes for that kind", (b) => b.item.stop && !reasonFits(b) && `${b.item.stop.kind}: ${b.item.stop.reason}`],
@@ -142,6 +143,17 @@ describe.each(SCENARIOS)("items in %s", (_scenario, build) => {
         return stop?.payload.stuck === true && e.payload.message === AUTO_ESCALATE_MESSAGE ? [] : [`turn ${e.payload.turn}`];
       })],
     ["only a stop in the stuck set is marked stuck", (b) => b.events.filter((e) => e.type === "work_item_needs_human" && e.payload.stuck && !STUCK_SET.includes(String(e.payload.kind))).map((e) => e.payload.kind)],
+    // `walk` raises `StopKind.CAP` for a task's time cap (not stuck) and for a spent fix loop (`_Stuck`); the cap it writes after `time_cap_reached` is the first.
+    ["a stop that follows a time cap is not marked stuck", (b) => b.events.filter((e, k) => e.type === "work_item_needs_human" && e.payload.stuck && b.events.slice(0, k).some((x) => x.type === "time_cap_reached")).map((e) => e.payload.kind)],
+    ["the stop an item shows is the one its last needs-human event wrote", (b) => {
+      // A pending gate, a rate limit and an external wait are stops the server reads off other events (`board._stop_payload`).
+      if (!b.item.stop || b.item.status !== "needs_human" || ["gate", "rate_limit", "wait"].includes(b.item.stop.kind)) return false;
+      const e = b.events.filter((x) => x.type === "work_item_needs_human").at(-1);
+      return (!e || e.payload.kind !== b.item.stop.kind || (e.payload.reason ?? null) !== (b.item.stop.reason ?? null)) && `${b.item.stop.kind}: ${b.item.stop.reason}`;
+    }],
+    // `store.create_session` counts a node's attempts at a hook point, an escalation turn's included.
+    ["an escalation session's attempt counts the escalation sessions before it on its node",
+      (b) => b.sessions.filter((s) => s.hook_point === "escalation").filter((s, k, all) => s.attempt !== all.slice(0, k).filter((x) => x.node_id === s.node_id).length + 1).map((s) => `${s.node_id} attempt ${s.attempt}`)],
     ["a stop's task is never an escalation turn", (b) => b.item.stop?.task === "escalation" && "escalation"],
     // Only Kraft's own cancel writes `mr_closed`; the poller that sees a merge request closed writes a stop.
     ["no merge request is closed but by Kraft's cancel", (b) => b.events.filter((e) => e.type === "mr_closed" && e.payload.by !== "cancel").map((e) => e.payload.by)],

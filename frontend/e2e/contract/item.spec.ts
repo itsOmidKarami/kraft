@@ -363,9 +363,20 @@ const ROWS: Row[] = [
     // An item-wide time cap: the one an item override raises, so the one whose stop names a limit.
     name: "stop: a time-capped item names its limit and offers Raise cap [decided]",
     run: async (p) => {
-      await app(p, item("capped"), { tweak: withCapLimit });
-      await expect(p.getByText(/The work item hit its time cap of \d+ minutes\./)).toBeVisible();
+      let minutes = 0;
+      await app(p, item("capped"), { tweak: (S) => { minutes = withCapLimit(S); } });
+      await expect(p.getByText(`The work item hit its time cap of ${minutes} minutes.`)).toBeVisible();
       await expect(p.getByRole("button", { name: "Raise cap" }).first()).toBeVisible();
+    },
+  },
+  {
+    // A task's time cap: what the server answers names no limit, so there is nothing to raise here, only the config to open.
+    name: "stop: a task's time cap names the task and offers Open config, not Raise cap",
+    run: async (p) => {
+      await app(p, item("capped"));
+      await expect(p.getByText("`implementation.main.implement` hit its time cap of 120 minutes.")).toBeVisible();
+      await expect(p.getByRole("button", { name: "Open config" }).first()).toBeVisible();
+      await expect(p.getByRole("button", { name: "Raise cap" })).toHaveCount(0);
     },
   },
 ];

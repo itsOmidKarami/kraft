@@ -1063,6 +1063,7 @@ export const withCapLimit = (S: Scenario) => {
   stop.payload = { ...stop.payload, reason, limit };
   b.item.stop = { ...b.item.stop, reason, limit: { ...limit, maximum: null } };
   b.item.running_time = { running_s, cap_minutes: minutes };
+  return minutes;
 };
 
 /** The running item names beads, so Mark complete says they stay open. */
