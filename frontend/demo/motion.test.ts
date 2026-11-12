@@ -553,6 +553,7 @@ describe("the clock and the purse", () => {
   });
 
   // `_stopped_step`: its tests passed before the cap stopped it, so the retry the raise makes goes on at its code review.
+  // Their sessions are still the round's (`collect_findings` reads round 0's rows), so the measurement counts them.
   it("the spend-capped sample, raised, runs only its code review: its tests are not paid for again", async () => {
     const { S, ticks, call } = started();
     const id = board(S, "kraft-58e2");
@@ -561,11 +562,23 @@ describe("the clock and the purse", () => {
     expect((await call("POST", `/work-items/${id}/budget/raise`, { budget_usd: 40 })).body).toMatchObject({ node_id: "verification", path: "verification.review", attempt: 1 });
     expect(types(ticks(1, id))).toEqual(["node_started", "worker_session_created", "worker_session_started"]);
     expect(ticks(1, id).filter(([t]) => ["findings_measured", "node_completed", "node_started"].includes(t))).toEqual([
-      ["findings_measured", expect.objectContaining({ measured_tasks: ["verification.review.code_review"], unmeasured_tasks: ["verification.tests.test_changed_scopes"] })],
+      ["findings_measured", expect.objectContaining({ measured_tasks: ["verification.review.code_review", "verification.tests.test_changed_scopes"], unmeasured_tasks: [] })],
       ["node_completed", { node_id: "verification" }],
       ["node_started", { node_id: "work_brief" }],
     ]);
     expect(b.sessions.slice(had).filter((s) => s.node_id === "verification").map((s) => [s.hook_point, s.attempt])).toEqual([["verification.review.code_review", 1]]);
+  });
+  // `RunFork.start` holds only until the node completes: a rejection that walks back through it runs every step again.
+  it("the raised sample, sent back from its review gate, runs its tests again", async () => {
+    const { S, ticks, call } = started();
+    const id = board(S, "kraft-58e2");
+    const b = S.bundles[id];
+    await call("POST", `/work-items/${id}/budget/raise`, { budget_usd: 40 });
+    for (let k = 0; k < 20 && b.item.pending_gate !== "local_review"; k++) ticks(1, id);
+    const had = b.sessions.length;
+    await call("POST", `/work-items/${id}/gates/local_review/reject`, { note: "again" });
+    for (let k = 0; k < 20 && !b.sessions.slice(had).some((s) => s.hook_point === "verification.review.code_review"); k++) ticks(1, id);
+    expect([...new Set(b.sessions.slice(had).filter((s) => s.node_id === "verification").map((s) => s.hook_point))]).toEqual(["verification.tests.test_changed_scopes", "verification.review.code_review"]);
   });
   it("checks the cap at every agent launch, one in the middle of a node too: the tests run, the code review does not", async () => {
     const { S, ticks, call } = started();

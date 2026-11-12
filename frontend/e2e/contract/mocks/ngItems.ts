@@ -175,6 +175,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
     mrOpened: (node) => { ev("mr_opened", { ...mr }, 0.02, node); item.mr_ref = { ...mr }; },
     complete: (node) => ev("node_completed", { node_id: node }, 0.02),
     skipped: () => false,
+    passed: () => false,
   };
   /** A node the walk ran to its end; at a gate, the person's approval too (`chain_revision_approval` passes itself). */
   const runNode = (n: DefNode) => {

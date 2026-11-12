@@ -59,8 +59,10 @@ export interface Writer {
   selfApprove(gate: string): void;
   mrOpened(node: string): void;
   complete(node: string): void;
-  /** Whether a scope skip passed over this task or its step. */
+  /** Whether a scope skip passed over this task or its step, or a step retry's fork started past it. */
   skipped(path: string): boolean;
+  /** Whether a step retry's fork started past this task's step: its sessions from before are still this round's. */
+  passed(path: string): boolean;
 }
 
 /** A recipe's beats; `T` is what it hands back once played out. */
@@ -262,7 +264,8 @@ export function* nodeBeats(w: Writer, n: DefNode, o: { red?: boolean } = {}): Be
       break;
     }
     case "verification": {
-      const had = [TESTS, REVIEW].filter(go);
+      // `collect_findings` reads the round's rows, so a step a step retry passed still counts as measured.
+      const had = [TESTS, REVIEW].filter((p) => go(p) || w.passed(p));
       let round = 0;
       if (go(TESTS) && o.red) {
         // The tests step failed, so the review step after it never ran this round; a fix cycle mends it.

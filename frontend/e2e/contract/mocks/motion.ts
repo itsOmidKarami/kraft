@@ -183,6 +183,7 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
       mrOpened: (node) => { T.mrOpened(id, node); },
       complete: (node) => { T.completeNode(id, node); },
       skipped: (path) => skipped(b()).some((g) => under(path, g)) || passed(b(), path),
+      passed: (path) => passed(b(), path),
     };
   };
 
