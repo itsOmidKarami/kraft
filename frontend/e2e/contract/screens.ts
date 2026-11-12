@@ -159,7 +159,8 @@ export const STATES: State[] = [
   // Document viewer
   { area: "doc-viewer", state: "default", app: appGateDoc() },
   { area: "doc-viewer", state: "fullscreen", app: async (p) => { await appGateDoc()(p); await click(/full screen/)(p); } },
-  { area: "doc-viewer", state: "editor-menu", app: async (p) => { await appSearchDoc(p); await p.getByRole("dialog").getByRole("button", { name: "Other editors" }).click(); await p.waitForTimeout(400); } },
+  // The gate's document: what search finds is Kraft's own copy, which offers no editor.
+  { area: "doc-viewer", state: "editor-menu", app: async (p) => { await appGateDoc()(p); await p.getByRole("dialog").getByRole("button", { name: "Other editors" }).click(); await p.waitForTimeout(400); } },
   { area: "doc-viewer", state: "from-search", app: appSearchDoc },
 
   // Logs viewer
