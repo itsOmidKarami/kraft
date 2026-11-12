@@ -29,9 +29,16 @@ const statusOf = (f: File) => (f.slice(3).includes("new") ? "new" : f.slice(3).i
  *  walk gives an item it has no entry for (`transitions.mrOpened`). */
 export const CONTENT: Record<string, Content> = {
   "kraft-cb59": { mr: 142, description: "Search re-embeds every candidate document on every query, so a large repository waits two to four seconds for each search. Cache the embeddings keyed by each document's content hash, drop an entry when reindex sees a new hash, and keep the cache to a fixed size. The search API stays as it is.",
-    files: [["plugins/search/cache.py", 86, 4], ["plugins/search/reindex.py", 22, 9], ["plugins/search/embed.py", 14, 11], ["plugins/search/config.py", 6, 0], ["tests/test_cache.py", 74, 0, "new"], ["tests/test_reindex.py", 18, 3, "late"], ["docs/search.md", 12, 2]],
-    // What the final review's threads quote (ngItems.ts, needs-gate): the cache's lookup and its store.
-    hunks: { "plugins/search/cache.py": { at: 10, rows: [" class EmbeddingCache:", "     \"\"\"Embeddings keyed by each document's content hash.\"\"\"", "     def newest(self, commits):", "-        return self._cache[commits[-1].ts]", "+        latest = max(c.ts for c in commits)", "+        return self._cache[latest]", " ", "     def put(self, key, value):", "+        self._cache[key] = value"] } } },
+    files: [["plugins/search/cache.py", 86, 0, "new"], ["plugins/search/reindex.py", 22, 9], ["plugins/search/embed.py", 14, 11], ["plugins/search/config.py", 6, 0], ["tests/test_cache.py", 74, 0, "new"], ["tests/test_reindex.py", 18, 3, "late"], ["docs/search.md", 12, 2]],
+    // The new module the review's threads quote (ngItems.ts, needs-gate): a lookup by the document's content hash, and a
+    // store that evicts the least recently used entry past the size bound.
+    hunks: { "plugins/search/cache.py": { at: 1, rows: [
+      "\"\"\"Embeddings for search, cached by each document's content hash.\"\"\"", "from collections import OrderedDict", "", "",
+      "class EmbeddingCache:", "    \"\"\"Embeddings keyed by each document's content hash, at most `size` of them.\"\"\"", "",
+      "    def __init__(self, size=4096):", "        self._size = size", "        self._cache = OrderedDict()", "",
+      "    def lookup(self, doc):", "        \"\"\"The embedding stored for `doc`'s content, or None.\"\"\"", "        key = doc.content_hash", "        if key not in self._cache:", "            return None", "        self._cache.move_to_end(key)", "        return self._cache[key]", "",
+      "    def store(self, doc, embedding):", "        self._cache[doc.content_hash] = embedding", "        if len(self._cache) > self._size:", "            self._cache.popitem(last=False)",
+    ].map((l) => `+${l}`) } } },
   "kraft-7d21": { mr: 132, description: "test_retry_after_crash fails about one run in twenty on CI: it sleeps for a fixed 50 ms and expects the pool to have replaced the crashed worker by then. Wait on the pool's restart event instead of a timer, and give the pool a hook the test can await.",
     files: [["kraft/workers/pool.py", 18, 6], ["kraft/workers/events.py", 9, 0], ["tests/workers/test_pool.py", 23, 17], ["tests/workers/conftest.py", 11, 2, "late"]] },
   "kraft-a3f0": { mr: 129, description: "Clients of the public API cannot tell how close they are to the rate limit until a request fails with 429. Send X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset on every response, read from the limiter that already counts requests.",

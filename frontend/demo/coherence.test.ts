@@ -374,6 +374,28 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
     }));
     expect(wrong.filter(Boolean)).toEqual([]);
   });
+  // A review thread sits on lines the item's own diff shows, and quotes them as the diff has them, each row's mark included.
+  it("each review thread is on a file of its item's diff, and quotes the new-side rows it spans", async () => {
+    const threaded = board.filter((b) => b.threads?.length);
+    if (sample) expect(threaded.length).toBeGreaterThan(0);
+    const wrong: string[] = [];
+    for (const b of threaded) {
+      const diff = (await call(`/work-items/${b.item.id}/diff`)).body;
+      const text = diff.landed.diff + diff.diff;
+      for (const th of b.threads ?? []) {
+        const p = text.split(/^(?=diff --git )/m).find((x: string) => x.startsWith(`diff --git a/${th.file_path} `));
+        const lines = new Map<number, string>();
+        if (p) {
+          const [, start] = /^@@ -\d+,\d+ \+(\d+),\d+ @@$/m.exec(p)!.map(Number);
+          let n = start;
+          for (const row of p.split(/^@@ .*$/m)[1].replace(/^\n/, "").replace(/\n$/, "").split("\n")) if (row[0] !== "-") lines.set(n++, row);
+        }
+        const span = Array.from({ length: th.end_line - th.start_line + 1 }, (_, k) => lines.get(th.start_line + k));
+        if (!p || span.some((r) => r === undefined) || (th.quote != null && th.quote !== span.join("\n"))) wrong.push(`${b.item.title}: ${th.id}`);
+      }
+    }
+    expect(wrong).toEqual([]);
+  });
   it("a file's patch reads as its kind: a test's asserts, and only the VS Code repo's code imports vscode", async () => {
     const wrong: string[] = [];
     for (const b of withTree) for (const p of (await call(`/work-items/${b.item.id}/diff`)).body.landed.diff.split(/^(?=diff --git )/m).filter(Boolean)) {
