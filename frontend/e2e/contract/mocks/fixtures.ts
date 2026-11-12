@@ -28,6 +28,7 @@ import { buildNgBoard } from "./ngBoard";
 import type { EventType } from "../../../src/types/vocab.generated";
 import type { GateRound } from "../../../src/types";
 import { buildNgItem, NG_NOW, NG_SCENARIOS } from "./ngItems";
+import { ago, agoPy } from "./clock";
 import { isAgentSession, runOutput, scopeRunsOf, type Run } from "./taskKinds";
 
 /* ── ids & time ──────────────────────────────────────────────────────────── */
@@ -231,7 +232,7 @@ export function subagentList(lines: any[], status: string): any[] {
     const running = status === "running" && n === 0;
     seen.set(l.agent, {
       id: l.agent, tool_use_id: `toolu_${l.agent}`, description: l.agent_label, type: l.agent_type ?? null, depth: 1, status: running ? "running" : "completed",
-      started_at: "2026-11-02T23:38:52.555Z", ended_at: running ? null : "2026-11-02T23:39:34.269Z", tokens: 31_000 + n * 7_000, tool_uses: 4 + n, duration_ms: 42_000,
+      started_at: ago(71), ended_at: running ? null : ago(70.3), tokens: 31_000 + n * 7_000, tool_uses: 4 + n, duration_ms: 42_000,
       last_tool: "Grep", summary: running ? null : "Found the grouping code in Changes.tsx.",
     });
   }
@@ -654,7 +655,7 @@ export function documentsFor(item: any, variant: Variant) {
     session_status: d.kind === "sessions" ? "done" : null,
     attachment_kind: d.attached ?? null, session_work_item_id: d.kind === "sessions" ? item.id : null,
     headingless: d.headingless ?? false,
-    indexed_at: t(200 - i * 7),
+    indexed_at: ago(10 + i * 7),
   }));
 }
 
@@ -855,19 +856,19 @@ function settingsFor(variant: Variant, theme: { mode?: string; density?: string;
     intake: {
       enabled: variant !== "empty", interval_s: 300, priority_ceiling: 2, schedules: [],
       repos: repos.slice(0, 2).map((r) => r.path),
-      repo_pickups: Object.fromEntries(repos.map((r, i) => [r.path, { items: i === 0 ? 14 : i === 1 ? 0 : null, last_picked_up: i === 0 ? t(400) : null }])),
+      repo_pickups: Object.fromEntries(repos.map((r, i) => [r.path, { items: i === 0 ? 14 : i === 1 ? 0 : null, last_picked_up: i === 0 ? ago(30) : null }])),
       recent_pickups: variant === "empty" ? [] : Array.from({ length: long ? 25 : 5 }, (_, i) => ({
         work_item_id: hex(2000 + i), bead_id: `kraft-${hex(3000 + i).slice(0, 4)}`,
         title: i % 2 ? LONG_TITLES.capped : TITLES.capped, repo: repos[i % repos.length]?.path ?? null,
-        priority: i % 3, status: ["created", "created", "skipped: no test_command", "created", "failed: bd unreachable"][i % 5], at: t(400 - i * 30),
+        priority: i % 3, status: ["created", "created", "skipped: no test_command", "created", "failed: bd unreachable"][i % 5], at: ago(30 + i * 30),
       })),
     },
     access: { bind: variant === "empty" ? "127.0.0.1" : "0.0.0.0", port: 8765, session_expiry_days: 7, password_set: variant !== "empty", auth_required: variant !== "empty", allowed_hosts: long ? ["kraft.local", "10.0.0.12", "a-very-long-hostname.internal.acme-corporation.example.com"] : ["kraft.local"], lan_hosts: [] as string[] },
-    notify: { enabled: variant !== "empty", url_set: variant !== "empty", base_url: long ? "https://kraft.internal.acme-corporation.example.com:8765" : "http://kraft.local:8765", events: ["gate_requested", "work_item_needs_human", "work_item_completed"], last_test: variant === "empty" ? null : { at: t(500), status: long ? null : 200, ms: long ? null : 412, error: long ? "connect ETIMEDOUT 10.0.0.12:443 after 30000ms — the webhook host did not answer" : null } },
+    notify: { enabled: variant !== "empty", url_set: variant !== "empty", base_url: long ? "https://kraft.internal.acme-corporation.example.com:8765" : "http://kraft.local:8765", events: ["gate_requested", "work_item_needs_human", "work_item_completed"], last_test: variant === "empty" ? null : { at: ago(20), status: long ? null : 200, ms: long ? null : 412, error: long ? "connect ETIMEDOUT 10.0.0.12:443 after 30000ms — the webhook host did not answer" : null } },
     sessions: { sessions: empty ? [] : [
-      { id: hex(5000), label: "Chrome on macOS", ip: "127.0.0.1", created_at: t(0), last_seen_at: t(600), expires_at: t(7 * 1440), current: true },
+      { id: hex(5000), label: "Chrome on macOS", ip: "127.0.0.1", created_at: t(0), last_seen_at: ago(10), expires_at: t(7 * 1440), current: true },
       { id: hex(5001), label: long ? "Mozilla/5.0 (iPhone; CPU iPhone OS 19_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.0 Mobile/15E148 Safari/604.1" : "Safari on iPhone", ip: "10.0.0.44", created_at: t(-3000), last_seen_at: t(100), expires_at: t(4000), current: false },
-      ...(long ? Array.from({ length: 8 }, (_, i) => ({ id: hex(5010 + i), label: null, ip: `10.0.${i}.${i * 17}`, created_at: t(-i * 400), last_seen_at: t(i * 20), expires_at: t(5000), current: false })) : []),
+      ...(long ? Array.from({ length: 8 }, (_, i) => ({ id: hex(5010 + i), label: null, ip: `10.0.${i}.${i * 17}`, created_at: t(-i * 400), last_seen_at: ago(5 + i * 20), expires_at: t(5000), current: false })) : []),
     ] },
     health: { status: long ? "degraded" : "ok", invalid_templates: long ? { "docs-only": "node 'implement' references unknown task on.docs.write" } : {}, invalid_policy: long ? ["loops.an_extremely_long_loop_name_that_nobody_should_have_typed.wall_clock_s exceeds 24h"] : [], bind: "127.0.0.1", port: 8765, session_expiry_days: 7, version: "0.9.3", installed: "0.9.3", kraft_default: { signature: null, count: 0 }, run_dir: "/Users/you/.kraft", pid: 41822, uptime_s: 3 * 86_400 + 4 * 3600 + 240,
       index: { documents: 214, last_scan_at: null as string | null, errors: [] as string[], repos_scanned: repos.length, embeddings: { available: true, model: "BAAI/bge-small-en-v1.5", chunks: 1830, reason: null, state: "ready" } },
@@ -879,9 +880,9 @@ function settingsFor(variant: Variant, theme: { mode?: string; density?: string;
 /** `GET /workers`: this machine's own worker first, then a busy ssh machine, a dial-in one that dropped, and a disabled one. */
 export const WORKERS_FIXTURE = [
   { name: "local", mode: "local", online: true, reason: null, slots_used: 1, capacity: null, configured_capacity: null, enabled: true, ssh: null, groups: [], repos: null, last_seen: null, kraft_version: "2.5.0", give_up_after: "never", holders: [], remove_blocked: "the local worker is part of this Kraft and cannot be removed; disable it instead" },
-  { name: "gpu-box", mode: "ssh", online: true, reason: "", slots_used: 1, capacity: 2, capacity_source: "server", machine_capacity: null, configured_capacity: 2, enabled: true, ssh: "gpu-box.lan", groups: ["gpu", "linux"], repos: ["kraft"], last_seen: "2026-10-23T09:58:00+00:00", kraft_version: "2.4.0", give_up_after: "2h", holders: [{ id: "a1b2c3d4", title: "Add the export button", steps: 1 }], remove_blocked: "gpu-box is running 1 step of Add the export button. Disable it so nothing new starts (Takes new steps off in Settings › Workers, or kraft admin worker disable gpu-box), then remove it once they end. A step held by a machine that is offline is freed by pausing or cancelling its item." },
-  { name: "home-server", mode: "dial-in", online: false, reason: "disconnected: end of stream", slots_used: 0, capacity: 1, capacity_source: "default", machine_capacity: null, configured_capacity: null, enabled: true, ssh: null, groups: [], repos: null, last_seen: "2026-10-23T08:12:00+00:00", kraft_version: "2.4.0", give_up_after: "never", holders: [], remove_blocked: null },
-  { name: "build-box", mode: "ssh", online: true, reason: "", slots_used: 0, capacity: 1, capacity_source: "default", machine_capacity: null, configured_capacity: null, enabled: false, ssh: "build-box.lan", groups: ["linux"], repos: null, last_seen: "2026-10-23T09:40:00+00:00", kraft_version: "2.4.0", give_up_after: "2h", holders: [], remove_blocked: null },
+  { name: "gpu-box", mode: "ssh", online: true, reason: "", slots_used: 1, capacity: 2, capacity_source: "server", machine_capacity: null, configured_capacity: 2, enabled: true, ssh: "gpu-box.lan", groups: ["gpu", "linux"], repos: ["kraft"], last_seen: agoPy(12), kraft_version: "2.4.0", give_up_after: "2h", holders: [{ id: "a1b2c3d4", title: "Add the export button", steps: 1 }], remove_blocked: "gpu-box is running 1 step of Add the export button. Disable it so nothing new starts (Takes new steps off in Settings › Workers, or kraft admin worker disable gpu-box), then remove it once they end. A step held by a machine that is offline is freed by pausing or cancelling its item." },
+  { name: "home-server", mode: "dial-in", online: false, reason: "disconnected: end of stream", slots_used: 0, capacity: 1, capacity_source: "default", machine_capacity: null, configured_capacity: null, enabled: true, ssh: null, groups: [], repos: null, last_seen: agoPy(118), kraft_version: "2.4.0", give_up_after: "never", holders: [], remove_blocked: null },
+  { name: "build-box", mode: "ssh", online: true, reason: "", slots_used: 0, capacity: 1, capacity_source: "default", machine_capacity: null, configured_capacity: null, enabled: false, ssh: "build-box.lan", groups: ["linux"], repos: null, last_seen: agoPy(30), kraft_version: "2.4.0", give_up_after: "2h", holders: [], remove_blocked: null },
 ];
 
 function analyticsFor(variant: Variant) {

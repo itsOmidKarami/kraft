@@ -7,6 +7,8 @@
  * The product reads none of this: it is the suite's stand-in for a server.
  */
 
+import { ago } from "./clock";
+
 type Obj = Record<string, any>;
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 
@@ -208,7 +210,7 @@ export function makeAreas() {
   const resultOf = (area: string): Obj => area === "repos" ? repoResult(draft.repos ?? pub.repos) : area === "policy" ? policyResult(draft.policy ?? pub.policy) : intakeResult(draft.intake ?? pub.intake, draftPolicyForIntake ?? pub.policy);
   const files = (area: string) => area === "repos" ? filesOf("repos", draft.repos ?? pub.repos) : area === "policy" ? filesOf("policy", draft.policy ?? pub.policy) : filesOf("intake", draft.intake ?? pub.intake, draftPolicyForIntake ?? pub.policy);
   const publishedFiles = (area: string) => area === "repos" ? filesOf("repos", pub.repos) : area === "policy" ? filesOf("policy", pub.policy) : filesOf("intake", pub.intake, pub.policy);
-  const view = (area: string) => ({ area, key: area, draft: draft[area] !== null, files: files(area), base: Object.fromEntries(Object.keys(files(area)).map((f) => [f, "9f2c".padEnd(64, "0")])), published: publishedFiles(area), updated_at: draft[area] ? "2026-10-01T09:12:00Z" : null, result: resultOf(area) });
+  const view = (area: string) => ({ area, key: area, draft: draft[area] !== null, files: files(area), base: Object.fromEntries(Object.keys(files(area)).map((f) => [f, "9f2c".padEnd(64, "0")])), published: publishedFiles(area), updated_at: draft[area] ? ago(90) : null, result: resultOf(area) });
 
   const snapshot = (area: string) => JSON.stringify(area === "intake" ? { i: draft.intake, p: draftPolicyForIntake } : draft[area]);
   const restore = (area: string, s: string) => { const v = JSON.parse(s); if (area === "intake") { draft.intake = v.i; draftPolicyForIntake = v.p; } else draft[area] = v; };
@@ -272,7 +274,7 @@ export function makeAreas() {
   };
 
   return {
-    list: () => (["repos", "policy", "intake"] as const).filter((a) => draft[a] !== null).map((a) => ({ area: a, key: a, files: Object.keys(files(a)).sort(), changes: resultOf(a).changes.length, problems: resultOf(a).problems.length, updated_at: "2026-10-01T09:12:00Z" })),
+    list: () => (["repos", "policy", "intake"] as const).filter((a) => draft[a] !== null).map((a) => ({ area: a, key: a, files: Object.keys(files(a)).sort(), changes: resultOf(a).changes.length, problems: resultOf(a).problems.length, updated_at: ago(90) })),
     /** `[status, body]`, or null for a request that is not this mock's. */
     handle(area: string, action: string | undefined, file: string | undefined, method: string, body: Obj, q: URLSearchParams): [number, unknown] | null {
       if (method === "DELETE") { draft[area] = null; if (area === "intake") draftPolicyForIntake = null; undo[area] = []; return [204, undefined]; }
@@ -311,8 +313,8 @@ export function makeAreas() {
       return [200, view(area)];
     },
     checks: () => [
-      { id: "c3", at: "2026-10-01T10:05:00Z", ready: 4, started: ["kraft-d71a"], skipped: [{ bead: "kraft-e1", reason: "above_priority_ceiling" }, { bead: "kraft-e2", reason: "above_priority_ceiling" }, { bead: "kraft-e3", reason: "already_item" }] },
-      { id: "c2", at: "2026-10-01T10:00:00Z", ready: 3, started: [], skipped: [{ bead: "kraft-f1", reason: "max_concurrent" }, { bead: "kraft-f2", reason: "max_concurrent" }, { bead: "kraft-f3", reason: "max_concurrent" }] },
+      { id: "c3", at: ago(3), ready: 4, started: ["kraft-d71a"], skipped: [{ bead: "kraft-e1", reason: "above_priority_ceiling" }, { bead: "kraft-e2", reason: "above_priority_ceiling" }, { bead: "kraft-e3", reason: "already_item" }] },
+      { id: "c2", at: ago(8), ready: 3, started: [], skipped: [{ bead: "kraft-f1", reason: "max_concurrent" }, { bead: "kraft-f2", reason: "max_concurrent" }, { bead: "kraft-f3", reason: "max_concurrent" }] },
     ],
     /** GET /policy: the shipped route, for the slot count. */
     activeCount: () => 3,

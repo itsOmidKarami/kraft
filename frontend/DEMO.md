@@ -66,7 +66,7 @@ strands an entry fails it. It keeps live motion still, as a hidden tab does
 data. `just demo-smoke` runs it (`npm run demo:smoke` without `just`), and so
 does CI's `ui contract` job.
 
-Four unit tests hold the demo's data to Kraft itself. `demo/apiShapes.test.ts`
+Five unit tests hold the demo's data to Kraft itself. `demo/apiShapes.test.ts`
 asks the mock, with the demo's options (`demo/scenario.ts`), every route in
 `tests/api/api_shapes.json`, the keys a real server answers with, and fails
 on a key or route the mock leaves out. `just shapes` rewrites that table
@@ -89,3 +89,8 @@ older sample items, which have none, say it by their model.
 `demo/deadEnds.test.ts` fails when a control leads nowhere: Duplicate answers
 with a real paused item, and every component the default chain extends is in
 the Library its editor links to.
+`demo/clock.test.ts` fails when an answer is dated after the demo's clock
+(`mocks/clock.ts`, which the page shifts to at start): a worker last seen, a
+check, a document indexed or an event later than now, bar the keys that name a
+moment still to come (a retry, an expiry). A past-tense fixture takes its stamp
+from `ago`.

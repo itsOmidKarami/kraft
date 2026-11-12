@@ -17,8 +17,8 @@ export const NG_SCENARIOS = [
   "failed", "waiting", "conflict", "mr-closed", "waiting-ci", "paused", "queued", "blocked",
 ] as const;
 export type NgScenario = (typeof NG_SCENARIOS)[number];
-/** T0 + 130 minutes, as a literal: this module loads before fixtures.ts finishes (they import each other). */
-export const NG_NOW = "2026-09-13T10:10:00.000Z";
+import { NG_NOW } from "./clock";
+export { NG_NOW };
 
 /** The node each scenario stands on, on the default chain; null: past its last node. */
 const AT: Record<NgScenario, string | null> = {

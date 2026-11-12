@@ -7,6 +7,7 @@ import { harnessesServer, PROVIDER_STATUS } from "./ngHarnesses";
 import { forgesServer } from "./ngForges";
 import { motion, type Motion, type MotionOptions } from "./motion";
 import { listRow, transitions, type Ev } from "./transitions";
+import { ago } from "./clock";
 import draftViews from "./draftViews.json" with { type: "json" };
 
 /**
@@ -117,7 +118,7 @@ function libraryState() {
     view() {
       return {
         area: "library", key: "library", draft: drafted, files: { "library.yaml": state.text }, base: { "library.yaml": "9f2c".padEnd(64, "0") },
-        updated_at: drafted ? "2026-10-01T09:12:00Z" : null,
+        updated_at: drafted ? ago(90) : null,
         result: {
           model: { "library.yaml": clone(model) }, resolved: null, sources: {}, warnings: [], yaml_error: undefined,
           extending: null, policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 },
@@ -195,7 +196,7 @@ const chainView = (key: string) => {
 };
 /** The keys `drafts._view` sends that the recorded views predate: no add-on, the published file (the shipped chain),
  *  and the closed sets the editors pick from (`catalogue.choices`). */
-const served = (v: any) => ({ addon: null, addon_library: null, published: { [`chains/${v.key}.yaml`]: DRAFTS.published.text }, ...v, result: { choices: DRAFTS.choices, ...v.result } });
+const served = (v: any) => ({ addon: null, addon_library: null, published: { [`chains/${v.key}.yaml`]: DRAFTS.published.text }, ...v, ...(v.updated_at ? { updated_at: ago(90) } : {}), result: { choices: DRAFTS.choices, ...v.result } });
 /** Block YAML of a mapping, for the fragment route's mock answer only (the server writes the real one). */
 const yamlOf = (v: unknown, ind = ""): string => {
   if (Array.isArray(v)) return v.map((x) => (x && typeof x === "object" ? `${ind}- ${yamlOf(x, `${ind}  `).trimStart()}` : `${ind}- ${x}\n`)).join("");
@@ -617,7 +618,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
         const problems = draftProblems(marked);
         const live = marked.filter((op, i) => !op.passed && !problems.some((x) => x.op === i));
         const cap = b.item.budget_cap ?? { spent_usd: 1.2, cap_usd: 10 };
-        return { ops: marked, problems, checks: { budget: { spent_usd: cap.spent_usd, cap_usd: cap.cap_usd }, added: [] }, nodes: draftChain(nodes, live).map((n: any) => ({ covered_by: null, icon: null, nodes: null, unforked: null, ...n })), base_seq: ops.length ? 42 : null, updated_at: ops.length ? "2026-10-01T09:12:00Z" : null };
+        return { ops: marked, problems, checks: { budget: { spent_usd: cap.spent_usd, cap_usd: cap.cap_usd }, added: [] }, nodes: draftChain(nodes, live).map((n: any) => ({ covered_by: null, icon: null, nodes: null, unforked: null, ...n })), base_seq: ops.length ? 42 : null, updated_at: ops.length ? ago(90) : null };
       };
       if (method === "DELETE") { const had = stored().length > 0; itemDrafts.set(m[1], []); return had ? { status: 204 } : json({ detail: "this work item has no draft" }, 404); }
       if (method === "PUT") { itemDrafts.set(m[1], req.json()?.ops ?? []); return json(answer(stored())); }
@@ -719,7 +720,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     if (hs) {
       if (p === "/harnesses") return json(PROVIDER_STATUS);
       if (p === "/policy") return json({ ...policy(), maxima: { allowed_tools: ["git", "shell"] }, defaults: { escalation_grants: ["git-commit"] } });
-      if (p === "/drafts") return json([{ area: "harnesses", key: "harnesses", files: ["harnesses.yaml", "policy.yaml"], changes: hs.view().result.changes.length, problems: hs.problems().length, updated_at: "2026-10-01T09:12:00Z" }]);
+      if (p === "/drafts") return json([{ area: "harnesses", key: "harnesses", files: ["harnesses.yaml", "policy.yaml"], changes: hs.view().result.changes.length, problems: hs.problems().length, updated_at: ago(90) }]);
       if ((m = p.match(/^\/drafts\/harnesses\/harnesses(?:\/(undo|publish|ops|rebase|fragment))?$/))) {
         if (method === "DELETE") return { status: 204 };
         if (m[1] === "ops") {
@@ -820,7 +821,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       if (method === "DELETE") return { status: 204 };
       if (action === "fragment") return json({ path: url.searchParams.get("path"), text: "model: opus\nprompt: Implement the change.\n" });
       if (action === "publish") return json({ published: [name], result: { ...result, changes: [] } });
-      const view = { area, key, draft: true, files: { [name]: text }, base: { [name]: "9f2c".padEnd(64, "0") }, updated_at: "2026-10-01T09:12:00Z", result };
+      const view = { area, key, draft: true, files: { [name]: text }, base: { [name]: "9f2c".padEnd(64, "0") }, updated_at: ago(90), result };
       if (action === "ops") return json({ ...view, ops: (req.json()?.ops ?? []).map((o: { op: string }) => ({ op: o.op })) });
       return json(view);
     }
@@ -828,7 +829,7 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     // `addon`, `providers` and `problem_details` came after the recording: none from an add-on, each provider's model.
     if (p === "/harnesses/profiles" && method === "GET") return json({ ...DRAFTS.harnesses, agent_profiles: DRAFTS.harnesses.agent_profiles.map((a: any) => ({ addon: null, problem_details: [], providers: Object.fromEntries(Object.entries(a.model).map(([n, model]) => [n, { model, effort: null }])), ...a })) });
     if (p === "/harnesses/providers") return json(DRAFTS.providers);
-    if (p === "/drafts") return json([...areas.list(), ...["default", "broken", "yaml-error", "stale"].map((key) => ({ area: "chains", key, files: [`chains/${key}.yaml`], changes: 1, problems: key === "broken" ? 1 : 0, updated_at: "2026-10-01T09:12:00Z" }))]);
+    if (p === "/drafts") return json([...areas.list(), ...["default", "broken", "yaml-error", "stale"].map((key) => ({ area: "chains", key, files: [`chains/${key}.yaml`], changes: 1, problems: key === "broken" ? 1 : 0, updated_at: ago(90) }))]);
     // `_chain_summary`'s other keys: no add-on, no description, it resolves, no node linked to a library component.
     // Also `team-default`, a chain that extends `default` (NG_EXTENDING_CHAIN): its draft view is a real server's too.
     if (p === "/templates/chains") return json(opts.ngBoard ? [...NG_CHAINS.map((c) => ({ addon: null, description: null, error: null, uses: {}, extends: null, extended_by: c.id === "default" ? [NG_EXTENDING_CHAIN.id] : [], ...c })), clone(NG_EXTENDING_CHAIN)] : st.templates);
