@@ -182,9 +182,12 @@ export function* nodeBeats(w: Writer, n: DefNode, o: { red?: boolean } = {}): Be
     case "implementation": {
       if (!go("implementation.main.implement")) break;
       const s = w.open("implementation.main.implement", n.id);
-      PLAN.forEach((title, k) => w.ev("plan_progress", { node_id: n.id, task: k + 1, total: PLAN.length, title }, 1.5));
+      // Its plan's tasks as it reports them, half of them a beat.
+      for (let k = 0; k < PLAN.length; k++) {
+        if (k % 3 === 0) yield;
+        w.ev("plan_progress", { node_id: n.id, task: k + 1, total: PLAN.length, title: PLAN[k] }, 1.5);
+      }
       w.clock(-1.5 * PLAN.length);
-      yield;
       w.close(s);
       break;
     }

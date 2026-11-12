@@ -4,7 +4,7 @@ import { ngDryRun } from "./ngBoard";
 import { chainOf, frozenOf } from "./ngChain";
 import { RESUME_PROMPT } from "./poller";
 import { buildNeverStarted } from "./ngItems";
-import { isAgentSession, MODEL, RUNS, scopeRunsOf, taskRun } from "./taskKinds";
+import { DOCS_SCOPE, isAgentSession, MODEL, RUNS, scopeRunsOf, taskRun, type Run } from "./taskKinds";
 
 /**
  * The work item's transitions, as the server makes them: what each door changes, the event row it appends
@@ -594,22 +594,26 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       return ok(settle(it));
     },
     /** `store.create_session`: a pending session of `node`'s task `hookPoint`, with a log to read. Every task kind has
-     *  one: an agent's goes on to `sessionRunning`, a builtin's, a forge's or a command's straight to `sessionExited`. */
-    createSession(id: string, node: string, hookPoint: string): Result {
+     *  one: an agent's goes on to `sessionRunning`, a builtin's, a forge's or a command's straight to `sessionExited`.
+     *  `round` is its fix loop's; `run` a scope command other than the task's own (a changed-test-scope pass runs one
+     *  session per command); `noAgent` an agent's task that will end with no agent started (`dispatch.skipped_session`). */
+    createSession(id: string, node: string, hookPoint: string, o: { round?: number; attempt?: number; run?: Run; noAgent?: boolean } = {}): Result {
       const x = find(id, true);
       if (refused(x)) return x;
       const { b, it } = x;
-      const attempt = b.sessions.filter((s) => s.node_id === node && s.hook_point === hookPoint).length + 1;
+      const attempt = o.attempt ?? b.sessions.filter((s) => s.node_id === node && s.hook_point === hookPoint).length + 1;
       const sid = sessionId();
       const task = hookPoint.split(".").at(-1)!;
       const agent = isAgentSession(it.materialized_chain, hookPoint);
+      const run = o.run ?? taskRun(it.materialized_chain, hookPoint);
+      const round = o.round ?? 0;
       b.sessions.push({
-        id: sid, work_item_id: id, node_id: node, hook_point: hookPoint, status: "pending", attempt, round: 0, thread: 1, model: null, head_sha: it.head_sha ?? null,
-        harness: agent ? "claude" : null, command: RUNS[taskRun(it.materialized_chain, hookPoint) ?? ""]?.command ?? null,
+        id: sid, work_item_id: id, node_id: node, hook_point: hookPoint, status: "pending", attempt, round, thread: 1, model: null, head_sha: o.noAgent ? null : it.head_sha ?? null,
+        harness: agent ? "claude" : null, command: (typeof run === "string" ? RUNS[run] : run)?.command ?? null,
         created_at: now(), started_at: now(), exited_at: null, tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, session_summary_ref: null,
       });
-      b.logs[sid] = sessionLog(agent, taskRun(it.materialized_chain, hookPoint), sid, 12, false, "running", task);
-      append(id, "worker_session_created", { session_id: sid, node_id: node, hook_point: hookPoint, round: 0, attempt, thread: 1 });
+      b.logs[sid] = o.noAgent ? [] : sessionLog(agent, run, sid, 12, false, "running", task);
+      append(id, "worker_session_created", { session_id: sid, node_id: node, hook_point: hookPoint, round, attempt, thread: 1 });
       settle(it);
       return ok({ id, session_id: sid });
     },
@@ -634,27 +638,31 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
     },
     /** `store.session_exited`: the session done, with the usage an agent reported on the way out, added to the item's
      *  spend, and the summary it wrote, if it wrote one (`summary`, its `session_summary_ref`). A builtin, forge or
-     *  command task reports none (`usage` null): only its wall time. */
-    sessionExited(id: string, sid: string, usage: { model: string; tokens_in: number; tokens_out: number; cost_usd: number } | null, summary: string | null = null): Result {
+     *  command task reports none (`usage` null): only its wall time, and `status` (a failed scope command); an agent's
+     *  task that started no agent (`noAgent`) says so in its log. A session still `waiting` on a forge ends too. */
+    sessionExited(id: string, sid: string, usage: { model: string; tokens_in: number; tokens_out: number; cost_usd: number } | null, summary: string | null = null, o: { status?: string; noAgent?: boolean } = {}): Result {
       const x = find(id, true);
       if (refused(x)) return x;
       const { b, it } = x;
       const s = b.sessions.find((y) => y.id === sid);
       if (!s) return no(404, `unknown session ${sid}`);
-      if (!LIVE_SESSION_STATUSES.includes(s.status)) return no(409, `session ${sid} is ${s.status}, not live`);
+      if (!LIVE_SESSION_STATUSES.includes(s.status) && s.status !== "waiting") return no(409, `session ${sid} is ${s.status}, not live`);
       const at = now();
       const wall_ms = Math.max(0, Date.parse(at) - Date.parse(s.started_at ?? s.created_at));
+      const status = o.status ?? "done";
       // COALESCE: no summary leaves the one already recorded.
       if (summary) s.session_summary_ref = summary;
       if (!usage) {
-        Object.assign(s, { status: "done", exited_at: at, wall_ms });
-        // A command's log has grown to all of its output by the time it ends.
-        if (!isAgentSession(it.materialized_chain, s.hook_point, !!s.model)) b.logs[sid] = commandLog(taskRun(it.materialized_chain, s.hook_point), "done", String(s.hook_point).split(".").at(-1)!);
-        append(id, "worker_session_exited", { session_id: sid, status: "done", wall_ms });
+        Object.assign(s, { status, exited_at: at, wall_ms });
+        // A command's log has grown to all of its output by the time it ends, the failing run's if it failed.
+        const task = String(s.hook_point).split(".").at(-1)!;
+        if (o.noAgent) b.logs[sid] = [{ n: 1, t: at, src: "stdout", text: "no bot feedback collected; no agent started" }];
+        else if (!isAgentSession(it.materialized_chain, s.hook_point, !!s.model)) b.logs[sid] = commandLog(s.command === DOCS_SCOPE.command ? DOCS_SCOPE : taskRun(it.materialized_chain, s.hook_point), status, task);
+        append(id, "worker_session_exited", { session_id: sid, status, wall_ms });
         settle(it);
         return ok({ id, session_id: sid });
       }
-      Object.assign(s, { status: "done", exited_at: at, wall_ms, ...usage, tokens_cache_write: 0, tokens_cache_read: 0 });
+      Object.assign(s, { status, exited_at: at, wall_ms, ...usage, tokens_cache_write: 0, tokens_cache_read: 0 });
       const u = it.usage;
       if (u) {
         const add = (r: any) => ({ ...r, tokens_in: r.tokens_in + usage.tokens_in, tokens_out: r.tokens_out + usage.tokens_out, cost_usd: dollars(r.cost_usd + usage.cost_usd), wall_ms: r.wall_ms + wall_ms, sessions: r.sessions + 1 });
@@ -664,7 +672,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
           : [...u.by_node, add({ node: s.node_id, tokens_in: 0, tokens_out: 0, cost_usd: 0, cost_complete: true, wall_ms: 0, sessions: 0, rounds: 1, capped_out: 0 })];
       }
       if (it.budget_cap) it.budget_cap = { ...it.budget_cap, spent_usd: dollars((it.budget_cap.spent_usd ?? 0) + usage.cost_usd) };
-      append(id, "worker_session_exited", { session_id: sid, status: "done", wall_ms, model: usage.model, tokens_in: usage.tokens_in, tokens_cache_write: 0, tokens_cache_read: 0, tokens_out: usage.tokens_out, cost_usd: usage.cost_usd });
+      append(id, "worker_session_exited", { session_id: sid, status, wall_ms, model: usage.model, tokens_in: usage.tokens_in, tokens_cache_write: 0, tokens_cache_read: 0, tokens_out: usage.tokens_out, cost_usd: usage.cost_usd });
       settle(it);
       return ok({ id, session_id: sid });
     },
@@ -732,6 +740,33 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       Object.assign(it, { status: "needs_human", step: null, stop: { kind: "budget", node, task: null, attempt: 1, resume_at: null, reason, facts: {}, scope: "work_item" } });
       append(id, "work_item_needs_human", { node_id: node, reason, kind: "budget", budget });
       return ok(settle(it));
+    },
+    /** A forge wait's poll that found it pending (`waits.py`): its session `waiting` with the time it has waited, and the
+     *  item waiting on its node until `retryAt`, when its poller re-enters it (`reenter`). An external wait writes no
+     *  stop event and says no reason (`board._stop_payload`). */
+    sessionWaiting(id: string, sid: string, retryAt: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      const { b, it } = x;
+      const s = b.sessions.find((y) => y.id === sid);
+      if (!s) return no(404, `unknown session ${sid}`);
+      if (!LIVE_SESSION_STATUSES.includes(s.status) && s.status !== "waiting") return no(409, `session ${sid} is ${s.status}, not live`);
+      const wall_ms = Math.max(0, Date.parse(now()) - Date.parse(s.started_at ?? s.created_at));
+      Object.assign(s, { status: "waiting", wall_ms });
+      b.logs[sid] = commandLog(taskRun(it.materialized_chain, s.hook_point), "waiting", String(s.hook_point).split(".").at(-1)!);
+      Object.assign(it, { status: "waiting", retry_at: retryAt, step: null, stop: { kind: "wait", node: s.node_id, task: s.hook_point, attempt: 1, resume_at: retryAt, reason: null, facts: {} } });
+      append(id, "worker_session_exited", { session_id: sid, status: "waiting", wall_ms });
+      append(id, "work_item_waiting", { node_id: s.node_id, retry_at: retryAt });
+      return ok(settle(it));
+    },
+    /** A gate Kraft passes itself, with no request (`chain_revision_unchanged`): approved by `kraft`. The walk then
+     *  completes it (`completeNode`). */
+    selfApprove(id: string, gate: string): Result {
+      const x = find(id, true);
+      if (refused(x)) return x;
+      if (!(x.it.chain_definition?.nodes ?? []).some((n: any) => n.id === gate && n.kind === "gate")) return no(404, `unknown gate ${py(gate)}`);
+      append(id, "gate_approved", { gate, by: "kraft" }, gate);
+      return ok(settle(x.it));
     },
     /** `store.mark_reentered`: a CI wait (`waiting`) its poller (`waits.py`) re-enters once its `retry_at` passes, back
      *  to active with no event of its own (the walk's `node_started` narrates the re-entry). */
