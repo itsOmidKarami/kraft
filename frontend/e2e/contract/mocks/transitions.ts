@@ -117,17 +117,21 @@ export const stepIndex = (nodes: any[], node: string | null, path: string) =>
 
 /** `lifecycle._stopped_step`: a plain retry after a cap or budget stop goes on at the step the item was in
  *  (`current_step`, written as each step starts), not its node's first: running out of time or money says nothing about
- *  the steps already passed. Null, the whole node, at its first step, at a gate, and once its fix loop has run this run,
+ *  the steps already passed. Null, the whole node, at its first step (a gate has none), and once its fix loop has run,
  *  since a fix can break what an earlier step passed. shortcut: a fix loop's counter is read as a fix cycle since the
- *  last fork (a person's retry clears it), and a loop cap's `capped` stop is not modelled; read the counters if the demo
- *  grows one. */
+ *  last fork (a person's retry clears it) with no rejection after it that re-runs the node (`counters.reset_fix_loops`
+ *  clears it too), and a loop cap's `capped` stop is not modelled; read the counters if the demo grows one. */
 function stoppedStep(b: ItemBundle): string | null {
   const it = b.item;
   if (!["cap", "budget"].includes(it.stop?.kind) || !it.current_step) return null;
-  const node = (it.chain_definition?.nodes ?? []).find((n: any) => n.id === it.current_node_id);
+  const nodes: any[] = it.chain_definition?.nodes ?? [];
+  const node = nodes.find((n) => n.id === it.current_node_id);
   const steps: string[][] = node?.steps ?? [];
-  if (!node || node.kind === "gate" || it.current_step >= steps.length) return null;
-  if (node.fix_loop && sinceFork(b.events).some((e) => e.type === "fix_cycle_started" && e.payload.node_id === node.id)) return null;
+  if (!node || it.current_step >= steps.length) return null;
+  const run = sinceFork(b.events);
+  const fixed = run.map((e) => e.type === "fix_cycle_started" && e.payload.node_id === node.id).lastIndexOf(true);
+  const rerun = (e: any) => e.type === "gate_rejected" && nodes.findIndex((n) => n.id === e.payload.node) <= nodes.indexOf(node);
+  if (node.fix_loop && fixed >= 0 && !run.slice(fixed).some(rerun)) return null;
   return steps[it.current_step][0].split(".").slice(0, 2).join(".");
 }
 

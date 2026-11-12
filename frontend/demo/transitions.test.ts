@@ -449,6 +449,18 @@ describe("samples and answers as the server shapes them", () => {
     ["a time cap at the code review", "kraft-58e2", (b) => { b.item.stop = { ...b.item.stop, kind: "cap" }; }, "verification.review", 1],
     ["a spend stop at the node's first step", "kraft-58e2", (b) => { b.item.current_step = 0; }, "verification", 2],
     ["a spend stop after a fix cycle", "kraft-58e2", (b) => { b.events.push({ ...b.events.at(-1)!, type: "fix_cycle_started", payload: { node_id: "verification", cycle: 1 } }); }, "verification", 2],
+    // A rejection that re-runs the node gives its fix rounds back (`counters.reset_fix_loops`): no fix has run since.
+    ["a spend stop after a fix cycle and a rejection that re-ran the node", "kraft-58e2", (b) => {
+      b.events.push({ ...b.events.at(-1)!, type: "fix_cycle_started", payload: { node_id: "verification", cycle: 1 } }, { ...b.events.at(-1)!, type: "gate_rejected", payload: { gate: "local_review", note: "again", node: "implementation", by: "human", verdict: "reject" } });
+    }, "verification.review", 1],
+    ["a spend stop after a fix cycle and a rejection to a node after it", "kraft-58e2", (b) => {
+      b.events.push({ ...b.events.at(-1)!, type: "fix_cycle_started", payload: { node_id: "verification", cycle: 1 } }, { ...b.events.at(-1)!, type: "gate_rejected", payload: { gate: "local_review", note: "again", node: "work_brief", by: "human", verdict: "reject" } });
+    }, "verification", 2],
+    // Only a cap or a spend stop says nothing about the steps passed: any other stop reruns the node.
+    ["a stuck stop at its second step", "kraft-58e2", (b) => { b.item.stop = { ...b.item.stop, kind: "stuck" }; }, "verification", 2],
+    ["a failed stop at its second step", "kraft-58e2", (b) => { b.item.stop = { ...b.item.stop, kind: "failed" }; }, "verification", 2],
+    // A rewind names its own path: the whole node it points at, even the one the item stopped in.
+    ["a spend stop with a rewind pending", "kraft-58e2", (b) => { b.events.push({ ...b.events.at(-1)!, type: "rewind_requested", payload: { review_id: "r1", target: "verification", note: "redo it" } }); }, "verification", 2],
   ])("%s retries %s at its stopped step", async (_name, bead, setup, path, attempt) => {
     const { S, call } = server();
     const b = S.bundles[idOf(S, bead)];
