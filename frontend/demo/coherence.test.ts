@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import { buildScenario, withScopes, type ItemBundle, type Scenario } from "../e2e/contract/mocks/fixtures";
-import { FRESH_REPOS, FRESH_TITLES, motion } from "../e2e/contract/mocks/motion";
+import { FRESH_TITLES, motion } from "../e2e/contract/mocks/motion";
 import { NG_REPOS } from "../e2e/contract/mocks/ngBoard";
 import { CONTENT, FRESH_CONTENT } from "../e2e/contract/mocks/ngContent";
 import { frozenOf } from "../e2e/contract/mocks/ngChain";
@@ -703,12 +703,44 @@ describe.each<[string, () => Scenario, boolean]>([["the default sample", () => b
   });
 });
 
+/** The items a walk files when nothing else is on the board, `n` of them: each completed by a door the tick it is filed. */
+const filings = new Map<number, ItemBundle[]>();
+const longWalk = (n: number): ItemBundle[] => {
+  if (filings.has(n)) return filings.get(n)!;
+  vi.useFakeTimers();
+  try {
+    const S = buildScenario("default");
+    S.ngBoard = [];
+    const T = transitions(S, { now: () => NG_NOW });
+    const m = motion(S, T, { random: () => 0 });
+    for (let k = 0; k < n * 3 && S.ngBoard.length < n; k++) {
+      vi.advanceTimersByTime(8_000);
+      for (const id of S.ngBoard) if (S.bundles[id].item.status === "active") T.markCompleted(id);
+    }
+    m.stop();
+    filings.set(n, S.ngBoard.map((id) => S.bundles[id]));
+    return filings.get(n)!;
+  } finally {
+    vi.useRealTimers();
+  }
+};
+
 describe("the content table, the entries the walk never reaches included", () => {
   const B = buildScenario("default");
   const rows = [
     ...[...B.ngBoard, ...B.ngArchived].map((id) => B.bundles[id].item).map((i) => ({ name: i.title, repo: i.repo.split("/").pop()!, docs: i.repo.endsWith("/kraft-docs") || i.chain_template === "docs_only", c: CONTENT[i.bead_id] })),
-    ...FRESH_TITLES.map((title, n) => ({ name: title, repo: FRESH_REPOS[n % FRESH_REPOS.length].split("/").pop()!, docs: FRESH_REPOS[n % FRESH_REPOS.length].endsWith("/kraft-docs"), c: FRESH_CONTENT[title] })),
+    ...FRESH_TITLES.map((title) => ({ name: title, repo: FRESH_CONTENT[title].repo!, docs: FRESH_CONTENT[title].repo === "kraft-docs", c: FRESH_CONTENT[title] })),
   ];
+  // What a long walk files: each story again and again, one filing a tick, each completed by a door at once so the next
+  // tick files the next (motion files only when nothing is active). Fifteen filings: every story three times.
+  it("a long walk files each story in its own repo every time, and no two of its items or the board's in one repo share a merge request", () => {
+    const filed = longWalk(15);
+    expect(filed.length).toBe(15);
+    expect(filed.filter((b) => b.item.repo !== `/Users/dev/code/${FRESH_CONTENT[b.item.title].repo}` || b.content!.files !== FRESH_CONTENT[b.item.title].files).map((b) => b.item.title)).toEqual([]);
+    const keys = [...rows.slice(0, -FRESH_TITLES.length).map((r) => `${r.repo}#${r.c.mr}`), ...filed.map((b) => `${b.item.repo.split("/").pop()}#${b.content!.mr}`)];
+    expect(keys.filter((x, k) => keys.indexOf(x) !== k)).toEqual([]);
+    expect(filed.filter((b) => b.content!.mr >= 150 && b.content!.mr <= 159).map((b) => b.item.title)).toEqual([]);
+  });
   it("has an entry for every board row and every title the walk refiles", () => {
     expect(rows.filter((r) => !r.c).map((r) => r.name)).toEqual([]);
   });

@@ -19,8 +19,9 @@ export type File = [path: string, insertions: number, deletions: number, ...flag
 /** A file's hunk written out where its template would not hold what a review thread quotes: its first line's number
  *  on both sides, and its lines, each led by its diff mark. */
 export type Rows = { at: number; rows: string[] };
-/** `question`: what its code review asked, for a row stopped on a question (ngItems.ts, needs-you). */
-export interface Content { description: string; files: File[]; mr: number; hunks?: Record<string, Rows>; question?: string }
+/** `question`: what its code review asked, for a row stopped on a question (ngItems.ts, needs-you). `repo`: the repo the
+ *  walk files it into (FRESH_CONTENT; a board row has its own, ngBoard.ts). */
+export interface Content { description: string; files: File[]; mr: number; hunks?: Record<string, Rows>; question?: string; repo?: string }
 
 export const isLate = (f: File) => f.slice(3).includes("late");
 const statusOf = (f: File) => (f.slice(3).includes("new") ? "new" : f.slice(3).includes("deleted") ? "deleted" : null);
@@ -88,17 +89,18 @@ export const CONTENT: Record<string, Content> = {
     files: [["kraft_api/webhooks/payloads.py", 4, 61], ["kraft_api/webhooks/subscribe.py", 11, 6], ["kraft_api/settings.py", 0, 7, "deleted"], ["tests/webhooks/test_payloads.py", 6, 48], ["tests/webhooks/test_subscribe.py", 15, 2, "late"]] },
 };
 
-/** By title: what live motion refiles (motion.ts FRESH_TITLES), so a walked item has a story of its own too. */
+/** By title: what live motion refiles (motion.ts FRESH_TITLES), so a walked item has a story of its own too, in the repo
+ *  its files are in. Each filing of a story after its first opens its own merge request (motion.ts `refile`). */
 export const FRESH_CONTENT: Record<string, Content> = {
-  "Cache the forge's merge request lookups": { mr: 170, description: "Every forge task looks up the item's merge request again, so one node can ask the forge the same question five times. Cache the lookup per item for the length of a node, and clear it when the merge request changes.",
+  "Cache the forge's merge request lookups": { mr: 170, repo: "kraft-core", description: "Every forge task looks up the item's merge request again, so one node can ask the forge the same question five times. Cache the lookup per item for the length of a node, and clear it when the merge request changes.",
     files: [["kraft/forge/mr_cache.py", 38, 0, "new"], ["kraft/forge/run.py", 14, 6], ["tests/forge/test_mr_cache.py", 46, 0, "new"], ["tests/forge/test_run.py", 7, 2, "late"]] },
-  "Show each session's model in the log header": { mr: 171, description: "A session's log does not say which model ran it, so comparing two runs means opening each session's details. Put the model and the harness in the log header, beside its start time.",
+  "Show each session's model in the log header": { mr: 171, repo: "kraft-api", description: "A session's log does not say which model ran it, so comparing two runs means opening each session's details. Put the model and the harness in the log header, beside its start time.",
     files: [["kraft_api/routes/logs.py", 12, 3], ["kraft_api/logs/header.py", 19, 4], ["tests/logs/test_header.py", 27, 0, "new"], ["tests/logs/test_routes.py", 5, 1, "late"]] },
-  "Retry a flaky CI poll once before stopping": { mr: 172, description: "A CI poll that times out once stops the item, though the next poll would have answered. Retry a timed-out poll once after a short wait, and stop only when the retry fails too.",
+  "Retry a flaky CI poll once before stopping": { mr: 172, repo: "kraft-plugins", description: "A CI poll that times out once stops the item, though the next poll would have answered. Retry a timed-out poll once after a short wait, and stop only when the retry fails too.",
     files: [["plugins/ci/poll.py", 23, 7], ["plugins/ci/backoff.py", 16, 0, "new"], ["tests/ci/test_poll.py", 34, 2], ["tests/ci/test_backoff.py", 11, 0, "late", "new"]] },
-  "Add a --since filter to kraft view events": { mr: 173, description: "kraft view events lists an item's whole history, which for a long-running item is hundreds of lines; --after takes only an event number. Add a --since flag that takes a time and lists only the events after it.",
+  "Add a --since filter to kraft view events": { mr: 173, repo: "kraft-core", description: "kraft view events lists an item's whole history, which for a long-running item is hundreds of lines; --after takes only an event number. Add a --since flag that takes a time and lists only the events after it.",
     files: [["kraft/cli/view.py", 18, 2], ["kraft/events/since.py", 24, 0, "new"], ["tests/cli/test_view_events.py", 37, 0, "new"], ["docs/cli/view.md", 6, 1], ["tests/events/test_since.py", 9, 0, "late", "new"]] },
-  "Warn when a gate names no artifact": { mr: 174, description: "A gate whose node produces nothing shows an empty document pane and gives its reviewer nothing to approve. Warn when the chain loads, name the gate, and say which task should produce its document.",
+  "Warn when a gate names no artifact": { mr: 174, repo: "kraft-core", description: "A gate whose node produces nothing shows an empty document pane and gives its reviewer nothing to approve. Warn when the chain loads, name the gate, and say which task should produce its document.",
     files: [["kraft/templates/lint.py", 21, 2], ["kraft/executor/gates.py", 9, 3], ["tests/templates/test_lint.py", 31, 0, "new"], ["tests/executor/test_gates.py", 6, 0, "late"]] },
 };
 

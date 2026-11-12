@@ -1,7 +1,7 @@
 import { LIVE_SESSION_STATUSES } from "../../../src/types/vocab.generated";
 import { hex, type ItemBundle, type Scenario } from "./fixtures";
 import { agentUsage, nodeBeats, type Beats, type Writer } from "./nodeRecipe";
-import { FRESH_CONTENT, planOf } from "./ngContent";
+import { FRESH_CONTENT, planOf, type Content } from "./ngContent";
 import { isAgentSession, taskRun } from "./taskKinds";
 import { pendingRewind, sinceFork, threadSummary, type Transitions } from "./transitions";
 
@@ -55,7 +55,13 @@ export const FRESH_TITLES = [
   "Add a --since filter to kraft view events",
   "Warn when a gate names no artifact",
 ];
-export const FRESH_REPOS = ["kraft-core", "kraft-api", "kraft-plugins", "kraft-core"].map((r) => `/Users/dev/code/${r}`);
+/** The walk's `n`th filing (from 0): the stories in turn, each in its own repo (ngContent.ts FRESH_CONTENT), and a merge
+ *  request of its own each time, the story's number on by one round of the titles per earlier filing of it. */
+export function refile(n: number): { title: string; repo: string; content: Content } {
+  const title = FRESH_TITLES[n % FRESH_TITLES.length];
+  const entry = FRESH_CONTENT[title];
+  return { title, repo: `/Users/dev/code/${entry.repo}`, content: { ...entry, mr: entry.mr + FRESH_TITLES.length * Math.floor(n / FRESH_TITLES.length) } };
+}
 /** The ticks an escalation turn runs before its agent answers. */
 const TURN_TICKS = 2;
 /** A minute of the recipe's clock on the live one: a forge wait's next poll, two of them, is due in six seconds, so the
@@ -344,11 +350,11 @@ export function motion(S: Scenario, T: Transitions, o: MotionOptions = {}): Moti
       const gated = board.some((id) => S.bundles[id].item.status === "needs_human" && S.bundles[id].item.pending_gate);
       if (!active.length && !gated) {
         const n = filed++;
-        const title = FRESH_TITLES[n % FRESH_TITLES.length];
-        const made = T.create({ title, description: FRESH_CONTENT[title].description, repo: FRESH_REPOS[n % FRESH_REPOS.length], chain_template: "default", autostart: true });
+        const { title, repo, content } = refile(n);
+        const made = T.create({ title, description: content.description, repo, chain_template: "default", autostart: true });
         if (made.status === 201) {
           // Its own files and merge request (ngContent.ts), as a board row has.
-          S.bundles[made.body.id].content = FRESH_CONTENT[title];
+          S.bundles[made.body.id].content = content;
           if (n === 0) red.add(made.body.id);
           step(made.body.id);
         }
