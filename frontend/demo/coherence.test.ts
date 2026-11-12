@@ -75,6 +75,8 @@ const seeded = (seed: (S: Scenario) => void) => { const S = buildScenario("defau
 let walk: Scenario | null = null;
 /** Where the walk's clock stood when it stopped. */
 let walkedTo = NG_NOW;
+/** The walk's running agent sessions, at any tick, whose log or sub-agents named a file not their item's. */
+const walkStrays = new Set<string>();
 const walked = (): Scenario => {
   if (walk) return walk;
   vi.useFakeTimers();
@@ -91,6 +93,8 @@ const walked = (): Scenario => {
       for (const id of S.ngBoard) {
         const b = S.bundles[id];
         if (b.item.pending_gate && b.events.at(-1)?.type === "gate_auto_review_skipped") T.approve(id, b.item.pending_gate);
+        // A running agent's log is as a visitor sees it mid-walk: the end leaves only finished ones to check.
+        if (b.content) for (const s of b.sessions) if (s.status === "running" && agentic(b, s) && foreignFiles(b, agentTexts(b, s)).length) walkStrays.add(`${b.item.title}: ${s.hook_point}`);
       }
     }
     m.stop();
@@ -133,11 +137,19 @@ describe.each(SCENARIOS)("sessions in %s", (_scenario, build) => {
       && !(Math.abs(Object.entries(PRICE).reduce((a, [k, usd]) => a + (s[k] ?? NaN) * usd / 1e6, 0) - s.cost_usd) < 1e-6)],
     // An item with content: its agents' logs and sub-agents are about its own files; the shared sample's are not its.
     ["an agent's log and sub-agents name only its item's own files", (b, s) => !!b.content && agentic(b, s) && foreignFiles(b, agentTexts(b, s)).length > 0],
+    ["a sub-agent is about one of its item's files, in its description and, once it has finished, its answer", (b, s) => !!b.content
+      && subagentsOf(b, s).some((a) => [a.description, ...(a.status === "completed" ? [a.summary] : [])].some((x) => !b.content!.files.some(([p]) => String(x).includes(p))))],
     ["only the implementer, verification's repair and its code review hand work to sub-agents", (b, s) => !!b.content && !DELEGATES.has(s.hook_point) && subagentsOf(b, s).length > 0],
+    ["a finished session's sub-agents have all finished", (b, s) => ["done", "done_with_concerns"].includes(s.status) && subagentsOf(b, s).some((a) => a.status !== "completed")],
     ["a sub-agent spends no more tokens than its session", (b, s) => s.tokens_in != null && subagentsOf(b, s).some((a) => a.tokens > usedBy(s))],
   ])("%s", (_rule, rule) => {
     expect(offenders(S, rule)).toEqual([]);
   });
+});
+
+it("in the live walk, a running agent's log and sub-agents name only its item's own files at every tick", () => {
+  walked();
+  expect([...walkStrays]).toEqual([]);
 });
 
 /** The nodes each template's chain has: what a real server freezes for `default` and `quick-task`, and the board's own `docs_only`. */

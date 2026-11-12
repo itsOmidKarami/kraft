@@ -223,10 +223,11 @@ function contentLog(sid: string, hook: string, c: Content, status: string): any[
     else line(src, JSON.stringify({ type: "tool_use", name: "Edit", input: { file_path: f, old_string: `${fn}(value`, new_string: `${fn}(value, limit` } }), { summary: `Edit ${f}` });
     const k = i / 4 - 1;
     if (i % 4 !== 0 || k >= subs) continue;
-    // A sub-agent after each of the first `subs` edits: its own file, its own question, its own usage.
-    const f2 = at(k), fn2 = symbolOf(f2), docs = isDocsPath(f2);
+    // A sub-agent after each of the first `subs` edits: its own file (code before its tests), question and usage.
+    const subjects = [...files.filter((p) => !isTest(p)), ...files.filter(isTest)];
+    const f2 = subjects[(h + k) % subjects.length], fn2 = symbolOf(f2), docs = isDocsPath(f2);
     const type = k === 1 ? "general-purpose" : "Explore";
-    const label = docs ? `Find the pages that link to ${f2}` : [`Find who calls ${fn2} in ${f2}`, `Check what ${f2} must keep`, `Find the tests that cover ${fn2}`][k];
+    const label = docs ? `Find the pages that link to ${f2}` : [`Find who calls ${fn2} in ${f2}`, `Check what ${f2} must keep`, `Find the tests that cover ${f2}`][k];
     const answer = docs ? `Found them: ${2 + ((h >>> k) % 4)} pages link to ${f2}, none by an anchor this change moves.`
       : [`Found it in ${f2}: ${fn2} has ${2 + ((h >>> k) % 3)} callers, all inside this change.`, `Found it in ${f2}: ${fn2} keeps its signature for its callers; only its body changes.`, `Found it in ${test ?? f2}: it covers ${fn2} only on the happy path.`][k];
     const id = `a${((h ^ Math.imul(k + 1, 0x9e3779b1)) >>> 0).toString(16).padStart(8, "0")}`;
