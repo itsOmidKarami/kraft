@@ -5,6 +5,7 @@ import { RESUME_PROMPT } from "./poller";
 import { agentUsage, agentWall, awaitPolls, drain, DOCS_RED, fixCycle, judge, measured, nodeBeats, OPEN, RED, REPAIR, REVIEW, REVIEWED, TESTS, testPass, type Found, type Open, type Writer } from "./nodeRecipe";
 import { isAgentSession, RUNS, taskRun } from "./taskKinds";
 import { escalationThreads, threadSummary } from "./transitions";
+import { mrOf, planTasks, type Content } from "./ngContent";
 
 /**
  * Items for the item page (ux2-W5) and the board (ngBoard.ts): the shipped default chain (ngChain.ts) in every
@@ -30,14 +31,15 @@ const AT: Record<NgScenario, string | null> = {
 };
 /** The default chain's node order: where a node another chain lacks would stand. */
 const ORDER = chainOf("default")!.nodes.map((n) => n.id);
-const MR = { number: 142, url: "https://github.com/acme/kraft-plugins/pull/142" };
 const STUCK = "stuck: fix attempt 2 in node verification changed nothing, so measuring again would see the same code. The repair ended done and gave no concerns.";
 /** What every automatic escalation turn is sent (`gates._AUTO_ESCALATE_MESSAGE`); a person's turn says its own. */
 export const AUTO_ESCALATE_MESSAGE = "(Auto-escalated: no one has looked at this yet. Diagnose why it stopped and fix it if you can; if you're not confident, stop and say so instead of guessing.)";
 /** `mr_poller.REASON`: the stop when the forge says the item's merge request was closed unmerged. */
 export const MR_CLOSED_REASON = "the merge request was closed on the forge without merging";
-/** `mr`: the merge request its draft opens, what its forge tasks print and its stop names (a board row's own, ngContent.ts). */
-export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, template = "default", mr = MR): ItemBundle {
+/** `mr`: the merge request its draft opens, what its forge tasks print and its stop names; `content`: what the item is
+ *  about, which its plan's tasks, its question and its review threads' lines are written from (a board row's own,
+ *  ngContent.ts). Without them, the sample's. */
+export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, template = "default", mr = mrOf("/Users/dev/code/kraft-plugins", 142), content?: Content): ItemBundle {
   const long = variant === "long";
   const id = hex(seed);
   const chain = chainOf(template)!;
@@ -258,7 +260,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
       // Round 1's code review asked a question instead of reviewing (`needs_context`): a measuring task's question stops
       // the node for a person before any fix cycle (`walk`), and no escalation answers a question (`gates.stuck_stop`).
       const cr = atTask("running");
-      const q = "The race needs a reindex API change the plan froze. Allow the change, or accept the finding and move on?";
+      const q = content?.question ?? "The race needs a reindex API change the plan froze. Allow the change, or accept the finding and move on?";
       close(cr, "needs_context");
       // A failed task with no findings file is a blind failure (`findings.from_blind_failure`): its log's last lines.
       const blind: Found = { finding: { severity: "critical", message: `${REVIEW} failed\n- ${q}`, file: null, line: null, source_plugin: REVIEW }, print: "9a0d3e7f1c52b846" };
@@ -273,7 +275,9 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
       // names what it hit (`time_cap_reached`), then the item stops with that reason. A task's cap is the chain's: no item
       // override raises it, so the stop names no `limit` (`caps.item_limit`).
       const s = open("implementation.main.implement", "implementation");
-      ["Read the search path", "Key the cache by content hash", "Invalidate on reindex"].forEach((title, k) => ev("plan_progress", { node_id: "implementation", task: k + 1, total: 6, title }, 25));
+      // Its plan's first three tasks (ngContent.ts `planTasks`), out of all of them.
+      const plan = content ? planTasks(content) : ["Read the search path", "Key the cache by content hash", "Invalidate on reindex", "Bound the cache", "Tests", "Docs"];
+      plan.slice(0, 3).forEach((title, k) => ev("plan_progress", { node_id: "implementation", task: k + 1, total: plan.length, title }, 25));
       m -= 75;
       close(s, "capped_out", 120 * 60_000);
       const reason = "`implementation.main.implement` hit its time cap of 120 minutes";
@@ -399,10 +403,15 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant, temp
   total.cost_usd = Math.round(total.cost_usd * 10_000) / 10_000;
   item.usage = { total: { ...total, cost_complete: true, split_complete: true, sessions: sessions.length, rounds: 1, capped_out: 0 }, by_node: byNode };
   item.budget_cap.spent_usd = total.cost_usd;
+  // Where the threads sit: a board row's on the lines its own hunk shows (ngContent.ts `hunks`), which they quote.
+  const [cache, own] = Object.entries(content?.hunks ?? {})[0] ?? [];
+  const at = (k: number) => own!.at + own!.rows.slice(0, k).filter((r) => r[0] !== "-").length;
+  const quote = (from: number, to: number) => own!.rows.filter((r) => r[0] !== "-").slice(from - own!.at, to - own!.at + 1).join("\n");
+  const [must, store] = own ? [[at(2), at(5)], [at(8), at(8)]] : [[12, 14], [30, 30]];
   const threads = sc === "needs-gate" ? [
-    { id: "th-r1-must", work_item_id: id, gate: "final_review", node_id: "implementation", file_path: "search/cache.py", side: "new", start_line: 12, end_line: 14, quote: " def newest(commits):\n+    latest = max(c.ts for c in commits)\n+    return self._cache[latest]", label: "must_fix", state: "resolved", resolved_at: t(94), created_at: t(92), comments: [{ id: "c-r1-must", author: "you", body: "`commits` can be empty: `max()` of an empty generator raises", created_at: t(92) }] },
-    { id: "th-r1-q", work_item_id: id, gate: "final_review", node_id: "implementation", file_path: "search/reindex.py", side: "new", start_line: 30, end_line: 30, quote: "+        self._cache[key] = value", label: "question", state: "open", created_at: t(93), comments: [{ id: "c-r1-q", author: "you", body: "why no size bound?", created_at: t(93) }] },
-    { id: "th1", work_item_id: id, gate: null, node_id: "local_review", file_path: "search/cache.py", side: "new", start_line: 40, end_line: 44, label: "question", state: "open", created_at: t(90), comments: [{ id: "c1", author: "you", body: "cache has no size bound", created_at: t(90) }] },
+    { id: "th-r1-must", work_item_id: id, gate: "final_review", node_id: "implementation", file_path: cache ?? "search/cache.py", side: "new", start_line: must[0], end_line: must[1], quote: own ? quote(must[0], must[1]) : " def newest(commits):\n+    latest = max(c.ts for c in commits)\n+    return self._cache[latest]", label: "must_fix", state: "resolved", resolved_at: t(94), created_at: t(92), comments: [{ id: "c-r1-must", author: "you", body: "`commits` can be empty: `max()` of an empty generator raises", created_at: t(92) }] },
+    { id: "th-r1-q", work_item_id: id, gate: "final_review", node_id: "implementation", file_path: cache ?? "search/reindex.py", side: "new", start_line: store[0], end_line: store[1], quote: own ? quote(store[0], store[1]) : "+        self._cache[key] = value", label: "question", state: "open", created_at: t(93), comments: [{ id: "c-r1-q", author: "you", body: "why no size bound?", created_at: t(93) }] },
+    { id: "th1", work_item_id: id, gate: null, node_id: "local_review", file_path: cache ?? "search/cache.py", side: "new", start_line: own ? at(7) : 40, end_line: own ? at(8) : 44, label: "question", state: "open", created_at: t(90), comments: [{ id: "c1", author: "you", body: "cache has no size bound", created_at: t(90) }] },
   ] : [];
   const reviews = sc === "needs-gate" ? [{ id: "rv1", gate: "final_review", outcome: "request_changes", summary: "Two things before this ships.", head_sha: "4d1e2f3", submitted_at: t(95) }] : [];
   return { item, sessions, events, logs, threads, reviews };

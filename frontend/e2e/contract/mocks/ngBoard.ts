@@ -3,7 +3,7 @@ import draftViews from "./draftViews.json" with { type: "json" };
 import { chainOf } from "./ngChain";
 import { buildNeverStarted, buildNgItem, type NgScenario } from "./ngItems";
 import { cacheRead } from "./nodeRecipe";
-import { CONTENT, mrOf } from "./ngContent";
+import { CONTENT, mrOf, planTasks } from "./ngContent";
 import { NG_NOW } from "./clock";
 
 /**
@@ -84,7 +84,9 @@ function checkoutMoved(i: any, b: ItemBundle) {
 
 /** The running row, in kraft-vscode's own checkout: what `waitsForCheckout` waits behind. */
 function runsInPlace(i: any) {
-  i.progress = { current: 2, total: 3, title: "Thread findings into the prompt" };
+  // Its plan's second task (ngContent.ts `planTasks`), the sample's where it has none.
+  const plan = CONTENT[i.bead_id] ? planTasks(CONTENT[i.bead_id]) : ["Read the verify contract", "Thread findings into the prompt", "Tests"];
+  i.progress = { current: 2, total: plan.length, title: plan[1] };
   i.step = { index: 2, count: 2, name: "review", task: "code_review" };
   Object.assign(i, { in_place: true, worktree_path: i.repo });
 }
@@ -152,7 +154,7 @@ function build(rows: Row[], variant: Variant, seed0: number, bundles: Record<str
   return rows.map((r, n) => {
     // Its own brief, files and merge request, in the default sample (ngContent.ts).
     const content = variant === "default" ? CONTENT[r.bead] : undefined;
-    const b = r.fresh ? buildNeverStarted(seed0 + n, long ? "long" : "default", r.chain) : buildNgItem(r.sc, seed0 + n, long ? "long" : "default", r.chain, content && mrOf(r.repo, content.mr));
+    const b = r.fresh ? buildNeverStarted(seed0 + n, long ? "long" : "default", r.chain) : buildNgItem(r.sc, seed0 + n, long ? "long" : "default", r.chain, content && mrOf(r.repo, content.mr), content);
     const i = b.item;
     i.id = hex(seed0 + n);
     i.title = long ? r.title + LONG_TAIL : r.title;

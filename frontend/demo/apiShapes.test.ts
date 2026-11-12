@@ -85,7 +85,7 @@ describe("the demo's mocked API answers every key the real server does", () => {
   const b = S.bundles[item];
   // No sample item is filed with a spec, so the attachment route reads one given here.
   b.item.attachments = [{ kind: "spec", path: "docs/spec.md" }];
-  const ids: Record<string, string> = { $ITEM: item, $FILED: item, $ONE_OFF: item, $SESSION: b.sessions[0].id, $AGENT: subagentList(b.logs[b.sessions[0].id] ?? [], b.sessions[0].status)[0]?.id ?? "none", $DOC: Object.values(S.docs).flat()[0].document_id, $REPO: b.item.repo };
+  const ids: Record<string, string> = { $ITEM: item, $FILED: item, $ONE_OFF: item, $SESSION: b.sessions[0].id, $AGENT: subagentList(b.logs[b.sessions[0].id] ?? [], b.sessions[0].status)[0]?.id ?? "none", $DOC: Object.values(S.docs).flat().find((d) => d.source_kind === "session_summary")!.document_id, $REPO: b.item.repo };
   const serve = mockServer(S, demoOptions);
   const url = (route: string, params: Record<string, string>) => {
     let path = route.replace(/^GET /, "");
@@ -97,8 +97,11 @@ describe("the demo's mocked API answers every key the real server does", () => {
     return `http://demo${path}${query.size ? `?${query}` : ""}`;
   };
 
+  // The real run searched for its fake agent's name, which no demo document holds: search matches every word, so the
+  // demo's answer would list nothing and show no result's keys. A word the demo's documents hold stands in.
+  const QUERY: Record<string, Record<string, string>> = { "GET /api/search": { q: "cache" } };
   it.each(Object.entries(TABLE.routes))("%s", async (route, { params, shape }) => {
-    const reply = (await serve({ method: "GET", url: url(route, params), json: () => null })) as Answer;
+    const reply = (await serve({ method: "GET", url: url(route, { ...params, ...QUERY[route] }), json: () => null })) as Answer;
     expect(reply.status, `${route} answers ${reply.status}: ${reply.body}`).toBe(200);
     const gaps = Object.keys(KNOWN_GAPS).filter((g) => g.startsWith(`${route}:`)).map((g) => g.slice(route.length + 1));
     const missing = missingKeys(shape, skeleton(JSON.parse(reply.body!)));

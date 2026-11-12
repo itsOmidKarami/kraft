@@ -3,7 +3,7 @@ import { inTreeOrder, tree } from "../../../src/ng/review/model";
 import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, gateRoundsOf, roundWindows, searchFor, subagentList, within, WORKERS_FIXTURE, type Scenario } from "./fixtures";
 import { makeAreas } from "./areasMock";
 import { ngThreads } from "./ngItems";
-import { docBody } from "./ngContent";
+import { chainKinds, docBody, pendingDoc, producedBy } from "./ngContent";
 import { harnessesServer, PROVIDER_STATUS } from "./ngHarnesses";
 import { forgesServer } from "./ngForges";
 import { motion, type Motion, type MotionOptions } from "./motion";
@@ -426,7 +426,11 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       return json(limit !== undefined ? page.slice(0, limit) : page);
     }
     if ((m = p.match(/^\/work-items\/([^/]+)\/documents$/))) {
-      return json({ work_item_id: m[1], documents: S.docs[m[1]] ?? [] });
+      // What a pending gate is about is listed too, before approval indexes it, in place of an earlier approval's copy.
+      const b = S.bundles[m[1]];
+      const pending = b && pendingDoc(b, new Date(opts.now?.() ?? Date.now()).toISOString());
+      const docs = (S.docs[m[1]] ?? []).filter((d) => d.path !== pending?.path);
+      return json({ work_item_id: m[1], documents: pending ? [pending, ...docs] : docs });
     }
     // An item the walk never entered has no base_ref stamped yet (`artifacts`): its diff is the server's empty answer
     // for that, and its comparison the 409 that comes before any worktree check. One that ran and has no worktree any
@@ -586,9 +590,14 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       const b = S.bundles[m[1]];
       if (!b) return json({ detail: "unknown work item" }, 404);
       const [, wid, where, kind] = m;
+      // A kind no task of the item's chain produces and no gate decides is a 404 (`_produced_path`).
+      if (where === "artifacts" && b.content && !chainKinds(b).has(kind)) return json({ detail: `no task of this work item produces '${kind}'` }, 404);
       // An item with content (ngContent.ts) has each kind's own text; the rest read the gate artifact's.
-      const a = b.content ? { content: docBody(b, { kind: `${kind}s` }) } : artifactFor(b.item, S.variant);
-      const title = `${kind[0].toUpperCase()}${kind.slice(1)}: ${b.item.title}`;
+      const own = b.content && docBody(b, { kind: `${kind}s` });
+      // Front matter is stripped, and a title it names wins over the heading (`_worktree_document`).
+      const [, fm, body] = /^---\n([\s\S]*?)\n---\n\n?([\s\S]*)$/.exec(own || "") ?? [];
+      const a = own ? { content: body ?? own } : artifactFor(b.item, S.variant);
+      const title = /^title: (.*)$/m.exec(fm ?? "")?.[1] ?? (own && /^# (.*)$/m.exec(own)?.[1]) ?? `${kind[0].toUpperCase()}${kind.slice(1)}: ${b.item.title}`;
       if (where === "artifacts") return json({ work_item_id: wid, kind, path: `items/${wid}/docs/${kind}.md`, absolute_path: `/Users/dev/.kraft/run/items/${wid}/docs/${kind}.md`, title, content: a.content, truncated: false });
       const att = (b.item.attachments ?? []).find((x: { kind: string }) => x.kind === kind);
       if (!att) return json({ detail: `this work item has no ${kind} attached` }, 404);
@@ -695,8 +704,10 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
     /* documents & search */
     if (p === "/search") {
       // The board's documents, where the board is the ng one (the older samples' otherwise): what a visitor can open.
+      if (!(q.get("q") ?? "").trim()) return json({ detail: "q is required" }, 422);
       const ids = opts.ngBoard ? [...S.ngBoard, ...S.ngArchived] : [...S.items, ...S.archived].map((i) => i.id);
-      return json(searchFor(q.get("q") ?? "", ids.flatMap((id) => S.docs[id] ?? []), S.variant, textOf));
+      return json(searchFor(q.get("q")!, ids.flatMap((id) => S.docs[id] ?? []), S.variant, textOf,
+        { source_kind: q.get("source_kind"), kind: q.get("kind"), repo: q.get("repo"), limit: Number(q.get("limit")) || undefined }));
     }
     if ((m = p.match(/^\/documents\/([^/]+)\/open$/))) return json({ document_id: m[1], path: ".engineering/specs/x.md", editor: "code" });
     if ((m = p.match(/^\/documents\/([^/]+)$/))) {
@@ -705,8 +716,15 @@ export function mockServer(S: Scenario, opts: MockOptions = {}): MockServer & { 
       const own = S.docText?.[id];
       // A summary with no front matter has nothing in `metadata` (`ingest.split_front_matter`), and no source times.
       if (own != null) return json({ ...documentDetail(id, all), content: own, metadata: {}, source_created_at: null, source_updated_at: null });
+      // A pending gate's document, by its synthetic id: the file again, nothing indexed about it (`_get_pending_gate_document`).
+      const [, wid] = /^gate:([^:]+):/.exec(id) ?? [];
+      const pending = wid && S.bundles[wid] && pendingDoc(S.bundles[wid], new Date(opts.now?.() ?? Date.now()).toISOString());
+      if (wid) return pending && pending.document_id === id
+        ? json({ id, ...Object.fromEntries(["repo", "source_kind", "kind", "title", "path", "indexed_at"].map((k) => [k, pending[k]])), content: docBody(S.bundles[wid], pending), metadata: {}, source_created_at: null, source_updated_at: null, links: [] })
+        : json({ detail: "document not found" }, 404);
       const d = all.find((x) => x.document_id === id);
-      return json(documentDetail(id, all, d && S.bundles[d.work_item_id]?.content ? docBody(S.bundles[d.work_item_id], d) : undefined));
+      const b = d && S.bundles[d.work_item_id];
+      return json(b?.content ? documentDetail(id, all, docBody(b, d), d.source_kind === "artifact" ? producedBy(b, d.kind.replace(/s$/, "")) : undefined) : documentDetail(id, all));
     }
     if (p === "/beads/search") return json({ query: q.get("q"), beads: [
       { id: "kraft-a4js", title: "Gate card findings list pushes the split off-screen", status: "open", issue_type: "bug" },

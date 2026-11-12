@@ -5,7 +5,7 @@ import { chainOf, frozenOf } from "./ngChain";
 import { RESUME_PROMPT } from "./poller";
 import { buildNeverStarted } from "./ngItems";
 import { DOCS_SCOPE, isAgentSession, MODEL, RUNS, scopeRunsOf, taskRun, type Run } from "./taskKinds";
-import { itemDocs, mergeDocs } from "./ngContent";
+import { itemDocs, mergeDocs, mrOf } from "./ngContent";
 
 /**
  * The work item's transitions, as the server makes them: what each door changes, the event row it appends
@@ -831,7 +831,7 @@ export function transitions(S: Scenario, o: TransitionOptions = {}) {
       if (refused(x)) return x;
       const { b, it } = x;
       const number = it.mr_ref?.number ?? b.content?.mr ?? 150 + mrs++;
-      const url = it.mr_ref?.url ?? `https://github.com/acme/${String(it.repo).split("/").pop()}/pull/${number}`;
+      const url = it.mr_ref?.url ?? mrOf(String(it.repo), number).url;
       it.mr_ref = { number, url };
       append(id, "mr_opened", { number, url }, node);
       return ok(settle(it));

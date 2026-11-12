@@ -55,7 +55,7 @@ export const FRESH_TITLES = [
   "Add a --since filter to kraft view events",
   "Warn when a gate names no artifact",
 ];
-const FRESH_REPOS = ["kraft-core", "kraft-api", "kraft-plugins", "kraft-docs"].map((r) => `/Users/dev/code/${r}`);
+export const FRESH_REPOS = ["kraft-core", "kraft-api", "kraft-plugins", "kraft-core"].map((r) => `/Users/dev/code/${r}`);
 /** The ticks an escalation turn runs before its agent answers. */
 const TURN_TICKS = 2;
 /** A minute of the recipe's clock on the live one: a forge wait's next poll, two of them, is due in six seconds, so the
