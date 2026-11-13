@@ -2082,8 +2082,27 @@ def _update_when_free(ns: argparse.Namespace) -> None:
     print(f"kraft: {tag} will be installed when Kraft is free{why}")
 
 
+def _snapshot_before_update(run_dirs: RunDirs) -> dict:
+    """Copy the configuration and every run database before an install, so the
+    version it replaces can be put back by hand. A home that never ran has
+    nothing to copy; a copy that fails stops the update before it installs."""
+    import sqlite3
+
+    from kraft import when_free
+
+    if not run_dirs.base.is_dir() or not config_dir().is_dir():
+        return {}
+    try:
+        taken = when_free.snapshot(run_dirs, config_dir())
+    except (OSError, sqlite3.Error) as exc:
+        _exit(f"could not back up the configuration and databases: {exc}. Nothing was installed")
+    folder = Path(taken["config_snapshot"]).parent
+    print(f"kraft: backed up the configuration and databases to {folder}")
+    return taken
+
+
 def _cmd_update(ns: argparse.Namespace) -> None:
-    from kraft import update
+    from kraft import update, when_free
 
     if ns.cancel_when_free:
         _when_free_call(client.unmark_update, instead="there is no mark to drop without one")
@@ -2147,9 +2166,14 @@ def _cmd_update(ns: argparse.Namespace) -> None:
         )
     print(f"kraft {here} -> {release.tag}")
     update_prechecks(release, interactive=True, assume_yes=ns.yes, channel=channel)
+    run_dirs = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir()))
+    taken = _snapshot_before_update(run_dirs)
     code = update.perform(release)
     if code != 0:
+        when_free.drop_snapshot(taken)
         raise SystemExit(code)
+    if taken:
+        when_free.delete_snapshots(run_dirs, keep=str(Path(taken["config_snapshot"]).parent))
     print(f"kraft {release.tag} installed.")
     if other := update.shadowing_kraft():
         print(

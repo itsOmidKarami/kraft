@@ -270,6 +270,25 @@ def test_confirm_ends_it(on_probation, client):
     assert client.post("/api/update/confirm").status_code == 409
 
 
+@pytest.fixture
+def day_old_snapshot(tmp_path):
+    """The snapshot a confirmed update left a day ago. Made before the server
+    starts, so it comes before `client` in a test's arguments."""
+    from kraft import when_free
+
+    folder = RunDirs(tmp_path / "run").ensure().base / f"{when_free.SNAPSHOT_PREFIX}1"
+    (folder / "config").mkdir(parents=True)
+    day_ago = time.time() - 86400
+    os.utime(folder, (day_ago, day_ago))
+    return folder
+
+
+def test_a_confirmed_updates_snapshot_outlives_a_restart(day_old_snapshot, client):
+    """It is the way back to the version before, so only the next update replaces it."""
+    assert client.get("/api/health").status_code == 200
+    assert day_old_snapshot.is_dir()
+
+
 def test_shutdown_during_probation_is_clean(on_probation, client):
     """Nothing was started, so shutdown cancels only what exists; leaving the
     client raises if it does not."""

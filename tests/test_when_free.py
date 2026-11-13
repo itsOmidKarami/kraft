@@ -642,7 +642,7 @@ def _snapshots(attempt):
     [
         "restarter-raises-after-install-is-not-retried",
         "went-busy-leaves-no-snapshot",
-        "two-busy-attempts-leave-one-snapshot-at-most",
+        "busy-attempts-keep-the-earlier-snapshot-and-none-of-their-own",
     ],
 )
 async def test_apply_once(attempt, case):
@@ -675,8 +675,10 @@ async def test_apply_once(attempt, case):
             attempt.busy["now"] = False
             attempt.st.version = "2.2.0"
             await when_free.apply_once(attempt.app, now=NOON)
-            assert len(_snapshots(attempt)) <= 1
-        assert _snapshots(attempt) == [attempt.seen["taken"][-1]]
+            if busy:
+                assert _snapshots(attempt) == [stale]
+        # The earlier one stays until the new server is confirmed (`end_probation`).
+        assert set(_snapshots(attempt)) == {stale, attempt.seen["taken"][-1]}
 
 
 @pytest.mark.parametrize(
