@@ -24,4 +24,14 @@ export const sitePages = [
     title: 'Not another coding agent.',
     description: 'What Kraft does that an interactive session, a loop or a skill doesn\'t, and when it is the wrong tool.',
   },
+  {
+    path: '/tour',
+    title: 'Where you work with Kraft.',
+    description: 'Kraft is one server with several ways in. Each shows the same work items and the same gates, so use whichever is nearest.',
+  },
+  {
+    path: '/customize',
+    title: 'The process is yours to change.',
+    description: 'Chains are files, so you can edit them, extend them and share them. Pick the agent and the model per task, or run a chain with no server at all.',
+  },
 ]

@@ -1428,6 +1428,11 @@
   background: #231f52;
 }
 
+.site .s-crop-phone {
+  max-width: 320px;
+  margin-inline: auto;
+}
+
 .site .s-crop img {
   display: block;
   width: 100%;
@@ -2245,7 +2250,9 @@
   color: var(--s-text-sub);
 }
 
-.site .s-ways code {
+.site .s-ways code,
+.site .s-block-body code,
+.site figcaption code {
   font-family: var(--s-mono);
   font-size: 15px;
   color: var(--s-text);
