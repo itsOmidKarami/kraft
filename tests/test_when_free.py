@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -350,6 +351,19 @@ def test_the_rollback_record_is_written_in_two_phases(run_dirs):
     }
     when_free.clear_rollback(run_dirs)
     assert when_free.read_rollback(run_dirs) is None
+
+
+def test_two_snapshots_in_one_second_never_touch_each_other(tmp_path, run_dirs, monkeypatch):
+    config = tmp_path / "config"
+    config.mkdir()
+    monkeypatch.setattr(when_free.time, "strftime", lambda *_a: "20261113-120000")
+
+    first = Path(when_free.snapshot(run_dirs, config, "2.2.0")["config_snapshot"]).parent
+    second = Path(when_free.snapshot(run_dirs, config, "2.2.1")["config_snapshot"]).parent
+
+    assert second.name == f"{first.name}-2"
+    assert (first / "version").read_text() == "2.2.0\n"
+    assert (second / "version").read_text() == "2.2.1\n"
 
 
 def test_a_snapshot_restores_config_and_databases_and_drops_a_stale_wal(tmp_path, run_dirs):

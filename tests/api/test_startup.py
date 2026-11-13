@@ -259,6 +259,8 @@ def test_probation_ends_by_itself(on_probation, short_probation, client):
 def test_confirm_ends_it(on_probation, client):
     from kraft import when_free
 
+    older = on_probation.run_dirs.base / f"{when_free.SNAPSHOT_PREFIX}0"
+    older.mkdir()
     r = client.post("/api/update/confirm")
 
     assert (r.status_code, r.json()) == (200, {"confirmed": True})
@@ -267,6 +269,8 @@ def test_confirm_ends_it(on_probation, client):
     assert on_probation.started == [1] and on_probation.spawned == ["w1"]
     assert when_free.read_rollback(on_probation.run_dirs) is None
     assert when_free.outcome(st)["from"] == "2.2.0"
+    # The confirmed update's snapshot is the way back now; the one before it goes.
+    assert on_probation.snapshot.is_dir() and not older.exists()
     assert client.post("/api/update/confirm").status_code == 409
 
 

@@ -465,7 +465,15 @@ def snapshot(run_dirs, config_dir: Path, version: str) -> dict:
     import shutil
     import sqlite3
 
-    root = run_dirs.base / f"{SNAPSHOT_PREFIX}{time.strftime('%Y%m%d-%H%M%S')}"
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    root, n = run_dirs.base / f"{SNAPSHOT_PREFIX}{stamp}", 1
+    while True:
+        try:
+            root.mkdir(parents=True)
+            break
+        except FileExistsError:  # two in one second: never touch the other
+            n += 1
+            root = run_dirs.base / f"{SNAPSHOT_PREFIX}{stamp}-{n}"
     config_copy = root / "config"
     snapshots = {}
     try:

@@ -2093,7 +2093,10 @@ def _snapshot_before_update(run_dirs: RunDirs) -> dict:
     if not run_dirs.base.is_dir() or not config_dir().is_dir():
         return {}
     try:
-        taken = when_free.snapshot(run_dirs, config_dir(), update.installed())
+        # The server that wrote the databases, when one answers: an install
+        # never restarted onto did not.
+        wrote = _running_server_version() or update.installed()
+        taken = when_free.snapshot(run_dirs, config_dir(), wrote)
     except (OSError, sqlite3.Error) as exc:
         _exit(f"could not back up the configuration and databases: {exc}. Nothing was installed")
     folder = Path(taken["config_snapshot"]).parent
@@ -2176,7 +2179,8 @@ def _cmd_update(ns: argparse.Namespace) -> None:
     if code != 0:
         when_free.drop_snapshot(taken)
         raise SystemExit(code)
-    if taken:
+    # An update still being confirmed may yet restore the snapshot its record names.
+    if taken and not when_free.read_rollback(run_dirs):
         when_free.delete_snapshots(run_dirs, keep=str(Path(taken["config_snapshot"]).parent))
     print(f"kraft {release.tag} installed.")
     if other := update.shadowing_kraft():
