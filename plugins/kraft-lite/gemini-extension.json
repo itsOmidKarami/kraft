@@ -1,5 +1,5 @@
 {
   "name": "kraft-lite",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "Walk a Kraft chain from spec to merge request inside your coding-agent session. It stops for your approval at each decision and limits its repair attempts. No server to run."
 }

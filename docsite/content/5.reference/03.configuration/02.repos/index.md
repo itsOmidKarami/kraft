@@ -94,7 +94,7 @@ No key on an entry passes silently. A key within two edits of a field below (`au
 |---|---|---|---|
 | `automated_review` | `{bot: LOGIN}` or `{check: NAME}`, or a list of them | unset | The automated reviewers a chain's `mr.automated_review` task waits for. A list names several; `[]` names none. Unset: the task expects none. See [Automated review](#automated-review). _Added in 2.4_ |
 | `ci_checks` | boolean | `true` | Set `false` on a repo with no CI, so both CI waits pass at once instead of waiting on checks that never come. See [`ci_checks`](#ci_checks). |
-| `post_merge_publish_jobs` | list of globs | `[]` | Failed-job names that count as publish jobs, such as a deploy to Pages. A red post-merge pipeline whose every failed job matches still files the follow-up bead but pauses no item. See [`post_merge_publish_jobs`](#post_merge_publish_jobs). _Added in next_ |
+| `post_merge_publish_jobs` | list of globs | `[]` | Failed-job names that count as publish jobs, such as a deploy to Pages. A red post-merge pipeline whose every failed job matches still files the follow-up bead but pauses no item. See [`post_merge_publish_jobs`](#post_merge_publish_jobs). _Added in 2.6_ |
 | `library_auto_update` | boolean | `false` | Take text-only changes to this repo's accepted [repo library](/reference/configuration/repo-libraries#automatic-updates) without a person. |
 
 ## Field details
@@ -157,7 +157,7 @@ Loading refuses an entry where a command string could name two scopes, because s
 Commands compare after shell splitting, so `just  test` and `just test` are one string.
 
 #### `concurrency_group`
-_Added in next_
+_Added in 2.6_
 
 Two scopes that name the same group never run together on one machine. See [Scopes that share a group](/concepts/how-test-scopes-run#scopes-that-share-a-group).
 
@@ -256,7 +256,7 @@ The two waits are a chain's `mr.ci` task before the merge and its `mr.post_merge
 
 ### `post_merge_publish_jobs`
 
-_Added in next_
+_Added in 2.6_
 
 After a merge, `mr.post_merge_ci` reads the target branch's pipeline. When it settles red, Kraft files a follow-up bead and pauses every running item whose base is the merged commit, because the commit may be broken. A failed deploy says nothing about the code, so list your publish jobs here and a pipeline whose failed jobs all match is reported without pausing anyone. The bead is titled `post-merge publish failed on <branch>` so a person still hears about it.
 

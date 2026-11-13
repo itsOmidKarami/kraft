@@ -2,7 +2,7 @@
   "name": "kraft",
   "displayName": "Kraft",
   "description": "Approve gates, review diffs and edit config for Kraft, the local orchestrator for your coding agent, without leaving VS Code or an editor built on it, such as VSCodium or Cursor.",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "publisher": "kraft-sdlc",
   "license": "Apache-2.0",
   "icon": "media/kraft.png",
@@ -254,7 +254,7 @@
       },
       {
         "command": "kraft.signIn",
-        "title": "Sign in to a server…",
+        "title": "Sign in to a server\u2026",
         "category": "Kraft"
       },
       {

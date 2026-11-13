@@ -62,6 +62,5 @@ Three commands check and reload the files:
 - [forges.yaml](/reference/configuration/forges): every field in `forges.yaml`: the named forge accounts, and which one a repo uses.
 
 ## Related
-<!-- not new: the harnesses.yaml link moved here from In this section -->
 
 - [Agent harnesses](/reference/harnesses): the fields of `harnesses.yaml`, for harness profiles and agent profiles, and the harnesses they configure.

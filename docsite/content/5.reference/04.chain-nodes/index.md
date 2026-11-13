@@ -151,7 +151,7 @@ the span.
 
 ### Resolve a rebase conflict with an agent
 
-_Added in next_
+_Added in 2.6_
 
 The shipped library has the task `resolve_rebase_conflict`, and no shipped chain names it. Name it, as `kraft-default:resolve_rebase_conflict`, under `on_conflict` and a base that moves and conflicts while the item waits on CI goes to an agent first. It re-runs the rebase on the item's branch and resolves the conflict. Kraft then restarts the span, so verification runs again on the new base, and a gate in the span that was approved reopens.
 
@@ -216,8 +216,8 @@ Every task takes these keys, then the keys of its kind. A task takes no
 | `policy` | [mapping](/reference/configuration/policy#policy-fields) | no | unset | This task's own policy layer. See [What a task's policy does](#what-a-tasks-policy-does). |
 | `skippable` | boolean | no | `true` | `false` refuses a skip of this task. |
 | `icon` | string | no | unset | The [icon](#icons) the board draws for the task. Refused on a fix loop's `judge`, whose icon is fixed. |
-| `outputs` | mapping: `files`, `variables` | no | unset | Only an agent or subprocess task in an exec node's own steps. `files` and `variables` name what the task leaves for later tasks. See [Step outputs](/reference/chain-nodes/step-outputs). _Added in next_ |
-| `reads` | list of `step.task` or `node.step.task` | no | `[]` | Only an agent, subprocess or `ci.pipeline` task. The earlier tasks whose outputs this one is given, each `step.task` or `node.step.task`. See [Step outputs](/reference/chain-nodes/step-outputs). _Added in next_ |
+| `outputs` | mapping: `files`, `variables` | no | unset | Only an agent or subprocess task in an exec node's own steps. `files` and `variables` name what the task leaves for later tasks. See [Step outputs](/reference/chain-nodes/step-outputs). _Added in 2.6_ |
+| `reads` | list of `step.task` or `node.step.task` | no | `[]` | Only an agent, subprocess or `ci.pipeline` task. The earlier tasks whose outputs this one is given, each `step.task` or `node.step.task`. See [Step outputs](/reference/chain-nodes/step-outputs). _Added in 2.6_ |
 
 ### What a task's policy does
 
@@ -267,10 +267,10 @@ CI pipeline by ID.
 
 | Key | Type | Required | Default | Meaning |
 |---|---|---|---|---|
-| `target` | string | yes | — | `mr.open_draft`, `mr.sync`, `mr.ci`, `mr.automated_review`, `mr.mark_ready`, `mr.external_approval`, `mr.merge` or `mr.post_merge_ci`. `ci.pipeline` waits for one pipeline by ID. _Added in next_ |
+| `target` | string | yes | — | `mr.open_draft`, `mr.sync`, `mr.ci`, `mr.automated_review`, `mr.mark_ready`, `mr.external_approval`, `mr.merge` or `mr.post_merge_ci`. `ci.pipeline` waits for one pipeline by ID. _Added in 2.6_ |
 | `wait` | mapping: `polling`, `grace_period` | no | unset | For a target that waits: `polling`, with an `initial_interval` and a `max_interval`. Set the timeout with the task's `policy`. |
 | `wait.grace_period` | duration | no | `60s` | Only on `mr.automated_review`: how long a review bot must stay quiet after its last activity on the head to count as finished. Refused on any other target. _Added in 2.4_ |
-| `pipeline` | string | yes, on `ci.pipeline` | — | Only on `ci.pipeline`: the pipeline's ID as digits, or `$NAME` (or `${NAME}`) for a variable a task in `reads` left. See [Waiting for a pipeline by ID](/reference/chain-nodes/wait-for-a-pipeline). _Added in next_ |
+| `pipeline` | string | yes, on `ci.pipeline` | — | Only on `ci.pipeline`: the pipeline's ID as digits, or `$NAME` (or `${NAME}`) for a variable a task in `reads` left. See [Waiting for a pipeline by ID](/reference/chain-nodes/wait-for-a-pipeline). _Added in 2.6_ |
 | `reviewers` | list of `{bot: LOGIN}` or `{check: NAME}` | no | unset | Only on `mr.automated_review`: the reviewers it waits for, each `{bot: LOGIN}` or `{check: NAME}`. The item's `reviewers` override and the repo's `automated_review` come first. `[]` names none. _Added in 2.4_ |
 
 `mr.post_merge_ci` watches the CI of the commit the item merged, however many merges land on the base branch after it. A run cancelled for a newer push moves the watch onto the base's tip, which holds that merge, and records `post_merge_ci_moved`.
@@ -323,7 +323,7 @@ library's sections and has examples of each.
 
 ## Group node
 
-_Added in next_
+_Added in 2.6_
 
 A `group` node holds the execution nodes that a plan's slices share, its body. Only chain
 revision makes one. A chain file that declares a group is refused, and so is an extending

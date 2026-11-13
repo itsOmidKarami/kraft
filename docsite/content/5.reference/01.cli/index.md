@@ -157,7 +157,7 @@ object per line, because a stream has no end on which to close an array.
 
 ## Calls from a coding agent's shell
 
-_Added in next_
+_Added in 2.6_
 
 A `kraft` command run from a coding agent's shell is recorded as an assistant's, as an
 [MCP](/reference/mcp-tools) call is: a gate it decides reads as an assistant's decision, and it is

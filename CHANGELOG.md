@@ -5,6 +5,182 @@ section from the `## Changelog` part of the pull requests it ships; do not
 edit this file by hand. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
+## 2.6.0
+
+### Highlights
+
+- Kraft's own chains and library now ship with Kraft as the built-in add-on kraft-default, so upgrading Kraft updates them. New homes get thin chains that extend it, `kraft admin update` shows what changes in kraft-default before installing, and older homes are told how to move over. When Kraft's own chains need attention, it tells you: a board banner, a browser notification and one webhook message per new state (notify.yaml `kraft_default`). (#1237)
+
+- Slices: a plan that ends in a `## Slices` section is built in parallel, one child work item per slice, then joined onto the parent's branch and its single merge request. When two slices conflict at the join, an agent (`resolve_join_conflict`) tries to resolve it first, and a person is asked only when it cannot join the slice. The item page draws the group as its path: the shared groundwork, one box per slice that opens its own item, and the join. A plan with no `## Slices` section behaves as before. (#1314)
+
+### New
+
+- New: Kraft Lite runs a gate's checks-first reviewer (`auto_review_mode: checks_first`) before the gate reaches you. It sends the work back on a `reject` or hands you the gate with its note, and never approves. (#1228)
+
+- Claude Code sub-agents' log lines are tagged and prefixed `↳ <label>:`, and the web log, the phone log and `kraft view logs --agent` can show one sub-agent's lines on their own. (#1243)
+
+- New: a task can declare `outputs:` and write to `$KRAFT_OUTPUT_DIR`, and a later task names it in `reads:` to get a read-only snapshot of those files and variables; `storage.outputs.max_size` sets how much one task may keep. (#1294)
+
+- New: the `ci.pipeline` task waits for one CI pipeline by id (literal or `$NAME` from a step output) without retrying jobs, and stops for a person on an infrastructure failure, a cancelled run or a pipeline that ran nothing. (#1301)
+
+- Add: a task's Claude Code sub-agents are listed on its Overview, on the item and the chain graph, and on the phone; a sub-agent still running when its session ends is noted in the log instead of failing the session. (#1302)
+
+- Sliced items: a conflict between slices at the join goes to an agent (`resolve_join_conflict`) first, and a person is asked only when it cannot join the slice. (#1320)
+
+- Fix: Claude workers launch with background tasks turned off, so a sub-agent can no longer be stopped mid-task with its work uncommitted when the session's turn ends. Harness files gain a `launch_env:` key for variables set on every launch. (#1326)
+
+- VS Code: sign in to a remote Kraft server from the extension with **Kraft: Sign in to a server…**. (#1328)
+
+- `kraft console --server URL` opens the console against a Kraft on another machine after a password sign-in, keeping a revocable session instead of using the server's token. (#1330)
+
+- A fix-loop repair can re-run CI jobs that failed outside the code (a download 504, a runner that went away) with `kraft item rerun-ci`, instead of the item stopping stuck. A stop after re-runs says the failure was infrastructure. (#1337)
+
+- Review page: the toolbar counts unresolved threads, and its arrows (or `]` and `[`) step through them, opening a folded or other file to show each one. (#1339)
+
+- Running work looks the same everywhere: blue, with a light moving along running nodes and ticks and a breathing dot beside running sub-agents, tasks and checks. Amber now means only that something needs you. (#1342)
+
+- `kraft console` draws running work in blue, with a spinner on the running node and a breathing dot on its current task and session (steady without truecolor or with `NO_COLOR`); amber now means only that an item needs you, a failed item's place is red, and an escalated item no longer spins. (#1349)
+
+- `kraft view list` and `kraft view watch` print the status the web board and console show (`running`, `needs you`, `failed`, …), with running in blue and done in green. `--json` rows and MCP `list_work_items` carry `display_status`. A script that reads the STATUS column should read `--json`'s `status` instead. (#1351)
+
+- `kraft view list --status` (and MCP `list_work_items`) also takes the words the STATUS column shows, such as `failed`, `running` or `needs you`. A word both have, like `waiting`, still means the stored status. `kraft view show` (and MCP `get_work_item`) now include the displayed status. (#1352)
+
+- The item page draws a sliced item's group as its path: the shared groundwork, one box per slice opening its own item, and the join. Its nodes open on their own view, and the chain says which phase the group is in. (#1357)
+
+- A slice's crumbs name its parent, and a sliced item's crumb lists the parent and its slices to jump between them. (#1358)
+
+- A test scope's `concurrency_group` in `repos.yaml` runs heavy suites one at a time on the local worker, across work items and repos. (#1381)
+
+- A test scope's `concurrency_group` now also runs one at a time on each remote machine; two machines of one runner group can each run one. A step waiting on a named machine or on `any` now says why on the board, whatever the reason. (#1384)
+
+- Kraft runs on Python 3.15, and CI tests it. Vector search doesn't install on 3.15 yet, because `onnxruntime` has no build for it: install Kraft with `--python 3.14` to use it. (#1386)
+
+- Console: update a remote server from the Server screen (#1394)
+
+- Kraft Lite runs Kraft's own method for a `kraft:<name>` task (spec, plan, code review, fix-loop judge, merge request metadata and the rest) when nothing is bound to it, instead of a one-line prompt. (#1395)
+
+- Kraft Lite reads a plan's `## Slices` section in Kraft's grammar (`kl.py plan-slices`), builds tasks in no slice as a first groundwork slice, and checks that a proposal covers every plan task (`plan-slices --check`). (#1399)
+
+- Kraft Lite reads a stock Kraft home (`kraft-default:` chains), and its gates follow Kraft's rules: the final review needs its document, and a chain revision that changes nothing passes without asking. (#1400)
+
+- New: a gate's page lists every round it went through, with how each ended, who decided and the note, and you can step back through them on the desktop and on a phone. (#1416)
+
+- The `default` chain now runs a reviewer agent at every gate before you're asked: it sends back work that isn't ready and hands the rest to you marked **ready for you**, and never approves on its own. Turn it off for one item with `--no-auto-gate`, or for a gate with `auto_review: null` in an override. A chain that extends `default` and gives one of its gates an `auto_review` with an `id`, `kind` or `extends` is now refused; delete those keys and keep any `prompt`, `skill` or `harness` it sets. (#1417)
+
+- New opt-in library task `resolve_rebase_conflict`: name it as `kraft-default:resolve_rebase_conflict` under `on_base_changed.on_conflict` and an agent resolves a rebase conflict before the item stops. (#1424)
+
+- New: set `post_merge_publish_jobs` on a repository so a failed deploy-only post-merge job files a follow-up bead without pausing running items. (#1429)
+
+- Changed: a `kraft` command run from a Claude Code session's shell is now recorded as an assistant's, not a person's. Set `KRAFT_CLIENT=cli` for a command you mean to make as yourself. (#1430)
+
+- A review gate's round now shows the review that closed it and the threads raised in it, on the review page, the gate view and the phone. (#1431)
+
+- Add: a `kraft-sdlc` command, the same as `kraft`, so `uvx kraft-sdlc` starts Kraft and the MCP registry can list Kraft's MCP server. (#1450)
+
+### Fixes
+
+- `POST /api/triggers` now answers 422 with the reason, not 502, when a chain breaks an administrator maximum. (#1217)
+
+- Fix: Re-running `kraft admin init` refreshes skills when its MCP server is already registered. (#1227)
+
+- Fix: git fetch and push over HTTPS with an API-token forge account no longer fail on macOS with "error setting certificate verify locations". (#1238)
+
+- Fix: on macOS, a sandboxed step could lose its last output (often the agent's result) when it ended at the wrong instant. (#1241)
+
+- Fix: the server's stale-pidfile check no longer crashes when macOS refuses to read a process's command line. (#1242)
+
+- Fix: a fix-loop round that changes nothing stops the node for a person, instead of measuring the same code again. (#1244)
+
+- Fix: `kraft admin stop` no longer prints a "removed a stale pidfile" note about the server it is stopping. (#1253)
+
+- Fix: the review page shows a thread only with its file one file at a time, and offers the whole change for a thread on a file the comparison leaves out. (#1259)
+
+- Update pydantic, websockets, react-router-dom, lucide-react and ws to their latest patch/minor releases. (#1277)
+
+- A malformed item draft now answers with a one-line error naming the op and field, instead of pydantic's raw multi-line message. (#1286)
+
+- `kraft admin install-service` and `uninstall-service` no longer crash on Linux without `systemctl` (such as a container): install says there is no systemd user manager and writes no unit, and uninstall removes any leftover unit. (#1287)
+
+- Fix: log lines in the web UI, and the test log a gate links to, no longer show colour codes like `[32m` from pytest output. (#1288)
+
+- Fix: CI job log tails in the web UI, fix-loop prompts and post-merge beads no longer show raw ANSI escape codes. (#1289)
+
+- Fix: the attach picker for a spec or plan now suggests the repo's markdown files as you type, including untracked ones and those in `.engineering/` and `docs/superpowers/`. (#1291)
+
+- Fix: the search's Review row for an item at a gate opens that gate's document, not the bare diff. (#1292)
+
+- Fixed: a draft pull request no longer stops its work item when GitHub refuses the reviewer request, as it does when the reviewer is the pull request's author; Kraft no longer tells the agent to take reviewers from CODEOWNERS. (#1297)
+
+- Changed: the default merge-request description step leaves reviewers empty unless the repository's own rules name one, and no longer takes them from CODEOWNERS. (#1299)
+
+- Fix: screen readers now hear a sub-agent's status, tokens and time on its row, and a task's sub-agents are read once per poll instead of twice. (#1304)
+
+- Fix: a future-dated update cache no longer counts as fresh (#1313)
+
+- Fix: Description box in new-item form now aligns with the other fields (#1315)
+
+- `kraft view pipelines` and CI waits on GitHub no longer come back empty when a fork's pull request uses a branch of the same name. (#1317)
+
+- Fix: a slice family that hits its shared cost cap sends one notification naming the parent, instead of one per slice. (#1321)
+
+- Fix: Analytics counts a work item built in slices once, with its slices' cost, repairs and stops added to it. (#1322)
+
+- Fix: a slice join no longer stops for a person when its conflict agent resolved the conflict but left a stray file behind. (#1323)
+
+- Fix: a slice join's conflict agent that is paused, stopped or cut off by a restart gets a fresh turn when the item resumes, instead of the item stopping for you. (#1324)
+
+- Fix: a slice join's conflict agent gets one fresh turn after a pause or restart; if it's cut short again, the item stops for you with the steps instead of running the agent again. (#1325)
+
+- Fix: `kraft admin addon validate` names a chain that does not resolve by its file, once, instead of printing the add-on's folder in front of the file's path. (#1329)
+
+- Fix: the review page draws the diffs in the same order as its file list, folders first. (#1336)
+
+- Fix: a workspace item whose Kraft was killed mid member checkout now finishes its members on restart, instead of running root-only and opening a merge request for the root alone. (#1340)
+
+- Fix: `kraft repo` updates now report a non-JSON server answer as an error instead of treating it as the saved repository. (#1353)
+
+- A running node's light no longer sticks out past its border on 1x screens. With reduced motion, a running node now shows a still lit arc instead of a full border, so it stays distinct from a current node that is not running in the mono colour scheme. (#1354)
+
+- A sliced work item's detail no longer reads every plan task done once its shared groundwork finishes. Until its slices join, it counts the groundwork and the slices whose items completed. (#1359)
+
+- A sliced item's own crumb no longer opens a menu of its slices; its **slices** node lists them. A slice's crumb still lists its parent and the other slices. (#1363)
+
+- An archived slice's page still shows its changed files and **Review changes**, read where the join replayed its commits onto its parent's branch, for as long as the parent has a worktree. (#1364)
+
+- A slice that retries itself after a failure is no longer rebased onto the base branch, so it stays on the parent's fork commit and its diff no longer counts the parent's groundwork. (#1366)
+
+- A sliced item's row on the board lists only the slices that need you, each by its own name, and fits a phone's screen. The desktop board's Show slices toggle is gone. (#1367)
+
+- An item whose test scope calls a `just` recipe its base branch lacks now stops as a configuration problem naming the recipe and the base, instead of failing its tests and spending a repair. (#1379)
+
+- Fix: the Kraft plugin skills route each job to one skill and no longer suggest a command that blocks the shell or a tool that refuses the stop (time caps, agent questions). (#1389)
+
+- The code review step is read-only, and the worker skills close several gaps: reviewers change nothing, review-bot triage keeps only severities that get fixed, and repair skills report what they leave. (#1391)
+
+- Docs: the HTTP API reference keeps the stable routes, the work item object and the routes a script calls; `/openapi.json` now tags and describes every route and covers the rest. (#1392)
+
+- Fix: the Kraft plugin skills now give accurate instructions for deciding gates through MCP, connecting a repo and checking config. (#1411)
+
+- Fix: Kraft Lite's `approve --slices` now refuses a slicing that leaves a plan task out, instead of approving it. (#1412)
+
+- Fix: a rebase conflict hit while waiting on CI stops as a conflict that escalation can pick up, not as an infra stop telling you to reinstall Kraft. (#1414)
+
+- Fix: an agent in a `read_only` step is told to change nothing instead of to commit and run tests, and Kraft Lite now carries `read_only` and tells its agent the same. (#1415)
+
+- Fix: Kraft Lite skills now say how to resume a slice child, handle a re-steered fix loop and a shipped-method task, and review a gate with the reviewer's own method. (#1419)
+
+- Fix: worker skills give clearer rules to the agents that review, plan and describe a change. (#1421)
+
+- A forge task's rebase conflict in a node with no fix loop now shows git's `rebase onto <base> failed:` line in the stop reason. (#1425)
+
+- Fix: a test step queued for a concurrency group no longer starts after its work item is paused. (#1427)
+
+- Fix: Treat cancelled, never-started CI jobs as infrastructure failures. (#1428)
+
+- Fix: a work item cut from an older commit no longer overwrites the saved test-selection record of a newer one, so after a change to a widely imported module the next item no longer runs nearly the whole suite. (#1446)
+
+- Build: dependency updates: fastapi 0.162.2, pydantic 2.14.3, vite 8.3.6, shiki 4.6.0, lucide-react 1.70.0 and others. (#1448)
+
 ## 2.5.0
 
 ### Highlights
