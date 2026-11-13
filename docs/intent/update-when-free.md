@@ -97,12 +97,12 @@ origin: src/kraft/when_free.py §pending
 
 ## REQ an-update-copies-config-and-databases-before-it-installs
 
-WHEN `kraft admin update` is about to install a release, the system SHALL first copy the configuration directory and every run database, with the installed version, into `run/update-snapshot-<time>/`, and IF the copy fails, THEN the system SHALL install nothing and remove the partial copy.
-enforced-by: tests/cli/test_admin_update.py::test_update_snapshots_config_and_databases_before_it_installs[installed-keeps-only-its-snapshot], tests/cli/test_admin_update.py::test_update_snapshots_config_and_databases_before_it_installs[failed-copy-installs-nothing]
+WHEN `kraft admin update` is about to install a release, the system SHALL first copy the configuration directory and every run database, with the version of the running server or else the installed one, into `run/update-snapshot-<time>/`, and IF the copy fails, THEN the system SHALL install nothing and remove the partial copy; a copy made in the same second as another SHALL NOT touch it.
+enforced-by: tests/cli/test_admin_update.py::test_update_snapshots_config_and_databases_before_it_installs[installed-keeps-only-its-snapshot], tests/cli/test_admin_update.py::test_update_snapshots_config_and_databases_before_it_installs[failed-copy-installs-nothing], tests/test_when_free.py::test_a_snapshot_restores_config_and_databases_and_drops_a_stale_wal
 origin: src/kraft/cli/admin.py §_snapshot_before_update
 
 ## REQ the-last-updates-snapshot-stays-until-the-next-one
 
-The system SHALL keep the snapshot of the last update that went through until the next update goes through, across restarts, and an attempt that installs nothing or is not confirmed SHALL NOT delete it.
-enforced-by: tests/api/test_startup.py::test_a_confirmed_updates_snapshot_outlives_a_restart, tests/test_when_free.py::test_apply_once[busy-attempts-keep-the-earlier-snapshot-and-none-of-their-own], tests/cli/test_admin_update.py::test_update_snapshots_config_and_databases_before_it_installs[failed-install-keeps-the-earlier-one], tests/cli/test_admin_update.py::test_update_snapshots_config_and_databases_before_it_installs[installed-keeps-only-its-snapshot]
+The system SHALL keep the snapshot of the last update that went through until the next update goes through, across restarts, and an attempt that installs nothing or is not confirmed SHALL NOT delete it, nor SHALL a manual update delete the snapshot an update still being confirmed names.
+enforced-by: tests/api/test_startup.py::test_a_confirmed_updates_snapshot_outlives_a_restart, tests/test_when_free.py::test_apply_once[busy-attempts-keep-the-earlier-snapshot-and-none-of-their-own], tests/cli/test_admin_update.py::test_update_snapshots_config_and_databases_before_it_installs[failed-install-keeps-the-earlier-one], tests/cli/test_admin_update.py::test_update_snapshots_config_and_databases_before_it_installs[refused-install-keeps-the-earlier-one], tests/cli/test_admin_update.py::test_update_snapshots_config_and_databases_before_it_installs[an-update-in-flight-keeps-its-snapshot], tests/cli/test_admin_update.py::test_update_snapshots_config_and_databases_before_it_installs[installed-keeps-only-its-snapshot], tests/api/test_startup.py::test_confirm_ends_it
 origin: src/kraft/when_free.py §delete_snapshots

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -353,20 +352,9 @@ def test_the_rollback_record_is_written_in_two_phases(run_dirs):
     assert when_free.read_rollback(run_dirs) is None
 
 
-def test_two_snapshots_in_one_second_never_touch_each_other(tmp_path, run_dirs, monkeypatch):
-    config = tmp_path / "config"
-    config.mkdir()
-    monkeypatch.setattr(when_free.time, "strftime", lambda *_a: "20261113-120000")
-
-    first = Path(when_free.snapshot(run_dirs, config, "2.2.0")["config_snapshot"]).parent
-    second = Path(when_free.snapshot(run_dirs, config, "2.2.1")["config_snapshot"]).parent
-
-    assert second.name == f"{first.name}-2"
-    assert (first / "version").read_text() == "2.2.0\n"
-    assert (second / "version").read_text() == "2.2.1\n"
-
-
-def test_a_snapshot_restores_config_and_databases_and_drops_a_stale_wal(tmp_path, run_dirs):
+def test_a_snapshot_restores_config_and_databases_and_drops_a_stale_wal(
+    tmp_path, run_dirs, monkeypatch
+):
     import sqlite3
 
     config = tmp_path / "config"
@@ -376,7 +364,9 @@ def test_a_snapshot_restores_config_and_databases_and_drops_a_stale_wal(tmp_path
     with sqlite3.connect(run_dirs.db) as c:
         c.execute("CREATE TABLE t (v TEXT)")
         c.execute("INSERT INTO t VALUES ('before')")
+    monkeypatch.setattr(when_free.time, "strftime", lambda *_a: "20261113-120000")
     record = when_free.snapshot(run_dirs, config, "2.2.0")
+    assert when_free.snapshot(run_dirs, config, "2.2.0")["config_snapshot"].endswith("-2/config")
 
     (config / "access.yaml").write_text("port: 1\n")
     (config / "chains" / "default.yaml").unlink()
@@ -427,8 +417,7 @@ def attempt(state, monkeypatch, tmp_path):
         return release["result"]
 
     def take(run_dirs, config_dir, version):
-        calls.append(("snapshot",))
-        seen.setdefault("versions", []).append(version)
+        calls.append(("snapshot", version))
         busy["now"] = seen.get("busy_after_snapshot", False)
         copy = run_dirs.base / f"{when_free.SNAPSHOT_PREFIX}{len(seen.setdefault('taken', []))}"
         (copy / "config").mkdir(parents=True)
@@ -690,9 +679,7 @@ async def test_apply_once(attempt, case):
             attempt.busy["now"] = False
             attempt.st.version = "2.2.0"
             await when_free.apply_once(attempt.app, now=NOON)
-            if busy:
-                assert _snapshots(attempt) == [stale]
-        # The earlier one stays until the new server is confirmed (`end_probation`).
+        # Busy attempts leave none of theirs; the earlier one awaits `end_probation`.
         assert set(_snapshots(attempt)) == {stale, attempt.seen["taken"][-1]}
 
 
@@ -727,8 +714,7 @@ async def test_a_handed_off_restart_keeps_its_snapshot_and_says_so(attempt):
     record = when_free.read_rollback(attempt.st.run_dirs)
     assert record["handed_off"] is True and record["handed_off_at"]
     assert len(_snapshots(attempt)) == 1
-    # The version that wrote the copied databases, not the one just installed.
-    assert attempt.seen["versions"] == ["2.2.0"]
+    assert ("snapshot", "2.2.0") in attempt.calls  # what wrote the databases, not v2.2.1
 
 
 async def test_outside_the_allowed_hours_nothing_happens(attempt):
