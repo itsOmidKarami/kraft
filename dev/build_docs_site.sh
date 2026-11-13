@@ -4,7 +4,8 @@
 # at /next/ (dev/docs_versions.py picks the tags). Every build uses this
 # checkout's site code (theme, components, config), so a site fix reaches the
 # release docs without a release; only docsite/content and .github/assets (and
-# an older release's diagram images) come from the tag. Needs
+# an older release's diagram images) come from the tag, with this checkout's
+# .github/assets filling in the images the tag lacks. Needs
 # docsite/node_modules (npm ci) and the repo's tags.
 #
 #   dev/build_docs_site.sh OUT_DIR
@@ -74,6 +75,11 @@ build_tag() { # ID BASE TAG DEST
   (cd "$ROOT/docsite" && tar -cf - --exclude ./content --exclude ./node_modules \
     --exclude ./.nuxt --exclude ./.output --exclude ./.data --exclude ./dist-site .) | tar -xf - -C "$w/docsite"
   cp "$ROOT/frontend/public/icon.svg" "$w/frontend/public/"
+  # This checkout's images first, then the tag's over them: the site code's
+  # marketing pages compile in every build and need their own images (a tag
+  # from before them has none), while the tag's pages keep the tag's.
+  mkdir -p "$w/.github"
+  cp -R "$ROOT/.github/assets" "$w/.github/"
   git -C "$ROOT" archive "$3" docsite/content .github/assets | tar -xf - -C "$w"
   # The tag was cut before its release stamped the "Added in next" notes (the
   # stamp pull request comes after), so stamp this copy the way that pull
