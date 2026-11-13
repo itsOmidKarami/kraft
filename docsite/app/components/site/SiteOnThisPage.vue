@@ -1,7 +1,9 @@
 <!-- The strip under a capability page's head: a link to each block. From a
      tablet up it sticks to the top of the screen, and the link of the block
      you are reading is marked (aria-current): the last block whose top has
-     passed under the bar. -->
+     passed under the bar. While it sticks, a jump to a block or a focused
+     link stops below it (scroll-padding-top, the bar's height: two rows on a
+     tablet). -->
 <script setup lang="ts">
 const props = defineProps<{ links: { id: string, label: string }[] }>()
 
@@ -20,16 +22,30 @@ function mark() {
 const onScroll = () => {
   frame ||= requestAnimationFrame(mark)
 }
+function pad() {
+  const el = bar.value
+  if (!el) return
+  document.documentElement.style.scrollPaddingTop = getComputedStyle(el).position === 'sticky' ? `${el.offsetHeight}px` : ''
+}
+const onResize = () => {
+  pad()
+  onScroll()
+}
 
 onMounted(() => {
+  pad()
+  // A #block address was jumped to before the padding existed: jump again.
+  const target = props.links.some(l => `#${l.id}` === location.hash) && document.getElementById(location.hash.slice(1))
+  if (target && document.documentElement.style.scrollPaddingTop) target.scrollIntoView()
   mark()
   window.addEventListener('scroll', onScroll, { passive: true })
-  window.addEventListener('resize', onScroll, { passive: true })
+  window.addEventListener('resize', onResize, { passive: true })
 })
 onBeforeUnmount(() => {
   window.removeEventListener('scroll', onScroll)
-  window.removeEventListener('resize', onScroll)
+  window.removeEventListener('resize', onResize)
   cancelAnimationFrame(frame)
+  document.documentElement.style.scrollPaddingTop = ''
 })
 </script>
 

@@ -1956,6 +1956,12 @@
     min-height: calc(100svh - 89px);
   }
 
+  /* A grid item with auto margins would shrink to its text and centre: keep
+     the column the sections below use. */
+  .site .s-pagehead > .s-wrap {
+    width: 100%;
+  }
+
   .site .s-pagehead:has(+ .s-onpage) {
     min-height: calc(100svh - 89px - var(--s-onpage-h));
   }
