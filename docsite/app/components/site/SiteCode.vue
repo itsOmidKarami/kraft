@@ -1,7 +1,7 @@
 <!-- A file shown in a panel: its path as the header, then its lines. Lines
      `hl` (first and last, counted from 0) are highlighted; `mark` puts the gate
-     diamond in a gutter beside that line. A line never scrolls sideways: a long
-     one wraps in its own row, the wrapped part two characters past the line's
+     diamond in the gutter beside that line (a phone drops an empty gutter). A
+     line never scrolls sideways: a long one wraps in its own row, the wrapped part two characters past the line's
      start. Each line is `key: value`; the key is drawn quieter, and a value of
      `gate` in amber. `short` replaces `note` on a phone. -->
 <script setup lang="ts">
@@ -33,13 +33,12 @@ const rows = computed(() => props.lines.map((text, i) => {
         {{ note }}
       </template>
     </div>
-    <pre :class="{ 's-code-gutter': mark !== undefined }"><code><span
+    <pre :class="{ 's-code-nomark': mark === undefined }"><code><span
       v-for="(r, i) in rows"
       :key="i"
       class="s-code-line"
       :class="{ 's-code-hl': r.hl }"
     ><span
-      v-if="mark !== undefined"
       class="s-code-mark"
       aria-hidden="true"
     ><i v-if="r.mark" /></span><span

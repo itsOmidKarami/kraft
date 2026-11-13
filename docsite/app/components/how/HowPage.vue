@@ -112,7 +112,7 @@ const REPOS_YAML = [
             src="/assets/site/gate-review.png"
             width="1230"
             height="488"
-            alt="A gate's review page: the review brief an agent wrote, the files on the branch and the Request changes and Approve buttons"
+            alt="A gate's review page: the review brief an agent wrote, the files on the branch and Request changes and Approve buttons"
             loading="lazy"
           >
         </div>

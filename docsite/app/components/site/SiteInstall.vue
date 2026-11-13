@@ -1,6 +1,6 @@
 <!-- The Install band, on the violet field: the command with a Copy button that
      says it copied in words, then the page's own text (the default slot) and its
-     links (the links slot). -->
+     links (the links slot). With no text it is shorter, as on How it works. -->
 <script setup lang="ts">
 const COMMAND = 'uv tool install kraft-sdlc'
 const copied = ref(false)
@@ -24,6 +24,7 @@ onBeforeUnmount(() => clearTimeout(timer))
 <template>
   <section
     class="s-section s-install s-field"
+    :class="{ 's-install-short': !$slots.default }"
     aria-labelledby="install"
   >
     <div class="s-wrap s-install-body">

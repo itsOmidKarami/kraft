@@ -65,7 +65,7 @@
 }
 
 .site {
-  --s-gutter: clamp(24px, 7.5vw, 96px);
+  --s-gutter: clamp(24px, calc(8.09vw - 7.55px), 96px);
   --s-mono: ui-monospace, Menlo, monospace;
   display: flex;
   flex-direction: column;
@@ -80,6 +80,12 @@
 
 .site main {
   flex: 1 0 auto;
+}
+
+/* Tailwind's base gives <code> and <pre> the docs' Plex Mono. */
+.site code,
+.site pre {
+  font-family: var(--s-mono);
 }
 
 /* No word left alone on a paragraph's last line, no lopsided heading. */
@@ -176,6 +182,15 @@
   background: rgb(255 255 255 / 0.06);
 }
 
+.site .s-field .s-themed .s-btn-secondary {
+  border-color: var(--s-outline);
+  background: var(--s-card);
+}
+
+.site .s-field .s-themed .s-btn-secondary:hover {
+  background: var(--s-raised);
+}
+
 .site .s-icon-button {
   display: flex;
   align-items: center;
@@ -230,6 +245,10 @@
 
 .site .s-header-phone .s-btn-sm {
   padding: 0 18px;
+}
+
+.site .s-header-phone:has([aria-expanded='true']) > .s-btn {
+  display: none;
 }
 
 .site .s-nav-link,
@@ -386,7 +405,7 @@
 .site .s-sheet-name {
   font-size: 20px;
   font-weight: 600;
-  line-height: 1.4;
+  line-height: 1.2;
   color: var(--s-text);
 }
 
@@ -435,7 +454,6 @@
 
 .site .s-footer-brand p {
   margin: 0;
-  max-width: 300px;
   font-size: 15px;
   line-height: 1.6;
   color: var(--s-text-muted);
@@ -494,6 +512,10 @@
 
   .site .s-footer-brand {
     gap: 6px;
+  }
+
+  .site .s-footer-brand p {
+    max-width: 300px;
   }
 
   .site .s-footer-col {
@@ -564,10 +586,27 @@
    window. */
 .site .s-display {
   margin: 0;
-  font-size: clamp(30px, 8.7vw, 72px);
+  font-size: clamp(30px, calc(17.35px + 4.27vw), 72px);
   font-weight: 600;
-  line-height: 1.06;
+  line-height: 1.04;
   letter-spacing: -0.03em;
+}
+
+@media (max-width: 767px) {
+  .site .s-display {
+    line-height: 1.08;
+    letter-spacing: -0.028em;
+  }
+
+  .site .s-h2 {
+    line-height: 1.1;
+    letter-spacing: -0.024em;
+  }
+
+  .site .s-card h3 {
+    line-height: 1.2;
+    letter-spacing: -0.014em;
+  }
 }
 
 .site .s-display span {
@@ -580,7 +619,7 @@
 
 .site .s-h2 {
   margin: 0;
-  font-size: clamp(34px, calc(16px + 4.2vw), 56px);
+  font-size: clamp(34px, calc(24.36px + 2.472vw), 56px);
   font-weight: 600;
   line-height: 1.08;
   letter-spacing: -0.026em;
@@ -588,19 +627,23 @@
 }
 
 .site .s-h2-big {
-  font-size: clamp(34px, calc(4px + 6.6vw), 72px);
+  font-size: clamp(34px, calc(17.35px + 4.27vw), 72px);
 }
 
 .site .s-lede {
   margin: 0;
   max-width: 640px;
-  font-size: clamp(17px, calc(14.5px + 0.42vw), 20px);
+  font-size: clamp(17px, calc(15.69px + 0.337vw), 20px);
   line-height: 1.55;
   color: var(--s-text-sub);
 }
 
 .site .s-field .s-lede {
   color: var(--s-lede);
+}
+
+.site .s-section .s-lede {
+  line-height: 1.6;
 }
 
 .site figcaption {
@@ -633,7 +676,7 @@
 
 /* Sections */
 .site .s-section {
-  padding-block: clamp(72px, 9.4vw, 120px);
+  padding-block: clamp(72px, calc(50.97px + 5.393vw), 120px);
   background: var(--s-ground);
 }
 
@@ -671,6 +714,10 @@
   .site .s-head-text {
     gap: 20px;
   }
+
+  .site .s-head > .s-arrow {
+    align-self: flex-end;
+  }
 }
 
 .site .s-figure {
@@ -682,7 +729,7 @@
 
 /* The hero */
 .site .s-hero {
-  padding-block: clamp(40px, 5.6vw, 72px) clamp(56px, 8.1vw, 104px);
+  padding-block: clamp(40px, calc(25.98px + 3.596vw), 72px) clamp(56px, calc(34.97px + 5.393vw), 104px);
 }
 
 .site .s-hero-body {
@@ -1254,7 +1301,7 @@
 
 /* "Not another coding agent." */
 .site .s-statement {
-  padding-block: clamp(80px, 10.6vw, 136px);
+  padding-block: clamp(80px, calc(55.46px + 6.292vw), 136px);
   text-align: center;
 }
 
@@ -1372,6 +1419,12 @@
   height: 20.8px;
 }
 
+@media (max-width: 767px) {
+  .site .s-code-nomark .s-code-mark {
+    display: none;
+  }
+}
+
 .site .s-code-mark i {
   width: 10px;
   height: 10px;
@@ -1474,7 +1527,7 @@
 
 .site .s-card h3 {
   margin: 0;
-  font-size: clamp(22px, calc(17px + 0.85vw), 28px);
+  font-size: clamp(22px, calc(19.37px + 0.674vw), 28px);
   font-weight: 600;
   line-height: 1.15;
   letter-spacing: -0.018em;
@@ -1569,6 +1622,14 @@
   align-items: center;
   gap: clamp(28px, 3.1vw, 40px);
   text-align: center;
+}
+
+.site .s-install-short {
+  padding-block: clamp(72px, calc(57.98px + 3.596vw), 104px);
+}
+
+.site .s-install-short .s-install-body {
+  gap: clamp(28px, calc(24.49px + 0.899vw), 36px);
 }
 
 .site .s-install-command {
@@ -1732,7 +1793,7 @@
 
 /* A capability page's head (site/SitePageHead.vue) */
 .site .s-pagehead {
-  padding-block: clamp(40px, 7.5vw, 96px) clamp(56px, 8.1vw, 104px);
+  padding-block: clamp(40px, calc(15.46px + 6.292vw), 96px) clamp(56px, calc(34.97px + 5.393vw), 104px);
 }
 
 .site .s-pagehead-grid {
@@ -1749,7 +1810,7 @@
 
 .site .s-pagehead-title {
   margin: 0;
-  font-size: clamp(34px, calc(16px + 4.2vw), 56px);
+  font-size: clamp(34px, calc(24.36px + 2.472vw), 56px);
   font-weight: 600;
   line-height: 1.06;
   letter-spacing: -0.028em;
@@ -1835,6 +1896,10 @@
   background: var(--s-accent-hover);
 }
 
+.site .s-video-poster .s-label-small {
+  font-weight: 600;
+}
+
 .site .s-video-title {
   font-size: 17px;
   font-weight: 600;
@@ -1900,7 +1965,7 @@
 
 /* A capability block (site/SiteBlock.vue) */
 .site .s-block {
-  padding-block: clamp(72px, 8.75vw, 112px);
+  padding-block: clamp(72px, calc(54.47px + 4.494vw), 112px);
 }
 
 .site .s-block-grid {
@@ -1961,6 +2026,16 @@
     grid-template-areas: '. picture' 'head picture' 'body picture' '. picture';
     column-gap: 72px;
     row-gap: 20px;
+  }
+
+  .site .s-block-right .s-block-grid,
+  .site .s-block-left .s-block-grid {
+    row-gap: 0;
+  }
+
+  .site .s-block-right .s-block-body,
+  .site .s-block-left .s-block-body {
+    margin-top: 20px;
   }
 
   .site .s-block-left .s-block-grid {
@@ -2159,7 +2234,7 @@
 }
 
 /* The scopes caps bound (site/drawing/ScopeNest.vue) */
-.site .s-drawing-nest {
+.site .s-block .s-drawing-nest {
   padding: 20px;
 }
 
@@ -2189,6 +2264,10 @@
   border-radius: 10px;
 }
 
+.site .s-nest li:not(:has(ul)) {
+  padding-bottom: 12px;
+}
+
 .site .s-nest li.s-nest-loop {
   padding-bottom: 12px;
   border-style: dashed;
@@ -2202,7 +2281,7 @@
   gap: 2px 16px;
   font-family: var(--s-mono);
   font-size: 12px;
-  line-height: 1.5;
+  line-height: normal;
 }
 
 .site .s-nest-row b {
@@ -2216,7 +2295,7 @@
 }
 
 @media (max-width: 767px) {
-  .site .s-drawing-nest {
+  .site .s-block .s-drawing-nest {
     padding: 14px;
   }
 

@@ -152,21 +152,22 @@ const RUN_POINTS = [
         </div>
         <figure class="s-figure">
           <div class="s-crop">
-            <picture>
-              <source
-                media="(max-width: 767px)"
-                srcset="/assets/site/needs-you-phone.png"
-                width="374"
-                height="228"
-              >
-              <img
-                src="/assets/site/needs-you.png"
-                width="1180"
-                height="216"
-                alt="Work items under Needs you on the Kraft board, each with the reason it stopped and one button"
-                loading="lazy"
-              >
-            </picture>
+            <img
+              class="s-wide"
+              src="/assets/site/needs-you.png"
+              width="1180"
+              height="216"
+              alt="Three work items under Needs you on the Kraft board, each with the reason it stopped and one button"
+              loading="lazy"
+            >
+            <img
+              class="s-narrow"
+              src="/assets/site/needs-you-phone.png"
+              width="374"
+              height="228"
+              alt="A work item under Needs you on the Kraft board, in the phone layout, waiting for a final review"
+              loading="lazy"
+            >
           </div>
           <figcaption>
             <span class="s-wide">Needs you, on the board: each item says why it stopped and offers one action.</span>
