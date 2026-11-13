@@ -412,8 +412,9 @@ def attempt(state, monkeypatch, tmp_path):
         calls.append(("latest_in_major", major, kwargs["channel"]))
         return release["result"]
 
-    def take(run_dirs, config_dir):
+    def take(run_dirs, config_dir, version):
         calls.append(("snapshot",))
+        seen.setdefault("versions", []).append(version)
         busy["now"] = seen.get("busy_after_snapshot", False)
         copy = run_dirs.base / f"{when_free.SNAPSHOT_PREFIX}{len(seen.setdefault('taken', []))}"
         (copy / "config").mkdir(parents=True)
@@ -712,6 +713,8 @@ async def test_a_handed_off_restart_keeps_its_snapshot_and_says_so(attempt):
     record = when_free.read_rollback(attempt.st.run_dirs)
     assert record["handed_off"] is True and record["handed_off_at"]
     assert len(_snapshots(attempt)) == 1
+    # The version that wrote the copied databases, not the one just installed.
+    assert attempt.seen["versions"] == ["2.2.0"]
 
 
 async def test_outside_the_allowed_hours_nothing_happens(attempt):

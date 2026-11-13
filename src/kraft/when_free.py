@@ -457,11 +457,11 @@ def clear_rollback(run_dirs) -> None:
     (run_dirs.base / ROLLBACK_FILE).unlink(missing_ok=True)
 
 
-def snapshot(run_dirs, config_dir: Path) -> dict:
+def snapshot(run_dirs, config_dir: Path, version: str) -> dict:
     """Copy the configuration directory, and back up every run database with
     SQLite's online backup (the server is still writing them), into a folder
-    of its own under the run dir, with the version that wrote them in
-    `version`. Returns phase 2's fields."""
+    of its own under the run dir, with `version`, the Kraft that wrote them,
+    in a file of that name. Returns phase 2's fields."""
     import shutil
     import sqlite3
 
@@ -470,7 +470,7 @@ def snapshot(run_dirs, config_dir: Path) -> dict:
     snapshots = {}
     try:
         shutil.copytree(config_dir, config_copy, symlinks=True)
-        (root / "version").write_text(update.installed() + "\n")
+        (root / "version").write_text(version + "\n")
         (root / "db").mkdir(parents=True, exist_ok=True)
         for source in sorted(run_dirs.base.glob("*.db")):
             target = root / "db" / source.name
@@ -746,7 +746,8 @@ async def _apply_claimed(app, st, cfg, got: Pending, admin) -> str | None:
         )
     # The previous update's snapshot stays until this one is confirmed
     # (`end_probation`): an attempt that goes nowhere must not cost it.
-    taken = await asyncio.to_thread(snapshot, run_dirs, config_dir_of(st))
+    # `running`, not `update.installed()`: a release is installed by now.
+    taken = await asyncio.to_thread(snapshot, run_dirs, config_dir_of(st), running)
     write_rollback(run_dirs, **taken)
     if not is_free(st.db):
         drop_snapshot(taken)

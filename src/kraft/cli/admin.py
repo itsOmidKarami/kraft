@@ -2088,12 +2088,12 @@ def _snapshot_before_update(run_dirs: RunDirs) -> dict:
     nothing to copy; a copy that fails stops the update before it installs."""
     import sqlite3
 
-    from kraft import when_free
+    from kraft import update, when_free
 
     if not run_dirs.base.is_dir() or not config_dir().is_dir():
         return {}
     try:
-        taken = when_free.snapshot(run_dirs, config_dir())
+        taken = when_free.snapshot(run_dirs, config_dir(), update.installed())
     except (OSError, sqlite3.Error) as exc:
         _exit(f"could not back up the configuration and databases: {exc}. Nothing was installed")
     folder = Path(taken["config_snapshot"]).parent
@@ -2168,7 +2168,11 @@ def _cmd_update(ns: argparse.Namespace) -> None:
     update_prechecks(release, interactive=True, assume_yes=ns.yes, channel=channel)
     run_dirs = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir()))
     taken = _snapshot_before_update(run_dirs)
-    code = update.perform(release)
+    try:
+        code = update.perform(release)
+    except SystemExit:
+        when_free.drop_snapshot(taken)
+        raise
     if code != 0:
         when_free.drop_snapshot(taken)
         raise SystemExit(code)
