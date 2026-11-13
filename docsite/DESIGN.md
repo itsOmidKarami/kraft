@@ -45,6 +45,7 @@ colors:
   running-blue-dark: "#80bdfc"
   running-blue-light: "#246099"
   blue-wash-dark: "#22293a"
+  blue-wash-light: "#dde6f1"
 typography:
   display:
     fontFamily: "Inter, system-ui, sans-serif"
@@ -216,7 +217,7 @@ A cool ink-and-violet ground with two signal colours that each carry one meaning
 - **Gate Amber** (`gate-amber-*`): the gate diamond, the "YOU" lane label, the second line of the hero headline, "YOU" beside a gate in a node list, and `kind: gate` in a code panel. **Amber Wash** (`amber-wash-*`) fills the "You" lane and the gate panel; **Amber Line** (`amber-line-*`) highlights lines in a code panel.
 
 ### Tertiary
-- **Running Blue** (`running-blue-*`): what runs at once or on another machine: the slice glyphs, the "3 SLICES" label, the other machine's lane label and glyph. **Blue Wash** (`blue-wash-dark`) fills the other machine's lane; its light value is derived when Scale up is built.
+- **Running Blue** (`running-blue-*`): what runs at once or on another machine: the slice glyphs, the "3 SLICES" label, the other machine's lane label and glyph. **Blue Wash** (`blue-wash-*`) fills the other machine's lane.
 
 ### Neutral
 - **Ground** (`ground-*`): the page's main band and the hero card's inside.

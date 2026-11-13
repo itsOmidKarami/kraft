@@ -14,4 +14,9 @@ export const sitePages = [
     title: 'How Kraft runs a work item.',
     description: 'A work item is one unit of work that ends in one merge request. Kraft runs it through a chain, retries within bounds when a step fails, and hands it to you when a decision is yours.',
   },
+  {
+    path: '/scale',
+    title: 'Run more than one thing at a time.',
+    description: 'Split a large plan into slices that several agents build at once, or move one step of a chain to another computer you already have.',
+  },
 ]

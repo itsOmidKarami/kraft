@@ -26,6 +26,7 @@
   --s-amber-wash: #efe2cd;
   --s-amber-line: #e7dccd;
   --s-blue: #246099;
+  --s-blue-wash: #dde6f1;
 }
 
 .dark .site,
@@ -50,6 +51,7 @@
   --s-amber-wash: #332f31;
   --s-amber-line: #292526;
   --s-blue: #80bdfc;
+  --s-blue-wash: #22293a;
 }
 
 .site .s-field {
@@ -1676,6 +1678,16 @@
   stroke-dasharray: 5 4;
 }
 
+.site .s-draw-lane {
+  fill: none;
+  stroke: var(--s-border);
+  stroke-width: 1;
+}
+
+.site .s-draw-lane-blue {
+  fill: var(--s-blue-wash);
+}
+
 .site .s-draw-main {
   fill: none;
   stroke: var(--s-text);
@@ -1699,6 +1711,18 @@
 
 .site .s-draw-label.s-draw-text {
   fill: var(--s-text);
+}
+
+/* A drawing in a capability block sits in a container-sized panel. */
+.site .s-block .s-drawing {
+  padding: 28px;
+  border-radius: 16px;
+}
+
+@media (max-width: 767px) {
+  .site .s-block .s-drawing {
+    padding: 20px;
+  }
 }
 
 /* A capability page's head (site/SitePageHead.vue) */
@@ -1727,12 +1751,16 @@
   text-wrap: balance;
 }
 
+.site .s-pagehead-solo .s-pagehead-text {
+  max-width: 760px;
+}
+
 .site .s-pagehead-text .s-block-label {
   color: var(--s-caption);
 }
 
 @media (min-width: 1024px) {
-  .site .s-pagehead-grid {
+  .site .s-pagehead-grid:not(.s-pagehead-solo) {
     display: grid;
     grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
     column-gap: 72px;
