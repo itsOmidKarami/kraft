@@ -73,5 +73,5 @@ Kraft running on this machine or on one you sign in to, on the extension's major
 
 - [Kraft for VS Code](https://kraft-sdlc.dev/guides/day-to-day/vscode): the guide, from install to a cleared gate
 - [Reference](https://kraft-sdlc.dev/reference/vscode-extension): keys, settings, row buttons, search and the status bar
-- [Why Kraft](https://kraft-sdlc.dev/get-started/why-kraft): what it does that a session, a loop or a skill doesn't
+- [Why Kraft](https://kraft-sdlc.dev/why): what it does that a session, a loop or a skill doesn't
 - [GitHub](https://github.com/itsOmidKarami/kraft): source, releases and issues

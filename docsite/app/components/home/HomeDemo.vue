@@ -56,7 +56,9 @@ const cols = computed(() => STEPS.map((s, i) => {
 // On a phone-width card the names give way to one line for the current step.
 const nowCol = computed(() => cols.value.find(c => c.state === 'cur'))
 
-const cue = computed(() => `In this demo the gate ${v.value.autoVerb === 'approve' ? 'approves itself' : 'sends itself back'} after a few seconds. In Kraft it waits for you.`)
+const cue = computed(() => v.value.autoVerb === 'approve'
+  ? 'In this demo the gate approves itself after a few seconds. In Kraft it waits for you.'
+  : 'In this demo, Request changes is pressed for you after a few seconds. In Kraft the gate waits for you.')
 
 // A gate reached while focus is in the demo is said once. Only while the demo
 // plays on its own: once the visitor drives, the panel says it as a live

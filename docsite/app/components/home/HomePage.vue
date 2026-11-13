@@ -154,7 +154,7 @@ const RUN_POINTS = [
           <div class="s-crop">
             <img
               class="s-wide"
-              src="/assets/site/needs-you.png"
+              src="/site/needs-you.png"
               width="1180"
               height="216"
               alt="Three work items under Needs you on the Kraft board, each with the reason it stopped and one button"
@@ -162,7 +162,7 @@ const RUN_POINTS = [
             >
             <img
               class="s-narrow"
-              src="/assets/site/needs-you-phone.png"
+              src="/site/needs-you-phone.png"
               width="374"
               height="228"
               alt="A work item under Needs you on the Kraft board, in the phone layout, waiting for a final review"

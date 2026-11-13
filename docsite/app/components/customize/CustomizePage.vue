@@ -42,15 +42,13 @@ const LITE_INSTALL = [
       <p>A chain that extends <code>default</code> holds only what it changes. Every other node is read from <code>default</code>, so your chain keeps up with it.</p>
       <p>The Chains screen draws it as a graph. Review &amp; publish shows what changed and checks it before it takes effect.</p>
       <template #picture>
-        <div class="s-crop">
-          <img
-            src="/assets/chain-extends.png"
-            width="1230"
-            height="700"
-            alt="The Chains screen: a chain that extends default, drawn as a graph, with its verification node marked overridden here and a security scan node marked added here"
-            loading="lazy"
-          >
-        </div>
+        <SiteShot
+          src="/site/chain-extends.png"
+          :width="1230"
+          :height="700"
+          alt="The Chains screen: a chain that extends default, drawn as a graph, with its verification node marked overridden here and a security scan node marked added here"
+          :phone="{ src: '/site/chain-extends-phone.png', width: 340, height: 100 }"
+        />
         <figcaption>A chain that extends <code>default</code>, drawn as a graph.</figcaption>
       </template>
     </SiteBlock>
@@ -86,15 +84,13 @@ const LITE_INSTALL = [
       <p>Each agent task names a harness and a model. Kraft ships seven harnesses: Claude Code, Codex, Cursor, OpenCode, Antigravity, Gemini CLI and Amp.</p>
       <p>Every shipped task runs on Claude Code, so moving one to another harness is a chain edit.</p>
       <template #picture>
-        <div class="s-crop">
-          <img
-            src="/assets/harnesses.png"
-            width="1230"
-            height="700"
-            alt="Settings, Harnesses: each harness with whether it is installed and available, and the agent tasks that run on it"
-            loading="lazy"
-          >
-        </div>
+        <SiteShot
+          src="/site/harnesses.png"
+          :width="1230"
+          :height="700"
+          alt="Settings, Harnesses: each harness with whether it is installed and available, and the agent tasks that run on it"
+          :phone="{ src: '/site/harnesses-phone.png', width: 370, height: 248 }"
+        />
         <figcaption>Harnesses in Settings, with the tasks each one runs.</figcaption>
       </template>
     </SiteBlock>

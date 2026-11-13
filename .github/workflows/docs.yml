@@ -33,6 +33,8 @@ on:
       - "dev/build_docs_site.sh"
       - "dev/docs_versions.py"
       - "dev/check_llm_docs.py"
+      - "dev/check_site_docs_links.py"
+      - "dev/check_docs_redirects.py"
       - ".github/workflows/docs.yml"
   push:
     branches: [main]
@@ -148,6 +150,13 @@ jobs:
             'docsite/content/**/*.md'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The marketing pages are site code from this checkout, shown only at the
+      # root, whose docs are the latest release's: a docs link they make must
+      # be a page and heading in that release, not only on main. Last of
+      # the checks, so a failure here still shows the others' results.
+      - name: the marketing pages' docs links exist in the latest release
+        run: python3 dev/check_site_docs_links.py
 
       # Pages setup only makes sense for the thing that's about to deploy --
       # a PR build stops here, checked but not published.

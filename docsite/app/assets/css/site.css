@@ -1574,6 +1574,26 @@
   border-radius: 10px;
 }
 
+/* A screenshot that opens whole on a tap (site/SiteShot.vue). Its phone crop
+   is shown at its own size or smaller, never stretched. */
+.site .s-shot {
+  display: block;
+  border-radius: 10px;
+  cursor: zoom-in;
+}
+
+.site .s-shot img {
+  width: auto;
+  max-width: 100%;
+  margin-inline: auto;
+}
+
+/* The crop's frame is violet in both themes: the dark theme's text colour. */
+.site .s-shot:focus-visible {
+  outline: 2px solid #eeeef2;
+  outline-offset: 3px;
+}
+
 @media (max-width: 767px) {
   .site .s-crop {
     padding: 10px;

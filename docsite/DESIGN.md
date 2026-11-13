@@ -198,6 +198,8 @@ Colour is meaning, never ornament. A deep violet field opens and closes each pag
 
 The interface appears as focused crops, never as a full window with its sidebar. There are no customer logos, testimonials, figures or benchmarks, and no icons beyond Kraft's own vocabulary.
 
+The marketing pages' images live in `docsite/public/site/`, site code, not in `.github/assets/`: every version's build compiles these pages, and a release's own `.github/assets` replaces this checkout's for its docs. Five are copies of docs screenshots (`mobile.png`, `vscode-gate.png`, `console.png`, `chain-extends.png`, `harnesses.png`), so a retake of one is copied here too.
+
 **Key Characteristics:**
 - Drawings before screenshots; screenshots as tight crops.
 - Two grounds alternate under every section; the violet field bookends the page.

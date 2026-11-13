@@ -433,7 +433,7 @@
       },
       {
         "view": "kraft.board",
-        "contents": "Kraft runs your coding agent from spec to merge request, and stops at a gate, a decision that is yours. This repo isn't connected to it.\n[Connect this repo](command:kraft.connectRepo)\nFor test and setup commands, use the web UI or `kraft repo connect`.\n[Show all repos](command:kraft.toggleAllRepos)\n[What is Kraft?](https://kraft-sdlc.dev/get-started/why-kraft)",
+        "contents": "Kraft runs your coding agent from spec to merge request, and stops at a gate, a decision that is yours. This repo isn't connected to it.\n[Connect this repo](command:kraft.connectRepo)\nFor test and setup commands, use the web UI or `kraft repo connect`.\n[Show all repos](command:kraft.toggleAllRepos)\n[What is Kraft?](https://kraft-sdlc.dev/why)",
         "when": "kraft.welcome == connect && !kraft.readOnly"
       }
     ],

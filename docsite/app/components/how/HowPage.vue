@@ -107,15 +107,13 @@ const REPOS_YAML = [
       <p>A gate is a node where the chain stops for you. Read what the agent wrote, then approve it, or request changes with a note that re-runs the node that wrote it.</p>
       <p>The default chain waits for you at the spec, at the plan, before it opens a draft merge request, and before it marks it ready.</p>
       <template #picture>
-        <div class="s-crop">
-          <img
-            src="/assets/site/gate-review.png"
-            width="1230"
-            height="488"
-            alt="A gate's review page: the review brief an agent wrote, the files on the branch and Request changes and Approve buttons"
-            loading="lazy"
-          >
-        </div>
+        <SiteShot
+          src="/site/gate-review.png"
+          :width="1230"
+          :height="488"
+          alt="A gate's review page: the review brief an agent wrote, the files on the branch and Request changes and Approve buttons"
+          :phone="{ src: '/site/gate-review-phone.png', width: 420, height: 290 }"
+        />
         <figcaption>A gate's review page: the brief an agent wrote, the files on the branch and the two decisions.</figcaption>
       </template>
     </SiteBlock>
