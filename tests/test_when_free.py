@@ -362,7 +362,7 @@ def test_a_snapshot_restores_config_and_databases_and_drops_a_stale_wal(tmp_path
     with sqlite3.connect(run_dirs.db) as c:
         c.execute("CREATE TABLE t (v TEXT)")
         c.execute("INSERT INTO t VALUES ('before')")
-    record = when_free.snapshot(run_dirs, config)
+    record = when_free.snapshot(run_dirs, config, "2.2.0")
 
     (config / "access.yaml").write_text("port: 1\n")
     (config / "chains" / "default.yaml").unlink()

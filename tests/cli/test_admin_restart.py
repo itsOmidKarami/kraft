@@ -68,7 +68,7 @@ def update_attempt(tmp_path, monkeypatch):
         key="v2.3.0",
         requirement={"name": "kraft-sdlc", "extras": ["vector"], "specifier": "==2.2.0"},
     )
-    when_free.write_rollback(run_dirs, **when_free.snapshot(run_dirs, config_dir))
+    when_free.write_rollback(run_dirs, **when_free.snapshot(run_dirs, config_dir, "2.2.0"))
     # What the new server did before it failed to confirm.
     (config_dir / "access.yaml").write_text("port: 9999\n")
     with sqlite3.connect(run_dirs.db) as c:
