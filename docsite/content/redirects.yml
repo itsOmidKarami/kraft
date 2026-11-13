@@ -41,7 +41,7 @@
 /get-started/install#verify: /get-started/install#check-it-worked
 /get-started/install#licences: /project/status-and-support#licenses
 /get-started/first-work-item#next-run-it-as-a-service: /guides/run/run-as-a-service#run-kraft-as-a-service
-/get-started/why-kraft#why-the-name: /get-started/why-kraft
+/get-started/why-kraft#why-the-name: /why#the-name
 /concepts/caps-and-budgets#raising-a-cap-in-the-interface: /guides/day-to-day/raise-a-cap#which-stop-offers-what
 /concepts/caps-and-budgets#budget-stops-and-what-the-interface-offers: /guides/day-to-day/raise-a-cap#which-stop-offers-what
 /concepts/caps-and-budgets#raising-a-budget-from-the-command-line: /guides/day-to-day/raise-a-cap#raise-the-cap-and-retry
@@ -674,8 +674,8 @@
 /get-started/first-work-item#_3-file-your-first-work-item: /get-started/first-work-item#_3-file-a-work-item-on-a-chain-with-a-gate
 /get-started/first-work-item#_4-start-it-and-watch: /get-started/first-work-item#_4-review-the-chain-then-start-it
 /get-started/first-work-item#_5-where-is-my-change: /get-started/first-work-item#_6-where-is-my-change
-/get-started/why-kraft#what-your-agent-cant-do-on-its-own: /get-started/why-kraft#what-kraft-adds
-/get-started/why-kraft#an-interactive-session: /get-started/why-kraft
+/get-started/why-kraft#what-your-agent-cant-do-on-its-own: /why#what-kraft-adds
+/get-started/why-kraft#an-interactive-session: /why
 /get-started/the-real-chain#the-chain-you-are-about-to-run: /get-started/the-real-chain#the-whole-chain
 
 /get-started/install#uninstall-and-where-state-lives: /get-started/faq#how-do-i-uninstall-kraft
@@ -748,7 +748,9 @@
 /guides/remote-access#related: /guides/run/remote-access#next-steps
 /guides/schedule-and-webhook-work#related: /guides/customize/schedule-and-webhook-work#next-steps
 /guides/upgrading-templates#related: /guides/run/upgrade-your-configuration#next-steps
-/get-started/why-kraft#next-steps: /get-started/why-kraft#related
+/get-started/why-kraft#next-steps: /why
+/get-started/why-kraft#related: /why
+/get-started/why-kraft: /why
 /guides/adding-a-harness#set-up-amp-or-cursor-credentials: /guides/harnesses/give-a-worker-its-login#_1-find-what-your-harness-needs
 /reference/cli/admin#migrating-a-pre-v1-template-configuration: /guides/run/coming-from-1-4#a-0x-home
 /reference/triggers#cron-entries: /reference/triggers#cron-syntax

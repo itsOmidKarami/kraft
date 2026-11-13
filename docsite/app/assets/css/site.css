@@ -1751,6 +1751,16 @@
   text-wrap: balance;
 }
 
+.site .s-pagehead-lede {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.site .s-pagehead-lede p {
+  margin: 0;
+}
+
 .site .s-pagehead-solo .s-pagehead-text {
   max-width: 760px;
 }
@@ -1977,6 +1987,80 @@
   .site .s-block-below .s-block-picture {
     align-self: start;
   }
+
+  .site .s-block-text .s-block-grid {
+    grid-template-rows: auto;
+    grid-template-areas: 'head body';
+    align-items: start;
+  }
+}
+
+/* Longer text in a block (Why Kraft): lists, inline code and links. */
+.site .s-prose {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 68ch;
+}
+
+.site .s-prose p,
+.site .s-prose ul,
+.site .s-prose ol {
+  margin: 0;
+  color: var(--s-text-sub);
+}
+
+.site .s-prose ul,
+.site .s-prose ol {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-left: 1.25em;
+}
+
+.site .s-prose ul {
+  list-style: disc;
+}
+
+.site .s-prose ol {
+  list-style: decimal;
+}
+
+.site .s-prose li::marker {
+  color: var(--s-text-muted);
+}
+
+.site .s-prose strong {
+  font-weight: 600;
+  color: var(--s-text);
+}
+
+.site .s-prose h3 {
+  margin: 16px 0 -4px;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.012em;
+}
+
+.site .s-prose h3:first-child {
+  margin-top: 0;
+}
+
+.site .s-prose a {
+  color: var(--s-accent);
+  text-underline-offset: 3px;
+}
+
+.site .s-prose code {
+  padding: 1px 5px;
+  border: 1px solid var(--s-hairline);
+  border-radius: 5px;
+  background: var(--s-card);
+  font-family: var(--s-mono);
+  font-size: 0.85em;
+  color: var(--s-text);
+  overflow-wrap: anywhere;
 }
 
 /* The default chain's nodes (How it works) */

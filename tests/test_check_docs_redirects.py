@@ -61,6 +61,22 @@ def test_pages_are_served_at_their_path_without_number_prefixes_and_the_home_is_
     assert set(cr.pages(content)) == {"/", "/guides/vscode", "/get-started/install", "/get-started"}
 
 
+def test_a_marketing_page_is_a_page_with_the_ids_of_what_it_draws(cr, content):
+    # app/pages/why.vue draws components/why/WhyPage.vue, whose sections are
+    # its anchors; a page that draws no component has only its own.
+    app = content.parent / "app"
+    write(app, "pages/why.vue", '<template><WhyPage v-if="home" /></template>\n')
+    write(app, "components/why/WhyPage.vue", '<SiteBlock id="the-name" title="The name." />\n')
+    write(app, "pages/scale.vue", '<template><section id="slices" /></template>\n')
+    site = cr.pages(content)
+    assert site["/why"] == {"the-name"}
+    assert site["/scale"] == {"slices"}
+    moved = {"/get-started/why-kraft": "/why"}
+    section = "/get-started/why-kraft#why-the-name"
+    assert cr.check_map({**moved, section: "/why#the-name"}, site) == []
+    assert cr.check_map({**moved, section: "/why#nope"}, site)
+
+
 def test_anchors_are_the_ids_the_site_gives_headings(cr, content):
     # A repeat is numbered, a leading digit gets `_`, `--` in a code span
     # collapses or is trimmed, and a `#` line in front matter or inside a code

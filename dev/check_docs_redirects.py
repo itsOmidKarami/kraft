@@ -121,15 +121,34 @@ def anchors(markdown: str) -> set[str]:
     return found
 
 
-def pages(content: Path) -> dict[str, set[str]]:
-    """Every page's address, and the anchors on it.
-
-    The home page, `/`, is site code (`docsite/app/pages/index.vue`) and not a
-    file under `content/`, so it is added here. It is one page for every
-    version, and a link to it from anywhere lands.
+def site_pages(pages_dir: Path, components: Path) -> dict[str, set[str]]:
+    """The marketing pages: site code (`docsite/app/pages/*.vue`), not files
+    under `content/`. Each is one page for every version, and a link to it
+    from anywhere lands. Its anchors are the `id="..."` of the page file and
+    of the page component it draws (`<WhyPage` is
+    `components/why/WhyPage.vue`), where its sections are.
     """
+    found: dict[str, set[str]] = {}
+    for page in sorted(pages_dir.glob("*.vue")):
+        address = "/" if page.stem == "index" else f"/{page.stem}"
+        text = page.read_text(encoding="utf-8")
+        for name in re.findall(r"<([A-Z][a-z]+)Page\b", text):
+            drawn = components / name.lower() / f"{name}Page.vue"
+            if drawn.exists():
+                text += drawn.read_text(encoding="utf-8")
+        found[address] = set(re.findall(r'\bid="([a-z0-9_-]+)"', text))
+    return found
+
+
+def pages(content: Path) -> dict[str, set[str]]:
+    """Every page's address, and the anchors on it: the docs under
+    `content/`, and the marketing pages in the app beside it (site_pages).
+    The home page, `/`, is always one.
+    """
+    app = content.parent / "app"
     return {
         "/": set(),
+        **site_pages(app / "pages", app / "components"),
         **{
             route(path.relative_to(content)): anchors(path.read_text(encoding="utf-8"))
             for path in sorted(content.rglob("*.md"))

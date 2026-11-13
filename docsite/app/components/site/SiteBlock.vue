@@ -2,13 +2,15 @@
      body (the default slot), a docs link and one picture. `picture` places the
      picture right or left of the text (sides alternate down a page), or below
      it across the column for a screenshot, with the body beside the heading.
-     Under 1024px everything stacks, text first. -->
+     Under 1024px everything stacks, text first. With no picture the heading
+     sits left of the body (Why Kraft's longer text); the label and the docs
+     link are optional. -->
 <script setup lang="ts">
 withDefaults(defineProps<{
   id: string
-  label: string
+  label?: string
   title: string
-  docs: { to: string, label: string }
+  docs?: { to: string, label: string }
   picture?: 'right' | 'left' | 'below'
   band?: boolean
 }>(), { picture: 'right' })
@@ -18,12 +20,15 @@ withDefaults(defineProps<{
   <section
     :id="id"
     class="s-section s-block"
-    :class="[`s-block-${picture}`, { 's-band': band }]"
+    :class="[$slots.picture ? `s-block-${picture}` : 's-block-text', { 's-band': band }]"
     :aria-labelledby="`${id}-title`"
   >
     <div class="s-wrap s-block-grid">
       <div class="s-block-head">
-        <p class="s-block-label">
+        <p
+          v-if="label"
+          class="s-block-label"
+        >
           {{ label }}
         </p>
         <h2
@@ -35,11 +40,17 @@ withDefaults(defineProps<{
       </div>
       <div class="s-block-body">
         <slot />
-        <SiteArrowLink :to="docs.to">
+        <SiteArrowLink
+          v-if="docs"
+          :to="docs.to"
+        >
           Docs: {{ docs.label }}
         </SiteArrowLink>
       </div>
-      <figure class="s-figure s-block-picture">
+      <figure
+        v-if="$slots.picture"
+        class="s-figure s-block-picture"
+      >
         <slot name="picture" />
       </figure>
     </div>

@@ -88,13 +88,14 @@ function forwardingPage(from: string, to: string): string {
 // link goes to that version's first docs page. Styled inline, in the site's own colour tokens
 // (entry.css is linked in the head), so it does not need the build's
 // utility classes.
-// The first docs page of a version: where the 404's link to it goes.
-const docsStart = (v: DocsVersion) => `${v.base}get-started/why-kraft`
+// The first docs page of a version: where the 404's link to it goes. Install,
+// since Why Kraft moved out of the docs to /why.
+const docsStart = (v: DocsVersion) => `${v.base}get-started/install`
 // Whether this build has that page: an older release's content may not.
 const contentDir = fileURLToPath(new URL('./content', import.meta.url))
 const hasDocsStart = existsSync(contentDir) && readdirSync(contentDir)
   .filter(dir => /^(\d+\.)?get-started$/.test(dir))
-  .some(dir => readdirSync(join(contentDir, dir)).some(file => /^(\d+\.)?why-kraft\.md$/.test(file)))
+  .some(dir => readdirSync(join(contentDir, dir)).some(file => /^(\d+\.)?install\.md$/.test(file)))
 const missingPage = `<style>
 .nf{box-sizing:border-box;min-height:100vh;padding:1.5rem;display:flex;flex-direction:column;background:var(--ui-bg,#fff);color:var(--ui-text,#334155);font-family:'IBM Plex Sans',system-ui,sans-serif}
 .nf a{color:var(--ui-primary,#7c3aed);text-underline-offset:4px}

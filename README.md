@@ -24,7 +24,7 @@ Hand Kraft a task, start it and walk away. You file a task, a *work item*, from
 the web UI, a phone or the CLI, and it waits paused until you start it. Your
 agent then drafts a spec and a plan, stops for your approval of each, builds the
 change on its own branch and opens a merge request. It's for developers tired of
-babysitting a session; [when not to use Kraft](https://kraft-sdlc.dev/get-started/why-kraft#when-not-to-use-kraft)
+babysitting a session; [when not to use Kraft](https://kraft-sdlc.dev/why#when-not-to-use-kraft)
 says who it isn't for.
 
 [![One work item in the Kraft web UI: filed from the board, stopped for a person at the spec, plan and local review gates in the order its chain file sets, then back at the final review with its draft merge request. Recorded on a dev instance with a simulated agent, sped up while the agent works.](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/run.gif)](https://kraft-sdlc.dev/demo/)
@@ -127,7 +127,7 @@ updating and uninstalling. Coming from 1.4? Read
 
 ## Where to go next
 
-- [Why Kraft](https://kraft-sdlc.dev/get-started/why-kraft): what it does that a session, a loop or a skill doesn't.
+- [Why Kraft](https://kraft-sdlc.dev/why): what it does that a session, a loop or a skill doesn't.
 - [Concepts](https://kraft-sdlc.dev/concepts/vocabulary): work items, chains, nodes, gates, caps.
 - [CLI reference](https://kraft-sdlc.dev/reference/cli): every `kraft` verb.
 - [Security](https://kraft-sdlc.dev/project/security): the threat model; report vulnerabilities as [SECURITY.md](https://github.com/itsOmidKarami/kraft/blob/main/SECURITY.md) describes.

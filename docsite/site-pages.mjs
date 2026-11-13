@@ -19,4 +19,9 @@ export const sitePages = [
     title: 'Run more than one thing at a time.',
     description: 'Split a large plan into slices that several agents build at once, or move one step of a chain to another computer you already have.',
   },
+  {
+    path: '/why',
+    title: 'Not another coding agent.',
+    description: 'What Kraft does that an interactive session, a loop or a skill doesn\'t, and when it is the wrong tool.',
+  },
 ]

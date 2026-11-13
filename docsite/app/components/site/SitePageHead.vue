@@ -1,5 +1,5 @@
 <!-- A capability page's head, on the violet field: where it sits in the site,
-     the page's one h1, its lede (the default slot) and one picture beside it
+     the page's one h1, its lede (the default slot: text, or paragraphs) and one picture beside it
      (the picture slot). With no picture the text takes one column. -->
 <script setup lang="ts">
 defineProps<{ label: string, title: string }>()
@@ -18,9 +18,9 @@ defineProps<{ label: string, title: string }>()
         <h1 class="s-pagehead-title">
           {{ title }}
         </h1>
-        <p class="s-lede">
+        <div class="s-lede s-pagehead-lede">
           <slot />
-        </p>
+        </div>
       </div>
       <slot name="picture" />
     </div>
