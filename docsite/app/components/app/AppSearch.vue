@@ -20,6 +20,14 @@ const { forced: forcedColorMode } = useDocusColorMode()
 const docs = useRuntimeConfig().public.docs
 const at = useDocsVersion()
 
+// The marketing pages (site-pages.mjs) are no content and in no sidebar, and
+// Nuxt UI's search shows only files the sidebar has, so they join it as its
+// links, each found by its title and description. Not the home page, whose
+// description is the site's.
+const siteLinks = (useRuntimeConfig().public.sitePages as { path: string, title: string, description: string }[])
+  .filter(p => p.path !== '/')
+  .map(p => ({ label: p.title, description: p.description, to: p.path }))
+
 const { data: files } = useLazyAsyncData('search_docs', async () => {
   const pages = await queryCollection('docs').where('extension', '=', 'md').select('path', 'title', 'description', 'body').all()
   return searchSections(pages as never)
@@ -62,6 +70,7 @@ const elsewhere = computed(() => at.value.current && at.value.current.id !== doc
 <template>
   <LazyUContentSearch
     :files="files"
+    :links="siteLinks"
     :navigation="searchNavigation"
     :fuse="fuse"
     v-model:search-term="term"

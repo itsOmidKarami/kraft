@@ -207,9 +207,9 @@ const RUN_POINTS = [
             <h3>Run more at once.</h3>
             <p>Split a large plan into slices that several agents build at once. Kraft joins the results before review.</p>
             <div class="s-drawing s-card-picture">
-              <SiteDrawingSlices class="s-wide" />
+              <SiteDrawingSlices class="s-draw-big" />
               <SiteDrawingSlices
-                class="s-narrow"
+                class="s-draw-small"
                 size="compact"
               />
             </div>

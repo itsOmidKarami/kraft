@@ -9,4 +9,9 @@ export const sitePages = [
     title: 'Kraft runs the task. You make the calls.',
     description: 'Kraft runs on your own machine. It hands coding tasks to your coding agent, checks the work and stops only for the decisions that are yours.',
   },
+  {
+    path: '/how-it-works',
+    title: 'How Kraft runs a work item.',
+    description: 'A work item is one unit of work that ends in one merge request. Kraft runs it through a chain, retries within bounds when a step fails, and hands it to you when a decision is yours.',
+  },
 ]
