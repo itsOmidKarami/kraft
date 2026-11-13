@@ -5,7 +5,8 @@
      the list above it, each step with its state. While the demo plays on its
      own the panel is quiet; once the visitor takes over it is a live region.
      Focus on a button holds the run, and when a pressed button goes away
-     focus moves to the panel, not to the page.
+     focus moves to the panel, not to the page. While focus is inside the demo
+     and the panel is quiet, reaching a gate is said politely, once.
      Under 720px of card the questions and names shrink and a key explains the
      glyphs; under 520px they give way to one line for the current step, and
      the panel keeps one height so the page does not jump. -->
@@ -54,13 +55,44 @@ const cols = computed(() => STEPS.map((s, i) => {
 
 // On a phone-width card the names give way to one line for the current step.
 const nowCol = computed(() => cols.value.find(c => c.state === 'cur'))
+
+const cue = computed(() => `In this demo the gate ${v.value.autoVerb === 'approve' ? 'approves itself' : 'sends itself back'} after a few seconds. In Kraft it waits for you.`)
+
+// A gate reached while focus is in the demo is said once. Only while the demo
+// plays on its own: once the visitor drives, the panel says it as a live
+// region. Read a moment later, after the player settles (under reduced motion
+// it pauses at the gate, and then the demo does not decide it).
+const inside = ref(false)
+const said = ref('')
+const leave = (e: FocusEvent) => {
+  inside.value = !!card.value?.contains(e.relatedTarget as Node | null)
+}
+watch(
+  () => [v.value.atGate ? `${v.value.cap.label}#${v.value.decisions}` : '', v.value.playing] as const,
+  ([gate, playing], [oldGate, oldPlaying]) => {
+    if (!gate) said.value = ''
+    if (!gate || gate === oldGate || !(playing || oldPlaying) || !inside.value) return
+    setTimeout(() => {
+      if (!v.value.atGate) return
+      said.value = `Gate: ${v.value.cap.title} ${v.value.counting ? cue.value : 'Waiting for you.'}`
+    }, 0)
+  },
+)
 </script>
 
 <template>
   <div
     ref="card"
     class="s-demo s-themed"
+    @focusin="inside = true"
+    @focusout="leave"
   >
+    <p
+      class="s-sr"
+      aria-live="polite"
+    >
+      {{ said }}
+    </p>
     <div class="s-demo-head">
       <div class="s-demo-title">
         <span class="s-demo-item">Cache the schema lookups</span>
@@ -231,7 +263,7 @@ const nowCol = computed(() => cols.value.find(c => c.state === 'cur'))
             class="s-panel-auto"
             :style="{ '--s-gate-wait': `${TIMING.gateWait}ms` }"
           >
-            In this demo the gate {{ v.autoVerb === 'approve' ? 'approves itself' : 'sends itself back' }} after a few seconds. In Kraft it waits for you.
+            {{ cue }}
             <span
               class="s-panel-auto-bar"
               aria-hidden="true"

@@ -2005,12 +2005,20 @@
   background: var(--s-band);
 }
 
+/* Inline, not flex, so a row that wraps is balanced: no link left alone. */
 .site .s-onpage-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0 28px;
+  --s-onpage-gap: 28px;
   padding-block: 10px;
+  text-wrap: balance;
+}
+
+.site .s-onpage-row > * {
+  margin-inline-end: var(--s-onpage-gap);
+  vertical-align: middle;
+}
+
+.site .s-onpage-row > :last-child {
+  margin-inline-end: 0;
 }
 
 .site .s-onpage-row .s-label-small {
@@ -2033,13 +2041,16 @@
   text-decoration: underline;
 }
 
-@media (max-width: 767px) {
+/* How it works' seven links fit one line from 1024 with the narrower gap. */
+@media (max-width: 1100px) {
   .site .s-onpage-row {
-    gap: 0 20px;
+    --s-onpage-gap: 20px;
   }
+}
 
+@media (max-width: 767px) {
   .site .s-onpage-row .s-label-small {
-    flex-basis: 100%;
+    display: block;
     padding-top: 6px;
   }
 }
