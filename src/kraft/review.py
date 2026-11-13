@@ -2,7 +2,7 @@
 
 `GET /work-items/{wid}/diff` renders the change for the human at a gate;
 `write_package` writes it to a file a review agent is handed by path. Sub-project
-F spec §9 makes that one function on purpose: the human approving a review and
+F spec Â§9 makes that one function on purpose: the human approving a review and
 the reviewer that produced it must be looking at the same change, and two
 separately-written producers are two things that eventually disagree about what
 the change is.
@@ -81,8 +81,8 @@ def read_change(
     diff = (["--literal-pathspecs"] if paths else []) + ["diff", unentered, *ws]
     diff_args = diff + ([f"-U{context}"] if context is not None else []) + rev + only
     # strip=False: a diff whose last line is blank context is still that diff
-    body = _config.git_read(worktree, *diff_args, strip=False)
-    numstat = _config.git_read(worktree, *diff, "--numstat", *rev, *only)
+    body = _config.git_read(worktree, "-c", "core.quotePath=false", *diff_args, strip=False)
+    numstat = _config.git_read(worktree, "-c", "core.quotePath=false", *diff, "--numstat", *rev, *only)
     if body is None or numstat is None:
         return None
     untracked: list[str] = []
@@ -93,14 +93,14 @@ def read_change(
         # (Kraft-tugdf.22). A tracked file under a root still shows, via `diff`.
         roots = [f":(exclude){r}" for r in _config.KRAFT_ROOTS]
         status = _config.git_read(
-            worktree, "status", unentered, "--porcelain", "-uall", "--", ".", *roots
+            worktree, "-c", "core.quotePath=false", "status", unentered, "--porcelain", "-uall", "--", ".", *roots
         )
         if status is None:
             return None
         untracked = [ln[3:] for ln in status.splitlines() if ln.startswith("?? ")]
     # A repo with no commits past `base` is normal, not a failure, so an empty
     # log is not folded in with the None checks above.
-    log = _config.git_read(worktree, "log", "--oneline", f"{base}..{head or 'HEAD'}") or ""
+    log = _config.git_read(worktree, "-c", "core.quotePath=false", "log", "--oneline", f"{base}..{head or 'HEAD'}") or ""
 
     files = []
     for line in numstat.splitlines():
@@ -143,7 +143,7 @@ def render_package(change: Change, base: str, *, since: str | None = None) -> st
     )
     return (
         f"{header}\n"
-        f"## Commits\n{chr(10).join(change.commits) or '(none yet — uncommitted work)'}\n\n"
+        f"## Commits\n{chr(10).join(change.commits) or '(none yet â uncommitted work)'}\n\n"
         f"## Files changed\n{stat or '(none)'}\n\n"
         f"## Untracked\n{chr(10).join(change.untracked) or '(none)'}\n\n"
         f"## Diff\n{change.diff}"
@@ -199,7 +199,7 @@ def touched_by(worktree: Path, runs, from_sha: str, to_sha: str) -> dict[str, li
             continue
         if not _is_ancestor(worktree, end, to_sha) or _is_ancestor(worktree, end, from_sha):
             continue
-        names = _config.git_read(worktree, "diff", "--name-only", start, end) or ""
+        names = _config.git_read(worktree, "-c", "core.quotePath=false", "diff", "--name-only", start, end) or ""
         for path in names.splitlines():
             if r["node_id"] not in out.setdefault(path, []):
                 out[path].append(r["node_id"])
@@ -225,7 +225,7 @@ def last_toucher(worktree: Path, runs, path: str) -> str | None:
         start, end = r["start_sha"], r["end_sha"]
         if not end or start == end:
             continue
-        names = _config.git_read(worktree, "diff", "--name-only", start, end) or ""
+        names = _config.git_read(worktree, "-c", "core.quotePath=false", "diff", "--name-only", start, end) or ""
         if path in names.splitlines():
             return r["node_id"]
     return None
@@ -242,7 +242,7 @@ def _working(n) -> bool:
 
 
 def changes_target(worktree: Path, nodes, current: int, threads, runs) -> tuple[int, str]:
-    """Where a gateless `request_changes` re-runs (review threads anywhere §1):
+    """Where a gateless `request_changes` re-runs (review threads anywhere Â§1):
     the earliest node, at or before `current`, that wrote what the threads are
     about; else the current working node. Raises ValueError when no working
     node exists at or before `current`."""
@@ -284,7 +284,7 @@ def filter_diff(diff: str, keep: set[str]) -> str:
 
 
 #: At most this many lines are quoted with a comment, as the review page sends
-#: (`Comments.tsx`'s `QUOTE_LINES`); past it, `…` stands for the rest.
+#: (`Comments.tsx`'s `QUOTE_LINES`); past it, `â¦` stands for the rest.
 QUOTE_LINES = 200
 
 _HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
@@ -330,7 +330,7 @@ def _diff_lines(diff: str) -> list[_DiffLine]:
 def _clip_quote(lines: list[str]) -> str | None:
     if not lines:
         return None
-    return "\n".join(lines[:QUOTE_LINES] + (["…"] if len(lines) > QUOTE_LINES else []))
+    return "\n".join(lines[:QUOTE_LINES] + (["â¦"] if len(lines) > QUOTE_LINES else []))
 
 
 def renamed_from(worktree: Path, base: str, head: str | None, path: str) -> str | None:
@@ -372,7 +372,7 @@ def quote_range(
     diff mark, as the review page quotes them (`range.ts`'s `quoteOf`), or
     None when they cannot be read. A one-side range is that side's lines
     `start` to `end`, a line the diff leaves alone read from the file; a range
-    across sides is every diff line between its two ends, `…` between hunks.
+    across sides is every diff line between its two ends, `â¦` between hunks.
 
     For a comment made where no diff is drawn -- `kraft item comment`, MCP's
     `add_review_comment` -- so that the agent reading the thread gets the
@@ -413,7 +413,7 @@ def quote_range(
         out: list[str] = []
         for i in range(lo, hi + 1):
             if i > lo and lines[i].hunk != lines[i - 1].hunk:
-                out.append("…")
+                out.append("â¦")
             out.append(lines[i].kind + lines[i].text)
         return _clip_quote(out)
     rev, at = (base, old_path) if side == DiffSide.OLD else (head, path)
