@@ -67,6 +67,8 @@
 .site {
   --s-gutter: clamp(24px, calc(8.09vw - 7.55px), 96px);
   --s-mono: ui-monospace, Menlo, monospace;
+  /* The On this page bar on one line: 10px padding, a 44px row, a 1px rule. */
+  --s-onpage-h: 65px;
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -1943,6 +1945,20 @@
     column-gap: 72px;
     align-items: center;
   }
+
+  /* On a desktop the head is the first screen, under the 89px header (an
+     88px row and its rule), and with an On this page bar the bar is that
+     screen's bottom edge. A head taller than the screen keeps its height. */
+  .site .s-pagehead {
+    display: grid;
+    align-content: center;
+    box-sizing: border-box;
+    min-height: calc(100svh - 89px);
+  }
+
+  .site .s-pagehead:has(+ .s-onpage) {
+    min-height: calc(100svh - 89px - var(--s-onpage-h));
+  }
 }
 
 /* The video's poster (site/SiteVideo.vue) */
@@ -2023,6 +2039,24 @@
 .site .s-onpage {
   border-bottom: 1px solid var(--s-hairline);
   background: var(--s-band);
+}
+
+/* From a tablet up the bar stays at the top of the screen as you read, and
+   marks the section you are in. A phone's bar wraps to several rows, too
+   tall to keep on screen, so it scrolls away. */
+@media (min-width: 768px) {
+  .site .s-onpage {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+}
+
+.site .s-onpage a[aria-current] {
+  color: var(--s-text);
+  text-decoration: underline;
+  text-decoration-color: var(--s-accent);
+  text-decoration-thickness: 2px;
 }
 
 /* Inline, not flex, so a row that wraps is balanced: no link left alone. */

@@ -268,7 +268,7 @@ A cool ink-and-violet ground with two signal colours that each carry one meaning
 
 ## Layout
 
-The desktop design is 1280px wide with 96px side margins, a 1088px column. Sections are bands that run the full width, with 112px to 136px of vertical padding (the hero 72px top, 104px bottom). A capability block is a two-column grid, 5fr text to 7fr picture with a 72px gap, the sides alternating down the page; a block with a screenshot puts its text above and the crop across the full column. Section heads sit left with their arrow link on the right, bottom-aligned.
+The desktop design is 1280px wide with 96px side margins, a 1088px column. Sections are bands that run the full width, with 112px to 136px of vertical padding (the hero 72px top, 104px bottom). A capability block is a two-column grid, 5fr text to 7fr picture with a 72px gap, the sides alternating down the page; a block with a screenshot puts its text above and the crop across the full column. Section heads sit left with their arrow link on the right, bottom-aligned. From 1024px up a product page's head fills the first screen under the header, its content centred; on How it works the On this page bar is that screen's bottom edge, and from 768px up the bar sticks to the top of the screen and marks the section being read.
 
 On a phone (designed at 390px) the side margins are 24px and sections 72px tall in padding (the hero 40px top, 56px bottom; the "Not another coding agent" band 80px). Everything stacks into one column; buttons go full width; the footer's link columns become a two-column grid under the wordmark and theme switch. The pages reflow from 320px with no sideways scroll, code included: a long line wraps in its own row, indented two characters past the line's start.
 
