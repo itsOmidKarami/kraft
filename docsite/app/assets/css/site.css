@@ -90,7 +90,9 @@
 
 /* No word left alone on a paragraph's last line, no lopsided heading. */
 .site p,
-.site figcaption {
+.site figcaption,
+.site li,
+.site dd {
   text-wrap: pretty;
 }
 
@@ -1119,7 +1121,9 @@
   justify-content: space-between;
   gap: 20px 32px;
   box-sizing: border-box;
-  min-height: 148px;
+  /* The tallest state at this card width, so the page does not jump as it
+     plays: 304px at 534px of card, 262 at 807, 190 from 1022. */
+  min-height: max(190px, min(calc(386px - 15.4cqw), calc(532px - 33.5cqw)));
   padding: 22px 26px;
   border-radius: 12px;
   background: var(--s-band);
@@ -1172,6 +1176,52 @@
   gap: 10px;
 }
 
+/* The demo deciding a gate itself: a quiet line, and a thin bar that fills
+   over the same wait the player uses. */
+.site .s-panel .s-panel-auto {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--s-text-muted);
+}
+
+.site .s-panel-auto-bar {
+  display: block;
+  height: 2px;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 1px;
+  background: var(--s-amber-line);
+}
+
+.site .s-panel-auto-bar i {
+  display: block;
+  height: 100%;
+  background: var(--s-amber);
+  transform-origin: left;
+  animation: s-gate-wait var(--s-gate-wait) linear both;
+}
+
+@keyframes s-gate-wait {
+  from {
+    transform: scaleX(0);
+  }
+
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site .s-panel-auto-bar i {
+    animation: none;
+  }
+}
+
+.site .s-key .s-key-now {
+  display: none;
+}
+
 .site .s-btn-primary.is-pressed {
   background: var(--s-accent-hover);
   transform: scale(0.97);
@@ -1208,7 +1258,16 @@
   }
 
   .site .s-lane-question,
-  .site .s-names {
+  .site .s-names-name {
+    font-size: 12px;
+    line-height: 1.3;
+  }
+
+  .site .s-names > div {
+    padding: 0 3px;
+  }
+
+  .site .s-names-actor {
     display: none;
   }
 
@@ -1264,6 +1323,28 @@
   .site .s-key {
     display: flex;
   }
+}
+
+@container (max-width: 519px) {
+  .site .s-lane-question,
+  .site .s-names {
+    display: none;
+  }
+
+  .site .s-key {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .site .s-key .s-key-now {
+    display: block;
+    flex-basis: 100%;
+    color: var(--s-text);
+  }
+
+  .site .s-key .s-key-now.is-gate {
+    color: var(--s-amber);
+  }
 
   /* One height for every state, so the page does not jump as it plays. */
   .site .s-panel {
@@ -1272,9 +1353,9 @@
     align-items: stretch;
     justify-content: flex-start;
     gap: 14px;
-    /* The tallest state, "Approve the change?", is 328px at 390 and 379px
-       at 320: the height holds it at every phone width. */
-    min-height: max(332px, calc(616px - 73vw));
+    /* The tallest state, a gate with its demo line, is 457px at 238px of
+       card (a 320 phone), 406 at 278 and 304 from 342. */
+    min-height: max(304px, calc(760px - 127.5cqw));
     padding: 16px;
   }
 
@@ -2155,16 +2236,20 @@
   padding-inline: 24px;
 }
 
+/* Two columns only where the longest name (chain_revision_approval) fits
+   whole in each. */
 .site .s-chainlist ol {
   margin: 0;
   padding: 16px 24px 18px;
   list-style: none;
+  columns: 2 240px;
   column-gap: 32px;
 }
 
-@media (min-width: 640px) {
-  .site .s-chainlist ol {
-    columns: 2;
+@media (max-width: 400px) {
+  .site .s-chainlist ol,
+  .site .s-chainlist .s-code-head {
+    padding-inline: 16px;
   }
 }
 
@@ -2345,16 +2430,16 @@
   }
 }
 
-/* Shown at one width only: .s-wide from 768px, .s-narrow below. Last in the
-   file, so it wins over a part's own display. */
+/* Shown at one width only: .s-wide from 768px, .s-narrow below. A part's own
+   rule can be more specific (.site .s-crop img), so these are !important. */
 @media (max-width: 767px) {
   .site .s-wide {
-    display: none;
+    display: none !important;
   }
 }
 
 @media (min-width: 768px) {
   .site .s-narrow {
-    display: none;
+    display: none !important;
   }
 }

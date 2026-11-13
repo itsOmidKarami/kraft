@@ -5,7 +5,7 @@ import type { Player, PlayerState, PlayerView } from '~/utils/homePlayer'
 // renders the paused item; in the browser the player starts once `card` is in
 // view, so a visitor scrolling down sees the run from its start, and stops when
 // the page is left. Under reduced motion it starts paused: nothing moves until
-// the visitor presses play or a button.
+// the visitor presses play or a button, and a gate always waits for a button.
 export function useHomePlayer(card: Readonly<Ref<HTMLElement | null>>) {
   const state = shallowRef<PlayerState>(initialState())
   const v = computed<PlayerView>(() => view(state.value))
@@ -13,6 +13,7 @@ export function useHomePlayer(card: Readonly<Ref<HTMLElement | null>>) {
   let observer: IntersectionObserver | undefined
 
   onMounted(() => {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     player = createPlayer({
       timers: {
         set: (fn, ms) => window.setTimeout(fn, ms),
@@ -20,10 +21,13 @@ export function useHomePlayer(card: Readonly<Ref<HTMLElement | null>>) {
       },
       onChange: (s) => {
         state.value = s
+        // Played on its own pace, the run would decide the gate itself: pause
+        // there instead, so it waits for Approve or Request changes.
+        if (reduced && v.value.atGate && v.value.playing) queueMicrotask(() => player?.toggle())
       },
     })
     state.value = player.state()
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return player.toggle()
+    if (reduced) return player.toggle()
     observer = new IntersectionObserver((entries) => {
       if (!entries.some(e => e.isIntersecting)) return
       observer?.disconnect()

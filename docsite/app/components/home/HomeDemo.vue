@@ -6,10 +6,11 @@
      own the panel is quiet; once the visitor takes over it is a live region.
      Focus on a button holds the run, and when a pressed button goes away
      focus moves to the panel, not to the page.
-     Under 720px of card the lane drops its questions, the labels give way to a
-     key, and the panel keeps one height so the page does not jump. -->
+     Under 720px of card the questions and names shrink and a key explains the
+     glyphs; under 520px they give way to one line for the current step, and
+     the panel keeps one height so the page does not jump. -->
 <script setup lang="ts">
-import { STEPS } from '~/utils/homePlayer'
+import { STEPS, TIMING } from '~/utils/homePlayer'
 import type { PlayerNode } from '~/utils/homePlayer'
 
 const card = useTemplateRef<HTMLElement>('card')
@@ -50,6 +51,9 @@ const cols = computed(() => STEPS.map((s, i) => {
     last: i === STEPS.length - 1,
   }
 }))
+
+// On a phone-width card the names give way to one line for the current step.
+const nowCol = computed(() => cols.value.find(c => c.state === 'cur'))
 </script>
 
 <template>
@@ -177,6 +181,11 @@ const cols = computed(() => STEPS.map((s, i) => {
         </div>
       </div>
       <div class="s-key">
+        <span
+          v-if="nowCol"
+          class="s-key-now"
+          :class="{ 'is-gate': nowCol.gate }"
+        >{{ nowCol.gate ? 'YOU' : nowCol.actor }} · {{ nowCol.name }}</span>
         <span><SiteGlyph
           name="agent"
           :size="14"
@@ -216,6 +225,17 @@ const cols = computed(() => STEPS.map((s, i) => {
           </p>
           <p class="s-panel-detail">
             {{ v.cap.detail }}
+          </p>
+          <p
+            v-if="v.counting"
+            class="s-panel-auto"
+            :style="{ '--s-gate-wait': `${TIMING.gateWait}ms` }"
+          >
+            In this demo the gate {{ v.autoVerb === 'approve' ? 'approves itself' : 'sends itself back' }} after a few seconds. In Kraft it waits for you.
+            <span
+              class="s-panel-auto-bar"
+              aria-hidden="true"
+            ><i /></span>
           </p>
         </template>
         <template v-else-if="v.running">

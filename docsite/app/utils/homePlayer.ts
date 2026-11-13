@@ -57,7 +57,7 @@ export const V_FRAMES: VFrame[] = [
 ]
 
 // Milliseconds.
-export const TIMING = { idle: 2400, run: 2200, gateWait: 2000, press: 700, vFrame: 1100, vHold: 2400, doneHold: 5000 }
+export const TIMING = { idle: 2400, run: 2200, gateWait: 6000, press: 700, vFrame: 1100, vHold: 2400, doneHold: 5000 }
 
 export type Timers = {
   set(fn: () => void, ms: number): number
