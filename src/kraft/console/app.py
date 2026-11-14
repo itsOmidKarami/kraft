@@ -583,10 +583,18 @@ class KraftConsole(App):
         return [(" ".join(keys), label) for label, keys in found.items()]
 
     def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
-        # Textual's theme picker lists its themes (Kraft has two), and its
+        # Textual's theme picker lists its themes (Kraft has two), its
         # "Keys" opens a panel of the framework's own bindings: `?` is Kraft's.
+        # Maximize/Minimize/Screenshot are the framework's own widget commands,
+        # which Kraft doesn't use, so they stay out of the palette too.
         for command in super().get_system_commands(screen):
-            if command.title not in ("Theme", "Keys"):
+            if command.title not in (
+                "Theme",
+                "Keys",
+                "Maximize",
+                "Minimize",
+                "Screenshot",
+            ):
                 yield command
         yield SystemCommand("Keys", "Kraft's keys for this screen", self.action_keys)
         yield SystemCommand("Dark", "Kraft's dark look", lambda: self._use("kraft-dark"))
