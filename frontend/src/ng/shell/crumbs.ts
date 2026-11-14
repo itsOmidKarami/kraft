@@ -1,4 +1,4 @@
-import { capitalise, gateName } from "../board/rowText";
+import { capitalise, gateName, mrRefText } from "../board/rowText";
 import { repoName, shortId } from "../../format";
 import type { CrumbItem } from "./pageItem";
 import { ROUTES } from "./routes";
@@ -60,7 +60,7 @@ export function crumbsFor(pathname: string, item: ItemLookup): Crumb[] {
     // The id never gives way: the header's chips ("in your checkout") shrink the repo instead.
     out.push(node ? mid(name, { to: url(id), title: id, whole: true }) : { text: name, kind: "current", title: id, whole: true, ...(menu && { menu }) });
     if (node) out.push(current(node));
-    if (it?.mr_ref) out.push({ text: `!${it.mr_ref.number}${it.display_status === "done" || it.display_status === "archived" ? " merged" : ""} ↗`, kind: "ext", href: it.mr_ref.url, title: it.mr_ref.url });
+    if (it?.mr_ref) out.push({ text: `${mrRefText(it.mr_ref)}${it.display_status === "done" || it.display_status === "archived" ? " merged" : ""} ↗`, kind: "ext", href: it.mr_ref.url, title: it.mr_ref.url });
     return out;
   }
   if (pathname === "/archived") return [mid("Board", { to: "/" }), current("Archived")];

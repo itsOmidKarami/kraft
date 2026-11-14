@@ -88,6 +88,17 @@ describe("crumbsFor", () => {
     expect(at("done")?.text).toBe("!142 merged ↗");
   });
 
+  it("signs a GitHub pull request #N and a GitLab merge request !N", () => {
+    const gh = { number: 1401, url: "https://github.com/itsOmidKarami/kraft/pull/1401" };
+    const gl = { number: 42, url: "https://gitlab.example/acme/app/-/merge_requests/42" };
+    const at = (mr: typeof gh, display_status: "running" | "done") =>
+      crumbsFor("/work-items/abc", () => ({ repo: "/r/x", title: "t", mr_ref: mr, display_status })).at(-1);
+    expect(at(gh, "running")).toEqual({ text: "#1401 ↗", kind: "ext", href: gh.url, title: gh.url });
+    expect(at(gh, "done")?.text).toBe("#1401 merged ↗");
+    expect(at(gl, "running")).toEqual({ text: "!42 ↗", kind: "ext", href: gl.url, title: gl.url });
+    expect(at(gl, "done")?.text).toBe("!42 merged ↗");
+  });
+
   it("names the draft item page Board › repo › new item, the repo linking back to the board filtered to it", () => {
     const [board, repo, cur] = crumbsFor("/work-items/new", (id) => (id === "new" ? { repo: "/code/kraft-plugins", title: "" } : undefined));
     expect(board).toMatchObject({ text: "Board", to: "/" });

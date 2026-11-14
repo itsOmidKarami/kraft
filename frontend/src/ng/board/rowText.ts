@@ -86,6 +86,12 @@ export const queuedVerbWords = (verb: string) => QUEUED_VERB[verb] ?? nodeWords(
 /** Up to the first full stop that ends a sentence, not one inside "$0.04". */
 const firstSentence = (s: string) => s.split(/\.(?:\s|$)/)[0];
 
+/** A merge request's number with its forge's sign, from the URL `mr_ref` carries: `#N` on GitHub (`/pull/N`),
+ *  `!N` on GitLab (`/-/merge_requests/N`). A URL that says neither keeps the old `!` — the sign GitLab uses
+ *  and the one every existing fixture already reads — rather than guessing a forge from the host. */
+export const mrRefText = (ref: { number: number; url?: string | null }): string =>
+  `${/\/pull\/\d+(?:[/?#]|$)/.test(ref.url ?? "") ? "#" : "!"}${ref.number}`;
+
 /** The reason tail after the meta: one short line per status and stop kind. */
 export function reasonTail(i: Row, now = Date.now()): string {
   const node = nameOf(i.chain_definition?.nodes, nodeOf(i));
@@ -120,7 +126,7 @@ export function reasonTail(i: Row, now = Date.now()): string {
       case "queued": return waitingForCheckout(i.queued) ?? "waiting to start";
       case "blocked": return "waiting on another item";
       case "escalated": return "escalation running";
-      case "done": return i.mr_ref ? `merged !${i.mr_ref.number}` : "completed";
+      case "done": return i.mr_ref ? `merged ${mrRefText(i.mr_ref)}` : "completed";
       case "cancelled": return "cancelled";
       default: return "";
     }

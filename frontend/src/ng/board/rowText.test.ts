@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DisplayStatus, StopKind, WorkItem } from "../../types";
 import { detail, sliced } from "../item/testkit";
-import { admittedRowAction, displayName, gateName, gateWords, glyphOf, nameOf, reasonTail, rowAction, sliceName, ticksOf } from "./rowText";
+import { admittedRowAction, displayName, gateName, gateWords, glyphOf, mrRefText, nameOf, reasonTail, rowAction, sliceName, ticksOf } from "./rowText";
 
 const NOW = Date.parse("2026-09-13T10:00:00Z");
 const stop = (kind: StopKind, more: Partial<NonNullable<WorkItem["stop"]>> = {}) => ({ kind, node: "verification", reason: null, resume_at: null, ...more }) as WorkItem["stop"];
@@ -54,6 +54,9 @@ describe("reasonTail", () => {
       [row("escalated"), "escalation running"],
       [row("done"), "completed"],
       [row("done", { mr_ref: { number: 139, url: "https://forge.example/mr/139" } }), "merged !139"],
+      // A GitHub pull request reads #N; a GitLab merge request still reads !N (issue #1405).
+      [row("done", { mr_ref: { number: 1401, url: "https://github.com/itsOmidKarami/kraft/pull/1401" } }), "merged #1401"],
+      [row("done", { mr_ref: { number: 42, url: "https://gitlab.example/acme/app/-/merge_requests/42" } }), "merged !42"],
       [row("cancelled"), "cancelled"],
     ];
     for (const [i, want] of cases) expect(reasonTail(i, NOW), `${i.display_status} ${i.stop?.kind ?? ""}`).toBe(want);
@@ -65,6 +68,18 @@ describe("reasonTail", () => {
     expect(reasonTail(row("running", { fallback: { to: { harness: "codex", model: "gpt-5.6-sol", effort: null } } }), NOW)).toBe("verification · on gpt-5.6-sol");
     expect(reasonTail(row("running", { fallback: { to: { harness: "codex", model: null, effort: null } } }), NOW)).toBe("verification · on codex");
   });
+});
+
+describe("mrRefText", () => {
+  it.each([
+    ["a GitHub pull request", { number: 1401, url: "https://github.com/itsOmidKarami/kraft/pull/1401" }, "#1401"],
+    ["a GitHub Enterprise pull request, query and all", { number: 7, url: "https://github.corp.example/o/r/pull/7?x=1" }, "#7"],
+    ["a GitLab merge request", { number: 42, url: "https://gitlab.example/acme/app/-/merge_requests/42" }, "!42"],
+    ["a self-hosted GitLab merge request", { number: 3, url: "https://gitlab.corp.example/g/p/-/merge_requests/3" }, "!3"],
+    // No recognisable forge in the URL: the old `!`, not a guess from the host.
+    ["an unrecognised forge", { number: 139, url: "https://forge.example/mr/139" }, "!139"],
+    ["no URL at all", { number: 139, url: "" }, "!139"],
+  ])("signs %s", (_, ref, want) => expect(mrRefText(ref)).toBe(want));
 });
 
 describe("rowAction", () => {
