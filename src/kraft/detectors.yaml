@@ -630,3 +630,17 @@ detectors:
       - run: "meson test -C builddir"
     setup:
       - run: "meson setup builddir"
+
+  - id: dune
+    tier: toolchain
+    family: ocaml
+    files: [dune-project]
+    test:
+      # `dune test` with no tests tests nothing, so propose no test command
+      # unless the project declares tests: a test stanza, a rule on the
+      # runtest alias, or a cram test.
+      - {when: [{contains: {dune: '\((?:tests?|inline_tests)\b|\balias[ \t]++runtest\b'}}, {contains: {'**/dune': '\((?:tests?|inline_tests)\b|\balias[ \t]++runtest\b'}}, {files: ['*.t', '**/*.t']}], run: "dune test"}
+    setup:
+      # Installs into the active opam switch, outside the worktree, as
+      # `bundle install` installs gems.
+      - {when: [{files: ['*.opam']}], run: "opam install . --deps-only --with-test --yes"}

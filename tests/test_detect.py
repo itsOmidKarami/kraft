@@ -265,6 +265,30 @@ KINDS = [
         "cmake -S . -B build",
     ),  # noqa: E501
     ("meson", {"meson.build": ""}, "meson test -C builddir", "meson setup builddir"),
+    (
+        "dune",
+        {"dune-project": "", "test/dune": "(test (name t))\n", "x.opam": ""},
+        "dune test",
+        "opam install . --deps-only --with-test --yes",
+    ),
+    (
+        "dune-inline-tests",
+        {"dune-project": "", "lib/dune": "(library (name x) (inline_tests))\n"},
+        "dune test",
+        None,
+    ),
+    (
+        "dune-cram",
+        {"dune-project": "", "test.t": "$ echo hi\n"},
+        "dune test",
+        None,
+    ),
+    (
+        "dune-without-tests",
+        {"dune-project": "", "lib/dune": "(library (name x))\n"},
+        None,
+        None,
+    ),
 ]
 
 
