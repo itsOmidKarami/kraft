@@ -411,6 +411,18 @@ detectors:
     setup:
       - run: "go mod download"
 
+  - id: leiningen
+    tier: toolchain
+    family: jvm
+    files: [project.clj]
+    test:
+      # With no test files, `lein test` reports 0 tests and passes: a build,
+      # not a test run. Like go without a _test.go file, it has no test
+      # command to propose.
+      - {when: [{files: ['test/*.clj', 'test/*.cljc']}], run: "lein test"}
+    setup:
+      - run: "lein with-profile +test deps"
+
   - id: gradle-wrapper
     tier: toolchain
     family: jvm
