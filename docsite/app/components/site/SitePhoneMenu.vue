@@ -61,7 +61,7 @@ onBeforeUnmount(() => document.documentElement.classList.remove('s-locked'))
             :key="p.to"
           >
             <NuxtLink :to="p.to">
-              <span class="s-sheet-name">{{ p.name }}</span>
+              <span class="s-sheet-name">{{ p.name }}</span>{{ ' ' }}
               <span class="s-sheet-line">{{ p.line }}</span>
             </NuxtLink>
           </li>

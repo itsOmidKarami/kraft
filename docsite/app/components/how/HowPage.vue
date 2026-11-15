@@ -160,7 +160,7 @@ const REPOS_YAML = [
       :docs="{ to: '/concepts/how-a-work-item-runs', label: 'How a work item runs' }"
     >
       <p>Each item runs on its own branch in its own git worktree, so items run in parallel.</p>
-      <p>Archiving an item removes its worktree and its branch.</p>
+      <p>Archiving an item removes its worktree, and its branch once its commits exist somewhere else.</p>
       <template #picture>
         <div class="s-drawing s-drawing-roomy">
           <SiteDrawingWorktrees />

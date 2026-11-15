@@ -21,8 +21,37 @@ const SKILLS = [
     <SitePageHead
       label="PRODUCT · TOUR"
       title="Where you work with Kraft."
+      top
     >
       Kraft is one server with several ways in. Each shows the same work items and the same gates, so use whichever is nearest.
+      <template #picture>
+        <figure class="s-figure">
+          <div class="s-tourhead">
+            <img
+              class="s-tourhead-browser"
+              src="/site/tour-board-phone.png"
+              width="400"
+              height="260"
+              alt="The board in a browser, with the Needs you list at the top"
+            >
+            <img
+              class="s-tourhead-vscode"
+              src="/site/vscode-gate-phone.png"
+              width="420"
+              height="184"
+              alt="The Kraft board in the VS Code sidebar"
+            >
+            <img
+              class="s-tourhead-phone"
+              src="/site/mobile.png"
+              width="390"
+              height="844"
+              alt="The board on a phone"
+            >
+          </div>
+          <figcaption>The board in a browser, in VS Code and on a phone.</figcaption>
+        </figure>
+      </template>
     </SitePageHead>
 
     <SiteBlock

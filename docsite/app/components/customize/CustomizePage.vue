@@ -17,6 +17,16 @@ const ADDON_REVIEW = [
   '  …',
   'Apply release@acme? [y/N]',
 ]
+// The head's picture: ~/.kraft/config/, path then note. `yours` is the one
+// file a person added.
+const CONFIG_FILES = [
+  { path: 'chains/', note: '' },
+  { path: 'default.yaml', note: 'The default chain', nested: true },
+  { path: 'with-lint.yaml', note: 'Extends default, adds a lint node', nested: true, yours: true },
+  { path: 'library.yaml', note: 'Tasks, with the agent and model for each' },
+  { path: 'harnesses.yaml', note: 'The agents Kraft can launch' },
+  { path: 'addons.yaml', note: 'The add-ons you installed' },
+]
 const LITE_INSTALL = [
   'claude plugin marketplace add itsOmidKarami/kraft',
   'claude plugin install kraft-lite@kraft',
@@ -28,8 +38,31 @@ const LITE_INSTALL = [
     <SitePageHead
       label="PRODUCT · MAKE IT YOURS"
       title="The process is yours to change."
+      top
     >
       Chains are files, so you can edit them, extend them and share them. Pick the agent and the model per task, or run a chain with no server at all.
+      <template #picture>
+        <figure class="s-figure">
+          <div class="s-headpanel s-files">
+            <p class="s-files-head">
+              <code>~/.kraft/config/</code>
+              <span class="s-headpanel-note">PLAIN YAML FILES</span>
+            </p>
+            <ul>
+              <li
+                v-for="f in CONFIG_FILES"
+                :key="f.path"
+                :class="{ 'is-nested': f.nested, 'is-yours': f.yours, 'is-folder': !f.note }"
+              >
+                <code>{{ f.path }}</code>
+                <span v-if="f.note">{{ f.note }}</span>
+                <b v-if="f.yours">YOURS</b>
+              </li>
+            </ul>
+          </div>
+          <figcaption>The process is a folder of plain YAML files. Kraft Lite reads the same chain files.</figcaption>
+        </figure>
+      </template>
     </SitePageHead>
 
     <SiteBlock

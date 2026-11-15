@@ -45,7 +45,7 @@ const { open, onFocusOut } = useDisclosure(root, button, '(max-width: 1023px)')
           class="s-menu-item"
           :to="p.to"
         >
-          <span class="s-menu-name">{{ p.name }}</span>
+          <span class="s-menu-name">{{ p.name }}</span>{{ ' ' }}
           <span class="s-menu-line">{{ p.line }}</span>
         </NuxtLink>
       </li>

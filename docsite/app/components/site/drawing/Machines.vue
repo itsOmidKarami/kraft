@@ -5,17 +5,17 @@
 const LABEL = 'A chain runs on your machine, one step runs on another machine, and the chain comes back'
 const SIZES = [
   {
-    cls: 's-draw-big', w: 536, g: 44, h: 212, inset: 18,
+    cls: 's-draw-big', w: 536, g: 44, h: 230, inset: 18,
     xs: [128, 246, 364], start: 40, end: 496, turns: [220, 316], out: [210, 326],
   },
   {
-    cls: 's-draw-small', w: 300, g: 36, h: 212, inset: 14,
+    cls: 's-draw-small', w: 300, g: 36, h: 230, inset: 14,
     xs: [56, 132, 208], start: 20, end: 280, turns: [118, 182], out: [110, 190],
   },
 ]
 // Lane centres: your machine's line, the other machine's.
 const TOP = 62
-const LOW = 170
+const LOW = 188
 </script>
 
 <template>
@@ -40,7 +40,7 @@ const LOW = 170
     <rect
       class="s-draw-lane-blue"
       x="1"
-      y="113"
+      y="131"
       :width="s.w - 2"
       height="98"
       rx="12"
@@ -59,12 +59,12 @@ const LOW = 170
     <text
       class="s-draw-label s-draw-blue"
       :x="s.inset"
-      y="138"
+      y="156"
     >ANOTHER MACHINE</text>
     <text
       class="s-draw-label s-draw-blue"
       :x="s.w - s.inset"
-      y="138"
+      y="156"
       text-anchor="end"
     >RUNS THE STEP</text>
     <g class="s-draw-line">
@@ -97,13 +97,13 @@ const LOW = 170
     <text
       class="s-draw-label"
       :x="s.out[0]"
-      y="110"
+      y="119"
       text-anchor="end"
     >OUT</text>
     <text
       class="s-draw-label"
       :x="s.out[1]"
-      y="110"
+      y="119"
     >BACK</text>
   </svg>
 </template>

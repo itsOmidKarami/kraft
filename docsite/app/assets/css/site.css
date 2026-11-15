@@ -2220,6 +2220,11 @@
     align-self: start;
   }
 
+  /* How it works' Gates block: its heading sits at the top of its row. */
+  .site #gates.s-block-below .s-block-grid {
+    align-items: start;
+  }
+
   .site .s-block-text .s-block-grid {
     grid-template-rows: auto;
     grid-template-areas: 'head body';
@@ -2406,7 +2411,7 @@
   flex-direction: column;
   gap: 12px;
   padding: 12px 16px 16px;
-  border: 1px solid var(--s-border);
+  border: 1px solid var(--s-stroke);
   border-radius: 12px;
 }
 
@@ -2512,5 +2517,667 @@
 @media (min-width: 768px) {
   .site .s-narrow {
     display: none !important;
+  }
+}
+
+/* A page head whose text and picture align at their tops (SitePageHead's
+   `top`): Make it yours, Product tour and Scale up. */
+@media (min-width: 1024px) {
+  .site .s-pagehead-grid.s-pagehead-top {
+    align-items: start;
+  }
+}
+
+/* A dark panel on the violet field, holding a page head's picture. Its own
+   width picks the drawing size inside (.s-draw-big or .s-draw-small). */
+.site .s-headpanel {
+  container-type: inline-size;
+  box-sizing: border-box;
+  padding: 28px;
+  border: 1px solid var(--s-rule);
+  border-radius: 16px;
+  background: var(--s-ground);
+  box-shadow: 0 24px 48px rgb(8 8 30 / 0.45);
+}
+
+.site .s-headpanel-note {
+  font-family: var(--s-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--s-text-muted);
+}
+
+@media (max-width: 767px) {
+  .site .s-headpanel {
+    padding: 20px 16px;
+  }
+}
+
+/* Make it yours' head: ~/.kraft/config/ as a list of files. */
+.site .s-files-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+  margin: 0 0 12px;
+  padding: 0 12px 16px;
+  border-bottom: 1px solid var(--s-hairline);
+}
+
+.site .s-files code {
+  font-size: 14px;
+  color: var(--s-text);
+}
+
+.site .s-files ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.site .s-files li {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr) auto;
+  column-gap: 20px;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 10px;
+}
+
+.site .s-files li span {
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--s-text-sub);
+}
+
+.site .s-files li.is-folder code {
+  color: var(--s-text-muted);
+}
+
+.site .s-files li.is-nested code {
+  padding-left: 22px;
+}
+
+.site .s-files li.is-yours {
+  background: #37374c;
+  box-shadow: inset 2px 0 0 var(--s-accent);
+}
+
+.site .s-files li.is-yours span {
+  color: var(--s-text);
+}
+
+.site .s-files li b {
+  font-family: var(--s-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--s-accent);
+}
+
+/* On a phone each path sits above its note. */
+@media (max-width: 767px) {
+  .site .s-files li {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'path tag' 'note note';
+    row-gap: 2px;
+    padding: 8px 10px;
+  }
+
+  .site .s-files li code {
+    grid-area: path;
+  }
+
+  .site .s-files li span {
+    grid-area: note;
+  }
+
+  .site .s-files li.is-nested span {
+    padding-left: 22px;
+  }
+
+  .site .s-files li b {
+    grid-area: tag;
+  }
+
+  .site .s-files-head {
+    padding-inline: 10px;
+  }
+}
+
+/* Scale up's head: three slices as strips, and a step moved to another
+   machine. The strips are hidden from a screen reader: the word beside each
+   says its state. */
+.site .s-strips {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-family: var(--s-mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+
+.site .s-strips-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+  margin: 0;
+  font-weight: 600;
+  color: var(--s-text);
+}
+
+.site .s-strips ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.site .s-strips-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 84px;
+  column-gap: 16px;
+  align-items: center;
+  min-height: 40px;
+}
+
+.site .s-strips-name {
+  font-weight: 500;
+  color: var(--s-text-sub);
+}
+
+.site .s-strips-row b {
+  font-weight: 600;
+  text-align: right;
+}
+
+.site .s-strips b.is-run,
+.site .s-strips-where {
+  color: var(--s-blue);
+}
+
+.site .s-strips b.is-you {
+  color: var(--s-amber);
+}
+
+.site .s-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  column-gap: 6px;
+  align-items: center;
+}
+
+.site .s-strip i {
+  box-sizing: border-box;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.site .s-strip i.is-done {
+  background: #77777f;
+}
+
+.site .s-strip i.is-run {
+  background: var(--s-blue);
+}
+
+.site .s-strip i.is-you {
+  background: var(--s-amber);
+}
+
+.site .s-strip i.is-todo {
+  border: 1px dashed var(--s-stroke);
+}
+
+.site .s-strip i.is-moved {
+  border: 1px dotted var(--s-stroke);
+}
+
+.site .s-strips hr {
+  width: 100%;
+  height: 1px;
+  margin: 8px 0;
+  border: 0;
+  background: var(--s-hairline);
+}
+
+.site .s-strips-move {
+  align-items: end;
+  padding-top: 14px;
+}
+
+.site .s-strips-move .s-strips-name {
+  align-self: start;
+  line-height: 10px;
+}
+
+.site .s-strips-move b {
+  line-height: 36px;
+}
+
+.site .s-strips-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.site .s-strips-machine {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  border-radius: 8px;
+  background: #2f394c;
+}
+
+.site .s-strips-machine .s-strip {
+  flex: 1 1 auto;
+}
+
+.site .s-strips-where {
+  position: absolute;
+  left: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* A narrow panel: each row's name and state word on one line, its strip
+   under them at the panel's width, and the machine's name on its own line
+   above its strip so it never covers a step or the state word. */
+@container (max-width: 479px) {
+  .site .s-strips-row,
+  .site .s-strips-move {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'name state' 'strip strip';
+    row-gap: 8px;
+    align-items: center;
+    padding-block: 6px;
+  }
+
+  .site .s-strips-name {
+    grid-area: name;
+  }
+
+  .site .s-strips-row b,
+  .site .s-strips-move b {
+    grid-area: state;
+    line-height: normal;
+  }
+
+  .site .s-strips-row > .s-strip,
+  .site .s-strips-lanes {
+    grid-area: strip;
+  }
+
+  .site .s-strips-move .s-strips-name {
+    line-height: normal;
+  }
+
+  .site .s-strips-machine {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding: 8px 0 12px;
+  }
+
+  .site .s-strips-where {
+    position: static;
+    padding-left: 8px;
+  }
+}
+
+/* Product tour's head: the browser and VS Code crops stacked beside the
+   phone's. Under 640px the two stack at full width and the phone's is left
+   out. */
+.site .s-tourhead {
+  display: grid;
+  grid-template-columns: minmax(0, 388fr) minmax(0, 195fr);
+  gap: 10px;
+  max-width: 593px;
+  margin-inline: auto;
+}
+
+.site .s-tourhead img {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--s-rule);
+  border-radius: 12px;
+}
+
+.site .s-tourhead-browser {
+  aspect-ratio: 388 / 242;
+  object-fit: cover;
+  object-position: left top;
+}
+
+.site .s-tourhead-phone {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+}
+
+@media (max-width: 639px) {
+  .site .s-tourhead {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: none;
+  }
+
+  .site .s-tourhead-phone {
+    display: none !important;
+  }
+}
+
+/* Why Kraft's head drawing (site/drawing/Session.vue) */
+.site .s-draw-you-lane {
+  fill: var(--s-amber-wash);
+}
+
+.site .s-draw-label.s-draw-you {
+  fill: var(--s-amber);
+}
+
+.site .s-draw-you-line,
+.site .s-draw-gate line {
+  stroke: var(--s-amber);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.site .s-draw-gate rect {
+  fill: var(--s-raised);
+  stroke: var(--s-amber);
+  stroke-width: 1.5;
+}
+
+.site .s-draw-gate circle {
+  fill: var(--s-amber);
+}
+
+/* Why Kraft's sections (why/WhyPage.vue) */
+.site .s-why-h2 {
+  margin-bottom: clamp(32px, 4.4vw, 56px);
+}
+
+.site .s-why-adds,
+.site .s-why-also {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.site .s-why-adds {
+  gap: 28px 32px;
+}
+
+.site .s-why-adds li {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 20px;
+  border-top: 1px solid var(--s-border);
+}
+
+.site .s-why-adds h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+.site .s-why-adds p,
+.site .s-why-also p {
+  margin: 0;
+  line-height: 1.55;
+  color: var(--s-text-sub);
+}
+
+.site .s-why-also {
+  gap: 16px;
+}
+
+.site .s-why-also li {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-sizing: border-box;
+  padding: 28px;
+  border: 1px solid var(--s-hairline);
+  border-radius: 16px;
+  background: var(--s-ground);
+}
+
+.site .s-why-also .s-block-label {
+  font-size: 12px;
+}
+
+.site .s-why-also h3 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.012em;
+}
+
+.site .s-why-also .s-arrow {
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+@media (min-width: 640px) {
+  .site .s-why-adds,
+  .site .s-why-also {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .site .s-why-adds {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .site .s-why-also {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 24px;
+  }
+}
+
+@media (max-width: 767px) {
+  .site .s-why-also li {
+    padding: 24px 20px;
+  }
+}
+
+/* How it compares: a table, its rows stacked under 768px with each cell
+   named by its column. The roles keep it a table to a screen reader once
+   its display changes. */
+.site .s-compare {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.site .s-compare thead th {
+  padding-block: 0 14px;
+  font-family: var(--s-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--s-text-muted);
+}
+
+.site .s-compare thead .s-compare-kraft {
+  color: var(--s-accent);
+}
+
+.site .s-compare th,
+.site .s-compare td {
+  padding-left: 0;
+  padding-right: 48px;
+}
+
+.site .s-compare :is(th, td):last-child {
+  padding-right: 0;
+}
+
+.site .s-compare :is(th, td):first-child {
+  width: 27%;
+}
+
+.site .s-compare :is(th, td):nth-child(2) {
+  width: 35%;
+}
+
+.site .s-compare tbody th,
+.site .s-compare td {
+  padding-block: 28px;
+  border-top: 1px solid var(--s-hairline);
+  vertical-align: top;
+}
+
+.site .s-compare tbody th {
+  font-family: inherit;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.012em;
+}
+
+.site .s-compare td {
+  line-height: 1.6;
+  color: var(--s-text-sub);
+}
+
+.site .s-compare td + td {
+  color: var(--s-text);
+}
+
+@media (max-width: 767px) {
+  .site .s-compare,
+  .site .s-compare tbody,
+  .site .s-compare tr,
+  .site .s-compare tbody th,
+  .site .s-compare td,
+  .site .s-compare :is(th, td):is(:first-child, :nth-child(2)) {
+    display: block;
+    width: auto;
+  }
+
+  .site .s-compare thead tr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .site .s-compare tbody tr {
+    padding: 24px 0;
+    border-top: 1px solid var(--s-hairline);
+  }
+
+  .site .s-compare tbody th,
+  .site .s-compare td {
+    padding: 0;
+    border: 0;
+  }
+
+  .site .s-compare td {
+    margin-top: 14px;
+  }
+
+  .site .s-compare td::before {
+    content: attr(data-label) / "";
+    display: block;
+    margin-bottom: 4px;
+    font-family: var(--s-mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--s-text-muted);
+  }
+
+  .site .s-compare td + td::before {
+    color: var(--s-accent);
+  }
+}
+
+/* When not to use Kraft: the reason beside the list. */
+.site .s-why-when {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.site .s-why-when-text {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.site .s-why-when-text p {
+  margin: 0;
+  color: var(--s-text-sub);
+}
+
+.site .s-why-when dl {
+  margin: 0;
+  border-top: 1px solid var(--s-hairline);
+}
+
+.site .s-why-when dl > div {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  column-gap: 32px;
+  align-items: baseline;
+  padding: 22px 0;
+  border-bottom: 1px solid var(--s-hairline);
+}
+
+.site .s-why-when dt {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.site .s-why-when dd {
+  margin: 0;
+  line-height: 1.55;
+  color: var(--s-text-sub);
+}
+
+.site .s-why-when code {
+  font-size: 15px;
+  color: var(--s-text);
+}
+
+@media (min-width: 1024px) {
+  .site .s-why-when {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    column-gap: 72px;
+    align-items: start;
+  }
+}
+
+@media (max-width: 767px) {
+  .site .s-why-when dl > div {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 4px;
+    padding: 16px 0;
+  }
+
+  .site .s-why-when dt {
+    font-size: 17px;
   }
 }

@@ -16,7 +16,7 @@
               <span class="s-nest-row"><b>A NODE</b><span>time, tokens, dollars</span></span>
               <ul>
                 <li class="s-nest-loop">
-                  <span class="s-nest-row"><b>ITS FIX LOOP</b><span>3 attempts, 1 hour as shipped</span></span>
+                  <span class="s-nest-row"><b>ITS FIX LOOP</b><span>verification: 2 attempts, 1 hour</span></span>
                 </li>
                 <li>
                   <span class="s-nest-row"><b>A STEP</b><span>time, tokens, dollars</span></span>
