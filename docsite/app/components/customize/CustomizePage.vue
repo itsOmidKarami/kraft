@@ -1,6 +1,7 @@
-<!-- Make it yours: the process is yours to change and share. Not on the
-     boards: the block template, its copy drawn from the docs each block links
-     to. Its two screenshots are the README's until they are retaken. -->
+<!-- Make it yours: the process is yours to change and share. The head is
+     the Head-customize board; the blocks aren't on the boards: the block
+     template, its copy drawn from the docs each block links to. Its two
+     screenshots are the README's until they are retaken. -->
 <script setup lang="ts">
 const demo = demoHref(useRuntimeConfig().app.baseURL)
 

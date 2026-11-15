@@ -227,8 +227,8 @@ A cool ink-and-violet ground with two signal colours that each carry one meaning
 - **Card** (`card-*`): the two "Yours to shape and scale" cards, the secondary button's fill, the selected segment of the theme switch.
 - **Raised** (`raised-*`): the inside of the current gate diamond.
 - **Hairline** (`hairline-*`): rules between list items, panel headers and section edges.
-- **Border** (`border-*`): outlines inside drawings (a scope box, a machine lane).
-- **Stroke** (`stroke-*`): every line in a drawing and the dashed outline of a node still to come.
+- **Border** (`border-*`): outlines inside drawings (a machine lane).
+- **Stroke** (`stroke-*`): every line in a drawing, the boxes of the scope nest and the dashed outline of a node still to come.
 - **Control Outline** (`control-outline-*`): the secondary button's and the theme switch's outline. Darker than the boards' stroke so it reaches 3:1 on every ground it meets, the amber wash included.
 - **Text** (`text-*`), **Secondary Text** (`text-sub-*`), **Muted Text** (`text-muted-*`): headings and current items; body copy and footer links; labels, captions and file paths.
 - **Glyph To-do** (`glyph-todo-*`): the icon inside a node still to come. Decorative only, never text.
@@ -319,6 +319,8 @@ A 12px band-coloured panel with a hairline: a monospace file path as its header,
 
 ### Drawings
 The fix loop, the scope nest, the worktrees, slices and the two machine lanes, each in a 16px band-coloured panel with 28px padding and a 15px muted caption below. All are SVG built from the two glyphs, the diamond, 2px strokes and 12px monospace labels, each with a text alternative that says what it shows.
+
+Why Kraft's head draws a session beside a chain in the same parts, on a dark panel on the violet field. The heads of Make it yours (the config folder as a file list) and Scale up (slices as progress strips, a step moved to another machine) are HTML text, not SVG, so they stay readable on a phone; a word beside each strip says its state, and the strips are hidden from a screen reader. Product tour's head is three screenshot crops. These three heads align their text and picture at the top; How it works and Why Kraft centre them.
 
 ### Install band
 On the violet field: "Install Kraft." at 56px, then the command in a band-coloured 16px container with a Copy button that says it copied in words, then the next steps and requirements in on-violet text, then a row of arrow links.

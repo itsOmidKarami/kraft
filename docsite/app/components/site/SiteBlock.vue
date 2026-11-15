@@ -3,7 +3,7 @@
      picture right or left of the text (sides alternate down a page), or below
      it across the column for a screenshot, with the body beside the heading.
      Under 1024px everything stacks, text first. With no picture the heading
-     sits left of the body (Why Kraft's longer text); the label and the docs
+     sits left of the body; the label and the docs
      link are optional. -->
 <script setup lang="ts">
 withDefaults(defineProps<{

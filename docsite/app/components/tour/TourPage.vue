@@ -1,6 +1,6 @@
-<!-- Product tour: where you work with Kraft, one surface per block. Not on
-     the boards: the block template's wide variant, its copy drawn from the
-     docs each block links to. The screenshots are crops of the README's, with
+<!-- Product tour: where you work with Kraft, one surface per block. The head
+     is the Head-tour board; the blocks aren't on the boards: the block
+     template's wide variant, its copy drawn from the docs each block links to. The screenshots are crops of the README's, with
      the app's sidebar cut off, until they are retaken. -->
 <script setup lang="ts">
 const demo = demoHref(useRuntimeConfig().app.baseURL)
