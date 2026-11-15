@@ -307,16 +307,21 @@ def test_the_wheel_is_pinned_after_it_is_built_and_before_it_is_smoke_tested():
 
 def test_kraft_ships_everywhere_before_the_extension_is_published():
     """A failed step stops every step after it, and the Marketplace login can
-    lapse. With the extension's steps last, a lapsed login fails the run
-    without leaving Homebrew on the old version or main unstamped."""
+    lapse. With the extension's steps last but the registry, a lapsed login
+    fails the run without leaving Homebrew on the old version or main
+    unstamped, and the registry publish gates on PyPI alone, so it still runs."""
     names = [n for n in _steps() if n]
-    assert names[-4:] == [
+    assert names[-5:] == [
         "sign in to Azure for the Marketplace",
         "publish the VS Code extension",
         "publish the VS Code extension to Open VSX",
         "check the Marketplace lists this release",
+        "publish to the MCP registry",
     ]
-    extension = len(names) - 4
+    registry = _job()["steps"][-1]["if"]
+    assert "steps.impact.outputs.pre == 'none'" in registry
+    assert "steps.pypi-served.outcome == 'success'" in registry
+    extension = len(names) - 5
     for kraft in [
         "push the tag and create the release",
         "publish to PyPI",
@@ -348,7 +353,7 @@ def test_the_marketplace_publish_is_the_managed_identity_and_holds_no_token():
     # Only a stable run touches the Marketplace: a pre-release or a no-op run never signs in.
     stable = "steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'"
     named = [s for s in _job()["steps"] if s.get("name")]
-    login, publish, _open_vsx, listing = named[-4:]
+    login, publish, _open_vsx, listing = named[-5:-1]
     assert [s["if"] for s in (login, publish, listing)] == [stable] * 3
 
 
