@@ -164,14 +164,17 @@ secrets or secrets of the `release` environment.
 8. **The MCP registry**, `io.github.itsOmidKarami/kraft`, the
    [MCP registry listing](#mcp-registry-listing) below. Needs no secret: it
    signs in with GitHub OIDC for the `io.github.itsOmidKarami` namespace. It
-   runs once PyPI serves the release, whatever the extension's steps did.
+   runs once PyPI serves the release, whatever the extension's steps did. Any
+   failure before the PyPI check skips it too: publish it by hand, as that
+   section says.
    Check:
    `curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.itsOmidKarami/kraft" | jq -r '.servers[].server.version'`.
 
-The VS Code extension goes last, after the run has checked that PyPI serves the
-new version. Its Marketplace login is the likeliest thing to lapse. Run last, a
-failure there skips only the extension's own steps, never Homebrew or the stamp
-pull request, and the run still goes red. Open VSX needs no Azure login, so it
+The VS Code extension goes after the run has checked that PyPI serves the new
+version, followed only by the MCP registry. Its Marketplace login is the
+likeliest thing to lapse. Run that late, a failure there skips only the
+extension's own steps, never Homebrew, the stamp pull request or the registry,
+and the run still goes red. Open VSX needs no Azure login, so it
 still publishes when only the Marketplace step failed.
 
 Last is also the safe order for users. VS Code updates the extension on its own,
