@@ -161,6 +161,12 @@ secrets or secrets of the `release` environment.
    Needs no secret: trusted publishing, registered for `kraft-sdlc.kraft`
    against this workflow and the `release` environment. Check:
    `curl -s https://open-vsx.org/api/kraft-sdlc/kraft | jq -r .version`.
+8. **The MCP registry**, `io.github.itsOmidKarami/kraft`, the
+   [MCP registry listing](#mcp-registry-listing) below. Needs no secret: it
+   signs in with GitHub OIDC for the `io.github.itsOmidKarami` namespace. It
+   runs once PyPI serves the release, whatever the extension's steps did.
+   Check:
+   `curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.itsOmidKarami/kraft" | jq -r '.servers[].server.version'`.
 
 The VS Code extension goes last, after the run has checked that PyPI serves the
 new version. Its Marketplace login is the likeliest thing to lapse. Run last, a
@@ -249,9 +255,14 @@ a client installs the server from PyPI as `uvx kraft-sdlc admin mcp`. It
 proves the name is ours by finding the README's hidden `mcp-name:` line on the
 PyPI page.
 
-Publishing isn't automatic. After a stable release's stamping pull request has
-merged, so that `server.json` names a version that is on PyPI, run from the
-repository root:
+The registry lists one fixed version per publish, so every stable release
+publishes again. The release workflow does it as its last step, once PyPI
+serves the release: it signs in with GitHub's OIDC token, so no secret is
+stored, and publishes the `server.json` the stamp step just wrote. A failure
+there doesn't hold back the extension, and leaves the run red.
+
+To publish by hand, for a failed run or a fix to the entry, run from the
+repository root on a main whose `server.json` names a version on PyPI:
 
 ```bash
 mcp-publisher login github   # as itsOmidKarami
@@ -260,6 +271,8 @@ mcp-publisher publish
 
 Install `mcp-publisher` with `brew install mcp-publisher` or from the
 [registry's releases](https://github.com/modelcontextprotocol/registry/releases).
+The workflow pins a publisher version and its checksum. If the step fails with
+"invalid audience", that version is too old for the registry: bump both.
 
 ## Docs "What's new" page
 
