@@ -138,7 +138,7 @@ secrets or secrets of the `release` environment.
    repository, `release.yml` and the `release` environment. Check:
    `curl -sf -o /dev/null https://pypi.org/pypi/kraft-sdlc/X.Y.Z/json && echo ok`.
    The run does this itself and fails after 10 minutes.
-4. **The stamp pull request**, which brings the five manifests and both
+4. **The stamp pull request**, which brings the manifests, `server.json` and both
    changelogs up to date on `main`. Needs the release-bot GitHub App:
    `RELEASE_BOT_CLIENT_ID` and `RELEASE_BOT_PRIVATE_KEY`, with the App
    installed on `kraft` and allowed contents and pull-request writes. Auto-merge
