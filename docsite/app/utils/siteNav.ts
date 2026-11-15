@@ -8,7 +8,7 @@ export const PRODUCT_PAGES = [
   { to: '/how-it-works', name: 'How it works', line: 'The chain, the gates and the limits that keep a run in bounds.' },
   { to: '/tour', name: 'Product tour', line: 'The board, the review page, your phone and your editor.' },
   { to: '/customize', name: 'Make it yours', line: 'Your own chains, add-ons and agents.' },
-  { to: '/scale', name: 'Scale up', line: 'Slices for large plans, and steps on other machines.' },
+  { to: '/scale', name: 'Scale up', line: 'Slices for large plans, and steps on remote machines.' },
 ]
 
 // The dashboard demo is a folder of static files beside the pages, not a
