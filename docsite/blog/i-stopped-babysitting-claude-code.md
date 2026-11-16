@@ -31,7 +31,7 @@ This week Kraft built a new home page for its own docs site: 30 files, +3,044/âˆ
 
 ![The fix loop: tests, repair, judge](/assets/fixloop.png)
 
-Hand-off to pull request took 69 minutes and $10.20. That's above the $10 default cap: Kraft checks the cap before each agent step and can't stop one mid-run, so the overshoot is at most one step.
+Hand-off to pull request took 69 minutes and $10.20. That's above the $10 default cap; I run mine higher. Kraft checks the cap before each agent step starts and won't stop one mid-run, so the overshoot is at most one step.
 
 When I approve the final review, Kraft merges only the commit I approved. It carries that approval across its own clean rebases; any other change cancels the merge or stops the item.
 

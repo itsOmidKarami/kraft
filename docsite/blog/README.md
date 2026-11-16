@@ -81,13 +81,13 @@ IDs.
 The post here is the original. A copy on another site names it, so readers and
 search engines credit this one:
 
-- **dev.to:** under Settings, Extensions, "Publishing to DEV Community from
-  RSS", add `https://kraft-sdlc.dev/blog/feed.xml`. Each new post arrives as a
-  draft with its canonical URL set to the post here. Check the draft, then
-  publish it. For a single post by hand, set `canonical_url:` in the front
-  matter of the dev.to editor to the post's address.
-- **Medium:** use Import a story with the post's address. Medium copies it and
-  sets the canonical link to the original.
+- **dev.to:** set `canonical_url:` in the dev.to editor's front matter to the
+  post's address. dev.to can also import posts from
+  `https://kraft-sdlc.dev/blog/feed.xml` (its Settings, Extensions); if you
+  use that, check that each imported draft names the post here as its
+  canonical URL before you publish it.
+- **Medium:** import the story from the post's address, then check that its
+  canonical link names the post here.
 - **Anywhere else:** link the original at the top or bottom, for example
   "First published on [kraft-sdlc.dev](https://kraft-sdlc.dev/blog/my-post)",
   and use its canonical-URL setting when it has one.

@@ -101,11 +101,13 @@ something vaguer that still implies it.
 Only after the post is live here, and only when the maintainer asks: this
 skill prepares copies, it doesn't post them.
 
-- **dev.to:** the feed at `https://kraft-sdlc.dev/blog/feed.xml` imports each
-  post as a draft with its canonical URL set. For a manual copy, set
-  `canonical_url:` to the post's address.
-- **Medium:** Import a story from the post's address, which sets the canonical
-  link.
+- **dev.to:** set `canonical_url:` to the post's address. A copy imported
+  from the feed (`https://kraft-sdlc.dev/blog/feed.xml`) needs the same check
+  before it is published.
+- **Medium:** import the story from the post's address, and check that its
+  canonical link names the post here.
+- **Check every copy** shows the canonical link in its page source before you
+  call it done.
 - **Anywhere without a canonical setting:** end the copy with "First published
   on kraft-sdlc.dev" linking the post.
 - **The copy is the same post.** Change only what the platform forces (its

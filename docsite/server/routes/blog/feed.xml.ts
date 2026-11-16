@@ -1,7 +1,7 @@
 // The blog's RSS feed (blog-posts.mjs), at /blog/feed.xml. Each item carries
-// the whole post as HTML in content:encoded, which a dev.to feed import turns
-// into a draft whose canonical URL is the post here; a reader gets the post
-// in full. Only the build at / prerenders it (nuxt.config.ts).
+// the whole post as HTML in content:encoded, so a feed reader gets the post in
+// full and a site that imports from the feed (dev.to) has the body to copy.
+// Only the build at / prerenders it (nuxt.config.ts).
 type Node = string | [string, Record<string, unknown>, ...Node[]]
 
 const VOID = new Set(['img', 'br', 'hr'])
