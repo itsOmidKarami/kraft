@@ -83,11 +83,10 @@ something vaguer that still implies it.
 3. **Check it rendered.** `KRAFT_BLOG_DRAFTS=1 just docs`, then open the post
    at a phone width and a desktop width, in light and dark. Look at every image
    and the video.
-4. **Run the checks** that cover a post: `just ci-checks`, and for new site
-   code `just docs-site`. `just vale` reads this folder's README but not the
-   posts, which keep their author's voice (a post may say "pull request" to a
-   GitHub reader). The docs workflow fails a draft that leaks
-   into the build, and a published post missing from the feed.
+4. **Run the checks** that cover a post: `just vale` (posts follow the docs'
+   terms and spelling: "merge request", British spelling), `just ci-checks`,
+   and for new site code `just docs-site`. The docs workflow fails a draft
+   that leaks into the build, and a published post missing from the feed.
 5. **Open the pull request** following `CONTRIBUTING.md`: label it
    `release::none` (a post is no product change, so it adds no line to the
    release notes) and leave `## Changelog` empty. Put the post's address in

@@ -1,6 +1,6 @@
 ---
-title: "I stopped babysitting Claude Code: spec in, pull request out"
-description: Why I built Kraft, one real run from hand-off to pull request, and what keeps the agent honest when nobody is watching.
+title: "I stopped babysitting Claude Code: spec in, merge request out"
+description: Why I built Kraft, one real run from hand-off to merge request, and what keeps the agent honest when nobody is watching.
 date: 2026-11-11
 author: Omid Karami
 image: /blog/i-stopped-babysitting-claude-code/cover.png
@@ -9,7 +9,7 @@ tags: [launch, claude-code]
 
 I use Claude Code on real repos every day, often in two or three sessions at once. The code was rarely the problem; I was. I answered `(y/n)` prompts, re-ran tests it said had passed, and reminded it what we had agreed an hour earlier. I was the scheduler, the reviewer, the test runner and the memory. When I closed the terminal, the work stopped.
 
-So I built [Kraft](https://github.com/itsOmidKarami/kraft), an open-source software factory that runs on your machine. It isn't another coding agent. It runs the one you already use, Claude Code by default, from spec to pull request, and stops only when a decision is yours.
+I built [Kraft](https://github.com/itsOmidKarami/kraft), an open-source software factory that runs on your machine. It isn't another coding agent. It runs the one you already use, Claude Code by default, from spec to merge request, and stops only when a decision is yours.
 
 ::site-video
 ---
@@ -25,13 +25,13 @@ label: "Play the video: Kraft, stop babysitting your coding agents, 1 minute 53 
 This week Kraft built a new home page for its own docs site: 30 files, +3,044/−466.
 
 1. **I settled the spec and plan in a session**, the way I always work with Claude Code.
-2. **I filed them with the work item.** An attached spec or plan counts as decided, so Kraft dropped those two gates. Filed work waits, paused, and spends nothing until you start it.
+2. **I filed them with the work item.** An attached spec or plan counts as decided, so Kraft dropped those two gates. Filed work waits paused and spends nothing until you start it.
 3. **I walked away.** Claude Code implemented the plan in its own git worktree, on its own branch, and left my checkout untouched. Kraft then ran the tests in a step the agent doesn't control. When tests fail, a repair step fixes the code; from round two, a judge decides whether another round is worth it. This run needed two.
-4. **It stopped for my review** of the diff, then opened the pull request and ran CI and automated review.
+4. **It stopped for my review** of the diff, then opened the merge request and ran CI and automated review.
 
 ![The fix loop: tests, repair, judge](/assets/fixloop.png)
 
-Hand-off to pull request took 69 minutes and $10.20. That's above the $10 default cap; I run mine higher. Kraft checks the cap before each agent step starts and won't stop one mid-run, so the overshoot is at most one step.
+Hand-off to merge request took 69 minutes and $10.20. That's above the $10 default cap; I run mine higher. Kraft checks the cap before each agent step starts and won't stop one mid-run, so the overshoot is at most one step.
 
 When I approve the final review, Kraft merges only the commit I approved. It carries that approval across its own clean rebases; any other change cancels the merge or stops the item.
 
