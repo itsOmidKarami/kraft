@@ -138,11 +138,17 @@ def site_pages(pages_dir: Path, components: Path) -> dict[str, set[str]]:
                 text += drawn.read_text(encoding="utf-8")
         found[address] = set(re.findall(r'\bid="([a-z0-9_-]+)"', text))
     # A section of site pages, such as the blog: its index.vue is the folder's
-    # address. Its pages beyond the index are not listed; nothing checks a link
-    # to one post.
+    # address.
     for index in sorted(pages_dir.glob("*/index.vue")):
         text = index.read_text(encoding="utf-8")
         found[f"/{index.parent.name}"] = set(re.findall(r'\bid="([a-z0-9_-]+)"', text))
+    # The blog's posts (docsite/blog/*.md, its README aside) and its feed.
+    posts = pages_dir.parents[1] / "blog"
+    if (pages_dir / "blog").is_dir():
+        found["/blog/feed.xml"] = set()
+        for post in sorted(posts.glob("*.md")):
+            if post.name != "README.md":
+                found[f"/blog/{post.stem}"] = set()
     return found
 
 

@@ -89,5 +89,5 @@ search engines credit this one:
 - **Medium:** import the story from the post's address, then check that its
   canonical link names the post here.
 - **Anywhere else:** link the original at the top or bottom, for example
-  "First published on [kraft-sdlc.dev](https://kraft-sdlc.dev/blog/my-post)",
+  "First published on kraft-sdlc.dev" linking the post's address,
   and use its canonical-URL setting when it has one.

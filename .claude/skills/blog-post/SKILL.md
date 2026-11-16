@@ -34,7 +34,7 @@ for the review:
 
 | Claim | Source |
 |---|---|
-| What Kraft is and does | `README.md`, `docsite/content/1.get-started/0.why-kraft.md` |
+| What Kraft is and does | `README.md`, the `/why` page (`docsite/app/components/why/WhyPage.vue`) |
 | Caps and defaults | `config/policy.yaml` ($10 a work item, $50 a day) |
 | A release's features | its GitHub release notes and `docsite/content/6.project/*whats-new*` |
 | Security and gates | `docsite/content/6.project/1.security-in-depth.md` |
@@ -52,8 +52,9 @@ Then hold these lines, which posts have got wrong before:
 - **Nothing invented.** No customers, testimonials, benchmarks, quotes or
   numbers that the repo or the maintainer didn't give you.
 - **Docs links** go to pages and headings in the latest release, not only on
-  main: the post shows beside the released docs. `just ci-checks` runs
-  `dev/check_site_docs_links.py`, which fails otherwise.
+  main: the post shows beside the released docs. Run
+  `python3 dev/check_site_docs_links.py` (it needs the release tags); the
+  docs workflow runs it too and fails otherwise.
 
 When a claim has no source, cut it or ask the maintainer. Don't soften it into
 something vaguer that still implies it.
@@ -84,9 +85,11 @@ something vaguer that still implies it.
    at a phone width and a desktop width, in light and dark. Look at every image
    and the video.
 4. **Run the checks** that cover a post: `just vale` (posts follow the docs'
-   terms and spelling: "merge request", British spelling), `just ci-checks`,
-   and for new site code `just docs-site`. The docs workflow fails a draft
-   that leaks into the build, and a published post missing from the feed.
+   terms and spelling: "merge request", British spelling),
+   `python3 dev/check_site_docs_links.py`, and `just ci-checks`. For new site
+   code, also `dev/build_docs_site.sh docsite/dist-site`. The docs workflow
+   fails a draft that leaks into the build, and a published post missing from
+   the feed.
 5. **Open the pull request** following `CONTRIBUTING.md`: label it
    `release::none` (a post is no product change, so it adds no line to the
    release notes) and leave `## Changelog` empty. Put the post's address in
