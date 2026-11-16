@@ -40,9 +40,10 @@ from docs_versions import _has_docs, versions  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "docsite" / "app"
 # A quoted site path: '/guides/x', "/project/y#z".
-_LINK = re.compile(r"""["'`](/[a-z][a-z0-9/._-]*(?:#[a-z0-9._-]+)?)["'`]""")
+_LINK = re.compile(r"""(?:["'`]|\]\()(/[a-z][a-z0-9/._-]*(?:#[a-z0-9._-]+)?)(?:["'`)])""")
 # Files beside the pages, not pages.
-_FILE_ROOTS = ("/assets/", "/site/", "/demo/", "/schemas/", "/diagrams/", "/_")
+# /blog: the blog's own pages and images, which are site code like this page.
+_FILE_ROOTS = ("/assets/", "/site/", "/demo/", "/schemas/", "/diagrams/", "/_", "/blog")
 
 
 def marketing_files(app: Path) -> list[Path]:
@@ -56,7 +57,9 @@ def marketing_files(app: Path) -> list[Path]:
             folders.add(app / "components" / name.lower())
     for folder in sorted(folders):
         files += sorted(folder.rglob("*.vue"))
-    return [*files, app / "utils" / "siteNav.ts"]
+    # The blog's posts (docsite/blog/) show at the root too.
+    posts = sorted(p for p in (app.parent / "blog").glob("*.md") if p.name != "README.md")
+    return [*files, app / "utils" / "siteNav.ts", *posts]
 
 
 def docs_links(files: list[Path], root: Path) -> list[tuple[str, str]]:

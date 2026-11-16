@@ -186,7 +186,7 @@ components:
 
 # Design System: Kraft marketing site
 
-<!-- Scope: the marketing pages in docsite/ (/, /how-it-works, /tour, /customize, /scale, /why). The docs pages keep Docus's look, and the web app's own system is frontend/src/ng/theme/theme.css. Source: the approved boards at https://claude.ai/artifact/1Cniz5ThNsGVeGSyWjFPjH and the Phase 5 build brief. -->
+<!-- Scope: the marketing pages in docsite/ (/, /how-it-works, /tour, /customize, /scale, /why) and the blog (/blog, its posts in docsite/blog/). The docs pages keep Docus's look, and the web app's own system is frontend/src/ng/theme/theme.css. Source: the approved boards at https://claude.ai/artifact/1Cniz5ThNsGVeGSyWjFPjH and the Phase 5 build brief. -->
 
 ## Overview
 
@@ -305,10 +305,10 @@ Quiet and exact: flat fills, hairlines and exact corners, no gloss and no motion
 - **Shadow Strategy:** none (see Elevation).
 
 ### Navigation
-- **Header:** 88px tall on the violet field with a violet-rule bottom edge: the wordmark (20px, 600), then Product (a disclosure), Why Kraft, Docs and GitHub at 17px and 500 in `on-violet-nav`, then a small primary Install button, 32px apart. On a phone, 64px tall: wordmark, Install and a 44px menu button.
+- **Header:** 88px tall on the violet field with a violet-rule bottom edge: the wordmark (20px, 600), then Product (a disclosure), Why Kraft, Docs, Blog and GitHub at 17px and 500 in `on-violet-nav`, then a small primary Install button, 32px apart. On a phone, 64px tall: wordmark, Install and a 44px menu button.
 - **Product menu:** a 560px two-column list on the band colour with a violet-rule border, 16px corners and 12px padding; each entry a 17px page name over a 15px line, 12px corners. Escape and a click outside close it, and focus returns to the button.
-- **Phone menu:** a full-height sheet on the violet field: a "PRODUCT" label over the four entries (20px names with their lines), then Why Kraft, Docs and GitHub, with Install and Try the live demo pinned to the bottom.
-- **Footer:** on the band colour with a hairline top: the wordmark and its meaning, the theme switch, and three link columns (Product, Docs, Project) with 12px monospace heads and 15px links, each 44px tall.
+- **Phone menu:** a full-height sheet on the violet field: a "PRODUCT" label over the four entries (20px names with their lines), then Why Kraft, Docs, Blog and GitHub, with Install and Try the live demo pinned to the bottom.
+- **Footer:** on the band colour with a hairline top: the wordmark and its meaning, the theme switch, and three link columns (Product, Docs, Project; Blog under Product) with 12px monospace heads and 15px links, each 44px tall.
 - **Theme switch:** a radio group labelled "Theme" with System, Light and Dark, 44px segments in a 10px control-outline frame; the checked segment takes the card fill and 600.
 
 ### Hero diagram (signature)
@@ -321,6 +321,9 @@ A 12px band-coloured panel with a hairline: a monospace file path as its header,
 The fix loop, the scope nest, the worktrees, slices and the two machine lanes, each in a 16px band-coloured panel with 28px padding and a 15px muted caption below. All are SVG built from the two glyphs, the diamond, 2px strokes and 12px monospace labels, each with a text alternative that says what it shows.
 
 Why Kraft's head draws a session beside a chain in the same parts, on a dark panel on the violet field. The heads of Make it yours (the config folder as a file list) and Scale up (slices as progress strips, a step moved to another machine) are HTML text, not SVG, so they stay readable on a phone; a word beside each strip says its state, and the strips are hidden from a screen reader. Product tour's head is three screenshot crops. These three heads align their text and picture at the top; How it works and Why Kraft centre them.
+
+### Blog
+`/blog` and each post take a capability page's head on the violet field, but only as tall as its text: a reader came for the post. Under it, one 720px column on the ground. The index lists posts newest first, each a monospace meta line (date, author, tags, 13px capitals in muted text), a 22 to 28px title link and its description, with hairlines between. A post's body is the docs' prose components in the site's face, 17px at 1.7, headings in Inter, links in the accent. A post's cover image is its share card only; the page doesn't repeat it above the body.
 
 ### Install band
 On the violet field: "Install Kraft." at 56px, then the command in a band-coloured 16px container with a Copy button that says it copied in words, then the next steps and requirements in on-violet text, then a row of arrow links.

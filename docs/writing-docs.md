@@ -15,6 +15,13 @@ warnings as it starts; the site works regardless.
 the latest release at <http://localhost:8000/>, each older major at
 `/vN/` and `main` at <http://localhost:8000/next/>, run `just docs-site`.
 
+## Blog posts
+
+The blog at `/blog` isn't part of the versioned docs: its posts are Markdown
+files in `docsite/blog/`, published from main on the next docs deploy.
+[docsite/blog/README.md](../docsite/blog/README.md) covers the front matter,
+images, drafts and sharing a copy on another site.
+
 ## Page rules
 
 `docsite/` is the published documentation site (a Nuxt/Docus app; `nuxt

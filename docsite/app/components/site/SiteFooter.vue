@@ -10,6 +10,7 @@ const COLUMNS = [
       { label: 'Why Kraft', to: '/why' },
       { label: 'Live demo', href: demo },
       { label: 'What\'s new', to: '/project/whats-new' },
+      { label: 'Blog', to: '/blog' },
     ],
   },
   {

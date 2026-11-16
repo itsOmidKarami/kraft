@@ -137,6 +137,12 @@ def site_pages(pages_dir: Path, components: Path) -> dict[str, set[str]]:
             if drawn.exists():
                 text += drawn.read_text(encoding="utf-8")
         found[address] = set(re.findall(r'\bid="([a-z0-9_-]+)"', text))
+    # A section of site pages, such as the blog: its index.vue is the folder's
+    # address. Its pages beyond the index are not listed; nothing checks a link
+    # to one post.
+    for index in sorted(pages_dir.glob("*/index.vue")):
+        text = index.read_text(encoding="utf-8")
+        found[f"/{index.parent.name}"] = set(re.findall(r'\bid="([a-z0-9_-]+)"', text))
     return found
 
 

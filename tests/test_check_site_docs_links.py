@@ -51,11 +51,14 @@ def test_docs_links_reads_paths_and_skips_files(tmp_path):
         "docs: { to: '/project/b#c' }\n"
         "const INSTALL = `/get-started/install/`\n"
         '<img src="/site/board.png"> <a href="/demo/"> <img src="/assets/x.png">\n'
-        'class="s-wrap" d="M4 3h3"\n',
+        'class="s-wrap" d="M4 3h3"\n'
+        "A post: see [the docs](/guides/d#e) and ![a shot](/assets/y.png).\n"
+        "![board](/blog/a-post/board.png) and [all posts](/blog)\n",
         encoding="utf-8",
     )
     assert checker.docs_links([page], tmp_path) == [
         ("Page.vue:1", "/guides/a"),
         ("Page.vue:2", "/project/b#c"),
         ("Page.vue:3", "/get-started/install"),
+        ("Page.vue:6", "/guides/d#e"),
     ]

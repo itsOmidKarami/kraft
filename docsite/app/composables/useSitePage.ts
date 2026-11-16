@@ -18,19 +18,25 @@ export function useSitePage(path: string) {
       description: formatOgDescription(page.title, page.description),
     })
   } else {
-    // A static host cannot redirect, so the page does: the refresh, a script
-    // that replaces the history entry, and a plain link for a reader with
-    // neither. `data-fixed` keeps plugins/canonical.ts from putting this
-    // build's base on the canonical, which names the one page at the root.
-    useHead({
-      title: 'Kraft',
-      link: [{ rel: 'canonical', href: target, 'data-fixed': '' }],
-      meta: [
-        { 'http-equiv': 'refresh', 'content': `0; url=${target}` },
-        { name: 'robots', content: 'noindex' },
-      ],
-      script: [{ innerHTML: `location.replace(${JSON.stringify(target).replace(/</g, '\\u003c')} + location.hash)` }],
-    })
+    useRootRedirect(target)
   }
   return { home, target }
+}
+
+// The page at `target` (a full URL at the root of the domain) in a build that
+// does not draw it: /next/ and /vN/ are built from the same site code. A static
+// host cannot redirect, so the page does: the refresh, a script that replaces
+// the history entry, and a plain link (the page's own template) for a reader
+// with neither. `data-fixed` keeps plugins/canonical.ts from putting this
+// build's base on the canonical, which names the one page at the root.
+export function useRootRedirect(target: string) {
+  useHead({
+    title: 'Kraft',
+    link: [{ rel: 'canonical', href: target, 'data-fixed': '' }],
+    meta: [
+      { 'http-equiv': 'refresh', 'content': `0; url=${target}` },
+      { name: 'robots', content: 'noindex' },
+    ],
+    script: [{ innerHTML: `location.replace(${JSON.stringify(target).replace(/</g, '\\u003c')} + location.hash)` }],
+  })
 }

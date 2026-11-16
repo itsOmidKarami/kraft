@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { contentRoutes, pagesMissingFrom } from './content-routes.mjs'
 import { sitePages } from './site-pages.mjs'
+import { blogRoutes } from './blog-posts.mjs'
+import { isHomeBuild } from './app/utils/home'
 
 // The site is served from the root of the custom domain (kraft-sdlc.dev), so
 // the latest release's docs are at /, an older major's at /vN/ and main's at
@@ -176,7 +178,7 @@ export default defineNuxtConfig({
         // A page the prerenderer was seeded with (nitro.prerender.routes) but
         // did not write is a 404 once deployed, and its error is only a line
         // in the log.
-        const missing = pagesMissingFrom(nitro.options.output.publicDir, pageRoutes)
+        const missing = pagesMissingFrom(nitro.options.output.publicDir, [...pageRoutes, ...(isHomeBuild(baseURL) ? blogRoutes.filter(r => !r.endsWith('.xml')) : [])])
         if (missing.length) throw new Error(`${missing.length} of ${pageRoutes.length} content pages have no HTML: ${missing.join(', ')}`)
       })
     },
@@ -236,6 +238,13 @@ export default defineNuxtConfig({
       title: 'Site',
       description: 'What Kraft is, before the docs say how to use it.',
       links: sitePages.map(p => ({ title: p.title, description: p.description, href: `${origin}${p.path}` })),
+    }, {
+      // Named, the docs are the only collection listed: without a section
+      // that names one, @nuxt/content lists every page collection, the blog's
+      // too (content.config.ts), whose posts have no raw/ copy to link to.
+      title: 'Docs',
+      contentCollection: 'docs',
+      contentFilters: [{ field: 'extension', operator: '=', value: 'md' }],
     }],
   },
   // @nuxtjs/robots refuses to write robots.txt under a base URL, and a crawler
@@ -249,6 +258,9 @@ export default defineNuxtConfig({
     // site.url and takes a host only from NUXT_SITE_URL, which would also
     // override site.url above.
     sitemapBase: `${origin}${baseURL.replace(/\/$/, '')}`,
+    // The blog's pages (blog-posts.mjs), which server/plugins/sitemap.ts adds
+    // at the root as it does the marketing pages.
+    blogPages: blogRoutes.filter(r => !r.endsWith('.xml')),
     public: {
       // Read by the version menu and the banners. The bases are full paths,
       // not router paths: each version is a separate build, so a link to
@@ -326,7 +338,7 @@ export default defineNuxtConfig({
       // Every page of the content, so no build depends on the links of its
       // root to find them (pageRoutes). No page links to a moved page's old
       // address, so the crawler would never reach it on its own.
-      routes: ['/robots.txt', ...sitePages.map(p => p.path), ...pageRoutes, ...movedPages.map(([from]) => from)],
+      routes: ['/robots.txt', ...sitePages.map(p => p.path), ...(isHomeBuild(baseURL) ? blogRoutes : ['/blog']), ...pageRoutes, ...movedPages.map(([from]) => from)],
       // The version menu links to the same page in every other build, which
       // the crawler would take for one of this build's own pages and fail as
       // a 404: a prefix match on each other version's base. The latest's is /,
