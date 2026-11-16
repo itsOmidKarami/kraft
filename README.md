@@ -114,7 +114,7 @@
 | src/kraft/console/live.py                    |      105 |        1 |     99% |       114 |
 | src/kraft/console/moments.py                 |       78 |        0 |    100% |           |
 | src/kraft/console/output.py                  |       53 |        0 |    100% |           |
-| src/kraft/console/panels.py                  |       97 |        4 |     96% |59, 157-159 |
+| src/kraft/console/panels.py                  |       97 |        5 |     95% |59, 105, 157-159 |
 | src/kraft/console/prompt.py                  |      140 |        4 |     97% |56, 130, 149, 192 |
 | src/kraft/console/pulse.py                   |      128 |        0 |    100% |           |
 | src/kraft/console/runner.py                  |      113 |        0 |    100% |           |
@@ -154,7 +154,7 @@
 | src/kraft/events.py                          |       32 |        0 |    100% |           |
 | src/kraft/executor/\_\_init\_\_.py           |       10 |        0 |    100% |           |
 | src/kraft/executor/context.py                |       68 |        2 |     97% |  285, 316 |
-| src/kraft/executor/dispatch.py               |     1195 |       31 |     97% |149-150, 350, 409, 438, 456, 467, 502, 601, 637-638, 788, 1524-1525, 1778-1780, 2077-2078, 2091-2092, 2162, 2195-2198, 2657, 2665, 3413, 3780, 3786 |
+| src/kraft/executor/dispatch.py               |     1195 |       33 |     97% |149-150, 350, 409, 438, 456, 467, 502, 539, 601, 637-638, 788, 1524-1525, 1778-1780, 2077-2078, 2090-2092, 2162, 2195-2198, 2657, 2665, 3413, 3780, 3786 |
 | src/kraft/executor/entry.py                  |      204 |        1 |     99% |       490 |
 | src/kraft/executor/fallback.py               |       83 |        0 |    100% |           |
 | src/kraft/executor/gates.py                  |      419 |       11 |     97% |256, 398, 401, 404, 409, 921, 935, 952, 1066-1067, 1468 |
@@ -222,7 +222,7 @@
 | src/kraft/remote/local\_jobs.py              |      145 |       17 |     88% |59, 73, 77, 120-121, 135-136, 141-142, 158-160, 186-189, 205 |
 | src/kraft/remote/local\_link.py              |      279 |        7 |     97% |89, 322-324, 350, 370, 418 |
 | src/kraft/remote/local\_serve.py             |      130 |        7 |     95% |42-43, 74-75, 97-98, 158 |
-| src/kraft/remote/machine.py                  |      435 |       42 |     90% |52, 127-130, 144-153, 250, 281-283, 308, 475, 502-504, 507-508, 518-520, 563-564, 672, 678-683, 696-698, 705-710, 731 |
+| src/kraft/remote/machine.py                  |      435 |       43 |     90% |52, 127-130, 144-153, 250, 281-283, 308, 475, 496-504, 507-508, 518-520, 563-564, 672, 678-683, 696-698, 705-710, 731 |
 | src/kraft/remote/machine\_config.py          |       23 |        0 |    100% |           |
 | src/kraft/remote/paths.py                    |       19 |        0 |    100% |           |
 | src/kraft/remote/placement.py                |       85 |        1 |     99% |       120 |
@@ -325,7 +325,7 @@
 | src/kraft/worker/worktree\_read.py           |       90 |        8 |     91% |52, 165-167, 170-174, 182-183 |
 | src/kraft/ws.py                              |       72 |        3 |     96% |     77-79 |
 | src/kraft/yamlload.py                        |       11 |        0 |    100% |           |
-| **TOTAL**                                    | **62939** | **3009** | **95%** |           |
+| **TOTAL**                                    | **62939** | **3013** | **95%** |           |
 
 
 ## Setup coverage badge
