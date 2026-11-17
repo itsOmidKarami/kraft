@@ -231,11 +231,6 @@ const inner = computed(() => {
 </template>
 
 <style scoped>
-.a-layer {
-  position: absolute;
-  inset: 0;
-}
-
 .a-zoom-title {
   position: absolute;
   width: 400px;

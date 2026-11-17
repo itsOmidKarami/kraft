@@ -54,7 +54,7 @@ In the `default` chain, a reviewer agent now checks each gate (spec, plan, chain
 ---
 name: gate
 still: /blog/whats-new-in-2-6/gate.png
-alt: "An illustration of the plan gate with its reviewer: in round 1 the auto_review step checks the plan and sends it back to plan; in round 2 it checks the revised plan and marks it ready for you, and the gate waits for you. The gate's history lists both rounds."
+alt: "An illustration of the plan gate with its reviewer: the gate waits for you while its auto_review step checks the plan first. In round 1 the reviewer sends the plan back; in round 2 it marks the revised plan ready for you. The gate's history lists both rounds."
 ---
 ::
 

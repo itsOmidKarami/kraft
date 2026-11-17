@@ -25,17 +25,20 @@ const g = computed(() => gateAt(props.t))
           <span class="a-label">auto_review</span>
           <span :class="`a-badge${g.tone ? ` is-${g.tone}` : ''}`">{{ g.badge }}</span>
         </div>
-        <span :class="`a-gate-line${g.yours ? ' is-ran' : ''}`" />
+        <span :class="`a-gate-line${g.reviewer !== 'todo' ? ' is-ran' : ''}`" />
         <div class="a-gate-item">
-          <span class="a-diamond-box"><span :class="`a-diamond${g.yours ? ' is-yours' : ''}`" /></span>
-          <span :class="`a-label is-you${g.yours ? ' is-on' : ''}`">you</span>
-          <span :class="`a-badge${g.yours ? ' is-warn' : ''}`">{{ g.you }}</span>
+          <span class="a-diamond-box"><span :class="`a-diamond${g.pending ? ' is-yours' : ''}`" /></span>
+          <span :class="`a-label is-you${g.pending ? ' is-on' : ''}`">you</span>
+          <span :class="`a-badge${g.pending ? ' is-warn' : ''}`">{{ g.you }}</span>
         </div>
       </div>
       <p class="a-gate-msg">
         Review and approve the implementation plan.
       </p>
-      <span class="a-pill"><svg
+      <span
+        v-if="g.pending"
+        class="a-pill"
+      ><svg
         viewBox="0 0 24 24"
         width="14"
         height="14"
@@ -61,8 +64,11 @@ const g = computed(() => gateAt(props.t))
         rx="1"
         transform="rotate(45 12 12)"
       /></svg>plan_approval</span>
-      <span class="a-pane-sub">gate node</span>
-      <span class="a-section">History · {{ g.rounds.length }} {{ g.rounds.length === 1 ? 'round' : 'rounds' }}</span>
+      <span class="a-pane-sub">gate node{{ g.pending ? ' · waiting for you' : '' }}</span>
+      <span
+        v-if="g.rounds.length"
+        class="a-section"
+      >History · {{ g.rounds.length }} {{ g.rounds.length === 1 ? 'round' : 'rounds' }}</span>
       <div
         v-for="r in g.rounds"
         :key="r.n"

@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { gateAt, meta as gate } from '../app/utils/blogAnimation/gate.ts'
+import { seconds, thousands } from '../app/utils/blogAnimation/shared.ts'
 import { meta as slices, slicesAt } from '../app/utils/blogAnimation/slices.ts'
 import { meta as subagents, subagentsAt } from '../app/utils/blogAnimation/subagents.ts'
 
@@ -26,6 +27,11 @@ test('each still frame shows the animation\'s point', () => {
   assert.equal(a.open, false, 'finished sub-agents stay folded while others run')
 })
 
+test('times and token counts read as the app writes them', () => {
+  assert.deepEqual([seconds(45.9), seconds(60), seconds(125)], ['45s', '1m', '2m'])
+  assert.deepEqual([thousands(950), thousands(4000), thousands(19_640)], ['950', '4k', '19.6k'])
+})
+
 test('a slice shows its plan tasks until it starts, and the join counts the slices it replays', () => {
   assert.deepEqual(slicesAt(0).slices.map(x => x.word), ['tasks 2–4', 'tasks 5, 6', 'tasks 7–9'])
   assert.deepEqual([17, 17.6, 18.4].map(t => slicesAt(t).joinWord), ['slice 1 of 3', 'slice 2 of 3', 'slice 3 of 3'])
@@ -40,12 +46,19 @@ test('a slice shows its plan tasks until it starts, and the join counts the slic
   }
 })
 
-test('the gate reviewer never approves, and the gate waits for you only after it is ready', () => {
+test('the gate waits for you from the moment it is reached, and its reviewer never approves', () => {
   for (const t of moments(LOOPS.gate.loop)) {
     const g = gateAt(t)
-    assert.ok(['checks first', 'reject', 'runs first when reached', 'ready for you'].includes(g.badge), `badge "${g.badge}" (t=${t})`)
-    assert.equal(g.yours, g.badge === 'ready for you', `t=${t}`)
+    assert.ok(['checks first', 'reject', 'ready for you'].includes(g.badge), `badge "${g.badge}" (t=${t})`)
+    // gateView.ts youSub: "waiting" while pending, else the newest round's outcome.
+    assert.equal(g.you, g.pending ? 'waiting' : 'changes requested · auto', `t=${t}`)
+    assert.equal(g.sentBack, !g.pending, `t=${t}`)
+    if (g.reviewer === 'run') assert.ok(g.pending, `the reviewer runs inside the wait (t=${t})`)
+    // GatePane.tsx: History once some round has ended.
+    assert.equal(g.rounds.length > 0, t >= 3.2, `t=${t}`)
   }
+  assert.equal(gateAt(1).badge, 'checks first')
+  assert.equal(gateAt(5).badge, 'reject')
 })
 
 test('sub-agents run before they finish, and the marks follow them', () => {

@@ -1,7 +1,7 @@
 import { type Look, type Meta, seconds, thousands } from './shared.ts'
 
-// The pane needs more height than the chains.
-export const meta: Meta = { loop: 18, still: 9, height: 440 }
+// The pane needs more height than the chains: three running sub-agents at once.
+export const meta: Meta = { loop: 18, still: 9, height: 510 }
 
 // An implement task that opens three sub-agents. The pane lists the running ones with what each is doing now, and
 // folds the finished ones away until none is still running; the marks under the task's box follow them.

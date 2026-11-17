@@ -23,8 +23,9 @@ const easeInOut = (x: number) => (x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 
 // 0 to 1 over `length` seconds from `from`, eased in and out.
 export const draw = (t: number, from: number, length: number) => easeInOut(clamp01((t - from) / length))
 
-export const seconds = (s: number) => s < 60 ? `${Math.floor(s)}s` : `${Math.floor(s / 60)}m ${String(Math.floor(s % 60)).padStart(2, '0')}s`
-export const thousands = (n: number) => n < 1000 ? String(Math.round(n)) : `${(n / 1000).toFixed(1)}k`
+// Times and token counts as the app writes them (frontend/src/format.ts `elapsed`, `tokens`): "45s", "2m", "19.6k", "4k".
+export const seconds = (s: number) => s < 60 ? `${Math.floor(s)}s` : `${Math.floor(s / 60)}m`
+export const thousands = (n: number) => n < 1000 ? String(Math.round(n)) : `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`
 
 // A chain edge's class: dashed until what it leads to has started.
 export const edge = (on: boolean) => (on ? 'a-edge' : 'a-edge is-todo')

@@ -26,33 +26,61 @@ const W = 860
 const { view, meta } = ANIMATIONS[props.name]
 const t = ref(meta.still)
 const scale = ref(1)
+// Paused by the reader's button or by reduced motion; ready once the page's script runs, so the button only shows when it works.
+const paused = ref(false)
+const ready = ref(false)
 const box = useTemplateRef<HTMLElement>('box')
 
 let raf = 0
+let visible = false
+let go = () => {}
 let stop = () => {}
 onMounted(() => {
   const el = box.value!
   const resize = new ResizeObserver(() => (scale.value = el.clientWidth / W))
   resize.observe(el)
-  const calm = matchMedia('(prefers-reduced-motion: reduce)')
   let start = 0
+  let from = 0
   const tick = (now: number) => {
     start ||= now
-    t.value = ((now - start) / 1000) % meta.loop
+    t.value = (from + (now - start) / 1000) % meta.loop
     raf = requestAnimationFrame(tick)
   }
-  const seen = new IntersectionObserver(([e]) => {
+  // Runs from where it stands, only while on screen and not paused.
+  go = () => {
     cancelAnimationFrame(raf)
-    if (e!.isIntersecting && !calm.matches) raf = requestAnimationFrame(tick)
+    if (!visible || paused.value) return
+    start = 0
+    from = t.value
+    raf = requestAnimationFrame(tick)
+  }
+  const calm = matchMedia('(prefers-reduced-motion: reduce)')
+  const still = () => {
+    paused.value = calm.matches
+    if (calm.matches) t.value = meta.still
+    go()
+  }
+  calm.addEventListener('change', still)
+  paused.value = calm.matches
+  const seen = new IntersectionObserver(([e]) => {
+    visible = e!.isIntersecting
+    go()
   })
   seen.observe(el)
+  ready.value = true
   stop = () => {
     resize.disconnect()
     seen.disconnect()
+    calm.removeEventListener('change', still)
     cancelAnimationFrame(raf)
   }
 })
 onBeforeUnmount(() => stop())
+
+function toggle() {
+  paused.value = !paused.value
+  go()
+}
 </script>
 
 <template>
@@ -62,7 +90,7 @@ onBeforeUnmount(() => stop())
       class="s-anim"
       role="img"
       :aria-label="alt"
-      :style="{ height: `${meta.height * scale}px` }"
+      :style="{ aspectRatio: `${W} / ${meta.height}` }"
     >
       <div
         class="a-stage"
@@ -75,12 +103,23 @@ onBeforeUnmount(() => stop())
         />
       </div>
     </figure>
-    <p
-      class="s-anim-note"
-      aria-hidden="true"
-    >
-      Illustration: Kraft's item page, drawn with a made-up run.
-    </p>
+    <div class="s-anim-foot">
+      <p
+        class="s-anim-note"
+        aria-hidden="true"
+      >
+        Illustration: Kraft's item page, drawn with a made-up run.
+      </p>
+      <button
+        v-if="ready"
+        type="button"
+        class="s-anim-pause"
+        :aria-pressed="paused"
+        @click="toggle"
+      >
+        {{ paused ? 'Play' : 'Pause' }}<span class="s-anim-sr"> the animation</span>
+      </button>
+    </div>
   </div>
 </template>
 
@@ -92,8 +131,47 @@ onBeforeUnmount(() => stop())
   margin: 28px 0;
 }
 
+.site .s-anim-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.site .s-anim-pause {
+  flex: none;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--s-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--s-text-sub);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.site .s-anim-pause:hover {
+  background: var(--s-raised);
+}
+
+.site .s-anim-pause:focus-visible {
+  outline: 2px solid var(--s-text);
+  outline-offset: 2px;
+}
+
+.site .s-anim-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .site .s-anim-note {
-  margin: 8px 0 0;
+  margin: 0;
   font-size: 13px;
   color: var(--s-text-muted);
 }
@@ -119,6 +197,11 @@ onBeforeUnmount(() => stop())
   --a-bad: #ec8082;
 }
 
+
+.s-anim .a-layer {
+  position: absolute;
+  inset: 0;
+}
 
 .s-anim .a-stage {
   position: absolute;

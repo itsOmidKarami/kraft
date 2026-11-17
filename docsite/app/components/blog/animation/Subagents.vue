@@ -56,7 +56,7 @@ const a = computed(() => subagentsAt(props.t))
         >{{ a.running.length }}</span>
       </span>
       <span class="a-label is-run">implement</span>
-      <span class="a-meta">{{ a.on ? `running · ${a.ran}` : 'not yet' }}</span>
+      <span class="a-meta">{{ a.on ? `running · ${a.ran}` : 'not started' }}</span>
       <span
         v-if="a.marks.length"
         class="a-marks"
@@ -78,9 +78,9 @@ const a = computed(() => subagentsAt(props.t))
         width="14"
         height="14"
       ><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" /></svg>implement</span>
-      <span class="a-pane-sub">{{ a.on ? `agent task · running ${a.ran}` : 'agent task · not yet' }}</span>
+      <span class="a-pane-sub">{{ a.on ? `agent task · running ${a.ran}` : 'agent task · not started' }}</span>
       <span class="a-tabs"><span class="is-on">Overview</span><span>Input</span><span>Output</span><span>Log</span><span>Config</span></span>
-      <span class="a-facts"><span>status</span><span>{{ a.on ? 'running' : 'not yet' }}</span><span>harness</span><span>claude</span></span>
+      <span class="a-facts"><span>status</span><span>{{ a.on ? 'running' : 'not started' }}</span><span>harness</span><span>claude</span></span>
       <span
         v-if="a.running.length || a.finished.length"
         class="a-section"
