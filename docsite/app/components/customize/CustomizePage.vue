@@ -1,7 +1,8 @@
 <!-- Make it yours: the process is yours to change and share. The head is
      the Head-customize board; the blocks aren't on the boards: the block
-     template, its copy drawn from the docs each block links to. Its two
-     screenshots are the README's until they are retaken. -->
+     template, its copy drawn from the docs each block links to. Block 01's
+     picture is an animated demo (CustomizeDemo.vue); block 03's is a
+     screenshot, the README's until it is retaken. -->
 <script setup lang="ts">
 const demo = demoHref(useRuntimeConfig().app.baseURL)
 
@@ -76,14 +77,7 @@ const LITE_INSTALL = [
       <p>A chain that extends <code>default</code> holds only what it changes. Every other node is read from <code>default</code>, so your chain keeps up with it.</p>
       <p>The Chains screen draws it as a graph. Review &amp; publish shows what changed and checks it before it takes effect.</p>
       <template #picture>
-        <SiteShot
-          src="/site/chain-extends.png"
-          :width="1230"
-          :height="700"
-          alt="The Chains screen: a chain that extends default, drawn as a graph, with its verification node marked overridden here and a security scan node marked added here"
-          :phone="{ src: '/site/chain-extends-phone.png', width: 340, height: 100 }"
-        />
-        <figcaption>A chain that extends <code>default</code>, drawn as a graph.</figcaption>
+        <CustomizeDemo />
       </template>
     </SiteBlock>
 

@@ -2585,6 +2585,927 @@
   }
 }
 
+/* The Chains editing demo (customize/CustomizeDemo.vue). The app replica keeps
+   the app's dark look in both site themes, like the violet frame it sits on, so
+   its colours are fixed values; the caption and the buttons use the site's
+   tokens. The wide layout needs the 1088px column; under 1100px the narrow one
+   shows, and both read one player. */
+.site .s-cdemo {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin: 0;
+}
+
+.site .s-cdemo-wide {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.site .s-cdemo-narrow {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+@media (max-width: 1099px) {
+  .site .s-cdemo-wide {
+    display: none;
+  }
+}
+
+@media (min-width: 1100px) {
+  .site .s-cdemo-narrow {
+    display: none;
+  }
+}
+
+.site .s-cdemo-frame {
+  display: grid;
+  grid-template-columns: 600px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+  border-radius: 16px;
+  background: #231f52;
+}
+
+.site .s-cdemo-narrow .s-cdemo-frame {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+}
+
+/* The app crop */
+.site .s-cdemo-app {
+  --a-bg: #20202b;
+  --a-pane: #2e2e39;
+  --a-menu: #2a2a35;
+  --a-line: #393944;
+  --a-border: #51515d;
+  --a-edge: #5d5d6a;
+  --a-stroke: #777784;
+  --a-text: #eeeef2;
+  --a-sub: #c6c7cc;
+  --a-muted: #9d9ea5;
+  --a-amber: #deb866;
+  --a-green: #7acc98;
+  --a-red: #e5807a;
+  color: var(--a-text);
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  background-color: var(--a-bg);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* The file can run taller than 612px in a narrow column; the crop then
+   stretches with it. */
+.site .s-cdemo-crop {
+  display: flex;
+  flex-direction: column;
+  min-height: 612px;
+}
+
+.site .s-cdemo-crop,
+.site .s-cdemo-dots,
+.site .s-cdemo-track {
+  background-color: var(--a-bg);
+  background-image: radial-gradient(var(--a-line) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+.site .s-cdemo-canvas {
+  position: relative;
+  overflow: hidden;
+  flex: none;
+}
+
+.site .s-cdemo-m {
+  font-family: ui-monospace, Menlo, monospace;
+}
+
+.site .s-cdemo-fade {
+  position: absolute;
+  inset: 0;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 20px, #000 calc(100% - 20px), transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 20px, #000 calc(100% - 20px), transparent 100%);
+}
+
+.site .s-cdemo-gnode {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  transition: left 0.7s cubic-bezier(0.3, 0.7, 0.2, 1), opacity 0.5s, transform 0.5s;
+}
+
+.site .s-cdemo-gbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--a-stroke);
+  border-radius: 11px;
+  background: var(--a-bg);
+  color: var(--a-sub);
+  transition: box-shadow 0.3s;
+}
+
+.site .s-cdemo-gbox.is-sel {
+  box-shadow: 0 0 0 2px var(--a-bg), 0 0 0 4px var(--a-text);
+}
+
+.site .s-cdemo-app svg:not(.s-cdemo-mark) {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.site .s-cdemo-gate {
+  position: absolute;
+  left: 11px;
+  top: 11px;
+  box-sizing: border-box;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--a-stroke);
+  border-radius: 6px;
+  background: var(--a-bg);
+  transform: rotate(45deg);
+}
+
+.site .s-cdemo-glabel {
+  position: absolute;
+  left: 50%;
+  top: 50px;
+  transform: translateX(-50%);
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--a-bg);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+  color: var(--a-sub);
+}
+
+.site .s-cdemo-glabel.is-bold {
+  font-weight: 600;
+  color: var(--a-text);
+}
+
+.site .s-cdemo-step-label {
+  top: -22px;
+  font-weight: 400;
+  color: var(--a-muted);
+}
+
+.site .s-cdemo-gmeta {
+  position: absolute;
+  left: 50%;
+  top: 66px;
+  transform: translateX(-50%);
+  padding: 0 3px;
+  background: var(--a-bg);
+  font-size: 11px;
+  white-space: nowrap;
+  transition: opacity 0.4s;
+}
+
+.site .s-cdemo-edge {
+  position: absolute;
+  height: 1px;
+  background: var(--a-edge);
+  transition: left 0.7s cubic-bezier(0.3, 0.7, 0.2, 1), width 0.7s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+
+.site .s-cdemo-seam {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--a-stroke);
+  transition: left 0.7s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+
+.site .s-cdemo-plus {
+  position: absolute;
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  border: 1px dashed var(--a-green);
+  border-radius: 10px;
+  background: #25332c;
+  color: var(--a-green);
+  font: 500 14px/17px Inter, sans-serif;
+  text-align: center;
+}
+
+.site .s-cdemo-mark {
+  position: absolute;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+}
+
+.site .s-cdemo-banner {
+  position: absolute;
+  left: 12px;
+  top: 52px;
+  right: 12px;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--a-line);
+  border-radius: 7px;
+  background: var(--a-pane);
+  font-size: 12px;
+  color: var(--a-sub);
+}
+
+.site .s-cdemo-back {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.site .s-cdemo-nodename {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--a-text);
+}
+
+.site .s-cdemo-under {
+  color: var(--a-text);
+  text-decoration: underline;
+}
+
+.site .s-cdemo-menu {
+  position: absolute;
+  z-index: 5;
+  box-sizing: border-box;
+  padding: 6px;
+  border: 1px solid var(--a-border);
+  border-radius: 9px;
+  background: var(--a-menu);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+}
+
+.site .s-cdemo-mhead {
+  padding: 4px 8px 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.site .s-cdemo-mitem {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.site .s-cdemo-mitem.is-on {
+  background: #3a3a47;
+}
+
+.site .s-cdemo-mic {
+  flex: none;
+  margin-top: 2px;
+}
+
+.site .s-cdemo-mtext {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.site .s-cdemo-msub,
+.site .s-cdemo-muted {
+  font-size: 12px;
+  color: var(--a-muted);
+}
+
+.site .s-cdemo-search {
+  margin: 2px 4px 6px;
+  padding: 5px 9px;
+  border: 1px solid var(--a-text);
+  border-radius: 7px;
+  font-size: 12px;
+  color: var(--a-text);
+}
+
+.site .s-cdemo-idrow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 6px;
+}
+
+.site .s-cdemo-idrow .s-cdemo-search {
+  margin: 0;
+}
+
+.site .s-cdemo-sub {
+  font-size: 12px;
+  color: var(--a-sub);
+}
+
+.site .s-cdemo-create {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.site .s-cdemo-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--a-border);
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--a-sub);
+}
+
+.site .s-cdemo-btn.s-cdemo-pri {
+  border-color: transparent;
+  background: var(--a-text);
+  color: var(--a-bg);
+}
+
+.site .s-cdemo-btn.s-cdemo-danger {
+  border-color: var(--a-red);
+  color: var(--a-red);
+}
+
+.site .s-cdemo-card {
+  position: absolute;
+  z-index: 4;
+  box-sizing: border-box;
+  padding: 10px 0;
+  border: 1px solid var(--a-line);
+  border-radius: 9px;
+  background: var(--a-pane);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 0.4);
+}
+
+.site .s-cdemo-card p {
+  margin: 0;
+}
+
+.site .s-cdemo-crumbs {
+  padding: 0 14px;
+  font-size: 11px;
+  color: var(--a-sub);
+}
+
+.site .s-cdemo-ctitle {
+  padding: 3px 14px 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.site .s-cdemo-csub {
+  padding: 1px 14px 6px;
+  font-size: 11px;
+  color: var(--a-muted);
+}
+
+.site .s-cdemo-cnote {
+  padding: 6px 14px 2px;
+  border-top: 1px solid var(--a-line);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--a-sub);
+}
+
+.site .s-cdemo-rows {
+  padding-top: 4px;
+  border-top: 1px solid var(--a-line);
+}
+
+.site .s-cdemo-prow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 1px 14px;
+  font-size: 12px;
+}
+
+.site .s-cdemo-chipsrc {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--a-border);
+  border-radius: 5px;
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--a-sub);
+}
+
+.site .s-cdemo-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--a-text);
+}
+
+.site .s-cdemo-change {
+  display: flex;
+  gap: 8px;
+  padding: 3px 14px 4px;
+  font-size: 12px;
+}
+
+.site .s-cdemo-changetext {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.site .s-cdemo-changek {
+  overflow-wrap: anywhere;
+  color: var(--a-text);
+}
+
+.site .s-cdemo-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 8px 14px 0;
+  border-top: 1px solid var(--a-line);
+}
+
+/* The panel under a node: On failure and its fix loop */
+.site .s-cdemo-bp {
+  flex: 1 1 auto;
+  border-top: 1px solid var(--a-line);
+  background: var(--a-bg);
+}
+
+.site .s-cdemo-tabs {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 36px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--a-line);
+  font-size: 12px;
+}
+
+.site .s-cdemo-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--a-muted);
+}
+
+.site .s-cdemo-tab.is-on {
+  box-sizing: border-box;
+  height: 36px;
+  border-bottom: 1.5px solid var(--a-text);
+  color: var(--a-text);
+}
+
+.site .s-cdemo-app svg.s-cdemo-tabic {
+  width: 13px;
+  height: 13px;
+}
+
+.site .s-cdemo-nofix {
+  margin: 12px 12px 6px;
+  padding: 9px 12px;
+  border: 1px dashed var(--a-border);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.site .s-cdemo-green {
+  color: var(--a-green);
+  text-decoration: underline;
+}
+
+.site .s-cdemo-nofixnote {
+  margin: 0 12px;
+  font-size: 11.5px;
+  color: var(--a-muted);
+}
+
+.site .s-cdemo-loop {
+  position: relative;
+  height: 110px;
+}
+
+.site .s-cdemo-loop-e1 {
+  left: 228px;
+  top: 52px;
+  width: 50px;
+}
+
+.site .s-cdemo-loop-e2 {
+  left: 322px;
+  top: 52px;
+  width: 50px;
+}
+
+.site .s-cdemo-loop-start {
+  left: 212px;
+  top: 44px;
+}
+
+.site .s-cdemo-loop-task {
+  left: 278px;
+  top: 30px;
+}
+
+.site .s-cdemo-loop-end {
+  left: 372px;
+  top: 44px;
+}
+
+/* The file */
+.site .s-cdemo-file {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: 10px;
+  background: #15151f;
+  color: #eeeef2;
+  font-family: var(--s-mono);
+}
+
+.site .s-cdemo-filehead {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+  margin: 0;
+  padding: 13px 16px;
+  border-bottom: 1px solid #393944;
+  font-size: 13px;
+  color: #9d9ea5;
+}
+
+.site .s-cdemo-note {
+  flex: none;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+}
+
+.site .s-cdemo-note.is-draft {
+  font-weight: 700;
+  color: #eeeef2;
+}
+
+.site .s-cdemo-lines {
+  padding: 12px 0 18px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.site .s-cdemo-yl {
+  display: flex;
+  padding: 0 16px;
+  overflow: hidden;
+  transition: max-height 0.5s, opacity 0.4s, background-color 0.5s;
+}
+
+/* A wrapped line hangs under its text; the leading spaces are the padding. */
+.site .s-cdemo-yt {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-indent: -2ch;
+}
+
+.site .s-cdemo-yk {
+  color: #c6c7cc;
+}
+
+/* The caption and the buttons */
+.site .s-cdemo-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+}
+
+.site .s-cdemo-caption {
+  display: flex;
+  flex: 1 1 320px;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.site .s-cdemo-caption p {
+  margin: 0;
+}
+
+.site .s-cdemo-label {
+  font-family: var(--s-mono);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+  letter-spacing: 0.06em;
+  color: var(--s-text-muted);
+}
+
+.site .s-cdemo-title {
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.site .s-cdemo-detail {
+  min-height: 3em;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--s-text-sub);
+}
+
+.site .s-cdemo-controls {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.site .s-cdemo-steps {
+  display: flex;
+  gap: 8px;
+}
+
+.site .s-cdemo-stepbtn {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--s-outline);
+  border-radius: 10px;
+  background: var(--s-card);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--s-text-sub);
+  cursor: pointer;
+}
+
+.site .s-cdemo-stepbtn:hover {
+  border-color: var(--s-text);
+  background: var(--s-raised);
+  color: var(--s-text);
+}
+
+.site .s-cdemo-stepbtn.is-on {
+  border-color: var(--s-text);
+  font-weight: 600;
+  color: var(--s-text);
+}
+
+.site .s-cdemo-pause {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--s-outline);
+  border-radius: 10px;
+  background: var(--s-card);
+  color: var(--s-text);
+  cursor: pointer;
+}
+
+.site .s-cdemo-pause:hover {
+  background: var(--s-raised);
+}
+
+.site .s-cdemo-figcap {
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--s-text-muted);
+}
+
+.site .s-cdemo-figcap code {
+  font-size: 14px;
+}
+
+/* The phone layout: the chain's track, then the file */
+.site .s-cdemo-track {
+  display: flex;
+  flex-direction: column;
+}
+
+.site .s-cdemo-trackbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  box-sizing: border-box;
+  min-height: 32px;
+  padding: 5px 10px;
+  border-bottom: 1px solid #393944;
+  background: var(--a-bg);
+  font-size: 11px;
+  color: var(--a-sub);
+}
+
+.site .s-cdemo-trackname {
+  font-weight: 600;
+  color: var(--a-text);
+}
+
+.site .s-cdemo-extends {
+  padding: 0 6px;
+  border: 1px solid var(--a-border);
+  border-radius: 5px;
+  white-space: nowrap;
+}
+
+.site .s-cdemo-state {
+  font-family: var(--s-mono);
+  font-size: 10.5px;
+  color: var(--a-muted);
+}
+
+.site .s-cdemo-state.is-draft {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--a-text);
+}
+
+.site .s-cdemo-lane {
+  position: relative;
+  flex: none;
+  height: 118px;
+}
+
+.site .s-cdemo-pfade {
+  position: absolute;
+  inset: 0;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+}
+
+.site .s-cdemo-pedge {
+  top: 43px;
+}
+
+.site .s-cdemo-pnode,
+.site .s-cdemo-track .s-cdemo-gbox {
+  width: 34px;
+  height: 34px;
+}
+
+.site .s-cdemo-pnode {
+  top: 26px;
+}
+
+.site .s-cdemo-track .s-cdemo-gbox {
+  border-radius: 10px;
+}
+
+.site .s-cdemo-track svg:not(.s-cdemo-mark) {
+  width: 15px;
+  height: 15px;
+}
+
+.site .s-cdemo-track .s-cdemo-glabel {
+  font-size: 12px;
+}
+
+.site .s-cdemo-below {
+  top: 40px;
+}
+
+.site .s-cdemo-above {
+  top: -22px;
+}
+
+.site .s-cdemo-pmeta {
+  top: 58px;
+  font-size: 12px;
+}
+
+.site .s-cdemo-narrow .s-cdemo-filehead {
+  padding: 11px 12px;
+}
+
+.site .s-cdemo-narrow .s-cdemo-lines {
+  padding: 10px 0;
+}
+
+.site .s-cdemo-narrow .s-cdemo-yl {
+  padding: 0 12px;
+}
+
+/* The finished file's height at 390px, so the page below doesn't move. */
+.site .s-cdemo-pfile {
+  min-height: 608px;
+}
+
+.site .s-cdemo-pbar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.site .s-cdemo-pcaption {
+  flex: none;
+  gap: 14px;
+}
+
+/* The longest caption's height, held on the wrapper, not the title. */
+@media (max-width: 480px) {
+  .site .s-cdemo-pcaption {
+    min-height: 136px;
+  }
+
+  .site .s-cdemo-trackbar {
+    min-height: 49px;
+  }
+}
+
+@media (max-width: 379px) {
+  .site .s-cdemo-pcaption {
+    min-height: 162px;
+  }
+}
+
+@media (max-width: 339px) {
+  .site .s-cdemo-pcaption {
+    min-height: 190px;
+  }
+}
+
+.site .s-cdemo-phead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.site .s-cdemo-ptext {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.site .s-cdemo-pcaption .s-cdemo-title {
+  font-size: 22px;
+  line-height: 1.25;
+  letter-spacing: -0.012em;
+}
+
+.site .s-cdemo-pcaption .s-cdemo-detail {
+  min-height: 0;
+}
+
+.site .s-cdemo-psteps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.site .s-cdemo-psteps .s-cdemo-stepbtn {
+  padding: 0 8px;
+}
+
+@media (max-width: 359px) {
+  .site .s-cdemo-psteps .s-cdemo-stepbtn {
+    padding: 0 4px;
+  }
+}
+
+.site .s-cdemo-psteps .s-cdemo-stepbtn.is-on {
+  border-color: var(--s-accent);
+  background: var(--s-accent);
+  color: var(--s-on-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site .s-cdemo * {
+    transition: none !important;
+  }
+}
+
 /* Scale up's head: three slices as strips, and a step moved to another
    machine. The strips are hidden from a screen reader: the word beside each
    says its state. */

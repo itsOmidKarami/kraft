@@ -290,7 +290,7 @@ Gently rounded and never pill-shaped. Controls take 10px, inner panels and list 
 
 ## Components
 
-Quiet and exact: flat fills, hairlines and exact corners, no gloss and no motion that isn't the hero diagram's.
+Quiet and exact: flat fills, hairlines and exact corners, no gloss and no motion that isn't the hero diagram's or the chains editing demo's.
 
 ### Buttons
 - **Shape:** gently rounded (10px).
@@ -313,6 +313,9 @@ Quiet and exact: flat fills, hairlines and exact corners, no gloss and no motion
 
 ### Hero diagram (signature)
 One work item on the default chain, drawn on the ground colour inside a 16px card: a header with the item's name and a monospace kind line, a pause button, then the "You" lane in amber wash above the steps with each gate's question over its diamond, the step glyphs on one line, and each step's actor and name below. Done steps are solid outlines, steps to come are dashed. Under it the gate panel, in amber wash, asks the current question with Approve and Request changes. On a phone the track stays one horizontal line and only the current step is spelled out, in a panel of fixed height below it.
+
+### Chains editing demo (Make it yours)
+Block 01 of Make it yours replaces a screenshot with the Chains screen editing `with-lint` in three edits, beside the YAML file it writes, then a Review & publish summary. The crop is the app's own dark look, canvas only, on the violet frame (16px corners, 12px padding, 10px inner panels), and stays dark in both themes; the file is a code panel on the same frame. Under the frame sit a caption, three step buttons and a pause button in the site's tokens. It follows the hero diagram's motion rules: it starts when in view, holds on hover or focus, and under reduced motion opens paused on the review and moves only on a button. The crop is hidden from a screen reader, which gets the file and the caption. From 1100px it is the crop beside the file; under that, the chain's track above the file.
 
 ### Code panel
 A 12px band-coloured panel with a hairline: a monospace file path as its header, then the file at 13px with 1.6 line height. One line or group may be highlighted in amber line, with an amber diamond in the gutter beside a gate's id.
