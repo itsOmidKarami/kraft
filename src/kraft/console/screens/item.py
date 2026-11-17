@@ -661,7 +661,7 @@ class Item(ChainTab, MenuActions, View):
             rows.reverse()
         target = next((row for row in rows if (row - log.scroll_y) * step > 0), None)
         if target is not None:
-            log.scroll_to(y=target, animate=False)
+            log.scroll_to(y=target, animate=False, immediate=True)
 
     def on_click(self, event: events.Click) -> None:
         """A click on a tab's name opens it."""
