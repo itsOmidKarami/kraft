@@ -178,8 +178,9 @@ export default defineNuxtConfig({
         // A page the prerenderer was seeded with (nitro.prerender.routes) but
         // did not write is a 404 once deployed, and its error is only a line
         // in the log.
-        const missing = pagesMissingFrom(nitro.options.output.publicDir, [...pageRoutes, ...(isHomeBuild(baseURL) ? blogRoutes.filter(r => !r.endsWith('.xml')) : [])])
-        if (missing.length) throw new Error(`${missing.length} of ${pageRoutes.length} content pages have no HTML: ${missing.join(', ')}`)
+        const expected = [...pageRoutes, ...(isHomeBuild(baseURL) ? blogRoutes.filter(r => !r.endsWith('.xml')) : [])]
+        const missing = pagesMissingFrom(nitro.options.output.publicDir, expected)
+        if (missing.length) throw new Error(`${missing.length} of ${expected.length} pages have no HTML: ${missing.join(', ')}`)
       })
     },
     'content:file:afterParse'({ content }) {

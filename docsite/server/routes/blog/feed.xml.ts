@@ -2,30 +2,7 @@
 // the whole post as HTML in content:encoded, so a feed reader gets the post in
 // full and a site that imports from the feed (dev.to) has the body to copy.
 // Only the build at / prerenders it (nuxt.config.ts).
-type Node = string | [string, Record<string, unknown>, ...Node[]]
-
-const VOID = new Set(['img', 'br', 'hr'])
-const escape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-
-// The post body as plain HTML: the minimark tree Nuxt Content stores, with
-// site links made absolute and a code block as its source text, since a feed
-// reader has none of the site's styles.
-export function toHtml(node: Node, origin: string): string {
-  if (typeof node === 'string') return escape(node)
-  const [tag, props, ...children] = node
-  // The code highlighter's colours: the site's, not the reader's.
-  if (tag === 'style' || tag === 'script') return ''
-  // The site's video player is a script; a feed reader gets a link to the video.
-  if (tag === 'site-video') return `<p><a href="https://www.youtube.com/watch?v=${escape(String(props.id))}">${escape(String(props.title))}</a></p>`
-  if (tag === 'pre') return `<pre><code>${escape(String(props.code ?? ''))}</code></pre>`
-  const attrs = Object.entries(props)
-    .filter(([key, value]) => ['href', 'src', 'alt', 'title'].includes(key) && typeof value === 'string')
-    .map(([key, value]) => ` ${key}="${escape((value as string).startsWith('/') ? `${origin}${value}` : value as string)}"`)
-    .join('')
-  if (VOID.has(tag)) return `<${tag}${attrs}>`
-  return `<${tag}${attrs}>${children.map(c => toHtml(c, origin)).join('')}</${tag}>`
-}
-
+import { type FeedNode, feedHtml } from '../../utils/feedHtml'
 const cdata = (s: string) => `<![CDATA[${s.replace(/]]>/g, ']]]]><![CDATA[>')}]]>`
 
 export default defineEventHandler(async (event) => {
@@ -34,7 +11,7 @@ export default defineEventHandler(async (event) => {
   const posts = await queryCollection(event, 'blog').order('date', 'DESC').all()
   const items = posts.map((post) => {
     const link = `${origin}${post.path}`
-    const body = (post.body as unknown as { value: Node[] }).value.map(n => toHtml(n, origin)).join('\n')
+    const body = (post.body as unknown as { value: FeedNode[] }).value.map(n => feedHtml(n, origin)).join('\n')
     return `    <item>
       <title>${escape(post.title)}</title>
       <link>${link}</link>

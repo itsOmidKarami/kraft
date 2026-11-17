@@ -110,11 +110,14 @@ jobs:
           site="$RUNNER_TEMP/site"
           test -f "$site/blog/feed.xml" || { echo "::error::no blog/feed.xml at the root"; exit 1; }
           if ls "$site"/*/blog/feed.xml >/dev/null 2>&1; then echo "::error::a versioned build wrote a blog feed"; exit 1; fi
+          # Drafts as docsite/blog-posts.mjs reads them, not a second reading here.
+          drafts=$(node --input-type=module -e "import { isDraft } from './docsite/blog-posts.mjs'; import { readFileSync } from 'node:fs'; for (const p of process.argv.slice(1)) if (isDraft(readFileSync(p, 'utf8'))) console.log(p)" docsite/blog/*.md)
           for post in docsite/blog/*.md; do
             name=$(basename "$post" .md)
             [ "$name" = README ] && continue
-            if grep -q '^draft: *true *$' "$post"; then
-              if grep -rlq -- "/blog/$name" "$site"; then echo "::error::draft $name is in the built site"; exit 1; fi
+            if grep -qxF "$post" <<<"$drafts"; then
+              # The post's address, not one that only starts with it.
+              if grep -rlqE -- "/blog/$name([^a-z0-9-]|$)" "$site"; then echo "::error::draft $name is in the built site"; exit 1; fi
             else
               test -f "$site/blog/$name.html" || { echo "::error::no page for blog post $name"; exit 1; }
               grep -q "/blog/$name</link>" "$site/blog/feed.xml" || { echo "::error::$name is not in the feed"; exit 1; }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// One blog post (blog-posts.mjs). Only the build at / draws it; /next/ and
-// /vN/ answer with a redirect to it. Its canonical names this address, so a
+// One blog post (blog-posts.mjs). Only the build at / writes it; /next/ and
+// /vN/ have only the index's redirect. Its canonical names this address, so a
 // copy shared on another site can name it as the original.
 definePageMeta({ layout: 'site', header: false, footer: false })
 

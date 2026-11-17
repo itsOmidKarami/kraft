@@ -42,7 +42,9 @@ To see a draft while you write it, run `KRAFT_BLOG_DRAFTS=1 just docs` and open
 ## Images and video
 
 Put a post's images in `docsite/public/blog/<post>/` and link them from the
-root: `![What it shows](/blog/my-post/board.png)`. The alt text says what the
+root: `![What it shows](/blog/my-post/board.png)`. Everything in
+`docsite/public/` is published as it is, a draft's images included: don't
+put an image there that can't be public before its post is. The alt text says what the
 image shows, not "a screenshot". A docs screenshot already in `.github/assets/`
 can be linked as `/assets/<name>.png`.
 
@@ -69,12 +71,8 @@ heading that is only on main links nowhere until the next release.
 
 ## What a post may claim
 
-The same rules as the docs: every number and claim comes from the repo
-(`README.md`, `config/policy.yaml` for the caps, the docs pages). No
-customers, testimonials or benchmarks that don't exist. Don't write that an
-agent can't skip or approve a gate: say the steps run in order from the chain
-file, and that a sandbox with a `network:` policy makes a gate a wall. No bead
-IDs.
+The rules for what a post may claim, and the steps from draft to live, are in
+[the blog-post skill](../../.claude/skills/blog-post/SKILL.md).
 
 ## Sharing a copy elsewhere
 

@@ -1,6 +1,6 @@
 ---
 name: blog-post
-description: Kraft's own rules for a post on the kraft-sdlc.dev blog - what a post may claim, where its facts come from, how it goes from a draft to live, and how a copy shared on dev.to, Medium or elsewhere points back to the original. Use when writing, reviewing or publishing a blog post, a release story such as "What's new in X.Y", or a copy of one on another site; not for how to write prose.
+description: Use when writing, reviewing or publishing a post for the kraft-sdlc.dev blog (docsite/blog/), a release story such as "What's new in X.Y", or a copy for dev.to, Medium or another site. Covers what a post may claim, the draft-to-live process and canonical links; not prose style.
 ---
 
 # A post on the Kraft blog
@@ -20,12 +20,10 @@ Style is out of scope here: the checks below are about content and process.
   before it appears anywhere else. Never publish a post on another platform
   first and copy it back, except to rescue one that already exists only
   elsewhere (as the launch article was, from dev.to).
-- **Everything the post needs ships with it.** Images go in
-  `docsite/public/blog/<slug>/`, not on another site's CDN. A docs screenshot
-  already in `.github/assets/` is linked as `/assets/<name>.png`. A video uses
-  `::site-video`, never a platform's embed syntax (`{% embed %}`).
-- **The address is permanent.** Pick the slug once. A live post is never
-  renamed or deleted; correct it in place.
+- **Everything ships with it; the address is permanent.** Images and video
+  live in this repo, never on another site's CDN or embed, and a live post is
+  never renamed or deleted: correct it in place. The README's "The file" and
+  "Images and video" say how.
 
 ## 2. Every claim comes from the repo
 
@@ -38,7 +36,7 @@ for the review:
 | Caps and defaults | `config/policy.yaml` ($10 a work item, $50 a day) |
 | A release's features | its GitHub release notes and `docsite/content/6.project/*whats-new*` |
 | Security and gates | `docsite/content/6.project/1.security-in-depth.md` |
-| A run's numbers (time, cost, files) | the work item itself (`kraft view show`), or the maintainer |
+| A run's numbers (time, cost, files) | the work item on a real instance (`kraft view show ID`), never `just dev` (its agents are fake), or the maintainer |
 
 Then hold these lines, which posts have got wrong before:
 
@@ -46,15 +44,16 @@ Then hold these lines, which posts have got wrong before:
   the steps run in order from the chain file, and that a sandbox with a
   `network:` policy makes a gate a wall; an unsandboxed worker runs as the user
   (security-in-depth, "Agents and gates").
-- **Local work.** Closing the laptop pauses local work. It doesn't keep running.
+- **Local work.** Closing the laptop pauses work that runs on it. A step on
+  another machine keeps going and hands in its result when the laptop wakes
+  (`docsite/content/3.guides/4.run/13.run-a-step-on-another-machine.md`, "When
+  your laptop sleeps").
 - **No bead ids** (`Kraft-xxxxx`) in text. Check screenshots too, and ask the
   maintainer before publishing one that shows them.
 - **Nothing invented.** No customers, testimonials, benchmarks, quotes or
   numbers that the repo or the maintainer didn't give you.
 - **Docs links** go to pages and headings in the latest release, not only on
-  main: the post shows beside the released docs. Run
-  `python3 dev/check_site_docs_links.py` (it needs the release tags); the
-  docs workflow runs it too and fails otherwise.
+  main: the post shows beside the released docs.
 
 When a claim has no source, cut it or ask the maintainer. Don't soften it into
 something vaguer that still implies it.
@@ -69,25 +68,26 @@ something vaguer that still implies it.
   release notes and What's new page for the rest. Write it only once `vX.Y.0`
   is tagged and released.
 - **Honest about limits.** Say when not to use the thing, and what it costs.
-  A post that only sells reads as an ad, and dev.to has flagged one before.
+  A post that only sells reads as an ad.
 - **First person is the author's.** A post signed by the maintainer speaks as
   them; don't put opinions or anecdotes in their mouth. Ask for them.
 
 ## 4. From draft to live
 
 1. **Branch and file.** A post gets its own branch and pull request, separate
-   from any code change. Start the front matter with `draft: true` unless the
-   maintainer wants it live on merge.
+   from any code change. Start the front matter with `draft: true` and keep it
+   until the maintainer says, in the conversation or on the pull request, to
+   publish. A deadline or a request to skip the draft is not that yes.
 2. **Ask for what you can't source.** Screenshots of the maintainer's own
    board, run numbers, opinions. List them in the pull request description as
    open items rather than inventing placeholders that might ship.
 3. **Check it rendered.** `KRAFT_BLOG_DRAFTS=1 just docs`, then open the post
    at a phone width and a desktop width, in light and dark. Look at every image
    and the video.
-4. **Run the checks** that cover a post: `just vale` (posts follow the docs'
-   terms and spelling: "merge request", British spelling),
-   `python3 dev/check_site_docs_links.py`, and `just ci-checks`. For new site
-   code, also `dev/build_docs_site.sh docsite/dist-site`. The docs workflow
+4. **Run the checks** that cover a post: `just ci-checks` (it includes Vale:
+   posts follow the docs' terms and spelling, "merge request" and British
+   spelling) and `python3 dev/check_site_docs_links.py` (it needs the release
+   tags). For new site code, also `dev/build_docs_site.sh docsite/dist-site`. The docs workflow
    fails a draft that leaks into the build, and a published post missing from
    the feed.
 5. **Open the pull request** following `CONTRIBUTING.md`: label it
@@ -103,14 +103,9 @@ something vaguer that still implies it.
 Only after the post is live here, and only when the maintainer asks: this
 skill prepares copies, it doesn't post them.
 
-- **dev.to:** set `canonical_url:` to the post's address. A copy imported
-  from the feed (`https://kraft-sdlc.dev/blog/feed.xml`) needs the same check
-  before it is published.
-- **Medium:** import the story from the post's address, and check that its
-  canonical link names the post here.
-- **Check every copy** shows the canonical link in its page source before you
-  call it done.
-- **Anywhere without a canonical setting:** end the copy with "First published
-  on kraft-sdlc.dev" linking the post.
-- **The copy is the same post.** Change only what the platform forces (its
-  video embed, its tags). Fix a mistake here first, then in the copies.
+- **Canonical link.** Set it as the README's "Sharing a copy elsewhere" says,
+  and check that the copy's page source shows it before you call it done.
+- **The copy is the same post.** Change only what the platform forces (video
+  embed, tags, absolute links). A wording change goes into the post here
+  first, through a pull request; until it merges, the copy keeps the old
+  wording.

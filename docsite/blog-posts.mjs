@@ -15,10 +15,12 @@ export const blogDir = fileURLToPath(new URL('./blog', import.meta.url))
 
 const showDrafts = process.env.KRAFT_BLOG_DRAFTS === '1'
 
-// Only the front matter's own `draft:` line counts, not one in the body.
+// Only the front matter's own `draft:` line counts, not one in the body. Read
+// the way YAML reads it: a BOM, CRLF line ends, `True` and a trailing comment
+// all still mean a draft (tests/blogPosts.test.ts).
 export function isDraft(text) {
-  const front = /^---\n([\s\S]*?)\n---/.exec(text)
-  return !!front && /^draft:\s*true\s*$/m.test(front[1])
+  const front = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---/.exec(text)
+  return !!front && /^draft:\s*(true|True|TRUE)\s*(#.*)?$/m.test(front[1].replace(/\r/g, ''))
 }
 
 // Every post file, relative to blogDir, and whether it is a draft.

@@ -31,7 +31,7 @@ This week Kraft built a new home page for its own docs site: 30 files, +3,044/âˆ
 
 ![The fix loop: tests, repair, judge](/assets/fixloop.png)
 
-Hand-off to merge request took 69 minutes and $10.20. That's above the $10 default cap; I run mine higher. Kraft checks the cap before each agent step starts and won't stop one mid-run, so the overshoot is at most one step.
+Hand-off to merge request took 69 minutes and $10.20. That's above the $10 default cap; I run mine higher. Kraft checks the cap before each agent step starts and won't stop one mid-run.
 
 When I approve the final review, Kraft merges only the commit I approved. It carries that approval across its own clean rebases; any other change cancels the merge or stops the item.
 
@@ -50,9 +50,9 @@ Three lessons:
 ## What keeps it honest
 
 - **A chain, not improvisation.** The steps live in a YAML file you can read and diff, and Kraft runs them in that order. A separate reviewer or judge, not the agent that wrote the fix, decides when a fix is done.
-- **You at the decisions.** Most software factories let an agent approve the merge; Kraft stops for you at the spec, the plan and the final review. It refuses an agent's calls to decide its own gate, but an unsandboxed worker runs as you and could get around that. A sandbox with a `network:` policy makes the gate a wall; [the security page](/project/security-in-depth#agents-and-gates) draws the line.
+- **You at the decisions.** Kraft stops for you at the spec, the plan and the final review. It refuses an agent's calls to decide its own gate, but an unsandboxed worker runs as you and could get around that. A sandbox with a `network:` policy makes the gate a wall; [the security page](/project/security-in-depth#agents-and-gates) draws the line.
 - **Caps.** By default a work item can spend $10 and the whole instance $50 a day. A capped item stops and hands you the full trace.
-- **Local.** Kraft is one process on your machine, bound to localhost. A tunnel brings the board to your phone. Close the laptop and local work pauses.
+- **Local.** Kraft runs on your machine, bound to localhost. A tunnel brings the board to your phone. Close the laptop and local work pauses.
 
 ## When to skip it
 
