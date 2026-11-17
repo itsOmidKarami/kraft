@@ -2715,7 +2715,8 @@
   transition: box-shadow 0.3s;
 }
 
-.site .s-cdemo-gbox.is-sel {
+.site .s-cdemo-gbox.is-sel,
+.site .s-cdemo-gate.is-sel {
   box-shadow: 0 0 0 2px var(--a-bg), 0 0 0 4px var(--a-text);
 }
 
@@ -2760,12 +2761,6 @@
 .site .s-cdemo-glabel.is-bold {
   font-weight: 600;
   color: var(--a-text);
-}
-
-.site .s-cdemo-step-label {
-  top: -22px;
-  font-weight: 400;
-  color: var(--a-muted);
 }
 
 .site .s-cdemo-gmeta {
@@ -2845,11 +2840,6 @@
   color: var(--a-text);
 }
 
-.site .s-cdemo-under {
-  color: var(--a-text);
-  text-decoration: underline;
-}
-
 .site .s-cdemo-menu {
   position: absolute;
   z-index: 5;
@@ -2903,27 +2893,6 @@
   border-radius: 7px;
   font-size: 12px;
   color: var(--a-text);
-}
-
-.site .s-cdemo-idrow {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 4px 6px;
-}
-
-.site .s-cdemo-idrow .s-cdemo-search {
-  margin: 0;
-}
-
-.site .s-cdemo-sub {
-  font-size: 12px;
-  color: var(--a-sub);
-}
-
-.site .s-cdemo-create {
-  display: flex;
-  justify-content: flex-end;
 }
 
 .site .s-cdemo-btn {
@@ -3051,7 +3020,7 @@
   border-top: 1px solid var(--a-line);
 }
 
-/* The panel under a node: On failure and its fix loop */
+/* The panel under a node: its tabs */
 .site .s-cdemo-bp {
   flex: 1 1 auto;
   border-top: 1px solid var(--a-line);
@@ -3085,57 +3054,6 @@
 .site .s-cdemo-app svg.s-cdemo-tabic {
   width: 13px;
   height: 13px;
-}
-
-.site .s-cdemo-nofix {
-  margin: 12px 12px 6px;
-  padding: 9px 12px;
-  border: 1px dashed var(--a-border);
-  border-radius: 8px;
-  font-size: 12px;
-}
-
-.site .s-cdemo-green {
-  color: var(--a-green);
-  text-decoration: underline;
-}
-
-.site .s-cdemo-nofixnote {
-  margin: 0 12px;
-  font-size: 11.5px;
-  color: var(--a-muted);
-}
-
-.site .s-cdemo-loop {
-  position: relative;
-  height: 110px;
-}
-
-.site .s-cdemo-loop-e1 {
-  left: 228px;
-  top: 52px;
-  width: 50px;
-}
-
-.site .s-cdemo-loop-e2 {
-  left: 322px;
-  top: 52px;
-  width: 50px;
-}
-
-.site .s-cdemo-loop-start {
-  left: 212px;
-  top: 44px;
-}
-
-.site .s-cdemo-loop-task {
-  left: 278px;
-  top: 30px;
-}
-
-.site .s-cdemo-loop-end {
-  left: 372px;
-  top: 44px;
 }
 
 /* The file */
@@ -3415,9 +3333,18 @@
   padding: 0 12px;
 }
 
-/* The finished file's height at 390px, so the page below doesn't move. */
-.site .s-cdemo-pfile {
-  min-height: 608px;
+/* The phone's two files share one spot; the one not shown keeps its height, hidden. */
+.site .s-cdemo-stack {
+  display: grid;
+}
+
+.site .s-cdemo-layer {
+  grid-area: 1 / 1;
+}
+
+.site .s-cdemo-layer.is-off,
+.site .s-cdemo-layer.is-off .s-cdemo-yl {
+  visibility: hidden !important;
 }
 
 .site .s-cdemo-pbar {

@@ -1,9 +1,10 @@
-import { DUR, jump, nextFrame, startFrame } from '~/utils/customizePlayer'
+import { DUR, holds, jump, nextFrame, startFrame } from '~/utils/customizePlayer'
 
 // The Make it yours demo (app/utils/customizePlayer.ts) as Vue state. The server
 // renders frame 0. In the browser the run starts once `fig` is in view and
-// stops when it leaves view or the page is left; hover or focus inside the
-// figure holds it. Under reduced motion it opens paused on the finished
+// stops when it leaves view or the page is left. A hovering mouse holds it, and
+// so does keyboard focus inside the figure, but not focus on its own buttons:
+// a click on Play leaves focus there, and the demo must not look stuck. Under reduced motion it opens paused on the finished
 // review and moves only when a button is pressed.
 export function useCustomizePlayer(fig: Readonly<Ref<HTMLElement | null>>) {
   // A new object on every change, so a press on the frame already shown
@@ -11,7 +12,7 @@ export function useCustomizePlayer(fig: Readonly<Ref<HTMLElement | null>>) {
   const state = shallowRef({ frame: startFrame(false), playing: true })
   const inView = ref(false)
   const hovered = ref(false)
-  const focused = ref(false)
+  const focusHolds = ref(false)
   let timer: number | undefined
   let observer: IntersectionObserver | undefined
 
@@ -21,7 +22,7 @@ export function useCustomizePlayer(fig: Readonly<Ref<HTMLElement | null>>) {
   }
   const schedule = () => {
     stop()
-    if (!state.value.playing || !inView.value || hovered.value || focused.value) return
+    if (!state.value.playing || !inView.value || hovered.value || focusHolds.value) return
     timer = window.setTimeout(() => {
       state.value = { ...state.value, frame: nextFrame(state.value.frame) }
     }, DUR[state.value.frame])
@@ -29,7 +30,7 @@ export function useCustomizePlayer(fig: Readonly<Ref<HTMLElement | null>>) {
 
   onMounted(() => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) state.value = { frame: startFrame(true), playing: false }
-    watch([state, inView, hovered, focused], schedule, { immediate: true })
+    watch([state, inView, hovered, focusHolds], schedule, { immediate: true })
     observer = new IntersectionObserver(es => (inView.value = es.some(e => e.isIntersecting)), { threshold: 0.15 })
     if (fig.value) observer.observe(fig.value)
     else inView.value = true
@@ -46,9 +47,12 @@ export function useCustomizePlayer(fig: Readonly<Ref<HTMLElement | null>>) {
     // A mouse hovering holds the run; a touch has no leave, so it does not.
     enter: (e: PointerEvent) => { if (e.pointerType === 'mouse') hovered.value = true },
     leave: () => (hovered.value = false),
-    focusin: () => (focused.value = true),
+    focusin: (e: FocusEvent) => {
+      const t = e.target as Element
+      focusHolds.value = holds({ hovered: false, focusVisible: t.matches(':focus-visible'), onControl: !!t.closest('button') })
+    },
     focusout: (e: FocusEvent) => {
-      if (!fig.value?.contains(e.relatedTarget as Node | null)) focused.value = false
+      if (!fig.value?.contains(e.relatedTarget as Node | null)) focusHolds.value = false
     },
   }
 }
