@@ -25,7 +25,7 @@ const p = computed(() => phoneView(pf.value))
 
 // A line not yet written keeps its place in the page, hidden.
 const lineStyle = (l: YamlLine) => ({
-  maxHeight: `${l.shown ? 64 : 0}px`,
+  gridTemplateRows: l.shown ? '1fr' : '0fr',
   opacity: l.shown ? 1 : 0,
   visibility: l.shown ? 'visible' : 'hidden',
   paddingBlock: l.shown ? '1.5px' : '0',
@@ -54,9 +54,13 @@ const textStyle = (l: YamlLine) => ({ paddingLeft: `${l.pad}ch` })
         >
           <div
             class="s-cdemo-dots s-cdemo-canvas"
+            :class="{ 'is-reset': d.reset }"
             :style="d.cv.style"
           >
-            <template v-if="d.cv.chain">
+            <div
+              class="s-cdemo-view"
+              :class="{ 'is-off': !d.cv.chain }"
+            >
               <div class="s-cdemo-fade">
                 <div
                   v-for="(e, i) in d.edges"
@@ -102,9 +106,12 @@ const textStyle = (l: YamlLine) => ({ paddingLeft: `${l.pad}ch` })
                 class="s-cdemo-plus"
                 :style="d.plusStyle"
               >+</div>
-            </template>
+            </div>
 
-            <template v-else>
+            <div
+              class="s-cdemo-view"
+              :class="{ 'is-off': d.cv.chain }"
+            >
               <p
                 v-if="d.cv.banner"
                 class="s-cdemo-banner"
@@ -160,7 +167,7 @@ const textStyle = (l: YamlLine) => ({ paddingLeft: `${l.pad}ch` })
                 <span
                   class="s-cdemo-glabel"
                   :class="{ 'is-bold': d.nv.sel }"
-                >{{ d.nv.taskId }}</span>
+                >implement</span>
               </div>
               <div
                 v-if="d.nv.addTask"
@@ -171,10 +178,12 @@ const textStyle = (l: YamlLine) => ({ paddingLeft: `${l.pad}ch` })
                 <span class="s-cdemo-btn">← chain</span>
                 <span class="s-cdemo-m s-cdemo-nodename">{{ d.cv.nodeName }}</span>
               </div>
-            </template>
+            </div>
 
+            <Transition name="s-cdemo-pop">
             <div
               v-if="d.menu.show"
+              :key="d.menu.head || d.menu.items[0]?.title"
               class="s-cdemo-menu"
               :style="d.menu.style"
             >
@@ -199,9 +208,12 @@ const textStyle = (l: YamlLine) => ({ paddingLeft: `${l.pad}ch` })
                 <span class="s-cdemo-mtext"><span :class="{ 's-cdemo-m': it.titleCls }">{{ it.title }}</span><span class="s-cdemo-msub">{{ it.sub }}</span></span>
               </div>
             </div>
+            </Transition>
 
+            <Transition name="s-cdemo-pop">
             <div
               v-if="d.card.show"
+              :key="d.card.title"
               class="s-cdemo-card"
               :style="d.card.style"
             >
@@ -236,6 +248,13 @@ const textStyle = (l: YamlLine) => ({ paddingLeft: `${l.pad}ch` })
                     />{{ r.chipText }}</span>
                   </div>
                   <div
+                    v-else-if="r.isText"
+                    class="s-cdemo-trow"
+                  >
+                    <span class="s-cdemo-tlabel">{{ r.k }}</span>
+                    <span class="s-cdemo-tbox">{{ r.v }}</span>
+                  </div>
+                  <div
                     v-else
                     class="s-cdemo-change"
                   >
@@ -255,6 +274,7 @@ const textStyle = (l: YamlLine) => ({ paddingLeft: `${l.pad}ch` })
                 <span class="s-cdemo-btn s-cdemo-pri">Publish</span>
               </div>
             </div>
+            </Transition>
           </div>
 
           <div
@@ -279,17 +299,28 @@ const textStyle = (l: YamlLine) => ({ paddingLeft: `${l.pad}ch` })
 
         <div class="s-cdemo-file">
           <p class="s-cdemo-filehead">
-            <span>{{ d.path }}</span>
+            <Transition
+              name="s-cdemo-swap"
+              mode="out-in"
+            ><span :key="d.path">{{ d.path }}</span></Transition>
             <span
               class="s-cdemo-note"
               :class="{ 'is-draft': d.changes }"
             >{{ d.note }}</span>
           </p>
-          <div class="s-cdemo-lines">
+          <Transition
+            name="s-cdemo-swap"
+            mode="out-in"
+          >
+          <div
+            :key="d.path"
+            class="s-cdemo-lines"
+          >
             <div
               v-for="(l, i) in d.lines"
               :key="i"
               class="s-cdemo-yl"
+              :class="{ 'is-hidden': !l.shown }"
               :style="lineStyle(l)"
             >
               <span
@@ -298,6 +329,7 @@ const textStyle = (l: YamlLine) => ({ paddingLeft: `${l.pad}ch` })
               ><span>{{ l.prefix }}</span><span class="s-cdemo-yk">{{ l.key }}</span><span>{{ l.rest }}</span></span>
             </div>
           </div>
+          </Transition>
         </div>
       </div>
 
@@ -468,6 +500,7 @@ const textStyle = (l: YamlLine) => ({ paddingLeft: `${l.pad}ch` })
                 v-for="(l, i) in file"
                 :key="i"
                 class="s-cdemo-yl"
+                :class="{ 'is-hidden': !l.shown }"
                 :style="lineStyle(l)"
               >
                 <span

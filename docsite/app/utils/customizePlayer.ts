@@ -29,25 +29,26 @@ const REVIEW = { label: 'REVIEW & PUBLISH', title: 'Two changes, checked before 
 
 export type Caption = { label: string, title: string, detail: string }
 
+// Each detail is about ten words, so it reads in its frame's time.
 export const CAPS: Caption[] = [
-  { label: 'A CHAIN THAT EXTENDS DEFAULT', title: 'A chain that holds only what it changes.', detail: 'with-lint is three lines. Every node on the canvas is read from default.' },
-  { label: E1, title: T1, detail: 'It’s inherited from default, so a change to it is saved as this chain’s override.' },
-  { label: E1, title: T1, detail: 'Its implement task’s harness, set on Config. The file gains one override; the rest still comes from default.' },
-  { label: E2, title: T2, detail: 'Each + between two nodes adds an exec node or a gate there.' },
-  { label: E2, title: T2, detail: 'Named lint, it opens empty. Its first step takes the lint task the guide adds to your library.' },
-  { label: E2, title: T2, detail: 'Every item on this chain now runs lint after verification.' },
-  { label: E3, title: T3, detail: 'local_review gets a new message in default.yaml. with-lint reads it the next time Kraft loads the chains.' },
-  { label: E3, title: T3, detail: 'with-lint.yaml doesn’t change. It still holds only its own two edits.' },
-  { ...REVIEW, detail: 'The default change isn’t one of them. Publish checks the chain still resolves and waits for zero problems.' },
+  { label: 'A CHAIN THAT EXTENDS DEFAULT', title: 'A chain that holds only what it changes.', detail: 'with-lint is three lines. Every node here comes from default.' },
+  { label: E1, title: T1, detail: 'It’s inherited, so a change becomes this chain’s override.' },
+  { label: E1, title: T1, detail: 'Set its task’s harness. The file gains one override.' },
+  { label: E2, title: T2, detail: 'Each + adds an exec node or a gate.' },
+  { label: E2, title: T2, detail: 'It opens empty; its first step takes the lint task.' },
+  { label: E2, title: T2, detail: 'Every item on this chain now runs lint.' },
+  { label: E3, title: T3, detail: 'local_review gets a new message in default.yaml.' },
+  { label: E3, title: T3, detail: 'with-lint.yaml doesn’t change. It holds only its own edits.' },
+  { ...REVIEW, detail: 'The default change isn’t one of them.' },
 ]
 
 // The phone's five frames: 0 as filed, 1-3 one step each, 4 the review.
 export const PHONE_CAPS: Caption[] = [
-  { label: 'A CHAIN THAT EXTENDS DEFAULT', title: 'A chain that holds only what it changes.', detail: 'with-lint is three lines. Every other node is read from default.' },
-  { label: E1, title: T1, detail: 'Set its implement task’s harness on the Chains screen. The file gains one override.' },
-  { label: E2, title: T2, detail: 'The new node is written in full under add, with the lint task from your library.' },
-  { label: E3, title: T3, detail: 'local_review’s new message reaches with-lint. with-lint.yaml doesn’t change.' },
-  { ...REVIEW, detail: 'The default change isn’t one of them.' },
+  { label: 'A CHAIN THAT EXTENDS DEFAULT', title: 'A chain that holds only what it changes.', detail: 'with-lint is three lines. Every other node comes from default.' },
+  { label: E1, title: T1, detail: 'Its task’s harness, set on the Chains screen: one override.' },
+  { label: E2, title: T2, detail: 'The new node is written in full under add.' },
+  { label: E3, title: T3, detail: 'local_review’s message changes in default.yaml. with-lint picks it up.' },
+  { ...REVIEW, detail: 'The default change isn’t one of them; with-lint.yaml never changed.' },
 ]
 export const PHONE_APPLIED = [0, 1, 3, 3, 3]
 export const PHONE_HOT = [[], [1], [2, 3], [], [1, 2, 3]]
@@ -60,7 +61,7 @@ export const PHONE_LAST = PHONE_CAPS.length - 1
 export const STEPS = [
   { name: 'Change a node', short: 'Change', first: 1, result: 2, frames: [1, 2] },
   { name: 'Add a node', short: 'Add node', first: 3, result: 5, frames: [3, 4, 5] },
-  { name: 'Default changes', short: 'Default', first: 6, result: 7, frames: [6, 7] },
+  { name: 'Default changes', short: 'Default', first: 6, result: 6, frames: [6, 7] },
 ]
 
 export const stepOf = (frame: number) => STEPS.findIndex(s => s.frames.includes(frame))
@@ -72,11 +73,11 @@ export const startFrame = (reduced: boolean) => (reduced ? LAST : 0)
 // The phone shows the whole step the desktop frame belongs to.
 export const phoneFrame = (frame: number) => (frame === 0 ? 0 : frame === LAST ? PHONE_LAST : stepOf(frame) + 1)
 
-// Whether the run holds: under a hovering mouse, or with keyboard focus
-// (:focus-visible) inside the figure on anything but its own controls, so a
-// click on Play or a step button never leaves the demo stuck.
-export const holds = (o: { hovered: boolean, focusVisible: boolean, onControl: boolean }) =>
-  o.hovered || (o.focusVisible && !o.onControl)
+// Whether focus inside the figure holds the run: keyboard focus
+// (:focus-visible) on anything but its own controls, so a click on Play or a
+// step button never leaves the demo stuck. A hovering mouse holds it too, in
+// the composable.
+export const focusHolds = (focusVisible: boolean, onControl: boolean) => focusVisible && !onControl
 
 // What the editor writes: chain keys in the order id, extends, description,
 // add, overrides; mappings in block style; [beat, line, beat it goes at].
@@ -141,7 +142,7 @@ export const draftNote = (changes: number, problem = false) =>
 // ---- The desktop app crop -------------------------------------------------
 
 type Row = {
-  k: string, v: string, isKv: boolean, isChange: boolean, signText: string, signStyle: string,
+  k: string, v: string, isKv: boolean, isChange: boolean, isText: boolean, signText: string, signStyle: string,
   chip: boolean, chipText: string, dot: boolean, kStyle: string, vStyle: string, chipStyle: string,
 }
 type RowOpts = { kind?: string, sign?: string, chip?: string, dot?: boolean, kw?: number, mono?: boolean, select?: boolean }
@@ -149,7 +150,7 @@ type RowOpts = { kind?: string, sign?: string, chip?: string, dot?: boolean, kw?
 const row = (k: string, v: string, o: RowOpts = {}): Row => {
   const kind = o.kind || 'kv'
   return {
-    k, v, isKv: kind === 'kv', isChange: kind === 'change',
+    k, v, isKv: kind === 'kv', isChange: kind === 'change', isText: kind === 'text',
     signText: o.sign || '', signStyle: `color: ${o.sign === '+' ? 'var(--a-green)' : 'var(--a-amber)'};`,
     chip: !!o.chip, chipText: o.chip || '', dot: !!o.dot,
     kStyle: `flex: none; width: ${o.kw || 74}px; color: var(--a-sub);`,
@@ -169,10 +170,11 @@ function card(f: number): Card {
     row('harness', 'codex ⌄', { mono: true, chip: 'this chain', dot: true, kw: 58, select: true }),
     row('profile', 'strong', { mono: true, chip: 'library', kw: 58 }),
   ] }
-  // The inherited gate default changed: its value comes from `default`
-  // (the app's source chip for chain:default), under the app's own note.
-  if (f === 6 || f === 7) return { ...base, show: true, style: 'left: 304px; top: 378px; width: 284px;', crumbs: 'with-lint ›', title: 'local_review', sub: 'gate', note: INHERITED_NOTE, rows: [
-    row('message', NEW_MESSAGE, { chip: 'default', kw: 58 }),
+  // The inherited gate whose default changed, as its Overview tab draws it:
+  // the app's own note, then `message` in its text box with the new value
+  // (panes/ChainPane.tsx, panes/Overview.tsx). It follows the file: --d.
+  if (f === 6 || f === 7) return { ...base, show: true, style: 'left: 304px; top: 378px; width: 284px; --d: 400ms;', crumbs: 'with-lint ›', title: 'local_review', sub: 'gate', note: INHERITED_NOTE, rows: [
+    row('message', NEW_MESSAGE, { kind: 'text' }),
   ] }
   if (f === LAST) return { ...base, show: true, foot: true, style: 'left: 318px; top: 20px; width: 266px;', crumbs: 'with-lint ›', title: 'Draft · 2 changes', sub: '✓ resolves · ready to publish', rows: [
     row('implementation.main.implement', 'harness', { kind: 'change', sign: '~' }),
@@ -181,7 +183,7 @@ function card(f: number): Card {
   return base
 }
 
-type MenuItem = { exec?: boolean, gate?: boolean, term?: boolean, agent?: boolean, title: string, sub: string, cls: string, titleCls: string }
+type MenuItem = { exec?: boolean, gate?: boolean, term?: boolean, title: string, sub: string, cls: string, titleCls: string }
 
 export function desktopView(f: number) {
   const applied = APPLIED[f]!
@@ -201,7 +203,7 @@ export function desktopView(f: number) {
   const half = (d: { ghost: boolean, kind: string }) => d.ghost ? 0 : d.kind === 'gate' ? 18 : 26
   const nodes = defs.map(d => ({
     id: d.id,
-    isGate: d.kind === 'gate', isBox: d.kind !== 'gate',
+    isGate: d.kind === 'gate',
     agent: d.kind === 'agent', layers: d.kind === 'layers', term: d.kind === 'term',
     sel: d.sel,
     meta: d.meta || '·',
@@ -231,10 +233,8 @@ export function desktopView(f: number) {
     addTask: view === 'lint',
     plus: `left: 290px; top: ${NY - 10}px;`,
     task: `left: 278px; top: ${NY - 22}px;`,
-    taskId: 'implement',
     // A selected task shows only its On failure tab; the lint node, selected, shows all three.
     sel: impl,
-    agent: impl, term: false,
   }
 
   let menu: { show: boolean, search: boolean, head: string, query: string, style: string, items: MenuItem[] } =
@@ -249,7 +249,8 @@ export function desktopView(f: number) {
   const changes = CHANGES[f]!
   const file = FILE[f] as keyof typeof FILE_PATH
   return {
-    cv: { chain: view === 'chain', node: view !== 'chain', banner: impl, nodeName: impl ? 'implementation' : 'lint', style: `height: ${canvasH}px;` },
+    reset: f === 0,
+    cv: { chain: view === 'chain', banner: impl, nodeName: impl ? 'implementation' : 'lint', style: `height: ${canvasH}px;` },
     nodes, edges, seams,
     plusStyle: `left: ${seamX - 10}px; top: ${CY - 10}px; opacity: ${adding ? 1 : 0};`,
     nv, menu, card: card(f),

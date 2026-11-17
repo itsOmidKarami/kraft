@@ -6,7 +6,12 @@
 // Run with: node --experimental-strip-types --test "docsite/tests/*.test.ts"
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { DUR, LAST, desktopView, holds, jump, phoneFrame, phoneView, startFrame, yamlText } from '../app/utils/customizePlayer.ts'
+import { APPLIED, CAPS, CHANGES, DUR, FILE, LAST, PHONE_APPLIED, PHONE_CAPS, PHONE_CHANGES, PHONE_FILE, PHONE_HOT, PHONE_LAST, VIEW, desktopView, focusHolds, jump, phoneFrame, phoneView, startFrame, yamlText } from '../app/utils/customizePlayer.ts'
+
+test('every frame has a row in every frame table', () => {
+  for (const t of [DUR, APPLIED, VIEW, CHANGES, FILE, CAPS]) assert.equal(t.length, LAST + 1)
+  for (const t of [PHONE_CAPS, PHONE_APPLIED, PHONE_HOT, PHONE_CHANGES, PHONE_FILE]) assert.equal(t.length, PHONE_LAST + 1)
+})
 
 test('the loop runs 20 to 25 seconds', () => {
   const total = DUR.reduce((a, b) => a + b, 0)
@@ -15,7 +20,7 @@ test('the loop runs 20 to 25 seconds', () => {
 
 test('a step button jumps to its first frame while playing and to its result while paused', () => {
   assert.deepEqual([0, 1, 2].map(i => jump(true, i)), [1, 3, 6])
-  assert.deepEqual([0, 1, 2].map(i => jump(false, i)), [2, 5, 7])
+  assert.deepEqual([0, 1, 2].map(i => jump(false, i)), [2, 5, 6])
 })
 
 test('the server and a visitor with motion start on frame 0; reduced motion opens on the review', () => {
@@ -56,11 +61,12 @@ test('default changes: the panel shows default.yaml with its edit lit, then with
   assert.ok(!after.lines.some(l => l.lit))
 })
 
-test('default changes: local_review is selected with the new value from default, and the review stays at two changes', () => {
+test('default changes: local_review is selected as its Overview tab shows it, and the review stays at two changes', () => {
   const v = desktopView(6)
   assert.ok(v.nodes.find(n => n.id === 'local_review')!.sel)
+  // The Overview tab: the note, then message in its text box; no source chip (that is the Config tab's).
   assert.equal(v.card.note, 'Inherited from default. Changes here are saved as this chain’s overrides.')
-  assert.deepEqual(v.card.rows.map(r => [r.k, r.v, r.chipText]), [['message', 'Approve the work brief, then open the draft merge request.', 'default']])
+  assert.deepEqual(v.card.rows.map(r => [r.k, r.v, r.isText, r.chip]), [['message', 'Approve the work brief, then open the draft merge request.', true, false]])
   // implementation and lint keep their own marks; local_review gets none.
   assert.deepEqual(v.nodes.map(n => n.meta), ['overridden here', '·', 'added here', '·', '·'])
   const review = desktopView(LAST)
@@ -70,6 +76,33 @@ test('default changes: local_review is selected with the new value from default,
   assert.equal(phoneView(4).path, 'chains/with-lint.yaml')
 })
 
+test('the review frame holds the whole file, both edits and nothing of default.yaml', () => {
+  assert.equal(yamlText(APPLIED[LAST]!), [
+    'id: with-lint', 'extends: default', 'description: The default chain, plus a lint node.', '',
+    'add:', '  - after: verification', '    node:', '      id: lint', '      kind: exec',
+    '      steps:', '        - id: step_1', '          tasks:', '            - id: lint', '              extends: lint', '',
+    'overrides:', '  implementation.main.implement:', '    harness: codex',
+  ].join('\n'))
+  assert.equal(desktopView(LAST).note, 'DRAFT · 2 CHANGES')
+})
+
+// The phone's track and strip at each of its frames: [lint on the track, implementation's mark, lint's mark, strip].
+const PHONE_ROWS: [number, boolean, string, string, string][] = [
+  [0, false, '·', '·', 'PUBLISHED'],
+  [1, false, 'overridden here', '·', 'DRAFT · 1 CHANGE'],
+  [2, true, 'overridden here', 'added here', 'DRAFT · 2 CHANGES'],
+  [3, true, 'overridden here', 'added here', 'DRAFT · 2 CHANGES'],
+  [4, true, 'overridden here', 'added here', '✓ RESOLVES · READY TO PUBLISH'],
+]
+for (const [pf, lint, implMark, lintMark, strip] of PHONE_ROWS) {
+  test(`the phone at frame ${pf}: track and strip`, () => {
+    const v = phoneView(pf)
+    const node = (id: string) => v.nodes.find(n => n.id === id)!
+    assert.equal(node('lint').wrap.includes('opacity: 1'), lint)
+    assert.deepEqual([node('implementation').meta, node('lint').meta, v.state], [implMark, lintMark, strip])
+  })
+}
+
 test('the review lights every edit of with-lint.yaml and nothing else', () => {
   const review = desktopView(LAST).lines.filter(l => l.shown && l.text !== '')
   assert.deepEqual(review.filter(l => !l.lit).map(l => l.text), ['id: with-lint', 'extends: default', 'description: The default chain, plus a lint node.'])
@@ -78,10 +111,9 @@ test('the review lights every edit of with-lint.yaml and nothing else', () => {
   assert.deepEqual(lit(1), ['overrides:', 'implementation.main.implement:', 'harness: codex'])
 })
 
-test('hover holds; keyboard focus holds except on the demo’s own controls; a mouse click never does', () => {
-  assert.equal(holds({ hovered: true, focusVisible: false, onControl: false }), true)
-  assert.equal(holds({ hovered: false, focusVisible: true, onControl: false }), true)
+test('keyboard focus holds the run except on the demo’s own controls; a mouse click never does', () => {
+  assert.equal(focusHolds(true, false), true)
   // Tabbing onto a step button or Play, or clicking one, leaves the run going.
-  assert.equal(holds({ hovered: false, focusVisible: true, onControl: true }), false)
-  assert.equal(holds({ hovered: false, focusVisible: false, onControl: true }), false)
+  assert.equal(focusHolds(true, true), false)
+  assert.equal(focusHolds(false, true), false)
 })

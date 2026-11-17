@@ -1,4 +1,4 @@
-import { DUR, holds, jump, nextFrame, startFrame } from '~/utils/customizePlayer'
+import { DUR, focusHolds, jump, nextFrame, startFrame } from '~/utils/customizePlayer'
 
 // The Make it yours demo (app/utils/customizePlayer.ts) as Vue state. The server
 // renders frame 0. In the browser the run starts once `fig` is in view and
@@ -12,7 +12,7 @@ export function useCustomizePlayer(fig: Readonly<Ref<HTMLElement | null>>) {
   const state = shallowRef({ frame: startFrame(false), playing: true })
   const inView = ref(false)
   const hovered = ref(false)
-  const focusHolds = ref(false)
+  const held = ref(false)
   let timer: number | undefined
   let observer: IntersectionObserver | undefined
 
@@ -22,7 +22,7 @@ export function useCustomizePlayer(fig: Readonly<Ref<HTMLElement | null>>) {
   }
   const schedule = () => {
     stop()
-    if (!state.value.playing || !inView.value || hovered.value || focusHolds.value) return
+    if (!state.value.playing || !inView.value || hovered.value || held.value) return
     timer = window.setTimeout(() => {
       state.value = { ...state.value, frame: nextFrame(state.value.frame) }
     }, DUR[state.value.frame])
@@ -30,7 +30,7 @@ export function useCustomizePlayer(fig: Readonly<Ref<HTMLElement | null>>) {
 
   onMounted(() => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) state.value = { frame: startFrame(true), playing: false }
-    watch([state, inView, hovered, focusHolds], schedule, { immediate: true })
+    watch([state, inView, hovered, held], schedule, { immediate: true })
     observer = new IntersectionObserver(es => (inView.value = es.some(e => e.isIntersecting)), { threshold: 0.15 })
     if (fig.value) observer.observe(fig.value)
     else inView.value = true
@@ -49,10 +49,10 @@ export function useCustomizePlayer(fig: Readonly<Ref<HTMLElement | null>>) {
     leave: () => (hovered.value = false),
     focusin: (e: FocusEvent) => {
       const t = e.target as Element
-      focusHolds.value = holds({ hovered: false, focusVisible: t.matches(':focus-visible'), onControl: !!t.closest('button') })
+      held.value = focusHolds(t.matches(':focus-visible'), !!t.closest('button'))
     },
     focusout: (e: FocusEvent) => {
-      if (!fig.value?.contains(e.relatedTarget as Node | null)) focusHolds.value = false
+      if (!fig.value?.contains(e.relatedTarget as Node | null)) held.value = false
     },
   }
 }
