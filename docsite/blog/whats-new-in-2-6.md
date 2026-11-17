@@ -41,17 +41,28 @@ One set of [caps](/concepts/vocabulary#cap) covers the item and all its slices, 
 
 ## A reviewer at every gate
 
+The screenshots in this section and the next come from the [demo](https://kraft-sdlc.dev/demo/), on its sample data.
+
+
 In the `default` chain, a reviewer agent now checks each gate (spec, plan, chain revision, local review and final review) before you're asked. It reads the document the gate is about, sends work that isn't ready back with its reasons, and hands you the rest marked **ready for you**, with a note. It never approves: the decision stays yours.
 
+![A gate in the demo: the auto_review step, marked checks first, runs before you; the panel lists the gate's two rounds, the first ended with changes requested](/blog/whats-new-in-2-6/gate-reviewer.png)
+
+The gate's page also keeps its history: every round, how it ended, who decided and the note, on the desktop and the phone.
+
 Each check is a paid agent session, at every gate an item reaches. Turn it off for one item with `kraft item create --no-auto-gate`, or for one gate with an override; [Change or turn off the gate reviewer](/guides/customize/add-review-agents#change-or-turn-off-the-gate-reviewer-in-the-default-chain) shows how.
+
+## Sub-agents show up
+
+When a Claude Code task starts sub-agents, they used to run out of sight. Now the item, the chain graph and the phone list each one with what it's doing, its tokens and its tool uses, and the log can show one sub-agent's lines alone. [A sub-agent](/reference/web-ui/item-page#a-sub-agent) says what each field means.
+
+![A running code review step in the demo, with one sub-agent listed: what it checks, 17.8k tokens, 11 tool uses, running Grep](/blog/whats-new-in-2-6/sub-agents.png)
 
 ## Also in 2.6
 
 - **Kraft's own chains ship with Kraft.** As the built-in add-on `kraft-default`, they update when Kraft does, and `kraft admin update` shows what changes in them before it installs. See [the built-in kraft-default](/reference/configuration/addons#the-built-in-kraft-default).
-- **Sub-agents show up.** The item, the chain graph and the phone list a task's Claude Code sub-agents with their tokens and what they run, and the log can show one sub-agent's lines alone. See [a sub-agent](/reference/web-ui/item-page#a-sub-agent).
 - **Re-run CI that failed outside the code.** When jobs fail on a download timeout or a lost runner, a fix-loop repair can re-run them with [`kraft item rerun-ci`](/reference/cli/item#item-rerun-ci) instead of the item getting stuck.
 - **Heavy test suites take turns.** A test scope's [`concurrency_group`](/reference/configuration/repos#concurrency_group) runs its suite one at a time, across work items and repos, on your machine and on each remote one.
-- **A gate's history.** A gate's page lists every round, with how it ended, who decided and their note, on the desktop and the phone.
 - **Easier review.** The review page counts unresolved threads, and `]` and `[` step through them.
 - **Blue means running, amber means you.** The web UI and the console draw running work in blue and keep amber for what needs you.
 - **The console and VS Code reach a remote Kraft** after a password sign-in. See [the console from another machine](/reference/console#from-another-machine).
