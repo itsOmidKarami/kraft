@@ -78,6 +78,11 @@ onBeforeUnmount(() => document.documentElement.classList.remove('s-locked'))
             Docs
           </NuxtLink>
         </li>
+        <li>
+          <NuxtLink to="/blog">
+            Blog
+          </NuxtLink>
+        </li>
         <li><a :href="REPO">GitHub</a></li>
       </ul>
       <div class="s-sheet-actions">

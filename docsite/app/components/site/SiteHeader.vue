@@ -1,5 +1,5 @@
 <!-- The marketing pages' header, on the violet field in both themes. From
-     1024px: the wordmark, the Product menu, three links and Install. Below:
+     1024px: the wordmark, the Product menu, four links and Install. Below:
      the wordmark, Install and the phone menu's button. Each set is hidden at
      the other width (assets/css/site.css). -->
 <template>
@@ -27,6 +27,12 @@
           to="/get-started"
         >
           Docs
+        </NuxtLink>
+        <NuxtLink
+          class="s-nav-link"
+          to="/blog"
+        >
+          Blog
         </NuxtLink>
         <a
           class="s-nav-link"

@@ -68,9 +68,17 @@ def test_a_marketing_page_is_a_page_with_the_ids_of_what_it_draws(cr, content):
     write(app, "pages/why.vue", '<template><WhyPage v-if="home" /></template>\n')
     write(app, "components/why/WhyPage.vue", '<SiteBlock id="the-name" title="The name." />\n')
     write(app, "pages/scale.vue", '<template><section id="slices" /></template>\n')
+    # A folder of pages is a page at its index (the blog); the blog's posts
+    # are its Markdown files, its README aside, and the feed is one more.
+    write(app, "pages/blog/index.vue", '<template><ol id="posts" /></template>\n')
+    write(app, "pages/blog/[slug].vue", "<template><article /></template>\n")
+    write(content.parent, "blog/a-post.md", "---\ntitle: A\n---\n")
+    write(content.parent, "blog/README.md", "# Writing a post\n")
     site = cr.pages(content)
     assert site["/why"] == {"the-name"}
     assert site["/scale"] == {"slices"}
+    assert site["/blog"] == {"posts"}
+    assert sorted(a for a in site if a.startswith("/blog/")) == ["/blog/a-post", "/blog/feed.xml"]
     moved = {"/get-started/why-kraft": "/why"}
     section = "/get-started/why-kraft#why-the-name"
     assert cr.check_map({**moved, section: "/why#the-name"}, site) == []
