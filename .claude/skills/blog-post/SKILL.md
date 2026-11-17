@@ -97,6 +97,9 @@ something vaguer that still implies it.
 6. **Publish** by deleting `draft: true`, in the same pull request or a
    follow-up one, only with the maintainer's yes. It goes live on the docs
    deploy after the merge.
+7. **Link a release post from its release.** Once a "What's new in X.Y" post
+   is live, give the maintainer a line for the top of that release's notes on
+   GitHub, linking the post; they make the edit. Other posts need no link.
 
 ## 5. Copies elsewhere point back
 
