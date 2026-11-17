@@ -10,6 +10,8 @@ from support.console_board import RUNNING, _detail, _opened, _serve, _serve_even
 from textual.widgets import RichLog
 
 from kraft import client, render
+from kraft.console.dialogs import Keys
+from kraft.console.screens.item import TABS
 
 WARN = "warning"
 LANDED = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old [/]\n+new [/]"
@@ -97,6 +99,95 @@ def test_the_diff_shows_what_landed_then_what_did_not_then_its_trailer(
         return [(text, names.get(colour.lower(), colour)) for text, colour in _diff(app)]
 
     assert console.run(scenario) == lines
+
+
+@pytest.mark.parametrize(
+    ("width", "previous_key", "next_key"),
+    [
+        (80, "left_curly_bracket", "right_curly_bracket"),
+        (120, "shift+left_square_bracket", "shift+right_square_bracket"),
+    ],
+    ids=["wrapped-braces", "wide-shift-brackets"],
+)
+def test_diff_keys_jump_between_drawn_file_headers(
+    board, monkeypatch, width, previous_key, next_key
+):
+    """File jumps cross landed and uncommitted work, count wrapped rows, and stop at the ends."""
+    _serve(monkeypatch, _detail(RUNNING), calls=[])
+    _serve_events(monkeypatch, [])
+    files = [
+        f"diff --git a/{name} b/{name}\n"
+        + "\n".join(f"+{name} line {n} " + "changed text " * 12 for n in range(35))
+        for name in ("one.py", "two.py", "three.py", "four.py")
+    ]
+    payload = {
+        "base_ref": "main",
+        "landed": {"commits": ["c1"], "diff": "\n".join(files[:2])},
+        "diff": "\n".join(files[2:]),
+    }
+    monkeypatch.setattr(client, "diff", lambda *args, **kwargs: asyncio.sleep(0, payload))
+    console = board([RUNNING])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, RUNNING["id"])
+        await pilot.press("left_square_bracket")
+        await console.until(pilot, lambda: app.view._diff_drawn == payload)
+        log = app.query_one("#diff", RichLog)
+        headers = [
+            next(
+                n for n, line in enumerate(log.lines) if line.text.rstrip() == file.splitlines()[0]
+            )
+            for file in files
+        ]
+        # The second file's payload row is 37, but wrapped changes push it further down.
+        assert headers[1] > 37
+        assert headers[-1] < log.max_scroll_y
+        await pilot.press(previous_key)
+        assert log.scroll_y == 0
+        for header in headers:
+            await pilot.press(next_key)
+            assert log.scroll_y == header
+        await pilot.press(next_key)
+        assert log.scroll_y == headers[-1]
+        for header in reversed(headers[:-1]):
+            await pilot.press(previous_key)
+            assert log.scroll_y == header
+        await pilot.press(previous_key)
+        assert log.scroll_y == headers[0]
+        # From within a file, previous finds its header and next finds the following file.
+        log.scroll_to(y=headers[1] + 3, animate=False, immediate=True)
+        await pilot.press(next_key)
+        assert log.scroll_y == headers[2]
+        log.scroll_to(y=headers[1] + 3, animate=False, immediate=True)
+        await pilot.press(previous_key)
+        assert log.scroll_y == headers[1]
+
+    console.run(scenario, size=(width, 24))
+
+
+@pytest.mark.parametrize("tab", [key for key, _ in TABS])
+def test_file_jump_keys_are_offered_only_on_the_diff(board, monkeypatch, tab):
+    """`?` names both file keys on the Diff and leaves them out on every other tab."""
+    _serve(monkeypatch, _detail(RUNNING), calls=[])
+    _serve_events(monkeypatch, [])
+    monkeypatch.setattr(
+        client, "diff", lambda *args, **kwargs: asyncio.sleep(0, {"base_ref": "main", "diff": ""})
+    )
+    console = board([RUNNING])
+
+    async def scenario(app, pilot):
+        await _opened(console, app, pilot, RUNNING["id"])
+        app.view.show_tab(tab)
+        await pilot.press("question_mark")
+        assert isinstance(app.screen, Keys)
+        return [
+            (key, label)
+            for key, label in app.screen.here
+            if label in ("next file", "previous file")
+        ]
+
+    expected = [("{", "previous file"), ("}", "next file")] if tab == "diff" else []
+    assert console.run(scenario) == expected
 
 
 def test_a_huge_diff_lets_keys_through_while_it_draws(board, monkeypatch):
