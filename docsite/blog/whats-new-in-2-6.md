@@ -32,7 +32,13 @@ When you approve that plan, Kraft adds the split to the chain revision and asks 
 
 The item page draws the whole group: the groundwork, a box per slice that opens its item, and the join.
 
-![A sliced work item's chain: the groundwork's implementation and verification, three slices side by side, then the join](/blog/whats-new-in-2-6/slices.png)
+::blog-animation
+---
+name: slices
+still: /blog/whats-new-in-2-6/slices.png
+alt: "An illustration of a sliced work item on the item page: the groundwork runs, then three slices run side by side. A zoom into slice 1 shows its own chain, implementation then verification. Slice 3 stops for a person and carries on, and the join replays each slice onto one branch."
+---
+::
 
 If two slices conflict at the join, an agent tries to resolve the conflict. Kraft carries on only once every commit of the slice is on the branch. Otherwise it puts the branch back and stops the item, with the exact steps for you.
 
@@ -42,11 +48,15 @@ The item's dollar and token [caps](/concepts/vocabulary#cap) cover it and all it
 
 ## A reviewer at every gate
 
-The screenshots in this section and the next come from the [demo](https://kraft-sdlc.dev/demo/), on its sample data.
-
 In the `default` chain, a reviewer agent now checks each gate (spec, plan, chain revision, local review and final review) before you're asked. It reads the document the gate is about, sends work that isn't ready back with its reasons, and hands you the rest marked **ready for you**, with a note. It never approves; the gate then waits for you.
 
-![A gate in the demo: the auto_review step, marked checks first, runs before you; the panel lists the gate's two rounds, the first ended with changes requested](/blog/whats-new-in-2-6/gate-reviewer.png)
+::blog-animation
+---
+name: gate
+still: /blog/whats-new-in-2-6/gate.png
+alt: "An illustration of the plan gate with its reviewer: in round 1 the auto_review step checks the plan and sends it back to plan; in round 2 it checks the revised plan and marks it ready for you, and the gate waits for you. The gate's history lists both rounds."
+---
+::
 
 The gate's page also keeps its history: every round, how it ended, who decided and the note, on the desktop and the phone.
 
@@ -56,7 +66,13 @@ Each check is a paid agent session, at every gate an item reaches. Turn it off f
 
 When a Claude Code task starts sub-agents, they used to run out of sight. Now the item, the chain graph and the phone list each one with what it's doing, its tokens and its tool uses, and the log can show one sub-agent's lines alone. [A sub-agent](/reference/web-ui/item-page#a-sub-agent) says what each field means.
 
-![A running code review step in the demo, with one sub-agent listed: what it checks, 17.8k tokens, 11 tool uses, running Grep](/blog/whats-new-in-2-6/sub-agents.png)
+::blog-animation
+---
+name: subagents
+still: /blog/whats-new-in-2-6/subagents.png
+alt: "An illustration of an implement task that starts three sub-agents: the task's pane lists each with its tokens, tool uses and the tool it runs now, a mark under the task's box follows each one, and they finish one by one."
+---
+::
 
 ## Also in 2.6
 

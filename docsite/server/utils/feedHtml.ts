@@ -17,6 +17,8 @@ export function feedHtml(node: FeedNode, origin: string): string {
   if (tag === 'style' || tag === 'script') return ''
   // The site's video player is a script; a feed reader gets a link to the video.
   if (tag === 'site-video') return `<p><a href="https://www.youtube.com/watch?v=${escape(String(props.id))}">${escape(String(props.title))}</a></p>`
+  // An animation of the item page is a script too; a feed reader gets its still frame.
+  if (tag === 'blog-animation') return props.still ? `<p><img src="${escape(`${origin}${props.still}`)}" alt="${escape(String(props.alt ?? ''))}"></p>` : ''
   // Any other component is unwrapped to its contents.
   if (!HTML.has(tag)) return children.map(c => feedHtml(c, origin)).join('')
   if (tag === 'pre') return `<pre><code>${escape(String(props.code ?? ''))}</code></pre>`

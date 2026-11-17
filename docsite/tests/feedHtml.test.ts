@@ -14,6 +14,8 @@ const rows: [string, FeedNode, string][] = [
   ['a code block is its source text', ['pre', { code: 'a <b>\n', language: 'bash' }, ['code', {}, ['span', {}, 'a']]], '<pre><code>a &lt;b&gt;\n</code></pre>'],
   ['the highlighter style is dropped', ['style', {}, 'html{}'], ''],
   ['the video is a link', ['site-video', { id: 'abc', title: 'T' }], '<p><a href="https://www.youtube.com/watch?v=abc">T</a></p>'],
+  ['an animation is its still frame', ['blog-animation', { name: 'gate', still: '/blog/p/gate.png', alt: 'A "gate"' }], '<p><img src="https://kraft-sdlc.dev/blog/p/gate.png" alt="A &quot;gate&quot;"></p>'],
+  ['an animation with no still is left out', ['blog-animation', { name: 'gate', alt: 'A' }], ''],
   ['a callout is unwrapped', ['note', {}, ['p', {}, 'x']], '<p>x</p>'],
 ]
 
