@@ -3494,12 +3494,6 @@
   }
 }
 
-.site .s-cdemo-psteps .s-cdemo-stepbtn.is-on {
-  border-color: var(--s-accent);
-  background: var(--s-accent);
-  color: var(--s-on-accent);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .site .s-cdemo * {
     transition: none !important;
