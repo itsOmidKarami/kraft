@@ -3517,6 +3517,11 @@
     transition-duration: 0.15s !important;
     transition-delay: 0s !important;
   }
+
+  /* A menu or card only fades: no 6px lift to snap. */
+  .site .s-cdemo-pop-enter-from {
+    transform: none;
+  }
 }
 
 /* Scale up's head: three slices as strips, and a step moved to another
