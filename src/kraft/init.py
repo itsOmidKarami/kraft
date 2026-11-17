@@ -20,10 +20,10 @@ from pathlib import Path
 
 from kraft.paths import BUNDLED
 
-#: Where the source tree keeps the skills. Also one half of the published
-#: marketplace: `plugins/` splits to a repo whose root holds `kraft/` and
-#: `kraft-lite/`, so the plugin lives beside its sibling rather than inside the
-#: Python package.
+#: Where the source tree keeps the skills. This repository is the marketplace:
+#: its root `.claude-plugin/marketplace.json` lists `./plugins/kraft` and
+#: `./plugins/kraft-lite`. Users add it with
+#: `claude plugin marketplace add itsOmidKarami/kraft`.
 SOURCE_SKILLS = Path(__file__).resolve().parents[2] / "plugins" / "kraft" / "skills"
 
 

@@ -1240,7 +1240,7 @@ def repository_policies_or_422(st, target: WorkItemTarget | None) -> dict[str, I
 
 
 def _on_approve(st) -> executor.OnApprove:
-    """`apply_approval` bound to this app state — the door `_review_gates` calls
+    """`apply_approval` bound to this app state — the door `review_gates` calls
     so an agent's `approve` verdict has a human approval's effects."""
     from kraft.api.routes import gates
 

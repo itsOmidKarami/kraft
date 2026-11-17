@@ -63,7 +63,8 @@ async def apply_approval(
 
     One function, two doors: the `POST .../approve` endpoint (a human) and
     `kraft.executor.gates.review_gates` (an agent's `approve` verdict), which reaches it
-    through the `on_approve` callback `_launch_approval` hands the executor.
+    through the callback built by `deps._on_approve(st)` and passed to each
+    executor launch as `on_approve`.
     The same rule `apply_rejection` already enforces for the other verdict:
     an agent's approval must have exactly the effects a person's would.
 

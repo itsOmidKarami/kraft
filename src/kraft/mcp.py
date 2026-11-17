@@ -204,9 +204,10 @@ def build() -> MCPServer:
         name, still read; pass `chain`.
 
         `runner` is where the item's steps run: a machine or a group from
-        workers.yaml, `any` or `local`. A name must be in workers.yaml; a sandboxed,
-        in-place or workspace-member item is refused. Leave
-        it out unless a human asked for one.
+        workers.yaml, `any` or `local`. A name must be in workers.yaml; an
+        in-place item or one with workspace members is refused a remote runner.
+        A remote machine builds the same sandbox for a sandboxed item. Leave it
+        out unless a human asked for one.
 
         `chain_yaml` is a one-off chain, the same YAML a chain file holds, used by
         this item only. If it has custom content (its own prompts, commands,
@@ -572,8 +573,9 @@ def build() -> MCPServer:
         binding; naming a field replaces the stored override rather than merging
         with it, but a call that does not name `runner` keeps the stored one. `runner` is
         where the steps run: a machine or a group from
-        workers.yaml, `any` or `local`; a sandboxed, in-place or workspace-member
-        item is refused. It takes effect at the next step launch."""
+        workers.yaml, `any` or `local`; an in-place item or one with workspace
+        members is refused a remote runner. A remote machine builds the same
+        sandbox for a sandboxed item. It takes effect at the next step launch."""
         return await client.set_agent_overrides(
             model, escalate_model, effort, runner=runner, clear=clear, work_item_id=work_item_id
         )
@@ -602,8 +604,9 @@ def build() -> MCPServer:
         screen's system defaults or the chain everyone else uses. A
         model/effort the node's harness refuses is refused here. `runner` is
         where the node's steps run: a machine or a group from workers.yaml,
-        `any` or `local`; a sandboxed, in-place or workspace-member
-        item is refused. `clear` resets this node back to the template's own
+        `any` or `local`; an in-place item or one with workspace members is
+        refused a remote runner. A remote machine builds the same sandbox for
+        a sandboxed item. `clear` resets this node back to the template's own
         binding; naming a field sets it and keeps the node's other fields.
         409s once the node has started, except a `runner` alone, which takes
         effect at the node's next step launch."""
