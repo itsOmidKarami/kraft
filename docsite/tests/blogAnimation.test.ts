@@ -1,9 +1,13 @@
-// The blog's animations of the item page (app/utils/blogAnimations.ts): what each shows at a moment, and the rules of
+// The blog's animations of the item page (app/utils/blogAnimation/*.ts): what each shows at a moment, and the rules of
 // the app they must not break while they play.
 // Run with: node --experimental-strip-types --test "docsite/tests/*.test.ts"
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { gateAt, LOOPS, slicesAt, subagentsAt } from '../app/utils/blogAnimations.ts'
+import { gateAt, meta as gate } from '../app/utils/blogAnimation/gate.ts'
+import { meta as slices, slicesAt } from '../app/utils/blogAnimation/slices.ts'
+import { meta as subagents, subagentsAt } from '../app/utils/blogAnimation/subagents.ts'
+
+const LOOPS = { slices, gate, subagents }
 
 // Every moment of a loop, a tenth of a second apart.
 const moments = (loop: number) => Array.from({ length: loop * 10 }, (_, i) => i / 10)
