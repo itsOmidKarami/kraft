@@ -5,7 +5,6 @@ date: 2026-11-17
 author: Omid Karami
 image: /blog/whats-new-in-2-6/slices.png
 tags: [release]
-draft: true
 ---
 
 Kraft 2.6 is out. Several agents can now build one large plan at once and still open a single merge request, and a reviewer agent checks every gate in the default chain before you see it.
