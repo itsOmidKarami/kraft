@@ -52,7 +52,7 @@ The gate's page also keeps its history: every round, how it ended, who decided a
 
 Each check is a paid agent session, at every gate an item reaches. Turn it off for one item with `kraft item create --no-auto-gate`, or for one gate with an override; [Change or turn off the gate reviewer](/guides/customize/add-review-agents#change-or-turn-off-the-gate-reviewer-in-the-default-chain) shows how.
 
-## Sub-agents show up
+## See what each sub-agent is doing
 
 When a Claude Code task starts sub-agents, they used to run out of sight. Now the item, the chain graph and the phone list each one with what it's doing, its tokens and its tool uses, and the log can show one sub-agent's lines alone. [A sub-agent](/reference/web-ui/item-page#a-sub-agent) says what each field means.
 
