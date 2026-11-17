@@ -55,8 +55,8 @@
         </aside>
         <h2>
             <span class="text">603 statements &nbsp;</span>
-            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">564<span class="text"> run</span></button>
-            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">39<span class="text"> missing</span></button>
+            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">565<span class="text"> run</span></button>
+            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">38<span class="text"> missing</span></button>
             <button type="button" class="exc show_exc button_toggle_exc" value="exc" data-shortcut="x" title="Toggle lines excluded">0<span class="text"> excluded</span></button>
         </h2>
         <p class="text">
@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_e76ffebab55e5b0a_workers_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.3">coverage.py v7.17.3</a>,
-            created at 2026-11-17 07:52 +0000
+            created at 2026-11-17 08:09 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -945,7 +945,7 @@
     <p class="pln"><span class="n"><a id="t863" href="#t863">863</a></span><span class="t">    <span class="com"># trigger&#x27;s is (`entry.one_line_title`); one with no text anywhere is refused.</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t864" href="#t864">864</a></span><span class="t">    <span class="nam">title</span><span class="op">,</span> <span class="nam">description</span> <span class="op">=</span> <span class="nam">entry</span><span class="op">.</span><span class="nam">one_line_title</span><span class="op">(</span><span class="nam">row</span><span class="op">[</span><span class="str">&quot;title&quot;</span><span class="op">]</span><span class="op">,</span> <span class="nam">row</span><span class="op">[</span><span class="str">&quot;description&quot;</span><span class="op">]</span> <span class="key">or</span> <span class="str">&quot;&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t865" href="#t865">865</a></span><span class="t">    <span class="key">if</span> <span class="key">not</span> <span class="nam">title</span><span class="op">.</span><span class="nam">strip</span><span class="op">(</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t866" href="#t866">866</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">422</span><span class="op">,</span> <span class="str">&quot;title cannot be empty: give the item a title first&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t866" href="#t866">866</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">422</span><span class="op">,</span> <span class="str">&quot;title cannot be empty: give the item a title first&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t867" href="#t867">867</a></span><span class="t">    <span class="nam">duplicates</span> <span class="op">=</span> <span class="nam">st</span><span class="op">.</span><span class="nam">db</span><span class="op">.</span><span class="nam">read</span><span class="op">(</span><span class="key">lambda</span> <span class="nam">c</span><span class="op">:</span> <span class="nam">store</span><span class="op">.</span><span class="nam">open_duplicates</span><span class="op">(</span><span class="nam">c</span><span class="op">,</span> <span class="nam">row</span><span class="op">[</span><span class="str">&quot;repo&quot;</span><span class="op">]</span><span class="op">,</span> <span class="nam">title</span><span class="op">,</span> <span class="op">[</span><span class="op">]</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t868" href="#t868">868</a></span><span class="t">    <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t869" href="#t869">869</a></span><span class="t">        <span class="nam">new_id</span> <span class="op">=</span> <span class="key">await</span> <span class="nam">executor</span><span class="op">.</span><span class="nam">intake</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
@@ -1617,7 +1617,7 @@
             <a class="nav" href="z_e76ffebab55e5b0a_workers_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.17.3">coverage.py v7.17.3</a>,
-            created at 2026-11-17 07:52 +0000
+            created at 2026-11-17 08:09 +0000
         </p>
     </div>
 </footer>
