@@ -3,6 +3,7 @@ title: "What's new in 2.6: one plan, built in slices"
 description: Several agents can now build one plan at once and still open one merge request, and a reviewer checks every gate before it asks you.
 date: 2026-11-17
 author: Omid Karami
+image: /blog/whats-new-in-2-6/slices.png
 tags: [release]
 draft: true
 ---
@@ -29,6 +30,8 @@ When you approve that plan:
 3. **The slices join.** When every slice has ended, Kraft replays each one's commits onto the parent's branch in slice order. Verification, review and the merge request then run once, on the combined code.
 
 The item page draws the whole group: the groundwork, a box per slice that opens its item, and the join.
+
+![A sliced work item's chain: the groundwork's implementation and verification, three slices side by side, then the join](/blog/whats-new-in-2-6/slices.png)
 
 If two slices conflict at the join, an agent tries to resolve the conflict. Kraft carries on only once every commit of the slice is on the branch. Otherwise it puts the branch back and stops the item, with the exact steps for you.
 
