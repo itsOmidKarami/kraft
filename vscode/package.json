@@ -925,7 +925,7 @@
     "package": "vsce package"
   },
   "dependencies": {
-    "ws": "^8.22.1"
+    "ws": "^8.23.0"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.0",
