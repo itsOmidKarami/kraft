@@ -15,6 +15,7 @@ const ALLOWED = [
   "graph/layout", // the ChainNode type only
   "icons",
   "useMedia", // one live media-query hook, for both layouts
+  "useNow", // the half-minute clock ages and countdowns move on, for both layouts
   "settings/docsUrl", // the docs for the running version, one rule for both About pages
   "http",
   "live",

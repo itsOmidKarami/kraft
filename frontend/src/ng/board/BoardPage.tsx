@@ -6,6 +6,7 @@ import { useStore } from "../../store";
 import type { WorkItem } from "../../types";
 import { act } from "../item/actions";
 import { usePane } from "../shell/usePane";
+import { useNow } from "../useNow";
 import { gateReviewUrl } from "../review/url";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { reload, useOffline } from "../offline";
@@ -69,16 +70,6 @@ function useListLoad() {
   }, []);
   useEffect(refresh, [refresh]);
   return { load, refresh, offline: useOffline().offline };
-}
-
-/** A minute's clock for the rows' ages and "retry in". */
-function useNow() {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(t);
-  }, []);
-  return now;
 }
 
 /** `/`: the board (W6). First-run while no repo is connected, decided once

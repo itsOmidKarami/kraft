@@ -19,6 +19,7 @@ import { totals } from "./Top";
 import { BROKEN_BASE_TEXT, brokenBase, forgeHint, failedFix, failureFacts, headline, hintText, keptLine } from "./cause";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
+import { useNow } from "../useNow";
 import { CHECK_REPO_SETTINGS, MR_SYNC_STOPPED, REBASE_NEEDS_YOU, REVIEW_THE_CONFLICTS, WAITING_ON_THE_PROVIDER, WAITING_FOR_SLICES, slicesWaitText, waitTitle, ABANDONED, ABANDONED_TEXT, NO_REASON_GIVEN } from "./sharedWords";
 import { LinkButton, linkButtonClass } from "../ui/LinkButton";
 import { Select } from "../ui/Select";
@@ -51,8 +52,9 @@ export function StateCard({ item, files = null, ...h }: { item: ItemDetail; file
   // A failed card's Retry takes a steer, as the pane's Retry did before the card took that over.
   const [steer, setSteer] = useState("");
   const events = useEndEvents(item);
+  const now = useNow();
   const navigate = useNavigate();
-  const card = cardFor(item, { ...h, steer, setSteer, files, logUrl: logLink(item), onRepos: () => navigate(`/settings/repos/${encodeURIComponent(item.repo)}`), onReview: (nodes) => navigate(`/work-items/${encodeURIComponent(item.id)}/review${nodes ? `?nodes=${encodeURIComponent(nodes)}` : ""}`) }, events, async (p) => {
+  const card = cardFor(item, { ...h, now, steer, setSteer, files, logUrl: logLink(item), onRepos: () => navigate(`/settings/repos/${encodeURIComponent(item.repo)}`), onReview: (nodes) => navigate(`/work-items/${encodeURIComponent(item.id)}/review${nodes ? `?nodes=${encodeURIComponent(nodes)}` : ""}`) }, events, async (p) => {
     setBusy(true);
     setError(null);
     const r = await p;
@@ -134,7 +136,7 @@ function failedActions(item: ItemDetail, retry: ReturnType<typeof retryFrom>, h:
   return failedFix(item) === "repo" ? [...retries, { label: CHECK_REPO_SETTINGS, run: h.onRepos }] : retries;
 }
 
-function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: string) => void; files: DiffFile[] | null; onRepos: () => void; onReview: (nodes?: string) => void; logUrl: string }, events: KraftEvent[], run: Run): Card | null {
+function cardFor(item: ItemDetail, h: Handlers & { now: number; steer: string; setSteer: (s: string) => void; files: DiffFile[] | null; onRepos: () => void; onReview: (nodes?: string) => void; logUrl: string }, events: KraftEvent[], run: Run): Card | null {
   const stop = item.stop;
   const facts = (stop?.facts ?? {}) as Record<string, unknown>;
   const node = standingNode(item.chain_definition.nodes, stop?.node);
@@ -170,7 +172,7 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
     const harness = str(facts.harness);
     const allowed = list(facts.fallback_allowed);
     const fs: [string, ReactNode][] = [];
-    if (stop.resume_at) fs.push(["next retry", until(stop.resume_at)]);
+    if (stop.resume_at) fs.push(["next retry", until(stop.resume_at, h.now)]);
     if (item.rate_limit) fs.push(["retries", `${item.rate_limit.count} of ${item.rate_limit.cap} used (policy: rate-limit retries)`]);
     if (allowed.length) fs.push(["fallback", `${allowed.join(", ")} ${allowed.length === 1 ? "is" : "are"} allowed by the harness list`]);
     return {
@@ -192,7 +194,7 @@ function cardFor(item: ItemDetail, h: Handlers & { steer: string; setSteer: (s: 
   if (status === "waiting" && stop?.kind === "wait")
     return {
       tone: "neutral", glyph: <Clock size={14} aria-hidden />, title: waitTitle(stop.reason), where, node: stop.node, text: stop.reason ?? undefined,
-      facts: stop.resume_at ? [["next check", until(stop.resume_at)]] : [],
+      facts: stop.resume_at ? [["next check", until(stop.resume_at, h.now)]] : [],
       actions: [],
     };
   if (status === "needs_you" && stop?.kind === "conflict") {
