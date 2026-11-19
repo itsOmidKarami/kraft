@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useNow } from "../../useNow";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useEvents } from "../../item/useEvents";
 import { useItem } from "../../item/useItem";
@@ -15,11 +15,7 @@ export function Item() {
   const loaded = useItem(id);
   const version = loaded.state === "ready" ? loaded.version : "";
   const events = useEvents(id, version);
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(t);
-  }, []);
+  const now = useNow();
   if (params.get("doc")) return <Doc id={params.get("doc")!} />;
   // A spec or plan attached at intake, read from Kraft's copy: before start nothing has indexed it.
   if (params.get("attached")) return <Doc url={`/work-items/${encodeURIComponent(id)}/attachments/${encodeURIComponent(params.get("attached")!)}`} />;

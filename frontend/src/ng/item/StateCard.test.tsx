@@ -406,12 +406,15 @@ describe("StateCard", () => {
     expect(within(card).queryByRole("button", { name: /Retry/ })).toBeNull();
   });
 
-  it("a wait's next check counts down with no new data", () => {
+  it.each([
+    ["wait", "Waiting on CI", "next check"],
+    ["rate_limit", "Waiting on the provider", "next retry"],
+  ])("%s: the %s card's %s counts down with no new data", (kind, title, fact) => {
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     try {
       vi.setSystemTime(new Date("2026-11-19T10:00:00Z"));
-      show({ display_status: "waiting", stop: stop("wait", { reason: null, resume_at: "2026-11-19T10:04:30Z" }) });
-      const check = () => within(screen.getByRole("region", { name: "Waiting on CI" })).getByText("next check").nextElementSibling;
+      show({ display_status: "waiting", stop: stop(kind, { reason: null, resume_at: "2026-11-19T10:04:30Z" }) });
+      const check = () => within(screen.getByRole("region", { name: title })).getByText(fact).nextElementSibling;
       expect(check()).toHaveTextContent("in 4m");
       act(() => vi.advanceTimersByTime(120_000));
       expect(check()).toHaveTextContent("in 2m");
