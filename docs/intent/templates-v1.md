@@ -1315,6 +1315,13 @@ A fix-loop judge SHALL NOT cause the system to exceed the loop's effective
 attempt or duration limits.
 enforced-by: tests/skills/test_fix_loop_judge.py::test_judge_continue_behaves_like_no_judge_present
 
+## REQ fix-loop-may-start-early
+
+A node's fix loop MAY set `early`, which is off by default. A node without a
+fix loop, and a recovery plan, SHALL NOT set it.
+enforced-by: tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[off-by-default], tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[on], tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[a-bool-only], tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[not-on-the-node], tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[not-on-a-recovery-plan]
+origin: src/kraft/templates/models.py
+
 ## REQ invalid-judge-result-does-not-block-the-loop
 
 When a fix-loop judge cannot provide a valid decision, the system SHALL

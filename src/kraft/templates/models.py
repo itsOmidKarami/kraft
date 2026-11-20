@@ -1189,6 +1189,9 @@ class FixLoop(ExecutionShape):
     #: cannot collide with anything. No reserved check belongs here.
     judge: AnyTask | None = None
     max_attempts: Annotated[int, Field(gt=0)] | None = None
+    #: Start the loop as soon as one of the node's own steps finishes with eligible
+    #: findings, without running the later steps (`dispatch.measure_node`).
+    early: bool = False
 
     @model_validator(mode="after")
     def _no_nested_handler(self) -> Self:

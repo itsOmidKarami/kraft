@@ -106,7 +106,7 @@ MODEL_KEYS = {
         read_past=("icon", "policy", "runner", "skippable"),
         refused=("on_failure",),
     ),
-    "FixLoop": _plus({}, read=("judge", "max_attempts", "steps", "tasks")),
+    "FixLoop": _plus({}, read=("judge", "max_attempts", "steps", "tasks"), read_past=("early",)),
 }
 #: The keys an extending chain edits its parent with, and what an override may not set.
 EDIT_KEYS = ("remove", "add", "overrides")

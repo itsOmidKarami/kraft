@@ -43,7 +43,7 @@ TASK_KEYS = (
 STEP_KEYS = (
     "id", "extends", "runner", "icon", "tasks", "on_failure", "policy", "skippable", "read_only",
 )  # fmt: skip
-SHAPE_KEYS = ("tasks", "steps", JUDGE_SEGMENT, "max_attempts", "read_only")
+SHAPE_KEYS = ("tasks", "steps", JUDGE_SEGMENT, "max_attempts", "early", "read_only")
 #: The order inside a nested mapping, by its key.
 NESTED_KEYS = {
     "policy": tuple(TemplatePolicyOverride.model_fields),

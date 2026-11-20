@@ -652,6 +652,11 @@
     "FixLoop": {
       "additionalProperties": false,
       "properties": {
+        "early": {
+          "default": false,
+          "title": "Early",
+          "type": "boolean"
+        },
         "judge": {
           "anyOf": [
             {
