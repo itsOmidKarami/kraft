@@ -812,7 +812,7 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         "rerun-ci",
         parents=[common],
         help="re-run the CI jobs that failed outside the code: a fix-loop repair, or a "
-        "person on a fix loop stopped for them, which then retries",
+        "person on a fix loop or a ci.pipeline wait stopped for them, which then retries",
     )
     rerun_ci.add_argument("id", nargs="?")
     rerun_ci.add_argument(

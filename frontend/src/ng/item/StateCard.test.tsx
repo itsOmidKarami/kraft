@@ -222,6 +222,24 @@ describe("StateCard", () => {
     expect(within(card).getByRole("button", { name: "Retry from verification" })).toHaveClass("btn-primary");
   });
 
+  // A `ci.pipeline` wait's red pipeline: Re-run CI leads where the server lists it, and posts the re-run.
+  it.each([
+    ["listing rerun_ci", ["retry", "rerun_ci", "complete", "cancel"], ["Re-run CI", "Retry from open_draft", "Open merge request →"]],
+    ["not listing it", ["retry", "complete", "cancel"], ["Retry from open_draft", "Open merge request →"]],
+    ["an older server sending no actions", undefined, ["Retry from open_draft", "Escalate…", "Open merge request →"]],
+  ] as const)("a failed stop, the server %s, offers %j", async (_name, actions, labels) => {
+    const calls = stubFetch(acceptWrites("POST /work-items/w1/ci-rerun"));
+    const { h } = show({ display_status: "failed", stop: stop("failed", { reason: "pipeline 7 is red" }), ...(actions && { actions: [...actions] as ItemAction[] }) });
+    const card = screen.getByRole("region", { name: "Failed" });
+    expect(acts(card)).toEqual(labels);
+    expect(within(card).getByRole("button", { name: labels[0] })).toHaveClass("btn-primary");
+    if (labels[0] !== "Re-run CI") return;
+    expect(within(card).getByRole("button", { name: "Retry from open_draft" })).toHaveClass("btn-secondary");
+    await userEvent.click(within(card).getByRole("button", { name: "Re-run CI" }));
+    await waitFor(() => expect(h.reload).toHaveBeenCalled());
+    expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/ci-rerun", body: { reason: "re-run by a person: CI failed outside the code" } }]);
+  });
+
   // The infra stop's `facts.cause` picks what the card offers (Kraft-9d8b2.67); every other cause, or none, says where to look.
   it.each([
     ["forge_auth", ["Retry from open_draft", "Escalate…", "Open merge request →"], null],

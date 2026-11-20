@@ -199,7 +199,9 @@ export function headerState(item: Pick<WorkItem, "display_status" | "stop" | "cu
   const main = strandedOneOff(item) ? "start" : first(
     status === "paused" ? ["resume"]
     : status === "needs_you" ? needsYouMain(item)
-    : status === "failed" || status === "escalated" ? ["retry"]
+    // A `ci.pipeline` wait's red or broken pipeline: Re-run CI, which retries, where the server lists it.
+    : status === "failed" ? ["rerun", "retry"]
+    : status === "escalated" ? ["retry"]
     : status === "done" || status === "cancelled" ? ["archive"]
     : status === "archived" ? ["restore"]
     : ["pause"],

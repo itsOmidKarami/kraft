@@ -49,6 +49,8 @@ describe("pairOf (C.5): one pair, by status and stop kind", () => {
     // A paused item's Steer is a resume with the note.
     ["paused, the server refusing resume", mk("paused", null, { actions: ["steer", "skip", "cancel"] }), [null, null]],
     ["failed, the server refusing escalate", mk("failed", stop("failed"), { actions: ["retry", "complete", "cancel"] }), [null, "retry"]],
+    // A `ci.pipeline` wait's red pipeline: Re-run CI leads, as on a stuck stop.
+    ["failed, the server admitting rerun_ci", mk("failed", stop("failed"), { actions: ["retry", "rerun_ci", "complete", "cancel"] }), ["retry", "rerun-ci"]],
     ["gate, the server refusing reject", mk("needs_you", stop("gate", { node: "plan_approval" }), { actions: ["approve"] }), [null, "review"]],
     // A budget the item could raise, which the server will not: Retry, as on a cap it cannot raise.
     ["budget, the item's own cap, the server refusing raise_budget", mk("needs_you", own(), { ...OWN_CAP, actions: ["retry", "complete", "cancel"] }), [null, "retry"]],

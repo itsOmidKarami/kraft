@@ -3,7 +3,8 @@
 A forge task, `ci.pipeline`, waits for one CI pipeline named by its id: a GitLab
 pipeline `id` or a GitHub Actions run id, given as digits or as `$NAME` from a
 step output. It reads and never writes: the id may come from a worker, so it
-retries no job, and a pipeline it will not judge stops the item for a person.
+retries no job, and a pipeline it will not judge stops the item for a person. Only
+that person re-runs it.
 
 ## REQ ci-pipeline-takes-a-pipeline-id
 
@@ -58,6 +59,16 @@ The system SHALL NOT retry a job, push, look for a merge request or record a pip
 while a `ci.pipeline` task looks at its pipeline.
 enforced-by: tests/adapters/forge/test_run_pipeline.py::test_pipeline_wait_never_writes, tests/adapters/forge/test_run_pipeline.py::test_pipeline_wait[infra-red]
 origin: src/kraft/adapters/forge/run.py §_pipeline_wait
+
+## REQ only-a-person-re-runs-a-ci-pipeline-wait
+
+WHEN a person re-runs CI on an item stopped for them (failed, on the forge's infrastructure, stuck
+or at a cap) on a node with a `ci.pipeline` wait, the system SHALL re-run that pipeline's failed
+jobs, record the event with its id, and retry the node; IF anyone else asks (an assistant, an
+escalation turn, the item's own session), the item has not stopped, nothing in the pipeline failed,
+or the id's writer is in the same node, THEN the system SHALL refuse it and re-run nothing.
+enforced-by: tests/api/test_ci_rerun.py::test_a_person_re_runs_a_pipeline_wait_s_pipeline_and_it_retries[failed], tests/api/test_ci_rerun.py::test_a_person_re_runs_a_pipeline_wait_s_pipeline_and_it_retries[infra], tests/api/test_ci_rerun.py::test_a_person_re_runs_a_pipeline_wait_s_pipeline_and_it_retries[stuck], tests/api/test_ci_rerun.py::test_a_person_re_runs_a_pipeline_wait_s_pipeline_and_it_retries[cap], tests/api/test_ci_rerun.py::test_a_pipeline_rerun_is_refused[not-stopped], tests/api/test_ci_rerun.py::test_a_pipeline_rerun_is_refused[an-assistant], tests/api/test_ci_rerun.py::test_a_pipeline_rerun_is_refused[an-escalation-turn], tests/api/test_ci_rerun.py::test_a_pipeline_rerun_is_refused[its-own-worker-session], tests/api/test_ci_rerun.py::test_a_pipeline_rerun_is_refused[green], tests/api/test_ci_rerun.py::test_a_pipeline_rerun_is_refused[ran-nothing], tests/api/test_ci_rerun.py::test_a_pipeline_rerun_is_refused[id-written-in-its-node]
+origin: src/kraft/api/routes/lifecycle.py §_rerun_pipeline
 
 ## REQ ci-pipeline-ignores-ci-checks
 

@@ -241,6 +241,9 @@ const CASES: [string, Partial<ItemDetail>, string][] = [
   ["escalated", { display_status: "escalated", status: "needs_human", stop: S("stuck"), worker_sessions: session("failed") }, "escalated"],
   ["failed", { display_status: "failed", status: "needs_human", stop: S("failed"), worker_sessions: session("failed") }, "failed"],
   ["infra", { display_status: "failed", status: "needs_human", stop: S("infra"), worker_sessions: session("failed") }, "infra"],
+  // A `ci.pipeline` wait's red or broken pipeline: the server lists rerun_ci, which the header, the card and the phone bar lead with.
+  ["failed on a pipeline", { display_status: "failed", status: "needs_human", stop: S("failed"), worker_sessions: session("failed"), actions: serverActions("failed_on_pipeline") }, "failed_on_pipeline"],
+  ["infra on a pipeline", { display_status: "failed", status: "needs_human", stop: S("infra"), worker_sessions: session("failed"), actions: serverActions("infra_on_pipeline") }, "infra_on_pipeline"],
   // A parent at a group whose slices have not ended: the three states the table adds for it.
   ["slices, waiting", { display_status: "waiting", status: "waiting", stop: S("slices"), slices: SLICES }, "slices_waiting"],
   ["slices, paused", { display_status: "paused", status: "paused", slices: SLICES, worker_sessions: session("paused") }, "slices_paused"],
@@ -307,7 +310,7 @@ describe("no surface offers a door the server refuses (R11b-01)", () => {
   // The two layouts agree on the way on from a stop: the header's main and the phone bar's primary.
   // A cap stop is the one they word apart: the phone's raise is its card's link, beside Retry.
   const WAY: Partial<Record<Main | ActId, string>> = { gate: "gate", review: "gate", answer: "answer", raise: "raise", retry: "retry", conflicts: "conflicts", reopen: "reopen-mr", "reopen-mr": "reopen-mr", rerun: "rerun-ci", "rerun-ci": "rerun-ci" };
-  it.each(CASES.filter(([name, over]) => (over.display_status === "needs_you" || over.display_status === "escalated") && name !== "cap"))("%s: the desktop header and the phone bar offer the same way on", (_name, over) => {
+  it.each(CASES.filter(([name, over]) => (over.display_status === "needs_you" || over.display_status === "escalated" || over.display_status === "failed") && name !== "cap"))("%s: the desktop header and the phone bar offer the same way on", (_name, over) => {
     const item = detail(over);
     expect(WAY[headerState(item).main!]).toBe(WAY[pairOf(item).primary!.id]);
   });

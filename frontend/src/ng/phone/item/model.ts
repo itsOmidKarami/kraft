@@ -230,7 +230,8 @@ function pairTable(item: ItemDetail): { secondary: Act | null; primary: Act | nu
     case "queued": return { secondary: null, primary: a("pause", REMOVE_FROM_QUEUE) };
     // Blocked behind another item: Kraft starts it; Pause takes it out, Unblock starts it without them.
     case "blocked": return { secondary: item.dependencies?.some((d) => !d.met) ? a("unblock", "Unblock") : null, primary: a("pause", "Pause") };
-    case "failed": return { secondary: a("escalate", "Escalate"), primary: a("retry", "Retry") };
+    // A `ci.pipeline` wait's red or broken pipeline: Re-run CI, which retries, as on a stuck stop.
+    case "failed": return admits(item, "rerun_ci", false) ? { secondary: a("retry", "Retry"), primary: a("rerun-ci", "Re-run CI") } : { secondary: a("escalate", "Escalate"), primary: a("retry", "Retry") };
     case "needs_you":
       switch (stop?.kind) {
         case "gate": return { secondary: a("reject", `${REQUEST_CHANGES}…`), primary: a("review", "Review") };

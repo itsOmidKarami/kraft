@@ -131,8 +131,13 @@ function retryFrom(item: ItemDetail, node: ChainNode | undefined, run: Run, stee
 /** What the failed card offers besides Escalate, by `failedFix`: a refused forge credential gets words, not a button
  *  (`forgeHint`; the repo's settings hold no token), a stranded claim just a retry, and any other
  *  infrastructure stop, or one naming no cause, a way to the repo's settings. */
-function failedActions(item: ItemDetail, retry: ReturnType<typeof retryFrom>, h: { onRepos: () => void }) {
-  const retries = when(admits(item, "retry", true), retry);
+function failedActions(item: ItemDetail, retry: ReturnType<typeof retryFrom>, h: { onRepos: () => void }, run: Run) {
+  // A `ci.pipeline` wait's red or broken pipeline: re-running it is the way on, and it retries.
+  const rerun = admits(item, "rerun_ci", false);
+  const retries = [
+    ...when(rerun, { label: "Re-run CI", primary: true, run: () => run(act.rerunCi(item.id)) }),
+    ...when(admits(item, "retry", true), { ...retry, primary: !rerun }),
+  ];
   return failedFix(item) === "repo" ? [...retries, { label: CHECK_REPO_SETTINGS, run: h.onRepos }] : retries;
 }
 
@@ -163,7 +168,7 @@ function cardFor(item: ItemDetail, h: Handlers & { now: number; steer: string; s
         </>
       ),
       facts: [...keptFact, ...rows.slice(0, 3 - keptFact.length), ...(spent ? [spent] : [])],
-      actions: [...failedActions(item, retry, h), ...when(admits(item, "escalate", true), { label: "Escalate…", run: h.onEscalate })],
+      actions: [...failedActions(item, retry, h, run), ...when(admits(item, "escalate", true), { label: "Escalate…", run: h.onEscalate })],
       // What Retry does, in the card's words: the task it restarts. The branch and the spend are already facts above.
       note: retries ? `Restarts ${retry.target}${item.branch ? " on the kept branch" : ""}` : undefined,
     };

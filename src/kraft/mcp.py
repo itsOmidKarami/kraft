@@ -527,7 +527,8 @@ def build() -> MCPServer:
         not red for the current head. On an item whose fix loop stopped for a
         person (stuck or at its cap), it re-runs the jobs and retries the node,
         for the person, their assistant or an escalation, never the item's own
-        worker session."""
+        worker session. A `ci.pipeline` wait's pipeline is re-run only by a
+        person, never through this tool."""
         return await client.ci_rerun(reason, work_item_id)
 
     @server.tool()
