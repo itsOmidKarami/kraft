@@ -753,6 +753,21 @@
     "ForgeTask": {
       "additionalProperties": false,
       "properties": {
+        "config": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReviewWaitConfig"
+            },
+            {
+              "$ref": "#/$defs/PipelineWaitConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Config"
+        },
         "extends": {
           "description": "A library component of the same kind to inherit from; this one's own keys win.",
           "type": "string"
@@ -791,18 +806,6 @@
           ],
           "default": null
         },
-        "pipeline": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Pipeline"
-        },
         "policy": {
           "anyOf": [
             {
@@ -820,28 +823,6 @@
           },
           "title": "Reads",
           "type": "array"
-        },
-        "reviewers": {
-          "anyOf": [
-            {
-              "items": {
-                "anyOf": [
-                  {
-                    "$ref": "#/$defs/BotReviewer"
-                  },
-                  {
-                    "$ref": "#/$defs/CheckReviewer"
-                  }
-                ]
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reviewers"
         },
         "scope": {
           "$ref": "#/$defs/TaskScope",
@@ -873,11 +854,6 @@
             }
           ],
           "default": null
-        },
-        "watch_ci": {
-          "default": false,
-          "title": "Watch Ci",
-          "type": "boolean"
         }
       },
       "title": "ForgeTask",
@@ -1084,6 +1060,18 @@
       "title": "OutputsDecl",
       "type": "object"
     },
+    "PipelineWaitConfig": {
+      "additionalProperties": false,
+      "description": "`ci.pipeline`'s own key: the id of the one pipeline it waits for (a\nGitLab pipeline `id`, a GitHub Actions run id), as digits or a `$NAME`.",
+      "properties": {
+        "pipeline": {
+          "title": "Pipeline",
+          "type": "string"
+        }
+      },
+      "title": "PipelineWaitConfig",
+      "type": "object"
+    },
     "PollingPolicy": {
       "additionalProperties": false,
       "properties": {
@@ -1171,6 +1159,54 @@
         }
       },
       "title": "RecoveryPlan",
+      "type": "object"
+    },
+    "ReviewWaitConfig": {
+      "additionalProperties": false,
+      "description": "`mr.automated_review`'s own keys (`forge-task-config-is-per-target`).",
+      "properties": {
+        "grace_period": {
+          "anyOf": [
+            {
+              "format": "duration",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Grace Period"
+        },
+        "reviewers": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/BotReviewer"
+                  },
+                  {
+                    "$ref": "#/$defs/CheckReviewer"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewers"
+        },
+        "watch_ci": {
+          "default": false,
+          "title": "Watch Ci",
+          "type": "boolean"
+        }
+      },
+      "title": "ReviewWaitConfig",
       "type": "object"
     },
     "SandboxCredential": {
@@ -1970,19 +2006,6 @@
       "additionalProperties": false,
       "description": "`external-wait-has-configurable-timeout-and-polling`: a wait's polling.\nIts timeout is its task's own `policy: total_time_cap_minutes` (Ruling\n196); a `timeout:` written here before that is read as one\n(`ForgeTask._retired_wait_timeout`).",
       "properties": {
-        "grace_period": {
-          "anyOf": [
-            {
-              "format": "duration",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Grace Period"
-        },
         "polling": {
           "$ref": "#/$defs/PollingPolicy"
         }

@@ -37,8 +37,7 @@ NODE_KEYS = (
 TASK_KEYS = (
     "id", "kind", "extends", "icon", "harness", "ref", "command", "target", "prompt", "skill",
     "produces", "profile", "model", "effort", "inputs", "fallback", "outputs", "reads", "steering",
-    "scope", "execution", "suite", "wait", "reviewers", "watch_ci", "pipeline", "policy",
-    "skippable", "on_failure",
+    "scope", "execution", "suite", "wait", "config", "policy", "skippable", "on_failure",
 )  # fmt: skip
 STEP_KEYS = (
     "id", "extends", "runner", "icon", "tasks", "on_failure", "policy", "skippable", "read_only",
@@ -49,7 +48,8 @@ NESTED_KEYS = {
     "policy": tuple(TemplatePolicyOverride.model_fields),
     "on_base_changed": ("restart_from", "on_conflict"),
     "on_merge_rejected": ("restart_from", "repair"),
-    "wait": ("grace_period", "polling"),
+    "wait": ("polling",),
+    "config": ("reviewers", "watch_ci", "grace_period", "pipeline"),
     "polling": ("initial_interval", "max_interval"),
     "outputs": ("files", "variables"),
 }

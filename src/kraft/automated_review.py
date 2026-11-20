@@ -1,9 +1,9 @@
 """Which automated reviewers a merge request waits for (Ruling 171).
 
-Named on a `repos.yaml` entry (`config.RepoEntry`), on the review task
-(`ForgeTask.reviewers`) or by an item's node override, and read by the forge
-probes that wait on them; its own module so the forge adapters need not import the
-config loader to name the type.
+Named on a `repos.yaml` entry (`config.RepoEntry`), in the review task's
+`config.reviewers` (read as `ForgeTask.reviewers`) or by an item's node
+override, and read by the forge probes that wait on them; its own module so the
+forge adapters need not import the config loader to name the type.
 """
 
 from __future__ import annotations

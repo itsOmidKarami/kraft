@@ -46,6 +46,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic_core import InitErrorDetails, PydanticCustomError
 
 from kraft.automated_review import Reviewer
 from kraft.cap_levels import LEVEL_OF
@@ -396,9 +397,6 @@ class WaitPolicy(BaseModel):
     model_config = _CONFIG
 
     polling: PollingPolicy = Field(default_factory=PollingPolicy)
-    #: `mr.automated_review` only: how long a review bot must stay quiet after
-    #: its last activity on the head before it counts as finished with it.
-    grace_period: Duration | None = None
 
 
 #: The grace period of a review wait that authors none.
@@ -758,26 +756,32 @@ def pipeline_variable(value: str | None) -> str | None:
     return (match[1] or match[2]) if match else None
 
 
-class ForgeTask(TaskBase):
-    kind: Literal[TaskKind.FORGE]
-    target: Annotated[ForgeAction, _LOOSE]
-    wait: WaitPolicy | None = None
-    #: `mr.automated_review` only: the reviewers it waits for when neither the
-    #: item's node override nor the repository's `automated_review:` names
-    #: any. Which reviewers, never how each is read
-    #: (`automated-review-implementation-is-not-template-configuration`).
-    #: `[]` expects none.
+class ReviewWaitConfig(BaseModel):
+    """`mr.automated_review`'s own keys (`forge-task-config-is-per-target`)."""
+
+    model_config = _CONFIG
+
+    #: The reviewers it waits for when neither the item's node override nor the
+    #: repository's `automated_review:` names any. Which, never how each is read
+    #: (`automated-review-implementation-is-not-template-configuration`). `[]`
+    #: expects none.
     reviewers: list[Reviewer] | None = None
-    #: `mr.automated_review` only: also push the branch and read the merge
-    #: request's pipeline at every check, and end on a red pipeline or a merge
-    #: conflict. It names *what* the wait also looks at, never how CI is read
-    #: (`automated-review-implementation-is-not-template-configuration`); the
-    #: node's own `mr.ci` task, in a later step, stays the owner of CI
+    #: Also push the branch and read the merge request's pipeline at every
+    #: check, ending on a red pipeline or a conflict; the node's own `mr.ci`
+    #: task, in a later step, stays the owner of CI
     #: (`watch-ci-is-only-on-a-review-wait-ahead-of-its-ci-wait`).
     watch_ci: StrictBool = False
-    #: `ci.pipeline` only, and required there: the id of the one pipeline it
-    #: waits for (a GitLab pipeline `id`, a GitHub Actions run id), as digits.
-    pipeline: StrictStr | None = None
+    #: How long a review bot must stay quiet after its last activity on the head.
+    grace_period: Duration | None = None
+
+
+class PipelineWaitConfig(BaseModel):
+    """`ci.pipeline`'s own key: the id of the one pipeline it waits for (a
+    GitLab pipeline `id`, a GitHub Actions run id), as digits or a `$NAME`."""
+
+    model_config = _CONFIG
+
+    pipeline: StrictStr
 
     @field_validator("pipeline", mode="before")
     @classmethod
@@ -786,30 +790,144 @@ class ForgeTask(TaskBase):
         reads an integer, which is the digits it means."""
         return str(value) if isinstance(value, int) and not isinstance(value, bool) else value
 
+
+#: The one place a target names its config. A target missing here takes none.
+CONFIG_OF: dict[ForgeAction, type[BaseModel]] = {
+    ForgeAction.MR_AUTOMATED_REVIEW: ReviewWaitConfig,
+    ForgeAction.CI_PIPELINE: PipelineWaitConfig,
+}
+#: Every key a forge task's `config` knows. Another target's one is a clear when
+#: null or false; anything else is refused.
+CONFIG_KEYS = frozenset(k for shape in CONFIG_OF.values() for k in shape.model_fields)
+#: The keys `config` replaced, flat on the task (Kraft-nghnx); `grace_period`
+#: was on `wait`.
+_FLAT = ("reviewers", "watch_ci", "pipeline")
+
+
+def _unset(value: object) -> bool:
+    # By identity: `0` is not `false`.
+    return value is None or value is False
+
+
+def lift_config(task: Mapping, *, stored: bool) -> tuple[dict, tuple[str, ...]]:
+    """`task` with its flat `reviewers`, `watch_ci`, `pipeline` and
+    `wait.grace_period` moved under `config`, and the flat names it moved
+    (`flat-forge-keys-read-as-config`). Only a mapping whose `kind` is `forge`
+    or absent (inherited through `extends`) is touched. A `stored` snapshot
+    dumped every flat key, unset ones too: those are dropped there, not
+    lifted. A flat key beside the same key under `config` is refused, naming
+    the key as written. `config` takes the place of the first moved key, or
+    follows `wait` when only `wait.grace_period` moved."""
+    task = dict(task)
+    config = task.get("config")
+    if task.get("kind", TaskKind.FORGE) != TaskKind.FORGE or not (
+        config is None or isinstance(config, Mapping)
+    ):
+        return task, ()
+    wait = task.get("wait")
+    nested = isinstance(wait, Mapping) and "grace_period" in wait
+    found = {k: v for k, v in task.items() if k in _FLAT}  # in the task's order
+    if nested:
+        found["grace_period"] = wait["grace_period"]
+    if not found:
+        return task, ()
+    keep = {k: v for k, v in found.items() if not (stored and _unset(v))}
+    named = {k: "wait.grace_period" if k == "grace_period" else k for k in keep}
+    for key in keep:
+        if config is not None and key in config:
+            raise ValueError(f"{named[key]}: set it once, under config")
+    lifted: dict = {}
+    for key, value in task.items():
+        if key in _FLAT:
+            if keep and key in keep and "config" not in lifted and "config" not in task:
+                lifted["config"] = None  # its place; filled below
+            continue
+        if key == "wait" and nested:
+            rest = {k: v for k, v in wait.items() if k != "grace_period"}
+            if rest:
+                lifted["wait"] = rest
+            if "grace_period" in keep and set(keep) == {"grace_period"} and "config" not in task:
+                lifted["config"] = None
+            continue
+        lifted[key] = value
+    if not keep:
+        return lifted, ()
+    lifted["config"] = {**(config or {}), **keep}
+    return lifted, tuple(named.values())
+
+
+class ForgeTask(TaskBase):
+    kind: Literal[TaskKind.FORGE]
+    target: Annotated[ForgeAction, _LOOSE]
+    wait: WaitPolicy | None = None
+    #: The target's own keys: a `ReviewWaitConfig` on `mr.automated_review`, a
+    #: `PipelineWaitConfig` on `ci.pipeline`, none on any other target
+    #: (`forge-task-config-is-per-target`).
+    config: ReviewWaitConfig | PipelineWaitConfig | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _flat_config(cls, data: object, info: ValidationInfo) -> object:
+        """The flat form, read as `config` (`flat-forge-keys-read-as-config`).
+        Silent: what reaches the model directly is Kraft's own record or input
+        a seam already lifted, and warned about."""
+        if not isinstance(data, dict):
+            return data
+        stored = bool((info.context or {}).get("stored_snapshot"))
+        return lift_config(data, stored=stored)[0]
+
+    @field_validator("config", mode="before")
+    @classmethod
+    def _config_of_its_target(cls, value: object, info: ValidationInfo) -> object:
+        """The target's class validates its config; another target's known key
+        is a clear when null or false and refused otherwise. Raised here, not
+        on the model, so a nested error keeps its `config` segment."""
+        target = info.data.get("target")
+        if target is None or not isinstance(value, dict):
+            return value  # the target's own error, or the union's
+        shape = CONFIG_OF.get(target)
+        own = shape.model_fields if shape is not None else {}
+        for key, item in value.items():
+            if key in CONFIG_KEYS and key not in own and not _unset(item):
+                takes = ", ".join(own) or "none"
+                raise ValidationError.from_exception_data(
+                    cls.__name__,
+                    [
+                        InitErrorDetails(
+                            type=PydanticCustomError(
+                                "config_key",
+                                "not an option of {target}, whose config takes {takes}",
+                                {"target": target.value, "takes": takes},
+                            ),
+                            loc=(key,),  # pydantic prefixes `config`
+                            input=item,
+                        )
+                    ],
+                )
+        kept = {k: v for k, v in value.items() if k in own or k not in CONFIG_KEYS}
+        if shape is None:
+            if kept:  # an unknown key, on a target with no config
+                key = next(iter(kept))
+                raise ValidationError.from_exception_data(
+                    cls.__name__,
+                    [InitErrorDetails(type="extra_forbidden", loc=(key,), input=kept[key])],
+                )
+            return None
+        return shape.model_validate(kept, context=info.context)
+
     def takes_reads(self) -> bool:
         return self.target is ForgeAction.CI_PIPELINE
 
-    def unread(self) -> frozenset[str]:
-        extra = frozenset() if self.target is ForgeAction.CI_PIPELINE else frozenset({"pipeline"})
-        if self.target is not ForgeAction.MR_AUTOMATED_REVIEW:
-            extra |= frozenset({"watch_ci"})
-        return super().unread() | extra
-
     @model_validator(mode="after")
-    def _pipeline_only_on_ci_pipeline(self) -> Self:
+    def _ci_pipeline_takes_its_id(self) -> Self:
         if self.target is not ForgeAction.CI_PIPELINE:
-            if self.pipeline is not None:
-                raise ValueError(
-                    f"pipeline: only a {ForgeAction.CI_PIPELINE.value} task waits for a "
-                    f"pipeline, not {self.target.value}"
-                )
             return self
         if self.pipeline is None:
             raise ValueError(
-                f"pipeline: a {ForgeAction.CI_PIPELINE.value} task needs its pipeline id"
+                f"config.pipeline: a {ForgeAction.CI_PIPELINE.value} task needs its pipeline id"
             )
         if not (re.fullmatch(r"[0-9]+", self.pipeline) or pipeline_variable(self.pipeline)):
-            raise ValueError("pipeline: must be a pipeline id (digits only) or a $NAME")
+            raise ValueError("config.pipeline: must be a pipeline id (digits only) or a $NAME")
         if self.scope is not TaskScope.ONCE:
             raise ValueError(
                 f"scope: a {ForgeAction.CI_PIPELINE.value} task waits for one pipeline "
@@ -817,31 +935,29 @@ class ForgeTask(TaskBase):
             )
         return self
 
-    @model_validator(mode="after")
-    def _reviewers_only_on_the_review(self) -> Self:
-        if self.target is ForgeAction.MR_AUTOMATED_REVIEW:
-            return self
-        if self.reviewers is not None:
-            raise ValueError(
-                f"reviewers: only an {ForgeAction.MR_AUTOMATED_REVIEW.value} task waits for "
-                f"reviewers, not {self.target.value}"
-            )
-        if self.watch_ci:
-            raise ValueError(
-                f"watch_ci: only an {ForgeAction.MR_AUTOMATED_REVIEW.value} task watches CI "
-                f"while it waits, not {self.target.value}"
-            )
-        if self.wait is not None and self.wait.grace_period is not None:
-            raise ValueError(
-                f"wait.grace_period: only an {ForgeAction.MR_AUTOMATED_REVIEW.value} task "
-                f"waits for review bots to settle, not {self.target.value}"
-            )
-        return self
+    @property
+    def reviewers(self) -> list[Reviewer] | None:
+        """`config.reviewers` on a review wait; `None` otherwise."""
+        return self.config.reviewers if isinstance(self.config, ReviewWaitConfig) else None
+
+    @property
+    def watch_ci(self) -> bool:
+        """`config.watch_ci` on a review wait; `False` otherwise."""
+        return isinstance(self.config, ReviewWaitConfig) and self.config.watch_ci
+
+    @property
+    def pipeline(self) -> str | None:
+        """`config.pipeline` on a pipeline wait; `None` otherwise."""
+        return self.config.pipeline if isinstance(self.config, PipelineWaitConfig) else None
 
     @property
     def grace(self) -> timedelta:
-        """How long a review bot must stay quiet to be finished with a push."""
-        return (self.wait and self.wait.grace_period) or DEFAULT_GRACE
+        """`config.grace_period`: how long a review bot must stay quiet to be
+        finished with a push; `DEFAULT_GRACE` when unset."""
+        config = self.config
+        if isinstance(config, ReviewWaitConfig) and config.grace_period is not None:
+            return config.grace_period
+        return DEFAULT_GRACE
 
     @model_validator(mode="before")
     @classmethod
@@ -1583,8 +1699,8 @@ class Chain(BaseModel):
                     and node.ci_wait_after(task.path) is None
                 ):
                     raise ValueError(
-                        f"{task.path}: watch_ci needs an {ForgeAction.MR_CI.value} task in a "
-                        f"later step of node {node.id!r}'s own steps"
+                        f"{task.path}: config.watch_ci needs an {ForgeAction.MR_CI.value} task "
+                        f"in a later step of node {node.id!r}'s own steps"
                     )
         return self
 

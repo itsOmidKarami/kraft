@@ -23,9 +23,12 @@ from kraft.templates.models import (
     GateNode,
     MergeRejectionPolicy,
     OutputsDecl,
+    PipelineWaitConfig,
     RecoveryPlan,
+    ReviewWaitConfig,
     Step,
     SubprocessTask,
+    WaitPolicy,
 )
 
 TEMPLATES = Path(__file__).resolve().parents[2] / "config"
@@ -130,6 +133,9 @@ CANONICAL = [
     (BaseChangePolicy, authored.NESTED_KEYS["on_base_changed"]),
     (MergeRejectionPolicy, authored.NESTED_KEYS["on_merge_rejected"]),
     (OutputsDecl, authored.NESTED_KEYS["outputs"]),
+    (ReviewWaitConfig, authored.NESTED_KEYS["config"]),
+    (PipelineWaitConfig, authored.NESTED_KEYS["config"]),
+    (WaitPolicy, authored.NESTED_KEYS["wait"]),
     *((task, authored.TASK_KEYS) for task in (AgentTask, BuiltinTask, SubprocessTask, ForgeTask)),
 ]
 

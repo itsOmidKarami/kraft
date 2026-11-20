@@ -414,12 +414,6 @@ def _wait_chain(**task) -> dict:
     return {"id": "c", "nodes": [{"id": "feedback", "kind": "exec", "tasks": [wait]}]}
 
 
-@pytest.fixture
-def warnings_afresh(monkeypatch):
-    """A deprecation is said once per process; these tests hear it anew."""
-    monkeypatch.setattr(_policy, "_DEPRECATIONS_SAID", set())
-
-
 def test_a_wait_timeout_written_before_ruling_196_reads_as_the_tasks_total_cap(
     caplog, warnings_afresh
 ):

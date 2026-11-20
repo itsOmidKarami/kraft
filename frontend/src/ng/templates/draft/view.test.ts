@@ -3,7 +3,7 @@ import { DEFAULT_VIEW } from "./fixture.default";
 import type { Result, Scope } from "./types";
 import { EXT, EXTENDING_VIEW } from "./fixture.extending";
 import { mergeView } from "./fixture.merge";
-import { addedNodes, authoredAt, authoredNodes, changeAt, counts, extendsOf, kindOf, normalise, problemsAt, resolvedAt, resolvedNode, originOf, sourceRows, sourceWord, valueAt } from "./view";
+import { addedNodes, authoredAt, authoredNodes, changeAt, counts, expandedRows, extendsOf, kindOf, normalise, problemsAt, resolvedAt, resolvedNode, originOf, rowChanged, sourceRows, sourceWord, valueAt } from "./view";
 
 const R = DEFAULT_VIEW.result;
 const CHAIN: Scope = { area: "chains", key: "default" };
@@ -149,5 +149,25 @@ describe("the library scope", () => {
 
   it("reads a value from the component's own keys", () => {
     expect(valueAt({ ...lib, resolved: null }, LIB, "tasks.implementer", "prompt")).toBe("do it");
+  });
+});
+
+describe("a forge task's config rows", () => {
+  it.each([
+    { field: "config.watch_ci", group: "config" },
+    { field: "policy.time_cap_minutes", group: "policy" },
+  ])("$field is changed when the change names $group and the file sets it", ({ field, group }) => {
+    const r = withR({ changes: [{ path: "n.main.t", kind: "change", summary: "s", fields: [group] }] });
+    expect(rowChanged(r, "n.main.t", field, "chain")).toBe(true);
+    expect(rowChanged(r, "n.main.t", field, "default")).toBe(false);
+  });
+
+  it("expands an extending chain's config into one row per key", () => {
+    const TEAM: Scope = { area: "chains", key: "team" };
+    const r = EXTENDING_VIEW.result;
+    const wait = { id: "scan", kind: "forge", target: "mr.automated_review", config: { watch_ci: true } };
+    const node = { id: "security_scan", kind: "exec", tasks: [wait] };
+    const withWait: Result = { ...r, extending: { ...r.extending!, nodes: (r.extending!.nodes ?? []).map((n) => (n.id === "security_scan" ? node : n)) } };
+    expect(expandedRows(withWait, TEAM, "security_scan.main.scan")).toContainEqual({ field: "config.watch_ci", value: true, source: "chain" });
   });
 });

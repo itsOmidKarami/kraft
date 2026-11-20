@@ -8,14 +8,14 @@ that person re-runs it.
 
 ## REQ ci-pipeline-takes-a-pipeline-id
 
-IF a `ci.pipeline` task has no `pipeline`, or one that is neither digits nor `$NAME`, THEN the
+IF a `ci.pipeline` task has no `config.pipeline`, or one that is neither digits nor `$NAME`, THEN the
 system SHALL refuse the chain, with a message that does not contain the value.
 enforced-by: tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_refusals[missing], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_refusals[letters], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_refusals[trailing-newline], tests/templates/test_ci_pipeline_task.py::test_a_bad_value_is_never_echoed
 origin: src/kraft/templates/models.py §ForgeTask
 
 ## REQ ci-pipeline-is-for-ci-pipeline-alone
 
-IF a forge target other than `ci.pipeline` has a `pipeline`, THEN the system SHALL refuse the chain.
+IF a forge target other than `ci.pipeline` has a `config.pipeline`, THEN the system SHALL refuse the chain.
 enforced-by: tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_refusals[other-target]
 origin: src/kraft/templates/models.py §ForgeTask
 

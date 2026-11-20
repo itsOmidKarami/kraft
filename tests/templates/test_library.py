@@ -137,7 +137,7 @@ def test_the_default_review_wait_settings_stay_on_its_node(design):
     wait = by_path["merge_request_feedback.automated_review.await_review"]
     assert (wait.watch_ci, wait.policy.total_time_cap_minutes) == (True, 10)
     # The rest is the library task's: an `extends` merge copies the parent.
-    assert wait.wait.grace_period.total_seconds() == 60
+    assert wait.grace.total_seconds() == 60
     assert feedback.node.fix_loop.early is True
     other, id = design.with_chain(
         DESIGN_TEMPLATES / "chains" / "other.yaml",

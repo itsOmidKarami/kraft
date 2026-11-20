@@ -410,8 +410,9 @@ tasks:
     scope: each_repository
     policy:
       total_time_cap_minutes: 30
-    wait:
+    config:
       grace_period: 60s
+    wait:
       polling:
         initial_interval: 30s
         max_interval: 5m
@@ -511,7 +512,8 @@ nodes:
           - id: await_review
             extends: await_automated_review
             # This node's own: the library task keeps watch_ci off and 30 minutes.
-            watch_ci: true
+            config:
+              watch_ci: true
             policy:
               total_time_cap_minutes: 10
       - id: review_feedback

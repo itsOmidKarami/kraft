@@ -971,9 +971,7 @@
           "kind": "forge",
           "target": "mr.open_draft",
           "wait": null,
-          "reviewers": null,
-          "watch_ci": false,
-          "pipeline": null
+          "config": null
          }
         ],
         "on_failure": null,
@@ -1028,12 +1026,13 @@
            "polling": {
             "initial_interval": "30s",
             "max_interval": "5m"
-           },
-           "grace_period": "1m"
+           }
           },
-          "reviewers": null,
-          "watch_ci": true,
-          "pipeline": null
+          "config": {
+           "reviewers": null,
+           "watch_ci": true,
+           "grace_period": "1m"
+          }
          }
         ],
         "on_failure": null,
@@ -1107,12 +1106,9 @@
            "polling": {
             "initial_interval": "30s",
             "max_interval": "5m"
-           },
-           "grace_period": null
+           }
           },
-          "reviewers": null,
-          "watch_ci": false,
-          "pipeline": null
+          "config": null
          }
         ],
         "on_failure": null,
@@ -1177,9 +1173,7 @@
            "kind": "forge",
            "target": "mr.sync",
            "wait": null,
-           "reviewers": null,
-           "watch_ci": false,
-           "pipeline": null
+           "config": null
           }
          ],
          "on_failure": null,
@@ -1244,9 +1238,7 @@
            "kind": "forge",
            "target": "mr.sync",
            "wait": null,
-           "reviewers": null,
-           "watch_ci": false,
-           "pipeline": null
+           "config": null
           }
          ],
          "on_failure": null,
@@ -1384,9 +1376,7 @@
         "kind": "forge",
         "target": "mr.mark_ready",
         "wait": null,
-        "reviewers": null,
-        "watch_ci": false,
-        "pipeline": null
+        "config": null
        }
       ],
       "steps": null,
@@ -1430,12 +1420,9 @@
          "polling": {
           "initial_interval": "5m",
           "max_interval": "1h"
-         },
-         "grace_period": null
+         }
         },
-        "reviewers": null,
-        "watch_ci": false,
-        "pipeline": null
+        "config": null
        }
       ],
       "steps": null,
@@ -1466,9 +1453,7 @@
         "kind": "forge",
         "target": "mr.merge",
         "wait": null,
-        "reviewers": null,
-        "watch_ci": false,
-        "pipeline": null
+        "config": null
        }
       ],
       "steps": null,
@@ -1543,12 +1528,9 @@
          "polling": {
           "initial_interval": "30s",
           "max_interval": "5m"
-         },
-         "grace_period": null
+         }
         },
-        "reviewers": null,
-        "watch_ci": false,
-        "pipeline": null
+        "config": null
        }
       ],
       "steps": null,

@@ -18,7 +18,6 @@ from kraft import executor, policy, store, waits
 from kraft.adapters import forge
 from kraft.automated_review import BotReviewer, CheckReviewer, as_reviewers
 from kraft.executor import dispatch
-from kraft.templates.models import ForgeTask
 
 from .nodes import forge_node
 from .test_run_chain import _multi_repo_item, _run_task, _with_origin
@@ -88,13 +87,16 @@ async def test_the_nearest_layer_s_reviewers_reach_the_review_task(
 @pytest.mark.parametrize(
     "target, fields, refused",
     [
+        ("mr.automated_review", {"config": {"reviewers": [{"bot": "b"}]}}, False),
+        ("mr.ci", {"config": {"reviewers": [{"bot": "b"}]}}, True),
+        ("mr.automated_review", {"config": {"reviewers": [{"login": "b"}]}}, True),
+        ("mr.automated_review", {"config": {"grace_period": "30s"}}, False),
+        ("mr.ci", {"config": {"grace_period": "30s"}}, True),
+        ("mr.ci", {"config": {"watch_ci": True}}, True),
+        ("mr.automated_review", {"config": {"watch_ci": True}}, True),
         ("mr.automated_review", {"reviewers": [{"bot": "b"}]}, False),
         ("mr.ci", {"reviewers": [{"bot": "b"}]}, True),
-        ("mr.automated_review", {"reviewers": [{"login": "b"}]}, True),
-        ("mr.automated_review", {"wait": {"grace_period": "30s"}}, False),
-        ("mr.ci", {"wait": {"grace_period": "30s"}}, True),
-        ("mr.ci", {"watch_ci": True}, True),
-        ("mr.automated_review", {"watch_ci": True}, True),
+        ("mr.automated_review", {"reviewers": [], "config": {"reviewers": []}}, True),
     ],
     ids=[
         "the-review",
@@ -104,6 +106,9 @@ async def test_the_nearest_layer_s_reviewers_reach_the_review_task(
         "grace-period-on-another-wait",
         "watch-ci-on-another-wait",
         "watch-ci-with-no-ci-wait-after-it",
+        "flat-reviewers-on-the-review",
+        "flat-reviewers-on-another-wait",
+        "flat-beside-config",
     ],
 )
 def test_only_the_review_task_names_reviewers(target, fields, refused):
@@ -193,16 +198,6 @@ def test_watch_ci_looks_ahead_to_a_ci_wait_in_its_own_node(nodes, refused):
     else:
         [node] = v1_resolved(nodes).nodes
         assert node.ci_wait_after("n.s0.review").path == "n.s1.ci"
-
-
-@pytest.mark.parametrize(
-    "target, hidden",
-    [("mr.automated_review", False), ("mr.ci", True)],
-    ids=["the-review", "another-wait"],
-)
-def test_the_watch_ci_row_shows_only_on_the_review_wait(target, hidden):
-    task = ForgeTask.model_validate({"id": "t", "kind": "forge", "target": target})
-    assert ("watch_ci" in task.unread()) is hidden
 
 
 # --- the collect path ------------------------------------------------------------

@@ -547,7 +547,11 @@ def test_a_template_cannot_configure_how_automated_review_is_read(key):
     from pydantic import ValidationError
 
     task = {"id": "review", "kind": "forge", "target": "mr.automated_review"}
-    for authored in ({**task, key: "x"}, {**task, "wait": {key: "x"}}):
+    for authored in (
+        {**task, key: "x"},
+        {**task, "wait": {key: "x"}},
+        {**task, "config": {key: "x"}},
+    ):
         with pytest.raises(ValidationError, match=key):
             v1_resolved([{"id": "feedback", "kind": "exec", "tasks": [authored]}])
 

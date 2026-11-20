@@ -139,7 +139,7 @@ export function expandedRows(r: Result, scope: Scope, path: string): { field: st
   const rows: { field: string; value: unknown; source: string }[] = [];
   for (const [k, v] of Object.entries(at)) {
     if (NOT_ROWS.has(k) || NESTED.has(k)) continue;
-    const pairs = k === "policy" && v && typeof v === "object" ? Object.entries(v).map(([c, x]) => [`policy.${c}`, x] as const) : [[k, v] as const];
+    const pairs = (k === "policy" || k === "config") && v && typeof v === "object" ? Object.entries(v).map(([c, x]) => [`${k}.${c}`, x] as const) : [[k, v] as const];
     for (const [field, value] of pairs) rows.push({ field, value, source: added || dig(own, field) !== undefined ? "chain" : "inherited" });
   }
   return rows;
@@ -157,9 +157,12 @@ export function chainCapGroups(r: Result, scope: Scope): { head: string; rows: {
   ];
 }
 
-/** Whether the draft changed this Config row: a change at its path names the field, or names `policy` (a policy key is reported by the group) and the row is a `policy.*` key the file sets. */
-export const rowChanged = (r: Result, path: string, field: string, source?: string) =>
-  r.changes.some((c) => c.path === path && ((c.fields ?? []).includes(field) || (field.startsWith("policy.") && source === "chain" && (c.fields ?? []).includes("policy"))));
+/** Whether the draft changed this Config row: a change at its path names the field, or names `policy` or `config` (a key of either is reported by the group) and the row is a key of it the file sets. */
+const GROUPED = new Set(["policy", "config"]);
+export const rowChanged = (r: Result, path: string, field: string, source?: string) => {
+  const group = field.split(".")[0];
+  return r.changes.some((c) => c.path === path && ((c.fields ?? []).includes(field) || (GROUPED.has(group) && field !== group && source === "chain" && (c.fields ?? []).includes(group))));
+};
 
 /** The header's two numbers. A YAML syntax error counts as a problem. */
 export const counts = (r: Result) => ({ changes: r.changes.length, problems: r.problems.length + (r.yaml_error ? 1 : 0) });

@@ -2129,10 +2129,10 @@ enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_a_red_pipeline_the_
 
 ## REQ automated-review-implementation-is-not-template-configuration
 
-Templates MAY name which reviewers an automated-review task waits for, a bot
-login or a check name in its `reviewers`, the wait's grace period, and whether it
-also watches the merge request's CI (`watch_ci`), which names what it looks at,
-not how it is read.
+Templates MAY name, in an automated-review task's `config`: which reviewers it
+waits for, a bot login or a check name, in `reviewers`, the wait's
+`grace_period`, and whether it also watches the merge request's CI, `watch_ci`,
+which names what it looks at, not how it is read.
 Templates SHALL NOT expose how a review is read, such as webhook event names,
 commands, comment authors, free check-name keys, or API and CLI mechanics. The
 selected task implementation SHALL own those details.
@@ -2147,9 +2147,28 @@ that names the other kind as null SHALL load as the kind it names.
 enforced-by: tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[stored-bot-with-a-null-check], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[stored-check-with-a-null-bot], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-check-with-a-key-it-lacks], tests/adapters/forge/test_automated_review.py::test_a_reviewer_is_named_exactly_one_way_or_refused_at_load[both], tests/adapters/forge/test_automated_review.py::test_a_reviewer_is_named_exactly_one_way_or_refused_at_load[neither]
 origin: src/kraft/automated_review.py §Reviewer
 
+## REQ forge-task-config-is-per-target
+
+A forge task's `config` SHALL take only the keys of its own target, and a
+target with none SHALL take no `config`. A key another target takes SHALL be
+refused when it has a value other than null or false, and dropped when it is
+null or false. Any other key SHALL be refused.
+enforced-by: tests/templates/test_forge_config.py::test_a_forge_tasks_config_takes_its_targets_keys[the-review-waits-own], tests/templates/test_forge_config.py::test_a_forge_tasks_config_takes_its_targets_keys[another-targets-key], tests/templates/test_forge_config.py::test_a_forge_tasks_config_takes_its_targets_keys[another-targets-clear], tests/templates/test_forge_config.py::test_a_forge_tasks_config_takes_its_targets_keys[a-typo-even-unset], tests/templates/test_forge_config.py::test_a_forge_tasks_config_takes_its_targets_keys[a-typo-even-null], tests/templates/test_forge_config.py::test_a_forge_tasks_config_takes_its_targets_keys[empty-on-a-pipeline-wait], tests/templates/test_forge_config.py::test_a_forge_tasks_config_takes_its_targets_keys[a-target-with-none], tests/templates/test_forge_config.py::test_a_forge_tasks_config_takes_its_targets_keys[a-target-with-none-cleared], tests/templates/test_forge_config.py::test_a_forge_tasks_config_takes_its_targets_keys[zero-is-not-false]
+origin: src/kraft/templates/models.py §ForgeTask
+
+## REQ flat-forge-keys-read-as-config
+
+A forge task's flat `reviewers`, `watch_ci`, `pipeline` and `wait.grace_period`
+SHALL be read as the same key under `config`. In an item's stored snapshot, one
+holding the value every snapshot dumped when unset SHALL be dropped, and none
+SHALL warn. A flat key beside the same key under `config` in one mapping SHALL
+be refused.
+enforced-by: tests/templates/test_forge_config.py::test_lift_config_moves_the_flat_keys[reviewers-null-as-written], tests/templates/test_forge_config.py::test_lift_config_moves_the_flat_keys[reviewers-null-stored], tests/templates/test_forge_config.py::test_lift_config_moves_the_flat_keys[reviewers-empty-stored], tests/templates/test_forge_config.py::test_lift_config_moves_the_flat_keys[watch-ci-false-as-written], tests/templates/test_forge_config.py::test_lift_config_moves_the_flat_keys[defaults-stored], tests/templates/test_forge_config.py::test_lift_config_moves_the_flat_keys[grace-period], tests/templates/test_forge_config.py::test_lift_config_moves_the_flat_keys[grace-period-alone], tests/templates/test_forge_config.py::test_lift_config_moves_the_flat_keys[an-agent-task-untouched], tests/templates/test_forge_config.py::test_lift_config_puts_config_where_the_first_moved_key_stood, tests/templates/test_forge_config.py::test_a_flat_key_beside_the_same_key_under_config_is_refused[reviewers], tests/templates/test_forge_config.py::test_a_flat_key_beside_the_same_key_under_config_is_refused[grace-period], tests/templates/test_forge_config.py::test_a_stored_snapshot_reads_the_flat_form_silently[v2.6], tests/templates/test_forge_config.py::test_a_stored_snapshot_reads_the_flat_form_silently[main], tests/templates/test_forge_config.py::test_a_stored_snapshot_reads_the_flat_form_silently[before-2.6], tests/templates/test_forge_config.py::test_a_flat_grace_period_reads_beside_a_retired_wait_timeout, tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[flat-reviewers-on-the-review], tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[flat-reviewers-on-another-wait], tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[flat-beside-config]
+origin: src/kraft/templates/models.py §lift_config
+
 ## REQ watch-ci-is-only-on-a-review-wait-ahead-of-its-ci-wait
 
-IF a task sets `watch_ci` and it is not an `mr.automated_review` task in one of
+IF a task sets `config.watch_ci` and it is not an `mr.automated_review` task in one of
 its node's own steps with an `mr.ci` task in a later one of those steps, THEN
 the system SHALL refuse the chain at load.
 enforced-by: tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[watch-ci-on-another-wait], tests/adapters/forge/test_run_review.py::test_only_the_review_task_names_reviewers[watch-ci-with-no-ci-wait-after-it], tests/adapters/forge/test_run_review.py::test_watch_ci_looks_ahead_to_a_ci_wait_in_its_own_node[a-later-step], tests/adapters/forge/test_run_review.py::test_watch_ci_looks_ahead_to_a_ci_wait_in_its_own_node[the-same-step], tests/adapters/forge/test_run_review.py::test_watch_ci_looks_ahead_to_a_ci_wait_in_its_own_node[an-earlier-step], tests/adapters/forge/test_run_review.py::test_watch_ci_looks_ahead_to_a_ci_wait_in_its_own_node[only-in-on-failure], tests/adapters/forge/test_run_review.py::test_watch_ci_looks_ahead_to_a_ci_wait_in_its_own_node[only-in-the-fix-loop], tests/adapters/forge/test_run_review.py::test_watch_ci_looks_ahead_to_a_ci_wait_in_its_own_node[watching-from-the-fix-loop], tests/adapters/forge/test_run_review.py::test_watch_ci_looks_ahead_to_a_ci_wait_in_its_own_node[in-a-later-node]

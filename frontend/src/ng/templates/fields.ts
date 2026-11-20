@@ -28,8 +28,6 @@ const META: Record<string, FieldMeta> = {
   // A mapping of two lists, not a list: no row edits it, so the lock says YAML, not Overview.
   outputs: { label: "outputs", kind: "list", elsewhere: "Edit outputs.files and outputs.variables in YAML", where: "YAML" },
   reads: { label: "reads", kind: "list" },
-  pipeline: { label: "pipeline", kind: "text" },
-  watch_ci: { label: "watch CI", kind: "bool" },
   steering: { label: "steering", kind: "list", choices: "steering" },
   scope: { label: "runs", kind: "enum", options: ["once", "each_repository"] },
   execution: { label: "order", kind: "enum", options: ["sequential", "parallel"] },
@@ -49,6 +47,11 @@ const META: Record<string, FieldMeta> = {
   max_attempts: { label: "attempts", kind: "int" },
   on_base_changed: { label: "on base change", kind: "enum", options: "restart" },
   on_merge_rejected: { label: "on merge rejected", kind: "enum", options: "rejectRestart" },
+  "config.pipeline": { label: "pipeline", kind: "text" },
+  "config.watch_ci": { label: "watch CI", kind: "bool" },
+  "config.grace_period": { label: "grace period", kind: "duration" },
+  // A list of entry mappings: YAML edits it.
+  "config.reviewers": { label: "reviewers", kind: "list", elsewhere: "Edit reviewers in YAML", where: "YAML" },
   "wait.polling.initial_interval": { label: "check every", kind: "duration" },
   "wait.polling.max_interval": { label: "backs off to", kind: "duration" },
   "policy.time_cap_minutes": { label: "running cap", kind: "minutes" },
@@ -76,12 +79,12 @@ export function editOps(path: string, field: string, value: unknown, current: un
   return field === "on_merge_rejected" && current == null && value != null ? [{ op: "add_handler", path, kind: "on_merge_rejected" }, set] : [set];
 }
 
-/** An unlisted field edits as text under its own name (`policy.sandbox` → "sandbox"). */
+/** An unlisted field edits as text under its own name (`policy.sandbox` → "sandbox", `config.x` → "x"). */
 /** How an agent task picks its model: a named profile, or a model and effort of its own. The profile wins, and neither set reads as the profile's default. */
 export const routeOf = (v: { profile?: unknown; model?: unknown; effort?: unknown }): "profile" | "model" => (v.profile || !(v.model || v.effort) ? "profile" : "model");
 export const ROUTE_LABEL = { profile: "profile", model: "model + effort" } as const;
 
-export const fieldMeta = (field: string): FieldMeta => META[field] ?? { label: field.replace(/^policy\./, "").replace(/_/g, " "), kind: "text" };
+export const fieldMeta = (field: string): FieldMeta => META[field] ?? { label: field.replace(/^(policy|config)\./, "").replace(/_/g, " "), kind: "text" };
 
 /** What a row says when its cap is not this task's own but its recovery's. */
 export const RECOVERY_NOTE = "applies to its on-failure recovery";
