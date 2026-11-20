@@ -18,7 +18,13 @@ import yaml
 
 from kraft.policy import TemplatePolicyOverride
 from kraft.templates.library import Namespace, _merge
-from kraft.templates.models import AUTO_REVIEW_SEGMENT, JUDGE_SEGMENT, MAIN_STEP, PATH_SEPARATOR
+from kraft.templates.models import (
+    AUTO_REVIEW_SEGMENT,
+    JUDGE_SEGMENT,
+    MAIN_STEP,
+    PATH_SEPARATOR,
+    lift_tasks,
+)
 
 CHAIN = "chain"
 LIBRARY = "library"
@@ -78,9 +84,12 @@ def load(text: str | None) -> object:
 
 
 def normalise(data: object) -> object:
-    """`data` with the shorthand normalised in place, as `load` does."""
+    """`data` with the shorthand normalised and every flat forge key under
+    `config`, in place, as `load` does. The lift is silent: this knows no
+    file, and the server warns when it loads the same one."""
     if isinstance(data, dict):
         _walk(data, _normalise)
+        lift_tasks(data)
     return data
 
 

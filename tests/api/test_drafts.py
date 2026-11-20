@@ -384,6 +384,33 @@ def test_a_library_rename_joins_the_chains_it_rewrites_to_the_draft(client, temp
     assert "extends: builder" in text
 
 
+def test_an_edit_of_a_flat_library_publishes_the_config_form(client, templates_dir):
+    path = templates_dir / "library.yaml"
+    data = yaml.safe_load(path.read_text())
+    data["tasks"]["flat_review"] = {
+        "kind": "forge",
+        "target": "mr.automated_review",
+        "reviewers": [{"bot": "a"}],
+    }
+    old = yaml.safe_dump(data, sort_keys=False)
+    path.write_text(old)
+    library = "/api/drafts/library/library"
+    ops = [
+        {"op": "set_field", "path": "tasks.flat_review", "field": "config.watch_ci", "value": True},
+        {"op": "reset_field", "path": "tasks.flat_review", "field": "config.reviewers"},
+    ]
+    assert client.post(f"{library}/ops", json={"ops": ops}).status_code == 200
+
+    assert client.post(f"{library}/publish").status_code == 200
+    published = yaml.safe_load(path.read_text())["tasks"]["flat_review"]
+    assert published == {
+        "kind": "forge",
+        "target": "mr.automated_review",
+        "config": {"watch_ci": True},
+    }
+    assert (templates_dir / "library.yaml.pre-config").read_text() == old
+
+
 # ── the config-file areas (W13 B) ──
 
 POLICY = "/api/drafts/policy/policy"
