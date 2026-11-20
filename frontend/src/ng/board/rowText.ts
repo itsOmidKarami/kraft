@@ -108,7 +108,8 @@ export function reasonTail(i: Row, now = Date.now()): string {
           case "budget":
           // A checkout stop goes on to what the person should do; the item page says it whole.
           case "checkout": return i.stop.reason ? firstSentence(i.stop.reason) : `waiting for you${where}`;
-          default: return i.stop?.reason ?? `waiting for you${where}`;
+          // A reason in paragraphs (the fix-loop judge's) is still one row.
+          default: return i.stop?.reason?.replace(/\s+/g, " ").trim() ?? `waiting for you${where}`;
         }
       case "failed": return `failed${where}`;
       case "paused": return i.current_node_id ? `paused${where}` : "created paused";

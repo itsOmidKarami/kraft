@@ -176,6 +176,44 @@ describe("StateCard", () => {
     expect(h.onEscalate).toHaveBeenCalled();
   });
 
+  // Kraft-1n450: the judge's stop on red CI read as one paragraph, with its findings only as hashes in it.
+  const said = "Re-run the e2e job.\n\nDocker Hub's pull rate limit failed it.";
+  const verdict = (reasoning: string) => ({ seq: 1, work_item_id: "w1", type: "judge_verdict", node_id: "verification", created_at: "2026-09-13T09:00:00Z", payload: {
+    node_id: "verification", cycle: 1, verdict: "stop_needs_human", reasoning,
+    findings: [{ severity: "important", message: "job e2e failed: script_failure", file: null, line: null, jobs: [{ label: "verification.checks.lint" }] }],
+  } });
+  it("a judge's stuck stop keeps its paragraphs, lists its findings with their logs, and offers Re-run CI first", async () => {
+    const calls = stubFetch({ ...acceptWrites("POST /work-items/w1/ci-rerun"), "GET /work-items/w1/events": [200, [verdict(said)]] });
+    const { h } = show({ display_status: "needs_you", status: "needs_human", actions: ["retry", "rerun_ci", "escalate"], stop: stop("stuck", { ...judge, reason: `judge: ${said}` }) });
+    const card = screen.getByRole("region", { name: "Stuck" });
+    expect(within(card).getByText(/^judge: Re-run the e2e job\./).textContent).toBe(`judge: ${said}`);
+    const rows = await within(card).findByRole("list", { name: "Findings" });
+    expect(rows).toHaveTextContent("important job e2e failed: script_failure");
+    expect(within(rows).getByRole("link", { name: "log" }).getAttribute("href")).toMatch(/tab=log/);
+    expect(acts(card)).toEqual(["Re-run CI", "Retry from verification", "Escalate…", "Open verification →"]);
+    expect(within(card).getByRole("button", { name: "Re-run CI" })).toHaveClass("btn-primary");
+    expect(within(card).getByRole("button", { name: "Retry from verification" })).toHaveClass("btn-secondary");
+    await userEvent.click(within(card).getByRole("button", { name: "Re-run CI" }));
+    await waitFor(() => expect(h.reload).toHaveBeenCalled());
+    expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/ci-rerun", body: { reason: "re-run by a person: CI failed outside the code" } }]);
+  });
+
+  it.each([
+    // A stall after an earlier judge verdict: that verdict's findings are not this stop's.
+    // No `actions` (an older server): Retry and Escalate… by their own rules, Re-run CI never.
+    ["a stall's", "stuck: 1 finding(s) unchanged across cycle 1", false, undefined],
+    ["the judge's own", `judge: ${said}`, true, ["retry", "escalate"]],
+  ] as const)("%s stuck stop lists findings only if it is the verdict, and with no rerun_ci door offers no Re-run CI", async (_case, reason, listed, actions?: readonly ItemAction[]) => {
+    const calls = stubFetch({ "GET /work-items/w1/events": [200, [verdict(said)]] });
+    show({ display_status: "needs_you", status: "needs_human", ...(actions && { actions: [...actions] }), stop: stop("stuck", { ...judge, reason }) });
+    const card = screen.getByRole("region", { name: "Stuck" });
+    await waitFor(() => expect(calls.some((c) => c.path === "/work-items/w1/events")).toBe(true));
+    await act(() => new Promise((done) => setTimeout(done, 0))); // the events have landed
+    expect(!!within(card).queryByRole("list", { name: "Findings" })).toBe(listed);
+    expect(acts(card)).toEqual(["Retry from verification", "Escalate…", "Open verification →"]);
+    expect(within(card).getByRole("button", { name: "Retry from verification" })).toHaveClass("btn-primary");
+  });
+
   // The infra stop's `facts.cause` picks what the card offers (Kraft-9d8b2.67); every other cause, or none, says where to look.
   it.each([
     ["forge_auth", ["Retry from open_draft", "Escalate…", "Open merge request →"], null],

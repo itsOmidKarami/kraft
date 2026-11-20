@@ -7,7 +7,17 @@ from datetime import datetime
 
 from fastapi import HTTPException, Request
 
-from kraft import caps, escalate, events, executor, inplace, reviewed_head, storage, store
+from kraft import (
+    caps,
+    ci_reruns,
+    escalate,
+    events,
+    executor,
+    inplace,
+    reviewed_head,
+    storage,
+    store,
+)
 from kraft import config as config_mod
 from kraft import policy as policy_mod
 from kraft import progress as progress_mod
@@ -333,6 +343,9 @@ def item_actions(
         budget_stop=bool((stop_payload or {}).get("budget")),
         raisable=raisable(stop_payload),
         mr_closed=row["stop_kind"] == StopKind.MR_CLOSED and mr_ref is not None,
+        ci_rerunnable=chain is not None
+        and ci_reruns.stopped_for_a_person(row)
+        and ci_reruns.waits_on_mr_ci(ci_reruns.node_of(chain, row["current_node_id"])),
         walk_live=deps.task_is_live(app, row["id"]),
         escalation_live=escalation_live,
         agent_paused=agent_paused,

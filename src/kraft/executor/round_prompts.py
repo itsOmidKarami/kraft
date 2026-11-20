@@ -523,7 +523,10 @@ JUDGE_PROMPT = (
     "findings are shrinking, or this looks like real progress.\n"
     '  "verdict": "stop_needs_human"  -- the loop is not converging (the '
     "same findings recur, or new ones keep appearing as fast as old ones "
-    "are fixed); stop and hand this to a person.\n"
+    "are fixed); stop and hand this to a person. `concerns` becomes the stop "
+    "reason that person reads: open with one sentence saying what they should "
+    "do, then a blank line, then the evidence in short paragraphs with a blank "
+    "line between them.\n"
     '  "verdict": "stop_downgrade"    -- the remaining findings are real '
     "but not worth the cost of another cycle; let the chain proceed with "
     "them unresolved. `concerns` becomes the note a human sees at the "

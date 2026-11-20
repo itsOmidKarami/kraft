@@ -176,6 +176,7 @@ class ItemAction(StrEnum):
     RETRY = "retry"
     RAISE_BUDGET = "raise_budget"
     REOPEN_MR = "reopen_mr"
+    RERUN_CI = "rerun_ci"
     UNBLOCK = "unblock"
     SKIP = "skip"
     PAUSE = "pause"
@@ -211,6 +212,9 @@ class DoorFacts:
     raisable: bool = False
     #: Stopped on a closed merge request it has a ref for.
     mr_closed: bool = False
+    #: Its fix loop stopped for a person on a node that waits on merge-request
+    #: CI (`ci_reruns.stopped_for_a_person`), which `POST /ci-rerun` re-runs.
+    ci_rerunnable: bool = False
     #: A walk task is registered for it (`deps.task_is_live`).
     walk_live: bool = False
     #: An escalation session is pending or running.
@@ -272,6 +276,8 @@ def open_doors(f: DoorFacts) -> tuple[ItemAction, ...]:
         ItemAction.RAISE_BUDGET: retry_ok and f.raisable and not f.walk_live,
         # reopen_mr: a closed merge request, then `_retry`.
         ItemAction.REOPEN_MR: retry_ok and f.mr_closed,
+        # ci_rerun: a person's re-run, then `_retry`.
+        ItemAction.RERUN_CI: retry_ok and f.ci_rerunnable,
         # unblock_work_item answers 200 dropping nothing when nothing is unmet.
         ItemAction.UNBLOCK: a(V.UNBLOCK) and f.unmet_dependency,
         # skip_work_item: a skippable node, no escalation turn, and no walk

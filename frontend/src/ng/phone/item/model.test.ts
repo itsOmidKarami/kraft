@@ -55,6 +55,9 @@ describe("pairOf (C.5): one pair, by status and stop kind", () => {
     ["mr closed, the server refusing reopen_mr", mk("needs_you", stop("mr_closed"), { actions: ["cancel"] }), [null, "cancel"]],
     // No merge request on file to reopen: Retry, as the desktop header falls back.
     ["mr closed, nothing on file to reopen", mk("needs_you", stop("mr_closed"), { actions: ["retry", "skip", "escalate", "complete", "cancel"] }), ["cancel", "retry"]],
+    // A fix loop stopped on CI that failed outside the code: Re-run CI where the server takes it, which retries.
+    ["stuck, the server admitting rerun_ci", mk("needs_you", stop("stuck"), { actions: ["retry", "rerun_ci", "escalate", "cancel"] }), ["retry", "rerun-ci"]],
+    ["stuck, the server refusing rerun_ci", mk("needs_you", stop("stuck"), { actions: ["retry", "escalate", "cancel"] }), ["escalate", "retry"]],
     ["archived, the server refusing restore", mk("archived", null, { actions: [] }), [null, null]],
   ] as const)("%s", (_name, item, want) => expect(ids(item)).toEqual(want));
 

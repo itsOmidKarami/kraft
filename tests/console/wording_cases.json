@@ -75,6 +75,12 @@
       "tail": "the fix loop made no progress in 3 rounds"
     },
     {
+      "name": "other-stop-in-paragraphs",
+      "row": { "display_status": "needs_you", "current_node_id": "verification", "stop": { "kind": "stuck", "node": "verification", "reason": "judge: Re-run the e2e job.\n\nDocker Hub's pull rate limit failed it." } },
+      "group": "needs",
+      "tail": "judge: Re-run the e2e job. Docker Hub's pull rate limit failed it."
+    },
+    {
       "name": "other-stop-without-reason",
       "row": { "display_status": "needs_you", "current_node_id": "merge_request", "stop": { "kind": "other", "node": "merge_request", "reason": null } },
       "group": "needs",

@@ -605,6 +605,13 @@ def _in_state(client, repo, state: dict, **body) -> str:
             c.execute("UPDATE work_items SET archived_at = datetime('now') WHERE id = ?", (wid,))
         if state.get("mr"):
             events.append(c, wid, "mr_opened", {"number": 7, "url": "u"}, node_id=state["node"])
+    if state.get("worktree"):
+        # Its worktree on its branch, as a started item has one.
+        from support.harness import git
+
+        branch = client.get(f"/api/work-items/{wid}").json()["branch"]
+        worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
+        git(Path(repo), "worktree", "add", "-b", branch, str(worktree))
     if state.get("escalation"):
         _create_escalation_session(wid, f"esc-{wid}", state["node"])
         with (

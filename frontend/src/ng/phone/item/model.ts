@@ -171,7 +171,7 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
 
 export type ActId =
   | "pause" | "unblock" | "steer" | "resume" | "start" | "reject" | "review" | "raise" | "retry" | "escalate" | "answer"
-  | "cancel" | "reopen-mr" | "conflicts" | "board" | "restore"
+  | "cancel" | "reopen-mr" | "rerun-ci" | "conflicts" | "board" | "restore"
   | "repo" | "settings" | "open-mr" | "duplicate" | "archive" | "complete";
 export interface Act {
   id: ActId;
@@ -191,6 +191,7 @@ const actDoor = (item: ItemDetail, id: ActId): ItemAction | null => {
     case "start": return strandedOneOff(item) ? null : "resume";
     case "answer": return "resume";
     case "reopen-mr": return "reopen_mr";
+    case "rerun-ci": return "rerun_ci";
     case "raise": return "retry";
     default: return null;
   }
@@ -241,7 +242,8 @@ function pairTable(item: ItemDetail): { secondary: Act | null; primary: Act | nu
         case "conflict": return { secondary: a("cancel", "Cancel…", true), primary: a("conflicts", REVIEW_THE_CONFLICTS) };
         // No merge request on file to reopen: Retry, as the desktop header's `needsYouMain` falls back.
         case "mr_closed": return { secondary: a("cancel", "Cancel…", true), primary: admits(item, "reopen_mr", true) ? a("reopen-mr", "Reopen MR") : a("retry", "Retry") };
-        default: return { secondary: a("escalate", "Escalate"), primary: a("retry", "Retry") };
+        // A fix loop stopped on CI that failed outside the code: Re-run CI, which retries; Escalate is in ⋮.
+        default: return admits(item, "rerun_ci", false) ? { secondary: a("retry", "Retry"), primary: a("rerun-ci", "Re-run CI") } : { secondary: a("escalate", "Escalate"), primary: a("retry", "Retry") };
       }
     case "done":
     case "cancelled": return { secondary: null, primary: a("board", "Back to board") };

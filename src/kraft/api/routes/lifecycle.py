@@ -3099,27 +3099,40 @@ async def ci_rerun(wid: str, body: CiRerun, request: Request):
     One re-run per fix attempt, and only inside an open one: `max_attempts`
     bounds how often a real code failure could be re-run. This shares no state
     with the forge-flagged self-retry (`ci_infra:<node_id>`).
+
+    A person calls it too, on an item whose fix loop stopped for them on that
+    node (`ci_reruns.stopped_for_a_person`): the failed jobs re-run, then the
+    node retries the way `POST /retry` with no `path` does, so it waits on
+    that run. Like `reopen_mr`, the item's own worker session may not make
+    that call; an escalation turn may, as it may retry.
     """
     st = request.app.state
     reason = body.reason.strip()
     if not reason:
         raise HTTPException(422, "a re-run needs a reason")
     row = deps._work_item_row(st, wid)
-    worktree = inplace.item_folder(st.run_dirs, row)
-    if not worktree.is_dir():
-        raise deps.worktree_missing(row)
     node_id = row["current_node_id"]
     node = ci_reruns.node_of(store.materialized_chain_of(row), node_id)
+    # Ahead of the worktree: an item on any other node is a 409, not a 404.
     if not ci_reruns.waits_on_mr_ci(node):
         raise HTTPException(
             409,
             f"{node_id} does not wait on merge-request CI; only its fix loop can re-run CI",
         )
-    cycle = st.db.read(lambda c: ci_reruns.open_fix_cycle(c, wid, node_id))
-    if cycle is None:
-        raise HTTPException(409, f"no fix attempt is running on {node_id}")
-    if st.db.read(lambda c: ci_reruns.reruns(c, wid, node_id, after_seq=cycle["seq"])):
-        raise HTTPException(409, "CI was already re-run in this fix attempt")
+    by_person = ci_reruns.stopped_for_a_person(row)
+    if by_person:
+        when_free.refuse_if_claimed()
+        deps.forbid_self_action(st, request, wid)
+        cycle = None
+    else:
+        cycle = st.db.read(lambda c: ci_reruns.open_fix_cycle(c, wid, node_id))
+        if cycle is None:
+            raise HTTPException(409, f"no fix attempt is running on {node_id}")
+        if st.db.read(lambda c: ci_reruns.reruns(c, wid, node_id, after_seq=cycle["seq"])):
+            raise HTTPException(409, "CI was already re-run in this fix attempt")
+    worktree = inplace.item_folder(st.run_dirs, row)
+    if not worktree.is_dir():
+        raise deps.worktree_missing(row)
 
     branch = store.branch_for(row)
     repo_entry = deps.launch(st, row["repo"]).repo_entry
@@ -3148,10 +3161,13 @@ async def ci_rerun(wid: str, body: CiRerun, request: Request):
 
     payload = {
         "node_id": node_id,
-        "cycle": cycle["payload"].get("cycle"),
+        # None for a person's: no fix attempt is open.
+        "cycle": cycle["payload"].get("cycle") if cycle else None,
         "reason": reason,
         "jobs": [j.name for j in ci.failed_jobs],
         "reran": list(reran),
     }
     await st.db.write(lambda c: events.append(c, wid, ForgeEvent.CI_RERUN_REQUESTED, payload))
+    if by_person:
+        return await _retry(wid, Retry(), request)
     return {"work_item_id": wid, "reran": list(reran), "jobs": payload["jobs"]}

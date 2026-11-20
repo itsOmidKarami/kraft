@@ -206,7 +206,8 @@ def _tail(row: dict, stop: dict, node: str, now: float) -> str:
                 case "cap" | "budget" | "checkout":
                     return _first_sentence(reason) if reason else f"waiting for you{where}"
                 case _:
-                    return _or(reason, f"waiting for you{where}")
+                    # A reason in paragraphs (the fix-loop judge's) is still one row.
+                    return " ".join(reason.split()) if reason else f"waiting for you{where}"
         case "failed":
             return f"failed{where}"
         case "paused":

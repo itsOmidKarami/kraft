@@ -71,6 +71,12 @@ finding is, and say what the next cycle should do differently or why none will
 help: "tag 3f9a2c (the unchecked empty list in `parse()`) survived rounds 1 to 3;
 the package shows no edit near it since your last session".
 
+On `stop_needs_human`, write for the person who picks it up: the first sentence
+says what they should do, then a blank line, then the evidence in short
+paragraphs. A red CI job that failed outside the code (a registry rate limit, a
+runner that went away) is a re-run, which `kraft item rerun-ci <id> --reason
+"..."` does and then retries the node.
+
 When you are unsure, report `continue`, and say what you could not tell in
 `concerns`. A loop stopped early that would have converged in one more cycle
 either strands the item for a human who then just retries it, or lets a real

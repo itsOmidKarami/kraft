@@ -235,11 +235,16 @@ function cardFor(item: ItemDetail, h: Handlers & { now: number; steer: string; s
   // Any other stop that needs you: a stuck fix loop, a question with no text, a kind a later server adds.
   // A gate, a question, a cap and a budget have their banner or question card; this one has its own way on (R11a-01).
   if (status === "needs_you" && stop && !(["gate", "budget", "cap"] as string[]).includes(stop.kind) && !(stop.kind === "question" && item.needs_context_question)) {
+    // A fix loop stopped on CI that failed outside the code: re-running it is the way on, and it retries.
+    const rerun = admits(item, "rerun_ci", false);
+    const findings = judgedFindings(item, events);
     return {
       tone: "warn", glyph: <CircleHelp size={14} aria-hidden />, title: stop.kind === "stuck" ? "Stuck" : "Needs you", where, text: stop.reason ?? undefined, node: stop.node,
       facts: spent ? [spent] : [],
+      body: findings.length ? <FindingRows item={item} findings={findings} /> : undefined,
       actions: [
-        ...when(admits(item, "retry", true), retryFrom(item, node, run)),
+        ...when(rerun, { label: "Re-run CI", primary: true, run: () => run(act.rerunCi(item.id)) }),
+        ...when(admits(item, "retry", true), { ...retryFrom(item, node, run), primary: !rerun }),
         ...when(admits(item, "escalate", true), { label: "Escalate…", run: h.onEscalate }),
       ],
     };
@@ -318,10 +323,11 @@ function cardFor(item: ItemDetail, h: Handlers & { now: number; steer: string; s
 }
 
 /** The events a card needs that the detail does not carry (who closed the MR,
- *  which node opened it, the cancel's reason, why it paused): read once, for those cards only. */
+ *  which node opened it, the cancel's reason, why it paused, the findings a
+ *  judge stopped on): read once, for those cards only. */
 function useEndEvents(
   item: ItemDetail,
-  wants = item.display_status === "cancelled" || item.display_status === "done" || item.stop?.kind === "mr_closed",
+  wants = item.display_status === "cancelled" || item.display_status === "done" || item.stop?.kind === "mr_closed" || item.stop?.kind === "stuck",
 ): KraftEvent[] {
   const [events, setEvents] = useState<KraftEvent[]>([]);
   useEffect(() => {
@@ -437,6 +443,37 @@ function NotStartedCard({ item }: { item: ItemDetail }) {
 }
 
 /** Where "Open the full log" goes: the failed task's pane on its Log tab, or the node's when the task is not in the chain. */
+type Finding = { severity: string; message: string; file?: string | null; line?: number | null; jobs?: { label: string }[] };
+
+/** The findings the fix-loop judge stopped on, when this stop is its verdict:
+ *  the node's latest, whose reasoning the reason carries. Any other stop, a
+ *  stall or a cap, would read an older verdict's findings as its own. */
+export function judgedFindings(item: ItemDetail, events: KraftEvent[]): Finding[] {
+  const stop = item.stop;
+  const verdict = events.filter((e) => e.type === "judge_verdict" && e.payload.node_id === stop?.node).at(-1)?.payload;
+  const said = str(verdict?.reasoning);
+  if (verdict?.verdict !== "stop_needs_human" || !said || !(stop?.reason ?? "").includes(said)) return [];
+  return Array.isArray(verdict.findings) ? (verdict.findings as Finding[]) : [];
+}
+
+/** One row per finding: its severity, what it says, where, and the log of the task that found it. */
+function FindingRows({ item, findings }: { item: ItemDetail; findings: Finding[] }) {
+  return (
+    <ul className="item-card-findings" aria-label="Findings">
+      {findings.map((f, i) => {
+        const sel = f.jobs?.[0] ? pathSel(f.jobs[0].label, item.chain_definition.nodes) : null;
+        return (
+          <li key={i}>
+            <span className="item-card-severity">{f.severity}</span> {f.message}
+            {f.file && <code className="item-card-finding-at">{f.line ? `${f.file}:${f.line}` : f.file}</code>}
+            {sel && <Link className={linkButtonClass({ inline: true })} to={placeUrl(item.id, { sel, tab: "log" })}>log</Link>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function logLink(item: ItemDetail): string {
   const stop = item.stop;
   const sel = stop?.task ? pathSel(stop.task, item.chain_definition.nodes) : null;

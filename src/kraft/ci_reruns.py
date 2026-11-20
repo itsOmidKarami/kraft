@@ -14,10 +14,11 @@ import sqlite3
 
 from kraft import events
 from kraft.templates.models import ForgeAction, ForgeTask, ResolvedNode
-from kraft.vocab import RESTARTS_RUN, ChainEvent, ForgeEvent, GateEvent
+from kraft.vocab import RESTARTS_RUN, ChainEvent, ForgeEvent, GateEvent, StopKind, WorkItemStatus
 
 __all__ = [
     "waits_on_mr_ci",
+    "stopped_for_a_person",
     "open_fix_cycle",
     "reran_last_cycle",
     "reruns",
@@ -31,6 +32,17 @@ def waits_on_mr_ci(node: ResolvedNode | None) -> bool:
     for `None`: a node the caller could not find in the item's chain."""
     return node is not None and any(
         isinstance(t.task, ForgeTask) and t.task.target is ForgeAction.MR_CI for t in node.tasks()
+    )
+
+
+def stopped_for_a_person(row) -> bool:
+    """Whether the item's fix loop stopped for a person, stuck or at its cap:
+    the stops whose reason can say CI failed outside the code, which a person
+    re-runs (`POST /ci-rerun`) and retries in one step. The caller checks the
+    node waits on merge-request CI."""
+    return row["status"] == WorkItemStatus.NEEDS_HUMAN and row["stop_kind"] in (
+        StopKind.STUCK,
+        StopKind.CAP,
     )
 
 

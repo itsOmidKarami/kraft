@@ -72,6 +72,14 @@
       "reason": "stuck: 1 finding(s) unchanged across cycle 1",
       "mr": true
     },
+    "stuck_on_ci": {
+      "status": "needs_human",
+      "node": "merge_request_feedback",
+      "stop": "stuck",
+      "reason": "judge: CI failed outside the code",
+      "mr": true,
+      "worktree": true
+    },
     "cap": {
       "status": "needs_human",
       "node": "implementation",
@@ -229,6 +237,7 @@
         "gate_must_fix",
         "question",
         "stuck",
+        "stuck_on_ci",
         "cap",
         "conflict",
         "failed",
@@ -254,6 +263,7 @@
         "gate_must_fix",
         "question",
         "stuck",
+        "stuck_on_ci",
         "cap",
         "conflict",
         "failed",
@@ -278,6 +288,7 @@
         "gate_must_fix",
         "question",
         "stuck",
+        "stuck_on_ci",
         "cap",
         "conflict",
         "failed",
@@ -305,6 +316,15 @@
         "mr_closed"
       ]
     },
+    "rerun_ci": {
+      "path": "ci-rerun",
+      "body": {
+        "reason": "registry rate limit"
+      },
+      "takes": [
+        "stuck_on_ci"
+      ]
+    },
     "cancel": {
       "path": "cancel",
       "body": {
@@ -325,6 +345,7 @@
         "gate_must_fix",
         "question",
         "stuck",
+        "stuck_on_ci",
         "cap",
         "conflict",
         "failed",
@@ -363,6 +384,7 @@
         "gate_must_fix",
         "question",
         "stuck",
+        "stuck_on_ci",
         "cap",
         "conflict",
         "failed",
@@ -445,6 +467,7 @@
         "gate_must_fix",
         "question",
         "stuck",
+        "stuck_on_ci",
         "cap",
         "conflict",
         "failed",

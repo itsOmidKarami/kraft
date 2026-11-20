@@ -16,11 +16,21 @@ origin: src/kraft/api/routes/lifecycle.py §ci_rerun
 
 ## REQ a-rerun-needs-a-red-open-fix-attempt
 
-IF no fix attempt is open on a node that waits on merge-request CI, or CI is not red for the
+IF no fix attempt is open on a node that waits on merge-request CI and its fix loop has not
+stopped for a person, or CI is not red for the
 branch's current head, or nothing in it can be re-run, THEN the system SHALL refuse the re-run and
 record no event.
 enforced-by: tests/api/test_ci_rerun.py::test_a_rerun_is_refused[node-without-mr-ci], tests/api/test_ci_rerun.py::test_a_rerun_is_refused[no-open-cycle], tests/api/test_ci_rerun.py::test_a_rerun_is_refused[ci-green], tests/api/test_ci_rerun.py::test_a_rerun_is_refused[ci-pending], tests/api/test_ci_rerun.py::test_a_rerun_is_refused[stale-head], tests/api/test_ci_rerun.py::test_a_rerun_is_refused[nothing-re-runnable]
 origin: src/kraft/api/routes/lifecycle.py §ci_rerun
+
+## REQ a-person-re-runs-ci-and-retries
+
+WHEN a person re-runs CI on an item whose fix loop stopped for them, stuck or at its cap, on a node
+that waits on merge-request CI, the system SHALL re-run the failed jobs, record the event with no
+cycle, and retry the node; IF the item's own worker session asks, or it stopped for any other
+reason, THEN the system SHALL refuse it and re-run nothing.
+enforced-by: tests/api/test_ci_rerun.py::test_a_person_re_runs_ci_on_a_stopped_fix_loop_and_it_retries[stuck], tests/api/test_ci_rerun.py::test_a_person_re_runs_ci_on_a_stopped_fix_loop_and_it_retries[cap], tests/api/test_ci_rerun.py::test_a_persons_rerun_is_refused[stopped-for-another-reason], tests/api/test_ci_rerun.py::test_a_persons_rerun_is_refused[its-own-worker-session], tests/api/test_ci_rerun.py::test_after_a_persons_rerun_the_node_waits_on_ci_before_any_fix[stuck], tests/api/test_ci_rerun.py::test_after_a_persons_rerun_the_node_waits_on_ci_before_any_fix[cap]
+origin: src/kraft/ci_reruns.py §stopped_for_a_person
 
 ## REQ a-fix-attempt-re-runs-ci-once
 

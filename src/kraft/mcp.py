@@ -524,7 +524,10 @@ def build() -> MCPServer:
         or a runner that went away. Change nothing in the checkout and pass what
         you saw as `reason`. A failing test, lint, type check or build error is
         never a re-run. Once per fix attempt; refused outside one, or when CI is
-        not red for the current head."""
+        not red for the current head. On an item whose fix loop stopped for a
+        person (stuck or at its cap), it re-runs the jobs and retries the node,
+        for the person, their assistant or an escalation, never the item's own
+        worker session."""
         return await client.ci_rerun(reason, work_item_id)
 
     @server.tool()

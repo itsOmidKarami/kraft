@@ -390,7 +390,14 @@ def _cmd_escalate(ns: argparse.Namespace) -> None:
 
 
 def _cmd_rerun_ci(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.ci_rerun(ns.reason, ns.id)), common._render_action, ns.json)
+    result = asyncio.run(client.ci_rerun(ns.reason, ns.id))
+    # A person's re-run answers as the retry it ends in; a repair's names the jobs.
+    said = (
+        common._render_action
+        if "reran" in result
+        else common.item_action("retried {id}", small=answers.retried)
+    )
+    common.emit(result, said, ns.json)
 
 
 def _cmd_mr_label(ns: argparse.Namespace) -> None:
@@ -804,7 +811,8 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     rerun_ci = subs.add_parser(
         "rerun-ci",
         parents=[common],
-        help="re-run the CI jobs that failed outside the code (a fix-loop repair)",
+        help="re-run the CI jobs that failed outside the code: a fix-loop repair, or a "
+        "person on a fix loop stopped for them, which then retries",
     )
     rerun_ci.add_argument("id", nargs="?")
     rerun_ci.add_argument(

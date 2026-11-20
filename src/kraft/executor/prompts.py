@@ -109,8 +109,8 @@ def ci_rerun_stop_note(reruns: list[dict]) -> str:
         return ""
     last = reruns[-1]["payload"].get("reason", "")
     return (
-        f" CI was re-run {len(reruns)} time(s) for an infrastructure failure ({last}) and is "
-        "still red: re-run CI once it clears, then retry this item."
+        f"\n\nCI was re-run {len(reruns)} time(s) for an infrastructure failure ({last}) and is "
+        "still red: once it clears, `kraft item rerun-ci` re-runs CI and retries this item."
     )
 
 

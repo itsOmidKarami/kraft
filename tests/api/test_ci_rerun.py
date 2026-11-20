@@ -1,13 +1,23 @@
 """POST /work-items/{wid}/ci-rerun -- a fix-loop repair re-runs the CI jobs that
-failed outside the code (Kraft-zje6v)."""
+failed outside the code (Kraft-zje6v), and a person re-runs them on a fix loop
+that stopped for them, then retries (Kraft-1n450)."""
 
 from __future__ import annotations
 
 import pytest
-from support.api import _completed_item, _fake_forge, _force_node
+from support.api import (
+    _cancel_task,
+    _completed_item,
+    _create_escalation_session,
+    _fake_forge,
+    _force_node,
+    _in_state,
+    _poll_events,
+)
 
 from kraft import events
 from kraft.adapters import forge as forge_mod
+from kraft.api import deps
 from kraft.vocab import ChainEvent
 
 NODE = "merge_request_feedback"
@@ -104,3 +114,76 @@ def test_a_rerun_in_the_next_attempt_is_allowed(client, repo, monkeypatch):
 
     assert _rerun(client, wid).status_code == 200
     assert [e["payload"]["cycle"] for e in _recorded(client, wid)] == [1, 2]
+
+
+#: A default-chain item whose fix loop on `merge_request_feedback` stopped for a person.
+_STOPPED = {
+    "status": "needs_human",
+    "node": NODE,
+    "reason": "judge: rate limit",
+    "mr": True,
+    "worktree": True,
+}
+
+
+@pytest.mark.parametrize("stop", ["stuck", "cap"])
+def test_a_person_re_runs_ci_on_a_stopped_fix_loop_and_it_retries(client, repo, monkeypatch, stop):
+    wid = _in_state(client, repo, {**_STOPPED, "stop": stop})
+    fake = _fake_forge(monkeypatch, **_RED)
+    monkeypatch.setattr(deps, "spawn", lambda app, w, coro: deps.discard(coro))
+    assert "rerun_ci" in client.get(f"/api/work-items/{wid}").json()["actions"]
+
+    r = _rerun(client, wid, "registry rate limit")
+
+    assert r.status_code == 200, r.text
+    assert fake.retried == ["/pipelines"]
+    (event,) = _recorded(client, wid)
+    assert event["payload"]["cycle"] is None
+    # The retry's own response shape (`_retry`, not a copy of it), as `reopen-mr` answers.
+    body = r.json()
+    assert (body["id"], body["node_id"]) == (wid, NODE)
+
+
+@pytest.mark.parametrize(
+    ("status", "state", "own_session"),
+    [
+        pytest.param(409, {"stop": "failed"}, False, id="stopped-for-another-reason"),
+        pytest.param(403, {"stop": "stuck"}, True, id="its-own-worker-session"),
+    ],
+)
+def test_a_persons_rerun_is_refused(client, repo, monkeypatch, status, state, own_session):
+    wid = _in_state(client, repo, {**_STOPPED, **state})
+    fake = _fake_forge(monkeypatch, **_RED)
+    headers = {}
+    if own_session:
+        _create_escalation_session(wid, "s1", NODE, hook_point=f"{NODE}.fix_loop.repair.repair")
+        headers = {"X-Kraft-Session-Id": f"{wid}/s1"}
+
+    r = client.post(f"/api/work-items/{wid}/ci-rerun", json={"reason": "x"}, headers=headers)
+
+    assert r.status_code == status, r.text
+    assert fake.retried == []
+    assert _recorded(client, wid) == []
+
+
+@pytest.mark.parametrize("stop", ["stuck", "cap"])
+def test_after_a_persons_rerun_the_node_waits_on_ci_before_any_fix(client, repo, monkeypatch, stop):
+    """The retry restarts the node, which waits on the re-run pipeline before
+    it spends another fix attempt."""
+    wid = _in_state(client, repo, {**_STOPPED, "stop": stop})
+    _fake_forge(monkeypatch, **{**_RED, "ci_states": ["failed", "pending"]})
+
+    assert _rerun(client, wid, "registry rate limit").status_code == 200
+    try:
+        seen = _poll_events(client, wid, "work_item_waiting")
+    finally:
+        client.portal.call(_cancel_task, client.app, wid)
+
+    after = seen[[e["type"] for e in seen].index("ci_rerun_requested") :]
+    waits = [
+        i
+        for i, e in enumerate(after)
+        if e["type"] == "external_wait_started" and e["payload"]["kind"] == "mr.ci"
+    ]
+    assert waits, [e["type"] for e in after]
+    assert "fix_cycle_started" not in [e["type"] for e in after[: waits[0]]]
