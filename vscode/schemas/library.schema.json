@@ -247,6 +247,9 @@
           "minLength": 1,
           "title": "Bot",
           "type": "string"
+        },
+        "check": {
+          "type": "null"
         }
       },
       "title": "BotReviewer",
@@ -356,6 +359,9 @@
       "additionalProperties": false,
       "description": "A check or commit status on the head. It settles when it completes.",
       "properties": {
+        "bot": {
+          "type": "null"
+        },
         "check": {
           "minLength": 1,
           "title": "Check",
@@ -752,21 +758,180 @@
     },
     "ForgeTask": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "target": {
+                "const": "mr.automated_review"
+              }
+            },
+            "required": [
+              "target"
+            ]
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/ReviewWaitConfig"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "target": {
+                "const": "ci.pipeline"
+              }
+            },
+            "required": [
+              "target"
+            ]
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/PipelineWaitConfig"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "target": {
+                "enum": [
+                  "mr.open_draft",
+                  "mr.sync",
+                  "mr.ci",
+                  "mr.mark_ready",
+                  "mr.external_approval",
+                  "mr.merge",
+                  "mr.post_merge_ci"
+                ]
+              }
+            },
+            "required": [
+              "target"
+            ]
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "grace_period": {
+                        "enum": [
+                          null,
+                          false
+                        ]
+                      },
+                      "pipeline": {
+                        "enum": [
+                          null,
+                          false
+                        ]
+                      },
+                      "reviewers": {
+                        "enum": [
+                          null,
+                          false
+                        ]
+                      },
+                      "watch_ci": {
+                        "enum": [
+                          null,
+                          false
+                        ]
+                      }
+                    },
+                    "type": "object"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "required": [
+                "target"
+              ]
+            }
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/ReviewWaitConfig"
+                  },
+                  {
+                    "$ref": "#/$defs/PipelineWaitConfig"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "grace_period": {
+                        "enum": [
+                          null,
+                          false
+                        ]
+                      },
+                      "pipeline": {
+                        "enum": [
+                          null,
+                          false
+                        ]
+                      },
+                      "reviewers": {
+                        "enum": [
+                          null,
+                          false
+                        ]
+                      },
+                      "watch_ci": {
+                        "enum": [
+                          null,
+                          false
+                        ]
+                      }
+                    },
+                    "type": "object"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
       "properties": {
         "config": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ReviewWaitConfig"
-            },
-            {
-              "$ref": "#/$defs/PipelineWaitConfig"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Config"
+          "description": "The target's own keys: `reviewers`, `watch_ci` and `grace_period` on mr.automated_review, `pipeline` on ci.pipeline, none on any other target."
         },
         "extends": {
           "description": "A library component of the same kind to inherit from; this one's own keys win.",
@@ -806,6 +971,10 @@
           ],
           "default": null
         },
+        "pipeline": {
+          "deprecated": true,
+          "deprecationMessage": "Retired: write it as config.pipeline. Kraft still reads it, with a warning, until the next major release."
+        },
         "policy": {
           "anyOf": [
             {
@@ -823,6 +992,10 @@
           },
           "title": "Reads",
           "type": "array"
+        },
+        "reviewers": {
+          "deprecated": true,
+          "deprecationMessage": "Retired: write it as config.reviewers. Kraft still reads it, with a warning, until the next major release."
         },
         "scope": {
           "$ref": "#/$defs/TaskScope",
@@ -854,6 +1027,10 @@
             }
           ],
           "default": null
+        },
+        "watch_ci": {
+          "deprecated": true,
+          "deprecationMessage": "Retired: write it as config.watch_ci. Kraft still reads it, with a warning, until the next major release."
         }
       },
       "title": "ForgeTask",
@@ -1064,9 +1241,30 @@
       "additionalProperties": false,
       "description": "`ci.pipeline`'s own key: the id of the one pipeline it waits for (a\nGitLab pipeline `id`, a GitHub Actions run id), as digits or a `$NAME`.",
       "properties": {
+        "grace_period": {
+          "enum": [
+            null,
+            false
+          ]
+        },
         "pipeline": {
           "title": "Pipeline",
-          "type": "string"
+          "type": [
+            "string",
+            "integer"
+          ]
+        },
+        "reviewers": {
+          "enum": [
+            null,
+            false
+          ]
+        },
+        "watch_ci": {
+          "enum": [
+            null,
+            false
+          ]
         }
       },
       "title": "PipelineWaitConfig",
@@ -1177,6 +1375,12 @@
           ],
           "default": null,
           "title": "Grace Period"
+        },
+        "pipeline": {
+          "enum": [
+            null,
+            false
+          ]
         },
         "reviewers": {
           "anyOf": [
@@ -2006,6 +2210,10 @@
       "additionalProperties": false,
       "description": "`external-wait-has-configurable-timeout-and-polling`: a wait's polling.\nIts timeout is its task's own `policy: total_time_cap_minutes` (Ruling\n196); a `timeout:` written here before that is read as one\n(`ForgeTask._retired_wait_timeout`).",
       "properties": {
+        "grace_period": {
+          "deprecated": true,
+          "deprecationMessage": "Retired: write it as config.grace_period. Kraft still reads it, with a warning, until the next major release."
+        },
         "polling": {
           "$ref": "#/$defs/PollingPolicy"
         }
