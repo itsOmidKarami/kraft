@@ -585,9 +585,14 @@ def test_gh_reviewer_feedback_payload_shapes():
     )  # fmt: skip
     assert "errors" not in data
     for thread in data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]:
-        assert {"id", "isResolved", "comments"} <= thread.keys()
+        assert {"id", "isResolved", "isOutdated", "viewerCanReply", "viewerCanResolve"} <= (
+            thread.keys()
+        )
         for note in thread["comments"]["nodes"]:
             assert {"author", "body", "path", "line", "originalLine", "updatedAt"} <= note.keys()
+            assert {"id", "fullDatabaseId", "createdAt", "state", "replyTo"} <= note.keys()
+            assert {"pullRequestReview"} <= note.keys()
+            assert note["author"] is None or "__typename" in note["author"]
 
 
 @pytest.mark.e2e("glab")
@@ -613,4 +618,4 @@ def test_glab_reviewer_feedback_payload_shapes():
     for discussion in api(f"projects/:id/merge_requests/{iid}/discussions?per_page=100"):
         assert {"id", "notes"} <= discussion.keys()
         for note in discussion["notes"]:
-            assert {"author", "body", "resolvable", "updated_at"} <= note.keys()
+            assert {"id", "author", "body", "resolvable", "created_at", "updated_at"} <= note.keys()

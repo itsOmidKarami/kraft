@@ -119,7 +119,7 @@ def _collected(item: ReviewerFeedback, how: str | None) -> dict:
         "reviewer": reviewer_key(item.reviewer),
         "finished": how,
         "summaries": sorted(newest.values(), key=lambda s: s["updated_at"]),
-        "threads": list(item.threads),
+        "threads": [{k: v for k, v in t.items() if k != "notes"} for t in item.threads],
         "check": item.check if failed else None,
     }
 

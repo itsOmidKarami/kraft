@@ -234,11 +234,59 @@ class ReviewerFeedback:
     #: "updated_at": iso}`.
     summaries: tuple[dict, ...] = ()
     #: Its unresolved inline threads, from any push: `{"id": str, "file": str |
-    #: None, "line": int | None, "body": str}`.
+    #: None, "line": int | None, "body": str, "notes": tuple[ForgeNote, ...]}`.
+    #: `body` is every note flattened (pending and system ones too); `notes`
+    #: leaves those out and keeps each note's ids, author and time.
     threads: tuple[dict, ...] = ()
     #: A `check:` reviewer's check: `{"name", "finished": bool, "conclusion":
     #: str | None, "output": str}`; None for a bot.
     check: dict | None = None
+
+
+@dataclass(frozen=True)
+class ForgeNote:
+    """One note of a review thread, or one top-level comment, as the forge returned it."""
+
+    #: GitHub: the GraphQL node id; GitLab: the note id.
+    id: str
+    #: GitHub: `fullDatabaseId`, what REST addresses; GitLab: the note id again.
+    rest_id: str
+    author: str
+    #: GitHub: `Bot`, `User`, ... (GraphQL `__typename`, REST `user.type`); None on GitLab.
+    author_type: str | None
+    body: str
+    created_at: str
+    updated_at: str
+    #: GitHub: the node id of the comment this one answers.
+    reply_to: str | None = None
+    #: GitHub: the REST id of the review this comment was submitted in.
+    review_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ForgeThread:
+    """One review thread (a GitLab discussion), with its notes in order."""
+
+    id: str
+    #: The pull request's number, the merge request's iid.
+    mr: int
+    resolved: bool
+    outdated: bool
+    can_reply: bool
+    can_resolve: bool
+    file: str | None
+    line: int | None
+    notes: tuple[ForgeNote, ...]
+
+
+@dataclass(frozen=True)
+class Posted:
+    """What a write left on the forge: the note's ids (GitHub: REST id and node id;
+    GitLab: the note id), when it was created, and its body as the forge returned it."""
+
+    ids: tuple[str, ...]
+    created_at: str
+    body: str
 
 
 @dataclass(frozen=True)

@@ -19,6 +19,7 @@ from kraft.adapters.forge.models import (
     DropCause,
     FailedJob,
     ForgeError,
+    ForgeNote,
     HeadMoved,
     Job,
     Label,
@@ -46,6 +47,23 @@ _APPROVAL_NOTES = ("approved this merge request", "unapproved this merge request
 #: is never a verdict (Kraft-zn8me). `set_labels` re-creates the MR pipeline
 #: and auto-cancel of redundant pipelines cancels the old one; a pipeline a
 #: person cancelled with no successor is `ci.render_ci`'s "abandoned".
+def _glab_notes(notes: list[dict]) -> tuple[ForgeNote, ...]:
+    """A discussion's notes, a system note ("changed this line") left out."""
+    return tuple(
+        ForgeNote(
+            id=str(n.get("id") or ""),
+            rest_id=str(n.get("id") or ""),
+            author=str((n.get("author") or {}).get("username") or ""),
+            author_type=None,
+            body=n.get("body") or "",
+            created_at=n.get("created_at") or "",
+            updated_at=n.get("updated_at") or "",
+        )
+        for n in notes
+        if not n.get("system")
+    )
+
+
 def _bot_feedback(reviewer, notes: list[dict], discussions: list[dict], since) -> ReviewerFeedback:
     """One bot's part of the merge request's notes and discussions."""
     bot = reviewer.bot
@@ -103,6 +121,7 @@ def _bot_feedback(reviewer, notes: list[dict], discussions: list[dict], since) -
                             ),
                         ]
                     ),
+                    "notes": _glab_notes(thread),
                 }
             )
     return ReviewerFeedback(reviewer, mr_ops.newest(seen), tuple(summaries), tuple(threads))

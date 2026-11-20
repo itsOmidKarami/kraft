@@ -20,6 +20,7 @@ from kraft.adapters.forge.models import (
     DropCause,
     FailedJob,
     ForgeError,
+    ForgeNote,
     HeadMoved,
     Job,
     Label,
@@ -59,6 +60,30 @@ _GH_SETTLED_OK = frozenset({"SUCCESS", "NEUTRAL", "SKIPPED"})
 #: A completed run that did nothing: green must never be said of it
 #: (`pipeline_status`).
 _GH_NOTHING_RAN = frozenset({"SKIPPED", "NEUTRAL", "STALE"})
+
+
+def _str_or_none(v: object) -> str | None:
+    return None if v is None else str(v)
+
+
+def _gh_notes(nodes: list[dict]) -> tuple[ForgeNote, ...]:
+    """A thread's comments as notes, a pending one left out: a draft nobody else
+    can see yet, which the collection and `read_thread` both skip."""
+    return tuple(
+        ForgeNote(
+            id=str(n.get("id") or ""),
+            rest_id=str(n.get("fullDatabaseId") or ""),
+            author=str((n.get("author") or {}).get("login") or ""),
+            author_type=(n.get("author") or {}).get("__typename"),
+            body=n.get("body") or "",
+            created_at=n.get("createdAt") or "",
+            updated_at=n.get("updatedAt") or "",
+            reply_to=(n.get("replyTo") or {}).get("id"),
+            review_id=_str_or_none((n.get("pullRequestReview") or {}).get("fullDatabaseId")),
+        )
+        for n in nodes
+        if n.get("state") != "PENDING"
+    )
 
 
 def _bot_feedback(
@@ -128,6 +153,7 @@ def _bot_feedback(
                     "file": first.get("path"),
                     "line": first.get("line") or first.get("originalLine"),
                     "body": body,
+                    "notes": _gh_notes(notes),
                 }
             )
     return ReviewerFeedback(reviewer, mr_ops.newest(seen), tuple(summaries), tuple(open_threads))
@@ -207,24 +233,28 @@ query($owner: String!, $name: String!, $n: Int!) {
   }
 }
 """
+#: The fields every review comment is read with (`_gh_notes`).
+_NOTE_FIELDS = (
+    "id fullDatabaseId author { __typename login } body path line originalLine "
+    "createdAt updatedAt state replyTo { id } pullRequestReview { fullDatabaseId }"
+)
 #: A pull request's review threads, with each one's comments: what
 #: `reviewer_feedback` reads, since REST review comments carry no resolved flag.
-_THREADS_QUERY = """
-query($owner: String!, $name: String!, $n: Int!) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $n) {
-      reviewThreads(first: 100) {
-        nodes {
-          id
-          isResolved
-          comments(first: 100) {
-            nodes { author { login } body path line originalLine updatedAt }
-          }
-        }
-      }
-    }
-  }
-}
+_THREADS_QUERY = f"""
+query($owner: String!, $name: String!, $n: Int!) {{
+  repository(owner: $owner, name: $name) {{
+    pullRequest(number: $n) {{
+      reviewThreads(first: 100) {{
+        nodes {{
+          id isResolved isOutdated viewerCanReply viewerCanResolve
+          comments(first: 100) {{
+            nodes {{ {_NOTE_FIELDS} }}
+          }}
+        }}
+      }}
+    }}
+  }}
+}}
 """
 _READY_MUTATION = """
 mutation($id: ID!) {

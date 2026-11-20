@@ -51,22 +51,29 @@ def _gh_review(state, at, *, commit=HEAD, login="coderabbitai[bot]", body="looks
     }
 
 
-def _gh_thread(id, resolved, login, body, at):
+def _gh_comment_node(id, login, body, at, **extra):
+    return {
+        "id": f"C_{id}",
+        "fullDatabaseId": "901",
+        "author": {"login": login, "__typename": "Bot"},
+        "body": body,
+        "path": "calc.py",
+        "line": None,
+        "originalLine": 3,
+        "createdAt": at,
+        "updatedAt": at,
+        "state": "SUBMITTED",
+        "replyTo": None,
+        "pullRequestReview": {"fullDatabaseId": "51"},
+        **extra,
+    }
+
+
+def _gh_thread(id, resolved, login, body, at, *more):
     return {
         "id": id,
         "isResolved": resolved,
-        "comments": {
-            "nodes": [
-                {
-                    "author": {"login": login},
-                    "body": body,
-                    "path": "calc.py",
-                    "line": None,
-                    "originalLine": 3,
-                    "updatedAt": at,
-                }
-            ]
-        },
+        "comments": {"nodes": [_gh_comment_node(id, login, body, at), *more]},
     }
 
 
@@ -76,7 +83,14 @@ def _gh_threads(*nodes):
 
 
 def _glab_note(id, username, body, at, **extra):
-    return {"id": id, "author": {"username": username}, "body": body, "updated_at": at, **extra}
+    return {
+        "id": id,
+        "author": {"username": username},
+        "body": body,
+        "created_at": at,
+        "updated_at": at,
+        **extra,
+    }
 
 
 def _glab_discussion(id, *notes):
@@ -152,6 +166,25 @@ def _comment(body, at):
     return {"kind": "comment", "state": None, "body": body, "updated_at": at}
 
 
+_AT = "2026-01-01T12:00:50Z"
+
+
+def _gh_expected(body="unused x", *notes):
+    first = forge.ForgeNote("C_T1", "901", "coderabbitai", "Bot", "unused x", _AT, _AT, None, "51")
+    return {
+        "id": "T1",
+        "file": "calc.py",
+        "line": 3,
+        "body": body,
+        "notes": (first, *notes),
+    }
+
+
+def _glab_expected():
+    note = forge.ForgeNote("3", "3", "coderabbitai", None, "unused x", _AT, _AT)
+    return {"id": "d1", "file": "calc.py", "line": 3, "body": "unused x", "notes": (note,)}
+
+
 @pytest.mark.parametrize(
     "backend, routes, reviewer, last_activity, summaries, threads, check",
     [
@@ -169,7 +202,93 @@ def _comment(body, at):
                     "updated_at": "2026-01-01T12:00:40Z",
                 },
             ],
-            [{"id": "T1", "file": "calc.py", "line": 3, "body": "unused x"}],
+            [_gh_expected()],
+            None,
+        ),
+        # A pending comment is a draft nobody else sees: out of `notes`, but the
+        # flattened `body` is as it always was (the head wait's fingerprints).
+        (
+            GH,
+            {
+                **_GH_BOT,
+                "api graphql": _gh_threads(
+                    _gh_thread(
+                        "T1",
+                        False,
+                        "coderabbitai",
+                        "unused x",
+                        _AT,
+                        _gh_comment_node(
+                            "P", "a-person", "draft", _AT, state="PENDING", fullDatabaseId="902"
+                        ),
+                    )
+                ),
+            },
+            BOT,
+            datetime(2026, 1, 1, 12, 0, 50, tzinfo=UTC),
+            [
+                _comment("walkthrough", "2026-01-01T12:00:30Z"),
+                {
+                    "kind": "review",
+                    "state": "COMMENTED",
+                    "body": "looks mostly fine",
+                    "updated_at": "2026-01-01T12:00:40Z",
+                },
+            ],
+            [_gh_expected("unused x\na-person: draft")],
+            None,
+        ),
+        (
+            GH,
+            {
+                **_GH_BOT,
+                "api graphql": _gh_threads(
+                    _gh_thread(
+                        "T1",
+                        False,
+                        "coderabbitai",
+                        "unused x",
+                        _AT,
+                        _gh_comment_node(
+                            "R",
+                            "a-person",
+                            "no",
+                            "2026-01-01T12:01:00Z",
+                            fullDatabaseId="903",
+                            author={"login": "a-person", "__typename": "User"},
+                            replyTo={"id": "C_T1"},
+                            pullRequestReview={"fullDatabaseId": "52"},
+                        ),
+                    )
+                ),
+            },
+            BOT,
+            datetime(2026, 1, 1, 12, 0, 50, tzinfo=UTC),
+            [
+                _comment("walkthrough", "2026-01-01T12:00:30Z"),
+                {
+                    "kind": "review",
+                    "state": "COMMENTED",
+                    "body": "looks mostly fine",
+                    "updated_at": "2026-01-01T12:00:40Z",
+                },
+            ],
+            [
+                _gh_expected(
+                    "unused x\na-person: no",
+                    forge.ForgeNote(
+                        "C_R",
+                        "903",
+                        "a-person",
+                        "User",
+                        "no",
+                        "2026-01-01T12:01:00Z",
+                        "2026-01-01T12:01:00Z",
+                        "C_T1",
+                        "52",
+                    ),
+                )
+            ],
             None,
         ),
         (
@@ -219,7 +338,7 @@ def _comment(body, at):
             BOT,
             datetime(2026, 1, 1, 12, 0, 50, tzinfo=UTC),
             [_comment("walkthrough", "2026-01-01T12:00:30Z")],
-            [{"id": "d1", "file": "calc.py", "line": 3, "body": "unused x"}],
+            [_glab_expected()],
             None,
         ),
         # An approval, or its withdrawal, is the bot's activity, dated by its
@@ -258,7 +377,37 @@ def _comment(body, at):
             BOT,
             datetime(2026, 1, 1, 12, 3, 0, tzinfo=UTC),
             [_comment("walkthrough", "2026-01-01T12:00:30Z")],
-            [{"id": "d1", "file": "calc.py", "line": 3, "body": "unused x"}],
+            [_glab_expected()],
+            None,
+        ),
+        # A system note ("changed this line") is flattened into `body` as ever, and
+        # left out of `notes`.
+        (
+            GLAB,
+            {
+                **_GLAB_BOT,
+                GLAB_DISCUSSIONS: json.dumps(
+                    [
+                        _glab_discussion(
+                            "d1",
+                            _glab_note(
+                                3,
+                                "coderabbitai",
+                                "unused x",
+                                _AT,
+                                resolvable=True,
+                                resolved=False,
+                                position={"new_path": "calc.py", "new_line": 3},
+                            ),
+                            _glab_note(10, "coderabbitai", "changed this line", _AT, system=True),
+                        )
+                    ]
+                ),
+            },
+            BOT,
+            datetime(2026, 1, 1, 12, 0, 50, tzinfo=UTC),
+            [_comment("walkthrough", "2026-01-01T12:00:30Z")],
+            [{**_glab_expected(), "body": "unused x\ncoderabbitai: changed this line"}],
             None,
         ),
         (
@@ -276,7 +425,17 @@ def _comment(body, at):
             {"name": "review-bot", "finished": True, "conclusion": "failed", "output": "2 issues"},
         ),
     ],
-    ids=["gh-bot", "gh-check", "gh-check-cancelled", "glab-bot", "glab-bot-approved", "glab-check"],
+    ids=[
+        "gh-bot",
+        "gh-pending-left-out-of-notes",
+        "gh-a-reply-names-what-it-answers",
+        "gh-check",
+        "gh-check-cancelled",
+        "glab-bot",
+        "glab-bot-approved",
+        "glab-system-note-left-out-of-notes",
+        "glab-check",
+    ],
 )
 async def test_reviewer_feedback_reads(
     cli, tmp_path, backend, routes, reviewer, last_activity, summaries, threads, check
