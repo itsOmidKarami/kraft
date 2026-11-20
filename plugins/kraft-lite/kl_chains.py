@@ -79,7 +79,9 @@ MODEL_KEYS = {
         read_past=("harness", "fallback", "inputs"),
         refused=("outputs",),
     ),
-    "ForgeTask": _plus(_TASK, read=("target",), read_past=("wait", "reviewers", "pipeline")),
+    "ForgeTask": _plus(
+        _TASK, read=("target",), read_past=("wait", "reviewers", "watch_ci", "pipeline")
+    ),
     "BuiltinTask": _plus(_TASK, read=("ref", "suite"), read_past=("execution",)),
     "SubprocessTask": _plus(_TASK, read=("command",), refused=("outputs",)),
     "ExecNode": _plus(

@@ -768,6 +768,13 @@ class ForgeTask(TaskBase):
     #: (`automated-review-implementation-is-not-template-configuration`).
     #: `[]` expects none.
     reviewers: list[AutomatedReview] | None = None
+    #: `mr.automated_review` only: also push the branch and read the merge
+    #: request's pipeline at every check, and end on a red pipeline or a merge
+    #: conflict. It names *what* the wait also looks at, never how CI is read
+    #: (`automated-review-implementation-is-not-template-configuration`); the
+    #: node's own `mr.ci` task, in a later step, stays the owner of CI
+    #: (`watch-ci-is-only-on-a-review-wait-ahead-of-its-ci-wait`).
+    watch_ci: StrictBool = False
     #: `ci.pipeline` only, and required there: the id of the one pipeline it
     #: waits for (a GitLab pipeline `id`, a GitHub Actions run id), as digits.
     pipeline: StrictStr | None = None
@@ -784,6 +791,8 @@ class ForgeTask(TaskBase):
 
     def unread(self) -> frozenset[str]:
         extra = frozenset() if self.target is ForgeAction.CI_PIPELINE else frozenset({"pipeline"})
+        if self.target is not ForgeAction.MR_AUTOMATED_REVIEW:
+            extra |= frozenset({"watch_ci"})
         return super().unread() | extra
 
     @model_validator(mode="after")
@@ -816,6 +825,11 @@ class ForgeTask(TaskBase):
             raise ValueError(
                 f"reviewers: only an {ForgeAction.MR_AUTOMATED_REVIEW.value} task waits for "
                 f"reviewers, not {self.target.value}"
+            )
+        if self.watch_ci:
+            raise ValueError(
+                f"watch_ci: only an {ForgeAction.MR_AUTOMATED_REVIEW.value} task watches CI "
+                f"while it waits, not {self.target.value}"
             )
         if self.wait is not None and self.wait.grace_period is not None:
             raise ValueError(
@@ -1553,6 +1567,25 @@ class Chain(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _watch_ci_looks_ahead_to_its_ci_wait(self) -> Self:
+        """A review wait that sets `watch_ci` only looks ahead: the node's own
+        `mr.ci` task owns CI, so one must sit in a later step of the same node's
+        own steps, never in a recovery plan, the fix loop or another node
+        (`watch-ci-is-only-on-a-review-wait-ahead-of-its-ci-wait`)."""
+        for node in ResolvedChain.from_chain(self).nodes:
+            for task in node.tasks():
+                if (
+                    isinstance(task.task, ForgeTask)
+                    and task.task.watch_ci
+                    and node.ci_wait_after(task.path) is None
+                ):
+                    raise ValueError(
+                        f"{task.path}: watch_ci needs an {ForgeAction.MR_CI.value} task in a "
+                        f"later step of node {node.id!r}'s own steps"
+                    )
+        return self
+
+    @model_validator(mode="after")
     def _reads_name_earlier_writers(self) -> Self:
         """Every `reads` entry names a task that declares `outputs` and sits
         before the reader. "Before" is an earlier node, or an earlier step of
@@ -1790,6 +1823,31 @@ class ResolvedNode:
             for dedicated in (inner.judge, inner.escalation):
                 if dedicated is not None:
                     yield dedicated
+
+    def _own_step_groups(self) -> Iterator[tuple[ResolvedStep, ...]]:
+        """Each run of this node's own steps: its own, and a group body's nodes'."""
+        yield self.steps
+        for inner in self.body:
+            yield from inner._own_step_groups()
+
+    def ci_wait_after(self, path: str) -> ResolvedTask | None:
+        """The first `mr.ci` task in the first of this node's own steps after
+        the step holding the task at `path`; None when `path` is in none of the
+        own steps (a recovery plan's, the fix loop's), or no later own step has
+        one. The one lookup behind the `watch_ci` load check and its runtime."""
+        for steps in self._own_step_groups():
+            held = next(
+                (i for i, step in enumerate(steps) if any(t.path == path for t in step.tasks)),
+                None,
+            )
+            if held is None:
+                continue
+            for step in steps[held + 1 :]:
+                for t in step.tasks:
+                    if isinstance(t.task, ForgeTask) and t.task.target is ForgeAction.MR_CI:
+                        return t
+            return None
+        return None
 
     @property
     def covered_by(self) -> str | None:

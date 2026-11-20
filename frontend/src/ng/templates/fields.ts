@@ -29,6 +29,7 @@ const META: Record<string, FieldMeta> = {
   outputs: { label: "outputs", kind: "list", elsewhere: "Edit outputs.files and outputs.variables in YAML", where: "YAML" },
   reads: { label: "reads", kind: "list" },
   pipeline: { label: "pipeline", kind: "text" },
+  watch_ci: { label: "watch CI", kind: "bool" },
   steering: { label: "steering", kind: "list", choices: "steering" },
   scope: { label: "runs", kind: "enum", options: ["once", "each_repository"] },
   execution: { label: "order", kind: "enum", options: ["sequential", "parallel"] },

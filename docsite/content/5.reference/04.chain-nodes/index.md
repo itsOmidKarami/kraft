@@ -272,6 +272,7 @@ CI pipeline by ID.
 | `wait.grace_period` | duration | no | `60s` | Only on `mr.automated_review`: how long a review bot must stay quiet after its last activity on the head to count as finished. Refused on any other target. _Added in 2.4_ |
 | `pipeline` | string | yes, on `ci.pipeline` | — | Only on `ci.pipeline`: the pipeline's ID as digits, or `$NAME` (or `${NAME}`) for a variable a task in `reads` left. See [Waiting for a pipeline by ID](/reference/chain-nodes/wait-for-a-pipeline). _Added in 2.6_ |
 | `reviewers` | list of `{bot: LOGIN}` or `{check: NAME}` | no | unset | Only on `mr.automated_review`: the reviewers it waits for, each `{bot: LOGIN}` or `{check: NAME}`. The item's `reviewers` override and the repo's `automated_review` come first. `[]` names none. _Added in 2.4_ |
+| `watch_ci` | boolean | no | `false` | Only on `mr.automated_review`, and only with an `mr.ci` task in a later step of the same node: at every check the wait also pushes the branch and reads the merge request's pipeline, and ends on a red pipeline or a merge conflict. See [How review and CI waits settle](/concepts/how-review-and-ci-waits-settle). _Added in next_ |
 
 `mr.post_merge_ci` watches the CI of the commit the item merged, however many merges land on the base branch after it. A run cancelled for a newer push moves the watch onto the base's tip, which holds that merge, and records `post_merge_ci_moved`.
 

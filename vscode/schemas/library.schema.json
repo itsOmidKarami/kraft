@@ -869,6 +869,11 @@
             }
           ],
           "default": null
+        },
+        "watch_ci": {
+          "default": false,
+          "title": "Watch Ci",
+          "type": "boolean"
         }
       },
       "title": "ForgeTask",

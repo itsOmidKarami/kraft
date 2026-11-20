@@ -18,6 +18,7 @@ from kraft import executor, policy, store, waits
 from kraft.adapters import forge
 from kraft.automated_review import AutomatedReview, as_reviewers
 from kraft.executor import dispatch
+from kraft.templates.models import ForgeTask
 
 from .nodes import forge_node
 from .test_run_chain import _multi_repo_item, _run_task, _with_origin
@@ -92,6 +93,8 @@ async def test_the_nearest_layer_s_reviewers_reach_the_review_task(
         ("mr.automated_review", {"reviewers": [{"login": "b"}]}, True),
         ("mr.automated_review", {"wait": {"grace_period": "30s"}}, False),
         ("mr.ci", {"wait": {"grace_period": "30s"}}, True),
+        ("mr.ci", {"watch_ci": True}, True),
+        ("mr.automated_review", {"watch_ci": True}, True),
     ],
     ids=[
         "the-review",
@@ -99,6 +102,8 @@ async def test_the_nearest_layer_s_reviewers_reach_the_review_task(
         "malformed-entry",
         "grace-period-on-the-review",
         "grace-period-on-another-wait",
+        "watch-ci-on-another-wait",
+        "watch-ci-with-no-ci-wait-after-it",
     ],
 )
 def test_only_the_review_task_names_reviewers(target, fields, refused):
@@ -112,6 +117,92 @@ def test_only_the_review_task_names_reviewers(target, fields, refused):
             v1_resolved(nodes)
     else:
         v1_resolved(nodes)
+
+
+_WATCHING = {"id": "review", "kind": "forge", "target": "mr.automated_review", "watch_ci": True}
+_CI_WAIT = {"id": "ci", "kind": "forge", "target": "mr.ci"}
+
+
+def _steps(*groups):
+    return [{"id": f"s{i}", "tasks": list(g)} for i, g in enumerate(groups)]
+
+
+@pytest.mark.parametrize(
+    "nodes, refused",
+    [
+        ([{"id": "n", "kind": "exec", "steps": _steps([_WATCHING], [_CI_WAIT])}], False),
+        ([{"id": "n", "kind": "exec", "steps": _steps([_WATCHING, _CI_WAIT])}], True),
+        ([{"id": "n", "kind": "exec", "steps": _steps([_CI_WAIT], [_WATCHING])}], True),
+        (
+            [
+                {
+                    "id": "n",
+                    "kind": "exec",
+                    "steps": _steps([_WATCHING]),
+                    "on_failure": {"tasks": [_CI_WAIT]},
+                }
+            ],
+            True,
+        ),
+        (
+            [
+                {
+                    "id": "n",
+                    "kind": "exec",
+                    "steps": _steps([_WATCHING]),
+                    "fix_loop": {"tasks": [_CI_WAIT]},
+                }
+            ],
+            True,
+        ),
+        (
+            [
+                {
+                    "id": "n",
+                    "kind": "exec",
+                    "steps": _steps([_CI_WAIT], [_CI_WAIT | {"id": "ci2"}]),
+                    "fix_loop": {"tasks": [_WATCHING]},
+                }
+            ],
+            True,
+        ),
+        (
+            [
+                {"id": "n", "kind": "exec", "steps": _steps([_WATCHING])},
+                {"id": "m", "kind": "exec", "tasks": [_CI_WAIT]},
+            ],
+            True,
+        ),
+    ],
+    ids=[
+        "a-later-step",
+        "the-same-step",
+        "an-earlier-step",
+        "only-in-on-failure",
+        "only-in-the-fix-loop",
+        "watching-from-the-fix-loop",
+        "in-a-later-node",
+    ],
+)
+def test_watch_ci_looks_ahead_to_a_ci_wait_in_its_own_node(nodes, refused):
+    """The CI wait owns CI; the review wait only looks ahead for it, so it needs
+    one in a later step of its own node, never a handler's or another node's."""
+    if refused:
+        with pytest.raises(ValidationError, match="watch_ci"):
+            v1_resolved(nodes)
+    else:
+        [node] = v1_resolved(nodes).nodes
+        assert node.ci_wait_after("n.s0.review").path == "n.s1.ci"
+
+
+@pytest.mark.parametrize(
+    "target, hidden",
+    [("mr.automated_review", False), ("mr.ci", True)],
+    ids=["the-review", "another-wait"],
+)
+def test_the_watch_ci_row_shows_only_on_the_review_wait(target, hidden):
+    task = ForgeTask.model_validate({"id": "t", "kind": "forge", "target": target})
+    assert ("watch_ci" in task.unread()) is hidden
 
 
 # --- the collect path ------------------------------------------------------------
