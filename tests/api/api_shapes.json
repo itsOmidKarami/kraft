@@ -798,6 +798,7 @@
     "judge_stop_note": [],
     "last_review_sha": "_",
     "materialized_chain": "_",
+    "measurement": "_",
     "mr_ref": "_",
     "needs_context_question": "_",
     "node_overrides": {},

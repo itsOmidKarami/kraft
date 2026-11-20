@@ -803,7 +803,8 @@
         "fallback": null,
         "outputs": null
        },
-       "max_attempts": 2
+       "max_attempts": 2,
+       "early": false
       },
       "escalation": null,
       "on_base_changed": null,
@@ -1279,7 +1280,8 @@
         "fallback": null,
         "outputs": null
        },
-       "max_attempts": 3
+       "max_attempts": 3,
+       "early": false
       },
       "escalation": null,
       "on_base_changed": {
