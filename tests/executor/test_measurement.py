@@ -10,8 +10,9 @@ from support.harness import IN_PLACE, commit_all, git, write
 
 from kraft import events, store
 from kraft.executor import context, dispatch
-from kraft.executor.context import BASE_MOVED
+from kraft.executor.context import BASE_MOVED, ENDED_EARLY, RATE_LIMITED
 from kraft.findings import Finding
+from kraft.vocab import ChainEvent
 
 
 def _agent(task_id, **fields):
@@ -99,6 +100,77 @@ async def test_a_step_that_does_not_pass_stops_the_node(
     assert got_verdict == verdict
     assert [t.task.id for t in got_failed] == failed
     assert fake_dispatch.calls == ["a"], "a later step must not run after an earlier one stopped"
+
+
+@pytest.mark.parametrize(
+    ("early", "reports", "severity", "answers", "declined", "verdict", "calls"),
+    [
+        (True, "b", "critical", {}, None, ENDED_EARLY, ["a", "b2"]),
+        (False, "b", "critical", {}, None, "ok", ["a", "b2", "c"]),
+        (True, "b", "minor", {}, None, "ok", ["a", "b2", "c"]),
+        (True, "b", "critical", {"b2": "failed"}, None, "failed", ["a", "b2"]),
+        (True, "b", "critical", {"b2": "paused"}, None, "paused", ["a", "b2"]),
+        (True, "b", "critical", {"b2": "rate_limited"}, None, RATE_LIMITED, ["a", "b2"]),
+        (True, "b", "critical", {}, "this-commit", "ok", ["a", "b2", "c"]),
+        (True, "b", "critical", {}, "another-commit", ENDED_EARLY, ["a", "b2"]),
+        (True, "c", "critical", {}, None, "ok", ["a", "b", "b2"]),
+    ],
+    ids=[
+        "ends-early",
+        "early-off",
+        "below-the-loop-severities",
+        "a-failed-co-task-keeps-failed",
+        "a-pause-outranks-it",
+        "a-rate-limit-outranks-it",
+        "declined-on-this-commit",
+        "declined-on-another-commit",
+        "in-the-last-step",
+    ],
+)
+async def test_eligible_findings_end_a_measurement_early(
+    item_on, fake_dispatch, early, reports, severity, answers, declined, verdict, calls
+):
+    """A step that advanced with a finding the loop would take ends the measurement
+    before the next step, unless a stop or a failure outranks it, the fix loop
+    declined it on this commit, or there is no later step to skip."""
+    node = _steps(["a"], ["b", "b2"], ["c"])
+    node["fix_loop"] = {"tasks": [{"id": "fix", "kind": "subprocess", "command": "true"}]}
+    node["fix_loop"]["early"] = early
+    it = await item_on([node])
+    head = dispatch._config.git_read(it.repo, "rev-parse", "HEAD")
+    finding = {
+        "severity": severity,
+        "message": "found it",
+        "file": "a.py",
+        "line": 1,
+        "source_plugin": "p",
+    }
+    path = {t.task.id: t.path for step in it.chain.chain.nodes[0].steps for t in step.tasks}
+    (it.run_dirs.results / "r.json").write_text(
+        json.dumps({"status": "done", "findings": [finding]})
+    )
+    await it.session("r", path[reports], "done", node="n", round=0, head_sha=head)
+    if declined:
+        payload = {
+            "node_id": "n",
+            "cycle": 0,
+            "verdict": "stop_downgrade",
+            "reasoning": "",
+            "findings": [finding],
+            "head_sha": head if declined == "this-commit" else "0" * 40,
+            "ended_early": True,
+        }
+        await it.database.write(
+            lambda c: events.append(c, it.id, ChainEvent.JUDGE_VERDICT, payload)
+        )
+    fake_dispatch.answer = lambda task_id: answers.get(task_id, "done")
+
+    got, failed, _ = await _measure(it, round=0)
+
+    assert got == verdict
+    assert fake_dispatch.calls == calls
+    if verdict == ENDED_EARLY:
+        assert failed == []
 
 
 def _timed(order, slow="a"):

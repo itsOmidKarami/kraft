@@ -2226,9 +2226,11 @@ async def _walk_node_once(
                 # repair's concerns before the first cycle is paid for.
                 repair_doubted = dispatch.repair_doubts(db, work_item_id, node, r_failed)
             else:
-                # Only "failed" reaches here, and that fall-through is deliberate:
-                # the repair ran, didn't resolve things, and the ordinary paid fix
-                # cycle below should now see the failure for what it actually is.
+                # Only "failed" and ENDED_EARLY reach here, and that fall-through is
+                # deliberate: the repair ran, didn't resolve things, and the ordinary
+                # paid fix cycle below should now see the failure for what it actually
+                # is. An early end of the re-measure goes to the fix loop at round -1,
+                # as a failure does, and never back to `on_failure`.
                 #
                 # The repair's own re-measure just wrote its findings/session rows
                 # under `_REPAIR_ROUND`, not the `round` this loop was on when it

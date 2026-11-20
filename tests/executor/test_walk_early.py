@@ -105,3 +105,32 @@ async def test_a_parked_re_measure_resumes_at_its_own_round(item_on, script, tmp
     assert _cycles(it) == ([-1] if between is None else [0])
     # resumed at -1, the re-measure's `done` ci session stands; at round 0 it reruns
     assert script.calls.count("ci") == (2 if between is None else 3)
+
+
+@pytest.mark.parametrize(
+    ("bots", "calls", "cycles"),
+    [
+        ((CLEAN,), ["bots", "triage", "fix", "bots", "triage", "ci", "hold"], [0, 1]),
+        (
+            (RED, CLEAN),
+            ["bots", "repair", "bots", "triage", "fix", "bots", "triage", "ci", "hold"],
+            [-1, 1],
+        ),
+    ],
+    ids=["measured-first", "after-on_failure"],
+)
+async def test_an_early_end_goes_straight_to_the_fix_loop(
+    item_on, script, tmp_path, bots, calls, cycles
+):
+    """The triage finding ends the measurement before the CI step runs. The fix loop
+    takes it: `on_failure` never answers it, and CI is first waited for on the fix."""
+    triage = (_found("rename it"), CLEAN)
+    it = await item_on([_node(tmp_path, bots=bots, triage=triage, on_failure=True)])
+    script.real = REAL
+
+    assert await _walk(it) == "ok"
+
+    assert script.calls == calls
+    assert _cycles(it) == cycles
+    first = it.events("findings_measured")[0]["payload"]
+    assert "n.ci.ci" in first["unmeasured_tasks"]

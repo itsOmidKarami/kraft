@@ -56,6 +56,12 @@ _ADVANCING = ADVANCING
 #: `walk_node` hands it to `run_once`, which restarts the declared span.
 BASE_MOVED = "base_moved"
 
+#: A step of a node whose fix loop starts early (`FixLoop.early`) finished with
+#: every task advanced and a finding eligible for the loop. `walk` hands it to
+#: the fix loop, never to `on_failure`; every outcome that outranks a failed task
+#: outranks it too (`dispatch.measure_node`).
+ENDED_EARLY = "ended_early"
+
 #: A task could not rebase: the forge's `conflict` status, or a raised
 #: `builtins.RebaseConflict`. A task failure like any other -- unless its node
 #: declares `on_base_changed.on_conflict`, in which case `measure_node` answers
@@ -136,6 +142,7 @@ LANDED_UNREVIEWED = "landed_unreviewed"
 #: * `advance` -- the node moves forward.
 #: * `task`    -- the one task is repairable/retryable (binding `on_failure`,
 #:   then node repair, then `fix_loop`).
+#: * `node`    -- the node's own fix loop takes it, before any recovery.
 #: * `chain`   -- handled by the chain walk itself, not a retry (a bounce).
 #: * `stop`    -- no retry at any tier: a pause, a budget breach, a config
 #:   error, a rate limit, a wait handed back to the scheduler, an infra-red
@@ -160,6 +167,7 @@ SCOPE: dict[str, str] = {
     UNREVIEWED_HEAD: "stop",  # the merge would push code no final review saw
     LANDED_UNREVIEWED: "stop",  # the forge merged code no final review saw; a person looks
     TIME_CAPPED: "stop",  # a scope's time ran out; a person decides (Ruling 194)
+    ENDED_EARLY: "node",  # eligible findings in an early step; the node's fix loop takes them
     BASE_MOVED: "chain",  # the bounce, taken by run_once
     CONFLICT_RESOLVED: "chain",  # the same restart, reopening the span's gates
     MERGE_REWIND: "chain",  # the walk rewinds to re-run the rejected span

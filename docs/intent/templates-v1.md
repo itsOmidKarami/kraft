@@ -1330,8 +1330,15 @@ enforced-by: tests/skills/test_fix_loop_judge.py::test_judge_continue_behaves_li
 
 A node's fix loop MAY set `early`, which is off by default. A node without a
 fix loop, and a recovery plan, SHALL NOT set it.
-enforced-by: tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[off-by-default], tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[on], tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[a-bool-only], tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[not-on-the-node], tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[not-on-a-recovery-plan]
-origin: src/kraft/templates/models.py
+
+WHEN it does, and a step of the node's own steps finishes with every task
+advanced and at least one finding at the loop severities that the fix loop
+hasn't declined on the current commit, the system SHALL end the measurement
+there without running the later steps, and SHALL hand the findings to the fix
+loop without running the node's `on_failure`. Every outcome that outranks a
+failed task SHALL outrank ending early.
+enforced-by: tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[off-by-default], tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[on], tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[a-bool-only], tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[not-on-the-node], tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[not-on-a-recovery-plan], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[ends-early], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[early-off], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[below-the-loop-severities], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[a-failed-co-task-keeps-failed], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[a-pause-outranks-it], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[a-rate-limit-outranks-it], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[declined-on-this-commit], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[declined-on-another-commit], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[in-the-last-step], tests/executor/test_walk_early.py::test_an_early_end_goes_straight_to_the_fix_loop[measured-first], tests/executor/test_walk_early.py::test_an_early_end_goes_straight_to_the_fix_loop[after-on_failure]
+origin: src/kraft/executor/dispatch.py
 
 ## REQ invalid-judge-result-does-not-block-the-loop
 

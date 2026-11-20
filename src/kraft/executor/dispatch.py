@@ -42,6 +42,7 @@ from kraft.executor.context import (
     CHECKOUT_REFUSED,
     CONFIG_ERROR,
     CONFLICT,
+    ENDED_EARLY,
     INFRA_STOP,
     LANDED_UNREVIEWED,
     MERGE_REJECTED,
@@ -2915,6 +2916,17 @@ async def measure_node(
         if open_at is None or open_at["round"] != round:
             await db.write(lambda c: store.begin_measurement(c, work_item_id, node.id, round))
     outcomes: list[tuple[ResolvedTask, object]] = []
+    early = own and _starts_early(node)
+    ended_early = False
+
+    def _ends_early(step: ResolvedStep) -> bool:
+        """Whether `step`, which just advanced, reports a finding the fix loop would
+        take that it has not already declined on this commit."""
+        found, _ = collect_findings(db, work_item_id, node, round, steps=(step,))
+        head = _config.git_read(Path(worktree), "rev-parse", "HEAD") if worktree else None
+        declined = declined_fingerprints(db, work_item_id, node.id, head)
+        return any(f.severity in loop_severities and f.fingerprint not in declined for f in found)
+
     for index, step in enumerate(groups):
         # A resumed node skips the steps before `start_step` -- they already
         # passed.
@@ -2935,6 +2947,11 @@ async def measure_node(
         # `_ADVANCING` (executor/context.py) is the existing definition of
         # "this task moved the node forward": ("done", "done_with_concerns").
         if any(isinstance(r, BaseException) or r not in _ADVANCING for r in results):
+            break
+        # Not at the last step: nothing would be skipped, so it is an ordinary
+        # measurement.
+        if early and index < len(groups) - 1 and _ends_early(step):
+            ended_early = True
             break
     if all(r != READ_ONLY_VIOLATED for _, r in outcomes) and await _wrote(node_before, node.id):
         outcomes = [(t, READ_ONLY_VIOLATED) for t, _ in outcomes]
@@ -3018,7 +3035,7 @@ async def measure_node(
     failed = [t for t, r in outcomes if isinstance(r, BaseException) or r not in _ADVANCING]
     if failed:
         return "failed", failed, excs
-    return "ok", [], []
+    return (ENDED_EARLY if ended_early else "ok"), [], []
 
 
 #: A task in one of these states failed outright. `measure_node` fails these
@@ -3481,6 +3498,36 @@ def previous_fix_session(db, work_item_id: str, node: ResolvedNode) -> sqlite3.R
         ).fetchall()
     )
     return rows[-1] if rows else None
+
+
+def declined_fingerprints(
+    db, work_item_id: str, node_id: str, head_sha: str | None
+) -> frozenset[str]:
+    """The tags of findings the node's fix loop declined to act on at `head_sha`.
+
+    A `judge_verdict` of the node's current run whose verdict is `stop_downgrade`
+    on a measurement that ended early (`ended_early`) holds for the commit it
+    names: those findings are not collected, fixed or judged again on it, the
+    re-measure after `on_failure` included. Empty without a head."""
+    if head_sha is None:
+        return frozenset()
+
+    def read(c):
+        start = ci_reruns.node_run_start(c, work_item_id, node_id)
+        return list(events.read_after(c, start, work_item_id))
+
+    tags: set[str] = set()
+    for e in db.read(read):
+        p = e["payload"]
+        if (
+            e["type"] == ChainEvent.JUDGE_VERDICT
+            and p.get("node_id") == node_id
+            and p.get("verdict") == "stop_downgrade"
+            and p.get("ended_early")
+            and p.get("head_sha") == head_sha
+        ):
+            tags.update(_findings.from_payload(f).fingerprint for f in p.get("findings", []))
+    return frozenset(tags)
 
 
 def last_measurement(
