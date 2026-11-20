@@ -98,6 +98,13 @@ describe("Banner", () => {
       expect(calls.filter((c) => c.method !== "GET")).toEqual([{ method: "POST", path: "/work-items/w1/ci-rerun", body: { reason: "re-run by a person: CI failed outside the code" } }]);
     });
 
+    it("takes one click while the re-run is on its way", async () => {
+      vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+      render(<Banner item={capped({ limit: LIMIT }, RERUN)} onRaise={() => {}} reload={() => {}} />);
+      await userEvent.click(screen.getByRole("button", { name: "Re-run CI" }));
+      expect(screen.getByRole("button", { name: "Re-run CI" })).toBeDisabled();
+    });
+
     it("shows why the server refused it, and does not reload", async () => {
       stubFetch({ "POST /work-items/w1/ci-rerun": [409, { detail: "CI is success: nothing failed to re-run" }] });
       const reload = vi.fn();
