@@ -135,7 +135,8 @@ class LibraryText(BaseModel):
 async def put_library(body: LibraryText, request: Request):
     """Save `library.yaml`, only if every chain that resolves now still
     resolves against it -- the chain save's own checks, over every chain --
-    and written verbatim. A chain that did not resolve before the edit is not
+    and written by `config.write_template`: a flat forge key in its `config:`
+    form, comments and layout kept. A chain that did not resolve before the edit is not
     the edit's to fix, so it does not refuse it."""
     st = request.app.state
     library = deps.library_or_503(st)
@@ -153,9 +154,9 @@ async def put_library(body: LibraryText, request: Request):
         # A library-wide issue names no chain, and its message says the rest.
         first = issues[0]
         raise HTTPException(422, str(first) if first.chain else first.message)
-    config_mod.write_text(path, body.text)
+    _, warning = config_mod.write_template(path, body.text)
     deps._reload_templates(st)
-    return _library_view(st, deps.library_or_503(st))
+    return {**_library_view(st, deps.library_or_503(st)), "warning": warning}
 
 
 # ── Template Schema V1 inspection (docs/templates-v1-design.md "Validation
@@ -418,8 +419,10 @@ class ChainText(BaseModel):
 async def put_template(tid: str, body: ChainText, request: Request):
     """Save one chain file, only if the library still resolves it: the text is
     checked as a candidate against the installed library -- the same check
-    `POST /templates/resolve` runs -- and written verbatim, so the author's
-    comments and layout survive. A new id becomes `chains/<id>.yaml`."""
+    `POST /templates/resolve` runs -- and written by `config.write_template`,
+    so the author's comments and layout survive and a flat forge key takes its
+    `config:` form; the answer's `text` is what was written. A new id becomes
+    `chains/<id>.yaml`."""
     st = request.app.state
     library = deps.library_or_503(st)
     # Before the id-shape check, which would answer 400 for a qualified id.
@@ -439,9 +442,9 @@ async def put_template(tid: str, body: ChainText, request: Request):
     if issues:
         raise HTTPException(422, issues[0].message)
     path.parent.mkdir(parents=True, exist_ok=True)
-    config_mod.write_text(path, body.text)
+    written, warning = config_mod.write_template(path, body.text)
     deps._reload_templates(st)
-    return {"id": tid, "file": str(path), "text": body.text}
+    return {"id": tid, "file": str(path), "text": written, "warning": warning}
 
 
 class ParseBody(BaseModel):

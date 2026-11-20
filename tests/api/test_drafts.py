@@ -290,9 +290,12 @@ def test_a_renamed_chain_keeps_its_draft_and_publishes_under_the_new_id(client, 
     text = client.get("/api/drafts/chains/quick-task").json()["files"]["chains/quick.yaml"]
     r = client.put("/api/drafts/chains/quick-task/files/chains/quick.yaml", json={"text": text})
     assert r.json()["result"]["resolved"]["id"] == "quick"
+    # Its backup goes with it: a later `quick-task` gets its own.
+    (templates_dir / "chains" / "quick-task.yaml.pre-config").write_text("old")
 
     assert client.post("/api/drafts/chains/quick-task/publish").status_code == 200
     assert not (templates_dir / "chains" / "quick-task.yaml").exists()
+    assert not (templates_dir / "chains" / "quick-task.yaml.pre-config").exists()
     assert (templates_dir / "chains" / "quick.yaml").read_text() == text
 
 
@@ -561,22 +564,48 @@ def test_a_repos_draft_over_a_repos_yaml_saved_since_answers_409(client, templat
     assert "saved elsewhere" in (templates_dir / "repos.yaml").read_text()
 
 
-def test_a_failing_apply_hook_answers_500_keeps_the_draft_and_the_retry_succeeds(
-    client, templates_dir, monkeypatch
-):
+def _refuse_policy(monkeypatch, client, templates_dir):
     from kraft.api import deps
 
     monkeypatch.setattr(deps, "reload_policy", lambda st: "refused")
     put_file(client, "policy", "policy.yaml", policy_text(templates_dir))
-    r = client.post(f"{POLICY}/publish")
+    return POLICY, "refused", "policy.yaml", "rate_limit_retries: 6"
+
+
+def _refuse_a_flat_chain(monkeypatch, client, templates_dir):
+    """`write_template` writes other text than the draft holds."""
+    from kraft.api import deps
+
+    flat = SCRATCH.replace(
+        '      - {id: t, kind: subprocess, command: "true"}',
+        "      - id: t\n        kind: forge\n        target: ci.pipeline\n        pipeline: 42",
+    )
+    (templates_dir / "chains" / "scratch.yaml").write_text(flat)
+    put(client, "scratch", flat.replace("pipeline: 42", "pipeline: 43"))
+
+    def refuse(st):
+        raise RuntimeError("refused")
+
+    monkeypatch.setattr(deps, "_reload_templates", refuse)
+    return "/api/drafts/chains/scratch", "refused", "chains/scratch.yaml", "config:"
+
+
+@pytest.mark.parametrize(
+    "arrange", [_refuse_policy, _refuse_a_flat_chain], ids=["policy", "a-flat-chain"]
+)
+def test_a_failing_apply_hook_answers_500_keeps_the_draft_and_the_retry_succeeds(
+    client, templates_dir, monkeypatch, arrange
+):
+    url, why, file, written = arrange(monkeypatch, client, templates_dir)
+    r = client.post(f"{url}/publish")
     assert r.status_code == 500
-    assert "refused" in r.json()["detail"]
-    assert "rate_limit_retries: 6" in (templates_dir / "policy.yaml").read_text()
-    assert client.get(POLICY).json()["draft"] is True
+    assert why in r.json()["detail"]
+    assert written in (templates_dir / file).read_text()
+    assert client.get(url).json()["draft"] is True
 
     monkeypatch.undo()
-    assert client.post(f"{POLICY}/publish").status_code == 200
-    assert client.get(POLICY).json()["draft"] is False
+    assert client.post(f"{url}/publish").status_code == 200
+    assert client.get(url).json()["draft"] is False
 
 
 def test_two_drafts_over_policy_yaml_the_second_publish_answers_409_and_writes_nothing(

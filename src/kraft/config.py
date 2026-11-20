@@ -212,6 +212,66 @@ def write_preserving(path: str | Path, data: dict) -> None:
         write_yaml(path, data)
 
 
+#: Beside a template file: the file as it was before Kraft first wrote it in the
+#: `config:` form. Written once and never overwritten; deleted with its file
+#: when a publish deletes or renames that chain.
+PRE_CONFIG = ".pre-config"
+KEPT_ANCHORS = "kept in the old form: this file uses YAML anchors, which Kraft does not rewrite"
+KEPT_UNSAFE = "kept in the old form: Kraft could not rewrite it safely"
+KEPT_NO_BACKUP = "kept in the old form: Kraft could not keep a copy of the file on disk first"
+
+
+def write_template(path: str | Path, text: str) -> tuple[str, str | None]:
+    """Write a chain or library file Kraft saves, in the `config:` form
+    (`kraft-saves-templates-in-the-config-form`): the text written, and why it
+    was kept in the old form, if it was. A save is never refused for the lift."""
+    from kraft.drafts import preserve
+
+    path = Path(path)
+    backup = path.with_name(path.name + PRE_CONFIG)
+    lifted = _flat_template(text)
+    written, warning = text, None
+    try:
+        old = path.read_text() if path.is_file() else None
+        if old is not None and _flat_template(old) is not None and not backup.exists():
+            write_text(backup, old)
+    except (OSError, UnicodeDecodeError):
+        # No copy of the file on disk: never rewrite it, never refuse the save.
+        lifted, warning = None, (KEPT_NO_BACKUP if lifted is not None else None)
+    if lifted is not None:
+        try:
+            if _uses_anchors(text):
+                warning = KEPT_ANCHORS
+            else:
+                written = preserve.rewrite(
+                    text, lifted, identity_keys=("path", "id"), place_new_keys=True
+                )
+        except Exception:  # noqa: BLE001 -- any failure writes the text as given
+            written, warning = text, KEPT_UNSAFE
+    write_text(path, written)
+    if warning:
+        logger.warning("%s: %s", path, warning)
+    return written, warning
+
+
+def _flat_template(text: str) -> dict | None:
+    """`text`'s mapping in the `config:` form, or None when it holds no flat key."""
+    from kraft.templates.models import lift_tasks
+
+    try:
+        data = safe_load(text)
+    except (yaml.YAMLError, ValueError):
+        return None
+    return data if isinstance(data, dict) and lift_tasks(data) else None
+
+
+def _uses_anchors(text: str) -> bool:
+    """`safe_load` expands anchors and `<<` invisibly; the event stream shows them."""
+    return any(
+        isinstance(e, yaml.AliasEvent) or getattr(e, "anchor", None) for e in yaml.parse(text)
+    )
+
+
 # ── repos ────────────────────────────────────────────────────────────────────
 
 REPOS_DEFAULT: dict = {"repos": []}
