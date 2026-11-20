@@ -114,6 +114,15 @@ class _Files:
         (" ".join(["`a`"] * 500), "more than 1,500 bytes of prose"),
         # A 31-byte span of real code is a quote: 1,480 bytes of prose and it still passes.
         ("x" * 1_480 + " `def load(file: Path, data: dict):`", None),
+        # 100 block quotes of a 19-byte slice of a note: 2,300 bytes, 400 of them markup.
+        ("\n\n".join(["> Rename `x` to `tota"] * 100), "more than 1,500 bytes of prose"),
+        # 100 one-line fences of a real 14-byte line: 2,299 bytes, 800 of them markup.
+        ("\n".join(["```\ndef add(a, b):\n```"] * 100), "more than 1,500 bytes of prose"),
+        # 200 indented one-liners of a real 14-byte line: 4,000 bytes, 1,200 of them markup.
+        ("\n\n".join(["    def add(a, b):"] * 200), "more than 1,500 bytes of prose"),
+        # The floor is 20 bytes: one of 20 is a quote (1,494 bytes of prose), one of 19 is not.
+        ("x" * 1_490 + "\n\n> Rename `x` to `total", None),
+        ("x" * 1_490 + "\n\n> Rename `x` to `tota", "more than 1,500 bytes of prose"),
     ],
     ids=[
         "plain-prose",
@@ -168,6 +177,11 @@ class _Files:
         "quotes-are-not-prose",
         "many-short-spans-are-prose",
         "a-long-span-is-a-quote",
+        "many-short-block-quotes-are-prose",
+        "many-one-line-fences-are-prose",
+        "many-short-indented-blocks-are-prose",
+        "a-20-byte-quote-counts",
+        "a-19-byte-quote-is-prose",
     ],
 )
 async def test_the_gate_refuses_what_could_render_run_or_leak(text, why):

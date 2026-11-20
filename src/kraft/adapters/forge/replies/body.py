@@ -31,9 +31,10 @@ if TYPE_CHECKING:
 #: renders as nothing and breaks the sequence.
 WORD_JOINER = "\u2060"
 PROSE_MAX = 1_500  # bytes of agent text that is not a verbatim quote
-#: An inline span shorter than this is checked verbatim but counts as prose: a one-character
-#: span is in every file, so a run of them would carry any text past `PROSE_MAX`.
-SPAN_QUOTE_MIN = 20
+#: A quote of any form (span, fence, indented block, block quote) shorter than this is checked
+#: verbatim but counts as prose: a one-character quote is in every file or note, so a run of
+#: them would carry any text past `PROSE_MAX`.
+QUOTE_MIN = 20
 NOTE_MAX = 60_000  # bytes of the whole note, footer and marker included
 
 _INVISIBLE = {"Cc", "Cf", "Co", "Cs", "Zl", "Zp"}
@@ -288,7 +289,7 @@ async def check(text: str, *, quotes: Quotes, secrets: Collection[str]) -> Refus
         if not found:
             return Refused("a quote not found verbatim")
         size = len(p.text.encode())
-        if p.quote == "block" or size >= SPAN_QUOTE_MIN:
+        if size >= QUOTE_MIN:
             verbatim += size
     if len(text.encode()) - verbatim > PROSE_MAX:
         return Refused("more than 1,500 bytes of prose")
