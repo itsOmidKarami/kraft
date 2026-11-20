@@ -969,6 +969,12 @@ def _cause_first(cause: str, log: str) -> str:
     return f"{cause}\n{log}"
 
 
+#: The line a CI-watching review wait leads its log with when it reads a red
+#: pipeline. A reused wait session's log is appended to, so the cause cannot
+#: rely on being the file's first line: `walk._task_cause` picks this prefix out.
+CI_RED_LINE = "CI is red: "
+
+
 async def _pipeline_stop(db, work_item_id: str, node_id: str, cause: str) -> str:
     """Stop for a person on a pipeline Kraft will not retry or judge: the reason
     `stops.stop_for_infra` shows is the newest of these events."""
@@ -2312,6 +2318,56 @@ def _trace_line(log: str) -> int | None:
     return int(m.group(2)) if m else None
 
 
+async def _watch_ci(
+    db,
+    targets: list[tuple[Forge, Path, Path]],
+    *,
+    branch: str,
+    work_item_id: str,
+    node_id: str,
+    ci_task: str,
+    ci_checks: bool,
+    multi: bool,
+) -> tuple[str, str | None, list[dict] | None]:
+    """What a review wait that sets `watch_ci` does before it reads its bots:
+    push each repository's branch and read its pipeline, and end on a settled
+    red. Each target is `(forge, repo, orig_repo)`; returns `(log, status,
+    findings)`, where a `status` of None lets the bots' part run.
+
+    It reads with the CI wait's own reader and verdict (`ci.render_ci`) and none
+    of the CI wait's side effects: no rebase, no infrastructure retry, no
+    skip-CI record, no pipeline pin. The node's `mr.ci` task owns CI, so a red
+    read is reported as that task's finding (`ci_task`), with its source and
+    fingerprint (`review-wait-red-pipeline-is-the-ci-wait-s-finding`)."""
+    log = ""
+    for forge, repo, orig_repo in targets:
+        await forge.push(repo=repo, branch=branch)
+        await _record_push(
+            db,
+            work_item_id=work_item_id,
+            node_id=node_id,
+            orig_repo=orig_repo,
+            repo=repo,
+            branch=branch,
+        )
+    for forge, repo, _ in targets:
+        head = await git._head_sha(repo, branch)
+        read = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
+        rendered, verdict = await ci.render_ci(
+            read, forge=forge, repo=repo, branch=branch, head_sha=head
+        )
+        if verdict == "failed":
+            cause = (
+                f"{CI_RED_LINE}{', '.join(j.name for j in read.failed_jobs)} failed on {head[:7]}"
+            )
+            return (
+                _cause_first(cause, log + rendered),
+                "failed",
+                _job_findings(read, rendered, ci_task),
+            )
+    return log, None, None
+
+
 async def run_task(
     db,
     run_dirs,
@@ -2367,6 +2423,12 @@ async def run_task(
     reads_feedback: bool = False,
     #: The review wait's grace period (`ForgeTask.grace`).
     grace: timedelta = DEFAULT_GRACE,
+    #: `ForgeTask.watch_ci`: the review wait also pushes and reads CI, and ends
+    #: on a red pipeline, as `ci_task`'s finding.
+    watch_ci: bool = False,
+    #: The node's own `mr.ci` task path, the owner of a CI finding the review
+    #: wait reports (`ResolvedNode.ci_wait_after`).
+    ci_task: str | None = None,
     #: `ci.pipeline`'s pipeline id (`ForgeTask.pipeline`), the writer paths of
     #: its `reads`, and the variables each declares now.
     pipeline: str | None = None,
@@ -2610,6 +2672,27 @@ async def run_task(
             # -- whether or not root itself has anything to publish.
             covered = {Path(r["repo_path"]).resolve() for r in rows if r["role"] == "submodule"}
             await git._assert_submodules_covered(repo, covered)
+        if handler == "automated_review" and watch_ci and ci_task and not multi:
+            log, watched, watched_findings = await _watch_ci(
+                db,
+                [
+                    (
+                        member_forges.get(mounts_by_row.get(row_id), live_forge),
+                        target_repo,
+                        target_repo if role == "submodule" else (orig_repo or target_repo),
+                    )
+                    for row_id, target_repo, role in targets
+                ],
+                branch=branch,
+                work_item_id=work_item_id,
+                node_id=node_id,
+                ci_task=ci_task,
+                ci_checks=ci_checks,
+                multi=multi,
+            )
+            if watched is not None:
+                # Ended here: the bots' part, which walks `targets`, has nothing to read.
+                status, findings, targets = watched, watched_findings, []
         for row_id, target_repo, role in targets:
             if multi and role == "root" and handler in ("mark_ready", "external_approval"):
                 # The root's own merge request waits for its members: it is

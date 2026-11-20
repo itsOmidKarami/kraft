@@ -1937,6 +1937,12 @@ async def _dispatch_task_in(
                 for other in node.tasks()
             ),
             grace=t.grace,
+            watch_ci=t.watch_ci,
+            ci_task=(
+                ci.path
+                if t.watch_ci and (ci := node.ci_wait_after(task.path)) is not None
+                else None
+            ),
             pipeline=t.pipeline,
             reads=reads,
             declared=declared,

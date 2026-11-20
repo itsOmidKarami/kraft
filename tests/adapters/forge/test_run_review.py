@@ -237,7 +237,7 @@ def _shipped_triage_step() -> dict:
     return {**step, "tasks": [{"id": task["id"], **own, "harness": "fake"}]}
 
 
-def _review_node(minutes, *, reads=True, reviewers=(_A, _B), loop=False):
+def _review_node(minutes, *, reads=True, reviewers=(_A, _B), loop=False, watch_ci=False):
     """One node: the review wait, and (when `reads`) a task that reads what it
     collected, in the step after. `loop` gives it the recovery the shipped
     `post_draft_feedback` has: `on_failure` for a failed check, a fix loop for
@@ -250,9 +250,15 @@ def _review_node(minutes, *, reads=True, reviewers=(_A, _B), loop=False):
         "policy": {"total_time_cap_minutes": minutes},
         "wait": {"polling": {"initial_interval": "30s", "max_interval": "2m"}},
     }
+    if watch_ci:
+        wait["watch_ci"] = True
     steps = [{"id": "settle", "tasks": [wait]}]
     if reads:
         steps.append(_shipped_triage_step())
+    if watch_ci:
+        steps.append(
+            {"id": "ci", "tasks": [{"id": "await_ci", "kind": "forge", "target": "mr.ci"}]}
+        )
     node = {"id": "feedback", "kind": "exec", "steps": steps}
     if loop:
 
@@ -277,6 +283,8 @@ def rig(item_on, database, run_dirs, monkeypatch, wait_clock, tmp_path):
 
     class Rig:
         triaged: list[str] = []
+        #: The instruction each launch was given, parallel to `triaged`.
+        instructions: list[str] = []
         verdicts: list[list[dict]] = []
 
         async def __call__(self, node, fake):
@@ -284,10 +292,11 @@ def rig(item_on, database, run_dirs, monkeypatch, wait_clock, tmp_path):
             # A harness for the reading task to select; what it launches is
             # replaced below, since only whether it is reached is asked.
             monkeypatch.setenv("KRAFT_HOME", str(fake_harness_home(tmp_path, ["true"])))
-            self.triaged, self.verdicts = [], []
+            self.triaged, self.instructions, self.verdicts = [], [], []
 
             async def launched(db, run_dirs, t, node, row, worktree, *, task, common, **_):
                 self.triaged.append(task.path)
+                self.instructions.append(_.get("instruction", ""))
                 if ".fix_loop." in task.path:
                     # A repair that changes nothing stops the loop.
                     (Path(worktree) / "repaired.txt").write_text("x")
