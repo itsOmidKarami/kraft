@@ -36,12 +36,18 @@ from kraft.api import api_router, deps, item_ids
 from kraft.api.routes import board, search
 from kraft.api.routes.search import OpenDocument
 from kraft.config import git_read
-from kraft.executor import gates, stops, walk
+from kraft.executor import dispatch, gates, stops, walk
 from kraft.executor import slices as slices_mod
 from kraft.policy import NO_CAP, PolicyError
 from kraft.remote import runs as remote_runs
 from kraft.templates.forks import ChainPath, PathError, override_record
-from kraft.templates.models import AgentTask, GateNode
+from kraft.templates.models import (
+    PATH_SEPARATOR,
+    AgentTask,
+    GateNode,
+    pipeline_variable,
+    resolve_reads,
+)
 from kraft.templates.retry import (
     AGENT_TASK_FIELDS,
     RetryOverrideError,
@@ -3085,6 +3091,88 @@ async def set_mr_labels(wid: str, body: MrLabels, request: Request):
     return {"work_item_id": wid, "labels": list(labels)}
 
 
+async def _rerun_pipeline(st, wid: str, row, node, reason: str, request: Request):
+    """A person's re-run of the pipeline a `ci.pipeline` wait stopped on, then
+    a retry of the node, whose wait reads that same pipeline again. Only a
+    person's: the id is one a worker chose, and a re-run is a write with the
+    server's token (#1301), so neither the item's sessions, an escalation turn
+    nor an assistant may ask for it. Not when the id's writer is in this node:
+    a plain Retry runs it again, and it starts a fresh pipeline."""
+    node_id = node.id
+    if not ci_reruns.pipeline_stopped_for_a_person(row):
+        raise HTTPException(
+            409,
+            f"{node_id} waits on a pipeline by id, which only a person re-runs, "
+            "and only once the item has stopped for them",
+        )
+    when_free.refuse_if_claimed()
+    # The item's own sessions are refused here too: none of them is a person.
+    if (who := _decided_by_caller(request)) != "human":
+        raise HTTPException(
+            403,
+            f"re-running a pipeline a worker named is a person's call, not an {who}'s",
+        )
+    ids = []
+    for wait in ci_reruns.pipeline_waits(node):
+        pipeline = wait.task.pipeline
+        name = pipeline_variable(pipeline)
+        if name is not None:
+            reads = resolve_reads(node_id, wait.task.reads)
+            if any(r.startswith(f"{node_id}{PATH_SEPARATOR}") for r in reads):
+                raise HTTPException(
+                    409,
+                    f"{wait.path} reads its pipeline id from a task in {node_id}: "
+                    "Retry runs that task again, and it starts a fresh pipeline",
+                )
+            declared = dispatch.declared_variables(row, reads)
+            pipeline = await asyncio.to_thread(
+                outputs.lookup_variable, st.run_dirs, wid, reads, name, declared
+            )
+        if pipeline:
+            ids.append(pipeline)
+    if not ids:
+        raise HTTPException(409, f"no pipeline id is set for {node_id}'s wait")
+    repos = st.db.read(
+        lambda c: c.execute(
+            "SELECT repo_path FROM work_item_repos WHERE work_item_id = ? AND role = 'root'",
+            (wid,),
+        ).fetchone()
+    )
+    # The repository the wait reads with: a workspace's root, else the item's folder.
+    repo = Path(repos["repo_path"]) if repos else inplace.item_folder(st.run_dirs, row)
+    if not repo.is_dir():
+        raise deps.worktree_missing(row)
+    repo_entry = deps.launch(st, row["repo"]).repo_entry
+    jobs: list[str] = []
+    reran: list[str] = []
+    try:
+        forge = await forge_mod.item_forge(st.db, row, repo_entry, *deps.forges_now(st))
+        for pipeline in ids:
+            ci = await forge.pipeline_status(repo=repo, pipeline_id=pipeline)
+            # Nothing failed (or nothing ran, which fails no job): GitLab's
+            # retry would answer a pipeline with no failed job as if it had re-run one.
+            if ci.state != "failed" or not ci.failed_jobs:
+                continue
+            reran += await forge.retry_jobs(repo=repo, ci=ci)
+            jobs += [j.name for j in ci.failed_jobs]
+    except forge_mod.ForgeError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    if not reran:
+        raise HTTPException(
+            409, f"pipeline {', '.join(ids)}: no failed job here can be re-run by Kraft"
+        )
+    payload = {
+        "node_id": node_id,
+        "cycle": None,
+        "reason": reason,
+        "pipelines": ids,
+        "jobs": jobs,
+        "reran": reran,
+    }
+    await st.db.write(lambda c: events.append(c, wid, ForgeEvent.CI_RERUN_REQUESTED, payload))
+    return await _retry(wid, Retry(), request)
+
+
 @api_router.post("/work-items/{wid}/ci-rerun")
 async def ci_rerun(wid: str, body: CiRerun, request: Request):
     """Re-run the CI jobs that failed outside the code.
@@ -3113,6 +3201,8 @@ async def ci_rerun(wid: str, body: CiRerun, request: Request):
     row = deps._work_item_row(st, wid)
     node_id = row["current_node_id"]
     node = ci_reruns.node_of(store.materialized_chain_of(row), node_id)
+    if not ci_reruns.waits_on_mr_ci(node) and ci_reruns.pipeline_waits(node):
+        return await _rerun_pipeline(st, wid, row, node, reason, request)
     # Ahead of the worktree: an item on any other node is a 409, not a 404.
     if not ci_reruns.waits_on_mr_ci(node):
         raise HTTPException(

@@ -106,11 +106,27 @@
       "stop": "failed",
       "reason": "the forge refused"
     },
+    "failed_on_pipeline": {
+      "status": "needs_human",
+      "node": "pipeline_watch",
+      "stop": "failed",
+      "reason": "pipeline_watch.main.wait failed: pipeline 7 is red",
+      "pipeline": true,
+      "worktree": true
+    },
     "infra": {
       "status": "needs_human",
       "node": "implementation",
       "stop": "infra",
       "reason": "a session was lost"
+    },
+    "infra_on_pipeline": {
+      "status": "needs_human",
+      "node": "pipeline_watch",
+      "stop": "infra",
+      "reason": "pipeline 7 failed on the forge's own infrastructure",
+      "pipeline": true,
+      "worktree": true
     },
     "failed_after_abandoned": {
       "status": "needs_human",
@@ -250,7 +266,9 @@
         "cap_on_ci",
         "conflict",
         "failed",
+        "failed_on_pipeline",
         "infra",
+        "infra_on_pipeline",
         "budget_item_cap",
         "budget_daily",
         "mr_closed",
@@ -277,7 +295,9 @@
         "cap_on_ci",
         "conflict",
         "failed",
+        "failed_on_pipeline",
         "infra",
+        "infra_on_pipeline",
         "failed_after_abandoned",
         "budget_item_cap",
         "budget_daily",
@@ -303,7 +323,9 @@
         "cap_on_ci",
         "conflict",
         "failed",
+        "failed_on_pipeline",
         "infra",
+        "infra_on_pipeline",
         "failed_after_abandoned",
         "mr_closed",
         "mr_closed_no_ref",
@@ -334,7 +356,9 @@
       },
       "takes": [
         "stuck_on_ci",
-        "cap_on_ci"
+        "cap_on_ci",
+        "failed_on_pipeline",
+        "infra_on_pipeline"
       ]
     },
     "cancel": {
@@ -362,7 +386,9 @@
         "cap_on_ci",
         "conflict",
         "failed",
+        "failed_on_pipeline",
         "infra",
+        "infra_on_pipeline",
         "failed_after_abandoned",
         "budget_item_cap",
         "budget_daily",
@@ -402,7 +428,9 @@
         "cap_on_ci",
         "conflict",
         "failed",
+        "failed_on_pipeline",
         "infra",
+        "infra_on_pipeline",
         "failed_after_abandoned",
         "budget_item_cap",
         "budget_daily",
@@ -486,7 +514,9 @@
         "cap_on_ci",
         "conflict",
         "failed",
+        "failed_on_pipeline",
         "infra",
+        "infra_on_pipeline",
         "failed_after_abandoned",
         "budget_item_cap",
         "budget_daily",

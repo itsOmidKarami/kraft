@@ -288,6 +288,22 @@ add:
 """
 
 
+#: The default chain with a `ci.pipeline` wait on pipeline 7 after merge-request feedback.
+PIPELINE_ONE_OFF = """\
+extends: default
+add:
+  - after: merge_request_feedback
+    node:
+      id: pipeline_watch
+      kind: exec
+      tasks:
+        - id: wait
+          kind: forge
+          target: ci.pipeline
+          pipeline: '7'
+"""
+
+
 LIBRARY_ONLY_ONE_OFF = "extends: default\nremove: [work_brief]\n"
 #: The caller headers `routes.gates._decided_by` reads as an MCP session and as a worker.
 MCP_HEADERS = {"X-Kraft-Client": "mcp"}
@@ -547,7 +563,15 @@ def _in_state(client, repo, state: dict, **body) -> str:
     from kraft.templates.models import AgentTask
     from kraft.vocab import ThreadLabel
 
-    wid = _paused(client, repo, chain_template="default", **body)
+    # A `ci.pipeline` wait is in no library chain: a one-off adds one (`pipeline`:
+    # True, or the one-off's own text), approved below.
+    one_off = state.get("pipeline")
+    chain = (
+        {"one_off_chain": one_off if isinstance(one_off, str) else PIPELINE_ONE_OFF}
+        if one_off
+        else {}
+    )
+    wid = _paused(client, repo, **(chain or {"chain_template": "default"}), **body)
     dep = _paused(client, repo, chain_template="default") if state.get("depends_on") else None
     kid = _paused(client, repo, chain_template="default") if state.get("slices") else None
     with closing(sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")) as c, c:
@@ -555,6 +579,8 @@ def _in_state(client, repo, state: dict, **body) -> str:
             "UPDATE work_items SET status = ?, current_node_id = ? WHERE id = ?",
             (state["status"], state["node"], wid),
         )
+        if chain:
+            c.execute("UPDATE work_items SET one_off_pending = 0 WHERE id = ?", (wid,))
         if "stop" in state:
             kw = {"budget": state["budget"]} if "budget" in state else {}
             store.mark_needs_human(c, wid, state["node"], state["reason"], kind=state["stop"], **kw)

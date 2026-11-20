@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import pytest
 from support.api import (
+    MCP_HEADERS,
     _cancel_task,
     _completed_item,
     _create_escalation_session,
@@ -187,3 +188,128 @@ def test_after_a_persons_rerun_the_node_waits_on_ci_before_any_fix(client, repo,
     ]
     assert waits, [e["type"] for e in after]
     assert "fix_cycle_started" not in [e["type"] for e in after[: waits[0]]]
+
+
+# A `ci.pipeline` wait's pipeline, which a person re-runs (Kraft-0ki8b).
+PIPE_NODE = "pipeline_watch"
+_ON_PIPELINE = {
+    "status": "needs_human",
+    "node": PIPE_NODE,
+    "stop": "failed",
+    "reason": "pipeline 7 is red",
+    "pipeline": True,
+    "worktree": True,
+}
+_JOB = forge_mod.FailedJob("e2e", "failed", "runner_system_failure")
+
+
+def _pipeline(state="failed", **fields):
+    jobs = (_JOB,) if state == "failed" and not fields.get("nothing_ran") else ()
+    return {
+        "pipeline_statuses": {
+            "7": [forge_mod.CIStatus(state=state, url="p7", failed_jobs=jobs, **fields)]
+        }
+    }
+
+
+@pytest.mark.parametrize("stop", ["failed", "infra", "stuck", "cap"])
+def test_a_person_re_runs_a_pipeline_wait_s_pipeline_and_it_retries(
+    client, repo, monkeypatch, stop
+):
+    wid = _in_state(client, repo, {**_ON_PIPELINE, "stop": stop})
+    fake = _fake_forge(monkeypatch, **_pipeline())
+    monkeypatch.setattr(deps, "spawn", lambda app, w, coro: deps.discard(coro))
+    assert "rerun_ci" in client.get(f"/api/work-items/{wid}").json()["actions"]
+
+    r = _rerun(client, wid, "runner went away")
+
+    assert r.status_code == 200, r.text
+    assert (fake.pipeline_status_ids, fake.retried) == (["7"], ["p7"])
+    (event,) = _recorded(client, wid)
+    payload = event["payload"]
+    assert (payload["pipelines"], payload["cycle"], payload["jobs"]) == (["7"], None, ["e2e"])
+    assert (r.json()["id"], r.json()["node_id"]) == (wid, PIPE_NODE)
+
+
+#: The wait reads its id from a task in its own node, which a retry runs again.
+_SAME_NODE = """\
+extends: default
+add:
+  - after: merge_request_feedback
+    node:
+      id: pipeline_watch
+      kind: exec
+      steps:
+        - id: start
+          tasks:
+            - id: emit
+              kind: subprocess
+              command: "true"
+              outputs: {variables: [PIPELINE_ID]}
+        - id: watch
+          tasks:
+            - id: wait
+              kind: forge
+              target: ci.pipeline
+              pipeline: $PIPELINE_ID
+              reads: [start.emit]
+"""
+
+
+@pytest.mark.parametrize(
+    ("status", "says", "state", "forge", "caller"),
+    [
+        pytest.param(
+            409,
+            "only once the item has stopped",
+            {"status": "active", "stop": None},
+            _pipeline(),
+            None,
+            id="not-stopped",
+        ),
+        pytest.param(403, "not an assistant's", {}, _pipeline(), "assistant", id="an-assistant"),
+        pytest.param(403, "not an agent's", {}, _pipeline(), "escalation", id="an-escalation-turn"),
+        pytest.param(
+            403,
+            "is a person's call",
+            {},
+            _pipeline(),
+            "its-own-session",
+            id="its-own-worker-session",
+        ),
+        pytest.param(409, "no failed job", {}, _pipeline("success"), None, id="green"),
+        pytest.param(
+            409, "no failed job", {}, _pipeline("failed", nothing_ran=True), None, id="ran-nothing"
+        ),
+        pytest.param(
+            409,
+            "starts a fresh pipeline",
+            {"pipeline": _SAME_NODE},
+            _pipeline(),
+            None,
+            id="id-written-in-its-node",
+        ),
+    ],
+)
+def test_a_pipeline_rerun_is_refused(client, repo, monkeypatch, status, says, state, forge, caller):
+    row = {**_ON_PIPELINE, **state}
+    if row["stop"] is None:
+        row.pop("stop")
+    wid = _in_state(client, repo, row)
+    fake = _fake_forge(monkeypatch, **forge)
+    headers = {}
+    if caller == "assistant":
+        headers = MCP_HEADERS
+    elif caller == "escalation":
+        _create_escalation_session(wid, "esc", PIPE_NODE)
+        headers = {"X-Kraft-Session-Id": f"{wid}/esc"}
+    elif caller == "its-own-session":
+        _create_escalation_session(wid, "s1", PIPE_NODE, hook_point=f"{PIPE_NODE}.main.wait")
+        headers = {"X-Kraft-Session-Id": f"{wid}/s1"}
+
+    r = client.post(f"/api/work-items/{wid}/ci-rerun", json={"reason": "x"}, headers=headers)
+
+    assert r.status_code == status, r.text
+    assert says in r.json()["detail"]
+    assert fake.retried == []
+    assert _recorded(client, wid) == []

@@ -29,9 +29,14 @@ def test_a_door_takes_only_the_states_this_table_lists(client, repo, monkeypatch
     from kraft.api.routes import lifecycle
 
     monkeypatch.setattr(lifecycle.forge_mod.run, "backend_for", lambda *_: "fake")
+    job = lifecycle.forge_mod.FailedJob("e2e", "failed", "script_failure")
     red = {
         "ci_states": ["failed"],
-        "ci_failed_jobs": [(lifecycle.forge_mod.FailedJob("e2e", "failed", "script_failure"),)],
+        "ci_failed_jobs": [(job,)],
+        # The pipeline a `pipeline` state's `ci.pipeline` wait names, red too.
+        "pipeline_statuses": {
+            "7": [lifecycle.forge_mod.CIStatus(state="failed", url="p7", failed_jobs=(job,))]
+        },
     }
     monkeypatch.setattr(
         lifecycle.forge_mod.run, "resolve", lambda _b: lifecycle.forge_mod.FakeForge(**red)

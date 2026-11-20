@@ -299,6 +299,16 @@ def raisable(stop_payload: dict | None) -> bool:
     return scope == "work_item" or (scope == "usd" and budget.get("path") == "")
 
 
+def _ci_rerunnable(row, chain) -> bool:
+    """Whether `POST /ci-rerun` takes a person's re-run of the item now: a fix
+    loop stopped for them on merge-request CI, or a stop at a `ci.pipeline`
+    wait's red or broken pipeline."""
+    node = ci_reruns.node_of(chain, row["current_node_id"])
+    if ci_reruns.waits_on_mr_ci(node):
+        return ci_reruns.stopped_for_a_person(row)
+    return bool(ci_reruns.pipeline_waits(node)) and ci_reruns.pipeline_stopped_for_a_person(row)
+
+
 def item_actions(
     app,
     row,
@@ -343,9 +353,7 @@ def item_actions(
         budget_stop=bool((stop_payload or {}).get("budget")),
         raisable=raisable(stop_payload),
         mr_closed=row["stop_kind"] == StopKind.MR_CLOSED and mr_ref is not None,
-        ci_rerunnable=chain is not None
-        and ci_reruns.stopped_for_a_person(row)
-        and ci_reruns.waits_on_mr_ci(ci_reruns.node_of(chain, row["current_node_id"])),
+        ci_rerunnable=chain is not None and _ci_rerunnable(row, chain),
         walk_live=deps.task_is_live(app, row["id"]),
         escalation_live=escalation_live,
         agent_paused=agent_paused,
