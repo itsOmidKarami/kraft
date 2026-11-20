@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -3128,6 +3129,10 @@ async def _rerun_pipeline(st, wid: str, row, node, reason: str, request: Request
             pipeline = await asyncio.to_thread(
                 outputs.lookup_variable, st.run_dirs, wid, reads, name, declared
             )
+        if pipeline and not re.fullmatch(r"[0-9]+", pipeline):
+            # As the wait refuses it: a worker's value goes into a forge API path
+            # read with the server's token, and is never echoed.
+            raise HTTPException(409, f"{wait.path}: the pipeline id must be digits only")
         if pipeline:
             ids.append(pipeline)
     if not ids:

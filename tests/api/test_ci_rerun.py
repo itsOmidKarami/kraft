@@ -16,7 +16,7 @@ from support.api import (
     _poll_events,
 )
 
-from kraft import events
+from kraft import events, item_paths
 from kraft.adapters import forge as forge_mod
 from kraft.api import deps
 from kraft.vocab import ChainEvent
@@ -203,13 +203,10 @@ _ON_PIPELINE = {
 _JOB = forge_mod.FailedJob("e2e", "failed", "runner_system_failure")
 
 
-def _pipeline(state="failed", **fields):
+def _pipeline(state="failed", id="7", **fields):
     jobs = (_JOB,) if state == "failed" and not fields.get("nothing_ran") else ()
-    return {
-        "pipeline_statuses": {
-            "7": [forge_mod.CIStatus(state=state, url="p7", failed_jobs=jobs, **fields)]
-        }
-    }
+    status = forge_mod.CIStatus(state=state, url=f"p{id}", failed_jobs=jobs, **fields)
+    return {"pipeline_statuses": {id: [status]}}
 
 
 @pytest.mark.parametrize("stop", ["failed", "infra", "stuck", "cap"])
@@ -313,3 +310,55 @@ def test_a_pipeline_rerun_is_refused(client, repo, monkeypatch, status, says, st
     assert says in r.json()["detail"]
     assert fake.retried == []
     assert _recorded(client, wid) == []
+
+
+#: The wait reads its id from an earlier node's step output.
+_EARLIER_NODE = """\
+extends: default
+add:
+  - after: merge_request_feedback
+    node:
+      id: find
+      kind: exec
+      tasks:
+        - id: emit
+          kind: subprocess
+          command: "true"
+          outputs: {variables: [PIPELINE_ID]}
+  - after: merge_request_feedback
+    node:
+      id: pipeline_watch
+      kind: exec
+      tasks:
+        - id: wait
+          kind: forge
+          target: ci.pipeline
+          pipeline: $PIPELINE_ID
+          reads: [find.main.emit]
+"""
+
+
+@pytest.mark.parametrize(
+    ("value", "status", "read"),
+    [
+        pytest.param("42", 200, ["42"], id="digits"),
+        # A worker's value never reaches a forge API path with the server's token.
+        pytest.param("1/../2", 409, [], id="not-digits"),
+    ],
+)
+def test_a_pipeline_rerun_reads_the_id_an_earlier_node_left(
+    client, repo, monkeypatch, value, status, read
+):
+    wid = _in_state(client, repo, {**_ON_PIPELINE, "pipeline": _EARLIER_NODE})
+    folder = item_paths.snapshot_dir(client.app.state.run_dirs, wid, "find.main.emit")
+    folder.mkdir(parents=True)
+    (folder / "variables.env").write_text(f"PIPELINE_ID={value}\n")
+    fake = _fake_forge(monkeypatch, **_pipeline(id="42"))
+    monkeypatch.setattr(deps, "spawn", lambda app, w, coro: deps.discard(coro))
+
+    r = _rerun(client, wid)
+
+    assert r.status_code == status, r.text
+    assert fake.pipeline_status_ids == read
+    if status == 409:
+        assert value not in r.json()["detail"]
