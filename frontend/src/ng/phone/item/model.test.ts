@@ -93,6 +93,8 @@ describe("kebabOf", () => {
   it("does not repeat a button the bar has, and archives only an ended item", () => {
     expect(kebabOf(mk("failed", stop("failed"))).map((a) => a.id)).not.toContain("escalate");
     expect(kebabOf(mk("running", null)).map((a) => a.id)).not.toContain("archive");
+    // Re-run CI and Retry take the bar on a stuck stop the server re-runs: Escalate moves to ⋮, not away.
+    expect(kebabOf(mk("needs_you", stop("stuck"), { actions: ["retry", "rerun_ci", "escalate", "cancel"] })).map((a) => a.id)).toContain("escalate");
     expect(kebabOf(mk("cancelled")).map((a) => a.id)).toContain("archive");
   });
   it.each([

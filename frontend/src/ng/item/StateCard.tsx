@@ -443,7 +443,7 @@ function NotStartedCard({ item }: { item: ItemDetail }) {
 }
 
 /** Where "Open the full log" goes: the failed task's pane on its Log tab, or the node's when the task is not in the chain. */
-type Finding = { severity: string; message: string; file?: string | null; line?: number | null; jobs?: { label: string }[] };
+type Finding = { severity: string; message: string; file?: string | null; line?: number | null; source_plugin?: string | null };
 
 /** The findings the fix-loop judge stopped on, when this stop is its verdict:
  *  the node's latest, whose reasoning the reason carries. Any other stop, a
@@ -456,17 +456,18 @@ export function judgedFindings(item: ItemDetail, events: KraftEvent[]): Finding[
   return Array.isArray(verdict.findings) ? (verdict.findings as Finding[]) : [];
 }
 
-/** One row per finding: its severity, what it says, where, and the log of the task that found it. */
+/** One row per finding: its severity, what it says (a failed command's runs to lines), where, and the log of the
+ *  task that found it: `source_plugin`, the task's path, as a job's label is a failed command's own text. */
 function FindingRows({ item, findings }: { item: ItemDetail; findings: Finding[] }) {
   return (
     <ul className="item-card-findings" aria-label="Findings">
       {findings.map((f, i) => {
-        const sel = f.jobs?.[0] ? pathSel(f.jobs[0].label, item.chain_definition.nodes) : null;
+        const sel = f.source_plugin ? pathSel(f.source_plugin, item.chain_definition.nodes) : null;
         return (
           <li key={i}>
-            <span className="item-card-severity">{f.severity}</span> {f.message}
+            <span className="item-card-severity">{f.severity}</span> <span className="item-card-finding-text">{f.message}</span>
             {f.file && <code className="item-card-finding-at">{f.line ? `${f.file}:${f.line}` : f.file}</code>}
-            {sel && <Link className={linkButtonClass({ inline: true })} to={placeUrl(item.id, { sel, tab: "log" })}>log</Link>}
+            {sel && <Link className={linkButtonClass({ inline: true })} aria-label={`log: ${f.message.split("\n")[0]}`} to={placeUrl(item.id, { sel, tab: "log" })}>log</Link>}
           </li>
         );
       })}

@@ -180,7 +180,11 @@ describe("StateCard", () => {
   const said = "Re-run the e2e job.\n\nDocker Hub's pull rate limit failed it.";
   const verdict = (reasoning: string) => ({ seq: 1, work_item_id: "w1", type: "judge_verdict", node_id: "verification", created_at: "2026-09-13T09:00:00Z", payload: {
     node_id: "verification", cycle: 1, verdict: "stop_needs_human", reasoning,
-    findings: [{ severity: "important", message: "job e2e failed: script_failure", file: null, line: null, jobs: [{ label: "verification.checks.lint" }] }],
+    findings: [
+      { severity: "important", message: "job e2e failed: script_failure", file: null, line: null, source_plugin: "verification.checks.lint", jobs: [{ label: "verification.checks.lint" }] },
+      // A failed command's finding: its job's label is the command, its message runs to lines.
+      { severity: "critical", message: "verification.checks.lint failed\n- just lint: E501", file: null, line: null, source_plugin: "verification.checks.lint", jobs: [{ label: "just lint" }] },
+    ],
   } });
   it("a judge's stuck stop keeps its paragraphs, lists its findings with their logs, and offers Re-run CI first", async () => {
     const calls = stubFetch({ ...acceptWrites("POST /work-items/w1/ci-rerun"), "GET /work-items/w1/events": [200, [verdict(said)]] });
@@ -189,7 +193,11 @@ describe("StateCard", () => {
     expect(within(card).getByText(/^judge: Re-run the e2e job\./).textContent).toBe(`judge: ${said}`);
     const rows = await within(card).findByRole("list", { name: "Findings" });
     expect(rows).toHaveTextContent("important job e2e failed: script_failure");
-    expect(within(rows).getByRole("link", { name: "log" }).getAttribute("href")).toMatch(/tab=log/);
+    expect(within(rows).getByText(/^verification\.checks\.lint failed/).textContent).toBe("verification.checks.lint failed\n- just lint: E501");
+    // Each log link by its finding's first line, both to the task's log.
+    const logs = within(rows).getAllByRole("link");
+    expect(logs.map((l) => l.getAttribute("aria-label"))).toEqual(["log: job e2e failed: script_failure", "log: verification.checks.lint failed"]);
+    for (const l of logs) expect(l.getAttribute("href")).toMatch(/tab=log/);
     expect(acts(card)).toEqual(["Re-run CI", "Retry from verification", "Escalate…", "Open verification →"]);
     expect(within(card).getByRole("button", { name: "Re-run CI" })).toHaveClass("btn-primary");
     expect(within(card).getByRole("button", { name: "Retry from verification" })).toHaveClass("btn-secondary");

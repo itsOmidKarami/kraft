@@ -73,8 +73,8 @@ the package shows no edit near it since your last session".
 
 On `stop_needs_human`, write for the person who picks it up: the first sentence
 says what they should do, then a blank line, then the evidence in short
-paragraphs. A red CI job that failed outside the code (a registry rate limit, a
-runner that went away) is a re-run, which `kraft item rerun-ci <id> --reason
+paragraphs. A red merge-request CI job that failed outside the code (a registry
+rate limit, a runner that went away) is a re-run, which `kraft item rerun-ci <id> --reason
 "..."` does and then retries the node.
 
 When you are unsure, report `continue`, and say what you could not tell in
