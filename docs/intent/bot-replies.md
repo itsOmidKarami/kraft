@@ -93,3 +93,30 @@ authentication, TLS or SSO failure or GitHub's one-pending-review refusal as
 deferred, and every other refusal as final.
 enforced-by: tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[cli-timeout], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[no-http-response], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[http-timeout], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[5xx], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[429], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[403-rate-limit], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[graphql-rate-limit], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[cli-never-started], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[401], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[tls], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[403-sso], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[not-signed-in], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[dns-failure], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[connection-refused], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[connection-timed-out], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[422-pending-review], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[422-other], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[400], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[403-forbidden], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[404], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[409], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[410], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[413], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[graphql-forbidden], tests/adapters/forge/replies/test_send.py::test_a_failed_write_is_classified[graphql-unknown], tests/adapters/forge/test_transport.py::test_an_error_names_its_errors_detail[errors-objects], tests/adapters/forge/test_transport.py::test_an_error_names_its_errors_detail[errors-strings], tests/adapters/forge/test_transport.py::test_an_error_names_its_errors_detail[message-only], tests/adapters/forge/test_http.py::test_a_call_is_bounded_and_its_error_stays_short[errors-detail]
 origin: src/kraft/adapters/forge/replies/send.py
+
+## REQ a-reply-has-at-most-three-counted-sends
+WHEN Kraft sends a reply, the system SHALL send only a pending intent the gate
+allows, SHALL count each unclear or rate-limited send and give the intent up after
+three, SHALL wait out a rate limit's retry-after, and SHALL try a deferred intent
+at most once every five minutes without counting it.
+enforced-by: tests/adapters/forge/replies/test_send.py::test_counted_sends_and_backoff, tests/adapters/forge/replies/test_send.py::test_send_skips_an_intent_that_is_not_pending[unclear], tests/adapters/forge/replies/test_send.py::test_send_skips_an_intent_that_is_not_pending[posted], tests/adapters/forge/replies/test_send.py::test_send_skips_an_intent_that_is_not_pending[ended], tests/adapters/forge/replies/test_send.py::test_the_gate_ends_an_intent_it_will_not_send[refused], tests/adapters/forge/replies/test_send.py::test_the_gate_ends_an_intent_it_will_not_send[superseded], tests/adapters/forge/replies/test_send.py::test_a_send_records_its_outcome[posted], tests/adapters/forge/replies/test_send.py::test_a_send_records_its_outcome[unclear], tests/adapters/forge/replies/test_send.py::test_a_send_records_its_outcome[refused], tests/adapters/forge/replies/test_send.py::test_a_send_records_its_outcome[an-os-error-is-unclear]
+origin: src/kraft/adapters/forge/replies/send.py
+
+## REQ forge-writes-are-spaced-per-account
+WHILE Kraft writes replies, the system SHALL start at most one write a second on
+each forge account, across work items.
+enforced-by: tests/adapters/forge/replies/test_send.py::test_writes_are_spaced_per_account[same-account-waits-a-second], tests/adapters/forge/replies/test_send.py::test_writes_are_spaced_per_account[another-account-does-not]
+origin: src/kraft/adapters/forge/replies/send.py
+
+## REQ a-send-cut-short-is-reconciled-not-resent
+WHEN a send is about to write, the system SHALL first record it as unclear, so a
+crash, cancel or restart before its outcome is recorded is reconciled before any
+resend, and SHALL treat a failure that is not a forge error as unclear.
+enforced-by: tests/adapters/forge/replies/test_send.py::test_a_crash_mid_send_leaves_the_intent_unclear, tests/adapters/forge/replies/test_send.py::test_a_send_records_its_outcome[an-os-error-is-unclear], tests/adapters/forge/replies/test_record.py::test_an_intent_s_state_is_folded_from_its_events[send-began-is-unclear]
+origin: src/kraft/adapters/forge/replies/send.py
+
+## REQ a-posting-point-stops-sending-after-its-time-budget
+WHEN 60 seconds have passed since a posting point began, the system SHALL start
+no further send there, leaving what is unsent for the next posting point.
+enforced-by: tests/adapters/forge/replies/test_send.py::test_a_posting_point_stops_sending_after_its_time_budget
+origin: src/kraft/adapters/forge/replies/send.py
