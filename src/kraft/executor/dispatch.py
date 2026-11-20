@@ -3578,13 +3578,29 @@ def last_measurement(
     same fingerprints and the loop would escalate straight back to needs_human
     without ever giving the steered retry a chance to run.
     """
+    event, fix_seen = last_measured(db, work_item_id, node_id)
+    if event is None:
+        return None, False, None
+    return (
+        [_findings.from_payload(f) for f in event["payload"].get("findings", [])],
+        fix_seen,
+        event["payload"].get("head_sha"),
+    )
+
+
+def last_measured(
+    db, work_item_id: str, node_id: str, *, before: int | None = None
+) -> tuple[dict | None, bool]:
+    """The node's newest `findings_measured` event with `seq < before` (any, by
+    default), whole, and whether an unrefunded `fix_cycle_started` followed it
+    below `before`. `last_measurement` is this, read as findings."""
     evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
     fix_seen = False
     # A cycle that started and was refunded (`fix_cycle_refunded`, Kraft-jdkoq)
     # never repaired anything, so it is not a fix having run.
     refunded: set[int] = set()
     for e in reversed(evts):
-        if e["payload"].get("node_id") != node_id:
+        if (before is not None and e["seq"] >= before) or e["payload"].get("node_id") != node_id:
             continue
         if e["type"] == ChainEvent.FIX_CYCLE_REFUNDED:
             refunded.add(e["payload"].get("cycle"))
@@ -3593,12 +3609,8 @@ def last_measurement(
         ):
             fix_seen = True
         elif e["type"] == ChainEvent.FINDINGS_MEASURED:
-            return (
-                [_findings.from_payload(f) for f in e["payload"].get("findings", [])],
-                fix_seen,
-                e["payload"].get("head_sha"),
-            )
-    return None, False, None
+            return e, fix_seen
+    return None, False
 
 
 #: The escalation hook's own `hook_point`. Not a node task and not dispatched

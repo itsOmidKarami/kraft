@@ -25,6 +25,7 @@ from kraft.executor.context import (
     CONFIG_ERROR,
     CONFLICT,
     CONFLICT_RESOLVED,
+    ENDED_EARLY,
     ESCALATION_COMMITTED,
     INFRA_STOP,
     LANDED_UNREVIEWED,
@@ -2079,6 +2080,18 @@ async def _walk_node_once(
     # What a doubted repair said, for the first cycle only (Kraft-yi005): it
     # makes the judge due then, and is cleared with `_first_iteration`.
     repair_doubted: list[str] = []
+
+    async def _continue() -> None:
+        """The fix loop did not start on a measurement that ended early: reopen it
+        at the next step, same round, to run only the steps that did not run."""
+        nonlocal resume_step
+        await db.write(
+            lambda c: store.begin_measurement(
+                c, work_item_id, node.id, round, since=measuring["since"]
+            )
+        )
+        resume_step = measuring["step"] + 1
+
     while True:
         verdict, failed, excs = await dispatch.measure_node(
             db,
@@ -2240,9 +2253,27 @@ async def _walk_node_once(
                 # rows instead of the fresher re-measure this repair just produced.
                 verdict, failed, excs, round = r_verdict, r_failed, r_excs, _REPAIR_ROUND
 
-        previous_found, fix_ran, previous_head = dispatch.last_measurement(
-            db, work_item_id, node.id
+        # Read now: the judge reassigns `verdict`.
+        ended_early = verdict == ENDED_EARLY
+        # Read before the record is written and the measurement closed: its step
+        # and start are what a declined early start continues from.
+        measuring = dispatch.open_measurement(db, work_item_id, node.id) if loop.early else None
+        latest, fix_ran = dispatch.last_measured(db, work_item_id, node.id)
+        # The record a continued measurement amends is the one it wrote since it began.
+        amends = (
+            latest["seq"] if measuring and latest and latest["seq"] > measuring["since"] else None
         )
+        if amends is not None:
+            # The previous measurement is the one before that record, not the record itself.
+            previous, fix_ran = dispatch.last_measured(db, work_item_id, node.id, before=amends)
+        else:
+            previous = latest
+        previous_found = (
+            [_findings.from_payload(f) for f in previous["payload"].get("findings", [])]
+            if previous is not None
+            else None
+        )
+        previous_head = previous["payload"].get("head_sha") if previous is not None else None
         head_sha = _config.git_read(Path(worktree), "rev-parse", "HEAD")
         # The tags this loop's own checks already meant: the *eligible* subset of
         # the last measurement. `last_measurement` returns whole findings now
@@ -2305,6 +2336,11 @@ async def _walk_node_once(
         found = _findings.resolve_identity(
             found, known={f.fingerprint for f in previous_found or []}
         )
+        if loop.early:
+            # What the fix loop declined on this commit is not collected again: not
+            # recorded, not eligible, not in the list to fix, not before the judge.
+            declined = dispatch.declined_fingerprints(db, work_item_id, node.id, head_sha)
+            found = [f for f in found if f.fingerprint not in declined]
         # Parallel to `found`, never a dict keyed on fingerprint: two findings in
         # one round can share a tag if the reviewer pointed both at the same
         # `same_as`, and a dict would silently drop one of them.
@@ -2346,11 +2382,16 @@ async def _walk_node_once(
             # that writes the schema wrong must not read as one that found nothing.
             **({"dropped": dropped_findings} if dropped_findings else {}),
         }
-        await db.write(
-            lambda c, payload=measured_payload: events.append(
-                c, work_item_id, ChainEvent.FINDINGS_MEASURED, payload
+        if amends is not None:
+            await db.write(
+                lambda c, seq=amends, payload=measured_payload: events.amend(c, seq, payload)
             )
-        )
+        else:
+            await db.write(
+                lambda c, payload=measured_payload: events.append(
+                    c, work_item_id, ChainEvent.FINDINGS_MEASURED, payload
+                )
+            )
         if loop.early:
             await db.write(lambda c: store.end_measurement(c, work_item_id))
 
@@ -2360,6 +2401,9 @@ async def _walk_node_once(
         enters_loop = bool(eligible) or bool(blind_failures)
 
         if not enters_loop:
+            if ended_early:
+                await _continue()
+                continue
             await node_runs.completed(
                 db, Path(worktree) if worktree else None, work_item_id, node.id, run_dirs=run_dirs
             )
@@ -2492,6 +2536,10 @@ async def _walk_node_once(
                 "verdict": verdict,
                 "reasoning": reasoning,
                 "findings": [asdict(f) for f in eligible],
+                # A `stop_downgrade` with `ended_early` holds for this commit
+                # (`dispatch.declined_fingerprints`): the judge isn't paid again.
+                "head_sha": head_sha,
+                "ended_early": ended_early,
             }
             await db.write(
                 lambda c, payload=judge_payload: events.append(
@@ -2512,6 +2560,12 @@ async def _walk_node_once(
             # on the blind subset. Only a task with no failure at all can be
             # treated as clean here.
             if verdict == "stop_downgrade" and not failed:
+                if ended_early:
+                    # The loop doesn't start on what ended the measurement: it goes on
+                    # with the steps that didn't run, and the verdict event below
+                    # keeps those findings from coming back on this commit.
+                    await _continue()
+                    continue
                 await node_runs.completed(
                     db,
                     Path(worktree) if worktree else None,

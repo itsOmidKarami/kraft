@@ -1258,7 +1258,9 @@ enforced-by: tests/templates/test_models.py::test_recovery_plan_and_fix_loop_als
 
 After each successful fix-loop attempt, the system SHALL rerun the execution
 node from its first step before deciding whether another attempt is needed.
-enforced-by: tests/executor/test_walk.py::test_a_fix_loop_attempt_remeasures_the_node_from_its_first_step
+WHEN the fix loop doesn't start on a measurement that ended early, the system
+SHALL instead continue it with the steps that didn't run.
+enforced-by: tests/executor/test_walk.py::test_a_fix_loop_attempt_remeasures_the_node_from_its_first_step, tests/executor/test_walk_early.py::test_a_declined_early_start_continues_and_amends_its_record[ci-at-once]
 
 ## REQ fix-loop-is-bounded-and-detects-stall
 
@@ -1317,8 +1319,9 @@ enforced-by: tests/skills/test_fix_loop_judge.py::test_round_one_fixes_freely_no
 ## REQ fix-loop-judge-has-three-decisions
 
 A fix-loop judge SHALL decide whether to continue fixing, accept a clean
-execution result, or stop for a human.
-enforced-by: tests/skills/test_fix_loop_judge.py::test_judge_continue_behaves_like_no_judge_present, tests/skills/test_fix_loop_judge.py::test_judge_stop_needs_human_preempts_the_cap, tests/skills/test_fix_loop_judge.py::test_judge_stop_downgrade_exits_the_loop_clean, tests/skills/test_fix_loop_judge.py::test_judge_stop_downgrade_does_not_downgrade_a_failing_task, tests/executor/test_agent_inputs.py::test_the_seeded_fix_loop_judge_declares_the_package_and_its_method
+execution result, or stop for a human. A `stop_downgrade` on a measurement that
+ended early SHALL continue that measurement rather than complete the node.
+enforced-by: tests/executor/test_walk_early.py::test_a_declined_early_start_continues_and_amends_its_record[ci-at-once], tests/skills/test_fix_loop_judge.py::test_judge_continue_behaves_like_no_judge_present, tests/skills/test_fix_loop_judge.py::test_judge_stop_needs_human_preempts_the_cap, tests/skills/test_fix_loop_judge.py::test_judge_stop_downgrade_exits_the_loop_clean, tests/skills/test_fix_loop_judge.py::test_judge_stop_downgrade_does_not_downgrade_a_failing_task, tests/executor/test_agent_inputs.py::test_the_seeded_fix_loop_judge_declares_the_package_and_its_method
 
 ## REQ fix-loop-judge-cannot-override-limits
 
@@ -1339,6 +1342,26 @@ loop without running the node's `on_failure`. Every outcome that outranks a
 failed task SHALL outrank ending early.
 enforced-by: tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[off-by-default], tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[on], tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[a-bool-only], tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[not-on-the-node], tests/templates/test_failure_controls.py::test_early_is_a_flag_of_the_fix_loop_only[not-on-a-recovery-plan], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[ends-early], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[early-off], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[below-the-loop-severities], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[a-failed-co-task-keeps-failed], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[a-pause-outranks-it], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[a-rate-limit-outranks-it], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[declined-on-this-commit], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[declined-on-another-commit], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[in-the-last-step], tests/executor/test_walk_early.py::test_an_early_end_goes_straight_to_the_fix_loop[measured-first], tests/executor/test_walk_early.py::test_an_early_end_goes_straight_to_the_fix_loop[after-on_failure]
 origin: src/kraft/executor/dispatch.py
+
+## REQ a-declined-early-start-is-saved-for-the-commit
+
+WHEN the fix loop doesn't start on a measurement that ended early, the system
+SHALL record that outcome for the commit in the judge's verdict event. Every
+later measurement of that commit in the node's run, the re-measure after
+`on_failure` included, SHALL NOT end early on those findings, collect them,
+hand them to the fix loop or ask the judge about them again.
+enforced-by: tests/executor/test_walk_early.py::test_a_declined_early_start_is_not_judged_again_on_the_same_commit[re-measure-passes], tests/executor/test_walk_early.py::test_a_declined_early_start_is_not_judged_again_on_the_same_commit[re-measure-fails], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[declined-on-this-commit], tests/executor/test_measurement.py::test_eligible_findings_end_a_measurement_early[declined-on-another-commit]
+origin: src/kraft/executor/walk.py
+
+## REQ a-declined-early-start-continues-the-measurement
+
+WHEN the fix loop doesn't start on a measurement that ended early, the system
+SHALL run only the node's steps that didn't run, at the same round, SHALL amend
+that measurement's one `findings_measured` event with their results instead of
+recording another, and SHALL complete the node only when they pass. A
+measurement whose record is written is over: a later entry SHALL start a new one.
+enforced-by: tests/executor/test_walk_early.py::test_a_declined_early_start_continues_and_amends_its_record[ci-at-once], tests/executor/test_walk_early.py::test_a_declined_early_start_continues_and_amends_its_record[ci-parks-first], tests/executor/test_walk_early.py::test_a_recorded_measurement_is_not_resumed
+origin: src/kraft/executor/walk.py
 
 ## REQ invalid-judge-result-does-not-block-the-loop
 

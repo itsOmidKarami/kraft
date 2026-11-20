@@ -40,6 +40,16 @@ def append(
     return cur.lastrowid
 
 
+def amend(conn: sqlite3.Connection, seq: int, payload: dict) -> None:
+    """Replace the payload of the event at `seq`, redacted as `append` does.
+
+    For the one record a measurement writes and then completes
+    (`findings_measured`, amended when a declined early start continues it)."""
+    conn.execute(
+        "UPDATE events SET payload = ? WHERE seq = ?", (redact.redact(json.dumps(payload)), seq)
+    )
+
+
 def read_after(
     conn: sqlite3.Connection,
     after_seq: int,

@@ -13,7 +13,7 @@ from support.harness import entry_of
 
 from kraft import events, executor
 from kraft import policy as _policy
-from kraft.executor import walk
+from kraft.executor import dispatch, walk
 from kraft.vocab import ChainEvent
 
 REVIEWER = Path(__file__).resolve().parents[1] / "support" / "fake_reviewer.py"
@@ -24,6 +24,29 @@ FIX = shlex.join(["sh", "-c", "echo x >> fixed.txt && git add fixed.txt && git c
 REAL = frozenset({"bots", "triage", "ci", "fix"})
 POLICY = _policy.Policy(loops={}, default=_policy.Cap(9, 3600))
 LAUNCH = executor.LaunchContext(repo_entry=entry_of({"setup_command": ""}))
+
+
+class Judge:
+    """What the stand-in judge answers: `verdicts` in turn, the last repeating, and
+    the `round` of every call in `rounds`."""
+
+    def __init__(self):
+        self.verdicts = ["continue"]
+        self.rounds: list[int] = []
+
+
+@pytest.fixture
+def judge(monkeypatch) -> Judge:
+    """`dispatch.judge_verdict` answered by a `Judge` rather than by a session."""
+    stand_in = Judge()
+
+    async def fake(*args, round, **kw):
+        stand_in.rounds.append(round)
+        verdicts = stand_in.verdicts
+        return (verdicts.pop(0) if len(verdicts) > 1 else verdicts[0]), "why"
+
+    monkeypatch.setattr(dispatch, "judge_verdict", fake)
+    return stand_in
 
 
 def _found(message, severity="critical", *, status="done", source="reviewer", **extra) -> dict:
@@ -134,3 +157,112 @@ async def test_an_early_end_goes_straight_to_the_fix_loop(
     assert _cycles(it) == cycles
     first = it.events("findings_measured")[0]["payload"]
     assert "n.ci.ci" in first["unmeasured_tasks"]
+
+
+@pytest.mark.parametrize(
+    ("then", "judged", "tail"),
+    [
+        (CLEAN, [1], []),
+        (_found("lint failed", status="failed"), [1, -1], ["fix", "bots", "triage", "ci", "hold"]),
+    ],
+    ids=["re-measure-passes", "re-measure-fails"],
+)
+async def test_a_declined_early_start_is_not_judged_again_on_the_same_commit(
+    item_on, script, judge, tmp_path, then, judged, tail
+):
+    """Round 1 ends early on "naming nit", which the judge declines. The continued ci
+    step fails after a park, so on_failure runs and re-measures at -1 on the same
+    commit: the nit doesn't end that measurement early, isn't collected and isn't
+    judged again."""
+    red = _found("lint failed", status="failed")
+    nit = _found("naming nit", "important")
+    it = await item_on(
+        [
+            _node(
+                tmp_path,
+                triage=(_found("rename"), nit, nit, CLEAN),
+                ci=(red, red, then, CLEAN),
+                on_failure=True,
+            )
+        ]
+    )
+    script.real = REAL
+    script.plan = {"hold": ["paused", "done"]}
+    judge.verdicts = ["stop_downgrade", "continue"]
+
+    assert await _walk(it) == "paused"
+    assert await _walk(it, it.row()["current_step"]) == "ok"
+
+    assert judge.rounds == judged
+    assert script.calls == [
+        *[
+            "bots",
+            "triage",
+            "fix",
+            "bots",
+            "triage",
+            "ci",
+            "hold",
+        ],  # entry 1: parked after the continue
+        *["ci", "hold", "repair", "bots", "triage", "ci", "hold"],  # entry 2: the -1 re-measure
+        *tail,
+    ]
+    declined = it.events("judge_verdict")[0]["payload"]
+    round_1 = it.events("findings_measured")[1]["payload"]
+    assert (declined["ended_early"], declined["head_sha"]) == (True, round_1["head_sha"])
+    for e in it.events("findings_measured")[2:] + it.events("judge_verdict")[1:]:
+        assert "naming nit" not in [f["message"] for f in e["payload"]["findings"]]
+    for instruction in script.instructions["fix"][1:]:
+        # only the list to fix: round 1's early record still lists the nit in the history
+        assert "naming nit" not in instruction.split("Findings to fix:")[1].split("\n\n")[0]
+
+
+@pytest.mark.parametrize(
+    "hold", [["done"], ["paused", "done"]], ids=["ci-at-once", "ci-parks-first"]
+)
+async def test_a_declined_early_start_continues_and_amends_its_record(
+    item_on, script, judge, tmp_path, hold
+):
+    """The judge declines round 1's early start: the measurement goes on with the
+    ci step at the same round, and its result amends round 1's one record."""
+    it = await item_on(
+        [
+            _node(
+                tmp_path,
+                triage=(_found("rename"), _found("naming nit", "important")),
+                ci=(_found("ci note", "minor"),),
+                on_failure=True,
+            )
+        ]
+    )
+    script.real = REAL
+    script.plan = {"hold": list(hold)}  # the script consumes its plan
+    judge.verdicts = ["stop_downgrade"]
+
+    result = await _walk(it)
+    if hold[0] == "paused":
+        assert result == "paused"
+        result = await _walk(it, it.row()["current_step"])
+
+    assert result == "ok"
+    assert _cycles(it) == [0, 1]  # one record per measurement: the continue amended it
+    record = it.events("findings_measured")[1]["payload"]
+    assert "n.ci.ci" in record["measured_tasks"]
+    assert [f["message"] for f in record["findings"]] == ["ci note"]
+    # parked: ci's `done` session at round 1 stands on re-entry, only hold runs again
+    parked = ["hold"] if hold[0] == "paused" else []
+    assert script.calls == ["bots", "triage", "fix", "bots", "triage", "ci", "hold", *parked]
+    assert [s["round"] for s in it.sessions("n") if s["hook_point"] == "n.ci.ci"] == [1]
+
+
+async def test_a_recorded_measurement_is_not_resumed(item_on, script, tmp_path):
+    """A stop after the record (the repair paused, so refunded) then a re-entry at the
+    cursor starts a new measurement: it appends a record, never amends the finished one."""
+    it = await item_on([_node(tmp_path, triage=(_found("rename"), CLEAN))])
+    script.real = REAL - {"fix"}  # scripted, so it can pause; a scripted repair commits when done
+    script.plan = {"fix": ["paused", "done"]}
+
+    assert await _walk(it) == "paused"
+    assert await _walk(it, it.row()["current_step"]) == "ok"
+
+    assert _cycles(it) == [0, 0, 1]
