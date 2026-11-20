@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import re
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol
 
@@ -598,6 +598,11 @@ def _head(repo: Path) -> str | None:
     return out.stdout.strip()
 
 
+#: A `FakeForge.write_script` entry: the write lands, then raises a `ForgeError` with
+#: no status, as a write whose answer timed out.
+LOST = "lost"
+
+
 @dataclass
 class FakeForge:
     """In-memory forge for tests.
@@ -702,6 +707,21 @@ class FakeForge:
     #: `review_results`. Empty, each reviewer answers with nothing to say: a
     #: bot with no activity, a check that finished and passed.
     feedback_script: list[list[ReviewerFeedback]] = field(default_factory=list)
+    #: Review threads by id: `read_thread` answers them, the writes change them.
+    threads: dict[str, ForgeThread] = field(default_factory=dict)
+    #: Top-level comments, oldest first: `mr_comments` answers them.
+    comments: list[ForgeNote] = field(default_factory=list)
+    #: The login `viewer` answers and every note the fake writes is by; a
+    #: `ForgeError` is raised instead.
+    viewer_login: str | ForgeError = "kraft-user"
+    #: What each write does, one entry per write, consumed and not repeated (empty:
+    #: every write lands): a `ForgeError` is raised and nothing lands; `LOST` lands,
+    #: then raises a `ForgeError` with no status.
+    write_script: list[ForgeError | str] = field(default_factory=list)
+    #: Every write asked for, in order, landed or not: `(op, target id)`.
+    writes: list[tuple[str, str]] = field(default_factory=list)
+    #: Notes the fake has written: their ids and times come from it, so order is stable.
+    _notes_made: int = field(default=0, init=False, repr=False)
     #: `approval_state`'s answers, consumed like `ci_states`.
     approval_states: list[ApprovalState] = field(default_factory=lambda: ["approved"])
     #: `branch_ci_status`'s own script, for the post-merge pipeline; `None`
@@ -911,6 +931,90 @@ class FakeForge:
             )
             for r in reviewers
         ]
+
+    async def viewer(self, *, repo: Path) -> str:
+        if isinstance(self.viewer_login, ForgeError):
+            raise self.viewer_login
+        return self.viewer_login
+
+    async def read_thread(self, *, repo: Path, branch: str, thread_id: str) -> ForgeThread | None:
+        return self.threads.get(thread_id)
+
+    async def mr_comments(self, *, repo: Path, branch: str) -> tuple[ForgeNote, ...]:
+        return tuple(self.comments)
+
+    def _write(self, op: str, target: str) -> bool:
+        """Record a write and take its script entry: raises a scripted error before
+        anything lands, and says whether to raise a lost answer after it landed."""
+        self.writes.append((op, target))
+        step = self.write_script.pop(0) if self.write_script else None
+        if isinstance(step, ForgeError):
+            raise step
+        return step == LOST
+
+    def _lost(self) -> ForgeError:
+        return ForgeError("fake: the answer was lost")
+
+    def _note(self, body: str) -> ForgeNote:
+        self._notes_made += 1
+        n = self._notes_made
+        return ForgeNote(
+            f"FN{n}",
+            str(1000 + n),
+            self.viewer_login if isinstance(self.viewer_login, str) else "",
+            "User",
+            body,
+            f"2026-01-01T00:{n // 60:02d}:{n % 60:02d}Z",
+            f"2026-01-01T00:{n // 60:02d}:{n % 60:02d}Z",
+        )
+
+    @staticmethod
+    def _posted(note: ForgeNote) -> Posted:
+        return Posted((note.rest_id, note.id), note.created_at, note.body)
+
+    async def reply_to_thread(self, *, repo: Path, thread: ForgeThread, body: str) -> Posted:
+        lost = self._write("reply", thread.id)
+        current = self.threads.get(thread.id, thread)
+        note = self._note(body)
+        self.threads[thread.id] = replace(current, notes=(*current.notes, note))
+        if lost:
+            raise self._lost()
+        return self._posted(note)
+
+    async def resolve_thread(self, *, repo: Path, thread: ForgeThread) -> None:
+        lost = self._write("resolve", thread.id)
+        self.threads[thread.id] = replace(self.threads.get(thread.id, thread), resolved=True)
+        if lost:
+            raise self._lost()
+
+    async def upsert_comment(
+        self, *, repo: Path, branch: str, note_id: str | None, body: str
+    ) -> Posted:
+        lost = self._write("upsert", note_id or "new")
+        if note_id is None:
+            note = self._note(body)
+            self.comments.append(note)
+        else:
+            old = next(c for c in self.comments if note_id in (c.id, c.rest_id))
+            note = replace(old, body=body)
+            self.comments[self.comments.index(old)] = note
+        if lost:
+            raise self._lost()
+        return self._posted(note)
+
+    async def delete_note(
+        self, *, repo: Path, branch: str, note: ForgeNote, in_thread: bool
+    ) -> None:
+        lost = self._write("delete", note.id)
+        if in_thread:
+            for tid, thread in self.threads.items():
+                kept = tuple(n for n in thread.notes if n.id != note.id)
+                if len(kept) != len(thread.notes):
+                    self.threads[tid] = replace(thread, notes=kept)
+        else:
+            self.comments = [c for c in self.comments if c.id != note.id]
+        if lost:
+            raise self._lost()
 
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> tuple[str, ...]:
         self.retried.append(ci.url)

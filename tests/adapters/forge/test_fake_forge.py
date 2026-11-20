@@ -275,3 +275,63 @@ async def test_fake_forge_counts_find_mr_calls():
     await f.find_mr(repo="/r", branch="b")
 
     assert f.find_mr_calls == 2
+
+
+@pytest.mark.parametrize(
+    "script, raises, landed",
+    [
+        ([], False, True),
+        ([forge.ForgeError("no", status=422)], True, False),
+        ([forge.LOST], True, True),
+    ],
+    ids=["lands", "refused", "lost-after-landing"],
+)
+async def test_the_fake_writes_into_its_threads_as_its_script_says(
+    tmp_path, script, raises, landed
+):
+    thread = forge.ForgeThread(
+        "T1",
+        7,
+        False,
+        False,
+        True,
+        True,
+        "a.py",
+        1,
+        (forge.ForgeNote("N1", "1", "bot", "Bot", "fix", "t", "t"),),
+    )
+    fake = forge.FakeForge(threads={"T1": thread}, write_script=list(script))
+
+    if raises:
+        with pytest.raises(forge.ForgeError):
+            await fake.reply_to_thread(repo=tmp_path, thread=thread, body="Answer:\n\nok")
+    else:
+        posted = await fake.reply_to_thread(repo=tmp_path, thread=thread, body="Answer:\n\nok")
+        assert posted.body == "Answer:\n\nok"
+    after = await fake.read_thread(repo=tmp_path, branch="b", thread_id="T1")
+
+    assert [n.author for n in after.notes] == ["bot", *(["kraft-user"] if landed else [])]
+    assert fake.writes == [("reply", "T1")]
+
+
+async def test_the_fake_resolves_upserts_deletes_and_names_its_viewer(tmp_path):
+    note = forge.ForgeNote("N1", "1", "bot", "Bot", "fix", "t", "t")
+    thread = forge.ForgeThread("T1", 7, False, False, True, True, "a.py", 1, (note,))
+    fake = forge.FakeForge(threads={"T1": thread})
+    ask = {"repo": tmp_path, "branch": "b"}
+
+    await fake.resolve_thread(repo=tmp_path, thread=thread)
+    made = await fake.upsert_comment(**ask, note_id=None, body="one")
+    await fake.upsert_comment(**ask, note_id=made.ids[1], body="two")
+    comments = await fake.mr_comments(**ask)
+    await fake.delete_note(**ask, note=note, in_thread=True)
+    await fake.delete_note(**ask, note=comments[0], in_thread=False)
+
+    assert (await fake.read_thread(**ask, thread_id="T1")).resolved is True
+    assert [c.body for c in comments] == ["two"]
+    assert (await fake.read_thread(**ask, thread_id="T1")).notes == ()
+    assert await fake.mr_comments(**ask) == ()
+    assert await fake.viewer(repo=tmp_path) == "kraft-user"
+    assert [op for op, _ in fake.writes] == ["resolve", "upsert", "upsert", "delete", "delete"]
+    with pytest.raises(forge.ForgeError):
+        await forge.FakeForge(viewer_login=forge.ForgeError("no token")).viewer(repo=tmp_path)
