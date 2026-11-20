@@ -206,7 +206,7 @@ describe("budgetRaise: only a budget stop the server would raise offers a raise"
   });
 });
 
-type Door = "pause" | "resume" | "retry" | "skip" | "escalate" | "cancel" | "archive" | "restore" | "reopen_mr" | "budget_raise" | "unblock" | "approve" | "navigate";
+type Door = "pause" | "resume" | "retry" | "skip" | "escalate" | "cancel" | "archive" | "restore" | "reopen_mr" | "rerun_ci" | "budget_raise" | "unblock" | "approve" | "navigate";
 const takes = (door: Door, state: string) => door === "navigate" || LIFECYCLE.doors[door].takes.includes(state);
 
 const S = (kind: StopKind, more: Partial<WorkItemStop> = {}): WorkItemStop => ({ kind, node: "verification", task: "verification.review.code_review", resume_at: null, reason: "r", ...more });
@@ -234,6 +234,8 @@ const CASES: [string, Partial<ItemDetail>, string][] = [
   ["conflict", { display_status: "needs_you", status: "needs_human", stop: S("conflict"), worker_sessions: session("failed") }, "conflict"],
   ["mr closed", { display_status: "needs_you", status: "needs_human", stop: S("mr_closed"), worker_sessions: session("done") }, "mr_closed"],
   ["stuck", { display_status: "needs_you", status: "needs_human", stop: S("stuck"), worker_sessions: session("failed") }, "stuck"],
+  // Its fix loop stopped on merge-request CI: the server lists rerun_ci, which the card and the phone bar offer.
+  ["stuck on CI", { display_status: "needs_you", status: "needs_human", stop: S("stuck"), worker_sessions: session("failed"), actions: serverActions("stuck_on_ci") }, "stuck_on_ci"],
   ["escalated", { display_status: "escalated", status: "needs_human", stop: S("stuck"), worker_sessions: session("failed") }, "escalated"],
   ["failed", { display_status: "failed", status: "needs_human", stop: S("failed"), worker_sessions: session("failed") }, "failed"],
   ["infra", { display_status: "failed", status: "needs_human", stop: S("infra"), worker_sessions: session("failed") }, "infra"],
@@ -248,12 +250,12 @@ const CASES: [string, Partial<ItemDetail>, string][] = [
 
 /** Raise cap: /budget/raise on the item's own cap; a policy or node limit is PATCHed, then retried. */
 const raiseDoor = (item: ItemDetail): Door => (budgetRaise(item) === "item" ? "budget_raise" : "retry");
-const MAIN_DOOR = (item: ItemDetail): Record<Main, Door> => ({ pause: "pause", resume: "resume", start: "resume", raise: raiseDoor(item), retry: "retry", archive: "archive", restore: "restore", gate: "approve", answer: "resume", conflicts: "navigate", reopen: "reopen_mr" });
+const MAIN_DOOR = (item: ItemDetail): Record<Main, Door> => ({ pause: "pause", resume: "resume", start: "resume", raise: raiseDoor(item), retry: "retry", archive: "archive", restore: "restore", gate: "approve", answer: "resume", conflicts: "navigate", reopen: "reopen_mr", rerun: "rerun_ci" });
 // Mark complete and Cancel end the item through one guard (`_end_work_item`).
 const PANEL_DOOR: Record<PanelItem, Door> = { escalate: "escalate", complete: "cancel", archive: "archive", cancel: "cancel" };
 const PHONE_DOOR = (item: ItemDetail): Record<ActId, Door> => ({
   pause: "pause", unblock: "unblock", steer: steerDoor(item), resume: "resume", start: "resume", reject: "approve", review: "navigate", raise: raiseDoor(item), retry: "retry", escalate: "escalate", answer: "resume",
-  cancel: "cancel", "reopen-mr": "reopen_mr", conflicts: "navigate", board: "navigate", restore: "restore", settings: "navigate", repo: "navigate", "open-mr": "navigate", duplicate: "navigate", archive: "archive", complete: "cancel",
+  cancel: "cancel", "reopen-mr": "reopen_mr", "rerun-ci": "rerun_ci", conflicts: "navigate", board: "navigate", restore: "restore", settings: "navigate", repo: "navigate", "open-mr": "navigate", duplicate: "navigate", archive: "archive", complete: "cancel",
 });
 const NODE_DOOR: Record<NodeActId, Door> = { pause: "pause", resume: "resume", skip: "skip", "retry-node": "retry", "retry-from": "retry", review: "navigate" };
 
@@ -302,7 +304,7 @@ describe("no surface offers a door the server refuses (R11b-01)", () => {
 
   // The two layouts agree on the way on from a stop: the header's main and the phone bar's primary.
   // A cap stop is the one they word apart: the phone's raise is its card's link, beside Retry.
-  const WAY: Partial<Record<Main | ActId, string>> = { gate: "gate", review: "gate", answer: "answer", raise: "raise", retry: "retry", conflicts: "conflicts", reopen: "reopen-mr", "reopen-mr": "reopen-mr" };
+  const WAY: Partial<Record<Main | ActId, string>> = { gate: "gate", review: "gate", answer: "answer", raise: "raise", retry: "retry", conflicts: "conflicts", reopen: "reopen-mr", "reopen-mr": "reopen-mr", rerun: "rerun-ci", "rerun-ci": "rerun-ci" };
   it.each(CASES.filter(([name, over]) => (over.display_status === "needs_you" || over.display_status === "escalated") && name !== "cap"))("%s: the desktop header and the phone bar offer the same way on", (_name, over) => {
     const item = detail(over);
     expect(WAY[headerState(item).main!]).toBe(WAY[pairOf(item).primary!.id]);

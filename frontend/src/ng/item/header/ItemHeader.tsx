@@ -159,6 +159,7 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
     if (hs.main === "answer") return onAnswer ? onAnswer() : navigate(itemUrl);
     if (hs.main === "conflicts") return navigate(`${itemUrl}/review${item.stop?.node ? `?nodes=${encodeURIComponent(item.stop.node)}` : ""}`);
     if (hs.main === "reopen") return void run(act.reopenMr(item.id));
+    if (hs.main === "rerun") return void run(act.rerunCi(item.id));
     if (asksFirst()) return draft!.setReviewing(true, start);
     if (hs.main === "start") return void startFresh();
     // Only an item that never started can need its chain approved: a resume goes straight to the server.

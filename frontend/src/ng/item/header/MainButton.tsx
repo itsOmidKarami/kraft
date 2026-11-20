@@ -5,7 +5,7 @@ import { MAIN_LABEL, type Main, type PanelItem } from "../status";
 import { tip } from "../../ui/Tooltip";
 import { MARK_COMPLETE, REMOVE_FROM_QUEUE } from "../sharedWords";
 
-const MAIN_ICON: Record<Main, typeof Pause> = { pause: Pause, resume: Play, start: Play, raise: Play, retry: RotateCcw, archive: Archive, restore: ArchiveRestore, gate: CircleCheck, answer: MessageSquare, conflicts: CircleAlert, reopen: RotateCcw };
+const MAIN_ICON: Record<Main, typeof Pause> = { pause: Pause, resume: Play, start: Play, raise: Play, retry: RotateCcw, archive: Archive, restore: ArchiveRestore, gate: CircleCheck, answer: MessageSquare, conflicts: CircleAlert, reopen: RotateCcw, rerun: RotateCcw };
 const ITEM: Record<PanelItem, { label: string; icon: typeof Pause; tone?: string }> = {
   escalate: { label: "Escalate…", icon: Siren, tone: "warn" },
   complete: { label: MARK_COMPLETE, icon: CircleCheck },
