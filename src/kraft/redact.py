@@ -25,6 +25,12 @@ def register(secret: str) -> None:
         _secrets = tuple(sorted({*_secrets, *forms}, key=len, reverse=True))
 
 
+def known() -> tuple[str, ...]:
+    """Every value registered so far, for a check that must refuse them (the reply
+    gate), not only hide them."""
+    return _secrets
+
+
 def redact(text: str) -> str:
     for secret in _secrets:
         text = text.replace(secret, PLACEHOLDER)
