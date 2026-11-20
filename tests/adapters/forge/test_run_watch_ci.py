@@ -382,3 +382,29 @@ async def test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots
         assert cause.endswith(" in pkg" if ci_read == {"pkg"} else f" in {worktree.name}")
     if status in ("failed", "done"):
         assert it.events("automated_review_settled") == []
+
+
+@pytest.mark.parametrize(
+    "watch_ci, at_601",
+    [(True, "done"), (False, "waiting")],
+    ids=["from-the-push", "from-the-wait-start"],
+)
+async def test_the_watching_wait_s_limit_counts_from_the_push(
+    run_forge, on_branch, monkeypatch, wait_clock, watch_ci, at_601
+):
+    """'If it didn't post a review after the push in 10 mins, it's done' --
+    only with watch_ci; without it the limit counts from the wait's start."""
+    monkeypatch.setattr(events, "_now", lambda: wait_clock.now.isoformat())
+    fake = forge.FakeForge(ci_states=["pending"])
+    # An earlier push, at 0.
+    await run_forge(fake, "ci_poll", "s0", repo=on_branch, orig_repo=on_branch)
+    wait_clock.advance(300)
+    first = await run_forge(
+        fake, "automated_review", "s1", **_watching(on_branch, watch_ci=watch_ci)
+    )
+    assert first[0] == "waiting"
+    wait_clock.advance(301)  # 601s after the push, 301s into the wait
+    got = await run_forge(fake, "automated_review", "s2", **_watching(on_branch, watch_ci=watch_ci))
+    assert got[0] == at_601
+    ended = [e["outcome"] for e in run_forge.events("external_wait_ended") if e["task"] == _WAIT]
+    assert ended == (["timed_out"] if watch_ci else [])

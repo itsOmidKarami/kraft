@@ -953,6 +953,9 @@ class WaitNote:
     #: What the wait is about, kept in its start: a wait open about something
     #: else ends `superseded` (`waits.observe`).
     started_extra: dict = field(default_factory=dict)
+    #: The instant a pending observation times out, when it is not the wait's
+    #: start plus its timeout: a CI-watching review wait counts from the push.
+    deadline: datetime | None = None
 
 
 _PIPELINE_ID = re.compile(r"[0-9]+")
@@ -1095,6 +1098,7 @@ async def _collect_review(
     run_dirs,
     session_id: str,
     round: int,
+    watch_ci: bool = False,
 ) -> tuple[str, str, WaitNote | None]:
     """One check of the review wait on its collect path: read every reviewer,
     decide whether each has finished with the head (`settle.decide`), and once
@@ -1119,7 +1123,7 @@ async def _collect_review(
         forge, db, repo=repo, orig_repo=orig_repo, branch=branch, head=head,
         work_item_id=work_item_id, node_id=node_id, hook_point=hook_point,
         reviewers=reviewers,
-        bounds=bounds, grace=grace,
+        bounds=bounds, grace=grace, watch_ci=watch_ci,
     )  # fmt: skip
     if collection is not None:
         _write_collection(destination, head, round, collection)
@@ -1142,6 +1146,7 @@ async def _settle_review(
     grace: timedelta,
     scope: str | None = None,
     mount: str | None = None,
+    watch_ci: bool = False,
 ) -> tuple[str, str, WaitNote, list[dict] | None]:
     """One check of whether every reviewer has finished with `head`
     (`settle.decide`): `waiting` with no collection yet, or `done` with what
@@ -1151,17 +1156,21 @@ async def _settle_review(
     # `waits.observe` tests are the same instant.
     now = waits.now()
     wait = db.read(lambda c: waits.open_wait(c, work_item_id, hook_point))
-    deadline = (
-        datetime.fromisoformat(wait.started["started_at"]) + bounds.timeout
-        if wait is not None
-        else now + bounds.timeout
-    )
-    timed_out = now >= deadline
     if not head:
         raise ForgeError(f"cannot read the head of {branch} in {repo}")
     since = db.read(lambda c: waits.pushed_at(c, work_item_id, repo=str(orig_repo), sha=head))
     if since is None:
         since = await git.committed_at(repo, head)
+    if watch_ci:
+        # "If it didn't post a review after the push in 10 mins, it's done"
+        # (`review-wait-watching-ci-counts-its-limit-from-the-push`): the time
+        # already gone on this head counts, whenever this wait started.
+        deadline = since + bounds.timeout
+    elif wait is not None:
+        deadline = datetime.fromisoformat(wait.started["started_at"]) + bounds.timeout
+    else:
+        deadline = now + bounds.timeout
+    timed_out = now >= deadline
     feedback = await forge.reviewer_feedback(
         repo=repo, branch=branch, reviewers=reviewers, since=since
     )
@@ -1173,7 +1182,13 @@ async def _settle_review(
     )
     if decided.state == "pending":
         log = f"automated review: waiting for the reviewers to finish with {head[:7]}\n"
-        note = WaitNote(decided.next_at, {"memory": decided.memory}, False, now)
+        note = WaitNote(
+            decided.next_at,
+            {"memory": decided.memory},
+            False,
+            now,
+            deadline=deadline if watch_ci else None,
+        )
         return log, "waiting", note, None
     log = f"automated review: {len(reviewers)} reviewer(s) finished with {head[:7]}\n"
     heard, silent = settle.heard_and_silent(reviewers, decided.memory)
@@ -1183,7 +1198,9 @@ async def _settle_review(
         payload = {"node_id": node_id, "task": hook_point, "repo": str(orig_repo)}
         payload |= {"mount": mount, "head": head, "heard": heard, "silent": silent}
         await db.write(lambda c: _record_settled(c, work_item_id, payload))
-    note = WaitNote(None, {"memory": decided.memory}, timed_out, now)
+    note = WaitNote(
+        None, {"memory": decided.memory}, timed_out, now, deadline=deadline if watch_ci else None
+    )
     return log, "done", note, decided.collection
 
 
@@ -1311,6 +1328,9 @@ async def _run_one(
     bounds: WaitBounds = DEFAULT_WAIT,
     session_id: str = "",
     round: int = 0,
+    #: The review wait watches CI (`ForgeTask.watch_ci`): its limit counts from
+    #: the push of the head it is about, not from the wait's start.
+    watch_ci: bool = False,
     #: `pipeline_wait`'s pipeline id (`ForgeTask.pipeline`), the writer paths of
     #: its `reads`, and the variables each declares now.
     pipeline: str | None = None,
@@ -1573,6 +1593,7 @@ async def _run_one(
                 run_dirs=run_dirs,
                 session_id=session_id,
                 round=round,
+                watch_ci=watch_ci,
             )
         case "automated_review" if any(r.bot is not None for r in reviewers):
             # Not collecting (nothing in the node reads it, or a multi-repo
@@ -1583,7 +1604,7 @@ async def _run_one(
                 forge, db, repo=repo, orig_repo=orig_repo, branch=branch, head=head,
                 work_item_id=work_item_id, node_id=node_id, hook_point=hook_point,
                 reviewers=reviewers,
-                bounds=bounds, grace=grace, scope=scope, mount=mount,
+                bounds=bounds, grace=grace, scope=scope, mount=mount, watch_ci=watch_ci,
             )  # fmt: skip
             if collection is not None:
                 found, unread, unfinished = _verdict(collection, mount)
@@ -2795,6 +2816,7 @@ async def run_task(
                     bounds=wait or DEFAULT_WAIT,
                     session_id=session_id,
                     round=round,
+                    watch_ci=watch_ci,
                     pipeline=pipeline,
                     reads=reads,
                     declared=declared,
@@ -3001,6 +3023,7 @@ async def _observed(
             next_at=note.next_at if note else None,
             extra=note.extra if note else None,
             started_extra=note.started_extra if note else None,
+            deadline=note.deadline if note else None,
         )
     )
     if outcome == "timed_out" and by_deadline:

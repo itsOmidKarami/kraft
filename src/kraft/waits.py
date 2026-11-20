@@ -149,6 +149,7 @@ def observe(
     next_at: datetime | None = None,
     extra: dict | None = None,
     started_extra: Mapping[str, object] | None = None,
+    deadline: datetime | None = None,
 ) -> Literal["pending", "settled", "timed_out", "error"]:
     """Record one observation of `task`'s wait, in the caller's transaction,
     and say what it amounts to. `state` is what the forge saw: `pending`,
@@ -170,7 +171,10 @@ def observe(
     and so comes back in `OpenWait.last`. `started_extra` is what the wait is
     *about*, kept in its start: an open wait that was started about something
     else (`ci.pipeline` re-resolving another id) ends `superseded` and a new one
-    starts, with its own clock."""
+    starts, with its own clock. `deadline`, when given, is the instant a pending
+    observation is tested against and clamped to, in place of the wait's start
+    plus its timeout: a wait whose limit counts from something else (a review
+    wait from the push) says so here, and no other wait changes."""
     now = now or datetime.fromisoformat(_now())
     ids = {"task": task, "node_id": node_id}
     wait = open_wait(conn, work_item_id, task)
@@ -200,7 +204,7 @@ def observe(
             "initial_interval_s": bounds.initial_interval.total_seconds(),
             "max_interval_s": bounds.max_interval.total_seconds(),
             "started_at": now.isoformat(),
-            "deadline": (now + bounds.timeout).isoformat(),
+            "deadline": (deadline or now + bounds.timeout).isoformat(),
             **(started_extra or {}),
         }
         events.append(conn, work_item_id, ForgeEvent.EXTERNAL_WAIT_STARTED, started)
@@ -212,7 +216,7 @@ def observe(
             "timeout_s": bounds.timeout.total_seconds(),
             "initial_interval_s": bounds.initial_interval.total_seconds(),
             "max_interval_s": bounds.max_interval.total_seconds(),
-            "deadline": (start + bounds.timeout).isoformat(),
+            "deadline": (deadline or start + bounds.timeout).isoformat(),
         }
         events.append(conn, work_item_id, ForgeEvent.EXTERNAL_WAIT_REBOUNDED, changed)
         wait = OpenWait({**wait.started, **changed}, wait.last)
@@ -246,13 +250,13 @@ def observe(
         "result": result,
         **(extra or {}),
     }
-    deadline = datetime.fromisoformat(wait.started["deadline"])
-    if state == "settled" or now >= deadline:
+    due_by = deadline or datetime.fromisoformat(wait.started["deadline"])
+    if state == "settled" or now >= due_by:
         events.append(conn, work_item_id, ForgeEvent.EXTERNAL_WAIT_OBSERVED, seen)
         outcome = "settled" if state == "settled" else "timed_out"
         end(outcome)
         return outcome
-    due = min(next_at or now + wait.bounds.interval_after(n), deadline)
+    due = min(next_at or now + wait.bounds.interval_after(n), due_by)
     events.append(
         conn,
         work_item_id,

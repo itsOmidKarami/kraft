@@ -2133,6 +2133,15 @@ wait does.
 enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[a-member-red], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[the-root-red-behind-a-pending-member], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[a-member-conflict], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[every-pipeline-pending], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[a-merged-member-is-skipped], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[a-pointer-only-root-is-not-read]
 origin: src/kraft/adapters/forge/run.py §_watch_ci
 
+## REQ review-wait-watching-ci-counts-its-limit-from-the-push
+
+WHERE an `mr.automated_review` task sets `watch_ci`, the system SHALL count the
+wait's timeout from when Kraft pushed the head the wait is about, or from that
+head's commit time when Kraft has no record of pushing it, and not from the
+wait's start.
+enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_s_limit_counts_from_the_push[from-the-push], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_s_limit_counts_from_the_push[from-the-wait-start]
+origin: src/kraft/adapters/forge/run.py §_settle_review -- the person, 2026-11-20: "if it didn't post a review after the push in 10 mins, it's done."
+
 ## REQ automated-review-collects-when-a-later-task-reads-it
 
 WHERE a later task of an automated-review task's node declares the
