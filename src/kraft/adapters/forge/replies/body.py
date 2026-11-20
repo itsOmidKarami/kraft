@@ -9,8 +9,10 @@ untrusted input; the gate narrows what can leave rather than trusting it."""
 
 from __future__ import annotations
 
+import math
 import re
 import unicodedata
+from collections import Counter
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,12 +20,16 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from kraft import redact
 from kraft.adapters.forge import git
+from kraft.adapters.forge import mr as mr_ops
 from kraft.adapters.forge.models import ForgeError
 from kraft.worker.env import BASELINE, worker_env
 
 if TYPE_CHECKING:
     from kraft.config import RepoEntry
 
+#: Goes before a character the forge would read as a command, mention or reference: it
+#: renders as nothing and breaks the sequence.
+WORD_JOINER = "\u2060"
 PROSE_MAX = 1_500  # bytes of agent text that is not a verbatim quote
 NOTE_MAX = 60_000  # bytes of the whole note, footer and marker included
 
@@ -318,3 +324,84 @@ def known_secrets(repo_entry: RepoEntry | None, *, extra: Iterable[str] = ()) ->
     return frozenset(
         [v for v in named if _counts(v, named=True)] + [v for v in rest if _counts(v, named=False)]
     )
+
+
+_SLASH_LINE = re.compile(r"^([ \t]*)/", re.M)
+_RUN = re.compile(r"[A-Za-z0-9+/=_-]{20,}")
+_SIGIL = re.compile(r"([@#!&%$~])(?=[A-Za-z0-9'\"\[])|(@)(?=[_.])")  # GitLab paths may start _ or .
+_ITERATION = re.compile(r"\*(?=iteration:)")
+_VULN = re.compile(r"\[(?=vulnerability:)")
+_KEY = re.compile(r"\b([A-Z][A-Z0-9_]+-)(?=\d)")
+_CUT = "\n\n_(cut to fit)_"
+
+
+def _entropy(s: str) -> float:
+    n = len(s)
+    return -sum(c / n * math.log2(c / n) for c in Counter(s).values())
+
+
+def _random_looking(run: str) -> bool:
+    # A sha, a word, an identifier or a path is not a secret; a token mixes all three
+    # classes, and base64's `/` sits inside a long segment.
+    if "/" in run and all(len(seg) < 20 for seg in run.split("/")):
+        return False
+    return bool(
+        not re.fullmatch(r"[0-9a-fA-F]+", run)
+        and re.search(r"[a-z]", run)
+        and re.search(r"[A-Z]", run)
+        and re.search(r"\d", run)
+        and _entropy(run) >= 4.0
+    )
+
+
+def _open_fence(text: str) -> str | None:
+    """The opening fence a cut text leaves unclosed, or None."""
+    mark: str | None = None
+    for line in text.split("\n"):
+        if mark is None:
+            m = _FENCE_OPEN.match(line)
+            if m and not (m[1][0] == "`" and "`" in m[2]):
+                mark = m[1]
+        elif re.match(rf"^ {{0,3}}{re.escape(mark[0])}{{{len(mark)},}}\s*$", line):
+            mark = None
+    return mark
+
+
+def _fit(body: str, room: int) -> str:
+    """`body` cut to `room` bytes at a character boundary, closing a code fence the cut
+    leaves open, and marked as cut."""
+    if len(body.encode()) <= room:
+        return body
+    cut = room - len(_CUT)
+    while True:
+        head = body.encode()[: max(cut, 0)].decode(errors="ignore")
+        fence = _open_fence(head)
+        out = head + (f"\n{fence}" if fence else "") + _CUT
+        excess = len(out.encode()) - room
+        if excess <= 0 or cut <= 0:
+            return out
+        cut -= excess
+
+
+def render(text: str, *, lead: str, work_item_id: str, marker: str) -> str:
+    """The note Kraft posts for agent `text` that passed `check`: its line breaks
+    normalised, every `/` line and every mention or reference sigil broken with a word
+    joiner (so no command, mention or cross-reference fires, inside code too), long
+    random-looking strings redacted, Kraft's `lead` first, the whole cut to
+    `NOTE_MAX` bytes, then the footer and the hidden `marker`.
+
+    Redaction runs before the sigils: a joiner inside a token would split the run and
+    hide it from the entropy test."""
+    body = text.replace("\r\n", "\n").replace("\r", "\n")
+    body = _SLASH_LINE.sub(lambda m: f"{m[1]}{WORD_JOINER}/", body)
+    body = _RUN.sub(lambda m: "[redacted]" if _random_looking(m[0]) else m[0], body)
+    body = _SIGIL.sub(lambda m: (m[1] or m[2]) + WORD_JOINER, body)
+    for rx in (_ITERATION, _VULN):
+        body = rx.sub(lambda m: m[0] + WORD_JOINER, body)
+    body = _KEY.sub(lambda m: m[1] + WORD_JOINER, body)
+    head = f"{lead}\n\n"
+    footer = (
+        f"\n\n---\n_Posted by [Kraft]({mr_ops.KRAFT_URL}) for work item `{work_item_id}`._"
+        f"\n\n{marker}"
+    )
+    return head + _fit(body, NOTE_MAX - len(head.encode()) - len(footer.encode())) + footer

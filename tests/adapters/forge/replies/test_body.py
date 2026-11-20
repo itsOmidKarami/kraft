@@ -8,7 +8,14 @@ import pytest
 from support.harness import commit_all, entry_of
 
 from kraft import redact
-from kraft.adapters.forge.replies.body import RepoQuotes, check, known_secrets
+from kraft.adapters.forge.replies.body import (
+    NOTE_MAX,
+    RepoQuotes,
+    check,
+    known_secrets,
+    render,
+)
+from kraft.adapters.forge.replies.facts import reply_marker
 
 FILES = {
     "calc.py": "\n".join(
@@ -271,3 +278,76 @@ async def test_repo_quotes_search_the_tracked_files_at_the_head(repo, files, quo
 
     ask = quotes.in_whole_lines(quote) if block else quotes.in_a_line(quote)
     assert await ask is found
+
+
+WJ = "\u2060"
+LEAD, ITEM, MARK = "Declined:", "w1abcdef", reply_marker("w1abcdef-0123456789ab")
+FOOT = f"\n\n---\n_Posted by [Kraft](https://kraft-sdlc.dev/) for work item `{ITEM}`._\n\n{MARK}"
+
+
+@pytest.mark.parametrize(
+    "text, body",
+    [
+        ("plain", "plain"),
+        ("one\r\ntwo\rthree", "one\ntwo\nthree"),
+        ("/approve", f"{WJ}/approve"),
+        ("  /merge now", f"  {WJ}/merge now"),
+        ("```\n/close\n```", f"```\n{WJ}/close\n```"),
+        ("ask @alice", f"ask @{WJ}alice"),
+        ("ask @_team and @.ops", f"ask @{WJ}_team and @{WJ}.ops"),
+        ("see #12 and !34", f"see #{WJ}12 and !{WJ}34"),
+        ('~bug %"v1" $77 &epic', f'~{WJ}bug %{WJ}"v1" ${WJ}77 &{WJ}epic'),
+        ("owner/repo@abc1234", f"owner/repo@{WJ}abc1234"),
+        ("*iteration:3", f"*{WJ}iteration:3"),
+        ("[vulnerability:1]", f"[{WJ}vulnerability:1]"),
+        ("PROJ-123 is open", f"PROJ-{WJ}123 is open"),
+        ("a # heading and 50% off", "a # heading and 50% off"),
+        ("`@Override`", f"`@{WJ}Override`"),
+        ("tok aB3dE5fG7hJ9kL1mN3pQ5rS7 end", "tok [redacted] end"),
+        ("tok aB3dE5fG7hJ9-QX-1kL1mN3pQ5r end", "tok [redacted] end"),
+        ("sha " + "a1b2c3d4" * 5, "sha " + "a1b2c3d4" * 5),
+        ("test_a_long_snake_case_name_here", "test_a_long_snake_case_name_here"),
+        (
+            "see src/kraft/adapters/forge/V2Replies/Body3",
+            "see src/kraft/adapters/forge/V2Replies/Body3",
+        ),
+    ],
+    ids=[
+        "plain",
+        "line-breaks",
+        "slash-command",
+        "indented-slash",
+        "slash-in-code",
+        "mention",
+        "mention-underscore-and-dot",
+        "issue-and-mr-refs",
+        "label-milestone-snippet-epic",
+        "user-at-sha",
+        "iteration",
+        "vulnerability",
+        "jira-key",
+        "no-sigil-target",
+        "inside-code-too",
+        "high-entropy",
+        "a-token-with-a-key-shape-inside",
+        "a-full-sha-is-kept",
+        "an-identifier-is-kept",
+        "mixed-case-path",
+    ],
+)
+def test_the_note_is_neutralised_led_signed_and_marked(text, body):
+    assert render(text, lead=LEAD, work_item_id=ITEM, marker=MARK) == f"{LEAD}\n\n{body}{FOOT}"
+
+
+def test_a_note_too_long_is_cut_closing_its_fence_before_the_footer():
+    note = render("```\n" + "x = 1\n" * 20_000 + "```", lead=LEAD, work_item_id=ITEM, marker=MARK)
+
+    assert len(note.encode()) <= NOTE_MAX
+    assert note.endswith(FOOT)
+    before_footer = note[: -len(FOOT)]
+    assert before_footer.count("```") % 2 == 0
+
+
+def test_a_cut_never_splits_a_character():
+    note = render("é" * 40_000, lead=LEAD, work_item_id=ITEM, marker=MARK)
+    assert len(note.encode()) <= NOTE_MAX and "\ufffd" not in note
