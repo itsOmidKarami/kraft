@@ -267,7 +267,7 @@ def test_save_repos_round_trip_drops_legacy_key(tmp_path):
 def test_load_repos_hands_over_the_model_not_a_dump_of_it(tmp_path):
     """Kraft-5d510.6: every reader gets `RepoEntry`, its nested fields typed,
     so no caller re-parses a dict the loader already validated."""
-    from kraft.automated_review import AutomatedReview
+    from kraft.automated_review import BotReviewer
 
     (entry,) = _load(
         tmp_path,
@@ -279,7 +279,7 @@ def test_load_repos_hands_over_the_model_not_a_dump_of_it(tmp_path):
     )
 
     assert isinstance(entry, config.RepoEntry)
-    assert isinstance(entry.automated_review, AutomatedReview)
+    assert isinstance(entry.automated_review, BotReviewer)
     assert isinstance(entry.test_scopes[0], config.TestScope)
 
 

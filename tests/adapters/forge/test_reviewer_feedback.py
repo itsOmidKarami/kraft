@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 import pytest
 
 from kraft.adapters import forge
-from kraft.automated_review import AutomatedReview
+from kraft.automated_review import BotReviewer, CheckReviewer
 
 from .api_outputs import READ_BRANCH, READ_THREAD
 from .outputs import glab_mr
@@ -27,8 +27,8 @@ from .test_automated_review import (
 )
 
 SINCE = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
-BOT = AutomatedReview(bot="coderabbitai")
-CHECK = AutomatedReview(check="review-bot")
+BOT = BotReviewer(bot="coderabbitai")
+CHECK = CheckReviewer(check="review-bot")
 
 GH_ISSUE_COMMENTS = "api repos/{owner}/{repo}/issues/7/comments"
 GH_REVIEWS = "api repos/{owner}/{repo}/pulls/7/reviews"

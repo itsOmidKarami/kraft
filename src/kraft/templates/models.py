@@ -47,7 +47,7 @@ from pydantic import (
     model_validator,
 )
 
-from kraft.automated_review import AutomatedReview
+from kraft.automated_review import Reviewer
 from kraft.cap_levels import LEVEL_OF
 from kraft.policy import (
     FROZEN,
@@ -767,7 +767,7 @@ class ForgeTask(TaskBase):
     #: any. Which reviewers, never how each is read
     #: (`automated-review-implementation-is-not-template-configuration`).
     #: `[]` expects none.
-    reviewers: list[AutomatedReview] | None = None
+    reviewers: list[Reviewer] | None = None
     #: `mr.automated_review` only: also push the branch and read the merge
     #: request's pipeline at every check, and end on a red pipeline or a merge
     #: conflict. It names *what* the wait also looks at, never how CI is read

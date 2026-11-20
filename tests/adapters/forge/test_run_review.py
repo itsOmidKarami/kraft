@@ -16,7 +16,7 @@ from support.harness import commit_all, entry_of, fake_harness_home, git, v1_res
 from kraft import builtins as _builtins
 from kraft import executor, policy, store, waits
 from kraft.adapters import forge
-from kraft.automated_review import AutomatedReview, as_reviewers
+from kraft.automated_review import BotReviewer, CheckReviewer, as_reviewers
 from kraft.executor import dispatch
 from kraft.templates.models import ForgeTask
 
@@ -207,7 +207,7 @@ def test_the_watch_ci_row_shows_only_on_the_review_wait(target, hidden):
 
 # --- the collect path ------------------------------------------------------------
 
-_A, _B = AutomatedReview(bot="a"), AutomatedReview(bot="b")
+_A, _B = BotReviewer(bot="a"), BotReviewer(bot="b")
 
 
 def _feedback(reviewer, active=None, *, threads=()):
@@ -467,7 +467,7 @@ def _said(reviewer, active, *, state=None, body=""):
     return replace(_feedback(reviewer, active), summaries=(summary,))
 
 
-_SCAN = AutomatedReview(check="scan")
+_SCAN = CheckReviewer(check="scan")
 #: A check still running.
 _RUNNING = forge.ReviewerFeedback(
     _SCAN, None, check={"name": "scan", "finished": False, "conclusion": None, "output": ""}
@@ -565,7 +565,7 @@ def test_kraft_s_own_verdict_names_each_finding_once(threads, summary, mount, fi
 async def test_a_check_with_nothing_reading_it_takes_the_direct_path_and_its_timeout_stops(
     item_on, database, run_dirs, monkeypatch, wait_clock
 ):
-    check = AutomatedReview(check="scan")
+    check = CheckReviewer(check="scan")
     it = await item_on([_review_node(1, reads=False, reviewers=(check,))])
     fake = forge.FakeForge(review_results=[forge.ReviewResult("pending")])
     ask = {

@@ -13,7 +13,7 @@ import pytest
 from kraft import events
 from kraft.adapters.forge import settle
 from kraft.adapters.forge.models import ForgeNote, ReviewerFeedback
-from kraft.automated_review import AutomatedReview
+from kraft.automated_review import BotReviewer, CheckReviewer
 from kraft.vocab import ForgeEvent
 
 SINCE = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
@@ -27,7 +27,7 @@ def at(seconds: float) -> datetime:
 
 def bot(name="x", *, active=None, summaries=(), threads=(), notes=()) -> ReviewerFeedback:
     return ReviewerFeedback(
-        AutomatedReview(bot=name),
+        BotReviewer(bot=name),
         None if active is None else at(active),
         tuple(summaries),
         tuple(
@@ -40,7 +40,7 @@ def bot(name="x", *, active=None, summaries=(), threads=(), notes=()) -> Reviewe
 
 def check(finished, conclusion=None, name="scan") -> ReviewerFeedback:
     return ReviewerFeedback(
-        AutomatedReview(check=name),
+        CheckReviewer(check=name),
         None,
         check={"name": name, "finished": finished, "conclusion": conclusion, "output": "boom"},
     )

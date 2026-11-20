@@ -13,7 +13,7 @@ from support.harness import entry_of
 from kraft import waits
 from kraft.adapters import forge
 from kraft.api import deps
-from kraft.automated_review import AutomatedReview
+from kraft.automated_review import CheckReviewer
 
 #: A `now` every parked wait is due by, so the test never sleeps out a backoff.
 LATER = "2999-01-01T00:00:00+00:00"
@@ -55,7 +55,7 @@ def _on_a_fake_forge(monkeypatch, **states) -> forge.FakeForge:
 def _review_check(*, finished: bool) -> forge.ReviewerFeedback:
     """The review check, running or passed: nothing for the triage to read."""
     check = {"name": "review", "finished": finished, "conclusion": "success", "output": ""}
-    return forge.ReviewerFeedback(AutomatedReview(check="review"), None, check=check)
+    return forge.ReviewerFeedback(CheckReviewer(check="review"), None, check=check)
 
 
 def test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci(

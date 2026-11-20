@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from kraft.adapters.forge.mr import MRMeta
-    from kraft.automated_review import AutomatedReview, Reviewers
+    from kraft.automated_review import BotReviewer, CheckReviewer, Reviewers
 
 CIState = Literal["pending", "success", "failed"]
 
@@ -225,7 +225,7 @@ class ReviewerFeedback:
     (`settle.decide`) and to hand on what it said. Nothing here says how the
     forge was asked."""
 
-    reviewer: AutomatedReview
+    reviewer: BotReviewer | CheckReviewer
     #: The newest comment, review or inline-comment update by this bot, on the
     #: forge's clock; None when it has done none.
     last_activity: datetime | None

@@ -1,37 +1,35 @@
 {
   "$defs": {
-    "AutomatedReview": {
+    "BotReviewer": {
       "additionalProperties": false,
-      "description": "One reviewer whose verdict `mr.automated_review` waits for, named\nexactly one way.\n\n* `bot` -- a forge login. The review settles when that login has reviewed\n  the merge request's current head.\n* `check` -- a check or commit status on the head. It settles when that\n  check completes.\n\nNone named at any layer, no automated reviewer is expected, and the wait settles\nclean at once (`automated_review_not_configured`). How either is read is the\nforge backend's (`automated-review-implementation-is-not-template-\nconfiguration`): this names *which* reviewer, never how to ask it.",
+      "description": "A forge login. The review settles when that login has reviewed the head.",
       "properties": {
         "bot": {
-          "anyOf": [
-            {
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Bot"
-        },
-        "check": {
-          "anyOf": [
-            {
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Check"
+          "minLength": 1,
+          "title": "Bot",
+          "type": "string"
         }
       },
-      "title": "AutomatedReview",
+      "required": [
+        "bot"
+      ],
+      "title": "BotReviewer",
+      "type": "object"
+    },
+    "CheckReviewer": {
+      "additionalProperties": false,
+      "description": "A check or commit status on the head. It settles when it completes.",
+      "properties": {
+        "check": {
+          "minLength": 1,
+          "title": "Check",
+          "type": "string"
+        }
+      },
+      "required": [
+        "check"
+      ],
+      "title": "CheckReviewer",
       "type": "object"
     },
     "CredentialInject": {
@@ -108,11 +106,25 @@
             {
               "oneOf": [
                 {
-                  "$ref": "#/$defs/AutomatedReview"
+                  "oneOf": [
+                    {
+                      "$ref": "#/$defs/BotReviewer"
+                    },
+                    {
+                      "$ref": "#/$defs/CheckReviewer"
+                    }
+                  ]
                 },
                 {
                   "items": {
-                    "$ref": "#/$defs/AutomatedReview"
+                    "oneOf": [
+                      {
+                        "$ref": "#/$defs/BotReviewer"
+                      },
+                      {
+                        "$ref": "#/$defs/CheckReviewer"
+                      }
+                    ]
                   },
                   "type": "array"
                 }

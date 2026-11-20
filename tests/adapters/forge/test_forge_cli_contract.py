@@ -22,7 +22,7 @@ from kraft.adapters.forge import gh as gh_adapter
 from kraft.adapters.forge.gh import _QUEUE_QUERY, _THREADS_QUERY
 from kraft.adapters.forge.github_api import GitHubApi
 from kraft.adapters.forge.gitlab_api import GitLabApi
-from kraft.automated_review import AutomatedReview
+from kraft.automated_review import BotReviewer, CheckReviewer
 from kraft.forges import ForgeAccount, TokenSource
 
 from . import api_outputs, outputs
@@ -172,16 +172,16 @@ _BY_BRANCH = {
         repo=r, branch="kraft/abc", mr=forge.MR(0, ""), labels=("x",)
     ),
     "bot_review": lambda f, r: f.automated_review(
-        repo=r, branch="kraft/abc", reviewers=(AutomatedReview(bot="b"),)
+        repo=r, branch="kraft/abc", reviewers=(BotReviewer(bot="b"),)
     ),
     "check_review": lambda f, r: f.automated_review(
-        repo=r, branch="kraft/abc", reviewers=(AutomatedReview(check="c"),)
+        repo=r, branch="kraft/abc", reviewers=(CheckReviewer(check="c"),)
     ),
     "bot_feedback": lambda f, r: f.reviewer_feedback(
-        repo=r, branch="kraft/abc", reviewers=(AutomatedReview(bot="b"),), since=_SINCE
+        repo=r, branch="kraft/abc", reviewers=(BotReviewer(bot="b"),), since=_SINCE
     ),
     "check_feedback": lambda f, r: f.reviewer_feedback(
-        repo=r, branch="kraft/abc", reviewers=(AutomatedReview(check="c"),), since=_SINCE
+        repo=r, branch="kraft/abc", reviewers=(CheckReviewer(check="c"),), since=_SINCE
     ),
 }
 

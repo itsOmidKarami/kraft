@@ -17,7 +17,7 @@ from typing import Literal
 
 from kraft.adapters.forge.models import ForgeNote, ReviewerFeedback
 from kraft.adapters.forge.replies import facts
-from kraft.automated_review import AutomatedReview, Reviewers
+from kraft.automated_review import BotReviewer, CheckReviewer, Reviewers
 from kraft.vocab import ForgeEvent
 
 #: How many items a bot must have reviewed in one repository, never once
@@ -41,7 +41,7 @@ class Settled:
     collection: list[dict]
 
 
-def reviewer_key(reviewer: AutomatedReview) -> str:
+def reviewer_key(reviewer: BotReviewer | CheckReviewer) -> str:
     return f"bot:{reviewer.bot}" if reviewer.bot is not None else f"check:{reviewer.check}"
 
 

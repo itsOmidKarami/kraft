@@ -9,10 +9,11 @@ from __future__ import annotations
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from kraft import config
 from kraft.adapters import forge
-from kraft.automated_review import AutomatedReview, as_reviewers
+from kraft.automated_review import BotReviewer, CheckReviewer, as_reviewers
 
 from .api_outputs import READ_BRANCH, pr_by_branch, pull_request
 from .nodes import FAIL
@@ -68,8 +69,8 @@ async def _review(cls, cli, tmp_path, routes, reviewer):
 
 GH = type("GH", (), {"name": "gh", "cls": forge.GhCli})
 GLAB = type("GLAB", (), {"name": "glab", "cls": forge.GlabCli})
-BOT = AutomatedReview(bot="coderabbitai")
-CHECK = AutomatedReview(check="review-bot")
+BOT = BotReviewer(bot="coderabbitai")
+CHECK = CheckReviewer(check="review-bot")
 
 
 # --- a bot reviewer ------------------------------------------------------------
@@ -389,3 +390,30 @@ def test_a_reviewer_is_named_exactly_one_way_or_refused_at_load(tmp_path, block)
     repos.write_text(json.dumps({"repos": [{"path": "/r", "automated_review": block}]}))
     with pytest.raises(config.ConfigError, match="exactly one"):
         config.load_repos(repos)
+
+
+@pytest.mark.parametrize(
+    ("entry", "kind"),
+    [
+        ({"bot": "x", "check": None}, BotReviewer),
+        ({"check": "c", "bot": None}, CheckReviewer),
+        ({"check": "c", "replies": True}, None),
+    ],
+    ids=[
+        "stored-bot-with-a-null-check",
+        "stored-check-with-a-null-bot",
+        "a-check-with-a-key-it-lacks",
+    ],
+)
+def test_a_reviewer_entry_is_a_bot_or_a_check(entry, kind):
+    """`reviewer-entry-is-a-bot-or-a-check`: every stored list holds the other
+    name as null, and loads; a key is checked against the entry's own kind."""
+    if kind is None:
+        with pytest.raises(ValidationError) as refused:
+            as_reviewers([entry])
+        assert refused.value.errors()[0]["loc"] == ("check", "replies")
+        return
+    (read,) = as_reviewers([entry])
+    assert type(read) is kind
+    assert read.model_dump() == {k: v for k, v in entry.items() if v is not None}
+    assert (read.bot, read.check) == (entry.get("bot"), entry.get("check"))
