@@ -405,6 +405,7 @@ async def test_the_collect_path_settles_then_hands_on_the_collection(
     assert rig.wait_session()["status"] == "done"
     assert [e["payload"]["outcome"] for e in rig.item.events("external_wait_ended")] == [ended]
     got = rig.collection()
+    assert got["read_at"] == rig.moment(clock if decided_at is None else decided_at).isoformat()
     assert [(r["reviewer"], r["finished"]) for r in got["reviewers"]] == list(
         zip(["bot:a", "bot:b"], finished, strict=True)
     )

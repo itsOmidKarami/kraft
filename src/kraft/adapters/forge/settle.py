@@ -15,7 +15,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Literal
 
-from kraft.adapters.forge.models import ReviewerFeedback
+from kraft.adapters.forge.models import ForgeNote, ReviewerFeedback
+from kraft.adapters.forge.replies import facts
 from kraft.automated_review import AutomatedReview, Reviewers
 from kraft.vocab import ForgeEvent
 
@@ -84,11 +85,12 @@ def decide(
             finished[key] = "timeout"
     if any(how is None for how in finished.values()):
         return Settled("pending", min(wakes, default=None), kept, [])
+    bots = [f.reviewer.bot for f in feedback if f.reviewer.bot is not None]
     return Settled(
         "settled",
         None,
         kept,
-        [_collected(item, finished[reviewer_key(item.reviewer)]) for item in feedback],
+        [_collected(item, finished[reviewer_key(item.reviewer)], bots) for item in feedback],
     )
 
 
@@ -105,9 +107,24 @@ def _activity(
     return max(seen, default=None), thread_ids
 
 
-def _collected(item: ReviewerFeedback, how: str | None) -> dict:
+def _note_json(note: ForgeNote, bots: list[str]) -> dict:
+    """One note as the triage reads it. No viewer and no record are passed until
+    the replies exist, so no note is `kraft` yet."""
+    return {
+        "id": note.id,
+        "author": note.author,
+        "by": facts.note_by(note, bots=bots),
+        "body": note.body,
+        "created_at": note.created_at,
+        "reply_to": note.reply_to,
+        "review_id": note.review_id,
+    }
+
+
+def _collected(item: ReviewerFeedback, how: str | None, bots: list[str]) -> dict:
     """One reviewer's entry in the collection the triage reads: only its newest
-    comment and newest review, its unresolved threads, and a check that did not
+    comment and newest review, its unresolved threads (each with its notes and
+    whose each is, `bots` being every configured bot), and a check that did not
     succeed with its output."""
     newest: dict[str, dict] = {}
     for summary in item.summaries:
@@ -119,7 +136,13 @@ def _collected(item: ReviewerFeedback, how: str | None) -> dict:
         "reviewer": reviewer_key(item.reviewer),
         "finished": how,
         "summaries": sorted(newest.values(), key=lambda s: s["updated_at"]),
-        "threads": [{k: v for k, v in t.items() if k != "notes"} for t in item.threads],
+        "threads": [
+            {
+                **{k: v for k, v in t.items() if k != "notes"},
+                "notes": [_note_json(n, bots) for n in t.get("notes", ())],
+            }
+            for t in item.threads
+        ],
         "check": item.check if failed else None,
     }
 

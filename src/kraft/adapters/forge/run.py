@@ -1117,7 +1117,7 @@ async def _collect_review(
                 {"node_id": node_id, "task": hook_point, "repo": str(orig_repo)},
             )
         )
-        _write_collection(destination, head, round, [])
+        _write_collection(destination, head, round, [], None)
         return "automated review: no reviewer configured; nothing to collect\n", "done", None
     log, status, note, collection = await _settle_review(
         forge, db, repo=repo, orig_repo=orig_repo, branch=branch, head=head,
@@ -1126,7 +1126,7 @@ async def _collect_review(
         bounds=bounds, grace=grace, watch_ci=watch_ci,
     )  # fmt: skip
     if collection is not None:
-        _write_collection(destination, head, round, collection)
+        _write_collection(destination, head, round, collection, note.now)
     return log, status, note
 
 
@@ -1271,12 +1271,20 @@ def _as_findings(messages: Iterable[str]) -> list[dict]:
     ]
 
 
-def _write_collection(destination: Path, head: str, round: int, collection: list[dict]) -> None:
-    """The collection the reading task is handed (`AgentInput.BOT_FEEDBACK`)."""
+def _write_collection(
+    destination: Path, head: str, round: int, collection: list[dict], read_at: datetime | None
+) -> None:
+    """The collection the reading task is handed (`AgentInput.BOT_FEEDBACK`).
+    `read_at` is the instant the wait decided the bots had finished; None when
+    nothing was read."""
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(
-        json.dumps({"head": head, "round": round, "reviewers": collection}, indent=2) + "\n"
-    )
+    body = {
+        "head": head,
+        "round": round,
+        "read_at": read_at.isoformat() if read_at else None,
+        "reviewers": collection,
+    }
+    destination.write_text(json.dumps(body, indent=2) + "\n")
 
 
 async def _run_one(

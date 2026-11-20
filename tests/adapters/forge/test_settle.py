@@ -12,7 +12,7 @@ import pytest
 
 from kraft import events
 from kraft.adapters.forge import settle
-from kraft.adapters.forge.models import ReviewerFeedback
+from kraft.adapters.forge.models import ForgeNote, ReviewerFeedback
 from kraft.automated_review import AutomatedReview
 from kraft.vocab import ForgeEvent
 
@@ -25,12 +25,16 @@ def at(seconds: float) -> datetime:
     return SINCE + timedelta(seconds=seconds)
 
 
-def bot(name="x", *, active=None, summaries=(), threads=()) -> ReviewerFeedback:
+def bot(name="x", *, active=None, summaries=(), threads=(), notes=()) -> ReviewerFeedback:
     return ReviewerFeedback(
         AutomatedReview(bot=name),
         None if active is None else at(active),
         tuple(summaries),
-        tuple({"id": t, "file": "a.py", "line": 1, "body": f"fix {t}"} for t in threads),
+        tuple(
+            {"id": t, "file": "a.py", "line": 1, "body": f"fix {t}"}
+            | ({"notes": notes} if notes else {})
+            for t in threads
+        ),
     )
 
 
@@ -220,3 +224,33 @@ async def test_a_bot_is_named_only_when_it_never_posted_in_a_repository_across_i
 
     repo = str(filed["w1"].repo)
     assert got == ([] if named is None else [{"repo": repo, "bot": "ccr", "items": named}])
+
+
+def test_each_collected_note_says_whose_it_is():
+    notes = (
+        ForgeNote("N1", "1", "x", "Bot", "fix it", "2026-01-01T00:00:01Z", "u", None, "51"),
+        ForgeNote("N2", "2", "x", "User", "no", "2026-01-01T00:00:02Z", "u", "N1", "52"),
+    )
+    [entry] = decide([bot(active=1, threads=["t1"], notes=notes)], now=100).collection
+
+    assert entry["threads"][0]["notes"] == [
+        {
+            "id": "N1",
+            "author": "x",
+            "by": "bot",
+            "body": "fix it",
+            "created_at": "2026-01-01T00:00:01Z",
+            "reply_to": None,
+            "review_id": "51",
+        },
+        {
+            "id": "N2",
+            "author": "x",
+            "by": "person",
+            "body": "no",
+            "created_at": "2026-01-01T00:00:02Z",
+            "reply_to": "N1",
+            "review_id": "52",
+        },
+    ]
+    assert entry["threads"][0]["body"] == "fix t1"  # unchanged
