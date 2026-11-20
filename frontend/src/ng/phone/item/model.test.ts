@@ -58,6 +58,9 @@ describe("pairOf (C.5): one pair, by status and stop kind", () => {
     // A fix loop stopped on CI that failed outside the code: Re-run CI where the server takes it, which retries.
     ["stuck, the server admitting rerun_ci", mk("needs_you", stop("stuck"), { actions: ["retry", "rerun_ci", "escalate", "cancel"] }), ["retry", "rerun-ci"]],
     ["stuck, the server refusing rerun_ci", mk("needs_you", stop("stuck"), { actions: ["retry", "escalate", "cancel"] }), ["escalate", "retry"]],
+    // At its cap on CI: Re-run CI in Steer's place, the raise or Retry still the way on.
+    ["cap, the server admitting rerun_ci", mk("needs_you", stop("cap"), { actions: ["retry", "rerun_ci", "escalate", "cancel"] }), ["rerun-ci", "retry"]],
+    ["cap, the server refusing rerun_ci", mk("needs_you", stop("cap"), { actions: ["retry", "escalate", "cancel"] }), ["steer", "retry"]],
     ["archived, the server refusing restore", mk("archived", null, { actions: [] }), [null, null]],
   ] as const)("%s", (_name, item, want) => expect(ids(item)).toEqual(want));
 

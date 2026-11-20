@@ -236,6 +236,8 @@ const CASES: [string, Partial<ItemDetail>, string][] = [
   ["stuck", { display_status: "needs_you", status: "needs_human", stop: S("stuck"), worker_sessions: session("failed") }, "stuck"],
   // Its fix loop stopped on merge-request CI: the server lists rerun_ci, which the card and the phone bar offer.
   ["stuck on CI", { display_status: "needs_you", status: "needs_human", stop: S("stuck"), worker_sessions: session("failed"), actions: serverActions("stuck_on_ci") }, "stuck_on_ci"],
+  // At its cap on merge-request CI: the server lists rerun_ci, which the banner and the phone bar offer beside the raise.
+  ["cap on CI", { display_status: "needs_you", status: "needs_human", stop: S("cap"), worker_sessions: session("failed"), actions: serverActions("cap_on_ci") }, "cap_on_ci"],
   ["escalated", { display_status: "escalated", status: "needs_human", stop: S("stuck"), worker_sessions: session("failed") }, "escalated"],
   ["failed", { display_status: "failed", status: "needs_human", stop: S("failed"), worker_sessions: session("failed") }, "failed"],
   ["infra", { display_status: "failed", status: "needs_human", stop: S("infra"), worker_sessions: session("failed") }, "infra"],

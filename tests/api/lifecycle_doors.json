@@ -86,6 +86,14 @@
       "stop": "cap",
       "reason": "running time hit its cap"
     },
+    "cap_on_ci": {
+      "status": "needs_human",
+      "node": "merge_request_feedback",
+      "stop": "cap",
+      "reason": "merge_request_feedback.fix_loop exhausted after 3 fix cycle(s)",
+      "mr": true,
+      "worktree": true
+    },
     "conflict": {
       "status": "needs_human",
       "node": "implementation",
@@ -239,6 +247,7 @@
         "stuck",
         "stuck_on_ci",
         "cap",
+        "cap_on_ci",
         "conflict",
         "failed",
         "infra",
@@ -265,6 +274,7 @@
         "stuck",
         "stuck_on_ci",
         "cap",
+        "cap_on_ci",
         "conflict",
         "failed",
         "infra",
@@ -290,6 +300,7 @@
         "stuck",
         "stuck_on_ci",
         "cap",
+        "cap_on_ci",
         "conflict",
         "failed",
         "infra",
@@ -322,7 +333,8 @@
         "reason": "registry rate limit"
       },
       "takes": [
-        "stuck_on_ci"
+        "stuck_on_ci",
+        "cap_on_ci"
       ]
     },
     "cancel": {
@@ -347,6 +359,7 @@
         "stuck",
         "stuck_on_ci",
         "cap",
+        "cap_on_ci",
         "conflict",
         "failed",
         "infra",
@@ -386,6 +399,7 @@
         "stuck",
         "stuck_on_ci",
         "cap",
+        "cap_on_ci",
         "conflict",
         "failed",
         "infra",
@@ -469,6 +483,7 @@
         "stuck",
         "stuck_on_ci",
         "cap",
+        "cap_on_ci",
         "conflict",
         "failed",
         "infra",
