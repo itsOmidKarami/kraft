@@ -21,6 +21,7 @@ from kraft.adapters.forge.models import (
     FailedJob,
     ForgeError,
     ForgeNote,
+    ForgeThread,
     HeadMoved,
     Job,
     Label,
@@ -28,6 +29,7 @@ from kraft.adapters.forge.models import (
     MRDetails,
     MRRef,
     Pipeline,
+    Posted,
     QueueRead,
     QueueState,
     ReviewerFeedback,
@@ -83,6 +85,38 @@ def _gh_notes(nodes: list[dict]) -> tuple[ForgeNote, ...]:
         )
         for n in nodes
         if n.get("state") != "PENDING"
+    )
+
+
+_VIEWER_QUERY = "query { viewer { login } }"
+_RESOLVE_MUTATION = """
+mutation($thread: ID!) {
+  resolveReviewThread(input: {threadId: $thread}) { thread { isResolved } }
+}
+"""
+
+
+def _gh_thread(node: dict, comments: list[dict]) -> ForgeThread:
+    first = comments[0] if comments else {}
+    return ForgeThread(
+        id=str(node["id"]),
+        mr=int((node.get("pullRequest") or {}).get("number") or 0),
+        resolved=bool(node.get("isResolved")),
+        outdated=bool(node.get("isOutdated")),
+        can_reply=bool(node.get("viewerCanReply")),
+        can_resolve=bool(node.get("viewerCanResolve")),
+        file=first.get("path"),
+        line=first.get("line") or first.get("originalLine"),
+        notes=_gh_notes(comments),
+    )
+
+
+def _posted(answer: dict, *ids: str) -> Posted:
+    """A write's answer as `Posted`: the REST id and the node id on GitHub."""
+    return Posted(
+        tuple(str(answer[k]) for k in ids),
+        str(answer.get("created_at") or ""),
+        answer.get("body") or "",
     )
 
 
@@ -706,6 +740,77 @@ class GhCli(mr_ops.CliWaits):
             else ReviewerFeedback(r, None, check=await self._check_feedback(repo, head, r.check))
             for r in reviewers
         ]
+
+    async def viewer(self, *, repo: Path) -> str:
+        data = await self._gql(repo, _VIEWER_QUERY, {})
+        login = (data.get("viewer") or {}).get("login") if isinstance(data, dict) else None
+        if not login:
+            raise ForgeError(f"gh api graphql answered without the viewer: {data!r:.200}")
+        return str(login)
+
+    async def read_thread(self, *, repo: Path, branch: str, thread_id: str) -> ForgeThread | None:
+        pr = await self._pr(repo, mr_ops.target(0, branch), checks=False)
+        node, comments = await self._thread_comments(repo, thread_id, None)
+        # `node` is not scoped to a pull request: another one's thread is not this one's.
+        if not node.get("id") or (node.get("pullRequest") or {}).get("number") != pr["number"]:
+            return None
+        return _gh_thread(node, comments)
+
+    async def reply_to_thread(self, *, repo: Path, thread: ForgeThread, body: str) -> Posted:
+        if not thread.notes:
+            raise ForgeError(f"thread {thread.id} has no note to reply to")
+        # A reply goes to the first comment's REST id. The body is a `str` field, so it
+        # is always sent raw (`-f`), whatever it starts with.
+        answer = await self._api(
+            repo,
+            f"repos/{{owner}}/{{repo}}/pulls/{thread.mr}/comments/{thread.notes[0].rest_id}/replies",
+            method="POST",
+            fields={"body": body},
+        )
+        return _posted(answer, "id", "node_id")
+
+    async def resolve_thread(self, *, repo: Path, thread: ForgeThread) -> None:
+        await self._gql(repo, _RESOLVE_MUTATION, {"thread": thread.id})
+
+    async def mr_comments(self, *, repo: Path, branch: str) -> tuple[ForgeNote, ...]:
+        pr = await self._pr(repo, mr_ops.target(0, branch), checks=False)
+        rows = await self._paged(
+            repo,
+            f"repos/{{owner}}/{{repo}}/issues/{pr['number']}/comments",
+            pages=mr_ops.BOT_PAGES,
+            strict=True,
+        )
+        return tuple(
+            ForgeNote(
+                id=str(r.get("node_id") or ""),
+                rest_id=str(r.get("id") or ""),
+                author=str((r.get("user") or {}).get("login") or ""),
+                author_type=(r.get("user") or {}).get("type"),
+                body=r.get("body") or "",
+                created_at=r.get("created_at") or "",
+                updated_at=r.get("updated_at") or "",
+            )
+            for r in rows
+        )
+
+    async def upsert_comment(
+        self, *, repo: Path, branch: str, note_id: str | None, body: str
+    ) -> Posted:
+        if note_id is None:
+            pr = await self._pr(repo, mr_ops.target(0, branch), checks=False)
+            path, method = f"repos/{{owner}}/{{repo}}/issues/{pr['number']}/comments", "POST"
+        else:
+            path, method = f"repos/{{owner}}/{{repo}}/issues/comments/{note_id}", "PATCH"
+        answer = await self._api(repo, path, method=method, fields={"body": body})
+        return _posted(answer, "id", "node_id")
+
+    async def delete_note(
+        self, *, repo: Path, branch: str, note: ForgeNote, in_thread: bool
+    ) -> None:
+        kind = "pulls" if in_thread else "issues"
+        await self._send(
+            repo, f"repos/{{owner}}/{{repo}}/{kind}/comments/{note.rest_id}", method="DELETE"
+        )
 
     async def _threads(self, repo: Path, number: int) -> list[dict]:
         """Every review thread of the pull request, each with every comment: the

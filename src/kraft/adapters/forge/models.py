@@ -541,6 +541,34 @@ class Forge(Protocol):
     async def reviewer_feedback(
         self, *, repo: Path, branch: str, reviewers: Reviewers, since: datetime
     ) -> list[ReviewerFeedback]: ...
+    async def viewer(self, *, repo: Path) -> str:
+        """The login Kraft writes as."""
+        ...
+
+    async def read_thread(self, *, repo: Path, branch: str, thread_id: str) -> ForgeThread | None:
+        """One review thread of the branch's merge request, notes filtered as the
+        collection filters them; None when the merge request has no such thread."""
+        ...
+
+    async def reply_to_thread(self, *, repo: Path, thread: ForgeThread, body: str) -> Posted:
+        """Reply in a thread read just before (it carries the number and the first
+        note's REST id)."""
+        ...
+
+    async def resolve_thread(self, *, repo: Path, thread: ForgeThread) -> None: ...
+    async def mr_comments(self, *, repo: Path, branch: str) -> tuple[ForgeNote, ...]:
+        """The merge request's top-level comments, every page, system notes left out."""
+        ...
+
+    async def upsert_comment(
+        self, *, repo: Path, branch: str, note_id: str | None, body: str
+    ) -> Posted:
+        """A new top-level comment when `note_id` is None, else that one edited."""
+        ...
+
+    async def delete_note(
+        self, *, repo: Path, branch: str, note: ForgeNote, in_thread: bool
+    ) -> None: ...
     async def mr_details(self, *, repo: Path, branch: str) -> MRDetails | None: ...
     async def pipelines(self, *, repo: Path, branch: str, base: str) -> tuple[Pipeline, ...]:
         """Newest first: at most 20 (GitHub: 20 branch runs and 20 merge-queue runs)."""
