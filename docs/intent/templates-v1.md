@@ -2087,13 +2087,50 @@ the CI wait.
 enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_a_red_pipeline_the_review_wait_reads_is_the_ci_wait_s_finding, tests/adapters/forge/test_run_watch_ci.py::test_a_red_pipeline_the_review_wait_reads_goes_to_on_failure_first
 origin: src/kraft/adapters/forge/run.py §_watch_ci
 
+## REQ review-wait-watching-ci-pushes-first
+
+WHEN an `mr.automated_review` task that sets `watch_ci` makes an observation,
+the system SHALL first push the item's branch and record the push, and SHALL end
+the wait settled, reading neither CI nor the bots, when the merge request is
+already merged.
+enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[pending], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[merged], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[push-refused], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[watch-ci-off]
+origin: src/kraft/adapters/forge/run.py §_watch_ci
+
+## REQ review-wait-watching-ci-reads-ci-without-acting-on-it
+
+WHILE an `mr.automated_review` task that sets `watch_ci` reads the merge
+request's pipeline, the system SHALL NOT rebase the branch, retry a job, count
+an infrastructure retry, pin a pipeline or record that CI is not configured,
+SHALL NOT read it when the repository's `ci_checks` is off, and SHALL leave every
+read but a settled red or a confirmed conflict, a read that fails for any reason
+but a rate limit included, to the node's CI wait.
+enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[pending], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[green], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[no-pipeline-yet], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[red-for-an-older-head], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[infra-red], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[abandoned], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[read-error], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[ci-checks-off], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[rate-limited], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[watch-ci-off]
+origin: src/kraft/adapters/forge/run.py §_watch_ci
+
+## REQ review-wait-watching-ci-ends-on-a-confirmed-conflict
+
+WHEN an `mr.automated_review` task that sets `watch_ci` reads a merge request
+confirmed to conflict with its base, the system SHALL end the wait settled, not
+failed, without reading the bots or writing what they said.
+enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[conflict], tests/adapters/forge/test_run_watch_ci.py::test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots[conflict]
+origin: src/kraft/adapters/forge/run.py §_watch_ci
+
+## REQ review-wait-cut-short-by-ci-records-no-heard-or-silent-bots
+
+WHEN an `mr.automated_review` task that sets `watch_ci` ends on a red pipeline
+or a confirmed conflict, the system SHALL NOT record which bots were heard or
+silent on that head.
+enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots[red], tests/adapters/forge/test_run_watch_ci.py::test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots[conflict]
+origin: src/kraft/adapters/forge/run.py §_watch_ci
+
 ## REQ automated-review-collects-when-a-later-task-reads-it
 
 WHERE a later task of an automated-review task's node declares the
 `bot_feedback` input, the system SHALL hold the wait until every named reviewer
 has finished with the latest pushed head, then write what the reviewers said for
-that task and report the wait settled, whatever they said.
-enforced-by: tests/adapters/forge/test_run_review.py::test_the_collect_path_settles_then_hands_on_the_collection[both-settle], tests/adapters/forge/test_run_review.py::test_the_next_check_comes_when_a_bots_grace_period_ends_not_at_the_backoff, tests/adapters/forge/test_run_review.py::test_no_reviewer_named_settles_with_an_empty_collection
+that task and report the wait settled, whatever they said, unless the wait sets
+`watch_ci` and a red pipeline or a confirmed conflict ends it first.
+enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots[red], tests/adapters/forge/test_run_watch_ci.py::test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots[conflict], tests/adapters/forge/test_run_review.py::test_the_collect_path_settles_then_hands_on_the_collection[both-settle], tests/adapters/forge/test_run_review.py::test_the_next_check_comes_when_a_bots_grace_period_ends_not_at_the_backoff, tests/adapters/forge/test_run_review.py::test_no_reviewer_named_settles_with_an_empty_collection
 origin: config/library.yaml §await_automated_review
 
 ## REQ automated-review-settles-a-bot-nothing-reads

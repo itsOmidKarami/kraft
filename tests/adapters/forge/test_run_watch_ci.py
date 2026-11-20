@@ -8,11 +8,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from support.harness import own_files
+
+from kraft import events, store
 from kraft.adapters import forge
+from kraft.adapters.forge import ForgeError
+from kraft.adapters.forge.models import FailedJob
 from kraft.executor.round_prompts import CI_LOG_NOTE
 
 from .test_run_chain import RED
-from .test_run_review import _review_node, rig  # noqa: F401 -- the fixture
+from .test_run_push import on_branch  # noqa: F401 -- the fixture
+from .test_run_review import _A, _review_node, rig  # noqa: F401 -- the fixture
 
 _WAIT, _CI = "feedback.settle.review", "feedback.ci.await_ci"
 
@@ -52,3 +59,181 @@ async def test_a_red_pipeline_the_review_wait_reads_goes_to_on_failure_first(rig
     )
     await rig.walk()
     assert rig.triaged[0] == "feedback.on_failure.checks.repair_checks"
+
+
+def _watching(repo, **kw):
+    """`run_forge` kwargs for the review wait on its collect path, watching CI."""
+    return {
+        "repo": repo,
+        "orig_repo": repo,
+        "node_id": "feedback",
+        "hook_point": _WAIT,
+        "reviewers": (_A,),
+        "reads_feedback": True,
+        "watch_ci": True,
+        "ci_task": _CI,
+        "wait": forge.WaitBounds.from_seconds(timeout=600, initial=30, maximum=120),
+        **kw,
+    }
+
+
+_RATE_LIMITED = ForgeError("slow", status=429, reason="rate_limited", retry_after=30)
+_INFRA = (FailedJob("test", "failed", "runner_system_failure"),)
+_STALE = {"ci_shas": ["0" * 40]}
+
+
+@pytest.mark.parametrize(
+    "fake_kw, raises, kw, status, pushed, ci_read, bots_read",
+    [
+        ({"ci_states": ["pending"]}, None, {}, "waiting", True, True, True),
+        ({"ci_states": ["success"]}, None, {}, "waiting", True, True, True),
+        ({"ci_states": ["pending"], "ci_no_checks": True}, None, {}, "waiting", True, True, True),
+        (
+            {"ci_states": ["failed"], "ci_failed_jobs": RED, **_STALE},
+            None,
+            {},
+            "waiting",
+            True,
+            True,
+            True,
+        ),
+        (
+            {"ci_states": ["failed"], "ci_failed_jobs": [_INFRA]},
+            None,
+            {},
+            "waiting",
+            True,
+            True,
+            True,
+        ),
+        (
+            {"ci_states": ["pending"], "ci_cancelled_at": ["2020-01-01T00:00:00+00:00"]},
+            None,
+            {},
+            "waiting",
+            True,
+            True,
+            True,
+        ),
+        ({}, ForgeError("boom"), {}, "waiting", True, True, True),
+        (
+            {"ci_states": ["failed"], "ci_failed_jobs": RED},
+            None,
+            {"ci_checks": False},
+            "waiting",
+            True,
+            False,
+            True,
+        ),
+        (
+            {"ci_states": ["success"], "mergeable": False, "merge_detail": "conflict"},
+            None,
+            {},
+            "done",
+            True,
+            True,
+            False,
+        ),
+        ({"opened": {1: "kraft/w1"}, "merged": [1]}, None, {}, "done", False, False, False),
+        ({"push_refused": "f" * 40}, None, {}, "failed", False, False, False),
+        ({}, _RATE_LIMITED, {}, "rate_limited", True, True, False),
+        (
+            {"ci_states": ["failed"], "ci_failed_jobs": RED},
+            None,
+            {"watch_ci": False},
+            "waiting",
+            False,
+            False,
+            True,
+        ),
+    ],
+    ids=[
+        "pending",
+        "green",
+        "no-pipeline-yet",
+        "red-for-an-older-head",
+        "infra-red",
+        "abandoned",
+        "read-error",
+        "ci-checks-off",
+        "conflict",
+        "merged",
+        "push-refused",
+        "rate-limited",
+        "watch-ci-off",
+    ],
+)
+async def test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict(
+    run_forge,
+    on_branch,
+    run_dirs,
+    monkeypatch,
+    fake_kw,
+    raises,
+    kw,
+    status,
+    pushed,
+    ci_read,
+    bots_read,
+):
+    """The review wait that watches CI pushes first and reads the pipeline, but
+    only a settled red or a confirmed conflict ends it; everything else is the
+    CI wait's, and it never rebases, retries, pins or records a missing CI."""
+    # Reads: one `ci_status` per check (a conflict's confirming re-read is the
+    # same script).
+    fake = forge.FakeForge(**fake_kw)
+    reads = []
+    if raises is not None:
+
+        async def failing(**kwargs):
+            reads.append(kwargs)
+            raise raises
+
+        monkeypatch.setattr(fake, "ci_status", failing)
+    got, _ = await run_forge(fake, "automated_review", "s1", **_watching(on_branch, **kw))
+
+    assert got == status
+    assert bool(run_forge.events("branch_pushed")) is pushed
+    assert bool(fake.pipeline_ids_requested or reads) is ci_read
+    assert bool(fake.reviewers_asked) is bots_read
+    # None of the CI wait's side effects.
+    assert fake.retried == []
+    assert (
+        run_forge.database.read(lambda c: store.read_counter(c, "w1", "ci_infra:feedback")) is None
+    )
+    assert run_forge.events("ci_not_configured") == []
+    pin = run_forge.database.read(
+        lambda c: c.execute("SELECT ci_pipeline_ref FROM work_items WHERE id = 'w1'").fetchone()
+    )
+    assert pin is None or pin["ci_pipeline_ref"] is None
+    assert set(fake.pipeline_ids_requested) <= {""}
+    assert not (own_files(run_dirs, "s1").folder / "bot_feedback.json").exists()
+    if raises is not None and raises.reason is None:
+        assert "not read" in run_forge.log("s1")
+
+
+@pytest.mark.parametrize(
+    "fake_kw, ended",
+    [
+        ({"ci_states": ["pending", "failed"], "ci_failed_jobs": [(), *RED]}, "failed"),
+        (
+            {"ci_states": ["pending", "success"], "mergeable": False, "merge_detail": "conflict"},
+            "done",
+        ),
+    ],
+    ids=["red", "conflict"],
+)
+async def test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots(
+    run_forge, on_branch, monkeypatch, wait_clock, fake_kw, ended
+):
+    # The push is stamped on the wait's clock.
+    monkeypatch.setattr(events, "_now", lambda: wait_clock.now.isoformat())
+    fake = forge.FakeForge(**fake_kw)
+    assert (await run_forge(fake, "automated_review", "s1", **_watching(on_branch)))[0] == "waiting"
+    wait_clock.advance(601)  # past the limit: read, the silent bot would settle as silent now
+    assert (await run_forge(fake, "automated_review", "s2", **_watching(on_branch)))[0] == ended
+    assert run_forge.events("automated_review_settled") == []
+    # Ending closes the episode: no wait is left open.
+    assert [
+        e["outcome"] for e in run_forge.events("external_wait_ended") if e["task"] == _WAIT
+    ] == ["settled"]

@@ -2340,7 +2340,22 @@ async def _watch_ci(
     read is reported as that task's finding (`ci_task`), with its source and
     fingerprint (`review-wait-red-pipeline-is-the-ci-wait-s-finding`)."""
     log = ""
+    # A merge request already merged (the CI wait's own guard, `ci_poll`): its
+    # branch is usually deleted with it, so a push would die against the stale
+    # lease, and there is nothing left to check.
+    live: list[tuple[Forge, Path, Path]] = []
     for forge, repo, orig_repo in targets:
+        existing = await forge.find_mr(repo=repo, branch=branch)
+        if existing is not None and existing.state == "merged":
+            log += f"already merged (!{existing.number}); nothing to check\n"
+            continue
+        live.append((forge, repo, orig_repo))
+    if not live:
+        return log, "done", None
+    # Every repository's branch first, so the bots' part, which stops at the
+    # first target not done, finds each pushed. A push error is not caught here:
+    # it fails the wait as the CI wait's does.
+    for forge, repo, orig_repo in live:
         await forge.push(repo=repo, branch=branch)
         await _record_push(
             db,
@@ -2350,21 +2365,30 @@ async def _watch_ci(
             repo=repo,
             branch=branch,
         )
-    for forge, repo, _ in targets:
+    if not ci_checks:
+        return log, None, None
+    for forge, repo, _ in live:
         head = await git._head_sha(repo, branch)
-        read = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
-        rendered, verdict = await ci.render_ci(
-            read, forge=forge, repo=repo, branch=branch, head_sha=head
-        )
-        if verdict == "failed":
-            cause = (
-                f"{CI_RED_LINE}{', '.join(j.name for j in read.failed_jobs)} failed on {head[:7]}"
+        try:
+            read = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
+            rendered, verdict = await ci.render_ci(
+                read, forge=forge, repo=repo, branch=branch, head_sha=head
             )
+        except ForgeError as exc:
+            if exc.reason == "rate_limited":
+                raise
+            log += f"pipeline not read ({exc}); the CI wait reads it\n"
+            continue
+        if verdict == "failed":
+            names = ", ".join(j.name for j in read.failed_jobs)
+            cause = f"{CI_RED_LINE}{names} failed on {head[:7]}"
             return (
                 _cause_first(cause, log + rendered),
                 "failed",
                 _job_findings(read, rendered, ci_task),
             )
+        if verdict == "conflict":
+            return log + rendered + "the CI wait rebases it\n", "done", None
     return log, None, None
 
 
