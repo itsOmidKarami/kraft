@@ -4,6 +4,7 @@ mapping it to a `ForgeError`, and building the argv."""
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 from support.harness import git
@@ -117,6 +118,33 @@ def test_a_failed_call_names_method_and_path_not_argv(cli, tmp_path):
     assert text.startswith("PUT repos/{owner}/{repo}/pulls/7/merge: Head branch was modified")
     assert "sha=" not in text
     assert (exc.value.status, exc.value.reason) == (409, "conflict")
+
+
+@pytest.mark.parametrize(
+    "body, says",
+    [
+        (
+            {
+                "message": "Validation Failed",
+                "errors": [
+                    {"message": "user_id can only have one pending review per pull request"}
+                ],
+            },
+            "Validation Failed; user_id can only have one pending review per pull request",
+        ),
+        (
+            {"message": "Unprocessable", "errors": ["one pending review per pull request"]},
+            "Unprocessable; one pending review per pull request",
+        ),
+        ({"message": "Not Found"}, "Not Found"),
+    ],
+    ids=["errors-objects", "errors-strings", "message-only"],
+)
+def test_an_error_names_its_errors_detail(cli, tmp_path, body, says):
+    cli.stub("gh", routes={"api *": Api(422, json.dumps(body))})
+    with pytest.raises(forge.ForgeError) as exc:
+        rest("gh", "repos/{owner}/{repo}/pulls/7/comments", tmp_path, "POST")
+    assert says in str(exc.value)
 
 
 def test_no_request_made_carries_no_reason(cli, tmp_path):

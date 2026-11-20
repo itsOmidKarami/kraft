@@ -133,7 +133,9 @@ async def run_cli(
         timeout = CLI_TIMEOUT_S
     try:
         # `to_thread` can't be cancelled, so the kill has to be subprocess.run's
-        # own. Every call here is a read or idempotent, so abandoning one is safe.
+        # own. Abandoning a timed-out call is safe: a read is repeated, and a write's
+        # caller treats the timeout as unclear and reconciles before any resend
+        # (`replies.send.classify`).
         return await asyncio.to_thread(
             subprocess.run,
             args,

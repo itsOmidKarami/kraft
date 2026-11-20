@@ -330,6 +330,17 @@ async def _never(req):
         pytest.param(
             lambda req: httpx.Response(400, json={"message": "m" * 600}), "…", id="long-message"
         ),
+        pytest.param(
+            lambda req: httpx.Response(
+                422,
+                json={
+                    "message": "Validation Failed",
+                    "errors": [{"message": "one pending review per pull request"}],
+                },
+            ),
+            "Validation Failed; one pending review per pull request",
+            id="errors-detail",
+        ),
     ],
 )
 async def test_a_call_is_bounded_and_its_error_stays_short(mock_http, monkeypatch, answer, says):

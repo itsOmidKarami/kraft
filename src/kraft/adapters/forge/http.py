@@ -27,6 +27,7 @@ from kraft.adapters.forge.transport import (
     _clip,
     _retry_after,
     _sso_url,
+    error_message,
     graphql_reason,
 )
 from kraft.forges import ForgeAccount, origin
@@ -281,8 +282,8 @@ class HttpTransport:
             if resp.status < 400:
                 return resp
             try:
-                message = _clip(str(resp.json().get("message", "")))
-            except (ForgeError, AttributeError):
+                message = _clip(error_message(resp.json()))
+            except ForgeError:
                 message = ""
             reason = reason_for(resp.status, resp.headers, message)
             wait = _retry_after(resp.headers)
