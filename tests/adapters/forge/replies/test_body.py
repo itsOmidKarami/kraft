@@ -110,6 +110,10 @@ class _Files:
         ("x" * 1_501, "more than 1,500 bytes of prose"),
         # 1,489 bytes of prose and markup, plus a 31-byte verbatim quote.
         ("x" * 1_480 + "\n```\ndef add(a, b):\n    return a + b\n```", None),
+        # 500 one-character spans: each is in the file, none is a quote, 1,999 bytes of prose.
+        (" ".join(["`a`"] * 500), "more than 1,500 bytes of prose"),
+        # A 31-byte span of real code is a quote: 1,480 bytes of prose and it still passes.
+        ("x" * 1_480 + " `def load(file: Path, data: dict):`", None),
     ],
     ids=[
         "plain-prose",
@@ -162,6 +166,8 @@ class _Files:
         "indented-block-verbatim",
         "prose-over-the-cap",
         "quotes-are-not-prose",
+        "many-short-spans-are-prose",
+        "a-long-span-is-a-quote",
     ],
 )
 async def test_the_gate_refuses_what_could_render_run_or_leak(text, why):
