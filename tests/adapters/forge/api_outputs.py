@@ -120,6 +120,8 @@ def checks_page(contexts: dict, *, oid: str = "abc123") -> str:
 READ_BRANCH = "api*graphql*first: 30*"
 READ_NUMBER = "api*graphql*pullRequest(number: $n) { id*"
 READ_MORE = "api*graphql*node(id: $id)*"
+#: One review thread by node id (`GhCli._thread_comments`); not the checks rollup's `$id`.
+READ_THREAD = "api*graphql*node(id: $thread)*"
 FIND = "api*graphql*states: [OPEN, CLOSED, MERGED]*"
 
 

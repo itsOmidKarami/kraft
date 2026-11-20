@@ -201,6 +201,11 @@ async def test_every_merge_request_call_names_the_branch(be, cli, tmp_path, op):
             outputs.PIPELINES: outputs.GLAB_CI_SUCCESS,
             "api graphql": json.dumps(_NO_THREADS),
             "api*/pulls -X POST*": json.dumps({"number": 7, "html_url": "u"}),
+            # The bot reads page these lists, so a `{}` default is not one.
+            "api*issues/7/comments*": "[]",
+            "api*pulls/7/reviews*": "[]",
+            "api*merge_requests/7/notes*": "[]",
+            "api*merge_requests/7/discussions*": "[]",
         },
     )
 

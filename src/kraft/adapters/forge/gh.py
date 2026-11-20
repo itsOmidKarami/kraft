@@ -241,16 +241,31 @@ _NOTE_FIELDS = (
 #: A pull request's review threads, with each one's comments: what
 #: `reviewer_feedback` reads, since REST review comments carry no resolved flag.
 _THREADS_QUERY = f"""
-query($owner: String!, $name: String!, $n: Int!) {{
+query($owner: String!, $name: String!, $n: Int!, $after: String) {{
   repository(owner: $owner, name: $name) {{
     pullRequest(number: $n) {{
-      reviewThreads(first: 100) {{
+      reviewThreads(first: 100, after: $after) {{
+        pageInfo {{ hasNextPage endCursor }}
         nodes {{
           id isResolved isOutdated viewerCanReply viewerCanResolve
-          comments(first: 100) {{
-            nodes {{ {_NOTE_FIELDS} }}
-          }}
+          comments(first: 100) {{ pageInfo {{ hasNextPage endCursor }} nodes {{ {_NOTE_FIELDS} }} }}
         }}
+      }}
+    }}
+  }}
+}}
+"""
+#: One review thread, and a page of its comments: `read_thread`, and the rest of a
+#: thread with more than 100 comments. Not scoped to a pull request (`node`), so a
+#: caller checks `pullRequest.number`.
+_THREAD_QUERY = f"""
+query($thread: ID!, $after: String) {{
+  node(id: $thread) {{
+    ... on PullRequestReviewThread {{
+      id isResolved isOutdated viewerCanReply viewerCanResolve
+      pullRequest {{ number }}
+      comments(first: 100, after: $after) {{
+        pageInfo {{ hasNextPage endCursor }} nodes {{ {_NOTE_FIELDS} }}
       }}
     }}
   }}
@@ -629,10 +644,10 @@ class GhCli(mr_ops.CliWaits):
         -- one finding per comment; anything else is clean."""
         pr = await self._pr(repo, mr_ops.target(0, branch), checks=False)
         number, head = pr["number"], pr["headRefOid"]
-        # ponytail: one page of 100 reviews -- paginate if a PR ever has more.
-        reviews = await self._api(
-            repo, f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews", fields={"per_page": 100}
-        )
+        reviews = await self._paged(
+            repo, f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews", pages=mr_ops.BOT_PAGES,
+            strict=True,
+        )  # fmt: skip
         mine = [
             r
             for r in reviews
@@ -646,10 +661,11 @@ class GhCli(mr_ops.CliWaits):
         if not mine:
             return ReviewResult("pending", detail=f"waiting for {bot} to review {head[:7]}")
         last = mine[-1]
-        comments = await self._api(
+        comments = await self._paged(
             repo,
             f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews/{last['id']}/comments",
-            fields={"per_page": 100},
+            pages=mr_ops.BOT_PAGES,
+            strict=True,
         )
         findings = tuple(
             f"{c.get('path')}:{c.get('line') or c.get('original_line')}: {c.get('body', '')}"
@@ -671,28 +687,80 @@ class GhCli(mr_ops.CliWaits):
         number, head = pr["number"], pr["headRefOid"]
         comments = reviews = threads = []
         if any(r.bot is not None for r in reviewers):
-            # ponytail: one page of 100 of each -- paginate if a PR ever has more.
-            comments = await self._api(
-                repo, f"repos/{{owner}}/{{repo}}/issues/{number}/comments", fields={"per_page": 100}
+            comments = await self._paged(
+                repo,
+                f"repos/{{owner}}/{{repo}}/issues/{number}/comments",
+                pages=mr_ops.BOT_PAGES,
+                strict=True,
             )
-            reviews = await self._api(
-                repo, f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews", fields={"per_page": 100}
+            reviews = await self._paged(
+                repo,
+                f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews",
+                pages=mr_ops.BOT_PAGES,
+                strict=True,
             )
-            data = await self._gql(
-                repo, _THREADS_QUERY, {"owner": "{owner}", "name": "{repo}", "n": number}
-            )
-            try:
-                threads = data["repository"]["pullRequest"]["reviewThreads"]["nodes"]
-            except (KeyError, TypeError) as exc:
-                raise ForgeError(
-                    f"gh api graphql answered without the review threads: {data!r:.200}"
-                ) from exc
+            threads = await self._threads(repo, number)
         return [
             _bot_feedback(r, comments, reviews, threads, head, since)
             if r.bot is not None
             else ReviewerFeedback(r, None, check=await self._check_feedback(repo, head, r.check))
             for r in reviewers
         ]
+
+    async def _threads(self, repo: Path, number: int) -> list[dict]:
+        """Every review thread of the pull request, each with every comment: the
+        threads by cursor, then each thread's own comments by cursor."""
+        out: list[dict] = []
+        variables: dict[str, str | int | bool] = {"owner": "{owner}", "name": "{repo}", "n": number}
+        for _ in range(mr_ops.BOT_PAGES):
+            data = await self._gql(repo, _THREADS_QUERY, variables)
+            try:
+                page = data["repository"]["pullRequest"]["reviewThreads"]
+                out += page.get("nodes") or []
+            except (KeyError, TypeError, AttributeError) as exc:
+                raise ForgeError(
+                    f"gh api graphql answered without the review threads: {data!r:.200}"
+                ) from exc
+            info = page.get("pageInfo") or {}
+            cursor = info.get("endCursor")
+            if not info.get("hasNextPage") or not cursor or cursor == variables.get("after"):
+                break
+            variables = {**variables, "after": cursor}
+        else:
+            raise ForgeError(f"gh api graphql: more than {mr_ops.BOT_PAGES * 100} review threads")
+        for thread in out:
+            comments = thread.get("comments") or {}
+            info = comments.get("pageInfo") or {}
+            if info.get("hasNextPage"):
+                cursor = info.get("endCursor")
+                _, more = await self._thread_comments(repo, str(thread["id"]), cursor)
+                thread["comments"] = {**comments, "nodes": [*(comments.get("nodes") or []), *more]}
+        return out
+
+    async def _thread_comments(
+        self, repo: Path, thread_id: str, after: str | None
+    ) -> tuple[dict, list[dict]]:
+        """One thread (`_THREAD_QUERY`) and every comment after the cursor `after`
+        (from the start when None): the thread node, and those comments."""
+        node: dict = {}
+        rows: list[dict] = []
+        for _ in range(mr_ops.BOT_PAGES):
+            variables: dict[str, str | int | bool] = {"thread": thread_id}
+            if after:
+                variables["after"] = after
+            data = await self._gql(repo, _THREAD_QUERY, variables)
+            found = data.get("node") if isinstance(data, dict) else None
+            if not found:
+                return {}, rows
+            node = found
+            page = found.get("comments") or {}
+            rows += page.get("nodes") or []
+            info = page.get("pageInfo") or {}
+            cursor = info.get("endCursor")
+            if not info.get("hasNextPage") or not cursor or cursor == after:
+                return node, rows
+            after = cursor
+        raise ForgeError(f"gh api graphql: more than {mr_ops.BOT_PAGES * 100} comments in a thread")
 
     async def _check_feedback(self, repo: Path, head: str, check: str) -> dict:
         """The check run `check` on `head`, or else the commit status of that

@@ -772,8 +772,11 @@ class GlabCli(mr_ops.CliWaits):
         # keeps approvals across pushes lets an old approval settle a new head.
         mr = await self._mr(repo, branch)
         iid = mr["iid"]
-        discussions = await self._api(
-            repo, f"projects/:id/merge_requests/{iid}/discussions", fields={"per_page": 100}
+        discussions = await self._paged(
+            repo,
+            f"projects/:id/merge_requests/{iid}/discussions",
+            pages=mr_ops.BOT_PAGES,
+            strict=True,
         )
         findings = tuple(
             f"{(n.get('position') or {}).get('new_path')}:"
@@ -853,14 +856,17 @@ class GlabCli(mr_ops.CliWaits):
         mr = await self._mr(repo, branch)
         notes = discussions = []
         if any(r.bot is not None for r in reviewers):
-            # ponytail: one page of 100 of each -- paginate if an MR ever has more.
-            notes = await self._api(
-                repo, f"projects/:id/merge_requests/{mr['iid']}/notes", fields={"per_page": 100}
+            notes = await self._paged(
+                repo,
+                f"projects/:id/merge_requests/{mr['iid']}/notes",
+                pages=mr_ops.BOT_PAGES,
+                strict=True,
             )
-            discussions = await self._api(
+            discussions = await self._paged(
                 repo,
                 f"projects/:id/merge_requests/{mr['iid']}/discussions",
-                fields={"per_page": 100},
+                pages=mr_ops.BOT_PAGES,
+                strict=True,
             )
         out = []
         for r in reviewers:

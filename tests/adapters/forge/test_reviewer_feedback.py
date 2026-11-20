@@ -13,7 +13,7 @@ import pytest
 from kraft.adapters import forge
 from kraft.automated_review import AutomatedReview
 
-from .api_outputs import READ_BRANCH
+from .api_outputs import READ_BRANCH, READ_THREAD
 from .outputs import glab_mr
 from .test_automated_review import (
     GH,
@@ -77,8 +77,9 @@ def _gh_thread(id, resolved, login, body, at, *more):
     }
 
 
-def _gh_threads(*nodes):
-    pull = {"reviewThreads": {"nodes": list(nodes)}}
+def _gh_threads(*nodes, more_after=None):
+    page = {"hasNextPage": more_after is not None, "endCursor": more_after}
+    pull = {"reviewThreads": {"pageInfo": page, "nodes": list(nodes)}}
     return json.dumps({"data": {"repository": {"pullRequest": pull}}})
 
 
@@ -469,3 +470,177 @@ async def test_the_fake_answers_its_script_then_has_nothing_to_say(tmp_path):
         (None, True),
     ]
     assert fake.reviewers_asked == [(BOT, CHECK), (BOT, CHECK)]
+
+
+_OLD = "2025-12-31T00:00:00Z"
+_NEW = "2026-01-01T12:30:00Z"
+
+
+def _page(make, n=100):
+    """A full page of 100: the read must ask for the next one."""
+    return json.dumps([make(i) for i in range(n)])
+
+
+def _old_gh_comment(i):
+    return _gh_comment("a-person", f"old {i}", _OLD)
+
+
+def _old_gh_review(i):
+    return _gh_review("COMMENTED", _OLD, login="a-person")
+
+
+def _old_glab_note(i):
+    return _glab_note(100 + i, "a-person", f"old {i}", _OLD, system=False)
+
+
+def _old_glab_discussion(i):
+    return _glab_discussion(f"old{i}", _glab_note(200 + i, "a-person", "old", _OLD))
+
+
+def _gh_resolved_threads(n, *, end):
+    nodes = [_gh_thread(f"R{i}", True, "coderabbitai", "done", _OLD) for i in range(n)]
+    return _gh_threads(*nodes, more_after=end)
+
+
+def _thread_with_more(id):
+    thread = _gh_thread(id, False, "coderabbitai", "unused x", _NEW)
+    thread["comments"]["pageInfo"] = {"hasNextPage": True, "endCursor": "c1"}
+    return thread
+
+
+def _gh_rest_of_thread(late):
+    node = {
+        "id": "T1",
+        "comments": {
+            "pageInfo": {"hasNextPage": False, "endCursor": None},
+            "nodes": [_gh_comment_node("late", "a-person", late, _NEW)],
+        },
+    }
+    return json.dumps({"data": {"node": node}})
+
+
+def _routes(specific: dict, base: dict, override: dict) -> dict:
+    """The page-2 or cursor route first, then the base routes, with `override`'s
+    answers in their base slots (behind `specific`)."""
+    return {**specific, **base, **override}
+
+
+@pytest.mark.parametrize(
+    "backend, routes, seen, newest",
+    [
+        (
+            GH,
+            _routes(
+                {
+                    "api*issues/7/comments*-F page=2*": json.dumps(
+                        [_gh_comment("coderabbitai[bot]", "newest comment", _NEW)]
+                    )
+                },
+                _GH_BOT,
+                {GH_ISSUE_COMMENTS: _page(_old_gh_comment)},
+            ),
+            "summary",
+            "newest comment",
+        ),
+        (
+            GH,
+            _routes(
+                {
+                    "api*pulls/7/reviews*-F page=2*": json.dumps(
+                        [_gh_review("COMMENTED", _NEW, body="newest review")]
+                    )
+                },
+                _GH_BOT,
+                {GH_REVIEWS: _page(_old_gh_review)},
+            ),
+            "summary",
+            "newest review",
+        ),
+        (
+            GH,
+            _routes(
+                {
+                    "api*graphql*after=t100*": _gh_threads(
+                        _gh_thread("T-newest", False, "coderabbitai", "late", _NEW)
+                    )
+                },
+                _GH_BOT,
+                {"api graphql": _gh_resolved_threads(100, end="t100")},
+            ),
+            "thread",
+            "T-newest",
+        ),
+        (
+            GH,
+            _routes(
+                {READ_THREAD: _gh_rest_of_thread("late answer")},
+                _GH_BOT,
+                {"api graphql": _gh_threads(_thread_with_more("T1"))},
+            ),
+            "note",
+            "late answer",
+        ),
+        (
+            GLAB,
+            _routes(
+                {
+                    "api*merge_requests/9/notes*-F page=2*": json.dumps(
+                        [_glab_note(900, "coderabbitai", "newest note", _NEW, system=False)]
+                    )
+                },
+                _GLAB_BOT,
+                {GLAB_NOTES: _page(_old_glab_note)},
+            ),
+            "summary",
+            "newest note",
+        ),
+        (
+            GLAB,
+            _routes(
+                {
+                    "api*merge_requests/9/discussions*-F page=2*": json.dumps(
+                        [
+                            _glab_discussion(
+                                "d-newest",
+                                _glab_note(
+                                    901,
+                                    "coderabbitai",
+                                    "late",
+                                    _NEW,
+                                    resolvable=True,
+                                    resolved=False,
+                                    position={"new_path": "calc.py", "new_line": 1},
+                                ),
+                            )
+                        ]
+                    )
+                },
+                _GLAB_BOT,
+                {GLAB_DISCUSSIONS: _page(_old_glab_discussion)},
+            ),
+            "thread",
+            "d-newest",
+        ),
+    ],
+    ids=[
+        "gh-comments",
+        "gh-reviews",
+        "gh-threads",
+        "gh-thread-comments",
+        "glab-notes",
+        "glab-discussions",
+    ],
+)
+async def test_every_page_of_bot_feedback_is_read(cli, tmp_path, backend, routes, seen, newest):
+    cli.stub(backend.name, routes=routes, default="[]")
+
+    (got,) = await backend.cls().reviewer_feedback(
+        repo=tmp_path, branch="kraft/w1", reviewers=(BOT,), since=SINCE
+    )
+
+    found = {
+        "summary": [s["body"] for s in got.summaries],
+        "thread": [t["id"] for t in got.threads],
+        "note": [n.body for t in got.threads for n in t["notes"]],
+    }[seen]
+    assert newest in found
