@@ -39,6 +39,7 @@ def _task(target: str, **kw) -> dict:
         (_task("mr.ci", config={"watch_ci": True}), ("config", "watch_ci")),
         (_task("mr.sync", config={"pipeline": None}), None),
         (_task("mr.ci", config={"watch_ci": 0}), ("config", "watch_ci")),
+        (_task("mr.ci", config={"x": 1}), ("config", "x")),
     ],
     ids=[
         "the-review-waits-own",
@@ -50,6 +51,7 @@ def _task(target: str, **kw) -> dict:
         "a-target-with-none",
         "a-target-with-none-cleared",
         "zero-is-not-false",
+        "an-unknown-key-on-a-target-with-none",
     ],
 )
 def test_a_forge_tasks_config_takes_its_targets_keys(request, task, loc):
