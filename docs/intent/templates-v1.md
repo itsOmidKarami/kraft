@@ -2261,13 +2261,22 @@ origin: config/library.yaml §await_automated_review
 
 ## REQ default-post-draft-flow-is-ordered
 
-The default chain SHALL create a draft merge request, await CI, run any
-declared automated-review task, decide with a triage step which of the review
-bots' feedback needs a change, address CI failures and the feedback that does,
-produce a work-item summary and review, and then request final-gate approval.
-After approval, it SHALL mark the merge request ready, await external approval,
-and merge.
+The default chain SHALL create a draft merge request, run any declared
+automated-review task, decide with a triage step which of the review bots'
+feedback needs a change, then await CI, address CI failures and the feedback
+that does, produce a work-item summary and review, and then request final-gate
+approval. After approval, it SHALL mark the merge request ready, await external
+approval, and merge.
 enforced-by: tests/api/test_default_chain_walk.py::test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci, tests/templates/test_publication_chain_order.py::test_the_seeded_default_chain_publishes_in_the_required_order
+
+## REQ default-review-wait-settings-stay-on-its-node
+
+The default chain's review wait SHALL watch CI with a 10-minute cap, and its fix
+loop SHALL be allowed to start early, both set on the library node
+`post_draft_feedback`, while the library task `await_automated_review` SHALL
+keep `watch_ci` off and its 30-minute cap.
+enforced-by: tests/templates/test_library.py::test_the_default_review_wait_settings_stay_on_its_node
+origin: config/library.yaml §post_draft_feedback
 
 ## REQ post-draft-feedback-uses-node-recovery-controls
 

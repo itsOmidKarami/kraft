@@ -286,19 +286,23 @@ nodes:
   post_draft_feedback:
     kind: exec
     steps:
-      - id: ci
-        tasks:
-          - id: await_ci
-            extends: await_mr_ci
       - id: automated_review
         tasks:
           - id: await_review
             extends: await_automated_review
+            # This node's own: the library task keeps watch_ci off and 30 minutes.
+            watch_ci: true
+            policy:
+              total_time_cap_minutes: 10
       - id: review_feedback
         read_only: true
         tasks:
           - id: triage
             extends: triage_review_feedback
+      - id: ci
+        tasks:
+          - id: await_ci
+            extends: await_mr_ci
     on_failure:
       steps:
         - id: repair
@@ -310,6 +314,7 @@ nodes:
             - id: sync_mr
               extends: sync_draft_mr
     fix_loop:
+      early: true
       steps:
         - id: repair
           tasks:
