@@ -231,6 +231,13 @@ describe("Peek", () => {
     expect(screen.getAllByRole("button", { name: /^Retry/ })).toHaveLength(n);
   });
 
+  // A stuck fix loop the server re-runs CI for: the footer's Re-run CI where no card is on screen, and it posts the re-run.
+  it("a stuck item's footer Re-run CI posts /ci-rerun on Activity", async () => {
+    const calls = mount({ status: "needs_human", display_status: "needs_you", stop: stop("stuck"), actions: ["retry", "rerun_ci", "escalate", "cancel"] }, { start: "activity", answers: acceptWrites("POST /work-items/w1/ci-rerun") });
+    fireEvent.click(await screen.findByRole("button", { name: "Re-run CI" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST").map((c) => c.path)).toEqual(["/work-items/w1/ci-rerun"]));
+  });
+
   it("lists Activity newest first and pages back with before_seq; a node's line opens the item there", async () => {
     const page = Array.from({ length: 50 }, (_, k) => ev(51 + k, "node_started", k === 49 ? "verification" : null));
     mount({}, { start: "activity", events: page });
