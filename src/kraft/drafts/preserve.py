@@ -32,7 +32,14 @@ from ruamel.yaml.tokens import CommentToken
 from kraft.drafts import authored
 
 
-def rewrite(text: str | None, data: Mapping, *, list_offset: int = 0) -> str:
+def rewrite(
+    text: str | None,
+    data: Mapping,
+    *,
+    list_offset: int = 0,
+    identity_keys: tuple[str, ...] = ("path",),
+    place_new_keys: bool = False,
+) -> str:
     """`data` written over `text`. A key `text` has keeps its comments, its
     place and its layout (a flow-style block stays flow-style); a key `data`
     adds goes at the end of its mapping; one `data` drops or replaces keeps
@@ -41,7 +48,16 @@ def rewrite(text: str | None, data: Mapping, *, list_offset: int = 0) -> str:
     with its comments; any other list is replaced whole. A value in `data`
     that is already a ruamel node (`carried`) is written as it is, with its
     own comments. `list_offset` is the `- ` indent to use when `text` has no
-    block list to take it from (`list_offset`: another file's)."""
+    block list to take it from (`list_offset`: another file's).
+
+    `identity_keys` names a list entry across the rewrite: the first of these
+    keys it has (a repo's `path`, a node's or task's `id`). With
+    `place_new_keys`, a key `data` adds goes right after the last key before
+    it in `data`'s order that the text has (first, when none), not at the
+    end; when that key is the mapping's last, the comment and blank lines
+    after the mapping (the next component's) move to after the new key. Only
+    `config.write_template` passes either: every other caller keeps the
+    defaults."""
     if not text or not text.strip():
         return _plainly(data)
     yaml = _yaml()
@@ -61,7 +77,7 @@ def rewrite(text: str | None, data: Mapping, *, list_offset: int = 0) -> str:
         # `  - path: …` under its key, as the file has it, not `- path: …`;
         # `-   path: …` keeps its three spaces too.
         yaml.indent(mapping=2, sequence=offset + 1 + gap, offset=offset)
-    _merge(doc, data)
+    _merge(doc, data, ids=identity_keys, place=place_new_keys)
     out = io.StringIO()
     yaml.dump(doc, out)
     written = _keep_flow_lines(text, out.getvalue())
@@ -270,7 +286,14 @@ def carried(text: str | None, key: str) -> list:
     return items
 
 
-def _merge(doc: CommentedMap, data: Mapping, parent: tuple | None = None) -> None:
+def _merge(
+    doc: CommentedMap,
+    data: Mapping,
+    parent: tuple | None = None,
+    *,
+    ids: tuple[str, ...] = ("path",),
+    place: bool = False,
+) -> None:
     """`parent` is `(mapping, key)` holding `doc`, None at the root: where the
     comment block before `doc`'s first key lives."""
     for key in [k for k in doc if k not in data]:
@@ -285,7 +308,7 @@ def _merge(doc: CommentedMap, data: Mapping, parent: tuple | None = None) -> Non
             if _same(current, value):
                 continue
             if isinstance(current, CommentedMap) and isinstance(value, Mapping) and value:
-                _merge(current, value, (doc, key))
+                _merge(current, value, (doc, key), ids=ids, place=place)
                 continue
             if _mappings(current) and isinstance(value, list | tuple) and value:
                 # The comment block after the list (the next key's
@@ -293,7 +316,7 @@ def _merge(doc: CommentedMap, data: Mapping, parent: tuple | None = None) -> Non
                 # or removing that entry loses it and appending one lands it
                 # between entries.
                 block = _take_block(doc, key)
-                _merge_seq(current, value)
+                _merge_seq(current, value, ids=ids, place=place)
                 if block:
                     _put_block(doc, key, block)
                 continue
@@ -302,7 +325,20 @@ def _merge(doc: CommentedMap, data: Mapping, parent: tuple | None = None) -> Non
             if block:
                 _put_block(doc, key, block)
             continue
-        doc[_quoted(key) if isinstance(key, str) else key] = _node(value)
+        new = _quoted(key) if isinstance(key, str) else key
+        if place:
+            order = list(data)
+            prior = [k for k in order[: order.index(key)] if k in doc]
+            last = prior[-1] if prior else None
+            # After the mapping's last key, the lines that follow are the next
+            # component's: they go after the new key, blank lines included.
+            at_end = last is not None and last == list(doc)[-1]
+            tail = _take_block(doc, last, keep_blank=True) if at_end else ""
+            doc.insert(list(doc).index(last) + 1 if last is not None else 0, new, _node(value))
+            if tail:
+                _put_block(doc, new, tail)
+        else:
+            doc[new] = _node(value)
 
 
 # A comment block between two keys is stored by ruamel as the tail of
@@ -344,9 +380,10 @@ def _tail(container: CommentedMap | CommentedSeq, key: object) -> tuple:
     return container, key, 2 if isinstance(container, CommentedMap) else 0, blocks
 
 
-def _take_block(container: CommentedMap, key: object) -> str:
+def _take_block(container: CommentedMap, key: object, *, keep_blank: bool = False) -> str:
     """The comment lines after `container[key]`'s subtree, without the
-    subtree's own end-of-line comment, taken off it."""
+    subtree's own end-of-line comment, taken off it. With `keep_blank`, a
+    block of only blank lines is returned too: they are cut off either way."""
     holder, index, slot, blocks = _tail(container, key)
     parts = []
     entry = holder.ca.items.get(index)
@@ -360,7 +397,7 @@ def _take_block(container: CommentedMap, key: object) -> str:
             parts.extend(t.value for t in node.ca.end if t is not None)
             node.ca.end = []
     block = "".join(parts)
-    return block if block.strip() else ""
+    return block if keep_blank or block.strip() else ""
 
 
 def _put_block(container: CommentedMap, key: object, block: str) -> None:
@@ -405,13 +442,21 @@ def _mappings(node: object) -> bool:
     )
 
 
-def _identity(item: object) -> object:
-    """What names one entry of a list of mappings across a rewrite: a repo's
-    `path`. None for an entry with none."""
-    return item.get("path") if isinstance(item, Mapping) else None
+def _identity(item: object, ids: tuple[str, ...] = ("path",)) -> object:
+    """What names one entry of a list of mappings across a rewrite: the first
+    of `ids` it has (a repo's `path`). None for an entry with none."""
+    if not isinstance(item, Mapping):
+        return None
+    return next((item.get(k) for k in ids if item.get(k) is not None), None)
 
 
-def _merge_seq(seq: CommentedSeq, values: list | tuple) -> None:
+def _merge_seq(
+    seq: CommentedSeq,
+    values: list | tuple,
+    *,
+    ids: tuple[str, ...] = ("path",),
+    place: bool = False,
+) -> None:
     """`seq` holding `values`, in their order: an entry already there (the
     same `path`, or the same value) is kept with its comments and merged
     into, a new one is added. A Settings save of one repo once rewrote the
@@ -423,7 +468,10 @@ def _merge_seq(seq: CommentedSeq, values: list | tuple) -> None:
             (
                 node
                 for node in unused
-                if (_identity(value) is not None and _identity(node) == _identity(value))
+                if (
+                    _identity(value, ids) is not None
+                    and _identity(node, ids) == _identity(value, ids)
+                )
                 or _same(node, value)
             ),
             None,
@@ -433,7 +481,7 @@ def _merge_seq(seq: CommentedSeq, values: list | tuple) -> None:
             continue
         unused.remove(match)
         if not _same(match, value):
-            _merge(match, value)
+            _merge(match, value, ids=ids, place=place)
         items.append(match)
     _drop_removed_entries_comments(seq, {id(node) for node in unused})
     # The list's own comments are by position: each follows its entry.
