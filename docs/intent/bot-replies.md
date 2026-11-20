@@ -120,3 +120,18 @@ WHEN 60 seconds have passed since a posting point began, the system SHALL start
 no further send there, leaving what is unsent for the next posting point.
 enforced-by: tests/adapters/forge/replies/test_send.py::test_a_posting_point_stops_sending_after_its_time_budget
 origin: src/kraft/adapters/forge/replies/send.py
+
+## REQ an-unclear-write-is-reconciled-before-any-resend
+WHEN a posting point begins and a write's outcome is unclear, the system SHALL
+read where its copy would be and record it posted when a note the viewer wrote
+carries its marker, and otherwise record it not found and leave any resend to the
+gate, and SHALL count a marker on any other author's note as nothing.
+enforced-by: tests/adapters/forge/replies/test_send.py::test_an_unclear_write_is_reconciled_by_its_marker[landed-with-a-lost-answer], tests/adapters/forge/replies/test_send.py::test_an_unclear_write_is_reconciled_by_its_marker[never-landed], tests/adapters/forge/replies/test_send.py::test_a_marker_on_another_authors_note_is_not_a_reconciled_copy, tests/adapters/forge/replies/test_send.py::test_a_failed_reconcile_read_leaves_the_intent_unclear, tests/adapters/forge/replies/test_send.py::test_a_summary_edit_is_reconciled_by_its_body_hash[edit-landed], tests/adapters/forge/replies/test_send.py::test_a_summary_edit_is_reconciled_by_its_body_hash[edit-did-not-land]
+origin: src/kraft/adapters/forge/replies/send.py
+
+## REQ a-duplicate-reply-keeps-the-earliest-copy
+WHEN two notes the viewer wrote carry one intent's marker and the same body, the
+system SHALL keep the earliest, delete the others and move the record to the one
+it kept, at later posting points, within the posting point's time budget.
+enforced-by: tests/adapters/forge/replies/test_send.py::test_a_duplicate_keeps_the_earliest_copy[the-record-moves-to-the-earliest], tests/adapters/forge/replies/test_send.py::test_a_duplicate_keeps_the_earliest_copy[the-record-holds-the-earliest], tests/adapters/forge/replies/test_send.py::test_the_sweep_reads_nothing_past_its_budget
+origin: src/kraft/adapters/forge/replies/send.py

@@ -10,13 +10,15 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from kraft.adapters.forge.git import CliUnavailable
-from kraft.adapters.forge.models import ForgeError, Posted, failure_cause
+from kraft.adapters.forge.models import ForgeError, ForgeNote, Posted, failure_cause
+from kraft.adapters.forge.mr import same_login
 from kraft.adapters.forge.replies import record
+from kraft.adapters.forge.replies.facts import body_hash, has_summary_marker, marker_of
 
 MAX_SENDS = 3
 DEFERRED_EVERY = timedelta(minutes=5)
@@ -26,6 +28,9 @@ SPACING_S = 1.0
 #: Item 2's per-operation gate: None to go ahead, or `("refused" | "superseded", why)`.
 Gate = Callable[[record.Intent], Awaitable[tuple[str, str] | None]]
 Write = Callable[[], Awaitable[Posted]]
+#: Where an intent's copy would be: the thread's notes, or the merge request's comments.
+Notes = Callable[[record.Intent], Awaitable[Sequence[ForgeNote]]]
+Delete = Callable[[ForgeNote], Awaitable[None]]
 Sent = Literal[
     "posted",
     "skipped",
@@ -87,6 +92,26 @@ _sleep = asyncio.sleep
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _copies(
+    intent: record.Intent, found: Iterable[ForgeNote], viewer: str, work_item_id: str
+) -> list[ForgeNote]:
+    """The viewer's notes in `found` that are this intent's write. A marker on anyone
+    else's note is nothing."""
+    mine = [n for n in found if same_login(n.author, viewer)]
+    if intent.payload["op"] == "summary":
+        return [
+            n
+            for n in mine
+            if has_summary_marker(n.body, work_item_id)
+            and body_hash(n.body) == intent.payload["body_sha256"]
+        ]
+    return [n for n in mine if marker_of(n.body) == intent.id]
+
+
+def _ids(note: ForgeNote) -> tuple[str, ...]:
+    return tuple(dict.fromkeys((note.rest_id, note.id)))  # GitLab: both are one id
 
 
 class PostingPoint:
@@ -155,3 +180,81 @@ class PostingPoint:
             return failure
         await self._write_event(record.posted, intent.id, note, via="send")
         return "posted"
+
+    async def reconcile(
+        self, intents: Iterable[record.Intent], *, viewer: str, notes: Notes
+    ) -> None:
+        """First at a posting point, over every `unclear` intent of the item: read where
+        its copy would be, and record it posted when a note the viewer wrote carries its
+        marker (a summary: its marker and body hash), else not found, which makes the
+        intent pending again for the caller's gate to decide any resend. A read that
+        fails leaves it unclear."""
+        for intent in intents:
+            if intent.state != "unclear" or not self.in_budget():
+                continue
+            try:
+                found = await notes(intent)
+            except ForgeError:
+                continue  # still unclear: the next posting point reads again
+            copies = sorted(
+                _copies(intent, found, viewer, self.work_item_id), key=lambda n: n.created_at
+            )
+            if copies:
+                first = copies[0]
+                posted = Posted(_ids(first), first.created_at, first.body)
+                await self._write_event(record.posted, intent.id, posted, via="reconcile")
+            else:
+                await self._write_event(record.not_found, intent.id)
+
+    async def sweep_duplicates(
+        self, intents: Iterable[record.Intent], *, viewer: str, notes: Notes, delete: Delete
+    ) -> None:
+        """At a later posting point, over every intent that was ever unclear and is now
+        posted: when two or more notes the viewer wrote carry its marker and the same
+        returned-body hash, keep the earliest by `created_at`, delete the others (a 404
+        counts as deleted), and move the record to the survivor when it is not the note
+        the record holds. Reads and deletes stop at the time budget; deletes are spaced.
+
+        The horizon is the caller's: pass the intents of the node's current run and
+        those of the run before it for one posting point (the late-copy window), never
+        the item's whole history."""
+        for intent in intents:
+            if not intent.ever_unclear or intent.state != "posted":
+                continue
+            if not self.in_budget():
+                return
+            try:
+                found = await notes(intent)
+            except ForgeError:
+                continue
+            groups: dict[str, list[ForgeNote]] = {}
+            for n in _copies(intent, found, viewer, self.work_item_id):
+                groups.setdefault(body_hash(n.body), []).append(n)
+            for group in groups.values():
+                if len(group) > 1:
+                    await self._delete_later_copies(
+                        intent, sorted(group, key=lambda n: n.created_at), delete
+                    )
+
+    async def _delete_later_copies(
+        self, intent: record.Intent, group: list[ForgeNote], delete: Delete
+    ) -> None:
+        first, *later = group
+        gone: list[str] = []
+        for n in later:
+            if not self.in_budget():
+                break
+            await self._spaced()
+            try:
+                await delete(n)
+            except ForgeError as exc:
+                if exc.status != 404:
+                    continue  # left for the next posting point
+            gone.append(n.id)
+        if not gone:
+            return
+        await self._write_event(record.duplicate_deleted, intent.id, _ids(first), gone)
+        held = set((intent.posted or {}).get("ids", ()))
+        if not held & set(_ids(first)):
+            posted = Posted(_ids(first), first.created_at, first.body)
+            await self._write_event(record.posted, intent.id, posted, via="duplicate")

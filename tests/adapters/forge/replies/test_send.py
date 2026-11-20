@@ -4,15 +4,18 @@ each class, within its budgets."""
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from support.harness import v1_node, v1_task
 
 from kraft import events
+from kraft.adapters import forge
 from kraft.adapters.forge.git import CliUnavailable
-from kraft.adapters.forge.models import ForgeError, Posted
+from kraft.adapters.forge.models import ForgeError, ForgeNote, Posted
 from kraft.adapters.forge.replies import record, send
+from kraft.adapters.forge.replies.facts import body_hash, marker_of, reply_marker, summary_marker
 from kraft.adapters.forge.replies.send import classify
 
 from .test_record import _PAYLOAD
@@ -97,6 +100,7 @@ def test_a_failed_write_is_classified(exc, failure):
     assert classify(exc) == failure
 
 
+VIEWER = "kraft-user"
 _T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _PRIOR = {  # what `intend(prior=...)` records after the intent
     "unclear": lambda c, w, i: record.send_failed(c, w, i, "unclear", ForgeError("timed out")),
@@ -120,14 +124,44 @@ class _Point:
         monkeypatch.setattr(send, "_last_write", {})
         monkeypatch.setattr(send, "_locks", {})
         self.pp = send.PostingPoint(self.db, self.item, account="github.com")
+        bot = ForgeNote("N0", "10", "coderabbitai", "Bot", "fix", "2025-12-31T00:00:00Z", "t")
+        thread = forge.ForgeThread("T1", 7, False, False, True, True, "a.py", 1, (bot,))
+        self.fake = forge.FakeForge(threads={"T1": thread}, viewer_login=VIEWER)
+
+    def reply(self, intent):
+        """A `Write` replying in `T1` with the intent's marker."""
+        body = f"Answer:\n\nok\n\n{reply_marker(intent.id)}"
+        return lambda: self.fake.reply_to_thread(
+            repo=".", thread=self.fake.threads["T1"], body=body
+        )
+
+    async def notes(self, intent):
+        return (await self.fake.read_thread(repo=".", branch="b", thread_id="T1")).notes
+
+    async def delete(self, note):
+        await self.fake.delete_note(repo=".", branch="b", note=note, in_thread=True)
+
+    def add_note(self, author, body):
+        """A note dated after every note the fake writes."""
+        thread = self.fake.threads["T1"]
+        n = len(thread.notes)
+        note = ForgeNote(f"X{n}", str(2000 + n), author, "User", body, "2026-01-01T01:00:00Z", "t")
+        self.fake.threads["T1"] = replace(thread, notes=(*thread.notes, note))
+
+    def events(self, type_):
+        return self.db.read(
+            lambda c: c.execute(
+                "SELECT * FROM events WHERE work_item_id = ? AND type = ?", (self.item, type_)
+            ).fetchall()
+        )
 
     async def _sleep(self, seconds):
         self.slept.append(seconds)
         self.t += seconds
 
-    async def intend(self, prior=None):
+    async def intend(self, prior=None, payload=_PAYLOAD):
         intent = record.new_id(self.item)
-        await self.db.write(lambda c: record.intend(c, self.item, intent, _PAYLOAD))
+        await self.db.write(lambda c: record.intend(c, self.item, intent, payload))
         if prior:
             await self.db.write(lambda c: _PRIOR[prior](c, self.item, intent))
         return self.reread(intent)
@@ -287,3 +321,117 @@ async def test_a_posting_point_stops_sending_after_its_time_budget(point):
     assert await point.pp.send(second, gate=_go_ahead, write=_counting(calls)) == "out_of_time"
 
     assert calls == [] and point.reread(second).state == "pending"
+
+
+async def _nothing(intent):
+    return ()
+
+
+async def _unreadable(intent):
+    raise ForgeError("read failed")
+
+
+@pytest.mark.parametrize(
+    "script, found, state",
+    [([forge.LOST], True, "posted"), ([ForgeError("timed out")], False, "pending")],
+    ids=["landed-with-a-lost-answer", "never-landed"],
+)
+async def test_an_unclear_write_is_reconciled_by_its_marker(point, script, found, state):
+    point.fake.write_script = list(script)
+    intent = await point.intend()
+    assert await point.pp.send(intent, gate=_go_ahead, write=point.reply(intent)) == "unclear"
+
+    await point.pp.reconcile([point.reread(intent)], viewer=VIEWER, notes=point.notes)
+
+    after = point.reread(intent)
+    assert after.state == state
+    assert (after.posted is not None and after.posted["via"] == "reconcile") is found
+
+
+async def test_a_marker_on_another_authors_note_is_not_a_reconciled_copy(point):
+    """Someone quoting Kraft's marker does not make the write posted."""
+    point.fake.write_script = [ForgeError("timed out")]
+    intent = await point.intend()
+    await point.pp.send(intent, gate=_go_ahead, write=point.reply(intent))
+    point.add_note("a-person", f"me too\n\n{reply_marker(intent.id)}")
+
+    await point.pp.reconcile([point.reread(intent)], viewer=VIEWER, notes=point.notes)
+
+    assert point.reread(intent).state == "pending"
+
+
+async def test_a_failed_reconcile_read_leaves_the_intent_unclear(point):
+    point.fake.write_script = [forge.LOST]
+    intent = await point.intend()
+    await point.pp.send(intent, gate=_go_ahead, write=point.reply(intent))
+
+    await point.pp.reconcile([point.reread(intent)], viewer=VIEWER, notes=_unreadable)
+
+    assert point.reread(intent).state == "unclear"
+
+
+@pytest.mark.parametrize(
+    "first_landed",
+    [True, False],
+    ids=["the-record-moves-to-the-earliest", "the-record-holds-the-earliest"],
+)
+async def test_a_duplicate_keeps_the_earliest_copy(point, first_landed):
+    """The first send's answer is lost; a reconcile that cannot see it yet finds
+    nothing; the resend posts. The first copy landed before the resend (the record
+    moves to it) or lands only after (the record keeps the resend)."""
+    point.fake.write_script = [forge.LOST if first_landed else ForgeError("timed out")]
+    intent = await point.intend()
+    await point.pp.send(intent, gate=_go_ahead, write=point.reply(intent))
+    await point.pp.reconcile([point.reread(intent)], viewer=VIEWER, notes=_nothing)
+    sent = await point.pp.send(point.reread(intent), gate=_go_ahead, write=point.reply(intent))
+    assert sent == "posted"
+    if not first_landed:
+        point.add_note(VIEWER, f"Answer:\n\nok\n\n{reply_marker(intent.id)}")
+    resent = point.reread(intent).posted["ids"]
+
+    point.later(0)
+    await point.pp.sweep_duplicates(
+        [point.reread(intent)], viewer=VIEWER, notes=point.notes, delete=point.delete
+    )
+
+    copies = [n for n in await point.notes(intent) if marker_of(n.body) == intent.id]
+    assert len(copies) == 1
+    assert (point.reread(intent).posted["ids"] != resent) is first_landed
+    assert len(point.events("reply_duplicate_deleted")) == 1
+
+
+async def test_the_sweep_reads_nothing_past_its_budget(point):
+    intent = await point.intend(prior="unclear")
+    posted = Posted(("1", "N1"), "t", "b")
+    await point.db.write(lambda c: record.posted(c, point.item, intent.id, posted, via="reconcile"))
+    point.advance(60)
+    asked = []
+
+    async def notes(intent):
+        asked.append(intent.id)
+        return ()
+
+    await point.pp.sweep_duplicates(
+        [point.reread(intent)], viewer=VIEWER, notes=notes, delete=_never
+    )
+
+    assert asked == []
+
+
+@pytest.mark.parametrize("current", [True, False], ids=["edit-landed", "edit-did-not-land"])
+async def test_a_summary_edit_is_reconciled_by_its_body_hash(point, current):
+    mark = summary_marker(point.item)
+    new, old = f"summary v2\n\n{mark}", f"summary v1\n\n{mark}"
+    payload = {**_PAYLOAD, "op": "summary", "body_sha256": body_hash(new)}
+    intent = await point.intend(prior="unclear", payload=payload)
+    shown = new if current else old
+    point.fake.comments.append(
+        ForgeNote("C1", "300", VIEWER, "User", shown, "2026-01-01T00:00:01Z", "t")
+    )
+
+    async def comments(intent):
+        return await point.fake.mr_comments(repo=".", branch="b")
+
+    await point.pp.reconcile([intent], viewer=VIEWER, notes=comments)
+
+    assert point.reread(intent).state == ("posted" if current else "pending")
