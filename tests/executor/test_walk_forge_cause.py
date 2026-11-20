@@ -359,3 +359,46 @@ async def test_a_forge_rate_limit_parks_the_item_until_the_forge_allows_it(
     assert (row["status"], row["stop_kind"]) == ("rate_limited", "rate_limit")
     assert row["retry_at"] == (moment + timedelta(seconds=30)).isoformat()
     assert not it.events("work_item_needs_human")
+
+
+@pytest.mark.parametrize(
+    ("fix_loop", "blind", "names"),
+    [
+        (False, False, "task failed in node checks: await_ci [forge]"),
+        (True, True, "await_ci [forge] failed in node checks"),
+    ],
+    ids=["no-fix-loop", "blind-in-a-fix-loop-node"],
+)
+async def test_a_stop_on_red_ci_the_review_wait_saw_names_the_ci_wait(
+    item_on, tmp_path, fake_agent, monkeypatch, fix_loop, blind, names
+):
+    # Reads: pending while the bots are pending (the wait parks), then red.
+    fake = _forge.FakeForge(
+        ci_states=["pending", "failed"],
+        ci_failed_jobs=[(), (_forge.FailedJob("test", "failed", "script_failure"),)],
+        review_results=["pending"],
+    )
+    monkeypatch.setattr(_forge.run, "resolve", lambda name: fake)
+    if blind:
+        # What a multi-repo item's red leaves the walk: a failed review wait
+        # with no findings, so no result file, as there.
+        monkeypatch.setattr(_forge.run, "_job_findings", lambda *a, **k: None)
+    review = {**_forge_task("review", "mr.automated_review"), "watch_ci": True}
+    node = {
+        "id": "checks",
+        "kind": "exec",
+        "steps": [
+            {"id": "settle", "tasks": [review]},
+            {"id": "ci", "tasks": [_forge_task("await_ci", "mr.ci")]},
+        ],
+        **({"fix_loop": {"tasks": [_agent("repair")]}} if fix_loop else {}),
+    }
+    it = await item_on([node])
+    await _walk(it, repo_entry=FORGE_REPO, policy=_loop_policy(tmp_path))
+    assert it.status() == "waiting"  # the red lands in a log that already has lines
+    await it.database.write(lambda c: store.mark_reentered(c, it.id))
+    await _walk(it, repo_entry=FORGE_REPO, policy=_loop_policy(tmp_path))
+
+    reason = _stop_reason(it)
+    assert names in reason and f"{_forge.run.CI_RED_LINE}test failed" in reason, reason
+    assert "review [forge]" not in reason

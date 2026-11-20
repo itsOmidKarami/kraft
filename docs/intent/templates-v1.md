@@ -2142,6 +2142,14 @@ wait's start.
 enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_s_limit_counts_from_the_push[from-the-push], tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_s_limit_counts_from_the_push[from-the-wait-start]
 origin: src/kraft/adapters/forge/run.py §_settle_review -- the person, 2026-11-20: "if it didn't post a review after the push in 10 mins, it's done."
 
+## REQ a-stop-on-red-ci-the-review-wait-saw-names-the-ci-wait
+
+WHEN a red pipeline that an `mr.automated_review` task watching CI read stops
+its node for a person, the system SHALL name the node's `mr.ci` task and the
+pipeline's failed jobs in the stop's reason, and not the review wait.
+enforced-by: tests/executor/test_walk_forge_cause.py::test_a_stop_on_red_ci_the_review_wait_saw_names_the_ci_wait[no-fix-loop], tests/executor/test_walk_forge_cause.py::test_a_stop_on_red_ci_the_review_wait_saw_names_the_ci_wait[blind-in-a-fix-loop-node]
+origin: src/kraft/executor/walk.py §_named_for_stop
+
 ## REQ automated-review-collects-when-a-later-task-reads-it
 
 WHERE a later task of an automated-review task's node declares the

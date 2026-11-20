@@ -432,14 +432,40 @@ def _task_cause(
     # memory limit killed it, or a `just` scope's recipe is missing, is the
     # cause; the task's first line is not.
     # So is the forge's `rebase onto <base> failed: <git's words>` (`forge.run`),
-    # which follows a pipeline's own first line.
+    # which follows a pipeline's own first line, and the `CI is red: ...` line a
+    # CI-watching review wait leads an observation with: its session's log is
+    # appended to, so that line is not the file's first.
     own = [
         ln
         for ln in lines[1:]
-        if ln.startswith((_subprocess.OOM_LINE, dispatch.NO_RECIPE_LINE, "rebase onto "))
+        if ln.startswith(
+            (
+                _subprocess.OOM_LINE,
+                dispatch.NO_RECIPE_LINE,
+                "rebase onto ",
+                forge_mod.run.CI_RED_LINE,
+            )
+        )
     ]
     line = own[-1] if own else next(iter(lines), "")
     return line if len(line) <= _STOP_CAUSE_MAX else line[: _STOP_CAUSE_MAX - 1] + "…"
+
+
+def _named_for_stop(db, work_item_id: str, node: ResolvedNode, task: ResolvedTask) -> str:
+    """`task` as a stop's reason names it. A review wait that watches CI and
+    failed on a red pipeline is named as the node's CI wait: the failure is
+    CI's, and a person reading "the review wait failed" would look in the wrong
+    place (`a-stop-on-red-ci-the-review-wait-saw-names-the-ci-wait`)."""
+    if (
+        isinstance(task.task, ForgeTask)
+        and task.task.watch_ci
+        and _task_cause(db, work_item_id, node, task, "failed").startswith(
+            forge_mod.run.CI_RED_LINE
+        )
+        and (ci := node.ci_wait_after(task.path)) is not None
+    ):
+        return prompts.named_with_kind(ci)
+    return prompts.named_with_kind(task)
 
 
 #: The end of an infra stop's reason for a failed in-process task, by the
@@ -1976,7 +2002,7 @@ async def _walk_node_once(
                 # otherwise. Naming each failed task's kind here is the
                 # cheapest way to tell them apart without guessing whether
                 # *this* retry's steer would land.
-                named = ", ".join(prompts.named_with_kind(t) for t in failed)
+                named = ", ".join(_named_for_stop(db, work_item_id, node, t) for t in failed)
                 reason = f"task failed in node {node.id}: {named}"
                 reason += _in_process_causes(db, work_item_id, node, failed)
                 scopes = _failed_scopes(db, work_item_id, node, failed, launch)
@@ -2363,7 +2389,11 @@ async def _walk_node_once(
             and all(f.source_plugin in in_process_blind for f in eligible)
         ):
             named = ", ".join(
-                sorted(prompts.named_with_kind(t) for t in blind_failures if _in_process(t))
+                sorted(
+                    _named_for_stop(db, work_item_id, node, t)
+                    for t in blind_failures
+                    if _in_process(t)
+                )
             )
             # A forge task that answered `conflict` (its forced rebase hit one)
             # is the branch's to resolve, not the daemon's: a conflict stop, in
