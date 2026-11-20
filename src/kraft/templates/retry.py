@@ -19,6 +19,7 @@ operational one stays within the administrator maximum, and every scope below
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from pydantic import ValidationError
@@ -32,6 +33,7 @@ from kraft.templates.models import (
     MaterializedChain,
     ResolvedChain,
     displaced_route,
+    lift_config,
 )
 
 #: Task fields a retry cannot touch: identity and kind, the structure hanging
@@ -140,7 +142,15 @@ def validate_retry_override(
     # nearer `extends` layer's does (Kraft-ps1ao).
     for key in displaced_route(task_config):
         scope.pop(key, None)
-    scope.update(task_config)
+    # A flat target-specific key goes under `config`, merged key by key: set
+    # beside the scope's own `config` it would be refused as set twice.
+    try:
+        given, _ = lift_config(task_config, stored=False)
+    except ValueError as exc:
+        raise RetryOverrideError(str(exc), field="task_config") from exc
+    if isinstance(given.get("config"), Mapping):
+        scope["config"] = {**(scope.get("config") or {}), **given.pop("config")}
+    scope.update(given)
 
     try:
         patched = Chain.model_validate_json(json.dumps(authored))
