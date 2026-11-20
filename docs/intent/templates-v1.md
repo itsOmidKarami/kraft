@@ -2120,7 +2120,17 @@ origin: src/kraft/adapters/forge/run.py §_watch_ci
 WHEN an `mr.automated_review` task that sets `watch_ci` ends on a red pipeline
 or a confirmed conflict, the system SHALL NOT record which bots were heard or
 silent on that head.
-enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots[red], tests/adapters/forge/test_run_watch_ci.py::test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots[conflict]
+enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots[red], tests/adapters/forge/test_run_watch_ci.py::test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots[conflict], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[a-member-red], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[a-member-conflict]
+origin: src/kraft/adapters/forge/run.py §_watch_ci
+
+## REQ multi-repo-review-wait-watches-every-repository-first
+
+WHERE an item has several repositories and its `mr.automated_review` task sets
+`watch_ci`, the system SHALL push every repository's branch and read every
+repository's pipeline, skipping only those whose merge request merged, before it
+reads any bot, and SHALL report a red pipeline there without findings, as the CI
+wait does.
+enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[a-member-red], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[the-root-red-behind-a-pending-member], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[a-member-conflict], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[every-pipeline-pending], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[a-merged-member-is-skipped], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[a-pointer-only-root-is-not-read]
 origin: src/kraft/adapters/forge/run.py §_watch_ci
 
 ## REQ automated-review-collects-when-a-later-task-reads-it

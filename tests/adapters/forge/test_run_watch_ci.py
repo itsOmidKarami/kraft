@@ -17,9 +17,15 @@ from kraft.adapters.forge import ForgeError
 from kraft.adapters.forge.models import FailedJob
 from kraft.executor.round_prompts import CI_LOG_NOTE
 
-from .test_run_chain import RED
+from .test_run_chain import RED, _run_task
 from .test_run_push import on_branch  # noqa: F401 -- the fixture
-from .test_run_review import _A, _review_node, rig  # noqa: F401 -- the fixture
+from .test_run_review import (
+    _A,
+    _both_halves_changed,
+    _feedback,
+    _review_node,
+    rig,  # noqa: F401 -- the fixture
+)
 
 _WAIT, _CI = "feedback.settle.review", "feedback.ci.await_ci"
 
@@ -237,3 +243,142 @@ async def test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots(
     assert [
         e["outcome"] for e in run_forge.events("external_wait_ended") if e["task"] == _WAIT
     ] == ["settled"]
+
+
+def _pipeline(state, *, red=False, conflict=False):
+    return forge.CIStatus(
+        state=state,
+        url="http://fake.forge/pipelines",
+        jobs=(f"fake-job: {state}",),
+        failed_jobs=RED[0] if red else (),
+        mergeable=False if conflict else None,
+        merge_detail="conflict" if conflict else "",
+    )
+
+
+@pytest.mark.parametrize(
+    "pipelines, merged, halves, status, pushed, ci_read, bots_read",
+    [
+        (
+            {"pkg": _pipeline("failed", red=True), "root": _pipeline("pending")},
+            False,
+            ("pkg", "root"),
+            "failed",
+            {"pkg", "root"},
+            {"pkg"},
+            {},
+        ),
+        (
+            {"pkg": _pipeline("pending"), "root": _pipeline("failed", red=True)},
+            False,
+            ("pkg", "root"),
+            "failed",
+            {"pkg", "root"},
+            {"pkg", "root"},
+            {},
+        ),
+        (
+            {"pkg": _pipeline("success", conflict=True), "root": _pipeline("pending")},
+            False,
+            ("pkg", "root"),
+            "done",
+            {"pkg", "root"},
+            {"pkg"},
+            {},
+        ),
+        (
+            {"pkg": _pipeline("pending"), "root": _pipeline("pending")},
+            False,
+            ("pkg", "root"),
+            "waiting",
+            {"pkg", "root"},
+            {"pkg", "root"},
+            {"pkg": 1},
+        ),
+        (
+            {"root": _pipeline("pending")},
+            True,
+            ("pkg", "root"),
+            "waiting",
+            {"root"},
+            {"root"},
+            None,
+        ),
+        ({"pkg": _pipeline("pending")}, False, ("pkg",), "waiting", {"pkg"}, {"pkg"}, {"pkg": 1}),
+    ],
+    ids=[
+        "a-member-red",
+        "the-root-red-behind-a-pending-member",
+        "a-member-conflict",
+        "every-pipeline-pending",
+        "a-merged-member-is-skipped",
+        "a-pointer-only-root-is-not-read",
+    ],
+)
+async def test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots(
+    item_on,
+    database,
+    run_dirs,
+    tmp_path,
+    monkeypatch,
+    pipelines,
+    merged,
+    halves,
+    status,
+    pushed,
+    ci_read,
+    bots_read,
+):
+    """Every repository is pushed and its pipeline read before any bot, so a
+    later repository's red does not wait behind an earlier one's pending."""
+    it, worktree, branch = await _both_halves_changed(
+        item_on, database, run_dirs, tmp_path, halves=halves
+    )
+    fake = forge.FakeForge()
+    if merged:
+        number = await fake.open_mr(
+            repo=worktree / "repos" / "pkg", branch=branch, base="main", title="t", body="b"
+        )
+        fake.merged.append(getattr(number, "number", number))
+    ci_reads: list[str] = []
+    bot_reads: dict[str, int] = {}
+
+    def which(repo):
+        return "pkg" if repo.name == "pkg" else "root"
+
+    async def ci_status(*, repo, mr, branch="", pipeline_id=""):
+        ci_reads.append(which(repo))
+        return pipelines[which(repo)]
+
+    async def feedback(*, repo, branch, reviewers, since):
+        bot_reads[which(repo)] = bot_reads.get(which(repo), 0) + 1
+        return [_feedback(_A)]
+
+    monkeypatch.setattr(fake, "ci_status", ci_status)
+    monkeypatch.setattr(fake, "reviewer_feedback", feedback)
+    ask = {
+        "handler": "automated_review",
+        "reviewers": (_A,),
+        "reads_feedback": True,
+        "watch_ci": True,
+        "ci_task": _CI,
+        "wait": forge.WaitBounds.from_seconds(timeout=600, initial=30, maximum=120),
+    }
+
+    got = await _run_task(database, run_dirs, it, worktree, branch, fake, monkeypatch, **ask)
+
+    assert got == status
+    assert {which(Path(e["payload"]["repo"])) for e in it.events("branch_pushed")} == pushed
+    assert set(ci_reads) == ci_read
+    if bots_read is not None:
+        assert bot_reads == bots_read
+    if status == "failed":
+        assert not Path(it.sessions()[-1]["result_path"]).exists(), "no findings, as the CI wait's"
+        cause = next(
+            line
+            for line in own_files(run_dirs, "s1").log.read_text().splitlines()
+            if line.startswith(forge.run.CI_RED_LINE)
+        )
+        assert cause.endswith(" in pkg" if ci_read == {"pkg"} else f" in {worktree.name}")
+    if status in ("failed", "done"):
+        assert it.events("automated_review_settled") == []

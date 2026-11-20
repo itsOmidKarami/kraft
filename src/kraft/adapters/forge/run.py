@@ -2340,14 +2340,18 @@ async def _watch_ci(
     read is reported as that task's finding (`ci_task`), with its source and
     fingerprint (`review-wait-red-pipeline-is-the-ci-wait-s-finding`)."""
     log = ""
+
+    def tag(repo: Path) -> str:
+        return f"[{repo.name}] " if multi else ""
+
     # A merge request already merged (the CI wait's own guard, `ci_poll`): its
     # branch is usually deleted with it, so a push would die against the stale
-    # lease, and there is nothing left to check.
+    # lease, and there is nothing left to check. Per repository: the others go on.
     live: list[tuple[Forge, Path, Path]] = []
     for forge, repo, orig_repo in targets:
         existing = await forge.find_mr(repo=repo, branch=branch)
         if existing is not None and existing.state == "merged":
-            log += f"already merged (!{existing.number}); nothing to check\n"
+            log += f"{tag(repo)}already merged (!{existing.number}); nothing to check\n"
             continue
         live.append((forge, repo, orig_repo))
     if not live:
@@ -2367,6 +2371,8 @@ async def _watch_ci(
         )
     if not ci_checks:
         return log, None, None
+    # Then every pipeline, in target order (deepest first, as the CI wait reads
+    # them), stopping at the first red or conflict.
     for forge, repo, _ in live:
         head = await git._head_sha(repo, branch)
         try:
@@ -2377,18 +2383,21 @@ async def _watch_ci(
         except ForgeError as exc:
             if exc.reason == "rate_limited":
                 raise
-            log += f"pipeline not read ({exc}); the CI wait reads it\n"
+            log += f"{tag(repo)}pipeline not read ({exc}); the CI wait reads it\n"
             continue
         if verdict == "failed":
             names = ", ".join(j.name for j in read.failed_jobs)
-            cause = f"{CI_RED_LINE}{names} failed on {head[:7]}"
+            cause = f"{CI_RED_LINE}{names} failed on {head[:7]}" + (
+                f" in {repo.name}" if multi else ""
+            )
+            # CI findings stay single-repo, as the CI wait's do (`run_task`).
             return (
-                _cause_first(cause, log + rendered),
+                _cause_first(cause, log + tag(repo) + rendered),
                 "failed",
-                _job_findings(read, rendered, ci_task),
+                None if multi else _job_findings(read, rendered, ci_task),
             )
         if verdict == "conflict":
-            return log + rendered + "the CI wait rebases it\n", "done", None
+            return log + tag(repo) + rendered + "the CI wait rebases it\n", "done", None
     return log, None, None
 
 
@@ -2696,7 +2705,7 @@ async def run_task(
             # -- whether or not root itself has anything to publish.
             covered = {Path(r["repo_path"]).resolve() for r in rows if r["role"] == "submodule"}
             await git._assert_submodules_covered(repo, covered)
-        if handler == "automated_review" and watch_ci and ci_task and not multi:
+        if handler == "automated_review" and watch_ci and ci_task:
             log, watched, watched_findings = await _watch_ci(
                 db,
                 [

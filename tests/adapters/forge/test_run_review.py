@@ -582,14 +582,15 @@ async def test_a_check_with_nothing_reading_it_takes_the_direct_path_and_its_tim
     assert got == "capped_out"
 
 
-async def _both_halves_changed(item_on, database, run_dirs, tmp_path):
-    """A workspace item whose member (`repos/pkg`) and root both changed, so
-    each opens a merge request and the review wait reads both."""
+async def _both_halves_changed(item_on, database, run_dirs, tmp_path, halves=("pkg", "root")):
+    """A workspace item whose `halves` (the member `repos/pkg`, the root) changed,
+    so each opens a merge request and the review wait reads those."""
     it, worktree, branch = await _multi_repo_item(item_on, database, run_dirs, tmp_path, "ignore")
     _with_origin(tmp_path, it, worktree)
     for where, name in ((worktree / "repos" / "pkg", "pkg"), (worktree, "root")):
-        write(where, f"{name}.txt", "x\n")
-        commit_all(where)
+        if name in halves:
+            write(where, f"{name}.txt", "x\n")
+            commit_all(where)
     return it, worktree, branch
 
 
