@@ -26,7 +26,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 60
+SCHEMA_VERSION = 61
 
 _SCHEMA_TEMPLATE = """
 CREATE TABLE work_items (
@@ -157,6 +157,9 @@ CREATE TABLE work_items (
   group_state      TEXT,
   -- 1 while a child is paused by its parent's pause (resume wakes only these)
   paused_by_parent INTEGER NOT NULL DEFAULT 0,
+  -- measurement: the open measurement of a node whose fix loop starts early, JSON
+  -- {node_id, round, since} (`store.stored_measurement`), NULL when no measurement is open
+  measurement      TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -1470,6 +1473,8 @@ SELECT rowid, id, work_item_id, node_id, hook_point, pid, pid_start_time, log_pa
         "CREATE UNIQUE INDEX idx_work_items_slice "
         "ON work_items(parent_id, slice_generation, slice_key) WHERE parent_id IS NOT NULL",
     ],
+    # The open measurement of a node whose fix loop starts early: JSON, NULL = none open.
+    60: ["ALTER TABLE work_items ADD COLUMN measurement TEXT"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins

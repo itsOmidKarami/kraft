@@ -1279,9 +1279,20 @@ origin: src/kraft/executor/walk.py
 ## REQ a-step-that-did-not-run-contributes-nothing
 
 WHEN a node is measured and an earlier step's latest result did not advance,
-the system SHALL NOT read a later step's result recorded before it.
-enforced-by: tests/executor/test_scopes.py::test_collect_findings_reads_a_later_step_only_if_no_earlier_step_stopped_after_it[stale], tests/executor/test_measurement.py::test_a_later_steps_question_is_asked_only_if_no_earlier_step_stopped_after_it[earlier-step-stopped-after-it]
+the system SHALL NOT read a later step's result recorded before it. For a node
+whose fix loop starts early, the system SHALL read no step past the one the
+measurement reached, whatever an earlier step recorded.
+enforced-by: tests/executor/test_scopes.py::test_collect_findings_reads_a_later_step_only_if_no_earlier_step_stopped_after_it[stale], tests/executor/test_measurement.py::test_a_later_steps_question_is_asked_only_if_no_earlier_step_stopped_after_it[earlier-step-stopped-after-it], tests/executor/test_measurement.py::test_a_measurement_reads_only_the_steps_it_reached[early-reads-the-steps-it-reached]
 origin: src/kraft/executor/dispatch.py
+
+## REQ a-resumed-measurement-reads-its-own-rows
+
+WHEN a node's fix loop starts early and a measurement of the node is resumed
+after a park, a crash or a resume, the system SHALL continue it at its own round
+and SHALL read as its result only the steps it has reached, its reused and
+preserved sessions included.
+enforced-by: tests/executor/test_walk_early.py::test_a_parked_re_measure_resumes_at_its_own_round[own-round], tests/executor/test_walk_early.py::test_a_parked_re_measure_resumes_at_its_own_round[after-a-restart], tests/executor/test_measurement.py::test_a_measurement_reads_only_the_steps_it_reached[early-reads-the-steps-it-reached]
+origin: src/kraft/executor/walk.py
 
 ## REQ fix-cycle-started-carries-the-attempt-cap
 

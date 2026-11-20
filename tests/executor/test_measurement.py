@@ -301,6 +301,55 @@ async def test_a_later_steps_question_is_asked_only_if_no_earlier_step_stopped_a
     assert dispatch.needs_context_question(it.database, it.id, node, 0) == asked
 
 
+@pytest.mark.parametrize(
+    ("early", "read"),
+    [(True, ["b"]), (False, ["b", "c"])],
+    ids=["early-reads-the-steps-it-reached", "otherwise-as-before"],
+)
+async def test_a_measurement_reads_only_the_steps_it_reached(item_on, early, read):
+    """After an early end the cursor names the step it reached: a later step's row
+    from an earlier measurement is not this one's result, a reached step's older
+    (reused) row is."""
+    steps = [{"id": f"s{i}", "tasks": [_agent(t)]} for i, t in enumerate("abc")]
+    loop = {"tasks": [_agent("fix")], "early": early}
+    node_def = {"id": "verify", "kind": "exec", "steps": steps, "fix_loop": loop}
+    it = await item_on([node_def], repo="/r")
+    node = it.chain.chain.nodes[0]
+    a_path, b_path, c_path = (step.tasks[0].path for step in node.steps)
+    (it.run_dirs.results / "b0.json").write_text(
+        json.dumps(
+            {
+                "status": "done",
+                "findings": [
+                    {
+                        "severity": "important",
+                        "message": "b finding",
+                        "file": "a.py",
+                        "line": 1,
+                        "source_plugin": "p",
+                    }
+                ],
+            }
+        )
+    )
+    (it.run_dirs.results / "c0.json").write_text(
+        json.dumps({"status": "needs_context", "question": "stale?"})
+    )
+    await it.session("b0", b_path, "done")
+    await it.session("c0", c_path, "needs_context")
+    await it.session("a0", a_path, "done")
+    await it.database.write(lambda c: store.set_current_step(c, it.id, 1))
+
+    has_session: dict[str, bool] = {}
+    found, _ = dispatch.collect_findings(it.database, it.id, node, 0, has_session=has_session)
+    question = dispatch.needs_context_question(it.database, it.id, node, 0)
+
+    assert has_session[c_path] is ("c" in read)
+    assert any(f.source_plugin == c_path for f in found) is ("c" in read)
+    assert (question == "stale?") is ("c" in read)
+    assert "b finding" in [f.message for f in found]
+
+
 async def test_reentry_is_not_stopped_by_the_previous_passs_fix_question(item_on):
     """A gate rejection or ci_wait poll re-entering a fix_loop node must not
     inherit the last pass's fix-task needs_context (review finding 5).

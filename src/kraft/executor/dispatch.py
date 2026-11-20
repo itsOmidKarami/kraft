@@ -2908,6 +2908,12 @@ async def measure_node(
     node_before = await _snapshot(
         own and getattr(node.node, "read_only", False), [t for g in groups for t in g.tasks]
     )
+    if own and _starts_early(node):
+        # One measurement spans its parks and resumes: only the first entry at a
+        # round opens it, a later one finds it open.
+        open_at = open_measurement(db, work_item_id, node.id)
+        if open_at is None or open_at["round"] != round:
+            await db.write(lambda c: store.begin_measurement(c, work_item_id, node.id, round))
     outcomes: list[tuple[ResolvedTask, object]] = []
     for index, step in enumerate(groups):
         # A resumed node skips the steps before `start_step` -- they already
@@ -3160,8 +3166,46 @@ def measured_tasks(
     return {t.path: t for step in (node.steps if steps is None else steps) for t in step.tasks}
 
 
+def _starts_early(node: ResolvedNode) -> bool:
+    """Whether the node's fix loop may start before the node has finished measuring."""
+    loop = getattr(node.node, "fix_loop", None)
+    return bool(loop and loop.early)
+
+
+def open_measurement(db, work_item_id: str, node_id: str) -> dict | None:
+    """The item's open measurement of `node_id`, with the step cursor as `"step"`.
+
+    Open means stored for this node and begun at or after the node's current run
+    (`ci_reruns.node_run_start`): a retry, a fork, a base-change or merge-rejection
+    restart, a gate decision and the node's completion each start a new run, so
+    a measurement stopped before its record never outlives them. A park, a crash
+    and a resume write none of those, so it goes on through them. `walk` and
+    `measure_node` both read it here, never from the store."""
+
+    def read(c):
+        stored = store.stored_measurement(c, work_item_id)
+        if stored is None or stored["node_id"] != node_id:
+            return None
+        run_start = ci_reruns.node_run_start(c, work_item_id, node_id)
+        return stored if stored["since"] >= run_start else None
+
+    return db.read(read)
+
+
+def _reached(db, work_item_id: str, node: ResolvedNode) -> int | None:
+    """The step the node's measurement has reached (its cursor), for a node whose
+    fix loop starts early; None for every other node, which reads as before."""
+    if not _starts_early(node):
+        return None
+    return db.read(
+        lambda c: c.execute(
+            "SELECT current_step FROM work_items WHERE id = ?", (work_item_id,)
+        ).fetchone()["current_step"]
+    )
+
+
 def _current_rows(
-    rows: list[sqlite3.Row], steps: tuple[ResolvedStep, ...]
+    rows: list[sqlite3.Row], steps: tuple[ResolvedStep, ...], reached: int | None = None
 ) -> dict[str, list[sqlite3.Row]]:
     """The rows that are this measurement's result, by task path.
 
@@ -3179,12 +3223,20 @@ def _current_rows(
     last row, or for a builtin scope loop every row at its latest head. The
     barrier is judged by those same rows, so it fires only where the collector
     itself reads the earlier task as not passed.
+
+    `reached`, given for a node whose fix loop starts early, replaces that rule:
+    an early end leaves the later steps' rows from an earlier measurement in
+    place, and the barrier cannot see them. A step past `reached` (the cursor)
+    contributes nothing, and every step up to it reads its latest rows whatever
+    their status, a reused or preserved session included.
     """
     # shortcut: a task an operator skipped after it failed still sets the barrier
     # (a skip writes no row), upgrade if a later step's reused row must survive it.
     current: dict[str, list[sqlite3.Row]] = {}
     barrier = -1
-    for step in steps:
+    for index, step in enumerate(steps):
+        if reached is not None and index > reached:
+            break
         # Moved only once the step is done: its tasks ran together, so none of
         # them is evidence about another.
         stopped_at = barrier
@@ -3192,7 +3244,7 @@ def _current_rows(
             mine = [
                 (i, row)
                 for i, row in enumerate(rows)
-                if i > barrier and row["hook_point"] == task.path
+                if (reached is not None or i > barrier) and row["hook_point"] == task.path
             ]
             if not mine:
                 continue
@@ -3284,7 +3336,11 @@ def collect_findings(
     """
     tasks = measured_tasks(node, steps)
     rows = db.read(lambda c: store.sessions_for_round(c, work_item_id, node.id, round))
-    by_hook = _current_rows(rows, node.steps if steps is None else steps)
+    by_hook = _current_rows(
+        rows,
+        node.steps if steps is None else steps,
+        _reached(db, work_item_id, node) if steps is None else None,
+    )
     if has_session is not None:
         has_session.update({path: path in by_hook for path in tasks})
     found: list[_findings.Finding] = []
@@ -3370,7 +3426,7 @@ def needs_context_question(
     # pass's question. `_current_rows` drops a task's oldest rows first, so its
     # latest row survives exactly when the task is still in the result.
     measuring = measured_tasks(node)
-    current = _current_rows(rows, node.steps)
+    current = _current_rows(rows, node.steps, _reached(db, work_item_id, node))
     latest: dict[str, sqlite3.Row] = {}
     for row in rows:
         hook = row["hook_point"]

@@ -2053,6 +2053,12 @@ async def _walk_node_once(
     # and 823s of a 3600s wall cap the judge then stopped the loop over.
     counter_row = db.read(lambda c: store.read_counter(c, work_item_id, key))
     round = counter_row["count"] if counter_row is not None else 0
+    if loop.early:
+        # A parked measurement continues at its own round, which the counter
+        # doesn't know when it is the re-measure after `on_failure` (round -1).
+        open_at = dispatch.open_measurement(db, work_item_id, node.id)
+        if open_at is not None:
+            round = open_at["round"]
     # One repair per call to `walk_node` -- exactly one per entry into the
     # node (a fresh call on every re-entry via `run_once`'s loop, a crash
     # resume, or the wait scheduler).
@@ -2201,6 +2207,8 @@ async def _walk_node_once(
                     loop_severities=loop_severities,
                 )
             if r_verdict == "ok":
+                if loop.early:
+                    await db.write(lambda c: store.end_measurement(c, work_item_id))
                 await node_runs.completed(
                     db,
                     Path(worktree) if worktree else None,
@@ -2341,6 +2349,8 @@ async def _walk_node_once(
                 c, work_item_id, ChainEvent.FINDINGS_MEASURED, payload
             )
         )
+        if loop.early:
+            await db.write(lambda c: store.end_measurement(c, work_item_id))
 
         # A failed task that produced no findings at all is still non-clean: the
         # findings list refines *why* a task failed, it does not define failure.

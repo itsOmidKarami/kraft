@@ -1210,6 +1210,45 @@ def set_current_step(conn: sqlite3.Connection, work_item_id: str, step: int) -> 
     conn.execute("UPDATE work_items SET current_step = ? WHERE id = ?", (step, work_item_id))
 
 
+def begin_measurement(
+    conn: sqlite3.Connection,
+    work_item_id: str,
+    node_id: str,
+    round: int,
+    *,
+    since: int | None = None,
+) -> None:
+    """Open a measurement of a node whose fix loop starts early.
+
+    Stored as JSON `{node_id, round, since}`: the round it runs at, and the
+    events `seq` it began after, which is what finds the record it later amends.
+    `since` defaults to the newest event's `seq`."""
+    if since is None:
+        row = conn.execute(
+            "SELECT COALESCE(MAX(seq), 0) FROM events WHERE work_item_id = ?", (work_item_id,)
+        ).fetchone()
+        since = row[0]
+    stored = json.dumps({"node_id": node_id, "round": round, "since": since})
+    conn.execute("UPDATE work_items SET measurement = ? WHERE id = ?", (stored, work_item_id))
+
+
+def end_measurement(conn: sqlite3.Connection, work_item_id: str) -> None:
+    """Close the item's open measurement (its record is written, or it completed)."""
+    conn.execute("UPDATE work_items SET measurement = NULL WHERE id = ?", (work_item_id,))
+
+
+def stored_measurement(conn: sqlite3.Connection, work_item_id: str) -> dict | None:
+    """The stored measurement with the step cursor as `"step"`, or None.
+
+    Raw: whether it still counts as open is `dispatch.open_measurement`'s call."""
+    row = conn.execute(
+        "SELECT measurement, current_step FROM work_items WHERE id = ?", (work_item_id,)
+    ).fetchone()
+    if row is None or row["measurement"] is None:
+        return None
+    return {**json.loads(row["measurement"]), "step": row["current_step"]}
+
+
 def set_ci_pipeline_ref(conn: sqlite3.Connection, work_item_id: str, ref: str) -> None:
     """Pin `on.ci.poll` to the pipeline it last saw, stored as
     "<head_sha>:<pipeline_id>" (Kraft-ivh1). GitLab only -- GitHub's
