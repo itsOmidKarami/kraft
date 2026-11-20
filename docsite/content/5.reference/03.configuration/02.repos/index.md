@@ -244,7 +244,7 @@ Reviewers can be named in three places. The nearest wins, and its list is the wh
 
 1. The item's own `reviewers` override on the review node: `kraft item set-node-override --node N --reviewer bot:LOGIN`.
 2. This repo's `automated_review`.
-3. The review task's `reviewers` in the chain or library.
+3. The review task's `config.reviewers` in the chain or library.
 
 `[]` counts as naming reviewers, meaning none: `automated_review: []` turns the review off even when the chain's task lists bots. A reviewer with both `bot` and `check`, or neither, is refused when the file loads. Unset here and everywhere else, the repository expects no automated review: the task settles clean at once and records `automated_review_not_configured`.
 

@@ -27,7 +27,7 @@ origin: src/kraft/templates/models.py §ForgeTask
 
 ## REQ ci-pipeline-id-comes-from-a-declared-variable
 
-IF a `ci.pipeline` task's `pipeline` is `$NAME` and no task in its `reads` declares `NAME`, THEN the
+IF a `ci.pipeline` task's `config.pipeline` is `$NAME` and no task in its `reads` declares `NAME`, THEN the
 system SHALL refuse the chain.
 enforced-by: tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_variable_refusals[no-writer-declares-it], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_variable_refusals[no-reads], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_variable_refusals[unclosed-brace], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_variable_refusals[stray-brace], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_variable_refusals[text-around-it], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_reads_its_id_from_a_writers_variable[$PIPELINE_ID], tests/templates/test_ci_pipeline_task.py::test_ci_pipeline_reads_its_id_from_a_writers_variable[${PIPELINE_ID}]
 origin: src/kraft/templates/models.py §Chain

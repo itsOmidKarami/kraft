@@ -268,17 +268,45 @@ CI pipeline by ID.
 | Key | Type | Required | Default | Meaning |
 |---|---|---|---|---|
 | `target` | string | yes | — | `mr.open_draft`, `mr.sync`, `mr.ci`, `mr.automated_review`, `mr.mark_ready`, `mr.external_approval`, `mr.merge` or `mr.post_merge_ci`. `ci.pipeline` waits for one pipeline by ID. _Added in 2.6_ |
-| `wait` | mapping: `polling`, `grace_period` | no | unset | For a target that waits: `polling`, with an `initial_interval` and a `max_interval`. Set the timeout with the task's `policy`. |
-| `wait.grace_period` | duration | no | `60s` | Only on `mr.automated_review`: how long a review bot must stay quiet after its last activity on the head to count as finished. Refused on any other target. _Added in 2.4_ |
-| `pipeline` | string | yes, on `ci.pipeline` | — | Only on `ci.pipeline`: the pipeline's ID as digits, or `$NAME` (or `${NAME}`) for a variable a task in `reads` left. See [Waiting for a pipeline by ID](/reference/chain-nodes/wait-for-a-pipeline). _Added in 2.6_ |
-| `reviewers` | list of `{bot: LOGIN}` or `{check: NAME}` | no | unset | Only on `mr.automated_review`: the reviewers it waits for, each `{bot: LOGIN}` or `{check: NAME}`. The item's `reviewers` override and the repo's `automated_review` come first. `[]` names none. _Added in 2.4_ |
-| `watch_ci` | boolean | no | `false` | Only on `mr.automated_review`: the wait also watches the merge request's CI. See [`watch_ci`](#watch_ci). _Added in next_ |
+| `wait` | mapping: `polling` | no | unset | For a target that waits: `polling`, with an `initial_interval` and a `max_interval`. Set the timeout with the task's `policy`. |
+| `config` | mapping | no | unset | This target's own keys, below. A target not listed takes none. _Added in next_ |
+| `reviewers` | list | no | unset | Retired: use `config.reviewers`. Read with a log warning until the next major release; Kraft writes the `config:` form when it saves the file. |
+| `pipeline` | string | no | unset | Retired: use `config.pipeline`. Read with a log warning until the next major release; Kraft writes the `config:` form when it saves the file. |
+| `wait.grace_period` | duration | no | unset | Retired: use `config.grace_period`. Read with a log warning until the next major release; Kraft writes the `config:` form when it saves the file. |
+
+#### `config`
+
+_Added in next_
+
+A forge task's `config` holds the keys of its `target`. `mr.automated_review` and `ci.pipeline` take the keys below; any other target takes none. A key the target doesn't take is refused, unless it is `null` or `false`, which is dropped.
+
+`mr.automated_review`:
+
+| Key | Type | Required | Default | Meaning |
+|---|---|---|---|---|
+| `reviewers` | list of `{bot: LOGIN}` or `{check: NAME}` | no | unset | The reviewers it waits for. The item's `reviewers` override and the repo's `automated_review` come first. `[]` names none. |
+| `watch_ci` | boolean | no | `false` | The wait also watches the merge request's CI. See [`watch_ci`](#watch_ci). _Added in next_ |
+| `grace_period` | duration | no | `60s` | How long a review bot must stay quiet after its last activity on the head to count as finished. |
+
+`ci.pipeline`:
+
+| Key | Type | Required | Default | Meaning |
+|---|---|---|---|---|
+| `pipeline` | string | yes | — | The pipeline's ID as digits, or `$NAME` (or `${NAME}`) for a variable a task in `reads` left. See [Waiting for a pipeline by ID](/reference/chain-nodes/wait-for-a-pipeline). |
+
+`extends` merges `config` key by key, as it does `policy`; `reviewers` is a list and replaces the inherited one whole. To clear an inherited value, set `<key>: null` under `config` in the child, or `config: null` for all of them. A child that changes `target` must clear the parent's keys this way, since the new target refuses them.
+
+The flat keys of earlier releases (`reviewers`, `pipeline` and `wait.grace_period` beside `target`) still load, read as `config.<key>`, with a log warning naming the file and the key. The VS Code schema marks them deprecated.
+
+The first time Kraft saves a file that still has one, from the Templates screens, it writes the `config:` form and keeps the file as it was on disk as `<file>.pre-config`, which it never overwrites. A file that uses YAML anchors is saved as written, with a warning. Add-on and repository libraries are never rewritten.
+
+An add-on or repository library that writes `config:` needs this release or later: an earlier Kraft refuses the key. An add-on says so in its `addon.json`, with this release as its [`requires.kraft`](/reference/configuration/addons#which-kraft-an-add-on-runs-on). A repository library has no such check, so every Kraft that reads it needs this release.
 
 #### `watch_ci`
 
 _Added in next_
 
-`watch_ci` works only with an `mr.ci` task in a later step of the same node. At every check the wait also pushes the branch and reads the merge request's pipeline, and ends on a red pipeline or a merge conflict. See [How review and CI waits settle](/concepts/how-review-and-ci-waits-settle).
+`config.watch_ci` works only with an `mr.ci` task in a later step of the same node. At every check the wait also pushes the branch and reads the merge request's pipeline, and ends on a red pipeline or a merge conflict. See [How review and CI waits settle](/concepts/how-review-and-ci-waits-settle).
 
 `mr.post_merge_ci` watches the CI of the commit the item merged, however many merges land on the base branch after it. A run cancelled for a newer push moves the watch onto the base's tip, which holds that merge, and records `post_merge_ci_moved`.
 
@@ -293,8 +321,9 @@ A review wait that names its bots and waits for them to settle:
 - id: await_review
   kind: forge
   target: mr.automated_review
-  reviewers: [{bot: coderabbitai}, {check: security-scan}]
-  wait: {grace_period: 90s}
+  config:
+    reviewers: [{bot: coderabbitai}, {check: security-scan}]
+    grace_period: 90s
 ```
 
 The shipped chain follows it with a triage step. See [How review and CI waits settle](/concepts/how-review-and-ci-waits-settle).

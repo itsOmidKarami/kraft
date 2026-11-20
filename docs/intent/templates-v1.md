@@ -2123,7 +2123,7 @@ An automated-review task SHALL report ordinary pending, clean, actionable, or
 error results. Actionable feedback SHALL enter
 the declaring execution node's recovery or fix-loop controls; on the collect
 path the wait reports pending, settled, or error instead, and actionable
-feedback comes from the reading task. A wait that sets `watch_ci` SHALL also end
+feedback comes from the reading task. A wait that sets `config.watch_ci` SHALL also end
 failed on a settled red pipeline.
 enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_a_red_pipeline_the_review_wait_reads_is_the_ci_wait_s_finding, tests/adapters/forge/test_run_watch_ci.py::test_a_red_pipeline_the_review_wait_reads_goes_to_on_failure_first, tests/adapters/forge/test_run_review.py::test_a_bot_with_nothing_reading_its_feedback_is_settled_then_judged_by_kraft[thread-fails], tests/adapters/forge/test_run_review.py::test_a_multi_repo_item_settles_each_repository_s_bot_on_its_own_memory[each-settles], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[pending], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[clean], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[actionable], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[error], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[on_failure], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[fix_loop], tests/adapters/forge/test_automated_review.py::test_a_bot_s_unresolved_feedback_is_actionable[gh], tests/adapters/forge/test_automated_review.py::test_a_bot_s_unresolved_feedback_is_actionable[glab], tests/adapters/forge/test_automated_review.py::test_a_review_check_still_running_is_pending[gh], tests/adapters/forge/test_automated_review.py::test_a_review_check_still_running_is_pending[glab], tests/test_waits.py::test_a_reviewer_error_stops_for_a_human_and_spends_no_repair, tests/adapters/forge/test_automated_review.py::test_a_withdrawn_bot_review_does_not_count[gh-dismissed-only], tests/adapters/forge/test_automated_review.py::test_a_withdrawn_bot_review_does_not_count[gh-dismissed-over-an-earlier-review], tests/adapters/forge/test_automated_review.py::test_a_withdrawn_bot_review_does_not_count[glab-resolved-only]
 
@@ -2196,7 +2196,7 @@ origin: src/kraft/templates/models.py §Chain._watch_ci_looks_ahead_to_its_ci_wa
 
 ## REQ review-wait-red-pipeline-is-the-ci-wait-s-finding
 
-WHEN an `mr.automated_review` task that sets `watch_ci` reads a settled red
+WHEN an `mr.automated_review` task that sets `config.watch_ci` reads a settled red
 pipeline that the CI wait would not first retry as an infrastructure failure,
 the system SHALL end the wait failed and report each failed job as a finding of
 the node's own `mr.ci` task, with that task's path as its source, so that it
@@ -2207,7 +2207,7 @@ origin: src/kraft/adapters/forge/run.py §_watch_ci
 
 ## REQ review-wait-watching-ci-pushes-first
 
-WHEN an `mr.automated_review` task that sets `watch_ci` makes an observation,
+WHEN an `mr.automated_review` task that sets `config.watch_ci` makes an observation,
 the system SHALL first push the item's branch and record the push, and SHALL end
 the wait settled, reading neither CI nor the bots, when the merge request is
 already merged.
@@ -2216,7 +2216,7 @@ origin: src/kraft/adapters/forge/run.py §_watch_ci
 
 ## REQ review-wait-watching-ci-reads-ci-without-acting-on-it
 
-WHILE an `mr.automated_review` task that sets `watch_ci` reads the merge
+WHILE an `mr.automated_review` task that sets `config.watch_ci` reads the merge
 request's pipeline, the system SHALL NOT rebase the branch, retry a job, count
 an infrastructure retry, pin a pipeline or record that CI is not configured,
 SHALL NOT read it when the repository's `ci_checks` is off, and SHALL leave every
@@ -2227,7 +2227,7 @@ origin: src/kraft/adapters/forge/run.py §_watch_ci
 
 ## REQ review-wait-watching-ci-ends-on-a-confirmed-conflict
 
-WHEN an `mr.automated_review` task that sets `watch_ci` reads a merge request
+WHEN an `mr.automated_review` task that sets `config.watch_ci` reads a merge request
 confirmed to conflict with its base, the system SHALL end the wait settled, not
 failed, without reading the bots or writing what they said.
 enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_the_watching_wait_acts_only_on_a_settled_red_or_a_conflict[conflict], tests/adapters/forge/test_run_watch_ci.py::test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots[conflict]
@@ -2235,7 +2235,7 @@ origin: src/kraft/adapters/forge/run.py §_watch_ci
 
 ## REQ review-wait-cut-short-by-ci-records-no-heard-or-silent-bots
 
-WHEN an `mr.automated_review` task that sets `watch_ci` ends on a red pipeline
+WHEN an `mr.automated_review` task that sets `config.watch_ci` ends on a red pipeline
 or a confirmed conflict, the system SHALL NOT record which bots were heard or
 silent on that head.
 enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots[red], tests/adapters/forge/test_run_watch_ci.py::test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots[conflict], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[a-member-red], tests/adapters/forge/test_run_watch_ci.py::test_a_multi_repo_watching_wait_reads_every_repository_before_its_bots[a-member-conflict]
@@ -2244,7 +2244,7 @@ origin: src/kraft/adapters/forge/run.py §_watch_ci
 ## REQ multi-repo-review-wait-watches-every-repository-first
 
 WHERE an item has several repositories and its `mr.automated_review` task sets
-`watch_ci`, the system SHALL push every repository's branch and read every
+`config.watch_ci`, the system SHALL push every repository's branch and read every
 repository's pipeline, skipping only those whose merge request merged, before it
 reads any bot, and SHALL report a red pipeline there without findings, as the CI
 wait does.
@@ -2253,7 +2253,7 @@ origin: src/kraft/adapters/forge/run.py §_watch_ci
 
 ## REQ review-wait-watching-ci-counts-its-limit-from-the-push
 
-WHERE an `mr.automated_review` task sets `watch_ci`, the system SHALL count the
+WHERE an `mr.automated_review` task sets `config.watch_ci`, the system SHALL count the
 wait's timeout from when Kraft pushed the head the wait is about, or from that
 head's commit time when Kraft has no record of pushing it, and not from the
 wait's start.
@@ -2274,7 +2274,7 @@ WHERE a later task of an automated-review task's node declares the
 `bot_feedback` input, the system SHALL hold the wait until every named reviewer
 has finished with the latest pushed head, then write what the reviewers said for
 that task and report the wait settled, whatever they said, unless the wait sets
-`watch_ci` and a red pipeline or a confirmed conflict ends it first.
+`config.watch_ci` and a red pipeline or a confirmed conflict ends it first.
 enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots[red], tests/adapters/forge/test_run_watch_ci.py::test_a_wait_cut_short_by_ci_records_no_heard_or_silent_bots[conflict], tests/adapters/forge/test_run_review.py::test_the_collect_path_settles_then_hands_on_the_collection[both-settle], tests/adapters/forge/test_run_review.py::test_the_next_check_comes_when_a_bots_grace_period_ends_not_at_the_backoff, tests/adapters/forge/test_run_review.py::test_no_reviewer_named_settles_with_an_empty_collection
 origin: config/library.yaml §await_automated_review
 
@@ -2287,7 +2287,7 @@ the latest pushed head, as on the collect path, each repository against its
 own head and with its own memory of the reviewers between checks. It SHALL then report actionable each bot's
 unresolved threads, a newest review that requests changes when the bot left no
 thread, and a check that finished without passing, and clean otherwise, unless the wait sets
-`watch_ci` and a red pipeline ends it first. A bot's
+`config.watch_ci` and a red pipeline ends it first. A bot's
 approval SHALL count as its activity. The wait's timeout SHALL settle it the
 same way, and SHALL NOT stop the item for human action, unless a named check is
 still unfinished then: that SHALL stop for human action, as a check alone does.
@@ -2330,7 +2330,7 @@ enforced-by: tests/api/test_default_chain_walk.py::test_approving_every_gate_thr
 The default chain's review wait SHALL watch CI with a 10-minute cap, and its fix
 loop SHALL be allowed to start early, both set on the library node
 `post_draft_feedback`, while the library task `await_automated_review` SHALL
-keep `watch_ci` off and its 30-minute cap.
+keep `config.watch_ci` off and its 30-minute cap.
 enforced-by: tests/templates/test_library.py::test_the_default_review_wait_settings_stay_on_its_node
 origin: config/library.yaml §post_draft_feedback
 
