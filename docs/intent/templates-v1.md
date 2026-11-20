@@ -422,11 +422,19 @@ origin: src/kraft/templates/models.py §AgentInput -- declared on the task (`inp
 
 An agent task that declares the `bot_feedback` input SHALL be handed what the
 review bots said, as the review wait collected it for this pass of the node,
-and a task that does not declare it SHALL NOT be. WHEN that collection holds no
-summary, no open thread and no failed check, the task SHALL be recorded as done
-with no findings and no agent SHALL be started.
-enforced-by: tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[declared], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[undeclared], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[empty-collection-skips], tests/executor/test_agent_inputs.py::test_a_skipped_triage_is_not_the_previous_review_of_the_next_round, tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[this-round], tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[stale-round-collection-ignored], tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[left-before-a-restart]
+and a task that does not declare it SHALL NOT be.
+enforced-by: tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[declared], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[undeclared], tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[this-round], tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[stale-round-collection-ignored], tests/executor/test_agent_inputs.py::test_the_collection_read_is_this_nodes_this_rounds_and_this_runs[left-before-a-restart]
 origin: src/kraft/templates/models.py §AgentInput -- declared as `inputs: [bot_feedback]` and delivered by `executor/dispatch.py` §dispatch_node through `prompts.bot_feedback` and `adapters/agent.py`'s `$KRAFT_BOT_FEEDBACK`; the collection is written by the node's `mr.automated_review` wait (`adapters/forge/run.py` §_collect_review).
+
+## REQ bot-feedback-with-nothing-to-judge-starts-no-agent
+
+WHEN the review wait's collection for this pass of the node holds no unresolved
+bot thread, no review check that did not pass (an unfinished one included) and
+no bot summary or review with a non-blank body (an approval's included), the
+system SHALL record a task that declares `bot_feedback` as done with no findings
+and SHALL NOT start an agent for it.
+enforced-by: tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[empty-collection-skips], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[bodyless-approval-skips], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[blank-body-approval-skips], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[approval-with-a-body-runs], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[failed-check-runs], tests/executor/test_agent_inputs.py::test_bot_feedback_is_delivered_only_when_declared[unfinished-check-runs], tests/executor/test_agent_inputs.py::test_a_skipped_triage_is_not_the_previous_review_of_the_next_round
+origin: src/kraft/executor/round_prompts.py §bot_feedback_source -- triage only when the bots said something that could need a change; GitHub keeps an approval's body (adapters/forge/gh.py §_bot_feedback), GitLab's approval writes no summary.
 
 ## REQ triage-verdict-is-delivered-to-the-review-brief
 

@@ -245,12 +245,17 @@ def _bot_node(**agent_fields):
     return [{"id": "review", "kind": "exec", "steps": steps}]
 
 
-def _collection(said: bool) -> dict:
-    """What a review wait left: one bot with a thread open, or with nothing to say."""
+_APPROVAL = {"kind": "review", "state": "APPROVED", "updated_at": "2026-01-01T00:00:00Z"}
+_SCAN = {"name": "scan", "output": ""}
+
+
+def _collection(said: bool, **entry) -> dict:
+    """What a review wait left: one bot with a thread open, or with nothing to
+    say; `entry` replaces that bot's fields."""
     thread = {"id": "t1", "file": "calc.py", "line": 3, "body": "unused x"}
-    entry = {"reviewer": "bot:x", "finished": "activity", "check": None}
-    entry |= {"summaries": [], "threads": [thread] if said else []}
-    return {"head": "abc123", "round": 0, "reviewers": [entry]}
+    bot = {"reviewer": "bot:x", "finished": "activity", "check": None}
+    bot |= {"summaries": [], "threads": [thread] if said else []} | entry
+    return {"head": "abc123", "round": 0, "reviewers": [bot]}
 
 
 async def _waited(it, collection: dict, *, round: int = 0) -> None:
@@ -262,26 +267,61 @@ async def _waited(it, collection: dict, *, round: int = 0) -> None:
 
 
 @pytest.mark.parametrize(
-    "said, inputs, ran, delivered",
+    "collection, inputs, ran, delivered",
     [
-        (True, ["bot_feedback"], True, True),
-        (True, [], True, False),
-        (False, ["bot_feedback"], False, False),
+        (_collection(True), ["bot_feedback"], True, True),
+        (_collection(True), [], True, False),
+        (_collection(False), ["bot_feedback"], False, False),
+        (_collection(False, summaries=[{**_APPROVAL, "body": ""}]), ["bot_feedback"], False, False),
+        (
+            _collection(False, summaries=[{**_APPROVAL, "body": " \n"}]),
+            ["bot_feedback"],
+            False,
+            False,
+        ),
+        (
+            _collection(False, summaries=[{**_APPROVAL, "body": "LGTM; x is unused"}]),
+            ["bot_feedback"],
+            True,
+            True,
+        ),
+        (
+            _collection(False, check={**_SCAN, "finished": True, "conclusion": "failure"}),
+            ["bot_feedback"],
+            True,
+            True,
+        ),
+        (
+            _collection(False, check={**_SCAN, "finished": False, "conclusion": None}),
+            ["bot_feedback"],
+            True,
+            True,
+        ),
     ],
-    ids=["declared", "undeclared", "empty-collection-skips"],
+    ids=[
+        "declared",
+        "undeclared",
+        "empty-collection-skips",
+        "bodyless-approval-skips",
+        "blank-body-approval-skips",
+        "approval-with-a-body-runs",
+        "failed-check-runs",
+        "unfinished-check-runs",
+    ],
 )
 async def test_bot_feedback_is_delivered_only_when_declared(
-    item_on, fake_agent, tmp_path, monkeypatch, said, inputs, ran, delivered
+    item_on, fake_agent, tmp_path, monkeypatch, collection, inputs, ran, delivered
 ):
     """`bot-feedback-is-delivered-to-a-task-that-declares-it`: the collection the
     review wait left is copied for the declaring session and named in its
-    launch; a collection with nothing in it starts no agent at all."""
+    launch; a collection with nothing in it starts no agent at all, and neither
+    does one holding only a body-less approval."""
     seen = tmp_path / "seen-env.txt"
     monkeypatch.setenv("KRAFT_FAKE_AGENT_SHELL", f'printf %s "$KRAFT_BOT_FEEDBACK" > {seen}')
     # In a person's own checkout, where a task that runs first takes the checkout.
     in_place = WorkItemTarget.for_repository("sample", in_place=True)
     it = await item_on(_bot_node(inputs=inputs), "review", target=in_place)
-    await _waited(it, _collection(said))
+    await _waited(it, collection)
 
     launch = executor.LaunchContext(repo_entry=NO_SETUP)
     assert (
@@ -300,7 +340,7 @@ async def test_bot_feedback_is_delivered_only_when_declared(
     assert own.is_file() is delivered
     assert (seen.read_text() == (str(own) if delivered else "")) if ran else not seen.exists()
     if delivered:
-        assert json.loads(own.read_text()) == _collection(True)
+        assert json.loads(own.read_text()) == collection
     assert len(it.events("task_marked")) == (1 if ran else 0), "nothing is taken for a skip"
     if not ran:
         assert session["head_sha"] is None, "a session that read nothing is no review of a head"

@@ -1695,14 +1695,17 @@ async def _dispatch_task_in(
     time_cap = _caps.Deadline(_caps.monotonic() + hit.remaining_s, hit) if hit else None
     # Nothing for a task reading what the review bots said means nothing to
     # spend on: no checkout taken, no sandbox, no session started
-    # (`bot-feedback-is-delivered-to-a-task-that-declares-it`).
+    # (`bot-feedback-with-nothing-to-judge-starts-no-agent`).
     if (
         isinstance(t, AgentTask)
         and AgentInput.BOT_FEEDBACK in t.inputs
         and prompts.bot_feedback_source(db, run_dirs, work_item_row["id"], node, round) is None
     ):
         return await skipped_session(
-            db, run_dirs, common, "no bot feedback collected; no agent started\n"
+            db,
+            run_dirs,
+            common,
+            "nothing in the bot feedback could need a change; no agent started\n",
         )
     if not isinstance(t, ForgeTask):
         # Resolved here, once, for every launch this task makes (Ruling 189):

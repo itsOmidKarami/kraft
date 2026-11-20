@@ -297,8 +297,10 @@ def bot_feedback_source(db, run_dirs, work_item_id: str, node, round: int) -> Pa
     """The collection this pass of `node` has to read, or None when it holds
     nothing to read: the newest session of this node and round, begun since the
     run last restarted, of one of its `mr.automated_review` tasks (the review
-    wait's collect path wrote `bot_feedback.json` in its folder), unless every
-    reviewer in it has no summary, no open thread and no failed check.
+    wait's collect path wrote `bot_feedback.json` in its folder), unless nothing
+    in it could need a change: no open thread, no review check that did not pass
+    (an unfinished one included) and no summary or review with a non-blank body
+    (an approval's included, since some bots list items there).
 
     This node and this round, and nothing from before a restart: a collection
     from a pass before the last repair describes a head that is gone, and
@@ -335,7 +337,15 @@ def bot_feedback_source(db, run_dirs, work_item_id: str, node, round: int) -> Pa
     except (OSError, ValueError, KeyError, TypeError):
         return None
     said = any(
-        isinstance(r, dict) and (r.get("summaries") or r.get("threads") or r.get("check"))
+        isinstance(r, dict)
+        and (
+            r.get("threads")
+            or r.get("check")
+            or any(
+                isinstance(s, dict) and str(s.get("body") or "").strip()
+                for s in r.get("summaries") or ()
+            )
+        )
         for r in collected
     )
     return source if said else None
