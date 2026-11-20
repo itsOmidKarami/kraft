@@ -403,7 +403,7 @@ _ON_A_FORGE = executor.LaunchContext(repo_entry=entry_of({"setup_command": "", "
 
 def _pipeline_node(**fields):
     """A one-task node waiting on pipeline 7, with a declared escalation."""
-    task = {"id": "ci", "kind": "forge", "target": "ci.pipeline", "pipeline": "7"}
+    task = {"id": "ci", "kind": "forge", "target": "ci.pipeline", "config": {"pipeline": "7"}}
     return {"id": "build", "kind": "exec", "tasks": [task], "escalation": _sub("esc"), **fields}
 
 

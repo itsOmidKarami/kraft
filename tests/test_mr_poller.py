@@ -93,7 +93,7 @@ async def test_tick_leaves_a_merged_or_open_mr_untouched(
         None,
         # By then the merge request has usually merged: waiting on a pipeline by
         # id is not taking it, so its being closed is no reason to stop.
-        v1_task("wait", kind="forge", target="ci.pipeline", pipeline="123"),
+        v1_task("wait", kind="forge", target="ci.pipeline", config={"pipeline": "123"}),
     ],
     ids=["plain-node", "ci-pipeline-only-node-is-not-mr"],
 )

@@ -383,7 +383,7 @@ async def test_a_stop_on_red_ci_the_review_wait_saw_names_the_ci_wait(
         # What a multi-repo item's red leaves the walk: a failed review wait
         # with no findings, so no result file, as there.
         monkeypatch.setattr(_forge.run, "_job_findings", lambda *a, **k: None)
-    review = {**_forge_task("review", "mr.automated_review"), "watch_ci": True}
+    review = {**_forge_task("review", "mr.automated_review"), "config": {"watch_ci": True}}
     node = {
         "id": "checks",
         "kind": "exec",

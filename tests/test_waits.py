@@ -323,7 +323,7 @@ async def test_a_wait_timeout_and_a_loop_cap_are_reported_apart(walk, item_on, w
                     ]
                 }
             },
-            {"pipeline": "123"},
+            {"config": {"pipeline": "123"}},
         ),
     ],
     ids=[

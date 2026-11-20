@@ -216,7 +216,7 @@ def _with_review_task(spec, reviewers=None):
     """`land` gains an `mr.automated_review` task, naming `reviewers` unless None."""
     task = {"id": "review", "kind": "forge", "target": "mr.automated_review"}
     if reviewers is not None:
-        task["reviewers"] = reviewers
+        task["config"] = {"reviewers": reviewers}
     _nodes(spec)[2]["tasks"].append(task)
 
 

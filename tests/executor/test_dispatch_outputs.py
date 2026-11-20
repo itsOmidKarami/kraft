@@ -373,7 +373,7 @@ async def test_declared_variables_are_the_chains_current_declaration(item_on):
 @pytest.mark.parametrize(
     ("target", "fields", "reads_chain"),
     [
-        pytest.param("ci.pipeline", {"pipeline": "7"}, True, id="ci.pipeline"),
+        pytest.param("ci.pipeline", {"config": {"pipeline": "7"}}, True, id="ci.pipeline"),
         pytest.param("mr.ci", {}, False, id="mr.ci"),
     ],
 )

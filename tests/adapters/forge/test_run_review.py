@@ -59,7 +59,7 @@ async def test_the_nearest_layer_s_reviewers_reach_the_review_task(
     fake = forge.FakeForge()
     monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
     node = forge_node(
-        "review", "mr.automated_review", **({} if task is None else {"reviewers": task})
+        "review", "mr.automated_review", **({} if task is None else {"config": {"reviewers": task}})
     )
     it = await item_on([node])
     if item is not None:
@@ -124,7 +124,12 @@ def test_only_the_review_task_names_reviewers(target, fields, refused):
         v1_resolved(nodes)
 
 
-_WATCHING = {"id": "review", "kind": "forge", "target": "mr.automated_review", "watch_ci": True}
+_WATCHING = {
+    "id": "review",
+    "kind": "forge",
+    "target": "mr.automated_review",
+    "config": {"watch_ci": True},
+}
 _CI_WAIT = {"id": "ci", "kind": "forge", "target": "mr.ci"}
 
 
@@ -241,12 +246,12 @@ def _review_node(minutes, *, reads=True, reviewers=(_A, _B), loop=False, watch_c
         "id": "review",
         "kind": "forge",
         "target": "mr.automated_review",
-        "reviewers": [r.model_dump(exclude_none=True) for r in reviewers],
+        "config": {"reviewers": [r.model_dump(exclude_none=True) for r in reviewers]},
         "policy": {"total_time_cap_minutes": minutes},
         "wait": {"polling": {"initial_interval": "30s", "max_interval": "2m"}},
     }
     if watch_ci:
-        wait["watch_ci"] = True
+        wait["config"]["watch_ci"] = True
     steps = [{"id": "settle", "tasks": [wait]}]
     if reads:
         steps.append(_shipped_triage_step())

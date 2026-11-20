@@ -23,7 +23,7 @@ def builtin(ref: str) -> tm.BuiltinTask:
 
 
 def forge(target: str) -> tm.ForgeTask:
-    needs = {"pipeline": "1"} if target == "ci.pipeline" else {}
+    needs = {"config": {"pipeline": "1"}} if target == "ci.pipeline" else {}
     return tm.ForgeTask.model_validate({"id": "t", "kind": "forge", "target": target, **needs})
 
 

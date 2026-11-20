@@ -70,7 +70,7 @@ def _chain_with(pipeline: str, *, writes=("PIPELINE_ID",), reads=("find.t",)) ->
                     {"id": "find", "tasks": [sub(outputs={"variables": list(writes)})]},
                     {
                         "id": "wait",
-                        "tasks": [forge(pipeline=pipeline, reads=list(reads))],
+                        "tasks": [forge(config={"pipeline": pipeline}, reads=list(reads))],
                     },
                 ]
             )

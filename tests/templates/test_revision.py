@@ -416,7 +416,7 @@ _EMIT_AND_WAIT = (
                 "id": "run",
                 "kind": "forge",
                 "target": "ci.pipeline",
-                "pipeline": "$PIPELINE_ID",
+                "config": {"pipeline": "$PIPELINE_ID"},
                 "reads": ["emit.main.run"],
             }
         ],
