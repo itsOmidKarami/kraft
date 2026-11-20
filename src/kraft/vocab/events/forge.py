@@ -41,6 +41,19 @@ class ForgeEvent(StrEnum):
     #: A review wait settled: which bots were heard since the push and which
     #: never posted. `kraft admin doctor` reads a bot's run of silences.
     AUTOMATED_REVIEW_SETTLED = "automated_review_settled"
+    #: Kraft is about to write a reply or the summary comment: recorded before any write.
+    REPLY_INTENDED = "reply_intended"
+    #: A send that did not post: it may have landed (`unclear`), hit a rate limit or
+    #: cannot succeed now (`deferred`).
+    REPLY_SEND_FAILED = "reply_send_failed"
+    #: The write landed, a reconcile found its copy, or a duplicate check moved it.
+    REPLY_POSTED = "reply_posted"
+    #: A reconcile read the thread and found no copy of an unclear write.
+    REPLY_NOT_FOUND = "reply_not_found"
+    #: The intent will never be sent: refused, superseded or given up.
+    REPLY_ENDED = "reply_ended"
+    #: A duplicate check deleted a later copy of a reply and kept the earliest.
+    REPLY_DUPLICATE_DELETED = "reply_duplicate_deleted"
     MERGE_QUEUE_DROPPED = "merge_queue_dropped"
     #: Kraft rewrote the head the final review approved itself -- a clean
     #: rebase, a pointer bump -- and pinned the new one (`kraft.reviewed_head`).
@@ -75,6 +88,12 @@ FORGE_EVENT_TRAITS = total(
         ForgeEvent.AUTOMATED_REVIEW_NOT_CONFIGURED: _PLAIN,
         ForgeEvent.AUTOMATED_REVIEW_ERRORED: _PLAIN,
         ForgeEvent.AUTOMATED_REVIEW_SETTLED: _PLAIN,
+        ForgeEvent.REPLY_INTENDED: _PLAIN,
+        ForgeEvent.REPLY_SEND_FAILED: _PLAIN,
+        ForgeEvent.REPLY_POSTED: _PLAIN,
+        ForgeEvent.REPLY_NOT_FOUND: _PLAIN,
+        ForgeEvent.REPLY_ENDED: _PLAIN,
+        ForgeEvent.REPLY_DUPLICATE_DELETED: _PLAIN,
         ForgeEvent.MERGE_QUEUE_DROPPED: _PLAIN,
         ForgeEvent.REVIEWED_HEAD_REPINNED: _PLAIN,
         ForgeEvent.MERGE_REFUSED_UNREVIEWED: _PLAIN,
