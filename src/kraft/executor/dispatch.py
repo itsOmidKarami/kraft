@@ -10,7 +10,7 @@ import shlex
 import sqlite3
 import stat
 import traceback
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -3500,6 +3500,42 @@ def previous_fix_session(db, work_item_id: str, node: ResolvedNode) -> sqlite3.R
     return rows[-1] if rows else None
 
 
+def _task_of(raw: dict, tasks: Collection[str]) -> str:
+    """The measuring task that read a stored finding: the session it came from
+    (the first of its `jobs` labels naming one of `tasks`), never its
+    `source_plugin`, which a task may set to another's path. Only a blind
+    failure, whose labels are its commands, falls back to `source_plugin`:
+    Kraft's own value there, the session's hook point."""
+    for job in raw.get("jobs") or []:
+        if job.get("label") in tasks:
+            return job["label"]
+    return raw.get("source_plugin", "")
+
+
+def unmeasured_findings(
+    previous: dict | None,
+    measured_tasks: Collection[str],
+    unmeasured_tasks: Collection[str],
+    found: Sequence[_findings.Finding],
+) -> list[dict]:
+    """The last findings of the tasks a measurement that ended early did not run.
+
+    `previous` is the previous record's payload: its `findings`, then its own
+    `unmeasured`, are looked through for what an unmeasured task last reported
+    and `found` (this measurement) does not re-report. Copied verbatim, so
+    severities and `jobs` are kept, and deduplicated by tag."""
+    if previous is None:
+        return []
+    tasks = {*measured_tasks, *unmeasured_tasks}
+    read_now = {f.fingerprint for f in found}
+    out: dict[str, dict] = {}
+    for raw in (*previous.get("findings", []), *previous.get("unmeasured", [])):
+        tag = _findings.from_payload(raw).fingerprint
+        if _task_of(raw, tasks) in unmeasured_tasks and tag not in read_now:
+            out.setdefault(tag, raw)
+    return list(out.values())
+
+
 def declined_fingerprints(
     db, work_item_id: str, node_id: str, head_sha: str | None
 ) -> frozenset[str]:
@@ -3673,7 +3709,7 @@ def judge_history(
     #: `evts`, when given, is a timeline the caller already fetched -- the same
     #: shape `escalate._reason` accepts. Read fresh when nothing is handed in,
     #: which is every existing caller including the judge's own.
-    measured: list[tuple[int, list[_findings.Finding]]] = []
+    measured: list[tuple[int, list[_findings.Finding], list[_findings.Finding]]] = []
     for e in evts if evts is not None else db.read(lambda c: events.read_after(c, 0, work_item_id)):
         if e["type"] == ChainEvent.FINDINGS_MEASURED and e["payload"].get("node_id") == node_id:
             cycle = e["payload"]["cycle"]
@@ -3685,6 +3721,12 @@ def judge_history(
                     [
                         _findings.from_payload(f)
                         for f in e["payload"].get("findings", [])
+                        if f.get("severity") in loop_severities
+                    ],
+                    # What an early end did not re-read that round (`unmeasured_findings`).
+                    [
+                        _findings.from_payload(f)
+                        for f in e["payload"].get("unmeasured", [])
                         if f.get("severity") in loop_severities
                     ],
                 )
@@ -3709,8 +3751,13 @@ def judge_history(
     # re-entries, so unlike the measurements these are collision-free.
     fix_by_round = {r["round"]: r["result_path"] for r in fix_rows}
     return [
-        {"round": i, "findings": found, "fix_result_path": fix_by_round.get(cycle)}
-        for i, (cycle, found) in enumerate(measured)
+        {
+            "round": i,
+            "findings": found,
+            "unmeasured": unread,
+            "fix_result_path": fix_by_round.get(cycle),
+        }
+        for i, (cycle, found, unread) in enumerate(measured)
     ]
 
 
@@ -3730,11 +3777,18 @@ def stuck_fingerprint(history: list[dict], min_repeats: int) -> str | None:
     and must not count as "no progress".
     """
     streaks: dict[str, int] = {}
+    prints: set[str] = set()
     for round_ in history:
         prints = {f.fingerprint for f in round_["findings"]}
         fix_ran = round_["fix_result_path"] is not None
+        # A finding nobody re-read this round (an early end skipped its task) holds
+        # its streak: it neither extends nor resets it.
+        held = {f.fingerprint for f in round_.get("unmeasured", [])} - prints
+        kept = {fp: streaks[fp] for fp in held if fp in streaks}
         streaks = {fp: streaks.get(fp, 0) + 1 if fix_ran and fp in streaks else 1 for fp in prints}
-    return next((fp for fp, n in streaks.items() if n >= min_repeats), None)
+        streaks.update(kept)
+    # Only what the latest round actually read: an unread finding is never stuck.
+    return next((fp for fp, n in streaks.items() if n >= min_repeats and fp in prints), None)
 
 
 def deferred_findings(db, work_item_id: str, loop_severities: frozenset[str]) -> list[dict]:
@@ -3783,9 +3837,13 @@ def regressed_fingerprints(history: list[dict]) -> list[str]:
     """
     if len(history) < 3:
         return []
-    per_round = [{f.fingerprint for f in r["findings"]} for r in history]
+    # A round holds a tag it read or carried unread: a gap where nobody re-read it
+    # is not a fix.
+    per_round = [
+        {f.fingerprint for f in (*r["findings"], *r.get("unmeasured", []))} for r in history
+    ]
     out = []
-    for fp in sorted(per_round[-1]):
+    for fp in sorted({f.fingerprint for f in history[-1]["findings"]}):
         seen = [i for i, prints in enumerate(per_round) if fp in prints]
         if len(seen) < 2 or seen[-1] - seen[0] == len(seen) - 1:
             continue  # never absent in between: persistent, not regressed

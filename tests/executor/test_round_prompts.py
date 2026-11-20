@@ -8,6 +8,7 @@ import pytest
 from support.harness import v1_node, v1_task
 
 from kraft.executor import prompts
+from kraft.findings import Finding
 
 
 def _chain(*, triage: bool) -> list[dict]:
@@ -56,3 +57,13 @@ async def test_the_brief_is_told_where_the_triage_verdict_is(item_on, triage, se
         [verdict] = [s for s in it.sessions("feedback") if s["id"] == first_verdict]
         assert verdict["result_path"] in note
         assert f"summaries/{first_verdict}.md" in note
+
+
+def test_the_history_marks_a_finding_nobody_re_read():
+    lint = Finding("critical", "lint failed", None, None, "n.ci.ci")
+    history = [{"round": 0, "findings": [], "unmeasured": [lint], "fix_result_path": None}]
+
+    text = prompts.format_judge_history(history)
+
+    assert "not re-read this round" in text and lint.fingerprint in text
+    assert "not re-read" not in prompts.format_judge_history([{**history[0], "unmeasured": []}])

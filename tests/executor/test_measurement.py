@@ -449,10 +449,11 @@ def _f(message):
     return Finding("critical", message, "a.py", 1, "p")
 
 
-def _round(n, messages, *, fixed=True):
+def _round(n, messages, *, fixed=True, unmeasured=()):
     return {
         "round": n,
         "findings": [_f(m) for m in messages],
+        "unmeasured": [_f(m) for m in unmeasured],
         "fix_result_path": f"/r/{n}.json" if fixed else None,
     }
 
@@ -474,6 +475,10 @@ def _round(n, messages, *, fixed=True):
         # fix removed it -- so nothing was reverted.
         ([_round(0, ["escape"]), _round(1, [], fixed=False), _round(2, ["escape"])], []),
         ([_round(0, ["escape"]), _round(1, ["escape"])], []),
+        # A gap where an early end did not re-read it is no fix, and an unread
+        # finding in the latest round is not one to fix.
+        ([_round(0, ["escape"]), _round(1, [], unmeasured=["escape"]), _round(2, ["escape"])], []),
+        ([_round(0, ["escape"]), _round(1, []), _round(2, [], unmeasured=["escape"])], []),
     ],
     ids=[
         "a-finding-that-came-back",
@@ -481,6 +486,8 @@ def _round(n, messages, *, fixed=True):
         "one-that-is-gone-now",
         "a-gap-with-no-fix-in-it",
         "two-rounds-cannot-hold-one",
+        "a-gap-where-it-was-not-re-read",
+        "not-re-read-in-the-latest-round",
     ],
 )
 def test_regressed_fingerprints_finds_a_finding_a_fix_undid(history, regressed):
@@ -551,3 +558,97 @@ async def test_unresolved_findings_steer_seeds_the_latest_measurements_findings(
         return
     assert all(text in note for text in present), note
     assert not any(text in note for text in absent), note
+
+
+@pytest.mark.parametrize(
+    ("history", "stuck"),
+    [
+        (
+            [_round(0, ["p"]), _round(1, [], unmeasured=["p"]), _round(2, ["p"]), _round(3, ["p"])],
+            "p",
+        ),
+        (
+            [
+                _round(0, ["p"]),
+                _round(1, [], unmeasured=["p"]),
+                _round(2, [], unmeasured=["p"]),
+                _round(3, ["p"]),
+            ],
+            None,
+        ),
+        (
+            [_round(0, ["p"]), _round(1, ["p"]), _round(2, ["p"]), _round(3, [], unmeasured=["p"])],
+            None,
+        ),
+    ],
+    ids=["held-not-reset", "held-not-extended", "never-stuck-while-unread"],
+)
+def test_an_unmeasured_finding_holds_its_stuck_streak(history, stuck):
+    """A round that did not re-read a finding neither extends nor resets its streak,
+    and an unread finding is never reported stuck."""
+    assert dispatch.stuck_fingerprint(history, 3) == (_f(stuck).fingerprint if stuck else None)
+
+
+def _raw(message, *, source="code-review", label="n.ci.ci"):
+    """A finding as a `findings_measured` payload stores it: the session it was read
+    from in `jobs`."""
+    return {
+        "severity": "critical",
+        "message": message,
+        "file": "a.py",
+        "line": 1,
+        "source_plugin": source,
+        "jobs": [{"label": label, "log_ref": "x"}],
+    }
+
+
+@pytest.mark.parametrize(
+    ("previous", "read", "unread", "found", "kept"),
+    [
+        ({"findings": [_raw("lint")]}, ["n.wait.bots"], ["n.ci.ci"], [], ["lint"]),
+        (
+            {"findings": [_raw("lint", source="n.ci.ci", label="make ci")]},
+            ["n.wait.bots"],
+            ["n.ci.ci"],
+            [],
+            ["lint"],
+        ),
+        (
+            {"findings": [_raw("lint", source="n.ci.ci", label="n.wait.bots")]},
+            ["n.wait.bots"],
+            ["n.ci.ci"],
+            [],
+            [],
+        ),
+        (
+            {"findings": [_raw("lint")]},
+            ["n.wait.bots"],
+            ["n.ci.ci"],
+            [Finding("critical", "lint", "a.py", 1, "code-review")],
+            [],
+        ),
+        ({"findings": [_raw("lint")]}, ["n.ci.ci"], [], [], []),
+        (
+            {"findings": [], "unmeasured": [_raw("lint")]},
+            ["n.wait.bots"],
+            ["n.ci.ci"],
+            [],
+            ["lint"],
+        ),
+    ],
+    ids=[
+        "by-the-session-that-read-it",
+        "a-blind-failure",
+        "read-by-another-task",
+        "re-read-now",
+        "its-task-was-read",
+        "carried-again",
+    ],
+)
+def test_unmeasured_findings_are_the_last_findings_of_the_tasks_not_read(
+    previous, read, unread, found, kept
+):
+    """Which task read a finding is the session it came from, never its source_plugin:
+    a red pipeline the bot wait saw is the bot wait's, which was read."""
+    got = dispatch.unmeasured_findings(previous, read, unread, found)
+    assert [f["message"] for f in got] == kept

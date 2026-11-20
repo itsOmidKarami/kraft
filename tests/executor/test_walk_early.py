@@ -14,6 +14,7 @@ from support.harness import entry_of
 from kraft import events, executor
 from kraft import policy as _policy
 from kraft.executor import dispatch, walk
+from kraft.findings import Finding
 from kraft.vocab import ChainEvent
 
 REVIEWER = Path(__file__).resolve().parents[1] / "support" / "fake_reviewer.py"
@@ -266,3 +267,62 @@ async def test_a_recorded_measurement_is_not_resumed(item_on, script, tmp_path):
     assert await _walk(it, it.row()["current_step"]) == "ok"
 
     assert _cycles(it) == [0, 0, 1]
+
+
+async def test_findings_an_early_end_did_not_re_read_are_kept_apart(
+    item_on, script, judge, tmp_path
+):
+    """Round 0's red ci (a reviewer-sourced finding) isn't re-read when round 1 ends at
+    triage: it is recorded apart, never in the list to fix, shown as not re-read, keeps
+    its severity and its tag. Re-read reworded in round 2, it may claim that tag, and it
+    is no REPEAT: nobody was asked to fix it in round 1."""
+    lint = _found("lint failed", status="failed", source="ci-bot")
+    tag = Finding("critical", "lint failed", "a.py", 1, "ci-bot").fingerprint
+    again = _found("lint failed again", status="failed", source="ci-bot", same_as=tag)
+    it = await item_on(
+        [_node(tmp_path, triage=(CLEAN, _found("rename"), CLEAN), ci=(lint, again, CLEAN))]
+    )
+    script.real = REAL
+    judge.verdicts = ["continue"]
+
+    assert await _walk(it) == "ok"
+
+    rounds = [e["payload"] for e in it.events("findings_measured")]
+    assert [f["message"] for f in rounds[1]["findings"]] == ["rename"]
+    assert [(f["message"], f["severity"]) for f in rounds[1]["unmeasured"]] == [
+        ("lint failed", "critical")
+    ]
+    to_fix = [i.split("Findings to fix:")[1].split("\n\n")[0] for i in script.instructions["fix"]]
+    assert "rename" in to_fix[1] and "lint failed" not in to_fix[1]
+    assert "not re-read this round" in script.instructions["fix"][1]
+    assert rounds[2]["findings"][0]["same_as"] == tag
+    assert "lint failed again" in to_fix[2] and "REPEAT" not in to_fix[2]
+
+
+@pytest.mark.parametrize(
+    ("bots", "triage", "ci", "stuck"),
+    [
+        (
+            (CLEAN, _found("lint failed", source="ci-bot"), CLEAN),
+            (CLEAN,),
+            (_found("lint failed", source="ci-bot"), CLEAN),
+            False,
+        ),
+        ((CLEAN,), (_found("rename"), _found("rename")), (CLEAN,), True),
+    ],
+    ids=["previous-read-other-tasks", "same-tasks"],
+)
+async def test_the_whole_set_stuck_check_needs_the_same_tasks_read(
+    item_on, script, judge, tmp_path, bots, triage, ci, stuck
+):
+    """The same finding read by another task (the bot wait seeing a red pipeline, part 2)
+    after a fix is not "unchanged" when the previous measurement read other tasks."""
+    it = await item_on([_node(tmp_path, bots=bots, triage=triage, ci=ci)])
+    script.real = REAL
+    judge.verdicts = ["continue"]
+
+    result = await _walk(it)
+
+    reasons = [e["payload"]["reason"] for e in it.events("work_item_needs_human")]
+    stuck_stop = any(r.startswith("stuck:") for r in reasons)
+    assert (result, stuck_stop) == (("needs_human", True) if stuck else ("ok", False))

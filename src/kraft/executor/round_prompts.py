@@ -534,6 +534,12 @@ def format_judge_history(history: list[dict]) -> str:
             )
         else:
             text = "clean"
+        if h.get("unmeasured"):
+            # Last read in an earlier round: an early end did not run their task.
+            text += "; not re-read this round: " + "; ".join(
+                f"[{f.severity}] {f.fingerprint} ({f.source_plugin}) {f.message}"
+                for f in h["unmeasured"]
+            )
         fix_note = (
             f" (that round's fix: {h['fix_result_path']})" if h.get("fix_result_path") else ""
         )

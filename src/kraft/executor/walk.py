@@ -2333,8 +2333,16 @@ async def _walk_node_once(
         # (Kraft-s7c04.2). A reviewer is shown the tags of this node's last
         # measurement when its task declares `inputs: [carried_findings]`
         # (`dispatch.dispatch_node`), which is exactly `previous_found`.
+        # What the previous measurement did not re-read keeps its identity and
+        # severity (`unmeasured_findings`), but was never asked of the fixer: it
+        # feeds `known` and the severity floor, never `previous_prints`.
+        previous_unmeasured = [
+            _findings.from_payload(u)
+            for u in (previous["payload"].get("unmeasured", []) if previous else [])
+        ]
         found = _findings.resolve_identity(
-            found, known={f.fingerprint for f in previous_found or []}
+            found,
+            known={f.fingerprint for f in [*(previous_found or []), *previous_unmeasured]},
         )
         if loop.early:
             # What the fix loop declined on this commit is not collected again: not
@@ -2347,13 +2355,25 @@ async def _walk_node_once(
         as_reported = [f.severity for f in found]
         found = _carry_severity(
             found,
-            previous_found or [],
+            [*(previous_found or []), *previous_unmeasured],
             # Both known and equal, never "both None": a pair of unreadable heads
             # is not evidence that nothing moved.
             unchanged_tree=head_sha is not None and head_sha == previous_head,
         )
         eligible = [f for f in found if f.severity in policy.loop_severities]
         prints = sorted({f.fingerprint for f in eligible})
+        # The tasks an early end skipped keep their last findings, apart from this
+        # measurement's own (`dispatch.unmeasured_findings`).
+        unmeasured = (
+            dispatch.unmeasured_findings(
+                previous["payload"] if previous is not None else None,
+                sorted(p for p, ran in has_session.items() if ran),
+                sorted(p for p, ran in has_session.items() if not ran),
+                found,
+            )
+            if ended_early
+            else []
+        )
         # Built here rather than inside the lambda, the same way `judge_payload`
         # below is: every name a deferred lambda reads out of this loop has to be
         # bound at definition time or it sees the next iteration's value.
@@ -2378,10 +2398,21 @@ async def _walk_node_once(
                 for f, s in zip(found, as_reported, strict=True)
             ],
             "fingerprints": prints,
+            # Only on an early end, and only when it left some: every other record
+            # keeps today's shape. Apart from `findings`, so never eligible or fixed.
+            **({"unmeasured": unmeasured} if unmeasured else {}),
             # Only when the parser threw entries away as malformed: a reviewer
             # that writes the schema wrong must not read as one that found nothing.
             **({"dropped": dropped_findings} if dropped_findings else {}),
         }
+        # The whole-set check below compares like with like: a previous measurement
+        # that read other tasks says nothing about this one's set being unchanged.
+        read_other = (
+            loop.early
+            and previous is not None
+            and previous["payload"].get("measured_tasks") != measured_payload["measured_tasks"]
+        )
+        same_set = prints == previous_prints and not read_other
         if amends is not None:
             await db.write(
                 lambda c, seq=amends, payload=measured_payload: events.amend(c, seq, payload)
@@ -2625,7 +2656,7 @@ async def _walk_node_once(
             # so the common (non-stuck) path pays no extra history read.
             stuck_fp = (
                 None
-                if prints == previous_prints
+                if same_set
                 else dispatch.stuck_fingerprint(
                     dispatch.judge_history(
                         db,
@@ -2637,7 +2668,7 @@ async def _walk_node_once(
                     _FINGERPRINT_STREAK_LIMIT,
                 )
             )
-            if prints == previous_prints or stuck_fp:
+            if same_set or stuck_fp:
                 reason = (
                     f"stuck: {len(prints)} finding(s) unchanged across cycle {count - 1}"
                     if stuck_fp is None
