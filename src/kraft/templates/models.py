@@ -856,6 +856,92 @@ def lift_config(task: Mapping, *, stored: bool) -> tuple[dict, tuple[str, ...]]:
     return lifted, tuple(named.values())
 
 
+def lift_tasks(data: dict) -> list[str]:
+    """Lift every task mapping of a chain or library mapping `data` in place
+    (`lift_config`, as written) and return the moved paths, `<where>.<flat
+    name>`, `<where>` being the ids and slot names walked through. The walk
+    goes by position, never by key name: a library task named `pipeline`
+    stays a task. A task `lift_config` refuses is left as written, for the
+    model to refuse at the task; anything that is not the container expected
+    is skipped, so a malformed file still reaches the loader's own error. It
+    mirrors `drafts.authored._walk`, which visits containers instead."""
+    moved: list[str] = []
+
+    def at(where: str, name: object) -> str:
+        return f"{where}.{name}" if where else str(name)
+
+    def entries(value: object) -> list[dict]:
+        return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
+
+    def task(t: dict, where: str) -> None:
+        try:
+            lifted, names = lift_config(t, stored=False)
+        except ValueError:
+            lifted, names = t, ()
+        if names:
+            t.clear()
+            t.update(lifted)
+            moved.extend(at(where, n) for n in names)
+        if isinstance(t.get("on_failure"), dict):
+            shape(t["on_failure"], at(where, "on_failure"))
+
+    def listed(t: dict, where: str) -> None:
+        task(t, at(where, t["id"]) if isinstance(t.get("id"), str) else where)
+
+    def step(s: dict, where: str) -> None:
+        for t in entries(s.get("tasks")):
+            listed(t, where)
+        if isinstance(s.get("on_failure"), dict):
+            shape(s["on_failure"], at(where, "on_failure"))
+
+    def shape(c: dict, where: str) -> None:
+        for t in entries(c.get("tasks")):
+            listed(t, where)
+        for s in entries(c.get("steps")):
+            step(s, at(where, s["id"]) if isinstance(s.get("id"), str) else where)
+        if isinstance(c.get(JUDGE_SEGMENT), dict):
+            task(c[JUDGE_SEGMENT], at(where, JUDGE_SEGMENT))
+
+    def node(n: dict, where: str) -> None:
+        shape(n, where)
+        for key in ("on_failure", "fix_loop"):
+            if isinstance(n.get(key), dict):
+                shape(n[key], at(where, key))
+        for key in ("escalation", AUTO_REVIEW_SEGMENT):
+            if isinstance(n.get(key), dict):
+                task(n[key], at(where, key))
+        for key, slot in (("on_base_changed", "on_conflict"), ("on_merge_rejected", "repair")):
+            handler = n.get(key)
+            if isinstance(handler, dict) and isinstance(handler.get(slot), dict):
+                shape(handler[slot], at(where, f"{key}.{slot}"))
+
+    def named(n: dict, where: str) -> str:
+        return at(where, n["id"]) if isinstance(n.get("id"), str) else where
+
+    nodes = data.get("nodes")
+    if isinstance(nodes, dict):  # a library's section
+        for name, n in nodes.items():
+            if isinstance(n, dict):
+                node(n, at("nodes", name))
+    for n in entries(nodes):
+        node(n, named(n, ""))
+    for entry in entries(data.get("add")):
+        if isinstance(entry.get("node"), dict):
+            node(entry["node"], named(entry["node"], "add"))
+    overrides = data.get("overrides")
+    for path, value in overrides.items() if isinstance(overrides, dict) else ():
+        if isinstance(value, dict):
+            task(value, at("overrides", path))
+            shape(value, at("overrides", path))
+    # A library's sections; a chain has none.
+    for section, walk in (("steps", step), ("tasks", task)):
+        if isinstance(data.get(section), dict):
+            for name, value in data[section].items():
+                if isinstance(value, dict):
+                    walk(value, at(section, name))
+    return moved
+
+
 class ForgeTask(TaskBase):
     kind: Literal[TaskKind.FORGE]
     target: Annotated[ForgeAction, _LOOSE]

@@ -7,9 +7,13 @@ import json
 import logging
 
 import pytest
+import yaml
+from drafts.test_authored import SLOTS, TEMPLATES
 from pydantic import ValidationError
 
+from kraft.drafts import authored
 from kraft.templates import models as tm
+from kraft.templates.library import TemplateLibrary
 from kraft.templates.models import MaterializedChain
 from templates.test_time_caps import _materialize
 
@@ -190,3 +194,64 @@ def test_a_flat_grace_period_reads_beside_a_retired_wait_timeout(warnings_afresh
         _task("mr.automated_review", wait={"timeout": "90s", "grace_period": "30s"})
     )
     assert (task.grace.total_seconds(), task.policy.total_time_cap_minutes) == (30, 2)
+
+
+def test_the_lift_reaches_every_task_position_and_no_component_name(monkeypatch):
+    """The walk lifts what the resolver calls a task, at every slot, and reads
+    a section's keys as names: `lift_tasks` is checked against the resolver,
+    not against `drafts/authored._walk`, which visits containers."""
+    library = TemplateLibrary.from_yaml_dir(TEMPLATES)
+    candidate, id = library.with_chain(TEMPLATES / "chains" / "slots.yaml", yaml.safe_load(SLOTS))
+    model = authored.load(SLOTS)
+    # `a.fix_loop.judge` is task `j`, `g.auto_review` task `rv`: ids, not path tails.
+    tasks = sorted(authored.at(model, p)["id"] for p in candidate.resolve_chain(id).task_paths)
+    seen = []
+    monkeypatch.setattr(
+        tm, "lift_config", lambda t, *, stored: (seen.append(t.get("id")), (dict(t), ()))[1]
+    )
+    tm.lift_tasks(yaml.safe_load(SLOTS))
+    assert sorted(seen) == tasks
+
+    seen.clear()
+    tm.lift_tasks(
+        {
+            "extends": "default",
+            "overrides": {"a.main.t": {"policy": {}}},
+            "add": [
+                {"after": "a", "node": {"id": "n", "kind": "exec", "tasks": [{"id": "added"}]}}
+            ],
+        }
+    )
+    assert sorted(seen, key=str) == sorted([None, "added"], key=str)  # the override has no id
+
+    monkeypatch.undo()
+    named = {
+        "tasks": {"pipeline": {"kind": "forge", "target": "mr.ci", "reviewers": None}},
+        "steps": {"reviewers": {"tasks": [{"id": "t", "kind": "forge", "target": "mr.ci"}]}},
+    }
+    assert tm.lift_tasks(named) == ["tasks.pipeline.reviewers"]
+    assert set(named["tasks"]) == {"pipeline"} and set(named["steps"]) == {"reviewers"}
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"nodes": 5},
+        {"nodes": ["x", None]},
+        {"overrides": [{"a": 1}]},
+        {"tasks": None, "steps": "x"},
+        {"nodes": [{"id": "n", "tasks": ["x", 3], "steps": [None], "fix_loop": []}]},
+        {"add": [{"node": "x"}, 3]},
+    ],
+    ids=[
+        "nodes-a-number",
+        "a-scalar-node",
+        "overrides-a-list",
+        "sections-of-the-wrong-type",
+        "scalar-tasks-and-steps",
+        "a-scalar-added-node",
+    ],
+)
+def test_lift_tasks_skips_what_it_cannot_walk(data):
+    """A malformed file still reaches the loader's own error, not an `AttributeError`."""
+    assert tm.lift_tasks(data) == []

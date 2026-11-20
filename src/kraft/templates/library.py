@@ -33,7 +33,7 @@ from kraft import skill as _skill
 from kraft.addons import inherit
 from kraft.addons.load import InstalledAddon, alias_extends, builds_on, qualify
 from kraft.config import bounded_yaml
-from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError
+from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError, deprecated
 from kraft.templates import extension, positions
 from kraft.templates.models import (
     AUTO_REVIEW_SEGMENT,
@@ -47,6 +47,7 @@ from kraft.templates.models import (
     TaskKind,
     displaced_route,
     first_error,
+    lift_tasks,
 )
 from kraft.templates.positions import Position
 from kraft.yamlload import safe_load
@@ -338,7 +339,20 @@ def _section(path: Path, data: Mapping[str, object], namespace: Namespace) -> Ma
         _refuse_qualified(path, f"{namespace.value} key", name)
         if not isinstance(body, Mapping):
             raise TemplateLibraryError(f"{path}: {namespace.value}.{name} must be a mapping")
-    return section
+    if namespace is Namespace.STEERING:
+        return section
+    return _lifted(path, {namespace.value: dict(section)})[namespace.value]
+
+
+def _lifted(path: Path, data: dict) -> dict:
+    """`data`, a copy, in the `config:` form, warning for each flat key it held
+    (`flat-forge-keys-read-as-config`)."""
+    data = copy.deepcopy(data)
+    for where in lift_tasks(data):
+        deprecated(
+            "%s: %s is deprecated; write it as config.%s", path, where, where.rpartition(".")[2]
+        )
+    return data
 
 
 def _chain_id(chain_path: Path, body: Mapping[str, object]) -> str:
@@ -705,6 +719,7 @@ class TemplateLibrary:
                 key = f"{namespace}:{name}"
                 if section == _CHAINS:
                     chain_path, body = entry  # type: ignore[misc]
+                    body = _lifted(chain_path, dict(body))
                     chains[key] = RawComponent(
                         {**body, "id": key},
                         ComponentSource(chain_path, Namespace.NODES, key, chain=True),
@@ -962,6 +977,7 @@ class TemplateLibrary:
             raise TemplateLibraryError(
                 f"{chain_path}: chain id {id!r} is already declared by {claimed}"
             )
+        body = _lifted(chain_path, dict(body))
         self._chains[id] = RawComponent(
             {**body, "id": id}, ComponentSource(chain_path, Namespace.NODES, id, chain=True)
         )
