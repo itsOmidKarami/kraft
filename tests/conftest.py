@@ -29,7 +29,8 @@ from kraft.paths import RunDirs
 #: worker every session runs in. `redaction`: no registered secret. `agent_shell`: outside one.
 pytest_plugins = [
     f"support.{m}"
-    for m in ("rig_fixtures", "local_worker", "redaction", "agent_shell", "forge_probe", "basetemp")
+    for m in ("rig_fixtures", "local_worker", "redaction", "agent_shell", "forge_probe")
+    + ("basetemp", "replies_on")
 ]
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]

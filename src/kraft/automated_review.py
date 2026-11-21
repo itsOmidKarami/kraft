@@ -16,11 +16,20 @@ from pydantic import (
     ConfigDict,
     Discriminator,
     Field,
+    StrictBool,
     StrictStr,
     Tag,
     TypeAdapter,
+    field_validator,
+    model_serializer,
     model_validator,
 )
+from pydantic.json_schema import SkipJsonSchema
+
+#: Whether a bot entry may turn replies on. False until the reply round, the
+#: policy keys and the user docs land: Part 2's third item deletes this flag and
+#: the refusal below. Tests set it (`replies_on`).
+REPLIES_ARRIVED = False
 
 
 class _Reviewer(BaseModel):
@@ -39,7 +48,28 @@ class BotReviewer(_Reviewer):
     """A forge login. The review settles when that login has reviewed the head."""
 
     bot: StrictStr = Field(min_length=1)
+    #: Kraft replies in this bot's threads and posts its summary comment
+    #: (`executor.replies`). Left out of the schema until it can be turned on.
+    replies: SkipJsonSchema[StrictBool] = False
     check: ClassVar[None] = None
+
+    @field_validator("replies")
+    @classmethod
+    def _not_yet(cls, value: bool) -> bool:
+        # Read at validation time: a reviewer rebuilt from stored JSON or a frozen
+        # chain is checked the same way in a test as in production.
+        if value and not REPLIES_ARRIVED:
+            raise ValueError("`replies` arrives in a later release of Kraft")
+        return value
+
+    @model_serializer(mode="wrap")
+    def _quiet_default(self, handler):
+        # Stored snapshots and saved templates keep writing `{bot: x}`. No return
+        # annotation: one would replace the serialization schema with a bare object.
+        data = handler(self)
+        if isinstance(data, dict) and not data.get("replies"):
+            data.pop("replies", None)
+        return data
 
 
 class CheckReviewer(_Reviewer):
@@ -47,6 +77,7 @@ class CheckReviewer(_Reviewer):
 
     check: StrictStr = Field(min_length=1)
     bot: ClassVar[None] = None
+    replies: ClassVar[bool] = False
 
 
 def _which(value: object) -> str | None:

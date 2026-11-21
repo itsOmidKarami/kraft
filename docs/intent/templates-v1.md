@@ -2130,8 +2130,9 @@ enforced-by: tests/adapters/forge/test_run_watch_ci.py::test_a_red_pipeline_the_
 ## REQ automated-review-implementation-is-not-template-configuration
 
 Templates MAY name, in an automated-review task's `config`: which reviewers it
-waits for, a bot login or a check name, in `reviewers`, the wait's
-`grace_period`, and whether it also watches the merge request's CI, `watch_ci`,
+waits for, a bot login or a check name, in `reviewers`, whether Kraft
+replies to a bot, `replies`, the wait's `grace_period`, and whether it also
+watches the merge request's CI, `watch_ci`,
 which names what it looks at, not how it is read.
 Templates SHALL NOT expose how a review is read, such as webhook event names,
 commands, comment authors, free check-name keys, or API and CLI mechanics. The
@@ -2143,8 +2144,9 @@ enforced-by: tests/test_waits.py::test_a_template_cannot_configure_how_automated
 A reviewer entry, on a task's `config`, in `repos.yaml`'s `automated_review`
 or in an item's node override, SHALL be either a bot entry or a check entry by
 its shape, and a key SHALL be checked against that kind alone. A stored entry
-that names the other kind as null SHALL load as the kind it names.
-enforced-by: tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[stored-bot-with-a-null-check], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[stored-check-with-a-null-bot], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-check-with-a-key-it-lacks], tests/adapters/forge/test_automated_review.py::test_a_reviewer_is_named_exactly_one_way_or_refused_at_load[both], tests/adapters/forge/test_automated_review.py::test_a_reviewer_is_named_exactly_one_way_or_refused_at_load[neither]
+that names the other kind as null SHALL load as the kind it names. A bot entry
+MAY say whether Kraft replies to the bot (`replies`).
+enforced-by: tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-replies], tests/cli/test_item_reviewers.py::test_a_node_gets_its_reviewers_from_the_terminal[a-bot-with-replies], tests/drafts/test_repos.py::test_a_save_keeps_the_yaml_only_automated_review_as_written, tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[stored-bot-with-a-null-check], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[stored-check-with-a-null-bot], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-check-with-a-key-it-lacks], tests/adapters/forge/test_automated_review.py::test_a_reviewer_is_named_exactly_one_way_or_refused_at_load[both], tests/adapters/forge/test_automated_review.py::test_a_reviewer_is_named_exactly_one_way_or_refused_at_load[neither]
 origin: src/kraft/automated_review.py §Reviewer
 
 ## REQ forge-task-config-is-per-target

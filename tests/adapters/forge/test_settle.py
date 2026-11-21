@@ -159,6 +159,13 @@ def test_a_collection_names_each_reviewer_with_its_threads_and_failed_check():
         None,
     )
     assert (second["reviewer"], second["check"]["conclusion"]) == ("check:scan", "failure")
+    assert (first["replies"], second["replies"]) == (False, False)
+
+
+def test_a_collection_says_which_bots_take_replies(replies_on):
+    feedback = ReviewerFeedback(BotReviewer(bot="a", replies=True), at(1), (), ())
+
+    assert decide([feedback], now=100).collection[0]["replies"] is True
 
 
 def test_a_check_that_succeeded_is_collected_without_its_output():

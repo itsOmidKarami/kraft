@@ -136,3 +136,12 @@ system SHALL keep the earliest, delete the others and move the record to the one
 it kept, at later posting points, within the posting point's time budget.
 enforced-by: tests/adapters/forge/replies/test_send.py::test_a_duplicate_keeps_the_earliest_copy[the-record-moves-to-the-earliest], tests/adapters/forge/replies/test_send.py::test_a_duplicate_keeps_the_earliest_copy[the-record-holds-the-earliest], tests/adapters/forge/replies/test_send.py::test_the_sweep_reads_nothing_past_its_budget
 origin: src/kraft/adapters/forge/replies/send.py
+
+## REQ replies-are-refused-until-the-conversation-arrives
+WHILE the reply round and its limits have not shipped, IF a bot reviewer entry
+sets `replies: true` in a task's `config`, `repos.yaml` or a node override, THEN
+the system SHALL refuse it, naming that it arrives in a later release. A check
+entry SHALL never take `replies`, and an entry's dump SHALL leave `replies` out
+when it is false.
+enforced-by: tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-replies-before-they-arrive], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-replies-off], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-check-with-replies-after-they-arrive], tests/adapters/forge/test_automated_review.py::test_the_schema_does_not_offer_replies_before_they_arrive, tests/test_overrides.py::test_replies_before_they_arrive_is_refused_in_its_own_words
+origin: src/kraft/automated_review.py §BotReviewer -- Omid, 2026-11-20: refuse `replies: true` at load until the third Part 2 item lands.

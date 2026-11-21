@@ -134,6 +134,7 @@ def _collected(item: ReviewerFeedback, how: str | None, bots: list[str]) -> dict
     failed = item.check is not None and item.check.get("conclusion") not in _PASSED
     return {
         "reviewer": reviewer_key(item.reviewer),
+        "replies": item.reviewer.replies,
         "finished": how,
         "summaries": sorted(newest.values(), key=lambda s: s["updated_at"]),
         "threads": [

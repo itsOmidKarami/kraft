@@ -51,17 +51,27 @@ def _node_overrides(pairs: list[str]) -> dict | None:
     return overrides or None
 
 
+#: What may follow `bot:LOGIN`, each after a `:` (Part 2's third item adds `resolve=kraft`).
+_BOT_OPTIONS = {"replies": ("replies", True)}
+
+
 def _reviewer(raw: str) -> dict | None:
-    """One `--reviewer`: `bot:LOGIN` or `check:NAME`, or `none` (None), which
-    alone sends `[]`, no reviewer expected."""
+    """One `--reviewer`: `bot:LOGIN[:replies]` or `check:NAME`, or `none` (None),
+    which alone sends `[]`, no reviewer expected. Options are parsed after a bot's
+    login only: a check's name may hold `:`."""
     if raw == "none":
         return None
     kind, sep, name = raw.partition(":")
+    # Not advertised while the server refuses it (item 3 names `:replies` here).
+    usage = f"--reviewer takes bot:LOGIN, check:NAME or none, not {raw!r}"
     if kind not in ("bot", "check") or not (sep and name):
-        raise argparse.ArgumentTypeError(
-            f"--reviewer takes bot:LOGIN, check:NAME or none, not {raw!r}"
-        )
-    return {kind: name}
+        raise argparse.ArgumentTypeError(usage)
+    if kind == "check":
+        return {"check": name}
+    login, *options = name.split(":")
+    if not login or any(o not in _BOT_OPTIONS for o in options):
+        raise argparse.ArgumentTypeError(usage)
+    return {"bot": login, **dict(_BOT_OPTIONS[o] for o in options)}
 
 
 def _budget(raw: str) -> float | None:

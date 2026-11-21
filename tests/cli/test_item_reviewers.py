@@ -29,10 +29,13 @@ def _node_overrides(capsys, wid: str) -> dict:
             [{"bot": "coderabbitai"}, {"check": "scan"}],
         ),
         (["--reviewer", "none"], []),
+        (["--reviewer", "bot:coderabbitai:replies"], [{"bot": "coderabbitai", "replies": True}]),
     ],
-    ids=["a-bot-and-a-check", "none-sends-empty"],
+    ids=["a-bot-and-a-check", "none-sends-empty", "a-bot-with-replies"],
 )
-def test_a_node_gets_its_reviewers_from_the_terminal(app, monkeypatch, capsys, repo, flags, stored):
+def test_a_node_gets_its_reviewers_from_the_terminal(
+    app, monkeypatch, capsys, repo, flags, stored, replies_on
+):
     connect_repo(repo)
     monkeypatch.chdir(repo)
     cli.main(["item", "create", "t", "--json"])
@@ -53,14 +56,15 @@ def test_reviewers_can_be_named_at_intake(app, monkeypatch, capsys, repo):
     assert _node_overrides(capsys, wid) == {NODE: {"reviewers": [{"bot": "x"}]}}
 
 
-def test_a_malformed_reviewer_flag_is_an_argument_error(app, monkeypatch, capsys, repo):
+@pytest.mark.parametrize("bad", ["bogus", "bot:x:loud"], ids=["not-a-kind", "an-unknown-option"])
+def test_a_malformed_reviewer_flag_is_an_argument_error(app, monkeypatch, capsys, repo, bad):
     connect_repo(repo)
     monkeypatch.chdir(repo)
     cli.main(["item", "create", "t", "--json"])
     wid = json.loads(capsys.readouterr().out)["id"]
 
     with pytest.raises(SystemExit) as exit_:
-        cli.main(["item", "set-node-override", wid, "--node", NODE, "--reviewer", "bogus"])
+        cli.main(["item", "set-node-override", wid, "--node", NODE, "--reviewer", bad])
 
     assert exit_.value.code == 2
     assert "bot:LOGIN, check:NAME or none" in capsys.readouterr().err
