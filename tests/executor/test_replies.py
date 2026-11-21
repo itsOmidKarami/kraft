@@ -122,8 +122,8 @@ async def _walk(rig, *between) -> str:
         status = await rig.walk()
         if status != "waiting":
             return status
-        if i < len(between):
-            between[i]()
+        if i < len(between) and (after := between[i]()) is not None:
+            await after  # a step that writes the database is a coroutine
     raise AssertionError("the walk never ended")
 
 
@@ -200,6 +200,71 @@ def _the_head_moves(rig, fake, monkeypatch):
     monkeypatch.setattr(fake, "mr_details", details)
 
 
+def _the_mr_closes(rig, fake, monkeypatch):
+    async def details(*, repo, branch):
+        head = git(rig.item.worktree, "rev-parse", "HEAD")
+        return forge.MRDetails(
+            1, "http://fake.forge/1", "closed", "t", "", True, (), branch, "main", head
+        )
+
+    monkeypatch.setattr(fake, "mr_details", details)
+
+
+def _first_send_waits(fake, monkeypatch):
+    """The first gate cannot read the thread (a 503): the intent stays pending,
+    and the next wake's posting point is the one that decides it."""
+    read, failed = fake.read_thread, []
+
+    async def once(**kwargs):
+        if not failed:
+            failed.append(1)
+            raise ForgeError("x (HTTP 503)", status=503)
+        return await read(**kwargs)
+
+    monkeypatch.setattr(fake, "read_thread", once)
+
+
+def _triage_result(rig) -> Path:
+    [triage] = [s for s in rig.item.sessions("feedback") if s["hook_point"].endswith(".triage")]
+    return Path(triage["result_path"])
+
+
+def _a_newer_triage_ran(rig, fake, monkeypatch):
+    _first_send_waits(fake, monkeypatch)
+
+    async def runs():
+        await rig.item.session(
+            "newer",
+            "feedback.review_feedback.triage",
+            "done",
+            head_sha=git(rig.item.worktree, "rev-parse", "HEAD"),
+        )
+
+    return runs
+
+
+def _the_text_goes(rig, fake, monkeypatch):
+    _first_send_waits(fake, monkeypatch)
+
+    def edit():
+        path = _triage_result(rig)
+        path.write_text(json.dumps({**json.loads(path.read_text()), "replies": []}))
+
+    return edit
+
+
+def _the_text_is_edited(rig, fake, monkeypatch):
+    _first_send_waits(fake, monkeypatch)
+
+    def edit():
+        path = _triage_result(rig)
+        data = json.loads(path.read_text())
+        data["replies"][0]["body"] += " Two callers read it."
+        path.write_text(json.dumps(data))
+
+    return edit
+
+
 @pytest.mark.parametrize(
     "how, reply, ended",
     [
@@ -208,6 +273,10 @@ def _the_head_moves(rig, fake, monkeypatch):
         (_the_head_moves, _DECLINE, [("superseded", "head_moved")]),
         (None, {**_DECLINE, "body": "see https://x.example"}, [("refused", "body: a link")]),
         (None, {**_DECLINE, "thread": "T9"}, []),
+        (_the_mr_closes, _DECLINE, [("refused", "mr_not_open")]),
+        (_a_newer_triage_ran, _DECLINE, [("superseded", "not_latest")]),
+        (_the_text_goes, _DECLINE, [("refused", "no_text")]),
+        (_the_text_is_edited, _DECLINE, [("superseded", "body_changed")]),
     ],
     ids=[
         "a-person-wrote-in-it",
@@ -215,23 +284,142 @@ def _the_head_moves(rig, fake, monkeypatch):
         "the-forge-head-moved",
         "a-link-in-the-reply",
         "a-thread-not-collected",
+        "the-mr-is-closed",
+        "a-newer-triage-ran",
+        "the-text-is-gone",
+        "the-result-file-changed",
     ],
 )
 async def test_a_triage_reply_is_refused_or_superseded(
     rig, monkeypatch, replies_on, how, reply, ended
 ):
-    """Each change lands after the bots were read, before the reply's posting point."""
-    fake = await _filed(rig, monkeypatch, _t1())
-    if how is not None:
-        how(rig, fake, monkeypatch)
+    """Each change lands after the bots were read, before the reply's posting point;
+    the last four after a first posting point that could not read the thread."""
+    fake = await _filed(rig, monkeypatch, _t1(), **_ci(1))
+    later = how(rig, fake, monkeypatch) if how is not None else None
     rig.verdicts = [{"findings": [], "replies": [reply]}]
 
-    assert await _walk(rig) == "completed"
+    assert await _walk(rig, *([later] if later else [])) == "completed"
 
     got = [(e["payload"]["outcome"], e["payload"]["why"]) for e in rig.item.events("reply_ended")]
     assert got == ended
     assert len(_of(rig, "reply_intended")) == len(ended)
     assert fake.writes == []
+
+
+_RED = (forge.FailedJob("test", "failed", "script_failure"),)
+_TRIAGE, _REPAIR_CHECKS = (
+    "feedback.review_feedback.triage",
+    "feedback.on_failure.checks.repair_checks",
+)
+_FIX = "feedback.fix_loop.fix.repair"
+_A_FINDING = {
+    "severity": "important",
+    "message": "rename x",
+    "file": "calc.py",
+    "line": 1,
+    "source_plugin": "review-feedback",
+}
+
+
+def _the_judge_downgrades(monkeypatch):
+    async def downgrade(*_, **__):
+        return "stop_downgrade", "the rest is not worth a cycle"
+
+    monkeypatch.setattr(dispatch, "judge_verdict", downgrade)
+
+
+def _red_after_the_repair(ci_after):
+    """The CI reads of a walk whose first measure ends red at the review wait, so
+    `on_failure` repairs and re-measures: that re-measure parks the first walk, and
+    in the second the red comes again and the re-measure settles, reads the triage
+    and then the CI wait's `ci_after`."""
+    reads = ["failed", "pending", "failed", "success", ci_after]
+    return {
+        "watch_ci": True,
+        "ci_states": reads,
+        "ci_failed_jobs": [_RED if r == "failed" else () for r in reads],
+    }
+
+
+@pytest.mark.parametrize(
+    "fake_kw, verdicts, only_at_completion, downgrade, status, posted_after",
+    [
+        # The re-measure after `on_failure` is the first time a triage has run, and it
+        # falls through to a fix cycle: the reply goes before that cycle, not after.
+        (
+            _red_after_the_repair("failed"),
+            [{"findings": [], "replies": [_DECLINE]}],
+            False,
+            False,
+            "needs_human",
+            [_REPAIR_CHECKS, _TRIAGE],
+        ),
+        # The re-measure after `on_failure` comes back clean. The posting point after
+        # `recover_node` and the one at the top post nothing: only the completion's does.
+        (
+            _red_after_the_repair("success"),
+            [{"findings": [], "replies": [_DECLINE]}],
+            True,
+            False,
+            "completed",
+            [_REPAIR_CHECKS, _TRIAGE],
+        ),
+        # A fix cycle ran and the judge downgrades what is left: the loop ends clean.
+        # The posting points before it post nothing.
+        (
+            _ci(0),
+            [{"findings": [_A_FINDING], "replies": [_DECLINE]}] * 2,
+            True,
+            True,
+            "completed",
+            [_TRIAGE, _FIX, _TRIAGE],
+        ),
+    ],
+    ids=[
+        "after-the-on-failure-repair-and-before-the-fix-cycle",
+        "the-repair-settles-it-and-the-node-completes",
+        "the-judge-downgrades-what-is-left",
+    ],
+)
+async def test_a_pending_reply_is_posted_at_each_posting_point_that_walk_reaches(
+    rig,
+    monkeypatch,
+    replies_on,
+    fake_kw,
+    verdicts,
+    only_at_completion,
+    downgrade,
+    status,
+    posted_after,
+):
+    """A reply left unposted when the node completes is dropped, so each row asserts
+    the reply went at the posting point its walk reaches, with (`only_at_completion`)
+    every one before the completion's posting nothing, as an unreadable viewer does:
+    the next point tries again."""
+    fake = await _filed(rig, monkeypatch, _t1(), **fake_kw)
+    rig.verdicts = list(verdicts)
+    point, at_write = replies._Point.post, []
+
+    async def post(self, completing):
+        if completing or not only_at_completion:
+            await point(self, completing)
+
+    reply = fake.reply_to_thread
+
+    async def noted(**kwargs):
+        at_write.append(list(rig.triaged))
+        return await reply(**kwargs)
+
+    monkeypatch.setattr(replies._Point, "post", post)
+    monkeypatch.setattr(fake, "reply_to_thread", noted)
+    if downgrade:
+        _the_judge_downgrades(monkeypatch)
+
+    assert await _walk(rig) == status
+
+    assert at_write == [posted_after]
+    assert fake.writes == [("reply", "T1")]
 
 
 @pytest.mark.parametrize(

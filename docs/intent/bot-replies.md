@@ -197,17 +197,20 @@ origin: src/kraft/executor/replies.py §_post -- Omid, 2026-11-20: on a node wit
 WHEN Kraft posts a triage's replies, the system SHALL take them only from the
 node's latest triage in its current run that started an agent and finished with a
 result, SHALL NOT take any from a skipped triage, SHALL supersede a reply of an
-earlier session, and SHALL NOT post a reply in a thread the same triage raised
-as a finding.
-enforced-by: tests/executor/test_replies.py::test_a_reply_never_goes_beside_a_finding_on_the_same_thread, tests/executor/test_replies.py::test_the_latest_triage_is_the_newest_that_ran[a-skip-after-the-verdict], tests/executor/test_replies.py::test_the_latest_triage_is_the_newest_that_ran[a-failure-after-the-verdict], tests/executor/test_replies.py::test_the_latest_triage_is_the_newest_that_ran[before-the-run-began], tests/executor/test_replies.py::test_a_triage_reply_is_refused_or_superseded[a-thread-not-collected]
+earlier session, SHALL refuse one whose text the latest triage's result no longer
+holds, and SHALL NOT post a reply in a thread the same triage raised as a
+finding.
+enforced-by: tests/executor/test_replies.py::test_a_reply_never_goes_beside_a_finding_on_the_same_thread, tests/executor/test_replies.py::test_the_latest_triage_is_the_newest_that_ran[a-skip-after-the-verdict], tests/executor/test_replies.py::test_the_latest_triage_is_the_newest_that_ran[a-failure-after-the-verdict], tests/executor/test_replies.py::test_the_latest_triage_is_the_newest_that_ran[before-the-run-began], tests/executor/test_replies.py::test_a_triage_reply_is_refused_or_superseded[a-thread-not-collected], tests/executor/test_replies.py::test_a_triage_reply_is_refused_or_superseded[a-newer-triage-ran], tests/executor/test_replies.py::test_a_triage_reply_is_refused_or_superseded[the-text-is-gone]
 origin: src/kraft/executor/replies.py §latest_triage
 
 ## REQ a-triage-reply-is-posted-only-on-a-current-head
 WHEN Kraft is about to post a triage reply, IF the triage session's head, its
 collection's head, the checkout's head and the forge's head of the merge request
 are not one commit, or the thread holds a bot's or a person's note the triage
-never read, THEN the system SHALL supersede it and never post it.
-enforced-by: tests/executor/test_replies.py::test_a_triage_reply_is_refused_or_superseded[the-forge-head-moved], tests/executor/test_replies.py::test_the_thread_moved_since_the_triage_read_it
+never read, or the reply's rendered text is no longer the one recorded at its
+intent, THEN the system SHALL supersede it and never post it; and IF the merge
+request is not open, THEN the system SHALL refuse it.
+enforced-by: tests/executor/test_replies.py::test_a_triage_reply_is_refused_or_superseded[the-forge-head-moved], tests/executor/test_replies.py::test_the_thread_moved_since_the_triage_read_it, tests/executor/test_replies.py::test_a_triage_reply_is_refused_or_superseded[the-mr-is-closed], tests/executor/test_replies.py::test_a_triage_reply_is_refused_or_superseded[the-result-file-changed]
 origin: src/kraft/executor/replies.py §_Point.stale
 
 ## REQ a-reply-is-intended-once-whatever-the-wakes
@@ -215,6 +218,9 @@ WHEN a node's measurement returns again and again on the same head (a parked wai
 woken), the system SHALL create one intent per reply and post it at most once: a
 write whose answer was lost SHALL be reconciled at a later posting point, not
 sent again, and a copy that lands late SHALL be found and deleted at a later
-posting point.
-enforced-by: tests/executor/test_replies.py::test_a_triage_reply_is_posted_once_across_wakes, tests/executor/test_replies.py::test_a_lost_write_is_reconciled_not_sent_again, tests/executor/test_replies.py::test_a_late_copy_of_an_unclear_write_is_deleted
+posting point. A reply still pending SHALL be posted at the posting point after a
+recovery re-measure, and at each completion of the node (a clean recovery, a
+clean measure, a judge's downgrade), since a reply unposted at completion is
+dropped.
+enforced-by: tests/executor/test_replies.py::test_a_triage_reply_is_posted_once_across_wakes, tests/executor/test_replies.py::test_a_lost_write_is_reconciled_not_sent_again, tests/executor/test_replies.py::test_a_late_copy_of_an_unclear_write_is_deleted, tests/executor/test_replies.py::test_a_pending_reply_is_posted_at_each_posting_point_that_walk_reaches[after-the-on-failure-repair-and-before-the-fix-cycle], tests/executor/test_replies.py::test_a_pending_reply_is_posted_at_each_posting_point_that_walk_reaches[the-repair-settles-it-and-the-node-completes], tests/executor/test_replies.py::test_a_pending_reply_is_posted_at_each_posting_point_that_walk_reaches[the-judge-downgrades-what-is-left]
 origin: src/kraft/executor/replies.py §_Point.intend
