@@ -83,6 +83,8 @@ async def test_an_intent_s_state_is_folded_from_its_events(
     got = database.read(lambda c: record.read(c, it.id))[intent]
 
     assert (got.state, got.sends, got.ever_unclear) == (state, sends, ever_unclear)
+    # An ended intent keeps the reason it ended with (`_apply` writes "why").
+    assert got.why == ("why" if state in ("refused", "superseded", "given_up") else None)
 
 
 async def test_the_record_spans_every_fork(item_on, database):

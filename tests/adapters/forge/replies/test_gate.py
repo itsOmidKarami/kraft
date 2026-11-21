@@ -9,7 +9,7 @@ import pytest
 from support.bot_threads import VIEWER, bot_thread, kraft_note, note
 
 from kraft.adapters.forge.replies import facts
-from kraft.adapters.forge.replies.gate import thread_refusal, triage_refusal
+from kraft.adapters.forge.replies.gate import fix_refusal, thread_refusal, triage_refusal
 from kraft.adapters.forge.replies.record import Intent, new_id
 
 ITEM = "wi1"
@@ -113,4 +113,36 @@ def test_the_gate_reads_the_thread(thread, on, posted, expected):
 )
 def test_a_triage_reply_waits_its_turn(thread, intents, expected):
     got = triage_refusal(thread, bots=(BOT,), on=(BOT,), kraft=_kraft(), intents=intents)
+    assert got == expected
+
+
+@pytest.mark.parametrize(
+    "thread, intents, expected",
+    [
+        pytest.param(_thread(B), {}, None, id="first"),
+        pytest.param(_thread(B, K), {}, None, id="after-kraft-s-own-note"),
+        pytest.param(
+            _thread(B),
+            _by_id(_intent("posted", id=K_ID), _intent("posted", id=K2_ID, kind="answered")),
+            None,
+            id="at-the-cap",
+        ),
+        pytest.param(
+            _thread(B),
+            _by_id(_intent("posted", id=K_ID, kind="fixed", finding="fp1")),
+            "fixed_before",
+            id="posted-before-for-the-finding",
+        ),
+        pytest.param(
+            _thread(B),
+            _by_id(_intent("posted", id=K_ID, kind="fixed", finding="fp2")),
+            None,
+            id="posted-before-for-another-finding",
+        ),
+    ],
+)
+def test_a_fix_reply_goes_once_per_finding(thread, intents, expected):
+    got = fix_refusal(
+        thread, bots=(BOT,), on=(BOT,), kraft=_kraft(), intents=intents, finding="fp1"
+    )
     assert got == expected

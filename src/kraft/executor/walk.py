@@ -2715,12 +2715,19 @@ async def _walk_node_once(
                     escalatable=not _red_pipeline_only(failed),
                 )
 
+        head_before = _config.git_read(Path(worktree), "rev-parse", "HEAD")
+        # The prose fingerprint, never a `same_as` tag: `replies` compares the same on
+        # the triage's raw findings (`findings.prose_fingerprint`).
+        threads = {t: _findings.prose_fingerprint(f) for f in eligible for t in f.threads}
         payload = {
             "node_id": node.id,
             "cycle": count,
             # The cap `bump_counter` snapshotted, the one the breach check above used.
             "max_attempts": cap.attempts,
             "failed_tasks": [t.path for t in failed],
+            # Only with replies on (only then does a finding carry threads): which
+            # finding each thread's "Fixed in" is about, and the head it starts from.
+            **({"threads": threads, "head_sha": head_before} if threads else {}),
         }
         await db.write(
             lambda c, payload=payload: events.append(
@@ -2735,8 +2742,12 @@ async def _walk_node_once(
         if eligible:
             repeats = set(previous_prints or [])
             instruction += prompts.FIX_FINDINGS.format(
-                findings=prompts.format_findings(eligible, repeats, from_ci=_ci_sources(node))
+                findings=prompts.format_findings(
+                    eligible, repeats, from_ci=_ci_sources(node), threads=True
+                )
             )
+            if threads:
+                instruction += prompts.FIX_REPLIES
             # The tag is unconditional -- "this finding was in the last
             # measurement" is true either way -- but the note claims an earlier
             # attempt was made, which is false on the crash/resume path where
@@ -2774,7 +2785,6 @@ async def _walk_node_once(
         )
         instruction += prompts.round_history_note(history, dispatch.regressed_fingerprints(history))
         instruction += prompts.previous_attempt_note(previous_fix, run_dirs=run_dirs)
-        head_before = _config.git_read(Path(worktree), "rev-parse", "HEAD")
         # What "the round changed nothing" is judged against (Kraft-6rph9).
         before = _read_only.snapshot(db, row, launch, worktree)
         meta_before = forge_mod.read_mr_meta(Path(worktree), work_item_id, run_dirs)

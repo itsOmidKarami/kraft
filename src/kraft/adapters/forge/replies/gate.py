@@ -83,3 +83,28 @@ def triage_refusal(
     if argument_count(thread, intents, kraft=kraft) >= cap:
         return "cap"
     return None
+
+
+def fix_refusal(
+    thread: ForgeThread | None,
+    *,
+    bots: Iterable[str],
+    on: Iterable[str],
+    kraft: facts.Kraft,
+    intents: Mapping[str, Intent],
+    finding: str,
+) -> str | None:
+    """`thread_refusal`, then: one "Fixed in" per thread and finding, ever. Neither
+    the cap nor Kraft's last word applies to a fix."""
+    if (why := thread_refusal(thread, bots=bots, on=on, kraft=kraft)) is not None:
+        return why
+    assert thread is not None  # thread_refusal refuses a missing one
+    if any(
+        i.payload.get("kind") == "fixed"
+        and i.payload.get("thread") == thread.id
+        and i.payload.get("finding") == finding
+        and i.state in _HELD
+        for i in intents.values()
+    ):
+        return "fixed_before"
+    return None

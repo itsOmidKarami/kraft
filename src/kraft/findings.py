@@ -217,6 +217,13 @@ def from_payload(raw: dict) -> Finding:
     )
 
 
+def prose_fingerprint(f: Finding) -> str:
+    """`f`'s identity from its own words, whatever `same_as` it claims: the raw
+    result file of a reviewer shown no tags is not passed through
+    `resolve_identity`, so its `same_as` is not to be believed."""
+    return replace(f, same_as=None).fingerprint
+
+
 def payload_of(f: Finding) -> dict:
     """A finding as an event payload holds it: empty `threads` left out, so a record
     written with replies off is the one written before them."""
