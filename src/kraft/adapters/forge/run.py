@@ -38,6 +38,7 @@ from kraft.adapters.forge.models import (
     QueueRead,
     failure_cause,
 )
+from kraft.adapters.forge.replies import facts, record
 from kraft.automated_review import Reviewers
 from kraft.config import ConfigError, load_repos
 from kraft.paths import config_dir
@@ -1119,11 +1120,24 @@ async def _collect_review(
         )
         _write_collection(destination, head, round, [], None)
         return "automated review: no reviewer configured; nothing to collect\n", "done", None
+    kraft = None
+    if any(r.replies for r in reviewers):
+        # Read once per wait and kept in its memory: the head wait needs Kraft's notes
+        # from its first check. Unreadable, only the record says which notes are Kraft's.
+        wait = db.read(lambda c: waits.open_wait(c, work_item_id, hook_point))
+        viewer = ((wait.last if wait is not None else None) or {}).get("viewer")
+        if viewer is None:
+            try:
+                viewer = await forge.viewer(repo=repo)
+            except ForgeError:
+                viewer = None
+        posted = db.read(lambda c: record.posted_hashes(record.read(c, work_item_id)))
+        kraft = facts.Kraft(viewer, work_item_id, posted)
     log, status, note, collection = await _settle_review(
         forge, db, repo=repo, orig_repo=orig_repo, branch=branch, head=head,
         work_item_id=work_item_id, node_id=node_id, hook_point=hook_point,
         reviewers=reviewers,
-        bounds=bounds, grace=grace, watch_ci=watch_ci,
+        bounds=bounds, grace=grace, watch_ci=watch_ci, kraft=kraft,
     )  # fmt: skip
     if collection is not None:
         _write_collection(destination, head, round, collection, note.now)
@@ -1147,11 +1161,14 @@ async def _settle_review(
     scope: str | None = None,
     mount: str | None = None,
     watch_ci: bool = False,
+    kraft: facts.Kraft | None = None,
 ) -> tuple[str, str, WaitNote, list[dict] | None]:
     """One check of whether every reviewer has finished with `head`
     (`settle.decide`): `waiting` with no collection yet, or `done` with what
     each reviewer said. A multi-repo item's repositories each keep their own
-    memory in the wait, under `scope`."""
+    memory in the wait, under `scope`. `kraft`, given only on the collect path
+    with a replies-on bot, leaves Kraft's conversation out and is kept in the
+    wait (its viewer)."""
     # One reading of the clock, so the deadline this tests and the one
     # `waits.observe` tests are the same instant.
     now = waits.now()
@@ -1171,20 +1188,36 @@ async def _settle_review(
     else:
         deadline = now + bounds.timeout
     timed_out = now >= deadline
+    # Passed only when given: several tests replace `reviewer_feedback` with a
+    # function that takes no `kraft`.
     feedback = await forge.reviewer_feedback(
-        repo=repo, branch=branch, reviewers=reviewers, since=since
+        repo=repo,
+        branch=branch,
+        reviewers=reviewers,
+        since=since,
+        **({"kraft": kraft} if kraft is not None else {}),
     )
     memory = ((wait.last if wait is not None else None) or {}).get("memory", {})
     if scope is not None:
         memory = memory.get(scope, {})
     decided = settle.decide(
-        feedback, since=since, now=now, grace=grace, memory=memory, timed_out=timed_out
+        feedback,
+        since=since,
+        now=now,
+        grace=grace,
+        memory=memory,
+        timed_out=timed_out,
+        kraft=kraft,
     )
+    kept = {
+        "memory": decided.memory,
+        **({"viewer": kraft.viewer} if kraft and kraft.viewer else {}),
+    }
     if decided.state == "pending":
         log = f"automated review: waiting for the reviewers to finish with {head[:7]}\n"
         note = WaitNote(
             decided.next_at,
-            {"memory": decided.memory},
+            kept,
             False,
             now,
             deadline=deadline if watch_ci else None,
@@ -1198,9 +1231,7 @@ async def _settle_review(
         payload = {"node_id": node_id, "task": hook_point, "repo": str(orig_repo)}
         payload |= {"mount": mount, "head": head, "heard": heard, "silent": silent}
         await db.write(lambda c: _record_settled(c, work_item_id, payload))
-    note = WaitNote(
-        None, {"memory": decided.memory}, timed_out, now, deadline=deadline if watch_ci else None
-    )
+    note = WaitNote(None, kept, timed_out, now, deadline=deadline if watch_ci else None)
     return log, "done", note, decided.collection
 
 

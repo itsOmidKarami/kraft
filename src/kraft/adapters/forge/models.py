@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from kraft.adapters.forge.mr import MRMeta
+    from kraft.adapters.forge.replies import facts
     from kraft.automated_review import BotReviewer, CheckReviewer, Reviewers
 
 CIState = Literal["pending", "success", "failed"]
@@ -539,8 +540,18 @@ class Forge(Protocol):
         self, *, repo: Path, branch: str, reviewers: Reviewers
     ) -> ReviewResult: ...
     async def reviewer_feedback(
-        self, *, repo: Path, branch: str, reviewers: Reviewers, since: datetime
-    ) -> list[ReviewerFeedback]: ...
+        self,
+        *,
+        repo: Path,
+        branch: str,
+        reviewers: Reviewers,
+        since: datetime,
+        kraft: facts.Kraft | None = None,
+    ) -> list[ReviewerFeedback]:
+        """What each reviewer has said; `kraft` leaves Kraft's own conversation in a
+        bot's threads out of the bot's activity and summaries."""
+        ...
+
     async def viewer(self, *, repo: Path) -> str:
         """The login Kraft writes as."""
         ...
@@ -916,8 +927,15 @@ class FakeForge:
         return ReviewResult(result) if isinstance(result, str) else result
 
     async def reviewer_feedback(
-        self, *, repo: Path, branch: str, reviewers: Reviewers, since: datetime
+        self,
+        *,
+        repo: Path,
+        branch: str,
+        reviewers: Reviewers,
+        since: datetime,
+        kraft: facts.Kraft | None = None,
     ) -> list[ReviewerFeedback]:
+        # `kraft` is ignored: the script already says what each reviewer said.
         self.reviewers_asked.append(reviewers)
         if self.feedback_script:
             return self._next(self.feedback_script)

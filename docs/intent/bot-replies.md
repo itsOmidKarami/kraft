@@ -153,3 +153,21 @@ collection that session was handed and whose file is the finding's file, compare
 paths, and SHALL NOT count them in the finding's identity.
 enforced-by: tests/test_findings.py::test_a_finding_keeps_only_threads_on_its_own_file[another-file], tests/test_findings.py::test_a_finding_keeps_only_threads_on_its_own_file[not-collected], tests/test_findings.py::test_a_finding_keeps_only_threads_on_its_own_file[not-collected-on-a-pathless-finding], tests/test_findings.py::test_a_finding_keeps_only_threads_on_its_own_file[normalised], tests/test_findings.py::test_a_finding_keeps_only_threads_on_its_own_file[a-file-thread-on-a-pathless-finding], tests/test_findings.py::test_a_finding_reads_its_thread_ids[a-list]
 origin: src/kraft/findings.py §on_their_files
+
+## REQ head-wait-activity-leaves-out-the-conversation
+WHERE a bot the review wait reads has replies on, the system SHALL NOT count as
+the bot's activity, or hand on as its summary, any note of a thread that holds a
+Kraft note, nor a review whose body is blank and whose every comment is a reply in
+such a thread, unless it requests changes or approves, and SHALL NOT count a
+change in the bot's unresolved threads that Kraft has posted in. With replies
+off, the wait SHALL read activity as before.
+enforced-by: tests/adapters/forge/test_reviewer_feedback_replies.py::test_the_head_wait_leaves_out_the_conversation[gh-reply-in-a-kraft-thread], tests/adapters/forge/test_reviewer_feedback_replies.py::test_the_head_wait_leaves_out_the_conversation[gh-the-same-off], tests/adapters/forge/test_reviewer_feedback_replies.py::test_the_head_wait_leaves_out_the_conversation[gh-the-bot-s-own-review-still-counts], tests/adapters/forge/test_reviewer_feedback_replies.py::test_the_head_wait_leaves_out_the_conversation[gh-review-with-a-new-thread], tests/adapters/forge/test_reviewer_feedback_replies.py::test_the_head_wait_leaves_out_the_conversation[gh-a-changes-requested-reply-still-counts], tests/adapters/forge/test_reviewer_feedback_replies.py::test_the_head_wait_leaves_out_the_conversation[gh-marker-on-a-bot-note], tests/adapters/forge/test_reviewer_feedback_replies.py::test_the_head_wait_leaves_out_the_conversation[glab-reply-in-a-kraft-discussion], tests/adapters/forge/test_reviewer_feedback_replies.py::test_the_head_wait_leaves_out_the_conversation[glab-the-same-off], tests/adapters/forge/test_settle.py::test_a_thread_kraft_posted_in_leaves_the_compared_set[bot-resolved-a-kraft-thread], tests/adapters/forge/test_settle.py::test_a_thread_kraft_posted_in_leaves_the_compared_set[bot-resolved-another-thread]
+origin: src/kraft/adapters/forge/settle.py §decide
+
+## REQ the-viewer-is-read-only-when-there-is-work
+WHERE no reviewer of a node's review wait has replies on, the system SHALL make
+no forge call for replies. A collecting wait with such a reviewer SHALL read the
+login Kraft writes as once and keep it for the wait, and mark each collected note
+Kraft wrote as Kraft's.
+enforced-by: tests/adapters/forge/test_run_replies.py::test_a_replies_on_wait_reads_the_viewer_once_and_marks_kraft_notes, tests/adapters/forge/test_run_replies.py::test_a_replies_off_wait_never_reads_the_viewer
+origin: src/kraft/adapters/forge/run.py §_collect_review

@@ -189,6 +189,41 @@ async def test_a_withdrawn_bot_review_does_not_count(cli, tmp_path, backend, rou
     assert (await _review(backend, cli, tmp_path, routes, BOT)).state == expected
 
 
+@pytest.mark.parametrize(
+    "replies, reply_state, expected",
+    [
+        (True, "COMMENTED", ("calc.py:3: x is unused",)),
+        (False, "COMMENTED", ("calc.py:3: still unused",)),
+        (True, "CHANGES_REQUESTED", ("calc.py:3: still unused",)),
+    ],
+    ids=["gh-replies-on", "gh-replies-off", "gh-a-changes-requested-reply"],
+)
+async def test_a_reply_only_review_is_not_the_bot_s_review_where_kraft_replies(
+    cli, tmp_path, replies_on, replies, reply_state, expected
+):
+    """Where nothing collects there are no Kraft facts: a blank `COMMENTED` review
+    made only of replies is the bot answering a thread, so the review before it
+    stands. Only for a bot with replies on, and never a verdict."""
+    routes = {
+        READ_BRANCH: GH_PR,
+        GH_REVIEWS: json.dumps(
+            [
+                {**_gh_review("CHANGES_REQUESTED", id=50), "body": "fix calc"},
+                _gh_review(reply_state, id=51),
+            ]
+        ),
+        "api repos/{owner}/{repo}/pulls/7/reviews/50/comments": json.dumps(
+            [{"id": 9, "path": "calc.py", "line": 3, "body": "x is unused"}]
+        ),
+        GH_COMMENTS: json.dumps(
+            [{"id": 10, "path": "calc.py", "line": 3, "body": "still unused", "in_reply_to_id": 9}]
+        ),
+    }
+    reviewer = BotReviewer(bot="coderabbitai", replies=True) if replies else BOT
+
+    assert (await _review(GH, cli, tmp_path, routes, reviewer)).findings == expected
+
+
 # --- a check reviewer ----------------------------------------------------------
 
 

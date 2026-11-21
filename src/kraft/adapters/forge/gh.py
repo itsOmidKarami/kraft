@@ -35,6 +35,7 @@ from kraft.adapters.forge.models import (
     ReviewerFeedback,
     ReviewResult,
 )
+from kraft.adapters.forge.replies import facts
 from kraft.adapters.forge.transport import CliTransport, Field, Transport
 from kraft.automated_review import Reviewers
 
@@ -121,14 +122,31 @@ def _posted(answer: dict, *ids: str) -> Posted:
 
 
 def _bot_feedback(
-    reviewer, comments: list[dict], reviews: list[dict], threads: list[dict], head: str, since
+    reviewer,
+    comments: list[dict],
+    reviews: list[dict],
+    threads: list[dict],
+    head: str,
+    since,
+    kraft: facts.Kraft | None = None,
 ) -> ReviewerFeedback:
-    """One bot's part of the pull request's comments, reviews and threads."""
+    """One bot's part of the pull request's comments, reviews and threads. Given
+    `kraft`, Kraft's conversation in a thread is not the bot reviewing the push."""
     bot = reviewer.bot
 
     def mine(login: object) -> bool:
         return mr_ops.same_login(str(login or ""), bot)
 
+    # No note of a thread Kraft has posted in is activity or a summary, and neither
+    # is a review made only of replies in such threads (each reply on GitHub comes
+    # wrapped in one): the bot's own review that opened the thread still counts.
+    noted = [(t, _gh_notes((t.get("comments") or {}).get("nodes") or [])) for t in threads]
+    talk = {t["id"] for t, ns in noted if kraft is not None and kraft.talks_in(ns)}
+    replies_ = {n.review_id for t, ns in noted if t["id"] in talk for n in ns if n.reply_to}
+    elsewhere = {
+        n.review_id for t, ns in noted for n in ns if t["id"] not in talk or not n.reply_to
+    }
+    reply_only = replies_ - elsewhere - {None}
     summaries: list[dict] = []
     seen: list[datetime | None] = []
     for c in comments:
@@ -151,6 +169,14 @@ def _bot_feedback(
             "PENDING",
             "DISMISSED",
         ):
+            # Only the blank `COMMENTED` review a reply comes wrapped in: a verdict
+            # is never the conversation.
+            if (
+                r.get("state") == "COMMENTED"
+                and str(r.get("id")) in reply_only
+                and not str(r.get("body") or "").strip()
+            ):
+                continue
             at = mr_ops.forge_time(r.get("submitted_at"))
             seen.append(at)
             if r.get("commit_id") == head and at is not None and at > since:
@@ -165,11 +191,12 @@ def _bot_feedback(
     open_threads: list[dict] = []
     for t in threads:
         notes = (t.get("comments") or {}).get("nodes") or []
-        seen += [
-            mr_ops.forge_time(n.get("updatedAt"))
-            for n in notes
-            if mine((n.get("author") or {}).get("login"))
-        ]
+        if t["id"] not in talk:
+            seen += [
+                mr_ops.forge_time(n.get("updatedAt"))
+                for n in notes
+                if mine((n.get("author") or {}).get("login"))
+            ]
         if notes and mine((notes[0].get("author") or {}).get("login")) and not t.get("isResolved"):
             first = notes[0]
             body = "\n".join(
@@ -672,10 +699,14 @@ class GhCli(mr_ops.CliWaits):
         selects those instead (no rollup)."""
         return await gq.read_pr(self._transport(repo), repo, target, checks=checks, fields=fields)
 
-    async def _bot_review(self, repo: Path, branch: str, bot: str) -> ReviewResult:
+    async def _bot_review(
+        self, repo: Path, branch: str, bot: str, *, replies: bool = False
+    ) -> ReviewResult:
         """`bot`'s latest review of the PR's current head, dismissed ones
         skipped: pending until there is one. Changes requested, or any inline comment, is actionable
-        -- one finding per comment; anything else is clean."""
+        -- one finding per comment; anything else is clean. With `replies`, a blank
+        `COMMENTED` review whose comments all answer another is the bot answering a
+        thread, not its review of the head: the one before it stands."""
         pr = await self._pr(repo, mr_ops.target(0, branch), checks=False)
         number, head = pr["number"], pr["headRefOid"]
         reviews = await self._paged(
@@ -692,15 +723,24 @@ class GhCli(mr_ops.CliWaits):
             # counts, so the bot's latest other review of this head stands.
             and r.get("state") not in ("PENDING", "DISMISSED")
         ]
-        if not mine:
+        for last in reversed(mine):
+            comments = await self._paged(
+                repo,
+                f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews/{last['id']}/comments",
+                pages=mr_ops.BOT_PAGES,
+                strict=True,
+            )
+            talk = (
+                replies
+                and comments
+                and last.get("state") == "COMMENTED"
+                and not str(last.get("body") or "").strip()
+                and all(c.get("in_reply_to_id") for c in comments)
+            )
+            if not talk:
+                break
+        else:
             return ReviewResult("pending", detail=f"waiting for {bot} to review {head[:7]}")
-        last = mine[-1]
-        comments = await self._paged(
-            repo,
-            f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews/{last['id']}/comments",
-            pages=mr_ops.BOT_PAGES,
-            strict=True,
-        )
         findings = tuple(
             f"{c.get('path')}:{c.get('line') or c.get('original_line')}: {c.get('body', '')}"
             for c in comments
@@ -712,11 +752,18 @@ class GhCli(mr_ops.CliWaits):
         return ReviewResult("clean", detail=f"{bot}: {last.get('state')}")
 
     async def reviewer_feedback(
-        self, *, repo: Path, branch: str, reviewers: Reviewers, since: datetime
+        self,
+        *,
+        repo: Path,
+        branch: str,
+        reviewers: Reviewers,
+        since: datetime,
+        kraft: facts.Kraft | None = None,
     ) -> list[ReviewerFeedback]:
         """What each of `reviewers` has said on the pull request, in order. The
         pull request, and for the bots its comments, reviews and threads, are
-        read once however many reviewers there are."""
+        read once however many reviewers there are. `kraft` leaves Kraft's
+        conversation out of the bots' activity (`_bot_feedback`)."""
         pr = await self._pr(repo, mr_ops.target(0, branch), checks=False)
         number, head = pr["number"], pr["headRefOid"]
         comments = reviews = threads = []
@@ -735,7 +782,7 @@ class GhCli(mr_ops.CliWaits):
             )
             threads = await self._threads(repo, number)
         return [
-            _bot_feedback(r, comments, reviews, threads, head, since)
+            _bot_feedback(r, comments, reviews, threads, head, since, kraft)
             if r.bot is not None
             else ReviewerFeedback(r, None, check=await self._check_feedback(repo, head, r.check))
             for r in reviewers

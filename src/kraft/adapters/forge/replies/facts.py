@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from typing import Literal
 
 from kraft.adapters.forge.models import ForgeNote
@@ -93,3 +94,24 @@ def note_by(
     if is_kraft_note(note, viewer=viewer, work_item_id=work_item_id, posted=posted or {}):
         return "kraft"
     return "bot" if is_bot_note(note, bots) else "person"
+
+
+@dataclass(frozen=True)
+class Kraft:
+    """What tells Kraft's notes from everyone else's on one work item: the login it
+    writes as (None when unknown) and the reply record's posted hashes. The
+    collection, the head wait and the posting gate all ask it, so they never
+    disagree."""
+
+    viewer: str | None
+    work_item_id: str
+    posted: Mapping[str, str]
+
+    def wrote(self, note: ForgeNote) -> bool:
+        return is_kraft_note(
+            note, viewer=self.viewer, work_item_id=self.work_item_id, posted=self.posted
+        )
+
+    def talks_in(self, notes: Iterable[ForgeNote]) -> bool:
+        """Whether Kraft has a note among `notes`: the thread is its conversation."""
+        return any(self.wrote(n) for n in notes)

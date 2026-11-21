@@ -366,7 +366,7 @@ class CliWaits:
         for r in reviewers:
             try:
                 results.append(
-                    await self._bot_review(repo, branch, r.bot)
+                    await self._bot_review(repo, branch, r.bot, replies=r.replies)
                     if r.bot is not None
                     else await self._check_review(repo, branch, r.check)
                 )

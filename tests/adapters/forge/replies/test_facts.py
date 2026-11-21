@@ -9,6 +9,7 @@ import pytest
 
 from kraft.adapters.forge.models import ForgeNote
 from kraft.adapters.forge.replies.facts import (
+    Kraft,
     body_hash,
     marker_of,
     note_by,
@@ -101,3 +102,11 @@ def test_a_marker_is_read_off_the_last_line_and_left_out_of_the_hash(body, inten
     assert marker_of(body) == intent
     assert without_marker(body) == bare
     assert body_hash(body) == hashlib.sha256(bare.encode()).hexdigest()
+
+
+def test_kraft_talks_in_a_thread_holding_its_note():
+    mine = _note(author="kraft-user", type_="User", body=SIGNED, id="N2", rest_id="2")
+    notes = (_note(), mine)
+
+    assert Kraft("kraft-user", ITEM, {"N2": body_hash(SIGNED)}).talks_in(notes)
+    assert not Kraft("kraft-user", ITEM, {"N2": body_hash("edited")}).talks_in(notes)

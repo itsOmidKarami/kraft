@@ -53,6 +53,7 @@ def decide(
     grace: timedelta,
     memory: dict,
     timed_out: bool,
+    kraft: facts.Kraft | None = None,
 ) -> Settled:
     """Whether every reviewer in `feedback` has finished with the head pushed
     at `since`.
@@ -62,7 +63,8 @@ def decide(
     in its set of unresolved threads since the last check, at `now`. The first
     check of a wait has no set to compare with: it stores the threads as the
     baseline and counts none of them, so last round's declined threads do not
-    end the wait early. At the timeout every reviewer counts as finished."""
+    end the wait early. At the timeout every reviewer counts as finished.
+    `kraft` (a bot with replies on) leaves Kraft's conversation out of it."""
     kept: dict = {}
     finished: dict[str, str | None] = {}
     wakes: list[datetime] = []
@@ -72,7 +74,7 @@ def decide(
             kept[key] = memory.get(key, {})
             finished[key] = "check" if (item.check or {}).get("finished") else None
         else:
-            activity, thread_ids = _activity(item, memory.get(key), since, now)
+            activity, thread_ids = _activity(item, memory.get(key), since, now, kraft)
             kept[key] = {
                 "activity_at": None if activity is None else activity.isoformat(),
                 "threads": thread_ids,
@@ -90,15 +92,25 @@ def decide(
         "settled",
         None,
         kept,
-        [_collected(item, finished[reviewer_key(item.reviewer)], bots) for item in feedback],
+        [_collected(item, finished[reviewer_key(item.reviewer)], bots, kraft) for item in feedback],
     )
 
 
+def _talks(thread: dict, kraft: facts.Kraft | None) -> bool:
+    return kraft is not None and kraft.talks_in(thread.get("notes", ()))
+
+
 def _activity(
-    item: ReviewerFeedback, prior: dict | None, since: datetime, now: datetime
+    item: ReviewerFeedback,
+    prior: dict | None,
+    since: datetime,
+    now: datetime,
+    kraft: facts.Kraft | None = None,
 ) -> tuple[datetime | None, list[str]]:
-    """The bot's latest activity at this check, and its thread ids to remember."""
-    thread_ids = sorted(t["id"] for t in item.threads)
+    """The bot's latest activity at this check, and its thread ids to remember. A
+    thread Kraft has posted in is left out of those ids, so the bot resolving it
+    is not activity."""
+    thread_ids = sorted(t["id"] for t in item.threads if not _talks(t, kraft))
     seen = [datetime.fromisoformat(prior["activity_at"])] if prior and prior["activity_at"] else []
     if item.last_activity is not None and item.last_activity > since:
         seen.append(item.last_activity)
@@ -107,13 +119,15 @@ def _activity(
     return max(seen, default=None), thread_ids
 
 
-def _note_json(note: ForgeNote, bots: list[str]) -> dict:
-    """One note as the triage reads it. No viewer and no record are passed until
-    the replies exist, so no note is `kraft` yet."""
+def _note_json(note: ForgeNote, bots: list[str], kraft: facts.Kraft | None = None) -> dict:
+    """One note as the triage reads it: `kraft` when Kraft wrote it, which only a
+    wait with a replies-on bot can tell (it alone reads the viewer and the record)."""
     return {
         "id": note.id,
         "author": note.author,
-        "by": facts.note_by(note, bots=bots),
+        "by": "kraft"
+        if kraft is not None and kraft.wrote(note)
+        else facts.note_by(note, bots=bots),
         "body": note.body,
         "created_at": note.created_at,
         "reply_to": note.reply_to,
@@ -121,7 +135,9 @@ def _note_json(note: ForgeNote, bots: list[str]) -> dict:
     }
 
 
-def _collected(item: ReviewerFeedback, how: str | None, bots: list[str]) -> dict:
+def _collected(
+    item: ReviewerFeedback, how: str | None, bots: list[str], kraft: facts.Kraft | None = None
+) -> dict:
     """One reviewer's entry in the collection the triage reads: only its newest
     comment and newest review, its unresolved threads (each with its notes and
     whose each is, `bots` being every configured bot), and a check that did not
@@ -140,7 +156,7 @@ def _collected(item: ReviewerFeedback, how: str | None, bots: list[str]) -> dict
         "threads": [
             {
                 **{k: v for k, v in t.items() if k != "notes"},
-                "notes": [_note_json(n, bots) for n in t.get("notes", ())],
+                "notes": [_note_json(n, bots, kraft) for n in t.get("notes", ())],
             }
             for t in item.threads
         ],

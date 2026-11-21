@@ -9,10 +9,12 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from support.bot_threads import kraft_note, note
 
 from kraft import events
 from kraft.adapters.forge import settle
 from kraft.adapters.forge.models import ForgeNote, ReviewerFeedback
+from kraft.adapters.forge.replies import facts
 from kraft.automated_review import BotReviewer, CheckReviewer
 from kraft.vocab import ForgeEvent
 
@@ -57,9 +59,15 @@ def mem(activity=None, threads=()) -> dict:
     }
 
 
-def decide(feedback, *, now, memory=None, timed_out=False):
+def decide(feedback, *, now, memory=None, timed_out=False, kraft=None):
     return settle.decide(
-        feedback, since=SINCE, now=at(now), grace=GRACE, memory=memory or {}, timed_out=timed_out
+        feedback,
+        since=SINCE,
+        now=at(now),
+        grace=GRACE,
+        memory=memory or {},
+        timed_out=timed_out,
+        kraft=kraft,
     )
 
 
@@ -139,6 +147,25 @@ def test_a_reviewer_settles(feedback, now, memory, timed_out, state, next_at, fi
 )
 def test_what_a_check_remembers_for_the_next(feedback, now, memory, key, expected):
     assert decide(feedback, now=now, memory=memory).memory[key] == expected
+
+
+@pytest.mark.parametrize(
+    "notes, activity",
+    [
+        ((note("N1", "x", "fix"), kraft_note("N2", "w1")), None),
+        ((note("N1", "x", "fix"),), at(40)),
+    ],
+    ids=["bot-resolved-a-kraft-thread", "bot-resolved-another-thread"],
+)
+def test_a_thread_kraft_posted_in_leaves_the_compared_set(notes, activity):
+    """The first check stores only the threads Kraft has not posted in, so the
+    bot resolving one Kraft answered is not activity."""
+    kraft = facts.Kraft("kraft-user", "w1", {})
+    first = decide([bot(threads=["T1"], notes=notes)], now=10, kraft=kraft)
+
+    second = decide([bot()], now=40, memory=first.memory, kraft=kraft)
+
+    assert second.memory["bot:x"]["activity_at"] == (activity and activity.isoformat())
 
 
 def test_only_the_latest_summary_of_a_kind_is_collected():
