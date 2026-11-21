@@ -1950,8 +1950,10 @@ origin: src/kraft/adapters/forge/mr.py §read_mr_meta -- an MR must still open w
 
 When the default chain's post-draft feedback moves the worktree base, the
 system SHALL restart at the verification node, so the rebased head is tested
-and reviewed again before the chain goes on.
-enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head, tests/templates/test_library.py::test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft
+and reviewed again before the chain goes on. It SHALL do so as well when that
+node parks or stops after the move, before it completes, and when the move is
+a workspace member's, whatever the root reports after it.
+enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[completes], tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[parks-on-the-review-wait], tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[rate-limited], tests/templates/test_workspace_publication.py::test_a_members_conflict_is_rebased_onto_its_own_origin[a-declared-restart-re-verifies-it-past-a-root-still-waiting-ci_poll], tests/templates/test_library.py::test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft
 origin: config/chains/default.yaml -- Kraft-bjw6a. `merge_request_feedback` declares `on_base_changed: {restart_from: verification}`, since its CI-conflict path force-rebases. `merge`'s own conflict rebase is not declared: without a declaration it re-checks CI on the rebased head itself, and a restart from there would cross `final_review`.
 
 ## REQ an-undeclared-conflict-rebase-waits-for-the-rebased-heads-ci
@@ -1971,7 +1973,7 @@ with the reason `base_changed`; the restarted walk SHALL pass over each other on
 after an explicit conflict handler resolved a rebase conflict SHALL reopen every
 approved gate in its span, whether the conflict arose inside the walk or when
 `/retry` or `/resume` refreshed the worktree.
-enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head, tests/executor/test_base_change.py::test_a_clean_restart_passes_every_approved_gate_in_its_span[approved], tests/executor/test_base_change.py::test_a_clean_restart_passes_every_approved_gate_in_its_span[a-refused-rewind], tests/executor/test_base_change.py::test_a_clean_restart_passes_every_approved_gate_in_its_span[but-the-final-gate], tests/executor/test_base_change.py::test_a_resolved_conflict_reopens_the_approved_gates_in_its_span, tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler[retry], tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler[resume]
+enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[completes], tests/executor/test_base_change.py::test_a_clean_restart_passes_every_approved_gate_in_its_span[approved], tests/executor/test_base_change.py::test_a_clean_restart_passes_every_approved_gate_in_its_span[a-refused-rewind], tests/executor/test_base_change.py::test_a_clean_restart_passes_every_approved_gate_in_its_span[but-the-final-gate], tests/executor/test_base_change.py::test_a_resolved_conflict_reopens_the_approved_gates_in_its_span, tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler[retry], tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler[resume]
 origin: src/kraft/executor/walk.py §_restart_for_base_change -- Omid's decision: a clean rebase, the forge's forced rebase included, changes nothing a gate saw; a resolved conflict changed code no gate saw, so a human approves again. Distinct from `retry-reopens-invalidated-gates`: a restart is the walk's answer to a moved base, not an operator's retry.
 
 ## REQ optional-pre-draft-gate-keeps-work-local

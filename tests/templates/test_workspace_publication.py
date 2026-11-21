@@ -252,21 +252,29 @@ def _base_ref(database, row) -> str | None:
 
 @pytest.mark.parametrize("handler", ["ci_poll", "merge"])
 @pytest.mark.parametrize(
-    ("bounce", "expected"),
-    [(True, "base_moved"), (False, "waiting")],
-    ids=["a-declared-restart-re-verifies-it", "undeclared-it-waits-for-the-rebased-heads-ci"],
+    ("bounce", "root_source", "expected"),
+    [(True, False, "base_moved"), (False, False, "waiting"), (True, True, "base_moved")],
+    ids=[
+        "a-declared-restart-re-verifies-it",
+        "undeclared-it-waits-for-the-rebased-heads-ci",
+        "a-declared-restart-re-verifies-it-past-a-root-still-waiting",
+    ],
 )
 async def test_a_members_conflict_is_rebased_onto_its_own_origin(
-    database, run_dirs, tmp_path, monkeypatch, handler, bounce, expected
+    database, run_dirs, tmp_path, monkeypatch, handler, bounce, root_source, expected
 ):
     """Kraft-puqxq: a member's conflict rebase reads the member's own origin
     and default branch, never the root's, though dispatch hands the forge
     node the root's source repository as `orig_repo`. The item's `base_ref`
     is the root's, so the member's move is reported as one instead of being
-    written there. Kraft-tx0dz: a node with no base-change restart to
-    re-verify the rebased head waits for that head's own CI instead -- the
-    pipeline here still answers for the head before the rebase."""
-    row, worktree, _ = await _publishable(database, run_dirs, tmp_path, pointer="ignore")
+    written there -- whatever the root reports after it: a root with changes
+    of its own is read after its members, and its pipeline here is for another
+    head, so it is still waiting. Kraft-tx0dz: a node with no base-change
+    restart to re-verify the rebased head waits for that head's own CI
+    instead -- the pipeline here still answers for the head before the rebase."""
+    row, worktree, _ = await _publishable(
+        database, run_dirs, tmp_path, pointer="ignore", root_source=root_source
+    )
     (tmp_path / "pkg" / "moved.txt").write_text("landed meanwhile\n")
     git(tmp_path / "pkg", "add", "moved.txt")
     git(tmp_path / "pkg", "commit", "-qm", "the member's main moves")
