@@ -115,13 +115,34 @@ def _moves_base_once(it):
     return effect
 
 
+@pytest.mark.parametrize(
+    ("plan", "parks", "before"),
+    [
+        ({}, None, ["await_review", "triage", "await_ci"]),
+        # Pushing the rebased head failed: `on_failure` repairs and pushes it,
+        # and the node's re-measure parks on the review of that head.
+        (
+            {"await_ci": ["failed", "done"], "await_review": ["done", "waiting", "done"]},
+            "waiting",
+            ["await_review", "triage", "await_ci", "repair_feedback", "sync_mr", "await_review"],
+        ),
+        # Pushing the rebased head was rate-limited.
+        (
+            {"await_ci": ["rate_limited", "done"]},
+            "rate_limited",
+            ["await_review", "triage", "await_ci"],
+        ),
+    ],
+    ids=["completes", "parks-on-the-review-wait", "rate-limited"],
+)
 async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head(
-    item_on, script, default_chain
+    item_on, script, default_chain, plan, parks, before
 ):
     """Kraft-bjw6a. A CI conflict rebased away moves the base, and
     `merge_request_feedback` declares `on_base_changed: {restart_from:
     verification}`, so the rebased head is tested and reviewed again before
-    anything reads it as green.
+    anything reads it as green -- also when the node parks after the move and
+    its poller walks it again from its cursor.
 
     The rebase was clean -- the forge's forced rebase succeeds only with no
     textual conflict -- so the approved `local_review` in the restart span keeps
@@ -130,13 +151,17 @@ async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased
     test_base_change.py::test_a_resolved_conflict_reopens_the_approved_gates_in_its_span."""
     it = await item_on(default_chain, "merge_request_feedback")
     await approve(it, "local_review")
+    script.plan = plan
     script.effects = {"await_ci": _moves_base_once(it)}
 
-    assert await _walk(it, default_chain, "merge_request_feedback") == "awaiting_gate"
+    walked = await _walk(it, default_chain, "merge_request_feedback")
+    if parks:
+        assert walked == parks
+        await it.database.write(lambda c: store.mark_reentered(c, it.id))  # what its poller does
+        walked = await walk_once(it, POLICY)
+    assert walked == "awaiting_gate"
     assert script.calls == [
-        "await_review",
-        "triage",
-        "await_ci",
+        *before,
         "test_changed_scopes",
         "code_review",
         "author",

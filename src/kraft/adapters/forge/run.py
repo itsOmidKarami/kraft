@@ -2959,7 +2959,8 @@ async def run_task(
         forge_error=forge_error,
     )
     # A member's move is a base change `base_ref` cannot show: report it, as
-    # `builtins.mr_rebase` does, so the node's declared span re-verifies it.
+    # `builtins.mr_rebase` does, so the node's declared span re-verifies it --
+    # whatever the targets after it reported, or the move is never seen again.
     from kraft.executor.context import (  # the executor imports this module
         BASE_MOVED,
         CHECKOUT_REFUSED,
@@ -2973,7 +2974,7 @@ async def run_task(
         return LANDED_UNREVIEWED
     if unreviewed:
         return UNREVIEWED_HEAD
-    return BASE_MOVED if (moved and has_rebase_bounce and recorded == "done") else recorded
+    return BASE_MOVED if (moved and has_rebase_bounce) else recorded
 
 
 async def _observed(
