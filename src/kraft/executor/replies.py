@@ -89,6 +89,17 @@ def repair_replies(result_path, threads: Collection[str]) -> dict[str, str]:
     return out
 
 
+def summary_replies(result_path, reviewers: Collection[str]) -> list[dict]:
+    """The triage's one-line declines of top-level comments, each naming a reviewer
+    of the collection (`bot:LOGIN`)."""
+    return [
+        # One line each: a body with a line break would render as another bot's bullet.
+        {"reviewer": r["reviewer"], "body": " ".join(r["body"].split())}
+        for r in _rows(_result(result_path), "summary_replies")
+        if r.get("reviewer") in reviewers and _text(r)
+    ]
+
+
 def _own(node) -> list:
     """The node's own tasks: never its recovery's or its fix loop's."""
     return [t for step in node.steps for t in step.tasks]
@@ -433,8 +444,16 @@ class _Point:
             for cyc, tid, _, text, verdict in self.fix_candidates(completing)
         )
 
+    def _summary_keys(self, latest) -> set[str]:
+        """The reviewers of the latest triage's collection that take replies."""
+        coll = prompts.collection(self.run_dirs, self.wid, latest["id"])
+        return {r.get("reviewer") for r in coll.get("reviewers") or () if r.get("replies")}
+
     def summary_wanted(self) -> bool:
-        return False  # part 2b: the summary comment
+        latest = self.latest()
+        keys = self._summary_keys(latest) if latest else set()
+        lines = summary_replies(latest["result_path"], keys) if latest else []
+        return bool(lines) or any(i.payload.get("op") == "summary" for i in self.intents().values())
 
     def write_report(self, path: Path) -> None:
         pass  # part 2b: the reply report
@@ -460,7 +479,11 @@ class _Point:
         await self.reconcile()
         await self.triage_replies()
         await self.fix_replies(completing)
-        # Part 2b adds, at completion, self.summary().
+        if completing:
+            try:
+                await self.summary()
+            except ForgeError as exc:  # the comment waits; the report says nothing posted
+                logger.info("summary comment waits: %s", exc)
 
     async def account(self) -> str:
         """Writes are spaced per forge account: an API account's name, else the
@@ -537,6 +560,107 @@ class _Point:
             repo=self.worktree, branch=self.branch, thread_id=tid
         )
         return self._threads[tid]
+
+    async def summary(self) -> None:
+        """At completion, from the latest triage on the current head: one comment
+        for the top-level declines of bots with replies on, created or edited in
+        place, found only by its marker on the viewer's comment."""
+        latest = self.latest()
+        if latest is None or await self.stale(latest) is not None:
+            return  # no triage judged this head: the comment stays as it is
+        coll = prompts.collection(self.run_dirs, self.wid, latest["id"])
+        keys = self._summary_keys(latest)
+        notes = [
+            s.get("body") or ""
+            for r in coll.get("reviewers") or ()
+            if r.get("reviewer") in keys
+            for s in r.get("summaries") or ()
+        ]
+        kept = []
+        for line in summary_replies(latest["result_path"], keys):
+            refused = await body.check(
+                line["body"],
+                quotes=body.RepoQuotes(self.worktree, latest["head_sha"], notes),
+                secrets=self.secrets,
+            )
+            if refused is None:
+                kept.append(line)
+            else:
+                self.notes.append(
+                    {
+                        **self.where(None),
+                        "reviewer": line["reviewer"],
+                        "kind": "summary",
+                        "outcome": "refused",
+                        "why": f"body: {refused.why}",
+                    }
+                )
+        comments = await self.forge.mr_comments(repo=self.worktree, branch=self.branch)
+        mine = [
+            n
+            for n in comments
+            if same_login(n.author, self.viewer) and facts.has_summary_marker(n.body, self.wid)
+        ]
+        held = self.intents()
+        posted_before = any(
+            i.payload.get("op") == "summary" and i.state == "posted" for i in held.values()
+        )
+        if not mine and posted_before:
+            self.notes.append(
+                {
+                    **self.where(None),
+                    "kind": "summary",
+                    "outcome": "deleted",
+                    "why": "someone deleted it; not posted again",
+                }
+            )
+            return
+        if not kept and not mine:
+            return
+        head = latest["head_sha"]
+        text = "\n".join(
+            f"- {line['reviewer'].removeprefix('bot:')}: {line['body']}" for line in kept
+        )
+        rendered = body.render(
+            text or "Nothing is declined.",
+            lead=f"Declined review-bot comments on {head[:7]}:",
+            work_item_id=self.wid,
+            marker=facts.summary_marker(self.wid),
+        )
+        if mine and facts.body_hash(mine[0].body) == facts.body_hash(rendered):
+            return
+        intent = await self.intend(
+            {
+                "op": "summary",
+                "run": self.run_seq,
+                "head": head,
+                "body_sha256": facts.body_hash(rendered),
+            },
+            {
+                "op": "summary",
+                "thread": None,
+                "kind": "summary",
+                "head": head,
+                "round": latest["round"],
+                "session": latest["id"],
+            },
+            lambda _iid: rendered,
+        )
+
+        async def check(_intent):
+            if self._mr is None or self._mr.state != "open":
+                return ("refused", "mr_not_open")
+            return None
+
+        async def write():
+            return await self.forge.upsert_comment(
+                repo=self.worktree,
+                branch=self.branch,
+                note_id=mine[0].rest_id if mine else None,
+                body=rendered,
+            )
+
+        await self.pp.send(intent, gate=check, write=write)
 
     def where(self, tid: str | None) -> dict:
         """A report entry's thread fields, from the latest triage's collection."""

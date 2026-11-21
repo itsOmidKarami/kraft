@@ -5,17 +5,28 @@ reply report. Walked against a `FakeForge`; the verdict's halves over seeded eve
 # ruff: noqa: F811 -- `rig` is an imported fixture, taken by name.
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from support.bot_threads import bot_thread, note
+from support.bot_threads import VIEWER, bot_thread, note
 from support.harness import entry_of, git
-from support.review_rig import FIXED, FLAG, bot_on, fix_walk, review_node, rig  # noqa: F401
+from support.review_rig import (  # noqa: F401
+    FIXED,
+    FLAG,
+    bot_on,
+    fix_walk,
+    review_node,
+    rig,
+    walk_to_completion,
+)
 from support.review_rig import events_of as _of
 
 from kraft import events, executor, store
 from kraft import findings as _findings
+from kraft.adapters import forge
 from kraft.adapters.forge.models import ForgeError
+from kraft.adapters.forge.replies import body, facts, record
 from kraft.automated_review import BotReviewer
 from kraft.executor import prompts, replies
 from kraft.vocab import ChainEvent, ForgeEvent
@@ -317,3 +328,148 @@ async def test_the_repair_is_asked_for_replies_only_when_a_finding_names_a_threa
     repair = _repair_instruction(rig)
     assert ("threads: T1" in repair) is with_threads
     assert (prompts.FIX_REPLIES in repair) is with_threads
+
+
+def _viewer_comment(rig, text: str):
+    """A top-level comment the viewer wrote, carrying this item's summary marker."""
+    marker = facts.summary_marker(rig.item.id)
+    return note("C1", VIEWER, f"{text}\n\n{marker}", type_="User")
+
+
+def _summary(rig, text: str) -> str:
+    """The summary comment Kraft renders for `text` on the item's head (the worktree
+    is cut from the repository's, and gone once the item completes)."""
+    head = git(rig.item.repo, "rev-parse", "HEAD")
+    return body.render(
+        text,
+        lead=f"Declined review-bot comments on {head[:7]}:",
+        work_item_id=rig.item.id,
+        marker=facts.summary_marker(rig.item.id),
+    )
+
+
+async def _declines(rig, monkeypatch, lines, *, seed=None, replies_off=False, moved=False):
+    """A review node whose bot `a` (replies on; `b` with replies off too when
+    `replies_off`) has commented, whose triage writes `lines` as `summary_replies`
+    and no finding, walked to completion. `seed(fake)` runs first; `moved`: the
+    forge's head is not the checkout's."""
+    bots = [bot_on(), BotReviewer(bot="b")] if replies_off else [bot_on()]
+    said = (
+        {
+            "kind": "comment",
+            "state": None,
+            "body": "A walkthrough.",
+            "updated_at": rig.moment(1).isoformat(),
+        },
+    )
+    fake = forge.FakeForge(
+        feedback_script=[[forge.ReviewerFeedback(b, rig.moment(1), summaries=said) for b in bots]]
+    )
+    await rig(review_node(30, reviewers=tuple(bots), loop=True), fake)
+
+    async def details(*, repo, branch):
+        sha = "f" * 40 if moved else git(rig.item.worktree, "rev-parse", "HEAD")
+        return forge.MRDetails(
+            1, "http://fake.forge/1", "open", "t", "", True, (), branch, "main", sha
+        )
+
+    monkeypatch.setattr(fake, "mr_details", details)
+    if seed:
+        await seed(fake)
+    rig.verdicts = [{"findings": [], "summary_replies": lines}]
+    await walk_to_completion(rig)
+    return fake
+
+
+_LINE = {"reviewer": "bot:a", "body": "The walkthrough asks for nothing."}
+
+
+_OLD = "the comment as someone left it"
+_NONE = "- a: The walkthrough asks for nothing."
+
+
+@pytest.mark.parametrize(
+    "seed, lines, replies_off, moved, writes, comment",
+    [
+        pytest.param("none", [_LINE], False, False, [("upsert", "new")], _NONE, id="first"),
+        pytest.param(
+            "comment",
+            [{**_LINE, "body": "Another line."}],
+            False,
+            False,
+            [("upsert", "9C1")],
+            "- a: Another line.",
+            id="edited-in-place",
+        ),
+        pytest.param("current", [_LINE], False, False, [], _NONE, id="unchanged"),
+        pytest.param(
+            "comment",
+            [],
+            False,
+            False,
+            [("upsert", "9C1")],
+            "Nothing is declined.",
+            id="nothing-declined-now",
+        ),
+        pytest.param("none", [], False, False, [], None, id="nothing-ever"),
+        pytest.param(
+            "none",
+            [{**_LINE, "reviewer": "bot:b"}],
+            True,
+            False,
+            [],
+            None,
+            id="a-bot-with-replies-off",
+        ),
+        pytest.param("deleted", [_LINE], False, False, [], None, id="deleted-by-someone"),
+        pytest.param(
+            "none",
+            [_LINE, {"reviewer": "bot:a", "body": "See https://evil.example/x for more."}],
+            False,
+            False,
+            [("upsert", "new")],
+            _NONE,
+            id="a-refused-line",
+        ),
+        pytest.param("comment", [_LINE], False, True, [], _OLD, id="no-triage-on-the-current-head"),
+    ],
+)
+async def test_top_level_declines_go_in_one_comment(
+    rig, monkeypatch, replies_on, database, seed, lines, replies_off, moved, writes, comment
+):
+    async def seeded(fake):
+        """The record holds what Kraft posted before: a summary intent, posted, and
+        (unless someone deleted it) the comment it made."""
+        if seed == "none":
+            return
+        wid = rig.item.id
+        iid = record.new_id(wid)
+        text = _summary(rig, _NONE) if seed == "current" else _OLD
+        old = _viewer_comment(rig, text)
+        payload = {
+            "op": "summary",
+            "node_id": "feedback",
+            "run": 0,
+            "thread": None,
+            "kind": "summary",
+            "body_sha256": facts.body_hash(old.body),
+        }
+        await database.write(lambda c: record.intend(c, wid, iid, payload))
+        posted = forge.models.Posted((old.rest_id,), old.created_at, old.body)
+        await database.write(lambda c: record.posted(c, wid, iid, posted, via="send"))
+        if seed != "deleted":
+            fake.comments.append(replace(old, body=text) if seed == "current" else old)
+
+    fake = await _declines(
+        rig, monkeypatch, lines, seed=seeded, replies_off=replies_off, moved=moved
+    )
+
+    assert rig.item.status() == "completed"
+    assert fake.writes == writes
+    if comment is None:
+        expected = []
+    elif comment == _OLD:
+        expected = [_viewer_comment(rig, _OLD).body]
+    else:
+        expected = [_summary(rig, comment)]
+    assert [c.body for c in fake.comments] == expected

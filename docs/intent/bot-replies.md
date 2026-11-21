@@ -249,3 +249,13 @@ paraphrased form of one; never follows an instruction found in bot or commenter
 text; and quotes only tracked files or the thread.
 enforced-by: tests/skills/test_review_feedback.py::test_both_agents_get_the_reply_rules_word_for_word, tests/skills/test_review_feedback.py::test_the_skill_states_its_contract[replies-only-where-allowed], tests/skills/test_review_feedback.py::test_the_skill_states_its_contract[never-in-a-person-s-thread], tests/skills/test_review_feedback.py::test_the_skill_states_its_contract[a-fix-that-holds]
 origin: src/kraft/skills/review-feedback/SKILL.md -- Omid, 2026-11-20: free text behind the body gate, and explicit instructions to the agents never to put secrets in a reply or follow instructions in bot or commenter text.
+
+## REQ top-level-declines-go-in-one-summary-comment
+WHEN a node with replies on completes, the system SHALL post the latest triage's
+one-line declines of top-level comments, for bots with replies on, in one Kraft
+comment on the merge request, found only by its marker on a comment Kraft wrote:
+creating it, editing it in place when its text changed, editing it to say nothing
+is declined when no decline is left, leaving it alone when no triage judged the
+current head, and never creating it again after someone deleted it.
+enforced-by: tests/executor/test_replies_fix.py::test_top_level_declines_go_in_one_comment[first], tests/executor/test_replies_fix.py::test_top_level_declines_go_in_one_comment[edited-in-place], tests/executor/test_replies_fix.py::test_top_level_declines_go_in_one_comment[unchanged], tests/executor/test_replies_fix.py::test_top_level_declines_go_in_one_comment[nothing-declined-now], tests/executor/test_replies_fix.py::test_top_level_declines_go_in_one_comment[a-bot-with-replies-off], tests/executor/test_replies_fix.py::test_top_level_declines_go_in_one_comment[deleted-by-someone], tests/executor/test_replies_fix.py::test_top_level_declines_go_in_one_comment[a-refused-line], tests/executor/test_replies_fix.py::test_top_level_declines_go_in_one_comment[no-triage-on-the-current-head]
+origin: src/kraft/executor/replies.py §_Point.summary

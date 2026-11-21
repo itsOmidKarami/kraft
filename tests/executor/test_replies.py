@@ -86,6 +86,27 @@ def test_the_repair_s_replies_are_read_per_thread(tmp_path, content, read):
     assert replies.repair_replies(path, _COLLECTED) == read
 
 
+@pytest.mark.parametrize(
+    "content, read",
+    [
+        (
+            {"summary_replies": [{"reviewer": "bot:a", "body": "Asks for nothing."}]},
+            [{"reviewer": "bot:a", "body": "Asks for nothing."}],
+        ),
+        ({"summary_replies": [{"reviewer": "bot:z", "body": "Asks for nothing."}]}, []),
+        ({"summary_replies": [{"reviewer": "bot:a", "body": " "}]}, []),
+        (
+            {"summary_replies": [{"reviewer": "bot:a", "body": "a\n- bot:b: c"}]},
+            [{"reviewer": "bot:a", "body": "a - bot:b: c"}],
+        ),
+    ],
+    ids=["a-bot", "another-reviewer", "blank", "two-lines"],
+)
+def test_top_level_declines_name_a_collected_bot(tmp_path, content, read):
+    path = write(tmp_path, "result.json", json.dumps(content))
+    assert replies.summary_replies(path, {"bot:a"}) == read
+
+
 # --- the posting points -----------------------------------------------------------
 
 _DECLINE = {"thread": "T1", "kind": "declined", "body": "The caller reads it, so it stays."}
