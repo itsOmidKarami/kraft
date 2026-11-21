@@ -10,9 +10,10 @@ from pathlib import Path
 import pytest
 from support.bot_threads import VIEWER, bot_thread, kraft_note, note
 from support.harness import entry_of, git, write
-from support.review_rig import review_node, rig  # noqa: F401 -- the fixture
+from support.review_rig import bot_on, filed, review_node, rig  # noqa: F401 -- the fixture
+from support.review_rig import events_of as _of
 
-from kraft import events, executor, store, waits
+from kraft import events, executor, store
 from kraft.adapters import forge
 from kraft.adapters.forge.models import ForgeError
 from kraft.adapters.forge.replies import facts
@@ -66,42 +67,28 @@ def test_the_triage_s_replies_are_read_only_for_collected_threads(tmp_path, cont
     assert replies.triage_replies(path, _COLLECTED) == read
 
 
+@pytest.mark.parametrize(
+    "content, read",
+    [
+        ({"replies": [{"thread": "T1", "body": "Renamed it."}]}, {"T1": "Renamed it."}),
+        ({"replies": [{"thread": "T9", "body": "Renamed it."}]}, {}),
+        ({"replies": [{"thread": "T1", "body": "  "}]}, {}),
+        (
+            {"replies": [{"thread": "T1", "body": "First."}, {"thread": "T1", "body": "Second."}]},
+            {"T1": "First."},
+        ),
+        ({"replies": "x"}, {}),
+    ],
+    ids=["one", "not-a-thread", "blank", "second-for-a-thread", "not-a-list"],
+)
+def test_the_repair_s_replies_are_read_per_thread(tmp_path, content, read):
+    path = write(tmp_path, "result.json", json.dumps(content))
+    assert replies.repair_replies(path, _COLLECTED) == read
+
+
 # --- the posting points -----------------------------------------------------------
 
 _DECLINE = {"thread": "T1", "kind": "declined", "body": "The caller reads it, so it stays."}
-
-
-def _bot_on():
-    return BotReviewer(bot="a", replies=True)  # the test takes `replies_on`
-
-
-async def _filed(
-    rig, monkeypatch, *threads, bot=None, loop=True, reads=True, watch_ci=False, **fake
-):
-    """The review node with a fix loop, filed on a fake whose bot `a` (replies on)
-    has `threads` open, and whose merge request is open at the checkout's head."""
-    raw = [r for r, _ in threads]
-    bot = bot or _bot_on()
-    fake = forge.FakeForge(
-        feedback_script=[[forge.ReviewerFeedback(bot, rig.moment(1), threads=tuple(raw))]],
-        threads={t.id: t for _, t in threads},
-        **fake,
-    )
-    node = review_node(30, reviewers=(bot,), loop=loop, reads=reads, watch_ci=watch_ci)
-    await rig(node, fake)
-
-    async def details(*, repo, branch):
-        head = git(rig.item.worktree, "rev-parse", "HEAD")
-        return forge.MRDetails(
-            1, "http://fake.forge/1", "open", "t", "", True, (), branch, "main", head
-        )
-
-    monkeypatch.setattr(fake, "mr_details", details)
-    if watch_ci:
-        # The watching wait pushes, on the real clock; the head's own date is where
-        # the frozen one starts, so the bot's activity is read against that.
-        monkeypatch.setattr(waits, "pushed_at", lambda *_, **__: None)
-    return fake
 
 
 def _ci(parks: int) -> dict:
@@ -131,16 +118,12 @@ def _t1():
     return bot_thread("T1", note("N1", "a", "fix"))
 
 
-def _of(rig, *types) -> list[dict]:
-    return [e for e in rig.item.events() if e["type"] in types]
-
-
 def _marked(thread) -> list:
     return [n for n in thread.notes if facts.marker_of(n.body)]
 
 
 async def test_replies_off_posts_nothing_and_asks_the_forge_nothing(rig, monkeypatch):
-    fake = await _filed(rig, monkeypatch, _t1(), bot=BotReviewer(bot="a"))
+    fake = await filed(rig, monkeypatch, _t1(), bot=BotReviewer(bot="a"))
     # An agent that ignores the skill: replies are off, so nothing reads them.
     rig.verdicts = [{"findings": [], "replies": [_DECLINE]}]
     asked = []
@@ -165,7 +148,7 @@ async def test_replies_off_posts_nothing_and_asks_the_forge_nothing(rig, monkeyp
 
 
 async def test_a_triage_reply_is_posted_once_across_wakes(rig, monkeypatch, replies_on):
-    fake = await _filed(rig, monkeypatch, _t1(), **_ci(2))
+    fake = await filed(rig, monkeypatch, _t1(), **_ci(2))
     rig.verdicts = [{"findings": [], "replies": [_DECLINE]}]
 
     walked = []
@@ -295,7 +278,7 @@ async def test_a_triage_reply_is_refused_or_superseded(
 ):
     """Each change lands after the bots were read, before the reply's posting point;
     the last four after a first posting point that could not read the thread."""
-    fake = await _filed(rig, monkeypatch, _t1(), **_ci(1))
+    fake = await filed(rig, monkeypatch, _t1(), **_ci(1))
     later = how(rig, fake, monkeypatch) if how is not None else None
     rig.verdicts = [{"findings": [], "replies": [reply]}]
 
@@ -397,7 +380,7 @@ async def test_a_pending_reply_is_posted_at_each_posting_point_that_walk_reaches
     the reply went at the posting point its walk reaches, with (`only_at_completion`)
     every one before the completion's posting nothing, as an unreadable viewer does:
     the next point tries again."""
-    fake = await _filed(rig, monkeypatch, _t1(), **fake_kw)
+    fake = await filed(rig, monkeypatch, _t1(), **fake_kw)
     rig.verdicts = list(verdicts)
     point, at_write = replies._Point.post, []
 
@@ -437,7 +420,7 @@ async def test_replies_have_no_effect_where_nothing_can_act(
 ):
     shape = dict(shape)
     threads = shape.pop("threads", (_t1(),))
-    fake = await _filed(rig, monkeypatch, *threads, viewer_login=viewer, **shape)
+    fake = await filed(rig, monkeypatch, *threads, viewer_login=viewer, **shape)
     # Only work reads the viewer.
     rig.verdicts = [{"findings": [], "replies": [_DECLINE]}]
 
@@ -454,7 +437,7 @@ async def _seeded(item_on, run_dirs, *sessions):
     filed with `item_on`, and each `(sid, head, status, reply)` seeded as a
     triage session. A session with a `reply` gets a result file holding it and a
     one-thread collection (T1, bot `a`) in its `bot_feedback.json`."""
-    it = await item_on([review_node(30, reviewers=(_bot_on(),), loop=True)])
+    it = await item_on([review_node(30, reviewers=(bot_on(),), loop=True)])
     for sid, head, status, reply in sessions:
         _, _, result = await it.session(
             sid, "feedback.review_feedback.triage", status, head_sha=head
@@ -564,7 +547,7 @@ async def test_posting_point_has_no_effect_on_a_multi_repo_item_or_with_no_forge
 async def test_an_unreadable_viewer_posts_nothing_until_it_reads(
     rig, monkeypatch, caplog, replies_on
 ):
-    fake = await _filed(
+    fake = await filed(
         rig, monkeypatch, _t1(), viewer_login=ForgeError("x (HTTP 503)", status=503), **_ci(1)
     )
     rig.verdicts = [{"findings": [], "replies": [_DECLINE]}]
@@ -604,7 +587,7 @@ def _story(rig) -> list[tuple]:
 async def test_a_lost_write_is_reconciled_not_sent_again(rig, monkeypatch, replies_on):
     """The reply goes at the verdict's posting point and its answer is lost; the
     completion's posting point, the next on that head, finds it."""
-    fake = await _filed(rig, monkeypatch, _t1(), write_script=[forge.models.LOST])
+    fake = await filed(rig, monkeypatch, _t1(), write_script=[forge.models.LOST])
     rig.verdicts = [{"findings": [], "replies": [_DECLINE]}]
 
     assert await _walk(rig) == "completed"
@@ -621,7 +604,7 @@ async def test_a_lost_write_is_reconciled_not_sent_again(rig, monkeypatch, repli
 
 
 async def test_a_late_copy_of_an_unclear_write_is_deleted(rig, monkeypatch, replies_on):
-    fake = await _filed(rig, monkeypatch, _t1(), write_script=[forge.models.LOST], **_ci(2))
+    fake = await filed(rig, monkeypatch, _t1(), write_script=[forge.models.LOST], **_ci(2))
     rig.verdicts = [{"findings": [], "replies": [_DECLINE]}]
     late = []
 
@@ -642,7 +625,7 @@ async def test_a_late_copy_of_an_unclear_write_is_deleted(rig, monkeypatch, repl
 
 
 async def test_a_reply_never_goes_beside_a_finding_on_the_same_thread(rig, monkeypatch, replies_on):
-    fake = await _filed(rig, monkeypatch, _t1())
+    fake = await filed(rig, monkeypatch, _t1())
     finding = {
         "severity": "important",
         "message": "rename x",
@@ -661,7 +644,7 @@ async def test_a_reply_never_goes_beside_a_finding_on_the_same_thread(rig, monke
 
 
 async def test_the_thread_moved_since_the_triage_read_it(rig, monkeypatch, replies_on):
-    fake = await _filed(rig, monkeypatch, _t1())
+    fake = await filed(rig, monkeypatch, _t1())
     rig.verdicts = [{"findings": [], "replies": [_DECLINE]}]
     triaged = dispatch._launch_agent
 

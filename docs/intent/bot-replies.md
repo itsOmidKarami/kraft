@@ -224,3 +224,18 @@ clean measure, a judge's downgrade), since a reply unposted at completion is
 dropped.
 enforced-by: tests/executor/test_replies.py::test_a_triage_reply_is_posted_once_across_wakes, tests/executor/test_replies.py::test_a_lost_write_is_reconciled_not_sent_again, tests/executor/test_replies.py::test_a_late_copy_of_an_unclear_write_is_deleted, tests/executor/test_replies.py::test_a_pending_reply_is_posted_at_each_posting_point_that_walk_reaches[after-the-on-failure-repair-and-before-the-fix-cycle], tests/executor/test_replies.py::test_a_pending_reply_is_posted_at_each_posting_point_that_walk_reaches[the-repair-settles-it-and-the-node-completes], tests/executor/test_replies.py::test_a_pending_reply_is_posted_at_each_posting_point_that_walk_reaches[the-judge-downgrades-what-is-left]
 origin: src/kraft/executor/replies.py §_Point.intend
+
+## REQ a-fix-reply-is-posted-only-once-confirmed
+WHEN a fix cycle's repair writes a reply for a review-bot thread, the system
+SHALL post "Fixed in" only once the latest triage on the cycle's commit saw the
+thread and wrote nothing for it, none of its findings has the finding's identity,
+the commit changed the thread's file, the commit is both the newest push since
+the cycle and the forge's head of an open merge request, the thread is still
+collected, no later fix cycle started, and no "Fixed in" went to that thread for
+that finding before; it SHALL wait while the commit is unpushed or no triage ran
+on it, SHALL supersede the reply otherwise, including when the node completes
+with it unconfirmed or unpushed, and SHALL post the triage's reply instead when
+that triage wrote one in the thread. With replies off, a finding SHALL carry no
+thread and the fix loop SHALL be as before.
+enforced-by: tests/executor/test_replies_fix.py::test_the_fix_verdict[confirmed], tests/executor/test_replies_fix.py::test_the_fix_verdict[another-head-pushed-since], tests/executor/test_replies_fix.py::test_the_fix_verdict[not-pushed-yet], tests/executor/test_replies_fix.py::test_the_fix_verdict[not-pushed-at-completion], tests/executor/test_replies_fix.py::test_the_fix_verdict[a-later-cycle], tests/executor/test_replies_fix.py::test_the_fix_verdict[no-triage-on-the-commit-yet], tests/executor/test_replies_fix.py::test_the_fix_verdict[unconfirmed-at-completion], tests/executor/test_replies_fix.py::test_the_fix_verdict[left-the-collection], tests/executor/test_replies_fix.py::test_the_fix_verdict[a-bogus-same-as], tests/executor/test_replies_fix.py::test_a_fix_reply_waits_for_the_triage_on_its_commit[the-merge-request-closed], tests/executor/test_replies_fix.py::test_threads_from_a_replies_off_bot_change_nothing, tests/executor/test_replies_fix.py::test_a_fix_reply_waits_for_the_triage_on_its_commit[confirmed], tests/executor/test_replies_fix.py::test_a_fix_reply_waits_for_the_triage_on_its_commit[raised-again], tests/executor/test_replies_fix.py::test_a_fix_reply_waits_for_the_triage_on_its_commit[the-same-finding-without-its-thread], tests/executor/test_replies_fix.py::test_a_fix_reply_waits_for_the_triage_on_its_commit[the-triage-replied-instead], tests/executor/test_replies_fix.py::test_a_fix_reply_needs_its_commit_on_the_forge, tests/executor/test_replies_fix.py::test_a_fix_reply_needs_the_thread_s_file_changed, tests/executor/test_replies_fix.py::test_a_fix_reply_goes_once, tests/adapters/forge/replies/test_gate.py::test_a_fix_reply_goes_once_per_finding[posted-before-for-the-finding]
+origin: src/kraft/executor/replies.py §_Point._fix_verdict

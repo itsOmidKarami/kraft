@@ -36,6 +36,7 @@ def format_findings(
     *,
     tags: bool = False,
     from_ci: frozenset[str] = frozenset(),
+    threads: bool = False,
 ) -> str:
     """One bullet per finding, plus one indented line per job it came from
     naming exactly where that job's own session log lives -- so a fix agent
@@ -53,6 +54,8 @@ def format_findings(
         lines.append(f"- {ident}{tag}[{f.severity}] {where} — {f.message} ({f.source_plugin})")
         if f.source_plugin in from_ci:
             lines.append(CI_LOG_NOTE)
+        if threads and f.threads:
+            lines.append(f"    threads: {', '.join(f.threads)}")
         for job in f.jobs:
             lines.append(f"    {job.label} → {job.log_ref}")
     return "\n".join(lines)
@@ -362,6 +365,17 @@ def bot_feedback(db, run_dirs, work_item_id: str, node, round: int, session_id: 
     own = item_paths.session_files(run_dirs, work_item_id, session_id).bot_feedback
     own.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, own)
+    from kraft.executor import replies as _replies  # imports dispatch, which imports this module
+
+    head = collection(run_dirs, work_item_id, session_id).get("head")
+    pending = _replies.fix_pending(db, run_dirs, work_item_id, node, head) if head else {}
+    if pending:
+        data = json.loads(own.read_text())
+        for r in data.get("reviewers") or ():
+            for t in r.get("threads") or ():
+                if t.get("id") in pending:
+                    t["fix_pending"] = pending[t["id"]]
+        own.write_text(json.dumps(data, indent=2) + "\n")
     return str(own)
 
 

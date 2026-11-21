@@ -24,11 +24,12 @@ import pytest
 import yaml
 
 from kraft import builtins as _builtins
-from kraft import executor, policy, store
+from kraft import executor, policy, store, waits
 from kraft.adapters import forge
 from kraft.automated_review import BotReviewer
 from kraft.executor import dispatch, round_prompts
 from kraft.templates.models import AgentInput
+from support.bot_threads import bot_thread, note
 from support.harness import entry_of, fake_harness_home, git
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -95,6 +96,119 @@ def review_node(minutes, *, reads=True, reviewers=(A, B), loop=False, watch_ci=F
             "max_attempts": 2,
         }
     return node
+
+
+FLAG = {
+    "severity": "important",
+    "message": "rename x",
+    "file": "repaired.txt",
+    "line": 1,
+    "source_plugin": "review-feedback",
+    "threads": ["T1"],
+}
+FIXED = {"replies": [{"thread": "T1", "body": "Renamed it."}]}
+
+
+def bot_on():
+    return BotReviewer(bot="a", replies=True)  # the test takes `replies_on`
+
+
+async def filed(
+    rig, monkeypatch, *threads, bot=None, loop=True, reads=True, watch_ci=False, **fake
+):
+    """The review node with a fix loop, filed on a fake whose bot `a` (replies on)
+    has `threads` open, and whose merge request is open at the checkout's head."""
+    raw = [r for r, _ in threads]
+    bot = bot or bot_on()
+    fake = forge.FakeForge(
+        feedback_script=[[forge.ReviewerFeedback(bot, rig.moment(1), threads=tuple(raw))]],
+        threads={t.id: t for _, t in threads},
+        **fake,
+    )
+    node = review_node(30, reviewers=(bot,), loop=loop, reads=reads, watch_ci=watch_ci)
+    await rig(node, fake)
+
+    async def details(*, repo, branch):
+        head = git(rig.item.worktree, "rev-parse", "HEAD")
+        return forge.MRDetails(
+            1, "http://fake.forge/1", "open", "t", "", True, (), branch, "main", head
+        )
+
+    monkeypatch.setattr(fake, "mr_details", details)
+    if watch_ci:
+        # The watching wait pushes, on the real clock; the head's own date is where
+        # the frozen one starts, so the bot's activity is read against that.
+        monkeypatch.setattr(waits, "pushed_at", lambda *_, **__: None)
+    return fake
+
+
+def events_of(rig, *types) -> list[dict]:
+    """The filed item's events of the given types, oldest first."""
+    return [e for e in rig.item.events() if e["type"] in types]
+
+
+async def walk_to_completion(rig, *, start=10, step=63, walks=8) -> list[str]:
+    """Walk the filed item until it completes, the wait clock `step` seconds on at
+    each walk (past a bot's grace period). Returns each walk's status, so a test can
+    assert the parks it expects."""
+    seen = []
+    for n in range(walks):
+        rig.clock(start + n * step)
+        seen.append(await rig.walk())
+        if seen[-1] == "completed":
+            return seen
+    raise AssertionError(f"not completed after {walks} walks: {seen}")
+
+
+async def fix_walk(
+    rig,
+    monkeypatch,
+    second,
+    *,
+    threads=None,
+    flags=(FLAG,),
+    repair=FIXED,
+    reviewers=None,
+    state="open",
+    head=None,
+    ci_states=("success",),
+    tweak=None,
+) -> forge.FakeForge:
+    """One fix cycle on a node whose bot `a` takes replies: the first triage raises
+    `flags` (on T1 by default, in `threads`), the repair commits `repaired.txt` and
+    writes `repair`, the review wait pushes the new head (`watch_ci`), and the second
+    triage writes `second` (findings, or a dict with `replies`). The merge request is
+    `state` at the checkout's head, or at `head()` when given; `tweak(fake)` runs
+    before the first walk."""
+    reviewers = reviewers or (bot_on(),)
+    threads = threads or [bot_thread("T1", note("N1", "a", "rename x"), file="repaired.txt")]
+    fake = forge.FakeForge(
+        feedback_script=[
+            [
+                forge.ReviewerFeedback(
+                    reviewers[0], rig.moment(1), threads=tuple(raw for raw, _ in threads)
+                )
+            ]
+        ],
+        threads={t.id: t for _, t in threads},
+        ci_states=list(ci_states),
+    )
+    await rig(review_node(30, reviewers=reviewers, loop=True, watch_ci=True), fake)
+
+    async def details(*, repo, branch):
+        sha = head() if head else git(rig.item.worktree, "rev-parse", "HEAD")
+        return forge.MRDetails(
+            1, "http://fake.forge/1", state, "t", "", True, (), branch, "main", sha
+        )
+
+    monkeypatch.setattr(fake, "mr_details", details)
+    monkeypatch.setattr(waits, "pushed_at", lambda *_, **__: None)
+    if tweak:
+        tweak(fake)
+    rig.verdicts = [{"findings": list(flags)}, second]
+    rig.repairs = [repair]
+    await walk_to_completion(rig)
+    return fake
 
 
 @pytest.fixture

@@ -62,6 +62,9 @@ from kraft.worker.worktree_read import open_dir_no_symlinks, open_no_symlinks, r
 logger = logging.getLogger(__name__)
 
 ITEMS = "items"
+#: The reply report (`executor.replies`), in the item's folder: what Kraft posted in
+#: review-bot threads and what it did not, for the review brief to read.
+REPLY_REPORT = "reply_report.json"
 #: The most of a document Kraft reads into a prompt or onto the board, as the
 #: gate and artifact readers already cap it.
 DOC_MAX_BYTES = 1_000_000

@@ -19,7 +19,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Collection
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from kraft import events, inplace, store
@@ -34,7 +34,7 @@ from kraft.config import git_read
 from kraft.executor import dispatch
 from kraft.executor import round_prompts as prompts
 from kraft.templates.models import AgentInput, AgentTask, ForgeAction, ForgeTask
-from kraft.vocab import ADVANCING, ForgeEvent
+from kraft.vocab import ADVANCING, ChainEvent, ForgeEvent
 from kraft.vocab.sql import marks
 from kraft.worker.worktree_read import read_no_follow
 
@@ -77,6 +77,16 @@ def triage_replies(result_path, threads: Collection[str]) -> list[dict]:
         ):
             out[tid] = {"thread": tid, "kind": r["kind"], "body": r["body"]}
     return list(out.values())
+
+
+def repair_replies(result_path, threads: Collection[str]) -> dict[str, str]:
+    """The repair's `replies`, thread to body, for the threads it was handed."""
+    out: dict[str, str] = {}
+    for r in _rows(_result(result_path), "replies"):
+        tid = r.get("thread")
+        if isinstance(tid, str) and tid in threads and tid not in out and _text(r):
+            out[tid] = r["body"]
+    return out
 
 
 def _own(node) -> list:
@@ -130,6 +140,95 @@ def latest_triage(c, work_item_id: str, node, since: str):
         "ORDER BY created_at DESC, rowid DESC LIMIT 1",
         (work_item_id, node.id, hook.path, *ADVANCING, since),
     ).fetchone()
+
+
+@dataclass(frozen=True)
+class _Cycle:
+    cycle: int
+    seq: int  # its `fix_cycle_started`
+    started_at: str
+    base: str | None  # the head it started from
+    threads: dict  # thread id -> fingerprint
+    head: str | None = None  # its commit, once finished
+    committed: bool = False
+
+
+def _cycles(c, work_item_id: str, node_id: str, run_seq: int) -> list[_Cycle]:
+    """The node's fix cycles in its current run, each with its finish if it has one."""
+    out: list[_Cycle] = []
+    rows = c.execute(
+        "SELECT seq, type, payload, created_at FROM events WHERE work_item_id = ? AND seq > ? "
+        "AND type IN (?, ?) ORDER BY seq",
+        (work_item_id, run_seq, ChainEvent.FIX_CYCLE_STARTED, ChainEvent.FIX_CYCLE_FINISHED),
+    )
+    for r in rows:
+        p = json.loads(r["payload"])
+        if p.get("node_id") != node_id:
+            continue
+        if r["type"] == ChainEvent.FIX_CYCLE_STARTED:
+            out.append(
+                _Cycle(
+                    p["cycle"],
+                    r["seq"],
+                    r["created_at"],
+                    p.get("head_sha"),
+                    p.get("threads") or {},
+                )
+            )
+        elif out and out[-1].cycle == p.get("cycle") and out[-1].head is None:
+            out[-1] = replace(out[-1], head=p.get("head_sha"), committed=bool(p.get("committed")))
+    return out
+
+
+def _repair_session(c, work_item_id: str, node, cycle: _Cycle):
+    """The cycle's own fix session: the newest of the fix loop's agent task at the
+    cycle's round since its start (a refunded cycle's number is reused)."""
+    hook = next((t for s in node.fix_loop for t in s.tasks if isinstance(t.task, AgentTask)), None)
+    if hook is None:
+        return None
+    return c.execute(
+        "SELECT id, result_path FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
+        f"AND hook_point = ? AND round = ? AND status IN ({marks(ADVANCING)}) "
+        "AND created_at >= ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+        (work_item_id, node.id, hook.path, cycle.cycle, *ADVANCING, cycle.started_at),
+    ).fetchone()
+
+
+def _pushes_since(c, work_item_id: str, repo: str, seq: int) -> list[str]:
+    """The heads Kraft pushed for `repo` after event `seq`, oldest first
+    (`run._record_push` records one only when the head changed)."""
+    rows = c.execute(
+        "SELECT json_extract(payload, '$.sha') AS sha FROM events WHERE work_item_id = ? "
+        "AND type = ? AND json_extract(payload, '$.repo') = ? AND seq > ? ORDER BY seq",
+        (work_item_id, ForgeEvent.BRANCH_PUSHED, repo, seq),
+    ).fetchall()
+    return [r["sha"] for r in rows]
+
+
+def fix_pending(db, run_dirs, work_item_id: str, node, head: str) -> dict[str, str]:
+    """Each thread a fix cycle of this run took and committed on `head` whose
+    "Fixed in" has not gone out or ended: the triage's copy marks it `fix_pending`,
+    so a triage that finds the fix holds writes nothing for it."""
+    run_seq, _ = db.read(lambda c: _run_start(c, work_item_id, node.id))
+    held = db.read(lambda c: record.read(c, work_item_id))
+    out: dict[str, str] = {}
+    for cyc in db.read(lambda c: _cycles(c, work_item_id, node.id, run_seq)):
+        if not (cyc.committed and cyc.head == head and cyc.threads):
+            continue
+        # Every thread the cycle took, whether or not the repair wrote it a reply: a
+        # fix with no reply is still the fix loop's, and the report says so.
+        for tid in cyc.threads:
+            done = any(
+                i.payload.get("kind") == "fixed"
+                and i.payload.get("run") == run_seq
+                and i.payload.get("cycle") == cyc.cycle
+                and i.payload.get("thread") == tid
+                and i.state != "pending"
+                for i in held.values()
+            )
+            if not done:
+                out[tid] = head[:7]
+    return out
 
 
 def _inert_reason(db, work_item_id: str, node) -> str | None:
@@ -326,7 +425,13 @@ class _Point:
         )
 
     def fix_ready(self, completing: bool) -> bool:
-        return False  # part 2b: fix replies
+        held = self.intents()
+        return any(
+            verdict != "wait"
+            and text is not None
+            and self._held(held, self._fix_key(cyc, tid)) is None
+            for cyc, tid, _, text, verdict in self.fix_candidates(completing)
+        )
 
     def summary_wanted(self) -> bool:
         return False  # part 2b: the summary comment
@@ -354,7 +459,8 @@ class _Point:
         self.pp = send.PostingPoint(self.db, self.wid, account=await self.account())
         await self.reconcile()
         await self.triage_replies()
-        # Part 2b adds: await self.fix_replies(completing); at completion, self.summary().
+        await self.fix_replies(completing)
+        # Part 2b adds, at completion, self.summary().
 
     async def account(self) -> str:
         """Writes are spaced per forge account: an API account's name, else the
@@ -431,6 +537,166 @@ class _Point:
             repo=self.worktree, branch=self.branch, thread_id=tid
         )
         return self._threads[tid]
+
+    def where(self, tid: str | None) -> dict:
+        """A report entry's thread fields, from the latest triage's collection."""
+        latest = self.latest()
+        seen = prompts.collected_threads(self.run_dirs, self.wid, latest["id"]) if latest else {}
+        t = seen.get(tid) or {}
+        last = next(
+            (n.get("body") for n in reversed(t.get("notes") or []) if n.get("by") == "bot"), None
+        )
+        return {
+            "thread": tid,
+            "reviewer": t.get("reviewer"),
+            "file": t.get("file"),
+            "line": t.get("line"),
+            "bot_last_word": last[:300] if last else None,
+        }
+
+    def fix_candidates(self, completing: bool):
+        """(cycle, thread, session, the repair's text, verdict) for every fix reply of
+        this run: verdict "send", "wait" (the triage on the commit has not run), or
+        ("superseded", why)."""
+        cycles = self.db.read(lambda c: _cycles(c, self.wid, self.node.id, self.run_seq))
+        out = []
+        for cyc in cycles:
+            if not (cyc.committed and cyc.threads and cyc.head):
+                continue
+            sess = self.db.read(lambda c, cyc=cyc: _repair_session(c, self.wid, self.node, cyc))
+            if sess is None:
+                continue
+            texts = repair_replies(sess["result_path"], cyc.threads)
+            for tid in cyc.threads:  # a thread the repair wrote no reply for: text None
+                verdict = self._fix_verdict(cyc, tid, cycles, completing)
+                out.append((cyc, tid, sess["id"], texts.get(tid), verdict))
+        return out
+
+    def _fix_verdict(self, cyc, tid, cycles, completing):
+        """Whether the triage on the cycle's commit confirmed the fix of `tid`."""
+        if any(o.seq > cyc.seq for o in cycles):
+            return ("superseded", "later_cycle")
+        repo = str(Path(self.row["repo"]))
+        pushed = self.db.read(lambda c: _pushes_since(c, self.wid, repo, cyc.seq))
+        if pushed and pushed[-1] != cyc.head:
+            return ("superseded", "head_moved")  # another commit went out after the fix
+        if not pushed:
+            # Not pushed yet (the next measurement's first step pushes it).
+            return ("superseded", "not_pushed") if completing else "wait"
+        latest = self.latest()
+        if latest is None or latest["head_sha"] != cyc.head:
+            # The commit exists only since the cycle: a triage on it ran after the fix.
+            return ("superseded", "not_confirmed") if completing else "wait"
+        seen = prompts.collected_threads(self.run_dirs, self.wid, latest["id"])
+        if tid not in seen:
+            return ("superseded", "not_collected")
+        fp = cyc.threads[tid]
+        found = _findings.parse(latest["result_path"])
+        if any(tid in f.threads or _findings.prose_fingerprint(f) == fp for f in found):
+            return ("superseded", "raised_again")
+        if any(r["thread"] == tid for r in triage_replies(latest["result_path"], seen)):
+            return ("superseded", "triage_replied")  # one reply per thread per head
+        file = seen[tid].get("file")
+        changed = file and git_read(
+            self.worktree, "diff", "--name-only", cyc.base or cyc.head, cyc.head, "--", file
+        )
+        if file and not changed:
+            return ("superseded", "file_unchanged")
+        return "send"
+
+    def _fix_key(self, cyc, tid) -> dict:
+        return {
+            "op": "reply",
+            "kind": "fixed",
+            "run": self.run_seq,
+            "cycle": cyc.cycle,
+            "thread": tid,
+        }
+
+    async def fix_replies(self, completing: bool) -> None:
+        for cyc, tid, session, text, verdict in self.fix_candidates(completing):
+            if verdict == "wait":
+                continue
+            if text is None:
+                # Fixed with no reply: nothing to post; the report names it.
+                if completing:
+                    why = (
+                        "confirmed; the repair wrote no reply" if verdict == "send" else verdict[1]
+                    )
+                    self.notes.append(
+                        {**self.where(tid), "kind": "fixed", "outcome": "no_reply", "why": why}
+                    )
+                continue
+            lead = f"Fixed in {cyc.head[:7]}:"
+            intent = await self.intend(
+                self._fix_key(cyc, tid),
+                {
+                    "op": "reply",
+                    "kind": "fixed",
+                    "thread": tid,
+                    "cycle": cyc.cycle,
+                    "finding": cyc.threads[tid],
+                    "head": cyc.head,
+                    "round": cyc.cycle,
+                    "session": session,
+                },
+                lambda iid, text=text, lead=lead: body.render(
+                    text, lead=lead, work_item_id=self.wid, marker=facts.reply_marker(iid)
+                ),
+            )
+            try:
+                await self._send_fix(intent, cyc, text, lead, verdict)
+            except ForgeError as exc:
+                # A read in the gate failed: nothing was sent; it waits for the next
+                # posting point, or is listed `unsent` at completion.
+                logger.info("fix reply %s waits: %s", intent.id, exc)
+
+    async def _send_fix(self, intent, cyc, text: str, lead: str, verdict) -> None:
+        rendered: dict[str, str] = {}
+
+        async def check(_intent):
+            if verdict != "send":
+                return verdict  # ("superseded", why): recorded, listed in the report
+            if self._mr is None:
+                self._mr = await self.forge.mr_details(repo=self.worktree, branch=self.branch)
+            if self._mr is None or self._mr.state != "open":
+                return ("refused", "mr_not_open")
+            if self._mr.head_sha != cyc.head:
+                return ("superseded", "head_moved")  # a person's force-push dropped the fix
+            thread = await self.thread(intent.payload["thread"])
+            held = self.intents()
+            why = gate.fix_refusal(
+                thread,
+                bots=self.bots,
+                on=self.on,
+                kraft=self.kraft(held),
+                intents=held,
+                finding=intent.payload["finding"],
+            )
+            if why is not None:
+                return ("refused", why)
+            refused = await body.check(
+                text,
+                quotes=body.RepoQuotes(self.worktree, cyc.head, [n.body for n in thread.notes]),
+                secrets=self.secrets,
+            )
+            if refused is not None:
+                return ("refused", f"body: {refused.why}")
+            rendered["body"] = body.render(
+                text, lead=lead, work_item_id=self.wid, marker=facts.reply_marker(intent.id)
+            )
+            if facts.body_hash(rendered["body"]) != intent.payload["body_sha256"]:
+                return ("superseded", "body_changed")
+            return None
+
+        async def write():
+            return await self.forge.reply_to_thread(
+                repo=self.worktree,
+                thread=self._threads[intent.payload["thread"]],
+                body=rendered["body"],
+            )
+
+        await self.pp.send(intent, gate=check, write=write)
 
     async def triage_replies(self) -> None:
         latest = self.latest()
