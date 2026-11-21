@@ -11,7 +11,7 @@ from support.harness import entry_of, v1_node
 
 from kraft import executor
 from kraft import policy as _policy
-from kraft.executor import dispatch, prompts
+from kraft.executor import dispatch, prompts, walk
 
 NO_SETUP = entry_of({"setup_command": ""})
 
@@ -74,9 +74,21 @@ async def test_a_step_recovery_reruns_every_task_in_the_step_and_no_earlier_step
     assert script.calls.count("prep") == 1
 
 
-async def test_a_node_recovery_reruns_the_node_from_its_first_step(item_on, script):
+@pytest.mark.parametrize(
+    ("loop", "after"),
+    [
+        (None, []),
+        # The re-measure passes with a finding the fix loop takes, as the
+        # default chain's triage does: it is the node's measurement, so the
+        # finding is fixed, not dropped with the node marked complete.
+        ({}, ["cycle", "prep", "a"]),
+        ({"early": True}, ["cycle", "prep", "a"]),
+    ],
+    ids=["clean", "findings-enter-the-fix-loop", "findings-enter-an-early-fix-loop"],
+)
+async def test_a_node_recovery_reruns_the_node_from_its_first_step(item_on, script, loop, after):
     """`node-recovery-retries-the-entire-node`."""
-    script.plan = {"a": ["failed", "done"]}
+    fields = {} if loop is None else {"fix_loop": {"tasks": [_sub("cycle")], **loop}}
     it = await item_on(
         [
             v1_node(
@@ -85,12 +97,25 @@ async def test_a_node_recovery_reruns_the_node_from_its_first_step(item_on, scri
                     {"id": "check", "tasks": [_sub("a")]},
                 ],
                 on_failure=_fix(),
+                **fields,
             )
         ]
     )
 
-    assert await _walk(it) == "completed"
-    assert script.calls == ["prep", "a", "fix", "prep", "a"]
+    async def reports(_row):
+        if loop is not None and script.calls.count("a") == 2:
+            finding = {"severity": "important", "message": "rename x", "source_plugin": "a"}
+            (it.run_dirs.results / "s-a.json").write_text(
+                json.dumps({"status": "done", "findings": [finding]})
+            )
+            await it.session("s-a", "build.check.a", "done", round=walk._REPAIR_ROUND)
+
+    script.plan = {"a": ["failed", "done"]}
+    script.effects["a"] = reports
+
+    policy = _policy.Policy(loops={}, default=_policy.Cap(3, 3600))
+    assert await _walk(it, policy=policy) == "completed"
+    assert script.calls == ["prep", "a", "fix", "prep", "a", *after]
 
 
 @pytest.mark.parametrize(
