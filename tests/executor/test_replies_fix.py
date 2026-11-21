@@ -12,7 +12,6 @@ import pytest
 from support.bot_threads import VIEWER, bot_thread, note
 from support.harness import entry_of, git
 from support.review_rig import (  # noqa: F401
-    FIXED,
     FLAG,
     bot_on,
     filed,
@@ -33,12 +32,6 @@ from kraft.automated_review import BotReviewer
 from kraft.executor import prompts, replies
 from kraft.vocab import ChainEvent, ForgeEvent
 
-_REPLY_TYPES = (
-    ForgeEvent.REPLY_INTENDED,
-    ForgeEvent.REPLY_SEND_FAILED,
-    ForgeEvent.REPLY_POSTED,
-    ForgeEvent.REPLY_ENDED,
-)
 #: What the cycle recorded for T1: the prose fingerprint of `FLAG`.
 _FP = _findings.prose_fingerprint(
     _findings.Finding(**{k: v for k, v in FLAG.items() if k != "threads"})
@@ -214,7 +207,11 @@ async def test_a_fix_reply_goes_once(rig, monkeypatch, replies_on):
     fake = await fix_walk(rig, monkeypatch, [], ci_states=("pending",) * 6 + ("success",))
 
     assert fake.writes == [("reply", "T1")]
+    # One intent, posted: a later posting point finds it by its key, neither making a
+    # second nor ending one at the gate's `fixed_before`.
+    assert len(_of(rig, ForgeEvent.REPLY_INTENDED)) == 1
     assert len(_of(rig, ForgeEvent.REPLY_POSTED)) == 1
+    assert _of(rig, ForgeEvent.REPLY_ENDED) == []
 
 
 def _repair_instruction(rig) -> str:
