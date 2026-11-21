@@ -145,3 +145,11 @@ entry SHALL never take `replies`, and an entry's dump SHALL leave `replies` out
 when it is false.
 enforced-by: tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-replies-before-they-arrive], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-bot-with-replies-off], tests/adapters/forge/test_automated_review.py::test_a_reviewer_entry_is_a_bot_or_a_check[a-check-with-replies-after-they-arrive], tests/adapters/forge/test_automated_review.py::test_the_schema_does_not_offer_replies_before_they_arrive, tests/test_overrides.py::test_replies_before_they_arrive_is_refused_in_its_own_words
 origin: src/kraft/automated_review.py §BotReviewer -- Omid, 2026-11-20: refuse `replies: true` at load until the third Part 2 item lands.
+
+## REQ a-finding-names-only-threads-on-its-own-file
+WHEN a reviewer's result file names review-bot threads on a finding, the system
+SHALL keep only the threads, of a bot with replies on, that were in the
+collection that session was handed and whose file is the finding's file, compared as normalised repository-relative
+paths, and SHALL NOT count them in the finding's identity.
+enforced-by: tests/test_findings.py::test_a_finding_keeps_only_threads_on_its_own_file[another-file], tests/test_findings.py::test_a_finding_keeps_only_threads_on_its_own_file[not-collected], tests/test_findings.py::test_a_finding_keeps_only_threads_on_its_own_file[not-collected-on-a-pathless-finding], tests/test_findings.py::test_a_finding_keeps_only_threads_on_its_own_file[normalised], tests/test_findings.py::test_a_finding_keeps_only_threads_on_its_own_file[a-file-thread-on-a-pathless-finding], tests/test_findings.py::test_a_finding_reads_its_thread_ids[a-list]
+origin: src/kraft/findings.py §on_their_files

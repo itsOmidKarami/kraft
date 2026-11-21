@@ -365,6 +365,32 @@ def bot_feedback(db, run_dirs, work_item_id: str, node, round: int, session_id: 
     return str(own)
 
 
+def collection(run_dirs, work_item_id: str, session_id: str) -> dict:
+    """The collection the session `session_id` was handed (its own copy), or {}."""
+    own = item_paths.session_files(run_dirs, work_item_id, session_id).bot_feedback
+    try:
+        data = json.loads(own.read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def collected_threads(run_dirs, work_item_id: str, session_id: str) -> dict[str, dict]:
+    """The threads the session `session_id` was handed, by id, each with its
+    reviewer's key under `reviewer` and whether that reviewer takes replies under
+    `replies`. Empty when it was handed none."""
+    reviewers = collection(run_dirs, work_item_id, session_id).get("reviewers")
+    if not isinstance(reviewers, list):
+        return {}
+    return {
+        t["id"]: {**t, "reviewer": r.get("reviewer"), "replies": bool(r.get("replies"))}
+        for r in reviewers
+        if isinstance(r, dict)
+        for t in r.get("threads") or ()
+        if isinstance(t, dict) and isinstance(t.get("id"), str)
+    }
+
+
 def previous_attempt_note(previous_fix, *, run_dirs) -> str:
     """The fix-prompt addendum for `kraft.executor.walk`'s previous-fix lookup,
     or "" if there was no previous attempt. A plain function so the no-summary

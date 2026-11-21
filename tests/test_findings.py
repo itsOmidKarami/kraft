@@ -12,8 +12,10 @@ from kraft.findings import (
     _extract_message,
     from_blind_failure,
     from_payload,
+    on_their_files,
     parse,
     parse_counted,
+    payload_of,
     resolve_identity,
 )
 
@@ -299,6 +301,70 @@ def test_from_payload_normal_round_trip(tmp_path):
         f.line,
         f.source_plugin,
     ) == ("critical", "error found", "test.py", 42, "checker")
+
+
+@pytest.mark.parametrize(
+    "raw, threads",
+    [
+        (["T1", "T2"], ("T1", "T2")),
+        ("T1", ()),
+        ([1, "T1", ""], ("T1",)),
+        (None, ()),
+    ],
+    ids=["a-list", "not-a-list", "non-strings-dropped", "absent"],
+)
+def test_a_finding_reads_its_thread_ids(tmp_path, raw, threads):
+    finding = {"severity": "important", "message": "m", "source_plugin": "review-feedback"}
+    if raw is not None:
+        finding["threads"] = raw
+    [read] = parse(_findings(tmp_path, {"findings": [finding]}))
+    assert read.threads == threads
+    assert read.fingerprint == dataclasses.replace(read, threads=()).fingerprint
+    assert from_payload(payload_of(read)) == read
+
+
+@pytest.mark.parametrize(
+    "threads, payload",
+    [((), None), (("T1",), ("T1",))],
+    ids=["empty-left-out", "kept"],
+)
+def test_a_finding_s_payload_holds_its_threads_only_when_it_has_some(threads, payload):
+    f = Finding("important", "m", "a.py", None, "review-feedback", threads=threads)
+    assert payload_of(f).get("threads") == payload
+
+
+_ON = {"T1": "pkg/calc.py", "T2": "./pkg/calc.py", "T3": "other.py", "T4": None}
+
+
+@pytest.mark.parametrize(
+    "file, threads, kept",
+    [
+        ("pkg/calc.py", ("T1",), ("T1",)),
+        ("pkg/calc.py", ("T2",), ("T2",)),
+        ("pkg/calc.py", ("T3",), ()),
+        ("pkg/calc.py", ("T9",), ()),
+        (None, ("T9",), ()),
+        (None, ("T4",), ("T4",)),
+        (None, ("T1",), ()),
+        ("pkg/../pkg/calc.py/", ("T1",), ("T1",)),
+        ("../calc.py", ("T1",), ()),
+    ],
+    ids=[
+        "same-file",
+        "normalised",
+        "another-file",
+        "not-collected",
+        "not-collected-on-a-pathless-finding",
+        "no-file-on-no-file",
+        "a-file-thread-on-a-pathless-finding",
+        "dot-dot-and-slash-normalised",
+        "outside-the-repository",
+    ],
+)
+def test_a_finding_keeps_only_threads_on_its_own_file(file, threads, kept):
+    f = Finding("important", "m", file, None, "review-feedback", threads=threads)
+    [out] = on_their_files([f], _ON)
+    assert out.threads == kept
 
 
 def test_from_payload_extra_keys_does_not_raise(tmp_path):

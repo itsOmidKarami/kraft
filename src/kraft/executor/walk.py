@@ -4,7 +4,7 @@ import asyncio
 import json
 import math
 from collections.abc import Callable, Iterable
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from kraft import builtins as _builtins
@@ -2325,7 +2325,13 @@ async def _walk_node_once(
         dropped_findings: dict[str, int] = {}
         has_session: dict[str, bool] = {}
         found, reported_hooks = dispatch.collect_findings(
-            db, work_item_id, node, round, dropped=dropped_findings, has_session=has_session
+            db,
+            work_item_id,
+            node,
+            round,
+            dropped=dropped_findings,
+            has_session=has_session,
+            run_dirs=run_dirs,
         )
         # A `same_as` is only believable for a tag this round's reviewer was
         # actually shown. An invented or stale tag would collapse two distinct
@@ -2394,7 +2400,7 @@ async def _walk_node_once(
             "measured_tasks": sorted(p for p, ran in has_session.items() if ran),
             "unmeasured_tasks": sorted(p for p, ran in has_session.items() if not ran),
             "findings": [
-                {**asdict(f), **({"reported_severity": s} if s != f.severity else {})}
+                {**_findings.payload_of(f), **({"reported_severity": s} if s != f.severity else {})}
                 for f, s in zip(found, as_reported, strict=True)
             ],
             "fingerprints": prints,
@@ -2566,7 +2572,7 @@ async def _walk_node_once(
                 "cycle": round,
                 "verdict": verdict,
                 "reasoning": reasoning,
-                "findings": [asdict(f) for f in eligible],
+                "findings": [_findings.payload_of(f) for f in eligible],
                 # A `stop_downgrade` with `ended_early` holds for this commit
                 # (`dispatch.declined_fingerprints`): the judge isn't paid again.
                 "head_sha": head_sha,

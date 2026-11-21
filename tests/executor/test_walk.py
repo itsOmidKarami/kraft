@@ -515,7 +515,7 @@ async def _recover(item_on, node, *, steer=None, measured_round=0, collect_at=No
         mp.setattr(
             dispatch,
             "collect_findings",
-            lambda db, w, n, round: ((collect_at or {}).get(round, []), set()),
+            lambda db, w, n, round, run_dirs=None: ((collect_at or {}).get(round, []), set()),
         )
         it = await item_on([node], repo="/r")
         resolved = it.chain.chain.nodes[0]

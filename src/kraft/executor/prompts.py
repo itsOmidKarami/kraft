@@ -13,6 +13,8 @@ from kraft.executor.round_prompts import JUDGE_PROMPT as JUDGE_PROMPT
 from kraft.executor.round_prompts import bot_feedback as bot_feedback
 from kraft.executor.round_prompts import bot_feedback_source as bot_feedback_source
 from kraft.executor.round_prompts import carried_findings_note as carried_findings_note
+from kraft.executor.round_prompts import collected_threads as collected_threads
+from kraft.executor.round_prompts import collection as collection
 from kraft.executor.round_prompts import deferred_findings_note as deferred_findings_note
 from kraft.executor.round_prompts import fix_attempt_note as fix_attempt_note
 from kraft.executor.round_prompts import format_findings as format_findings

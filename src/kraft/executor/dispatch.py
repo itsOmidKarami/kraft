@@ -2925,7 +2925,7 @@ async def measure_node(
     def _ends_early(step: ResolvedStep) -> bool:
         """Whether `step`, which just advanced, reports a finding the fix loop would
         take that it has not already declined on this commit."""
-        found, _ = collect_findings(db, work_item_id, node, round, steps=(step,))
+        found, _ = collect_findings(db, work_item_id, node, round, steps=(step,), run_dirs=run_dirs)
         head = _config.git_read(Path(worktree), "rev-parse", "HEAD") if worktree else None
         declined = declined_fingerprints(db, work_item_id, node.id, head)
         return any(f.severity in loop_severities and f.fingerprint not in declined for f in found)
@@ -3124,7 +3124,7 @@ async def run_recovery(
             },
         )
     )
-    found, _reported = collect_findings(db, work_item_id, node, measured_round)
+    found, _reported = collect_findings(db, work_item_id, node, measured_round, run_dirs=run_dirs)
     seeded = prompts.seeded_findings_note(found) if found else None
     note = f"{note}\n{prompts.SUGGEST_ACTION}"
     context = f"{note}\n\n{seeded}" if seeded else note
@@ -3290,8 +3290,14 @@ def collect_findings(
     steps: tuple[ResolvedStep, ...] | None = None,
     dropped: dict[str, int] | None = None,
     has_session: dict[str, bool] | None = None,
+    run_dirs=None,
 ):
     """(findings, task paths that reported at least one) for one cycle.
+
+    A parsed finding keeps only the review-bot thread ids that were in the
+    collection its session was handed, of a bot with replies on, and on its own
+    file (`findings.on_their_files`); without `run_dirs` no collection is known
+    and every thread id is dropped.
 
     `dropped`, when given, is filled with `{task path: entries the parser threw
     away as malformed}`, so a caller can record that a reviewer wrote its
@@ -3371,6 +3377,15 @@ def collect_findings(
             parsed, n_dropped = _findings.parse_counted(row["result_path"])
             if n_dropped and dropped is not None:
                 dropped[hook] = dropped.get(hook, 0) + n_dropped
+            if parsed and any(f.threads for f in parsed):
+                collected = (
+                    prompts.collected_threads(run_dirs, work_item_id, row["id"]) if run_dirs else {}
+                )
+                # Only a thread of a bot with replies on: with replies off a finding
+                # keeps no thread id, so no payload, prompt or copy changes.
+                parsed = _findings.on_their_files(
+                    parsed, {tid: t.get("file") for tid, t in collected.items() if t["replies"]}
+                )
             if parsed:
                 reported.add(hook)
                 job = _findings.JobRef(
