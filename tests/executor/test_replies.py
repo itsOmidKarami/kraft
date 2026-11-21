@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from support.bot_threads import VIEWER, bot_thread, kraft_note, note
 from support.harness import entry_of, git, write
-from support.review_rig import bot_on, filed, review_node, rig  # noqa: F401 -- the fixture
+from support.review_rig import bot_on, filed, review_node, rig, t1  # noqa: F401 -- the fixture
 from support.review_rig import events_of as _of
 
 from kraft import events, executor, store
@@ -135,16 +135,12 @@ async def _walk(rig, *between) -> str:
     raise AssertionError("the walk never ended")
 
 
-def _t1():
-    return bot_thread("T1", note("N1", "a", "fix"))
-
-
 def _marked(thread) -> list:
     return [n for n in thread.notes if facts.marker_of(n.body)]
 
 
 async def test_replies_off_posts_nothing_and_asks_the_forge_nothing(rig, monkeypatch):
-    fake = await filed(rig, monkeypatch, _t1(), bot=BotReviewer(bot="a"))
+    fake = await filed(rig, monkeypatch, t1(), bot=BotReviewer(bot="a"))
     # An agent that ignores the skill: replies are off, so nothing reads them.
     rig.verdicts = [{"findings": [], "replies": [_DECLINE]}]
     asked = []
@@ -169,7 +165,7 @@ async def test_replies_off_posts_nothing_and_asks_the_forge_nothing(rig, monkeyp
 
 
 async def test_a_triage_reply_is_posted_once_across_wakes(rig, monkeypatch, replies_on):
-    fake = await filed(rig, monkeypatch, _t1(), **_ci(2))
+    fake = await filed(rig, monkeypatch, t1(), **_ci(2))
     rig.verdicts = [{"findings": [], "replies": [_DECLINE]}]
 
     walked = []
@@ -299,7 +295,7 @@ async def test_a_triage_reply_is_refused_or_superseded(
 ):
     """Each change lands after the bots were read, before the reply's posting point;
     the last four after a first posting point that could not read the thread."""
-    fake = await filed(rig, monkeypatch, _t1(), **_ci(1))
+    fake = await filed(rig, monkeypatch, t1(), **_ci(1))
     later = how(rig, fake, monkeypatch) if how is not None else None
     rig.verdicts = [{"findings": [], "replies": [reply]}]
 
@@ -401,7 +397,7 @@ async def test_a_pending_reply_is_posted_at_each_posting_point_that_walk_reaches
     the reply went at the posting point its walk reaches, with (`only_at_completion`)
     every one before the completion's posting nothing, as an unreadable viewer does:
     the next point tries again."""
-    fake = await filed(rig, monkeypatch, _t1(), **fake_kw)
+    fake = await filed(rig, monkeypatch, t1(), **fake_kw)
     rig.verdicts = list(verdicts)
     point, at_write = replies._Point.post, []
 
@@ -440,7 +436,7 @@ async def test_replies_have_no_effect_where_nothing_can_act(
     rig, monkeypatch, replies_on, shape, viewer, reason
 ):
     shape = dict(shape)
-    threads = shape.pop("threads", (_t1(),))
+    threads = shape.pop("threads", (t1(),))
     fake = await filed(rig, monkeypatch, *threads, viewer_login=viewer, **shape)
     # Only work reads the viewer.
     rig.verdicts = [{"findings": [], "replies": [_DECLINE]}]
@@ -468,7 +464,7 @@ async def _seeded(item_on, run_dirs, *sessions):
             Path(result).write_text(
                 json.dumps({"status": "done", "findings": [], "replies": [reply]})
             )
-            raw, _ = _t1()
+            raw, _ = t1()
             copy = it.files(sid).bot_feedback
             copy.parent.mkdir(parents=True, exist_ok=True)
             notes = [{"id": "N1", "author": "a", "by": "bot"}]
@@ -569,7 +565,7 @@ async def test_an_unreadable_viewer_posts_nothing_until_it_reads(
     rig, monkeypatch, caplog, replies_on
 ):
     fake = await filed(
-        rig, monkeypatch, _t1(), viewer_login=ForgeError("x (HTTP 503)", status=503), **_ci(1)
+        rig, monkeypatch, t1(), viewer_login=ForgeError("x (HTTP 503)", status=503), **_ci(1)
     )
     rig.verdicts = [{"findings": [], "replies": [_DECLINE]}]
     at_first = []
@@ -608,7 +604,7 @@ def _story(rig) -> list[tuple]:
 async def test_a_lost_write_is_reconciled_not_sent_again(rig, monkeypatch, replies_on):
     """The reply goes at the verdict's posting point and its answer is lost; the
     completion's posting point, the next on that head, finds it."""
-    fake = await filed(rig, monkeypatch, _t1(), write_script=[forge.models.LOST])
+    fake = await filed(rig, monkeypatch, t1(), write_script=[forge.models.LOST])
     rig.verdicts = [{"findings": [], "replies": [_DECLINE]}]
 
     assert await _walk(rig) == "completed"
@@ -625,7 +621,7 @@ async def test_a_lost_write_is_reconciled_not_sent_again(rig, monkeypatch, repli
 
 
 async def test_a_late_copy_of_an_unclear_write_is_deleted(rig, monkeypatch, replies_on):
-    fake = await filed(rig, monkeypatch, _t1(), write_script=[forge.models.LOST], **_ci(2))
+    fake = await filed(rig, monkeypatch, t1(), write_script=[forge.models.LOST], **_ci(2))
     rig.verdicts = [{"findings": [], "replies": [_DECLINE]}]
     late = []
 
@@ -646,7 +642,7 @@ async def test_a_late_copy_of_an_unclear_write_is_deleted(rig, monkeypatch, repl
 
 
 async def test_a_reply_never_goes_beside_a_finding_on_the_same_thread(rig, monkeypatch, replies_on):
-    fake = await filed(rig, monkeypatch, _t1())
+    fake = await filed(rig, monkeypatch, t1())
     finding = {
         "severity": "important",
         "message": "rename x",
@@ -665,7 +661,7 @@ async def test_a_reply_never_goes_beside_a_finding_on_the_same_thread(rig, monke
 
 
 async def test_the_thread_moved_since_the_triage_read_it(rig, monkeypatch, replies_on):
-    fake = await filed(rig, monkeypatch, _t1())
+    fake = await filed(rig, monkeypatch, t1())
     rig.verdicts = [{"findings": [], "replies": [_DECLINE]}]
     triaged = dispatch._launch_agent
 

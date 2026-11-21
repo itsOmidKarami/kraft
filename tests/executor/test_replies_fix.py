@@ -19,6 +19,7 @@ from support.review_rig import (  # noqa: F401
     fix_walk,
     review_node,
     rig,
+    t1,
     walk_to_completion,
 )
 from support.review_rig import events_of as _of
@@ -515,10 +516,6 @@ def _entries(rig) -> list[tuple]:
 _DECLINE = {"thread": "T1", "kind": "declined", "body": "The caller reads it, so it stays."}
 
 
-def _t1():
-    return bot_thread("T1", note("N1", "a", "fix"))
-
-
 async def test_the_reply_report_lists_what_was_and_was_not_posted(rig, monkeypatch, replies_on):
     t1 = bot_thread("T1", note("N1", "a", "rename x"), file="repaired.txt")
     t2 = bot_thread(
@@ -598,7 +595,7 @@ async def test_a_fix_with_no_reply_is_reported(rig, monkeypatch, replies_on):
 async def test_a_completion_with_replies_off_removes_the_report(
     rig, monkeypatch, replies_on, report_of
 ):
-    fake = await filed(rig, monkeypatch, _t1(), bot=BotReviewer(bot="a"))
+    fake = await filed(rig, monkeypatch, t1(), bot=BotReviewer(bot="a"))
     path = replies.report_path(rig.item.run_dirs, rig.item.id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"node_id": report_of, "head": None, "entries": []}))

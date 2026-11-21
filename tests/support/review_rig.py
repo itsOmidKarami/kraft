@@ -142,6 +142,11 @@ async def filed(
     return fake
 
 
+def t1():
+    """Bot `a`'s one open thread, on `calc.py`."""
+    return bot_thread("T1", note("N1", "a", "fix"))
+
+
 def events_of(rig, *types) -> list[dict]:
     """The filed item's events of the given types, oldest first."""
     return [e for e in rig.item.events() if e["type"] in types]
