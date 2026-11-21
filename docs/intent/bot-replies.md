@@ -171,3 +171,13 @@ login Kraft writes as once and keep it for the wait, and mark each collected not
 Kraft wrote as Kraft's.
 enforced-by: tests/adapters/forge/test_run_replies.py::test_a_replies_on_wait_reads_the_viewer_once_and_marks_kraft_notes, tests/adapters/forge/test_run_replies.py::test_a_replies_off_wait_never_reads_the_viewer
 origin: src/kraft/adapters/forge/run.py §_collect_review
+
+## REQ a-triage-reply-respects-the-cap-and-kraft-s-last-word
+IF a review-bot thread is resolved, locked, not started by a bot with replies on,
+or holds a note that is neither a configured bot's nor Kraft's unedited one, THEN
+the system SHALL post no reply in it; and it SHALL post no triage reply when
+Kraft's note is the thread's latest, or when Kraft's triage replies in the thread
+over the item's life, deleted, unclear and unrecorded marked ones included, have
+reached the cap.
+enforced-by: tests/adapters/forge/replies/test_gate.py::test_the_gate_reads_the_thread[a-person-wrote-in-it], tests/adapters/forge/replies/test_gate.py::test_the_gate_reads_the_thread[a-kraft-note-edited], tests/adapters/forge/replies/test_gate.py::test_the_gate_reads_the_thread[the-bot-from-a-user-account], tests/adapters/forge/replies/test_gate.py::test_the_gate_reads_the_thread[started-by-a-bot-with-replies-off], tests/adapters/forge/replies/test_gate.py::test_the_gate_reads_the_thread[locked], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[after-kraft], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[at-the-cap], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[an-unclear-send-counts], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[marked-notes-the-record-lost], tests/adapters/forge/replies/test_gate.py::test_a_triage_reply_waits_its_turn[a-fix-reply-does-not-count]
+origin: src/kraft/adapters/forge/replies/gate.py §triage_refusal

@@ -19,10 +19,8 @@ import json
 from collections.abc import Collection
 from pathlib import Path
 
+from kraft.adapters.forge.replies.gate import TRIAGE_KINDS
 from kraft.worker.worktree_read import read_no_follow
-
-#: What a triage reply may be: `fixed` is the repair's, never the triage's.
-TRIAGE_KINDS = ("declined", "answered")
 
 
 def _result(path) -> dict:
